@@ -76,8 +76,9 @@ namespace {
         const std::wstring wide_directory = working_directory.empty()
             ? std::wstring { }
             : working_directory.wstring();
-        if (!CreateProcessW(nullptr, cmdline.data(), nullptr, nullptr, TRUE, 0,
-                nullptr,
+        // Suspended so the job exists before the shell can spawn anything.
+        if (!CreateProcessW(nullptr, cmdline.data(), nullptr, nullptr, TRUE,
+                CREATE_SUSPENDED, nullptr,
                 wide_directory.empty() ? nullptr : wide_directory.c_str(), &si,
                 &pi)) {
             CloseHandle(out_read);
@@ -90,6 +91,16 @@ namespace {
         }
         CloseHandle(out_write);
         CloseHandle(in_read);
+
+        // The Windows killpg: a timeout must reap the descendants too, or one
+        // of them holds the output pipe and the reader below never sees EOF.
+        // Not KILL_ON_JOB_CLOSE: a command that daemonizes on success must
+        // survive, as it does on POSIX.
+        HANDLE job = CreateJobObjectW(nullptr, nullptr);
+        if (job != nullptr) {
+            AssignProcessToJobObject(job, pi.hProcess);
+        }
+        ResumeThread(pi.hThread);
 
         std::string output;
         std::thread reader([&out_read, &output] {
@@ -128,6 +139,9 @@ namespace {
         const DWORD wait = WaitForSingleObject(pi.hProcess, ms);
         if (wait == WAIT_TIMEOUT) {
             result.timed_out = true;
+            if (job != nullptr) {
+                TerminateJobObject(job, 124);
+            }
             TerminateProcess(pi.hProcess, 124);
             WaitForSingleObject(pi.hProcess, INFINITE);
         }
@@ -142,6 +156,9 @@ namespace {
         CloseHandle(out_read);
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
+        if (job != nullptr) {
+            CloseHandle(job);
+        }
 
         result.spawned = true;
         result.output  = std::move(output);
@@ -166,27 +183,39 @@ namespace {
                 &startup, &process)) {
             return false;
         }
-        const HANDLE job = process.hProcess;
         CloseHandle(process.hThread);
+        HANDLE job = CreateJobObjectW(nullptr, nullptr);
+        if (job != nullptr) {
+            AssignProcessToJobObject(job, process.hProcess);
+        }
+        const auto terminate = [&] {
+            if (job != nullptr) {
+                TerminateJobObject(job, 124);
+            }
+            TerminateProcess(process.hProcess, 124);
+        };
         if (on_spawned) {
             on_spawned();
         }
         const auto deadline = std::chrono::steady_clock::now() + timeout;
         for (;;) {
             if (stop.stop_requested()) {
-                TerminateProcess(job, 124);
+                terminate();
                 break;
             }
-            if (WaitForSingleObject(job, 100) == WAIT_OBJECT_0) {
+            if (WaitForSingleObject(process.hProcess, 100) == WAIT_OBJECT_0) {
                 break;
             }
             if (std::chrono::steady_clock::now() >= deadline) {
-                TerminateProcess(job, 124);
+                terminate();
                 break;
             }
         }
-        WaitForSingleObject(job, INFINITE);
-        CloseHandle(job);
+        WaitForSingleObject(process.hProcess, INFINITE);
+        CloseHandle(process.hProcess);
+        if (job != nullptr) {
+            CloseHandle(job);
+        }
         return true;
     }
 

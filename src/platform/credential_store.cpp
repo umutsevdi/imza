@@ -89,9 +89,12 @@ CredentialStore::CredentialStore(Mode mode)
     }
     _keychain = true;
 #else
-    GError* error          = nullptr;
-    SecretService* service = secret_service_get_sync(
-        static_cast<SecretServiceFlags>(0), nullptr, &error);
+    // OPEN_SESSION is what makes libsecret contact org.freedesktop.secrets:
+    // without it the call only builds the D-Bus proxy, which succeeds on any
+    // machine that merely has a session bus.
+    GError* error = nullptr;
+    SecretService* service
+        = secret_service_get_sync(SECRET_SERVICE_OPEN_SESSION, nullptr, &error);
     if (error != nullptr || service == nullptr) {
         _reason = error != nullptr && error->message != nullptr
             ? error->message

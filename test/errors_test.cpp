@@ -8,11 +8,29 @@
 #include "workspace/review_subsystem.h"
 #include <doctest/doctest.h>
 
+#include <chrono>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace {
+
+// stop() must not depend on a request arriving to unblock accept().
+TEST_CASE("loopback server stops without waiting for a connection")
+{
+    imza::test::LoopbackHttpServer server;
+    server.handle = [](imza::test::detail::Socket fd,
+                        const imza::test::LoopbackRequest&) {
+        imza::test::LoopbackHttpServer::respond(
+            fd, "HTTP/1.1 204 No Content", { }, "");
+    };
+    REQUIRE(server.start());
+
+    const auto started = std::chrono::steady_clock::now();
+    server.stop();
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    CHECK(elapsed < std::chrono::seconds(2));
+}
 
 TEST_CASE("parse_api_error classifies provider error response shapes")
 {

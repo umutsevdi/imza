@@ -382,10 +382,10 @@ namespace {
 
         void _build(const PermissionPrompt& request)
         {
-            build_tool_approval(request.allow_for_session);
+            build_tool_approval(request);
         }
 
-        void build_tool_approval(bool allow_for_session)
+        void build_tool_approval(const PermissionPrompt& request)
         {
             _tool_phase = ToolPhase::DECIDE;
             _reason_buf.clear();
@@ -400,7 +400,7 @@ namespace {
             };
             _accept         = action_button("Allow once",
                 [resolve] { resolve(ToolDecision::ACCEPT_ONCE, ""); });
-            _accept_session = allow_for_session
+            _accept_session = request.allow_for_session
                 ? action_button("Allow for this session",
                       [resolve] {
                           resolve(ToolDecision::ACCEPT_FOR_SESSION, "");
@@ -413,6 +413,14 @@ namespace {
             _back = action_button(
                 "Back", [this] { _set_tool_phase(ToolPhase::DECIDE); });
 
+            _tool_static = vbox({
+                text(tool_action_description(request)) | color(PANEL_FG_DIM),
+                tool_approval_reason(request),
+                separatorEmpty(),
+                tool_request_body(request, *_state->environment->system(),
+                    modal_content_width(*_session->modal_handle())),
+                separatorEmpty(),
+            });
             _build_tool_body();
         }
 
@@ -627,15 +635,8 @@ namespace {
 
         Element _tool_body(const PermissionPrompt& req)
         {
-            Elements rows { _header_line(tool_display_name(req.name)) };
-            rows.push_back(
-                text(tool_action_description(req)) | color(PANEL_FG_DIM));
-            rows.push_back(tool_approval_reason(req));
-            rows.push_back(separatorEmpty());
-            rows.push_back(
-                tool_request_body(req, *_state->environment->system(),
-                    modal_content_width(*_session->modal_handle())));
-            rows.push_back(separatorEmpty());
+            Elements rows { _header_line(tool_display_name(req.name)),
+                _tool_static };
             if (_tool_phase == ToolPhase::REASON) {
                 rows.push_back(section_title("Reason for rejecting", PANEL_FG));
                 rows.push_back(_reason_input->Render());
@@ -746,6 +747,7 @@ namespace {
         std::string _reason_buf;
         int _reason_cursor = 0;
         ScrollView _static_view { };
+        Element _tool_static;
         Component _reason_input;
         Component _accept;
         Component _accept_session;

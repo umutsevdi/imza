@@ -95,6 +95,10 @@ public:
 
     std::optional<std::string> agent_rules_path() const;
     std::vector<Skill> skills() const;
+    // Shared snapshot of `skills()`, invalidated on system or workspace
+    // republish: per-frame renderers must not pay the copy and sort on
+    // every call.
+    std::shared_ptr<const std::vector<Skill>> sorted_skills() const;
     // Re-detects global skills after an install or removal and republishes
     // the system snapshot, so the catalogue updates without a restart.
     void rescan_skills();
@@ -134,6 +138,7 @@ private:
     mutable std::shared_mutex _workspace_mutex;
     std::shared_ptr<const WorkspaceEnvironment> _workspace;
     std::shared_ptr<const RepositoryState> _repository;
+    mutable std::shared_ptr<const std::vector<Skill>> _sorted_skills;
     Signal<> _workspace_changed;
     Signal<> _system_changed;
     Signal<> _repository_changed;

@@ -111,7 +111,7 @@ namespace {
 
         bool _handle_pick_event(const Event& event)
         {
-            if (event == Event::F5) {
+            if (event == Event::CtrlR) {
                 for (const auto& view : _views()) {
                     _provider_store.refetch_models(view.id);
                 }
@@ -774,7 +774,7 @@ namespace {
             if (!any_fetching) {
                 empty_state = any_failed
                     ? status_text("✗ Some providers failed - press "
-                                  "F5 to retry.",
+                                  "Ctrl+R to retry.",
                           false)
                     : text("no models") | dim;
             }
@@ -783,7 +783,7 @@ namespace {
                 : Element { };
             return render_model_pick("Models", _pick_filter, _pick,
                 std::move(status_row), std::move(empty_state),
-                "Enter pick · F5 refresh · Esc close");
+                "Enter pick · Ctrl+R refresh · Esc close");
         }
 
         std::shared_ptr<ApplicationState> _state;

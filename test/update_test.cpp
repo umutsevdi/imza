@@ -35,8 +35,8 @@ TEST_CASE("expected_asset_name merges the version into the platform asset")
     CHECK(expected_asset_name({ }, "v0.3.1") == "imza-0.3.1-windows-x64.exe");
 #elif defined(__APPLE__)
     const std::string pkg = expected_asset_name({ }, "v0.3.1");
-    CHECK(pkg == "imza-0.3.1-macos-x64.pkg"
-        || pkg == "imza-0.3.1-macos-arm64.pkg");
+    CHECK((pkg == "imza-0.3.1-macos-x64.pkg"
+        || pkg == "imza-0.3.1-macos-arm64.pkg"));
     CHECK(expected_asset_name({ "apt" }, "0.3.1")
         == expected_asset_name({ }, "0.3.1"));
 #else

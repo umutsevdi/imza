@@ -467,7 +467,7 @@ TEST_CASE("autocomplete submits argument-less commands on Enter")
     imza::Autocomplete autocomplete;
 
     // A fully typed command clears the popup; Enter then submits
-    // directly through the normal path — accept() is not involved.
+    // directly through the normal path (accept() is not involved).
     autocomplete.refresh(*state, "/exit", 5);
     CHECK_FALSE(autocomplete.active());
     autocomplete.clear();

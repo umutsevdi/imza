@@ -51,7 +51,7 @@ TEST_CASE("chat hints resolve the phase line provider per render")
     hints.phase_line_fn = [&calls] {
         ++calls;
         return calls == 1 ? std::string("no toggle here")
-                          : std::string("Ctrl+S Sidechat");
+                          : std::string("Ctrl+E Sidechat");
     };
 
     auto state = imza::test::make_test_state();
@@ -60,10 +60,10 @@ TEST_CASE("chat hints resolve the phase line provider per render")
 
     const std::string first = imza::test::to_text(chat->Render(), 100, 40);
     CHECK(first.find("no toggle here") != std::string::npos);
-    CHECK(first.find("Ctrl+S Sidechat") == std::string::npos);
+    CHECK(first.find("Ctrl+E Sidechat") == std::string::npos);
 
     const std::string second = imza::test::to_text(chat->Render(), 100, 40);
-    CHECK(second.find("Ctrl+S Sidechat") != std::string::npos);
+    CHECK(second.find("Ctrl+E Sidechat") != std::string::npos);
 }
 TEST_CASE("plan tab is chat-only until a plan exists")
 {

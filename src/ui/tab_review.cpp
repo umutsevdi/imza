@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <deque>
 #include <format>
+#include <map>
 #include <set>
 #include <thread>
 
@@ -197,7 +198,7 @@ namespace {
                 | focusPosition(0, selected_y) | yframe | vscroll_indicator
                 | flex;
             static constexpr std::string_view top_hint
-                = "p Send to Plan · r AI Review · h Handoff · Ctrl+S Sidechat";
+                = "p Send to Plan · r AI Review · h Handoff · Ctrl+E Sidechat";
             const std::string hint_line = _editor.is_open() ? "Enter save · "
                     + std::string(MULTILINE_KEY) + " new line · Esc cancel"
                 : _selected_comment ? "↑↓ navigate · e edit · DEL delete"
@@ -418,6 +419,18 @@ namespace {
             int display_y = 0;
         };
 
+        // Wrap segments per line, valid while the tab renders from one
+        // review snapshot; cleared when the highlights are invalidated.
+        const std::vector<std::string>& _wrapped(
+            const ReviewLine& line, int width) const
+        {
+            auto& slot = _wraps[&line];
+            if (slot.first != width) {
+                slot = { width, wrap_text(line.content, width) };
+            }
+            return slot.second;
+        }
+
         void _prepare_highlights(
             const RepositoryReview& review, int review_width, bool side_by_side)
         {
@@ -427,6 +440,7 @@ namespace {
                 return;
             }
             _highlights.clear();
+            _wraps.clear();
             _highlighted_review       = &review;
             _highlighted_width        = review_width;
             _highlighted_side_by_side = side_by_side;
@@ -620,16 +634,18 @@ namespace {
             std::string marker              = style.marker;
             std::optional<Color> background = style.background;
             const int content_width         = diff_content_width(review_width);
-            const std::vector<std::string> segments
-                = wrap_text(line.content, content_width);
+            const std::size_t segment_count
+                = _wrapped(line, content_width).size();
             const bool selected
                 = _selected == static_cast<int>(_visible.size());
             _push(
                 rows,
-                [this, &line, marker = std::move(marker), background, segments,
-                    selected] {
+                [this, &line, content_width, marker = std::move(marker),
+                    background, selected] {
                     const bool old_side
                         = line.kind == ReviewLine::Kind::DELETION;
+                    const std::vector<std::string>& segments
+                        = _wrapped(line, content_width);
                     Elements content_rows;
                     if (line.kind == ReviewLine::Kind::META) {
                         for (const std::string& segment : segments) {
@@ -653,7 +669,7 @@ namespace {
                 },
                 VisibleRow { VisibleRow::Kind::LINE, file_index, &line,
                     std::nullopt, 0 },
-                selected, static_cast<int>(segments.size()));
+                selected, static_cast<int>(segment_count));
             _push_comments(
                 rows, snapshot, file_index, path, line, review_width);
             _push_editor(rows, path, line, review_width);
@@ -675,8 +691,8 @@ namespace {
             const LineChangeStyle style     = line_change_style(line->kind);
             std::string marker              = style.marker;
             std::optional<Color> background = style.background;
-            const std::vector<std::string> segments = wrap_text(
-                line->content, review_side_content_width(side_width));
+            const std::vector<std::string>& segments
+                = _wrapped(*line, review_side_content_width(side_width));
             const Elements highlighted
                 = _highlighted_rows(*line, old_side, segments);
             Elements content_rows;
@@ -710,11 +726,11 @@ namespace {
             const int content_width = review_side_content_width(side_width);
             const int height        = std::max(old_line != nullptr
                     ? static_cast<int>(
-                          wrap_text(old_line->content, content_width).size())
+                          _wrapped(*old_line, content_width).size())
                     : 1,
                 new_line != nullptr
                     ? static_cast<int>(
-                          wrap_text(new_line->content, content_width).size())
+                          _wrapped(*new_line, content_width).size())
                     : 1);
             const bool selected
                 = _selected == static_cast<int>(_visible.size());
@@ -1021,6 +1037,11 @@ namespace {
         std::vector<VisibleRow> _visible;
         std::shared_ptr<const RepositoryReview> _rendered_review;
         ReviewHighlights _highlights;
+        // Wrap cache for _wrapped(): line -> (width, segments); mutable so
+        // const row painters can fill it on first use.
+        mutable std::map<const ReviewLine*,
+            std::pair<int, std::vector<std::string>>>
+            _wraps;
         const RepositoryReview* _highlighted_review = nullptr;
         std::deque<Box> _boxes;
         std::vector<int> _box_rows;

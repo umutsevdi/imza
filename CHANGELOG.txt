@@ -23,8 +23,9 @@ Changes:
   - Imza is now installable with Homebrew: `brew install umutsevdi/imza/imza`;
     every release updates the cask automatically.
   - Added arm64 Linux packages.
-  - Improved performance during diff scans.
   - Fixed the chat input cursor disappearing or blinking.
+  - Improved performance during diff scans.
+  - Reduced CPU usage during streaming.
 
 -------------------------------------------------------------------------------
 0.6.4 - 2026-10-17

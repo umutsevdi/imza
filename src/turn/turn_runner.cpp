@@ -215,8 +215,8 @@ Status TurnRunner::run_stream(
 
 // Streams a summary of history[begin..end) through the compaction
 // prompt. The caller owns the CompactionEvent lifecycle: it calls
-// begin_compaction, then commits — finish_compaction for the in-turn
-// path, complete_manual_compaction for the /compact path. Returns the
+// begin_compaction, then commits (finish_compaction for the in-turn
+// path, complete_manual_compaction for the /compact path). Returns the
 // raw summary on success.
 std::optional<std::string> TurnRunner::_summarize(
     const std::vector<Message>& history, std::size_t begin, std::size_t end,

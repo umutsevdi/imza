@@ -391,6 +391,7 @@ add_library(imza_ui
     src/ui/app.cpp
     src/ui/autocomplete.cpp
     src/ui/components.cpp
+    src/ui/frame_pulse.cpp
     src/ui/greeting.cpp
     src/ui/markdown.cpp
     src/ui/modals/connect.cpp

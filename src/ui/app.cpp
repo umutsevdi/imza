@@ -3,6 +3,7 @@
 #include "platform/clipboard.h"
 #include "runtime/main_thread_queue.h"
 #include "tools/skills.h"
+#include "ui/frame_pulse.h"
 #include "ui/ui.h"
 
 #include <ftxui/component/animation.hpp>
@@ -236,9 +237,9 @@ namespace {
             _chat_hints.phase_line_fn = [this] {
                 return _phase == WorkflowPhase::PLAN
                     ? std::string("Tab next phase · Shift+Tab previous "
-                                  "phase · Ctrl+S chat")
+                                  "phase · Ctrl+E chat")
                     : std::string(
-                          "Tab next phase · Shift+Tab previous phase · Ctrl+S "
+                          "Tab next phase · Shift+Tab previous phase · Ctrl+E "
                           "Sidechat");
             };
             // The plan tab splits 50/50 once a document exists; the chat
@@ -451,8 +452,8 @@ namespace {
                 return _sidechat->OnEvent(event);
             }
             // The sidechat receives all events while visible; hidden, only
-            // the toggle shortcut — stale clicks on its last-rendered box
-            // must not reach it.
+            // the toggle shortcut (stale clicks on its last-rendered box
+            // must not reach it).
             const bool sidechat_visible = _state->sidechat_open
                 && _phase != WorkflowPhase::PLAN
                 && (_layout.kind != LayoutCtx::Kind::NARROW
@@ -464,7 +465,7 @@ namespace {
                 && _sidechat->OnEvent(event)) {
                 return true;
             }
-            // PLAN: the tab swaps doc/chat on Ctrl+S (no sidechat there).
+            // PLAN: the tab swaps doc/chat on Ctrl+E (no sidechat there).
             if (is_sidechat_toggle(event) && _phase == WorkflowPhase::PLAN
                 && _tabs_content->OnEvent(event)) {
                 return true;
@@ -504,13 +505,10 @@ namespace {
         {
             ComponentBase::OnAnimation(params);
             _sidechat->OnAnimation(params);
-            // Expiry is driven by the frame loop, not a timer thread. A
-            // notice with a deadline keeps requesting frames until it clears,
-            // so the loop cannot stall with one still pending.
+            // Expiry is driven by the frame loop, not a timer thread. The
+            // frame pulse keeps frames coming while a notice is pending, so
+            // the loop does not stall with one still undismissed.
             _state->notifications->dismiss_expired();
-            if (!_state->notifications->notifications()->empty()) {
-                animation::RequestAnimationFrame();
-            }
         }
 
         Component ActiveChild() override
@@ -678,6 +676,19 @@ int run_repl(std::shared_ptr<ApplicationState> state)
             *state, ConnectModal { ConnectModal::Entry::MANAGE });
     }
     auto app = make_repl_root(state, &screen);
+    // The pulse keeps frames arriving at spinner-step rate while anything
+    // animates: components no longer sustain the request loop themselves.
+    // Declared after the screen so its wake callback dies first.
+    imza::FramePulse frame_pulse(
+        std::chrono::milliseconds(SPINNER_FRAME_MS),
+        [state] {
+            return state->session->phase() != Session::Phase::IDLE
+                || state->session->compaction_running()
+                || !state->environment->ready()
+                || state->subagents->running_count(false) > 0
+                || !state->notifications->notifications()->empty();
+        },
+        [] { animation::RequestAnimationFrame(); });
     // Empty callback: FTXUI only posts Event::Custom after selection changes
     // when one is registered; SelectionCopier consumes it.
     screen.SelectionChange([] { });

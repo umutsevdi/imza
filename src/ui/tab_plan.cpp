@@ -15,7 +15,7 @@ namespace {
 
     // PLAN tab content: chat until a plan exists; once the agent creates
     // one, the annotator pane appears beside the chat (50/50 wide, chat
-    // left; alternating full-pane narrow) and Ctrl+S moves focus between
+    // left; alternating full-pane narrow) and Ctrl+E moves focus between
     // the two.
     class PlanTab : public ComponentBase {
     public:

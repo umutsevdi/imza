@@ -102,8 +102,8 @@ void on_turn_finished(ApplicationState& state, std::string error);
 void run_slash(ApplicationState& state, std::string_view command);
 // A hidden, cancellable review pass over the loaded diff: AI findings or
 // the handoff report. The caller supplies the prompt and consumes the raw
-// reply; everything else — model selection, the loaded-review and size
-// guards, the subagent options, the transcript, the running state — is
+// reply; everything else (model selection, the loaded-review and size
+// guards, the subagent options, the transcript, the running state) is
 // shared. Each pass owns its own running slot, so the two may run at the
 // same time; only a repeat of the same pass is refused. `complete` runs on
 // the subagent worker with the reply and returns "" when the reply had the

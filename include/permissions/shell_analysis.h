@@ -37,7 +37,7 @@ bool shell_readonly_allowed(const ShellInvocation& invocation);
 
 // Programs that delete filesystem content. They never run through the
 // shell: deletion goes through imza.fs.remove so it cannot bypass the
-// filesystem permission gate. Absolute — no session, startup, or
+// filesystem permission gate. Absolute: no session, startup, or
 // --allow-cmd grant re-enables one.
 bool shell_deletion_denied(std::string_view program);
 

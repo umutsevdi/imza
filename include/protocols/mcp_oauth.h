@@ -151,7 +151,7 @@ struct McpSignInHooks {
     McpOauthPost post;
     // Opens the user's browser at the authorize URL. Defaults to failing:
     // the network layer has no process-spawning dependency. Sign-in keeps
-    // waiting for the callback either way — the user may open the URL
+    // waiting for the callback either way; the user may open the URL
     // (surfaced through the outcome/progress) by hand.
     std::function<bool(const std::string& url)> open_browser;
     std::function<void(std::string_view phase)> progress;

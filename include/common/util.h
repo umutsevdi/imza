@@ -425,7 +425,7 @@ inline std::string home_dir()
     );
 }
 
-// Expands a leading `~` — alone or followed by a separator — to the home
+// Expands a leading `~` (alone or followed by a separator) to the home
 // directory. `~user` and any other input are returned unchanged.
 inline std::string expand_user_path(std::string_view path)
 {

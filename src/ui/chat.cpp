@@ -27,6 +27,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -112,7 +113,8 @@ namespace {
             {
                 Node::ComputeRequirement();
                 requirement_                      = children_[0]->requirement();
-                requirement_.focused.cursor_shape = Screen::Cursor::Block;
+                requirement_.focused.cursor_shape
+                    = Screen::Cursor::BlockBlinking;
             }
 
             void SetBox(Box box) override
@@ -313,11 +315,13 @@ namespace {
                 _trailing_markdown_index = ~std::size_t { 0 };
                 _playout_index           = ~std::size_t { 0 };
                 _playout_chars           = 0;
-                _cache_kind              = ctx.kind;
-                _cache_width             = ctx.width;
-                _content_serial          = content_serial;
-                _cached_begin            = 0;
-                _cached_end              = 0;
+                _playout_at              = std::chrono::steady_clock::now();
+                _header_args.clear();
+                _cache_kind     = ctx.kind;
+                _cache_width    = ctx.width;
+                _content_serial = content_serial;
+                _cached_begin   = 0;
+                _cached_end     = 0;
                 _clear_interaction_cache();
             } else if (_item_cache.size() < item_count) {
                 const std::size_t previous_size = _item_cache.size();
@@ -401,10 +405,13 @@ namespace {
                         // A new turn animates from its first character.
                         _playout_index = item_index;
                         _playout_chars = 0;
+                        _playout_at    = now;
                     }
                     // Budget rises with the backlog but never past the
                     // display ceiling: without it, the release rate would
                     // converge to the arrival rate and the pacing vanish.
+                    // Rates are time-proportional so they hold whatever
+                    // cadence renders fire at.
                     const std::size_t backlog
                         = at.markdown.size() - _playout_chars;
                     if (backlog > PLAYOUT_HARD_CAP) {
@@ -413,9 +420,19 @@ namespace {
                         // gate hide it behind the previous element.
                         _trailing_markdown_at = { };
                     } else {
+                        const int tick_ms = std::clamp(
+                            static_cast<int>(std::chrono::duration_cast<
+                                std::chrono::milliseconds>(now - _playout_at)
+                                    .count()),
+                            1, 90);
+                        _playout_at = now;
+                        // Per-ms rates match the constants in ui.h at a
+                        // 15ms tick: floor 1, cap 8, drain backlog/15.
+                        const std::size_t scale
+                            = std::max<std::size_t>(1, tick_ms / 15);
                         const std::size_t budget = std::min(backlog,
-                            std::clamp(backlog / 15, std::size_t { 1 },
-                                PLAYOUT_MAX_CHARS_PER_TICK));
+                            std::clamp(
+                                backlog * tick_ms / 225, scale, 8 * scale));
                         _playout_chars           = std::min(
                             at.markdown.size(), _playout_chars + budget);
                     }
@@ -612,7 +629,15 @@ namespace {
             if (event.is_mouse()) {
                 if (event.mouse().motion == Mouse::Moved) {
                     _hover_dirty = true;
-                    animation::RequestAnimationFrame();
+                    // A moved cursor repaints the whole visible timeline
+                    // and a skipped request keeps the flag pending, so
+                    // pacing the request alone still repaints at hover
+                    // rate.
+                    const auto now = std::chrono::steady_clock::now();
+                    if (now - _hover_at >= std::chrono::milliseconds(50)) {
+                        _hover_at = now;
+                        animation::RequestAnimationFrame();
+                    }
                 }
                 if (forward_interaction_event(event, _read_buttons,
                         _subagent_buttons, _diff_buttons, _pending_lua_buttons,
@@ -695,28 +720,22 @@ namespace {
             return _input->OnEvent(event);
         }
 
-        void OnAnimation(animation::Params& params) override
+        void OnAnimation(animation::Params&) override
         {
-            const auto phase = _session->phase();
-            if (phase != Session::Phase::IDLE) {
-                _animation_ms
-                    += std::chrono::duration_cast<std::chrono::milliseconds>(
-                        params.duration());
-                animation::RequestAnimationFrame();
-                return;
-            }
-            // Background compaction outlives the turn: keep the timeline
-            // spinner alive while its event is still running.
-            if (_session->compaction_running()) {
-                _animation_ms
-                    += std::chrono::duration_cast<std::chrono::milliseconds>(
-                        params.duration());
-                animation::RequestAnimationFrame();
-                return;
-            }
-            // The playout drain outlives the turn: keep the frame loop
-            // alive until the queued tail has fully released, or the
-            // response freezes a few characters short.
+            // FTXUI's animation-request hysteresis rewrites its timing
+            // reference whenever a request lands more than 33ms after the
+            // previous animation, which the throttled wake loop always
+            // does — callback durations are clipped, so steps accumulate
+            // wall time instead.
+            const auto now = std::chrono::steady_clock::now();
+            _animation_ms
+                += std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now - _last_animation);
+            _last_animation = now;
+            // The playout drain outlives the turn and the pulse's wake
+            // conditions: keep the loop alive until the queued tail has
+            // fully released, or the response freezes a few characters
+            // short.
             const auto items = _session->items();
             if (_playout_index != ~std::size_t { 0 }
                 && !_session->interrupt_requested()
@@ -724,15 +743,11 @@ namespace {
                 const auto* turn
                     = std::get_if<AssistantTurn>(&(*items)[_playout_index]);
                 if (turn != nullptr && _playout_chars < turn->markdown.size()) {
-                    _animation_ms += std::chrono::duration_cast<
-                        std::chrono::milliseconds>(params.duration());
                     animation::RequestAnimationFrame();
                 }
             }
         }
 
-        // Animation steps are derived from accumulated animation time so
-        // their speed is independent of the render loop's frame rate.
         int _spinner_step() const
         {
             return static_cast<int>(_animation_ms.count()) / SPINNER_FRAME_MS;
@@ -878,9 +893,16 @@ namespace {
         std::chrono::steady_clock::time_point _trailing_markdown_at { };
         // Playout pacing: how much of the active trailing turn's markdown
         // the view has released, advanced per frame by the PLAYOUT_*
-        // constants (ui.h). Session truth is never delayed — only pixels.
+        // constants (ui.h); session truth is never delayed, only pixels.
         std::size_t _playout_index = ~std::size_t { 0 };
         std::size_t _playout_chars = 0;
+        // Id -> (args, rendered args text); cleared whenever the item
+        // caches reset so ids from previous sessions cannot leak across.
+        std::unordered_map<std::size_t, std::pair<std::string, std::string>>
+            _header_args;
+        // Wall clock of the last paced release; the budget derives from the
+        // elapsed interval, not the callback count.
+        std::chrono::steady_clock::time_point _playout_at { };
         // Parse generation of the paced element: bumped on every throttled
         // re-parse so the item version reflects refreshes even after the
         // release has caught up with the truth.
@@ -978,6 +1000,18 @@ namespace {
                 : std::optional<std::string>(std::move(status));
         }
 
+        // tool_header_args is memoized per id: running-tool cards re-render
+        // at spinner cadence.
+        std::string _header_args_text(const ToolCall& tc)
+        {
+            auto& slot = _header_args[tc.id];
+            if (slot.first != tc.args) {
+                slot.first  = tc.args;
+                slot.second = tool_header_args(tc);
+            }
+            return slot.second;
+        }
+
         Element _tool_header_element(const ToolCall& tc)
         {
             Elements parts {
@@ -985,7 +1019,7 @@ namespace {
                                         : tool_display_name(tc.name))
                     | bold | color(HL_GREEN),
                 text(" "),
-                text(tool_header_args(tc)) | color(PANEL_FG_DIM),
+                text(_header_args_text(tc)) | color(PANEL_FG_DIM),
             };
             if (const auto status = _shell_status(tc)) {
                 parts.push_back(filler());
@@ -1394,6 +1428,11 @@ namespace {
 
         bool _follow      = true;
         bool _hover_dirty = false;
+        // Wall clock of the last hover-initiated frame request: a burst of
+        // mouse packets must not schedule one repaint per packet.
+        std::chrono::steady_clock::time_point _hover_at { };
+        std::chrono::steady_clock::time_point _last_animation
+            = std::chrono::steady_clock::now();
         std::chrono::milliseconds _animation_ms { };
         std::uint64_t _content_serial = 0;
         ScrollView _viewport { };

@@ -150,9 +150,8 @@ int authorize_target(lua_State* L, const FilesystemRequest& request,
     const std::string& path, std::string& target);
 
 // One accessor per binding module (one file under src/tools/bindings/):
-// the module's complete registration metadata — autoload flag, catalog
-// name, model-facing description, type aliases, and method catalog —
-// owned by that module's implementation.
+// the module's complete registration metadata, owned by that module's
+// implementation.
 const LuaModule& core_module();
 const LuaModule& fs_module();
 const LuaModule& web_module();

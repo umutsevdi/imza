@@ -149,7 +149,7 @@ public:
             }
             if (_sidebar.context) {
                 std::vector<ContextSkill> skills;
-                for (const Skill& skill : env->skills()) {
+                for (const Skill& skill : *env->sorted_skills()) {
                     skills.push_back({ skill.name,
                         _state->session->is_skill_loaded(skill.path) });
                 }
@@ -200,26 +200,37 @@ private:
         Component component;
     };
 
+    struct DocumentLink {
+        std::string label;
+        std::string content;
+        bool latest                                = false;
+        bool operator==(const DocumentLink&) const = default;
+    };
+
     template <typename Key, typename Payload, typename Render, typename Click,
         typename Update>
     Component _memoized_link(std::map<Key, Link<Payload>>& cache, Key key,
-        std::shared_ptr<Payload> payload, Render render, Click on_click,
-        Update update)
+        const Payload& payload, Render render, Click on_click, Update update)
     {
         auto found = cache.find(key);
         if (found == cache.end()) {
+            // The closures read the cache-owned payload on every render
+            // and click call: per-frame callers never capture a copy, and
+            // updated content can never go stale there.
+            auto data = std::make_shared<Payload>(payload);
             // Non-focusable: a click must not rotate the app-level Stacked
             // container away from the main column.
             Component component
-                = hover_link([payload, render] { return render(*payload); },
-                    std::move(on_click), PANEL_FG_DIM);
+                = hover_link([data, render] { return render(*data); },
+                    [data, click = std::move(on_click)] { click(*data); },
+                    PANEL_FG_DIM);
             _links_container->Add(component);
             found = cache
                         .emplace(std::move(key),
-                            Link<Payload> { std::move(payload), component })
+                            Link<Payload> { std::move(data), component })
                         .first;
         } else {
-            update(*found->second.data);
+            update(payload, *found->second.data);
         }
         _active_links.push_back(found->second.component);
         return found->second.component;
@@ -286,51 +297,65 @@ private:
     Component _changed_file_link(const ChangedFile& file)
     {
         return _memoized_link(
-            _file_links, file.path, std::make_shared<ChangedFile>(file),
+            _file_links, file.path, file,
             [](const ChangedFile& current) {
                 return changed_file_item(current);
             },
-            [this, target = changed_file_target(file)] {
-                _state->review->request_file_jump(target);
+            [this](const ChangedFile& current) {
+                _state->review->request_file_jump(changed_file_target(current));
                 _navigate(WorkflowPhase::REVIEW);
             },
-            [&file](ChangedFile& existing) { existing = file; });
+            [](const ChangedFile& next, ChangedFile& existing) {
+                if (existing != next) {
+                    existing = next;
+                }
+            });
     }
 
     Component _document_link(std::size_t index, std::string label,
         const std::string& content, bool latest)
     {
-        auto payload = std::make_shared<std::string>(content);
+        const DocumentLink payload { std::move(label), content, latest };
         return _memoized_link(
             _document_links, index, payload,
-            [label, latest](const std::string&) {
+            [](const DocumentLink& current) {
                 // Explicit colors are only needed on the latest row: the
                 // link wrapper already paints inactive rows dim-colored,
                 // and | dim keeps them greyed on limited palettes.
                 Element row = hbox({
-                    text("●") | color(latest ? HL_GREEN : PANEL_FG_DIM),
+                    text("●") | color(current.latest ? HL_GREEN : PANEL_FG_DIM),
                     text(" "),
-                    paragraph(label) | color(latest ? PANEL_FG : PANEL_FG_DIM)
+                    paragraph(current.label)
+                        | color(current.latest ? PANEL_FG : PANEL_FG_DIM)
                         | xflex,
                 });
-                return latest ? row : row | dim;
+                return current.latest ? row : row | dim;
             },
-            [this, label, payload] {
-                ViewerModal vm { label, *payload, "md", 1 };
+            [this](const DocumentLink& current) {
+                ViewerModal vm { current.label, current.content, "md", 1 };
                 vm.line_numbers = false;
-                vm.save_name    = label;
+                vm.save_name    = current.label;
                 enqueue_user_modal(*_state, vm);
             },
-            [content](std::string& existing) { existing = content; });
+            [](const DocumentLink& next, DocumentLink& existing) {
+                if (existing != next) {
+                    existing = next;
+                }
+            });
     }
 
-    Component _comment_link(std::size_t id, std::string label)
+    Component _comment_link(std::size_t id, const std::string& label)
     {
         return _memoized_link(
-            _comment_links, id, std::make_shared<std::string>(label),
+            _comment_links, id, label,
             [](const std::string& current) { return text(current) | bold; },
-            [this, id] { _state->review->request_jump(id); },
-            [&label](std::string& existing) { existing = std::move(label); });
+            [this, id](
+                const std::string&) { _state->review->request_jump(id); },
+            [](const std::string& next, std::string& existing) {
+                if (existing != next) {
+                    existing = next;
+                }
+            });
     }
 
     std::shared_ptr<ApplicationState> _state;
@@ -351,7 +376,7 @@ private:
     Signal<>::Subscription _documents_subscription;
     Component _links_container;
     std::map<std::string, Link<ChangedFile>> _file_links;
-    std::map<std::size_t, Link<std::string>> _document_links;
+    std::map<std::size_t, Link<DocumentLink>> _document_links;
     std::map<std::size_t, Link<std::string>> _comment_links;
     std::vector<Component> _active_links;
 };

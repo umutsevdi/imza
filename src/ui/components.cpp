@@ -275,7 +275,7 @@ bool move_list_cursor(const ftxui::Event& event, int& cursor, int count)
 namespace {
     int glyph_width(std::string_view glyph)
     {
-        const int width = ftxui::string_width(std::string(glyph));
+        const int width = ftxui::string_width(glyph);
         return width < 1 ? 1 : width;
     }
 } // namespace

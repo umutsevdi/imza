@@ -1,4 +1,5 @@
 #include "app/flows.h"
+#include "ui/frame_pulse.h"
 #include "ui/ui.h"
 
 #include <ftxui/component/animation.hpp>
@@ -20,7 +21,7 @@ namespace {
         ChatHints hints;
         hints.scroll_line.clear();
         hints.phase_line.clear();
-        hints.input_hint         = "  Ctrl+S hide · F5 clear";
+        hints.input_hint         = "  Ctrl+E hide · Ctrl+R clear";
         hints.empty_state_banner = false;
         return hints;
     }
@@ -72,7 +73,7 @@ public:
 
     bool OnEvent(Event event) override
     {
-        if (event == Event::CtrlS) {
+        if (event == Event::CtrlE) {
             if (_state->sidechat_open) {
                 imza::close_sidechat(*_state);
                 _unfocus();
@@ -85,7 +86,7 @@ public:
         if (_pane == nullptr) {
             return false;
         }
-        if (event == Event::F5) {
+        if (event == Event::CtrlR) {
             imza::refresh_sidechat(*_state);
             return true;
         }
@@ -141,10 +142,21 @@ private:
             _status.modal = _modal;
             _host->Add(_modal);
             _host->Add(_pane);
+            // The child session animates independently of the root phase;
+            // its pulse wakes the shared screen while it works. Built here
+            // on the render thread, after the child state exists.
+            _pulse = std::make_unique<FramePulse>(
+                std::chrono::milliseconds(SPINNER_FRAME_MS),
+                [child = _state->sidechat] {
+                    return child->session->phase() != Session::Phase::IDLE
+                        || child->session->compaction_running();
+                },
+                [] { animation::RequestAnimationFrame(); });
             return;
         }
         _pane.reset();
         _modal.reset();
+        _pulse.reset();
         _status.modal.reset();
         _host->DetachAllChildren();
         _unfocus();
@@ -171,6 +183,7 @@ private:
     Component _host;
     Component _pane;
     Component _modal;
+    std::unique_ptr<FramePulse> _pulse;
     bool _focused     = false;
     LayoutCtx _layout = layout_context(0);
     ftxui::Box _pane_box { };

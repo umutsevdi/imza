@@ -20,8 +20,8 @@ template <typename LockVariant> void release_lock(LockVariant& held)
 }
 
 // RAII scratch directory: unique per instance under the system temp path,
-// created eagerly, removed with everything inside it on destruction —
-// including when an assertion fails mid-test.
+// created eagerly, removed with everything inside it on destruction
+// (including when an assertion fails mid-test).
 struct TempDir {
     TempDir()
         : path(std::filesystem::temp_directory_path()

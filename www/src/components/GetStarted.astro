@@ -149,7 +149,8 @@ const tagName = pinned ? VERSION : undefined;
 
   <div class="brew-panel tui-panel" hidden data-brew-panel>
     <p class="brew-head">Install with Homebrew</p>
-    <pre class="code-block brew-cmd"><span class="t-prompt">$</span> {BREW_COMMAND}</pre>
+    <pre
+      class="code-block brew-cmd"><span class="t-prompt">$</span> {BREW_COMMAND}</pre>
     <div class="brew-foot">
       <button class="brew-copy" type="button" data-copy={BREW_COMMAND}>
         copy
@@ -160,16 +161,27 @@ const tagName = pinned ? VERSION : undefined;
 
   <div class="dl">
     <a class="btn dl-primary" href={fallbackUrl} data-dl-primary>
-      <svg class="dl-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-        <path d="M7.25 1.5a.75.75 0 0 1 1.5 0v7.19l2.22-2.22a.75.75 0 1 1 1.06 1.06l-3.5 3.5a.75.75 0 0 1-1.06 0l-3.5-3.5a.75.75 0 1 1 1.06-1.06l2.22 2.22V1.5Z" />
-        <path d="M2.75 11a.75.75 0 0 1 .75.75v1.5h9v-1.5a.75.75 0 0 1 1.5 0v1.75c0 .69-.56 1.25-1.25 1.25H3c-.69 0-1.25-.56-1.25-1.25v-1.75a.75.75 0 0 1 .75-.75Z" />
+      <svg
+        class="dl-icon"
+        viewBox="0 0 16 16"
+        fill="currentColor"
+        aria-hidden="true"
+      >
+        <path
+          d="M7.25 1.5a.75.75 0 0 1 1.5 0v7.19l2.22-2.22a.75.75 0 1 1 1.06 1.06l-3.5 3.5a.75.75 0 0 1-1.06 0l-3.5-3.5a.75.75 0 1 1 1.06-1.06l2.22 2.22V1.5Z"
+        ></path>
+        <path
+          d="M2.75 11a.75.75 0 0 1 .75.75v1.5h9v-1.5a.75.75 0 0 1 1.5 0v1.75c0 .69-.56 1.25-1.25 1.25H3c-.69 0-1.25-.56-1.25-1.25v-1.75a.75.75 0 0 1 .75-.75Z"
+        ></path>
       </svg>
       <span class="dl-label" data-dl-label>Download</span>
     </a>
     <details class="dl-menu" data-dl-menu>
       <summary class="dl-toggle" aria-label="All download options">
         <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-          <path d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z" />
+          <path
+            d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z"
+          ></path>
         </svg>
       </summary>
       <div class="dl-list">
@@ -234,7 +246,8 @@ const tagName = pinned ? VERSION : undefined;
     };
   }
 
-  const primary = document.querySelector<HTMLAnchorElement>("[data-dl-primary]");
+  const primary =
+    document.querySelector<HTMLAnchorElement>("[data-dl-primary]");
   const label = document.querySelector<HTMLElement>("[data-dl-label]");
   const brewPanel = document.querySelector<HTMLElement>("[data-brew-panel]");
 

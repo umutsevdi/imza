@@ -36,6 +36,7 @@ jobs:
     # floor of the produced binary, so this must stay at 22.04 (glibc 2.35)
     # for the .deb to run on Ubuntu 22.04 / Debian 12 and newer. arm64 runs
     # natively on GitHub's arm64 runner: no cross-compilation, no qemu.
+    timeout-minutes: 45
     runs-on: ${{ matrix.runs-on }}
     container: ${{ matrix.container }}
     needs: prepare
@@ -97,6 +98,7 @@ jobs:
     # floor of the produced binary, so this must stay at EL9 (glibc 2.34)
     # for the .rpm to run on AlmaLinux / Rocky 9 and newer. arm64 runs
     # natively on GitHub's arm64 runner: no cross-compilation, no qemu.
+    timeout-minutes: 45
     runs-on: ${{ matrix.runs-on }}
     container: almalinux:9
     needs: prepare
@@ -137,6 +139,7 @@ jobs:
           if-no-files-found: error
 
   macos:
+    timeout-minutes: 45
     runs-on: macos-15
     needs: prepare
     steps:
@@ -175,6 +178,7 @@ jobs:
           if-no-files-found: error
 
   windows:
+    timeout-minutes: 45
     runs-on: windows-latest
     needs: prepare
     steps:

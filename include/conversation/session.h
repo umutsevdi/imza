@@ -287,9 +287,7 @@ public:
     void bump_modal_serial();
     void present_modal(ModalPayload payload);
 
-    // The conversation's modal queue: user dialogs and agent requests
-    // awaiting presentation. Conversation-scoped by design — a new or
-    // restored conversation starts with an empty queue.
+    // User dialogs and agent requests awaiting presentation.
     ModalQueue queue;
 
     // Loaded skills and the pending skill turn: conversation-scoped, so

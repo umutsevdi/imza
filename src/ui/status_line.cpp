@@ -31,8 +31,10 @@ namespace {
             , _layout(std::move(layout))
             , _workflow(std::move(workflow))
             , _workspace_subscription(
-                  _state->environment->subscribe_to_workspace_change(
-                      [] { animation::RequestAnimationFrame(); }))
+                  _state->environment->subscribe_to_workspace_change([this] {
+                      _cwd_dirty.store(true);
+                      animation::RequestAnimationFrame();
+                  }))
             , _repository_subscription(
                   _state->environment->subscribe_to_repository_change(
                       [] { animation::RequestAnimationFrame(); }))
@@ -119,9 +121,10 @@ namespace {
                 bar.push_back(text(" · " + tags) | color(PANEL_FG_DIM));
             }
             bar.push_back(filler());
-            if (append_background_tasks(&bar, wide)) {
-                animation::RequestAnimationFrame();
-            }
+            // The background-tasks spinner advances via OnAnimation
+            // accumulation; the frame pulse keeps frames coming, so this
+            // render must not re-request one.
+            append_background_tasks(&bar, wide);
             if (wide) {
                 bar.push_back(text(_cwd()) | color(PANEL_FG_DIM));
                 if (repository && !repository->branch.empty()) {
@@ -136,17 +139,22 @@ namespace {
                 | color(PANEL_FG) | xflex;
         }
 
-        void OnAnimation(animation::Params& params) override
+        void OnAnimation(animation::Params&) override
         {
+            const auto now = std::chrono::steady_clock::now();
+            // FTXUI's animation-request hysteresis rewrites its timing
+            // reference whenever a request lands more than 33ms after the
+            // previous animation, which the throttled wake loop always
+            // does — callback durations are clipped, so steps accumulate
+            // wall time instead. While nothing is shown, the reference
+            // rebases without accumulating: the step freezes across the
+            // gap rather than jumping by the hidden span.
             if (append_background_tasks(nullptr, false)) {
-                // Spinner position derives from accumulated animation time,
-                // not the callback count, so its speed does not follow the
-                // render loop's frame rate.
                 _animation_ms
                     += std::chrono::duration_cast<std::chrono::milliseconds>(
-                        params.duration());
-                animation::RequestAnimationFrame();
+                        now - _last_animation);
             }
+            _last_animation = now;
         }
 
     private:
@@ -194,6 +202,8 @@ namespace {
         std::shared_ptr<ApplicationState> _state;
         LayoutFn _layout;
         WorkflowFn _workflow;
+        std::chrono::steady_clock::time_point _last_animation
+            = std::chrono::steady_clock::now();
         std::chrono::milliseconds _animation_ms { };
         std::string _last_model;
         ModelPricing _cached;
@@ -274,12 +284,19 @@ namespace {
 
         std::string _cwd()
         {
-            std::error_code ec;
-            const std::filesystem::path cwd = std::filesystem::current_path(ec);
-            return ec ? "" : _abbreviate_home(cwd.string());
+            // current_path is a syscall: re-derive only when the workspace
+            // changes (the only in-process source of chdir).
+            if (_cwd_dirty.exchange(false)) {
+                std::error_code ec;
+                _cwd_text = _abbreviate_home(
+                    std::filesystem::current_path(ec).string());
+            }
+            return _cwd_text;
         }
-    };
 
+        std::atomic<bool> _cwd_dirty { true };
+        std::string _cwd_text;
+    };
 } // namespace
 
 ftxui::Component make_status_line(std::shared_ptr<ApplicationState> state,

@@ -641,7 +641,7 @@ ModelPricing ProviderStore::pricing_for(
     const std::string provider_id = to_lower(
         connection != nullptr ? connection->id : std::string(connection_id));
     // Keys are qualified (`provider/model`), so the lookup can only match
-    // this provider's rows — a bare id can never borrow a sibling's.
+    // this provider's rows; a bare id can never borrow a sibling's.
     const std::string qualified = provider_id + "/" + key;
     const ModelPricing* match   = resolve_model(_pricing, qualified);
     return match != nullptr ? *match : ModelPricing { };

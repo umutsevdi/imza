@@ -606,8 +606,9 @@ void Environment::_publish_workspace(
         if (generation != _workspace_generation) {
             return;
         }
-        _workspace  = std::move(ws);
-        _repository = std::make_shared<const RepositoryState>();
+        _workspace     = std::move(ws);
+        _repository    = std::make_shared<const RepositoryState>();
+        _sorted_skills = nullptr;
         _workspace_ready.store(true);
     }
     _workspace_ready_cv.notify_all();
@@ -620,7 +621,8 @@ void Environment::_publish_system(
 {
     {
         std::unique_lock lock(_workspace_mutex);
-        _system = std::move(system);
+        _system        = std::move(system);
+        _sorted_skills = nullptr;
         _system_ready.store(true);
     }
     _system_ready_cv.notify_all();
@@ -767,27 +769,35 @@ void Environment::rescan_skills()
     _publish_system(std::move(refreshed));
 }
 
-std::vector<Skill> Environment::skills() const
+std::vector<Skill> Environment::skills() const { return *sorted_skills(); }
+
+std::shared_ptr<const std::vector<Skill>> Environment::sorted_skills() const
 {
-    std::vector<Skill> out;
-    if (const auto system = this->system()) {
-        for (const auto& [name, skill] : system->global_skills) {
-            out.push_back(skill);
+    // The system() and workspace() accessors take the same mutex: read the
+    // raw members under the held lock instead.
+    std::unique_lock lock(_workspace_mutex);
+    if (_sorted_skills == nullptr) {
+        std::vector<Skill> out;
+        if (_system) {
+            for (const auto& [name, skill] : _system->global_skills) {
+                out.push_back(skill);
+            }
         }
+        if (_workspace) {
+            for (const auto& [name, skill] : _workspace->project_skills) {
+                out.push_back(skill);
+            }
+        }
+        std::sort(out.begin(), out.end(), [](const Skill& a, const Skill& b) {
+            if (a.scope != b.scope) {
+                return a.scope == Skill::Scope::PROJECT;
+            }
+            return a.name < b.name;
+        });
+        _sorted_skills
+            = std::make_shared<const std::vector<Skill>>(std::move(out));
     }
-    const auto ws = workspace();
-    if (ws) {
-        for (const auto& [name, skill] : ws->project_skills) {
-            out.push_back(skill);
-        }
-    }
-    std::sort(out.begin(), out.end(), [](const Skill& a, const Skill& b) {
-        if (a.scope != b.scope) {
-            return a.scope == Skill::Scope::PROJECT;
-        }
-        return a.name < b.name;
-    });
-    return out;
+    return _sorted_skills;
 }
 
 } // namespace imza

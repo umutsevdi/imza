@@ -79,11 +79,12 @@ inline constexpr int EXIT_CONFIRM_WIDTH = 52;
 // queue (not the network) decides the cadence, and a burst drains smoothly
 // after the turn ends. The markdown re-parse stays gated by
 // TRAILING_MARKDOWN_INTERVAL regardless.
-// Display ceiling: characters per tick the view never exceeds, whatever the
-// backlog. ~8 chars per 60 fps frame ≈ 480 chars/s of steady typing.
-inline constexpr std::size_t PLAYOUT_MAX_CHARS_PER_TICK = 8;
-// Backlogs beyond this snap to full text instead of animating (tool-call
-// result insertions, compaction, restored turns).
+// Pacing is time-proportional so it holds whatever cadence renders fire at:
+// a release is at most 8 chars per 15ms of elapsed time (~530 chars/s
+// steady), at least 1 char per 15ms, and otherwise drains 1/15 of the
+// remaining backlog per 15ms.
+// Backlogs beyond PLAYOUT_HARD_CAP snap to full text instead of animating
+// (tool-call result insertions, compaction, restored turns).
 inline constexpr std::size_t PLAYOUT_HARD_CAP = 4000;
 
 // The streaming chat tail's markdown re-parse cadence. Matched to the
@@ -98,7 +99,7 @@ inline constexpr int DIFF_VIEWER_MODAL_MAX_WIDTH = 160;
 
 // Spinner pacing is wall-clock based so animation speed does not follow the
 // render loop's frame rate: one spinner step per SPINNER_FRAME_MS of
-// accumulated animation time.
+// accumulated wall time.
 inline constexpr int SPINNER_FRAME_MS = 45;
 
 int modal_max_width(const ModalPayload& modal);
@@ -328,7 +329,7 @@ inline bool is_bracketed_paste_end(const ftxui::Event& event)
 }
 inline bool is_sidechat_toggle(const ftxui::Event& event)
 {
-    return event == ftxui::Event::CtrlS;
+    return event == ftxui::Event::CtrlE;
 }
 inline void insert_newline_at(std::string& text, int& cursor)
 {
@@ -454,7 +455,7 @@ struct ChatHints {
     std::function<int(const LayoutCtx&)> content_width;
     std::string scroll_line = "Ctrl+↑↓ input history · ↑↓ scroll";
     std::string phase_line
-        = "Tab next phase · Shift+Tab previous phase · Ctrl+S Sidechat";
+        = "Tab next phase · Shift+Tab previous phase · Ctrl+E Sidechat";
     // When set, replaces phase_line each render (the shared chat needs
     // phase-accurate hints without being re-created).
     std::function<std::string()> phase_line_fn;

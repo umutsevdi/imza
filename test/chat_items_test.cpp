@@ -159,7 +159,7 @@ TEST_CASE("busy chat footer shows the phase hint without a progress sweep")
 
     bool seen_hint = false;
     for (const std::string& line : imza::split_lines(rendered)) {
-        if (line.find("Ctrl+S Sidechat") == std::string::npos) {
+        if (line.find("Ctrl+E Sidechat") == std::string::npos) {
             continue;
         }
         seen_hint = true;

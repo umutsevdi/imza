@@ -5,7 +5,9 @@
 // "Connection: close". Fixtures install a Handler before start(); knobs
 // and scripted responses belong to them, transport plumbing lives here.
 
+#include <atomic>
 #include <cctype>
+#include <cerrno>
 #include <cstdlib>
 #include <functional>
 #include <initializer_list>
@@ -23,6 +25,7 @@
 #ifndef _WIN32
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -67,7 +70,6 @@ namespace detail {
     {
         return ::recv(handle, data, static_cast<int>(size), 0);
     }
-    inline void shutdown_socket(Socket handle) { ::shutdown(handle, SD_BOTH); }
     inline bool set_receive_timeout(Socket handle, int seconds)
     {
         const DWORD timeout = static_cast<DWORD>(seconds) * 1000;
@@ -85,6 +87,13 @@ namespace detail {
     inline Socket accept_socket(Socket listener)
     {
         return ::accept(listener, nullptr, nullptr);
+    }
+    // shutdown() does not wake accept() on a listening Winsock socket, so
+    // the server polls instead of blocking. >0 ready, 0 timeout, -1 failed.
+    inline int wait_readable(Socket handle, int timeout_ms)
+    {
+        WSAPOLLFD entry { handle, POLLRDNORM, 0 };
+        return ::WSAPoll(&entry, 1, timeout_ms);
     }
     inline bool bind_loopback(Socket handle, sockaddr_in& address)
     {
@@ -123,10 +132,6 @@ namespace detail {
     {
         return static_cast<int>(::recv(handle, data, size, 0));
     }
-    inline void shutdown_socket(Socket handle)
-    {
-        ::shutdown(handle, SHUT_RDWR);
-    }
     inline bool set_receive_timeout(Socket handle, int seconds)
     {
         const timeval timeout { seconds, 0 };
@@ -144,6 +149,14 @@ namespace detail {
     inline Socket accept_socket(Socket listener)
     {
         return ::accept(listener, nullptr, nullptr);
+    }
+    // >0 ready, 0 timeout, -1 failed. EINTR reads as a timeout so the caller
+    // keeps one shape on every platform.
+    inline int wait_readable(Socket handle, int timeout_ms)
+    {
+        pollfd entry { handle, POLLIN, 0 };
+        const int ready = ::poll(&entry, 1, timeout_ms);
+        return ready < 0 && errno == EINTR ? 0 : ready;
     }
     inline bool bind_loopback(Socket handle, sockaddr_in& address)
     {
@@ -212,16 +225,15 @@ public:
             listen_fd_ = detail::INVALID_SOCKET_VALUE;
             return false;
         }
-        base_   = "http://127.0.0.1:" + std::to_string(ntohs(bound.sin_port));
+        base_ = "http://127.0.0.1:" + std::to_string(ntohs(bound.sin_port));
+        stopping_.store(false);
         thread_ = std::thread([this] { serve(); });
         return true;
     }
 
     void stop()
     {
-        if (listen_fd_ != detail::INVALID_SOCKET_VALUE) {
-            detail::shutdown_socket(listen_fd_);
-        }
+        stopping_.store(true);
         if (thread_.joinable()) {
             thread_.join();
         }
@@ -257,9 +269,19 @@ private:
     void serve()
     {
         for (;;) {
+            if (stopping_.load()) {
+                return;
+            }
+            const int readable = detail::wait_readable(listen_fd_, 50);
+            if (readable == 0) {
+                continue;
+            }
+            if (readable < 0) {
+                return;
+            }
             const detail::Socket fd = detail::accept_socket(listen_fd_);
             if (fd == detail::INVALID_SOCKET_VALUE) {
-                return; // unblocked by stop()'s shutdown
+                return;
             }
             detail::set_receive_timeout(fd, 5);
             LoopbackRequest request;
@@ -327,6 +349,7 @@ private:
     }
 
     detail::Socket listen_fd_ = detail::INVALID_SOCKET_VALUE;
+    std::atomic<bool> stopping_ { false };
     std::thread thread_;
     std::string base_;
 };

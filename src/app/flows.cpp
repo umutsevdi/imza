@@ -277,12 +277,6 @@ namespace {
         return true;
     }
 
-    // The one operation that swaps the active conversation. Owns the
-    // whole protocol: the caller has already saved and released the
-    // previous file lock; this clears every conversation-scoped surface
-    // (queue, loaded skills, pending skill turn — via restore) plus the
-    // workspace-scoped grants and runner flags, then installs the
-    // snapshot. Nothing else may clear these piecemeal.
     void install_session(ApplicationState& state, SessionSnapshot snapshot)
     {
         state.session->restore(std::move(snapshot));
@@ -930,7 +924,7 @@ std::optional<std::size_t> run_review_pass(
             // truncated reply and a shape failure the budget caused. It
             // must start on the main thread: this callback runs on the
             // finishing subagent's own worker, and run_review_pass prunes
-            // completed workers — joining the thread it is running on.
+            // completed workers, joining the thread it is running on.
             const std::string failure_message
                 = truncated ? error_text(Status::TRUNCATED) : parse_error;
             state_ptr->post([state_ptr, pass, label, prompt,
@@ -1176,7 +1170,7 @@ void refresh_sidechat(ApplicationState& state)
 {
     if (state.sidechat == nullptr) {
         state.session->set_error(
-            "No Sidechat is open - open one with Ctrl+S first.");
+            "No Sidechat is open - open one with Ctrl+E first.");
         return;
     }
     interrupt(*state.sidechat);
