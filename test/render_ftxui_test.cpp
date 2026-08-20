@@ -21,32 +21,33 @@ std::string to_text(ftxui::Element element)
 
 TEST_CASE("render_markdown_element renders paragraphs")
 {
-    const std::string out = to_text(ursa::render_markdown_element("hello world"));
+    const std::string out
+        = to_text(ursa::render_markdown_element("hello world"));
     CHECK(out.find("hello") != std::string::npos);
 }
 
 TEST_CASE("render_markdown_element renders code blocks")
 {
-    const std::string out =
-        to_text(ursa::render_markdown_element("```\nint x = 42;\n```"));
+    const std::string out
+        = to_text(ursa::render_markdown_element("```\nint x = 42;\n```"));
     CHECK(out.find("int x = 42;") != std::string::npos);
     CHECK(out.find("┌") != std::string::npos);
 }
 
 TEST_CASE("render_markdown_element renders tables")
 {
-    const std::string out = to_text(ursa::render_markdown_element(
-        "| a | b |\n"
-        "| - | - |\n"
-        "| 1 | 2 |\n"));
+    const std::string out
+        = to_text(ursa::render_markdown_element("| a | b |\n"
+                                                "| - | - |\n"
+                                                "| 1 | 2 |\n"));
     CHECK(out.find("a") != std::string::npos);
     CHECK(out.find("│") != std::string::npos);
 }
 
 TEST_CASE("render_markdown_element renders lists and headings")
 {
-    const std::string out = to_text(ursa::render_markdown_element(
-        "# Title\n\n- one\n- two\n\n1. first\n"));
+    const std::string out = to_text(
+        ursa::render_markdown_element("# Title\n\n- one\n- two\n\n1. first\n"));
     CHECK(out.find("Title") != std::string::npos);
     CHECK(out.find("- one") != std::string::npos);
     CHECK(out.find("1. first") != std::string::npos);
@@ -54,8 +55,8 @@ TEST_CASE("render_markdown_element renders lists and headings")
 
 TEST_CASE("render_markdown_element drops html")
 {
-    const std::string out =
-        to_text(ursa::render_markdown_element("text <script>bad</script>"));
+    const std::string out
+        = to_text(ursa::render_markdown_element("text <script>bad</script>"));
     CHECK(out.find("<script>") == std::string::npos);
     CHECK(out.find("text") != std::string::npos);
 }

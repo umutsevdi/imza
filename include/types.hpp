@@ -13,10 +13,10 @@ enum class Status {
     CONFIG_ERROR
 };
 
-enum class Standard { OPENAI, ANTHROPIC };
+enum class ApiStandard { OPENAI, ANTHROPIC };
 
 struct Config {
-    Standard standard = Standard::OPENAI;
+    ApiStandard standard = ApiStandard::OPENAI;
     std::string api_base;
     std::string api_key;
     std::string model;

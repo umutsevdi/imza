@@ -57,8 +57,8 @@ Status load_config(const std::filesystem::path& path, Config& out)
     out.model    = root.get("model", "").asString();
 
     const std::string standard = root.get("standard", "openai").asString();
-    out.standard
-        = (standard == "anthropic") ? Standard::ANTHROPIC : Standard::OPENAI;
+    out.standard = (standard == "anthropic") ? ApiStandard::ANTHROPIC
+                                             : ApiStandard::OPENAI;
 
     if (out.api_key.empty() || out.model.empty()) {
         return Status::CONFIG_ERROR;

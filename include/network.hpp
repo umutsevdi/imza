@@ -1,8 +1,10 @@
 #pragma once
 
-#include <functional>
 #include <json/json.h>
+
+#include <functional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "types.hpp"
@@ -28,19 +30,24 @@ struct ChatRequest {
     double temperature = 0.7;
 };
 
-struct ChatResponse {
-    std::string content;
-    int prompt_tokens     = 0;
-    int completion_tokens = 0;
-};
-
 using StreamCallback = std::function<void(const StreamEvent&)>;
 
-Status chat_stream(
-    const Config& cfg, const ChatRequest& req, StreamCallback on_event);
+struct Provider {
+    Json::Value (*build)(const ChatRequest& req);
+    std::string (*endpoint)();
+    std::vector<std::string> (*headers)(const std::string& api_key);
+    Status (*parse)(
+        std::string_view event, std::string_view data, StreamEvent& out);
+};
 
-Json::Value build_request(Standard standard, const ChatRequest& req);
-Status parse_stream_event(Standard standard, std::string_view event,
-    std::string_view data, StreamEvent& out);
+Provider get_provider(const Config& cfg);
+
+Status stream(const Provider& provider, const Config& cfg,
+    const ChatRequest& req, StreamCallback cb);
+
+std::string strip_slash(std::string_view base);
+std::string write_json(const Json::Value& value);
+Json::Value parse_json(std::string_view text);
+const char* role_str(Message::Type type);
 
 } // namespace ursa

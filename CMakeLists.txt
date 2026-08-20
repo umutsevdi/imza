@@ -83,7 +83,13 @@ FetchContent_MakeAvailable(jsoncpp doctest cmarkgfm)
 file(GLOB TEST_SOURCES "test/*.cpp")
 
 # Core
-add_library(ursa_core src/network.cpp src/config.cpp)
+add_library(ursa_core
+    src/config.cpp
+    src/network/network_common.cpp
+    src/network/provider.cpp
+    src/network/openai_provider.cpp
+    src/network/anthropic_provider.cpp
+)
 target_include_directories(ursa_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${cmarkgfm_SOURCE_DIR}/src
@@ -113,6 +119,8 @@ target_link_libraries(ursa PRIVATE
     ftxui::ftxui
     libcmark-gfm-extensions_static
     libcmark-gfm_static
+    jsoncpp_static
+    CURL::libcurl
 )
 
 
