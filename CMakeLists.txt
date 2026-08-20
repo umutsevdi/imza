@@ -72,10 +72,22 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(jsoncpp doctest cmark)
 
+file(GLOB TEST_SOURCES "test/*.cpp")
 
-file(GLOB SOURCES "src/*.cpp")
-file(GLOB TEST_SOURCES  "test/*.cpp")
-add_executable(ursa ${SOURCES})
+# Core library (network + config) shared by the app and the tests.
+add_library(ursa_core src/network.cpp src/config.cpp)
+target_include_directories(ursa_core PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${cmark_SOURCE_DIR}/src
+    ${jsoncpp_SOURCE_DIR}/include
+    ${replxx_SOURCE_DIR}/include
+)
+target_link_libraries(ursa_core PRIVATE
+    jsoncpp_static
+    CURL::libcurl
+)
+
+add_executable(ursa src/main.cpp)
 target_include_directories(ursa PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${cmark_SOURCE_DIR}/src
@@ -83,11 +95,10 @@ target_include_directories(ursa PRIVATE
     ${replxx_SOURCE_DIR}/include
 )
 target_link_libraries(ursa PRIVATE
-    cmark
-    jsoncpp_static
-    CURL::libcurl
+    ursa_core
     replxx
 )
+
 
 if (TESTS)
     add_executable(ursa_tests ${TEST_SOURCES})
@@ -98,6 +109,7 @@ if (TESTS)
         ${replxx_SOURCE_DIR}/include
     )
     target_link_libraries(ursa_tests PRIVATE
+        ursa_core
         cmark
         jsoncpp_static
         CURL::libcurl
