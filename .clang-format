@@ -1,0 +1,17 @@
+﻿---
+BasedOnStyle: WebKit
+AlignConsecutiveAssignments: 'true'
+AlignTrailingComments: 'true'
+AllowShortCaseLabelsOnASingleLine: 'true'
+ColumnLimit: '80'
+TabWidth: '4'
+UseTab: Never
+FixNamespaceComments: 'true'
+IncludeCategories:
+  - Regex: ^".*"$
+    Priority: 1
+  - Regex: ^<.*\.h>$
+    Priority: 2
+  - Regex: ^<.*>$
+    Priority: 3
+...

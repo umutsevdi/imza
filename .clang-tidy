@@ -1,0 +1,64 @@
+Checks:
+  - -*
+  - bugprone-branch-clone
+  - bugprone-dangling-handle
+  - bugprone-inaccurate-erase
+  - bugprone-inc-dec-in-conditions
+  - bugprone-macro-parentheses
+  - bugprone-misplaced-widening-cast
+  - bugprone-multiple-statement-macro
+  - bugprone-signed-char-misuse
+  - bugprone-string-constructor
+  - bugprone-suspicious-enum-usage
+  - bugprone-swapped-arguments
+  - bugprone-unhandled-exception-at-new
+  - cppcoreguidelines-pro-type-member-init
+  - misc-no-recursion
+  - misc-static-assert
+  - misc-throw-by-value-catch-by-reference
+  - misc-unconventional-assign-operator
+  - modernize-avoid-c-arrays
+  - modernize-deprecated-headers
+  - modernize-make-unique
+  - modernize-pass-by-value
+  - modernize-use-bool-literals
+  - modernize-use-default-member-init
+  - modernize-use-emplace
+  - modernize-use-equals-default
+  - modernize-use-noexcept
+  - modernize-use-nullptr
+  - modernize-use-override
+  - performance-for-range-copy
+  - performance-move-const-arg
+  - performance-no-automatic-move
+  - performance-type-promotion-in-math-fn
+  - performance-unnecessary-copy-initialization
+  - performance-unnecessary-value-param
+  - readability-braces-around-statements
+  - readability-const-return-type
+  - readability-container-size-empty
+  - readability-delete-null-pointer
+  - readability-implicit-bool-conversion
+  - readability-make-member-function-const
+  - readability-redundant-member-init
+  - readability-simplify-boolean-expr
+  - readability-static-accessed-through-instance
+  - readability-string-compare
+
+HeaderFileExtensions: ["", h]
+ImplementationFileExtensions: [c, cpp, cxx]
+HeaderFilterRegex: (src)/
+FormatStyle: file
+CheckOptions:
+  bugprone-suspicious-enum-usage.StrictMode: false
+  cppcoreguidelines-pro-type-member-init.IgnoreArrays: true
+  cppcoreguidelines-pro-type-member-init.UseAssignment: true
+  modernize-deprecated-headers.CheckHeaderFile: true
+  modernize-use-bool-literals.IgnoreMacros: false
+  modernize-use-default-member-init.IgnoreMacros: false
+  modernize-use-default-member-init.UseAssignment: true
+  modernize-pass-by-value.ValuesOnly: true
+  modernize-use-noexcept.ReplacementString: ""
+  performance-for-range-copy.WarnOnAllAutoCopies: false
+  readability-implicit-bool-conversion.AllowIntegerConditions: true
+  readability-implicit-bool-conversion.AllowPointerConditions: true

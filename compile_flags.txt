@@ -1,0 +1,11 @@
+-std=c++23
+-xc++-header
+-Wall
+-Wextra
+-Wpedantic
+-I
+include/
+-I
+build/_deps/doctest-src/
+-I
+build/_deps/jsoncpp-src/include/
