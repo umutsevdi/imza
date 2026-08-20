@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <json/json.h>
 #include <string>
 #include <vector>
@@ -33,7 +34,7 @@ struct ChatResponse {
     int completion_tokens = 0;
 };
 
-using StreamCallback = void (*)(const StreamEvent&);
+using StreamCallback = std::function<void(const StreamEvent&)>;
 
 Status chat_stream(
     const Config& cfg, const ChatRequest& req, StreamCallback on_event);

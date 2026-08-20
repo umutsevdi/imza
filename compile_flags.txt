@@ -9,3 +9,7 @@ include/
 build/_deps/doctest-src/
 -I
 build/_deps/jsoncpp-src/include/
+-I
+build/_deps/cmarkgfm-src/src/
+-I
+build/_deps/ftxui-src/include/

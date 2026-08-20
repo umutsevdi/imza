@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 4.0)
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 project(ursa LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
@@ -37,13 +38,18 @@ find_package(OpenSSL REQUIRED)
 find_package(CURL REQUIRED)
 include(FetchContent)
 
+
 # ---- Dependencies ----
+# FTXUI
+set(FTXUI_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(FTXUI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(FTXUI_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
-    replxx
-    GIT_REPOSITORY https://github.com/AmokHuginnsson/replxx.git
-    GIT_TAG master
+    ftxui
+    GIT_REPOSITORY https://github.com/ArthurSonzogni/ftxui
+    GIT_TAG v7.0.3
 )
-FetchContent_MakeAvailable(replxx)
+FetchContent_MakeAvailable(ftxui)
 
 
 # jsoncpp
@@ -64,59 +70,73 @@ FetchContent_Declare(
     GIT_TAG v2.4.12
 )
 
-# cmark
+# cmark-gfm
+set(CMARK_STATIC ON CACHE BOOL "" FORCE)
+set(CMARK_SHARED OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
-    cmark
-    GIT_REPOSITORY https://github.com/commonmark/cmark.git
-    GIT_TAG 0.31.1   # pin a tag
+    cmarkgfm
+    GIT_REPOSITORY https://github.com/github/cmark-gfm.git
+    GIT_TAG 0.29.0.gfm.13
 )
-FetchContent_MakeAvailable(jsoncpp doctest cmark)
+FetchContent_MakeAvailable(jsoncpp doctest cmarkgfm)
 
 file(GLOB TEST_SOURCES "test/*.cpp")
 
-# Core library (network + config) shared by the app and the tests.
+# Core
 add_library(ursa_core src/network.cpp src/config.cpp)
 target_include_directories(ursa_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${cmark_SOURCE_DIR}/src
+    ${cmarkgfm_SOURCE_DIR}/src
+    ${cmarkgfm_BINARY_DIR}/src
+    ${cmarkgfm_SOURCE_DIR}/extensions
     ${jsoncpp_SOURCE_DIR}/include
-    ${replxx_SOURCE_DIR}/include
 )
 target_link_libraries(ursa_core PRIVATE
     jsoncpp_static
     CURL::libcurl
 )
 
-add_executable(ursa src/main.cpp)
+add_executable(ursa src/main.cpp src/render.cpp src/ui.cpp)
 target_include_directories(ursa PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${cmark_SOURCE_DIR}/src
+    ${cmarkgfm_SOURCE_DIR}/src
+    ${cmarkgfm_BINARY_DIR}/src
+    ${cmarkgfm_SOURCE_DIR}/extensions
     ${jsoncpp_SOURCE_DIR}/include
-    ${replxx_SOURCE_DIR}/include
+)
+target_compile_definitions(ursa PRIVATE
+    CMARK_GFM_STATIC_DEFINE
+    CMARK_GFM_EXTENSIONS_STATIC_DEFINE
 )
 target_link_libraries(ursa PRIVATE
     ursa_core
-    replxx
+    ftxui::ftxui
+    libcmark-gfm-extensions_static
+    libcmark-gfm_static
 )
 
 
 if (TESTS)
-    add_executable(ursa_tests ${TEST_SOURCES})
+    add_executable(ursa_tests ${TEST_SOURCES} src/render.cpp)
     target_include_directories(ursa_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${cmark_SOURCE_DIR}/src
+        ${cmarkgfm_SOURCE_DIR}/src
+    ${cmarkgfm_BINARY_DIR}/src
+        ${cmarkgfm_SOURCE_DIR}/extensions
         ${jsoncpp_SOURCE_DIR}/include
-        ${replxx_SOURCE_DIR}/include
+    )
+    target_compile_definitions(ursa_tests PRIVATE
+        CMARK_GFM_STATIC_DEFINE
+        CMARK_GFM_EXTENSIONS_STATIC_DEFINE
     )
     target_link_libraries(ursa_tests PRIVATE
         ursa_core
-        cmark
+        ftxui::ftxui
+        libcmark-gfm-extensions_static
+        libcmark-gfm_static
         jsoncpp_static
         CURL::libcurl
-        replxx
         doctest::doctest
     )
 
 endif()
-
-
