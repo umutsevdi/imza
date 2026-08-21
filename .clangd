@@ -1,5 +1,11 @@
 # https://clangd.llvm.org/config
 ---
+CompileFlags:
+  Remove:
+    - -fmodules-ts
+    - -fmodule-mapper=*
+    - -fdeps-format=*
+---
 # Default conditions, apply everywhere.
 
 # Header-specific conditions.

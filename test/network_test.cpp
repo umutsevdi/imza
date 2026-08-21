@@ -1,8 +1,8 @@
 #include <doctest/doctest.h>
 #include <json/json.h>
 
-#include "network.hpp"
-#include "types.hpp"
+#include "network.h"
+#include "types.h"
 
 TEST_CASE("OpenAI request shape via factory")
 {

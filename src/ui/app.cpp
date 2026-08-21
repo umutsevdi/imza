@@ -1,4 +1,4 @@
-#include "ui.hpp"
+#include "ui.h"
 
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_base.hpp>
@@ -10,8 +10,9 @@
 #include <unistd.h>
 
 #include <functional>
+#include <iostream>
 
-#include "render.hpp"
+#include "render.h"
 #include <print>
 
 namespace ursa {
@@ -23,16 +24,16 @@ namespace {
     Element header_element(const Config& cfg)
     {
         const std::string cwd = std::filesystem::current_path().string();
-        Element bar = hbox({
+        Element bar           = hbox({
             text(" "),
-            text("ursa") | bold | color(Color::White),
+            text("URSA") | bold,
             text(cfg.model.empty() ? "" : "  ·  " + cfg.model)
-                | color(Color::GrayLight),
+                | color(Color::GrayDark),
             filler(),
-            text(cwd) | color(Color::GrayLight),
+            text(cwd) | color(Color::GrayDark),
             text(" "),
         });
-        return std::move(bar) | bgcolor(Color::GrayDark);
+        return std::move(bar) | bgcolor(Color::Cyan);
     }
 
     class Repl : public ComponentBase {
@@ -41,10 +42,10 @@ namespace {
             : screen_(screen)
             , controller_(controller)
         {
-            todo_ = make_todo(controller, [] { return 30; });
+            todo_  = make_todo(controller, [] { return 30; });
             files_ = make_changed_files(controller);
-            chat_  = make_chat(controller,
-                [] { return ftxui::Terminal::Size().dimx; });
+            chat_  = make_chat(
+                controller, [] { return ftxui::Terminal::Size().dimx; });
             settings_ = make_settings(controller);
             Add(chat_);
         }
@@ -52,37 +53,43 @@ namespace {
         Element OnRender() override
         {
             const int w = ftxui::Terminal::Size().dimx;
-            const LayoutCtx::Kind kind = w >= 100 ? LayoutCtx::Kind::WIDE : LayoutCtx::Kind::NARROW;
+            const LayoutCtx::Kind kind
+                = w >= 100 ? LayoutCtx::Kind::WIDE : LayoutCtx::Kind::NARROW;
 
             Element side
                 = vbox({ todo_->Render() | yflex, files_->Render() | yflex })
                 | bgcolor(PANEL_COLOR);
 
             Element right_col = chat_->Render();
-            const int chat_w   = (kind == LayoutCtx::Kind::WIDE) ? w - 31 : w;
-            right_col          = std::move(right_col) | size(WIDTH, EQUAL, chat_w);
-            Element header    = header_element(controller_.config());
+            const int chat_w  = (kind == LayoutCtx::Kind::WIDE) ? w - 31 : w;
+            right_col      = std::move(right_col) | size(WIDTH, EQUAL, chat_w);
+            Element header = header_element(controller_.config());
 
             Element root;
             if (kind == LayoutCtx::Kind::WIDE) {
-                root = vbox({ header,
-                    separatorEmpty(),
-                    hbox({ text(" "), side | size(WIDTH, EQUAL, 30) | yflex, text(" "), right_col })
-                        | flex })
+                root = vbox({ header, separatorEmpty(),
+                           hbox({ text(" "),
+                               side | size(WIDTH, EQUAL, 30) | yflex, text(" "),
+                               right_col })
+                               | flex })
                     | flex;
             } else {
-                root = vbox({ header, separatorEmpty(), side, right_col }) | flex;
+                root = vbox({ header, separatorEmpty(), side, right_col })
+                    | flex;
             }
 
-            if (std::holds_alternative<SettingsModal>(controller_.state().modal)) {
-                const int mw = std::min(w - 6, 72);
-                Element popup = settings_->Render() | borderRounded | bgcolor(PANEL_COLOR)
-                    | size(WIDTH, EQUAL, mw);
+            if (std::holds_alternative<SettingsModal>(
+                    controller_.state().modal)) {
+                const int mw  = std::min(w - 6, 72);
+                Element popup = settings_->Render() | borderRounded
+                    | bgcolor(PANEL_COLOR) | size(WIDTH, EQUAL, mw);
                 root = dbox({ dim(std::move(root)), center(std::move(popup)) });
-            } else if (std::holds_alternative<HelpModal>(controller_.state().modal)) {
+            } else if (std::holds_alternative<HelpModal>(
+                           controller_.state().modal)) {
                 const int mw  = std::min(w - 6, 72);
                 Element popup = render_help(controller_.commands())
-                    | borderRounded | bgcolor(PANEL_COLOR) | size(WIDTH, EQUAL, mw);
+                    | borderRounded | bgcolor(PANEL_COLOR)
+                    | size(WIDTH, EQUAL, mw);
                 root = dbox({ dim(std::move(root)), center(std::move(popup)) });
             }
             return root;
@@ -90,7 +97,8 @@ namespace {
 
         bool OnEvent(Event event) override
         {
-            if (std::holds_alternative<SettingsModal>(controller_.state().modal)) {
+            if (std::holds_alternative<SettingsModal>(
+                    controller_.state().modal)) {
                 if (event == Event::Escape) {
                     controller_.close_modal();
                     return true;
@@ -130,10 +138,20 @@ int run_repl(const Config& cfg)
     }
 
     ScreenInteractive screen = ScreenInteractive::FullscreenAlternateScreen();
-    Controller controller(cfg,
-        [&screen](std::function<void()> f) { screen.Post(f); },
+    Controller controller(
+        cfg, [&screen](std::function<void()> f) { screen.Post(f); },
         [&screen] { screen.Exit(); });
     auto app = ftxui::Make<Repl>(screen, controller);
+
+    struct TerminalMode {
+        ~TerminalMode()
+        {
+            std::cout << "\x1B[?2004l" << "\x1B[?1036l" << std::flush;
+        }
+    };
+    TerminalMode term_mode;
+    screen.Post(
+        [] { std::cout << "\x1B[?2004h" << "\x1B[?1036h" << std::flush; });
     screen.Loop(app);
     return 0;
 }

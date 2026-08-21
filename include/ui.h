@@ -4,14 +4,14 @@
 
 #include <functional>
 #include <optional>
-#include <thread>
 #include <string>
+#include <thread>
 #include <variant>
 #include <vector>
 
-#include "commands.hpp"
-#include "network.hpp"
-#include "types.hpp"
+#include "commands.h"
+#include "network.h"
+#include "types.h"
 
 namespace ursa {
 
@@ -62,15 +62,17 @@ struct SettingsModal {
     std::string model;
 };
 
-struct HelpModal {};
+struct HelpModal { };
 
 using Modal = std::variant<std::monostate, SettingsModal, HelpModal, Question>;
 
 struct UiState {
     enum class Phase { IDLE, STREAMING };
+    enum class Mode { PLAN, BUILD };
     std::vector<ConversationItem> items;
-    Modal modal = std::monostate {};
+    Modal modal = std::monostate { };
     Phase phase = Phase::IDLE;
+    Mode mode   = Mode::PLAN;
     std::string error;
 
     TodoList todo;
@@ -85,6 +87,7 @@ public:
     Controller(const Config& cfg, PostFn post, std::function<void()> on_exit);
 
     void submit(std::string text);
+    void toggle_mode();
     void open_demo();
     void open_help();
     void set_error(std::string msg);
@@ -112,8 +115,7 @@ std::string error_text(Status st);
 
 int run_repl(const Config& cfg);
 
-ftxui::Component make_chat(
-    Controller& controller, std::function<int()> width);
+ftxui::Component make_chat(Controller& controller, std::function<int()> width);
 ftxui::Component make_todo(Controller& controller, std::function<int()> width);
 ftxui::Component make_changed_files(Controller& controller);
 ftxui::Component make_settings(Controller& controller);

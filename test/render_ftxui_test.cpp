@@ -4,7 +4,7 @@
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/screen.hpp>
 
-#include "render.hpp"
+#include "render.h"
 
 namespace {
 

@@ -1,4 +1,4 @@
-#include "types.hpp"
+#include "types.h"
 
 #include <json/json.h>
 #include <cstdlib>

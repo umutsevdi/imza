@@ -1,4 +1,4 @@
-#include "ui.hpp"
+#include "ui.h"
 
 #include <ftxui/component/animation.hpp>
 #include <ftxui/component/component.hpp>
@@ -13,34 +13,37 @@
 #include <string_view>
 #include <vector>
 
-#include "commands.hpp"
-#include "render.hpp"
+#include "commands.h"
+#include "render.h"
 
 namespace ursa {
 
 namespace {
 
-using namespace ftxui;
+    using namespace ftxui;
 
     std::string to_lower(std::string_view s)
     {
         std::string out;
         out.reserve(s.size());
         for (char ch : s) {
-            out += static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            out += static_cast<char>(
+                std::tolower(static_cast<unsigned char>(ch)));
         }
         return out;
     }
 
-    Element status_element(const UiState& st)
+    Element error_element(const UiState& st)
     {
-        if (!st.error.empty()) {
-            return hbox({
-                text("! ") | bold | color(Color::RedLight),
-                text(st.error) | color(Color::RedLight),
-            });
+        if (st.error.empty()) {
+            return text("");
         }
-        return text("");
+        return hbox({
+            text(" ") | bgcolor(PANEL_COLOR),
+            text(" ") | bgcolor(Color::Red),
+            text(" " + st.error) | bgcolor(Color::Red),
+            filler() | bgcolor(Color::Red),
+        });
     }
 
     class ChatImpl : public ComponentBase {
@@ -51,11 +54,19 @@ using namespace ftxui;
         {
             input_options_.content     = &input_buf_;
             input_options_.placeholder = "ask anything — type / for commands";
-            input_options_.multiline   = false;
-            input_options_.on_change   = [this] { refresh_suggestions(); };
+            input_options_.multiline   = true;
+            input_options_.on_change   = [this] { on_input_changed(); };
             input_options_.on_enter    = [this] { submit(); };
             input_options_.cursor_position = Ref<int>(&input_cursor_);
-            input_                     = ftxui::Input(input_options_);
+            input_options_.insert          = true;
+            input_options_.transform       = [](InputState state) {
+                if (state.is_placeholder) {
+                    state.element |= dim;
+                }
+                state.element |= bgcolor(PANEL_COLOR);
+                return state.element;
+            };
+            input_ = ftxui::Input(input_options_);
             Add(input_);
             input_->TakeFocus();
         }
@@ -63,7 +74,8 @@ using namespace ftxui;
         Element OnRender() override
         {
             const UiState& st = controller_.state();
-            LayoutCtx ctx { width_() >= 100 ? LayoutCtx::Kind::WIDE : LayoutCtx::Kind::NARROW,
+            LayoutCtx ctx { width_() >= 100 ? LayoutCtx::Kind::WIDE
+                                            : LayoutCtx::Kind::NARROW,
                 width_() };
 
             const bool streaming = st.phase == UiState::Phase::STREAMING;
@@ -93,24 +105,39 @@ using namespace ftxui;
             Element log = std::move(content) | vscroll_indicator
                 | focusPositionRelative(0.0F, scroll_y_) | yframe;
 
-            Element input_box = vbox({
-                separatorEmpty(),
-                hbox({
-                    text("  "),
-                    input_->Render() | flex,
-                    status_element(st),
-                    text("  "),
-                }),
-                separatorEmpty(),
-            }) | bgcolor(PANEL_COLOR);
+            const bool plan    = st.mode == UiState::Mode::PLAN;
+            Element mode_badge = text(plan ? "PLAN" : "BUILD") | bold
+                | color(plan ? Color::Green : Color::Red);
+
+            Element input_box
+                = vbox({
+                      separatorEmpty(),
+                      hbox({
+                          text("  "),
+                          mode_badge,
+                      }),
+                      hbox({
+                          text("  "),
+                          input_->Render() | xflex,
+                          text("  "),
+                      }),
+                      hbox({
+                          text("  "),
+                          text("Tab: switch mode, Alt+Enter: multi line input")
+                              | color(Color::GrayDark),
+                      }),
+                      separatorEmpty(),
+                  })
+                | bgcolor(PANEL_COLOR);
 
             Element main = vbox({
-                std::move(log) | flex,
-            }) | flex;
+                               std::move(log) | flex,
+                           })
+                | flex;
 
             Elements bottom;
-            if (st.question) {
-                bottom.push_back(render_question(*st.question) | borderRounded);
+            if (!st.error.empty()) {
+                bottom.push_back(error_element(st));
             }
             if (show_suggestions()) {
                 bottom.push_back(render_suggestions());
@@ -128,6 +155,26 @@ using namespace ftxui;
 
         bool OnEvent(Event event) override
         {
+            if (event == Event::Special("\x1B[200~")) {
+                paste_mode_ = true;
+                return true;
+            }
+            if (event == Event::Special("\x1B[201~")) {
+                paste_mode_ = false;
+                return true;
+            }
+            if (event == Event::Special("\x1B\r")
+                || event == Event::Special("\x1B\n")) {
+                insert_newline();
+                return true;
+            }
+            if (event == Event::Escape) {
+                if (show_suggestions()) {
+                    matches_.clear();
+                    return true;
+                }
+                return true;
+            }
             if (show_suggestions()) {
                 if (event == Event::ArrowDown) {
                     sel_ = (sel_ + 1) % static_cast<int>(matches_.size());
@@ -135,17 +182,21 @@ using namespace ftxui;
                 }
                 if (event == Event::ArrowUp) {
                     const int n = static_cast<int>(matches_.size());
-                    sel_ = (sel_ - 1 + n) % n;
+                    sel_        = (sel_ - 1 + n) % n;
                     return true;
                 }
-                if (event == Event::Tab || event == Event::Return) {
+                if (event == Event::Tab) {
                     accept();
                     return true;
                 }
-                if (event == Event::Escape) {
-                    matches_.clear();
+                if (event == Event::Return) {
+                    execute_selected();
                     return true;
                 }
+            }
+            if (event == Event::Tab && !show_suggestions()) {
+                controller_.toggle_mode();
+                return true;
             }
             if (event.is_mouse()) {
                 const Mouse& m = event.mouse();
@@ -159,13 +210,17 @@ using namespace ftxui;
                 }
                 return false;
             }
-            if (event == Event::ArrowUp) {
-                scroll_by(-0.05F);
-                return true;
-            }
-            if (event == Event::ArrowDown) {
-                scroll_by(0.05F);
-                return true;
+            const bool multiline_input
+                = input_buf_.find('\n') != std::string::npos;
+            if (!multiline_input) {
+                if (event == Event::ArrowUp) {
+                    scroll_by(-0.05F);
+                    return true;
+                }
+                if (event == Event::ArrowDown) {
+                    scroll_by(0.05F);
+                    return true;
+                }
             }
             if (event == Event::PageUp) {
                 scroll_by(-0.35F);
@@ -173,6 +228,14 @@ using namespace ftxui;
             }
             if (event == Event::PageDown) {
                 scroll_by(0.35F);
+                return true;
+            }
+            if (event == Event::Return) {
+                if (paste_mode_) {
+                    insert_newline();
+                } else {
+                    submit();
+                }
                 return true;
             }
             return input_->OnEvent(event);
@@ -193,6 +256,19 @@ using namespace ftxui;
             scroll_y_ = std::clamp(scroll_y_ + delta, 0.0F, 1.0F);
         }
 
+        void on_input_changed()
+        {
+            controller_.state().error.clear();
+            refresh_suggestions();
+        }
+
+        void insert_newline()
+        {
+            input_buf_.insert(input_cursor_, "\n");
+            input_cursor_ += 1;
+            on_input_changed();
+        }
+
         void submit()
         {
             const std::string text(input_buf_);
@@ -206,9 +282,10 @@ using namespace ftxui;
         void refresh_suggestions()
         {
             matches_.clear();
-            sel_ = 0;
+            sel_                   = 0;
             const std::string text = input_buf_;
-            if (text.empty() || text[0] != '/' || text.find(' ') != std::string::npos) {
+            if (text.empty() || text[0] != '/'
+                || text.find(' ') != std::string::npos) {
                 return;
             }
             const std::string key = to_lower(text);
@@ -227,9 +304,19 @@ using namespace ftxui;
         void accept()
         {
             const SlashCommand* cmd = matches_[sel_];
-            input_buf_ = cmd->name;
-            input_cursor_ = static_cast<int>(input_buf_.size());
+            input_buf_              = cmd->name;
+            input_cursor_           = static_cast<int>(input_buf_.size());
             refresh_suggestions();
+        }
+
+        void execute_selected()
+        {
+            const SlashCommand* cmd = matches_[sel_];
+            input_buf_              = cmd->name;
+            input_cursor_           = static_cast<int>(input_buf_.size());
+            matches_.clear();
+            sel_ = 0;
+            submit();
         }
 
         bool show_suggestions() const { return !matches_.empty(); }
@@ -242,8 +329,8 @@ using namespace ftxui;
             Elements rows;
             for (size_t i = 0; i < shown; ++i) {
                 const SlashCommand& c = *matches_[i];
-                const bool sel = static_cast<int>(i) == sel_;
-                Element name = text(c.name);
+                const bool sel        = static_cast<int>(i) == sel_;
+                Element name          = text(c.name);
                 if (sel) {
                     name = name | bold;
                 }
@@ -256,8 +343,9 @@ using namespace ftxui;
                 rows.push_back(std::move(row));
             }
             if (total > shown) {
-                rows.push_back(text("  … " + std::to_string(total - shown) + " more")
-                    | dim | color(Color::GrayLight));
+                rows.push_back(
+                    text("  … " + std::to_string(total - shown) + " more") | dim
+                    | color(Color::GrayLight));
             }
             return vbox(std::move(rows)) | borderRounded | bgcolor(PANEL_COLOR);
         }
@@ -270,8 +358,9 @@ using namespace ftxui;
         Component input_;
 
         std::vector<const SlashCommand*> matches_;
-        int sel_ = 0;
+        int sel_          = 0;
         int input_cursor_ = 0;
+        bool paste_mode_  = false;
 
         float scroll_y_ = 1.0F;
         int frame_      = 0;

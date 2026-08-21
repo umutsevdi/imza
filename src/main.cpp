@@ -1,7 +1,7 @@
 #include <print>
 
-#include "types.hpp"
-#include "ui.hpp"
+#include "types.h"
+#include "ui.h"
 
 int main()
 {

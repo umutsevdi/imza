@@ -1,13 +1,12 @@
 #pragma once
 
 #include <json/json.h>
-
 #include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "types.hpp"
+#include "types.h"
 
 namespace ursa {
 

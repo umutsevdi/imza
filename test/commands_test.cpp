@@ -1,5 +1,5 @@
-#include "commands.hpp"
-#include "types.hpp"
+#include "commands.h"
+#include "types.h"
 
 #include <doctest/doctest.h>
 
@@ -9,8 +9,8 @@ TEST_CASE("slash_commands includes built-ins")
 {
     Config cfg;
     const auto cmds = slash_commands(cfg);
-    bool has_help = false;
-    bool has_exit = false;
+    bool has_help   = false;
+    bool has_exit   = false;
     for (const auto& c : cmds) {
         if (c.name == "/help") {
             has_help = true;

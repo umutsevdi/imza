@@ -1,4 +1,4 @@
-#include "ui.hpp"
+#include "ui.h"
 
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_base.hpp>
@@ -24,7 +24,8 @@ namespace {
         SettingsImpl(Controller& controller)
             : controller_(controller)
         {
-            models_ = { "gpt-4o", "claude-3.5-sonnet", "local/llama3", "gemini-1.5-pro" };
+            models_       = { "gpt-4o", "claude-3.5-sonnet", "local/llama3",
+                "gemini-1.5-pro" };
             capabilities_ = {
                 { "List files", true },
                 { "Search code", true },
@@ -45,7 +46,7 @@ namespace {
 
             radiobox_ = Radiobox(&themes_, &theme_idx_);
             slider_   = Slider("temperature", &temperature_, 0, 100, 1);
-            button_   = Button("Close (Esc)", [&] { controller_.close_modal(); });
+            button_ = Button("Close (Esc)", [&] { controller_.close_modal(); });
 
             Components children;
             children.push_back(dropdown_);
@@ -89,8 +90,7 @@ namespace {
                 separatorEmpty(),
                 button_->Render() | center,
                 separatorEmpty(),
-                text("Esc to close  ·  arrows to navigate")
-                    | dim | center,
+                text("Esc to close  ·  arrows to navigate") | dim | center,
             });
 
             return vbox({ separatorEmpty(), std::move(body), separatorEmpty() })

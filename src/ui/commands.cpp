@@ -1,4 +1,4 @@
-#include "commands.hpp"
+#include "commands.h"
 
 #include <cctype>
 
@@ -11,7 +11,8 @@ namespace {
         std::string out;
         out.reserve(s.size());
         for (char ch : s) {
-            out += static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            out += static_cast<char>(
+                std::tolower(static_cast<unsigned char>(ch)));
         }
         return out;
     }

@@ -1,4 +1,4 @@
-#include "network.hpp"
+#include "network.h"
 
 namespace ursa {
 

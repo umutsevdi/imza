@@ -1,9 +1,9 @@
-#include "ui.hpp"
+#include "ui.h"
 
 #include <ftxui/component/component.hpp>
 #include <ftxui/dom/elements.hpp>
 
-#include "render.hpp"
+#include "render.h"
 
 namespace ursa {
 

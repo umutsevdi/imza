@@ -1,4 +1,4 @@
-#include "render.hpp"
+#include "render.h"
 
 #include <cmark-gfm-core-extensions.h>
 #include <cmark-gfm.h>

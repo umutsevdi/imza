@@ -1,7 +1,6 @@
-#include "render.hpp"
+#include "render.h"
 
 #include <ftxui/dom/elements.hpp>
-
 #include <optional>
 #include <string_view>
 #include <vector>
@@ -14,8 +13,10 @@ namespace {
 
     Element card(Element body, std::optional<Color> bg = std::nullopt)
     {
-        Element inner = vbox({ separatorEmpty(), std::move(body), separatorEmpty() });
-        Element box = hbox({ text("  "), std::move(inner) | xflex, text("  ") });
+        Element inner
+            = vbox({ separatorEmpty(), std::move(body), separatorEmpty() });
+        Element box
+            = hbox({ text("  "), std::move(inner) | xflex, text("  ") });
         if (bg) {
             box = std::move(box) | bgcolor(*bg);
         }
@@ -70,32 +71,32 @@ Element render_todo(const TodoList& todo, const LayoutCtx& ctx [[maybe_unused]])
     Elements parts;
     for (const auto& it : todo.items) {
         const std::string mark = it.done ? "[x]" : "[ ]";
-        Element line           = hbox({ dim(text(mark)), text(" "), text(it.text) });
+        Element line = hbox({ dim(text(mark)), text(" "), text(it.text) });
         parts.push_back(std::move(line));
     }
-    Element body = parts.empty()
-        ? dim(text("none"))
-        : vbox(std::move(parts)) | borderRounded;
+    Element body = parts.empty() ? dim(text("none"))
+                                 : vbox(std::move(parts)) | borderRounded;
     return vbox({ section_title("Todo"), std::move(body) });
 }
 
 Element render_item(const ConversationItem& item, const LayoutCtx& ctx)
 {
-    return std::visit([&](const auto& v) -> Element {
-        using T = std::decay_t<decltype(v)>;
-        if constexpr (std::is_same_v<T, UserTurn>) {
-            return user_item(v);
-        } else if constexpr (std::is_same_v<T, AssistantTurn>) {
-            return assistant_item(v);
-        } else if constexpr (std::is_same_v<T, ToolCall>) {
-            return toolcall_item(v);
-        } else if constexpr (std::is_same_v<T, TodoList>) {
-            return render_todo(v, ctx);
-        } else if constexpr (std::is_same_v<T, Question>) {
-            return question_item(v);
-        }
-        return text("");
-    },
+    return std::visit(
+        [&](const auto& v) -> Element {
+            using T = std::decay_t<decltype(v)>;
+            if constexpr (std::is_same_v<T, UserTurn>) {
+                return user_item(v);
+            } else if constexpr (std::is_same_v<T, AssistantTurn>) {
+                return assistant_item(v);
+            } else if constexpr (std::is_same_v<T, ToolCall>) {
+                return toolcall_item(v);
+            } else if constexpr (std::is_same_v<T, TodoList>) {
+                return render_todo(v, ctx);
+            } else if constexpr (std::is_same_v<T, Question>) {
+                return question_item(v);
+            }
+            return text("");
+        },
         item);
 }
 
@@ -127,8 +128,8 @@ Element render_changed_files(
     for (const auto& f : files) {
         parts.push_back(changed_file_item(f));
     }
-    Element body
-        = parts.empty() ? dim(text("no changes")) : vbox(std::move(parts)) | borderRounded;
+    Element body = parts.empty() ? dim(text("no changes"))
+                                 : vbox(std::move(parts)) | borderRounded;
     return vbox({ section_title("Changed files"), std::move(body) });
 }
 

@@ -2,10 +2,9 @@
 
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/color.hpp>
-#include <string>
 #include <string_view>
 
-#include "ui.hpp"
+#include "ui.h"
 
 namespace ursa {
 

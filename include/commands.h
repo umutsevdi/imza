@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#include "types.hpp"
+#include "types.h"
 
 namespace ursa {
 
