@@ -110,7 +110,7 @@ namespace {
                 | color(plan ? Color::Green : Color::Red);
 
             Element input_box
-                = vbox({
+                = panel(vbox({
                       separatorEmpty(),
                       hbox({
                           text("  "),
@@ -124,11 +124,10 @@ namespace {
                       hbox({
                           text("  "),
                           text("Tab: switch mode, Alt+Enter: multi line input")
-                              | color(Color::GrayDark),
+                               | color(PANEL_FG_DIM),
                       }),
                       separatorEmpty(),
-                  })
-                | bgcolor(PANEL_COLOR);
+                  }));
 
             Element main = vbox({
                                std::move(log) | flex,
@@ -337,7 +336,7 @@ namespace {
                 Element row = hbox({
                     name,
                     text("   "),
-                    text(c.desc) | dim | color(Color::GrayLight),
+                    text(c.desc) | dim | color(PANEL_FG_DIM),
                 });
                 row = row | (sel ? bgcolor(Color::Blue) : bgcolor(PANEL_COLOR));
                 rows.push_back(std::move(row));
@@ -345,9 +344,10 @@ namespace {
             if (total > shown) {
                 rows.push_back(
                     text("  … " + std::to_string(total - shown) + " more") | dim
-                    | color(Color::GrayLight));
+                    | color(PANEL_FG_DIM));
             }
-            return vbox(std::move(rows)) | borderRounded | bgcolor(PANEL_COLOR);
+            return vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER)
+                | bgcolor(PANEL_COLOR) | color(PANEL_FG);
         }
 
         Controller& controller_;

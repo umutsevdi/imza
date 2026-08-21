@@ -57,8 +57,7 @@ namespace {
                 = w >= 100 ? LayoutCtx::Kind::WIDE : LayoutCtx::Kind::NARROW;
 
             Element side
-                = vbox({ todo_->Render() | yflex, files_->Render() | yflex })
-                | bgcolor(PANEL_COLOR);
+                = panel(vbox({ todo_->Render() | yflex, files_->Render() | yflex }));
 
             Element right_col = chat_->Render();
             const int chat_w  = (kind == LayoutCtx::Kind::WIDE) ? w - 31 : w;
@@ -81,15 +80,16 @@ namespace {
             if (std::holds_alternative<SettingsModal>(
                     controller_.state().modal)) {
                 const int mw  = std::min(w - 6, 72);
-                Element popup = settings_->Render() | borderRounded
-                    | bgcolor(PANEL_COLOR) | size(WIDTH, EQUAL, mw);
+                Element popup = settings_->Render() | borderStyled(ROUNDED, PANEL_BORDER)
+                    | bgcolor(PANEL_COLOR) | color(PANEL_FG)
+                    | size(WIDTH, EQUAL, mw);
                 root = dbox({ dim(std::move(root)), center(std::move(popup)) });
             } else if (std::holds_alternative<HelpModal>(
                            controller_.state().modal)) {
                 const int mw  = std::min(w - 6, 72);
                 Element popup = render_help(controller_.commands())
-                    | borderRounded | bgcolor(PANEL_COLOR)
-                    | size(WIDTH, EQUAL, mw);
+                    | borderStyled(ROUNDED, PANEL_BORDER) | bgcolor(PANEL_COLOR)
+                    | color(PANEL_FG) | size(WIDTH, EQUAL, mw);
                 root = dbox({ dim(std::move(root)), center(std::move(popup)) });
             }
             return root;

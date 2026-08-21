@@ -18,7 +18,7 @@ namespace {
         Element box
             = hbox({ text("  "), std::move(inner) | xflex, text("  ") });
         if (bg) {
-            box = std::move(box) | bgcolor(*bg);
+            box = std::move(box) | bgcolor(*bg) | color(PANEL_FG);
         }
         return std::move(box) | xflex;
     }
@@ -46,7 +46,7 @@ namespace {
 
     Element section_title(std::string_view title)
     {
-        return text(std::string(title)) | bold | color(Color::GrayLight);
+        return text(std::string(title)) | bold | color(PANEL_FG_DIM);
     }
 
     Element question_item(const Question& q)
@@ -75,7 +75,7 @@ Element render_todo(const TodoList& todo, const LayoutCtx& ctx [[maybe_unused]])
         parts.push_back(std::move(line));
     }
     Element body = parts.empty() ? dim(text("none"))
-                                 : vbox(std::move(parts)) | borderRounded;
+                                  : vbox(std::move(parts)) | borderStyled(ROUNDED, PANEL_BORDER);
     return vbox({ section_title("Todo"), std::move(body) });
 }
 
@@ -129,7 +129,7 @@ Element render_changed_files(
         parts.push_back(changed_file_item(f));
     }
     Element body = parts.empty() ? dim(text("no changes"))
-                                 : vbox(std::move(parts)) | borderRounded;
+                                  : vbox(std::move(parts)) | borderStyled(ROUNDED, PANEL_BORDER);
     return vbox({ section_title("Changed files"), std::move(body) });
 }
 
@@ -143,14 +143,14 @@ Element render_help(const std::vector<SlashCommand>& commands)
     Elements rows;
     for (const auto& c : commands) {
         rows.push_back(hbox({
-            text(c.name) | bold | color(Color::White),
+            text(c.name) | bold | color(PANEL_FG),
             text("   "),
-            text(c.desc) | dim | color(Color::GrayLight),
+            text(c.desc) | dim | color(PANEL_FG_DIM),
         }));
     }
     return vbox({
         section_title("Commands"),
-        vbox(std::move(rows)) | borderRounded,
+        vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER),
     });
 }
 

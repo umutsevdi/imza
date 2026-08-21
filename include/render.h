@@ -8,7 +8,15 @@
 
 namespace ursa {
 
-inline const ftxui::Color PANEL_COLOR = ftxui::Color::RGB(26, 34, 52);
+inline const ftxui::Color PANEL_COLOR  = ftxui::Color::RGB(26, 34, 52);
+inline const ftxui::Color PANEL_FG     = ftxui::Color::RGB(228, 232, 240);
+inline const ftxui::Color PANEL_FG_DIM = ftxui::Color::RGB(148, 156, 172);
+inline const ftxui::Color PANEL_BORDER = ftxui::Color::RGB(78, 89, 110);
+
+inline ftxui::Element panel(ftxui::Element e)
+{
+    return std::move(e) | ftxui::bgcolor(PANEL_COLOR) | ftxui::color(PANEL_FG);
+}
 
 ftxui::Element render_markdown_element(std::string_view md);
 
