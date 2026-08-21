@@ -102,7 +102,19 @@ target_link_libraries(ursa_core PRIVATE
     CURL::libcurl
 )
 
-add_executable(ursa src/main.cpp src/render.cpp src/ui.cpp)
+add_executable(ursa
+    src/main.cpp
+    src/ui/controller.cpp
+    src/ui/app.cpp
+    src/ui/chat.cpp
+    src/ui/todo.cpp
+    src/ui/changed_files.cpp
+    src/ui/settings.cpp
+    src/ui/question.cpp
+    src/ui/toolcall.cpp
+    src/render/markdown.cpp
+    src/render/items.cpp
+)
 target_include_directories(ursa PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${cmarkgfm_SOURCE_DIR}/src
@@ -125,7 +137,10 @@ target_link_libraries(ursa PRIVATE
 
 
 if (TESTS)
-    add_executable(ursa_tests ${TEST_SOURCES} src/render.cpp)
+    add_executable(ursa_tests ${TEST_SOURCES}
+        src/render/markdown.cpp
+        src/render/items.cpp
+    )
     target_include_directories(ursa_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${cmarkgfm_SOURCE_DIR}/src

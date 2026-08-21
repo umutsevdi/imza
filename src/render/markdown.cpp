@@ -251,7 +251,7 @@ namespace {
             const int lvl                    = heading_level_;
             heading_level_                   = 0;
             in_paragraph_                    = false;
-            static const Color kHeadColors[] = {
+            static const Color HEAD_COLORS[] = {
                 Color::White,
                 Color::CyanLight,
                 Color::MagentaLight,
@@ -261,7 +261,7 @@ namespace {
             };
             Decorator decorate = [lvl](Element e) {
                 const int idx = (lvl < 1 || lvl > 6) ? 0 : lvl - 1;
-                return std::move(e) | bold | color(kHeadColors[idx]);
+                return std::move(e) | bold | color(HEAD_COLORS[idx]);
             };
             flush_words(std::move(decorate));
         }
