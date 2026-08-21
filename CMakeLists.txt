@@ -107,6 +107,7 @@ add_executable(ursa
     src/ui/controller.cpp
     src/ui/app.cpp
     src/ui/chat.cpp
+    src/ui/commands.cpp
     src/ui/todo.cpp
     src/ui/changed_files.cpp
     src/ui/settings.cpp
@@ -136,11 +137,12 @@ target_link_libraries(ursa PRIVATE
 )
 
 
-if (TESTS)
-    add_executable(ursa_tests ${TEST_SOURCES}
-        src/render/markdown.cpp
-        src/render/items.cpp
-    )
+    if (TESTS)
+        add_executable(ursa_tests ${TEST_SOURCES}
+            src/ui/commands.cpp
+            src/render/markdown.cpp
+            src/render/items.cpp
+        )
     target_include_directories(ursa_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${cmarkgfm_SOURCE_DIR}/src

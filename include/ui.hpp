@@ -9,6 +9,7 @@
 #include <variant>
 #include <vector>
 
+#include "commands.hpp"
 #include "network.hpp"
 #include "types.hpp"
 
@@ -61,7 +62,9 @@ struct SettingsModal {
     std::string model;
 };
 
-using Modal = std::variant<std::monostate, SettingsModal, Question>;
+struct HelpModal {};
+
+using Modal = std::variant<std::monostate, SettingsModal, HelpModal, Question>;
 
 struct UiState {
     enum class Phase { IDLE, STREAMING };
@@ -79,20 +82,29 @@ using PostFn = std::function<void(std::function<void()>)>;
 
 class Controller {
 public:
-    Controller(const Config& cfg, PostFn post);
+    Controller(const Config& cfg, PostFn post, std::function<void()> on_exit);
 
     void submit(std::string text);
+    void open_demo();
+    void open_help();
+    void set_error(std::string msg);
+    void close_modal();
     UiState& state() { return state_; }
     const UiState& state() const { return state_; }
     const Config& config() const { return cfg_; }
+    const std::vector<SlashCommand>& commands() const { return commands_; }
 
 private:
+    void submit_message(std::string text);
+    void run_slash(std::string_view cmd);
     void apply(const StreamEvent& ev);
     void finish(std::string error);
 
     Config cfg_;
     UiState state_;
     PostFn post_;
+    std::function<void()> on_exit_;
+    std::vector<SlashCommand> commands_;
     std::optional<std::jthread> worker_;
 };
 
@@ -101,7 +113,7 @@ std::string error_text(Status st);
 int run_repl(const Config& cfg);
 
 ftxui::Component make_chat(
-    Controller& controller, std::function<void()> on_exit, std::function<int()> width);
+    Controller& controller, std::function<int()> width);
 ftxui::Component make_todo(Controller& controller, std::function<int()> width);
 ftxui::Component make_changed_files(Controller& controller);
 ftxui::Component make_settings(Controller& controller);

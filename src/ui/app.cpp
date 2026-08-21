@@ -44,8 +44,8 @@ namespace {
             todo_ = make_todo(controller, [] { return 30; });
             files_ = make_changed_files(controller);
             chat_  = make_chat(controller,
-                [&screen] { screen.Exit(); },
                 [] { return ftxui::Terminal::Size().dimx; });
+            settings_ = make_settings(controller);
             Add(chat_);
         }
 
@@ -63,18 +63,47 @@ namespace {
             right_col          = std::move(right_col) | size(WIDTH, EQUAL, chat_w);
             Element header    = header_element(controller_.config());
 
+            Element root;
             if (kind == LayoutCtx::Kind::WIDE) {
-                return vbox({ header,
+                root = vbox({ header,
                     separatorEmpty(),
                     hbox({ text(" "), side | size(WIDTH, EQUAL, 30) | yflex, text(" "), right_col })
                         | flex })
                     | flex;
+            } else {
+                root = vbox({ header, separatorEmpty(), side, right_col }) | flex;
             }
-            return vbox({ header, separatorEmpty(), side, right_col }) | flex;
+
+            if (std::holds_alternative<SettingsModal>(controller_.state().modal)) {
+                const int mw = std::min(w - 6, 72);
+                Element popup = settings_->Render() | borderRounded | bgcolor(PANEL_COLOR)
+                    | size(WIDTH, EQUAL, mw);
+                root = dbox({ dim(std::move(root)), center(std::move(popup)) });
+            } else if (std::holds_alternative<HelpModal>(controller_.state().modal)) {
+                const int mw  = std::min(w - 6, 72);
+                Element popup = render_help(controller_.commands())
+                    | borderRounded | bgcolor(PANEL_COLOR) | size(WIDTH, EQUAL, mw);
+                root = dbox({ dim(std::move(root)), center(std::move(popup)) });
+            }
+            return root;
         }
 
         bool OnEvent(Event event) override
         {
+            if (std::holds_alternative<SettingsModal>(controller_.state().modal)) {
+                if (event == Event::Escape) {
+                    controller_.close_modal();
+                    return true;
+                }
+                return settings_->OnEvent(event);
+            }
+            if (std::holds_alternative<HelpModal>(controller_.state().modal)) {
+                if (event == Event::Escape || event == Event::Return) {
+                    controller_.close_modal();
+                    return true;
+                }
+                return true;
+            }
             if (event == Event::CtrlC || event == Event::CtrlD) {
                 screen_.Exit();
                 return true;
@@ -88,6 +117,7 @@ namespace {
         Component todo_;
         Component files_;
         Component chat_;
+        Component settings_;
     };
 
 } // namespace
@@ -100,7 +130,9 @@ int run_repl(const Config& cfg)
     }
 
     ScreenInteractive screen = ScreenInteractive::FullscreenAlternateScreen();
-    Controller controller(cfg, [&screen](std::function<void()> f) { screen.Post(f); });
+    Controller controller(cfg,
+        [&screen](std::function<void()> f) { screen.Post(f); },
+        [&screen] { screen.Exit(); });
     auto app = ftxui::Make<Repl>(screen, controller);
     screen.Loop(app);
     return 0;

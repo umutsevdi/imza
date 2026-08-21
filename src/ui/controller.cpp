@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <functional>
 #include <string>
 #include <string_view>
 
@@ -31,9 +32,11 @@ std::string error_text(Status st)
     return "stream error (" + std::to_string(static_cast<int>(st)) + ")";
 }
 
-Controller::Controller(const Config& cfg, PostFn post)
+Controller::Controller(const Config& cfg, PostFn post, std::function<void()> on_exit)
     : cfg_(cfg)
     , post_(std::move(post))
+    , on_exit_(std::move(on_exit))
+    , commands_(slash_commands(cfg))
 {
     state_.todo = TodoList { {
         { "Implement settings modal", false },
@@ -51,6 +54,26 @@ Controller::Controller(const Config& cfg, PostFn post)
     };
 }
 
+void Controller::open_demo()
+{
+    state_.modal = SettingsModal { cfg_.model };
+}
+
+void Controller::open_help()
+{
+    state_.modal = HelpModal {};
+}
+
+void Controller::set_error(std::string msg)
+{
+    state_.error = std::move(msg);
+}
+
+void Controller::close_modal()
+{
+    state_.modal = std::monostate {};
+}
+
 void Controller::submit(std::string text)
 {
     if (state_.phase != UiState::Phase::IDLE) {
@@ -60,11 +83,16 @@ void Controller::submit(std::string text)
     if (t.empty()) {
         return;
     }
-    if (t == "/exit" || t == "/quit") {
+    if (t[0] == '/') {
+        run_slash(t);
         return;
     }
+    submit_message(std::string(t));
+}
 
-    state_.items.push_back(UserTurn { std::string(t) });
+void Controller::submit_message(std::string text)
+{
+    state_.items.push_back(UserTurn { std::move(text) });
     state_.error.clear();
     state_.phase = UiState::Phase::STREAMING;
 
@@ -91,6 +119,29 @@ void Controller::submit(std::string text)
             post_([this, st] { finish(error_text(st)); });
         }
     });
+}
+
+void Controller::run_slash(std::string_view cmd)
+{
+    const SlashCommand* found = find_command(commands_, cmd);
+    if (found == nullptr) {
+        set_error("unknown command: " + std::string(cmd));
+        return;
+    }
+    switch (found->action) {
+    case SlashCommand::Action::EXIT:
+        on_exit_();
+        break;
+    case SlashCommand::Action::HELP:
+        open_help();
+        break;
+    case SlashCommand::Action::SETTINGS:
+        open_demo();
+        break;
+    case SlashCommand::Action::SKILL:
+        submit_message(std::string(cmd));
+        break;
+    }
 }
 
 void Controller::apply(const StreamEvent& ev)

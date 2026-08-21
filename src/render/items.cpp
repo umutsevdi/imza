@@ -137,4 +137,20 @@ Element render_question(const Question& q)
     return vbox({ section_title("Question"), question_item(q) });
 }
 
+Element render_help(const std::vector<SlashCommand>& commands)
+{
+    Elements rows;
+    for (const auto& c : commands) {
+        rows.push_back(hbox({
+            text(c.name) | bold | color(Color::White),
+            text("   "),
+            text(c.desc) | dim | color(Color::GrayLight),
+        }));
+    }
+    return vbox({
+        section_title("Commands"),
+        vbox(std::move(rows)) | borderRounded,
+    });
+}
+
 } // namespace ursa

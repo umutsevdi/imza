@@ -13,13 +13,24 @@
 #include <string_view>
 #include <vector>
 
+#include "commands.hpp"
 #include "render.hpp"
 
 namespace ursa {
 
 namespace {
 
-    using namespace ftxui;
+using namespace ftxui;
+
+    std::string to_lower(std::string_view s)
+    {
+        std::string out;
+        out.reserve(s.size());
+        for (char ch : s) {
+            out += static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        }
+        return out;
+    }
 
     Element status_element(const UiState& st)
     {
@@ -34,16 +45,16 @@ namespace {
 
     class ChatImpl : public ComponentBase {
     public:
-        ChatImpl(Controller& controller, std::function<void()> on_exit,
-            std::function<int()> width)
+        ChatImpl(Controller& controller, std::function<int()> width)
             : controller_(controller)
-            , on_exit_(std::move(on_exit))
             , width_(std::move(width))
         {
             input_options_.content     = &input_buf_;
-            input_options_.placeholder = "ask anything — /exit quits";
+            input_options_.placeholder = "ask anything — type / for commands";
             input_options_.multiline   = false;
+            input_options_.on_change   = [this] { refresh_suggestions(); };
             input_options_.on_enter    = [this] { submit(); };
+            input_options_.cursor_position = Ref<int>(&input_cursor_);
             input_                     = ftxui::Input(input_options_);
             Add(input_);
             input_->TakeFocus();
@@ -101,6 +112,9 @@ namespace {
             if (st.question) {
                 bottom.push_back(render_question(*st.question) | borderRounded);
             }
+            if (show_suggestions()) {
+                bottom.push_back(render_suggestions());
+            }
             bottom.push_back(std::move(input_box));
 
             Elements root;
@@ -114,6 +128,25 @@ namespace {
 
         bool OnEvent(Event event) override
         {
+            if (show_suggestions()) {
+                if (event == Event::ArrowDown) {
+                    sel_ = (sel_ + 1) % static_cast<int>(matches_.size());
+                    return true;
+                }
+                if (event == Event::ArrowUp) {
+                    const int n = static_cast<int>(matches_.size());
+                    sel_ = (sel_ - 1 + n) % n;
+                    return true;
+                }
+                if (event == Event::Tab || event == Event::Return) {
+                    accept();
+                    return true;
+                }
+                if (event == Event::Escape) {
+                    matches_.clear();
+                    return true;
+                }
+            }
             if (event.is_mouse()) {
                 const Mouse& m = event.mouse();
                 if (m.button == Mouse::WheelUp) {
@@ -164,22 +197,81 @@ namespace {
         {
             const std::string text(input_buf_);
             input_buf_.clear();
-            if (text == "/exit" || text == "/quit") {
-                on_exit_();
-                return;
-            }
+            input_cursor_ = 0;
             controller_.submit(std::move(text));
             scroll_y_ = 1.0F;
             animation::RequestAnimationFrame();
         }
 
+        void refresh_suggestions()
+        {
+            matches_.clear();
+            sel_ = 0;
+            const std::string text = input_buf_;
+            if (text.empty() || text[0] != '/' || text.find(' ') != std::string::npos) {
+                return;
+            }
+            const std::string key = to_lower(text);
+            for (const auto& c : controller_.commands()) {
+                const std::string name = to_lower(c.name);
+                if (name.size() >= key.size()
+                    && name.compare(0, key.size(), key) == 0) {
+                    matches_.push_back(&c);
+                }
+            }
+            if (matches_.size() == 1 && matches_[0]->name == text) {
+                matches_.clear();
+            }
+        }
+
+        void accept()
+        {
+            const SlashCommand* cmd = matches_[sel_];
+            input_buf_ = cmd->name;
+            input_cursor_ = static_cast<int>(input_buf_.size());
+            refresh_suggestions();
+        }
+
+        bool show_suggestions() const { return !matches_.empty(); }
+
+        Element render_suggestions()
+        {
+            const size_t max_rows = 8;
+            const size_t total    = matches_.size();
+            const size_t shown    = std::min(total, max_rows);
+            Elements rows;
+            for (size_t i = 0; i < shown; ++i) {
+                const SlashCommand& c = *matches_[i];
+                const bool sel = static_cast<int>(i) == sel_;
+                Element name = text(c.name);
+                if (sel) {
+                    name = name | bold;
+                }
+                Element row = hbox({
+                    name,
+                    text("   "),
+                    text(c.desc) | dim | color(Color::GrayLight),
+                });
+                row = row | (sel ? bgcolor(Color::Blue) : bgcolor(PANEL_COLOR));
+                rows.push_back(std::move(row));
+            }
+            if (total > shown) {
+                rows.push_back(text("  … " + std::to_string(total - shown) + " more")
+                    | dim | color(Color::GrayLight));
+            }
+            return vbox(std::move(rows)) | borderRounded | bgcolor(PANEL_COLOR);
+        }
+
         Controller& controller_;
-        std::function<void()> on_exit_;
         std::function<int()> width_;
 
         std::string input_buf_;
         InputOption input_options_;
         Component input_;
+
+        std::vector<const SlashCommand*> matches_;
+        int sel_ = 0;
+        int input_cursor_ = 0;
 
         float scroll_y_ = 1.0F;
         int frame_      = 0;
@@ -187,10 +279,9 @@ namespace {
 
 } // namespace
 
-ftxui::Component make_chat(
-    Controller& controller, std::function<void()> on_exit, std::function<int()> width)
+ftxui::Component make_chat(Controller& controller, std::function<int()> width)
 {
-    return ftxui::Make<ChatImpl>(controller, std::move(on_exit), std::move(width));
+    return ftxui::Make<ChatImpl>(controller, std::move(width));
 }
 
 } // namespace ursa

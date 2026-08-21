@@ -18,5 +18,6 @@ ftxui::Element render_todo(const TodoList& todo, const LayoutCtx& ctx);
 ftxui::Element render_changed_files(
     const std::vector<ChangedFile>& files, const LayoutCtx& ctx);
 ftxui::Element render_question(const Question& q);
+ftxui::Element render_help(const std::vector<SlashCommand>& commands);
 
 } // namespace ursa
