@@ -17,11 +17,19 @@ struct Message {
 };
 
 struct StreamEvent {
-    enum class Kind { CONTENT_DELTA, DONE, ERROR };
+    enum class Kind { CONTENT_DELTA, TOOL_CALL, QUESTION, DONE, ERROR };
     Kind kind;
     std::string text;
     Status error;
+    ToolCallRequest tool_call;
+    QuestionForm question;
 };
+
+StreamEvent make_delta_event(std::string text);
+StreamEvent make_tool_call_event(ToolCallRequest request);
+StreamEvent make_question_event(QuestionForm form);
+StreamEvent make_done_event();
+StreamEvent make_error_event(Status error);
 
 struct ChatRequest {
     std::string model;

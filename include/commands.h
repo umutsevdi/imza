@@ -10,7 +10,7 @@ namespace ursa {
 struct SlashCommand {
     std::string name;
     std::string desc;
-    enum class Action { EXIT, HELP, SETTINGS, SKILL };
+    enum class Action { EXIT, HELP, SETTINGS, DEMO, SKILL };
     Action action = Action::SKILL;
 };
 

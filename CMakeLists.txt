@@ -111,8 +111,7 @@ add_executable(ursa
     src/ui/todo.cpp
     src/ui/changed_files.cpp
     src/ui/settings.cpp
-    src/ui/question.cpp
-    src/ui/toolcall.cpp
+    src/ui/modal.cpp
     src/render/markdown.cpp
     src/render/items.cpp
 )
@@ -140,6 +139,7 @@ target_link_libraries(ursa PRIVATE
     if (TESTS)
         add_executable(ursa_tests ${TEST_SOURCES}
             src/ui/commands.cpp
+            src/ui/controller.cpp
             src/render/markdown.cpp
             src/render/items.cpp
         )

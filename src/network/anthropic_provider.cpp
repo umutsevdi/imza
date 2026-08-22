@@ -51,15 +51,14 @@ namespace {
             const Json::Value root = parse_json(data);
             const std::string text
                 = root.get("delta", Json::Value::null)["text"].asString();
-            out = StreamEvent { StreamEvent::Kind::CONTENT_DELTA, text,
-                Status::OK };
+            out = make_delta_event(text);
             return Status::OK;
         }
         if (ev == "message_stop") {
-            out = StreamEvent { StreamEvent::Kind::DONE, "", Status::OK };
+            out = make_done_event();
             return Status::OK;
         }
-        out = StreamEvent { StreamEvent::Kind::CONTENT_DELTA, "", Status::OK };
+        out = make_delta_event("");
         return Status::OK;
     }
 

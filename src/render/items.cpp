@@ -2,6 +2,7 @@
 
 #include <ftxui/dom/elements.hpp>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -35,13 +36,13 @@ namespace {
 
     Element toolcall_item(const ToolCall& tc)
     {
-        return vbox({
-            hbox({
-                text("tool › ") | color(Color::YellowLight) | bold,
-                text(tc.name),
-            }),
-            paragraph(tc.args),
-        });
+        return card(render_markdown_element(tool_call_markdown(tc)));
+    }
+
+    Element modal_answer_item(const ModalAnswer& ans)
+    {
+        return card(
+            render_markdown_element(modal_answer_markdown(ans)), PANEL_COLOR);
     }
 
     Element section_title(std::string_view title)
@@ -49,22 +50,73 @@ namespace {
         return text(std::string(title)) | bold | color(PANEL_FG_DIM);
     }
 
-    Element question_item(const Question& q)
+    std::string fence_language(const std::string& tool)
     {
-        Elements opts;
-        for (const auto& o : q.options) {
-            opts.push_back(hbox({ text("• "), text(o) }));
+        if (tool == "bash" || tool == "sh" || tool == "shell") {
+            return "bash";
         }
-        return vbox({
-            hbox({
-                text("? ") | color(Color::MagentaLight) | bold,
-                text(q.prompt),
-            }),
-            vbox(std::move(opts)),
-        });
+        return tool;
     }
 
 } // namespace
+
+std::string question_form_markdown(const QuestionForm& form)
+{
+    std::string md;
+    for (const auto& c : form) {
+        if (!md.empty()) {
+            md += "\n\n";
+        }
+        md += "Question: \"" + c.prompt + "\"";
+        for (const auto& opt : c.options) {
+            md += "\n- [ ] " + opt;
+        }
+    }
+    return md;
+}
+
+std::string modal_answer_markdown(const ModalAnswer& answer)
+{
+    std::string md = "User answered:";
+    for (const auto& card : answer.cards) {
+        for (const auto& sel : card.selected) {
+            md += "\n> " + sel;
+        }
+        if (!card.free_text.empty()) {
+            md += "\n> " + card.free_text;
+        }
+    }
+    return md;
+}
+
+std::string tool_request_markdown(const ToolCallRequest& req)
+{
+    std::string md = "Requested to call:";
+    md += "\n```" + fence_language(req.name) + "\n" + req.args + "\n```";
+    return md;
+}
+
+std::string tool_call_markdown(const ToolCall& call)
+{
+    std::string md
+        = tool_request_markdown(ToolCallRequest { call.name, call.args, "" });
+    if (!call.result.has_value()) {
+        return md;
+    }
+    switch (call.result->kind) {
+    case ToolCall::Result::Kind::OUTPUT:
+        md += "\n\n---\n\n" + call.result->text;
+        break;
+    case ToolCall::Result::Kind::REJECT:
+        md += "\n\n---\n\nUser answered:\n> Rejected:";
+        if (!call.result->text.empty()) {
+            md += " " + call.result->text;
+        }
+        break;
+    case ToolCall::Result::Kind::CANCEL: break;
+    }
+    return md;
+}
 
 Element render_todo(const TodoList& todo, const LayoutCtx& ctx [[maybe_unused]])
 {
@@ -74,8 +126,9 @@ Element render_todo(const TodoList& todo, const LayoutCtx& ctx [[maybe_unused]])
         Element line = hbox({ dim(text(mark)), text(" "), text(it.text) });
         parts.push_back(std::move(line));
     }
-    Element body = parts.empty() ? dim(text("none"))
-                                  : vbox(std::move(parts)) | borderStyled(ROUNDED, PANEL_BORDER);
+    Element body = parts.empty()
+        ? dim(text("none"))
+        : vbox(std::move(parts)) | borderStyled(ROUNDED, PANEL_BORDER);
     return vbox({ section_title("Todo"), std::move(body) });
 }
 
@@ -92,8 +145,8 @@ Element render_item(const ConversationItem& item, const LayoutCtx& ctx)
                 return toolcall_item(v);
             } else if constexpr (std::is_same_v<T, TodoList>) {
                 return render_todo(v, ctx);
-            } else if constexpr (std::is_same_v<T, Question>) {
-                return question_item(v);
+            } else if constexpr (std::is_same_v<T, ModalAnswer>) {
+                return modal_answer_item(v);
             }
             return text("");
         },
@@ -128,14 +181,10 @@ Element render_changed_files(
     for (const auto& f : files) {
         parts.push_back(changed_file_item(f));
     }
-    Element body = parts.empty() ? dim(text("no changes"))
-                                  : vbox(std::move(parts)) | borderStyled(ROUNDED, PANEL_BORDER);
+    Element body = parts.empty()
+        ? dim(text("no changes"))
+        : vbox(std::move(parts)) | borderStyled(ROUNDED, PANEL_BORDER);
     return vbox({ section_title("Changed files"), std::move(body) });
-}
-
-Element render_question(const Question& q)
-{
-    return vbox({ section_title("Question"), question_item(q) });
 }
 
 Element render_help(const std::vector<SlashCommand>& commands)

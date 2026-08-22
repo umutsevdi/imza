@@ -25,6 +25,7 @@ std::vector<SlashCommand> slash_commands(const Config&)
         { "/help", "show available commands", SlashCommand::Action::HELP },
         { "/exit", "quit ursa", SlashCommand::Action::EXIT },
         { "/settings", "open settings", SlashCommand::Action::SETTINGS },
+        { "/demo", "run scripted modal demo", SlashCommand::Action::DEMO },
     };
 }
 

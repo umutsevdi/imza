@@ -109,25 +109,24 @@ namespace {
             Element mode_badge = text(plan ? "PLAN" : "BUILD") | bold
                 | color(plan ? Color::Green : Color::Red);
 
-            Element input_box
-                = panel(vbox({
-                      separatorEmpty(),
-                      hbox({
-                          text("  "),
-                          mode_badge,
-                      }),
-                      hbox({
-                          text("  "),
-                          input_->Render() | xflex,
-                          text("  "),
-                      }),
-                      hbox({
-                          text("  "),
-                          text("Tab: switch mode, Alt+Enter: multi line input")
-                               | color(PANEL_FG_DIM),
-                      }),
-                      separatorEmpty(),
-                  }));
+            Element input_box = panel(vbox({
+                separatorEmpty(),
+                hbox({
+                    text("  "),
+                    mode_badge,
+                }),
+                hbox({
+                    text("  "),
+                    input_->Render() | xflex,
+                    text("  "),
+                }),
+                hbox({
+                    text("  "),
+                    text("Tab: switch mode, Alt+Enter: multi line input")
+                        | color(PANEL_FG_DIM),
+                }),
+                separatorEmpty(),
+            }));
 
             Element main = vbox({
                                std::move(log) | flex,

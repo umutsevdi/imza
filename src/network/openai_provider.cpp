@@ -36,29 +36,27 @@ namespace {
     Status parse(std::string_view, std::string_view data, StreamEvent& out)
     {
         if (data == "[DONE]") {
-            out = StreamEvent { StreamEvent::Kind::DONE, "", Status::OK };
+            out = make_done_event();
             return Status::OK;
         }
         const Json::Value root = parse_json(data);
         if (root.isNull()) {
-            out = StreamEvent { StreamEvent::Kind::ERROR, "",
-                Status::JSON_ERROR };
+            out = make_error_event(Status::JSON_ERROR);
             return Status::JSON_ERROR;
         }
         const Json::Value& choices = root["choices"];
         if (choices.isArray() && choices.size() > 0) {
             const Json::Value& delta = choices[0]["delta"];
             if (delta.isObject() && delta["content"].isString()) {
-                out = StreamEvent { StreamEvent::Kind::CONTENT_DELTA,
-                    delta["content"].asString(), Status::OK };
+                out = make_delta_event(delta["content"].asString());
                 return Status::OK;
             }
             if (choices[0]["finish_reason"].isString()) {
-                out = StreamEvent { StreamEvent::Kind::DONE, "", Status::OK };
+                out = make_done_event();
                 return Status::OK;
             }
         }
-        out = StreamEvent { StreamEvent::Kind::CONTENT_DELTA, "", Status::OK };
+        out = make_delta_event("");
         return Status::OK;
     }
 

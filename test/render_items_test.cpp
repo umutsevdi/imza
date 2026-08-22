@@ -58,10 +58,66 @@ TEST_CASE("render_changed_files renders status and path")
     CHECK(out.find("src/ui/app.cpp") != std::string::npos);
 }
 
-TEST_CASE("render_question renders prompt and options")
+TEST_CASE("question_form_markdown renders prompt and options")
 {
-    ursa::Question q { "model?", { "gpt-4o", "claude" } };
-    const std::string out = to_text(ursa::render_question(q));
-    CHECK(out.find("model?") != std::string::npos);
-    CHECK(out.find("gpt-4o") != std::string::npos);
+    ursa::QuestionForm form { { "model?", { "gpt-4o", "claude" }, false,
+        false } };
+    const std::string md = ursa::question_form_markdown(form);
+    CHECK(md.find("Question: \"model?\"") != std::string::npos);
+    CHECK(md.find("- [ ] gpt-4o") != std::string::npos);
+    CHECK(md.find("- [ ] claude") != std::string::npos);
+}
+
+TEST_CASE("modal_answer_markdown renders selected then free text")
+{
+    ursa::ModalAnswer ans { { { { "Option 3" }, "extra note" } } };
+    const std::string md = ursa::modal_answer_markdown(ans);
+    CHECK(md.find("User answered:") == 0);
+    CHECK(md.find("> Option 3\n> extra note") != std::string::npos);
+}
+
+TEST_CASE("tool_call_markdown renders request, separator, output")
+{
+    ursa::ToolCall call { 1, "bash", "ls -la", { } };
+    const std::string pending = ursa::tool_call_markdown(call);
+    CHECK(pending.find("Requested to call:") == 0);
+    CHECK(pending.find("```bash\nls -la\n```") != std::string::npos);
+    CHECK(pending.find("---") == std::string::npos);
+
+    call.result = ursa::ToolCall::Result { ursa::ToolCall::Result::Kind::OUTPUT,
+        "total 76" };
+    const std::string done = ursa::tool_call_markdown(call);
+    CHECK(done.find("---") != std::string::npos);
+    CHECK(done.find("total 76") != std::string::npos);
+}
+
+TEST_CASE("tool_call_markdown renders rejection with and without reason")
+{
+    ursa::ToolCall call { 1, "bash", "ls", { } };
+    call.result = ursa::ToolCall::Result { ursa::ToolCall::Result::Kind::REJECT,
+        "needs approval first" };
+    const std::string with_reason = ursa::tool_call_markdown(call);
+    CHECK(with_reason.find("User answered:") != std::string::npos);
+    CHECK(with_reason.find("> Rejected: needs approval first")
+        != std::string::npos);
+
+    call.result->text      = "";
+    const std::string bare = ursa::tool_call_markdown(call);
+    CHECK(bare.find("> Rejected:") != std::string::npos);
+    CHECK(bare.find("> Rejected: ") == std::string::npos);
+}
+
+TEST_CASE("render_item renders a modal answer and a tool call")
+{
+    ursa::ConversationItem ans = ursa::ModalAnswer { { { { "opt" }, "" } } };
+    const std::string out_a
+        = to_text(ursa::render_item(ans, { ursa::LayoutCtx::Kind::WIDE, 60 }));
+    CHECK(out_a.find("User answered:") != std::string::npos);
+    CHECK(out_a.find("opt") != std::string::npos);
+
+    ursa::ConversationItem call
+        = ursa::ToolCall { 1, "bash", "ls", std::nullopt };
+    const std::string out_t
+        = to_text(ursa::render_item(call, { ursa::LayoutCtx::Kind::WIDE, 60 }));
+    CHECK(out_t.find("ls") != std::string::npos);
 }

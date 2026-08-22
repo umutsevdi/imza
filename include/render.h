@@ -24,7 +24,11 @@ ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx);
 ftxui::Element render_todo(const TodoList& todo, const LayoutCtx& ctx);
 ftxui::Element render_changed_files(
     const std::vector<ChangedFile>& files, const LayoutCtx& ctx);
-ftxui::Element render_question(const Question& q);
 ftxui::Element render_help(const std::vector<SlashCommand>& commands);
+
+std::string question_form_markdown(const QuestionForm& form);
+std::string modal_answer_markdown(const ModalAnswer& answer);
+std::string tool_request_markdown(const ToolCallRequest& req);
+std::string tool_call_markdown(const ToolCall& call);
 
 } // namespace ursa
