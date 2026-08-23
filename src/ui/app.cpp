@@ -8,11 +8,9 @@
 #include <ftxui/screen/terminal.hpp>
 
 #include <unistd.h>
-
 #include <functional>
-#include <iostream>
 
-#include "render.h"
+#include "ui.h"
 #include <print>
 
 namespace ursa {
@@ -123,16 +121,6 @@ int run_repl(const Config& cfg)
         },
         [&screen] { screen.Exit(); });
     auto app = ftxui::Make<Repl>(screen, controller);
-
-    struct TerminalMode {
-        ~TerminalMode()
-        {
-            std::cout << "\x1B[?2004l" << "\x1B[?1036l" << std::flush;
-        }
-    };
-    TerminalMode term_mode;
-    screen.Post(
-        [] { std::cout << "\x1B[?2004h" << "\x1B[?1036h" << std::flush; });
     screen.Loop(app);
     return 0;
 }

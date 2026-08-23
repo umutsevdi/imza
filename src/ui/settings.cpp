@@ -2,6 +2,7 @@
 
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_base.hpp>
+#include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
 
 #include <string>
@@ -12,11 +13,6 @@ namespace ursa {
 namespace {
 
     using namespace ftxui;
-
-    Element section_title(std::string_view title)
-    {
-        return text(std::string(title)) | bold | color(Color::GrayLight);
-    }
 
     class SettingsImpl : public ComponentBase {
     public:
@@ -45,7 +41,15 @@ namespace {
 
             radiobox_ = Radiobox(&themes_, &theme_idx_);
             slider_   = Slider("temperature", &temperature_, 0, 100, 1);
-            button_ = Button("Close (Esc)", [&] { controller_.close_modal(); });
+            auto close = [&] { controller_.close_modal(); };
+            button_ = CatchEvent(Button("Close (Esc)", close),
+                [close](Event e) -> bool {
+                    if (e == Event::Character(' ')) {
+                        close();
+                        return true;
+                    }
+                    return false;
+                });
 
             Components children;
             children.push_back(dropdown_);
@@ -64,7 +68,7 @@ namespace {
         Element OnRender() override
         {
             Elements cap_lines;
-            cap_lines.push_back(section_title("Capabilities"));
+            cap_lines.push_back(section_title("Capabilities", Color::GrayLight));
             for (auto& c : checks_) {
                 cap_lines.push_back(c->Render());
             }
@@ -76,15 +80,15 @@ namespace {
                     filler(),
                 }),
                 separatorEmpty(),
-                section_title("Model"),
+                section_title("Model", Color::GrayLight),
                 dropdown_->Render(),
                 separatorEmpty(),
                 vbox(std::move(cap_lines)),
                 separatorEmpty(),
-                section_title("Theme"),
+                section_title("Theme", Color::GrayLight),
                 radiobox_->Render(),
                 separatorEmpty(),
-                section_title("Sampling"),
+                section_title("Sampling", Color::GrayLight),
                 slider_->Render(),
                 separatorEmpty(),
                 button_->Render() | center,

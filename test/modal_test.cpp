@@ -1,7 +1,7 @@
 #include <doctest/doctest.h>
 
 #include "format.h"
-#include "render.h"
+#include "ui.h"
 #include "ui.h"
 
 #include <chrono>
@@ -158,7 +158,7 @@ TEST_CASE(
     CHECK(snapshot.find(ask_md) != std::string::npos);
 
     env.controller.resolve_modal(
-        ursa::ModalResult { ursa::ModalAnswer { { { { "B" }, "" } } } });
+        ursa::ModalResult { ursa::ModalAnswer { { { { "B" }, "", "" } } } });
 
     REQUIRE(env.pump.wait_for([&] { return idle(env.controller.state()); }));
     CHECK(env.controller.queue_size() == 0);
@@ -355,7 +355,7 @@ TEST_CASE("one drain cycle folds question answer and tool output correctly")
         [&] { return showing_question(env.controller.state()); }));
     CHECK(env.controller.queue_size() == 2);
     env.controller.resolve_modal(
-        ursa::ModalResult { ursa::ModalAnswer { { { { "pg" }, "" } } } });
+        ursa::ModalResult { ursa::ModalAnswer { { { { "pg" }, "", "" } } } });
 
     REQUIRE(env.pump.wait_for(
         [&] { return showing_tool_ask(env.controller.state()); }));
@@ -406,7 +406,7 @@ TEST_CASE("FIFO order preserved and queue_size counts overlays")
     CHECK(env.controller.queue_size() == 3);
 
     env.controller.resolve_modal(
-        ursa::ModalResult { ursa::ModalAnswer { { { { "a" }, "" } } } });
+        ursa::ModalResult { ursa::ModalAnswer { { { { "a" }, "", "" } } } });
     REQUIRE(env.pump.wait_for(
         [&] { return showing_tool_ask(env.controller.state()); }));
     CHECK(env.controller.queue_size() == 2);
@@ -492,7 +492,7 @@ TEST_CASE("user modal enqueued mid-stream surfaces after the ask resolves")
         env.controller.state().modal));
 
     env.controller.resolve_modal(
-        ursa::ModalResult { ursa::ModalAnswer { { { { "a" }, "" } } } });
+        ursa::ModalResult { ursa::ModalAnswer { { { { "a" }, "", "" } } } });
     REQUIRE(env.pump.wait_for([&] {
         return std::holds_alternative<ursa::SettingsModal>(
             env.controller.state().modal);

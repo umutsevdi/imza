@@ -12,10 +12,12 @@
 #include <string_view>
 #include <vector>
 
-#include "render.h"
+#include "format.h"
 #include "util.h"
 
 namespace ursa {
+
+using namespace ftxui;
 
 namespace {
 
@@ -32,6 +34,27 @@ namespace {
             text(" " + st.error) | bgcolor(Color::Red),
             filler() | bgcolor(Color::Red),
         });
+    }
+
+    Element user_item(const UserTurn& t)
+    {
+        return card(render_markdown_element(t.text), PANEL_COLOR);
+    }
+
+    Element assistant_item(const AssistantTurn& t)
+    {
+        return card(render_markdown_element(t.markdown));
+    }
+
+    Element toolcall_item(const ToolCall& tc)
+    {
+        return card(render_markdown_element(tool_call_markdown(tc)));
+    }
+
+    Element modal_answer_item(const ModalAnswer& ans)
+    {
+        return card(
+            render_markdown_element(modal_answer_markdown(ans)), PANEL_COLOR);
     }
 
     class ChatImpl : public ComponentBase {
@@ -373,6 +396,27 @@ namespace {
     };
 
 } // namespace
+
+ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx)
+{
+    return std::visit(
+        [&](const auto& v) -> Element {
+            using T = std::decay_t<decltype(v)>;
+            if constexpr (std::is_same_v<T, UserTurn>) {
+                return user_item(v);
+            } else if constexpr (std::is_same_v<T, AssistantTurn>) {
+                return assistant_item(v);
+            } else if constexpr (std::is_same_v<T, ToolCall>) {
+                return toolcall_item(v);
+            } else if constexpr (std::is_same_v<T, TodoList>) {
+                return render_todo(v, ctx);
+            } else if constexpr (std::is_same_v<T, ModalAnswer>) {
+                return modal_answer_item(v);
+            }
+            return text("");
+        },
+        item);
+}
 
 ftxui::Component make_chat(Controller& controller, std::function<int()> width)
 {

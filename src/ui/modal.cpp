@@ -4,19 +4,46 @@
 #include <ftxui/component/component_base.hpp>
 #include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
+#include <ftxui/screen/terminal.hpp>
 
 #include <deque>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "render.h"
+#include "util.h"
 
 namespace ursa {
+
+using namespace ftxui;
 
 namespace {
 
     using namespace ftxui;
+
+    enum class ToolPhase { DECIDE, REASON };
+
+    InputOption field_option(std::string* content, int* cursor,
+        std::string placeholder, std::function<void()> on_enter,
+        std::function<void()> on_change = {})
+    {
+        InputOption io;
+        io.content         = content;
+        io.cursor_position = cursor;
+        io.placeholder     = std::move(placeholder);
+        io.multiline       = false;
+        io.on_enter        = std::move(on_enter);
+        io.on_change       = std::move(on_change);
+        io.transform       = [](InputState state) {
+            if (state.is_placeholder) {
+                state.element |= dim;
+            }
+            state.element |= bgcolor(
+                state.focused ? PANEL_COLOR_FOCUS : PANEL_COLOR);
+            return state.element;
+        };
+        return io;
+    }
 
     class ModalImpl : public ComponentBase {
     public:
@@ -58,14 +85,18 @@ namespace {
             }
             ensure_built(st);
             if (event == Event::Escape) {
+                if (std::holds_alternative<ToolCallRequest>(st.modal)
+                    && tool_phase_ == ToolPhase::REASON) {
+                    _set_tool_phase(ToolPhase::DECIDE);
+                    return true;
+                }
                 controller_.close_modal();
                 return true;
             }
-            if (std::holds_alternative<QuestionForm>(st.modal)) {
-                if (event == Event::Return) {
-                    submit_question();
-                    return true;
-                }
+            if (std::holds_alternative<QuestionForm>(st.modal)
+                && (event == Event::Tab || event == Event::TabReverse)) {
+                _cycle_focus(event == Event::Tab);
+                return true;
             } else if (std::holds_alternative<HelpModal>(st.modal)) {
                 if (event == Event::Return) {
                     controller_.close_modal();
@@ -84,6 +115,7 @@ namespace {
             std::vector<std::string> options;
             std::deque<bool> checked;
             int radio = 0;
+            bool text_live = false;
             std::string free_text;
             int ft_cursor = 0;
             Component selector;
@@ -103,39 +135,63 @@ namespace {
 
         void build(const ToolCallRequest&)
         {
-            kind_ = Kind::TOOL;
+            kind_        = Kind::TOOL;
+            tool_phase_  = ToolPhase::DECIDE;
             reason_buf_.clear();
             reason_cursor_ = 0;
 
-            InputOption io;
-            io.content         = &reason_buf_;
-            io.cursor_position = Ref<int>(&reason_cursor_);
-            io.placeholder     = "why?";
-            io.multiline       = false;
-            io.transform       = [](InputState state) {
-                if (state.is_placeholder) {
-                    state.element |= dim;
-                }
-                state.element |= bgcolor(PANEL_COLOR);
-                return state.element;
-            };
-            reason_input_ = Input(io);
+            reason_input_ = Input(field_option(
+                &reason_buf_, &reason_cursor_, "Reason",
+                [this] { _confirm_reject(); }));
 
-            auto resolve = [this](ToolVerdict verdict) {
-                controller_.resolve_modal(ModalResult { std::move(verdict) });
+            auto resolve = [this](ToolDecision d, std::string r) {
+                controller_.resolve_modal(
+                    ModalResult { ToolVerdict { d, std::move(r) } });
             };
-            accept_ = Button(
-                "Accept", [resolve] { resolve({ ToolDecision::ACCEPT, "" }); });
-            accept_always_ = Button("Accept Always",
-                [resolve] { resolve({ ToolDecision::ACCEPT_ALWAYS, "" }); });
-            reject_        = Button("Reject", [this, resolve] {
-                resolve({ ToolDecision::REJECT, reason_buf_ });
-            });
+            accept_ = with_space(
+                Button("Accept", [resolve] { resolve(ToolDecision::ACCEPT, ""); }),
+                [resolve] { resolve(ToolDecision::ACCEPT, ""); });
+            accept_always_ = with_space(
+                Button("Accept Always", [resolve] {
+                    resolve(ToolDecision::ACCEPT_ALWAYS, "");
+                }),
+                [resolve] { resolve(ToolDecision::ACCEPT_ALWAYS, ""); });
+            reject_ = with_space(
+                Button("Reject", [this] { _set_tool_phase(ToolPhase::REASON); }),
+                [this] { _set_tool_phase(ToolPhase::REASON); });
+            confirm_reject_ = with_space(
+                Button("Reject", [this] { _confirm_reject(); }),
+                [this] { _confirm_reject(); });
+            back_ = with_space(
+                Button("Back", [this] { _set_tool_phase(ToolPhase::DECIDE); }),
+                [this] { _set_tool_phase(ToolPhase::DECIDE); });
 
-            body_ = Container::Vertical({
-                reason_input_,
-                Container::Horizontal({ accept_, accept_always_, reject_ }),
-            });
+            _build_tool_body();
+        }
+
+        void _set_tool_phase(ToolPhase next)
+        {
+            tool_phase_ = next;
+            _build_tool_body();
+        }
+
+        void _build_tool_body()
+        {
+            if (tool_phase_ == ToolPhase::DECIDE) {
+                body_ = Container::Horizontal(
+                    { accept_, accept_always_, reject_ });
+            } else {
+                body_ = Container::Vertical(
+                    { reason_input_,
+                        Container::Horizontal({ confirm_reject_, back_ }) });
+                reason_input_->TakeFocus();
+            }
+        }
+
+        void _confirm_reject()
+        {
+            controller_.resolve_modal(ModalResult {
+                ToolVerdict { ToolDecision::REJECT, reason_buf_ } });
         }
 
         void build(const QuestionForm& form)
@@ -144,54 +200,60 @@ namespace {
             form_ = form;
             cards_.clear();
             cards_.reserve(form.size());
+            focusables_.clear();
+            focus_index_ = 0;
 
+            Components children;
             for (const auto& card : form) {
                 cards_.emplace_back();
                 CardState& cs = cards_.back();
                 cs.options    = card.options;
                 cs.checked.assign(card.options.size(), false);
-            }
 
-            Components children;
-            for (size_t i = 0; i < form.size(); ++i) {
-                const QuestionCard& card = form[i];
-                CardState& cs            = cards_[i];
-                if (card.multi) {
-                    Components checks;
-                    for (size_t j = 0; j < card.options.size(); ++j) {
-                        checks.push_back(
-                            Checkbox(card.options[j], &cs.checked[j]));
-                    }
-                    cs.selector = Container::Vertical(std::move(checks));
-                } else if (!card.options.empty()) {
-                    cs.selector = Radiobox(&cs.options, &cs.radio);
+                Components rows;
+                for (size_t j = 0; j < card.options.size(); ++j) {
+                    rows.push_back(
+                        make_option_row(cs, card.options[j], j, card.multi));
                 }
                 if (card.free_text) {
-                    InputOption io;
-                    io.content         = &cs.free_text;
-                    io.cursor_position = Ref<int>(&cs.ft_cursor);
-                    io.placeholder     = "type your answer";
-                    io.multiline       = false;
-                    io.transform       = [](InputState state) {
-                        if (state.is_placeholder) {
-                            state.element |= dim;
-                        }
-                        state.element |= bgcolor(PANEL_COLOR);
-                        return state.element;
-                    };
-                    cs.input = Input(io);
+                    const bool multi = card.multi;
+                    cs.input = Input(field_option(&cs.free_text, &cs.ft_cursor,
+                        card.options.empty()
+                            ? "type your answer"
+                            : "type your own answer",
+                        [this] { submit_question(); },
+                        [this, &cs] {
+                            if (!trim(cs.free_text).empty()) {
+                                cs.text_live = true;
+                            }
+                        }));
+                    Component input_row = Renderer(cs.input, [this, &cs, multi] {
+                        const bool live
+                            = cs.text_live && !trim(cs.free_text).empty();
+                        const std::string marker
+                            = multi ? (live ? "▣ " : "☐ ")
+                                    : (live ? "◉ " : "○ ");
+                        return hbox(
+                            { text(marker), text(" "), cs.input->Render() });
+                    });
+                    rows.push_back(input_row);
                 }
-                if (cs.selector) {
-                    children.push_back(cs.selector);
-                }
-                if (cs.input) {
-                    children.push_back(cs.input);
-                }
+
+                cs.selector = Container::Vertical(std::move(rows));
+                children.push_back(cs.selector);
+                focusables_.push_back(cs.selector);
             }
-            submit_ = Button("Submit", [this] { submit_question(); });
+            submit_ = with_space(
+                Button("Submit", [this] { submit_question(); }),
+                [this] { submit_question(); });
             children.push_back(submit_);
+            focusables_.push_back(submit_);
 
             body_ = Container::Vertical(std::move(children));
+            if (!focusables_.empty()) {
+                focus_index_ = 0;
+                focusables_.front()->TakeFocus();
+            }
         }
 
         void build(const SettingsModal&)
@@ -205,6 +267,69 @@ namespace {
 
         void build(std::monostate) { kind_ = Kind::NONE; }
 
+        void _cycle_focus(bool forward)
+        {
+            if (focusables_.empty()) {
+                return;
+            }
+            const int n = static_cast<int>(focusables_.size());
+            focus_index_ = (focus_index_ + (forward ? 1 : -1) + n) % n;
+            focusables_[focus_index_]->TakeFocus();
+        }
+
+        Component make_option_row(CardState& cs, const std::string& label,
+            size_t idx, bool multi)
+        {
+            auto toggle = [&cs, idx, multi] {
+                if (multi) {
+                    cs.checked[idx] = !cs.checked[idx];
+                } else {
+                    cs.radio      = static_cast<int>(idx);
+                    cs.text_live = false;
+                }
+            };
+            ButtonOption bo;
+            bo.transform = [&cs, idx, multi, &label](const EntryState& s) -> Element {
+                const bool selected
+                    = multi
+                        ? cs.checked[idx]
+                        : (!cs.text_live
+                            && cs.radio == static_cast<int>(idx));
+                const std::string marker
+                    = multi ? (selected ? "▣ " : "☐ ")
+                            : (selected ? "◉ " : "○ ");
+                Element e = text(label);
+                if (s.focused) {
+                    e = std::move(e) | bold | color(PANEL_FG) | inverted;
+                } else if (selected) {
+                    e = std::move(e) | bold | color(PANEL_FG);
+                } else {
+                    e = std::move(e) | color(PANEL_FG_DIM);
+                }
+                return hbox({ text(marker), std::move(e) });
+            };
+            bo.on_click = toggle;
+            Component row = Button(label, bo.on_click, bo);
+            return CatchEvent(row, [toggle](Event e) -> bool {
+                if (e == Event::Character(' ')) {
+                    toggle();
+                    return true;
+                }
+                return false;
+            });
+        }
+
+        Component with_space(Component child, std::function<void()> on_space)
+        {
+            return CatchEvent(child, [on_space](Event e) -> bool {
+                if (e == Event::Character(' ')) {
+                    on_space();
+                    return true;
+                }
+                return false;
+            });
+        }
+
         void submit_question()
         {
             ModalAnswer answer;
@@ -212,19 +337,24 @@ namespace {
                 const QuestionCard& card = form_[i];
                 const CardState& cs      = cards_[i];
                 QuestionAnswer qa;
-                if (card.multi) {
-                    for (size_t j = 0; j < card.options.size(); ++j) {
-                        if (cs.checked[j]) {
-                            qa.selected.push_back(card.options[j]);
-                        }
-                    }
-                } else if (!card.options.empty()
-                    && cs.radio < static_cast<int>(card.options.size())) {
-                    qa.selected.push_back(
-                        card.options[static_cast<size_t>(cs.radio)]);
-                }
-                if (card.free_text) {
+                qa.prompt = card.prompt;
+                const bool live = card.free_text && cs.text_live
+                    && !trim(cs.free_text).empty();
+                if (live) {
                     qa.free_text = cs.free_text;
+                } else {
+                    if (card.multi) {
+                        for (size_t j = 0; j < card.options.size(); ++j) {
+                            if (cs.checked[j]) {
+                                qa.selected.push_back(card.options[j]);
+                            }
+                        }
+                    } else if (!card.options.empty()
+                        && cs.radio
+                            < static_cast<int>(card.options.size())) {
+                        qa.selected.push_back(
+                            card.options[static_cast<size_t>(cs.radio)]);
+                    }
                 }
                 answer.cards.push_back(std::move(qa));
             }
@@ -244,38 +374,33 @@ namespace {
 
         Element tool_body(const ToolCallRequest& req)
         {
-            Elements code_lines;
-            for (size_t pos = 0; pos < req.args.size();) {
-                const size_t nl        = req.args.find('\n', pos);
-                const std::string line = req.args.substr(
-                    pos, nl == std::string::npos ? nl : nl - pos);
-                code_lines.push_back(text(line));
-                if (nl == std::string::npos) {
-                    break;
-                }
-                pos = nl + 1;
-            }
-            Element args_block
-                = vbox(std::move(code_lines)) | bgcolor(PANEL_COLOR);
-
             Elements rows { header_line("Tool call") };
-            if (!req.description.empty()) {
-                rows.push_back(text(req.description) | dim);
+            rows.push_back(separatorEmpty());
+            rows.push_back(code_block(req.args));
+            rows.push_back(separatorEmpty());
+            if (tool_phase_ == ToolPhase::REASON) {
+                rows.push_back(reason_input_->Render());
+                rows.push_back(hbox({
+                    confirm_reject_->Render(),
+                    text(" "),
+                    back_->Render(),
+                }));
+                rows.push_back(separatorEmpty());
+                rows.push_back(
+                    text("Enter confirms rejection · Esc goes back") | dim
+                    | color(PANEL_FG_DIM));
+            } else {
+                rows.push_back(hbox({
+                    accept_->Render(),
+                    text(" "),
+                    accept_always_->Render(),
+                    text(" "),
+                    reject_->Render(),
+                }));
+                rows.push_back(separatorEmpty());
+                rows.push_back(
+                    text("Esc cancels") | dim | color(PANEL_FG_DIM));
             }
-            rows.push_back(args_block);
-            rows.push_back(separatorEmpty());
-            rows.push_back(reason_input_->Render());
-            rows.push_back(hbox({
-                accept_->Render(),
-                text(" "),
-                accept_always_->Render(),
-                text(" "),
-                reject_->Render(),
-            }));
-            rows.push_back(separatorEmpty());
-            rows.push_back(
-                text("Esc cancels · typed text becomes the rejection reason")
-                | dim | color(PANEL_FG_DIM));
             return vbox(std::move(rows)) | xflex;
         }
 
@@ -288,12 +413,13 @@ namespace {
                 if (cards_[i].selector) {
                     rows.push_back(cards_[i].selector->Render());
                 }
-                if (cards_[i].input) {
-                    rows.push_back(cards_[i].input->Render());
-                }
             }
             rows.push_back(separatorEmpty());
             rows.push_back(submit_->Render() | center);
+            rows.push_back(separatorEmpty());
+            rows.push_back(
+                text("Arrows move between options · Enter confirms") | dim
+                | color(PANEL_FG_DIM));
             return vbox(std::move(rows)) | xflex;
         }
 
@@ -313,14 +439,19 @@ namespace {
 
         QuestionForm form_;
         std::vector<CardState> cards_;
+        std::vector<Component> focusables_;
+        int focus_index_ = 0;
         Component submit_;
 
+        ToolPhase tool_phase_   = ToolPhase::DECIDE;
         std::string reason_buf_;
         int reason_cursor_ = 0;
         Component reason_input_;
         Component accept_;
         Component accept_always_;
         Component reject_;
+        Component confirm_reject_;
+        Component back_;
         Component settings_;
 
         Component body_;
@@ -331,6 +462,22 @@ namespace {
 ftxui::Component make_modal(Controller& controller)
 {
     return ftxui::Make<ModalImpl>(controller);
+}
+
+ftxui::Element render_help(const std::vector<SlashCommand>& commands)
+{
+    Elements rows;
+    for (const auto& c : commands) {
+        rows.push_back(hbox({
+            text(c.name) | bold | color(PANEL_FG),
+            text("   "),
+            text(c.desc) | dim | color(PANEL_FG_DIM),
+        }));
+    }
+    return vbox({
+        section_title("Commands"),
+        vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER),
+    });
 }
 
 } // namespace ursa

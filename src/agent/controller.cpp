@@ -217,8 +217,12 @@ void Controller::run_demo()
         case 0: {
             cb(make_delta_event("Let me gather some details first.\n\n"));
             QuestionForm form;
-            form.push_back(QuestionCard { "Which storage backend should I use?",
+            form.push_back(QuestionCard { "Which storage backend?",
                 { "PostgreSQL", "SQLite", "MongoDB" }, false, false });
+            form.push_back(QuestionCard { "Which features do you need?",
+                { "Auth", "Billing", "Search", "Cache" }, true, false });
+            form.push_back(QuestionCard { "Preferred cloud region?",
+                { "us-east", "eu-west", "ap-south" }, false, true });
             form.push_back(QuestionCard {
                 "Anything else I should know?", { }, false, true });
             cb(make_question_event(std::move(form)));

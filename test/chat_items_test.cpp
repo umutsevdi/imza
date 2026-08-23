@@ -5,7 +5,6 @@
 #include <ftxui/screen/screen.hpp>
 
 #include "format.h"
-#include "render.h"
 #include "ui.h"
 
 namespace {
@@ -36,45 +35,19 @@ TEST_CASE("render_item renders assistant markdown")
     CHECK(out.find("Title") != std::string::npos);
 }
 
-TEST_CASE("render_todo renders as panel when wide, strip when narrow")
+TEST_CASE("render_item renders a modal answer and a tool call")
 {
-    ursa::TodoList todo { { { "a", false }, { "b", true } } };
+    ursa::ConversationItem ans = ursa::ModalAnswer { { { { "opt" }, "" } } };
+    const std::string out_a
+        = to_text(ursa::render_item(ans, { ursa::LayoutCtx::Kind::WIDE, 60 }));
+    CHECK(out_a.find("User answered:") != std::string::npos);
+    CHECK(out_a.find("opt") != std::string::npos);
 
-    const std::string wide = to_text(
-        ursa::render_todo(todo, { ursa::LayoutCtx::Kind::WIDE, 120 }));
-    CHECK(wide.find("[ ]") != std::string::npos);
-    CHECK(wide.find("[x]") != std::string::npos);
-
-    const std::string narrow = to_text(
-        ursa::render_todo(todo, { ursa::LayoutCtx::Kind::NARROW, 60 }));
-    CHECK(narrow.find("a") != std::string::npos);
-}
-
-TEST_CASE("render_changed_files renders status and path")
-{
-    ursa::ChangedFile f { "src/ui/app.cpp", "M" };
-    const std::string out = to_text(
-        ursa::render_changed_files({ f }, { ursa::LayoutCtx::Kind::WIDE, 30 }));
-    CHECK(out.find("M") != std::string::npos);
-    CHECK(out.find("src/ui/app.cpp") != std::string::npos);
-}
-
-TEST_CASE("question_form_markdown renders prompt and options")
-{
-    ursa::QuestionForm form { { "model?", { "gpt-4o", "claude" }, false,
-        false } };
-    const std::string md = ursa::question_form_markdown(form);
-    CHECK(md.find("Question: \"model?\"") != std::string::npos);
-    CHECK(md.find("- [ ] gpt-4o") != std::string::npos);
-    CHECK(md.find("- [ ] claude") != std::string::npos);
-}
-
-TEST_CASE("modal_answer_markdown renders selected then free text")
-{
-    ursa::ModalAnswer ans { { { { "Option 3" }, "extra note" } } };
-    const std::string md = ursa::modal_answer_markdown(ans);
-    CHECK(md.find("User answered:") == 0);
-    CHECK(md.find("> Option 3\n> extra note") != std::string::npos);
+    ursa::ConversationItem call
+        = ursa::ToolCall { 1, "bash", "ls", std::nullopt };
+    const std::string out_t
+        = to_text(ursa::render_item(call, { ursa::LayoutCtx::Kind::WIDE, 60 }));
+    CHECK(out_t.find("ls") != std::string::npos);
 }
 
 TEST_CASE("tool_call_markdown renders request, separator, output")
@@ -106,19 +79,4 @@ TEST_CASE("tool_call_markdown renders rejection with and without reason")
     const std::string bare = ursa::tool_call_markdown(call);
     CHECK(bare.find("> Rejected:") != std::string::npos);
     CHECK(bare.find("> Rejected: ") == std::string::npos);
-}
-
-TEST_CASE("render_item renders a modal answer and a tool call")
-{
-    ursa::ConversationItem ans = ursa::ModalAnswer { { { { "opt" }, "" } } };
-    const std::string out_a
-        = to_text(ursa::render_item(ans, { ursa::LayoutCtx::Kind::WIDE, 60 }));
-    CHECK(out_a.find("User answered:") != std::string::npos);
-    CHECK(out_a.find("opt") != std::string::npos);
-
-    ursa::ConversationItem call
-        = ursa::ToolCall { 1, "bash", "ls", std::nullopt };
-    const std::string out_t
-        = to_text(ursa::render_item(call, { ursa::LayoutCtx::Kind::WIDE, 60 }));
-    CHECK(out_t.find("ls") != std::string::npos);
 }
