@@ -13,7 +13,6 @@
 #include <string_view>
 #include <vector>
 
-#include "commands.h"
 #include "render.h"
 
 namespace ursa {

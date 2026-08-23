@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include "format.h"
 #include "render.h"
 #include "ui.h"
 

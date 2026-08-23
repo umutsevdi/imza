@@ -42,9 +42,8 @@ namespace {
             : screen_(screen)
             , controller_(controller)
         {
-            todo_  = make_todo(controller, [] { return 30; });
-            files_ = make_changed_files(controller);
-            chat_  = make_chat(
+            side_ = make_side_panel(controller);
+            chat_ = make_chat(
                 controller, [] { return ftxui::Terminal::Size().dimx; });
             modal_ = make_modal(controller);
             Add(chat_);
@@ -56,8 +55,7 @@ namespace {
             const LayoutCtx::Kind kind
                 = w >= 100 ? LayoutCtx::Kind::WIDE : LayoutCtx::Kind::NARROW;
 
-            Element side = panel(
-                vbox({ todo_->Render() | yflex, files_->Render() | yflex }));
+            Element side = panel(side_->Render());
 
             Element right_col = chat_->Render();
             const int chat_w  = (kind == LayoutCtx::Kind::WIDE) ? w - 31 : w;
@@ -102,8 +100,7 @@ namespace {
     private:
         ScreenInteractive& screen_;
         Controller& controller_;
-        Component todo_;
-        Component files_;
+        Component side_;
         Component chat_;
         Component modal_;
     };

@@ -4,6 +4,7 @@
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/screen.hpp>
 
+#include "format.h"
 #include "render.h"
 #include "ui.h"
 

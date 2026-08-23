@@ -82,71 +82,94 @@ FetchContent_MakeAvailable(jsoncpp doctest cmarkgfm)
 
 file(GLOB TEST_SOURCES "test/*.cpp")
 
-# Core
+# Shared app configuration (no ftxui, no cmark)
 add_library(ursa_core
     src/config.cpp
+)
+target_include_directories(ursa_core PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${jsoncpp_SOURCE_DIR}/include
+)
+target_link_libraries(ursa_core PRIVATE
+    jsoncpp_static
+)
+
+# Network transport (no ftxui, no cmark)
+add_library(ursa_network
     src/network/network_common.cpp
     src/network/provider.cpp
     src/network/openai_provider.cpp
     src/network/anthropic_provider.cpp
 )
-target_include_directories(ursa_core PRIVATE
+target_include_directories(ursa_network PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${cmarkgfm_SOURCE_DIR}/src
-    ${cmarkgfm_BINARY_DIR}/src
-    ${cmarkgfm_SOURCE_DIR}/extensions
     ${jsoncpp_SOURCE_DIR}/include
 )
-target_link_libraries(ursa_core PRIVATE
+target_link_libraries(ursa_network PRIVATE
     jsoncpp_static
     CURL::libcurl
 )
 
-add_executable(ursa
-    src/main.cpp
-    src/ui/controller.cpp
+# Agent: orchestration, formatting, slash commands (ftxui-free)
+add_library(ursa_agent
+    src/agent/controller.cpp
+    src/agent/format.cpp
+)
+target_include_directories(ursa_agent PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${jsoncpp_SOURCE_DIR}/include
+)
+target_link_libraries(ursa_agent PUBLIC
+    ursa_network
+    jsoncpp_static
+)
+
+# UI: ftxui components + renderers
+add_library(ursa_ui
     src/ui/app.cpp
     src/ui/chat.cpp
-    src/ui/commands.cpp
-    src/ui/todo.cpp
-    src/ui/changed_files.cpp
-    src/ui/settings.cpp
     src/ui/modal.cpp
-    src/render/markdown.cpp
-    src/render/items.cpp
+    src/ui/settings.cpp
+    src/ui/side_panel.cpp
+    src/ui/markdown.cpp
+    src/ui/items.cpp
 )
-target_include_directories(ursa PRIVATE
+target_include_directories(ursa_ui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${cmarkgfm_SOURCE_DIR}/src
     ${cmarkgfm_BINARY_DIR}/src
     ${cmarkgfm_SOURCE_DIR}/extensions
     ${jsoncpp_SOURCE_DIR}/include
 )
-target_compile_definitions(ursa PRIVATE
+target_compile_definitions(ursa_ui PRIVATE
     CMARK_GFM_STATIC_DEFINE
     CMARK_GFM_EXTENSIONS_STATIC_DEFINE
 )
-target_link_libraries(ursa PRIVATE
-    ursa_core
+target_link_libraries(ursa_ui PUBLIC
+    ursa_agent
     ftxui::ftxui
     libcmark-gfm-extensions_static
     libcmark-gfm_static
     jsoncpp_static
-    CURL::libcurl
 )
 
+add_executable(ursa
+    src/main.cpp
+)
+target_include_directories(ursa PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(ursa PRIVATE
+    ursa_core
+    ursa_ui
+)
 
-    if (TESTS)
-        add_executable(ursa_tests ${TEST_SOURCES}
-            src/ui/commands.cpp
-            src/ui/controller.cpp
-            src/render/markdown.cpp
-            src/render/items.cpp
-        )
+if (TESTS)
+    add_executable(ursa_tests ${TEST_SOURCES})
     target_include_directories(ursa_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${cmarkgfm_SOURCE_DIR}/src
-    ${cmarkgfm_BINARY_DIR}/src
+        ${cmarkgfm_BINARY_DIR}/src
         ${cmarkgfm_SOURCE_DIR}/extensions
         ${jsoncpp_SOURCE_DIR}/include
     )
@@ -155,13 +178,8 @@ target_link_libraries(ursa PRIVATE
         CMARK_GFM_EXTENSIONS_STATIC_DEFINE
     )
     target_link_libraries(ursa_tests PRIVATE
-        ursa_core
-        ftxui::ftxui
-        libcmark-gfm-extensions_static
-        libcmark-gfm_static
-        jsoncpp_static
-        CURL::libcurl
+        ursa_agent
+        ursa_ui
         doctest::doctest
     )
-
 endif()
