@@ -81,6 +81,11 @@ struct HelpModal { };
 using ModalPayload = std::variant<std::monostate, SettingsModal, HelpModal,
     ToolCallRequest, QuestionForm>;
 
+struct QueuedMessage {
+    std::size_t id;
+    std::string text;
+};
+
 struct UiState {
     enum class Phase { IDLE, STREAMING, AWAITING };
     enum class Mode { PLAN, BUILD };
@@ -93,6 +98,7 @@ struct UiState {
 
     TodoList todo;
     std::vector<ChangedFile> changed_files;
+    std::vector<QueuedMessage> queued;
 };
 
 using PostFn = std::function<void(std::function<void()>)>;
@@ -116,6 +122,7 @@ public:
     void close_modal();
     void resolve_modal(ModalResult result);
     void enqueue_user_modal(ModalPayload payload);
+    void cancel_queued(std::size_t id);
     size_t queue_size() const;
     ModalResult request_modal(ModalPayload payload);
     UiState& state() { return state_; }
@@ -144,6 +151,8 @@ private:
     void _run_tool(const ToolCallRequest& req, std::vector<Message>& tool_msgs);
     void _fill_tool_result(const ToolCallRequest& req, ToolCall::Result result);
     void _present_front();
+    void _enqueue_message(std::string text);
+    void _drain_queued();
 
     Config cfg_;
     UiState state_;
@@ -161,6 +170,7 @@ private:
     mutable std::mutex queue_mutex_;
     std::set<std::string> allowed_tools_;
     std::size_t next_tool_id_ = 1;
+    std::size_t next_queued_id_ = 0;
 
     std::vector<StreamEvent> stream_events_;
     std::atomic<bool> alive_ { true };

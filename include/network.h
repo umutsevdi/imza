@@ -52,7 +52,6 @@ Provider get_provider(const Config& cfg);
 Status stream(const Provider& provider, const Config& cfg,
     const ChatRequest& req, StreamCallback cb);
 
-std::string strip_slash(std::string_view base);
 std::string write_json(const Json::Value& value);
 Json::Value parse_json(std::string_view text);
 const char* role_str(Message::Type type);

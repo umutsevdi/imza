@@ -7,8 +7,6 @@
 #include <ftxui/dom/flexbox_config.hpp>
 #include <ftxui/dom/table.hpp>
 
-#include <algorithm>
-#include <cctype>
 #include <cstdint>
 #include <functional>
 #include <string>

@@ -1,7 +1,7 @@
 #include <curl/curl.h>
-#include <sstream>
 
 #include "network.h"
+#include "util.h"
 
 namespace ursa {
 

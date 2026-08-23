@@ -3,8 +3,6 @@
 #include <ftxui/component/component.hpp>
 #include <ftxui/dom/elements.hpp>
 
-#include <functional>
-
 #include "render.h"
 
 namespace ursa {

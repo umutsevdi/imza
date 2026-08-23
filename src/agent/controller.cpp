@@ -1,10 +1,9 @@
 #include "agent.h"
 #include "format.h"
+#include "util.h"
 
 #include <cassert>
-#include <thread>
 
-#include <algorithm>
 #include <cctype>
 #include <functional>
 #include <memory>
@@ -16,36 +15,12 @@ namespace ursa {
 
 namespace {
 
-    std::string_view trim(std::string_view s)
-    {
-        size_t b = 0;
-        size_t e = s.size();
-        while (b < e && std::isspace(static_cast<unsigned char>(s[b]))) {
-            ++b;
-        }
-        while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1]))) {
-            --e;
-        }
-        return s.substr(b, e - b);
-    }
-
     std::string denial_text(const std::string& reason)
     {
         if (reason.empty()) {
             return "user denied";
         }
         return "user denied: " + reason;
-    }
-
-    std::string to_lower(std::string_view s)
-    {
-        std::string out;
-        out.reserve(s.size());
-        for (char ch : s) {
-            out += static_cast<char>(
-                std::tolower(static_cast<unsigned char>(ch)));
-        }
-        return out;
     }
 
 } // namespace
@@ -113,9 +88,37 @@ void Controller::enqueue_user_modal(ModalPayload payload)
         queue_.push_back(PendingModal { std::move(payload),
             std::shared_ptr<std::promise<ModalResult>> { } });
     }
-    if (state_.phase == UiState::Phase::IDLE && state_.modal.index() == 0) {
+    if (state_.modal.index() == 0
+        && (state_.phase == UiState::Phase::IDLE
+            || state_.phase == UiState::Phase::STREAMING)) {
         _present_front();
     }
+}
+
+void Controller::cancel_queued(std::size_t id)
+{
+    auto& q = state_.queued;
+    for (auto it = q.begin(); it != q.end(); ++it) {
+        if (it->id == id) {
+            q.erase(it);
+            return;
+        }
+    }
+}
+
+void Controller::_enqueue_message(std::string text)
+{
+    state_.queued.push_back(QueuedMessage { next_queued_id_++, std::move(text) });
+}
+
+void Controller::_drain_queued()
+{
+    if (state_.queued.empty()) {
+        return;
+    }
+    QueuedMessage next = std::move(state_.queued.front());
+    state_.queued.erase(state_.queued.begin());
+    submit(std::move(next.text));
 }
 
 size_t Controller::queue_size() const
@@ -175,9 +178,6 @@ void Controller::_present_front()
 
 void Controller::submit(std::string text)
 {
-    if (state_.phase != UiState::Phase::IDLE) {
-        return;
-    }
     const std::string_view t = trim(text);
     if (t.empty()) {
         return;
@@ -186,7 +186,11 @@ void Controller::submit(std::string text)
         run_slash(t);
         return;
     }
-    submit_message(std::string(t));
+    if (state_.phase == UiState::Phase::IDLE) {
+        submit_message(std::string(t));
+    } else {
+        _enqueue_message(std::string(t));
+    }
 }
 
 void Controller::submit_message(std::string text)
@@ -249,8 +253,20 @@ void Controller::run_slash(std::string_view cmd)
     case SlashCommand::Action::SETTINGS:
         enqueue_user_modal(SettingsModal { cfg_.model });
         break;
-    case SlashCommand::Action::DEMO: run_demo(); break;
-    case SlashCommand::Action::SKILL: submit_message(std::string(cmd)); break;
+    case SlashCommand::Action::DEMO:
+        if (state_.phase == UiState::Phase::IDLE) {
+            run_demo();
+        } else {
+            _enqueue_message(std::string(cmd));
+        }
+        break;
+    case SlashCommand::Action::SKILL:
+        if (state_.phase == UiState::Phase::IDLE) {
+            submit_message(std::string(cmd));
+        } else {
+            _enqueue_message(std::string(cmd));
+        }
+        break;
     }
 }
 
@@ -492,6 +508,7 @@ void Controller::finish(std::string error)
     }
     state_.phase = UiState::Phase::IDLE;
     _present_front();
+    _drain_queued();
 }
 
 std::vector<SlashCommand> slash_commands(const Config&)

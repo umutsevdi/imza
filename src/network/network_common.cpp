@@ -2,15 +2,6 @@
 
 namespace ursa {
 
-std::string strip_slash(std::string_view base)
-{
-    std::string out(base);
-    while (!out.empty() && out.back() == '/') {
-        out.pop_back();
-    }
-    return out;
-}
-
 std::string write_json(const Json::Value& value)
 {
     Json::StreamWriterBuilder builder;

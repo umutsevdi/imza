@@ -4,7 +4,6 @@
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_base.hpp>
 #include <ftxui/component/event.hpp>
-#include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/elements.hpp>
 
 #include <algorithm>
@@ -14,23 +13,13 @@
 #include <vector>
 
 #include "render.h"
+#include "util.h"
 
 namespace ursa {
 
 namespace {
 
     using namespace ftxui;
-
-    std::string to_lower(std::string_view s)
-    {
-        std::string out;
-        out.reserve(s.size());
-        for (char ch : s) {
-            out += static_cast<char>(
-                std::tolower(static_cast<unsigned char>(ch)));
-        }
-        return out;
-    }
 
     Element error_element(const UiState& st)
     {
@@ -97,6 +86,20 @@ namespace {
                     });
                 }
                 items.push_back(std::move(el));
+            }
+
+            const size_t queued_n = st.queued.size();
+            for (size_t i = 0; i < queued_n; ++i) {
+                const auto& q = st.queued[i];
+                Elements row {
+                    text("[QUEUED] ") | bold | color(Color::Green),
+                };
+                if (i + 1 == queued_n) {
+                    row.push_back(text(q.text + "   (ESC to cancel)") | dim);
+                } else {
+                    row.push_back(text(q.text) | dim);
+                }
+                items.push_back(hbox(std::move(row)));
             }
 
             Element content
@@ -168,6 +171,11 @@ namespace {
             if (event == Event::Escape) {
                 if (show_suggestions()) {
                     matches_.clear();
+                    return true;
+                }
+                if (!controller_.state().queued.empty()) {
+                    controller_.cancel_queued(
+                        controller_.state().queued.back().id);
                     return true;
                 }
                 return true;

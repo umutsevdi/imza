@@ -4,7 +4,6 @@
 #include <ftxui/component/component_base.hpp>
 #include <ftxui/dom/elements.hpp>
 
-#include <functional>
 #include <string>
 #include <vector>
 
