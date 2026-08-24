@@ -28,6 +28,7 @@ const char* role_str(Message::Type type)
     case Message::Type::SYSTEM: return "system";
     case Message::Type::USER: return "user";
     case Message::Type::ASSISTANT: return "assistant";
+    case Message::Type::TOOL: return "tool";
     }
     return "user";
 }

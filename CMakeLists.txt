@@ -114,6 +114,8 @@ target_link_libraries(ursa_network PRIVATE
 add_library(ursa_agent
     src/agent/controller.cpp
     src/agent/format.cpp
+    src/agent/tools.cpp
+    src/agent/builtin_tools.cpp
 )
 target_include_directories(ursa_agent PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -132,7 +134,7 @@ add_library(ursa_ui
     src/ui/settings.cpp
     src/ui/side_panel.cpp
     src/ui/markdown.cpp
-    src/ui/items.cpp
+    src/ui/render.cpp
 )
 target_include_directories(ursa_ui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include

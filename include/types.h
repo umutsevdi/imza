@@ -27,7 +27,8 @@ struct ToolVerdict {
 struct ToolCallRequest {
     std::string name;
     std::string args;
-    std::string description;
+    std::string description { };
+    std::string id { };
 };
 
 struct QuestionCard {
@@ -42,7 +43,7 @@ using QuestionForm = std::vector<QuestionCard>;
 struct QuestionAnswer {
     std::vector<std::string> selected;
     std::string free_text;
-    std::string prompt;
+    std::string prompt { };
 };
 
 struct ModalAnswer {

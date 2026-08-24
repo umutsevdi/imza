@@ -23,6 +23,42 @@ namespace {
         return "user denied: " + reason;
     }
 
+    std::optional<QuestionForm> parse_ask_args(const std::string& args)
+    {
+        const Json::Value parsed = parse_json(args);
+        if (!parsed.isObject() || !parsed["questions"].isArray()
+            || parsed["questions"].empty()) {
+            return std::nullopt;
+        }
+        QuestionForm form;
+        for (const auto& q : parsed["questions"]) {
+            QuestionCard card;
+            if (!q.isObject() || !q["prompt"].isString()
+                || q["prompt"].asString().empty()) {
+                return std::nullopt;
+            }
+            card.prompt = q["prompt"].asString();
+            if (q["options"].isArray()) {
+                for (const auto& o : q["options"]) {
+                    if (o.isString()) {
+                        card.options.push_back(o.asString());
+                    }
+                }
+            }
+            if (q["multi"].isBool()) {
+                card.multi = q["multi"].asBool();
+            }
+            if (q["free_text"].isBool()) {
+                card.free_text = q["free_text"].asBool();
+            }
+            form.push_back(std::move(card));
+        }
+        if (form.empty()) {
+            return std::nullopt;
+        }
+        return form;
+    }
+
 } // namespace
 
 std::string error_text(Status st)
@@ -30,29 +66,19 @@ std::string error_text(Status st)
     return "stream error (" + std::to_string(static_cast<int>(st)) + ")";
 }
 
-std::string Controller::default_tool_output(const ToolCallRequest& req)
-{
-    return "[" + req.name + " stub output]";
-}
-
 Controller::Controller(const Config& cfg, PostFn post,
-    std::function<void()> on_exit, StreamFn stream_fn, ToolRunner tool_runner)
+    std::function<void()> on_exit, StreamFn stream_fn, ToolRegistry tools)
     : cfg_(cfg)
     , post_(std::move(post))
     , on_exit_(std::move(on_exit))
     , commands_(slash_commands(cfg))
     , stream_fn_(std::move(stream_fn))
-    , tool_runner_(std::move(tool_runner))
+    , tools_(std::move(tools))
 {
     if (!stream_fn_) {
         stream_fn_ = [this](const ChatRequest& req, const StreamCallback& cb) {
             const auto provider = get_provider(cfg_);
             return stream(provider, cfg_, req, cb);
-        };
-    }
-    if (!tool_runner_) {
-        tool_runner_ = [](const ToolCallRequest& req) {
-            return default_tool_output(req);
         };
     }
 }
@@ -277,13 +303,30 @@ void Controller::run_slash(std::string_view cmd)
 std::vector<Message> Controller::_build_history() const
 {
     std::vector<Message> history;
-    history.push_back(
-        { Message::Type::SYSTEM, "You are a helpful assistant." });
+    std::string prompt = "You are a helpful assistant.";
+    const auto specs   = tools_.specs();
+    if (!specs.empty()) {
+        prompt += "\n\nYou can call tools. Available tools:";
+        for (const auto& s : specs) {
+            prompt += "\n- " + s.name + ": " + s.description;
+        }
+        prompt += "\nPrefer narrow line ranges when reading long files.";
+    }
+    history.push_back({ Message::Type::SYSTEM, std::move(prompt) });
     for (const auto& item : state_.items) {
         if (const auto* u = std::get_if<UserTurn>(&item)) {
             history.push_back({ Message::Type::USER, u->text });
         } else if (const auto* a = std::get_if<AssistantTurn>(&item)) {
             history.push_back({ Message::Type::ASSISTANT, a->markdown });
+        } else if (const auto* tc = std::get_if<ToolCall>(&item)) {
+            if (history.empty()
+                || history.back().type != Message::Type::ASSISTANT) {
+                history.push_back({ Message::Type::ASSISTANT, "" });
+            }
+            history.back().tool_calls.push_back(
+                ToolCallEntry { tc->call_id, tc->name, tc->args });
+            history.push_back({ Message::Type::TOOL, _tool_result_text(*tc),
+                { }, tc->call_id });
         }
     }
     return history;
@@ -311,13 +354,18 @@ void Controller::_drive(std::vector<Message> history, StreamFn override)
         ChatRequest req;
         req.model    = cfg_.model;
         req.messages = history;
+        req.tools    = tools_.specs();
         stream_events_.clear();
+        std::string text_buffer;
 
         StreamFn fn     = override ? override : stream_fn_;
-        const Status st = fn(req, [this](const StreamEvent& ev) {
+        const Status st = fn(req, [this, &text_buffer](const StreamEvent& ev) {
             if (ev.kind == StreamEvent::Kind::TOOL_CALL
                 || ev.kind == StreamEvent::Kind::QUESTION) {
                 stream_events_.push_back(ev);
+            }
+            if (ev.kind == StreamEvent::Kind::CONTENT_DELTA) {
+                text_buffer += ev.text;
             }
             _post([this, ev] { apply(ev); });
         });
@@ -331,7 +379,7 @@ void Controller::_drive(std::vector<Message> history, StreamFn override)
 
         std::string reply_buffer;
         const size_t history_before = history.size();
-        _drain_pending_asks(history, reply_buffer);
+        _drain_pending_asks(history, reply_buffer, text_buffer);
         if (!alive_.load()) {
             return;
         }
@@ -344,19 +392,55 @@ void Controller::_drive(std::vector<Message> history, StreamFn override)
     }
 }
 
-void Controller::_drain_pending_asks(
-    std::vector<Message>& history, std::string& reply_buffer)
+void Controller::_drain_pending_asks(std::vector<Message>& history,
+    std::string& reply_buffer, const std::string& assistant_text)
 {
     struct Ask {
         ModalPayload payload;
         std::future<ModalResult> future;
+        std::optional<ToolCallRequest> tool_req;
     };
     std::vector<Ask> asks;
     std::vector<Message> tool_msgs;
+    bool had_tool_calls = false;
 
     for (const auto& ev : stream_events_) {
         if (ev.kind == StreamEvent::Kind::TOOL_CALL) {
-            if (allowed_tools_.count(ev.tool_call.name) != 0) {
+            had_tool_calls = true;
+            if (ev.tool_call.name == "ask") {
+                auto form = parse_ask_args(ev.tool_call.args);
+                if (!form) {
+                    const ToolCallRequest req = ev.tool_call;
+                    _post([this, req] {
+                        _fill_tool_result(req,
+                            ToolCall::Result { ToolCall::Result::Kind::ERROR,
+                                "ask: expected a non-empty 'questions' array" });
+                    });
+                    tool_msgs.push_back(
+                        { Message::Type::TOOL,
+                            "ask: expected a non-empty 'questions' array", { },
+                            req.id });
+                    continue;
+                }
+                auto promise = std::make_shared<std::promise<ModalResult>>();
+                auto future  = promise->get_future();
+                {
+                    std::lock_guard lock(queue_mutex_);
+                    queue_.push_back(
+                        PendingModal { *form, std::move(promise) });
+                }
+                Ask ask;
+                ask.payload   = *form;
+                ask.future    = std::move(future);
+                ask.tool_req  = ev.tool_call;
+                asks.push_back(std::move(ask));
+                continue;
+            }
+            const Tool* tool = tools_.find(ev.tool_call.name);
+            const bool needs_approval = tool != nullptr
+                && tool->safety == ToolSafety::MUTATING
+                && allowed_tools_.count(ev.tool_call.name) == 0;
+            if (!needs_approval) {
                 _run_tool(ev.tool_call, tool_msgs);
                 continue;
             }
@@ -367,7 +451,8 @@ void Controller::_drain_pending_asks(
                 queue_.push_back(
                     PendingModal { ev.tool_call, std::move(promise) });
             }
-            asks.push_back(Ask { ev.tool_call, std::move(future) });
+            asks.push_back(Ask { .payload = ev.tool_call,
+                .future  = std::move(future), .tool_req = std::nullopt });
         } else if (ev.kind == StreamEvent::Kind::QUESTION) {
             auto promise = std::make_shared<std::promise<ModalResult>>();
             auto future  = promise->get_future();
@@ -376,7 +461,8 @@ void Controller::_drain_pending_asks(
                 queue_.push_back(
                     PendingModal { ev.question, std::move(promise) });
             }
-            asks.push_back(Ask { ev.question, std::move(future) });
+            asks.push_back(Ask { .payload = ev.question,
+                .future  = std::move(future), .tool_req = std::nullopt });
         }
     }
     if (!asks.empty()) {
@@ -389,23 +475,38 @@ void Controller::_drain_pending_asks(
         }
         const ModalResult res = ask.future.get();
         if (const auto* req = std::get_if<ToolCallRequest>(&ask.payload)) {
-            _apply_tool_result(*req, res, tool_msgs, reply_buffer);
+            _apply_tool_result(*req, res, tool_msgs);
+        } else if (ask.tool_req.has_value()) {
+            _apply_ask_result(*ask.tool_req, res, tool_msgs);
         } else {
             _apply_question_result(res, reply_buffer);
         }
     }
 
-    if (!reply_buffer.empty()) {
-        history.push_back({ Message::Type::USER, reply_buffer });
+    if (!had_tool_calls && asks.empty()) {
+        return;
+    }
+
+    Message assistant { Message::Type::ASSISTANT, assistant_text };
+    for (const auto& ev : stream_events_) {
+        if (ev.kind == StreamEvent::Kind::TOOL_CALL) {
+            assistant.tool_calls.push_back(ToolCallEntry { ev.tool_call.id,
+                ev.tool_call.name, ev.tool_call.args });
+        }
+    }
+    if (!assistant.tool_calls.empty() || !assistant.content.empty()) {
+        history.push_back(std::move(assistant));
     }
     for (auto& m : tool_msgs) {
         history.push_back(std::move(m));
     }
+    if (!reply_buffer.empty()) {
+        history.push_back({ Message::Type::USER, reply_buffer });
+    }
 }
 
 void Controller::_apply_tool_result(const ToolCallRequest& req,
-    const ModalResult& res, std::vector<Message>& tool_msgs,
-    std::string& reply_buffer)
+    const ModalResult& res, std::vector<Message>& tool_msgs)
 {
     const auto* verdict = std::get_if<ToolVerdict>(&res);
     if (verdict == nullptr) {
@@ -413,8 +514,8 @@ void Controller::_apply_tool_result(const ToolCallRequest& req,
             _fill_tool_result(
                 req, ToolCall::Result { ToolCall::Result::Kind::CANCEL, "" });
         });
-        reply_buffer += tool_request_markdown(req) + "\n---\n" + denial_text("")
-            + "\n\n";
+        tool_msgs.push_back(
+            { Message::Type::TOOL, denial_text(""), { }, req.id });
         return;
     }
     if (verdict->decision == ToolDecision::REJECT) {
@@ -423,8 +524,8 @@ void Controller::_apply_tool_result(const ToolCallRequest& req,
             _fill_tool_result(req,
                 ToolCall::Result { ToolCall::Result::Kind::REJECT, reason });
         });
-        reply_buffer += tool_request_markdown(req) + "\n---\n"
-            + denial_text(reason) + "\n\n";
+        tool_msgs.push_back(
+            { Message::Type::TOOL, denial_text(reason), { }, req.id });
         return;
     }
     if (verdict->decision == ToolDecision::ACCEPT_ALWAYS) {
@@ -445,16 +546,54 @@ void Controller::_apply_question_result(
     _post([this, copy] { state_.items.push_back(std::move(copy)); });
 }
 
+void Controller::_apply_ask_result(const ToolCallRequest& req,
+    const ModalResult& res, std::vector<Message>& tool_msgs)
+{
+    const auto* answer = std::get_if<ModalAnswer>(&res);
+    if (answer == nullptr) {
+        _post([this, req] {
+            _fill_tool_result(req,
+                ToolCall::Result { ToolCall::Result::Kind::CANCEL, "" });
+        });
+        tool_msgs.push_back(
+            { Message::Type::TOOL, denial_text(""), { }, req.id });
+        return;
+    }
+    ModalAnswer copy = *answer;
+    const std::string text = ask_answer_markdown(copy);
+    _post([this, req, text] {
+        _fill_tool_result(req,
+            ToolCall::Result { ToolCall::Result::Kind::OUTPUT, text });
+    });
+    tool_msgs.push_back({ Message::Type::TOOL, text, { }, req.id });
+}
+
 void Controller::_run_tool(
     const ToolCallRequest& req, std::vector<Message>& tool_msgs)
 {
-    const std::string out = tool_runner_(req);
-    _post([this, req, out] {
-        _fill_tool_result(
-            req, ToolCall::Result { ToolCall::Result::Kind::OUTPUT, out });
+    const ToolOutput out = tools_.dispatch(req);
+    const auto kind      = out.kind == ToolOutput::Kind::OUTPUT
+              ? ToolCall::Result::Kind::OUTPUT
+              : ToolCall::Result::Kind::ERROR;
+    _post([this, req, kind, out] {
+        _fill_tool_result(req, ToolCall::Result { kind, out.text });
     });
-    tool_msgs.push_back(
-        { Message::Type::USER, tool_request_markdown(req) + "\n---\n" + out });
+    tool_msgs.push_back({ Message::Type::TOOL, out.text, { }, req.id });
+}
+
+std::string Controller::_tool_result_text(const ToolCall& call)
+{
+    if (!call.result.has_value()) {
+        return "";
+    }
+    switch (call.result->kind) {
+    case ToolCall::Result::Kind::REJECT:
+    case ToolCall::Result::Kind::CANCEL:
+        return denial_text(call.result->text);
+    case ToolCall::Result::Kind::OUTPUT:
+    case ToolCall::Result::Kind::ERROR: return call.result->text;
+    }
+    return "";
 }
 
 void Controller::_fill_tool_result(
@@ -484,8 +623,8 @@ void Controller::apply(const StreamEvent& ev)
         }
         break;
     case StreamEvent::Kind::TOOL_CALL:
-        state_.items.push_back(ToolCall { next_tool_id_++, ev.tool_call.name,
-            ev.tool_call.args, std::nullopt });
+        state_.items.push_back(ToolCall { next_tool_id_++, ev.tool_call.id,
+            ev.tool_call.name, ev.tool_call.args, std::nullopt });
         break;
     case StreamEvent::Kind::QUESTION:
         if (!state_.items.empty()) {

@@ -28,7 +28,10 @@ ftxui::Element card(
     ftxui::Element body, std::optional<ftxui::Color> bg = std::nullopt);
 ftxui::Element section_title(
     std::string_view title, ftxui::Color color = PANEL_FG_DIM);
-ftxui::Element code_block(const std::string& code);
+ftxui::Element code_block(const std::string& code, const std::string& lang = "");
+ftxui::Element code_block_with_lines(const std::string& code,
+    const std::string& lang, std::size_t start_line);
+ftxui::Element list_block(const std::string& text);
 
 ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx);
 ftxui::Element render_todo(const TodoList& todo, const LayoutCtx& ctx);

@@ -41,3 +41,73 @@ TEST_CASE("modal_answer_markdown renders Q/A pairs with prompt")
     CHECK(md.find("anything else?**") != std::string::npos);
     CHECK(md.find("—") != std::string::npos);
 }
+
+TEST_CASE("tool_display_name capitalizes the first letter")
+{
+    CHECK(ursa::tool_display_name("read") == "Read");
+    CHECK(ursa::tool_display_name("list") == "List");
+    CHECK(ursa::tool_display_name("") == "");
+    CHECK(ursa::tool_display_name("read_file") == "Read_file");
+}
+
+TEST_CASE("tool_args_summary flattens object args to key=value pairs")
+{
+    CHECK(ursa::tool_args_summary(R"({"path":"notes.txt","n":3})")
+        == "n=3 path=notes.txt");
+    CHECK(ursa::tool_args_summary(R"({"flag":true})") == "flag=true");
+    CHECK(ursa::tool_args_summary(R"({"path":null})") == "path=null");
+}
+
+TEST_CASE("tool_args_summary passes non-object args through verbatim")
+{
+    CHECK(ursa::tool_args_summary("ls -la") == "ls -la");
+    CHECK(ursa::tool_args_summary("{}") == "{}");
+}
+
+TEST_CASE("tool_call_head shows the file path for read, args otherwise")
+{
+    ursa::ToolCall read { 1, "", "read",
+        R"({"path":"src/a.cpp","line_begin":1})", { } };
+    CHECK(ursa::tool_call_head(read) == "Read src/a.cpp");
+
+    ursa::ToolCall other { 1, "", "bash", "git status", { } };
+    CHECK(ursa::tool_call_head(other) == "Bash git status");
+
+    ursa::ToolCall ask { 1, "", "ask",
+        R"({"questions":[{"prompt":"Continue?"}]})", { } };
+    CHECK(ursa::tool_call_head(ask) == "Ask (1 question)");
+
+    ursa::ToolCall ask_multi { 1, "", "ask",
+        R"({"questions":[{"prompt":"A"},{"prompt":"B"}]})", { } };
+    CHECK(ursa::tool_call_head(ask_multi) == "Ask (2 questions)");
+}
+
+TEST_CASE("ask_answer_markdown numbers questions and blockquotes answers")
+{
+    ursa::ModalAnswer ans;
+    ans.cards.push_back(
+        ursa::QuestionAnswer { { "Sunny" }, "", "What's the weather today?" });
+    ans.cards.push_back(ursa::QuestionAnswer {
+        { "Reading files", "Listing directories" }, "", "Which capabilities?" });
+
+    const std::string md = ursa::ask_answer_markdown(ans);
+    CHECK(md
+        == "1. **What's the weather today?**\n> Sunny\n"
+           "2. **Which capabilities?**\n> Reading files, Listing directories");
+
+    ursa::ModalAnswer empty;
+    empty.cards.push_back(ursa::QuestionAnswer { { }, "", "Anything else?" });
+    CHECK(ursa::ask_answer_markdown(empty) == "1. **Anything else?**\n> —");
+}
+
+TEST_CASE("tool_code_language derives the extension for read only")
+{
+    ursa::ToolCall read { 1, "", "read", R"({"path":"src/a.cpp"})", { } };
+    CHECK(ursa::tool_code_language(read) == "cpp");
+
+    ursa::ToolCall no_ext { 1, "", "read", R"({"path":"Makefile"})", { } };
+    CHECK(ursa::tool_code_language(no_ext).empty());
+
+    ursa::ToolCall other { 1, "", "bash", "git status", { } };
+    CHECK(ursa::tool_code_language(other).empty());
+}

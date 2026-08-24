@@ -1,5 +1,7 @@
 #include "format.h"
 
+#include <cctype>
+#include <filesystem>
 #include <string>
 #include <string_view>
 
@@ -9,12 +11,99 @@ namespace {
 
 } // namespace
 
-std::string fence_language(const std::string& tool)
+std::string tool_display_name(const std::string& name)
 {
-    if (tool == "bash" || tool == "sh" || tool == "shell") {
-        return "bash";
+    if (name.empty()) {
+        return name;
     }
-    return tool;
+    std::string out = name;
+    out[0] = static_cast<char>(
+        std::toupper(static_cast<unsigned char>(out[0])));
+    return out;
+}
+
+std::string tool_args_summary(const std::string& args)
+{
+    const Json::Value parsed = parse_json(args);
+    if (!parsed.isObject() || parsed.empty()) {
+        return args;
+    }
+    std::string out;
+    for (const auto& key : parsed.getMemberNames()) {
+        if (!out.empty()) {
+            out += ' ';
+        }
+        out += key + "=";
+        const Json::Value& value = parsed[key];
+        if (value.isString()) {
+            out += value.asString();
+        } else if (value.isNull()) {
+            out += "null";
+        } else {
+            out += write_json(value);
+        }
+    }
+    return out;
+}
+
+namespace {
+
+    std::string read_path(const ToolCall& call)
+    {
+        const Json::Value parsed = parse_json(call.args);
+        if (parsed.isObject() && parsed["path"].isString()) {
+            return parsed["path"].asString();
+        }
+        return call.args;
+    }
+
+} // namespace
+
+std::string tool_call_head(const ToolCall& call)
+{
+    if (call.name == "read" || call.name == "list") {
+        return tool_display_name(call.name) + " " + read_path(call);
+    }
+    if (call.name == "ask") {
+        const Json::Value parsed = parse_json(call.args);
+        int n = 0;
+        if (parsed.isObject() && parsed["questions"].isArray()) {
+            n = static_cast<int>(parsed["questions"].size());
+        }
+        return tool_display_name(call.name) + " (" + std::to_string(n)
+            + " question" + (n == 1 ? "" : "s") + ")";
+    }
+    std::string head = tool_display_name(call.name);
+    const std::string args = tool_args_summary(call.args);
+    if (!args.empty()) {
+        head += " " + args;
+    }
+    return head;
+}
+
+std::string tool_code_language(const ToolCall& call)
+{
+    if (call.name != "read") {
+        return "";
+    }
+    std::string ext
+        = std::filesystem::path(read_path(call)).extension().string();
+    if (!ext.empty() && ext.front() == '.') {
+        ext.erase(0, 1);
+    }
+    return ext;
+}
+
+std::size_t read_start_line(const ToolCall& call)
+{
+    const Json::Value parsed = parse_json(call.args);
+    if (parsed.isObject() && parsed["line_begin"].isIntegral()) {
+        const auto raw = parsed["line_begin"].asInt64();
+        if (raw >= 1) {
+            return static_cast<std::size_t>(raw);
+        }
+    }
+    return 1;
 }
 
 std::string question_form_markdown(const QuestionForm& form)
@@ -64,31 +153,32 @@ std::string modal_answer_markdown(const ModalAnswer& answer)
     return md;
 }
 
-std::string tool_request_markdown(const ToolCallRequest& req)
+std::string ask_answer_markdown(const ModalAnswer& answer)
 {
-    std::string md = "Requested to call:";
-    md += "\n```" + fence_language(req.name) + "\n" + req.args + "\n```";
-    return md;
-}
-
-std::string tool_call_markdown(const ToolCall& call)
-{
-    std::string md
-        = tool_request_markdown(ToolCallRequest { call.name, call.args, "" });
-    if (!call.result.has_value()) {
-        return md;
-    }
-    switch (call.result->kind) {
-    case ToolCall::Result::Kind::OUTPUT:
-        md += "\n\n---\n\n" + call.result->text;
-        break;
-    case ToolCall::Result::Kind::REJECT:
-        md += "\n\n---\n\nUser answered:\n> Rejected:";
-        if (!call.result->text.empty()) {
-            md += " " + call.result->text;
+    std::string md;
+    int n = 1;
+    for (const auto& card : answer.cards) {
+        if (!md.empty()) {
+            md += "\n";
         }
-        break;
-    case ToolCall::Result::Kind::CANCEL: break;
+        md += std::to_string(n++) + ". **" + card.prompt + "**\n";
+        std::string body;
+        for (size_t i = 0; i < card.selected.size(); ++i) {
+            if (i) {
+                body += ", ";
+            }
+            body += card.selected[i];
+        }
+        if (!card.free_text.empty()) {
+            if (!body.empty()) {
+                body += " ";
+            }
+            body += card.free_text;
+        }
+        if (body.empty()) {
+            body = "—";
+        }
+        md += "> " + body;
     }
     return md;
 }

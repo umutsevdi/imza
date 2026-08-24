@@ -13,6 +13,7 @@ namespace {
     struct StreamCtx {
         const Provider* provider;
         StreamCallback cb;
+        ParseState parse_state;
         std::string buf;
         std::string event;
         std::string data;
@@ -23,9 +24,11 @@ namespace {
         if (ctx.event.empty() && ctx.data.empty()) {
             return;
         }
-        StreamEvent ev;
-        ctx.provider->parse(ctx.event, ctx.data, ev);
-        ctx.cb(ev);
+        std::vector<StreamEvent> outs;
+        ctx.provider->parse(ctx.parse_state, ctx.event, ctx.data, outs);
+        for (auto& ev : outs) {
+            ctx.cb(ev);
+        }
         ctx.event.clear();
         ctx.data.clear();
     }
@@ -90,7 +93,7 @@ Status stream(const Provider& provider, const Config& cfg,
         list = curl_slist_append(list, h.c_str());
     }
 
-    StreamCtx ctx { &provider, std::move(cb), { }, { }, { } };
+    StreamCtx ctx { &provider, std::move(cb), ParseState { }, { }, { }, { } };
 
     CURL* curl = curl_easy_init();
     if (!curl) {

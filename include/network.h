@@ -2,6 +2,7 @@
 
 #include <json/json.h>
 #include <functional>
+#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -10,10 +11,24 @@
 
 namespace ursa {
 
+struct ToolSpec {
+    std::string name;
+    std::string description;
+    Json::Value parameters;
+};
+
+struct ToolCallEntry {
+    std::string id;
+    std::string name;
+    std::string args;
+};
+
 struct Message {
-    enum class Type { SYSTEM, USER, ASSISTANT };
+    enum class Type { SYSTEM, USER, ASSISTANT, TOOL };
     Type type;
     std::string content;
+    std::vector<ToolCallEntry> tool_calls { };
+    std::string tool_call_id { };
 };
 
 struct StreamEvent {
@@ -34,17 +49,28 @@ StreamEvent make_error_event(Status error);
 struct ChatRequest {
     std::string model;
     std::vector<Message> messages;
+    std::vector<ToolSpec> tools;
     double temperature = 0.7;
 };
 
 using StreamCallback = std::function<void(const StreamEvent&)>;
 
+struct ToolAccum {
+    std::string id;
+    std::string name;
+    std::string args;
+};
+
+struct ParseState {
+    std::map<int, ToolAccum> tool_accums;
+};
+
 struct Provider {
     Json::Value (*build)(const ChatRequest& req);
     std::string (*endpoint)();
     std::vector<std::string> (*headers)(const std::string& api_key);
-    Status (*parse)(
-        std::string_view event, std::string_view data, StreamEvent& out);
+    Status (*parse)(ParseState& state, std::string_view event,
+        std::string_view data, std::vector<StreamEvent>& outs);
 };
 
 Provider get_provider(const Config& cfg);

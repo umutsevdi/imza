@@ -17,6 +17,22 @@ std::string to_text(ftxui::Element element)
     return screen.ToString();
 }
 
+std::string plain(std::string text)
+{
+    std::string out;
+    for (size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == '\x1b' && i + 1 < text.size() && text[i + 1] == '[') {
+            const size_t end = text.find('m', i);
+            if (end != std::string::npos) {
+                i = end;
+                continue;
+            }
+        }
+        out += text[i];
+    }
+    return out;
+}
+
 } // namespace
 
 TEST_CASE("render_item renders a user turn")
@@ -44,39 +60,49 @@ TEST_CASE("render_item renders a modal answer and a tool call")
     CHECK(out_a.find("opt") != std::string::npos);
 
     ursa::ConversationItem call
-        = ursa::ToolCall { 1, "bash", "ls", std::nullopt };
+        = ursa::ToolCall { 1, "", "bash", "ls", std::nullopt };
     const std::string out_t
         = to_text(ursa::render_item(call, { ursa::LayoutCtx::Kind::WIDE, 60 }));
     CHECK(out_t.find("ls") != std::string::npos);
 }
 
-TEST_CASE("tool_call_markdown renders request, separator, output")
+TEST_CASE("render_item renders tool call header and output code block")
 {
-    ursa::ToolCall call { 1, "bash", "ls -la", { } };
-    const std::string pending = ursa::tool_call_markdown(call);
-    CHECK(pending.find("Requested to call:") == 0);
-    CHECK(pending.find("```bash\nls -la\n```") != std::string::npos);
-    CHECK(pending.find("---") == std::string::npos);
+    ursa::ToolCall call { 1, "", "read",
+        R"({"path":"notes.txt","line_begin":2,"line_end":4})", { } };
+    const std::string pending = to_text(
+        ursa::render_item(call, { ursa::LayoutCtx::Kind::WIDE, 60 }));
+    CHECK(pending.find("Tool Call:") != std::string::npos);
+    CHECK(pending.find("Read notes.txt") != std::string::npos);
+    CHECK(pending.find("line_begin=") == std::string::npos);
 
     call.result = ursa::ToolCall::Result { ursa::ToolCall::Result::Kind::OUTPUT,
-        "total 76" };
-    const std::string done = ursa::tool_call_markdown(call);
-    CHECK(done.find("---") != std::string::npos);
-    CHECK(done.find("total 76") != std::string::npos);
+        "line two\n  indented line three" };
+    const std::string done = to_text(
+        ursa::render_item(call, { ursa::LayoutCtx::Kind::WIDE, 60 }));
+    CHECK(done.find("line two") != std::string::npos);
+    CHECK(done.find("  indented line three") != std::string::npos);
+    CHECK(plain(done).find("\n   txt") != std::string::npos);
 }
 
-TEST_CASE("tool_call_markdown renders rejection with and without reason")
+TEST_CASE("render_item renders tool errors and rejections")
 {
-    ursa::ToolCall call { 1, "bash", "ls", { } };
+    ursa::ToolCall call { 1, "", "bash", "git status", { } };
+    const std::string head = to_text(
+        ursa::render_item(call, { ursa::LayoutCtx::Kind::WIDE, 60 }));
+    CHECK(head.find("Bash git status") != std::string::npos);
+
+    call.result = ursa::ToolCall::Result { ursa::ToolCall::Result::Kind::ERROR,
+        "bash: command failed" };
+    const std::string errored = to_text(
+        ursa::render_item(call, { ursa::LayoutCtx::Kind::WIDE, 60 }));
+    CHECK(errored.find("Error:") != std::string::npos);
+    CHECK(errored.find("bash: command failed") != std::string::npos);
+
     call.result = ursa::ToolCall::Result { ursa::ToolCall::Result::Kind::REJECT,
         "needs approval first" };
-    const std::string with_reason = ursa::tool_call_markdown(call);
-    CHECK(with_reason.find("User answered:") != std::string::npos);
-    CHECK(with_reason.find("> Rejected: needs approval first")
-        != std::string::npos);
-
-    call.result->text      = "";
-    const std::string bare = ursa::tool_call_markdown(call);
-    CHECK(bare.find("> Rejected:") != std::string::npos);
-    CHECK(bare.find("> Rejected: ") == std::string::npos);
+    const std::string rejected = to_text(
+        ursa::render_item(call, { ursa::LayoutCtx::Kind::WIDE, 60 }));
+    CHECK(rejected.find("Rejected:") != std::string::npos);
+    CHECK(rejected.find("needs approval first") != std::string::npos);
 }

@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "network.h"
+#include "tools.h"
 #include "types.h"
 
 namespace ursa {
@@ -45,11 +46,12 @@ struct AssistantTurn {
 
 struct ToolCall {
     struct Result {
-        enum class Kind { OUTPUT, REJECT, CANCEL };
+        enum class Kind { OUTPUT, ERROR, REJECT, CANCEL };
         Kind kind;
         std::string text;
     };
     std::size_t id = 0;
+    std::string call_id { };
     std::string name;
     std::string args;
     std::optional<Result> result;
@@ -104,12 +106,11 @@ struct UiState {
 using PostFn = std::function<void(std::function<void()>)>;
 using StreamFn
     = std::function<Status(const ChatRequest&, const StreamCallback&)>;
-using ToolRunner = std::function<std::string(const ToolCallRequest&)>;
 
 class Controller {
 public:
     Controller(const Config& cfg, PostFn post, std::function<void()> on_exit,
-        StreamFn stream_fn = { }, ToolRunner tool_runner = { });
+        StreamFn stream_fn = { }, ToolRegistry tools = { });
     ~Controller();
 
     Controller(const Controller&)            = delete;
@@ -130,8 +131,6 @@ public:
     const Config& config() const { return cfg_; }
     const std::vector<SlashCommand>& commands() const { return commands_; }
 
-    static std::string default_tool_output(const ToolCallRequest& req);
-
 private:
     void submit_message(std::string text);
     void run_slash(std::string_view cmd);
@@ -142,14 +141,17 @@ private:
     std::vector<Message> _build_history() const;
     void _spawn(std::vector<Message> history, StreamFn override);
     void _drive(std::vector<Message> history, StreamFn override);
-    void _drain_pending_asks(
-        std::vector<Message>& history, std::string& reply_buffer);
+    void _drain_pending_asks(std::vector<Message>& history,
+        std::string& reply_buffer, const std::string& assistant_text);
     void _apply_tool_result(const ToolCallRequest& req, const ModalResult& res,
-        std::vector<Message>& tool_msgs, std::string& reply_buffer);
+        std::vector<Message>& tool_msgs);
     void _apply_question_result(
         const ModalResult& res, std::string& reply_buffer);
+    void _apply_ask_result(const ToolCallRequest& req, const ModalResult& res,
+        std::vector<Message>& tool_msgs);
     void _run_tool(const ToolCallRequest& req, std::vector<Message>& tool_msgs);
     void _fill_tool_result(const ToolCallRequest& req, ToolCall::Result result);
+    static std::string _tool_result_text(const ToolCall& call);
     void _present_front();
     void _enqueue_message(std::string text);
     void _drain_queued();
@@ -160,7 +162,7 @@ private:
     std::function<void()> on_exit_;
     std::vector<SlashCommand> commands_;
     StreamFn stream_fn_;
-    ToolRunner tool_runner_;
+    ToolRegistry tools_;
 
     struct PendingModal {
         ModalPayload payload;

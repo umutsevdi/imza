@@ -4,6 +4,23 @@
 #include "network.h"
 #include "types.h"
 
+namespace {
+
+std::vector<ursa::StreamEvent> parse_all(
+    const ursa::Provider& p, ursa::ParseState& state,
+    std::initializer_list<std::pair<std::string_view, std::string_view>> blocks)
+{
+    std::vector<ursa::StreamEvent> all;
+    for (const auto& [event, data] : blocks) {
+        std::vector<ursa::StreamEvent> outs;
+        p.parse(state, event, data, outs);
+        all.insert(all.end(), outs.begin(), outs.end());
+    }
+    return all;
+}
+
+} // namespace
+
 TEST_CASE("OpenAI request shape via factory")
 {
     ursa::Config cfg;
@@ -23,6 +40,7 @@ TEST_CASE("OpenAI request shape via factory")
     CHECK(v["messages"][0]["role"].asString() == "system");
     CHECK(v["messages"][1]["role"].asString() == "user");
     CHECK(v["messages"][1]["content"].asString() == "hi");
+    CHECK_FALSE(v.isMember("tools"));
     CHECK(p.endpoint() == "/chat/completions");
 }
 
@@ -45,7 +63,94 @@ TEST_CASE("Anthropic request shape via factory")
     CHECK(v["messages"].size() == 1);
     CHECK(v["messages"][0]["role"].asString() == "user");
     CHECK(v.isMember("max_tokens"));
+    CHECK_FALSE(v.isMember("tools"));
     CHECK(p.endpoint() == "/v1/messages");
+}
+
+TEST_CASE("OpenAI serializes tool specs and tool messages")
+{
+    ursa::Config cfg;
+    cfg.standard = ursa::ApiStandard::OPENAI;
+    const auto p = ursa::get_provider(cfg);
+
+    ursa::ToolSpec spec;
+    spec.name        = "read";
+    spec.description = "read a file";
+    spec.parameters   = ursa::parse_json(
+        R"({"type":"object","properties":{"path":{"type":"string"}}})");
+
+    ursa::ChatRequest req;
+    req.model     = "gpt-4o";
+    req.tools     = { spec };
+    ursa::Message assistant { ursa::Message::Type::ASSISTANT, "" };
+    assistant.tool_calls.push_back({ "call_1", "read", R"({"path":"a"})" });
+    req.messages.push_back(assistant);
+    req.messages.push_back(
+        { ursa::Message::Type::TOOL, "file body", { }, "call_1" });
+
+    const Json::Value v = p.build(req);
+    REQUIRE(v["tools"].size() == 1);
+    CHECK(v["tools"][0]["type"].asString() == "function");
+    CHECK(v["tools"][0]["function"]["name"].asString() == "read");
+    CHECK(v["tools"][0]["function"]["description"].asString() == "read a file");
+    CHECK(v["tools"][0]["function"]["parameters"]["properties"].isMember(
+        "path"));
+    CHECK(v["tool_choice"].asString() == "auto");
+
+    const Json::Value& asst = v["messages"][0];
+    CHECK(asst["role"].asString() == "assistant");
+    REQUIRE(asst["tool_calls"].size() == 1);
+    CHECK(asst["tool_calls"][0]["id"].asString() == "call_1");
+    CHECK(asst["tool_calls"][0]["function"]["name"].asString() == "read");
+    CHECK(asst["tool_calls"][0]["function"]["arguments"].asString()
+        == R"({"path":"a"})");
+
+    const Json::Value& tool = v["messages"][1];
+    CHECK(tool["role"].asString() == "tool");
+    CHECK(tool["content"].asString() == "file body");
+    CHECK(tool["tool_call_id"].asString() == "call_1");
+}
+
+TEST_CASE("Anthropic serializes tool specs and tool_result blocks")
+{
+    ursa::Config cfg;
+    cfg.standard = ursa::ApiStandard::ANTHROPIC;
+    const auto p = ursa::get_provider(cfg);
+
+    ursa::ToolSpec spec;
+    spec.name        = "grep";
+    spec.description = "search files";
+    spec.parameters   = ursa::parse_json(
+        R"({"type":"object","properties":{"pattern":{"type":"string"}}})");
+
+    ursa::ChatRequest req;
+    req.model     = "claude";
+    req.tools     = { spec };
+    ursa::Message assistant { ursa::Message::Type::ASSISTANT, "looking" };
+    assistant.tool_calls.push_back({ "tu_1", "grep", R"({"pattern":"foo"})" });
+    req.messages.push_back(assistant);
+    req.messages.push_back(
+        { ursa::Message::Type::TOOL, "2 matches", { }, "tu_1" });
+
+    const Json::Value v = p.build(req);
+    REQUIRE(v["tools"].size() == 1);
+    CHECK(v["tools"][0]["name"].asString() == "grep");
+    CHECK(v["tools"][0]["input_schema"]["properties"].isMember("pattern"));
+
+    const Json::Value& asst = v["messages"][0];
+    REQUIRE(asst["content"].isArray());
+    CHECK(asst["content"][0]["type"].asString() == "text");
+    CHECK(asst["content"][0]["text"].asString() == "looking");
+    CHECK(asst["content"][1]["type"].asString() == "tool_use");
+    CHECK(asst["content"][1]["id"].asString() == "tu_1");
+    CHECK(asst["content"][1]["input"]["pattern"].asString() == "foo");
+
+    const Json::Value& result = v["messages"][1];
+    CHECK(result["role"].asString() == "user");
+    REQUIRE(result["content"].isArray());
+    CHECK(result["content"][0]["type"].asString() == "tool_result");
+    CHECK(result["content"][0]["tool_use_id"].asString() == "tu_1");
+    CHECK(result["content"][0]["content"].asString() == "2 matches");
 }
 
 TEST_CASE("OpenAI content delta")
@@ -54,12 +159,12 @@ TEST_CASE("OpenAI content delta")
     cfg.standard = ursa::ApiStandard::OPENAI;
     const auto p = ursa::get_provider(cfg);
 
-    ursa::StreamEvent ev;
-    const auto st
-        = p.parse("", R"({"choices":[{"delta":{"content":"Hello"}}]})", ev);
-    CHECK(st == ursa::Status::OK);
-    CHECK(ev.kind == ursa::StreamEvent::Kind::CONTENT_DELTA);
-    CHECK(ev.text == "Hello");
+    ursa::ParseState state;
+    const auto outs = parse_all(p, state,
+        { { "", R"({"choices":[{"delta":{"content":"Hello"}}]})" } });
+    REQUIRE(outs.size() == 1);
+    CHECK(outs[0].kind == ursa::StreamEvent::Kind::CONTENT_DELTA);
+    CHECK(outs[0].text == "Hello");
 }
 
 TEST_CASE("OpenAI done")
@@ -68,10 +173,45 @@ TEST_CASE("OpenAI done")
     cfg.standard = ursa::ApiStandard::OPENAI;
     const auto p = ursa::get_provider(cfg);
 
-    ursa::StreamEvent ev;
-    const auto st = p.parse("", "[DONE]", ev);
-    CHECK(st == ursa::Status::OK);
-    CHECK(ev.kind == ursa::StreamEvent::Kind::DONE);
+    ursa::ParseState state;
+    const auto outs = parse_all(p, state, { { "", "[DONE]" } });
+    REQUIRE(outs.size() == 1);
+    CHECK(outs[0].kind == ursa::StreamEvent::Kind::DONE);
+}
+
+TEST_CASE("OpenAI accumulates fragmented tool calls and flushes")
+{
+    ursa::Config cfg;
+    cfg.standard = ursa::ApiStandard::OPENAI;
+    const auto p = ursa::get_provider(cfg);
+
+    ursa::ParseState state;
+    const auto outs = parse_all(p, state,
+        { { "",
+            R"({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"read","arguments":"{\"pa"}}]}}]})" },
+            { "",
+            R"({"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"th\":\"src/main.cpp\"}"}}]}}]})" },
+            { "",
+            R"({"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call_b","type":"function","function":{"name":"grep","arguments":"{}"}}]}}]})" },
+            { "", R"({"choices":[{"delta":{},"finish_reason":"tool_calls"}]})" } });
+
+    REQUIRE(outs.size() == 6);
+    for (size_t i = 0; i < 3; ++i) {
+        CHECK(outs[i].kind == ursa::StreamEvent::Kind::CONTENT_DELTA);
+    }
+    CHECK(outs[3].kind == ursa::StreamEvent::Kind::TOOL_CALL);
+    CHECK(outs[3].tool_call.id == "call_a");
+    CHECK(outs[3].tool_call.name == "read");
+    CHECK(outs[3].tool_call.args == R"({"path":"src/main.cpp"})");
+    CHECK(outs[4].kind == ursa::StreamEvent::Kind::TOOL_CALL);
+    CHECK(outs[4].tool_call.id == "call_b");
+    CHECK(outs[4].tool_call.name == "grep");
+    CHECK(outs[5].kind == ursa::StreamEvent::Kind::DONE);
+
+    ursa::ParseState drained;
+    const auto after = parse_all(p, drained, { { "", "[DONE]" } });
+    REQUIRE(after.size() == 1);
+    CHECK(after[0].kind == ursa::StreamEvent::Kind::DONE);
 }
 
 TEST_CASE("Anthropic content delta")
@@ -80,13 +220,14 @@ TEST_CASE("Anthropic content delta")
     cfg.standard = ursa::ApiStandard::ANTHROPIC;
     const auto p = ursa::get_provider(cfg);
 
-    ursa::StreamEvent ev;
-    const auto st = p.parse("content_block_delta",
-        R"({"type":"content_block_delta","delta":{"type":"text_delta","text":"Hi"}})",
-        ev);
-    CHECK(st == ursa::Status::OK);
-    CHECK(ev.kind == ursa::StreamEvent::Kind::CONTENT_DELTA);
-    CHECK(ev.text == "Hi");
+    ursa::ParseState state;
+    const auto outs
+        = parse_all(p, state,
+            { { "content_block_delta",
+                R"({"type":"content_block_delta","delta":{"type":"text_delta","text":"Hi"}})" } });
+    REQUIRE(outs.size() == 1);
+    CHECK(outs[0].kind == ursa::StreamEvent::Kind::CONTENT_DELTA);
+    CHECK(outs[0].text == "Hi");
 }
 
 TEST_CASE("Anthropic stop")
@@ -95,10 +236,36 @@ TEST_CASE("Anthropic stop")
     cfg.standard = ursa::ApiStandard::ANTHROPIC;
     const auto p = ursa::get_provider(cfg);
 
-    ursa::StreamEvent ev;
-    const auto st = p.parse("message_stop", "{}", ev);
-    CHECK(st == ursa::Status::OK);
-    CHECK(ev.kind == ursa::StreamEvent::Kind::DONE);
+    ursa::ParseState state;
+    const auto outs = parse_all(p, state, { { "message_stop", "{}" } });
+    REQUIRE(outs.size() == 1);
+    CHECK(outs[0].kind == ursa::StreamEvent::Kind::DONE);
+}
+
+TEST_CASE("Anthropic assembles tool_use block across deltas")
+{
+    ursa::Config cfg;
+    cfg.standard = ursa::ApiStandard::ANTHROPIC;
+    const auto p = ursa::get_provider(cfg);
+
+    ursa::ParseState state;
+    const auto outs = parse_all(p, state,
+        { { "content_block_start",
+            R"({"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tu_9","name":"write"}})" },
+            { "content_block_delta",
+            R"({"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"path\":"}})" },
+            { "content_block_delta",
+            R"({"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\"b.txt\"}"}})" },
+            { "content_block_stop", R"({"type":"content_block_stop","index":1})" },
+            { "message_stop",
+                R"({"type":"message_stop"})" } });
+
+    REQUIRE(outs.size() == 2);
+    CHECK(outs[0].kind == ursa::StreamEvent::Kind::TOOL_CALL);
+    CHECK(outs[0].tool_call.id == "tu_9");
+    CHECK(outs[0].tool_call.name == "write");
+    CHECK(outs[0].tool_call.args == R"({"path":"b.txt"})");
+    CHECK(outs[1].kind == ursa::StreamEvent::Kind::DONE);
 }
 
 TEST_CASE("get_provider selects by standard")

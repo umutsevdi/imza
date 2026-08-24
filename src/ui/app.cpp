@@ -113,13 +113,14 @@ int run_repl(const Config& cfg)
     }
 
     ScreenInteractive screen = ScreenInteractive::FullscreenAlternateScreen();
+    ToolRegistry tools       = builtin_tools();
     Controller controller(
         cfg,
         [&screen](std::function<void()> f) {
             screen.Post(std::move(f));
             screen.PostEvent(Event::Custom);
         },
-        [&screen] { screen.Exit(); });
+        [&screen] { screen.Exit(); }, StreamFn { }, std::move(tools));
     auto app = ftxui::Make<Repl>(screen, controller);
     screen.Loop(app);
     return 0;

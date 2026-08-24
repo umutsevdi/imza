@@ -48,7 +48,44 @@ namespace {
 
     Element toolcall_item(const ToolCall& tc)
     {
-        return card(render_markdown_element(tool_call_markdown(tc)));
+        Elements rows;
+        rows.push_back(hbox({
+            text("Tool Call: ") | bold | color(Color::GreenLight),
+            text(tool_call_head(tc)) | color(PANEL_FG),
+        }));
+        if (tc.result.has_value()) {
+            switch (tc.result->kind) {
+            case ToolCall::Result::Kind::OUTPUT:
+                if (!tc.result->text.empty()) {
+                    if (tc.name == "read") {
+                        rows.push_back(code_block_with_lines(tc.result->text,
+                            tool_code_language(tc), read_start_line(tc)));
+                    } else if (tc.name == "list") {
+                        rows.push_back(list_block(tc.result->text));
+                    } else if (tc.name == "ask") {
+                        rows.push_back(render_markdown_element(tc.result->text));
+                    } else {
+                        rows.push_back(
+                            code_block(tc.result->text, tool_code_language(tc)));
+                    }
+                }
+                break;
+            case ToolCall::Result::Kind::ERROR:
+                rows.push_back(hbox({
+                    text("Error: ") | bold | color(Color::RedLight),
+                    text(tc.result->text) | color(Color::RedLight),
+                }));
+                break;
+            case ToolCall::Result::Kind::REJECT:
+                rows.push_back(hbox({
+                    text("Rejected: ") | bold | color(Color::YellowLight),
+                    text(tc.result->text) | color(Color::YellowLight),
+                }));
+                break;
+            case ToolCall::Result::Kind::CANCEL: break;
+            }
+        }
+        return card(vbox(std::move(rows)));
     }
 
     Element modal_answer_item(const ModalAnswer& ans)
