@@ -41,7 +41,8 @@ namespace {
             : screen_(screen)
             , controller_(controller)
         {
-            side_ = make_side_panel(controller);
+            side_ = make_side_panel(controller,
+                [] { return ftxui::Terminal::Size().dimx; });
             chat_ = make_chat(
                 controller, [] { return ftxui::Terminal::Size().dimx; });
             modal_ = make_modal(controller);
@@ -65,7 +66,7 @@ namespace {
             if (kind == LayoutCtx::Kind::WIDE) {
                 root = vbox({ header, separatorEmpty(),
                            hbox({ text(" "),
-                               side | size(WIDTH, EQUAL, 30) | yflex, text(" "),
+                               side | yflex, text(" "),
                                right_col })
                                | flex })
                     | flex;

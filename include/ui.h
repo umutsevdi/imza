@@ -42,7 +42,8 @@ ftxui::Element render_help(const std::vector<SlashCommand>& commands);
 int run_repl(const Config& cfg);
 
 ftxui::Component make_chat(Controller& controller, std::function<int()> width);
-ftxui::Component make_side_panel(Controller& controller);
+ftxui::Component make_side_panel(
+    Controller& controller, std::function<int()> width);
 ftxui::Component make_settings(Controller& controller);
 ftxui::Component make_modal(Controller& controller);
 

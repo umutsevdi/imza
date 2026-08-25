@@ -13,21 +13,36 @@ using namespace ftxui;
 
 Element render_env_status(const UiState& state);
 
-ftxui::Component make_side_panel(Controller& controller)
+ftxui::Component make_side_panel(Controller& controller,
+    std::function<int()> width)
     {
-        constexpr int width = 30;
-        return ftxui::Renderer([&controller] {
-            using namespace ftxui;
-            LayoutCtx ctx { LayoutCtx::Kind::WIDE, width };
-            return vbox({
-                       render_todo(controller.state().todo, ctx) | yflex,
-                       render_changed_files(controller.state().changed_files, ctx)
-                           | yflex,
-                       separator(),
-                       render_env_status(controller.state()),
-                   })
-                | size(WIDTH, EQUAL, width);
-        });
+        constexpr int wide_width = 30;
+        constexpr int wide_threshold = 100;
+        return ftxui::Renderer(
+            [&controller, width = std::move(width)] {
+                using namespace ftxui;
+                const int w = width();
+                const bool narrow = w < wide_threshold;
+                LayoutCtx ctx { narrow ? LayoutCtx::Kind::NARROW
+                                       : LayoutCtx::Kind::WIDE,
+                    w };
+                Elements parts;
+                parts.push_back(
+                    render_todo(controller.state().todo, ctx) | yflex);
+                if (!narrow) {
+                    parts.push_back(
+                        render_changed_files(
+                            controller.state().changed_files, ctx)
+                        | yflex);
+                }
+                parts.push_back(separator());
+                parts.push_back(render_env_status(controller.state()));
+                Element body = vbox(std::move(parts));
+                if (narrow) {
+                    return body | xflex;
+                }
+                return body | size(WIDTH, EQUAL, wide_width);
+            });
     }
 
 namespace {
@@ -45,8 +60,40 @@ namespace {
         return hbox({
             text(f.status) | color(c) | bold,
             text(" "),
-            text(f.path),
+            paragraph(f.path) | xflex,
         });
+    }
+
+} // namespace
+
+namespace {
+
+    Element todo_item(const TodoItem& it)
+    {
+        using Status = TodoItem::Status;
+        ftxui::Color mark_color = PANEL_FG_DIM;
+        bool mark_bold          = false;
+        std::string mark;
+        switch (it.status) {
+        case Status::IN_PROGRESS:
+            mark       = "→";
+            mark_color = PANEL_FG;
+            mark_bold  = true;
+            break;
+        case Status::COMPLETED: mark = "[x]"; break;
+        case Status::CANCELLED: mark = "[-]"; break;
+        case Status::PENDING: mark = "[ ]"; break;
+        }
+        const bool inactive = it.status == Status::COMPLETED
+            || it.status == Status::CANCELLED;
+        Element mark_el = text(mark) | color(mark_color);
+        if (mark_bold) {
+            mark_el = std::move(mark_el) | bold;
+        }
+        Element content
+            = inactive ? dim(paragraph(it.content)) : paragraph(it.content);
+        return hbox(
+            { std::move(mark_el), text(" "), std::move(content) | xflex });
     }
 
 } // namespace
@@ -55,9 +102,7 @@ Element render_todo(const TodoList& todo, const LayoutCtx&)
 {
     Elements parts;
     for (const auto& it : todo.items) {
-        const std::string mark = it.done ? "[x]" : "[ ]";
-        Element line = hbox({ dim(text(mark)), text(" "), text(it.text) });
-        parts.push_back(std::move(line));
+        parts.push_back(todo_item(it));
     }
     Element body = parts.empty()
         ? dim(text("none"))

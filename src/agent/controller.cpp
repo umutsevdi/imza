@@ -81,6 +81,51 @@ namespace {
 
 } // namespace
 
+std::optional<TodoList> parse_todo_args(const Json::Value& args)
+{
+    if (!args.isObject() || !args["todos"].isArray()) {
+        return std::nullopt;
+    }
+    TodoList list;
+    for (const auto& entry : args["todos"]) {
+        if (!entry.isObject() || !entry["content"].isString()
+            || entry["content"].asString().empty()) {
+            return std::nullopt;
+        }
+        TodoItem item;
+        item.content = entry["content"].asString();
+        if (entry["status"].isString()) {
+            const std::string status = entry["status"].asString();
+            if (status == "in_progress") {
+                item.status = TodoItem::Status::IN_PROGRESS;
+            } else if (status == "completed") {
+                item.status = TodoItem::Status::COMPLETED;
+            } else if (status == "cancelled") {
+                item.status = TodoItem::Status::CANCELLED;
+            } else if (status != "pending") {
+                return std::nullopt;
+            }
+        }
+        list.items.push_back(std::move(item));
+    }
+    return list;
+}
+
+std::string todo_summary(const TodoList& todo)
+{
+    static constexpr std::string_view marks[] = { "[ ]", "[→]", "[x]", "[-]" };
+    std::string out;
+    for (const auto& it : todo.items) {
+        if (!out.empty()) {
+            out += '\n';
+        }
+        out += marks[static_cast<std::size_t>(it.status)];
+        out += ' ';
+        out += it.content;
+    }
+    return out;
+}
+
 std::string error_text(Status st)
 {
     return "stream error (" + std::to_string(static_cast<int>(st)) + ")";
@@ -528,6 +573,33 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
                 ask.future    = std::move(future);
                 ask.tool_req  = ev.tool_call;
                 asks.push_back(std::move(ask));
+                continue;
+            }
+            if (ev.tool_call.name == "todo") {
+                const std::optional<TodoList> list
+                    = parse_todo_args(parse_json(ev.tool_call.args));
+                const ToolCallRequest req = ev.tool_call;
+                if (!list.has_value()) {
+                    const std::string msg
+                        = "todo: expected a 'todos' array of {content, status} "
+                          "objects";
+                    _post([this, req, msg] {
+                        _fill_tool_result(req,
+                            ToolCall::Result { ToolCall::Result::Kind::ERROR,
+                                msg });
+                    });
+                    tool_msgs.push_back(
+                        { Message::Type::TOOL, msg, { }, req.id });
+                    continue;
+                }
+                const std::string text = todo_summary(*list);
+                _post([this, req, todo = *list, text] {
+                    state_.todo = todo;
+                    _fill_tool_result(req,
+                        ToolCall::Result { ToolCall::Result::Kind::OUTPUT,
+                            text });
+                });
+                tool_msgs.push_back({ Message::Type::TOOL, text, { }, req.id });
                 continue;
             }
             const Tool* tool = tools_.find(ev.tool_call.name);

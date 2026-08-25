@@ -80,6 +80,21 @@ TEST_CASE("tool_call_head shows the file path for read, args otherwise")
     ursa::ToolCall ask_multi { 1, "", "ask",
         R"({"questions":[{"prompt":"A"},{"prompt":"B"}]})", { } };
     CHECK(ursa::tool_call_head(ask_multi) == "Ask (2 questions)");
+
+    ursa::ToolCall todo { 1, "", "todo",
+        R"({"todos":[{"content":"a","status":"pending"},{"content":"b","status":"in_progress"},{"content":"c","status":"completed"}]})",
+        { } };
+    CHECK(ursa::tool_call_head(todo) == "Todo (3 tasks)");
+
+    ursa::ToolCall todo_one { 1, "", "todo",
+        R"({"todos":[{"content":"a"}]})", { } };
+    CHECK(ursa::tool_call_head(todo_one) == "Todo (1 task)");
+
+    ursa::ToolCall todo_clear { 1, "", "todo", R"({"todos":[]})", { } };
+    CHECK(ursa::tool_call_head(todo_clear) == "Todo");
+
+    ursa::ToolCall todo_bad { 1, "", "todo", "not json", { } };
+    CHECK(ursa::tool_call_head(todo_bad) == "Todo");
 }
 
 TEST_CASE("ask_answer_markdown numbers questions and blockquotes answers")

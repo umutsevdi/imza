@@ -76,6 +76,18 @@ std::string tool_call_head(const ToolCall& call)
         return tool_display_name(call.name) + " (" + std::to_string(n)
             + " question" + (n == 1 ? "" : "s") + ")";
     }
+    if (call.name == "todo") {
+        const Json::Value parsed = parse_json(call.args);
+        int n = 0;
+        if (parsed.isObject() && parsed["todos"].isArray()) {
+            n = static_cast<int>(parsed["todos"].size());
+        }
+        if (n == 0) {
+            return tool_display_name(call.name);
+        }
+        return tool_display_name(call.name) + " (" + std::to_string(n)
+            + " task" + (n == 1 ? "" : "s") + ")";
+    }
     std::string head = tool_display_name(call.name);
     const std::string args = tool_args_summary(call.args);
     if (!args.empty()) {

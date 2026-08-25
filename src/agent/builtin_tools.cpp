@@ -298,6 +298,20 @@ Tool make_shell_tool()
     return { std::move(spec), shell_run, ToolSafety::MUTATING, false };
 }
 
+Tool make_todo_tool()
+{
+    ToolSpec spec;
+    spec.name        = "todo";
+    spec.description = "Create and maintain a structured task list for the "
+                       "current coding session. Tracks progress, organizes "
+                       "multi-step work, and surfaces status to the user. Pass "
+                       "the complete updated list each time; it replaces the "
+                       "previous one.";
+    spec.parameters = parse_json(
+        R"json({"type":"object","properties":{"todos":{"type":"array","description":"the updated todo list","items":{"type":"object","properties":{"content":{"type":"string","description":"short imperative description of the task"},"status":{"type":"string","enum":["pending","in_progress","completed","cancelled"],"description":"task state (default pending)"}},"required":["content"]}}},"required":["todos"]})json");
+    return { std::move(spec), ToolHandler { }, ToolSafety::READ_ONLY };
+}
+
 ToolRegistry builtin_tools()
 {
     ToolRegistry tools;
@@ -305,6 +319,7 @@ ToolRegistry builtin_tools()
     tools.add(make_list_tool());
     tools.add(make_ask_tool());
     tools.add(make_shell_tool());
+    tools.add(make_todo_tool());
     return tools;
 }
 

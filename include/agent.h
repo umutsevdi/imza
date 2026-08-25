@@ -59,13 +59,17 @@ struct ToolCall {
 };
 
 struct TodoItem {
-    std::string text;
-    bool done = false;
+    enum class Status { PENDING, IN_PROGRESS, COMPLETED, CANCELLED };
+    std::string content;
+    Status status = Status::PENDING;
 };
 
 struct TodoList {
     std::vector<TodoItem> items;
 };
+
+std::optional<TodoList> parse_todo_args(const Json::Value& args);
+std::string todo_summary(const TodoList& todo);
 
 struct ChangedFile {
     std::string path;

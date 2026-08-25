@@ -44,6 +44,7 @@ Tool make_read_tool();
 Tool make_list_tool();
 Tool make_ask_tool();
 Tool make_shell_tool();
+Tool make_todo_tool();
 ToolRegistry builtin_tools();
 
 } // namespace ursa

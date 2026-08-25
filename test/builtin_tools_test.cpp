@@ -192,7 +192,7 @@ TEST_CASE("list rejects non-directories and reports empty output")
 TEST_CASE("builtin registry exposes both read-only tools")
 {
     const auto tools = ursa::builtin_tools();
-    REQUIRE(tools.tools().size() == 4);
+    REQUIRE(tools.tools().size() == 5);
 
     const auto* read = tools.find("read");
     REQUIRE(read != nullptr);
@@ -209,7 +209,7 @@ TEST_CASE("builtin registry exposes both read-only tools")
     CHECK(ask->safety == ursa::ToolSafety::READ_ONLY);
     CHECK(ask->spec.parameters["properties"].isMember("questions"));
 
-    CHECK(tools.specs().size() == 4);
+    CHECK(tools.specs().size() == 5);
 }
 
 TEST_CASE("shell tool runs a command and reports the exit code")
