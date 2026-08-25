@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -85,12 +86,16 @@ struct SettingsModal {
 
 struct HelpModal { };
 
-struct SystemPromptModal {
-    std::string prompt;
+struct ViewerModal {
+    std::string title;
+    std::string content;
+    std::string lang;
+    std::size_t start_line = 1;
+    bool line_numbers = true;
 };
 
 using ModalPayload = std::variant<std::monostate, SettingsModal, HelpModal,
-    SystemPromptModal, ToolCallRequest, QuestionForm>;
+    ViewerModal, ToolCallRequest, QuestionForm>;
 
 struct QueuedMessage {
     std::size_t id;
@@ -98,7 +103,7 @@ struct QueuedMessage {
 };
 
 struct UiState {
-    enum class Phase { IDLE, STREAMING, AWAITING };
+    enum class Phase { IDLE, CONNECTING, STREAMING, AWAITING };
     enum class Mode { PLAN, BUILD };
     std::vector<ConversationItem> items;
     ModalPayload modal         = std::monostate { };
@@ -112,6 +117,16 @@ struct UiState {
     std::vector<QueuedMessage> queued;
     bool env_ready = false;
     std::optional<std::string> agent_rules;
+
+    struct Countdown {
+        std::chrono::steady_clock::time_point deadline;
+    };
+    std::optional<Countdown> retry_countdown;
+
+    Usage totals;
+    Usage last;
+    double total_cost = 0.0;
+    double last_cost  = 0.0;
 };
 
 using PostFn = std::function<void(std::function<void()>)>;
@@ -196,6 +211,7 @@ private:
     std::vector<StreamEvent> stream_events_;
     std::atomic<bool> alive_ { true };
     std::optional<std::jthread> worker_;
+    int retry_after_secs_ = 0;
 };
 
 std::string error_text(Status st);

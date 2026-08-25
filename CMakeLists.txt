@@ -112,6 +112,7 @@ target_link_libraries(ursa_network PRIVATE
 
 # Agent: orchestration, formatting, slash commands (ftxui-free)
 add_library(ursa_agent
+    src/agent/pricing.cpp
     src/agent/controller.cpp
     src/agent/format.cpp
     src/agent/prompt.cpp

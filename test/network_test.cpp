@@ -278,3 +278,68 @@ TEST_CASE("get_provider selects by standard")
     anthropic.standard = ursa::ApiStandard::ANTHROPIC;
     CHECK(ursa::get_provider(anthropic).endpoint() == "/v1/messages");
 }
+
+TEST_CASE("OpenAI requests include_usage and emits a single usage event")
+{
+    ursa::Config cfg;
+    cfg.standard = ursa::ApiStandard::OPENAI;
+    const auto p = ursa::get_provider(cfg);
+
+    const Json::Value built = p.build(ursa::ChatRequest { "gpt-4o", { }, { } });
+    CHECK(built["stream_options"]["include_usage"].asBool() == true);
+
+    ursa::ParseState state;
+    const auto outs = parse_all(p, state,
+        { { "",
+              R"({"choices":[{"delta":{"content":"Hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":3,"total_tokens":13}})" },
+          { "", "[DONE]" } });
+    REQUIRE(outs.size() == 4);
+    CHECK(outs[0].kind == ursa::StreamEvent::Kind::CONTENT_DELTA);
+    CHECK(outs[0].text == "Hi");
+    CHECK(outs[1].kind == ursa::StreamEvent::Kind::USAGE);
+    CHECK(outs[1].usage.prompt == 10);
+    CHECK(outs[1].usage.completion == 3);
+    CHECK(outs[1].usage.total == 13);
+    CHECK(outs[2].kind == ursa::StreamEvent::Kind::DONE);
+    CHECK(outs[3].kind == ursa::StreamEvent::Kind::DONE);
+}
+
+TEST_CASE("OpenAI reads usage from choice when top-level absent (Kimi native)")
+{
+    ursa::Config cfg;
+    cfg.standard = ursa::ApiStandard::OPENAI;
+    const auto p = ursa::get_provider(cfg);
+
+    ursa::ParseState state;
+    const auto outs = parse_all(p, state,
+        { { "",
+              R"({"choices":[{"delta":{},"finish_reason":"stop","usage":{"prompt_tokens":12,"completion_tokens":5,"total_tokens":17}}]})" } });
+    REQUIRE(outs.size() == 2);
+    CHECK(outs[0].kind == ursa::StreamEvent::Kind::USAGE);
+    CHECK(outs[0].usage.total == 17);
+    CHECK(outs[1].kind == ursa::StreamEvent::Kind::DONE);
+}
+
+TEST_CASE("Anthropic emits usage from message_start and message_delta")
+{
+    ursa::Config cfg;
+    cfg.standard = ursa::ApiStandard::ANTHROPIC;
+    const auto p = ursa::get_provider(cfg);
+
+    ursa::ParseState state;
+    const auto outs = parse_all(p, state,
+        { { "message_start",
+              R"({"type":"message_start","message":{"usage":{"input_tokens":21,"output_tokens":0}}})" },
+          { "content_block_delta",
+              R"({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}})" },
+          { "message_delta",
+              R"({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}})" },
+          { "message_stop", R"({"type":"message_stop"})" } });
+    REQUIRE(outs.size() == 3);
+    CHECK(outs[0].kind == ursa::StreamEvent::Kind::CONTENT_DELTA);
+    CHECK(outs[1].kind == ursa::StreamEvent::Kind::USAGE);
+    CHECK(outs[1].usage.prompt == 21);
+    CHECK(outs[1].usage.completion == 7);
+    CHECK(outs[1].usage.total == 28);
+    CHECK(outs[2].kind == ursa::StreamEvent::Kind::DONE);
+}

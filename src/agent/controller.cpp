@@ -1,9 +1,13 @@
 #include "agent.h"
 #include "format.h"
+#include "pricing.h"
 #include "prompt.h"
 #include "util.h"
 
 #include <cassert>
+#include <algorithm>
+#include <chrono>
+#include <thread>
 
 #include <cctype>
 #include <functional>
@@ -128,7 +132,19 @@ std::string todo_summary(const TodoList& todo)
 
 std::string error_text(Status st)
 {
-    return "stream error (" + std::to_string(static_cast<int>(st)) + ")";
+    switch (st) {
+    case Status::OK: return "";
+    case Status::NETWORK_ERROR: return "network error";
+    case Status::INVALID_URL: return "invalid API URL";
+    case Status::JSON_ERROR: return "malformed response from provider";
+    case Status::API_ERROR: return "API error";
+    case Status::RATE_LIMITED: return "rate limited by provider";
+    case Status::BUDGET_EXCEEDED:
+        return "out of budget / insufficient credits";
+    case Status::UNSUPPORTED: return "unsupported operation";
+    case Status::CONFIG_ERROR: return "configuration error";
+    }
+    return "unknown error";
 }
 
 Controller::Controller(const Config& cfg, PostFn post,
@@ -145,7 +161,7 @@ Controller::Controller(const Config& cfg, PostFn post,
     if (!stream_fn_) {
         stream_fn_ = [this](const ChatRequest& req, const StreamCallback& cb) {
             const auto provider = get_provider(cfg_);
-            return stream(provider, cfg_, req, cb);
+            return stream(provider, cfg_, req, cb, &retry_after_secs_);
         };
     }
     if (env_.valid()) {
@@ -200,6 +216,7 @@ void Controller::enqueue_user_modal(ModalPayload payload)
     }
     if (state_.modal.index() == 0
         && (state_.phase == UiState::Phase::IDLE
+            || state_.phase == UiState::Phase::CONNECTING
             || state_.phase == UiState::Phase::STREAMING)) {
         _present_front();
     }
@@ -267,7 +284,7 @@ void Controller::resolve_modal(ModalResult result)
     }
     state_.modal = std::monostate { };
     if (state_.phase == UiState::Phase::AWAITING) {
-        state_.phase = UiState::Phase::STREAMING;
+        state_.phase = UiState::Phase::CONNECTING;
     }
     _present_front();
 }
@@ -311,7 +328,7 @@ void Controller::submit_message(std::string text)
     }
     state_.items.push_back(UserTurn { std::move(text) });
     state_.error.clear();
-    state_.phase = UiState::Phase::STREAMING;
+    state_.phase = UiState::Phase::CONNECTING;
     _spawn(_build_history(), StreamFn { });
 }
 
@@ -337,7 +354,7 @@ void Controller::run_demo()
     }
     state_.items.push_back(UserTurn { "/demo" });
     state_.error.clear();
-    state_.phase = UiState::Phase::STREAMING;
+    state_.phase = UiState::Phase::CONNECTING;
 
     auto round = std::make_shared<int>(0);
     StreamFn script
@@ -401,7 +418,8 @@ void Controller::run_slash(std::string_view cmd)
         }
         break;
     case SlashCommand::Action::SYSTEM_PROMPT:
-        enqueue_user_modal(SystemPromptModal { _system_prompt() });
+        enqueue_user_modal(
+            ViewerModal { "System prompt", _system_prompt(), "text", 1, false });
         break;
     }
 }
@@ -490,6 +508,7 @@ void Controller::_spawn(std::vector<Message> history, StreamFn override)
 
 void Controller::_drive(std::vector<Message> history, StreamFn override)
 {
+    int retries = 0;
     for (;;) {
         ChatRequest req;
         req.model    = cfg_.model;
@@ -499,22 +518,62 @@ void Controller::_drive(std::vector<Message> history, StreamFn override)
             : tools_.specs();
         stream_events_.clear();
         std::string text_buffer;
+        std::string error_msg;
+        Status error_status = Status::OK;
 
-        StreamFn fn     = override ? override : stream_fn_;
-        const Status st = fn(req, [this, &text_buffer](const StreamEvent& ev) {
-            if (ev.kind == StreamEvent::Kind::TOOL_CALL
-                || ev.kind == StreamEvent::Kind::QUESTION) {
-                stream_events_.push_back(ev);
+        StreamFn fn = override ? override : stream_fn_;
+        retry_after_secs_ = 0;
+        const Status st   = fn(req,
+            [this, &text_buffer, &error_msg, &error_status](
+                const StreamEvent& ev) {
+                if (ev.kind == StreamEvent::Kind::ERROR) {
+                    error_status = ev.error;
+                    error_msg    = ev.text;
+                    return;
+                }
+                if (ev.kind == StreamEvent::Kind::TOOL_CALL
+                    || ev.kind == StreamEvent::Kind::QUESTION) {
+                    stream_events_.push_back(ev);
+                }
+                if (ev.kind == StreamEvent::Kind::CONTENT_DELTA) {
+                    text_buffer += ev.text;
+                }
+                _post([this, ev] { apply(ev); });
+            });
+
+        const Status fail
+            = error_status != Status::OK ? error_status : st;
+        if (fail == Status::RATE_LIMITED && retries < 2) {
+            ++retries;
+            int wait = retry_after_secs_;
+            if (wait <= 0) {
+                wait = retries == 1 ? 2 : 5;
             }
-            if (ev.kind == StreamEvent::Kind::CONTENT_DELTA) {
-                text_buffer += ev.text;
+            wait = std::clamp(wait, 1, 30);
+            _post([this, wait] {
+                using namespace std::chrono_literals;
+                state_.phase = UiState::Phase::CONNECTING;
+                state_.retry_countdown
+                    = UiState::Countdown { std::chrono::steady_clock::now()
+                        + std::chrono::seconds(wait) };
+            });
+            using namespace std::chrono_literals;
+            std::this_thread::sleep_for(std::chrono::seconds(wait));
+            if (!alive_.load()) {
+                return;
             }
-            _post([this, ev] { apply(ev); });
-        });
-        if (st != Status::OK) {
-            _post([this, st] { finish(error_text(st)); });
+            continue;
+        }
+        if (fail != Status::OK) {
+            _post([this, fail, msg = error_msg] {
+                state_.error.clear();
+                finish(msg.empty() ? error_text(fail)
+                                   : error_text(fail) + ": " + msg);
+            });
             return;
         }
+        retries = 0;
+
         if (!alive_.load()) {
             return;
         }
@@ -810,6 +869,23 @@ void Controller::apply(const StreamEvent& ev)
         break;
     case StreamEvent::Kind::DONE: break;
     case StreamEvent::Kind::ERROR: finish(error_text(ev.error)); break;
+    case StreamEvent::Kind::CONNECTED:
+        if (state_.phase == UiState::Phase::CONNECTING) {
+            state_.error.clear();
+            state_.retry_countdown.reset();
+            state_.phase = UiState::Phase::STREAMING;
+        }
+        break;
+    case StreamEvent::Kind::USAGE: {
+        const ModelPricing p = get_pricing(cfg_);
+        state_.last          = ev.usage;
+        state_.totals.prompt += ev.usage.prompt;
+        state_.totals.completion += ev.usage.completion;
+        state_.totals.total += ev.usage.total;
+        state_.last_cost  = compute_cost(ev.usage, p);
+        state_.total_cost += state_.last_cost;
+        break;
+    }
     }
 }
 
@@ -818,7 +894,8 @@ void Controller::finish(std::string error)
     if (state_.phase == UiState::Phase::IDLE) {
         return;
     }
-    if (!error.empty()) {
+    state_.retry_countdown.reset();
+    if (!error.empty() && state_.error.empty()) {
         state_.error = std::move(error);
     }
     state_.phase = UiState::Phase::IDLE;

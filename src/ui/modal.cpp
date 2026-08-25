@@ -123,8 +123,8 @@ namespace {
                         return settings_body(payload);
                     } else if constexpr (std::is_same_v<T, HelpModal>) {
                         return help_body();
-                    } else if constexpr (std::is_same_v<T, SystemPromptModal>) {
-                        return system_prompt_body(payload);
+                    } else if constexpr (std::is_same_v<T, ViewerModal>) {
+                        return viewer_body(payload);
                     }
                     return text("");
                 },
@@ -157,7 +157,7 @@ namespace {
                     return true;
                 }
                 return true;
-            } else if (std::holds_alternative<SystemPromptModal>(st.modal)) {
+            } else if (std::holds_alternative<ViewerModal>(st.modal)) {
                 if (event == Event::Return) {
                     controller_.close_modal();
                     return true;
@@ -325,10 +325,10 @@ namespace {
 
         void build(const HelpModal&) { kind_ = Kind::HELP; }
 
-        void build(const SystemPromptModal&)
+        void build(const ViewerModal&)
         {
-            kind_          = Kind::SYSTEM_PROMPT;
-            prompt_scroll_ = 0.0F;
+            kind_          = Kind::VIEWER;
+            viewer_scroll_ = 0.0F;
         }
 
         void build(std::monostate) { kind_ = Kind::NONE; }
@@ -505,20 +505,26 @@ namespace {
 
         Element help_body() { return render_help(controller_.commands()); }
 
-        Element system_prompt_body(const SystemPromptModal& payload)
+        Element viewer_body(const ViewerModal& payload)
         {
-            const int popup_w
-                = std::min(Terminal::Size().dimx - 4, MODAL_MAX_WIDTH);
-            const std::size_t content_w
-                = static_cast<std::size_t>(std::max(40, popup_w - 8));
-            const std::string wrapped
-                = join_lines(wrapped_lines(payload.prompt, content_w));
-
-            Elements rows { header_line("System prompt") };
+            Element body;
+            if (payload.line_numbers) {
+                body = code_block_with_lines(
+                    payload.content, payload.lang, payload.start_line);
+            } else {
+                const int popup_w
+                    = std::min(Terminal::Size().dimx - 4, MODAL_MAX_WIDTH);
+                const std::size_t content_w
+                    = static_cast<std::size_t>(std::max(40, popup_w - 8));
+                body = code_block(
+                    join_lines(wrapped_lines(payload.content, content_w)),
+                    payload.lang);
+            }
+            Elements rows { header_line(payload.title) };
             rows.push_back(separatorEmpty());
-            rows.push_back(code_block(wrapped, "text")
+            rows.push_back(std::move(body)
                 | vscroll_indicator
-                | focusPositionRelative(0.0F, prompt_scroll_) | yframe
+                | focusPositionRelative(0.0F, viewer_scroll_) | yframe
                 | yflex);
             rows.push_back(separatorEmpty());
             rows.push_back(
@@ -530,8 +536,8 @@ namespace {
         bool scroll_prompt(Event event)
         {
             auto apply = [this](float delta) {
-                prompt_scroll_
-                    = std::clamp(prompt_scroll_ + delta, 0.0F, 1.0F);
+                viewer_scroll_
+                    = std::clamp(viewer_scroll_ + delta, 0.0F, 1.0F);
             };
             if (event == Event::ArrowUp) {
                 apply(-0.05F);
@@ -550,11 +556,11 @@ namespace {
                 return true;
             }
             if (event == Event::Home) {
-                prompt_scroll_ = 0.0F;
+                viewer_scroll_ = 0.0F;
                 return true;
             }
             if (event == Event::End) {
-                prompt_scroll_ = 1.0F;
+                viewer_scroll_ = 1.0F;
                 return true;
             }
             if (event.is_mouse()) {
@@ -571,7 +577,7 @@ namespace {
             return false;
         }
 
-        enum class Kind { NONE, TOOL, QUESTION, SETTINGS, HELP, SYSTEM_PROMPT };
+        enum class Kind { NONE, TOOL, QUESTION, SETTINGS, HELP, VIEWER };
 
         Controller& controller_;
         Kind kind_            = Kind::NONE;
@@ -587,7 +593,7 @@ namespace {
         ToolPhase tool_phase_   = ToolPhase::DECIDE;
         std::string reason_buf_;
         int reason_cursor_ = 0;
-        float prompt_scroll_ = 0.0F;
+        float viewer_scroll_ = 0.0F;
         Component reason_input_;
         Component accept_;
         Component accept_always_;

@@ -109,6 +109,28 @@ namespace {
             }
             return Status::OK;
         }
+        if (ev == "message_start") {
+            const Json::Value root = parse_json(data);
+            const Json::Value& msg = root["message"];
+            if (msg.isObject()) {
+                const Json::Value& usage = msg["usage"];
+                if (usage.isObject()) {
+                    state.usage.prompt = usage.get("input_tokens", 0).asUInt64();
+                    state.usage.total  = state.usage.prompt;
+                }
+            }
+            return Status::OK;
+        }
+        if (ev == "message_delta") {
+            const Json::Value root = parse_json(data);
+            const Json::Value& usage = root["usage"];
+            if (usage.isObject()) {
+                state.usage.completion = usage.get("output_tokens", 0).asUInt64();
+                state.usage.total
+                    = state.usage.prompt + state.usage.completion;
+            }
+            return Status::OK;
+        }
         if (ev == "content_block_delta") {
             const Json::Value root  = parse_json(data);
             const Json::Value& delta = root["delta"];
@@ -139,6 +161,10 @@ namespace {
             return Status::OK;
         }
         if (ev == "message_stop") {
+            if (state.usage.prompt > 0 || state.usage.completion > 0
+                || state.usage.total > 0) {
+                outs.push_back(make_usage_event(state.usage));
+            }
             outs.push_back(make_done_event());
             return Status::OK;
         }

@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "pricing.h"
 
 #include <ftxui/dom/elements.hpp>
 #include <chrono>
@@ -30,6 +31,29 @@ namespace {
         }
         lines.push_back(std::move(line));
         return lines;
+    }
+
+    std::string compact_tokens(std::uint64_t n)
+    {
+        std::ostringstream o;
+        if (n >= 1'000'000) {
+            o << std::fixed << std::setprecision(1)
+              << static_cast<double>(n) / 1'000'000.0 << 'M';
+        } else if (n >= 1'000) {
+            o << std::fixed << std::setprecision(1)
+              << static_cast<double>(n) / 1'000.0 << 'k';
+        } else {
+            o << n;
+        }
+        return o.str();
+    }
+
+    std::string money_text(double cost)
+    {
+        std::ostringstream o;
+        o << '$' << std::fixed
+          << std::setprecision(cost >= 1.0 ? 2 : 3) << cost;
+        return o.str();
     }
 
     std::size_t digit_width(std::size_t n)
@@ -182,9 +206,10 @@ Element panel(Element e)
     return std::move(e) | bgcolor(PANEL_COLOR) | color(PANEL_FG);
 }
 
-Element card(Element body, std::optional<Color> bg)
+Element card(Element body, std::optional<Color> bg, bool pad)
 {
-    Element inner = vbox({ separatorEmpty(), std::move(body), separatorEmpty() });
+    Element inner = pad ? vbox({ separatorEmpty(), std::move(body), separatorEmpty() })
+                        : vbox({ std::move(body) });
     Element box = hbox({ text("  "), std::move(inner) | xflex, text("  ") });
     if (bg) {
         box = std::move(box) | bgcolor(*bg) | color(PANEL_FG);
@@ -211,6 +236,20 @@ Element status_line(const Config& cfg, const UiState& state, const LayoutCtx& ct
     if (!cfg.model.empty()) {
         bar.push_back(text(" · " + cfg.model) | color(PANEL_FG_DIM));
     }
+    if (state.last.prompt > 0 || state.totals.total > 0) {
+        const ModelPricing pricing = get_pricing(cfg);
+        const std::uint64_t used   = state.last.prompt;
+        if (pricing.context_limit > 0) {
+            const std::uint64_t pct
+                = used * 100 / pricing.context_limit;
+            bar.push_back(text(" · " + compact_tokens(used) + "/"
+                + compact_tokens(pricing.context_limit) + " ("
+                + std::to_string(pct) + "%)") | color(PANEL_FG_DIM));
+        } else {
+            bar.push_back(text(" · " + compact_tokens(used) + " tok")
+                | color(PANEL_FG_DIM));
+        }
+    }
     bar.push_back(filler());
     if (!state.env_ready) {
         bar.push_back(text(_spinner_frame()) | color(PANEL_FG_DIM));
@@ -224,6 +263,10 @@ Element status_line(const Config& cfg, const UiState& state, const LayoutCtx& ct
             = _abbreviate_home(std::filesystem::current_path().string());
         bar.push_back(text(cwd) | color(PANEL_FG_DIM));
         bar.push_back(text("  "));
+    }
+    if (state.total_cost > 0) {
+        bar.push_back(text(money_text(state.total_cost) + "  ")
+            | color(PANEL_FG_DIM));
     }
     bar.push_back(text("URSA") | bold | color(PANEL_FG));
     return hbox(std::move(bar)) | bgcolor(PANEL_COLOR_FOCUS)

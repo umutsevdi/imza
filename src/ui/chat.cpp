@@ -3,11 +3,14 @@
 #include <ftxui/component/animation.hpp>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_base.hpp>
+#include <ftxui/component/component_options.hpp>
 #include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <functional>
+#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -23,27 +26,69 @@ namespace {
 
     using namespace ftxui;
 
+    constexpr std::size_t kLargeOutputLines = 30;
+
+    std::size_t count_lines(std::string_view text)
+    {
+        if (text.empty()) {
+            return 0;
+        }
+        std::size_t n = 1;
+        for (const char c : text) {
+            if (c == '\n') {
+                ++n;
+            }
+        }
+        return n;
+    }
+
+    std::string first_lines(const std::string& text, std::size_t max)
+    {
+        std::string out;
+        std::size_t lines = 0;
+        for (const char c : text) {
+            out += c;
+            if (c == '\n' && ++lines >= max) {
+                break;
+            }
+        }
+        return out;
+    }
+
     Element error_element(const UiState& st)
     {
-        if (st.error.empty()) {
+        std::string msg = st.error;
+        if (st.retry_countdown) {
+            auto remaining
+                = std::chrono::duration_cast<std::chrono::seconds>(
+                    st.retry_countdown->deadline
+                    - std::chrono::steady_clock::now())
+                      .count();
+            if (remaining < 0) {
+                remaining = 0;
+            }
+            msg = "rate limited — retrying in " + std::to_string(remaining)
+                + "s…";
+        }
+        if (msg.empty()) {
             return text("");
         }
         return hbox({
             text(" ") | bgcolor(PANEL_COLOR),
             text(" ") | bgcolor(Color::Red),
-            text(" " + st.error) | bgcolor(Color::Red),
+            text(" " + msg) | bgcolor(Color::Red),
             filler() | bgcolor(Color::Red),
         });
     }
 
     Element user_item(const UserTurn& t)
     {
-        return card(render_markdown_element(t.text), PANEL_COLOR);
+        return card(render_markdown_element(t.text), PANEL_COLOR, false);
     }
 
     Element assistant_item(const AssistantTurn& t)
     {
-        return card(render_markdown_element(t.markdown));
+        return card(render_markdown_element(t.markdown), std::nullopt, false);
     }
 
     Element toolcall_item(const ToolCall& tc)
@@ -57,10 +102,7 @@ namespace {
             switch (tc.result->kind) {
             case ToolCall::Result::Kind::OUTPUT:
                 if (!tc.result->text.empty()) {
-                    if (tc.name == "read") {
-                        rows.push_back(code_block_with_lines(tc.result->text,
-                            tool_code_language(tc), read_start_line(tc)));
-                    } else if (tc.name == "list") {
+                    if (tc.name == "list") {
                         rows.push_back(list_block(tc.result->text));
                     } else if (tc.name == "ask") {
                         rows.push_back(render_markdown_element(tc.result->text));
@@ -85,13 +127,13 @@ namespace {
             case ToolCall::Result::Kind::CANCEL: break;
             }
         }
-        return card(vbox(std::move(rows)));
+        return card(vbox(std::move(rows)), std::nullopt, false);
     }
 
     Element modal_answer_item(const ModalAnswer& ans)
     {
         return card(
-            render_markdown_element(modal_answer_markdown(ans)), PANEL_COLOR);
+            render_markdown_element(modal_answer_markdown(ans)), PANEL_COLOR, false);
     }
 
     class ChatImpl : public ComponentBase {
@@ -115,7 +157,8 @@ namespace {
                 return state.element;
             };
             input_ = ftxui::Input(input_options_);
-            Add(input_);
+            container_ = Container::Vertical({ input_ });
+            Add(container_);
             input_->TakeFocus();
         }
 
@@ -126,26 +169,63 @@ namespace {
                                             : LayoutCtx::Kind::NARROW,
                 width_() };
 
-            const bool streaming = st.phase == UiState::Phase::STREAMING;
+            const bool streaming  = st.phase == UiState::Phase::STREAMING;
+            const bool connecting = st.phase == UiState::Phase::CONNECTING;
 
             Elements items;
+            if (selected_ >= st.items.size() && !st.items.empty()) {
+                selected_ = st.items.size() - 1;
+            }
+            std::size_t item_index = 0;
+            item_boxes_.resize(st.items.size());
             for (const auto& it : st.items) {
-                if (!items.empty()) {
-                    items.push_back(text(""));
+                Element el;
+            if (std::holds_alternative<ToolCall>(it)) {
+                const ToolCall& tc = std::get<ToolCall>(it);
+                const bool output = tc.result.has_value()
+                    && tc.result->kind == ToolCall::Result::Kind::OUTPUT
+                    && !tc.result->text.empty();
+                if (tc.name == "read" && output) {
+                    el = render_read_item(tc);
+                } else if (tc.name == "shell" && output
+                    && count_lines(tc.result->text) > kLargeOutputLines) {
+                    el = render_shell_collapsed(tc);
+                } else {
+                    el = render_item(it, ctx);
                 }
-                Element el = render_item(it, ctx);
-                if (streaming && std::holds_alternative<AssistantTurn>(it)
+            } else {
+                el = render_item(it, ctx);
+            }
+                if ((streaming || connecting)
+                    && std::holds_alternative<AssistantTurn>(it)
                     && &it == &st.items.back()) {
                     el = vbox({
                         hbox({
                             spinner(15, static_cast<size_t>(frame_))
                                 | color(Color::GrayLight),
-                            text(" thinking…") | dim,
+                            text(connecting ? " connecting…" : " thinking…")
+                                | dim,
                         }),
                         el,
                     });
                 }
-                items.push_back(std::move(el));
+                const bool is_sel = (item_index == selected_);
+                const bool actionable_sel
+                    = is_sel && item_is_actionable(it);
+                Element gutter = is_sel
+                    ? vbox({ filler() }) | bgcolor(Color::GreenLight)
+                        | size(WIDTH, EQUAL, 1)
+                    : text(" ");
+                Element body = std::move(el);
+                if (actionable_sel) {
+                    body = vbox({ separatorEmpty(), std::move(body),
+                        separatorEmpty() })
+                        | bgcolor(PANEL_COLOR_FOCUS);
+                }
+                items.push_back(hbox({ gutter, text(" "),
+                    std::move(body) | xflex })
+                    | reflect(item_boxes_[item_index]));
+                ++item_index;
             }
 
             const size_t queued_n = st.queued.size();
@@ -185,14 +265,18 @@ namespace {
             Element main = vbox({
                                std::move(log) | flex,
                            })
-                | flex;
+                | flex | reflect(frame_box_);
 
             Elements bottom;
-            if (!st.error.empty()) {
-                bottom.push_back(error_element(st));
-            }
             if (show_suggestions()) {
                 bottom.push_back(render_suggestions());
+            }
+            bottom.push_back(hbox({ filler(),
+                text("↑/↓ select message · Enter opens · or click")
+                    | color(PANEL_FG_DIM) })
+                | xflex);
+            if (!st.error.empty() || st.retry_countdown) {
+                bottom.push_back(error_element(st));
             }
             bottom.push_back(std::move(input_box));
 
@@ -219,6 +303,14 @@ namespace {
                 || event == Event::Special("\x1B\n")) {
                 insert_newline();
                 return true;
+            }
+            if (event.is_mouse() && event.mouse().button == Mouse::Left
+                && event.mouse().motion == Mouse::Pressed) {
+                for (auto& [id, btn] : read_buttons_) {
+                    if (btn->OnEvent(event)) {
+                        return true;
+                    }
+                }
             }
             if (event == Event::Escape) {
                 if (show_suggestions()) {
@@ -270,12 +362,16 @@ namespace {
             const bool multiline_input
                 = input_buf_.find('\n') != std::string::npos;
             if (!multiline_input) {
-                if (event == Event::ArrowUp) {
-                    scroll_by(-0.05F);
+                const auto& items = controller_.state().items;
+                if (event == Event::ArrowUp && !items.empty()) {
+                    selected_ = selected_ > 0 ? selected_ - 1 : 0;
+                    scroll_to_selected();
                     return true;
                 }
-                if (event == Event::ArrowDown) {
-                    scroll_by(0.05F);
+                if (event == Event::ArrowDown && !items.empty()) {
+                    selected_
+                        = std::min(items.size() - 1, selected_ + 1);
+                    scroll_to_selected();
                     return true;
                 }
             }
@@ -290,9 +386,17 @@ namespace {
             if (event == Event::Return) {
                 if (paste_mode_) {
                     insert_newline();
-                } else {
-                    submit();
+                    return true;
                 }
+                if (input_buf_.empty()) {
+                    const auto& items = controller_.state().items;
+                    if (!items.empty() && selected_ < items.size()
+                        && item_is_actionable(items[selected_])) {
+                        open_viewer_for(std::get<ToolCall>(items[selected_]));
+                    }
+                    return true;
+                }
+                submit();
                 return true;
             }
             return input_->OnEvent(event);
@@ -300,7 +404,9 @@ namespace {
 
         void OnAnimation(animation::Params&) override
         {
-            if (controller_.state().phase != UiState::Phase::STREAMING) {
+            const auto phase = controller_.state().phase;
+            if (phase != UiState::Phase::STREAMING
+                && phase != UiState::Phase::CONNECTING) {
                 return;
             }
             ++frame_;
@@ -311,6 +417,68 @@ namespace {
         void scroll_by(float delta)
         {
             scroll_y_ = std::clamp(scroll_y_ + delta, 0.0F, 1.0F);
+        }
+
+        void scroll_to_selected()
+        {
+            const int frame_lines
+                = frame_box_.y_max - frame_box_.y_min + 1;
+            if (item_boxes_.empty() || frame_lines <= 0) {
+                return;
+            }
+            int content_lines = 0;
+            for (const auto& b : item_boxes_) {
+                content_lines += b.y_max - b.y_min + 1;
+            }
+            if (content_lines <= 0) {
+                return;
+            }
+            const int max_scroll = std::max(1, content_lines - frame_lines);
+            int top = 0;
+            for (std::size_t k = 0; k < selected_ && k < item_boxes_.size();
+                ++k) {
+                top += item_boxes_[k].y_max - item_boxes_[k].y_min + 1;
+            }
+            scroll_y_ = std::clamp(
+                static_cast<float>(top) / static_cast<float>(max_scroll),
+                0.0F, 1.0F);
+        }
+
+        void enqueue_viewer(std::string title, std::string content,
+            std::string lang, std::size_t start)
+        {
+            controller_.enqueue_user_modal(ViewerModal{
+                std::move(title), std::move(content), std::move(lang), start });
+        }
+
+        bool item_is_actionable(const ConversationItem& it) const
+        {
+            if (!std::holds_alternative<ToolCall>(it)) {
+                return false;
+            }
+            const auto& tc = std::get<ToolCall>(it);
+            if (!tc.result.has_value()
+                || tc.result->kind != ToolCall::Result::Kind::OUTPUT
+                || tc.result->text.empty()) {
+                return false;
+            }
+            if (tc.name == "read") {
+                return true;
+            }
+            if (tc.name == "shell") {
+                return count_lines(tc.result->text) > kLargeOutputLines;
+            }
+            return false;
+        }
+
+        void open_viewer_for(const ToolCall& tc)
+        {
+            if (tc.name == "read") {
+                enqueue_viewer(tool_call_head(tc), tc.result->text,
+                    tool_code_language(tc), read_start_line(tc));
+            } else {
+                enqueue_viewer("Shell output", tc.result->text, "", 1);
+            }
         }
 
         void on_input_changed()
@@ -411,6 +579,83 @@ namespace {
         Controller& controller_;
         std::function<int()> width_;
 
+        Component container_;
+        std::map<std::size_t, Component> read_buttons_;
+
+        Element render_read_item(const ToolCall& tc)
+        {
+            const std::string head    = tool_call_head(tc);
+            const std::string content = tc.result->text;
+            const std::string lang    = tool_code_language(tc);
+            const std::size_t start   = read_start_line(tc);
+            const std::string label   = "▸ open " + head + " in viewer ("
+                + std::to_string(count_lines(content)) + " lines)";
+            Component btn
+                = make_viewer_button(tc, head, content, lang, start, label);
+            Elements rows;
+            rows.push_back(hbox({
+                text("Tool Call: ") | bold | color(Color::GreenLight),
+                text(head) | color(PANEL_FG),
+            }));
+            rows.push_back(separatorEmpty());
+            rows.push_back(btn->Render());
+            rows.push_back(separatorEmpty());
+            return card(vbox(std::move(rows)), std::nullopt, false);
+        }
+
+        Element render_shell_collapsed(const ToolCall& tc)
+        {
+            const std::string& full = tc.result->text;
+            const std::size_t total = count_lines(full);
+            const std::string preview
+                = first_lines(full, kLargeOutputLines);
+            const std::string label = "▸ open full shell output in viewer ("
+                + std::to_string(total) + " lines)";
+            Component btn = make_viewer_button(
+                tc, "Shell output", full, "", 1, label);
+            Elements rows;
+            rows.push_back(hbox({
+                text("Tool Call: ") | bold | color(Color::GreenLight),
+                text("Shell") | color(PANEL_FG),
+            }));
+            rows.push_back(separatorEmpty());
+            rows.push_back(code_block(preview, ""));
+            rows.push_back(separatorEmpty());
+            rows.push_back(btn->Render());
+            rows.push_back(separatorEmpty());
+            return card(vbox(std::move(rows)), std::nullopt, false);
+        }
+
+        Component make_viewer_button(const ToolCall& tc, std::string title,
+            std::string content, std::string lang, std::size_t start,
+            std::string label)
+        {
+            auto it = read_buttons_.find(tc.id);
+            if (it != read_buttons_.end()) {
+                return it->second;
+            }
+            ButtonOption bo;
+            bo.label = std::move(label);
+            bo.on_click = [this, title = std::move(title),
+                              content = std::move(content),
+                              lang = std::move(lang), start] {
+                enqueue_viewer(title, content, lang, start);
+            };
+            bo.transform = [](EntryState s) -> Element {
+                Element e = text(s.label);
+                if (s.focused) {
+                    e = e | bold | underlined | color(PANEL_FG);
+                } else {
+                    e = e | color(PANEL_FG_DIM);
+                }
+                return e;
+            };
+            Component btn = Button(bo);
+            read_buttons_.emplace(tc.id, btn);
+            container_->Add(btn);
+            return btn;
+        }
+
         std::string input_buf_;
         InputOption input_options_;
         Component input_;
@@ -422,6 +667,9 @@ namespace {
 
         float scroll_y_ = 1.0F;
         int frame_      = 0;
+        std::size_t selected_ = 0;
+        std::vector<ftxui::Box> item_boxes_;
+        ftxui::Box frame_box_{};
     };
 
 } // namespace

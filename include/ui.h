@@ -27,7 +27,8 @@ ftxui::Element panel(ftxui::Element e);
 ftxui::Element render_markdown_element(std::string_view md);
 
 ftxui::Element card(
-    ftxui::Element body, std::optional<ftxui::Color> bg = std::nullopt);
+    ftxui::Element body, std::optional<ftxui::Color> bg = std::nullopt,
+    bool pad = true);
 ftxui::Element section_title(
     std::string_view title, ftxui::Color color = PANEL_FG_DIM);
 ftxui::Element code_block(const std::string& code, const std::string& lang = "");

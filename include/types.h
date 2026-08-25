@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
@@ -11,6 +13,8 @@ enum class Status {
     INVALID_URL,
     JSON_ERROR,
     API_ERROR,
+    RATE_LIMITED,
+    BUDGET_EXCEEDED,
     UNSUPPORTED,
     CONFIG_ERROR
 };
@@ -52,11 +56,18 @@ struct ModalAnswer {
 
 using ModalResult = std::variant<std::monostate, ToolVerdict, ModalAnswer>;
 
+struct ModelPricing {
+    double input_per_1k  = 0.0;
+    double output_per_1k = 0.0;
+    std::uint64_t context_limit = 0;
+};
+
 struct Config {
     ApiStandard standard = ApiStandard::OPENAI;
     std::string api_base;
     std::string api_key;
     std::string model;
+    std::optional<ModelPricing> pricing;
 };
 
 Status load_config(const std::filesystem::path& path, Config& out);

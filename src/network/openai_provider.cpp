@@ -29,6 +29,7 @@ namespace {
         root["model"]       = req.model;
         root["stream"]      = true;
         root["temperature"] = req.temperature;
+        root["stream_options"]["include_usage"] = true;
         append_tools(root, req);
 
         Json::Value messages(Json::arrayValue);
@@ -107,6 +108,28 @@ namespace {
         }
     }
 
+    Usage read_usage(const Json::Value& root)
+    {
+        Usage u;
+        const Json::Value& top = root["usage"];
+        if (top.isObject()) {
+            u.prompt    = top.get("prompt_tokens", 0).asUInt64();
+            u.completion = top.get("completion_tokens", 0).asUInt64();
+            u.total     = top.get("total_tokens", 0).asUInt64();
+            return u;
+        }
+        const Json::Value& choices = root["choices"];
+        if (choices.isArray() && choices.size() > 0) {
+            const Json::Value& cu = choices[0]["usage"];
+            if (cu.isObject()) {
+                u.prompt    = cu.get("prompt_tokens", 0).asUInt64();
+                u.completion = cu.get("completion_tokens", 0).asUInt64();
+                u.total     = cu.get("total_tokens", 0).asUInt64();
+            }
+        }
+        return u;
+    }
+
     Status parse(ParseState& state, std::string_view, std::string_view data,
         std::vector<StreamEvent>& outs)
     {
@@ -120,7 +143,20 @@ namespace {
             outs.push_back(make_error_event(Status::JSON_ERROR));
             return Status::JSON_ERROR;
         }
+        if (root.isMember("error")) {
+            const Json::Value& e = root["error"];
+            std::string msg;
+            if (e.isObject() && e["message"].isString()) {
+                msg = e["message"].asString();
+            } else if (e.isString()) {
+                msg = e.asString();
+            }
+            outs.push_back(make_error_event(Status::API_ERROR, msg));
+            return Status::API_ERROR;
+        }
+        const Usage u = read_usage(root);
         const Json::Value& choices = root["choices"];
+        bool done = false;
         if (choices.isArray() && choices.size() > 0) {
             const Json::Value& delta = choices[0]["delta"];
             if (delta.isObject()) {
@@ -131,11 +167,17 @@ namespace {
             }
             if (choices[0]["finish_reason"].isString()) {
                 flush_tools(state, outs);
-                outs.push_back(make_done_event());
-                return Status::OK;
+                done = true;
             }
         }
-        if (outs.empty()) {
+        if (!state.usage_emitted
+            && (u.prompt > 0 || u.completion > 0 || u.total > 0)) {
+            state.usage_emitted = true;
+            outs.push_back(make_usage_event(u));
+        }
+        if (done) {
+            outs.push_back(make_done_event());
+        } else if (outs.empty()) {
             outs.push_back(make_delta_event(""));
         }
         return Status::OK;
