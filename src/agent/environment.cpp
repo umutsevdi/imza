@@ -5,10 +5,10 @@
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <vector>
-
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -198,12 +198,47 @@ void detect_package_managers(Environment& env)
 
 } // namespace
 
+std::optional<InstructionFile> load_agent_file(
+    const std::filesystem::path& root)
+{
+    constexpr std::size_t max_bytes = 32 * 1024;
+    static const char* const candidates[]
+        = { "AGENTS.md", "CLAUDE.md", "GEMINI.md" };
+    for (const char* name : candidates) {
+        const std::filesystem::path path = root / name;
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(path, ec) || ec) {
+            continue;
+        }
+        std::ifstream in(path, std::ios::binary);
+        if (!in) {
+            continue;
+        }
+        std::string content { std::istreambuf_iterator<char>(in),
+            std::istreambuf_iterator<char>() };
+        if (content.empty()) {
+            continue;
+        }
+        if (content.size() > max_bytes) {
+            content.resize(max_bytes);
+            content += "\n[truncated]";
+        }
+        return InstructionFile { name, std::move(content) };
+    }
+    return std::nullopt;
+}
+
 Environment analyze_environment()
 {
     Environment env;
     detect_os(env);
     detect_package_managers(env);
     env.today = today_string();
+    std::error_code ec;
+    const std::filesystem::path cwd = std::filesystem::current_path(ec);
+    if (!ec) {
+        env.instruction = load_agent_file(cwd);
+    }
     return env;
 }
 

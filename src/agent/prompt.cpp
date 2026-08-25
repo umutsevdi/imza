@@ -101,6 +101,19 @@ namespace {
         return out;
     }
 
+    std::string instructions_block(const InstructionFile& file)
+    {
+        std::string out = "<instructions source=\"";
+        out += file.path;
+        out += "\">\n";
+        out += file.content;
+        if (out.back() != '\n') {
+            out += '\n';
+        }
+        out += "</instructions>";
+        return out;
+    }
+
 } // namespace
 
 std::string build_system_prompt(const Environment* env)
@@ -109,6 +122,10 @@ std::string build_system_prompt(const Environment* env)
     if (env != nullptr) {
         out += "\n\n";
         out += environment_block(*env);
+        if (env->instruction) {
+            out += "\n\n";
+            out += instructions_block(*env->instruction);
+        }
     }
     return out;
 }

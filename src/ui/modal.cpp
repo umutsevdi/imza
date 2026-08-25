@@ -6,6 +6,7 @@
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/terminal.hpp>
 
+#include <algorithm>
 #include <deque>
 #include <string>
 #include <utility>
@@ -22,6 +23,57 @@ namespace {
     using namespace ftxui;
 
     enum class ToolPhase { DECIDE, REASON };
+
+    std::vector<std::string> wrapped_lines(
+        const std::string& body, std::size_t width)
+    {
+        std::vector<std::string> out;
+        std::string line;
+        std::string word;
+        auto flush_word = [&] {
+            if (word.empty()) {
+                return;
+            }
+            if (line.empty()) {
+                line = word;
+            } else if (line.size() + 1 + word.size() <= width) {
+                line += " ";
+                line += word;
+            } else {
+                out.push_back(std::move(line));
+                line = word;
+            }
+            word.clear();
+        };
+        for (const char c : body) {
+            if (c == '\n') {
+                flush_word();
+                out.push_back(std::move(line));
+                line.clear();
+            } else if (c == ' ') {
+                flush_word();
+            } else {
+                word += c;
+            }
+        }
+        flush_word();
+        if (!line.empty()) {
+            out.push_back(std::move(line));
+        }
+        return out;
+    }
+
+    std::string join_lines(const std::vector<std::string>& lines)
+    {
+        std::string out;
+        for (std::size_t i = 0; i < lines.size(); ++i) {
+            if (i != 0) {
+                out += '\n';
+            }
+            out += lines[i];
+        }
+        return out;
+    }
 
     InputOption field_option(std::string* content, int* cursor,
         std::string placeholder, std::function<void()> on_enter,
@@ -110,7 +162,7 @@ namespace {
                     controller_.close_modal();
                     return true;
                 }
-                return true;
+                return scroll_prompt(event);
             }
             if (body_) {
                 return body_->OnEvent(event);
@@ -273,7 +325,11 @@ namespace {
 
         void build(const HelpModal&) { kind_ = Kind::HELP; }
 
-        void build(const SystemPromptModal&) { kind_ = Kind::SYSTEM_PROMPT; }
+        void build(const SystemPromptModal&)
+        {
+            kind_          = Kind::SYSTEM_PROMPT;
+            prompt_scroll_ = 0.0F;
+        }
 
         void build(std::monostate) { kind_ = Kind::NONE; }
 
@@ -451,13 +507,68 @@ namespace {
 
         Element system_prompt_body(const SystemPromptModal& payload)
         {
+            const int popup_w
+                = std::min(Terminal::Size().dimx - 4, MODAL_MAX_WIDTH);
+            const std::size_t content_w
+                = static_cast<std::size_t>(std::max(40, popup_w - 8));
+            const std::string wrapped
+                = join_lines(wrapped_lines(payload.prompt, content_w));
+
             Elements rows { header_line("System prompt") };
             rows.push_back(separatorEmpty());
-            rows.push_back(code_block(payload.prompt, "text"));
+            rows.push_back(code_block(wrapped, "text")
+                | vscroll_indicator
+                | focusPositionRelative(0.0F, prompt_scroll_) | yframe
+                | yflex);
             rows.push_back(separatorEmpty());
             rows.push_back(
-                text("Esc closes") | dim | color(PANEL_FG_DIM));
+                text("↑/↓ scroll · Esc closes") | dim
+                    | color(PANEL_FG_DIM));
             return vbox(std::move(rows)) | xflex;
+        }
+
+        bool scroll_prompt(Event event)
+        {
+            auto apply = [this](float delta) {
+                prompt_scroll_
+                    = std::clamp(prompt_scroll_ + delta, 0.0F, 1.0F);
+            };
+            if (event == Event::ArrowUp) {
+                apply(-0.05F);
+                return true;
+            }
+            if (event == Event::ArrowDown) {
+                apply(0.05F);
+                return true;
+            }
+            if (event == Event::PageUp) {
+                apply(-0.35F);
+                return true;
+            }
+            if (event == Event::PageDown) {
+                apply(0.35F);
+                return true;
+            }
+            if (event == Event::Home) {
+                prompt_scroll_ = 0.0F;
+                return true;
+            }
+            if (event == Event::End) {
+                prompt_scroll_ = 1.0F;
+                return true;
+            }
+            if (event.is_mouse()) {
+                const Mouse& m = event.mouse();
+                if (m.button == Mouse::WheelUp) {
+                    apply(-0.04F);
+                    return true;
+                }
+                if (m.button == Mouse::WheelDown) {
+                    apply(0.04F);
+                    return true;
+                }
+            }
+            return false;
         }
 
         enum class Kind { NONE, TOOL, QUESTION, SETTINGS, HELP, SYSTEM_PROMPT };
@@ -476,6 +587,7 @@ namespace {
         ToolPhase tool_phase_   = ToolPhase::DECIDE;
         std::string reason_buf_;
         int reason_cursor_ = 0;
+        float prompt_scroll_ = 0.0F;
         Component reason_input_;
         Component accept_;
         Component accept_always_;

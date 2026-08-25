@@ -8,6 +8,7 @@
 #include <ftxui/screen/terminal.hpp>
 
 #include <unistd.h>
+#include <algorithm>
 #include <functional>
 
 #include "environment.h"
@@ -19,21 +20,6 @@ namespace ursa {
 namespace {
 
     using namespace ftxui;
-
-    Element header_element(const Config& cfg)
-    {
-        const std::string cwd = std::filesystem::current_path().string();
-        Element bar           = hbox({
-            text(" "),
-            text("URSA") | bold,
-            text(cfg.model.empty() ? "" : "  ·  " + cfg.model)
-                | color(Color::GrayDark),
-            filler(),
-            text(cwd) | color(Color::GrayDark),
-            text(" "),
-        });
-        return std::move(bar) | bgcolor(Color::Cyan);
-    }
 
     class Repl : public ComponentBase {
     public:
@@ -60,26 +46,35 @@ namespace {
             Element right_col = chat_->Render();
             const int chat_w  = (kind == LayoutCtx::Kind::WIDE) ? w - 31 : w;
             right_col      = std::move(right_col) | size(WIDTH, EQUAL, chat_w);
-            Element header = header_element(controller_.config());
+            Element status = status_line(
+                controller_.config(), controller_.state(), { kind, w });
 
             Element root;
             if (kind == LayoutCtx::Kind::WIDE) {
-                root = vbox({ header, separatorEmpty(),
+                root = vbox({ separatorEmpty(),
                            hbox({ text(" "),
                                side | yflex, text(" "),
                                right_col })
-                               | flex })
+                               | flex,
+                           separatorEmpty(),
+                           status })
                     | flex;
             } else {
-                root = vbox({ header, separatorEmpty(), side, right_col })
+                root
+                    = vbox({ separatorEmpty(), side, right_col,
+                        separatorEmpty(), status })
                     | flex;
             }
 
             if (controller_.state().modal.index() != 0) {
-                const int mw  = std::min(w - 6, 72);
+                const int w   = ftxui::Terminal::Size().dimx;
+                const int h   = ftxui::Terminal::Size().dimy;
+                const int mw  = std::min(w - 4, MODAL_MAX_WIDTH);
+                const int mh  = std::max(10, h - 4);
                 Element popup = modal_->Render()
                     | borderStyled(ROUNDED, PANEL_BORDER) | bgcolor(PANEL_COLOR)
-                    | color(PANEL_FG) | clear_under | size(WIDTH, EQUAL, mw);
+                    | color(PANEL_FG) | clear_under | size(WIDTH, EQUAL, mw)
+                    | size(HEIGHT, LESS_THAN, mh);
                 root = dbox({ dim(std::move(root)), center(std::move(popup)) });
             }
             return root;

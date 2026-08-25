@@ -167,16 +167,8 @@ namespace {
             Element log = std::move(content) | vscroll_indicator
                 | focusPositionRelative(0.0F, scroll_y_) | yframe;
 
-            const bool plan    = st.mode == UiState::Mode::PLAN;
-            Element mode_badge = text(plan ? "PLAN" : "BUILD") | bold
-                | color(plan ? Color::Green : Color::Red);
-
             Element input_box = panel(vbox({
                 separatorEmpty(),
-                hbox({
-                    text("  "),
-                    mode_badge,
-                }),
                 hbox({
                     text("  "),
                     input_->Render() | xflex,

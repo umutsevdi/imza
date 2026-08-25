@@ -1,6 +1,9 @@
 #include "ui.h"
 
 #include <ftxui/dom/elements.hpp>
+#include <chrono>
+#include <cstdlib>
+#include <filesystem>
 #include <optional>
 #include <sstream>
 #include <iomanip>
@@ -32,6 +35,49 @@ namespace {
     std::size_t digit_width(std::size_t n)
     {
         return std::to_string(n).size();
+    }
+
+    std::string _home_dir()
+    {
+#ifdef _WIN32
+        char* buf = nullptr;
+        size_t sz = 0;
+        if (_dupenv_s(&buf, &sz, "USERPROFILE") != 0 || buf == nullptr) {
+            return "";
+        }
+        std::string value(buf);
+        free(buf);
+        return value;
+#else
+        const char* value = std::getenv("HOME");
+        return value != nullptr ? std::string(value) : "";
+#endif
+    }
+
+    std::string _abbreviate_home(const std::string& path)
+    {
+        const std::string home = _home_dir();
+        if (home.empty()) {
+            return path;
+        }
+        if (path == home) {
+            return "~";
+        }
+        if (path.rfind(home + "/", 0) == 0) {
+            return "~" + path.substr(home.size());
+        }
+        return path;
+    }
+
+    const char* _spinner_frame()
+    {
+        static const char* frames[]
+            = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" };
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+                        .count();
+        return frames[static_cast<std::size_t>(ms / 100)
+            % (sizeof(frames) / sizeof(frames[0]))];
     }
 
 } // namespace
@@ -149,6 +195,39 @@ Element card(Element body, std::optional<Color> bg)
 Element section_title(std::string_view title, Color fg)
 {
     return text(std::string(title)) | bold | color(fg);
+}
+
+Element status_line(const Config& cfg, const UiState& state, const LayoutCtx& ctx)
+{
+    const bool wide = ctx.kind == LayoutCtx::Kind::WIDE;
+    const bool plan = state.mode == UiState::Mode::PLAN;
+    Element mode    = text(plan ? " PLAN " : " BUILD ")
+        | bold | color(PANEL_COLOR_FOCUS)
+        | bgcolor(plan ? Color::GreenLight : Color::RedLight);
+
+    Elements bar;
+    bar.push_back(text(" "));
+    bar.push_back(std::move(mode));
+    if (!cfg.model.empty()) {
+        bar.push_back(text(" · " + cfg.model) | color(PANEL_FG_DIM));
+    }
+    bar.push_back(filler());
+    if (!state.env_ready) {
+        bar.push_back(text(_spinner_frame()) | color(PANEL_FG_DIM));
+        if (wide) {
+            bar.push_back(text(" Caching…") | color(PANEL_FG_DIM));
+        }
+        bar.push_back(text("  "));
+    }
+    if (wide) {
+        const std::string cwd
+            = _abbreviate_home(std::filesystem::current_path().string());
+        bar.push_back(text(cwd) | color(PANEL_FG_DIM));
+        bar.push_back(text("  "));
+    }
+    bar.push_back(text("URSA") | bold | color(PANEL_FG));
+    return hbox(std::move(bar)) | bgcolor(PANEL_COLOR_FOCUS)
+        | color(PANEL_FG) | xflex;
 }
 
 } // namespace ursa

@@ -111,6 +111,7 @@ struct UiState {
     std::vector<ChangedFile> changed_files;
     std::vector<QueuedMessage> queued;
     bool env_ready = false;
+    std::optional<std::string> agent_rules;
 };
 
 using PostFn = std::function<void(std::function<void()>)>;

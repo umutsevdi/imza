@@ -39,6 +39,32 @@ TEST_CASE("system prompt embeds the environment block")
     CHECK(prompt.find("</env>") != std::string::npos);
 }
 
+TEST_CASE("system prompt embeds workspace instructions when present")
+{
+    Environment env;
+    env.os_name       = "Linux";
+    env.default_shell = "/bin/bash";
+    env.today         = "Fri Aug 28 2026";
+    env.instruction   = InstructionFile { "AGENTS.md", "# Rules\nBe terse." };
+
+    const std::string prompt = build_system_prompt(&env);
+    CHECK(prompt.find("<instructions source=\"AGENTS.md\">")
+        != std::string::npos);
+    CHECK(prompt.find("Be terse.") != std::string::npos);
+    CHECK(prompt.find("</instructions>") != std::string::npos);
+}
+
+TEST_CASE("system prompt omits the instructions block when absent")
+{
+    Environment env;
+    env.os_name       = "Linux";
+    env.default_shell = "/bin/bash";
+    env.today         = "Fri Aug 28 2026";
+
+    const std::string prompt = build_system_prompt(&env);
+    CHECK(prompt.find("<instructions") == std::string::npos);
+}
+
 TEST_CASE("mode reminders carry unique detectable tags")
 {
     const std::string_view plan = plan_mode_reminder();

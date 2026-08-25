@@ -20,6 +20,8 @@ inline const ftxui::Color PANEL_FG_DIM = ftxui::Color::RGB(148, 156, 172);
 inline const ftxui::Color PANEL_BORDER = ftxui::Color::RGB(78, 89, 110);
 inline const ftxui::Color PANEL_COLOR_FOCUS = ftxui::Color::RGB(44, 56, 84);
 
+inline constexpr int MODAL_MAX_WIDTH = 120;
+
 ftxui::Element panel(ftxui::Element e);
 
 ftxui::Element render_markdown_element(std::string_view md);
@@ -38,6 +40,8 @@ ftxui::Element render_todo(const TodoList& todo, const LayoutCtx& ctx);
 ftxui::Element render_changed_files(
     const std::vector<ChangedFile>& files, const LayoutCtx& ctx);
 ftxui::Element render_help(const std::vector<SlashCommand>& commands);
+ftxui::Element status_line(
+    const Config& cfg, const UiState& state, const LayoutCtx& ctx);
 
 int run_repl(const Config& cfg);
 

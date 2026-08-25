@@ -320,6 +320,9 @@ void Controller::_on_env_ready()
     env_ready_.store(true);
     _post([this] {
         state_.env_ready = true;
+        if (env_.valid() && env_.get().instruction) {
+            state_.agent_rules = env_.get().instruction->path;
+        }
         _present_front();
         if (state_.phase == UiState::Phase::IDLE && !state_.queued.empty()) {
             _drain_queued();
