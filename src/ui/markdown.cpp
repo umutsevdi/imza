@@ -217,7 +217,7 @@ namespace {
             if (in_cell_) {
                 cell_buf_ += ' ';
             } else if (in_paragraph_) {
-                words_.push_back(ftxui::text(" "));
+                needs_sep_ = true;
             }
         }
 
@@ -229,6 +229,7 @@ namespace {
         {
             in_paragraph_ = true;
             words_.clear();
+            needs_sep_ = false;
         }
 
         void paragraph_end()
@@ -241,6 +242,7 @@ namespace {
         {
             in_paragraph_ = true;
             words_.clear();
+            needs_sep_      = false;
             heading_level_ = lvl;
         }
 
@@ -415,24 +417,34 @@ namespace {
             words_.clear();
         }
 
+        void push_word(std::string_view word, const Style& fl)
+        {
+            if (needs_sep_ && !words_.empty()) {
+                words_.push_back(ftxui::text(" "));
+            }
+            needs_sep_ = false;
+            words_.push_back(styled(word, fl));
+        }
+
         void push_words(std::string_view body, const Style& fl)
         {
             size_t i = 0;
             while (i < body.size()) {
+                const bool gap = body[i] == ' ';
                 while (i < body.size() && body[i] == ' ') {
                     ++i;
+                }
+                if (gap) {
+                    needs_sep_ = true;
+                }
+                if (i == body.size()) {
+                    break;
                 }
                 const size_t start = i;
                 while (i < body.size() && body[i] != ' ') {
                     ++i;
                 }
-                if (i == start) {
-                    continue;
-                }
-                words_.push_back(styled(body.substr(start, i - start), fl));
-                if (i < body.size()) {
-                    words_.push_back(ftxui::text(" "));
-                }
+                push_word(body.substr(start, i - start), fl);
             }
         }
 
@@ -466,6 +478,7 @@ namespace {
 
         bool in_paragraph_ = false;
         bool in_cell_      = false;
+        bool needs_sep_    = false;
         Elements words_;
         int heading_level_ = 0;
 

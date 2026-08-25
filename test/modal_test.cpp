@@ -210,6 +210,7 @@ TEST_CASE(
 TEST_CASE("tool accept: output fills result, request half byte-stable")
 {
     Env env;
+    env.controller.toggle_mode();
     auto round = std::make_shared<int>(0);
     env.stream = [&env, round](const ursa::ChatRequest& req,
                      const ursa::StreamCallback& cb) {

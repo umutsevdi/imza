@@ -33,6 +33,7 @@ public:
     const Tool* find(std::string_view name) const;
     const std::vector<Tool>& tools() const { return tools_; }
     std::vector<ToolSpec> specs() const;
+    std::vector<ToolSpec> specs(ToolSafety safety) const;
     ToolOutput dispatch(const ToolCallRequest& req) const;
 
 private:

@@ -26,6 +26,17 @@ std::vector<ToolSpec> ToolRegistry::specs() const
     return out;
 }
 
+std::vector<ToolSpec> ToolRegistry::specs(ToolSafety safety) const
+{
+    std::vector<ToolSpec> out;
+    for (const auto& t : tools_) {
+        if (t.safety == safety) {
+            out.push_back(t.spec);
+        }
+    }
+    return out;
+}
+
 ToolOutput ToolRegistry::dispatch(const ToolCallRequest& req) const
 {
     const Tool* tool = find(req.name);

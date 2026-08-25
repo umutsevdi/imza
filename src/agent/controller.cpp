@@ -1,5 +1,6 @@
 #include "agent.h"
 #include "format.h"
+#include "prompt.h"
 #include "util.h"
 
 #include <cassert>
@@ -57,6 +58,25 @@ namespace {
             return std::nullopt;
         }
         return form;
+    }
+
+    enum class ModeReminder { NONE, PLAN, BUILD };
+
+    ModeReminder last_mode_reminder(const std::vector<Message>& history)
+    {
+        ModeReminder last = ModeReminder::NONE;
+        for (const Message& m : history) {
+            if (m.type != Message::Type::USER) {
+                continue;
+            }
+            if (m.content.find(PLAN_REMINDER_TAG) != std::string::npos) {
+                last = ModeReminder::PLAN;
+            } else if (m.content.find(BUILD_REMINDER_TAG)
+                != std::string::npos) {
+                last = ModeReminder::BUILD;
+            }
+        }
+        return last;
     }
 
 } // namespace
@@ -352,41 +372,12 @@ std::string Controller::shell_name() const
 
 std::string Controller::_system_prompt() const
 {
-    std::string prompt = "You are a helpful assistant.";
-    const auto specs   = tools_.specs();
-    if (!specs.empty()) {
-        prompt += "\n\nYou can call tools. Available tools:";
-        for (const auto& s : specs) {
-            prompt += "\n- " + s.name + ": " + s.description;
-        }
-        prompt += "\nPrefer narrow line ranges when reading long files.";
-    }
+    const Environment* env = nullptr;
     if (env_.valid()
         && env_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
-        const Environment& e = env_.get();
-        prompt += "\n\nEnvironment context:";
-        prompt += "\n- OS: " + e.os_name;
-        if (!e.os_version.empty()) {
-            prompt += " " + e.os_version;
-        }
-        if (!e.distro.empty()) {
-            prompt += "\n- Distro: " + e.distro;
-        }
-        prompt += "\n- Shell: " + e.default_shell;
-        prompt += "\n- Package managers: ";
-        if (e.package_managers.empty()) {
-            prompt += "none";
-        } else {
-            for (std::size_t i = 0; i < e.package_managers.size(); ++i) {
-                if (i) {
-                    prompt += ", ";
-                }
-                prompt += e.package_managers[i];
-            }
-        }
-        prompt += "\n- Date: " + e.today;
+        env = &env_.get();
     }
-    return prompt;
+    return build_system_prompt(env);
 }
 
 std::vector<Message> Controller::_build_history() const
@@ -407,6 +398,27 @@ std::vector<Message> Controller::_build_history() const
                 ToolCallEntry { tc->call_id, tc->name, tc->args });
             history.push_back({ Message::Type::TOOL, _tool_result_text(*tc),
                 { }, tc->call_id });
+        }
+    }
+
+    const ModeReminder injected = last_mode_reminder(history);
+    if (state_.mode == UiState::Mode::PLAN
+        && injected != ModeReminder::PLAN) {
+        for (Message& m : history) {
+            if (m.type == Message::Type::USER) {
+                m.content += "\n\n";
+                m.content += plan_mode_reminder();
+                break;
+            }
+        }
+    } else if (state_.mode == UiState::Mode::BUILD
+        && injected == ModeReminder::PLAN) {
+        for (auto it = history.rbegin(); it != history.rend(); ++it) {
+            if (it->type == Message::Type::USER) {
+                it->content += "\n\n";
+                it->content += build_mode_reminder();
+                break;
+            }
         }
     }
     return history;
@@ -434,7 +446,9 @@ void Controller::_drive(std::vector<Message> history, StreamFn override)
         ChatRequest req;
         req.model    = cfg_.model;
         req.messages = history;
-        req.tools    = tools_.specs();
+        req.tools    = state_.mode == UiState::Mode::PLAN
+            ? tools_.specs(ToolSafety::READ_ONLY)
+            : tools_.specs();
         stream_events_.clear();
         std::string text_buffer;
 

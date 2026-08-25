@@ -34,6 +34,16 @@ TEST_CASE("render_markdown_element renders code blocks")
     CHECK(out.find("┌") != std::string::npos);
 }
 
+TEST_CASE("render_markdown_element spaces inline code from neighbors")
+{
+    const std::string out
+        = to_text(ursa::render_markdown_element("see `code` now"));
+    CHECK(out.find("see ") != std::string::npos);
+    CHECK(out.find(" now") != std::string::npos);
+    CHECK(out.find("seecode") == std::string::npos);
+    CHECK(out.find("codenow") == std::string::npos);
+}
+
 TEST_CASE("render_markdown_element renders tables")
 {
     const std::string out

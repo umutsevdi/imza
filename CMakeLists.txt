@@ -114,6 +114,7 @@ target_link_libraries(ursa_network PRIVATE
 add_library(ursa_agent
     src/agent/controller.cpp
     src/agent/format.cpp
+    src/agent/prompt.cpp
     src/agent/tools.cpp
     src/agent/builtin_tools.cpp
     src/agent/environment.cpp
