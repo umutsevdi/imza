@@ -83,15 +83,11 @@ namespace {
         return root;
     }
 
-    std::string_view endpoint() { return "/v1/messages"; }
-
-    std::vector<std::string> headers(const std::string& key)
+    std::vector<std::string> headers()
     {
         return {
             "Content-Type: application/json",
             "Accept: text/event-stream",
-            "x-api-key: " + key,
-            "anthropic-version: 2023-06-01",
         };
     }
 
@@ -125,7 +121,14 @@ namespace {
             if (msg.isObject()) {
                 const Json::Value& usage = msg["usage"];
                 if (usage.isObject()) {
-                    state.usage.prompt = usage.get("input_tokens", 0).asUInt64();
+                    state.usage.cached_read
+                        = usage.get("cache_read_input_tokens", 0).asUInt64();
+                    state.usage.cached_write
+                        = usage.get("cache_creation_input_tokens", 0).asUInt64();
+                    state.usage.prompt
+                        = usage.get("input_tokens", 0).asUInt64()
+                        + state.usage.cached_read
+                        + state.usage.cached_write;
                     state.usage.total  = state.usage.prompt;
                 }
             }
@@ -180,6 +183,6 @@ namespace {
 
 } // namespace
 
-extern const Provider anthropic_provider = { build, endpoint, headers, parse };
+    extern const Provider anthropic_provider = { build, headers, parse };
 
 } // namespace ursa

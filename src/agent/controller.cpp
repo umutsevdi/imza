@@ -4,8 +4,8 @@
 #include "prompt.h"
 #include "util.h"
 
-#include <cassert>
 #include <algorithm>
+#include <cassert>
 #include <chrono>
 #include <thread>
 
@@ -139,8 +139,7 @@ std::string error_text(Status st)
     case Status::JSON_ERROR: return "malformed response from provider";
     case Status::API_ERROR: return "API error";
     case Status::RATE_LIMITED: return "rate limited by provider";
-    case Status::BUDGET_EXCEEDED:
-        return "out of budget / insufficient credits";
+    case Status::BUDGET_EXCEEDED: return "out of budget / insufficient credits";
     case Status::UNSUPPORTED: return "unsupported operation";
     case Status::CONFIG_ERROR: return "configuration error";
     }
@@ -149,22 +148,31 @@ std::string error_text(Status st)
 
 Controller::Controller(const Config& cfg, PostFn post,
     std::function<void()> on_exit, StreamFn stream_fn, ToolRegistry tools,
-    std::shared_future<Environment> env)
+    std::shared_future<Environment> env, ModelsFn models_fn)
     : cfg_(cfg)
     , post_(std::move(post))
     , on_exit_(std::move(on_exit))
-    , commands_(slash_commands(cfg))
+    , commands_(slash_commands())
     , stream_fn_(std::move(stream_fn))
     , tools_(std::move(tools))
     , env_(std::move(env))
+    , models_fn_(std::move(models_fn))
 {
     specs_plan_ = tools_.specs(ToolSafety::READ_ONLY);
     specs_all_  = tools_.specs();
 
+    load_catalog(presets_path(), catalog_);
+    set_pricing_catalog(catalog_);
+
     if (!stream_fn_) {
         stream_fn_ = [this](const ChatRequest& req, const StreamCallback& cb) {
-            const auto provider = get_provider(cfg_);
-            return stream(provider, cfg_, req, cb, &retry_after_secs_);
+            Route route;
+            {
+                std::lock_guard lock(data_mutex_);
+                route = _active_route_locked(req.model);
+            }
+            return stream(
+                get_provider(route), route, req, cb, &retry_after_secs_);
         };
     }
     if (env_.valid()) {
@@ -183,6 +191,46 @@ Controller::Controller(const Config& cfg, PostFn post,
             _on_env_ready();
         });
     }
+    _post([this] {
+        std::lock_guard lock(data_mutex_);
+        for (const Connection& conn : cfg_.providers) {
+            _start_fetch_locked(conn.id);
+        }
+    });
+}
+
+void Controller::ensure_catalog_fresh()
+{
+    std::lock_guard lock(data_mutex_);
+    if (catalog_syncing_ || !catalog_stale(catalog_)) {
+        return;
+    }
+    catalog_syncing_ = true;
+    auto future      = std::async(std::launch::async, [] {
+        Catalog catalog;
+        const Status st = fetch_catalog(catalog);
+        return std::make_pair(st, catalog);
+    }).share();
+    catalog_waiter_.emplace([this, future] {
+        future.wait();
+        if (!alive_.load()) {
+            return;
+        }
+        _post([this, future] {
+            auto [st, catalog] = future.get();
+            {
+                std::lock_guard lock(data_mutex_);
+                catalog_syncing_ = false;
+                if (st != Status::OK) {
+                    return;
+                }
+                catalog_ = catalog;
+                save_catalog(presets_path(), catalog_);
+                set_pricing_catalog(catalog_);
+            }
+            ++state_.modal_serial;
+        });
+    });
 }
 
 Controller::~Controller()
@@ -198,6 +246,8 @@ Controller::~Controller()
     }
     worker_.reset();
     env_waiter_.reset();
+    catalog_waiter_.reset();
+    fetch_threads_.clear();
 }
 
 void Controller::toggle_mode()
@@ -240,7 +290,8 @@ void Controller::cancel_queued(std::size_t id)
 
 void Controller::_enqueue_message(std::string text)
 {
-    state_.queued.push_back(QueuedMessage { next_queued_id_++, std::move(text) });
+    state_.queued.push_back(
+        QueuedMessage { next_queued_id_++, std::move(text) });
 }
 
 void Controller::_drain_queued()
@@ -277,6 +328,13 @@ ModalResult Controller::request_modal(ModalPayload payload)
 
 void Controller::resolve_modal(ModalResult result)
 {
+    if (auto* connect = std::get_if<ConnectResult>(&result)) {
+        _begin_connect(*connect);
+        return;
+    }
+    if (auto* choice = std::get_if<ModelChoice>(&result)) {
+        _apply_pick(*choice);
+    }
     {
         std::lock_guard lock(queue_mutex_);
         if (!queue_.empty()) {
@@ -327,6 +385,13 @@ void Controller::submit(std::string text)
 
 void Controller::submit_message(std::string text)
 {
+    {
+        std::lock_guard lock(data_mutex_);
+        if (!cfg_.last_used || cfg_.last_used->model.empty()) {
+            state_.error = "no model selected — run /model";
+            return;
+        }
+    }
     if (env_.valid() && !env_ready_.load()) {
         _enqueue_message(std::move(text));
         return;
@@ -343,7 +408,9 @@ void Controller::_on_env_ready()
     _post([this] {
         state_.env_ready = true;
         if (env_.valid() && env_.get().instruction) {
-            state_.agent_rules = env_.get().instruction->path;
+            state_.agent_rules    = env_.get().instruction->path;
+            state_.project_skills = env_.get().project_skills.size();
+            state_.global_skills  = env_.get().global_skills.size();
         }
         _present_front();
         if (state_.phase == UiState::Phase::IDLE && !state_.queued.empty()) {
@@ -406,7 +473,7 @@ void Controller::run_slash(std::string_view cmd)
     case SlashCommand::Action::EXIT: on_exit_(); break;
     case SlashCommand::Action::HELP: enqueue_user_modal(HelpModal { }); break;
     case SlashCommand::Action::SETTINGS:
-        enqueue_user_modal(SettingsModal { cfg_.model });
+        enqueue_user_modal(SettingsModal { });
         break;
     case SlashCommand::Action::DEMO:
         if (state_.phase == UiState::Phase::IDLE) {
@@ -415,9 +482,33 @@ void Controller::run_slash(std::string_view cmd)
             _enqueue_message(std::string(cmd));
         }
         break;
+    case SlashCommand::Action::CONNECT:
+        if (state_.phase == UiState::Phase::IDLE) {
+            enqueue_user_modal(ConnectModal { ConnectModal::Entry::MANAGE });
+        } else {
+            _enqueue_message(std::string(cmd));
+        }
+        break;
+    case SlashCommand::Action::MODEL: {
+        if (state_.phase != UiState::Phase::IDLE) {
+            _enqueue_message(std::string(cmd));
+            break;
+        }
+        bool any = false;
+        {
+            std::lock_guard lock(data_mutex_);
+            any = !cfg_.providers.empty();
+        }
+        if (!any) {
+            set_error("no connections — run /connect first");
+            break;
+        }
+        enqueue_user_modal(ConnectModal { ConnectModal::Entry::PICK_MODEL });
+        break;
+    }
     case SlashCommand::Action::SYSTEM_PROMPT:
-        enqueue_user_modal(
-            ViewerModal { "System prompt", _system_prompt(), "text", 1, false });
+        enqueue_user_modal(ViewerModal {
+            "System prompt", _system_prompt(), "text", 1, false });
         break;
     }
 }
@@ -425,7 +516,8 @@ void Controller::run_slash(std::string_view cmd)
 std::string Controller::shell_name() const
 {
     if (env_.valid()
-        && env_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+        && env_.wait_for(std::chrono::seconds(0))
+            == std::future_status::ready) {
         const Environment& e = env_.get();
         if (!e.default_shell.empty()) {
             return std::filesystem::path(e.default_shell).filename().string();
@@ -438,7 +530,8 @@ std::string Controller::_system_prompt() const
 {
     const Environment* env = nullptr;
     if (env_.valid()
-        && env_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+        && env_.wait_for(std::chrono::seconds(0))
+            == std::future_status::ready) {
         env = &env_.get();
     }
     return build_system_prompt(env);
@@ -466,8 +559,7 @@ std::vector<Message> Controller::_build_history() const
     }
 
     const ModeReminder injected = last_mode_reminder(history);
-    if (state_.mode == UiState::Mode::PLAN
-        && injected != ModeReminder::PLAN) {
+    if (state_.mode == UiState::Mode::PLAN && injected != ModeReminder::PLAN) {
         for (Message& m : history) {
             if (m.type == Message::Type::USER) {
                 m.content += "\n\n";
@@ -509,37 +601,91 @@ void Controller::_drive(std::vector<Message> history, StreamFn override)
     int retries = 0;
     for (;;) {
         ChatRequest req;
-        req.model    = cfg_.model;
+        {
+            std::lock_guard lock(data_mutex_);
+            req.model = cfg_.last_used ? cfg_.last_used->model : "";
+        }
         req.messages = history;
-        req.tools    = state_.mode == UiState::Mode::PLAN ? specs_plan_
-                                                          : specs_all_;
+        req.tools
+            = state_.mode == UiState::Mode::PLAN ? specs_plan_ : specs_all_;
         stream_events_.clear();
         std::string text_buffer;
         std::string error_msg;
         Status error_status = Status::OK;
+        bool saw_stream     = false;
 
-        StreamFn fn = override ? override : stream_fn_;
+        StreamCallback cb = [this, &text_buffer, &error_msg, &error_status,
+                                &saw_stream](const StreamEvent& ev) {
+            if (ev.kind == StreamEvent::Kind::ERROR) {
+                error_status = ev.error;
+                error_msg    = ev.text;
+                return;
+            }
+            if (ev.kind == StreamEvent::Kind::TOOL_CALL
+                || ev.kind == StreamEvent::Kind::QUESTION) {
+                stream_events_.push_back(ev);
+            }
+            if (ev.kind == StreamEvent::Kind::CONTENT_DELTA
+                || ev.kind == StreamEvent::Kind::CONNECTED) {
+                saw_stream = true;
+            }
+            if (ev.kind == StreamEvent::Kind::CONTENT_DELTA) {
+                text_buffer += ev.text;
+            }
+            _post([this, ev] { apply(ev); });
+        };
+
+        StreamFn fn       = override ? override : stream_fn_;
         retry_after_secs_ = 0;
-        const Status st   = fn(req,
-            [this, &text_buffer, &error_msg, &error_status](
-                const StreamEvent& ev) {
-                if (ev.kind == StreamEvent::Kind::ERROR) {
-                    error_status = ev.error;
-                    error_msg    = ev.text;
-                    return;
+        Status st;
+        if (override) {
+            st = fn(req, cb);
+        } else {
+            Route route;
+            {
+                std::lock_guard lock(data_mutex_);
+                route = _active_route_locked(req.model);
+            }
+            st = stream(
+                get_provider(route), route, req, cb, &retry_after_secs_);
+            const Status attempt
+                = error_status != Status::OK ? error_status : st;
+            if (attempt == Status::API_ERROR && !saw_stream
+                && route.dialect == ApiStandard::OPENAI) {
+                Route alt;
+                bool has_alt = false;
+                {
+                    std::lock_guard lock(data_mutex_);
+                    if (cfg_.last_used) {
+                        if (Connection* conn
+                            = _find_locked(cfg_.last_used->provider)) {
+                            alt = resolve_route(
+                                *conn, catalog_, ApiStandard::ANTHROPIC);
+                            has_alt = !alt.endpoint.empty();
+                        }
+                    }
                 }
-                if (ev.kind == StreamEvent::Kind::TOOL_CALL
-                    || ev.kind == StreamEvent::Kind::QUESTION) {
-                    stream_events_.push_back(ev);
+                if (has_alt && alt.endpoint != route.endpoint) {
+                    retry_after_secs_ = 0;
+                    error_status      = Status::OK;
+                    error_msg.clear();
+                    st = stream(
+                        get_provider(alt), alt, req, cb, &retry_after_secs_);
+                    const Status retried
+                        = error_status != Status::OK ? error_status : st;
+                    if (retried == Status::OK) {
+                        std::lock_guard lock(data_mutex_);
+                        if (Connection* conn
+                            = _find_locked(cfg_.last_used->provider)) {
+                            conn->dialects[req.model] = ApiStandard::ANTHROPIC;
+                            save_config(config_path(), cfg_);
+                        }
+                    }
                 }
-                if (ev.kind == StreamEvent::Kind::CONTENT_DELTA) {
-                    text_buffer += ev.text;
-                }
-                _post([this, ev] { apply(ev); });
-            });
+            }
+        }
 
-        const Status fail
-            = error_status != Status::OK ? error_status : st;
+        const Status fail = error_status != Status::OK ? error_status : st;
         if (fail == Status::RATE_LIMITED && retries < 2) {
             ++retries;
             int wait = retry_after_secs_;
@@ -552,7 +698,7 @@ void Controller::_drive(std::vector<Message> history, StreamFn override)
                 state_.phase = UiState::Phase::CONNECTING;
                 state_.retry_countdown
                     = UiState::Countdown { std::chrono::steady_clock::now()
-                        + std::chrono::seconds(wait) };
+                          + std::chrono::seconds(wait) };
             });
             using namespace std::chrono_literals;
             std::this_thread::sleep_for(std::chrono::seconds(wait));
@@ -612,12 +758,12 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
                     _post([this, req] {
                         _fill_tool_result(req,
                             ToolCall::Result { ToolCall::Result::Kind::ERROR,
-                                "ask: expected a non-empty 'questions' array" });
+                                "ask: expected a non-empty 'questions' "
+                                "array" });
                     });
-                    tool_msgs.push_back(
-                        { Message::Type::TOOL,
-                            "ask: expected a non-empty 'questions' array", { },
-                            req.id });
+                    tool_msgs.push_back({ Message::Type::TOOL,
+                        "ask: expected a non-empty 'questions' array", { },
+                        req.id });
                     continue;
                 }
                 auto promise = std::make_shared<std::promise<ModalResult>>();
@@ -628,9 +774,9 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
                         PendingModal { *form, std::move(promise) });
                 }
                 Ask ask;
-                ask.payload   = *form;
-                ask.future    = std::move(future);
-                ask.tool_req  = ev.tool_call;
+                ask.payload  = *form;
+                ask.future   = std::move(future);
+                ask.tool_req = ev.tool_call;
                 asks.push_back(std::move(ask));
                 continue;
             }
@@ -644,8 +790,8 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
                           "objects";
                     _post([this, req, msg] {
                         _fill_tool_result(req,
-                            ToolCall::Result { ToolCall::Result::Kind::ERROR,
-                                msg });
+                            ToolCall::Result {
+                                ToolCall::Result::Kind::ERROR, msg });
                     });
                     tool_msgs.push_back(
                         { Message::Type::TOOL, msg, { }, req.id });
@@ -655,13 +801,13 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
                 _post([this, req, todo = *list, text] {
                     state_.todo = todo;
                     _fill_tool_result(req,
-                        ToolCall::Result { ToolCall::Result::Kind::OUTPUT,
-                            text });
+                        ToolCall::Result {
+                            ToolCall::Result::Kind::OUTPUT, text });
                 });
                 tool_msgs.push_back({ Message::Type::TOOL, text, { }, req.id });
                 continue;
             }
-            const Tool* tool = tools_.find(ev.tool_call.name);
+            const Tool* tool          = tools_.find(ev.tool_call.name);
             const bool needs_approval = tool != nullptr
                 && tool->safety == ToolSafety::MUTATING
                 && allowed_tools_.count(ev.tool_call.name) == 0;
@@ -677,7 +823,8 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
                     PendingModal { ev.tool_call, std::move(promise) });
             }
             asks.push_back(Ask { .payload = ev.tool_call,
-                .future  = std::move(future), .tool_req = std::nullopt });
+                .future                   = std::move(future),
+                .tool_req                 = std::nullopt });
         } else if (ev.kind == StreamEvent::Kind::QUESTION) {
             auto promise = std::make_shared<std::promise<ModalResult>>();
             auto future  = promise->get_future();
@@ -687,7 +834,8 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
                     PendingModal { ev.question, std::move(promise) });
             }
             asks.push_back(Ask { .payload = ev.question,
-                .future  = std::move(future), .tool_req = std::nullopt });
+                .future                   = std::move(future),
+                .tool_req                 = std::nullopt });
         }
     }
     if (!asks.empty()) {
@@ -715,8 +863,8 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
     Message assistant { Message::Type::ASSISTANT, assistant_text };
     for (const auto& ev : stream_events_) {
         if (ev.kind == StreamEvent::Kind::TOOL_CALL) {
-            assistant.tool_calls.push_back(ToolCallEntry { ev.tool_call.id,
-                ev.tool_call.name, ev.tool_call.args });
+            assistant.tool_calls.push_back(ToolCallEntry {
+                ev.tool_call.id, ev.tool_call.name, ev.tool_call.args });
         }
     }
     if (!assistant.tool_calls.empty() || !assistant.content.empty()) {
@@ -782,18 +930,18 @@ void Controller::_apply_ask_result(const ToolCallRequest& req,
     const auto* answer = std::get_if<ModalAnswer>(&res);
     if (answer == nullptr) {
         _post([this, req] {
-            _fill_tool_result(req,
-                ToolCall::Result { ToolCall::Result::Kind::CANCEL, "" });
+            _fill_tool_result(
+                req, ToolCall::Result { ToolCall::Result::Kind::CANCEL, "" });
         });
         tool_msgs.push_back(
             { Message::Type::TOOL, denial_text(""), { }, req.id });
         return;
     }
-    ModalAnswer copy = *answer;
+    ModalAnswer copy       = *answer;
     const std::string text = ask_answer_markdown(copy);
     _post([this, req, text] {
-        _fill_tool_result(req,
-            ToolCall::Result { ToolCall::Result::Kind::OUTPUT, text });
+        _fill_tool_result(
+            req, ToolCall::Result { ToolCall::Result::Kind::OUTPUT, text });
     });
     tool_msgs.push_back({ Message::Type::TOOL, text, { }, req.id });
 }
@@ -803,8 +951,8 @@ void Controller::_run_tool(
 {
     const ToolOutput out = tools_.dispatch(req);
     const auto kind      = out.kind == ToolOutput::Kind::OUTPUT
-              ? ToolCall::Result::Kind::OUTPUT
-              : ToolCall::Result::Kind::ERROR;
+        ? ToolCall::Result::Kind::OUTPUT
+        : ToolCall::Result::Kind::ERROR;
     _post([this, req, kind, out] {
         _fill_tool_result(req, ToolCall::Result { kind, out.text });
     });
@@ -818,8 +966,7 @@ std::string Controller::_tool_result_text(const ToolCall& call)
     }
     switch (call.result->kind) {
     case ToolCall::Result::Kind::REJECT:
-    case ToolCall::Result::Kind::CANCEL:
-        return denial_text(call.result->text);
+    case ToolCall::Result::Kind::CANCEL: return denial_text(call.result->text);
     case ToolCall::Result::Kind::OUTPUT:
     case ToolCall::Result::Kind::ERROR: return call.result->text;
     }
@@ -834,9 +981,9 @@ void Controller::_fill_tool_result(
         if (tc == nullptr || tc->result.has_value()) {
             continue;
         }
-        const bool matched = !req.id.empty() ? tc->call_id == req.id
-                                             : tc->name == req.name
-            && tc->args == req.args;
+        const bool matched = !req.id.empty()
+            ? tc->call_id == req.id
+            : tc->name == req.name && tc->args == req.args;
         if (matched) {
             tc->result = std::move(result);
             return;
@@ -879,12 +1026,17 @@ void Controller::apply(const StreamEvent& ev)
         }
         break;
     case StreamEvent::Kind::USAGE: {
-        const ModelPricing p = get_pricing(cfg_);
+        std::string model;
+        {
+            std::lock_guard lock(data_mutex_);
+            model = cfg_.last_used ? cfg_.last_used->model : "";
+        }
+        const ModelPricing p = get_pricing(model);
         state_.last          = ev.usage;
         state_.totals.prompt += ev.usage.prompt;
         state_.totals.completion += ev.usage.completion;
         state_.totals.total += ev.usage.total;
-        state_.last_cost  = compute_cost(ev.usage, p);
+        state_.last_cost = compute_cost(ev.usage, p);
         state_.total_cost += state_.last_cost;
         break;
     }
@@ -905,11 +1057,374 @@ void Controller::finish(std::string error)
     _drain_queued();
 }
 
-std::vector<SlashCommand> slash_commands(const Config&)
+Config Controller::config() const
+{
+    std::lock_guard lock(data_mutex_);
+    return cfg_;
+}
+
+std::vector<ConnectionView> Controller::connections() const
+{
+    std::lock_guard lock(data_mutex_);
+    std::vector<ConnectionView> views;
+    views.reserve(cfg_.providers.size());
+    for (const Connection& conn : cfg_.providers) {
+        ConnectionView view;
+        view.id          = conn.id;
+        view.provider_id = conn.provider_id;
+        view.api_key     = conn.api_key;
+        view.active = cfg_.last_used && cfg_.last_used->provider == conn.id;
+        if (conn.provider_id == kLocalProviderId) {
+            view.name = "Local";
+        } else if (conn.provider_id == kCustomProviderId) {
+            view.name = "Custom";
+        } else if (const auto it = catalog_.providers.find(conn.provider_id);
+            it != catalog_.providers.end()) {
+            view.name = it->second.name;
+        }
+        if (view.name.empty()) {
+            view.name = conn.provider_id;
+        }
+        const auto it = model_catalog_.find(conn.id);
+        if (it != model_catalog_.end()) {
+            if (auto* ready
+                = std::get_if<CatalogEntry::Ready>(&it->second.state)) {
+                view.state       = ConnectionView::State::READY;
+                view.model_count = ready->models.size();
+            } else if (auto* failed
+                = std::get_if<CatalogEntry::Failed>(&it->second.state)) {
+                view.state = ConnectionView::State::FAILED;
+                view.error = failed->status;
+            }
+        }
+        views.push_back(std::move(view));
+    }
+    return views;
+}
+
+ModelList Controller::models_for(const std::string& connection_id) const
+{
+    std::lock_guard lock(data_mutex_);
+    ModelList list;
+    const Connection* conn = nullptr;
+    for (const Connection& conn_item : cfg_.providers) {
+        if (conn_item.id == connection_id) {
+            conn = &conn_item;
+            break;
+        }
+    }
+    if (conn == nullptr) {
+        list.state = ModelList::State::FAILED;
+        list.error = Status::CONFIG_ERROR;
+        return list;
+    }
+    const auto it = model_catalog_.find(connection_id);
+    if (it == model_catalog_.end()) {
+        return list;
+    }
+    auto* ready = std::get_if<CatalogEntry::Ready>(&it->second.state);
+    if (ready == nullptr) {
+        if (auto* failed
+            = std::get_if<CatalogEntry::Failed>(&it->second.state)) {
+            list.state = ModelList::State::FAILED;
+            list.error = failed->status;
+        }
+        return list;
+    }
+    list.state          = ModelList::State::READY;
+    list.models         = ready->models;
+    const auto provider = catalog_.providers.find(conn->provider_id);
+    if (provider == catalog_.providers.end()) {
+        return list;
+    }
+    for (ModelInfo& info : list.models) {
+        if (info.context_length.has_value()) {
+            continue;
+        }
+        const auto model = provider->second.models.find(info.id);
+        if (model != provider->second.models.end() && model->second.context) {
+            info.context_length = model->second.context;
+        }
+    }
+    return list;
+}
+
+bool Controller::remove_connection(const std::string& connection_id)
+{
+    bool removed = false;
+    {
+        std::lock_guard lock(data_mutex_);
+        if (cfg_.providers.size() <= 1) {
+            return false;
+        }
+        auto& providers = cfg_.providers;
+        providers.erase(std::remove_if(providers.begin(), providers.end(),
+                            [&](const Connection& conn) {
+                                return conn.id == connection_id;
+                            }),
+            providers.end());
+        removed = true;
+        ++generations_[connection_id];
+        model_catalog_.erase(connection_id);
+        if (cfg_.last_used && cfg_.last_used->provider == connection_id) {
+            if (!cfg_.providers.empty()) {
+                cfg_.last_used = LastUsed { cfg_.providers.front().id, "" };
+            } else {
+                cfg_.last_used.reset();
+            }
+        }
+        save_config(config_path(), cfg_);
+    }
+    if (removed) {
+        ++state_.modal_serial;
+    }
+    return removed;
+}
+
+void Controller::refetch_models(const std::string& connection_id)
+{
+    std::lock_guard lock(data_mutex_);
+    _start_fetch_locked(connection_id);
+}
+
+std::vector<std::pair<std::string, std::string>>
+Controller::provider_options() const
+{
+    std::lock_guard lock(data_mutex_);
+    std::vector<std::pair<std::string, std::string>> options;
+    options.reserve(catalog_.providers.size() + 2);
+    for (const auto& [id, provider] : catalog_.providers) {
+        options.emplace_back(id, provider.name.empty() ? id : provider.name);
+    }
+    std::sort(options.begin(), options.end());
+    options.emplace_back(std::string(kLocalProviderId), "Local");
+    options.emplace_back(std::string(kCustomProviderId), "Custom");
+    return options;
+}
+
+Route Controller::_active_route_locked(const std::string& model) const
+{
+    if (!cfg_.last_used) {
+        return Route { };
+    }
+    for (const Connection& conn : cfg_.providers) {
+        if (conn.id != cfg_.last_used->provider) {
+            continue;
+        }
+        ApiStandard dialect = ApiStandard::OPENAI;
+        if (const auto it = conn.dialects.find(model);
+            it != conn.dialects.end()) {
+            dialect = it->second;
+        }
+        return resolve_route(conn, catalog_, dialect);
+    }
+    return Route { };
+}
+
+std::string Controller::_unique_id_locked(std::string base) const
+{
+    const auto taken = [&](const std::string& id) {
+        for (const Connection& conn : cfg_.providers) {
+            if (conn.id == id) {
+                return true;
+            }
+        }
+        return false;
+    };
+    if (!taken(base)) {
+        return base;
+    }
+    for (int n = 2;; ++n) {
+        std::string candidate = base + "-" + std::to_string(n);
+        if (!taken(candidate)) {
+            return candidate;
+        }
+    }
+}
+
+Connection* Controller::_find_locked(const std::string& id)
+{
+    for (Connection& conn : cfg_.providers) {
+        if (conn.id == id) {
+            return &conn;
+        }
+    }
+    return nullptr;
+}
+
+void Controller::_start_fetch_locked(const std::string& connection_id)
+{
+    const Connection* conn = _find_locked(connection_id);
+    if (conn == nullptr) {
+        return;
+    }
+    const Route route = resolve_route(*conn, catalog_, ApiStandard::OPENAI);
+    const int gen     = ++generations_[connection_id];
+    if (route.api.empty()) {
+        model_catalog_[connection_id]
+            = CatalogEntry { CatalogEntry::Failed { Status::INVALID_URL } };
+        return;
+    }
+    model_catalog_[connection_id] = CatalogEntry { CatalogEntry::Fetching { } };
+
+    auto models = std::make_shared<std::vector<ModelInfo>>();
+    ModelsFn fn = models_fn_;
+    if (!fn) {
+        fn = [](const Route& r, std::vector<ModelInfo>& out) {
+            return fetch_models(r, out);
+        };
+    }
+    std::shared_future<Status> future
+        = std::async(std::launch::async, [fn, route, models] {
+              return fn(route, *models);
+          }).share();
+    fetch_threads_.emplace_back([this, connection_id, gen, future, models] {
+        future.wait();
+        if (!alive_.load()) {
+            return;
+        }
+        _post([this, connection_id, gen, future, models] {
+            std::lock_guard lock(data_mutex_);
+            if (generations_[connection_id] != gen) {
+                return;
+            }
+            const Status st = future.get();
+            if (st == Status::OK) {
+                model_catalog_[connection_id]
+                    = CatalogEntry { CatalogEntry::Ready { *models } };
+            } else {
+                model_catalog_[connection_id]
+                    = CatalogEntry { CatalogEntry::Failed { st } };
+            }
+        });
+    });
+}
+
+void Controller::_begin_connect(const ConnectResult& res)
+{
+    Route route;
+    bool known = false;
+    {
+        std::lock_guard lock(data_mutex_);
+        known = res.provider_id == kLocalProviderId
+            || res.provider_id == kCustomProviderId
+            || catalog_.providers.count(res.provider_id) > 0;
+        if (known) {
+            Connection probe;
+            probe.provider_id = res.provider_id;
+            probe.endpoint    = res.endpoint;
+            probe.api_key     = res.api_key;
+            route = resolve_route(probe, catalog_, ApiStandard::OPENAI);
+        }
+    }
+    if (!known || route.endpoint.empty()) {
+        state_.connect_status = "unknown provider";
+        return;
+    }
+
+    auto models = std::make_shared<std::vector<ModelInfo>>();
+    ModelsFn fn = models_fn_;
+    if (!fn) {
+        fn = [](const Route& r, std::vector<ModelInfo>& out) {
+            return fetch_models(r, out);
+        };
+    }
+    std::shared_future<Status> future
+        = std::async(std::launch::async, [fn, route, models] {
+              return fn(route, *models);
+          }).share();
+    fetch_threads_.emplace_back([this, res, future, models] {
+        future.wait();
+        if (!alive_.load()) {
+            return;
+        }
+        _post([this, res, future, models] {
+            const Status st = future.get();
+            if (st != Status::OK) {
+                state_.connect_status = error_text(st);
+                return;
+            }
+            state_.connect_status
+                = "✓ " + std::to_string(models->size()) + " models";
+            if (res.persist) {
+                const bool first = _commit_connection(res);
+                if (std::holds_alternative<ConnectModal>(state_.modal)) {
+                    state_.modal
+                        = ConnectModal { first ? ConnectModal::Entry::PICK_MODEL
+                                               : ConnectModal::Entry::MANAGE };
+                    ++state_.modal_serial;
+                }
+            }
+        });
+    });
+}
+
+bool Controller::_commit_connection(const ConnectResult& res)
+{
+    std::lock_guard lock(data_mutex_);
+    const bool first = !cfg_.last_used.has_value();
+
+    Connection probe;
+    probe.provider_id = res.provider_id;
+    probe.endpoint    = res.endpoint;
+    probe.api_key     = res.api_key;
+    const Route route = resolve_route(probe, catalog_, ApiStandard::OPENAI);
+
+    Connection stored;
+    stored.provider_id = res.provider_id;
+    stored.api_key     = res.api_key;
+    if (res.provider_id == kLocalProviderId
+        || res.provider_id == kCustomProviderId) {
+        stored.endpoint = res.endpoint;
+    }
+
+    Connection* existing = nullptr;
+    if (!route.endpoint.empty()) {
+        for (Connection& conn : cfg_.providers) {
+            const Route other
+                = resolve_route(conn, catalog_, ApiStandard::OPENAI);
+            if (other.endpoint == route.endpoint) {
+                existing = &conn;
+                break;
+            }
+        }
+    }
+
+    std::string id;
+    if (existing != nullptr) {
+        existing->provider_id = stored.provider_id;
+        existing->api_key     = stored.api_key;
+        existing->endpoint    = stored.endpoint;
+        existing->dialects.clear();
+        id = existing->id;
+    } else {
+        stored.id = _unique_id_locked(res.provider_id);
+        id        = stored.id;
+        cfg_.providers.push_back(std::move(stored));
+    }
+    save_config(config_path(), cfg_);
+    _start_fetch_locked(id);
+    return first;
+}
+
+void Controller::_apply_pick(const ModelChoice& choice)
+{
+    std::lock_guard lock(data_mutex_);
+    if (_find_locked(choice.connection_id) == nullptr) {
+        return;
+    }
+    cfg_.last_used = LastUsed { choice.connection_id, choice.model_id };
+    save_config(config_path(), cfg_);
+}
+
+std::vector<SlashCommand> slash_commands()
 {
     return {
         { "/help", "show available commands", SlashCommand::Action::HELP },
         { "/exit", "quit ursa", SlashCommand::Action::EXIT },
+        { "/connect", "manage provider connections",
+            SlashCommand::Action::CONNECT },
+        { "/model", "pick the active model", SlashCommand::Action::MODEL },
         { "/settings", "open settings", SlashCommand::Action::SETTINGS },
         { "/demo", "run scripted modal demo", SlashCommand::Action::DEMO },
         { "/prompt", "show the generated system prompt",

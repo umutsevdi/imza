@@ -10,40 +10,50 @@ namespace ursa {
 
 using namespace ftxui;
 
-ftxui::Component make_side_panel(Controller& controller,
-    std::function<int()> width)
-    {
-        return ftxui::Renderer(
-            [&controller, width = std::move(width)] {
-                using namespace ftxui;
-                const int w = width();
-                const bool narrow = w < LayoutCtx::wide_threshold;
-                LayoutCtx ctx { narrow ? LayoutCtx::Kind::NARROW
-                                       : LayoutCtx::Kind::WIDE,
-                    w };
-                Elements parts;
+ftxui::Component make_side_panel(
+    Controller& controller, std::function<int()> width)
+{
+    return ftxui::Renderer([&controller, width = std::move(width)] {
+        using namespace ftxui;
+        const int w       = width();
+        const bool narrow = w < LayoutCtx::wide_threshold;
+        LayoutCtx ctx {
+            narrow ? LayoutCtx::Kind::NARROW : LayoutCtx::Kind::WIDE, w
+        };
+        Elements parts;
+        parts.push_back(render_todo(controller.state().todo, ctx) | yflex);
+        if (!narrow) {
+            parts.push_back(
+                render_changed_files(controller.state().changed_files, ctx)
+                | yflex);
+            const std::optional<std::string>& rules
+                = controller.state().agent_rules;
+            if (rules) {
+                parts.push_back(text(" " + *rules + " ") | bold
+                    | color(Color::Black) | bgcolor(Color::Yellow) | xflex);
+            }
+            int project_skills = controller.state().project_skills;
+            int global_skills  = controller.state().global_skills;
+            if (project_skills > 0) {
                 parts.push_back(
-                    render_todo(controller.state().todo, ctx) | yflex);
-                if (!narrow) {
-                    parts.push_back(
-                        render_changed_files(
-                            controller.state().changed_files, ctx)
-                        | yflex);
-                }
-                const std::optional<std::string>& rules
-                    = controller.state().agent_rules;
-                if (!narrow && rules) {
-                    parts.push_back(text(" " + *rules + " ") | bold
-                        | color(Color::Black) | bgcolor(Color::Yellow)
-                        | xflex);
-                }
-                Element body = vbox(std::move(parts));
-                if (narrow) {
-                    return body | xflex;
-                }
-                return body | size(WIDTH, EQUAL, LayoutCtx::panel_width);
-            });
-    }
+                    text(std::format(" {} Project Skills ", project_skills))
+                    | bold | color(Color::Black) | bgcolor(Color::BlueLight)
+                    | xflex);
+            }
+            if (global_skills > 0) {
+                parts.push_back(
+                    text(std::format(" {} Global Skills ", global_skills))
+                    | bold | color(Color::Black) | bgcolor(Color::GrayLight)
+                    | xflex);
+            }
+        }
+        Element body = vbox(std::move(parts));
+        if (narrow) {
+            return body | xflex;
+        }
+        return body | size(WIDTH, EQUAL, LayoutCtx::panel_width);
+    });
+}
 
 namespace {
 
@@ -70,7 +80,7 @@ namespace {
 
     Element todo_item(const TodoItem& it)
     {
-        using Status = TodoItem::Status;
+        using Status            = TodoItem::Status;
         ftxui::Color mark_color = PANEL_FG_DIM;
         bool mark_bold          = false;
         std::string mark;
@@ -84,8 +94,8 @@ namespace {
         case Status::CANCELLED: mark = "[-]"; break;
         case Status::PENDING: mark = "[ ]"; break;
         }
-        const bool inactive = it.status == Status::COMPLETED
-            || it.status == Status::CANCELLED;
+        const bool inactive
+            = it.status == Status::COMPLETED || it.status == Status::CANCELLED;
         Element mark_el = text(mark) | color(mark_color);
         if (mark_bold) {
             mark_el = std::move(mark_el) | bold;

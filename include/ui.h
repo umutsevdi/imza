@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ftxui/component/component_base.hpp>
+#include <ftxui/component/component_options.hpp>
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/color.hpp>
 
@@ -14,29 +15,38 @@
 
 namespace ursa {
 
-inline const ftxui::Color PANEL_COLOR  = ftxui::Color::RGB(26, 34, 52);
-inline const ftxui::Color PANEL_FG     = ftxui::Color::RGB(228, 232, 240);
-inline const ftxui::Color PANEL_FG_DIM = ftxui::Color::RGB(148, 156, 172);
-inline const ftxui::Color PANEL_BORDER = ftxui::Color::RGB(78, 89, 110);
+inline const ftxui::Color PANEL_COLOR       = ftxui::Color::RGB(26, 34, 52);
+inline const ftxui::Color PANEL_FG          = ftxui::Color::RGB(228, 232, 240);
+inline const ftxui::Color PANEL_FG_DIM      = ftxui::Color::RGB(148, 156, 172);
+inline const ftxui::Color PANEL_BORDER      = ftxui::Color::RGB(78, 89, 110);
 inline const ftxui::Color PANEL_COLOR_FOCUS = ftxui::Color::RGB(44, 56, 84);
 
-inline constexpr int MODAL_MAX_WIDTH = 120;
+inline constexpr int MODAL_MAX_WIDTH = 100;
 
 ftxui::Element panel(ftxui::Element e);
 
 ftxui::Component space_activates(
     ftxui::Component child, std::function<void()> on_space);
 
+ftxui::InputOption field_option(std::string* content, int* cursor,
+    std::string placeholder, std::function<void()> on_change = { },
+    std::function<void()> on_enter = { });
+ftxui::InputOption password_option(std::string* content, int* cursor,
+    std::string placeholder, std::function<void()> on_change = { });
+ftxui::Component action_button(std::string label,
+    std::function<void()> on_click, const ftxui::Color& color = PANEL_BORDER,
+    const ftxui::Color& color_focussed = PANEL_COLOR);
+
 ftxui::Element render_markdown_element(std::string_view md);
 
-ftxui::Element card(
-    ftxui::Element body, std::optional<ftxui::Color> bg = std::nullopt,
-    bool pad = true);
+ftxui::Element card(ftxui::Element body,
+    std::optional<ftxui::Color> bg = std::nullopt, bool pad = true);
 ftxui::Element section_title(
     std::string_view title, ftxui::Color color = PANEL_FG_DIM);
-ftxui::Element code_block(const std::string& code, const std::string& lang = "");
-ftxui::Element code_block_with_lines(const std::string& code,
-    const std::string& lang, std::size_t start_line);
+ftxui::Element code_block(
+    const std::string& code, const std::string& lang = "");
+ftxui::Element code_block_with_lines(
+    const std::string& code, const std::string& lang, std::size_t start_line);
 ftxui::Element list_block(const std::string& text);
 
 ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx);
@@ -53,6 +63,7 @@ ftxui::Component make_chat(Controller& controller, std::function<int()> width);
 ftxui::Component make_side_panel(
     Controller& controller, std::function<int()> width);
 ftxui::Component make_settings(Controller& controller);
+ftxui::Component make_connect(Controller& controller);
 ftxui::Component make_modal(Controller& controller);
 
 } // namespace ursa

@@ -3,54 +3,79 @@
 #include "util.h"
 
 #include <algorithm>
-#include <unordered_map>
+#include <cstdint>
+#include <map>
+#include <mutex>
+#include <optional>
+#include <string>
 
 namespace ursa {
 
 namespace {
 
-using Row = ModelPricing;
+    constexpr double kPerMillionToPerK = 1.0 / 1000.0;
 
-const std::unordered_map<std::string, Row>& table()
-{
-    static const std::unordered_map<std::string, Row> rows = {
-        { "gpt-4o-mini",        { 0.00015, 0.00060, 128000 } },
-        { "gpt-4o",             { 0.00250, 0.01000, 128000 } },
-        { "gpt-4-turbo",        { 0.01000, 0.03000, 128000 } },
-        { "gpt-4",              { 0.03000, 0.06000, 8192 } },
-        { "o1",                 { 0.01500, 0.06000, 200000 } },
-        { "o3-mini",            { 0.00110, 0.00440, 200000 } },
-        { "claude-3-5-sonnet",  { 0.00300, 0.01500, 200000 } },
-        { "claude-3-5-haiku",   { 0.00080, 0.00400, 200000 } },
-        { "claude-3-opus",      { 0.01500, 0.07500, 200000 } },
-        { "claude-3-7-sonnet",  { 0.00300, 0.01500, 200000 } },
-        { "claude-sonnet-4",    { 0.00300, 0.01500, 200000 } },
-        { "claude-opus-4",      { 0.01500, 0.07500, 200000 } },
-        { "glm-4.7-flash",      { 0.00000, 0.00000, 128000 } },
-        { "glm-4.5-flash",      { 0.00000, 0.00000, 128000 } },
-        { "glm-4.7",            { 0.00050, 0.00150, 128000 } },
-        { "glm-4.6",            { 0.00050, 0.00150, 128000 } },
-        { "glm-5",              { 0.00060, 0.00150, 128000 } },
-        { "kimi-k2",            { 0.00060, 0.00240, 131072 } },
-        { "kimi-k1",            { 0.00060, 0.00240, 131072 } },
-        { "deepseek-chat",      { 0.00027, 0.00110, 128000 } },
-        { "deepseek-reasoner",  { 0.00055, 0.00219, 128000 } },
-    };
-    return rows;
-}
+    std::mutex& pricing_mutex()
+    {
+        static std::mutex mutex;
+        return mutex;
+    }
+
+    std::map<std::string, ModelPricing>& pricing_table()
+    {
+        static std::map<std::string, ModelPricing> table;
+        return table;
+    }
+
+    std::optional<ModelPricing> pricing_from_model(const CachedModel& model)
+    {
+        if (!model.cost_input && !model.cost_output) {
+            return std::nullopt;
+        }
+        ModelPricing pricing;
+        pricing.input_per_1k = model.cost_input.value_or(0.0) * kPerMillionToPerK;
+        pricing.output_per_1k = model.cost_output.value_or(0.0) * kPerMillionToPerK;
+        pricing.cache_read_per_1k
+            = model.cost_cache_read.value_or(0.0) * kPerMillionToPerK;
+        pricing.cache_write_per_1k
+            = model.cost_cache_write.value_or(0.0) * kPerMillionToPerK;
+        pricing.context_limit = model.context.value_or(0);
+        return pricing;
+    }
+
+    void insert_pricing(std::map<std::string, ModelPricing>& table,
+        const std::string& key, const ModelPricing& pricing)
+    {
+        table[to_lower(key)] = pricing;
+    }
 
 } // namespace
 
-ModelPricing get_pricing(const Config& cfg)
+void set_pricing_catalog(const Catalog& catalog)
 {
-    if (cfg.pricing) {
-        return *cfg.pricing;
+    std::map<std::string, ModelPricing> table;
+    for (const auto& [provider_id, provider] : catalog.providers) {
+        for (const auto& [model_id, model] : provider.models) {
+            const std::optional<ModelPricing> pricing = pricing_from_model(model);
+            if (!pricing) {
+                continue;
+            }
+            insert_pricing(table, model_id, *pricing);
+            insert_pricing(table, provider_id + "/" + model_id, *pricing);
+        }
     }
-    const std::string model = to_lower(cfg.model);
+    std::lock_guard lock(pricing_mutex());
+    pricing_table() = std::move(table);
+}
+
+ModelPricing get_pricing(std::string_view model_view)
+{
+    const std::string model = to_lower(model_view);
     if (model.empty()) {
         return { };
     }
-    const auto& rows = table();
+    std::lock_guard lock(pricing_mutex());
+    const std::map<std::string, ModelPricing>& rows = pricing_table();
     auto exact = rows.find(model);
     if (exact != rows.end()) {
         return exact->second;
@@ -65,9 +90,28 @@ ModelPricing get_pricing(const Config& cfg)
 
 double compute_cost(const Usage& usage, const ModelPricing& pricing)
 {
-    const double in  = (static_cast<double>(usage.prompt) / 1000.0) * pricing.input_per_1k;
-    const double out = (static_cast<double>(usage.completion) / 1000.0) * pricing.output_per_1k;
-    return in + out;
+    const std::int64_t cached_read
+        = std::min<std::int64_t>(usage.cached_read, usage.prompt);
+    const std::int64_t cached_write = std::min<std::int64_t>(
+        usage.cached_write, usage.prompt - cached_read);
+
+    const double read_rate = pricing.cache_read_per_1k > 0.0
+        ? pricing.cache_read_per_1k
+        : pricing.input_per_1k;
+    const double write_rate = pricing.cache_write_per_1k > 0.0
+        ? pricing.cache_write_per_1k
+        : pricing.input_per_1k;
+
+    const std::int64_t plain_prompt
+        = static_cast<std::int64_t>(usage.prompt) - cached_read - cached_write;
+    const double plain = (static_cast<double>(plain_prompt) / 1000.0)
+        * pricing.input_per_1k;
+    const double read = (static_cast<double>(cached_read) / 1000.0) * read_rate;
+    const double write
+        = (static_cast<double>(cached_write) / 1000.0) * write_rate;
+    const double out = (static_cast<double>(usage.completion) / 1000.0)
+        * pricing.output_per_1k;
+    return plain + read + write + out;
 }
 
 } // namespace ursa

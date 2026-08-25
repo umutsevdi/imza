@@ -7,16 +7,16 @@
 
 namespace ursa {
 
-std::filesystem::path config_path()
+std::filesystem::path base_config_dir()
 {
 #if defined(_WIN32)
     const char* appdata        = std::getenv("APPDATA");
     std::filesystem::path base = appdata ? appdata : ".";
-    return base / "ursa" / "config.json";
+    return base / "ursa";
 #elif defined(__APPLE__)
     const char* home           = std::getenv("HOME");
     std::filesystem::path base = home ? home : ".";
-    return base / "Library" / "Application Support" / "ursa" / "config.json";
+    return base / "Library" / "Application Support" / "ursa";
 #else
     const char* xdg  = std::getenv("XDG_CONFIG_HOME");
     const char* home = std::getenv("HOME");
@@ -29,9 +29,47 @@ std::filesystem::path config_path()
     } else {
         base = ".config";
     }
-    return base / "ursa" / "config.json";
+    return base / "ursa";
 #endif
 }
+
+std::filesystem::path config_path()
+{
+    return base_config_dir() / "config.json";
+}
+
+std::filesystem::path presets_path()
+{
+    return base_config_dir() / "presets.json";
+}
+
+namespace {
+
+    std::string string_or_empty(const Json::Value& parent, const char* key)
+    {
+        const Json::Value& v = parent[key];
+        return v.isString() ? v.asString() : std::string();
+    }
+
+    bool parse_dialect(const std::string& text, ApiStandard& out)
+    {
+        if (text == "openai") {
+            out = ApiStandard::OPENAI;
+            return true;
+        }
+        if (text == "anthropic") {
+            out = ApiStandard::ANTHROPIC;
+            return true;
+        }
+        return false;
+    }
+
+    const char* dialect_str(ApiStandard standard)
+    {
+        return standard == ApiStandard::ANTHROPIC ? "anthropic" : "openai";
+    }
+
+} // namespace
 
 Status load_config(const std::filesystem::path& path, Config& out,
     std::string* error)
@@ -43,9 +81,11 @@ Status load_config(const std::filesystem::path& path, Config& out,
         return st;
     };
 
+    out = Config { };
+
     std::ifstream file(path);
     if (!file) {
-        return fail(Status::CONFIG_ERROR, "cannot open " + path.string());
+        return Status::OK;
     }
 
     std::stringstream buffer;
@@ -62,23 +102,124 @@ Status load_config(const std::filesystem::path& path, Config& out,
     if (!Json::parseFromStream(reader, parse_stream, &root, &err)) {
         return fail(Status::CONFIG_ERROR, "invalid JSON: " + err);
     }
+    if (!root.isObject()) {
+        return fail(Status::CONFIG_ERROR, "config root is not an object");
+    }
 
-    const auto string_field = [&](const char* key) -> std::string {
-        const Json::Value& v = root[key];
-        return v.isString() ? v.asString() : std::string();
-    };
+    const Json::Value& providers = root["providers"];
+    if (!providers.isNull()) {
+        if (!providers.isArray()) {
+            return fail(Status::CONFIG_ERROR, "'providers' must be an array");
+        }
+        for (const Json::Value& entry : providers) {
+            if (!entry.isObject()) {
+                return fail(
+                    Status::CONFIG_ERROR, "provider entry must be an object");
+            }
+            Connection conn;
+            conn.id          = string_or_empty(entry, "id");
+            conn.provider_id = string_or_empty(entry, "provider_id");
+            conn.endpoint    = string_or_empty(entry, "endpoint");
+            conn.api_key     = string_or_empty(entry, "api_key");
+            if (conn.id.empty() || conn.provider_id.empty()) {
+                return fail(Status::CONFIG_ERROR,
+                    "provider entry requires non-empty 'id' and 'provider_id'");
+            }
+            const Json::Value& dialects = entry["dialects"];
+            if (!dialects.isNull()) {
+                if (!dialects.isObject()) {
+                    return fail(Status::CONFIG_ERROR,
+                        "'dialects' must be an object");
+                }
+                for (const std::string& model : dialects.getMemberNames()) {
+                    ApiStandard standard;
+                    if (!parse_dialect(dialects[model].asString(), standard)) {
+                        return fail(Status::CONFIG_ERROR,
+                            "unknown dialect for model '" + model + "'");
+                    }
+                    conn.dialects[model] = standard;
+                }
+            }
+            out.providers.push_back(std::move(conn));
+        }
+    }
 
-    out.api_base = string_field("api_base");
-    out.api_key  = string_field("api_key");
-    out.model    = string_field("model");
+    const Json::Value& last = root["last_used"];
+    if (!last.isNull()) {
+        if (!last.isObject()) {
+            return fail(Status::CONFIG_ERROR, "'last_used' must be an object");
+        }
+        LastUsed used;
+        used.provider = string_or_empty(last, "provider");
+        used.model    = string_or_empty(last, "model");
+        bool found    = false;
+        for (const Connection& conn : out.providers) {
+            if (conn.id == used.provider) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            return fail(Status::CONFIG_ERROR,
+                "'last_used.provider' does not resolve to a connection");
+        }
+        out.last_used = std::move(used);
+    }
 
-    const std::string standard = string_field("standard");
-    out.standard = (standard == "anthropic") ? ApiStandard::ANTHROPIC
-                                             : ApiStandard::OPENAI;
+    return Status::OK;
+}
 
-    if (out.api_key.empty() || out.model.empty()) {
-        return fail(Status::CONFIG_ERROR,
-            "config requires non-empty 'api_key' and 'model'");
+Status save_config(const std::filesystem::path& path, const Config& cfg)
+{
+    Json::Value root(Json::objectValue);
+
+    Json::Value providers(Json::arrayValue);
+    for (const Connection& conn : cfg.providers) {
+        Json::Value entry(Json::objectValue);
+        entry["id"]          = conn.id;
+        entry["provider_id"] = conn.provider_id;
+        if (!conn.endpoint.empty()) {
+            entry["endpoint"] = conn.endpoint;
+        }
+        entry["api_key"] = conn.api_key;
+        if (!conn.dialects.empty()) {
+            Json::Value dialects(Json::objectValue);
+            for (const auto& [model, standard] : conn.dialects) {
+                dialects[model] = dialect_str(standard);
+            }
+            entry["dialects"] = dialects;
+        }
+        providers.append(entry);
+    }
+    root["providers"] = providers;
+
+    if (cfg.last_used) {
+        Json::Value last(Json::objectValue);
+        last["provider"] = cfg.last_used->provider;
+        last["model"]    = cfg.last_used->model;
+        root["last_used"] = last;
+    }
+
+    const std::filesystem::path parent = path.parent_path();
+    std::error_code ec;
+    std::filesystem::create_directories(parent, ec);
+
+    const std::filesystem::path tmp = path.string() + ".tmp";
+    {
+        std::ofstream file(tmp, std::ios::trunc);
+        if (!file) {
+            return Status::CONFIG_ERROR;
+        }
+        Json::StreamWriterBuilder builder;
+        builder["indentation"] = "  ";
+        file << Json::writeString(builder, root) << "\n";
+        if (!file) {
+            return Status::CONFIG_ERROR;
+        }
+    }
+    std::filesystem::rename(tmp, path, ec);
+    if (ec) {
+        return Status::CONFIG_ERROR;
     }
     return Status::OK;
 }

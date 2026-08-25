@@ -1,10 +1,72 @@
 #include "network.h"
 
+#include <curl/curl.h>
+
 #include <memory>
 
 #include "util.h"
 
 namespace ursa {
+
+std::vector<std::string> auth_headers(AuthType auth, const std::string& key)
+{
+    if (auth == AuthType::NONE || key.empty()) {
+        return { };
+    }
+    if (auth == AuthType::ANTHROPIC) {
+        return { "x-api-key: " + key, "anthropic-version: 2023-06-01" };
+    }
+    return { "Authorization: Bearer " + key };
+}
+
+namespace {
+
+    size_t append_body(char* ptr, size_t, size_t n, void* userdata)
+    {
+        static_cast<std::string*>(userdata)->append(ptr, n);
+        return n;
+    }
+
+} // namespace
+
+Status http_get(const std::string& url,
+    const std::vector<std::string>& headers, long timeout_secs,
+    std::string& body, long* http_code)
+{
+    static thread_local CURL* handle = curl_easy_init();
+    if (!handle) {
+        return Status::NETWORK_ERROR;
+    }
+
+    curl_slist* list = nullptr;
+    for (const auto& h : headers) {
+        list = curl_slist_append(list, h.c_str());
+    }
+
+    curl_easy_reset(handle);
+    curl_easy_setopt(handle, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, timeout_secs);
+    curl_easy_setopt(handle, CURLOPT_TIMEOUT, timeout_secs);
+    curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(handle, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(handle, CURLOPT_HTTPHEADER, list);
+    curl_easy_setopt(handle, CURLOPT_HTTPGET, 1L);
+    curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, append_body);
+    curl_easy_setopt(handle, CURLOPT_WRITEDATA, &body);
+
+    const CURLcode res = curl_easy_perform(handle);
+    curl_slist_free_all(list);
+
+    long code = 0;
+    curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &code);
+    if (http_code != nullptr) {
+        *http_code = code;
+    }
+    if (res != CURLE_OK) {
+        return Status::NETWORK_ERROR;
+    }
+    return Status::OK;
+}
 
 std::string write_json(const Json::Value& value)
 {

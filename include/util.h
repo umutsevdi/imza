@@ -100,4 +100,21 @@ std::string join(const Container& items, std::string_view sep)
     return out;
 }
 
+inline std::string home_dir()
+{
+#ifdef _WIN32
+    char* buf = nullptr;
+    size_t sz = 0;
+    if (_dupenv_s(&buf, &sz, "USERPROFILE") != 0 || buf == nullptr) {
+        return "";
+    }
+    std::string value(buf);
+    free(buf);
+    return value;
+#else
+    const char* value = std::getenv("HOME");
+    return value != nullptr ? std::string(value) : "";
+#endif
+}
+
 } // namespace ursa

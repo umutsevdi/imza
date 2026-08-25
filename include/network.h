@@ -4,6 +4,7 @@
 #include <json/json.h>
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -35,6 +36,8 @@ struct Message {
 struct Usage {
     std::uint64_t prompt    = 0;
     std::uint64_t completion = 0;
+    std::uint64_t cached_read = 0;
+    std::uint64_t cached_write = 0;
     std::uint64_t total     = 0;
 };
 
@@ -63,6 +66,30 @@ struct ChatRequest {
     double temperature = 0.7;
 };
 
+enum class AuthType { BEARER, ANTHROPIC, NONE };
+
+struct Route {
+    std::string endpoint;
+    std::string api;
+    ApiStandard dialect = ApiStandard::OPENAI;
+    AuthType auth       = AuthType::BEARER;
+    std::string api_key;
+};
+
+std::vector<std::string> auth_headers(AuthType auth, const std::string& key);
+
+struct ModelInfo {
+    std::string id;
+    std::string name;
+    std::optional<std::uint64_t> context_length;
+};
+
+Status parse_models_response(std::string_view body, std::vector<ModelInfo>& out);
+Status fetch_models(const Route& route, std::vector<ModelInfo>& out);
+
+Status http_get(const std::string& url, const std::vector<std::string>& headers,
+    long timeout_secs, std::string& body, long* http_code);
+
 using StreamCallback = std::function<void(const StreamEvent&)>;
 
 struct ToolAccum {
@@ -81,15 +108,14 @@ struct ParseState {
 
 struct Provider {
     Json::Value (*build)(const ChatRequest& req);
-    std::string_view (*endpoint)();
-    std::vector<std::string> (*headers)(const std::string& api_key);
+    std::vector<std::string> (*headers)();
     void (*parse)(ParseState& state, std::string_view event,
         std::string_view data, std::vector<StreamEvent>& outs);
 };
 
-Provider get_provider(const Config& cfg);
+Provider get_provider(const Route& route);
 
-Status stream(const Provider& provider, const Config& cfg,
+Status stream(const Provider& provider, const Route& route,
     const ChatRequest& req, StreamCallback cb, int* retry_after = nullptr);
 
 Status parse_api_error(std::string_view body, std::string& message);

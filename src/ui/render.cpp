@@ -1,130 +1,25 @@
 #include "ui.h"
-#include "pricing.h"
 #include "util.h"
 
+#include <cstdlib>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
-#include <chrono>
-#include <cstdlib>
-#include <filesystem>
 #include <functional>
 #include <optional>
-#include <sstream>
-#include <iomanip>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ursa {
-
 using namespace ftxui;
 
-namespace {
-
-    std::string compact_tokens(std::uint64_t n)
-    {
-        std::ostringstream o;
-        if (n >= 1'000'000) {
-            o << std::fixed << std::setprecision(1)
-              << static_cast<double>(n) / 1'000'000.0 << 'M';
-        } else if (n >= 1'000) {
-            o << std::fixed << std::setprecision(1)
-              << static_cast<double>(n) / 1'000.0 << 'k';
-        } else {
-            o << n;
-        }
-        return o.str();
-    }
-
-    std::string money_text(double cost)
-    {
-        std::ostringstream o;
-        o << '$' << std::fixed
-          << std::setprecision(cost >= 1.0 ? 2 : 3) << cost;
-        return o.str();
-    }
-
-    std::size_t digit_width(std::size_t n)
-    {
-        return std::to_string(n).size();
-    }
-
-    std::string _home_dir()
-    {
-#ifdef _WIN32
-        char* buf = nullptr;
-        size_t sz = 0;
-        if (_dupenv_s(&buf, &sz, "USERPROFILE") != 0 || buf == nullptr) {
-            return "";
-        }
-        std::string value(buf);
-        free(buf);
-        return value;
-#else
-        const char* value = std::getenv("HOME");
-        return value != nullptr ? std::string(value) : "";
-#endif
-    }
-
-    std::string _abbreviate_home(const std::string& path)
-    {
-        const std::string home = _home_dir();
-        if (home.empty()) {
-            return path;
-        }
-        if (path == home) {
-            return "~";
-        }
-        if (path.rfind(home + "/", 0) == 0) {
-            return "~" + path.substr(home.size());
-        }
-        return path;
-    }
-
-    const char* _spinner_frame()
-    {
-        static const char* frames[]
-            = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" };
-        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now().time_since_epoch())
-                        .count();
-        return frames[static_cast<std::size_t>(ms / 100)
-            % (sizeof(frames) / sizeof(frames[0]))];
-    }
-
-    std::string _cached_cwd()
-    {
-        using namespace std::chrono_literals;
-        static std::string cached;
-        static std::chrono::steady_clock::time_point fetched;
-        const auto now = std::chrono::steady_clock::now();
-        if (cached.empty() || now - fetched > 1s) {
-            std::error_code ec;
-            const std::filesystem::path cwd
-                = std::filesystem::current_path(ec);
-            cached = ec ? "" : _abbreviate_home(cwd.string());
-            fetched = now;
-        }
-        return cached;
-    }
-
-    ModelPricing _cached_pricing(const Config& cfg)
-    {
-        static std::string last_model;
-        static ModelPricing cached;
-        if (last_model != cfg.model) {
-            last_model = cfg.model;
-            cached     = get_pricing(cfg);
-        }
-        return cached;
-    }
-
-} // namespace
+std::size_t digit_width(std::size_t n) { return std::to_string(n).size(); }
 
 Element code_block(const std::string& code, const std::string& lang)
 {
-    const Color bg = Color::Black;
-    const Color fg = Color::White;
+    const Color bg = PANEL_COLOR;
+    const Color fg = PANEL_FG;
     Elements body;
     if (!lang.empty()) {
         body.push_back(text(lang) | color(PANEL_FG_DIM));
@@ -141,15 +36,16 @@ Element code_block(const std::string& code, const std::string& lang)
         pos = nl + 1;
     }
     Element inner = vbox(std::move(body));
-    return hbox({ text(" "), std::move(inner) | xflex, text(" ") }) | bgcolor(bg);
+    return hbox({ text(" "), std::move(inner) | xflex, text(" ") })
+        | bgcolor(bg) | dim;
 }
 
-Element code_block_with_lines(const std::string& code, const std::string& lang,
-    std::size_t start_line)
+Element code_block_with_lines(
+    const std::string& code, const std::string& lang, std::size_t start_line)
 {
-    const Color bg = Color::Black;
-    const Color fg = Color::White;
-    const Color gutter = PANEL_FG_DIM;
+    const Color bg                       = PANEL_COLOR;
+    const Color fg                       = PANEL_FG;
+    const Color gutter                   = PANEL_FG_DIM;
     const std::vector<std::string> lines = split_lines(code);
 
     std::size_t footer = lines.size();
@@ -162,8 +58,8 @@ Element code_block_with_lines(const std::string& code, const std::string& lang,
     const std::size_t content_end
         = footer > 0 && lines[footer - 1].empty() ? footer - 1 : footer;
     const std::size_t last_num = start_line + content_end;
-    const std::size_t width    = digit_width(last_num < start_line ? start_line
-                                                                    : last_num);
+    const std::size_t width
+        = digit_width(last_num < start_line ? start_line : last_num);
 
     Elements body;
     if (!lang.empty()) {
@@ -177,7 +73,7 @@ Element code_block_with_lines(const std::string& code, const std::string& lang,
         if (i == footer - 1 && lines[i].empty()) {
             continue;
         }
-        const std::string num    = std::to_string(start_line + i);
+        const std::string num = std::to_string(start_line + i);
         std::string padded(width - num.size(), ' ');
         padded += num;
         body.push_back(hbox({
@@ -187,14 +83,15 @@ Element code_block_with_lines(const std::string& code, const std::string& lang,
         }));
     }
     Element inner = vbox(std::move(body));
-    return hbox({ text(" "), std::move(inner) | xflex, text(" ") }) | bgcolor(bg);
+    return hbox({ text(" "), std::move(inner) | xflex, text(" ") })
+        | bgcolor(bg) | dim;
 }
 
 Element list_block(const std::string& code)
 {
-    const Color bg   = Color::Black;
-    const Color fg   = PANEL_FG;
-    const Color size = PANEL_FG_DIM;
+    const Color bg                       = Color::Black;
+    const Color fg                       = PANEL_FG;
+    const Color size                     = PANEL_FG_DIM;
     const std::vector<std::string> lines = split_lines(code);
 
     Elements body;
@@ -204,8 +101,10 @@ Element list_block(const std::string& code)
             continue;
         }
         const std::size_t tab = raw.find('\t');
-        const std::string name = tab == std::string::npos ? raw : raw.substr(0, tab);
-        const std::string sz   = tab == std::string::npos ? "" : raw.substr(tab + 1);
+        const std::string name
+            = tab == std::string::npos ? raw : raw.substr(0, tab);
+        const std::string sz
+            = tab == std::string::npos ? "" : raw.substr(tab + 1);
         body.push_back(hbox({
             text(name) | xflex | color(fg),
             text("  "),
@@ -213,7 +112,8 @@ Element list_block(const std::string& code)
         }));
     }
     Element inner = vbox(std::move(body));
-    return hbox({ text(" "), std::move(inner) | xflex, text(" ") }) | bgcolor(bg);
+    return hbox({ text(" "), std::move(inner) | xflex, text(" ") })
+        | bgcolor(bg);
 }
 
 Element panel(Element e)
@@ -223,8 +123,8 @@ Element panel(Element e)
 
 Component space_activates(Component child, std::function<void()> on_space)
 {
-    return CatchEvent(child,
-        [on_space = std::move(on_space)](Event e) -> bool {
+    return CatchEvent(std::move(child),
+        [on_space = std::move(on_space)](const Event& e) -> bool {
             if (e == Event::Character(' ')) {
                 on_space();
                 return true;
@@ -233,11 +133,60 @@ Component space_activates(Component child, std::function<void()> on_space)
         });
 }
 
+InputOption field_option(std::string* content, int* cursor,
+    std::string placeholder, std::function<void()> on_change,
+    std::function<void()> on_enter)
+{
+    InputOption io;
+    io.content         = content;
+    io.cursor_position = cursor;
+    io.placeholder     = std::move(placeholder);
+    io.multiline       = false;
+    io.on_change       = std::move(on_change);
+    io.on_enter        = std::move(on_enter);
+    io.transform       = [](InputState state) {
+        if (state.is_placeholder) {
+            state.element |= dim;
+        }
+        state.element |= underlined;
+        state.element
+            |= bgcolor(state.focused ? PANEL_COLOR_FOCUS : PANEL_COLOR);
+        return state.element;
+    };
+    return io;
+}
+
+InputOption password_option(std::string* content, int* cursor,
+    std::string placeholder, std::function<void()> on_change)
+{
+    InputOption io = field_option(
+        content, cursor, std::move(placeholder), std::move(on_change));
+    io.password = true;
+    return io;
+}
+
+Component action_button(std::string label, std::function<void()> on_click,
+    const Color& color_bg, const Color& color_focussed)
+{
+    ButtonOption bo;
+    bo.transform = [label, color_focussed, color_bg](const EntryState& state) {
+        Element e = text(" " + label + " ");
+        if (state.focused) {
+            e = std::move(e) | bold | bgcolor(color_focussed) | color(PANEL_FG);
+        } else {
+            e = std::move(e) | bgcolor(color_bg) | color(PANEL_FG);
+        }
+        return e;
+    };
+    return space_activates(Button(std::move(label), on_click, bo), on_click);
+}
+
 Element card(Element body, std::optional<Color> bg, bool pad)
 {
-    Element inner = pad ? vbox({ separatorEmpty(), std::move(body), separatorEmpty() })
-                        : vbox({ std::move(body) });
-    Element box = hbox({ text("  "), std::move(inner) | xflex, text("  ") });
+    Element inner = pad
+        ? vbox({ separatorEmpty(), std::move(body), separatorEmpty() })
+        : vbox({ std::move(body) });
+    Element box   = hbox({ text("  "), std::move(inner) | xflex, text("  ") });
     if (bg) {
         box = std::move(box) | bgcolor(*bg) | color(PANEL_FG);
     }
@@ -248,55 +197,4 @@ Element section_title(std::string_view title, Color fg)
 {
     return text(std::string(title)) | bold | color(fg);
 }
-
-Element status_line(const Config& cfg, const UiState& state, const LayoutCtx& ctx)
-{
-    const bool wide = ctx.kind == LayoutCtx::Kind::WIDE;
-    const bool plan = state.mode == UiState::Mode::PLAN;
-    Element mode    = text(plan ? " PLAN " : " BUILD ")
-        | bold | color(PANEL_COLOR_FOCUS)
-        | bgcolor(plan ? Color::GreenLight : Color::RedLight);
-
-    Elements bar;
-    bar.push_back(text(" "));
-    bar.push_back(std::move(mode));
-    if (!cfg.model.empty()) {
-        bar.push_back(text(" · " + cfg.model) | color(PANEL_FG_DIM));
-    }
-    if (state.last.prompt > 0 || state.totals.total > 0) {
-        const ModelPricing pricing = _cached_pricing(cfg);
-        const std::uint64_t used   = state.last.prompt;
-        if (pricing.context_limit > 0) {
-            const std::uint64_t pct
-                = used * 100 / pricing.context_limit;
-            bar.push_back(text(" · " + compact_tokens(used) + "/"
-                + compact_tokens(pricing.context_limit) + " ("
-                + std::to_string(pct) + "%)") | color(PANEL_FG_DIM));
-        } else {
-            bar.push_back(text(" · " + compact_tokens(used) + " tok")
-                | color(PANEL_FG_DIM));
-        }
-    }
-    bar.push_back(filler());
-    if (!state.env_ready) {
-        bar.push_back(text(_spinner_frame()) | color(PANEL_FG_DIM));
-        if (wide) {
-            bar.push_back(text(" Caching…") | color(PANEL_FG_DIM));
-        }
-        bar.push_back(text("  "));
-    }
-    if (wide) {
-        bar.push_back(text(_cached_cwd()) | color(PANEL_FG_DIM));
-        bar.push_back(text("  "));
-    }
-    if (state.total_cost > 0) {
-        bar.push_back(text(money_text(state.total_cost) + "  ")
-            | color(PANEL_FG_DIM));
-    }
-    bar.push_back(text("URSA") | bold | color(PANEL_FG));
-    return hbox(std::move(bar)) | bgcolor(PANEL_COLOR_FOCUS)
-        | color(PANEL_FG) | xflex;
-}
-
 } // namespace ursa
-

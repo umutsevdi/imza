@@ -5,6 +5,7 @@
 #include <future>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace ursa {
@@ -22,6 +23,9 @@ struct Environment {
     std::vector<std::string> package_managers;
     std::string today;
     std::optional<InstructionFile> instruction;
+    std::unordered_map<std::string, std::filesystem::path> project_skills;
+    std::unordered_map<std::string, std::filesystem::path> global_skills;
+    bool has_git;
 };
 
 Environment analyze_environment();

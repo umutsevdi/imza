@@ -59,14 +59,11 @@ namespace {
         return root;
     }
 
-    std::string_view endpoint() { return "/chat/completions"; }
-
-    std::vector<std::string> headers(const std::string& key)
+    std::vector<std::string> headers()
     {
         return {
             "Content-Type: application/json",
             "Accept: text/event-stream",
-            "Authorization: Bearer " + key,
         };
     }
 
@@ -112,6 +109,10 @@ namespace {
             u.prompt    = top.get("prompt_tokens", 0).asUInt64();
             u.completion = top.get("completion_tokens", 0).asUInt64();
             u.total     = top.get("total_tokens", 0).asUInt64();
+            const Json::Value& details = top["prompt_tokens_details"];
+            if (details.isObject()) {
+                u.cached_read = details.get("cached_tokens", 0).asUInt64();
+            }
             return u;
         }
         const Json::Value& choices = root["choices"];
@@ -121,6 +122,10 @@ namespace {
                 u.prompt    = cu.get("prompt_tokens", 0).asUInt64();
                 u.completion = cu.get("completion_tokens", 0).asUInt64();
                 u.total     = cu.get("total_tokens", 0).asUInt64();
+                const Json::Value& details = cu["prompt_tokens_details"];
+                if (details.isObject()) {
+                    u.cached_read = details.get("cached_tokens", 0).asUInt64();
+                }
             }
         }
         return u;
@@ -180,6 +185,6 @@ namespace {
 
 } // namespace
 
-extern const Provider openai_provider = { build, endpoint, headers, parse };
+    extern const Provider openai_provider = { build, headers, parse };
 
 } // namespace ursa

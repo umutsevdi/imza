@@ -14,6 +14,7 @@
 #include <variant>
 #include <vector>
 
+#include "catalog.h"
 #include "environment.h"
 #include "network.h"
 #include "tools.h"
@@ -24,11 +25,19 @@ namespace ursa {
 struct SlashCommand {
     std::string name;
     std::string desc;
-    enum class Action { EXIT, HELP, SETTINGS, DEMO, SYSTEM_PROMPT };
+    enum class Action {
+        EXIT,
+        HELP,
+        SETTINGS,
+        DEMO,
+        SYSTEM_PROMPT,
+        CONNECT,
+        MODEL
+    };
     Action action = Action::HELP;
 };
 
-std::vector<SlashCommand> slash_commands(const Config& cfg);
+std::vector<SlashCommand> slash_commands();
 const SlashCommand* find_command(
     const std::vector<SlashCommand>& commands, std::string_view name);
 
@@ -82,8 +91,11 @@ struct ChangedFile {
 using ConversationItem
     = std::variant<UserTurn, AssistantTurn, ToolCall, TodoList, ModalAnswer>;
 
-struct SettingsModal {
-    std::string model;
+struct SettingsModal { };
+
+struct ConnectModal {
+    enum class Entry { MANAGE, PICK_MODEL };
+    Entry entry = Entry::MANAGE;
 };
 
 struct HelpModal { };
@@ -93,11 +105,11 @@ struct ViewerModal {
     std::string content;
     std::string lang;
     std::size_t start_line = 1;
-    bool line_numbers = true;
+    bool line_numbers      = true;
 };
 
 using ModalPayload = std::variant<std::monostate, SettingsModal, HelpModal,
-    ViewerModal, ToolCallRequest, QuestionForm>;
+    ViewerModal, ToolCallRequest, QuestionForm, ConnectModal>;
 
 struct QueuedMessage {
     std::size_t id;
@@ -113,6 +125,7 @@ struct UiState {
     Phase phase                = Phase::IDLE;
     Mode mode                  = Mode::PLAN;
     std::string error;
+    std::string connect_status;
 
     TodoList todo;
     std::vector<ChangedFile> changed_files;
@@ -127,19 +140,52 @@ struct UiState {
 
     Usage totals;
     Usage last;
-    double total_cost = 0.0;
-    double last_cost  = 0.0;
+    double total_cost  = 0.0;
+    double last_cost   = 0.0;
+    int project_skills = 0;
+    int global_skills  = 0;
 };
 
 using PostFn = std::function<void(std::function<void()>)>;
 using StreamFn
     = std::function<Status(const ChatRequest&, const StreamCallback&)>;
+using ModelsFn = std::function<Status(const Route&, std::vector<ModelInfo>&)>;
+
+struct CatalogEntry {
+    struct Fetching { };
+    struct Ready {
+        std::vector<ModelInfo> models;
+    };
+    struct Failed {
+        Status status = Status::OK;
+    };
+    std::variant<Fetching, Ready, Failed> state;
+};
+
+struct ConnectionView {
+    enum class State { FETCHING, READY, FAILED };
+    std::string id;
+    std::string provider_id;
+    std::string name;
+    bool active = false;
+    std::string api_key;
+    State state             = State::FETCHING;
+    Status error            = Status::OK;
+    std::size_t model_count = 0;
+};
+
+struct ModelList {
+    enum class State { FETCHING, READY, FAILED };
+    State state  = State::FETCHING;
+    Status error = Status::OK;
+    std::vector<ModelInfo> models;
+};
 
 class Controller {
 public:
     Controller(const Config& cfg, PostFn post, std::function<void()> on_exit,
         StreamFn stream_fn = { }, ToolRegistry tools = { },
-        std::shared_future<Environment> env = { });
+        std::shared_future<Environment> env = { }, ModelsFn models_fn = { });
     ~Controller();
 
     Controller(const Controller&)            = delete;
@@ -157,7 +203,13 @@ public:
     size_t queue_size() const;
     ModalResult request_modal(ModalPayload payload);
     const UiState& state() const { return state_; }
-    const Config& config() const { return cfg_; }
+    Config config() const;
+    std::vector<ConnectionView> connections() const;
+    ModelList models_for(const std::string& connection_id) const;
+    bool remove_connection(const std::string& connection_id);
+    void refetch_models(const std::string& connection_id);
+    void ensure_catalog_fresh();
+    std::vector<std::pair<std::string, std::string>> provider_options() const;
     const std::vector<SlashCommand>& commands() const { return commands_; }
     std::string shell_name() const;
 
@@ -173,6 +225,15 @@ private:
     void _on_env_ready();
     void _spawn(std::vector<Message> history, StreamFn override);
     void _drive(std::vector<Message> history, StreamFn override);
+    Route _active_route_locked(const std::string& model) const;
+    std::string _unique_id_locked(std::string base) const;
+    Connection* _find_locked(const std::string& id);
+    void _begin_connect(const ConnectResult& res);
+    bool _commit_connection(const ConnectResult& res);
+    void _apply_pick(const ModelChoice& choice);
+    void _start_fetch_locked(const std::string& connection_id);
+    void _start_catalog_sync_locked();
+
     void _drain_pending_asks(std::vector<Message>& history,
         std::string& reply_buffer, const std::string& assistant_text);
     void _apply_tool_result(const ToolCallRequest& req, const ModalResult& res,
@@ -209,13 +270,22 @@ private:
     std::deque<PendingModal> queue_;
     mutable std::mutex queue_mutex_;
     std::set<std::string> allowed_tools_;
-    std::size_t next_tool_id_ = 1;
+    std::size_t next_tool_id_   = 1;
     std::size_t next_queued_id_ = 0;
 
     std::vector<StreamEvent> stream_events_;
     std::atomic<bool> alive_ { true };
     std::optional<std::jthread> worker_;
     int retry_after_secs_ = 0;
+
+    Catalog catalog_;
+    std::map<std::string, CatalogEntry> model_catalog_;
+    std::map<std::string, int> generations_;
+    bool catalog_syncing_ = false;
+    mutable std::mutex data_mutex_;
+    ModelsFn models_fn_;
+    std::vector<std::jthread> fetch_threads_;
+    std::optional<std::jthread> catalog_waiter_;
 };
 
 std::string error_text(Status st);

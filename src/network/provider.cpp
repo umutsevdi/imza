@@ -164,15 +164,17 @@ namespace {
 
 } // namespace
 
-Status stream(const Provider& provider, const Config& cfg,
+Status stream(const Provider& provider, const Route& route,
     const ChatRequest& req, StreamCallback cb, int* retry_after)
 {
     const std::string body = write_json(provider.build(req));
-    std::string url = strip_slash(cfg.api_base);
-    url += provider.endpoint();
+    const std::string& url = route.endpoint;
 
-    const std::vector<std::string> header_strs = provider.headers(cfg.api_key);
-    curl_slist* list                           = nullptr;
+    std::vector<std::string> header_strs = provider.headers();
+    for (auto& h : auth_headers(route.auth, route.api_key)) {
+        header_strs.push_back(std::move(h));
+    }
+    curl_slist* list                     = nullptr;
     for (const auto& h : header_strs) {
         list = curl_slist_append(list, h.c_str());
     }
@@ -229,12 +231,12 @@ Status stream(const Provider& provider, const Config& cfg,
     return Status::OK;
 }
 
-Provider get_provider(const Config& cfg)
+Provider get_provider(const Route& route)
 {
-    if (cfg.standard == ApiStandard::OPENAI) {
-        return openai_provider;
+    if (route.dialect == ApiStandard::ANTHROPIC) {
+        return anthropic_provider;
     }
-    return anthropic_provider;
+    return openai_provider;
 }
 
 } // namespace ursa

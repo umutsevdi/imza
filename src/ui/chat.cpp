@@ -6,6 +6,7 @@
 #include <ftxui/component/component_options.hpp>
 #include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
+#include <ftxui/dom/node.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -28,16 +29,49 @@ namespace {
 
     constexpr std::size_t kLargeOutputLines = 30;
     constexpr std::size_t kInvalidVersion   = ~std::size_t { 0 };
+    constexpr int kWheelStep                = 3;
+
+    // reflect() clips the recorded box to the screen stencil at render time,
+    // which under a yframe reports the viewport height instead of the content
+    // height. This captures the unclipped requirement instead.
+    Decorator content_height(int* out)
+    {
+        class Impl : public Node {
+        public:
+            Impl(Element child, int* out)
+                : Node(Elements { std::move(child) })
+                , out_(out)
+            {
+            }
+
+            void ComputeRequirement() override
+            {
+                Node::ComputeRequirement();
+                requirement_ = children_[0]->requirement();
+                *out_        = requirement_.min_y;
+            }
+
+            void SetBox(Box box) override
+            {
+                Node::SetBox(box);
+                children_[0]->SetBox(box);
+            }
+
+        private:
+            int* out_;
+        };
+        return [out](Element child) {
+            return std::make_shared<Impl>(std::move(child), out);
+        };
+    }
 
     Element error_element(const UiState& st)
     {
         std::string msg = st.error;
         if (st.retry_countdown) {
-            auto remaining
-                = std::chrono::duration_cast<std::chrono::seconds>(
-                    st.retry_countdown->deadline
-                    - std::chrono::steady_clock::now())
-                      .count();
+            auto remaining = std::chrono::duration_cast<std::chrono::seconds>(
+                st.retry_countdown->deadline - std::chrono::steady_clock::now())
+                                 .count();
             if (remaining < 0) {
                 remaining = 0;
             }
@@ -93,10 +127,11 @@ namespace {
                     if (tc.name == "list") {
                         rows.push_back(list_block(tc.result->text));
                     } else if (tc.name == "ask") {
-                        rows.push_back(render_markdown_element(tc.result->text));
-                    } else {
                         rows.push_back(
-                            code_block(tc.result->text, tool_code_language(tc)));
+                            render_markdown_element(tc.result->text));
+                    } else {
+                        rows.push_back(code_block(
+                            tc.result->text, tool_code_language(tc)));
                     }
                 }
                 break;
@@ -120,8 +155,8 @@ namespace {
 
     Element modal_answer_item(const ModalAnswer& ans)
     {
-        return card(
-            render_markdown_element(modal_answer_markdown(ans)), PANEL_COLOR, false);
+        return card(render_markdown_element(modal_answer_markdown(ans)),
+            PANEL_COLOR, false);
     }
 
     class ChatImpl : public ComponentBase {
@@ -131,7 +166,7 @@ namespace {
             , width_(std::move(width))
         {
             input_options_.content     = &input_buf_;
-            input_options_.placeholder = "ask anything — type / for commands";
+            input_options_.placeholder = "Ask anything — type / for commands";
             input_options_.multiline   = true;
             input_options_.on_change   = [this] { on_input_changed(); };
             input_options_.on_enter    = [this] { submit(); };
@@ -144,7 +179,7 @@ namespace {
                 state.element |= bgcolor(PANEL_COLOR);
                 return state.element;
             };
-            input_ = ftxui::Input(input_options_);
+            input_     = ftxui::Input(input_options_);
             container_ = Container::Vertical({ input_ });
             Add(container_);
             input_->TakeFocus();
@@ -162,17 +197,19 @@ namespace {
             const bool connecting = st.phase == UiState::Phase::CONNECTING;
 
             Elements items;
-            if (selected_ >= st.items.size() && !st.items.empty()) {
-                selected_ = st.items.size() - 1;
+            if (follow_) {
+                scroll_top_ = max_scroll();
+            } else {
+                scroll_top_ = std::clamp(scroll_top_, 0, max_scroll());
             }
-            if (cache_kind_ != ctx.kind || item_cache_.size() != st.items.size()) {
+            if (cache_kind_ != ctx.kind
+                || item_cache_.size() != st.items.size()) {
                 item_cache_.clear();
                 item_cache_.resize(st.items.size());
                 item_versions_.assign(st.items.size(), kInvalidVersion);
                 cache_kind_ = ctx.kind;
             }
             std::size_t item_index = 0;
-            item_boxes_.resize(st.items.size());
             for (const auto& it : st.items) {
                 const std::size_t version = item_version(it);
                 if (item_versions_[item_index] != version) {
@@ -186,7 +223,8 @@ namespace {
                         } else if (tc.name == "shell" && output
                             && count_lines(tc.result->text)
                                 > kLargeOutputLines) {
-                            item_cache_[item_index] = render_shell_collapsed(tc);
+                            item_cache_[item_index]
+                                = render_shell_collapsed(tc);
                         } else {
                             item_cache_[item_index] = render_item(it, ctx);
                         }
@@ -209,22 +247,10 @@ namespace {
                         el,
                     });
                 }
-                const bool is_sel = (item_index == selected_);
-                const bool actionable_sel
-                    = is_sel && item_is_actionable(it);
-                Element gutter = is_sel
-                    ? vbox({ filler() }) | bgcolor(Color::GreenLight)
-                        | size(WIDTH, EQUAL, 1)
-                    : text(" ");
-                Element body = std::move(el);
-                if (actionable_sel) {
-                    body = vbox({ separatorEmpty(), std::move(body),
-                        separatorEmpty() })
-                        | bgcolor(PANEL_COLOR_FOCUS);
-                }
-                items.push_back(hbox({ gutter, text(" "),
-                    std::move(body) | xflex })
-                    | reflect(item_boxes_[item_index]));
+                items.push_back(hbox({
+                    text(" "),
+                    std::move(el) | xflex,
+                }));
                 ++item_index;
             }
 
@@ -242,10 +268,13 @@ namespace {
                 items.push_back(hbox(std::move(row)));
             }
 
-            Element content
-                = items.empty() ? text("") : vbox(std::move(items)) | flex;
-            Element log = std::move(content) | vscroll_indicator
-                | focusPositionRelative(0.0F, scroll_y_) | yframe;
+            Element content = items.empty() ? text("")
+                                            : vbox(std::move(items))
+                    | content_height(&content_height_) | flex;
+            Element log     = std::move(content) | vscroll_indicator
+                | focusPosition(
+                    0, scroll_top_ + std::max(0, viewport_lines() - 1) / 2)
+                | yframe;
 
             Element input_box = panel(vbox({
                 separatorEmpty(),
@@ -254,14 +283,8 @@ namespace {
                     input_->Render() | xflex,
                     text("  "),
                 }),
-                hbox({
-                    text("  "),
-                    text("Tab: switch mode, Alt+Enter: multi line input")
-                        | color(PANEL_FG_DIM),
-                }),
                 separatorEmpty(),
             }));
-
             Element main = vbox({
                                std::move(log) | flex,
                            })
@@ -271,15 +294,26 @@ namespace {
             if (show_suggestions()) {
                 bottom.push_back(render_suggestions());
             }
-            bottom.push_back(hbox({ filler(),
-                text("↑/↓ select message · Enter opens · or click")
-                    | color(PANEL_FG_DIM) })
+            bottom.push_back(
+                hbox({
+                    filler(),
+                    text("↑/↓ scroll · click a card to open in viewer")
+                        | color(PANEL_FG_DIM),
+                    text(" "),
+                })
+                | xflex);
+            bottom.push_back(
+                hbox({
+                    filler(),
+                    text("Tab: switch mode, Alt+Enter: multi line input")
+                        | color(PANEL_FG_DIM),
+                    text(" "),
+                })
                 | xflex);
             if (!st.error.empty() || st.retry_countdown) {
                 bottom.push_back(error_element(st));
             }
             bottom.push_back(std::move(input_box));
-
             Elements root;
             root.push_back(std::move(main));
             root.push_back(separatorEmpty());
@@ -350,11 +384,11 @@ namespace {
             if (event.is_mouse()) {
                 const Mouse& m = event.mouse();
                 if (m.button == Mouse::WheelUp) {
-                    scroll_by(-0.04F);
+                    scroll_lines(-kWheelStep);
                     return true;
                 }
                 if (m.button == Mouse::WheelDown) {
-                    scroll_by(0.04F);
+                    scroll_lines(kWheelStep);
                     return true;
                 }
                 return false;
@@ -362,25 +396,21 @@ namespace {
             const bool multiline_input
                 = input_buf_.find('\n') != std::string::npos;
             if (!multiline_input) {
-                const auto& items = controller_.state().items;
-                if (event == Event::ArrowUp && !items.empty()) {
-                    selected_ = selected_ > 0 ? selected_ - 1 : 0;
-                    scroll_to_selected();
+                if (event == Event::ArrowUp) {
+                    scroll_lines(-1);
                     return true;
                 }
-                if (event == Event::ArrowDown && !items.empty()) {
-                    selected_
-                        = std::min(items.size() - 1, selected_ + 1);
-                    scroll_to_selected();
+                if (event == Event::ArrowDown) {
+                    scroll_lines(1);
                     return true;
                 }
             }
             if (event == Event::PageUp) {
-                scroll_by(-0.35F);
+                scroll_lines(-std::max(1, viewport_lines() - 1));
                 return true;
             }
             if (event == Event::PageDown) {
-                scroll_by(0.35F);
+                scroll_lines(std::max(1, viewport_lines() - 1));
                 return true;
             }
             if (event == Event::Return) {
@@ -389,11 +419,6 @@ namespace {
                     return true;
                 }
                 if (input_buf_.empty()) {
-                    const auto& items = controller_.state().items;
-                    if (!items.empty() && selected_ < items.size()
-                        && item_is_actionable(items[selected_])) {
-                        open_viewer_for(std::get<ToolCall>(items[selected_]));
-                    }
                     return true;
                 }
                 submit();
@@ -414,62 +439,33 @@ namespace {
         }
 
     private:
-        void scroll_by(float delta)
+        int content_lines() const { return content_height_; }
+
+        int viewport_lines() const
         {
-            scroll_y_ = std::clamp(scroll_y_ + delta, 0.0F, 1.0F);
+            if (frame_box_.y_max < frame_box_.y_min) {
+                return 0;
+            }
+            return frame_box_.y_max - frame_box_.y_min + 1;
         }
 
-        void scroll_to_selected()
+        int max_scroll() const
         {
-            const int frame_lines
-                = frame_box_.y_max - frame_box_.y_min + 1;
-            if (item_boxes_.empty() || frame_lines <= 0) {
-                return;
-            }
-            int content_lines = 0;
-            for (const auto& b : item_boxes_) {
-                content_lines += b.y_max - b.y_min + 1;
-            }
-            if (content_lines <= 0) {
-                return;
-            }
-            const int max_scroll = std::max(1, content_lines - frame_lines);
-            int top = 0;
-            for (std::size_t k = 0; k < selected_ && k < item_boxes_.size();
-                ++k) {
-                top += item_boxes_[k].y_max - item_boxes_[k].y_min + 1;
-            }
-            scroll_y_ = std::clamp(
-                static_cast<float>(top) / static_cast<float>(max_scroll),
-                0.0F, 1.0F);
+            return std::max(0, content_lines() - viewport_lines());
         }
 
-        bool item_is_actionable(const ConversationItem& it) const
+        void scroll_lines(int delta)
         {
-            if (!std::holds_alternative<ToolCall>(it)) {
-                return false;
-            }
-            const auto& tc = std::get<ToolCall>(it);
-            if (!tc.result.has_value()
-                || tc.result->kind != ToolCall::Result::Kind::OUTPUT
-                || tc.result->text.empty()) {
-                return false;
-            }
-            if (tc.name == "read") {
-                return true;
-            }
-            if (tc.name == "shell") {
-                return count_lines(tc.result->text) > kLargeOutputLines;
-            }
-            return false;
+            scroll_top_ = std::clamp(scroll_top_ + delta, 0, max_scroll());
+            follow_     = scroll_top_ == max_scroll();
         }
 
         void open_viewer_for(const ToolCall& tc)
         {
             if (tc.name == "read") {
-                controller_.enqueue_user_modal(ViewerModal {
-                    tool_call_head(tc), tc.result->text,
-                    tool_code_language(tc), read_start_line(tc) });
+                controller_.enqueue_user_modal(
+                    ViewerModal { tool_call_head(tc), tc.result->text,
+                        tool_code_language(tc), read_start_line(tc) });
             } else {
                 controller_.enqueue_user_modal(
                     ViewerModal { "Shell output", tc.result->text, "", 1 });
@@ -495,7 +491,7 @@ namespace {
             input_buf_.clear();
             input_cursor_ = 0;
             controller_.submit(std::move(text));
-            scroll_y_ = 1.0F;
+            follow_ = true;
             animation::RequestAnimationFrame();
         }
 
@@ -587,7 +583,7 @@ namespace {
             const std::string content = tc.result->text;
             const std::string label   = "▸ open " + head + " in viewer ("
                 + std::to_string(count_lines(content)) + " lines)";
-            Component btn             = make_viewer_button(tc.id, label);
+            Component btn = make_viewer_button(tc.id, label);
             Elements rows;
             rows.push_back(hbox({
                 text("Tool Call: ") | bold | color(Color::GreenLight),
@@ -601,13 +597,12 @@ namespace {
 
         Element render_shell_collapsed(const ToolCall& tc)
         {
-            const std::string& full = tc.result->text;
-            const std::size_t total = count_lines(full);
-            const std::string preview
-                = take_lines(full, kLargeOutputLines);
-            const std::string label = "▸ open full shell output in viewer ("
+            const std::string& full   = tc.result->text;
+            const std::size_t total   = count_lines(full);
+            const std::string preview = take_lines(full, kLargeOutputLines);
+            const std::string label   = "▸ open full shell output in viewer ("
                 + std::to_string(total) + " lines)";
-            Component btn           = make_viewer_button(tc.id, label);
+            Component btn = make_viewer_button(tc.id, label);
             Elements rows;
             rows.push_back(hbox({
                 text("Tool Call: ") | bold | color(Color::GreenLight),
@@ -627,9 +622,7 @@ namespace {
             if (it != read_buttons_.end()) {
                 return it->second;
             }
-            ButtonOption bo;
-            bo.label = std::move(label);
-            bo.on_click = [this, id] {
+            const auto on_click = [this, id] {
                 for (const auto& item : controller_.state().items) {
                     const auto* tc = std::get_if<ToolCall>(&item);
                     if (tc != nullptr && tc->id == id) {
@@ -638,6 +631,9 @@ namespace {
                     }
                 }
             };
+            ButtonOption bo;
+            bo.label     = std::move(label);
+            bo.on_click  = on_click;
             bo.transform = [](EntryState s) -> Element {
                 Element e = text(s.label);
                 if (s.focused) {
@@ -647,7 +643,7 @@ namespace {
                 }
                 return e;
             };
-            Component btn = Button(bo);
+            Component btn = space_activates(Button(bo), on_click);
             read_buttons_.emplace(id, btn);
             container_->Add(btn);
             return btn;
@@ -662,11 +658,11 @@ namespace {
         int input_cursor_ = 0;
         bool paste_mode_  = false;
 
-        float scroll_y_ = 1.0F;
-        int frame_      = 0;
-        std::size_t selected_ = 0;
-        std::vector<ftxui::Box> item_boxes_;
-        ftxui::Box frame_box_{};
+        int scroll_top_     = 0;
+        bool follow_        = true;
+        int frame_          = 0;
+        int content_height_ = 0;
+        ftxui::Box frame_box_ { };
     };
 
 } // namespace

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <variant>
@@ -54,24 +55,52 @@ struct ModalAnswer {
     std::vector<QuestionAnswer> cards;
 };
 
-using ModalResult = std::variant<std::monostate, ToolVerdict, ModalAnswer>;
+struct ConnectResult {
+    std::string provider_id;
+    std::string endpoint;
+    std::string api_key;
+    bool persist = true;
+};
+
+struct ModelChoice {
+    std::string connection_id;
+    std::string model_id;
+};
+
+using ModalResult = std::variant<std::monostate, ToolVerdict, ModalAnswer,
+    ConnectResult, ModelChoice>;
 
 struct ModelPricing {
     double input_per_1k  = 0.0;
     double output_per_1k = 0.0;
+    double cache_read_per_1k = 0.0;
+    double cache_write_per_1k = 0.0;
     std::uint64_t context_limit = 0;
 };
 
-struct Config {
-    ApiStandard standard = ApiStandard::OPENAI;
-    std::string api_base;
+struct Connection {
+    std::string id;
+    std::string provider_id;
+    std::string endpoint;
     std::string api_key;
+    std::map<std::string, ApiStandard> dialects;
+};
+
+struct LastUsed {
+    std::string provider;
     std::string model;
-    std::optional<ModelPricing> pricing;
+};
+
+struct Config {
+    std::vector<Connection> providers;
+    std::optional<LastUsed> last_used;
 };
 
 Status load_config(const std::filesystem::path& path, Config& out,
     std::string* error = nullptr);
+Status save_config(const std::filesystem::path& path, const Config& cfg);
+std::filesystem::path base_config_dir(void);
 std::filesystem::path config_path(void);
+std::filesystem::path presets_path(void);
 
 } // namespace ursa

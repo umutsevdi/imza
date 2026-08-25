@@ -82,24 +82,13 @@ FetchContent_MakeAvailable(jsoncpp doctest cmarkgfm)
 
 file(GLOB TEST_SOURCES "test/*.cpp")
 
-# Shared app configuration (no ftxui, no cmark)
-add_library(ursa_core
-    src/config.cpp
-)
-target_include_directories(ursa_core PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${jsoncpp_SOURCE_DIR}/include
-)
-target_link_libraries(ursa_core PRIVATE
-    jsoncpp_static
-)
-
 # Network transport (no ftxui, no cmark)
 add_library(ursa_network
     src/network/network_common.cpp
     src/network/provider.cpp
     src/network/openai_provider.cpp
     src/network/anthropic_provider.cpp
+    src/network/models.cpp
 )
 target_include_directories(ursa_network PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -108,6 +97,20 @@ target_include_directories(ursa_network PRIVATE
 target_link_libraries(ursa_network PRIVATE
     jsoncpp_static
     CURL::libcurl
+)
+
+# Shared app configuration + catalog cache (no ftxui, no cmark)
+add_library(ursa_core
+    src/config.cpp
+    src/catalog.cpp
+)
+target_include_directories(ursa_core PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${jsoncpp_SOURCE_DIR}/include
+)
+target_link_libraries(ursa_core PUBLIC
+    ursa_network
+    jsoncpp_static
 )
 
 # Agent: orchestration, formatting, slash commands (ftxui-free)
@@ -126,6 +129,7 @@ target_include_directories(ursa_agent PRIVATE
     ${jsoncpp_SOURCE_DIR}/include
 )
 target_link_libraries(ursa_agent PUBLIC
+    ursa_core
     ursa_network
     jsoncpp_static
 )
@@ -134,11 +138,13 @@ target_link_libraries(ursa_agent PUBLIC
 add_library(ursa_ui
     src/ui/app.cpp
     src/ui/chat.cpp
+    src/ui/connect.cpp
+    src/ui/markdown.cpp
     src/ui/modal.cpp
+    src/ui/render.cpp
     src/ui/settings.cpp
     src/ui/side_panel.cpp
-    src/ui/markdown.cpp
-    src/ui/render.cpp
+    src/ui/status_line.cpp
 )
 target_include_directories(ursa_ui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
