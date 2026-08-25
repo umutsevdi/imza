@@ -3,6 +3,7 @@
 #include <ftxui/component/component.hpp>
 #include <ftxui/dom/elements.hpp>
 
+#include <chrono>
 #include <string>
 #include <vector>
 
@@ -10,20 +11,24 @@ namespace ursa {
 
 using namespace ftxui;
 
+Element render_env_status(const UiState& state);
+
 ftxui::Component make_side_panel(Controller& controller)
-{
-    constexpr int width = 30;
-    return ftxui::Renderer([&controller] {
-        using namespace ftxui;
-        LayoutCtx ctx { LayoutCtx::Kind::WIDE, width };
-        return vbox({
-                   render_todo(controller.state().todo, ctx) | yflex,
-                   render_changed_files(controller.state().changed_files, ctx)
-                       | yflex,
-               })
-            | size(WIDTH, EQUAL, width);
-    });
-}
+    {
+        constexpr int width = 30;
+        return ftxui::Renderer([&controller] {
+            using namespace ftxui;
+            LayoutCtx ctx { LayoutCtx::Kind::WIDE, width };
+            return vbox({
+                       render_todo(controller.state().todo, ctx) | yflex,
+                       render_changed_files(controller.state().changed_files, ctx)
+                           | yflex,
+                       separator(),
+                       render_env_status(controller.state()),
+                   })
+                | size(WIDTH, EQUAL, width);
+        });
+    }
 
 namespace {
 
@@ -71,6 +76,23 @@ Element render_changed_files(
         ? dim(text("no changes"))
         : vbox(std::move(parts)) | borderStyled(ROUNDED, PANEL_BORDER);
     return vbox({ section_title("Changed files"), std::move(body) });
+}
+
+Element render_env_status(const UiState& state)
+{
+    if (state.env_ready) {
+        return hbox({ text("✓ Environment ready")
+            | color(Color::GreenLight) });
+    }
+    static const char* frames[]
+        = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" };
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch())
+                      .count();
+    const std::size_t idx
+        = static_cast<std::size_t>(ms / 100) % (sizeof(frames) / sizeof(frames[0]));
+    return hbox({ text(frames[idx]) | color(Color::GrayDark),
+        text(" Analyzing environment…") | color(Color::GrayDark) });
 }
 
 } // namespace ursa

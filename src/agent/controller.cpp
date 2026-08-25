@@ -67,19 +67,37 @@ std::string error_text(Status st)
 }
 
 Controller::Controller(const Config& cfg, PostFn post,
-    std::function<void()> on_exit, StreamFn stream_fn, ToolRegistry tools)
+    std::function<void()> on_exit, StreamFn stream_fn, ToolRegistry tools,
+    std::shared_future<Environment> env)
     : cfg_(cfg)
     , post_(std::move(post))
     , on_exit_(std::move(on_exit))
     , commands_(slash_commands(cfg))
     , stream_fn_(std::move(stream_fn))
     , tools_(std::move(tools))
+    , env_(std::move(env))
 {
     if (!stream_fn_) {
         stream_fn_ = [this](const ChatRequest& req, const StreamCallback& cb) {
             const auto provider = get_provider(cfg_);
             return stream(provider, cfg_, req, cb);
         };
+    }
+    if (env_.valid()) {
+        env_waiter_ = std::jthread([this] {
+            using namespace std::chrono_literals;
+            while (env_.wait_for(0s) == std::future_status::timeout) {
+                if (!alive_.load()) {
+                    return;
+                }
+                _post([] { });
+                std::this_thread::sleep_for(150ms);
+            }
+            if (!alive_.load()) {
+                return;
+            }
+            _on_env_ready();
+        });
     }
 }
 
@@ -95,6 +113,7 @@ Controller::~Controller()
         }
     }
     worker_.reset();
+    env_waiter_.reset();
 }
 
 void Controller::toggle_mode()
@@ -221,10 +240,26 @@ void Controller::submit(std::string text)
 
 void Controller::submit_message(std::string text)
 {
+    if (env_.valid() && !env_ready_.load()) {
+        _enqueue_message(std::move(text));
+        return;
+    }
     state_.items.push_back(UserTurn { std::move(text) });
     state_.error.clear();
     state_.phase = UiState::Phase::STREAMING;
     _spawn(_build_history(), StreamFn { });
+}
+
+void Controller::_on_env_ready()
+{
+    env_ready_.store(true);
+    _post([this] {
+        state_.env_ready = true;
+        _present_front();
+        if (state_.phase == UiState::Phase::IDLE && !state_.queued.empty()) {
+            _drain_queued();
+        }
+    });
 }
 
 void Controller::run_demo()
@@ -297,12 +332,26 @@ void Controller::run_slash(std::string_view cmd)
             _enqueue_message(std::string(cmd));
         }
         break;
+    case SlashCommand::Action::SYSTEM_PROMPT:
+        enqueue_user_modal(SystemPromptModal { _system_prompt() });
+        break;
     }
 }
 
-std::vector<Message> Controller::_build_history() const
+std::string Controller::shell_name() const
 {
-    std::vector<Message> history;
+    if (env_.valid()
+        && env_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+        const Environment& e = env_.get();
+        if (!e.default_shell.empty()) {
+            return std::filesystem::path(e.default_shell).filename().string();
+        }
+    }
+    return "sh";
+}
+
+std::string Controller::_system_prompt() const
+{
     std::string prompt = "You are a helpful assistant.";
     const auto specs   = tools_.specs();
     if (!specs.empty()) {
@@ -312,7 +361,38 @@ std::vector<Message> Controller::_build_history() const
         }
         prompt += "\nPrefer narrow line ranges when reading long files.";
     }
-    history.push_back({ Message::Type::SYSTEM, std::move(prompt) });
+    if (env_.valid()
+        && env_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+        const Environment& e = env_.get();
+        prompt += "\n\nEnvironment context:";
+        prompt += "\n- OS: " + e.os_name;
+        if (!e.os_version.empty()) {
+            prompt += " " + e.os_version;
+        }
+        if (!e.distro.empty()) {
+            prompt += "\n- Distro: " + e.distro;
+        }
+        prompt += "\n- Shell: " + e.default_shell;
+        prompt += "\n- Package managers: ";
+        if (e.package_managers.empty()) {
+            prompt += "none";
+        } else {
+            for (std::size_t i = 0; i < e.package_managers.size(); ++i) {
+                if (i) {
+                    prompt += ", ";
+                }
+                prompt += e.package_managers[i];
+            }
+        }
+        prompt += "\n- Date: " + e.today;
+    }
+    return prompt;
+}
+
+std::vector<Message> Controller::_build_history() const
+{
+    std::vector<Message> history;
+    history.push_back({ Message::Type::SYSTEM, _system_prompt() });
     for (const auto& item : state_.items) {
         if (const auto* u = std::get_if<UserTurn>(&item)) {
             history.push_back({ Message::Type::USER, u->text });
@@ -529,7 +609,10 @@ void Controller::_apply_tool_result(const ToolCallRequest& req,
         return;
     }
     if (verdict->decision == ToolDecision::ACCEPT_ALWAYS) {
-        allowed_tools_.insert(req.name);
+        const Tool* tool = tools_.find(req.name);
+        if (tool == nullptr || tool->persistent) {
+            allowed_tools_.insert(req.name);
+        }
     }
     _run_tool(req, tool_msgs);
 }
@@ -661,6 +744,8 @@ std::vector<SlashCommand> slash_commands(const Config&)
         { "/exit", "quit ursa", SlashCommand::Action::EXIT },
         { "/settings", "open settings", SlashCommand::Action::SETTINGS },
         { "/demo", "run scripted modal demo", SlashCommand::Action::DEMO },
+        { "/prompt", "show the generated system prompt",
+            SlashCommand::Action::SYSTEM_PROMPT },
     };
 }
 

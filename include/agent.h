@@ -13,6 +13,7 @@
 #include <variant>
 #include <vector>
 
+#include "environment.h"
 #include "network.h"
 #include "tools.h"
 #include "types.h"
@@ -22,7 +23,7 @@ namespace ursa {
 struct SlashCommand {
     std::string name;
     std::string desc;
-    enum class Action { EXIT, HELP, SETTINGS, DEMO, SKILL };
+    enum class Action { EXIT, HELP, SETTINGS, DEMO, SKILL, SYSTEM_PROMPT };
     Action action = Action::SKILL;
 };
 
@@ -80,8 +81,12 @@ struct SettingsModal {
 
 struct HelpModal { };
 
+struct SystemPromptModal {
+    std::string prompt;
+};
+
 using ModalPayload = std::variant<std::monostate, SettingsModal, HelpModal,
-    ToolCallRequest, QuestionForm>;
+    SystemPromptModal, ToolCallRequest, QuestionForm>;
 
 struct QueuedMessage {
     std::size_t id;
@@ -101,6 +106,7 @@ struct UiState {
     TodoList todo;
     std::vector<ChangedFile> changed_files;
     std::vector<QueuedMessage> queued;
+    bool env_ready = false;
 };
 
 using PostFn = std::function<void(std::function<void()>)>;
@@ -110,7 +116,8 @@ using StreamFn
 class Controller {
 public:
     Controller(const Config& cfg, PostFn post, std::function<void()> on_exit,
-        StreamFn stream_fn = { }, ToolRegistry tools = { });
+        StreamFn stream_fn = { }, ToolRegistry tools = { },
+        std::shared_future<Environment> env = { });
     ~Controller();
 
     Controller(const Controller&)            = delete;
@@ -130,6 +137,7 @@ public:
     const UiState& state() const { return state_; }
     const Config& config() const { return cfg_; }
     const std::vector<SlashCommand>& commands() const { return commands_; }
+    std::string shell_name() const;
 
 private:
     void submit_message(std::string text);
@@ -139,6 +147,8 @@ private:
 
     void _post(std::function<void()> f);
     std::vector<Message> _build_history() const;
+    std::string _system_prompt() const;
+    void _on_env_ready();
     void _spawn(std::vector<Message> history, StreamFn override);
     void _drive(std::vector<Message> history, StreamFn override);
     void _drain_pending_asks(std::vector<Message>& history,
@@ -163,6 +173,10 @@ private:
     std::vector<SlashCommand> commands_;
     StreamFn stream_fn_;
     ToolRegistry tools_;
+
+    std::shared_future<Environment> env_;
+    std::atomic<bool> env_ready_ { false };
+    std::optional<std::jthread> env_waiter_;
 
     struct PendingModal {
         ModalPayload payload;

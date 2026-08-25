@@ -116,6 +116,8 @@ add_library(ursa_agent
     src/agent/format.cpp
     src/agent/tools.cpp
     src/agent/builtin_tools.cpp
+    src/agent/environment.cpp
+    src/agent/command.cpp
 )
 target_include_directories(ursa_agent PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include

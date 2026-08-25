@@ -71,6 +71,8 @@ namespace {
                         return settings_body(payload);
                     } else if constexpr (std::is_same_v<T, HelpModal>) {
                         return help_body();
+                    } else if constexpr (std::is_same_v<T, SystemPromptModal>) {
+                        return system_prompt_body(payload);
                     }
                     return text("");
                 },
@@ -98,6 +100,12 @@ namespace {
                 _cycle_focus(event == Event::Tab);
                 return true;
             } else if (std::holds_alternative<HelpModal>(st.modal)) {
+                if (event == Event::Return) {
+                    controller_.close_modal();
+                    return true;
+                }
+                return true;
+            } else if (std::holds_alternative<SystemPromptModal>(st.modal)) {
                 if (event == Event::Return) {
                     controller_.close_modal();
                     return true;
@@ -265,6 +273,8 @@ namespace {
 
         void build(const HelpModal&) { kind_ = Kind::HELP; }
 
+        void build(const SystemPromptModal&) { kind_ = Kind::SYSTEM_PROMPT; }
+
         void build(std::monostate) { kind_ = Kind::NONE; }
 
         void _cycle_focus(bool forward)
@@ -376,7 +386,16 @@ namespace {
         {
             Elements rows { header_line("Tool call") };
             rows.push_back(separatorEmpty());
-            rows.push_back(code_block(req.args));
+            if (req.name == "shell") {
+                const Json::Value parsed = parse_json(req.args);
+                std::string cmd = req.args;
+                if (parsed.isObject() && parsed["command"].isString()) {
+                    cmd = parsed["command"].asString();
+                }
+                rows.push_back(code_block(cmd, controller_.shell_name()));
+            } else {
+                rows.push_back(code_block(req.args));
+            }
             rows.push_back(separatorEmpty());
             if (tool_phase_ == ToolPhase::REASON) {
                 rows.push_back(reason_input_->Render());
@@ -430,7 +449,18 @@ namespace {
 
         Element help_body() { return render_help(controller_.commands()); }
 
-        enum class Kind { NONE, TOOL, QUESTION, SETTINGS, HELP };
+        Element system_prompt_body(const SystemPromptModal& payload)
+        {
+            Elements rows { header_line("System prompt") };
+            rows.push_back(separatorEmpty());
+            rows.push_back(code_block(payload.prompt, "text"));
+            rows.push_back(separatorEmpty());
+            rows.push_back(
+                text("Esc closes") | dim | color(PANEL_FG_DIM));
+            return vbox(std::move(rows)) | xflex;
+        }
+
+        enum class Kind { NONE, TOOL, QUESTION, SETTINGS, HELP, SYSTEM_PROMPT };
 
         Controller& controller_;
         Kind kind_            = Kind::NONE;

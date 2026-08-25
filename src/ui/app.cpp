@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <functional>
 
+#include "environment.h"
 #include "ui.h"
 #include <print>
 
@@ -114,13 +115,15 @@ int run_repl(const Config& cfg)
 
     ScreenInteractive screen = ScreenInteractive::FullscreenAlternateScreen();
     ToolRegistry tools       = builtin_tools();
+    auto env                 = analyze_environment_async();
     Controller controller(
         cfg,
         [&screen](std::function<void()> f) {
             screen.Post(std::move(f));
             screen.PostEvent(Event::Custom);
         },
-        [&screen] { screen.Exit(); }, StreamFn { }, std::move(tools));
+        [&screen] { screen.Exit(); }, StreamFn { }, std::move(tools),
+        std::move(env));
     auto app = ftxui::Make<Repl>(screen, controller);
     screen.Loop(app);
     return 0;

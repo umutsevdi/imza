@@ -64,6 +64,9 @@ std::string tool_call_head(const ToolCall& call)
     if (call.name == "read" || call.name == "list") {
         return tool_display_name(call.name) + " " + read_path(call);
     }
+    if (call.name == "shell") {
+        return "Shell";
+    }
     if (call.name == "ask") {
         const Json::Value parsed = parse_json(call.args);
         int n = 0;

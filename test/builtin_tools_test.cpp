@@ -192,7 +192,7 @@ TEST_CASE("list rejects non-directories and reports empty output")
 TEST_CASE("builtin registry exposes both read-only tools")
 {
     const auto tools = ursa::builtin_tools();
-    REQUIRE(tools.tools().size() == 3);
+    REQUIRE(tools.tools().size() == 4);
 
     const auto* read = tools.find("read");
     REQUIRE(read != nullptr);
@@ -209,5 +209,34 @@ TEST_CASE("builtin registry exposes both read-only tools")
     CHECK(ask->safety == ursa::ToolSafety::READ_ONLY);
     CHECK(ask->spec.parameters["properties"].isMember("questions"));
 
-    CHECK(tools.specs().size() == 3);
+    CHECK(tools.specs().size() == 4);
+}
+
+TEST_CASE("shell tool runs a command and reports the exit code")
+{
+    const auto tool = ursa::make_shell_tool();
+    REQUIRE(tool.safety == ursa::ToolSafety::MUTATING);
+    CHECK(tool.persistent == false);
+    CHECK(tool.spec.parameters["properties"].isMember("command"));
+    CHECK(tool.spec.parameters["properties"].isMember("timeout"));
+
+    const auto out = tool.run(
+        ursa::parse_json(R"({"command":"echo hi-from-shell"})"));
+    CHECK(out.kind == ursa::ToolOutput::Kind::OUTPUT);
+    CHECK(out.text.find("hi-from-shell") != std::string::npos);
+    CHECK(out.text.find("[exit code: 0]") != std::string::npos);
+}
+
+TEST_CASE("shell tool rejects a missing command and honors timeout clamp")
+{
+    const auto tool = ursa::make_shell_tool();
+
+    const auto empty = tool.run(ursa::parse_json(R"({"command":""})"));
+    CHECK(empty.kind == ursa::ToolOutput::Kind::ERROR);
+    CHECK(empty.text.find("non-empty") != std::string::npos);
+
+    const auto bad_timeout
+        = tool.run(ursa::parse_json(R"({"command":"true","timeout":0})"));
+    CHECK(bad_timeout.kind == ursa::ToolOutput::Kind::ERROR);
+    CHECK(bad_timeout.text.find("timeout") != std::string::npos);
 }

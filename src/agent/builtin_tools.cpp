@@ -1,6 +1,9 @@
 #include "tools.h"
 
+#include "command.h"
+
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -208,7 +211,43 @@ namespace {
         return { ToolOutput::Kind::OUTPUT, std::move(out) };
     }
 
-} // namespace
+    ToolOutput shell_run(const Json::Value& args)
+    {
+        if (!args.isObject() || !args["command"].isString()
+            || args["command"].asString().empty()) {
+            return error("shell: 'command' must be a non-empty string");
+        }
+        const std::string command = args["command"].asString();
+
+        std::chrono::seconds timeout = std::chrono::seconds(10);
+        if (args["timeout"].isIntegral()) {
+            const auto raw = args["timeout"].asInt64();
+            if (raw < 1) {
+                return error("shell: timeout must be 1 or greater");
+            }
+            timeout = std::chrono::seconds(static_cast<long>(raw));
+        }
+
+        const CommandResult r = run_command(command, timeout);
+        if (!r.spawned) {
+            return error("shell: failed to execute command");
+        }
+
+        std::string out = command + "\n";
+        out += r.output;
+        if (!out.empty() && out.back() != '\n') {
+            out += '\n';
+        }
+        if (r.timed_out) {
+            out += "[command timed out after "
+                + std::to_string(timeout.count()) + "s]\n";
+        } else {
+            out += "[exit code: " + std::to_string(r.exit_code) + "]\n";
+        }
+        return { ToolOutput::Kind::OUTPUT, std::move(out) };
+    }
+
+    } // namespace
 
 Tool make_read_tool()
 {
@@ -246,12 +285,26 @@ Tool make_ask_tool()
     return { std::move(spec), ToolHandler { }, ToolSafety::READ_ONLY };
 }
 
+Tool make_shell_tool()
+{
+    ToolSpec spec;
+    spec.name = "shell";
+    spec.description = "Run a single shell command (one-liner) on the host and "
+                       "return its combined stdout/stderr. The command is subject "
+                       "to a timeout (seconds, default 10) after which it is "
+                       "terminated.";
+    spec.parameters = parse_json(
+        R"json({"type":"object","properties":{"command":{"type":"string","description":"the shell command to run"},"timeout":{"type":"integer","description":"maximum runtime in seconds before the command is killed (default 10)"}},"required":["command"]})json");
+    return { std::move(spec), shell_run, ToolSafety::MUTATING, false };
+}
+
 ToolRegistry builtin_tools()
 {
     ToolRegistry tools;
     tools.add(make_read_tool());
     tools.add(make_list_tool());
     tools.add(make_ask_tool());
+    tools.add(make_shell_tool());
     return tools;
 }
 

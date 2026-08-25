@@ -24,6 +24,7 @@ struct Tool {
     ToolSpec spec;
     ToolHandler run;
     ToolSafety safety = ToolSafety::MUTATING;
+    bool persistent = true;
 };
 
 class ToolRegistry {
@@ -41,6 +42,7 @@ private:
 Tool make_read_tool();
 Tool make_list_tool();
 Tool make_ask_tool();
+Tool make_shell_tool();
 ToolRegistry builtin_tools();
 
 } // namespace ursa
