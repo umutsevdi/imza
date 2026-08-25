@@ -32,9 +32,13 @@ namespace {
         std::vector<uint8_t> aligns; // 'l' | 'c' | 'r', per column
     };
 
-    cmark_node* parse(const std::string& md)
+    cmark_node* parse(std::string_view md)
     {
-        cmark_gfm_core_extensions_ensure_registered();
+        static const bool extensions = [] {
+            cmark_gfm_core_extensions_ensure_registered();
+            return true;
+        }();
+        (void)extensions;
         cmark_parser* parser        = cmark_parser_new(CMARK_OPT_DEFAULT);
         cmark_syntax_extension* ext = cmark_find_syntax_extension("table");
         if (ext) {
@@ -493,7 +497,7 @@ namespace {
 Element render_markdown_element(std::string_view md)
 {
     FtxuiSink sink;
-    cmark_node* doc = parse(std::string(md));
+    cmark_node* doc = parse(md);
     if (doc) {
         walk_markdown(doc, sink);
     }

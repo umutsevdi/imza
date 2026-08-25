@@ -7,10 +7,6 @@
 
 namespace ursa {
 
-namespace {
-
-} // namespace
-
 std::string tool_display_name(const std::string& name)
 {
     if (name.empty()) {

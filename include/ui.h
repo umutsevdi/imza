@@ -24,6 +24,9 @@ inline constexpr int MODAL_MAX_WIDTH = 120;
 
 ftxui::Element panel(ftxui::Element e);
 
+ftxui::Component space_activates(
+    ftxui::Component child, std::function<void()> on_space);
+
 ftxui::Element render_markdown_element(std::string_view md);
 
 ftxui::Element card(

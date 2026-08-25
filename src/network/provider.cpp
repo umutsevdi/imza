@@ -1,8 +1,8 @@
 #include <curl/curl.h>
 
 #include <algorithm>
+#include <charconv>
 #include <cctype>
-#include <cstdlib>
 #include <string_view>
 
 #include "network.h"
@@ -15,6 +15,8 @@ extern const Provider anthropic_provider;
 
 namespace {
 
+    constexpr std::size_t kRawCap = 16 * 1024;
+
     struct StreamCtx {
         const Provider* provider;
         StreamCallback cb;
@@ -23,13 +25,15 @@ namespace {
         std::string event;
         std::string data;
         std::string raw;
+        std::vector<StreamEvent> outs;
         int retry_after = 0;
+        int http_status = 0;
         bool connected  = false;
     };
 
     void mark_connected(StreamCtx& ctx)
     {
-        if (ctx.connected) {
+        if (ctx.connected || ctx.http_status < 200 || ctx.http_status >= 300) {
             return;
         }
         ctx.connected = true;
@@ -38,12 +42,19 @@ namespace {
 
     size_t header_callback(char* ptr, size_t size, size_t nmemb, void* userdata)
     {
-        auto* ctx     = static_cast<StreamCtx*>(userdata);
+        auto* ctx         = static_cast<StreamCtx*>(userdata);
         const size_t total = size * nmemb;
-        mark_connected(*ctx);
         std::string_view line(ptr, total);
         while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) {
             line.remove_suffix(1);
+        }
+        if (line.starts_with("HTTP/")) {
+            const auto sp = line.find(' ');
+            if (sp != std::string_view::npos) {
+                std::string_view v = line.substr(sp + 1);
+                std::from_chars(v.data(), v.data() + v.size(),
+                    ctx->http_status);
+            }
         }
         constexpr std::string_view key = "retry-after:";
         if (line.size() > key.size()
@@ -56,8 +67,11 @@ namespace {
             while (!v.empty() && v.front() == ' ') {
                 v.remove_prefix(1);
             }
-            ctx->retry_after = std::atoi(std::string(v).c_str());
+            ctx->retry_after = 0;
+            std::from_chars(
+                v.data(), v.data() + v.size(), ctx->retry_after);
         }
+        mark_connected(*ctx);
         return total;
     }
 
@@ -66,9 +80,9 @@ namespace {
         if (ctx.event.empty() && ctx.data.empty()) {
             return;
         }
-        std::vector<StreamEvent> outs;
-        ctx.provider->parse(ctx.parse_state, ctx.event, ctx.data, outs);
-        for (auto& ev : outs) {
+        ctx.outs.clear();
+        ctx.provider->parse(ctx.parse_state, ctx.event, ctx.data, ctx.outs);
+        for (auto& ev : ctx.outs) {
             ctx.cb(ev);
         }
         ctx.event.clear();
@@ -95,14 +109,16 @@ namespace {
             if (!e.empty() && e.front() == ' ') {
                 e = e.substr(1);
             }
-            ctx.event = std::string(e);
+            ctx.event.assign(e.data(), e.size());
         }
     }
 
     size_t write_callback(char* ptr, size_t, size_t n, void* userdata)
     {
         auto* ctx = static_cast<StreamCtx*>(userdata);
-        ctx->raw.append(ptr, n);
+        if (ctx->raw.size() < kRawCap) {
+            ctx->raw.append(ptr, std::min(n, kRawCap - ctx->raw.size()));
+        }
         mark_connected(*ctx);
         ctx->buf.append(ptr, n);
 
@@ -140,13 +156,20 @@ namespace {
         return st;
     }
 
+    CURL* reuse_handle()
+    {
+        static thread_local CURL* handle = curl_easy_init();
+        return handle;
+    }
+
 } // namespace
 
 Status stream(const Provider& provider, const Config& cfg,
     const ChatRequest& req, StreamCallback cb, int* retry_after)
 {
     const std::string body = write_json(provider.build(req));
-    const std::string url  = strip_slash(cfg.api_base) + provider.endpoint();
+    std::string url = strip_slash(cfg.api_base);
+    url += provider.endpoint();
 
     const std::vector<std::string> header_strs = provider.headers(cfg.api_key);
     curl_slist* list                           = nullptr;
@@ -154,16 +177,22 @@ Status stream(const Provider& provider, const Config& cfg,
         list = curl_slist_append(list, h.c_str());
     }
 
-    StreamCtx ctx { &provider, std::move(cb), ParseState { }, { }, { }, { },
-        { }, 0, false };
+    StreamCtx ctx;
+    ctx.provider = &provider;
+    ctx.cb       = std::move(cb);
 
-    CURL* curl = curl_easy_init();
+    CURL* curl = reuse_handle();
     if (!curl) {
         curl_slist_free_all(list);
         return Status::NETWORK_ERROR;
     }
 
     char errbuf[CURL_ERROR_SIZE] = { };
+    curl_easy_reset(curl);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 30L);
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, list);
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
@@ -179,7 +208,6 @@ Status stream(const Provider& provider, const Config& cfg,
     long code = 0;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code);
     curl_slist_free_all(list);
-    curl_easy_cleanup(curl);
 
     if (res != CURLE_OK) {
         std::string detail(errbuf[0] != '\0' ? errbuf : curl_easy_strerror(res));

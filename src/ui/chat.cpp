@@ -27,33 +27,7 @@ namespace {
     using namespace ftxui;
 
     constexpr std::size_t kLargeOutputLines = 30;
-
-    std::size_t count_lines(std::string_view text)
-    {
-        if (text.empty()) {
-            return 0;
-        }
-        std::size_t n = 1;
-        for (const char c : text) {
-            if (c == '\n') {
-                ++n;
-            }
-        }
-        return n;
-    }
-
-    std::string first_lines(const std::string& text, std::size_t max)
-    {
-        std::string out;
-        std::size_t lines = 0;
-        for (const char c : text) {
-            out += c;
-            if (c == '\n' && ++lines >= max) {
-                break;
-            }
-        }
-        return out;
-    }
+    constexpr std::size_t kInvalidVersion   = ~std::size_t { 0 };
 
     Element error_element(const UiState& st)
     {
@@ -79,6 +53,20 @@ namespace {
             text(" " + msg) | bgcolor(Color::Red),
             filler() | bgcolor(Color::Red),
         });
+    }
+
+    std::size_t item_version(const ConversationItem& it)
+    {
+        if (const auto* a = std::get_if<AssistantTurn>(&it)) {
+            return a->markdown.size();
+        }
+        if (const auto* tc = std::get_if<ToolCall>(&it)) {
+            if (!tc->result.has_value()) {
+                return 0;
+            }
+            return 1 + tc->result->text.size();
+        }
+        return 0;
     }
 
     Element user_item(const UserTurn& t)
@@ -165,8 +153,9 @@ namespace {
         Element OnRender() override
         {
             const UiState& st = controller_.state();
-            LayoutCtx ctx { width_() >= 100 ? LayoutCtx::Kind::WIDE
-                                            : LayoutCtx::Kind::NARROW,
+            LayoutCtx ctx { width_() >= LayoutCtx::wide_threshold
+                    ? LayoutCtx::Kind::WIDE
+                    : LayoutCtx::Kind::NARROW,
                 width_() };
 
             const bool streaming  = st.phase == UiState::Phase::STREAMING;
@@ -176,26 +165,37 @@ namespace {
             if (selected_ >= st.items.size() && !st.items.empty()) {
                 selected_ = st.items.size() - 1;
             }
+            if (cache_kind_ != ctx.kind || item_cache_.size() != st.items.size()) {
+                item_cache_.clear();
+                item_cache_.resize(st.items.size());
+                item_versions_.assign(st.items.size(), kInvalidVersion);
+                cache_kind_ = ctx.kind;
+            }
             std::size_t item_index = 0;
             item_boxes_.resize(st.items.size());
             for (const auto& it : st.items) {
-                Element el;
-            if (std::holds_alternative<ToolCall>(it)) {
-                const ToolCall& tc = std::get<ToolCall>(it);
-                const bool output = tc.result.has_value()
-                    && tc.result->kind == ToolCall::Result::Kind::OUTPUT
-                    && !tc.result->text.empty();
-                if (tc.name == "read" && output) {
-                    el = render_read_item(tc);
-                } else if (tc.name == "shell" && output
-                    && count_lines(tc.result->text) > kLargeOutputLines) {
-                    el = render_shell_collapsed(tc);
-                } else {
-                    el = render_item(it, ctx);
+                const std::size_t version = item_version(it);
+                if (item_versions_[item_index] != version) {
+                    if (std::holds_alternative<ToolCall>(it)) {
+                        const ToolCall& tc = std::get<ToolCall>(it);
+                        const bool output  = tc.result.has_value()
+                            && tc.result->kind == ToolCall::Result::Kind::OUTPUT
+                            && !tc.result->text.empty();
+                        if (tc.name == "read" && output) {
+                            item_cache_[item_index] = render_read_item(tc);
+                        } else if (tc.name == "shell" && output
+                            && count_lines(tc.result->text)
+                                > kLargeOutputLines) {
+                            item_cache_[item_index] = render_shell_collapsed(tc);
+                        } else {
+                            item_cache_[item_index] = render_item(it, ctx);
+                        }
+                    } else {
+                        item_cache_[item_index] = render_item(it, ctx);
+                    }
+                    item_versions_[item_index] = version;
                 }
-            } else {
-                el = render_item(it, ctx);
-            }
+                Element el = item_cache_[item_index];
                 if ((streaming || connecting)
                     && std::holds_alternative<AssistantTurn>(it)
                     && &it == &st.items.back()) {
@@ -444,13 +444,6 @@ namespace {
                 0.0F, 1.0F);
         }
 
-        void enqueue_viewer(std::string title, std::string content,
-            std::string lang, std::size_t start)
-        {
-            controller_.enqueue_user_modal(ViewerModal{
-                std::move(title), std::move(content), std::move(lang), start });
-        }
-
         bool item_is_actionable(const ConversationItem& it) const
         {
             if (!std::holds_alternative<ToolCall>(it)) {
@@ -474,16 +467,18 @@ namespace {
         void open_viewer_for(const ToolCall& tc)
         {
             if (tc.name == "read") {
-                enqueue_viewer(tool_call_head(tc), tc.result->text,
-                    tool_code_language(tc), read_start_line(tc));
+                controller_.enqueue_user_modal(ViewerModal {
+                    tool_call_head(tc), tc.result->text,
+                    tool_code_language(tc), read_start_line(tc) });
             } else {
-                enqueue_viewer("Shell output", tc.result->text, "", 1);
+                controller_.enqueue_user_modal(
+                    ViewerModal { "Shell output", tc.result->text, "", 1 });
             }
         }
 
         void on_input_changed()
         {
-            controller_.state().error.clear();
+            controller_.clear_error();
             refresh_suggestions();
         }
 
@@ -582,16 +577,17 @@ namespace {
         Component container_;
         std::map<std::size_t, Component> read_buttons_;
 
+        std::vector<Element> item_cache_;
+        std::vector<std::size_t> item_versions_;
+        LayoutCtx::Kind cache_kind_ = LayoutCtx::Kind::NARROW;
+
         Element render_read_item(const ToolCall& tc)
         {
             const std::string head    = tool_call_head(tc);
             const std::string content = tc.result->text;
-            const std::string lang    = tool_code_language(tc);
-            const std::size_t start   = read_start_line(tc);
             const std::string label   = "▸ open " + head + " in viewer ("
                 + std::to_string(count_lines(content)) + " lines)";
-            Component btn
-                = make_viewer_button(tc, head, content, lang, start, label);
+            Component btn             = make_viewer_button(tc.id, label);
             Elements rows;
             rows.push_back(hbox({
                 text("Tool Call: ") | bold | color(Color::GreenLight),
@@ -608,11 +604,10 @@ namespace {
             const std::string& full = tc.result->text;
             const std::size_t total = count_lines(full);
             const std::string preview
-                = first_lines(full, kLargeOutputLines);
+                = take_lines(full, kLargeOutputLines);
             const std::string label = "▸ open full shell output in viewer ("
                 + std::to_string(total) + " lines)";
-            Component btn = make_viewer_button(
-                tc, "Shell output", full, "", 1, label);
+            Component btn           = make_viewer_button(tc.id, label);
             Elements rows;
             rows.push_back(hbox({
                 text("Tool Call: ") | bold | color(Color::GreenLight),
@@ -626,20 +621,22 @@ namespace {
             return card(vbox(std::move(rows)), std::nullopt, false);
         }
 
-        Component make_viewer_button(const ToolCall& tc, std::string title,
-            std::string content, std::string lang, std::size_t start,
-            std::string label)
+        Component make_viewer_button(std::size_t id, std::string label)
         {
-            auto it = read_buttons_.find(tc.id);
+            auto it = read_buttons_.find(id);
             if (it != read_buttons_.end()) {
                 return it->second;
             }
             ButtonOption bo;
             bo.label = std::move(label);
-            bo.on_click = [this, title = std::move(title),
-                              content = std::move(content),
-                              lang = std::move(lang), start] {
-                enqueue_viewer(title, content, lang, start);
+            bo.on_click = [this, id] {
+                for (const auto& item : controller_.state().items) {
+                    const auto* tc = std::get_if<ToolCall>(&item);
+                    if (tc != nullptr && tc->id == id) {
+                        open_viewer_for(*tc);
+                        return;
+                    }
+                }
             };
             bo.transform = [](EntryState s) -> Element {
                 Element e = text(s.label);
@@ -651,7 +648,7 @@ namespace {
                 return e;
             };
             Component btn = Button(bo);
-            read_buttons_.emplace(tc.id, btn);
+            read_buttons_.emplace(id, btn);
             container_->Add(btn);
             return btn;
         }

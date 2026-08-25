@@ -24,8 +24,8 @@ namespace ursa {
 struct SlashCommand {
     std::string name;
     std::string desc;
-    enum class Action { EXIT, HELP, SETTINGS, DEMO, SKILL, SYSTEM_PROMPT };
-    Action action = Action::SKILL;
+    enum class Action { EXIT, HELP, SETTINGS, DEMO, SYSTEM_PROMPT };
+    Action action = Action::HELP;
 };
 
 std::vector<SlashCommand> slash_commands(const Config& cfg);
@@ -34,6 +34,8 @@ const SlashCommand* find_command(
 
 struct LayoutCtx {
     enum class Kind { WIDE, NARROW };
+    static constexpr int wide_threshold = 100;
+    static constexpr int panel_width    = 30;
     Kind kind;
     int width;
 };
@@ -147,13 +149,13 @@ public:
     void toggle_mode();
     void run_demo();
     void set_error(std::string msg);
+    void clear_error();
     void close_modal();
     void resolve_modal(ModalResult result);
     void enqueue_user_modal(ModalPayload payload);
     void cancel_queued(std::size_t id);
     size_t queue_size() const;
     ModalResult request_modal(ModalPayload payload);
-    UiState& state() { return state_; }
     const UiState& state() const { return state_; }
     const Config& config() const { return cfg_; }
     const std::vector<SlashCommand>& commands() const { return commands_; }
@@ -193,6 +195,8 @@ private:
     std::vector<SlashCommand> commands_;
     StreamFn stream_fn_;
     ToolRegistry tools_;
+    std::vector<ToolSpec> specs_plan_;
+    std::vector<ToolSpec> specs_all_;
 
     std::shared_future<Environment> env_;
     std::atomic<bool> env_ready_ { false };

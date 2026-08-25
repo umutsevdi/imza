@@ -13,13 +13,11 @@ using namespace ftxui;
 ftxui::Component make_side_panel(Controller& controller,
     std::function<int()> width)
     {
-        constexpr int wide_width = 30;
-        constexpr int wide_threshold = 100;
         return ftxui::Renderer(
             [&controller, width = std::move(width)] {
                 using namespace ftxui;
                 const int w = width();
-                const bool narrow = w < wide_threshold;
+                const bool narrow = w < LayoutCtx::wide_threshold;
                 LayoutCtx ctx { narrow ? LayoutCtx::Kind::NARROW
                                        : LayoutCtx::Kind::WIDE,
                     w };
@@ -43,7 +41,7 @@ ftxui::Component make_side_panel(Controller& controller,
                 if (narrow) {
                     return body | xflex;
                 }
-                return body | size(WIDTH, EQUAL, wide_width);
+                return body | size(WIDTH, EQUAL, LayoutCtx::panel_width);
             });
     }
 

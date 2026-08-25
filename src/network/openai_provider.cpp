@@ -59,7 +59,7 @@ namespace {
         return root;
     }
 
-    std::string endpoint() { return "/chat/completions"; }
+    std::string_view endpoint() { return "/chat/completions"; }
 
     std::vector<std::string> headers(const std::string& key)
     {
@@ -76,11 +76,7 @@ namespace {
             if (acc.name.empty()) {
                 continue;
             }
-            ToolCallRequest req;
-            req.name = acc.name;
-            req.args = acc.args.empty() ? "{}" : acc.args;
-            req.id   = acc.id;
-            outs.push_back(make_tool_call_event(std::move(req)));
+            outs.push_back(make_tool_call_event(finish_accum(acc)));
         }
         state.tool_accums.clear();
     }
@@ -130,18 +126,18 @@ namespace {
         return u;
     }
 
-    Status parse(ParseState& state, std::string_view, std::string_view data,
+    void parse(ParseState& state, std::string_view, std::string_view data,
         std::vector<StreamEvent>& outs)
     {
         if (data == "[DONE]") {
             flush_tools(state, outs);
             outs.push_back(make_done_event());
-            return Status::OK;
+            return;
         }
         const Json::Value root = parse_json(data);
         if (root.isNull()) {
             outs.push_back(make_error_event(Status::JSON_ERROR));
-            return Status::JSON_ERROR;
+            return;
         }
         if (root.isMember("error")) {
             const Json::Value& e = root["error"];
@@ -152,7 +148,7 @@ namespace {
                 msg = e.asString();
             }
             outs.push_back(make_error_event(Status::API_ERROR, msg));
-            return Status::API_ERROR;
+            return;
         }
         const Usage u = read_usage(root);
         const Json::Value& choices = root["choices"];
@@ -180,7 +176,6 @@ namespace {
         } else if (outs.empty()) {
             outs.push_back(make_delta_event(""));
         }
-        return Status::OK;
     }
 
 } // namespace

@@ -158,6 +158,9 @@ Controller::Controller(const Config& cfg, PostFn post,
     , tools_(std::move(tools))
     , env_(std::move(env))
 {
+    specs_plan_ = tools_.specs(ToolSafety::READ_ONLY);
+    specs_all_  = tools_.specs();
+
     if (!stream_fn_) {
         stream_fn_ = [this](const ChatRequest& req, const StreamCallback& cb) {
             const auto provider = get_provider(cfg_);
@@ -204,6 +207,8 @@ void Controller::toggle_mode()
 }
 
 void Controller::set_error(std::string msg) { state_.error = std::move(msg); }
+
+void Controller::clear_error() { state_.error.clear(); }
 
 void Controller::close_modal() { resolve_modal(std::monostate { }); }
 
@@ -410,13 +415,6 @@ void Controller::run_slash(std::string_view cmd)
             _enqueue_message(std::string(cmd));
         }
         break;
-    case SlashCommand::Action::SKILL:
-        if (state_.phase == UiState::Phase::IDLE) {
-            submit_message(std::string(cmd));
-        } else {
-            _enqueue_message(std::string(cmd));
-        }
-        break;
     case SlashCommand::Action::SYSTEM_PROMPT:
         enqueue_user_modal(
             ViewerModal { "System prompt", _system_prompt(), "text", 1, false });
@@ -513,9 +511,8 @@ void Controller::_drive(std::vector<Message> history, StreamFn override)
         ChatRequest req;
         req.model    = cfg_.model;
         req.messages = history;
-        req.tools    = state_.mode == UiState::Mode::PLAN
-            ? tools_.specs(ToolSafety::READ_ONLY)
-            : tools_.specs();
+        req.tools    = state_.mode == UiState::Mode::PLAN ? specs_plan_
+                                                          : specs_all_;
         stream_events_.clear();
         std::string text_buffer;
         std::string error_msg;
@@ -774,7 +771,9 @@ void Controller::_apply_question_result(
     }
     ModalAnswer copy = *answer;
     reply_buffer += modal_answer_markdown(copy);
-    _post([this, copy] { state_.items.push_back(std::move(copy)); });
+    _post([this, copy = std::move(copy)] {
+        state_.items.push_back(std::move(copy));
+    });
 }
 
 void Controller::_apply_ask_result(const ToolCallRequest& req,
@@ -835,7 +834,10 @@ void Controller::_fill_tool_result(
         if (tc == nullptr || tc->result.has_value()) {
             continue;
         }
-        if (tc->name == req.name && tc->args == req.args) {
+        const bool matched = !req.id.empty() ? tc->call_id == req.id
+                                             : tc->name == req.name
+            && tc->args == req.args;
+        if (matched) {
             tc->result = std::move(result);
             return;
         }

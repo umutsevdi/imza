@@ -7,10 +7,12 @@ int main()
 {
     const auto path = ursa::config_path();
     ursa::Config cfg;
-    const auto status = ursa::load_config(path, cfg);
+    std::string error;
+    const auto status = ursa::load_config(path, cfg, &error);
     if (status != ursa::Status::OK) {
-        std::println(
-            "config error ({}) at {}", static_cast<int>(status), path.string());
+        std::println("config error ({}): {}",
+            static_cast<int>(status),
+            error.empty() ? path.string() : error);
         return 1;
     }
 

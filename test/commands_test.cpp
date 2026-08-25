@@ -22,7 +22,12 @@ TEST_CASE("slash_commands includes built-ins")
     CHECK(has_help);
     CHECK(has_exit);
     for (const auto& c : cmds) {
-        CHECK(c.action != SlashCommand::Action::SKILL);
+        const bool known = c.action == SlashCommand::Action::EXIT
+            || c.action == SlashCommand::Action::HELP
+            || c.action == SlashCommand::Action::SETTINGS
+            || c.action == SlashCommand::Action::DEMO
+            || c.action == SlashCommand::Action::SYSTEM_PROMPT;
+        CHECK(known);
     }
 }
 

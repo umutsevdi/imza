@@ -83,7 +83,7 @@ namespace {
         return root;
     }
 
-    std::string endpoint() { return "/v1/messages"; }
+    std::string_view endpoint() { return "/v1/messages"; }
 
     std::vector<std::string> headers(const std::string& key)
     {
@@ -95,11 +95,21 @@ namespace {
         };
     }
 
-    Status parse(ParseState& state, std::string_view event,
+    void flush_pending_tools(ParseState& state, std::vector<StreamEvent>& outs)
+    {
+        for (auto& [index, acc] : state.tool_accums) {
+            if (acc.name.empty()) {
+                continue;
+            }
+            outs.push_back(make_tool_call_event(finish_accum(acc)));
+        }
+        state.tool_accums.clear();
+    }
+
+    void parse(ParseState& state, std::string_view event,
         std::string_view data, std::vector<StreamEvent>& outs)
     {
-        const std::string ev(event);
-        if (ev == "content_block_start") {
+        if (event == "content_block_start") {
             const Json::Value root  = parse_json(data);
             const Json::Value& block = root["content_block"];
             if (block.get("type", "").asString() == "tool_use") {
@@ -107,9 +117,9 @@ namespace {
                 acc.id   = block.get("id", "").asString();
                 acc.name = block.get("name", "").asString();
             }
-            return Status::OK;
+            return;
         }
-        if (ev == "message_start") {
+        if (event == "message_start") {
             const Json::Value root = parse_json(data);
             const Json::Value& msg = root["message"];
             if (msg.isObject()) {
@@ -119,9 +129,9 @@ namespace {
                     state.usage.total  = state.usage.prompt;
                 }
             }
-            return Status::OK;
+            return;
         }
-        if (ev == "message_delta") {
+        if (event == "message_delta") {
             const Json::Value root = parse_json(data);
             const Json::Value& usage = root["usage"];
             if (usage.isObject()) {
@@ -129,9 +139,9 @@ namespace {
                 state.usage.total
                     = state.usage.prompt + state.usage.completion;
             }
-            return Status::OK;
+            return;
         }
-        if (ev == "content_block_delta") {
+        if (event == "content_block_delta") {
             const Json::Value root  = parse_json(data);
             const Json::Value& delta = root["delta"];
             const std::string type   = delta.get("type", "").asString();
@@ -144,31 +154,28 @@ namespace {
                         += delta.get("partial_json", "").asString();
                 }
             }
-            return Status::OK;
+            return;
         }
-        if (ev == "content_block_stop") {
+        if (event == "content_block_stop") {
             const Json::Value root = parse_json(data);
             const int index        = root.get("index", 0).asInt();
             auto it                = state.tool_accums.find(index);
             if (it != state.tool_accums.end()) {
-                ToolCallRequest req;
-                req.name = it->second.name;
-                req.args = it->second.args.empty() ? "{}" : it->second.args;
-                req.id   = it->second.id;
+                const ToolCallRequest req = finish_accum(it->second);
                 state.tool_accums.erase(it);
-                outs.push_back(make_tool_call_event(std::move(req)));
+                outs.push_back(make_tool_call_event(req));
             }
-            return Status::OK;
+            return;
         }
-        if (ev == "message_stop") {
+        if (event == "message_stop") {
+            flush_pending_tools(state, outs);
             if (state.usage.prompt > 0 || state.usage.completion > 0
                 || state.usage.total > 0) {
                 outs.push_back(make_usage_event(state.usage));
             }
             outs.push_back(make_done_event());
-            return Status::OK;
+            return;
         }
-        return Status::OK;
     }
 
 } // namespace

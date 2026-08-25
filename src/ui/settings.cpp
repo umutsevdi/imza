@@ -41,15 +41,9 @@ namespace {
 
             radiobox_ = Radiobox(&themes_, &theme_idx_);
             slider_   = Slider("temperature", &temperature_, 0, 100, 1);
-            auto close = [&] { controller_.close_modal(); };
-            button_ = CatchEvent(Button("Close (Esc)", close),
-                [close](Event e) -> bool {
-                    if (e == Event::Character(' ')) {
-                        close();
-                        return true;
-                    }
-                    return false;
-                });
+            button_ = space_activates(
+                Button("Close (Esc)", [&] { controller_.close_modal(); }),
+                [&] { controller_.close_modal(); });
 
             Components children;
             children.push_back(dropdown_);

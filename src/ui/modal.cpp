@@ -195,7 +195,6 @@ namespace {
 
         void build(const ToolCallRequest&)
         {
-            kind_        = Kind::TOOL;
             tool_phase_  = ToolPhase::DECIDE;
             reason_buf_.clear();
             reason_cursor_ = 0;
@@ -208,21 +207,21 @@ namespace {
                 controller_.resolve_modal(
                     ModalResult { ToolVerdict { d, std::move(r) } });
             };
-            accept_ = with_space(
+            accept_ = space_activates(
                 Button("Accept", [resolve] { resolve(ToolDecision::ACCEPT, ""); }),
                 [resolve] { resolve(ToolDecision::ACCEPT, ""); });
-            accept_always_ = with_space(
+            accept_always_ = space_activates(
                 Button("Accept Always", [resolve] {
                     resolve(ToolDecision::ACCEPT_ALWAYS, "");
                 }),
                 [resolve] { resolve(ToolDecision::ACCEPT_ALWAYS, ""); });
-            reject_ = with_space(
+            reject_ = space_activates(
                 Button("Reject", [this] { _set_tool_phase(ToolPhase::REASON); }),
                 [this] { _set_tool_phase(ToolPhase::REASON); });
-            confirm_reject_ = with_space(
+            confirm_reject_ = space_activates(
                 Button("Reject", [this] { _confirm_reject(); }),
                 [this] { _confirm_reject(); });
-            back_ = with_space(
+            back_ = space_activates(
                 Button("Back", [this] { _set_tool_phase(ToolPhase::DECIDE); }),
                 [this] { _set_tool_phase(ToolPhase::DECIDE); });
 
@@ -256,7 +255,6 @@ namespace {
 
         void build(const QuestionForm& form)
         {
-            kind_ = Kind::QUESTION;
             form_ = form;
             cards_.clear();
             cards_.reserve(form.size());
@@ -267,7 +265,6 @@ namespace {
             for (const auto& card : form) {
                 cards_.emplace_back();
                 CardState& cs = cards_.back();
-                cs.options    = card.options;
                 cs.checked.assign(card.options.size(), false);
 
                 Components rows;
@@ -303,7 +300,7 @@ namespace {
                 children.push_back(cs.selector);
                 focusables_.push_back(cs.selector);
             }
-            submit_ = with_space(
+            submit_ = space_activates(
                 Button("Submit", [this] { submit_question(); }),
                 [this] { submit_question(); });
             children.push_back(submit_);
@@ -318,20 +315,15 @@ namespace {
 
         void build(const SettingsModal&)
         {
-            kind_     = Kind::SETTINGS;
             settings_ = make_settings(controller_);
             body_     = settings_;
         }
 
-        void build(const HelpModal&) { kind_ = Kind::HELP; }
+        void build(const HelpModal&) { }
 
-        void build(const ViewerModal&)
-        {
-            kind_          = Kind::VIEWER;
-            viewer_scroll_ = 0.0F;
-        }
+        void build(const ViewerModal&) { viewer_scroll_ = 0.0F; }
 
-        void build(std::monostate) { kind_ = Kind::NONE; }
+        void build(std::monostate) { }
 
         void _cycle_focus(bool forward)
         {
@@ -376,24 +368,7 @@ namespace {
             };
             bo.on_click = toggle;
             Component row = Button(label, bo.on_click, bo);
-            return CatchEvent(row, [toggle](Event e) -> bool {
-                if (e == Event::Character(' ')) {
-                    toggle();
-                    return true;
-                }
-                return false;
-            });
-        }
-
-        Component with_space(Component child, std::function<void()> on_space)
-        {
-            return CatchEvent(child, [on_space](Event e) -> bool {
-                if (e == Event::Character(' ')) {
-                    on_space();
-                    return true;
-                }
-                return false;
-            });
+            return space_activates(row, toggle);
         }
 
         void submit_question()
@@ -577,10 +552,7 @@ namespace {
             return false;
         }
 
-        enum class Kind { NONE, TOOL, QUESTION, SETTINGS, HELP, VIEWER };
-
         Controller& controller_;
-        Kind kind_            = Kind::NONE;
         bool built_           = false;
         std::uint64_t serial_ = 0;
 

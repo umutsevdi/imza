@@ -1,22 +1,13 @@
 #include "pricing.h"
 
+#include "util.h"
+
 #include <algorithm>
-#include <cctype>
 #include <unordered_map>
 
 namespace ursa {
 
 namespace {
-
-std::string to_lower(std::string_view s)
-{
-    std::string out;
-    out.reserve(s.size());
-    for (char c : s) {
-        out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-    }
-    return out;
-}
 
 using Row = ModelPricing;
 

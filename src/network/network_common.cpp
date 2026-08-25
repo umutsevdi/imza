@@ -1,6 +1,8 @@
 #include "network.h"
 
-#include <cctype>
+#include <memory>
+
+#include "util.h"
 
 namespace ursa {
 
@@ -13,15 +15,26 @@ std::string write_json(const Json::Value& value)
 
 Json::Value parse_json(std::string_view text)
 {
+    static thread_local Json::CharReaderBuilder builder;
+    static thread_local std::unique_ptr<Json::CharReader> reader(
+        builder.newCharReader());
     Json::Value value;
-    Json::CharReaderBuilder reader;
     std::string err;
-    const std::string copy(text);
-    std::istringstream stream(copy);
-    if (!Json::parseFromStream(reader, stream, &value, &err)) {
+    if (text.empty()
+        || !reader->parse(
+            text.data(), text.data() + text.size(), &value, &err)) {
         return Json::Value::null;
     }
     return value;
+}
+
+ToolCallRequest finish_accum(const ToolAccum& acc)
+{
+    ToolCallRequest req;
+    req.name = acc.name;
+    req.args = acc.args.empty() ? "{}" : acc.args;
+    req.id   = acc.id;
+    return req;
 }
 
 const char* role_str(Message::Type type)
@@ -90,18 +103,6 @@ StreamEvent make_connected_event()
     return ev;
 }
 
-namespace {
-
-    std::string lower_copy(std::string s)
-    {
-        for (char& c : s) {
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        }
-        return s;
-    }
-
-} // namespace
-
 Status parse_api_error(std::string_view body, std::string& message)
 {
     message.clear();
@@ -130,7 +131,7 @@ Status parse_api_error(std::string_view body, std::string& message)
     if (msg.empty() && kind.empty()) {
         return Status::OK;
     }
-    const std::string hay = lower_copy(kind + " " + msg);
+    const std::string hay = to_lower(kind + " " + msg);
     Status st             = Status::API_ERROR;
     if (hay.find("rate") != std::string::npos
         || hay.find("too many") != std::string::npos) {

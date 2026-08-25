@@ -33,15 +33,26 @@ std::filesystem::path config_path()
 #endif
 }
 
-Status load_config(const std::filesystem::path& path, Config& out)
+Status load_config(const std::filesystem::path& path, Config& out,
+    std::string* error)
 {
+    const auto fail = [&](Status st, const std::string& msg) {
+        if (error != nullptr) {
+            *error = msg;
+        }
+        return st;
+    };
+
     std::ifstream file(path);
     if (!file) {
-        return Status::CONFIG_ERROR;
+        return fail(Status::CONFIG_ERROR, "cannot open " + path.string());
     }
 
     std::stringstream buffer;
     buffer << file.rdbuf();
+    if (file.bad() && !file.eof()) {
+        return fail(Status::CONFIG_ERROR, "failed to read " + path.string());
+    }
     const std::string text = buffer.str();
 
     Json::Value root;
@@ -49,19 +60,25 @@ Status load_config(const std::filesystem::path& path, Config& out)
     std::string err;
     std::istringstream parse_stream { text };
     if (!Json::parseFromStream(reader, parse_stream, &root, &err)) {
-        return Status::CONFIG_ERROR;
+        return fail(Status::CONFIG_ERROR, "invalid JSON: " + err);
     }
 
-    out.api_base = root.get("api_base", "").asString();
-    out.api_key  = root.get("api_key", "").asString();
-    out.model    = root.get("model", "").asString();
+    const auto string_field = [&](const char* key) -> std::string {
+        const Json::Value& v = root[key];
+        return v.isString() ? v.asString() : std::string();
+    };
 
-    const std::string standard = root.get("standard", "openai").asString();
+    out.api_base = string_field("api_base");
+    out.api_key  = string_field("api_key");
+    out.model    = string_field("model");
+
+    const std::string standard = string_field("standard");
     out.standard = (standard == "anthropic") ? ApiStandard::ANTHROPIC
                                              : ApiStandard::OPENAI;
 
     if (out.api_key.empty() || out.model.empty()) {
-        return Status::CONFIG_ERROR;
+        return fail(Status::CONFIG_ERROR,
+            "config requires non-empty 'api_key' and 'model'");
     }
     return Status::OK;
 }

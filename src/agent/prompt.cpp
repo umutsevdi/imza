@@ -1,5 +1,7 @@
 #include "prompt.h"
 
+#include "util.h"
+
 #include <filesystem>
 #include <string_view>
 #include <vector>
@@ -57,18 +59,6 @@ namespace {
 #else
         return "unknown";
 #endif
-    }
-
-    std::string join(const std::vector<std::string>& items, std::string_view sep)
-    {
-        std::string out;
-        for (std::size_t i = 0; i < items.size(); ++i) {
-            if (i != 0) {
-                out += sep;
-            }
-            out += items[i];
-        }
-        return out;
     }
 
     std::string environment_block(const Environment& e)

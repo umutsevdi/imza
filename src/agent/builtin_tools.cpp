@@ -1,6 +1,7 @@
 #include "tools.h"
 
 #include "command.h"
+#include "util.h"
 
 #include <algorithm>
 #include <chrono>
@@ -19,24 +20,6 @@ namespace {
 
     constexpr std::size_t MAX_READ_LINES  = 2000;
     constexpr std::size_t MAX_LIST_ENTRIES = 2000;
-
-    std::vector<std::string> split_lines(const std::string& text)
-    {
-        std::vector<std::string> lines;
-        std::string line;
-        for (const char c : text) {
-            if (c == '\n') {
-                lines.push_back(std::move(line));
-                line.clear();
-            } else {
-                line += c;
-            }
-        }
-        if (!line.empty()) {
-            lines.push_back(std::move(line));
-        }
-        return lines;
-    }
 
     std::string join_lines(const std::vector<std::string>& lines,
         std::size_t begin, std::size_t end)
@@ -118,8 +101,7 @@ namespace {
         const std::size_t length             = lines.size();
         if (length == 0) {
             return { ToolOutput::Kind::OUTPUT, "(empty file)" };
-        }
-        if (begin > length) {
+        }        if (begin > length) {
             return error("read: line_begin " + std::to_string(begin)
                 + " exceeds file length " + std::to_string(length) + ": " + path);
         }
@@ -189,20 +171,20 @@ namespace {
             truncated = true;
         }
 
-    std::string out;
-    for (const auto& name : names) {
-        if (!out.empty()) {
-            out += '\n';
+        std::string out;
+        for (const auto& name : names) {
+            if (!out.empty()) {
+                out += '\n';
+            }
+            out += name;
+            if (name.empty() || name.back() == '/') {
+                out += '\t' + std::string("—");
+                continue;
+            }
+            std::error_code sec;
+            const auto sz = fs::file_size(root / name, sec);
+            out += '\t' + (sec ? "—" : format_kb(sz));
         }
-        out += name;
-        if (name.empty() || name.back() == '/') {
-            out += '\t' + std::string("—");
-            continue;
-        }
-        std::error_code sec;
-        const auto sz = fs::file_size(root / name, sec);
-        out += '\t' + (sec ? "—" : format_kb(sz));
-    }
         if (truncated) {
             out += "\n[truncated: showing first "
                 + std::to_string(MAX_LIST_ENTRIES) + " of "

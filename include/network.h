@@ -40,12 +40,12 @@ struct Usage {
 
 struct StreamEvent {
     enum class Kind { CONTENT_DELTA, TOOL_CALL, QUESTION, DONE, ERROR, USAGE, CONNECTED };
-    Kind kind;
+    Kind kind = Kind::CONTENT_DELTA;
     std::string text;
-    Status error;
+    Status error = Status::OK;
     ToolCallRequest tool_call;
     QuestionForm question;
-    Usage usage;
+    Usage usage { };
 };
 
 StreamEvent make_delta_event(std::string text);
@@ -71,6 +71,8 @@ struct ToolAccum {
     std::string args;
 };
 
+ToolCallRequest finish_accum(const ToolAccum& acc);
+
 struct ParseState {
     std::map<int, ToolAccum> tool_accums;
     Usage usage;
@@ -79,9 +81,9 @@ struct ParseState {
 
 struct Provider {
     Json::Value (*build)(const ChatRequest& req);
-    std::string (*endpoint)();
+    std::string_view (*endpoint)();
     std::vector<std::string> (*headers)(const std::string& api_key);
-    Status (*parse)(ParseState& state, std::string_view event,
+    void (*parse)(ParseState& state, std::string_view event,
         std::string_view data, std::vector<StreamEvent>& outs);
 };
 

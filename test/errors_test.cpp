@@ -302,11 +302,10 @@ TEST_CASE("stream reports rate limit, retry-after and provider message")
 
     CHECK(st == ursa::Status::RATE_LIMITED);
     CHECK(retry_after == 7);
-    REQUIRE(events.size() == 2);
-    CHECK(events[0].kind == ursa::StreamEvent::Kind::CONNECTED);
-    CHECK(events[1].kind == ursa::StreamEvent::Kind::ERROR);
-    CHECK(events[1].error == ursa::Status::RATE_LIMITED);
-    CHECK(events[1].text == "Rate limit exceeded");
+    REQUIRE(events.size() == 1);
+    CHECK(events[0].kind == ursa::StreamEvent::Kind::ERROR);
+    CHECK(events[0].error == ursa::Status::RATE_LIMITED);
+    CHECK(events[0].text == "Rate limit exceeded");
 }
 
 TEST_CASE("stream emits CONNECTED then parses SSE on success")

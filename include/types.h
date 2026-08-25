@@ -70,7 +70,8 @@ struct Config {
     std::optional<ModelPricing> pricing;
 };
 
-Status load_config(const std::filesystem::path& path, Config& out);
+Status load_config(const std::filesystem::path& path, Config& out,
+    std::string* error = nullptr);
 std::filesystem::path config_path(void);
 
 } // namespace ursa

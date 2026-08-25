@@ -39,12 +39,16 @@ namespace {
         {
             const int w = ftxui::Terminal::Size().dimx;
             const LayoutCtx::Kind kind
-                = w >= 100 ? LayoutCtx::Kind::WIDE : LayoutCtx::Kind::NARROW;
+                = w >= LayoutCtx::wide_threshold ? LayoutCtx::Kind::WIDE
+                                                 : LayoutCtx::Kind::NARROW;
 
             Element side = panel(side_->Render());
 
             Element right_col = chat_->Render();
-            const int chat_w  = (kind == LayoutCtx::Kind::WIDE) ? w - 31 : w;
+            const int chat_w
+                = (kind == LayoutCtx::Kind::WIDE)
+                ? w - LayoutCtx::panel_width - 1
+                : w;
             right_col      = std::move(right_col) | size(WIDTH, EQUAL, chat_w);
             Element status = status_line(
                 controller_.config(), controller_.state(), { kind, w });
@@ -67,10 +71,9 @@ namespace {
             }
 
             if (controller_.state().modal.index() != 0) {
-                const int w   = ftxui::Terminal::Size().dimx;
-                const int h   = ftxui::Terminal::Size().dimy;
-                const int mw  = std::min(w - 4, MODAL_MAX_WIDTH);
-                const int mh  = std::max(10, h - 4);
+                const int h  = ftxui::Terminal::Size().dimy;
+                const int mw = std::min(w - 4, MODAL_MAX_WIDTH);
+                const int mh = std::max(10, h - 4);
                 Element popup = modal_->Render()
                     | borderStyled(ROUNDED, PANEL_BORDER) | bgcolor(PANEL_COLOR)
                     | color(PANEL_FG) | clear_under | size(WIDTH, EQUAL, mw)

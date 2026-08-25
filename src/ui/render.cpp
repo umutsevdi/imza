@@ -1,10 +1,14 @@
 #include "ui.h"
 #include "pricing.h"
+#include "util.h"
 
+#include <ftxui/component/component.hpp>
+#include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <sstream>
 #include <iomanip>
@@ -16,22 +20,6 @@ namespace ursa {
 using namespace ftxui;
 
 namespace {
-
-    std::vector<std::string> split_text(const std::string& text)
-    {
-        std::vector<std::string> lines;
-        std::string line;
-        for (const char c : text) {
-            if (c == '\n') {
-                lines.push_back(std::move(line));
-                line.clear();
-            } else {
-                line += c;
-            }
-        }
-        lines.push_back(std::move(line));
-        return lines;
-    }
 
     std::string compact_tokens(std::uint64_t n)
     {
@@ -104,6 +92,33 @@ namespace {
             % (sizeof(frames) / sizeof(frames[0]))];
     }
 
+    std::string _cached_cwd()
+    {
+        using namespace std::chrono_literals;
+        static std::string cached;
+        static std::chrono::steady_clock::time_point fetched;
+        const auto now = std::chrono::steady_clock::now();
+        if (cached.empty() || now - fetched > 1s) {
+            std::error_code ec;
+            const std::filesystem::path cwd
+                = std::filesystem::current_path(ec);
+            cached = ec ? "" : _abbreviate_home(cwd.string());
+            fetched = now;
+        }
+        return cached;
+    }
+
+    ModelPricing _cached_pricing(const Config& cfg)
+    {
+        static std::string last_model;
+        static ModelPricing cached;
+        if (last_model != cfg.model) {
+            last_model = cfg.model;
+            cached     = get_pricing(cfg);
+        }
+        return cached;
+    }
+
 } // namespace
 
 Element code_block(const std::string& code, const std::string& lang)
@@ -135,7 +150,7 @@ Element code_block_with_lines(const std::string& code, const std::string& lang,
     const Color bg = Color::Black;
     const Color fg = Color::White;
     const Color gutter = PANEL_FG_DIM;
-    const std::vector<std::string> lines = split_text(code);
+    const std::vector<std::string> lines = split_lines(code);
 
     std::size_t footer = lines.size();
     for (std::size_t i = 0; i < lines.size(); ++i) {
@@ -180,7 +195,7 @@ Element list_block(const std::string& code)
     const Color bg   = Color::Black;
     const Color fg   = PANEL_FG;
     const Color size = PANEL_FG_DIM;
-    const std::vector<std::string> lines = split_text(code);
+    const std::vector<std::string> lines = split_lines(code);
 
     Elements body;
     for (const std::string& raw : lines) {
@@ -204,6 +219,18 @@ Element list_block(const std::string& code)
 Element panel(Element e)
 {
     return std::move(e) | bgcolor(PANEL_COLOR) | color(PANEL_FG);
+}
+
+Component space_activates(Component child, std::function<void()> on_space)
+{
+    return CatchEvent(child,
+        [on_space = std::move(on_space)](Event e) -> bool {
+            if (e == Event::Character(' ')) {
+                on_space();
+                return true;
+            }
+            return false;
+        });
 }
 
 Element card(Element body, std::optional<Color> bg, bool pad)
@@ -237,7 +264,7 @@ Element status_line(const Config& cfg, const UiState& state, const LayoutCtx& ct
         bar.push_back(text(" · " + cfg.model) | color(PANEL_FG_DIM));
     }
     if (state.last.prompt > 0 || state.totals.total > 0) {
-        const ModelPricing pricing = get_pricing(cfg);
+        const ModelPricing pricing = _cached_pricing(cfg);
         const std::uint64_t used   = state.last.prompt;
         if (pricing.context_limit > 0) {
             const std::uint64_t pct
@@ -259,9 +286,7 @@ Element status_line(const Config& cfg, const UiState& state, const LayoutCtx& ct
         bar.push_back(text("  "));
     }
     if (wide) {
-        const std::string cwd
-            = _abbreviate_home(std::filesystem::current_path().string());
-        bar.push_back(text(cwd) | color(PANEL_FG_DIM));
+        bar.push_back(text(_cached_cwd()) | color(PANEL_FG_DIM));
         bar.push_back(text("  "));
     }
     if (state.total_cost > 0) {

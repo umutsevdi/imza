@@ -1,6 +1,7 @@
 #include "environment.h"
 
-#include <cctype>
+#include "util.h"
+
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -63,21 +64,6 @@ std::string read_command_output(const std::string& cmd)
     return out;
 }
 
-std::string trim(const std::string& s)
-{
-    size_t begin = 0;
-    size_t end = s.size();
-    while (begin < end
-        && std::isspace(static_cast<unsigned char>(s[begin]))) {
-        ++begin;
-    }
-    while (end > begin
-        && std::isspace(static_cast<unsigned char>(s[end - 1]))) {
-        --end;
-    }
-    return s.substr(begin, end - begin);
-}
-
 bool find_in_path(const std::string& name)
 {
 #ifdef _WIN32
@@ -122,7 +108,7 @@ void parse_os_release(Environment& env)
         if (!value.empty() && value.front() == '"' && value.back() == '"') {
             value = value.substr(1, value.size() - 2);
         }
-        value = trim(value);
+        value = std::string(trim(value));
         if (key == "NAME") {
             name = value;
         } else if (key == "VERSION_ID") {
