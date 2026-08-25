@@ -21,7 +21,7 @@ tasks in your workspace.
 - [X] token & cost tracking; rate-limit retry with countdown
 - [ ] file modification tools (`write`, `edit`) — the model cannot change files
 - [ ] search tools (pattern `glob`, `grep`) and `webfetch`
-- [ ] provider/model switching at runtime; multiple provider profiles
+- [X] provider/model switching at runtime; multiple provider profiles
 - [ ] custom slash commands / skills
 - [ ] subagents and MCP tool servers
 - [ ] session resume / conversation persistence
