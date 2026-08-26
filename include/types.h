@@ -81,8 +81,12 @@ struct ModelChoice {
     std::string model_id;
 };
 
+struct VariantChoice {
+    std::string effort;
+};
+
 using ModalResult = std::variant<std::monostate, ToolVerdict, ModalAnswer,
-    ConnectResult, ModelChoice>;
+    ConnectResult, ModelChoice, VariantChoice>;
 
 struct ModelPricing {
     double input_per_1k  = 0.0;
@@ -108,6 +112,7 @@ struct LastUsed {
 struct Config {
     std::vector<Connection> providers;
     std::optional<LastUsed> last_used;
+    std::optional<std::string> reasoning_effort;
 };
 
 Status load_config(const std::filesystem::path& path, Config& out,

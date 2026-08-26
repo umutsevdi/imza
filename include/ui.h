@@ -47,7 +47,6 @@ ftxui::Element code_block(
     const std::string& code, const std::string& lang = "");
 ftxui::Element code_block_with_lines(
     const std::string& code, const std::string& lang, std::size_t start_line);
-ftxui::Element list_block(const std::string& text);
 ftxui::Element diff_split(const DiffView& diff);
 
 ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx);
@@ -63,8 +62,8 @@ int run_repl(const Config& cfg);
 ftxui::Component make_chat(Controller& controller, std::function<int()> width);
 ftxui::Component make_side_panel(
     Controller& controller, std::function<int()> width);
-ftxui::Component make_settings(Controller& controller);
 ftxui::Component make_connect(Controller& controller);
+ftxui::Component make_variant(Controller& controller);
 ftxui::Component make_modal(Controller& controller);
 
 } // namespace ursa

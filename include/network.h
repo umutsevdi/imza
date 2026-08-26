@@ -25,12 +25,18 @@ struct ToolCallEntry {
     std::string args;
 };
 
+struct ThinkingBlock {
+    std::string text;
+    std::string signature;
+};
+
 struct Message {
     enum class Type { SYSTEM, USER, ASSISTANT, TOOL };
     Type type;
     std::string content;
     std::vector<ToolCallEntry> tool_calls { };
     std::string tool_call_id { };
+    std::vector<ThinkingBlock> thinking { };
 };
 
 struct Usage {
@@ -42,13 +48,14 @@ struct Usage {
 };
 
 struct StreamEvent {
-    enum class Kind { CONTENT_DELTA, TOOL_CALL, QUESTION, DONE, ERROR, USAGE, CONNECTED };
+    enum class Kind { CONTENT_DELTA, TOOL_CALL, QUESTION, DONE, ERROR, USAGE, CONNECTED, REASONING };
     Kind kind = Kind::CONTENT_DELTA;
     std::string text;
     Status error = Status::OK;
     ToolCallRequest tool_call;
     QuestionForm question;
     Usage usage { };
+    std::string thinking_signature { };
 };
 
 StreamEvent make_delta_event(std::string text);
@@ -58,12 +65,15 @@ StreamEvent make_done_event();
 StreamEvent make_error_event(Status error, std::string message = "");
 StreamEvent make_usage_event(Usage usage);
 StreamEvent make_connected_event();
+StreamEvent make_reasoning_event(std::string text, std::string signature = "");
 
 struct ChatRequest {
     std::string model;
     std::vector<Message> messages;
     std::vector<ToolSpec> tools;
     double temperature = 0.7;
+    std::optional<std::string> reasoning_effort;
+    std::optional<std::uint64_t> thinking_budget;
 };
 
 enum class AuthType { BEARER, ANTHROPIC, NONE };
@@ -100,8 +110,14 @@ struct ToolAccum {
 
 ToolCallRequest finish_accum(const ToolAccum& acc);
 
+struct ThinkingAccum {
+    std::string text;
+    std::string signature;
+};
+
 struct ParseState {
     std::map<int, ToolAccum> tool_accums;
+    std::map<int, ThinkingAccum> thinking_accums;
     Usage usage;
     bool usage_emitted = false;
 };

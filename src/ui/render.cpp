@@ -87,35 +87,6 @@ Element code_block_with_lines(
         | bgcolor(bg) | dim;
 }
 
-Element list_block(const std::string& code)
-{
-    const Color bg                       = PANEL_COLOR;
-    const Color fg                       = PANEL_FG;
-    const Color size                     = PANEL_FG_DIM;
-    const std::vector<std::string> lines = split_lines(code);
-
-    Elements body;
-    for (const std::string& raw : lines) {
-        if (raw.rfind("[truncated", 0) == 0) {
-            body.push_back(text(raw) | color(PANEL_FG_DIM));
-            continue;
-        }
-        const std::size_t tab = raw.find('\t');
-        const std::string name
-            = tab == std::string::npos ? raw : raw.substr(0, tab);
-        const std::string sz
-            = tab == std::string::npos ? "" : raw.substr(tab + 1);
-        body.push_back(hbox({
-            text(name) | xflex | color(fg),
-            text("  "),
-            text(sz) | color(size),
-        }));
-    }
-    Element inner = vbox(std::move(body));
-    return hbox({ text(" "), std::move(inner) | xflex, text(" ") })
-        | bgcolor(bg);
-}
-
 Element panel(Element e)
 {
     return std::move(e) | bgcolor(PANEL_COLOR) | color(PANEL_FG);
@@ -206,7 +177,7 @@ Element diff_split(const DiffView& diff)
     const Color fg     = PANEL_FG;
     const Color gutter = PANEL_FG_DIM;
     const Color border = PANEL_BORDER;
-    const Color red    = Color::RedLight;
+    const Color red    = Color::Red;
     const Color addbg  = Color::Green;
 
     const std::size_t cap = 60;
@@ -277,7 +248,8 @@ Element diff_split(const DiffView& diff)
             = !r.left.empty() && (r.right.empty() || r.right != r.left);
         const bool right_add
             = !r.right.empty() && (r.left.empty() || r.left != r.right);
-        Element L = text(ls) | (left_red ? color(red) : color(fg));
+        Element L = text(ls)
+            | (left_red ? bgcolor(red) | color(Color::Black) : color(fg));
         Element R = text(rs)
             | (right_add ? bgcolor(addbg) | color(Color::Black) : color(fg));
         rows.push_back(hbox({ L, text(" │ ") | color(border), R }));

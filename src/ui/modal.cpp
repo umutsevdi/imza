@@ -99,14 +99,14 @@ namespace {
                         return tool_body(payload);
                     } else if constexpr (std::is_same_v<T, QuestionForm>) {
                         return question_body();
-                    } else if constexpr (std::is_same_v<T, SettingsModal>) {
-                        return settings_body(payload);
                     } else if constexpr (std::is_same_v<T, HelpModal>) {
                         return help_body();
                     } else if constexpr (std::is_same_v<T, ViewerModal>) {
                         return viewer_body(payload);
                     } else if constexpr (std::is_same_v<T, ConnectModal>) {
                         return connect_->Render();
+                    } else if constexpr (std::is_same_v<T, VariantModal>) {
+                        return variant_->Render();
                     }
                     return text("");
                 },
@@ -284,16 +284,16 @@ namespace {
             }
         }
 
-        void build(const SettingsModal&)
-        {
-            settings_ = make_settings(controller_);
-            body_     = settings_;
-        }
-
         void build(const ConnectModal&)
         {
             connect_ = make_connect(controller_);
             body_    = connect_;
+        }
+
+        void build(const VariantModal&)
+        {
+            variant_ = make_variant(controller_);
+            body_    = variant_;
         }
 
         void build(const HelpModal&) { }
@@ -392,7 +392,8 @@ namespace {
                 rows.push_back(text(tool_request_summary(req.name, req.args))
                     | color(PANEL_FG));
             } else {
-                rows.push_back(code_block(req.args));
+                rows.push_back(text(tool_request_summary(req.name, req.args))
+                    | color(PANEL_FG));
             }
             rows.push_back(separatorEmpty());
             if (tool_phase_ == ToolPhase::REASON) {
@@ -437,11 +438,6 @@ namespace {
             return vbox(std::move(rows)) | xflex;
         }
 
-        Element settings_body(const SettingsModal&)
-        {
-            return settings_->Render();
-        }
-
         Element help_body() { return render_help(controller_.commands()); }
 
         Element viewer_body(const ViewerModal& payload)
@@ -468,7 +464,6 @@ namespace {
                 hbox({ filler(), text("↑/↓ navigate · Esc close") | dim }));
             return vbox(std::move(rows)) | xflex;
         }
-
 
         bool scroll_prompt(Event event)
         {
@@ -532,8 +527,8 @@ namespace {
         Component reject_;
         Component confirm_reject_;
         Component back_;
-        Component settings_;
         Component connect_;
+        Component variant_;
 
         Component body_;
     };

@@ -25,15 +25,7 @@ namespace ursa {
 struct SlashCommand {
     std::string name;
     std::string desc;
-    enum class Action {
-        EXIT,
-        HELP,
-        SETTINGS,
-        DEMO,
-        SYSTEM_PROMPT,
-        CONNECT,
-        MODEL
-    };
+    enum class Action { EXIT, HELP, SYSTEM_PROMPT, CONNECT, MODEL, VARIANT };
     Action action = Action::HELP;
 };
 
@@ -55,6 +47,9 @@ struct UserTurn {
 
 struct AssistantTurn {
     std::string markdown;
+    std::string reasoning;
+    std::string reasoning_signature;
+    std::optional<std::chrono::milliseconds> reasoning_ms;
 };
 
 struct ToolCall {
@@ -62,10 +57,10 @@ struct ToolCall {
         enum class Kind { OUTPUT, ERROR, REJECT, CANCEL };
         Kind kind;
         std::string text;
-        std::optional<DiffView> diff { };
+        std::optional<DiffView> diff;
     };
     std::size_t id = 0;
-    std::string call_id { };
+    std::string call_id;
     std::string name;
     std::string args;
     std::optional<Result> result;
@@ -92,8 +87,6 @@ struct ChangedFile {
 using ConversationItem
     = std::variant<UserTurn, AssistantTurn, ToolCall, TodoList, ModalAnswer>;
 
-struct SettingsModal { };
-
 struct ConnectModal {
     enum class Entry { MANAGE, PICK_MODEL };
     Entry entry = Entry::MANAGE;
@@ -109,8 +102,13 @@ struct ViewerModal {
     bool line_numbers      = true;
 };
 
-using ModalPayload = std::variant<std::monostate, SettingsModal, HelpModal,
-    ViewerModal, ToolCallRequest, QuestionForm, ConnectModal>;
+struct VariantModal {
+    std::vector<std::string> options;
+    std::string current;
+};
+
+using ModalPayload = std::variant<std::monostate, HelpModal, ViewerModal,
+    ToolCallRequest, QuestionForm, ConnectModal, VariantModal>;
 
 struct QueuedMessage {
     std::size_t id;
@@ -194,7 +192,6 @@ public:
 
     void submit(std::string text);
     void toggle_mode();
-    void run_demo();
     void set_error(std::string msg);
     void clear_error();
     void close_modal();
@@ -221,7 +218,8 @@ private:
     void finish(std::string error);
 
     void _post(std::function<void()> f);
-    std::vector<Message> _build_history() const;
+    std::vector<Message> _build_history(
+        ApiStandard dialect = ApiStandard::OPENAI) const;
     std::string _system_prompt() const;
     void _on_env_ready();
     void _spawn(std::vector<Message> history, StreamFn override);
@@ -236,9 +234,15 @@ private:
     void _start_catalog_sync_locked();
 
     void _drain_pending_asks(std::vector<Message>& history,
-        std::string& reply_buffer, const std::string& assistant_text);
+        std::string& reply_buffer, const std::string& assistant_text,
+        ApiStandard dialect);
     void _apply_tool_result(const ToolCallRequest& req, const ModalResult& res,
         std::vector<Message>& tool_msgs);
+    bool _model_reasons(const std::string& model) const;
+    std::uint64_t _budget_for_effort(const std::string& effort) const;
+    void _set_reasoning(ChatRequest& req, ApiStandard dialect);
+    AssistantTurn* _last_assistant();
+    void _finalize_reasoning(AssistantTurn& a);
     void _apply_question_result(
         const ModalResult& res, std::string& reply_buffer);
     void _apply_ask_result(const ToolCallRequest& req, const ModalResult& res,
@@ -275,6 +279,7 @@ private:
     std::size_t next_queued_id_ = 0;
 
     std::vector<StreamEvent> stream_events_;
+    std::optional<std::chrono::steady_clock::time_point> reasoning_start_;
     std::atomic<bool> alive_ { true };
     std::optional<std::jthread> worker_;
     int retry_after_secs_ = 0;

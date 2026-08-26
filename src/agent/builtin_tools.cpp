@@ -51,6 +51,17 @@ namespace {
         return s + " KB";
     }
 
+    std::size_t utf8_width(const std::string& s)
+    {
+        std::size_t w = 0;
+        for (unsigned char c : s) {
+            if ((c & 0xC0) != 0x80) {
+                ++w;
+            }
+        }
+        return w;
+    }
+
     ToolOutput read_run(const Json::Value& args)
     {
         if (!args.isObject() || !args["path"].isString()
@@ -171,19 +182,30 @@ namespace {
             truncated = true;
         }
 
+        std::size_t max_w = 0;
+        for (const auto& name : names) {
+            const std::size_t w = utf8_width(name);
+            if (w > max_w) {
+                max_w = w;
+            }
+        }
         std::string out;
         for (const auto& name : names) {
             if (!out.empty()) {
                 out += '\n';
             }
             out += name;
+            const std::size_t pad = max_w + 2 > utf8_width(name)
+                ? max_w + 2 - utf8_width(name)
+                : 2;
+            out += std::string(pad, ' ');
             if (name.empty() || name.back() == '/') {
-                out += '\t' + std::string("—");
+                out += "—";
                 continue;
             }
             std::error_code sec;
             const auto sz = fs::file_size(root / name, sec);
-            out += '\t' + (sec ? "—" : format_kb(sz));
+            out += sec ? "—" : format_kb(sz);
         }
         if (truncated) {
             out += "\n[truncated: showing first "
@@ -655,9 +677,9 @@ Tool make_list_tool()
 {
     ToolSpec spec;
     spec.name        = "list";
-    spec.description = "List the entries of a directory (non-recursive), "
+    spec.description = "List all entries of a directory (non-recursive), "
                        "sorted, one per line; directories carry a trailing "
-                       "slash.";
+                       "slash, along with their file sizes.";
     spec.parameters = parse_json(
         R"json({"type":"object","properties":{"path":{"type":"string","description":"directory to list (defaults to the current directory)"}}})json");
     return { std::move(spec), list_run, ToolSafety::READ_ONLY };

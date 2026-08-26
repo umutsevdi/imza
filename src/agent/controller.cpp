@@ -365,6 +365,14 @@ void Controller::resolve_modal(ModalResult result)
     if (auto* choice = std::get_if<ModelChoice>(&result)) {
         _apply_pick(*choice);
     }
+    if (auto* variant = std::get_if<VariantChoice>(&result)) {
+        {
+            std::lock_guard lock(data_mutex_);
+            cfg_.reasoning_effort = variant->effort;
+            save_config(config_path(), cfg_);
+        }
+        ++state_.modal_serial;
+    }
     {
         std::lock_guard lock(queue_mutex_);
         if (!queue_.empty()) {
@@ -449,49 +457,6 @@ void Controller::_on_env_ready()
     });
 }
 
-void Controller::run_demo()
-{
-    if (state_.phase != UiState::Phase::IDLE) {
-        return;
-    }
-    state_.items.push_back(UserTurn { "/demo" });
-    state_.error.clear();
-    state_.phase = UiState::Phase::CONNECTING;
-
-    auto round = std::make_shared<int>(0);
-    StreamFn script
-        = [round](const ChatRequest&, const StreamCallback& cb) -> Status {
-        switch (*round) {
-        case 0: {
-            cb(make_delta_event("Let me gather some details first.\n\n"));
-            QuestionForm form;
-            form.push_back(QuestionCard { "Which storage backend?",
-                { "PostgreSQL", "SQLite", "MongoDB" }, false, false });
-            form.push_back(QuestionCard { "Which features do you need?",
-                { "Auth", "Billing", "Search", "Cache" }, true, false });
-            form.push_back(QuestionCard { "Preferred cloud region?",
-                { "us-east", "eu-west", "ap-south" }, false, true });
-            form.push_back(QuestionCard {
-                "Anything else I should know?", { }, false, true });
-            cb(make_question_event(std::move(form)));
-            break;
-        }
-        case 1: {
-            cb(make_delta_event("Setting things up.\n\n"));
-            cb(make_tool_call_event(ToolCallRequest {
-                "bash", "ls -la", "list working directory" }));
-            break;
-        }
-        default: cb(make_delta_event("Done — demo complete.")); break;
-        }
-        ++*round;
-        cb(make_done_event());
-        return Status::OK;
-    };
-
-    _spawn(_build_history(), std::move(script));
-}
-
 void Controller::run_slash(std::string_view cmd)
 {
     const SlashCommand* found = find_command(commands_, cmd);
@@ -502,16 +467,6 @@ void Controller::run_slash(std::string_view cmd)
     switch (found->action) {
     case SlashCommand::Action::EXIT: on_exit_(); break;
     case SlashCommand::Action::HELP: enqueue_user_modal(HelpModal { }); break;
-    case SlashCommand::Action::SETTINGS:
-        enqueue_user_modal(SettingsModal { });
-        break;
-    case SlashCommand::Action::DEMO:
-        if (state_.phase == UiState::Phase::IDLE) {
-            run_demo();
-        } else {
-            _enqueue_message(std::string(cmd));
-        }
-        break;
     case SlashCommand::Action::CONNECT:
         if (state_.phase == UiState::Phase::IDLE) {
             enqueue_user_modal(ConnectModal { ConnectModal::Entry::MANAGE });
@@ -534,6 +489,23 @@ void Controller::run_slash(std::string_view cmd)
             break;
         }
         enqueue_user_modal(ConnectModal { ConnectModal::Entry::PICK_MODEL });
+        break;
+    }
+    case SlashCommand::Action::VARIANT: {
+        if (state_.phase != UiState::Phase::IDLE) {
+            _enqueue_message(std::string(cmd));
+            break;
+        }
+        std::string current;
+        {
+            std::lock_guard lock(data_mutex_);
+            current = cfg_.reasoning_effort.value_or("default");
+            if (current == "medium") {
+                current = "default";
+            }
+        }
+        enqueue_user_modal(VariantModal {
+            { "off", "low", "default", "high" }, current });
         break;
     }
     case SlashCommand::Action::SYSTEM_PROMPT:
@@ -567,7 +539,71 @@ std::string Controller::_system_prompt() const
     return build_system_prompt(env);
 }
 
-std::vector<Message> Controller::_build_history() const
+bool Controller::_model_reasons(const std::string& model) const
+{
+    if (model.empty()) {
+        return false;
+    }
+    for (const auto& [provider_id, provider] : catalog_.providers) {
+        auto it = provider.models.find(model);
+        if (it != provider.models.end() && it->second.reasoning == true) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::uint64_t Controller::_budget_for_effort(const std::string& effort) const
+{
+    if (effort == "low") {
+        return 2000;
+    }
+    if (effort == "high") {
+        return 16000;
+    }
+    return 8000;
+}
+
+void Controller::_set_reasoning(ChatRequest& req, ApiStandard dialect)
+{
+    req.reasoning_effort.reset();
+    req.thinking_budget.reset();
+    std::string effort = cfg_.reasoning_effort.value_or("default");
+    if (effort == "medium") {
+        effort = "default";
+    }
+    if (effort == "off" || !_model_reasons(req.model)) {
+        return;
+    }
+    if (dialect == ApiStandard::ANTHROPIC) {
+        req.thinking_budget = _budget_for_effort(effort);
+    } else {
+        req.reasoning_effort = effort == "default" ? "medium" : effort;
+    }
+}
+
+AssistantTurn* Controller::_last_assistant()
+{
+    for (auto it = state_.items.rbegin(); it != state_.items.rend(); ++it) {
+        if (auto* a = std::get_if<AssistantTurn>(&*it)) {
+            return a;
+        }
+    }
+    return nullptr;
+}
+
+void Controller::_finalize_reasoning(AssistantTurn& a)
+{
+    if (!reasoning_start_.has_value() || a.reasoning.empty()
+        || a.reasoning_ms.has_value()) {
+        return;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    a.reasoning_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now - *reasoning_start_);
+}
+
+std::vector<Message> Controller::_build_history(ApiStandard dialect) const
 {
     std::vector<Message> history;
     history.push_back({ Message::Type::SYSTEM, _system_prompt() });
@@ -575,7 +611,11 @@ std::vector<Message> Controller::_build_history() const
         if (const auto* u = std::get_if<UserTurn>(&item)) {
             history.push_back({ Message::Type::USER, u->text });
         } else if (const auto* a = std::get_if<AssistantTurn>(&item)) {
-            history.push_back({ Message::Type::ASSISTANT, a->markdown });
+            Message m { Message::Type::ASSISTANT, a->markdown };
+            if (dialect == ApiStandard::ANTHROPIC && !a->reasoning.empty()) {
+                m.thinking.push_back({ a->reasoning, a->reasoning_signature });
+            }
+            history.push_back(std::move(m));
         } else if (const auto* tc = std::get_if<ToolCall>(&item)) {
             if (history.empty()
                 || history.back().type != Message::Type::ASSISTANT) {
@@ -638,6 +678,7 @@ void Controller::_drive(std::vector<Message> history, StreamFn override)
         req.messages = history;
         req.tools
             = state_.mode == UiState::Mode::PLAN ? specs_plan_ : specs_all_;
+        reasoning_start_.reset();
         stream_events_.clear();
         std::string text_buffer;
         std::string error_msg;
@@ -668,6 +709,7 @@ void Controller::_drive(std::vector<Message> history, StreamFn override)
         StreamFn fn       = override ? override : stream_fn_;
         retry_after_secs_ = 0;
         Status st;
+        ApiStandard active_dialect = ApiStandard::OPENAI;
         if (override) {
             st = fn(req, cb);
         } else {
@@ -675,6 +717,8 @@ void Controller::_drive(std::vector<Message> history, StreamFn override)
             {
                 std::lock_guard lock(data_mutex_);
                 route = _active_route_locked(req.model);
+                _set_reasoning(req, route.dialect);
+                active_dialect = route.dialect;
             }
             st = stream(
                 get_provider(route), route, req, cb, &retry_after_secs_);
@@ -699,6 +743,10 @@ void Controller::_drive(std::vector<Message> history, StreamFn override)
                     retry_after_secs_ = 0;
                     error_status      = Status::OK;
                     error_msg.clear();
+                    {
+                        std::lock_guard lock(data_mutex_);
+                        _set_reasoning(req, ApiStandard::ANTHROPIC);
+                    }
                     st = stream(
                         get_provider(alt), alt, req, cb, &retry_after_secs_);
                     const Status retried
@@ -753,7 +801,7 @@ void Controller::_drive(std::vector<Message> history, StreamFn override)
 
         std::string reply_buffer;
         const size_t history_before = history.size();
-        _drain_pending_asks(history, reply_buffer, text_buffer);
+        _drain_pending_asks(history, reply_buffer, text_buffer, active_dialect);
         if (!alive_.load()) {
             return;
         }
@@ -767,7 +815,8 @@ void Controller::_drive(std::vector<Message> history, StreamFn override)
 }
 
 void Controller::_drain_pending_asks(std::vector<Message>& history,
-    std::string& reply_buffer, const std::string& assistant_text)
+    std::string& reply_buffer, const std::string& assistant_text,
+    ApiStandard dialect)
 {
     struct Ask {
         ModalPayload payload;
@@ -896,6 +945,14 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
     }
 
     Message assistant { Message::Type::ASSISTANT, assistant_text };
+    if (dialect == ApiStandard::ANTHROPIC) {
+        if (AssistantTurn* a = _last_assistant()) {
+            if (!a->reasoning.empty()) {
+                assistant.thinking.push_back(
+                    { a->reasoning, a->reasoning_signature });
+            }
+        }
+    }
     for (const auto& ev : stream_events_) {
         if (ev.kind == StreamEvent::Kind::TOOL_CALL) {
             assistant.tool_calls.push_back(ToolCallEntry {
@@ -1031,15 +1088,34 @@ void Controller::_fill_tool_result(
 void Controller::apply(const StreamEvent& ev)
 {
     switch (ev.kind) {
-    case StreamEvent::Kind::CONTENT_DELTA:
-        assert(state_.phase != UiState::Phase::AWAITING);
+        case StreamEvent::Kind::CONTENT_DELTA:
+            assert(state_.phase != UiState::Phase::AWAITING);
+            if (!state_.items.empty()) {
+                if (auto* a = std::get_if<AssistantTurn>(&state_.items.back())) {
+                    if (!ev.text.empty()) {
+                        _finalize_reasoning(*a);
+                    }
+                    a->markdown += ev.text;
+                }
+            }
+            break;
+    case StreamEvent::Kind::REASONING:
         if (!state_.items.empty()) {
             if (auto* a = std::get_if<AssistantTurn>(&state_.items.back())) {
-                a->markdown += ev.text;
+                if (a->reasoning.empty() && !reasoning_start_.has_value()) {
+                    reasoning_start_ = std::chrono::steady_clock::now();
+                }
+                a->reasoning += ev.text;
+                if (!ev.thinking_signature.empty()) {
+                    a->reasoning_signature = ev.thinking_signature;
+                }
             }
         }
         break;
     case StreamEvent::Kind::TOOL_CALL:
+        if (auto* a = std::get_if<AssistantTurn>(&state_.items.back())) {
+            _finalize_reasoning(*a);
+        }
         state_.items.push_back(ToolCall { next_tool_id_++, ev.tool_call.id,
             ev.tool_call.name, ev.tool_call.args, std::nullopt });
         break;
@@ -1053,7 +1129,11 @@ void Controller::apply(const StreamEvent& ev)
             }
         }
         break;
-    case StreamEvent::Kind::DONE: break;
+    case StreamEvent::Kind::DONE:
+        if (auto* a = _last_assistant()) {
+            _finalize_reasoning(*a);
+        }
+        break;
     case StreamEvent::Kind::ERROR: finish(error_text(ev.error)); break;
     case StreamEvent::Kind::CONNECTED:
         if (state_.phase == UiState::Phase::CONNECTING) {
@@ -1462,8 +1542,7 @@ std::vector<SlashCommand> slash_commands()
         { "/connect", "manage provider connections",
             SlashCommand::Action::CONNECT },
         { "/model", "pick the active model", SlashCommand::Action::MODEL },
-        { "/settings", "open settings", SlashCommand::Action::SETTINGS },
-        { "/demo", "run scripted modal demo", SlashCommand::Action::DEMO },
+        { "/variant", "pick reasoning effort", SlashCommand::Action::VARIANT },
         { "/prompt", "show the generated system prompt",
             SlashCommand::Action::SYSTEM_PROMPT },
     };

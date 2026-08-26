@@ -30,6 +30,9 @@ namespace {
         root["stream"]      = true;
         root["temperature"] = req.temperature;
         root["stream_options"]["include_usage"] = true;
+        if (req.reasoning_effort) {
+            root["reasoning_effort"] = *req.reasoning_effort;
+        }
         append_tools(root, req);
 
         Json::Value messages(Json::arrayValue);
@@ -163,6 +166,13 @@ namespace {
             if (delta.isObject()) {
                 if (delta["content"].isString()) {
                     outs.push_back(make_delta_event(delta["content"].asString()));
+                }
+                if (delta["reasoning"].isString()) {
+                    outs.push_back(
+                        make_reasoning_event(delta["reasoning"].asString()));
+                } else if (delta["reasoning_content"].isString()) {
+                    outs.push_back(make_reasoning_event(
+                        delta["reasoning_content"].asString()));
                 }
                 take_delta(delta, state);
             }

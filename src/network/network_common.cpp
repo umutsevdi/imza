@@ -165,6 +165,15 @@ StreamEvent make_connected_event()
     return ev;
 }
 
+StreamEvent make_reasoning_event(std::string text, std::string signature)
+{
+    StreamEvent ev;
+    ev.kind              = StreamEvent::Kind::REASONING;
+    ev.text              = std::move(text);
+    ev.thinking_signature = std::move(signature);
+    return ev;
+}
+
 Status parse_api_error(std::string_view body, std::string& message)
 {
     message.clear();

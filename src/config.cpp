@@ -166,6 +166,11 @@ Status load_config(const std::filesystem::path& path, Config& out,
         out.last_used = std::move(used);
     }
 
+    const Json::Value& effort = root["reasoning_effort"];
+    if (effort.isString() && !effort.asString().empty()) {
+        out.reasoning_effort = effort.asString();
+    }
+
     return Status::OK;
 }
 
@@ -198,6 +203,10 @@ Status save_config(const std::filesystem::path& path, const Config& cfg)
         last["provider"] = cfg.last_used->provider;
         last["model"]    = cfg.last_used->model;
         root["last_used"] = last;
+    }
+
+    if (cfg.reasoning_effort && !cfg.reasoning_effort->empty()) {
+        root["reasoning_effort"] = *cfg.reasoning_effort;
     }
 
     const std::filesystem::path parent = path.parent_path();

@@ -106,6 +106,16 @@ Element status_line(
     bar.push_back(std::move(mode));
     if (!active_model.empty()) {
         bar.push_back(text(" · " + active_model) | color(PANEL_FG_DIM));
+        if (cfg.reasoning_effort && !cfg.reasoning_effort->empty()
+            && *cfg.reasoning_effort != "off") {
+            std::string shown = *cfg.reasoning_effort;
+            if (shown == "medium") {
+                shown = "default";
+            }
+            const ftxui::Color effort_color = shown == "high" ? Color::GreenLight
+                                                              : PANEL_FG;
+            bar.push_back(text(" (" + shown + ")") | color(effort_color));
+        }
     }
     if (state.last.prompt > 0 || state.totals.total > 0) {
         const ModelPricing pricing = _cached_pricing(active_model);

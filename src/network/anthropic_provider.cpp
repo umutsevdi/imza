@@ -10,7 +10,17 @@ namespace {
         root["model"]       = req.model;
         root["stream"]      = true;
         root["temperature"] = req.temperature;
-        root["max_tokens"]  = 4096;
+        if (req.thinking_budget) {
+            root["max_tokens"] = static_cast<Json::UInt64>(
+                *req.thinking_budget + 4096);
+            Json::Value thinking(Json::objectValue);
+            thinking["type"]          = "enabled";
+            thinking["budget_tokens"] = static_cast<Json::UInt64>(
+                *req.thinking_budget);
+            root["thinking"] = thinking;
+        } else {
+            root["max_tokens"] = 4096;
+        }
 
         Json::Value messages(Json::arrayValue);
         Json::Value system(Json::arrayValue);
@@ -42,8 +52,15 @@ namespace {
             flush_results();
             Json::Value o;
             o["role"] = role_str(m.type);
-            if (!m.tool_calls.empty()) {
+            if (!m.tool_calls.empty() || !m.thinking.empty()) {
                 Json::Value content(Json::arrayValue);
+                for (const auto& tb : m.thinking) {
+                    Json::Value block;
+                    block["type"]      = "thinking";
+                    block["thinking"]  = tb.text;
+                    block["signature"] = tb.signature;
+                    content.append(block);
+                }
                 if (!m.content.empty()) {
                     Json::Value text;
                     text["type"] = "text";
@@ -108,10 +125,15 @@ namespace {
         if (event == "content_block_start") {
             const Json::Value root  = parse_json(data);
             const Json::Value& block = root["content_block"];
-            if (block.get("type", "").asString() == "tool_use") {
+            const std::string type   = block.get("type", "").asString();
+            if (type == "tool_use") {
                 ToolAccum& acc = state.tool_accums[root.get("index", 0).asInt()];
                 acc.id   = block.get("id", "").asString();
                 acc.name = block.get("name", "").asString();
+            } else if (type == "thinking") {
+                ThinkingAccum& acc
+                    = state.thinking_accums[root.get("index", 0).asInt()];
+                acc.text = block.get("thinking", "").asString();
             }
             return;
         }
@@ -156,6 +178,12 @@ namespace {
                     it->second.args
                         += delta.get("partial_json", "").asString();
                 }
+            } else if (type == "thinking_delta") {
+                const std::string text = delta.get("thinking", "").asString();
+                const int index        = root.get("index", 0).asInt();
+                ThinkingAccum& acc     = state.thinking_accums[index];
+                acc.text += text;
+                outs.push_back(make_reasoning_event(text));
             }
             return;
         }
@@ -167,6 +195,15 @@ namespace {
                 const ToolCallRequest req = finish_accum(it->second);
                 state.tool_accums.erase(it);
                 outs.push_back(make_tool_call_event(req));
+                return;
+            }
+            auto think_it = state.thinking_accums.find(index);
+            if (think_it != state.thinking_accums.end()) {
+                const std::string signature
+                    = root["content_block"].get("signature", "").asString();
+                think_it->second.signature = signature;
+                outs.push_back(make_reasoning_event("", signature));
+                state.thinking_accums.erase(think_it);
             }
             return;
         }

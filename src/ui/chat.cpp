@@ -91,7 +91,8 @@ namespace {
     std::size_t item_version(const ConversationItem& it)
     {
         if (const auto* a = std::get_if<AssistantTurn>(&it)) {
-            return a->markdown.size();
+            return a->markdown.size() + a->reasoning.size()
+                + (a->reasoning_ms ? 1 : 0);
         }
         if (const auto* tc = std::get_if<ToolCall>(&it)) {
             if (!tc->result.has_value()) {
@@ -110,53 +111,6 @@ namespace {
     Element assistant_item(const AssistantTurn& t)
     {
         return card(render_markdown_element(t.markdown), std::nullopt, false);
-    }
-
-    Element toolcall_item(const ToolCall& tc)
-    {
-        Elements rows;
-        rows.push_back(hbox({
-            text("Tool Call:") | bold | color(Color::GreenLight),
-            text(" " + tool_call_head(tc)) | color(PANEL_FG),
-        }));
-        if (tc.result.has_value()) {
-            switch (tc.result->kind) {
-            case ToolCall::Result::Kind::OUTPUT:
-                if (!tc.result->text.empty()) {
-                    if (tc.name == "edit" || tc.name == "write") {
-                        if (tc.result->diff.has_value()) {
-                            rows.push_back(diff_split(*tc.result->diff));
-                        } else {
-                            rows.push_back(code_block(
-                                tc.result->text, tool_code_language(tc)));
-                        }
-                    } else if (tc.name == "list") {
-                        rows.push_back(list_block(tc.result->text));
-                    } else if (tc.name == "ask") {
-                        rows.push_back(
-                            render_markdown_element(tc.result->text));
-                    } else {
-                        rows.push_back(code_block(
-                            tc.result->text, tool_code_language(tc)));
-                    }
-                }
-                break;
-            case ToolCall::Result::Kind::ERROR:
-                rows.push_back(hbox({
-                    text("Error: ") | bold | color(Color::RedLight),
-                    text(tc.result->text) | color(Color::RedLight),
-                }));
-                break;
-            case ToolCall::Result::Kind::REJECT:
-                rows.push_back(hbox({
-                    text("Rejected: ") | bold | color(Color::YellowLight),
-                    text(tc.result->text) | color(Color::YellowLight),
-                }));
-                break;
-            case ToolCall::Result::Kind::CANCEL: break;
-            }
-        }
-        return card(vbox(std::move(rows)), std::nullopt, false);
     }
 
     Element modal_answer_item(const ModalAnswer& ans)
@@ -218,40 +172,92 @@ namespace {
             std::size_t item_index = 0;
             for (const auto& it : st.items) {
                 const std::size_t version = item_version(it);
-                if (item_versions_[item_index] != version) {
+                const bool is_trailing    = &it == &st.items.back();
+                const bool active         = is_trailing && streaming
+                    && std::holds_alternative<AssistantTurn>(it);
+                std::size_t eff_version = version;
+                if (active) {
+                    const auto& at = std::get<AssistantTurn>(it);
+                    const bool thinking_now
+                        = (!at.reasoning.empty()
+                              && !at.reasoning_ms.has_value())
+                        || (at.reasoning.empty() && !at.reasoning_ms.has_value()
+                            && reasoning_enabled());
+                    if (thinking_now) {
+                        eff_version = static_cast<std::size_t>(frame_);
+                    }
+                }
+                if (item_versions_[item_index] != eff_version) {
                     if (std::holds_alternative<ToolCall>(it)) {
                         const ToolCall& tc = std::get<ToolCall>(it);
-                        const bool output  = tc.result.has_value()
-                            && tc.result->kind == ToolCall::Result::Kind::OUTPUT
-                            && !tc.result->text.empty();
-                        if (tc.name == "read" && output) {
-                            item_cache_[item_index] = render_read_item(tc);
-                        } else if (tc.name == "shell" && output
-                            && count_lines(tc.result->text)
-                                > kLargeOutputLines) {
-                            item_cache_[item_index]
-                                = render_shell_collapsed(tc);
+                        if (!tc.result.has_value()) {
+                            item_cache_[item_index] = render_tool_pending(tc);
                         } else {
-                            item_cache_[item_index] = render_item(it, ctx);
+                            switch (tc.result->kind) {
+                            case ToolCall::Result::Kind::OUTPUT: {
+                                const bool big = count_lines(tc.result->text)
+                                    > kLargeOutputLines;
+                                if (tc.name == "read") {
+                                    item_cache_[item_index]
+                                        = render_read_item(tc);
+                                } else if (tc.name == "list") {
+                                    item_cache_[item_index]
+                                        = render_list_collapsed(tc);
+                                } else if (tc.name == "shell" && big) {
+                                    item_cache_[item_index]
+                                        = render_shell_collapsed(tc);
+                                } else if (tc.name == "edit"
+                                    || tc.name == "write") {
+                                    item_cache_[item_index]
+                                        = render_write_item(tc);
+                                } else if (tc.name == "ask") {
+                                    item_cache_[item_index]
+                                        = render_ask_item(tc);
+                                } else {
+                                    item_cache_[item_index]
+                                        = render_generic_tool(tc);
+                                }
+                                break;
+                            }
+                            case ToolCall::Result::Kind::ERROR:
+                                item_cache_[item_index] = render_tool_error(tc);
+                                break;
+                            case ToolCall::Result::Kind::REJECT:
+                                item_cache_[item_index]
+                                    = render_tool_reject(tc);
+                                break;
+                            case ToolCall::Result::Kind::CANCEL:
+                                item_cache_[item_index]
+                                    = render_tool_pending(tc);
+                                break;
+                            }
                         }
+                    } else if (std::holds_alternative<AssistantTurn>(it)) {
+                        item_cache_[item_index]
+                            = render_assistant(std::get<AssistantTurn>(it),
+                                item_index, ctx, active);
                     } else {
                         item_cache_[item_index] = render_item(it, ctx);
                     }
-                    item_versions_[item_index] = version;
+                    item_versions_[item_index] = eff_version;
                 }
                 Element el = item_cache_[item_index];
                 if ((streaming || connecting)
                     && std::holds_alternative<AssistantTurn>(it)
                     && &it == &st.items.back()) {
-                    el = vbox({
-                        hbox({
-                            spinner(15, static_cast<size_t>(frame_))
-                                | color(Color::GrayLight),
-                            text(connecting ? " connecting…" : " thinking…")
-                                | dim,
-                        }),
-                        el,
-                    });
+                    const auto& at = std::get<AssistantTurn>(it);
+                    if (at.reasoning.empty()
+                        && (!reasoning_enabled() || connecting)) {
+                        el = vbox({
+                            hbox({
+                                spinner(15, static_cast<size_t>(frame_))
+                                    | color(Color::GrayLight),
+                                text(connecting ? " Connecting…" : " Thinking…")
+                                    | dim,
+                            }),
+                            el,
+                        });
+                    }
                 }
                 items.push_back(hbox({
                     text(" "),
@@ -347,6 +353,11 @@ namespace {
             if (event.is_mouse() && event.mouse().button == Mouse::Left
                 && event.mouse().motion == Mouse::Pressed) {
                 for (auto& [id, btn] : read_buttons_) {
+                    if (btn->OnEvent(event)) {
+                        return true;
+                    }
+                }
+                for (auto& [id, btn] : reasoning_comps_) {
                     if (btn->OnEvent(event)) {
                         return true;
                     }
@@ -472,6 +483,9 @@ namespace {
                 controller_.enqueue_user_modal(
                     ViewerModal { tool_call_head(tc), tc.result->text,
                         tool_code_language(tc), read_start_line(tc) });
+            } else if (tc.name == "list") {
+                controller_.enqueue_user_modal(ViewerModal {
+                    "Directory listing", tc.result->text, "", 1 });
             } else {
                 controller_.enqueue_user_modal(
                     ViewerModal { "Shell output", tc.result->text, "", 1 });
@@ -578,27 +592,54 @@ namespace {
 
         Component container_;
         std::map<std::size_t, Component> read_buttons_;
+        std::map<std::size_t, std::shared_ptr<std::string>> reasoning_labels_;
+        std::map<std::size_t, std::shared_ptr<std::string>> reasoning_content_;
+        std::map<std::size_t, Component> reasoning_comps_;
 
         std::vector<Element> item_cache_;
         std::vector<std::size_t> item_versions_;
         LayoutCtx::Kind cache_kind_ = LayoutCtx::Kind::NARROW;
 
+        Element tool_header_element(const ToolCall& tc)
+        {
+            return hbox({
+                text(tool_display_name(tc.name) + ": ") | bold
+                    | color(Color::GreenLight),
+                text(tool_header_args(tc)) | color(PANEL_FG),
+            });
+        }
+
         Element render_read_item(const ToolCall& tc)
         {
-            const std::string head    = tool_call_head(tc);
             const std::string content = tc.result->text;
-            const std::string label   = "▸ open " + head + " in viewer ("
-                + std::to_string(count_lines(content)) + " lines)";
+            const std::string label   = "▸ open " + tool_call_head(tc)
+                + " in viewer (" + std::to_string(count_lines(content))
+                + " lines)";
             Component btn = make_viewer_button(tc.id, label);
-            Elements rows;
-            rows.push_back(hbox({
-                text("Tool Call: ") | bold | color(Color::GreenLight),
-                text(head) | color(PANEL_FG),
-            }));
-            rows.push_back(separatorEmpty());
-            rows.push_back(btn->Render());
-            rows.push_back(separatorEmpty());
-            return card(vbox(std::move(rows)), std::nullopt, false);
+            return vbox({
+                tool_header_element(tc),
+                btn->Render(),
+                separatorEmpty(),
+            });
+        }
+
+        Element render_list_collapsed(const ToolCall& tc)
+        {
+            const std::string& full = tc.result->text;
+            std::size_t entries     = 0;
+            for (const auto& line : split_lines(full)) {
+                if (!line.empty() && line.rfind("[truncated", 0) != 0) {
+                    ++entries;
+                }
+            }
+            const std::string label = "▸ open directory listing in viewer ("
+                + std::to_string(entries) + " entries)";
+            Component btn = make_viewer_button(tc.id, label);
+            return vbox({
+                tool_header_element(tc),
+                btn->Render(),
+                separatorEmpty(),
+            });
         }
 
         Element render_shell_collapsed(const ToolCall& tc)
@@ -609,17 +650,77 @@ namespace {
             const std::string label   = "▸ open full shell output in viewer ("
                 + std::to_string(total) + " lines)";
             Component btn = make_viewer_button(tc.id, label);
-            Elements rows;
-            rows.push_back(hbox({
-                text("Tool Call: ") | bold | color(Color::GreenLight),
-                text("Shell") | color(PANEL_FG),
-            }));
-            rows.push_back(separatorEmpty());
-            rows.push_back(code_block(preview, ""));
-            rows.push_back(separatorEmpty());
-            rows.push_back(btn->Render());
-            rows.push_back(separatorEmpty());
-            return card(vbox(std::move(rows)), std::nullopt, false);
+            return vbox({
+                tool_header_element(tc),
+                code_block(preview, ""),
+                btn->Render(),
+                separatorEmpty(),
+            });
+        }
+
+        Element render_write_item(const ToolCall& tc)
+        {
+            Element body;
+            if (tc.result->diff.has_value()) {
+                body = diff_split(*tc.result->diff);
+            } else {
+                body = code_block(tc.result->text, tool_code_language(tc));
+            }
+            return vbox({
+                tool_header_element(tc),
+                body,
+                separatorEmpty(),
+            });
+        }
+
+        Element render_ask_item(const ToolCall& tc)
+        {
+            return vbox({
+                tool_header_element(tc),
+                render_markdown_element(tc.result->text),
+                separatorEmpty(),
+            });
+        }
+
+        Element render_generic_tool(const ToolCall& tc)
+        {
+            return vbox({
+                tool_header_element(tc),
+                code_block(tc.result->text, ""),
+                separatorEmpty(),
+            });
+        }
+
+        Element render_tool_error(const ToolCall& tc)
+        {
+            return vbox({
+                tool_header_element(tc),
+                hbox({
+                    text("Error: ") | bold | color(Color::RedLight),
+                    text(tc.result->text) | color(Color::RedLight),
+                }),
+                separatorEmpty(),
+            });
+        }
+
+        Element render_tool_reject(const ToolCall& tc)
+        {
+            return vbox({
+                tool_header_element(tc),
+                hbox({
+                    text("Rejected: ") | bold | color(Color::YellowLight),
+                    text(tc.result->text) | color(Color::YellowLight),
+                }),
+                separatorEmpty(),
+            });
+        }
+
+        Element render_tool_pending(const ToolCall& tc)
+        {
+            return vbox({
+                tool_header_element(tc),
+                separatorEmpty(),
+            });
         }
 
         Component make_viewer_button(std::size_t id, std::string label)
@@ -655,6 +756,82 @@ namespace {
             return btn;
         }
 
+        bool reasoning_enabled() const
+        {
+            const auto& e = controller_.config().reasoning_effort;
+            return e && !e->empty() && *e != "off";
+        }
+
+        Element render_assistant(const AssistantTurn& t, std::size_t index,
+            const LayoutCtx&, bool active = false)
+        {
+            Elements parts;
+            const bool has_reasoning = !t.reasoning.empty();
+            const bool placeholder   = active && !has_reasoning
+                && !t.reasoning_ms.has_value() && reasoning_enabled();
+            if (has_reasoning || placeholder) {
+                const bool done = t.reasoning_ms.has_value();
+                std::string label;
+                if (done) {
+                    const double secs
+                        = static_cast<double>(t.reasoning_ms->count()) / 1000.0;
+                    char buf[32];
+                    std::snprintf(buf, sizeof(buf), "%.1f", secs);
+                    label = "▸ Thought " + std::string(buf) + "s";
+                } else {
+                    label = " Thinking…";
+                }
+                Component btn = make_reasoning_button(
+                    index, label, placeholder ? std::string() : t.reasoning);
+                Element row = done
+                    ? btn->Render()
+                    : hbox({ spinner(15, static_cast<size_t>(frame_))
+                              | color(Color::GrayLight),
+                          btn->Render() });
+                parts.push_back(row);
+            }
+            if (!t.markdown.empty()) {
+                parts.push_back(assistant_item(t));
+            }
+            return vbox(std::move(parts));
+        }
+
+        Component make_reasoning_button(
+            std::size_t index, std::string label, const std::string& content)
+        {
+            auto it = reasoning_comps_.find(index);
+            if (it != reasoning_comps_.end()) {
+                *reasoning_labels_[index]  = label;
+                *reasoning_content_[index] = content;
+                return it->second;
+            }
+            auto label_ptr   = std::make_shared<std::string>(std::move(label));
+            auto content_ptr = std::make_shared<std::string>(content);
+            const auto on_click = [this, content_ptr] {
+                ViewerModal vm { " Thinking", *content_ptr, "", 1 };
+                vm.line_numbers = false;
+                controller_.enqueue_user_modal(vm);
+            };
+            ButtonOption bo;
+            bo.label     = *label_ptr;
+            bo.on_click  = on_click;
+            bo.transform = [label_ptr](EntryState s) -> Element {
+                Element e = text(*label_ptr);
+                if (s.focused) {
+                    e = e | bold | underlined | color(PANEL_FG);
+                } else {
+                    e = e | color(PANEL_FG_DIM);
+                }
+                return e;
+            };
+            Component btn             = space_activates(Button(bo), on_click);
+            reasoning_labels_[index]  = label_ptr;
+            reasoning_content_[index] = content_ptr;
+            reasoning_comps_[index]   = btn;
+            container_->Add(btn);
+            return btn;
+        }
+
         std::string input_buf_;
         InputOption input_options_;
         Component input_;
@@ -682,8 +859,6 @@ ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx)
                 return user_item(v);
             } else if constexpr (std::is_same_v<T, AssistantTurn>) {
                 return assistant_item(v);
-            } else if constexpr (std::is_same_v<T, ToolCall>) {
-                return toolcall_item(v);
             } else if constexpr (std::is_same_v<T, TodoList>) {
                 return render_todo(v, ctx);
             } else if constexpr (std::is_same_v<T, ModalAnswer>) {

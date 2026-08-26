@@ -142,9 +142,9 @@ add_library(ursa_ui
     src/ui/markdown.cpp
     src/ui/modal.cpp
     src/ui/render.cpp
-    src/ui/settings.cpp
     src/ui/side_panel.cpp
     src/ui/status_line.cpp
+    src/ui/variant.cpp
 )
 target_include_directories(ursa_ui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
