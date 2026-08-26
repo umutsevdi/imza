@@ -9,7 +9,6 @@
 #include <chrono>
 #include <thread>
 
-#include <cctype>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -338,22 +337,6 @@ size_t Controller::queue_size() const
 {
     std::lock_guard lock(queue_mutex_);
     return queue_.size();
-}
-
-ModalResult Controller::request_modal(ModalPayload payload)
-{
-    if (!alive_.load()) {
-        return std::monostate { };
-    }
-    auto promise = std::make_shared<std::promise<ModalResult>>();
-    std::future<ModalResult> future = promise->get_future();
-    {
-        std::lock_guard lock(queue_mutex_);
-        queue_.push_back(
-            PendingModal { std::move(payload), std::move(promise) });
-    }
-    _post([this] { _present_front(); });
-    return future.get();
 }
 
 void Controller::resolve_modal(ModalResult result)

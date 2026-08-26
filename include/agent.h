@@ -199,7 +199,6 @@ public:
     void enqueue_user_modal(ModalPayload payload);
     void cancel_queued(std::size_t id);
     size_t queue_size() const;
-    ModalResult request_modal(ModalPayload payload);
     const UiState& state() const { return state_; }
     Config config() const;
     std::vector<ConnectionView> connections() const;

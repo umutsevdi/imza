@@ -299,28 +299,6 @@ namespace {
             }
         }
 
-        std::string active_id() const
-        {
-            const auto all = views();
-            for (const auto& view : all) {
-                if (view.active) {
-                    return view.id;
-                }
-            }
-            return all.empty() ? "" : all.front().id;
-        }
-
-        std::string active_name() const
-        {
-            const std::string id = active_id();
-            for (const auto& view : views()) {
-                if (view.id == id) {
-                    return view.name;
-                }
-            }
-            return "";
-        }
-
         std::string selected_provider_name()
         {
             for (const auto& [id, name] : providers_) {
