@@ -10,7 +10,8 @@ namespace ursa {
 
 namespace {
 
-    constexpr std::string_view BASE_PROMPT = R"prompt(You are ursa, an interactive CLI coding agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
+    constexpr std::string_view BASE_PROMPT
+        = R"prompt(You are ursa, an interactive CLI coding agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
 
 # Tone and style
 - Your output is displayed in a terminal. Keep responses short and concise; answer the user's question directly without preamble or postamble.
@@ -48,37 +49,21 @@ namespace {
 - In PLAN mode only read-only tools are available. Research the request, ask the user clarifying questions when intent is ambiguous, weigh tradeoffs, and present a concise, well-structured plan in your reply. Do not attempt to make changes.
 - In BUILD mode all tools are available. Implement the plan, then verify the result if possible.)prompt";
 
-    std::string_view platform_name()
-    {
-#if defined(_WIN32)
-        return "windows";
-#elif defined(__APPLE__)
-        return "macOS";
-#elif defined(__linux__)
-        return "linux";
-#else
-        return "unknown";
-#endif
-    }
-
     std::string environment_block(const Environment& e)
     {
         std::string out = "<env>";
         std::error_code ec;
         const std::filesystem::path cwd = std::filesystem::current_path(ec);
-        out += "\n  Working directory: ";
+        out += "\n  Current Directory: ";
         out += ec ? "unknown" : cwd.string();
-        out += "\n  Platform: ";
-        out += platform_name();
-        out += "\n  OS: ";
+        if (e.project_root.has_value()) {
+            out += "\n  Project Root: " + e.project_root.value().string();
+        }
+        out += "\n  Operating System: ";
         out += e.os_name;
         if (!e.os_version.empty()) {
             out += " ";
             out += e.os_version;
-        }
-        if (!e.distro.empty()) {
-            out += "\n  Distro: ";
-            out += e.distro;
         }
         out += "\n  Shell: ";
         out += e.default_shell;

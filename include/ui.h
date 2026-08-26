@@ -54,13 +54,13 @@ ftxui::Element render_todo(const TodoList& todo, const LayoutCtx& ctx);
 ftxui::Element render_changed_files(
     const std::vector<ChangedFile>& files, const LayoutCtx& ctx);
 ftxui::Element render_help(const std::vector<SlashCommand>& commands);
-ftxui::Element status_line(
-    const Config& cfg, const UiState& state, const LayoutCtx& ctx);
 
 int run_repl(const Config& cfg);
 
 ftxui::Component make_chat(Controller& controller, std::function<int()> width);
 ftxui::Component make_side_panel(
+    Controller& controller, std::function<int()> width);
+ftxui::Component make_status_line(
     Controller& controller, std::function<int()> width);
 ftxui::Component make_connect(Controller& controller);
 ftxui::Component make_variant(Controller& controller);

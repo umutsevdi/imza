@@ -1,5 +1,6 @@
 #include "ui.h"
 
+#include <ftxui/component/app.hpp>
 #include <ftxui/component/component.hpp>
 #include <ftxui/dom/elements.hpp>
 
@@ -7,33 +8,37 @@
 #include <vector>
 
 namespace ursa {
-
 using namespace ftxui;
+class SidePanel : public ComponentBase {
+public:
+    SidePanel(Controller& controller, std::function<int()> width)
+        : controller_(controller)
+        , width_(std::move(width)) { };
 
-ftxui::Component make_side_panel(
-    Controller& controller, std::function<int()> width)
-{
-    return ftxui::Renderer([&controller, width = std::move(width)] {
-        using namespace ftxui;
-        const int w       = width();
+    Element OnRender() override
+    {
+        const int w       = width_();
         const bool narrow = w < LayoutCtx::wide_threshold;
         LayoutCtx ctx {
             narrow ? LayoutCtx::Kind::NARROW : LayoutCtx::Kind::WIDE, w
         };
         Elements parts;
-        parts.push_back(render_todo(controller.state().todo, ctx) | yflex);
+        if (controller_.state().todo.items.size()) {
+            parts.push_back(render_todo(controller_.state().todo, ctx) | yflex);
+        }
+
         if (!narrow) {
             parts.push_back(
-                render_changed_files(controller.state().changed_files, ctx)
+                render_changed_files(controller_.state().changed_files, ctx)
                 | yflex);
             const std::optional<std::string>& rules
-                = controller.state().agent_rules;
+                = controller_.state().agent_rules;
             if (rules) {
                 parts.push_back(text(" " + *rules + " ") | bold
                     | color(Color::Black) | bgcolor(Color::Yellow) | xflex);
             }
-            int project_skills = controller.state().project_skills;
-            int global_skills  = controller.state().global_skills;
+            int project_skills = controller_.state().project_skills;
+            int global_skills  = controller_.state().global_skills;
             if (project_skills > 0) {
                 parts.push_back(
                     text(std::format(" {} Project Skills ", project_skills))
@@ -51,8 +56,18 @@ ftxui::Component make_side_panel(
         if (narrow) {
             return body | xflex;
         }
-        return body | size(WIDTH, EQUAL, LayoutCtx::panel_width);
-    });
+        return panel(body) | size(WIDTH, EQUAL, LayoutCtx::panel_width);
+    }
+
+private:
+    Controller& controller_;
+    std::function<int()> width_;
+};
+
+ftxui::Component make_side_panel(
+    Controller& controller, std::function<int()> width)
+{
+    return ftxui::Make<SidePanel>(controller, std::move(width));
 }
 
 namespace {

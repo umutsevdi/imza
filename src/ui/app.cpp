@@ -31,6 +31,9 @@ namespace {
                 controller, [] { return ftxui::Terminal::Size().dimx; });
             chat_ = make_chat(
                 controller, [] { return ftxui::Terminal::Size().dimx; });
+            status_line_ = make_status_line(
+                controller, [] { return ftxui::Terminal::Size().dimx; });
+            ;
             modal_ = make_modal(controller);
             Add(chat_);
         }
@@ -42,16 +45,15 @@ namespace {
                 ? LayoutCtx::Kind::WIDE
                 : LayoutCtx::Kind::NARROW;
 
-            Element side = panel(side_->Render());
-
+            Element side      = side_->Render();
             Element right_col = chat_->Render();
-            const int chat_w  = (kind == LayoutCtx::Kind::WIDE)
+            Element status    = status_line_->Render();
+
+            const int chat_w = (kind == LayoutCtx::Kind::WIDE)
                 ? w - LayoutCtx::panel_width - 1
                 : w;
             right_col
                 = std::move(right_col) | size(WIDTH, EQUAL, chat_w) | yflex;
-            Element status = status_line(
-                controller_.config(), controller_.state(), { kind, w });
 
             Element root;
             if (kind == LayoutCtx::Kind::WIDE) {
@@ -98,6 +100,7 @@ namespace {
         Component side_;
         Component chat_;
         Component modal_;
+        Component status_line_;
     };
 
 } // namespace
