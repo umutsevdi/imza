@@ -89,7 +89,7 @@ Element code_block_with_lines(
 
 Element list_block(const std::string& code)
 {
-    const Color bg                       = Color::Black;
+    const Color bg                       = PANEL_COLOR;
     const Color fg                       = PANEL_FG;
     const Color size                     = PANEL_FG_DIM;
     const std::vector<std::string> lines = split_lines(code);
@@ -186,7 +186,9 @@ Element card(Element body, std::optional<Color> bg, bool pad)
     Element inner = pad
         ? vbox({ separatorEmpty(), std::move(body), separatorEmpty() })
         : vbox({ std::move(body) });
-    Element box   = hbox({ text("  "), std::move(inner) | xflex, text("  ") });
+    Element box   = vbox({ separatorEmpty(),
+        hbox({ text("  "), std::move(inner) | xflex, text("  ") }),
+        separatorEmpty() });
     if (bg) {
         box = std::move(box) | bgcolor(*bg) | color(PANEL_FG);
     }
@@ -196,5 +198,90 @@ Element card(Element body, std::optional<Color> bg, bool pad)
 Element section_title(std::string_view title, Color fg)
 {
     return text(std::string(title)) | bold | color(fg);
+}
+
+Element diff_split(const DiffView& diff)
+{
+    const Color bg     = PANEL_COLOR;
+    const Color fg     = PANEL_FG;
+    const Color gutter = PANEL_FG_DIM;
+    const Color border = PANEL_BORDER;
+    const Color red    = Color::RedLight;
+    const Color addbg  = Color::Green;
+
+    const std::size_t cap = 60;
+    auto fmt = [&](const std::optional<std::size_t>& no, const std::string& s) {
+        std::string g = no ? std::to_string(*no) : std::string();
+        while (g.size() < 4) {
+            g += " ";
+        }
+        return g + " " + s;
+    };
+
+    struct Pair {
+        std::string left;
+        std::string right;
+        bool skip = false;
+    };
+    std::vector<Pair> pairs;
+    std::size_t max_l = 0;
+    std::size_t max_r = 0;
+    for (const auto& r : diff.rows) {
+        Pair p;
+        const bool is_skip = !r.left.empty() && r.left == r.right
+            && r.left.find("unchanged line") != std::string::npos;
+        if (is_skip) {
+            p.skip = true;
+            p.left = "  " + r.left;
+        } else {
+            p.left  = fmt(r.left_no, r.left);
+            p.right = fmt(r.right_no, r.right);
+        }
+        max_l = std::max(max_l, p.left.size());
+        max_r = std::max(max_r, p.right.size());
+        pairs.push_back(std::move(p));
+    }
+    if (max_l > cap) {
+        max_l = cap;
+    }
+    if (max_r > cap) {
+        max_r = cap;
+    }
+
+    auto clip = [](std::string s, std::size_t w) {
+        if (s.size() > w) {
+            s = s.substr(0, w > 1 ? w - 1 : w);
+            if (w > 1) {
+                s += "…";
+            }
+        } else if (s.size() < w) {
+            s.append(w - s.size(), ' ');
+        }
+        return s;
+    };
+
+    Elements rows;
+    for (std::size_t i = 0; i < diff.rows.size(); ++i) {
+        const auto& r = diff.rows[i];
+        const auto& p = pairs[i];
+        if (p.skip) {
+            rows.push_back(
+                hbox({ text(clip(p.left, max_l + 2)) | dim | color(gutter),
+                    filler() })
+                | bgcolor(bg));
+            continue;
+        }
+        const std::string ls = clip(p.left, max_l);
+        const std::string rs = clip(p.right, max_r);
+        const bool left_red
+            = !r.left.empty() && (r.right.empty() || r.right != r.left);
+        const bool right_add
+            = !r.right.empty() && (r.left.empty() || r.left != r.right);
+        Element L = text(ls) | (left_red ? color(red) : color(fg));
+        Element R = text(rs)
+            | (right_add ? bgcolor(addbg) | color(Color::Black) : color(fg));
+        rows.push_back(hbox({ L, text(" │ ") | color(border), R }));
+    }
+    return vbox(std::move(rows)) | bgcolor(bg) | xflex;
 }
 } // namespace ursa

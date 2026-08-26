@@ -10,6 +10,7 @@
 #include <thread>
 
 #include <cctype>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <string>
@@ -26,6 +27,35 @@ namespace {
             return "user denied";
         }
         return "user denied: " + reason;
+    }
+
+    bool auto_approved_in_project(const std::string& name,
+        const std::string& args)
+    {
+        if (name != "edit" && name != "write") {
+            return false;
+        }
+        const Json::Value parsed = parse_json(args);
+        if (!parsed.isObject() || !parsed["file_path"].isString()) {
+            return false;
+        }
+        std::error_code ec;
+        const std::filesystem::path target = std::filesystem::weakly_canonical(
+            std::filesystem::absolute(parsed["file_path"].asString()), ec);
+        if (ec) {
+            return false;
+        }
+        const std::filesystem::path root = std::filesystem::weakly_canonical(
+            std::filesystem::current_path(ec), ec);
+        if (ec) {
+            return false;
+        }
+        const auto rel = target.lexically_relative(root);
+        if (rel.empty()) {
+            return true;
+        }
+        const std::string rel_str = rel.string();
+        return rel_str.rfind("..", 0) != 0;
     }
 
     std::optional<QuestionForm> parse_ask_args(const std::string& args)
@@ -808,9 +838,14 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
                 continue;
             }
             const Tool* tool          = tools_.find(ev.tool_call.name);
-            const bool needs_approval = tool != nullptr
+            bool needs_approval = tool != nullptr
                 && tool->safety == ToolSafety::MUTATING
                 && allowed_tools_.count(ev.tool_call.name) == 0;
+            if (needs_approval
+                && auto_approved_in_project(
+                    ev.tool_call.name, ev.tool_call.args)) {
+                needs_approval = false;
+            }
             if (!needs_approval) {
                 _run_tool(ev.tool_call, tool_msgs);
                 continue;
@@ -954,7 +989,9 @@ void Controller::_run_tool(
         ? ToolCall::Result::Kind::OUTPUT
         : ToolCall::Result::Kind::ERROR;
     _post([this, req, kind, out] {
-        _fill_tool_result(req, ToolCall::Result { kind, out.text });
+        ToolCall::Result result { kind, out.text };
+        result.diff = out.diff;
+        _fill_tool_result(req, std::move(result));
     });
     tool_msgs.push_back({ Message::Type::TOOL, out.text, { }, req.id });
 }

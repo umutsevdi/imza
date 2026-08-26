@@ -1,5 +1,7 @@
 #include "ui.h"
 
+#include "format.h"
+
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_base.hpp>
 #include <ftxui/component/event.hpp>
@@ -386,6 +388,9 @@ namespace {
                     cmd = parsed["command"].asString();
                 }
                 rows.push_back(code_block(cmd, controller_.shell_name()));
+            } else if (req.name == "edit" || req.name == "write") {
+                rows.push_back(text(tool_request_summary(req.name, req.args))
+                    | color(PANEL_FG));
             } else {
                 rows.push_back(code_block(req.args));
             }

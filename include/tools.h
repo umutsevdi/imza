@@ -14,6 +14,7 @@ struct ToolOutput {
     enum class Kind { OUTPUT, ERROR };
     Kind kind;
     std::string text;
+    std::optional<DiffView> diff { };
 };
 
 using ToolHandler = std::function<ToolOutput(const Json::Value& args)>;
@@ -45,6 +46,8 @@ Tool make_list_tool();
 Tool make_ask_tool();
 Tool make_shell_tool();
 Tool make_todo_tool();
+Tool make_edit_tool();
+Tool make_write_tool();
 ToolRegistry builtin_tools();
 
 } // namespace ursa

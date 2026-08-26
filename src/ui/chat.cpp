@@ -82,7 +82,6 @@ namespace {
             return text("");
         }
         return hbox({
-            text(" ") | bgcolor(PANEL_COLOR),
             text(" ") | bgcolor(Color::Red),
             text(" " + msg) | bgcolor(Color::Red),
             filler() | bgcolor(Color::Red),
@@ -117,14 +116,21 @@ namespace {
     {
         Elements rows;
         rows.push_back(hbox({
-            text("Tool Call: ") | bold | color(Color::GreenLight),
-            text(tool_call_head(tc)) | color(PANEL_FG),
+            text("Tool Call:") | bold | color(Color::GreenLight),
+            text(" " + tool_call_head(tc)) | color(PANEL_FG),
         }));
         if (tc.result.has_value()) {
             switch (tc.result->kind) {
             case ToolCall::Result::Kind::OUTPUT:
                 if (!tc.result->text.empty()) {
-                    if (tc.name == "list") {
+                    if (tc.name == "edit" || tc.name == "write") {
+                        if (tc.result->diff.has_value()) {
+                            rows.push_back(diff_split(*tc.result->diff));
+                        } else {
+                            rows.push_back(code_block(
+                                tc.result->text, tool_code_language(tc)));
+                        }
+                    } else if (tc.name == "list") {
                         rows.push_back(list_block(tc.result->text));
                     } else if (tc.name == "ask") {
                         rows.push_back(
@@ -285,9 +291,9 @@ namespace {
                 }),
                 separatorEmpty(),
             }));
-            Element main = vbox({
-                               std::move(log) | flex,
-                           })
+            Element main      = vbox({
+                                    std::move(log) | flex,
+                                })
                 | flex | reflect(frame_box_);
 
             Elements bottom;
@@ -310,10 +316,10 @@ namespace {
                     text(" "),
                 })
                 | xflex);
+            bottom.push_back(std::move(input_box));
             if (!st.error.empty() || st.retry_countdown) {
                 bottom.push_back(error_element(st));
             }
-            bottom.push_back(std::move(input_box));
             Elements root;
             root.push_back(std::move(main));
             root.push_back(separatorEmpty());

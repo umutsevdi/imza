@@ -62,6 +62,7 @@ struct ToolCall {
         enum class Kind { OUTPUT, ERROR, REJECT, CANCEL };
         Kind kind;
         std::string text;
+        std::optional<DiffView> diff { };
     };
     std::size_t id = 0;
     std::string call_id { };

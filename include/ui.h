@@ -48,6 +48,7 @@ ftxui::Element code_block(
 ftxui::Element code_block_with_lines(
     const std::string& code, const std::string& lang, std::size_t start_line);
 ftxui::Element list_block(const std::string& text);
+ftxui::Element diff_split(const DiffView& diff);
 
 ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx);
 ftxui::Element render_todo(const TodoList& todo, const LayoutCtx& ctx);
