@@ -20,22 +20,24 @@ using namespace ftxui;
 
 class StatusLine : public ComponentBase {
 public:
-    StatusLine(Controller& controller, std::function<int()> width)
-        : controller_(controller)
-        , width_(std::move(width)) { };
+    StatusLine(std::shared_ptr<Session> session, Controller& controller,
+            std::function<int()> width)
+            : session_(std::move(session))
+            , controller_(controller)
+            , width_(std::move(width)) { };
 
     Element OnRender() override
     {
         using namespace ftxui;
         const Config& cfg    = controller_.config();
-        const UiState& state = controller_.state();
+        const Session& state = *session_;
         const int w          = width_();
         const bool narrow    = w < LayoutCtx::wide_threshold;
         LayoutCtx ctx {
             narrow ? LayoutCtx::Kind::NARROW : LayoutCtx::Kind::WIDE, w
         };
         const bool wide = ctx.kind == LayoutCtx::Kind::WIDE;
-        const bool plan = state.mode == UiState::Mode::PLAN;
+        const bool plan = state.mode() == Session::Mode::PLAN;
         Element mode    = text(plan ? " PLAN " : " BUILD ") | bold
             | color(PANEL_COLOR_FOCUS)
             | bgcolor(plan ? Color::GreenLight : Color::RedLight);
@@ -58,9 +60,9 @@ public:
                 bar.push_back(text(" (" + shown + ")") | color(effort_color));
             }
         }
-        if (state.last.prompt > 0 || state.totals.total > 0) {
+        if (state.last().prompt > 0 || state.totals().total > 0) {
             const ModelPricing pricing = _cached_pricing(active_model);
-            const std::uint64_t used   = state.last.prompt;
+            const std::uint64_t used   = state.last().prompt;
             if (pricing.context_limit > 0) {
                 const std::uint64_t pct = used * 100 / pricing.context_limit;
                 bar.push_back(text(" · " + compact_tokens(used) + "/"
@@ -85,8 +87,8 @@ public:
             bar.push_back(text(_cached_cwd()) | color(PANEL_FG_DIM));
             bar.push_back(text("  "));
         }
-        if (state.total_cost > 0) {
-            bar.push_back(text(money_text(state.total_cost) + "  ")
+        if (state.total_cost() > 0) {
+            bar.push_back(text(money_text(state.total_cost()) + "  ")
                 | color(PANEL_FG_DIM));
         }
         bar.push_back(
@@ -102,6 +104,7 @@ public:
     }
 
 private:
+    std::shared_ptr<Session> session_;
     Controller& controller_;
     std::function<int()> width_;
     int frame_ = 0;
@@ -172,8 +175,10 @@ private:
 };
 
 ftxui::Component make_status_line(
-    Controller& controller, std::function<int()> width)
+    std::shared_ptr<Session> session, Controller& controller,
+    std::function<int()> width)
 {
-    return ftxui::Make<StatusLine>(controller, std::move(width));
+    return ftxui::Make<StatusLine>(
+        std::move(session), controller, std::move(width));
 }
 } // namespace ursa

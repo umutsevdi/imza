@@ -117,8 +117,9 @@ namespace {
 
     class ConnectImpl : public ComponentBase {
     public:
-        explicit ConnectImpl(Controller& controller)
-            : controller_(controller)
+        explicit ConnectImpl(std::shared_ptr<Session> session, Controller& controller)
+            : session_(std::move(session))
+            , controller_(controller)
         {
         }
 
@@ -248,13 +249,14 @@ namespace {
 
         void sync_phase()
         {
-            const UiState& st = controller_.state();
-            if (const auto* modal = std::get_if<ConnectModal>(&st.modal)) {
-                if (modal->entry != entry_) {
+            const Session& st = *session_;
+            const auto modal  = st.modal();
+            if (const auto* m = std::get_if<ConnectModal>(&modal)) {
+                if (m->entry != entry_) {
                     picker_open_  = false;
                     in_add_       = false;
                     row_selected_ = 0;
-                    entry_        = modal->entry;
+                    entry_        = m->entry;
                 }
             }
         }
@@ -375,12 +377,12 @@ namespace {
         bool test_ok()
         {
             return tested_signature_ == current_signature()
-                && controller_.state().connect_status.rfind("✓", 0) == 0;
+            && session_->connect_status().rfind("✓", 0) == 0;
         }
 
         void maybe_rebuild_manage()
         {
-            const UiState& st = controller_.state();
+            const Session& st = *session_;
             bool confirming   = false;
             for (const auto& [id, active] : confirm_) {
                 confirming = confirming || active;
@@ -388,8 +390,8 @@ namespace {
             const bool base_visible = selected_provider_ == kCustomProviderId
                 || selected_provider_ == kLocalProviderId;
             const std::uint64_t status_key
-                = std::hash<std::string> { }(st.connect_status) << 32;
-            const std::uint64_t key = status_key + st.modal_serial * 16ULL
+                = std::hash<std::string> { }(st.connect_status()) << 32;
+            const std::uint64_t key = status_key + st.modal_serial() * 16ULL
                 + (confirming ? 4ULL : 0ULL) + (base_visible ? 2ULL : 0ULL)
                 + (selected_provider_.empty() ? 0ULL : 1ULL);
             if (key == manage_key_) {
@@ -692,23 +694,23 @@ namespace {
 
         Element status_line_element()
         {
-            const UiState& st = controller_.state();
+            const Session& st = *session_;
             if (!row_error_.empty()) {
                 return status_element(row_error_, false);
             }
             const bool fresh = tested_signature_ == current_signature();
-            if (fresh && !st.connect_status.empty()) {
-                const bool ok = st.connect_status.rfind("✓", 0) == 0;
-                return status_element(st.connect_status, ok);
+            if (fresh && !st.connect_status().empty()) {
+                const bool ok = st.connect_status().rfind("✓", 0) == 0;
+                return status_element(st.connect_status(), ok);
             }
             return text("");
         }
 
         void maybe_rebuild_pick()
         {
-            const UiState& st = controller_.state();
+            const Session& st = *session_;
             const Config cfg  = controller_.config();
-            std::uint64_t key = st.modal_serial * 1000003ULL;
+            std::uint64_t key = st.modal_serial() * 1000003ULL;
             key += std::hash<std::string> { }(cfg.last_used
                     ? cfg.last_used->provider + " " + cfg.last_used->model
                     : std::string { });
@@ -876,6 +878,7 @@ namespace {
         }
 
         Controller& controller_;
+        std::shared_ptr<Session> session_;
         ConnectModal::Entry entry_ = ConnectModal::Entry::MANAGE;
 
         Component container_;
@@ -920,9 +923,10 @@ namespace {
 
 } // namespace
 
-ftxui::Component make_connect(Controller& controller)
+ftxui::Component make_connect(
+    std::shared_ptr<Session> session, Controller& controller)
 {
-    return ftxui::Make<ConnectImpl>(controller);
+    return ftxui::Make<ConnectImpl>(std::move(session), controller);
 }
 
 } // namespace ursa

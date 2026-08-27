@@ -117,6 +117,7 @@ target_link_libraries(ursa_core PUBLIC
 add_library(ursa_agent
     src/agent/pricing.cpp
     src/agent/controller.cpp
+    src/agent/session.cpp
     src/agent/format.cpp
     src/agent/prompt.cpp
     src/agent/tools.cpp

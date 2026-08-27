@@ -16,10 +16,12 @@ namespace {
 
     class VariantImpl : public ComponentBase {
     public:
-        VariantImpl(Controller& controller)
-            : controller_(controller)
+        VariantImpl(std::shared_ptr<Session> session, Controller& controller)
+            : session_(std::move(session))
+            , controller_(controller)
         {
-            const auto& modal = std::get<VariantModal>(controller_.state().modal);
+            const auto& modal
+                = std::get<VariantModal>(session_->modal());
             options_          = modal.options;
             selected_         = 0;
             for (size_t i = 0; i < options_.size(); ++i) {
@@ -73,6 +75,7 @@ namespace {
             }
         }
 
+        std::shared_ptr<Session> session_;
         Controller& controller_;
         std::vector<std::string> options_;
         int selected_ = 0;
@@ -83,9 +86,10 @@ namespace {
 
 } // namespace
 
-ftxui::Component make_variant(Controller& controller)
+ftxui::Component make_variant(
+    std::shared_ptr<Session> session, Controller& controller)
 {
-    return ftxui::Make<VariantImpl>(controller);
+    return ftxui::Make<VariantImpl>(std::move(session), controller);
 }
 
 } // namespace ursa

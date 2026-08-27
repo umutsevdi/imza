@@ -65,12 +65,13 @@ namespace {
         };
     }
 
-    Element error_element(const UiState& st)
+    Element error_element(const Session& st)
     {
-        std::string msg = st.error;
-        if (st.retry_countdown) {
+        std::string msg = st.error();
+        if (st.retry_countdown()) {
             auto remaining = std::chrono::duration_cast<std::chrono::seconds>(
-                st.retry_countdown->deadline - std::chrono::steady_clock::now())
+                st.retry_countdown()->deadline
+                - std::chrono::steady_clock::now())
                                  .count();
             if (remaining < 0) {
                 remaining = 0;
@@ -121,8 +122,10 @@ namespace {
 
     class ChatImpl : public ComponentBase {
     public:
-        ChatImpl(Controller& controller, std::function<int()> width)
-            : controller_(controller)
+        ChatImpl(std::shared_ptr<Session> session, Controller& controller,
+            std::function<int()> width)
+            : session_(std::move(session))
+            , controller_(controller)
             , width_(std::move(width))
         {
             input_options_.content     = &input_buf_;
@@ -147,14 +150,14 @@ namespace {
 
         Element OnRender() override
         {
-            const UiState& st = controller_.state();
+            const Session& st = *session_;
             LayoutCtx ctx { width_() >= LayoutCtx::wide_threshold
                     ? LayoutCtx::Kind::WIDE
                     : LayoutCtx::Kind::NARROW,
                 width_() };
 
-            const bool streaming  = st.phase == UiState::Phase::STREAMING;
-            const bool connecting = st.phase == UiState::Phase::CONNECTING;
+            const bool streaming  = st.phase() == Session::Phase::STREAMING;
+            const bool connecting = st.phase() == Session::Phase::CONNECTING;
 
             Elements items;
             if (follow_) {
@@ -163,16 +166,16 @@ namespace {
                 scroll_top_ = std::clamp(scroll_top_, 0, max_scroll());
             }
             if (cache_kind_ != ctx.kind
-                || item_cache_.size() != st.items.size()) {
+                || item_cache_.size() != st.items().size()) {
                 item_cache_.clear();
-                item_cache_.resize(st.items.size());
-                item_versions_.assign(st.items.size(), kInvalidVersion);
+                item_cache_.resize(st.items().size());
+                item_versions_.assign(st.items().size(), kInvalidVersion);
                 cache_kind_ = ctx.kind;
             }
             std::size_t item_index = 0;
-            for (const auto& it : st.items) {
+            for (const auto& it : st.items()) {
                 const std::size_t version = item_version(it);
-                const bool is_trailing    = &it == &st.items.back();
+                const bool is_trailing    = &it == &st.items().back();
                 const bool active         = is_trailing && streaming
                     && std::holds_alternative<AssistantTurn>(it);
                 std::size_t eff_version = version;
@@ -244,7 +247,7 @@ namespace {
                 Element el = item_cache_[item_index];
                 if ((streaming || connecting)
                     && std::holds_alternative<AssistantTurn>(it)
-                    && &it == &st.items.back()) {
+                    && &it == &st.items().back()) {
                     const auto& at = std::get<AssistantTurn>(it);
                     if (at.reasoning.empty()
                         && (!reasoning_enabled() || connecting)) {
@@ -266,9 +269,9 @@ namespace {
                 ++item_index;
             }
 
-            const size_t queued_n = st.queued.size();
+            const size_t queued_n = st.queued().size();
             for (size_t i = 0; i < queued_n; ++i) {
-                const auto& q = st.queued[i];
+                const auto& q = st.queued()[i];
                 Elements row {
                     text("[QUEUED] ") | bold | color(Color::Green),
                 };
@@ -323,7 +326,7 @@ namespace {
                 })
                 | xflex);
             bottom.push_back(std::move(input_box));
-            if (!st.error.empty() || st.retry_countdown) {
+            if (!st.error().empty() || st.retry_countdown()) {
                 bottom.push_back(error_element(st));
             }
             Elements root;
@@ -368,9 +371,8 @@ namespace {
                     matches_.clear();
                     return true;
                 }
-                if (!controller_.state().queued.empty()) {
-                    controller_.cancel_queued(
-                        controller_.state().queued.back().id);
+                if (!session_->queued().empty()) {
+                    controller_.cancel_queued(session_->queued().back().id);
                     return true;
                 }
                 return true;
@@ -446,9 +448,9 @@ namespace {
 
         void OnAnimation(animation::Params&) override
         {
-            const auto phase = controller_.state().phase;
-            if (phase != UiState::Phase::STREAMING
-                && phase != UiState::Phase::CONNECTING) {
+            const auto phase = session_->phase();
+            if (phase != Session::Phase::STREAMING
+                && phase != Session::Phase::CONNECTING) {
                 return;
             }
             ++frame_;
@@ -587,6 +589,7 @@ namespace {
                 | bgcolor(PANEL_COLOR) | color(PANEL_FG);
         }
 
+        std::shared_ptr<Session> session_;
         Controller& controller_;
         std::function<int()> width_;
 
@@ -730,7 +733,7 @@ namespace {
                 return it->second;
             }
             const auto on_click = [this, id] {
-                for (const auto& item : controller_.state().items) {
+                for (const auto& item : session_->items()) {
                     const auto* tc = std::get_if<ToolCall>(&item);
                     if (tc != nullptr && tc->id == id) {
                         open_viewer_for(*tc);
@@ -869,9 +872,12 @@ ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx)
         item);
 }
 
-ftxui::Component make_chat(Controller& controller, std::function<int()> width)
+ftxui::Component make_chat(
+    std::shared_ptr<Session> session, Controller& controller,
+    std::function<int()> width)
 {
-    return ftxui::Make<ChatImpl>(controller, std::move(width));
+    return ftxui::Make<ChatImpl>(
+        std::move(session), controller, std::move(width));
 }
 
 } // namespace ursa

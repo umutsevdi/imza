@@ -22,18 +22,20 @@ namespace {
 
     class Repl : public ComponentBase {
     public:
-        Repl(ScreenInteractive& screen, Controller& controller)
+        Repl(ScreenInteractive& screen, std::shared_ptr<Session> session,
+            Controller& controller)
             : screen_(screen)
+            , session_(std::move(session))
             , controller_(controller)
         {
             side_ = make_side_panel(
-                controller, [] { return ftxui::Terminal::Size().dimx; });
+                session_, controller, [] { return ftxui::Terminal::Size().dimx; });
             chat_ = make_chat(
-                controller, [] { return ftxui::Terminal::Size().dimx; });
+                session_, controller, [] { return ftxui::Terminal::Size().dimx; });
             status_line_ = make_status_line(
-                controller, [] { return ftxui::Terminal::Size().dimx; });
+                session_, controller, [] { return ftxui::Terminal::Size().dimx; });
             ;
-            modal_ = make_modal(controller);
+            modal_ = make_modal(session_, controller);
             Add(chat_);
         }
 
@@ -68,7 +70,7 @@ namespace {
                     | flex;
             }
 
-            if (controller_.state().modal.index() != 0) {
+            if (session_->modal().index() != 0) {
                 const int h   = ftxui::Terminal::Size().dimy;
                 const int mw  = std::min(w - 4, MODAL_MAX_WIDTH);
                 const int mh  = std::max(10, h - 4);
@@ -87,7 +89,7 @@ namespace {
                 screen_.Exit();
                 return true;
             }
-            if (controller_.state().modal.index() != 0) {
+            if (session_->modal().index() != 0) {
                 return modal_->OnEvent(event);
             }
             return chat_->OnEvent(event);
@@ -95,6 +97,7 @@ namespace {
 
     private:
         ScreenInteractive& screen_;
+        std::shared_ptr<Session> session_;
         Controller& controller_;
         Component side_;
         Component chat_;
@@ -113,8 +116,8 @@ int run_repl(const Config& cfg)
 
     ScreenInteractive screen = ScreenInteractive::FullscreenAlternateScreen();
     ToolRegistry tools       = builtin_tools();
-    Controller controller(
-        cfg,
+    auto session             = std::make_shared<Session>();
+    Controller controller(session, cfg,
         [&screen](std::function<void()> f) {
             screen.Post(std::move(f));
             screen.PostEvent(Event::Custom);
@@ -125,7 +128,7 @@ int run_repl(const Config& cfg)
         controller.enqueue_user_modal(
             ConnectModal { ConnectModal::Entry::MANAGE });
     }
-    auto app = ftxui::Make<Repl>(screen, controller);
+    auto app = ftxui::Make<Repl>(screen, session, controller);
     screen.Loop(app);
     return 0;
 }

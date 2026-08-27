@@ -6,16 +6,19 @@
 #include <deque>
 #include <functional>
 #include <future>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <variant>
 #include <vector>
 
 #include "catalog.h"
 #include "network.h"
+#include "session.h"
 #include "tools.h"
 #include "types.h"
 
@@ -38,106 +41,6 @@ struct LayoutCtx {
     static constexpr int panel_width    = 30;
     Kind kind;
     int width;
-};
-
-struct UserTurn {
-    std::string text;
-};
-
-struct AssistantTurn {
-    std::string markdown;
-    std::string reasoning;
-    std::string reasoning_signature;
-    std::optional<std::chrono::milliseconds> reasoning_ms;
-};
-
-struct ToolCall {
-    struct Result {
-        enum class Kind { OUTPUT, ERROR, REJECT, CANCEL };
-        Kind kind;
-        std::string text;
-        std::optional<DiffView> diff;
-    };
-    std::size_t id = 0;
-    std::string call_id;
-    std::string name;
-    std::string args;
-    std::optional<Result> result;
-};
-
-struct TodoItem {
-    enum class Status { PENDING, IN_PROGRESS, COMPLETED, CANCELLED };
-    std::string content;
-    Status status = Status::PENDING;
-};
-
-struct TodoList {
-    std::vector<TodoItem> items;
-};
-
-std::optional<TodoList> parse_todo_args(const Json::Value& args);
-std::string todo_summary(const TodoList& todo);
-
-struct ChangedFile {
-    std::string path;
-    std::string status;
-};
-
-using ConversationItem
-    = std::variant<UserTurn, AssistantTurn, ToolCall, TodoList, ModalAnswer>;
-
-struct ConnectModal {
-    enum class Entry { MANAGE, PICK_MODEL };
-    Entry entry = Entry::MANAGE;
-};
-
-struct HelpModal { };
-
-struct ViewerModal {
-    std::string title;
-    std::string content;
-    std::string lang;
-    std::size_t start_line = 1;
-    bool line_numbers      = true;
-};
-
-struct VariantModal {
-    std::vector<std::string> options;
-    std::string current;
-};
-
-using ModalPayload = std::variant<std::monostate, HelpModal, ViewerModal,
-    ToolCallRequest, QuestionForm, ConnectModal, VariantModal>;
-
-struct QueuedMessage {
-    std::size_t id;
-    std::string text;
-};
-
-struct UiState {
-    enum class Phase { IDLE, CONNECTING, STREAMING, AWAITING };
-    enum class Mode { PLAN, BUILD };
-    std::vector<ConversationItem> items;
-    ModalPayload modal         = std::monostate { };
-    std::uint64_t modal_serial = 0;
-    Phase phase                = Phase::IDLE;
-    Mode mode                  = Mode::PLAN;
-    std::string error;
-    std::string connect_status;
-
-    TodoList todo;
-    std::vector<ChangedFile> changed_files;
-    std::vector<QueuedMessage> queued;
-
-    struct Countdown {
-        std::chrono::steady_clock::time_point deadline;
-    };
-    std::optional<Countdown> retry_countdown;
-
-    Usage totals;
-    Usage last;
-    double total_cost = 0.0;
-    double last_cost  = 0.0;
 };
 
 using PostFn = std::function<void(std::function<void()>)>;
@@ -177,9 +80,9 @@ struct ModelList {
 
 class Controller {
 public:
-    Controller(const Config& cfg, PostFn post, std::function<void()> on_exit,
-        StreamFn stream_fn = { }, ToolRegistry tools = { },
-        ModelsFn models_fn = { });
+    Controller(std::shared_ptr<Session> session, const Config& cfg,
+        PostFn post, std::function<void()> on_exit, StreamFn stream_fn = { },
+        ToolRegistry tools = { }, ModelsFn models_fn = { });
     ~Controller();
 
     Controller(const Controller&)            = delete;
@@ -194,7 +97,7 @@ public:
     void enqueue_user_modal(ModalPayload payload);
     void cancel_queued(std::size_t id);
     size_t queue_size() const;
-    const UiState& state() const { return state_; }
+    const Session& session() const { return *session_; }
     Config config() const;
     std::vector<ConnectionView> connections() const;
     ModelList models_for(const std::string& connection_id) const;
@@ -207,12 +110,9 @@ public:
 private:
     void submit_message(std::string text);
     void run_slash(std::string_view cmd);
-    void apply(const StreamEvent& ev);
     void finish(std::string error);
 
     void _post(std::function<void()> f);
-    std::vector<Message> _build_history(
-        ApiStandard dialect = ApiStandard::OPENAI) const;
     std::string _system_prompt() const;
     void _spawn(std::vector<Message> history, StreamFn override);
     void _drive(std::vector<Message> history, StreamFn override);
@@ -233,21 +133,16 @@ private:
     bool _model_reasons(const std::string& model) const;
     std::uint64_t _budget_for_effort(const std::string& effort) const;
     void _set_reasoning(ChatRequest& req, ApiStandard dialect);
-    AssistantTurn* _last_assistant();
-    void _finalize_reasoning(AssistantTurn& a);
     void _apply_question_result(
         const ModalResult& res, std::string& reply_buffer);
     void _apply_ask_result(const ToolCallRequest& req, const ModalResult& res,
         std::vector<Message>& tool_msgs);
     void _run_tool(const ToolCallRequest& req, std::vector<Message>& tool_msgs);
-    void _fill_tool_result(const ToolCallRequest& req, ToolCall::Result result);
-    static std::string _tool_result_text(const ToolCall& call);
     void _present_front();
-    void _enqueue_message(std::string text);
     void _drain_queued();
 
+    std::shared_ptr<Session> session_;
     Config cfg_;
-    UiState state_;
     PostFn post_;
     std::function<void()> on_exit_;
     std::vector<SlashCommand> commands_;
@@ -264,11 +159,8 @@ private:
     std::deque<PendingModal> queue_;
     mutable std::mutex queue_mutex_;
     std::set<std::string> allowed_tools_;
-    std::size_t next_tool_id_   = 1;
-    std::size_t next_queued_id_ = 0;
 
     std::vector<StreamEvent> stream_events_;
-    std::optional<std::chrono::steady_clock::time_point> reasoning_start_;
     std::atomic<bool> alive_ { true };
     std::optional<std::jthread> worker_;
     int retry_after_secs_ = 0;

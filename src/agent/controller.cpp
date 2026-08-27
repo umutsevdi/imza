@@ -21,14 +21,6 @@ namespace ursa {
 
 namespace {
 
-    std::string denial_text(const std::string& reason)
-    {
-        if (reason.empty()) {
-            return "user denied";
-        }
-        return "user denied: " + reason;
-    }
-
     bool auto_approved_in_project(const std::string& name,
         const std::string& args)
     {
@@ -94,71 +86,7 @@ namespace {
         return form;
     }
 
-    enum class ModeReminder { NONE, PLAN, BUILD };
-
-    ModeReminder last_mode_reminder(const std::vector<Message>& history)
-    {
-        ModeReminder last = ModeReminder::NONE;
-        for (const Message& m : history) {
-            if (m.type != Message::Type::USER) {
-                continue;
-            }
-            if (m.content.find(PLAN_REMINDER_TAG) != std::string::npos) {
-                last = ModeReminder::PLAN;
-            } else if (m.content.find(BUILD_REMINDER_TAG)
-                != std::string::npos) {
-                last = ModeReminder::BUILD;
-            }
-        }
-        return last;
-    }
-
-} // namespace
-
-std::optional<TodoList> parse_todo_args(const Json::Value& args)
-{
-    if (!args.isObject() || !args["todos"].isArray()) {
-        return std::nullopt;
-    }
-    TodoList list;
-    for (const auto& entry : args["todos"]) {
-        if (!entry.isObject() || !entry["content"].isString()
-            || entry["content"].asString().empty()) {
-            return std::nullopt;
-        }
-        TodoItem item;
-        item.content = entry["content"].asString();
-        if (entry["status"].isString()) {
-            const std::string status = entry["status"].asString();
-            if (status == "in_progress") {
-                item.status = TodoItem::Status::IN_PROGRESS;
-            } else if (status == "completed") {
-                item.status = TodoItem::Status::COMPLETED;
-            } else if (status == "cancelled") {
-                item.status = TodoItem::Status::CANCELLED;
-            } else if (status != "pending") {
-                return std::nullopt;
-            }
-        }
-        list.items.push_back(std::move(item));
-    }
-    return list;
-}
-
-std::string todo_summary(const TodoList& todo)
-{
-    static constexpr std::string_view marks[] = { "[ ]", "[→]", "[x]", "[-]" };
-    std::string out;
-    for (const auto& it : todo.items) {
-        if (!out.empty()) {
-            out += '\n';
-        }
-        out += marks[static_cast<std::size_t>(it.status)];
-        out += ' ';
-        out += it.content;
-    }
-    return out;
-}
+    } // namespace
 
 std::string error_text(Status st)
 {
@@ -176,10 +104,11 @@ std::string error_text(Status st)
     return "unknown error";
 }
 
-Controller::Controller(const Config& cfg, PostFn post,
-    std::function<void()> on_exit, StreamFn stream_fn, ToolRegistry tools,
-    ModelsFn models_fn)
-    : cfg_(cfg)
+Controller::Controller(std::shared_ptr<Session> session, const Config& cfg,
+    PostFn post, std::function<void()> on_exit, StreamFn stream_fn,
+    ToolRegistry tools, ModelsFn models_fn)
+    : session_(std::move(session))
+    , cfg_(cfg)
     , post_(std::move(post))
     , on_exit_(std::move(on_exit))
     , commands_(slash_commands())
@@ -208,8 +137,8 @@ Controller::Controller(const Config& cfg, PostFn post,
         [this](std::shared_ptr<const WorkspaceEnvironment>) {
             _post([this] {
                 _present_front();
-                if (state_.phase == UiState::Phase::IDLE
-                    && !state_.queued.empty()) {
+                if (session_->phase() == Session::Phase::IDLE
+                    && !session_->queued().empty()) {
                     _drain_queued();
                 }
             });
@@ -251,7 +180,7 @@ void Controller::ensure_catalog_fresh()
                 save_catalog(presets_path(), catalog_);
                 set_pricing_catalog(catalog_);
             }
-            ++state_.modal_serial;
+            session_->bump_modal_serial();
         });
     });
 }
@@ -273,15 +202,14 @@ Controller::~Controller()
     env_sub_();
 }
 
-void Controller::toggle_mode()
+void Controller::toggle_mode() { session_->toggle_mode(); }
+
+void Controller::set_error(std::string msg)
 {
-    state_.mode = (state_.mode == UiState::Mode::PLAN) ? UiState::Mode::BUILD
-                                                       : UiState::Mode::PLAN;
+    session_->set_error(std::move(msg));
 }
 
-void Controller::set_error(std::string msg) { state_.error = std::move(msg); }
-
-void Controller::clear_error() { state_.error.clear(); }
+void Controller::clear_error() { session_->clear_error(); }
 
 void Controller::close_modal() { resolve_modal(std::monostate { }); }
 
@@ -292,39 +220,26 @@ void Controller::enqueue_user_modal(ModalPayload payload)
         queue_.push_back(PendingModal { std::move(payload),
             std::shared_ptr<std::promise<ModalResult>> { } });
     }
-    if (state_.modal.index() == 0
-        && (state_.phase == UiState::Phase::IDLE
-            || state_.phase == UiState::Phase::CONNECTING
-            || state_.phase == UiState::Phase::STREAMING)) {
+    if (session_->modal().index() == 0
+        && (session_->phase() == Session::Phase::IDLE
+            || session_->phase() == Session::Phase::CONNECTING
+            || session_->phase() == Session::Phase::STREAMING)) {
         _present_front();
     }
 }
 
 void Controller::cancel_queued(std::size_t id)
 {
-    auto& q = state_.queued;
-    for (auto it = q.begin(); it != q.end(); ++it) {
-        if (it->id == id) {
-            q.erase(it);
-            return;
-        }
-    }
-}
-
-void Controller::_enqueue_message(std::string text)
-{
-    state_.queued.push_back(
-        QueuedMessage { next_queued_id_++, std::move(text) });
+    session_->cancel_queued(id);
 }
 
 void Controller::_drain_queued()
 {
-    if (state_.queued.empty()) {
+    std::optional<QueuedMessage> next = session_->pop_queued();
+    if (!next.has_value()) {
         return;
     }
-    QueuedMessage next = std::move(state_.queued.front());
-    state_.queued.erase(state_.queued.begin());
-    submit(std::move(next.text));
+    submit(std::move(next->text));
 }
 
 size_t Controller::queue_size() const
@@ -348,7 +263,7 @@ void Controller::resolve_modal(ModalResult result)
             cfg_.reasoning_effort = variant->effort;
             save_config(config_path(), cfg_);
         }
-        ++state_.modal_serial;
+        session_->bump_modal_serial();
     }
     {
         std::lock_guard lock(queue_mutex_);
@@ -360,9 +275,9 @@ void Controller::resolve_modal(ModalResult result)
             }
         }
     }
-    state_.modal = std::monostate { };
-    if (state_.phase == UiState::Phase::AWAITING) {
-        state_.phase = UiState::Phase::CONNECTING;
+    session_->clear_modal();
+    if (session_->phase() == Session::Phase::AWAITING) {
+        session_->set_phase(Session::Phase::CONNECTING);
     }
     _present_front();
 }
@@ -370,15 +285,10 @@ void Controller::resolve_modal(ModalResult result)
 void Controller::_present_front()
 {
     std::lock_guard lock(queue_mutex_);
-    if (state_.modal.index() != 0 || queue_.empty()) {
+    if (session_->modal().index() != 0 || queue_.empty()) {
         return;
     }
-    state_.modal = queue_.front().payload;
-    if (std::holds_alternative<ToolCallRequest>(state_.modal)
-        || std::holds_alternative<QuestionForm>(state_.modal)) {
-        state_.phase = UiState::Phase::AWAITING;
-    }
-    ++state_.modal_serial;
+    session_->present_modal(queue_.front().payload);
 }
 
 void Controller::submit(std::string text)
@@ -391,10 +301,10 @@ void Controller::submit(std::string text)
         run_slash(t);
         return;
     }
-    if (state_.phase == UiState::Phase::IDLE) {
+    if (session_->phase() == Session::Phase::IDLE) {
         submit_message(std::string(t));
     } else {
-        _enqueue_message(std::string(t));
+        session_->enqueue_message(std::string(t));
     }
 }
 
@@ -403,18 +313,16 @@ void Controller::submit_message(std::string text)
     {
         std::lock_guard lock(data_mutex_);
         if (!cfg_.last_used || cfg_.last_used->model.empty()) {
-            state_.error = "no model selected — run /model";
+            session_->set_error("no model selected — run /model");
             return;
         }
     }
     if (!get_environment()->ready()) {
-        _enqueue_message(std::move(text));
+        session_->enqueue_message(std::move(text));
         return;
     }
-    state_.items.push_back(UserTurn { std::move(text) });
-    state_.error.clear();
-    state_.phase = UiState::Phase::CONNECTING;
-    _spawn(_build_history(), StreamFn { });
+    session_->begin_send(std::move(text));
+    _spawn(session_->build_history(_system_prompt()), StreamFn { });
 }
 
 void Controller::run_slash(std::string_view cmd)
@@ -428,15 +336,15 @@ void Controller::run_slash(std::string_view cmd)
     case SlashCommand::Action::EXIT: on_exit_(); break;
     case SlashCommand::Action::HELP: enqueue_user_modal(HelpModal { }); break;
     case SlashCommand::Action::CONNECT:
-        if (state_.phase == UiState::Phase::IDLE) {
+        if (session_->phase() == Session::Phase::IDLE) {
             enqueue_user_modal(ConnectModal { ConnectModal::Entry::MANAGE });
         } else {
-            _enqueue_message(std::string(cmd));
+            session_->enqueue_message(std::string(cmd));
         }
         break;
     case SlashCommand::Action::MODEL: {
-        if (state_.phase != UiState::Phase::IDLE) {
-            _enqueue_message(std::string(cmd));
+        if (session_->phase() != Session::Phase::IDLE) {
+            session_->enqueue_message(std::string(cmd));
             break;
         }
         bool any = false;
@@ -452,8 +360,8 @@ void Controller::run_slash(std::string_view cmd)
         break;
     }
     case SlashCommand::Action::VARIANT: {
-        if (state_.phase != UiState::Phase::IDLE) {
-            _enqueue_message(std::string(cmd));
+        if (session_->phase() != Session::Phase::IDLE) {
+            session_->enqueue_message(std::string(cmd));
             break;
         }
         std::string current;
@@ -525,74 +433,6 @@ void Controller::_set_reasoning(ChatRequest& req, ApiStandard dialect)
     }
 }
 
-AssistantTurn* Controller::_last_assistant()
-{
-    for (auto it = state_.items.rbegin(); it != state_.items.rend(); ++it) {
-        if (auto* a = std::get_if<AssistantTurn>(&*it)) {
-            return a;
-        }
-    }
-    return nullptr;
-}
-
-void Controller::_finalize_reasoning(AssistantTurn& a)
-{
-    if (!reasoning_start_.has_value() || a.reasoning.empty()
-        || a.reasoning_ms.has_value()) {
-        return;
-    }
-    const auto now = std::chrono::steady_clock::now();
-    a.reasoning_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        now - *reasoning_start_);
-}
-
-std::vector<Message> Controller::_build_history(ApiStandard dialect) const
-{
-    std::vector<Message> history;
-    history.push_back({ Message::Type::SYSTEM, _system_prompt() });
-    for (const auto& item : state_.items) {
-        if (const auto* u = std::get_if<UserTurn>(&item)) {
-            history.push_back({ Message::Type::USER, u->text });
-        } else if (const auto* a = std::get_if<AssistantTurn>(&item)) {
-            Message m { Message::Type::ASSISTANT, a->markdown };
-            if (dialect == ApiStandard::ANTHROPIC && !a->reasoning.empty()) {
-                m.thinking.push_back({ a->reasoning, a->reasoning_signature });
-            }
-            history.push_back(std::move(m));
-        } else if (const auto* tc = std::get_if<ToolCall>(&item)) {
-            if (history.empty()
-                || history.back().type != Message::Type::ASSISTANT) {
-                history.push_back({ Message::Type::ASSISTANT, "" });
-            }
-            history.back().tool_calls.push_back(
-                ToolCallEntry { tc->call_id, tc->name, tc->args });
-            history.push_back({ Message::Type::TOOL, _tool_result_text(*tc),
-                { }, tc->call_id });
-        }
-    }
-
-    const ModeReminder injected = last_mode_reminder(history);
-    if (state_.mode == UiState::Mode::PLAN && injected != ModeReminder::PLAN) {
-        for (Message& m : history) {
-            if (m.type == Message::Type::USER) {
-                m.content += "\n\n";
-                m.content += plan_mode_reminder();
-                break;
-            }
-        }
-    } else if (state_.mode == UiState::Mode::BUILD
-        && injected == ModeReminder::PLAN) {
-        for (auto it = history.rbegin(); it != history.rend(); ++it) {
-            if (it->type == Message::Type::USER) {
-                it->content += "\n\n";
-                it->content += build_mode_reminder();
-                break;
-            }
-        }
-    }
-    return history;
-}
-
 void Controller::_post(std::function<void()> f)
 {
     if (alive_.load()) {
@@ -602,7 +442,7 @@ void Controller::_post(std::function<void()> f)
 
 void Controller::_spawn(std::vector<Message> history, StreamFn override)
 {
-    state_.items.push_back(AssistantTurn { });
+    session_->append_assistant();
     worker_.emplace([this, history = std::move(history),
                         override = std::move(override)]() mutable {
         _drive(std::move(history), std::move(override));
@@ -620,15 +460,16 @@ void Controller::_drive(std::vector<Message> history, StreamFn override)
         }
         req.messages = history;
         req.tools
-            = state_.mode == UiState::Mode::PLAN ? specs_plan_ : specs_all_;
-        reasoning_start_.reset();
+            = session_->mode() == Session::Mode::PLAN ? specs_plan_ : specs_all_;
+        session_->reset_reasoning();
         stream_events_.clear();
         std::string text_buffer;
         std::string error_msg;
         Status error_status = Status::OK;
         bool saw_stream     = false;
 
-        StreamCallback cb = [this, &text_buffer, &error_msg, &error_status,
+        StreamCallback cb = [this, model = req.model, &text_buffer,
+                                &error_msg, &error_status,
                                 &saw_stream](const StreamEvent& ev) {
             if (ev.kind == StreamEvent::Kind::ERROR) {
                 error_status = ev.error;
@@ -646,7 +487,10 @@ void Controller::_drive(std::vector<Message> history, StreamFn override)
             if (ev.kind == StreamEvent::Kind::CONTENT_DELTA) {
                 text_buffer += ev.text;
             }
-            _post([this, ev] { apply(ev); });
+            const ModelPricing pricing = ev.kind == StreamEvent::Kind::USAGE
+                ? get_pricing(model)
+                : ModelPricing { };
+            _post([this, ev, pricing] { session_->apply(ev, pricing); });
         };
 
         StreamFn fn       = override ? override : stream_fn_;
@@ -714,13 +558,7 @@ void Controller::_drive(std::vector<Message> history, StreamFn override)
                 wait = retries == 1 ? 2 : 5;
             }
             wait = std::clamp(wait, 1, 30);
-            _post([this, wait] {
-                using namespace std::chrono_literals;
-                state_.phase = UiState::Phase::CONNECTING;
-                state_.retry_countdown
-                    = UiState::Countdown { std::chrono::steady_clock::now()
-                          + std::chrono::seconds(wait) };
-            });
+            _post([this, wait] { session_->mark_retry(wait); });
             using namespace std::chrono_literals;
             std::this_thread::sleep_for(std::chrono::seconds(wait));
             if (!alive_.load()) {
@@ -730,7 +568,7 @@ void Controller::_drive(std::vector<Message> history, StreamFn override)
         }
         if (fail != Status::OK) {
             _post([this, fail, msg = error_msg] {
-                state_.error.clear();
+                session_->clear_error();
                 finish(msg.empty() ? error_text(fail)
                                    : error_text(fail) + ": " + msg);
             });
@@ -753,7 +591,7 @@ void Controller::_drive(std::vector<Message> history, StreamFn override)
             _post([this] { finish(""); });
             return;
         }
-        _post([this] { state_.items.push_back(AssistantTurn { }); });
+        _post([this] { session_->append_assistant(); });
     }
 }
 
@@ -778,7 +616,7 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
                 if (!form) {
                     const ToolCallRequest req = ev.tool_call;
                     _post([this, req] {
-                        _fill_tool_result(req,
+                        session_->fill_tool_result(req,
                             ToolCall::Result { ToolCall::Result::Kind::ERROR,
                                 "ask: expected a non-empty 'questions' "
                                 "array" });
@@ -811,7 +649,7 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
                         = "todo: expected a 'todos' array of {content, status} "
                           "objects";
                     _post([this, req, msg] {
-                        _fill_tool_result(req,
+                        session_->fill_tool_result(req,
                             ToolCall::Result {
                                 ToolCall::Result::Kind::ERROR, msg });
                     });
@@ -821,8 +659,8 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
                 }
                 const std::string text = todo_summary(*list);
                 _post([this, req, todo = *list, text] {
-                    state_.todo = todo;
-                    _fill_tool_result(req,
+                    session_->set_todo(todo);
+                    session_->fill_tool_result(req,
                         ToolCall::Result {
                             ToolCall::Result::Kind::OUTPUT, text });
                 });
@@ -889,7 +727,7 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
 
     Message assistant { Message::Type::ASSISTANT, assistant_text };
     if (dialect == ApiStandard::ANTHROPIC) {
-        if (AssistantTurn* a = _last_assistant()) {
+        if (const std::optional<AssistantTurn> a = session_->last_assistant()) {
             if (!a->reasoning.empty()) {
                 assistant.thinking.push_back(
                     { a->reasoning, a->reasoning_signature });
@@ -919,8 +757,8 @@ void Controller::_apply_tool_result(const ToolCallRequest& req,
     const auto* verdict = std::get_if<ToolVerdict>(&res);
     if (verdict == nullptr) {
         _post([this, req] {
-            _fill_tool_result(
-                req, ToolCall::Result { ToolCall::Result::Kind::CANCEL, "" });
+            session_->fill_tool_result(req,
+                ToolCall::Result { ToolCall::Result::Kind::CANCEL, "" });
         });
         tool_msgs.push_back(
             { Message::Type::TOOL, denial_text(""), { }, req.id });
@@ -929,7 +767,7 @@ void Controller::_apply_tool_result(const ToolCallRequest& req,
     if (verdict->decision == ToolDecision::REJECT) {
         std::string reason = verdict->reason;
         _post([this, req, reason] {
-            _fill_tool_result(req,
+            session_->fill_tool_result(req,
                 ToolCall::Result { ToolCall::Result::Kind::REJECT, reason });
         });
         tool_msgs.push_back(
@@ -955,7 +793,7 @@ void Controller::_apply_question_result(
     ModalAnswer copy = *answer;
     reply_buffer += modal_answer_markdown(copy);
     _post([this, copy = std::move(copy)] {
-        state_.items.push_back(std::move(copy));
+        session_->append_item(std::move(copy));
     });
 }
 
@@ -965,8 +803,8 @@ void Controller::_apply_ask_result(const ToolCallRequest& req,
     const auto* answer = std::get_if<ModalAnswer>(&res);
     if (answer == nullptr) {
         _post([this, req] {
-            _fill_tool_result(
-                req, ToolCall::Result { ToolCall::Result::Kind::CANCEL, "" });
+            session_->fill_tool_result(req,
+                ToolCall::Result { ToolCall::Result::Kind::CANCEL, "" });
         });
         tool_msgs.push_back(
             { Message::Type::TOOL, denial_text(""), { }, req.id });
@@ -975,8 +813,8 @@ void Controller::_apply_ask_result(const ToolCallRequest& req,
     ModalAnswer copy       = *answer;
     const std::string text = ask_answer_markdown(copy);
     _post([this, req, text] {
-        _fill_tool_result(
-            req, ToolCall::Result { ToolCall::Result::Kind::OUTPUT, text });
+        session_->fill_tool_result(req,
+            ToolCall::Result { ToolCall::Result::Kind::OUTPUT, text });
     });
     tool_msgs.push_back({ Message::Type::TOOL, text, { }, req.id });
 }
@@ -991,128 +829,17 @@ void Controller::_run_tool(
     _post([this, req, kind, out] {
         ToolCall::Result result { kind, out.text };
         result.diff = out.diff;
-        _fill_tool_result(req, std::move(result));
+        session_->fill_tool_result(req, std::move(result));
     });
     tool_msgs.push_back({ Message::Type::TOOL, out.text, { }, req.id });
 }
 
-std::string Controller::_tool_result_text(const ToolCall& call)
-{
-    if (!call.result.has_value()) {
-        return "";
-    }
-    switch (call.result->kind) {
-    case ToolCall::Result::Kind::REJECT:
-    case ToolCall::Result::Kind::CANCEL: return denial_text(call.result->text);
-    case ToolCall::Result::Kind::OUTPUT:
-    case ToolCall::Result::Kind::ERROR: return call.result->text;
-    }
-    return "";
-}
-
-void Controller::_fill_tool_result(
-    const ToolCallRequest& req, ToolCall::Result result)
-{
-    for (auto it = state_.items.rbegin(); it != state_.items.rend(); ++it) {
-        auto* tc = std::get_if<ToolCall>(&*it);
-        if (tc == nullptr || tc->result.has_value()) {
-            continue;
-        }
-        const bool matched = !req.id.empty()
-            ? tc->call_id == req.id
-            : tc->name == req.name && tc->args == req.args;
-        if (matched) {
-            tc->result = std::move(result);
-            return;
-        }
-    }
-}
-
-void Controller::apply(const StreamEvent& ev)
-{
-    switch (ev.kind) {
-        case StreamEvent::Kind::CONTENT_DELTA:
-            assert(state_.phase != UiState::Phase::AWAITING);
-            if (!state_.items.empty()) {
-                if (auto* a = std::get_if<AssistantTurn>(&state_.items.back())) {
-                    if (!ev.text.empty()) {
-                        _finalize_reasoning(*a);
-                    }
-                    a->markdown += ev.text;
-                }
-            }
-            break;
-    case StreamEvent::Kind::REASONING:
-        if (!state_.items.empty()) {
-            if (auto* a = std::get_if<AssistantTurn>(&state_.items.back())) {
-                if (a->reasoning.empty() && !reasoning_start_.has_value()) {
-                    reasoning_start_ = std::chrono::steady_clock::now();
-                }
-                a->reasoning += ev.text;
-                if (!ev.thinking_signature.empty()) {
-                    a->reasoning_signature = ev.thinking_signature;
-                }
-            }
-        }
-        break;
-    case StreamEvent::Kind::TOOL_CALL:
-        if (auto* a = std::get_if<AssistantTurn>(&state_.items.back())) {
-            _finalize_reasoning(*a);
-        }
-        state_.items.push_back(ToolCall { next_tool_id_++, ev.tool_call.id,
-            ev.tool_call.name, ev.tool_call.args, std::nullopt });
-        break;
-    case StreamEvent::Kind::QUESTION:
-        if (!state_.items.empty()) {
-            if (auto* a = std::get_if<AssistantTurn>(&state_.items.back())) {
-                if (!a->markdown.empty()) {
-                    a->markdown += "\n\n";
-                }
-                a->markdown += question_form_markdown(ev.question);
-            }
-        }
-        break;
-    case StreamEvent::Kind::DONE:
-        if (auto* a = _last_assistant()) {
-            _finalize_reasoning(*a);
-        }
-        break;
-    case StreamEvent::Kind::ERROR: finish(error_text(ev.error)); break;
-    case StreamEvent::Kind::CONNECTED:
-        if (state_.phase == UiState::Phase::CONNECTING) {
-            state_.error.clear();
-            state_.retry_countdown.reset();
-            state_.phase = UiState::Phase::STREAMING;
-        }
-        break;
-    case StreamEvent::Kind::USAGE: {
-        std::string model;
-        {
-            std::lock_guard lock(data_mutex_);
-            model = cfg_.last_used ? cfg_.last_used->model : "";
-        }
-        const ModelPricing p = get_pricing(model);
-        state_.last          = ev.usage;
-        state_.totals.prompt += ev.usage.prompt;
-        state_.totals.completion += ev.usage.completion;
-        state_.totals.total += ev.usage.total;
-        state_.last_cost = compute_cost(ev.usage, p);
-        state_.total_cost += state_.last_cost;
-        break;
-    }
-    }
-}
-
 void Controller::finish(std::string error)
 {
-    if (state_.phase == UiState::Phase::IDLE) {
+    const bool ended = session_->finish_session(std::move(error));
+    if (!ended) {
         return;
     }
-    state_.retry_countdown.reset();
-    if (!error.empty() && state_.error.empty()) {
-        state_.error = std::move(error);
-    }
-    state_.phase = UiState::Phase::IDLE;
     _present_front();
     _drain_queued();
 }
@@ -1236,7 +963,7 @@ bool Controller::remove_connection(const std::string& connection_id)
         save_config(config_path(), cfg_);
     }
     if (removed) {
-        ++state_.modal_serial;
+        session_->bump_modal_serial();
     }
     return removed;
 }
@@ -1378,7 +1105,7 @@ void Controller::_begin_connect(const ConnectResult& res)
         }
     }
     if (!known || route.endpoint.empty()) {
-        state_.connect_status = "unknown provider";
+        session_->set_connect_status("unknown provider");
         return;
     }
 
@@ -1401,18 +1128,18 @@ void Controller::_begin_connect(const ConnectResult& res)
         _post([this, res, future, models] {
             const Status st = future.get();
             if (st != Status::OK) {
-                state_.connect_status = error_text(st);
+                session_->set_connect_status(error_text(st));
                 return;
             }
-            state_.connect_status
-                = "✓ " + std::to_string(models->size()) + " models";
+            session_->set_connect_status(
+                "✓ " + std::to_string(models->size()) + " models");
             if (res.persist) {
                 const bool first = _commit_connection(res);
-                if (std::holds_alternative<ConnectModal>(state_.modal)) {
-                    state_.modal
-                        = ConnectModal { first ? ConnectModal::Entry::PICK_MODEL
-                                               : ConnectModal::Entry::MANAGE };
-                    ++state_.modal_serial;
+                if (std::holds_alternative<ConnectModal>(session_->modal())) {
+                    session_->set_modal(
+                        ConnectModal { first ? ConnectModal::Entry::PICK_MODEL
+                                             : ConnectModal::Entry::MANAGE });
+                    session_->bump_modal_serial();
                 }
             }
         });

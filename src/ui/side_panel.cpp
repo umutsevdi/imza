@@ -13,9 +13,11 @@ namespace ursa {
 using namespace ftxui;
 class SidePanel : public ComponentBase {
 public:
-    SidePanel(Controller& controller, std::function<int()> width)
-        : controller_(controller)
-        , width_(std::move(width)) { };
+    SidePanel(std::shared_ptr<Session> session, Controller& controller,
+            std::function<int()> width)
+            : session_(std::move(session))
+            , controller_(controller)
+            , width_(std::move(width)) { };
 
     Element OnRender() override
     {
@@ -25,14 +27,13 @@ public:
             narrow ? LayoutCtx::Kind::NARROW : LayoutCtx::Kind::WIDE, w
         };
         Elements parts;
-        if (controller_.state().todo.items.size()) {
-            parts.push_back(render_todo(controller_.state().todo, ctx) | yflex);
+        if (session_->todo().items.size()) {
+            parts.push_back(render_todo(session_->todo(), ctx) | yflex);
         }
 
         if (!narrow) {
-            parts.push_back(
-                render_changed_files(controller_.state().changed_files, ctx)
-                | yflex);
+            parts.push_back(render_changed_files(
+                session_->changed_files(), ctx) | yflex);
             const std::optional<std::string>& rules
                 = get_environment()->agent_rules_path();
             if (rules) {
@@ -64,14 +65,17 @@ public:
     }
 
 private:
+    std::shared_ptr<Session> session_;
     Controller& controller_;
     std::function<int()> width_;
 };
 
 ftxui::Component make_side_panel(
-    Controller& controller, std::function<int()> width)
+    std::shared_ptr<Session> session, Controller& controller,
+    std::function<int()> width)
 {
-    return ftxui::Make<SidePanel>(controller, std::move(width));
+    return ftxui::Make<SidePanel>(
+        std::move(session), controller, std::move(width));
 }
 
 namespace {

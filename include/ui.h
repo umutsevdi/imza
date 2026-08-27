@@ -57,13 +57,17 @@ ftxui::Element render_help(const std::vector<SlashCommand>& commands);
 
 int run_repl(const Config& cfg);
 
-ftxui::Component make_chat(Controller& controller, std::function<int()> width);
-ftxui::Component make_side_panel(
+ftxui::Component make_chat(std::shared_ptr<Session> session,
     Controller& controller, std::function<int()> width);
-ftxui::Component make_status_line(
+ftxui::Component make_side_panel(std::shared_ptr<Session> session,
     Controller& controller, std::function<int()> width);
-ftxui::Component make_connect(Controller& controller);
-ftxui::Component make_variant(Controller& controller);
-ftxui::Component make_modal(Controller& controller);
+ftxui::Component make_status_line(std::shared_ptr<Session> session,
+    Controller& controller, std::function<int()> width);
+ftxui::Component make_connect(
+    std::shared_ptr<Session> session, Controller& controller);
+ftxui::Component make_variant(
+    std::shared_ptr<Session> session, Controller& controller);
+ftxui::Component make_modal(
+    std::shared_ptr<Session> session, Controller& controller);
 
 } // namespace ursa

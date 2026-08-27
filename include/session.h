@@ -1,0 +1,181 @@
+#pragma once
+
+#include <chrono>
+#include <cstdint>
+#include <json/json.h>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <variant>
+#include <vector>
+
+#include "network.h"
+#include "types.h"
+
+namespace ursa {
+
+struct UserTurn {
+    std::string text;
+};
+
+struct AssistantTurn {
+    std::string markdown;
+    std::string reasoning;
+    std::string reasoning_signature;
+    std::optional<std::chrono::milliseconds> reasoning_ms;
+};
+
+struct ToolCall {
+    struct Result {
+        enum class Kind { OUTPUT, ERROR, REJECT, CANCEL };
+        Kind kind;
+        std::string text;
+        std::optional<DiffView> diff;
+    };
+    std::size_t id = 0;
+    std::string call_id;
+    std::string name;
+    std::string args;
+    std::optional<Result> result;
+};
+
+struct TodoItem {
+    enum class Status { PENDING, IN_PROGRESS, COMPLETED, CANCELLED };
+    std::string content;
+    Status status = Status::PENDING;
+};
+
+struct TodoList {
+    std::vector<TodoItem> items;
+};
+
+struct ChangedFile {
+    std::string path;
+    std::string status;
+};
+
+using ConversationItem
+    = std::variant<UserTurn, AssistantTurn, ToolCall, TodoList, ModalAnswer>;
+
+struct ConnectModal {
+    enum class Entry { MANAGE, PICK_MODEL };
+    Entry entry = Entry::MANAGE;
+};
+
+struct HelpModal { };
+
+struct ViewerModal {
+    std::string title;
+    std::string content;
+    std::string lang;
+    std::size_t start_line = 1;
+    bool line_numbers      = true;
+};
+
+struct VariantModal {
+    std::vector<std::string> options;
+    std::string current;
+};
+
+using ModalPayload = std::variant<std::monostate, HelpModal, ViewerModal,
+    ToolCallRequest, QuestionForm, ConnectModal, VariantModal>;
+
+struct QueuedMessage {
+    std::size_t id;
+    std::string text;
+};
+
+std::optional<TodoList> parse_todo_args(const Json::Value& args);
+std::string todo_summary(const TodoList& todo);
+std::string tool_result_text(const ToolCall& call);
+std::string denial_text(const std::string& reason);
+
+class Session {
+public:
+    enum class Phase { IDLE, CONNECTING, STREAMING, AWAITING };
+    enum class Mode { PLAN, BUILD };
+    struct Countdown {
+        std::chrono::steady_clock::time_point deadline;
+    };
+
+    Session();
+
+    const std::vector<ConversationItem>& items() const { return items_; }
+    ModalPayload modal() const;
+    std::uint64_t modal_serial() const;
+    Phase phase() const;
+    Mode mode() const;
+    std::string error() const;
+    std::string connect_status() const;
+    const TodoList& todo() const { return todo_; }
+    const std::vector<ChangedFile>& changed_files() const { return changed_files_; }
+    const std::vector<QueuedMessage>& queued() const { return queued_; }
+    std::optional<Countdown> retry_countdown() const;
+    Usage totals() const;
+    Usage last() const;
+    double total_cost() const;
+    double last_cost() const;
+
+    void toggle_mode();
+    void set_error(std::string msg);
+    void clear_error();
+    void set_connect_status(std::string status);
+    void cancel_queued(std::size_t id);
+    void enqueue_message(std::string text);
+    std::optional<QueuedMessage> pop_queued();
+
+    void begin_send(std::string text);
+    void append_assistant();
+    void append_item(ConversationItem item);
+    void append_tool(const ToolCallRequest& req);
+    void fill_tool_result(const ToolCallRequest& req, ToolCall::Result result);
+    void set_todo(TodoList todo);
+    void set_modal(ModalPayload payload);
+    void clear_modal();
+    void bump_modal_serial();
+    void present_modal(ModalPayload payload);
+    void set_phase(Phase phase);
+    void mark_retry(int wait_seconds);
+
+    void apply(const StreamEvent& ev, const ModelPricing& pricing);
+    bool finish_session(std::string error);
+    std::vector<Message> build_history(
+        std::string_view system_prompt, ApiStandard dialect = ApiStandard::OPENAI) const;
+
+    std::optional<AssistantTurn> last_assistant() const;
+    void reset_reasoning();
+
+private:
+    AssistantTurn* last_assistant_locked();
+    void finalize_reasoning(AssistantTurn& a);
+    void finish_session_locked(const std::string& error);
+    void update_usage(const StreamEvent& usage_event, const ModelPricing& pricing);
+
+    mutable std::mutex mutex_;
+
+    std::vector<ConversationItem> items_;
+    ModalPayload modal_         = std::monostate { };
+    std::uint64_t modal_serial_ = 0;
+    Phase phase_                = Phase::IDLE;
+    Mode mode_                  = Mode::PLAN;
+    std::string error_;
+    std::string connect_status_;
+
+    TodoList todo_;
+    std::vector<ChangedFile> changed_files_;
+    std::vector<QueuedMessage> queued_;
+
+    std::optional<Countdown> retry_countdown_;
+
+    Usage totals_;
+    Usage last_;
+    double total_cost_ = 0.0;
+    double last_cost_  = 0.0;
+
+    std::size_t next_tool_id_   = 1;
+    std::size_t next_queued_id_ = 0;
+    std::optional<std::chrono::steady_clock::time_point> reasoning_start_;
+};
+
+} // namespace ursa

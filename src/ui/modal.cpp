@@ -80,15 +80,16 @@ namespace {
 
     class ModalImpl : public ComponentBase {
     public:
-        explicit ModalImpl(Controller& controller)
-            : controller_(controller)
+        explicit ModalImpl(std::shared_ptr<Session> session, Controller& controller)
+            : session_(std::move(session))
+            , controller_(controller)
         {
         }
 
         Element OnRender() override
         {
-            const UiState& st = controller_.state();
-            if (st.modal.index() == 0) {
+            const Session& st = *session_;
+            if (st.modal().index() == 0) {
                 built_ = false;
                 return text("");
             }
@@ -111,25 +112,25 @@ namespace {
                     }
                     return text("");
                 },
-                st.modal);
+                st.modal());
         }
 
         bool OnEvent(Event event) override
         {
-            const UiState& st = controller_.state();
-            if (st.modal.index() == 0) {
+            const Session& st = *session_;
+            if (st.modal().index() == 0) {
                 return false;
             }
             ensure_built(st);
             if (event == Event::Escape) {
-                if (std::holds_alternative<ConnectModal>(st.modal)) {
+                if (std::holds_alternative<ConnectModal>(st.modal())) {
                     if (body_ && body_->OnEvent(event)) {
                         return true;
                     }
                     controller_.close_modal();
                     return true;
                 }
-                if (std::holds_alternative<ToolCallRequest>(st.modal)
+                if (std::holds_alternative<ToolCallRequest>(st.modal())
                     && tool_phase_ == ToolPhase::REASON) {
                     _set_tool_phase(ToolPhase::DECIDE);
                     return true;
@@ -137,13 +138,13 @@ namespace {
                 controller_.close_modal();
                 return true;
             }
-            if (std::holds_alternative<HelpModal>(st.modal)) {
+            if (std::holds_alternative<HelpModal>(st.modal())) {
                 if (event == Event::Return) {
                     controller_.close_modal();
                     return true;
                 }
                 return true;
-            } else if (std::holds_alternative<ViewerModal>(st.modal)) {
+            } else if (std::holds_alternative<ViewerModal>(st.modal())) {
                 if (event == Event::Return) {
                     controller_.close_modal();
                     return true;
@@ -168,15 +169,15 @@ namespace {
             Component input;
         };
 
-        void ensure_built(const UiState& st)
+        void ensure_built(const Session& st)
         {
-            if (built_ && serial_ == st.modal_serial) {
+            if (built_ && serial_ == st.modal_serial()) {
                 return;
             }
             built_  = true;
-            serial_ = st.modal_serial;
+            serial_ = st.modal_serial();
             std::visit(
-                [this](const auto& payload) { build(payload); }, st.modal);
+                [this](const auto& payload) { build(payload); }, st.modal());
         }
 
         void build(const ToolCallRequest&)
@@ -287,13 +288,13 @@ namespace {
 
         void build(const ConnectModal&)
         {
-            connect_ = make_connect(controller_);
+            connect_ = make_connect(session_, controller_);
             body_    = connect_;
         }
 
         void build(const VariantModal&)
         {
-            variant_ = make_variant(controller_);
+            variant_ = make_variant(session_, controller_);
             body_    = variant_;
         }
 
@@ -510,6 +511,7 @@ namespace {
             return false;
         }
 
+        std::shared_ptr<Session> session_;
         Controller& controller_;
         bool built_           = false;
         std::uint64_t serial_ = 0;
@@ -537,9 +539,10 @@ namespace {
 
 } // namespace
 
-ftxui::Component make_modal(Controller& controller)
+ftxui::Component make_modal(
+    std::shared_ptr<Session> session, Controller& controller)
 {
-    return ftxui::Make<ModalImpl>(controller);
+    return ftxui::Make<ModalImpl>(std::move(session), controller);
 }
 
 ftxui::Element render_help(const std::vector<SlashCommand>& commands)
