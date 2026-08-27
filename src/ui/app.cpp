@@ -28,36 +28,32 @@ namespace {
             , session_(std::move(session))
             , controller_(controller)
         {
-            side_ = make_side_panel(
-                session_, controller, [] { return ftxui::Terminal::Size().dimx; });
-            chat_ = make_chat(
-                session_, controller, [] { return ftxui::Terminal::Size().dimx; });
-            status_line_ = make_status_line(
-                session_, controller, [] { return ftxui::Terminal::Size().dimx; });
-            ;
+            const LayoutFn layout = [this] { return layout_; };
+            side_ = make_side_panel(session_, controller, layout);
+            chat_ = make_chat(session_, controller, layout);
+            status_line_ = make_status_line(session_, controller, layout);
             modal_ = make_modal(session_, controller);
             Add(chat_);
         }
 
         Element OnRender() override
         {
-            const int w                = ftxui::Terminal::Size().dimx;
-            const LayoutCtx::Kind kind = w >= LayoutCtx::wide_threshold
-                ? LayoutCtx::Kind::WIDE
-                : LayoutCtx::Kind::NARROW;
+            const auto terminal_size = ftxui::Terminal::Size();
+            layout_                  = layout_context(terminal_size.dimx);
+            const int w              = layout_.width;
 
             Element side      = side_->Render();
             Element right_col = chat_->Render();
             Element status    = status_line_->Render();
 
-            const int chat_w = (kind == LayoutCtx::Kind::WIDE)
+            const int chat_w = (layout_.kind == LayoutCtx::Kind::WIDE)
                 ? w - LayoutCtx::panel_width - 1
                 : w;
             right_col
                 = std::move(right_col) | size(WIDTH, EQUAL, chat_w) | yflex;
 
             Element root;
-            if (kind == LayoutCtx::Kind::WIDE) {
+            if (layout_.kind == LayoutCtx::Kind::WIDE) {
                 root = vbox({ separatorEmpty(),
                            hbox({ text(" "), side | yflex, text(" "),
                                right_col })
@@ -71,7 +67,7 @@ namespace {
             }
 
             if (session_->modal().index() != 0) {
-                const int h   = ftxui::Terminal::Size().dimy;
+                const int h   = terminal_size.dimy;
                 const int mw  = std::min(w - 4, MODAL_MAX_WIDTH);
                 const int mh  = std::max(10, h - 4);
                 Element popup = modal_->Render()
@@ -103,6 +99,7 @@ namespace {
         Component chat_;
         Component modal_;
         Component status_line_;
+        LayoutCtx layout_ = layout_context(0);
     };
 
 } // namespace

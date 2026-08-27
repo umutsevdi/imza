@@ -232,10 +232,23 @@ void Session::begin_send(std::string text)
     phase_ = Phase::CONNECTING;
 }
 
-void Session::append_assistant()
+void Session::append_assistant(std::string model, std::string reasoning_effort)
 {
     std::lock_guard lock(mutex_);
-    items_.push_back(AssistantTurn { });
+    items_.push_back(AssistantTurn {
+        .model = std::move(model),
+        .reasoning_effort = std::move(reasoning_effort)
+    });
+}
+
+void Session::set_last_assistant_metadata(
+    std::string model, std::string reasoning_effort)
+{
+    std::lock_guard lock(mutex_);
+    if (AssistantTurn* assistant = last_assistant_locked()) {
+        assistant->model = std::move(model);
+        assistant->reasoning_effort = std::move(reasoning_effort);
+    }
 }
 
 void Session::append_item(ConversationItem item)
@@ -326,6 +339,15 @@ void Session::reset_reasoning()
 {
     std::lock_guard lock(mutex_);
     reasoning_start_.reset();
+}
+
+void Session::request_interrupt() { interrupt_requested_.store(true); }
+
+void Session::clear_interrupt() { interrupt_requested_.store(false); }
+
+bool Session::interrupt_requested() const
+{
+    return interrupt_requested_.load();
 }
 
 std::optional<AssistantTurn> Session::last_assistant() const

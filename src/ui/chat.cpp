@@ -31,6 +31,16 @@ namespace {
     constexpr std::size_t kInvalidVersion   = ~std::size_t { 0 };
     constexpr int kWheelStep                = 3;
 
+    std::string assistant_metadata(const AssistantTurn& turn)
+    {
+        if (turn.model.empty()) {
+            return "";
+        }
+        const std::string effort
+            = turn.reasoning_effort.empty() ? "off" : turn.reasoning_effort;
+        return turn.model + " · " + effort;
+    }
+
     // reflect() clips the recorded box to the screen stencil at render time,
     // which under a yframe reports the viewport height instead of the content
     // height. This captures the unclipped requirement instead.
@@ -123,10 +133,10 @@ namespace {
     class ChatImpl : public ComponentBase {
     public:
         ChatImpl(std::shared_ptr<Session> session, Controller& controller,
-            std::function<int()> width)
+            LayoutFn layout)
             : session_(std::move(session))
             , controller_(controller)
-            , width_(std::move(width))
+            , layout_(std::move(layout))
         {
             input_options_.content     = &input_buf_;
             input_options_.placeholder = "Ask anything — type / for commands";
@@ -150,14 +160,12 @@ namespace {
 
         Element OnRender() override
         {
-            const Session& st = *session_;
-            LayoutCtx ctx { width_() >= LayoutCtx::wide_threshold
-                    ? LayoutCtx::Kind::WIDE
-                    : LayoutCtx::Kind::NARROW,
-                width_() };
+            const Session& st   = *session_;
+            const LayoutCtx ctx = layout_();
 
             const bool streaming  = st.phase() == Session::Phase::STREAMING;
             const bool connecting = st.phase() == Session::Phase::CONNECTING;
+            const bool busy       = streaming || connecting;
 
             Elements items;
             if (follow_) {
@@ -178,14 +186,24 @@ namespace {
                 const bool is_trailing    = &it == &st.items().back();
                 const bool active         = is_trailing && streaming
                     && std::holds_alternative<AssistantTurn>(it);
+                const bool final_segment = !(is_trailing && busy)
+                    && (item_index + 1 == st.items().size()
+                        || std::holds_alternative<UserTurn>(
+                            st.items()[item_index + 1]));
                 std::size_t eff_version = version;
+                if (final_segment) {
+                    eff_version ^= std::size_t { 1 } << 62;
+                }
+                if (active) {
+                    eff_version ^= std::size_t { 1 } << 61;
+                }
                 if (active) {
                     const auto& at = std::get<AssistantTurn>(it);
                     const bool thinking_now
                         = (!at.reasoning.empty()
                               && !at.reasoning_ms.has_value())
                         || (at.reasoning.empty() && !at.reasoning_ms.has_value()
-                            && reasoning_enabled());
+                            && reasoning_enabled(at));
                     if (thinking_now) {
                         eff_version = static_cast<std::size_t>(frame_);
                     }
@@ -238,7 +256,7 @@ namespace {
                     } else if (std::holds_alternative<AssistantTurn>(it)) {
                         item_cache_[item_index]
                             = render_assistant(std::get<AssistantTurn>(it),
-                                item_index, ctx, active);
+                                item_index, ctx, active, final_segment);
                     } else {
                         item_cache_[item_index] = render_item(it, ctx);
                     }
@@ -250,13 +268,15 @@ namespace {
                     && &it == &st.items().back()) {
                     const auto& at = std::get<AssistantTurn>(it);
                     if (at.reasoning.empty()
-                        && (!reasoning_enabled() || connecting)) {
+                        && (!reasoning_enabled(at) || connecting)) {
                         el = vbox({
                             hbox({
                                 spinner(15, static_cast<size_t>(frame_))
                                     | color(Color::GrayLight),
                                 text(connecting ? " Connecting…" : " Thinking…")
                                     | dim,
+                                filler(),
+                                text(interrupt_hint()) | dim,
                             }),
                             el,
                         });
@@ -306,9 +326,6 @@ namespace {
                 | flex | reflect(frame_box_);
 
             Elements bottom;
-            if (show_suggestions()) {
-                bottom.push_back(render_suggestions());
-            }
             bottom.push_back(
                 hbox({
                     filler(),
@@ -325,6 +342,9 @@ namespace {
                     text(" "),
                 })
                 | xflex);
+            if (show_suggestions()) {
+                bottom.push_back(render_suggestions());
+            }
             bottom.push_back(std::move(input_box));
             if (!st.error().empty() || st.retry_countdown()) {
                 bottom.push_back(error_element(st));
@@ -373,6 +393,10 @@ namespace {
                 }
                 if (!session_->queued().empty()) {
                     controller_.cancel_queued(session_->queued().back().id);
+                    return true;
+                }
+                if (session_->phase() != Session::Phase::IDLE) {
+                    controller_.interrupt();
                     return true;
                 }
                 return true;
@@ -591,12 +615,13 @@ namespace {
 
         std::shared_ptr<Session> session_;
         Controller& controller_;
-        std::function<int()> width_;
+        LayoutFn layout_;
 
         Component container_;
         std::map<std::size_t, Component> read_buttons_;
         std::map<std::size_t, std::shared_ptr<std::string>> reasoning_labels_;
         std::map<std::size_t, std::shared_ptr<std::string>> reasoning_content_;
+        std::map<std::size_t, std::shared_ptr<std::string>> reasoning_metadata_;
         std::map<std::size_t, Component> reasoning_comps_;
 
         std::vector<Element> item_cache_;
@@ -759,19 +784,19 @@ namespace {
             return btn;
         }
 
-        bool reasoning_enabled() const
+        bool reasoning_enabled(const AssistantTurn& turn) const
         {
-            const auto& e = controller_.config().reasoning_effort;
-            return e && !e->empty() && *e != "off";
+            return !turn.reasoning_effort.empty()
+                && turn.reasoning_effort != "off";
         }
 
         Element render_assistant(const AssistantTurn& t, std::size_t index,
-            const LayoutCtx&, bool active = false)
+            const LayoutCtx&, bool active, bool show_metadata)
         {
             Elements parts;
             const bool has_reasoning = !t.reasoning.empty();
             const bool placeholder   = active && !has_reasoning
-                && !t.reasoning_ms.has_value() && reasoning_enabled();
+                && !t.reasoning_ms.has_value() && reasoning_enabled(t);
             if (has_reasoning || placeholder) {
                 const bool done = t.reasoning_ms.has_value();
                 std::string label;
@@ -784,35 +809,45 @@ namespace {
                 } else {
                     label = " Thinking…";
                 }
-                Component btn = make_reasoning_button(
-                    index, label, placeholder ? std::string() : t.reasoning);
-                Element row = done
+                Component btn = make_reasoning_button(index, label,
+                    placeholder ? std::string() : t.reasoning,
+                    assistant_metadata(t));
+                Element row   = done
                     ? btn->Render()
                     : hbox({ spinner(15, static_cast<size_t>(frame_))
                               | color(Color::GrayLight),
-                          btn->Render() });
+                          btn->Render(), filler(),
+                          text(interrupt_hint()) | dim });
                 parts.push_back(row);
             }
             if (!t.markdown.empty()) {
                 parts.push_back(assistant_item(t));
             }
+            if (show_metadata) {
+                parts.push_back(
+                    hbox({ filler(), text(assistant_metadata(t)) | dim }));
+            }
             return vbox(std::move(parts));
         }
 
-        Component make_reasoning_button(
-            std::size_t index, std::string label, const std::string& content)
+        Component make_reasoning_button(std::size_t index, std::string label,
+            const std::string& content, std::string metadata)
         {
             auto it = reasoning_comps_.find(index);
             if (it != reasoning_comps_.end()) {
-                *reasoning_labels_[index]  = label;
-                *reasoning_content_[index] = content;
+                *reasoning_labels_[index]   = label;
+                *reasoning_content_[index]  = content;
+                *reasoning_metadata_[index] = std::move(metadata);
                 return it->second;
             }
             auto label_ptr   = std::make_shared<std::string>(std::move(label));
             auto content_ptr = std::make_shared<std::string>(content);
-            const auto on_click = [this, content_ptr] {
+            auto metadata_ptr
+                = std::make_shared<std::string>(std::move(metadata));
+            const auto on_click = [this, content_ptr, metadata_ptr] {
                 ViewerModal vm { " Thinking", *content_ptr, "", 1 };
                 vm.line_numbers = false;
+                vm.metadata     = *metadata_ptr;
                 controller_.enqueue_user_modal(vm);
             };
             ButtonOption bo;
@@ -827,13 +862,16 @@ namespace {
                 }
                 return e;
             };
-            Component btn             = space_activates(Button(bo), on_click);
-            reasoning_labels_[index]  = label_ptr;
-            reasoning_content_[index] = content_ptr;
-            reasoning_comps_[index]   = btn;
+            Component btn              = space_activates(Button(bo), on_click);
+            reasoning_labels_[index]   = label_ptr;
+            reasoning_content_[index]  = content_ptr;
+            reasoning_metadata_[index] = metadata_ptr;
+            reasoning_comps_[index]    = btn;
             container_->Add(btn);
             return btn;
         }
+
+        std::string interrupt_hint() { return "Esc interrupt"; }
 
         std::string input_buf_;
         InputOption input_options_;
@@ -873,11 +911,10 @@ ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx)
 }
 
 ftxui::Component make_chat(
-    std::shared_ptr<Session> session, Controller& controller,
-    std::function<int()> width)
+    std::shared_ptr<Session> session, Controller& controller, LayoutFn layout)
 {
     return ftxui::Make<ChatImpl>(
-        std::move(session), controller, std::move(width));
+        std::move(session), controller, std::move(layout));
 }
 
 } // namespace ursa

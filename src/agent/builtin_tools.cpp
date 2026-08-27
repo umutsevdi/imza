@@ -287,6 +287,11 @@ namespace {
             return false;
         }
         out << content;
+        out.close();
+        if (!out) {
+            err = "cannot write: " + path;
+            return false;
+        }
         return true;
     }
 
@@ -606,6 +611,11 @@ namespace {
                 new_lines.begin() + static_cast<std::ptrdiff_t>(at),
                 insert.begin(), insert.end());
             edits.push_back({ at, at, at, at + insert.size() });
+            const std::string out
+                = rebuild_lines(new_lines, trailing_newline);
+            if (!save_text(path, out, err)) {
+                return error("write: " + err);
+            }
             return make_diff_result("write: inserted text below line "
                     + std::to_string(line) + " in " + path,
                 path, old_lines, new_lines, edits);

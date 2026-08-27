@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <json/json.h>
@@ -24,6 +25,8 @@ struct AssistantTurn {
     std::string reasoning;
     std::string reasoning_signature;
     std::optional<std::chrono::milliseconds> reasoning_ms;
+    std::string model;
+    std::string reasoning_effort;
 };
 
 struct ToolCall {
@@ -71,6 +74,7 @@ struct ViewerModal {
     std::string lang;
     std::size_t start_line = 1;
     bool line_numbers      = true;
+    std::string metadata;
 };
 
 struct VariantModal {
@@ -126,7 +130,9 @@ public:
     std::optional<QueuedMessage> pop_queued();
 
     void begin_send(std::string text);
-    void append_assistant();
+    void append_assistant(std::string model = "", std::string reasoning_effort = "");
+    void set_last_assistant_metadata(std::string model,
+        std::string reasoning_effort);
     void append_item(ConversationItem item);
     void append_tool(const ToolCallRequest& req);
     void fill_tool_result(const ToolCallRequest& req, ToolCall::Result result);
@@ -145,6 +151,10 @@ public:
 
     std::optional<AssistantTurn> last_assistant() const;
     void reset_reasoning();
+
+    void request_interrupt();
+    void clear_interrupt();
+    bool interrupt_requested() const;
 
 private:
     AssistantTurn* last_assistant_locked();
@@ -176,6 +186,7 @@ private:
     std::size_t next_tool_id_   = 1;
     std::size_t next_queued_id_ = 0;
     std::optional<std::chrono::steady_clock::time_point> reasoning_start_;
+    std::atomic<bool> interrupt_requested_ { false };
 };
 
 } // namespace ursa

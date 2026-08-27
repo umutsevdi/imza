@@ -87,18 +87,18 @@ namespace {
 
 } // namespace
 
-void Controller::_drive(std::vector<Message> history, StreamFn override)
+void Controller::_drive(std::vector<Message> history, StreamFn override,
+    TurnSettings settings)
 {
     int retries = 0;
     for (;;) {
         ChatRequest req;
-        {
-            std::lock_guard lock(data_mutex_);
-            req.model = cfg_.last_used ? cfg_.last_used->model : "";
-        }
+        req.model = settings.model;
         req.messages = history;
-        req.tools
-            = session_->mode() == Session::Mode::PLAN ? specs_plan_ : specs_all_;
+        req.tools = settings.mode == Session::Mode::PLAN ? specs_plan_ : specs_all_;
+        req.interrupted = [session = session_] {
+            return session->interrupt_requested();
+        };
         session_->reset_reasoning();
         stream_events_.clear();
         std::string text_buffer;
@@ -135,16 +135,34 @@ void Controller::_drive(std::vector<Message> history, StreamFn override)
         retry_after_secs_ = 0;
         Status st;
         ApiStandard active_dialect = ApiStandard::OPENAI;
+        std::string current_model;
+        std::string current_effort;
         if (override) {
+            req.reasoning_effort = settings.reasoning_effort == "default"
+                ? std::optional<std::string>("medium")
+                : settings.reasoning_effort == "off"
+                ? std::nullopt
+                : std::optional<std::string>(settings.reasoning_effort);
+            current_model = req.model;
+            current_effort = settings.reasoning_effort;
+            session_->set_last_assistant_metadata(
+                current_model, current_effort);
             st = fn(req, cb);
         } else {
-            Route route;
+            Route route = settings.route;
             {
                 std::lock_guard lock(data_mutex_);
-                route = _active_route_locked(req.model);
-                _set_reasoning(req, route.dialect);
+                _set_reasoning(req, route.dialect, settings.reasoning_effort);
                 active_dialect = route.dialect;
+                current_model = req.model;
+                current_effort
+                    = req.reasoning_effort.has_value()
+                        || req.thinking_budget.has_value()
+                    ? settings.reasoning_effort
+                    : "off";
             }
+            session_->set_last_assistant_metadata(
+                current_model, current_effort);
             st = stream(
                 get_provider(route), route, req, cb, &retry_after_secs_);
             const Status attempt
@@ -155,13 +173,11 @@ void Controller::_drive(std::vector<Message> history, StreamFn override)
                 bool has_alt = false;
                 {
                     std::lock_guard lock(data_mutex_);
-                    if (cfg_.last_used) {
-                        if (Connection* conn
-                            = _find_locked(cfg_.last_used->provider)) {
+                    if (Connection* conn
+                        = _find_locked(settings.connection_id)) {
                             alt = resolve_route(
                                 *conn, catalog_, ApiStandard::ANTHROPIC);
                             has_alt = !alt.endpoint.empty();
-                        }
                     }
                 }
                 if (has_alt && alt.endpoint != route.endpoint) {
@@ -170,22 +186,34 @@ void Controller::_drive(std::vector<Message> history, StreamFn override)
                     error_msg.clear();
                     {
                         std::lock_guard lock(data_mutex_);
-                        _set_reasoning(req, ApiStandard::ANTHROPIC);
+                        _set_reasoning(req, ApiStandard::ANTHROPIC,
+                            settings.reasoning_effort);
                     }
                     st = stream(
                         get_provider(alt), alt, req, cb, &retry_after_secs_);
+                    active_dialect = ApiStandard::ANTHROPIC;
+                    current_effort = req.thinking_budget.has_value()
+                        ? settings.reasoning_effort
+                        : "off";
+                    session_->set_last_assistant_metadata(
+                        current_model, current_effort);
                     const Status retried
                         = error_status != Status::OK ? error_status : st;
                     if (retried == Status::OK) {
                         std::lock_guard lock(data_mutex_);
                         if (Connection* conn
-                            = _find_locked(cfg_.last_used->provider)) {
+                            = _find_locked(settings.connection_id)) {
                             conn->dialects[req.model] = ApiStandard::ANTHROPIC;
                             save_config(config_path(), cfg_);
                         }
                     }
                 }
             }
+        }
+
+        if (session_->interrupt_requested()) {
+            _post([this] { finish(""); });
+            return;
         }
 
         const Status fail = error_status != Status::OK ? error_status : st;
@@ -198,9 +226,14 @@ void Controller::_drive(std::vector<Message> history, StreamFn override)
             wait = std::clamp(wait, 1, 30);
             _post([this, wait] { session_->mark_retry(wait); });
             using namespace std::chrono_literals;
-            std::this_thread::sleep_for(std::chrono::seconds(wait));
-            if (!alive_.load()) {
-                return;
+            const auto deadline
+                = std::chrono::steady_clock::now() + std::chrono::seconds(wait);
+            while (std::chrono::steady_clock::now() < deadline) {
+                if (!alive_.load() || session_->interrupt_requested()) {
+                    _post([this] { finish(""); });
+                    return;
+                }
+                std::this_thread::sleep_for(50ms);
             }
             continue;
         }
@@ -224,12 +257,19 @@ void Controller::_drive(std::vector<Message> history, StreamFn override)
         if (!alive_.load()) {
             return;
         }
+        if (session_->interrupt_requested()) {
+            _post([this] { finish(""); });
+            return;
+        }
 
         if (history.size() == history_before) {
             _post([this] { finish(""); });
             return;
         }
-        _post([this] { session_->append_assistant(); });
+        _post([this, settings] {
+            session_->append_assistant(
+                settings.model, settings.reasoning_effort);
+        });
     }
 }
 

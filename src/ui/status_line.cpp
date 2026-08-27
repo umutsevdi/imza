@@ -21,21 +21,17 @@ using namespace ftxui;
 class StatusLine : public ComponentBase {
 public:
     StatusLine(std::shared_ptr<Session> session, Controller& controller,
-            std::function<int()> width)
+            LayoutFn layout)
             : session_(std::move(session))
             , controller_(controller)
-            , width_(std::move(width)) { };
+            , layout_(std::move(layout)) { };
 
     Element OnRender() override
     {
         using namespace ftxui;
         const Config& cfg    = controller_.config();
         const Session& state = *session_;
-        const int w          = width_();
-        const bool narrow    = w < LayoutCtx::wide_threshold;
-        LayoutCtx ctx {
-            narrow ? LayoutCtx::Kind::NARROW : LayoutCtx::Kind::WIDE, w
-        };
+        const LayoutCtx ctx  = layout_();
         const bool wide = ctx.kind == LayoutCtx::Kind::WIDE;
         const bool plan = state.mode() == Session::Mode::PLAN;
         Element mode    = text(plan ? " PLAN " : " BUILD ") | bold
@@ -106,7 +102,7 @@ public:
 private:
     std::shared_ptr<Session> session_;
     Controller& controller_;
-    std::function<int()> width_;
+    LayoutFn layout_;
     int frame_ = 0;
     std::string last_model_;
     ModelPricing cached_;
@@ -175,10 +171,9 @@ private:
 };
 
 ftxui::Component make_status_line(
-    std::shared_ptr<Session> session, Controller& controller,
-    std::function<int()> width)
+    std::shared_ptr<Session> session, Controller& controller, LayoutFn layout)
 {
     return ftxui::Make<StatusLine>(
-        std::move(session), controller, std::move(width));
+        std::move(session), controller, std::move(layout));
 }
 } // namespace ursa

@@ -69,6 +69,15 @@ struct ModelList {
     std::vector<ModelInfo> models;
 };
 
+struct TurnSettings {
+    std::string model;
+    std::string reasoning_effort;
+    Session::Mode mode = Session::Mode::PLAN;
+    ApiStandard dialect = ApiStandard::OPENAI;
+    std::string connection_id;
+    Route route;
+};
+
 class Controller {
 public:
     Controller(std::shared_ptr<Session> session, const Config& cfg,
@@ -87,6 +96,7 @@ public:
     void resolve_modal(ModalResult result);
     void enqueue_user_modal(ModalPayload payload);
     void cancel_queued(std::size_t id);
+    void interrupt();
     size_t queue_size() const;
     const Session& session() const { return *session_; }
     Config config() const;
@@ -105,8 +115,10 @@ private:
 
     void _post(std::function<void()> f);
     std::string _system_prompt() const;
-    void _spawn(std::vector<Message> history, StreamFn override);
-    void _drive(std::vector<Message> history, StreamFn override);
+    void _spawn(std::vector<Message> history, StreamFn override,
+        TurnSettings settings);
+    void _drive(std::vector<Message> history, StreamFn override,
+        TurnSettings settings);
     Route _active_route_locked(const std::string& model) const;
     std::string _unique_id_locked(std::string base) const;
     Connection* _find_locked(const std::string& id);
@@ -122,7 +134,8 @@ private:
         std::vector<Message>& tool_msgs);
     bool _model_reasons(const std::string& model) const;
     std::uint64_t _budget_for_effort(const std::string& effort) const;
-    void _set_reasoning(ChatRequest& req, ApiStandard dialect);
+    void _set_reasoning(ChatRequest& req, ApiStandard dialect,
+        std::string_view effort);
     void _apply_question_result(
         const ModalResult& res, std::string& reply_buffer);
     void _apply_ask_result(const ToolCallRequest& req, const ModalResult& res,

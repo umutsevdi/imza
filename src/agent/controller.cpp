@@ -125,6 +125,13 @@ void Controller::cancel_queued(std::size_t id)
     session_->cancel_queued(id);
 }
 
+void Controller::interrupt()
+{
+    if (session_->phase() != Session::Phase::IDLE) {
+        session_->request_interrupt();
+    }
+}
+
 void Controller::_drain_queued()
 {
     std::optional<QueuedMessage> next = session_->pop_queued();
@@ -202,19 +209,32 @@ void Controller::submit(std::string text)
 
 void Controller::submit_message(std::string text)
 {
+    TurnSettings settings;
     {
         std::lock_guard lock(data_mutex_);
         if (!cfg_.last_used || cfg_.last_used->model.empty()) {
             session_->set_error("no model selected — run /model");
             return;
         }
+        settings.model = cfg_.last_used->model;
+        settings.connection_id = cfg_.last_used->provider;
+        settings.reasoning_effort = cfg_.reasoning_effort.value_or("off");
+        if (settings.reasoning_effort == "medium") {
+            settings.reasoning_effort = "default";
+        }
+        settings.route = _active_route_locked(settings.model);
+        settings.dialect = settings.route.dialect;
     }
+    settings.mode = session_->mode();
     if (!get_environment()->ready()) {
         session_->enqueue_message(std::move(text));
         return;
     }
+    session_->clear_interrupt();
     session_->begin_send(std::move(text));
-    _spawn(session_->build_history(_system_prompt()), StreamFn { });
+    _spawn(session_->build_history(_system_prompt(), settings.dialect),
+        StreamFn { },
+        std::move(settings));
 }
 
 std::string Controller::_system_prompt() const
@@ -249,11 +269,12 @@ std::uint64_t Controller::_budget_for_effort(const std::string& effort) const
     return 8000;
 }
 
-void Controller::_set_reasoning(ChatRequest& req, ApiStandard dialect)
+void Controller::_set_reasoning(ChatRequest& req, ApiStandard dialect,
+    std::string_view configured_effort)
 {
     req.reasoning_effort.reset();
     req.thinking_budget.reset();
-    std::string effort = cfg_.reasoning_effort.value_or("default");
+    std::string effort(configured_effort);
     if (effort == "medium") {
         effort = "default";
     }
@@ -274,12 +295,14 @@ void Controller::_post(std::function<void()> f)
     }
 }
 
-void Controller::_spawn(std::vector<Message> history, StreamFn override)
+void Controller::_spawn(std::vector<Message> history, StreamFn override,
+    TurnSettings settings)
 {
-    session_->append_assistant();
+    session_->append_assistant(settings.model, settings.reasoning_effort);
     worker_.emplace([this, history = std::move(history),
-                        override = std::move(override)]() mutable {
-        _drive(std::move(history), std::move(override));
+                        override = std::move(override),
+                        settings = std::move(settings)]() mutable {
+        _drive(std::move(history), std::move(override), std::move(settings));
     });
 }
 

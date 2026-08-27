@@ -16,6 +16,8 @@
 
 namespace ursa {
 
+using LayoutFn = std::function<LayoutCtx()>;
+
 inline const ftxui::Color PANEL_COLOR       = ftxui::Color::RGB(26, 34, 52);
 inline const ftxui::Color PANEL_FG          = ftxui::Color::RGB(228, 232, 240);
 inline const ftxui::Color PANEL_FG_DIM      = ftxui::Color::RGB(148, 156, 172);
@@ -25,6 +27,8 @@ inline const ftxui::Color PANEL_COLOR_FOCUS = ftxui::Color::RGB(44, 56, 84);
 inline constexpr int MODAL_MAX_WIDTH = 100;
 
 ftxui::Element panel(ftxui::Element e);
+
+LayoutCtx layout_context(int width);
 
 ftxui::Component space_activates(
     ftxui::Component child, std::function<void()> on_space);
@@ -59,11 +63,11 @@ ftxui::Element render_help(const std::vector<SlashCommand>& commands);
 int run_repl(const Config& cfg);
 
 ftxui::Component make_chat(std::shared_ptr<Session> session,
-    Controller& controller, std::function<int()> width);
+    Controller& controller, LayoutFn layout);
 ftxui::Component make_side_panel(std::shared_ptr<Session> session,
-    Controller& controller, std::function<int()> width);
+    Controller& controller, LayoutFn layout);
 ftxui::Component make_status_line(std::shared_ptr<Session> session,
-    Controller& controller, std::function<int()> width);
+    Controller& controller, LayoutFn layout);
 ftxui::Component make_connect(
     std::shared_ptr<Session> session, Controller& controller);
 ftxui::Component make_variant(

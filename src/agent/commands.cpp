@@ -45,17 +45,9 @@ void Controller::run_slash(std::string_view cmd)
     case SlashCommand::Action::EXIT: on_exit_(); break;
     case SlashCommand::Action::HELP: enqueue_user_modal(HelpModal { }); break;
     case SlashCommand::Action::CONNECT:
-        if (session_->phase() == Session::Phase::IDLE) {
-            enqueue_user_modal(ConnectModal { ConnectModal::Entry::MANAGE });
-        } else {
-            session_->enqueue_message(std::string(cmd));
-        }
+        enqueue_user_modal(ConnectModal { ConnectModal::Entry::MANAGE });
         break;
     case SlashCommand::Action::MODEL: {
-        if (session_->phase() != Session::Phase::IDLE) {
-            session_->enqueue_message(std::string(cmd));
-            break;
-        }
         bool any = false;
         {
             std::lock_guard lock(data_mutex_);
@@ -69,10 +61,6 @@ void Controller::run_slash(std::string_view cmd)
         break;
     }
     case SlashCommand::Action::VARIANT: {
-        if (session_->phase() != Session::Phase::IDLE) {
-            session_->enqueue_message(std::string(cmd));
-            break;
-        }
         std::string current;
         {
             std::lock_guard lock(data_mutex_);

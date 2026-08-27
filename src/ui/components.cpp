@@ -12,6 +12,14 @@
 #include <vector>
 
 namespace ursa {
+
+LayoutCtx layout_context(int width)
+{
+    return { width >= LayoutCtx::wide_threshold ? LayoutCtx::Kind::WIDE
+                                                : LayoutCtx::Kind::NARROW,
+        width };
+}
+
 using namespace ftxui;
 
 std::size_t digit_width(std::size_t n) { return std::to_string(n).size(); }

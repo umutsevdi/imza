@@ -201,6 +201,13 @@ namespace {
         return n;
     }
 
+    int progress_callback(void* userdata, curl_off_t, curl_off_t, curl_off_t,
+        curl_off_t)
+    {
+        const auto* req = static_cast<const ChatRequest*>(userdata);
+        return req->interrupted && req->interrupted() ? 1 : 0;
+    }
+
     Status classify_failure(long code, const std::string& raw,
         std::string& message)
     {
@@ -266,6 +273,9 @@ Status stream(const Provider& provider, const Route& route,
     curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header_callback);
     curl_easy_setopt(curl, CURLOPT_HEADERDATA, &ctx);
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, progress_callback);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &req);
 
     const CURLcode res = curl_easy_perform(curl);
 
@@ -274,6 +284,10 @@ Status stream(const Provider& provider, const Route& route,
     curl_slist_free_all(list);
 
     if (res != CURLE_OK) {
+        if (res == CURLE_ABORTED_BY_CALLBACK && req.interrupted
+            && req.interrupted()) {
+            return Status::OK;
+        }
         std::string detail(errbuf[0] != '\0' ? errbuf : curl_easy_strerror(res));
         ctx.cb(make_error_event(Status::NETWORK_ERROR, std::move(detail)));
         return Status::NETWORK_ERROR;

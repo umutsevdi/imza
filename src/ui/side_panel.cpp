@@ -14,18 +14,15 @@ using namespace ftxui;
 class SidePanel : public ComponentBase {
 public:
     SidePanel(std::shared_ptr<Session> session, Controller& controller,
-            std::function<int()> width)
+            LayoutFn layout)
             : session_(std::move(session))
             , controller_(controller)
-            , width_(std::move(width)) { };
+            , layout_(std::move(layout)) { };
 
     Element OnRender() override
     {
-        const int w       = width_();
-        const bool narrow = w < LayoutCtx::wide_threshold;
-        LayoutCtx ctx {
-            narrow ? LayoutCtx::Kind::NARROW : LayoutCtx::Kind::WIDE, w
-        };
+        const LayoutCtx ctx = layout_();
+        const bool narrow   = ctx.kind == LayoutCtx::Kind::NARROW;
         Elements parts;
         if (session_->todo().items.size()) {
             parts.push_back(render_todo(session_->todo(), ctx) | yflex);
@@ -67,15 +64,14 @@ public:
 private:
     std::shared_ptr<Session> session_;
     Controller& controller_;
-    std::function<int()> width_;
+    LayoutFn layout_;
 };
 
 ftxui::Component make_side_panel(
-    std::shared_ptr<Session> session, Controller& controller,
-    std::function<int()> width)
+    std::shared_ptr<Session> session, Controller& controller, LayoutFn layout)
 {
     return ftxui::Make<SidePanel>(
-        std::move(session), controller, std::move(width));
+        std::move(session), controller, std::move(layout));
 }
 
 namespace {

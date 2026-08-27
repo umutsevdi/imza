@@ -7,6 +7,7 @@
 #include <ftxui/component/component_base.hpp>
 #include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
+#include <ftxui/dom/node.hpp>
 #include <ftxui/screen/terminal.hpp>
 
 #include <algorithm>
@@ -26,6 +27,37 @@ namespace {
     using namespace ftxui;
 
     enum class ToolPhase { DECIDE, REASON };
+
+    Decorator modal_content_height(int* out)
+    {
+        class Impl : public Node {
+        public:
+            Impl(Element child, int* out)
+                : Node(Elements { std::move(child) })
+                , out_(out)
+            {
+            }
+
+            void ComputeRequirement() override
+            {
+                Node::ComputeRequirement();
+                requirement_ = children_[0]->requirement();
+                *out_        = requirement_.min_y;
+            }
+
+            void SetBox(Box box) override
+            {
+                Node::SetBox(box);
+                children_[0]->SetBox(box);
+            }
+
+        private:
+            int* out_;
+        };
+        return [out](Element child) {
+            return std::make_shared<Impl>(std::move(child), out);
+        };
+    }
 
     std::vector<std::string> wrapped_lines(
         const std::string& body, std::size_t width)
@@ -143,13 +175,13 @@ namespace {
                     controller_.close_modal();
                     return true;
                 }
-                return true;
+                return scroll_static(event);
             } else if (std::holds_alternative<ViewerModal>(st.modal())) {
                 if (event == Event::Return) {
                     controller_.close_modal();
                     return true;
                 }
-                return scroll_prompt(event);
+                return scroll_static(event);
             }
             if (body_) {
                 return body_->OnEvent(event);
@@ -298,9 +330,9 @@ namespace {
             body_    = variant_;
         }
 
-        void build(const HelpModal&) { }
+        void build(const HelpModal&) { reset_static_scroll(); }
 
-        void build(const ViewerModal&) { viewer_scroll_ = 0.0F; }
+        void build(const ViewerModal&) { reset_static_scroll(); }
 
         void build(std::monostate) { }
 
@@ -441,7 +473,10 @@ namespace {
             return vbox(std::move(rows)) | xflex;
         }
 
-        Element help_body() { return render_help(controller_.commands()); }
+        Element help_body()
+        {
+            return static_viewport(render_help(controller_.commands()), { });
+        }
 
         Element viewer_body(const ViewerModal& payload)
         {
@@ -458,57 +493,94 @@ namespace {
                     join_lines(wrapped_lines(payload.content, content_w)),
                     payload.lang);
             }
-            Elements rows { header_line(payload.title) };
-            rows.push_back(separatorEmpty());
-            rows.push_back(std::move(body) | vscroll_indicator
-                | focusPositionRelative(0.0F, viewer_scroll_) | yframe | yflex);
-            rows.push_back(separatorEmpty());
-            rows.push_back(
-                hbox({ filler(), text("↑/↓ navigate · Esc close") | dim }));
-            return vbox(std::move(rows)) | xflex;
+            return vbox({ header_line(payload.title), separatorEmpty(),
+                static_viewport(std::move(body), payload.metadata) })
+                | xflex;
         }
 
-        bool scroll_prompt(Event event)
+        Element static_viewport(Element content, const std::string& metadata)
         {
-            auto apply = [this](float delta) {
-                viewer_scroll_ = std::clamp(viewer_scroll_ + delta, 0.0F, 1.0F);
-            };
+            static_scroll_ = std::clamp(static_scroll_, 0, max_static_scroll());
+            Element viewport = std::move(content)
+                | modal_content_height(&static_content_height_)
+                | vscroll_indicator
+                | focusPosition(0,
+                    static_scroll_ + std::max(0, static_viewport_lines() - 1) / 2)
+                | yframe | yflex | reflect(static_viewport_box_);
+            Elements rows { std::move(viewport), separatorEmpty() };
+            if (!metadata.empty()) {
+                rows.push_back(hbox({ filler(), text(metadata) | dim }));
+            }
+            rows.push_back(
+                hbox({ filler(), text("↑/↓ scroll · Esc close") | dim }));
+            return vbox(std::move(rows)) | xflex | yflex;
+        }
+
+        bool scroll_static(Event event)
+        {
             if (event == Event::ArrowUp) {
-                apply(-0.05F);
+                scroll_static_lines(-1);
                 return true;
             }
             if (event == Event::ArrowDown) {
-                apply(0.05F);
+                scroll_static_lines(1);
                 return true;
             }
             if (event == Event::PageUp) {
-                apply(-0.35F);
+                scroll_static_lines(-std::max(1, static_viewport_lines() - 1));
                 return true;
             }
             if (event == Event::PageDown) {
-                apply(0.35F);
+                scroll_static_lines(std::max(1, static_viewport_lines() - 1));
                 return true;
             }
             if (event == Event::Home) {
-                viewer_scroll_ = 0.0F;
+                static_scroll_ = 0;
                 return true;
             }
             if (event == Event::End) {
-                viewer_scroll_ = 1.0F;
+                static_scroll_ = max_static_scroll();
                 return true;
             }
             if (event.is_mouse()) {
                 const Mouse& m = event.mouse();
                 if (m.button == Mouse::WheelUp) {
-                    apply(-0.04F);
+                    scroll_static_lines(-3);
                     return true;
                 }
                 if (m.button == Mouse::WheelDown) {
-                    apply(0.04F);
+                    scroll_static_lines(3);
                     return true;
                 }
             }
             return false;
+        }
+
+        void reset_static_scroll()
+        {
+            static_scroll_         = 0;
+            static_content_height_ = 0;
+            static_viewport_box_   = { };
+        }
+
+        int static_viewport_lines() const
+        {
+            if (static_viewport_box_.y_max < static_viewport_box_.y_min) {
+                return 0;
+            }
+            return static_viewport_box_.y_max - static_viewport_box_.y_min + 1;
+        }
+
+        int max_static_scroll() const
+        {
+            return std::max(
+                0, static_content_height_ - static_viewport_lines());
+        }
+
+        void scroll_static_lines(int delta)
+        {
+            static_scroll_
+                = std::clamp(static_scroll_ + delta, 0, max_static_scroll());
         }
 
         std::shared_ptr<Session> session_;
@@ -524,7 +596,9 @@ namespace {
         ToolPhase tool_phase_ = ToolPhase::DECIDE;
         std::string reason_buf_;
         int reason_cursor_   = 0;
-        float viewer_scroll_ = 0.0F;
+        int static_scroll_         = 0;
+        int static_content_height_ = 0;
+        Box static_viewport_box_;
         Component reason_input_;
         Component accept_;
         Component accept_always_;
@@ -569,7 +643,7 @@ namespace {
             : session_(std::move(session))
             , controller_(controller)
         {
-            const auto& modal
+            const auto modal
                 = std::get<VariantModal>(session_->modal());
             options_          = modal.options;
             selected_         = 0;
