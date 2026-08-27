@@ -48,12 +48,7 @@ void Controller::run_slash(std::string_view cmd)
         enqueue_user_modal(ConnectModal { ConnectModal::Entry::MANAGE });
         break;
     case SlashCommand::Action::MODEL: {
-        bool any = false;
-        {
-            std::lock_guard lock(data_mutex_);
-            any = !cfg_.providers.empty();
-        }
-        if (!any) {
+        if (providers_.connections().empty()) {
             set_error("no connections — run /connect first");
             break;
         }
@@ -61,13 +56,9 @@ void Controller::run_slash(std::string_view cmd)
         break;
     }
     case SlashCommand::Action::VARIANT: {
-        std::string current;
-        {
-            std::lock_guard lock(data_mutex_);
-            current = cfg_.reasoning_effort.value_or("default");
-            if (current == "medium") {
-                current = "default";
-            }
+        std::string current = providers_.status().reasoning_effort;
+        if (current == "medium") {
+            current = "default";
         }
         enqueue_user_modal(VariantModal {
             { "off", "low", "default", "high" }, current });

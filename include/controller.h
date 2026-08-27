@@ -17,9 +17,9 @@
 #include <variant>
 #include <vector>
 
-#include "catalog.h"
 #include "commands.h"
 #include "network.h"
+#include "provider_store.h"
 #include "session.h"
 #include "tools.h"
 #include "types.h"
@@ -37,43 +37,6 @@ struct LayoutCtx {
 using PostFn = std::function<void(std::function<void()>)>;
 using StreamFn
     = std::function<Status(const ChatRequest&, const StreamCallback&)>;
-using ModelsFn = std::function<Status(const Route&, std::vector<ModelInfo>&)>;
-
-struct CatalogEntry {
-    struct Fetching { };
-    struct Ready {
-        std::vector<ModelInfo> models;
-    };
-    struct Failed {
-        Status status = Status::OK;
-    };
-    std::variant<Fetching, Ready, Failed> state;
-};
-
-struct ConnectionView {
-    enum class State { FETCHING, READY, FAILED };
-    std::string id;
-    std::string provider_id;
-    std::string name;
-    bool active = false;
-    std::string api_key;
-    State state             = State::FETCHING;
-    Status error            = Status::OK;
-    std::size_t model_count = 0;
-};
-
-struct ModelList {
-    enum class State { FETCHING, READY, FAILED };
-    State state  = State::FETCHING;
-    Status error = Status::OK;
-    std::vector<ModelInfo> models;
-};
-
-struct StatusConfigView {
-    std::string active_model;
-    std::string reasoning_effort;
-};
-
 struct TurnSettings {
     std::string model;
     std::string reasoning_effort;
@@ -125,13 +88,8 @@ private:
         TurnSettings settings);
     void _drive(std::vector<Message> history, StreamFn override,
         TurnSettings settings);
-    Route _active_route_locked(const std::string& model) const;
-    std::string _unique_id_locked(std::string base) const;
-    Connection* _find_locked(const std::string& id);
     void _begin_connect(const ConnectResult& res);
-    bool _commit_connection(const ConnectResult& res);
     void _apply_pick(const ModelChoice& choice);
-    void _start_fetch_locked(const std::string& connection_id);
 
     void _drain_pending_asks(std::vector<Message>& history,
         std::string& reply_buffer, const std::string& assistant_text,
@@ -151,15 +109,16 @@ private:
     void _drain_queued();
 
     std::shared_ptr<Session> session_;
-    Config cfg_;
     PostFn post_;
     std::function<void()> on_exit_;
     std::vector<SlashCommand> commands_;
     StreamFn stream_fn_;
+    bool has_stream_override_ { false };
     ToolRegistry tools_;
     std::vector<ToolSpec> specs_plan_;
     std::vector<ToolSpec> specs_all_;
     std::function<void()> env_sub_;
+    std::function<void()> provider_sub_;
 
     struct PendingModal {
         ModalPayload payload;
@@ -171,17 +130,10 @@ private:
 
     std::vector<StreamEvent> stream_events_;
     std::atomic<bool> alive_ { true };
+    ProviderStore providers_;
     std::optional<std::jthread> worker_;
     int retry_after_secs_ = 0;
 
-    Catalog catalog_;
-    std::map<std::string, CatalogEntry> model_catalog_;
-    std::map<std::string, int> generations_;
-    bool catalog_syncing_ = false;
-    mutable std::mutex data_mutex_;
-    ModelsFn models_fn_;
-    std::vector<std::jthread> fetch_threads_;
-    std::optional<std::jthread> catalog_waiter_;
 };
 
 std::string error_text(Status st);

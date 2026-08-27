@@ -150,17 +150,13 @@ void Controller::_drive(std::vector<Message> history, StreamFn override,
             st = fn(req, cb);
         } else {
             Route route = settings.route;
-            {
-                std::lock_guard lock(data_mutex_);
-                _set_reasoning(req, route.dialect, settings.reasoning_effort);
-                active_dialect = route.dialect;
-                current_model = req.model;
-                current_effort
-                    = req.reasoning_effort.has_value()
-                        || req.thinking_budget.has_value()
-                    ? settings.reasoning_effort
-                    : "off";
-            }
+            _set_reasoning(req, route.dialect, settings.reasoning_effort);
+            active_dialect = route.dialect;
+            current_model = req.model;
+            current_effort = req.reasoning_effort.has_value()
+                    || req.thinking_budget.has_value()
+                ? settings.reasoning_effort
+                : "off";
             session_->set_last_assistant_metadata(
                 current_model, current_effort);
             st = stream(
@@ -170,25 +166,15 @@ void Controller::_drive(std::vector<Message> history, StreamFn override,
             if (attempt == Status::API_ERROR && !saw_stream
                 && route.dialect == ApiStandard::OPENAI) {
                 Route alt;
-                bool has_alt = false;
-                {
-                    std::lock_guard lock(data_mutex_);
-                    if (Connection* conn
-                        = _find_locked(settings.connection_id)) {
-                            alt = resolve_route(
-                                *conn, catalog_, ApiStandard::ANTHROPIC);
-                            has_alt = !alt.endpoint.empty();
-                    }
-                }
+                alt = providers_.route_for(
+                    settings.connection_id, ApiStandard::ANTHROPIC);
+                const bool has_alt = !alt.endpoint.empty();
                 if (has_alt && alt.endpoint != route.endpoint) {
                     retry_after_secs_ = 0;
                     error_status      = Status::OK;
                     error_msg.clear();
-                    {
-                        std::lock_guard lock(data_mutex_);
-                        _set_reasoning(req, ApiStandard::ANTHROPIC,
-                            settings.reasoning_effort);
-                    }
+                    _set_reasoning(req, ApiStandard::ANTHROPIC,
+                        settings.reasoning_effort);
                     st = stream(
                         get_provider(alt), alt, req, cb, &retry_after_secs_);
                     active_dialect = ApiStandard::ANTHROPIC;
@@ -200,12 +186,8 @@ void Controller::_drive(std::vector<Message> history, StreamFn override,
                     const Status retried
                         = error_status != Status::OK ? error_status : st;
                     if (retried == Status::OK) {
-                        std::lock_guard lock(data_mutex_);
-                        if (Connection* conn
-                            = _find_locked(settings.connection_id)) {
-                            conn->dialects[req.model] = ApiStandard::ANTHROPIC;
-                            save_config(config_path(), cfg_);
-                        }
+                        providers_.remember_dialect(settings.connection_id,
+                            req.model, ApiStandard::ANTHROPIC);
                     }
                 }
             }

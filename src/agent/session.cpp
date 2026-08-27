@@ -1,6 +1,6 @@
 #include "session.h"
 
-#include "agent.h"
+#include "controller.h"
 #include "format.h"
 #include "pricing.h"
 #include "prompt.h"

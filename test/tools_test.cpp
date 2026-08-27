@@ -1,6 +1,9 @@
 #include <doctest/doctest.h>
 #include <json/json.h>
 
+#include <filesystem>
+#include <fstream>
+
 #include "tools.h"
 
 namespace ursa {
@@ -93,6 +96,43 @@ TEST_CASE("dispatch propagates handler errors")
     const ToolOutput out = tools.dispatch({ "boom", "{}", "", "" });
     CHECK(out.kind == ToolOutput::Kind::ERROR);
     CHECK(out.text == "it broke");
+}
+
+TEST_CASE("edit produces a diff whose right side holds the new content")
+{
+    const std::filesystem::path path
+        = std::filesystem::temp_directory_path() / "ursa_edit_diff_test.txt";
+    {
+        std::ofstream f(path, std::ios::binary | std::ios::trunc);
+        f << "original line\nappended line\n";
+    }
+
+    ToolRegistry tools;
+    tools.add(make_edit_tool());
+    const ToolOutput out = tools.dispatch(ToolCallRequest { "edit",
+        R"({"file_path":")"
+            + path.string()
+            + R"(","old_string":"original line","new_string":"edited line"})",
+        "", "" });
+
+    CHECK(out.kind == ToolOutput::Kind::OUTPUT);
+    REQUIRE(out.diff.has_value());
+
+    bool saw_new = false;
+    bool saw_old_on_right = false;
+    for (const auto& row : out.diff->rows) {
+        if (row.right.find("edited line") != std::string::npos) {
+            saw_new = true;
+        }
+        if (row.right == "original line") {
+            saw_old_on_right = true;
+        }
+    }
+    CHECK(saw_new);
+    CHECK_FALSE(saw_old_on_right);
+
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
 }
 
 } // namespace ursa

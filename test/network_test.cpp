@@ -23,10 +23,7 @@ std::vector<ursa::StreamEvent> parse_all(
 
 TEST_CASE("OpenAI request shape via factory")
 {
-    ursa::Config cfg;
-    cfg.standard = ursa::ApiStandard::OPENAI;
-
-    const auto p = ursa::get_provider(cfg);
+    const auto p = ursa::get_provider(ursa::Route { });
 
     ursa::ChatRequest req;
     req.model = "gpt-4o";
@@ -41,15 +38,13 @@ TEST_CASE("OpenAI request shape via factory")
     CHECK(v["messages"][1]["role"].asString() == "user");
     CHECK(v["messages"][1]["content"].asString() == "hi");
     CHECK_FALSE(v.isMember("tools"));
-    CHECK(p.endpoint() == "/chat/completions");
 }
 
 TEST_CASE("Anthropic request shape via factory")
 {
-    ursa::Config cfg;
-    cfg.standard = ursa::ApiStandard::ANTHROPIC;
-
-    const auto p = ursa::get_provider(cfg);
+    ursa::Route route;
+    route.dialect = ursa::ApiStandard::ANTHROPIC;
+    const auto p = ursa::get_provider(route);
 
     ursa::ChatRequest req;
     req.model = "claude";
@@ -64,14 +59,11 @@ TEST_CASE("Anthropic request shape via factory")
     CHECK(v["messages"][0]["role"].asString() == "user");
     CHECK(v.isMember("max_tokens"));
     CHECK_FALSE(v.isMember("tools"));
-    CHECK(p.endpoint() == "/v1/messages");
 }
 
 TEST_CASE("OpenAI serializes tool specs and tool messages")
 {
-    ursa::Config cfg;
-    cfg.standard = ursa::ApiStandard::OPENAI;
-    const auto p = ursa::get_provider(cfg);
+    const auto p = ursa::get_provider(ursa::Route { });
 
     ursa::ToolSpec spec;
     spec.name        = "read";
@@ -113,9 +105,9 @@ TEST_CASE("OpenAI serializes tool specs and tool messages")
 
 TEST_CASE("Anthropic serializes tool specs and tool_result blocks")
 {
-    ursa::Config cfg;
-    cfg.standard = ursa::ApiStandard::ANTHROPIC;
-    const auto p = ursa::get_provider(cfg);
+    ursa::Route route;
+    route.dialect = ursa::ApiStandard::ANTHROPIC;
+    const auto p = ursa::get_provider(route);
 
     ursa::ToolSpec spec;
     spec.name        = "grep";
@@ -155,9 +147,7 @@ TEST_CASE("Anthropic serializes tool specs and tool_result blocks")
 
 TEST_CASE("OpenAI content delta")
 {
-    ursa::Config cfg;
-    cfg.standard = ursa::ApiStandard::OPENAI;
-    const auto p = ursa::get_provider(cfg);
+    const auto p = ursa::get_provider(ursa::Route { });
 
     ursa::ParseState state;
     const auto outs = parse_all(p, state,
@@ -169,9 +159,7 @@ TEST_CASE("OpenAI content delta")
 
 TEST_CASE("OpenAI done")
 {
-    ursa::Config cfg;
-    cfg.standard = ursa::ApiStandard::OPENAI;
-    const auto p = ursa::get_provider(cfg);
+    const auto p = ursa::get_provider(ursa::Route { });
 
     ursa::ParseState state;
     const auto outs = parse_all(p, state, { { "", "[DONE]" } });
@@ -181,9 +169,7 @@ TEST_CASE("OpenAI done")
 
 TEST_CASE("OpenAI accumulates fragmented tool calls and flushes")
 {
-    ursa::Config cfg;
-    cfg.standard = ursa::ApiStandard::OPENAI;
-    const auto p = ursa::get_provider(cfg);
+    const auto p = ursa::get_provider(ursa::Route { });
 
     ursa::ParseState state;
     const auto outs = parse_all(p, state,
@@ -216,9 +202,9 @@ TEST_CASE("OpenAI accumulates fragmented tool calls and flushes")
 
 TEST_CASE("Anthropic content delta")
 {
-    ursa::Config cfg;
-    cfg.standard = ursa::ApiStandard::ANTHROPIC;
-    const auto p = ursa::get_provider(cfg);
+    ursa::Route route;
+    route.dialect = ursa::ApiStandard::ANTHROPIC;
+    const auto p = ursa::get_provider(route);
 
     ursa::ParseState state;
     const auto outs
@@ -232,9 +218,9 @@ TEST_CASE("Anthropic content delta")
 
 TEST_CASE("Anthropic stop")
 {
-    ursa::Config cfg;
-    cfg.standard = ursa::ApiStandard::ANTHROPIC;
-    const auto p = ursa::get_provider(cfg);
+    ursa::Route route;
+    route.dialect = ursa::ApiStandard::ANTHROPIC;
+    const auto p = ursa::get_provider(route);
 
     ursa::ParseState state;
     const auto outs = parse_all(p, state, { { "message_stop", "{}" } });
@@ -244,9 +230,9 @@ TEST_CASE("Anthropic stop")
 
 TEST_CASE("Anthropic assembles tool_use block across deltas")
 {
-    ursa::Config cfg;
-    cfg.standard = ursa::ApiStandard::ANTHROPIC;
-    const auto p = ursa::get_provider(cfg);
+    ursa::Route route;
+    route.dialect = ursa::ApiStandard::ANTHROPIC;
+    const auto p = ursa::get_provider(route);
 
     ursa::ParseState state;
     const auto outs = parse_all(p, state,
@@ -268,22 +254,24 @@ TEST_CASE("Anthropic assembles tool_use block across deltas")
     CHECK(outs[1].kind == ursa::StreamEvent::Kind::DONE);
 }
 
-TEST_CASE("get_provider selects by standard")
+TEST_CASE("get_provider selects by dialect")
 {
-    ursa::Config openai;
-    openai.standard = ursa::ApiStandard::OPENAI;
-    CHECK(ursa::get_provider(openai).endpoint() == "/chat/completions");
+    ursa::ChatRequest req;
+    req.model = "m";
 
-    ursa::Config anthropic;
-    anthropic.standard = ursa::ApiStandard::ANTHROPIC;
-    CHECK(ursa::get_provider(anthropic).endpoint() == "/v1/messages");
+    ursa::Route openai;
+    CHECK(ursa::get_provider(openai)
+              .build(req)["stream_options"]["include_usage"]
+              .asBool());
+
+    ursa::Route anthropic;
+    anthropic.dialect = ursa::ApiStandard::ANTHROPIC;
+    CHECK(ursa::get_provider(anthropic).build(req).isMember("max_tokens"));
 }
 
 TEST_CASE("OpenAI requests include_usage and emits a single usage event")
 {
-    ursa::Config cfg;
-    cfg.standard = ursa::ApiStandard::OPENAI;
-    const auto p = ursa::get_provider(cfg);
+    const auto p = ursa::get_provider(ursa::Route { });
 
     const Json::Value built = p.build(ursa::ChatRequest { "gpt-4o", { }, { } });
     CHECK(built["stream_options"]["include_usage"].asBool() == true);
@@ -306,9 +294,7 @@ TEST_CASE("OpenAI requests include_usage and emits a single usage event")
 
 TEST_CASE("OpenAI reads usage from choice when top-level absent (Kimi native)")
 {
-    ursa::Config cfg;
-    cfg.standard = ursa::ApiStandard::OPENAI;
-    const auto p = ursa::get_provider(cfg);
+    const auto p = ursa::get_provider(ursa::Route { });
 
     ursa::ParseState state;
     const auto outs = parse_all(p, state,
@@ -320,11 +306,51 @@ TEST_CASE("OpenAI reads usage from choice when top-level absent (Kimi native)")
     CHECK(outs[1].kind == ursa::StreamEvent::Kind::DONE);
 }
 
+TEST_CASE("OpenAI usage reports cached tokens from prompt_tokens_details")
+{
+    const auto p = ursa::get_provider(ursa::Route { });
+
+    ursa::ParseState state;
+    const auto outs = parse_all(p, state,
+        { { "",
+              R"({"choices":[{"delta":{}}],"usage":{"prompt_tokens":100,"completion_tokens":4,"total_tokens":104,"prompt_tokens_details":{"cached_tokens":60}}})" },
+            { "", "[DONE]" } });
+    REQUIRE(outs.size() == 2);
+    CHECK(outs[0].kind == ursa::StreamEvent::Kind::USAGE);
+    CHECK(outs[0].usage.prompt == 100);
+    CHECK(outs[0].usage.cached_read == 60);
+    CHECK(outs[0].usage.cached_write == 0);
+    CHECK(outs[0].usage.completion == 4);
+}
+
+TEST_CASE("Anthropic usage folds cache tokens into prompt")
+{
+    ursa::Route route;
+    route.dialect = ursa::ApiStandard::ANTHROPIC;
+    const auto p = ursa::get_provider(route);
+
+    ursa::ParseState state;
+    const auto outs = parse_all(p, state,
+        { { "message_start",
+              R"({"type":"message_start","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":60,"cache_creation_input_tokens":30}}})" },
+          { "message_delta",
+              R"({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}})" },
+          { "message_stop", R"({"type":"message_stop"})" } });
+    REQUIRE(outs.size() == 2);
+    CHECK(outs[0].kind == ursa::StreamEvent::Kind::USAGE);
+    CHECK(outs[0].usage.cached_read == 60);
+    CHECK(outs[0].usage.cached_write == 30);
+    CHECK(outs[0].usage.prompt == 100);
+    CHECK(outs[0].usage.completion == 7);
+    CHECK(outs[0].usage.total == 107);
+    CHECK(outs[1].kind == ursa::StreamEvent::Kind::DONE);
+}
+
 TEST_CASE("Anthropic emits usage from message_start and message_delta")
 {
-    ursa::Config cfg;
-    cfg.standard = ursa::ApiStandard::ANTHROPIC;
-    const auto p = ursa::get_provider(cfg);
+    ursa::Route route;
+    route.dialect = ursa::ApiStandard::ANTHROPIC;
+    const auto p = ursa::get_provider(route);
 
     ursa::ParseState state;
     const auto outs = parse_all(p, state,

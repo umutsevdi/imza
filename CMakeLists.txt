@@ -124,12 +124,22 @@ target_link_libraries(ursa_environment PUBLIC
     jsoncpp_static
 )
 
+add_library(ursa_provider
+    src/provider/provider_store.cpp
+    src/provider/pricing.cpp
+)
+target_include_directories(ursa_provider PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${jsoncpp_SOURCE_DIR}/include
+)
+target_link_libraries(ursa_provider PUBLIC
+    ursa_core
+    ursa_network
+)
+
 # Agent: orchestration, formatting, slash commands (ftxui-free)
 add_library(ursa_agent
-    src/agent/pricing.cpp
     src/agent/controller.cpp
-    src/agent/connect_flow.cpp
-    src/agent/catalog_sync.cpp
     src/agent/stream_loop.cpp
     src/agent/commands.cpp
     src/agent/session.cpp
@@ -146,6 +156,7 @@ target_link_libraries(ursa_agent PUBLIC
     ursa_core
     ursa_network
     ursa_environment
+    ursa_provider
     jsoncpp_static
 )
 

@@ -36,7 +36,7 @@ cmake --build build --target ursa ursa_tests
 ```
 
 Dependencies are fetched automatically (ftxui, jsoncpp, cmark-gfm, doctest);
-system OpenSSL and CURL are required.
+system CURL is required.
 
 ## Run
 

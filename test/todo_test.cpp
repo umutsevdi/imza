@@ -2,8 +2,8 @@
 
 #include <doctest/doctest.h>
 
-#include "agent.h"
 #include "network.h"
+#include "session.h"
 #include "tools.h"
 
 TEST_CASE("parse_todo_args accepts a valid list with statuses")

@@ -4,7 +4,6 @@
 #include "format.h"
 #include "tools.h"
 #include "ui.h"
-#include "ui.h"
 
 #include <chrono>
 #include <deque>
@@ -68,7 +67,17 @@ struct Env {
     std::vector<ursa::ChatRequest> requests;
     std::vector<ursa::ToolCallRequest> ran_tools;
     ursa::StreamFn stream;
-    ursa::Controller controller { ursa::Config { }, pump.fn(), [] { },
+    std::shared_ptr<ursa::Session> session
+        = std::make_shared<ursa::Session>();
+    ursa::Controller controller { session, [] {
+        ursa::Config cfg;
+        ursa::Connection conn;
+        conn.id          = "test";
+        conn.provider_id = "test";
+        cfg.providers.push_back(conn);
+        cfg.last_used = ursa::LastUsed { "test", "m" };
+        return cfg;
+    }(), pump.fn(), [] { },
         [this](const ursa::ChatRequest& req, const ursa::StreamCallback& cb) {
             return stream(req, cb);
         },
@@ -105,7 +114,7 @@ struct Env {
     size_t user_turn_count() const
     {
         size_t n = 0;
-        for (const auto& it : controller.state().items) {
+        for (const auto& it : controller.session().items()) {
             if (std::holds_alternative<ursa::UserTurn>(it)) {
                 ++n;
             }
@@ -115,8 +124,8 @@ struct Env {
 
     const ursa::ToolCall* pending_tool() const
     {
-        for (auto it = controller.state().items.rbegin();
-            it != controller.state().items.rend(); ++it) {
+        for (auto it = controller.session().items().rbegin();
+            it != controller.session().items().rend(); ++it) {
             if (const auto* tc = std::get_if<ursa::ToolCall>(&*it)) {
                 return tc;
             }
@@ -125,21 +134,21 @@ struct Env {
     }
 };
 
-bool showing_tool_ask(const ursa::UiState& st)
+bool showing_tool_ask(const ursa::Session& st)
 {
-    return std::holds_alternative<ursa::ToolCallRequest>(st.modal)
-        && st.phase == ursa::UiState::Phase::AWAITING;
+    return std::holds_alternative<ursa::ToolCallRequest>(st.modal())
+        && st.phase() == ursa::Session::Phase::AWAITING;
 }
 
-bool showing_question(const ursa::UiState& st)
+bool showing_question(const ursa::Session& st)
 {
-    return std::holds_alternative<ursa::QuestionForm>(st.modal)
-        && st.phase == ursa::UiState::Phase::AWAITING;
+    return std::holds_alternative<ursa::QuestionForm>(st.modal())
+        && st.phase() == ursa::Session::Phase::AWAITING;
 }
 
-bool idle(const ursa::UiState& st)
+bool idle(const ursa::Session& st)
 {
-    return st.phase == ursa::UiState::Phase::IDLE && st.modal.index() == 0;
+    return st.phase() == ursa::Session::Phase::IDLE && st.modal().index() == 0;
 }
 
 } // namespace
@@ -165,14 +174,14 @@ TEST_CASE(
 
     env.controller.submit("go");
     REQUIRE(env.pump.wait_for(
-        [&] { return showing_question(env.controller.state()); }));
+        [&] { return showing_question(env.controller.session()); }));
     CHECK(env.controller.queue_size() == 1);
 
     const std::string ask_md = ursa::question_form_markdown(
         { { "Which one?", { "A", "B" }, false, false } });
     auto assistant_corpus = [&] {
         std::string all;
-        for (const auto& it : env.controller.state().items) {
+        for (const auto& it : env.controller.session().items()) {
             if (const auto* a = std::get_if<ursa::AssistantTurn>(&it)) {
                 all += a->markdown + "\n";
             }
@@ -185,7 +194,7 @@ TEST_CASE(
     env.controller.resolve_modal(
         ursa::ModalResult { ursa::ModalAnswer { { { { "B" }, "", "" } } } });
 
-    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.state()); }));
+    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.session()); }));
     CHECK(env.controller.queue_size() == 0);
 
     const std::string after = assistant_corpus();
@@ -193,7 +202,7 @@ TEST_CASE(
     CHECK(after.find(ask_md) == after.rfind(ask_md));
 
     size_t answers = 0;
-    for (const auto& it : env.controller.state().items) {
+    for (const auto& it : env.controller.session().items()) {
         if (std::holds_alternative<ursa::ModalAnswer>(it)) {
             ++answers;
         }
@@ -224,7 +233,7 @@ TEST_CASE("tool accept: output fills result, request half byte-stable")
 
     env.controller.submit("go");
     REQUIRE(env.pump.wait_for(
-        [&] { return showing_tool_ask(env.controller.state()); }));
+        [&] { return showing_tool_ask(env.controller.session()); }));
 
     const ursa::ToolCall* pending = env.pending_tool();
     REQUIRE(pending != nullptr);
@@ -235,7 +244,7 @@ TEST_CASE("tool accept: output fills result, request half byte-stable")
     env.controller.resolve_modal(ursa::ModalResult {
         ursa::ToolVerdict { ursa::ToolDecision::ACCEPT, "" } });
 
-    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.state()); }));
+    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.session()); }));
     REQUIRE(env.ran_tools.size() == 1);
 
     const ursa::ToolCall* done = env.pending_tool();
@@ -278,12 +287,12 @@ TEST_CASE("reject with reason reaches transcript and injected result")
 
     env.controller.submit("go");
     REQUIRE(env.pump.wait_for(
-        [&] { return showing_tool_ask(env.controller.state()); }));
+        [&] { return showing_tool_ask(env.controller.session()); }));
 
     env.controller.resolve_modal(ursa::ModalResult { ursa::ToolVerdict {
         ursa::ToolDecision::REJECT, "needs approval first" } });
 
-    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.state()); }));
+    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.session()); }));
     CHECK(env.ran_tools.empty());
 
     const ursa::ToolCall* tc = env.pending_tool();
@@ -314,11 +323,11 @@ TEST_CASE("esc on tool injects generic denial, appends nothing to transcript")
 
     env.controller.submit("go");
     REQUIRE(env.pump.wait_for(
-        [&] { return showing_tool_ask(env.controller.state()); }));
+        [&] { return showing_tool_ask(env.controller.session()); }));
 
     env.controller.close_modal();
 
-    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.state()); }));
+    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.session()); }));
     CHECK(env.ran_tools.empty());
 
     const ursa::ToolCall* tc = env.pending_tool();
@@ -346,14 +355,14 @@ TEST_CASE("esc on question skips form, appends nothing, no exception")
 
     env.controller.submit("go");
     REQUIRE(env.pump.wait_for(
-        [&] { return showing_question(env.controller.state()); }));
+        [&] { return showing_question(env.controller.session()); }));
 
     env.controller.close_modal();
 
-    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.state()); }));
+    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.session()); }));
     CHECK(env.user_turn_count() == 1);
     size_t answers = 0;
-    for (const auto& it : env.controller.state().items) {
+    for (const auto& it : env.controller.session().items()) {
         if (std::holds_alternative<ursa::ModalAnswer>(it)) {
             ++answers;
         }
@@ -380,17 +389,17 @@ TEST_CASE("one drain cycle folds question answer and tool output correctly")
     env.controller.submit("go");
 
     REQUIRE(env.pump.wait_for(
-        [&] { return showing_question(env.controller.state()); }));
+        [&] { return showing_question(env.controller.session()); }));
     CHECK(env.controller.queue_size() == 2);
     env.controller.resolve_modal(
         ursa::ModalResult { ursa::ModalAnswer { { { { "pg" }, "", "" } } } });
 
     REQUIRE(env.pump.wait_for(
-        [&] { return showing_tool_ask(env.controller.state()); }));
+        [&] { return showing_tool_ask(env.controller.session()); }));
     env.controller.resolve_modal(ursa::ModalResult {
         ursa::ToolVerdict { ursa::ToolDecision::ACCEPT, "" } });
 
-    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.state()); }));
+    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.session()); }));
 
     CHECK(env.user_turn_count() == 1);
     const auto& msgs = env.last_request().messages;
@@ -432,7 +441,7 @@ TEST_CASE("FIFO order preserved and queue_size counts overlays")
 
     env.controller.submit("go");
     REQUIRE(env.pump.wait_for(
-        [&] { return showing_question(env.controller.state()); }));
+        [&] { return showing_question(env.controller.session()); }));
 
     env.controller.enqueue_user_modal(ursa::HelpModal { });
     env.pump.pump();
@@ -441,18 +450,18 @@ TEST_CASE("FIFO order preserved and queue_size counts overlays")
     env.controller.resolve_modal(
         ursa::ModalResult { ursa::ModalAnswer { { { { "a" }, "", "" } } } });
     REQUIRE(env.pump.wait_for(
-        [&] { return showing_tool_ask(env.controller.state()); }));
+        [&] { return showing_tool_ask(env.controller.session()); }));
     CHECK(env.controller.queue_size() == 2);
 
     env.controller.close_modal();
     REQUIRE(env.pump.wait_for([&] {
         return std::holds_alternative<ursa::HelpModal>(
-            env.controller.state().modal);
+            env.controller.session().modal());
     }));
     CHECK(env.controller.queue_size() == 1);
 
     env.controller.close_modal();
-    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.state()); }));
+    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.session()); }));
     CHECK(env.controller.queue_size() == 0);
 }
 
@@ -478,19 +487,19 @@ TEST_CASE("accept-always records tool and later calls never queue")
 
     env.controller.submit("go");
     REQUIRE(env.pump.wait_for(
-        [&] { return showing_tool_ask(env.controller.state()); }));
+        [&] { return showing_tool_ask(env.controller.session()); }));
 
     env.controller.resolve_modal(ursa::ModalResult {
         ursa::ToolVerdict { ursa::ToolDecision::ACCEPT_ALWAYS, "" } });
 
-    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.state()); }));
+    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.session()); }));
     CHECK(env.controller.queue_size() == 0);
     REQUIRE(env.ran_tools.size() == 2);
     CHECK(env.ran_tools[0].args == "echo one");
     CHECK(env.ran_tools[1].args == "echo two");
 
     size_t tool_items = 0;
-    for (const auto& it : env.controller.state().items) {
+    for (const auto& it : env.controller.session().items()) {
         if (const auto* tc = std::get_if<ursa::ToolCall>(&it)) {
             ++tool_items;
             REQUIRE(tc->result.has_value());
@@ -517,22 +526,23 @@ TEST_CASE("user modal enqueued mid-stream surfaces after the ask resolves")
 
     env.controller.submit("go");
     REQUIRE(env.pump.wait_for(
-        [&] { return showing_question(env.controller.state()); }));
+        [&] { return showing_question(env.controller.session()); }));
 
-    env.controller.enqueue_user_modal(ursa::SettingsModal { "m" });
+    env.controller.enqueue_user_modal(
+        ursa::VariantModal { { "off", "default" }, "default" });
     env.pump.pump();
     CHECK(std::holds_alternative<ursa::QuestionForm>(
-        env.controller.state().modal));
+        env.controller.session().modal()));
 
     env.controller.resolve_modal(
         ursa::ModalResult { ursa::ModalAnswer { { { { "a" }, "", "" } } } });
     REQUIRE(env.pump.wait_for([&] {
-        return std::holds_alternative<ursa::SettingsModal>(
-            env.controller.state().modal);
+        return std::holds_alternative<ursa::VariantModal>(
+            env.controller.session().modal());
     }));
 
     env.controller.close_modal();
-    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.state()); }));
+    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.session()); }));
     CHECK(env.controller.queue_size() == 0);
 }
 
@@ -551,7 +561,7 @@ TEST_CASE("read-only tools run without an approval modal")
     };
 
     env.controller.submit("go");
-    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.state()); }));
+    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.session()); }));
 
     CHECK(env.controller.queue_size() == 0);
     REQUIRE(env.ran_tools.size() == 1);
@@ -582,7 +592,7 @@ TEST_CASE("unknown tools error back to the model without a modal")
     };
 
     env.controller.submit("go");
-    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.state()); }));
+    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.session()); }));
 
     CHECK(env.controller.queue_size() == 0);
     CHECK(env.ran_tools.empty());

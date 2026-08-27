@@ -1,7 +1,7 @@
 #include <doctest/doctest.h>
 #include <json/json.h>
 
-#include "agent.h"
+#include "controller.h"
 #include "network.h"
 #include "types.h"
 
@@ -83,9 +83,7 @@ TEST_CASE("error_text maps statuses to human strings")
 
 TEST_CASE("OpenAI parse turns mid-stream error blocks into ERROR events")
 {
-    ursa::Config cfg;
-    cfg.standard = ursa::ApiStandard::OPENAI;
-    const auto p = ursa::get_provider(cfg);
+    const auto p = ursa::get_provider(ursa::Route { });
 
     ursa::ParseState state;
     std::vector<ursa::StreamEvent> outs;
@@ -148,16 +146,26 @@ struct AgentEnv {
     PostPump pump;
     std::vector<ursa::ChatRequest> requests;
     ursa::StreamFn stream;
-    ursa::Controller controller { ursa::Config { }, pump.fn(), [] { },
+    std::shared_ptr<ursa::Session> session
+        = std::make_shared<ursa::Session>();
+    ursa::Controller controller { session, [] {
+        ursa::Config cfg;
+        ursa::Connection conn;
+        conn.id          = "test";
+        conn.provider_id = "test";
+        cfg.providers.push_back(conn);
+        cfg.last_used = ursa::LastUsed { "test", "m" };
+        return cfg;
+    }(), pump.fn(), [] { },
         [this](const ursa::ChatRequest& req, const ursa::StreamCallback& cb) {
             return stream(req, cb);
         },
         ursa::ToolRegistry { } };
 };
 
-bool idle(const ursa::UiState& st)
+bool idle(const ursa::Session& st)
 {
-    return st.phase == ursa::UiState::Phase::IDLE && st.modal.index() == 0;
+    return st.phase() == ursa::Session::Phase::IDLE && st.modal().index() == 0;
 }
 
 TEST_CASE("controller retries rate-limited requests and then completes")
@@ -179,10 +187,10 @@ TEST_CASE("controller retries rate-limited requests and then completes")
         return ursa::Status::OK;
     };
     env.controller.submit("hello");
-    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.state()); }));
+    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.session()); }));
     CHECK(env.requests.size() == 2);
-    CHECK(env.controller.state().error.empty());
-    const auto& items = env.controller.state().items;
+    CHECK(env.controller.session().error().empty());
+    const auto& items = env.controller.session().items();
     bool found = false;
     for (const auto& it : items) {
         if (const auto* a = std::get_if<ursa::AssistantTurn>(&it)) {
@@ -205,9 +213,9 @@ TEST_CASE("controller does not retry budget errors")
         return ursa::Status::BUDGET_EXCEEDED;
     };
     env.controller.submit("hello");
-    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.state()); }));
+    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.session()); }));
     CHECK(env.requests.size() == 1);
-    CHECK(env.controller.state().error
+    CHECK(env.controller.session().error()
         == "out of budget / insufficient credits: insufficient credits");
 }
 
@@ -222,12 +230,14 @@ struct FakeApi {
         : response(std::move(resp))
     {
         fd = ::socket(AF_INET, SOCK_STREAM, 0);
+        REQUIRE_MESSAGE(fd >= 0, std::strerror(errno));
         sockaddr_in addr { };
         addr.sin_family      = AF_INET;
         addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         addr.sin_port        = 0;
-        REQUIRE(::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr))
-            == 0);
+        REQUIRE_MESSAGE(
+            ::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0,
+            std::strerror(errno));
         socklen_t len = sizeof(addr);
         ::getsockname(fd, reinterpret_cast<sockaddr*>(&addr), &len);
         port = ntohs(addr.sin_port);
@@ -284,19 +294,20 @@ TEST_CASE("stream reports rate limit, retry-after and provider message")
                 "\r\n"
                 R"({"error":{"message":"Rate limit exceeded"}})");
 
-    ursa::Config cfg;
-    cfg.api_base = "http://127.0.0.1:" + std::to_string(api.port);
-    cfg.api_key  = "k";
-    cfg.standard = ursa::ApiStandard::OPENAI;
+    ursa::Route route;
+    route.endpoint = "http://127.0.0.1:" + std::to_string(api.port)
+        + "/chat/completions";
+    route.api     = "http://127.0.0.1:" + std::to_string(api.port);
+    route.api_key = "k";
 
     ursa::ChatRequest req;
     req.model = "gpt-4o";
 
     std::vector<ursa::StreamEvent> events;
     int retry_after = 0;
-    const auto p    = ursa::get_provider(cfg);
+    const auto p    = ursa::get_provider(route);
     const ursa::Status st
-        = ursa::stream(p, cfg, req,
+        = ursa::stream(p, route, req,
             [&](const ursa::StreamEvent& ev) { events.push_back(ev); },
             &retry_after);
 
@@ -316,17 +327,17 @@ TEST_CASE("stream emits CONNECTED then parses SSE on success")
                 "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n"
                 "data: [DONE]\n\n");
 
-    ursa::Config cfg;
-    cfg.api_base = "http://127.0.0.1:" + std::to_string(api.port);
-    cfg.api_key  = "k";
-    cfg.standard = ursa::ApiStandard::OPENAI;
+    ursa::Route route;
+    route.endpoint = "http://127.0.0.1:" + std::to_string(api.port)
+        + "/chat/completions";
+    route.api_key = "k";
 
     ursa::ChatRequest req;
     req.model = "gpt-4o";
 
     std::vector<ursa::StreamEvent> events;
-    const auto p     = ursa::get_provider(cfg);
-    const ursa::Status st = ursa::stream(p, cfg, req,
+    const auto p     = ursa::get_provider(route);
+    const ursa::Status st = ursa::stream(p, route, req,
         [&](const ursa::StreamEvent& ev) { events.push_back(ev); });
 
     CHECK(st == ursa::Status::OK);

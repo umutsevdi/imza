@@ -3,9 +3,9 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
-#include <future>
 #include <string>
 #include <string_view>
+#include <thread>
 
 #include "environment.h"
 
@@ -17,25 +17,96 @@ namespace {
         out << content;
     }
 
-    TEST_CASE("analyze_environment populates the core fields")
+    bool wait_until_ready(const ursa::Environment& env, int timeout_ms = 5000)
     {
-        const auto e = ursa::analyze_environment();
-        CHECK_FALSE(e.os_name.empty());
-        CHECK_FALSE(e.default_shell.empty());
-        CHECK_FALSE(e.today.empty());
-        CHECK(e.today.size() == 10);
-        CHECK(e.today[4] == '-');
-        CHECK(e.today[7] == '-');
+        const auto deadline = std::chrono::steady_clock::now()
+            + std::chrono::milliseconds(timeout_ms);
+        while (std::chrono::steady_clock::now() < deadline) {
+            if (env.ready()) {
+                return true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return env.ready();
     }
 
-    TEST_CASE("analyze_environment_async resolves to a ready future")
+    TEST_CASE("system environment populates the core fields synchronously")
     {
-        auto future = ursa::analyze_environment_async();
-        REQUIRE(future.valid());
-        CHECK(future.wait_for(std::chrono::seconds(5))
-            == std::future_status::ready);
-        const auto e = future.get();
-        CHECK_FALSE(e.os_name.empty());
+        const auto env = ursa::get_environment();
+        const auto sys = env->system();
+        REQUIRE(sys != nullptr);
+        CHECK_FALSE(sys->os_name.empty());
+        CHECK_FALSE(sys->default_shell.empty());
+        CHECK_FALSE(sys->today.empty());
+        CHECK(sys->today.size() == 10);
+        CHECK(sys->today[4] == '-');
+        CHECK(sys->today[7] == '-');
+    }
+
+    TEST_CASE("environment becomes ready after the workspace scan")
+    {
+        const auto env = ursa::get_environment();
+        REQUIRE(wait_until_ready(*env));
+        CHECK(env->ready());
+    }
+
+    TEST_CASE("workspace may be null in a non-git folder while still ready")
+    {
+        const auto original = std::filesystem::current_path();
+        const auto dir = std::filesystem::temp_directory_path()
+            / "ursa_test_nongit";
+        std::filesystem::remove_all(dir);
+        REQUIRE(std::filesystem::create_directories(dir));
+
+        ursa::Environment env;
+        REQUIRE(wait_until_ready(env));
+        REQUIRE(env.chdir(dir));
+        CHECK(env.ready());
+        REQUIRE(env.workspace() != nullptr);
+        CHECK_FALSE(env.workspace()->project_root.has_value());
+        CHECK_FALSE(env.agent_rules_path().has_value());
+        CHECK(env.project_skills() == 0);
+
+        std::filesystem::current_path(original);
+        std::filesystem::remove_all(dir);
+    }
+
+    TEST_CASE("workspace subscription fires on readiness")
+    {
+        ursa::Environment env;
+        std::shared_ptr<const ursa::WorkspaceEnvironment> captured;
+        env.subscribe_to_workspace_change(
+            [&](std::shared_ptr<const ursa::WorkspaceEnvironment> ws) {
+                captured = std::move(ws);
+            });
+        REQUIRE(wait_until_ready(env));
+        CHECK(env.ready());
+        CHECK(captured != nullptr);
+        CHECK(captured == env.workspace());
+    }
+
+    TEST_CASE("workspace carries an instruction and project skills when rooted")
+    {
+        const auto original = std::filesystem::current_path();
+        const auto root = std::filesystem::temp_directory_path()
+            / "ursa_test_wsroot";
+        std::filesystem::remove_all(root);
+        const auto git = root / ".git";
+        REQUIRE(std::filesystem::create_directories(git));
+        write_file(root / "AGENTS.md", "agents rules");
+
+        ursa::Environment env;
+        REQUIRE(wait_until_ready(env));
+        REQUIRE(env.chdir(root));
+        const auto ws = env.workspace();
+        REQUIRE(ws != nullptr);
+        REQUIRE(ws->project_root.has_value());
+        REQUIRE(ws->instruction.has_value());
+        CHECK(ws->instruction->content == "agents rules");
+        CHECK(env.agent_rules_path() == "AGENTS.md");
+
+        std::filesystem::current_path(original);
+        std::filesystem::remove_all(root);
     }
 
     TEST_CASE("load_agent_file prefers AGENTS.md over other candidates")

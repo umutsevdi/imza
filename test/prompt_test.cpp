@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include <filesystem>
 #include <string>
 #include <string_view>
 
@@ -10,7 +11,7 @@ namespace ursa {
 
 TEST_CASE("base system prompt without environment")
 {
-    const std::string prompt = build_system_prompt(nullptr);
+    const std::string prompt = build_system_prompt(nullptr, nullptr);
     CHECK(prompt.find("ursa") != std::string::npos);
     CHECK(prompt.find("PLAN") != std::string::npos);
     CHECK(prompt.find("BUILD") != std::string::npos);
@@ -20,19 +21,17 @@ TEST_CASE("base system prompt without environment")
 
 TEST_CASE("system prompt embeds the environment block")
 {
-    Environment env;
-    env.os_name          = "Linux";
-    env.os_version       = "6.8";
-    env.distro           = "Ubuntu";
-    env.default_shell    = "/bin/bash";
-    env.package_managers = { "apt", "snap" };
-    env.today            = "Fri Aug 28 2026";
+    SystemEnvironment sys;
+    sys.os_name          = "Linux";
+    sys.os_version       = "6.8";
+    sys.default_shell    = "/bin/bash";
+    sys.package_managers = { "apt", "snap" };
+    sys.today            = "Fri Aug 28 2026";
 
-    const std::string prompt = build_system_prompt(&env);
+    const std::string prompt = build_system_prompt(&sys, nullptr);
     CHECK(prompt.find("<env>") != std::string::npos);
-    CHECK(prompt.find("Working directory") != std::string::npos);
-    CHECK(prompt.find("OS: Linux 6.8") != std::string::npos);
-    CHECK(prompt.find("Distro: Ubuntu") != std::string::npos);
+    CHECK(prompt.find("Current Directory") != std::string::npos);
+    CHECK(prompt.find("Operating System: Linux 6.8") != std::string::npos);
     CHECK(prompt.find("/bin/bash") != std::string::npos);
     CHECK(prompt.find("apt, snap") != std::string::npos);
     CHECK(prompt.find("Fri Aug 28 2026") != std::string::npos);
@@ -41,13 +40,14 @@ TEST_CASE("system prompt embeds the environment block")
 
 TEST_CASE("system prompt embeds workspace instructions when present")
 {
-    Environment env;
-    env.os_name       = "Linux";
-    env.default_shell = "/bin/bash";
-    env.today         = "Fri Aug 28 2026";
-    env.instruction   = InstructionFile { "AGENTS.md", "# Rules\nBe terse." };
+    SystemEnvironment sys;
+    sys.os_name       = "Linux";
+    sys.default_shell = "/bin/bash";
+    sys.today         = "Fri Aug 28 2026";
+    WorkspaceEnvironment ws { std::filesystem::temp_directory_path() };
+    ws.instruction = InstructionFile { "AGENTS.md", "# Rules\nBe terse." };
 
-    const std::string prompt = build_system_prompt(&env);
+    const std::string prompt = build_system_prompt(&sys, &ws);
     CHECK(prompt.find("<instructions source=\"AGENTS.md\">")
         != std::string::npos);
     CHECK(prompt.find("Be terse.") != std::string::npos);
@@ -56,12 +56,13 @@ TEST_CASE("system prompt embeds workspace instructions when present")
 
 TEST_CASE("system prompt omits the instructions block when absent")
 {
-    Environment env;
-    env.os_name       = "Linux";
-    env.default_shell = "/bin/bash";
-    env.today         = "Fri Aug 28 2026";
+    SystemEnvironment sys;
+    sys.os_name       = "Linux";
+    sys.default_shell = "/bin/bash";
+    sys.today         = "Fri Aug 28 2026";
+    WorkspaceEnvironment ws { std::filesystem::temp_directory_path() };
 
-    const std::string prompt = build_system_prompt(&env);
+    const std::string prompt = build_system_prompt(&sys, &ws);
     CHECK(prompt.find("<instructions") == std::string::npos);
 }
 

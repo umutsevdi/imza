@@ -150,7 +150,7 @@ TEST_CASE("list returns sorted entries with directory markers")
     const auto out = run(tool, tmp.path.string());
     CHECK(out.kind == ursa::ToolOutput::Kind::OUTPUT);
     CHECK(out.text
-        == ".hidden\t0 KB\nalpha.txt\t0 KB\nbeta.txt\t0 KB\nzed/\t—");
+        == ".hidden    0 KB\nalpha.txt  0 KB\nbeta.txt   0 KB\nzed/       —");
 }
 
 TEST_CASE("list defaults to the current directory")
@@ -189,10 +189,10 @@ TEST_CASE("list rejects non-directories and reports empty output")
     CHECK(empty.text.empty());
 }
 
-TEST_CASE("builtin registry exposes both read-only tools")
+TEST_CASE("builtin registry exposes the current tool set")
 {
     const auto tools = ursa::builtin_tools();
-    REQUIRE(tools.tools().size() == 5);
+    REQUIRE(tools.tools().size() == 7);
 
     const auto* read = tools.find("read");
     REQUIRE(read != nullptr);
@@ -209,7 +209,11 @@ TEST_CASE("builtin registry exposes both read-only tools")
     CHECK(ask->safety == ursa::ToolSafety::READ_ONLY);
     CHECK(ask->spec.parameters["properties"].isMember("questions"));
 
-    CHECK(tools.specs().size() == 5);
+    REQUIRE(tools.find("shell") != nullptr);
+    REQUIRE(tools.find("todo") != nullptr);
+    REQUIRE(tools.find("edit") != nullptr);
+    REQUIRE(tools.find("write") != nullptr);
+    CHECK(tools.specs().size() == 7);
 }
 
 TEST_CASE("shell tool runs a command and reports the exit code")

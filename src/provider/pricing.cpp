@@ -34,7 +34,8 @@ namespace {
         }
         ModelPricing pricing;
         pricing.input_per_1k = model.cost_input.value_or(0.0) * kPerMillionToPerK;
-        pricing.output_per_1k = model.cost_output.value_or(0.0) * kPerMillionToPerK;
+        pricing.output_per_1k
+            = model.cost_output.value_or(0.0) * kPerMillionToPerK;
         pricing.cache_read_per_1k
             = model.cost_cache_read.value_or(0.0) * kPerMillionToPerK;
         pricing.cache_write_per_1k

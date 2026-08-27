@@ -12,7 +12,6 @@
 #include <string>
 #include <vector>
 
-#include "agent.h"
 #include "util.h"
 
 namespace ursa {

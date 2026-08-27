@@ -34,27 +34,22 @@ Controller::Controller(std::shared_ptr<Session> session, const Config& cfg,
     PostFn post, std::function<void()> on_exit, StreamFn stream_fn,
     ToolRegistry tools, ModelsFn models_fn)
     : session_(std::move(session))
-    , cfg_(cfg)
     , post_(std::move(post))
     , on_exit_(std::move(on_exit))
     , commands_(slash_commands())
     , stream_fn_(std::move(stream_fn))
+    , has_stream_override_(static_cast<bool>(stream_fn_))
     , tools_(std::move(tools))
-    , models_fn_(std::move(models_fn))
+    , providers_(cfg, std::move(models_fn))
 {
     specs_plan_ = tools_.specs(ToolSafety::READ_ONLY);
     specs_all_  = tools_.specs();
 
-    load_catalog(presets_path(), catalog_);
-    set_pricing_catalog(catalog_);
-
     if (!stream_fn_) {
         stream_fn_ = [this](const ChatRequest& req, const StreamCallback& cb) {
-            Route route;
-            {
-                std::lock_guard lock(data_mutex_);
-                route = _active_route_locked(req.model);
-            }
+            const auto selection = providers_.active_selection();
+            const Route route
+                = selection.has_value() ? selection->route : Route { };
             return stream(
                 get_provider(route), route, req, cb, &retry_after_secs_);
         };
@@ -69,12 +64,10 @@ Controller::Controller(std::shared_ptr<Session> session, const Config& cfg,
                 }
             });
         });
-    _post([this] {
-        std::lock_guard lock(data_mutex_);
-        for (const Connection& conn : cfg_.providers) {
-            _start_fetch_locked(conn.id);
-        }
+    provider_sub_ = providers_.subscribe([this] {
+        _post([this] { session_->bump_modal_serial(); });
     });
+    _post([this] { providers_.start_model_fetches(); });
 }
 
 Controller::~Controller()
@@ -88,10 +81,9 @@ Controller::~Controller()
             }
         }
     }
-    worker_.reset();
-    catalog_waiter_.reset();
-    fetch_threads_.clear();
+    provider_sub_();
     env_sub_();
+    worker_.reset();
 }
 
 void Controller::toggle_mode() { session_->toggle_mode(); }
@@ -157,11 +149,7 @@ void Controller::resolve_modal(ModalResult result)
         _apply_pick(*choice);
     }
     if (auto* variant = std::get_if<VariantChoice>(&result)) {
-        {
-            std::lock_guard lock(data_mutex_);
-            cfg_.reasoning_effort = variant->effort;
-            save_config(config_path(), cfg_);
-        }
+        providers_.set_reasoning_effort(variant->effort);
         session_->bump_modal_serial();
     }
     {
@@ -209,22 +197,21 @@ void Controller::submit(std::string text)
 
 void Controller::submit_message(std::string text)
 {
-    TurnSettings settings;
-    {
-        std::lock_guard lock(data_mutex_);
-        if (!cfg_.last_used || cfg_.last_used->model.empty()) {
-            session_->set_error("no model selected — run /model");
-            return;
-        }
-        settings.model = cfg_.last_used->model;
-        settings.connection_id = cfg_.last_used->provider;
-        settings.reasoning_effort = cfg_.reasoning_effort.value_or("off");
-        if (settings.reasoning_effort == "medium") {
-            settings.reasoning_effort = "default";
-        }
-        settings.route = _active_route_locked(settings.model);
-        settings.dialect = settings.route.dialect;
+    const std::optional<ProviderSelection> selection
+        = providers_.active_selection();
+    if (!selection.has_value()) {
+        session_->set_error("no model selected — run /model");
+        return;
     }
+    TurnSettings settings;
+    settings.model            = selection->model;
+    settings.connection_id    = selection->connection_id;
+    settings.reasoning_effort = selection->reasoning_effort;
+    if (settings.reasoning_effort == "medium") {
+        settings.reasoning_effort = "default";
+    }
+    settings.route   = selection->route;
+    settings.dialect = settings.route.dialect;
     settings.mode = session_->mode();
     if (!get_environment()->ready()) {
         session_->enqueue_message(std::move(text));
@@ -233,7 +220,7 @@ void Controller::submit_message(std::string text)
     session_->clear_interrupt();
     session_->begin_send(std::move(text));
     _spawn(session_->build_history(_system_prompt(), settings.dialect),
-        StreamFn { },
+        has_stream_override_ ? stream_fn_ : StreamFn { },
         std::move(settings));
 }
 
@@ -249,13 +236,7 @@ bool Controller::_model_reasons(const std::string& model) const
     if (model.empty()) {
         return false;
     }
-    for (const auto& [provider_id, provider] : catalog_.providers) {
-        auto it = provider.models.find(model);
-        if (it != provider.models.end() && it->second.reasoning == true) {
-            return true;
-        }
-    }
-    return false;
+    return providers_.model_reasons(model);
 }
 
 std::uint64_t Controller::_budget_for_effort(const std::string& effort) const
@@ -314,6 +295,70 @@ void Controller::finish(std::string error)
     }
     _present_front();
     _drain_queued();
+}
+
+Config Controller::config() const { return providers_.config(); }
+
+StatusConfigView Controller::status_config() const
+{
+    return providers_.status();
+}
+
+std::vector<ConnectionView> Controller::connections() const
+{
+    return providers_.connections();
+}
+
+ModelList Controller::models_for(const std::string& connection_id) const
+{
+    return providers_.models_for(connection_id);
+}
+
+bool Controller::remove_connection(const std::string& connection_id)
+{
+    return providers_.remove_connection(connection_id);
+}
+
+void Controller::refetch_models(const std::string& connection_id)
+{
+    providers_.refetch_models(connection_id);
+}
+
+void Controller::ensure_catalog_fresh()
+{
+    providers_.ensure_catalog_fresh();
+}
+
+std::vector<std::pair<std::string, std::string>>
+Controller::provider_options() const
+{
+    return providers_.provider_options();
+}
+
+void Controller::_begin_connect(const ConnectResult& result)
+{
+    providers_.connect(result, [this](ConnectOutcome outcome) {
+        _post([this, outcome] {
+            if (outcome.status != Status::OK) {
+                session_->set_connect_status(error_text(outcome.status));
+                return;
+            }
+            session_->set_connect_status(
+                "✓ " + std::to_string(outcome.model_count) + " models");
+            if (outcome.persisted
+                && std::holds_alternative<ConnectModal>(session_->modal())) {
+                session_->set_modal(ConnectModal {
+                    outcome.first_connection ? ConnectModal::Entry::PICK_MODEL
+                                             : ConnectModal::Entry::MANAGE });
+                session_->bump_modal_serial();
+            }
+        });
+    });
+}
+
+void Controller::_apply_pick(const ModelChoice& choice)
+{
+    providers_.select_model(choice);
 }
 
 } // namespace ursa

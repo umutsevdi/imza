@@ -68,7 +68,7 @@ TEST_CASE("tool_call_head shows the file path for read, args otherwise")
 {
     ursa::ToolCall read { 1, "", "read",
         R"({"path":"src/a.cpp","line_begin":1})", { } };
-    CHECK(ursa::tool_call_head(read) == "Read src/a.cpp");
+    CHECK(ursa::tool_call_head(read) == "src/a.cpp");
 
     ursa::ToolCall other { 1, "", "bash", "git status", { } };
     CHECK(ursa::tool_call_head(other) == "Bash git status");
