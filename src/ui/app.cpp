@@ -7,18 +7,31 @@
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/terminal.hpp>
 
-#include <unistd.h>
 #include <algorithm>
+#include <cstdio>
 #include <functional>
-
-#include "ui.h"
 #include <print>
+
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace ursa {
 
 namespace {
 
     using namespace ftxui;
+
+    bool is_interactive_terminal()
+    {
+#ifdef _WIN32
+        return _isatty(_fileno(stdin)) && _isatty(_fileno(stdout));
+#else
+        return isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
+#endif
+    }
 
     class Repl : public ComponentBase {
     public:
@@ -106,7 +119,7 @@ namespace {
 
 int run_repl(const Config& cfg)
 {
-    if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO)) {
+    if (!is_interactive_terminal()) {
         std::println("ursa requires an interactive terminal");
         return 1;
     }

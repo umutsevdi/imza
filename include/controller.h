@@ -69,6 +69,11 @@ struct ModelList {
     std::vector<ModelInfo> models;
 };
 
+struct StatusConfigView {
+    std::string active_model;
+    std::string reasoning_effort;
+};
+
 struct TurnSettings {
     std::string model;
     std::string reasoning_effort;
@@ -100,6 +105,7 @@ public:
     size_t queue_size() const;
     const Session& session() const { return *session_; }
     Config config() const;
+    StatusConfigView status_config() const;
     std::vector<ConnectionView> connections() const;
     ModelList models_for(const std::string& connection_id) const;
     bool remove_connection(const std::string& connection_id);

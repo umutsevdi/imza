@@ -148,14 +148,12 @@ namespace {
             return;
         }
         if (root.isMember("error")) {
-            const Json::Value& e = root["error"];
             std::string msg;
-            if (e.isObject() && e["message"].isString()) {
-                msg = e["message"].asString();
-            } else if (e.isString()) {
-                msg = e.asString();
+            Status status = parse_api_error(data, msg);
+            if (status == Status::OK) {
+                status = Status::API_ERROR;
             }
-            outs.push_back(make_error_event(Status::API_ERROR, msg));
+            outs.push_back(make_error_event(status, msg));
             return;
         }
         const Usage u = read_usage(root);

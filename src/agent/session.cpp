@@ -171,6 +171,12 @@ double Session::last_cost() const
     return last_cost_;
 }
 
+Session::StatusView Session::status_view() const
+{
+    std::lock_guard lock(mutex_);
+    return { mode_, totals_, last_, total_cost_ };
+}
+
 void Session::toggle_mode()
 {
     std::lock_guard lock(mutex_);

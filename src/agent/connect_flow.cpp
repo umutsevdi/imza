@@ -15,6 +15,13 @@ Config Controller::config() const
     return cfg_;
 }
 
+StatusConfigView Controller::status_config() const
+{
+    std::lock_guard lock(data_mutex_);
+    return { cfg_.last_used ? cfg_.last_used->model : "",
+        cfg_.reasoning_effort.value_or("off") };
+}
+
 std::vector<ConnectionView> Controller::connections() const
 {
     std::lock_guard lock(data_mutex_);

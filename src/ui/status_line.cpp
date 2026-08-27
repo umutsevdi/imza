@@ -29,25 +29,25 @@ public:
     Element OnRender() override
     {
         using namespace ftxui;
-        const Config& cfg    = controller_.config();
-        const Session& state = *session_;
-        const LayoutCtx ctx  = layout_();
-        const bool wide = ctx.kind == LayoutCtx::Kind::WIDE;
-        const bool plan = state.mode() == Session::Mode::PLAN;
-        Element mode    = text(plan ? " PLAN " : " BUILD ") | bold
+        const StatusConfigView config = controller_.status_config();
+        const Session::StatusView state = session_->status_view();
+        const LayoutCtx ctx = layout_();
+        const bool wide              = ctx.kind == LayoutCtx::Kind::WIDE;
+        const bool plan              = state.mode == Session::Mode::PLAN;
+        const bool environment_ready = get_environment()->ready();
+        Element mode = text(plan ? " PLAN " : " BUILD ") | bold
             | color(PANEL_COLOR_FOCUS)
             | bgcolor(plan ? Color::GreenLight : Color::RedLight);
-        const std::string active_model
-            = cfg.last_used ? cfg.last_used->model : "";
+        const std::string& active_model = config.active_model;
 
         Elements bar;
         bar.push_back(text(" "));
         bar.push_back(std::move(mode));
         if (!active_model.empty()) {
             bar.push_back(text(" · " + active_model) | color(PANEL_FG_DIM));
-            if (cfg.reasoning_effort && !cfg.reasoning_effort->empty()
-                && *cfg.reasoning_effort != "off") {
-                std::string shown = *cfg.reasoning_effort;
+            if (!config.reasoning_effort.empty()
+                && config.reasoning_effort != "off") {
+                std::string shown = config.reasoning_effort;
                 if (shown == "medium") {
                     shown = "default";
                 }
@@ -56,9 +56,9 @@ public:
                 bar.push_back(text(" (" + shown + ")") | color(effort_color));
             }
         }
-        if (state.last().prompt > 0 || state.totals().total > 0) {
+        if (state.last.prompt > 0 || state.totals.total > 0) {
             const ModelPricing pricing = _cached_pricing(active_model);
-            const std::uint64_t used   = state.last().prompt;
+            const std::uint64_t used   = state.last.prompt;
             if (pricing.context_limit > 0) {
                 const std::uint64_t pct = used * 100 / pricing.context_limit;
                 bar.push_back(text(" · " + compact_tokens(used) + "/"
@@ -71,7 +71,8 @@ public:
             }
         }
         bar.push_back(filler());
-        if (!get_environment()->ready()) {
+        if (!environment_ready) {
+            animation::RequestAnimationFrame();
             bar.push_back(spinner(15, static_cast<size_t>(frame_))
                 | color(Color::GrayLight));
             if (wide) {
@@ -83,8 +84,8 @@ public:
             bar.push_back(text(_cached_cwd()) | color(PANEL_FG_DIM));
             bar.push_back(text("  "));
         }
-        if (state.total_cost() > 0) {
-            bar.push_back(text(money_text(state.total_cost()) + "  ")
+        if (state.total_cost > 0) {
+            bar.push_back(text(money_text(state.total_cost) + "  ")
                 | color(PANEL_FG_DIM));
         }
         bar.push_back(
@@ -95,8 +96,9 @@ public:
 
     void OnAnimation(animation::Params&) override
     {
-        ++frame_;
-        animation::RequestAnimationFrame();
+        if (!get_environment()->ready()) {
+            ++frame_;
+        }
     }
 
 private:

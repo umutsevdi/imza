@@ -184,6 +184,10 @@ namespace {
                 ThinkingAccum& acc     = state.thinking_accums[index];
                 acc.text += text;
                 outs.push_back(make_reasoning_event(text));
+            } else if (type == "signature_delta") {
+                const int index    = root.get("index", 0).asInt();
+                ThinkingAccum& acc = state.thinking_accums[index];
+                acc.signature += delta.get("signature", "").asString();
             }
             return;
         }
@@ -199,10 +203,8 @@ namespace {
             }
             auto think_it = state.thinking_accums.find(index);
             if (think_it != state.thinking_accums.end()) {
-                const std::string signature
-                    = root["content_block"].get("signature", "").asString();
-                think_it->second.signature = signature;
-                outs.push_back(make_reasoning_event("", signature));
+                outs.push_back(
+                    make_reasoning_event("", think_it->second.signature));
                 state.thinking_accums.erase(think_it);
             }
             return;

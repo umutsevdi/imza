@@ -32,8 +32,6 @@ elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
 endif()
 
 
-# OpenSSL
-find_package(OpenSSL REQUIRED)
 # CURL
 find_package(CURL REQUIRED)
 include(FetchContent)

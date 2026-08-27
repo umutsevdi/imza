@@ -102,6 +102,12 @@ public:
     struct Countdown {
         std::chrono::steady_clock::time_point deadline;
     };
+    struct StatusView {
+        Mode mode;
+        Usage totals;
+        Usage last;
+        double total_cost;
+    };
 
     Session();
 
@@ -120,6 +126,7 @@ public:
     Usage last() const;
     double total_cost() const;
     double last_cost() const;
+    StatusView status_view() const;
 
     void toggle_mode();
     void set_error(std::string msg);
