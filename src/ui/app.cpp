@@ -11,7 +11,6 @@
 #include <algorithm>
 #include <functional>
 
-#include "environment.h"
 #include "ui.h"
 #include <print>
 
@@ -114,15 +113,13 @@ int run_repl(const Config& cfg)
 
     ScreenInteractive screen = ScreenInteractive::FullscreenAlternateScreen();
     ToolRegistry tools       = builtin_tools();
-    auto env                 = analyze_environment_async();
     Controller controller(
         cfg,
         [&screen](std::function<void()> f) {
             screen.Post(std::move(f));
             screen.PostEvent(Event::Custom);
         },
-        [&screen] { screen.Exit(); }, StreamFn { }, std::move(tools),
-        std::move(env));
+        [&screen] { screen.Exit(); }, StreamFn { }, std::move(tools));
     controller.ensure_catalog_fresh();
     if (controller.config().providers.empty()) {
         controller.enqueue_user_modal(

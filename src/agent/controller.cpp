@@ -1,4 +1,5 @@
 #include "agent.h"
+#include "environment.h"
 #include "format.h"
 #include "pricing.h"
 #include "prompt.h"
@@ -177,14 +178,13 @@ std::string error_text(Status st)
 
 Controller::Controller(const Config& cfg, PostFn post,
     std::function<void()> on_exit, StreamFn stream_fn, ToolRegistry tools,
-    std::shared_future<Environment> env, ModelsFn models_fn)
+    ModelsFn models_fn)
     : cfg_(cfg)
     , post_(std::move(post))
     , on_exit_(std::move(on_exit))
     , commands_(slash_commands())
     , stream_fn_(std::move(stream_fn))
     , tools_(std::move(tools))
-    , env_(std::move(env))
     , models_fn_(std::move(models_fn))
 {
     specs_plan_ = tools_.specs(ToolSafety::READ_ONLY);
@@ -204,22 +204,16 @@ Controller::Controller(const Config& cfg, PostFn post,
                 get_provider(route), route, req, cb, &retry_after_secs_);
         };
     }
-    if (env_.valid()) {
-        env_waiter_ = std::jthread([this] {
-            using namespace std::chrono_literals;
-            while (env_.wait_for(0s) == std::future_status::timeout) {
-                if (!alive_.load()) {
-                    return;
+    env_sub_ = get_environment()->subscribe_to_workspace_change(
+        [this](std::shared_ptr<const WorkspaceEnvironment>) {
+            _post([this] {
+                _present_front();
+                if (state_.phase == UiState::Phase::IDLE
+                    && !state_.queued.empty()) {
+                    _drain_queued();
                 }
-                _post([] { });
-                std::this_thread::sleep_for(150ms);
-            }
-            if (!alive_.load()) {
-                return;
-            }
-            _on_env_ready();
+            });
         });
-    }
     _post([this] {
         std::lock_guard lock(data_mutex_);
         for (const Connection& conn : cfg_.providers) {
@@ -274,9 +268,9 @@ Controller::~Controller()
         }
     }
     worker_.reset();
-    env_waiter_.reset();
     catalog_waiter_.reset();
     fetch_threads_.clear();
+    env_sub_();
 }
 
 void Controller::toggle_mode()
@@ -413,7 +407,7 @@ void Controller::submit_message(std::string text)
             return;
         }
     }
-    if (env_.valid() && !env_ready_.load()) {
+    if (!get_environment()->ready()) {
         _enqueue_message(std::move(text));
         return;
     }
@@ -421,23 +415,6 @@ void Controller::submit_message(std::string text)
     state_.error.clear();
     state_.phase = UiState::Phase::CONNECTING;
     _spawn(_build_history(), StreamFn { });
-}
-
-void Controller::_on_env_ready()
-{
-    env_ready_.store(true);
-    _post([this] {
-        state_.env_ready = true;
-        if (env_.valid() && env_.get().instruction) {
-            state_.agent_rules    = env_.get().instruction->path;
-            state_.project_skills = env_.get().project_skills.size();
-            state_.global_skills  = env_.get().global_skills.size();
-        }
-        _present_front();
-        if (state_.phase == UiState::Phase::IDLE && !state_.queued.empty()) {
-            _drain_queued();
-        }
-    });
 }
 
 void Controller::run_slash(std::string_view cmd)
@@ -498,28 +475,11 @@ void Controller::run_slash(std::string_view cmd)
     }
 }
 
-std::string Controller::shell_name() const
-{
-    if (env_.valid()
-        && env_.wait_for(std::chrono::seconds(0))
-            == std::future_status::ready) {
-        const Environment& e = env_.get();
-        if (!e.default_shell.empty()) {
-            return std::filesystem::path(e.default_shell).filename().string();
-        }
-    }
-    return "sh";
-}
-
 std::string Controller::_system_prompt() const
 {
-    const Environment* env = nullptr;
-    if (env_.valid()
-        && env_.wait_for(std::chrono::seconds(0))
-            == std::future_status::ready) {
-        env = &env_.get();
-    }
-    return build_system_prompt(env);
+    const std::shared_ptr<Environment> env = get_environment();
+    return build_system_prompt(
+        env->system().get(), env->workspace().get());
 }
 
 bool Controller::_model_reasons(const std::string& model) const

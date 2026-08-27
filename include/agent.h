@@ -15,7 +15,6 @@
 #include <vector>
 
 #include "catalog.h"
-#include "environment.h"
 #include "network.h"
 #include "tools.h"
 #include "types.h"
@@ -129,8 +128,6 @@ struct UiState {
     TodoList todo;
     std::vector<ChangedFile> changed_files;
     std::vector<QueuedMessage> queued;
-    bool env_ready = false;
-    std::optional<std::string> agent_rules;
 
     struct Countdown {
         std::chrono::steady_clock::time_point deadline;
@@ -139,10 +136,8 @@ struct UiState {
 
     Usage totals;
     Usage last;
-    double total_cost  = 0.0;
-    double last_cost   = 0.0;
-    int project_skills = 0;
-    int global_skills  = 0;
+    double total_cost = 0.0;
+    double last_cost  = 0.0;
 };
 
 using PostFn = std::function<void(std::function<void()>)>;
@@ -184,7 +179,7 @@ class Controller {
 public:
     Controller(const Config& cfg, PostFn post, std::function<void()> on_exit,
         StreamFn stream_fn = { }, ToolRegistry tools = { },
-        std::shared_future<Environment> env = { }, ModelsFn models_fn = { });
+        ModelsFn models_fn = { });
     ~Controller();
 
     Controller(const Controller&)            = delete;
@@ -208,7 +203,6 @@ public:
     void ensure_catalog_fresh();
     std::vector<std::pair<std::string, std::string>> provider_options() const;
     const std::vector<SlashCommand>& commands() const { return commands_; }
-    std::string shell_name() const;
 
 private:
     void submit_message(std::string text);
@@ -220,7 +214,6 @@ private:
     std::vector<Message> _build_history(
         ApiStandard dialect = ApiStandard::OPENAI) const;
     std::string _system_prompt() const;
-    void _on_env_ready();
     void _spawn(std::vector<Message> history, StreamFn override);
     void _drive(std::vector<Message> history, StreamFn override);
     Route _active_route_locked(const std::string& model) const;
@@ -262,10 +255,7 @@ private:
     ToolRegistry tools_;
     std::vector<ToolSpec> specs_plan_;
     std::vector<ToolSpec> specs_all_;
-
-    std::shared_future<Environment> env_;
-    std::atomic<bool> env_ready_ { false };
-    std::optional<std::jthread> env_waiter_;
+    std::function<void()> env_sub_;
 
     struct PendingModal {
         ModalPayload payload;

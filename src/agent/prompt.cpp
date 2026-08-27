@@ -49,29 +49,31 @@ namespace {
 - In PLAN mode only read-only tools are available. Research the request, ask the user clarifying questions when intent is ambiguous, weigh tradeoffs, and present a concise, well-structured plan in your reply. Do not attempt to make changes.
 - In BUILD mode all tools are available. Implement the plan, then verify the result if possible.)prompt";
 
-    std::string environment_block(const Environment& e)
+    std::string environment_block(const SystemEnvironment& sys,
+        const WorkspaceEnvironment* ws)
     {
         std::string out = "<env>";
         std::error_code ec;
         const std::filesystem::path cwd = std::filesystem::current_path(ec);
         out += "\n  Current Directory: ";
         out += ec ? "unknown" : cwd.string();
-        if (e.project_root.has_value()) {
-            out += "\n  Project Root: " + e.project_root.value().string();
+        if (ws != nullptr && ws->project_root.has_value()) {
+            out += "\n  Project Root: " + ws->project_root.value().string();
         }
         out += "\n  Operating System: ";
-        out += e.os_name;
-        if (!e.os_version.empty()) {
+        out += sys.os_name;
+        if (!sys.os_version.empty()) {
             out += " ";
-            out += e.os_version;
+            out += sys.os_version;
         }
         out += "\n  Shell: ";
-        out += e.default_shell;
+        out += sys.default_shell;
         out += "\n  Package managers: ";
-        out += e.package_managers.empty() ? std::string("none")
-                                          : join(e.package_managers, ", ");
+        out += sys.package_managers.empty()
+            ? std::string("none")
+            : join(sys.package_managers, ", ");
         out += "\n  Today's date: ";
-        out += e.today;
+        out += sys.today;
         out += "\n</env>";
         return out;
     }
@@ -91,15 +93,16 @@ namespace {
 
 } // namespace
 
-std::string build_system_prompt(const Environment* env)
+std::string build_system_prompt(
+    const SystemEnvironment* sys, const WorkspaceEnvironment* ws)
 {
     std::string out(BASE_PROMPT);
-    if (env != nullptr) {
+    if (sys != nullptr) {
         out += "\n\n";
-        out += environment_block(*env);
-        if (env->instruction) {
+        out += environment_block(*sys, ws);
+        if (ws != nullptr && ws->instruction) {
             out += "\n\n";
-            out += instructions_block(*env->instruction);
+            out += instructions_block(*ws->instruction);
         }
     }
     return out;

@@ -1,5 +1,7 @@
 #include "ui.h"
 
+#include "environment.h"
+
 #include <ftxui/component/app.hpp>
 #include <ftxui/component/component.hpp>
 #include <ftxui/dom/elements.hpp>
@@ -32,13 +34,15 @@ public:
                 render_changed_files(controller_.state().changed_files, ctx)
                 | yflex);
             const std::optional<std::string>& rules
-                = controller_.state().agent_rules;
+                = get_environment()->agent_rules_path();
             if (rules) {
                 parts.push_back(text(" " + *rules + " ") | bold
                     | color(Color::Black) | bgcolor(Color::Yellow) | xflex);
             }
-            int project_skills = controller_.state().project_skills;
-            int global_skills  = controller_.state().global_skills;
+            const int project_skills
+                = static_cast<int>(get_environment()->project_skills());
+            const int global_skills
+                = static_cast<int>(get_environment()->global_skills());
             if (project_skills > 0) {
                 parts.push_back(
                     text(std::format(" {} Project Skills ", project_skills))

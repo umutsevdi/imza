@@ -12,7 +12,8 @@ constexpr std::string_view PLAN_REMINDER_TAG
 constexpr std::string_view BUILD_REMINDER_TAG
     = "<system-reminder id=\"build-mode\">";
 
-std::string build_system_prompt(const Environment* env);
+std::string build_system_prompt(const SystemEnvironment* sys,
+    const WorkspaceEnvironment* ws);
 std::string_view plan_mode_reminder();
 std::string_view build_mode_reminder();
 

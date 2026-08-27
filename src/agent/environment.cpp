@@ -3,6 +3,7 @@
 #include "types.h"
 #include "util.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -261,54 +262,6 @@ std::optional<InstructionFile> load_agent_file(
     return std::nullopt;
 }
 
-bool Environment::chdir(const std::filesystem::path& dir)
-{
-    std::error_code ec;
-    std::filesystem::current_path(dir, ec);
-    if (ec) {
-        return false;
-    }
-    project_root.reset();
-    auto p = std::filesystem::current_path(ec);
-    while (true) {
-        if (std::filesystem::exists(p / ".git", ec)) {
-            if (!ec) {
-                project_root = p;
-            }
-            break;
-        }
-        if (p.parent_path() == p) {
-            break;
-        }
-        p = p.parent_path();
-    }
-    if (project_root.has_value()) {
-        instruction = load_agent_file(project_root.value());
-        detect_project_skills(project_root.value(), project_skills);
-    }
-    return true;
-}
-
-Environment analyze_environment()
-{
-    Environment env;
-    detect_os(env.os_name, env.os_version, env.default_shell);
-    detect_package_managers(env.package_managers);
-    env.today   = today_string();
-    env.has_git = find_in_path("git");
-    detect_global_skills(env.global_skills);
-    std::error_code ec;
-    env.chdir(std::filesystem::current_path(ec));
-    return env;
-}
-
-std::shared_future<Environment> analyze_environment_async()
-{
-    return std::async(std::launch::async, analyze_environment).share();
-}
-
-/// VERSION 2
-
 SystemEnvironment::SystemEnvironment()
 {
     detect_os(os_name, os_version, default_shell);
@@ -340,7 +293,32 @@ WorkspaceEnvironment::WorkspaceEnvironment(const std::filesystem::path& dir)
     }
 }
 
-bool EnvironmentV2::chdir(const std::filesystem::path& dir)
+Environment::Environment()
+    : system_(std::make_shared<const SystemEnvironment>())
+{
+    worker_ = std::jthread([this] {
+        std::error_code ec;
+        const std::filesystem::path dir = std::filesystem::current_path(ec);
+        auto ws = std::make_shared<const WorkspaceEnvironment>(dir);
+        publish(std::move(ws));
+    });
+}
+
+void Environment::publish(std::shared_ptr<const WorkspaceEnvironment> ws)
+{
+    std::vector<Subscriber> callbacks;
+    {
+        std::unique_lock lock(workspace_mutex_);
+        workspace_ = std::move(ws);
+        ready_.store(true);
+        callbacks = cbs_;
+    }
+    for (const auto& sub : callbacks) {
+        sub.cb(workspace_);
+    }
+}
+
+bool Environment::chdir(const std::filesystem::path& dir)
 {
     std::error_code ec;
     std::filesystem::current_path(dir, ec);
@@ -348,28 +326,69 @@ bool EnvironmentV2::chdir(const std::filesystem::path& dir)
         return false;
     }
     auto next = std::make_shared<const WorkspaceEnvironment>(dir);
-    auto p    = std::filesystem::current_path(ec);
-    std::vector<
-        std::function<void(std::shared_ptr<const WorkspaceEnvironment>)>>
-        callbacks;
-    {
-        std::unique_lock lock(workspace_mutex_);
-        workspace_ = next;
-        callbacks  = cbs_;
-    }
-    for (auto& cb : callbacks) {
-        cb(workspace_);
-    }
+    publish(std::move(next));
     return true;
 }
 
-void EnvironmentV2::subscribe_to_workspace_change(
+std::function<void()> Environment::subscribe_to_workspace_change(
     const std::function<void(std::shared_ptr<const WorkspaceEnvironment>)>& cb)
 {
+    bool already;
+    std::shared_ptr<const WorkspaceEnvironment> current;
+    std::uint64_t id;
     {
         std::unique_lock lock(workspace_mutex_);
-        cbs_.push_back(cb);
+        already = ready_.load();
+        id      = next_id_++;
+        cbs_.push_back(Subscriber { id, cb });
+        if (already) {
+            current = workspace_;
+        }
     }
+    if (already) {
+        cb(current);
+    }
+    return [this, id] {
+        std::unique_lock lock(workspace_mutex_);
+        cbs_.erase(std::remove_if(cbs_.begin(), cbs_.end(),
+                        [id](const Subscriber& s) { return s.id == id; }),
+            cbs_.end());
+    };
+}
+
+std::optional<std::string> Environment::agent_rules_path() const
+{
+    const auto ws = workspace();
+    if (ws == nullptr || !ws->instruction) {
+        return std::nullopt;
+    }
+    return ws->instruction->path;
+}
+
+std::size_t Environment::project_skills() const
+{
+    const auto ws = workspace();
+    return ws == nullptr ? 0 : ws->project_skills.size();
+}
+
+std::size_t Environment::global_skills() const
+{
+    return system_->global_skills.size();
+}
+
+std::string shell_name(const SystemEnvironment& sys)
+{
+    if (sys.default_shell.empty()) {
+        return "sh";
+    }
+    return std::filesystem::path(sys.default_shell).filename().string();
+}
+
+std::shared_ptr<Environment> get_environment()
+{
+    static const std::shared_ptr<Environment> env
+        = std::make_shared<Environment>();
+    return env;
 }
 
 } // namespace ursa

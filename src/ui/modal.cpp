@@ -1,5 +1,6 @@
 #include "ui.h"
 
+#include "environment.h"
 #include "format.h"
 
 #include <ftxui/component/component.hpp>
@@ -387,7 +388,8 @@ namespace {
                 if (parsed.isObject() && parsed["command"].isString()) {
                     cmd = parsed["command"].asString();
                 }
-                rows.push_back(code_block(cmd, controller_.shell_name()));
+                rows.push_back(code_block(cmd,
+                    shell_name(*get_environment()->system())));
             } else if (req.name == "edit" || req.name == "write") {
                 rows.push_back(text(tool_request_summary(req.name, req.args))
                     | color(PANEL_FG));

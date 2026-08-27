@@ -2,6 +2,8 @@
 #include "ui.h"
 #include "util.h"
 
+#include "environment.h"
+
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -71,7 +73,7 @@ public:
             }
         }
         bar.push_back(filler());
-        if (!state.env_ready) {
+        if (!get_environment()->ready()) {
             bar.push_back(spinner(15, static_cast<size_t>(frame_))
                 | color(Color::GrayLight));
             if (wide) {
