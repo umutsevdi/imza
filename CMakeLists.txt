@@ -84,8 +84,7 @@ file(GLOB TEST_SOURCES "test/*.cpp")
 
 # Network transport (no ftxui, no cmark)
 add_library(ursa_network
-    src/network/network_common.cpp
-    src/network/provider.cpp
+    src/network/transport.cpp
     src/network/openai_provider.cpp
     src/network/anthropic_provider.cpp
     src/network/models.cpp
@@ -101,8 +100,8 @@ target_link_libraries(ursa_network PRIVATE
 
 # Shared app configuration + catalog cache (no ftxui, no cmark)
 add_library(ursa_core
-    src/config.cpp
-    src/catalog.cpp
+    src/core/config.cpp
+    src/core/catalog.cpp
 )
 target_include_directories(ursa_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -113,16 +112,32 @@ target_link_libraries(ursa_core PUBLIC
     jsoncpp_static
 )
 
+# System/workspace environment + prompt building (no ftxui, no cmark)
+add_library(ursa_environment
+    src/environment/environment.cpp
+    src/environment/prompt.cpp
+)
+target_include_directories(ursa_environment PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${jsoncpp_SOURCE_DIR}/include
+)
+target_link_libraries(ursa_environment PUBLIC
+    ursa_core
+    jsoncpp_static
+)
+
 # Agent: orchestration, formatting, slash commands (ftxui-free)
 add_library(ursa_agent
     src/agent/pricing.cpp
     src/agent/controller.cpp
+    src/agent/connect_flow.cpp
+    src/agent/catalog_sync.cpp
+    src/agent/stream_loop.cpp
+    src/agent/commands.cpp
     src/agent/session.cpp
     src/agent/format.cpp
-    src/agent/prompt.cpp
     src/agent/tools.cpp
     src/agent/builtin_tools.cpp
-    src/agent/environment.cpp
     src/agent/command.cpp
 )
 target_include_directories(ursa_agent PRIVATE
@@ -132,6 +147,7 @@ target_include_directories(ursa_agent PRIVATE
 target_link_libraries(ursa_agent PUBLIC
     ursa_core
     ursa_network
+    ursa_environment
     jsoncpp_static
 )
 
@@ -142,10 +158,9 @@ add_library(ursa_ui
     src/ui/connect.cpp
     src/ui/markdown.cpp
     src/ui/modal.cpp
-    src/ui/render.cpp
+    src/ui/components.cpp
     src/ui/side_panel.cpp
     src/ui/status_line.cpp
-    src/ui/variant.cpp
 )
 target_include_directories(ursa_ui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include

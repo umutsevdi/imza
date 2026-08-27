@@ -11,7 +11,8 @@
 #include <string_view>
 #include <vector>
 
-#include "agent.h"
+#include "commands.h"
+#include "controller.h"
 
 namespace ursa {
 
