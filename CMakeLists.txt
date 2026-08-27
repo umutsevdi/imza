@@ -145,7 +145,6 @@ add_library(ursa_agent
     src/agent/session.cpp
     src/agent/format.cpp
     src/agent/tools.cpp
-    src/agent/builtin_tools.cpp
     src/agent/command.cpp
 )
 target_include_directories(ursa_agent PRIVATE

@@ -3,7 +3,6 @@
 #include "pricing.h"
 
 #include <algorithm>
-#include <memory>
 #include <utility>
 
 namespace ursa {
@@ -70,14 +69,14 @@ std::vector<ConnectionView> ProviderStore::connections() const
         view.id          = connection.id;
         view.provider_id = connection.provider_id;
         view.api_key     = connection.api_key;
-        view.active = config_.last_used
-            && config_.last_used->provider == connection.id;
+        view.active
+            = config_.last_used && config_.last_used->provider == connection.id;
         if (connection.provider_id == kLocalProviderId) {
             view.name = "Local";
         } else if (connection.provider_id == kCustomProviderId) {
             view.name = "Custom";
-        } else if (const auto it = catalog_.providers.find(
-                       connection.provider_id);
+        } else if (const auto it
+            = catalog_.providers.find(connection.provider_id);
             it != catalog_.providers.end()) {
             view.name = it->second.name;
         }
@@ -124,8 +123,8 @@ ModelList ProviderStore::models_for(std::string_view connection_id) const
         }
         return list;
     }
-    list.state  = ModelList::State::READY;
-    list.models = ready->models;
+    list.state          = ModelList::State::READY;
+    list.models         = ready->models;
     const auto provider = catalog_.providers.find(connection->provider_id);
     if (provider == catalog_.providers.end()) {
         return list;
@@ -221,8 +220,7 @@ void ProviderStore::refetch_models(std::string_view connection_id)
     _notify_changed();
 }
 
-void ProviderStore::connect(
-    ConnectResult result, ConnectCompleteFn complete)
+void ProviderStore::connect(ConnectResult result, ConnectCompleteFn complete)
 {
     Route route;
     {
@@ -274,8 +272,8 @@ bool ProviderStore::remove_connection(std::string_view connection_id)
         if (config_.providers.size() <= 1) {
             return false;
         }
-        Config candidate = config_;
-        auto& providers  = candidate.providers;
+        Config candidate    = config_;
+        auto& providers     = candidate.providers;
         const auto old_size = providers.size();
         providers.erase(std::remove_if(providers.begin(), providers.end(),
                             [connection_id](const Connection& connection) {
@@ -307,8 +305,9 @@ bool ProviderStore::select_model(const ModelChoice& choice)
         if (_find_locked(choice.connection_id) == nullptr) {
             return false;
         }
-        Config candidate   = config_;
-        candidate.last_used = LastUsed { choice.connection_id, choice.model_id };
+        Config candidate = config_;
+        candidate.last_used
+            = LastUsed { choice.connection_id, choice.model_id };
         if (save_config(config_path(), candidate) != Status::OK) {
             return false;
         }
@@ -322,7 +321,7 @@ bool ProviderStore::set_reasoning_effort(std::string effort)
 {
     {
         std::lock_guard lock(mutex_);
-        Config candidate          = config_;
+        Config candidate           = config_;
         candidate.reasoning_effort = std::move(effort);
         if (save_config(config_path(), candidate) != Status::OK) {
             return false;
@@ -333,13 +332,13 @@ bool ProviderStore::set_reasoning_effort(std::string effort)
     return true;
 }
 
-void ProviderStore::remember_dialect(std::string_view connection_id,
-    std::string_view model, ApiStandard dialect)
+void ProviderStore::remember_dialect(
+    std::string_view connection_id, std::string_view model, ApiStandard dialect)
 {
     {
         std::lock_guard lock(mutex_);
         Config candidate = config_;
-        auto it = std::find_if(candidate.providers.begin(),
+        auto it          = std::find_if(candidate.providers.begin(),
             candidate.providers.end(), [connection_id](const Connection& item) {
                 return item.id == connection_id;
             });
@@ -386,17 +385,17 @@ void ProviderStore::ensure_catalog_fresh()
 
 Connection* ProviderStore::_find_locked(std::string_view id)
 {
-    const auto it = std::find_if(config_.providers.begin(),
-        config_.providers.end(),
-        [id](const Connection& connection) { return connection.id == id; });
+    const auto it
+        = std::find_if(config_.providers.begin(), config_.providers.end(),
+            [id](const Connection& connection) { return connection.id == id; });
     return it == config_.providers.end() ? nullptr : &*it;
 }
 
 const Connection* ProviderStore::_find_locked(std::string_view id) const
 {
-    const auto it = std::find_if(config_.providers.begin(),
-        config_.providers.end(),
-        [id](const Connection& connection) { return connection.id == id; });
+    const auto it
+        = std::find_if(config_.providers.begin(), config_.providers.end(),
+            [id](const Connection& connection) { return connection.id == id; });
     return it == config_.providers.end() ? nullptr : &*it;
 }
 
@@ -425,7 +424,7 @@ void ProviderStore::_start_fetch_locked(const std::string& connection_id)
     if (connection == nullptr) {
         return;
     }
-    const Route route = _route_locked(*connection, ApiStandard::OPENAI);
+    const Route route    = _route_locked(*connection, ApiStandard::OPENAI);
     const int generation = ++generations_[connection_id];
     if (route.api.empty()) {
         model_catalog_[connection_id]
@@ -445,8 +444,9 @@ void ProviderStore::_start_fetch_locked(const std::string& connection_id)
                 return;
             }
             if (status == Status::OK) {
-                model_catalog_[connection_id]
-                    = CatalogEntry { CatalogEntry::Ready { std::move(models) } };
+                model_catalog_[connection_id] = CatalogEntry {
+                    CatalogEntry::Ready { std::move(models) }
+                };
             } else {
                 model_catalog_[connection_id]
                     = CatalogEntry { CatalogEntry::Failed { status } };
@@ -503,8 +503,7 @@ Status ProviderStore::_commit_connection_locked(const ConnectResult& result,
     }
     config_ = std::move(candidate);
     ++generations_[id];
-    model_catalog_[id]
-        = CatalogEntry { CatalogEntry::Ready { models } };
+    model_catalog_[id] = CatalogEntry { CatalogEntry::Ready { models } };
     return Status::OK;
 }
 

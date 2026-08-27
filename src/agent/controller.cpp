@@ -2,7 +2,6 @@
 
 #include "commands.h"
 #include "environment.h"
-#include "pricing.h"
 #include "prompt.h"
 #include "util.h"
 
@@ -64,9 +63,8 @@ Controller::Controller(std::shared_ptr<Session> session, const Config& cfg,
                 }
             });
         });
-    provider_sub_ = providers_.subscribe([this] {
-        _post([this] { session_->bump_modal_serial(); });
-    });
+    provider_sub_ = providers_.subscribe(
+        [this] { _post([this] { session_->bump_modal_serial(); }); });
     _post([this] { providers_.start_model_fetches(); });
 }
 
@@ -112,10 +110,7 @@ void Controller::enqueue_user_modal(ModalPayload payload)
     }
 }
 
-void Controller::cancel_queued(std::size_t id)
-{
-    session_->cancel_queued(id);
-}
+void Controller::cancel_queued(std::size_t id) { session_->cancel_queued(id); }
 
 void Controller::interrupt()
 {
@@ -212,7 +207,7 @@ void Controller::submit_message(std::string text)
     }
     settings.route   = selection->route;
     settings.dialect = settings.route.dialect;
-    settings.mode = session_->mode();
+    settings.mode    = session_->mode();
     if (!get_environment()->ready()) {
         session_->enqueue_message(std::move(text));
         return;
@@ -220,15 +215,13 @@ void Controller::submit_message(std::string text)
     session_->clear_interrupt();
     session_->begin_send(std::move(text));
     _spawn(session_->build_history(_system_prompt(), settings.dialect),
-        has_stream_override_ ? stream_fn_ : StreamFn { },
-        std::move(settings));
+        has_stream_override_ ? stream_fn_ : StreamFn { }, std::move(settings));
 }
 
 std::string Controller::_system_prompt() const
 {
     const std::shared_ptr<Environment> env = get_environment();
-    return build_system_prompt(
-        env->system().get(), env->workspace().get());
+    return build_system_prompt(env->system().get(), env->workspace().get());
 }
 
 bool Controller::_model_reasons(const std::string& model) const
@@ -250,8 +243,8 @@ std::uint64_t Controller::_budget_for_effort(const std::string& effort) const
     return 8000;
 }
 
-void Controller::_set_reasoning(ChatRequest& req, ApiStandard dialect,
-    std::string_view configured_effort)
+void Controller::_set_reasoning(
+    ChatRequest& req, ApiStandard dialect, std::string_view configured_effort)
 {
     req.reasoning_effort.reset();
     req.thinking_budget.reset();
@@ -276,8 +269,8 @@ void Controller::_post(std::function<void()> f)
     }
 }
 
-void Controller::_spawn(std::vector<Message> history, StreamFn override,
-    TurnSettings settings)
+void Controller::_spawn(
+    std::vector<Message> history, StreamFn override, TurnSettings settings)
 {
     session_->append_assistant(settings.model, settings.reasoning_effort);
     worker_.emplace([this, history = std::move(history),
@@ -324,10 +317,7 @@ void Controller::refetch_models(const std::string& connection_id)
     providers_.refetch_models(connection_id);
 }
 
-void Controller::ensure_catalog_fresh()
-{
-    providers_.ensure_catalog_fresh();
-}
+void Controller::ensure_catalog_fresh() { providers_.ensure_catalog_fresh(); }
 
 std::vector<std::pair<std::string, std::string>>
 Controller::provider_options() const
@@ -347,9 +337,9 @@ void Controller::_begin_connect(const ConnectResult& result)
                 "✓ " + std::to_string(outcome.model_count) + " models");
             if (outcome.persisted
                 && std::holds_alternative<ConnectModal>(session_->modal())) {
-                session_->set_modal(ConnectModal {
-                    outcome.first_connection ? ConnectModal::Entry::PICK_MODEL
-                                             : ConnectModal::Entry::MANAGE });
+                session_->set_modal(ConnectModal { outcome.first_connection
+                        ? ConnectModal::Entry::PICK_MODEL
+                        : ConnectModal::Entry::MANAGE });
                 session_->bump_modal_serial();
             }
         });

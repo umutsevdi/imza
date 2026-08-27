@@ -11,7 +11,6 @@
 #include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
 #include <iomanip>
-#include <optional>
 #include <sstream>
 #include <string>
 
@@ -21,20 +20,20 @@ using namespace ftxui;
 class StatusLine : public ComponentBase {
 public:
     StatusLine(std::shared_ptr<Session> session, Controller& controller,
-            LayoutFn layout)
-            : session_(std::move(session))
-            , controller_(controller)
-            , layout_(std::move(layout)) { };
+        LayoutFn layout)
+        : session_(std::move(session))
+        , controller_(controller)
+        , layout_(std::move(layout)) { };
 
     Element OnRender() override
     {
         using namespace ftxui;
-        const StatusConfigView config = controller_.status_config();
+        const StatusConfigView config   = controller_.status_config();
         const Session::StatusView state = session_->status_view();
-        const LayoutCtx ctx = layout_();
-        const bool wide              = ctx.kind == LayoutCtx::Kind::WIDE;
-        const bool plan              = state.mode == Session::Mode::PLAN;
-        const bool environment_ready = get_environment()->ready();
+        const LayoutCtx ctx             = layout_();
+        const bool wide                 = ctx.kind == LayoutCtx::Kind::WIDE;
+        const bool plan                 = state.mode == Session::Mode::PLAN;
+        const bool environment_ready    = get_environment()->ready();
         Element mode = text(plan ? " PLAN " : " BUILD ") | bold
             | color(PANEL_COLOR_FOCUS)
             | bgcolor(plan ? Color::GreenLight : Color::RedLight);

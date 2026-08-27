@@ -8,7 +8,6 @@
 #include <ftxui/screen/terminal.hpp>
 
 #include <algorithm>
-#include <cstdio>
 #include <functional>
 #include <print>
 
@@ -42,10 +41,10 @@ namespace {
             , controller_(controller)
         {
             const LayoutFn layout = [this] { return layout_; };
-            side_ = make_side_panel(session_, controller, layout);
-            chat_ = make_chat(session_, controller, layout);
+            side_        = make_side_panel(session_, controller, layout);
+            chat_        = make_chat(session_, controller, layout);
             status_line_ = make_status_line(session_, controller, layout);
-            modal_ = make_modal(session_, controller);
+            modal_       = make_modal(session_, controller);
             Add(chat_);
         }
 
@@ -127,7 +126,8 @@ int run_repl(const Config& cfg)
     ScreenInteractive screen = ScreenInteractive::FullscreenAlternateScreen();
     ToolRegistry tools       = builtin_tools();
     auto session             = std::make_shared<Session>();
-    Controller controller(session, cfg,
+    Controller controller(
+        session, cfg,
         [&screen](std::function<void()> f) {
             screen.Post(std::move(f));
             screen.PostEvent(Event::Custom);

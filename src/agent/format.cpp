@@ -3,7 +3,6 @@
 #include <cctype>
 #include <filesystem>
 #include <string>
-#include <string_view>
 
 namespace ursa {
 

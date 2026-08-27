@@ -57,17 +57,17 @@ ftxui::Element diff_split(const DiffView& diff);
 ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx);
 ftxui::Element render_todo(const TodoList& todo, const LayoutCtx& ctx);
 ftxui::Element render_changed_files(
-    const std::vector<ChangedFile>& files, const LayoutCtx& ctx);
+    const std::string& files, const LayoutCtx& ctx);
 ftxui::Element render_help(const std::vector<SlashCommand>& commands);
 
 int run_repl(const Config& cfg);
 
-ftxui::Component make_chat(std::shared_ptr<Session> session,
-    Controller& controller, LayoutFn layout);
-ftxui::Component make_side_panel(std::shared_ptr<Session> session,
-    Controller& controller, LayoutFn layout);
-ftxui::Component make_status_line(std::shared_ptr<Session> session,
-    Controller& controller, LayoutFn layout);
+ftxui::Component make_chat(
+    std::shared_ptr<Session> session, Controller& controller, LayoutFn layout);
+ftxui::Component make_side_panel(
+    std::shared_ptr<Session> session, Controller& controller, LayoutFn layout);
+ftxui::Component make_status_line(
+    std::shared_ptr<Session> session, Controller& controller, LayoutFn layout);
 ftxui::Component make_connect(
     std::shared_ptr<Session> session, Controller& controller);
 ftxui::Component make_variant(

@@ -33,7 +33,8 @@ namespace {
             return std::nullopt;
         }
         ModelPricing pricing;
-        pricing.input_per_1k = model.cost_input.value_or(0.0) * kPerMillionToPerK;
+        pricing.input_per_1k
+            = model.cost_input.value_or(0.0) * kPerMillionToPerK;
         pricing.output_per_1k
             = model.cost_output.value_or(0.0) * kPerMillionToPerK;
         pricing.cache_read_per_1k
@@ -57,7 +58,8 @@ void set_pricing_catalog(const Catalog& catalog)
     std::map<std::string, ModelPricing> table;
     for (const auto& [provider_id, provider] : catalog.providers) {
         for (const auto& [model_id, model] : provider.models) {
-            const std::optional<ModelPricing> pricing = pricing_from_model(model);
+            const std::optional<ModelPricing> pricing
+                = pricing_from_model(model);
             if (!pricing) {
                 continue;
             }
@@ -77,7 +79,7 @@ ModelPricing get_pricing(std::string_view model_view)
     }
     std::lock_guard lock(pricing_mutex());
     const std::map<std::string, ModelPricing>& rows = pricing_table();
-    auto exact = rows.find(model);
+    auto exact                                      = rows.find(model);
     if (exact != rows.end()) {
         return exact->second;
     }
@@ -96,7 +98,7 @@ double compute_cost(const Usage& usage, const ModelPricing& pricing)
     const std::int64_t cached_write = std::min<std::int64_t>(
         usage.cached_write, usage.prompt - cached_read);
 
-    const double read_rate = pricing.cache_read_per_1k > 0.0
+    const double read_rate  = pricing.cache_read_per_1k > 0.0
         ? pricing.cache_read_per_1k
         : pricing.input_per_1k;
     const double write_rate = pricing.cache_write_per_1k > 0.0
@@ -105,8 +107,8 @@ double compute_cost(const Usage& usage, const ModelPricing& pricing)
 
     const std::int64_t plain_prompt
         = static_cast<std::int64_t>(usage.prompt) - cached_read - cached_write;
-    const double plain = (static_cast<double>(plain_prompt) / 1000.0)
-        * pricing.input_per_1k;
+    const double plain
+        = (static_cast<double>(plain_prompt) / 1000.0) * pricing.input_per_1k;
     const double read = (static_cast<double>(cached_read) / 1000.0) * read_rate;
     const double write
         = (static_cast<double>(cached_write) / 1000.0) * write_rate;

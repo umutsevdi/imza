@@ -112,7 +112,8 @@ namespace {
 
     class ModalImpl : public ComponentBase {
     public:
-        explicit ModalImpl(std::shared_ptr<Session> session, Controller& controller)
+        explicit ModalImpl(
+            std::shared_ptr<Session> session, Controller& controller)
             : session_(std::move(session))
             , controller_(controller)
         {
@@ -421,8 +422,8 @@ namespace {
                 if (parsed.isObject() && parsed["command"].isString()) {
                     cmd = parsed["command"].asString();
                 }
-                rows.push_back(code_block(cmd,
-                    shell_name(*get_environment()->system())));
+                rows.push_back(
+                    code_block(cmd, shell_name(*get_environment()->system())));
             } else if (req.name == "edit" || req.name == "write") {
                 rows.push_back(text(tool_request_summary(req.name, req.args))
                     | color(PANEL_FG));
@@ -494,7 +495,7 @@ namespace {
                     payload.lang);
             }
             return vbox({ header_line(payload.title), separatorEmpty(),
-                static_viewport(std::move(body), payload.metadata) })
+                       static_viewport(std::move(body), payload.metadata) })
                 | xflex;
         }
 
@@ -505,7 +506,8 @@ namespace {
                 | modal_content_height(&static_content_height_)
                 | vscroll_indicator
                 | focusPosition(0,
-                    static_scroll_ + std::max(0, static_viewport_lines() - 1) / 2)
+                    static_scroll_
+                        + std::max(0, static_viewport_lines() - 1) / 2)
                 | yframe | yflex | reflect(static_viewport_box_);
             Elements rows { std::move(viewport), separatorEmpty() };
             if (!metadata.empty()) {
@@ -595,7 +597,7 @@ namespace {
 
         ToolPhase tool_phase_ = ToolPhase::DECIDE;
         std::string reason_buf_;
-        int reason_cursor_   = 0;
+        int reason_cursor_         = 0;
         int static_scroll_         = 0;
         int static_content_height_ = 0;
         Box static_viewport_box_;
@@ -643,18 +645,17 @@ namespace {
             : session_(std::move(session))
             , controller_(controller)
         {
-            const auto modal
-                = std::get<VariantModal>(session_->modal());
-            options_          = modal.options;
-            selected_         = 0;
+            const auto modal = std::get<VariantModal>(session_->modal());
+            options_         = modal.options;
+            selected_        = 0;
             for (size_t i = 0; i < options_.size(); ++i) {
                 if (options_[i] == modal.current) {
                     selected_ = static_cast<int>(i);
                     break;
                 }
             }
-            radiobox_ = Radiobox(&options_, &selected_);
-            apply_    = action_button("Apply (Enter)", [&] { apply(); });
+            radiobox_  = Radiobox(&options_, &selected_);
+            apply_     = action_button("Apply (Enter)", [&] { apply(); });
             container_ = Container::Vertical({ radiobox_, apply_ });
             Add(container_);
         }
@@ -662,8 +663,7 @@ namespace {
         Element OnRender() override
         {
             Elements rows;
-            rows.push_back(
-                section_title("Reasoning effort", Color::GrayLight));
+            rows.push_back(section_title("Reasoning effort", Color::GrayLight));
             rows.push_back(radiobox_->Render());
             rows.push_back(separatorEmpty());
             rows.push_back(apply_->Render() | center);
@@ -671,7 +671,7 @@ namespace {
             rows.push_back(text("arrows navigate · Enter apply · Esc close")
                 | dim | center);
             return vbox({ separatorEmpty(), vbox(std::move(rows)),
-                separatorEmpty() })
+                       separatorEmpty() })
                 | xflex;
         }
 

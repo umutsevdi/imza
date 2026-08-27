@@ -5,7 +5,6 @@
 #include "pricing.h"
 #include "prompt.h"
 
-#include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <string>
@@ -215,8 +214,7 @@ void Session::cancel_queued(std::size_t id)
 void Session::enqueue_message(std::string text)
 {
     std::lock_guard lock(mutex_);
-    queued_.push_back(
-        QueuedMessage { next_queued_id_++, std::move(text) });
+    queued_.push_back(QueuedMessage { next_queued_id_++, std::move(text) });
 }
 
 std::optional<QueuedMessage> Session::pop_queued()
@@ -241,10 +239,8 @@ void Session::begin_send(std::string text)
 void Session::append_assistant(std::string model, std::string reasoning_effort)
 {
     std::lock_guard lock(mutex_);
-    items_.push_back(AssistantTurn {
-        .model = std::move(model),
-        .reasoning_effort = std::move(reasoning_effort)
-    });
+    items_.push_back(AssistantTurn { .model = std::move(model),
+        .reasoning_effort                   = std::move(reasoning_effort) });
 }
 
 void Session::set_last_assistant_metadata(
@@ -252,7 +248,7 @@ void Session::set_last_assistant_metadata(
 {
     std::lock_guard lock(mutex_);
     if (AssistantTurn* assistant = last_assistant_locked()) {
-        assistant->model = std::move(model);
+        assistant->model            = std::move(model);
         assistant->reasoning_effort = std::move(reasoning_effort);
     }
 }
@@ -269,8 +265,8 @@ void Session::append_tool(const ToolCallRequest& req)
     if (auto* a = last_assistant_locked()) {
         finalize_reasoning(*a);
     }
-    items_.push_back(ToolCall { next_tool_id_++, req.id, req.name, req.args,
-        std::nullopt });
+    items_.push_back(
+        ToolCall { next_tool_id_++, req.id, req.name, req.args, std::nullopt });
 }
 
 void Session::fill_tool_result(
@@ -282,9 +278,9 @@ void Session::fill_tool_result(
         if (tc == nullptr || tc->result.has_value()) {
             continue;
         }
-        const bool matched = !req.id.empty() ? tc->call_id == req.id
-                                             : tc->name == req.name
-                            && tc->args == req.args;
+        const bool matched = !req.id.empty()
+            ? tc->call_id == req.id
+            : tc->name == req.name && tc->args == req.args;
         if (matched) {
             tc->result = std::move(result);
             return;
@@ -336,7 +332,7 @@ void Session::set_phase(Phase phase)
 void Session::mark_retry(int wait_seconds)
 {
     std::lock_guard lock(mutex_);
-    phase_ = Phase::CONNECTING;
+    phase_           = Phase::CONNECTING;
     retry_countdown_ = Countdown { std::chrono::steady_clock::now()
         + std::chrono::seconds(wait_seconds) };
 }
@@ -403,8 +399,8 @@ std::vector<Message> Session::build_history(
             }
             history.back().tool_calls.push_back(
                 ToolCallEntry { tc->call_id, tc->name, tc->args });
-            history.push_back(
-                { Message::Type::TOOL, tool_result_text(*tc), { }, tc->call_id });
+            history.push_back({ Message::Type::TOOL, tool_result_text(*tc), { },
+                tc->call_id });
         }
     }
 
@@ -479,7 +475,9 @@ void Session::apply(const StreamEvent& ev, const ModelPricing& pricing)
             finalize_reasoning(*a);
         }
         break;
-    case StreamEvent::Kind::ERROR: finish_session_locked(error_text(ev.error)); break;
+    case StreamEvent::Kind::ERROR:
+        finish_session_locked(error_text(ev.error));
+        break;
     case StreamEvent::Kind::CONNECTED:
         if (phase_ == Phase::CONNECTING) {
             error_.clear();
@@ -527,11 +525,11 @@ void Session::finish_session_locked(const std::string& error)
 void Session::update_usage(
     const StreamEvent& usage_event, const ModelPricing& pricing)
 {
-    last_          = usage_event.usage;
+    last_ = usage_event.usage;
     totals_.prompt += usage_event.usage.prompt;
     totals_.completion += usage_event.usage.completion;
     totals_.total += usage_event.usage.total;
-    last_cost_  = compute_cost(usage_event.usage, pricing);
+    last_cost_ = compute_cost(usage_event.usage, pricing);
     total_cost_ += last_cost_;
 }
 

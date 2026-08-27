@@ -2,7 +2,6 @@
 
 #include "format.h"
 #include "pricing.h"
-#include "util.h"
 
 #include <algorithm>
 #include <chrono>
@@ -11,7 +10,6 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -20,8 +18,8 @@ namespace ursa {
 
 namespace {
 
-    bool auto_approved_in_project(const std::string& name,
-        const std::string& args)
+    bool auto_approved_in_project(
+        const std::string& name, const std::string& args)
     {
         if (name != "edit" && name != "write") {
             return false;
@@ -87,18 +85,18 @@ namespace {
 
 } // namespace
 
-void Controller::_drive(std::vector<Message> history, StreamFn override,
-    TurnSettings settings)
+void Controller::_drive(
+    std::vector<Message> history, StreamFn override, TurnSettings settings)
 {
     int retries = 0;
     for (;;) {
         ChatRequest req;
-        req.model = settings.model;
+        req.model    = settings.model;
         req.messages = history;
-        req.tools = settings.mode == Session::Mode::PLAN ? specs_plan_ : specs_all_;
-        req.interrupted = [session = session_] {
-            return session->interrupt_requested();
-        };
+        req.tools
+            = settings.mode == Session::Mode::PLAN ? specs_plan_ : specs_all_;
+        req.interrupted
+            = [session = session_] { return session->interrupt_requested(); };
         session_->reset_reasoning();
         stream_events_.clear();
         std::string text_buffer;
@@ -106,8 +104,8 @@ void Controller::_drive(std::vector<Message> history, StreamFn override,
         Status error_status = Status::OK;
         bool saw_stream     = false;
 
-        StreamCallback cb = [this, model = req.model, &text_buffer,
-                                &error_msg, &error_status,
+        StreamCallback cb = [this, model = req.model, &text_buffer, &error_msg,
+                                &error_status,
                                 &saw_stream](const StreamEvent& ev) {
             if (ev.kind == StreamEvent::Kind::ERROR) {
                 error_status = ev.error;
@@ -143,8 +141,8 @@ void Controller::_drive(std::vector<Message> history, StreamFn override,
                 : settings.reasoning_effort == "off"
                 ? std::nullopt
                 : std::optional<std::string>(settings.reasoning_effort);
-            current_model = req.model;
-            current_effort = settings.reasoning_effort;
+            current_model        = req.model;
+            current_effort       = settings.reasoning_effort;
             session_->set_last_assistant_metadata(
                 current_model, current_effort);
             st = fn(req, cb);
@@ -152,7 +150,7 @@ void Controller::_drive(std::vector<Message> history, StreamFn override,
             Route route = settings.route;
             _set_reasoning(req, route.dialect, settings.reasoning_effort);
             active_dialect = route.dialect;
-            current_model = req.model;
+            current_model  = req.model;
             current_effort = req.reasoning_effort.has_value()
                     || req.thinking_budget.has_value()
                 ? settings.reasoning_effort
@@ -173,8 +171,8 @@ void Controller::_drive(std::vector<Message> history, StreamFn override,
                     retry_after_secs_ = 0;
                     error_status      = Status::OK;
                     error_msg.clear();
-                    _set_reasoning(req, ApiStandard::ANTHROPIC,
-                        settings.reasoning_effort);
+                    _set_reasoning(
+                        req, ApiStandard::ANTHROPIC, settings.reasoning_effort);
                     st = stream(
                         get_provider(alt), alt, req, cb, &retry_after_secs_);
                     active_dialect = ApiStandard::ANTHROPIC;
@@ -327,7 +325,7 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
                 tool_msgs.push_back({ Message::Type::TOOL, text, { }, req.id });
                 continue;
             }
-            const Tool* tool          = tools_.find(ev.tool_call.name);
+            const Tool* tool    = tools_.find(ev.tool_call.name);
             bool needs_approval = tool != nullptr
                 && tool->safety == ToolSafety::MUTATING
                 && allowed_tools_.count(ev.tool_call.name) == 0;
@@ -417,8 +415,8 @@ void Controller::_apply_tool_result(const ToolCallRequest& req,
     const auto* verdict = std::get_if<ToolVerdict>(&res);
     if (verdict == nullptr) {
         _post([this, req] {
-            session_->fill_tool_result(req,
-                ToolCall::Result { ToolCall::Result::Kind::CANCEL, "" });
+            session_->fill_tool_result(
+                req, ToolCall::Result { ToolCall::Result::Kind::CANCEL, "" });
         });
         tool_msgs.push_back(
             { Message::Type::TOOL, denial_text(""), { }, req.id });
@@ -463,8 +461,8 @@ void Controller::_apply_ask_result(const ToolCallRequest& req,
     const auto* answer = std::get_if<ModalAnswer>(&res);
     if (answer == nullptr) {
         _post([this, req] {
-            session_->fill_tool_result(req,
-                ToolCall::Result { ToolCall::Result::Kind::CANCEL, "" });
+            session_->fill_tool_result(
+                req, ToolCall::Result { ToolCall::Result::Kind::CANCEL, "" });
         });
         tool_msgs.push_back(
             { Message::Type::TOOL, denial_text(""), { }, req.id });
@@ -473,8 +471,8 @@ void Controller::_apply_ask_result(const ToolCallRequest& req,
     ModalAnswer copy       = *answer;
     const std::string text = ask_answer_markdown(copy);
     _post([this, req, text] {
-        session_->fill_tool_result(req,
-            ToolCall::Result { ToolCall::Result::Kind::OUTPUT, text });
+        session_->fill_tool_result(
+            req, ToolCall::Result { ToolCall::Result::Kind::OUTPUT, text });
     });
     tool_msgs.push_back({ Message::Type::TOOL, text, { }, req.id });
 }

@@ -1,3 +1,4 @@
+#include "command.h"
 #include "ui.h"
 
 #include "environment.h"
@@ -6,7 +7,9 @@
 #include <ftxui/component/component.hpp>
 #include <ftxui/dom/elements.hpp>
 
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace ursa {
@@ -14,10 +17,31 @@ using namespace ftxui;
 class SidePanel : public ComponentBase {
 public:
     SidePanel(std::shared_ptr<Session> session, Controller& controller,
-            LayoutFn layout)
-            : session_(std::move(session))
-            , controller_(controller)
-            , layout_(std::move(layout)) { };
+        LayoutFn layout)
+        : session_(std::move(session))
+        , controller_(controller)
+        , layout_(std::move(layout))
+    {
+        changed_files_checker_
+            = std::jthread([this](const std::stop_token& stop) {
+                  while (!stop.stop_requested()) {
+                      auto ws = workspace_.load();
+                      if (ws) {
+                          std::string out = run_command(
+                              "git status --short", std::chrono::seconds { 1 })
+                                                .output;
+                          {
+                              std::unique_lock g { display_mutex_ };
+                              if (out != display_) {
+                                  display_ = out;
+                                  animation::RequestAnimationFrame();
+                              }
+                          }
+                      }
+                      std::this_thread::sleep_for(std::chrono::seconds { 2 });
+                  }
+              });
+    };
 
     Element OnRender() override
     {
@@ -29,8 +53,22 @@ public:
         }
 
         if (!narrow) {
-            parts.push_back(render_changed_files(
-                session_->changed_files(), ctx) | yflex);
+            auto env = get_environment();
+            if (env->ready() && !subscription_started_) {
+                subscription_started_ = true;
+                env->subscribe_to_workspace_change(
+                    [this](const std::shared_ptr<const WorkspaceEnvironment>&
+                            wsenv) { workspace_ = (wsenv); });
+            }
+
+            {
+                std::shared_lock g { display_mutex_ };
+                if (!display_.empty()) {
+                    parts.push_back(
+                        render_changed_files(display_, ctx) | yflex);
+                }
+            }
+
             const std::optional<std::string>& rules
                 = get_environment()->agent_rules_path();
             if (rules) {
@@ -64,7 +102,12 @@ public:
 private:
     std::shared_ptr<Session> session_;
     Controller& controller_;
+    std::shared_mutex display_mutex_;
+    std::string display_;
     LayoutFn layout_;
+    std::atomic<bool> subscription_started_ { false };
+    std::atomic<std::shared_ptr<const WorkspaceEnvironment>> workspace_;
+    std::jthread changed_files_checker_;
 };
 
 ftxui::Component make_side_panel(
@@ -139,16 +182,10 @@ Element render_todo(const TodoList& todo, const LayoutCtx&)
     return vbox({ section_title("Todo"), std::move(body) });
 }
 
-Element render_changed_files(
-    const std::vector<ChangedFile>& files, const LayoutCtx&)
+Element render_changed_files(const std::string& files, const LayoutCtx&)
 {
-    Elements parts;
-    for (const auto& f : files) {
-        parts.push_back(changed_file_item(f));
-    }
-    Element body = parts.empty()
-        ? dim(text("no changes"))
-        : vbox(std::move(parts)) | borderStyled(ROUNDED, PANEL_BORDER);
+    Element body
+        = vbox(dim(paragraph(files)) | borderStyled(ROUNDED, PANEL_BORDER));
     return vbox({ section_title("Changed files"), std::move(body) });
 }
 
