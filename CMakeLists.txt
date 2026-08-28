@@ -139,6 +139,7 @@ target_link_libraries(ursa_provider PUBLIC
 
 # Agent: orchestration, formatting, slash commands (ftxui-free)
 add_library(ursa_agent
+    src/agent/attachments.cpp
     src/agent/controller.cpp
     src/agent/stream_loop.cpp
     src/agent/commands.cpp

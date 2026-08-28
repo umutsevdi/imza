@@ -386,26 +386,6 @@ namespace {
         std::size_t new_end;
     };
 
-    std::size_t line_of_offset(
-        const std::vector<std::string>& lines, std::size_t off)
-    {
-        std::size_t pos = 0;
-        for (std::size_t i = 0; i < lines.size(); ++i) {
-            const std::size_t len = lines[i].size();
-            if (off < pos + len) {
-                return i;
-            }
-            pos += len;
-            if (i + 1 < lines.size()) {
-                if (off == pos) {
-                    return i + 1;
-                }
-                ++pos;
-            }
-        }
-        return lines.size();
-    }
-
     long get_int(const Json::Value& v, long def)
     {
         if (v.isIntegral()) {
@@ -509,9 +489,25 @@ namespace {
 
     ToolOutput make_diff_result(std::string summary, const std::string& path,
         const std::vector<std::string>& old_lines,
-        const std::vector<std::string>& new_lines,
-        const std::vector<EditSpan>& edits)
+        const std::vector<std::string>& new_lines)
     {
+        std::size_t prefix = 0;
+        while (prefix < old_lines.size() && prefix < new_lines.size()
+            && old_lines[prefix] == new_lines[prefix]) {
+            ++prefix;
+        }
+        std::size_t old_suffix = old_lines.size();
+        std::size_t new_suffix = new_lines.size();
+        while (old_suffix > prefix && new_suffix > prefix
+            && old_lines[old_suffix - 1] == new_lines[new_suffix - 1]) {
+            --old_suffix;
+            --new_suffix;
+        }
+        std::vector<EditSpan> edits;
+        if (prefix != old_lines.size() || prefix != new_lines.size()) {
+            edits.push_back(
+                { prefix, old_suffix, prefix, new_suffix });
+        }
         ToolOutput out { ToolOutput::Kind::OUTPUT, std::move(summary) };
         out.diff = build_diff_view(path, old_lines, new_lines, edits);
         return out;
@@ -578,54 +574,27 @@ namespace {
             : std::min(static_cast<std::size_t>(replace_count), matches.size());
 
         const std::vector<std::string> old_lines = split_lines(content);
-        std::vector<std::string> new_lines;
-        new_lines.reserve(old_lines.size());
-        std::vector<EditSpan> edits;
-        std::size_t consumed = 0;
         std::size_t replaced = 0;
         std::string out;
-        out.reserve(content.size());
+        out.reserve(content.size() + n * fresh.size());
         std::size_t cursor = 0;
-        for (std::size_t idx = 0; idx < matches.size(); ++idx) {
+        for (std::size_t idx = 0; idx < n; ++idx) {
             const std::size_t match   = matches[idx];
-            const bool do_replace     = idx < n;
             const std::size_t m_end   = match + old.size();
-            const std::size_t l_start = line_of_offset(old_lines, match);
-            const std::size_t l_end   = line_of_offset(old_lines, m_end);
-            for (; consumed < l_start && consumed < old_lines.size();
-                ++consumed) {
-                new_lines.push_back(old_lines[consumed]);
-            }
-            if (do_replace) {
-                const std::size_t nb = new_lines.size();
-                const auto repl      = split_lines(fresh);
-                for (const auto& rl : repl) {
-                    new_lines.push_back(rl);
-                }
-                edits.push_back({ l_start, l_end, nb, new_lines.size() });
-                consumed = l_end;
-                out += fresh;
-                ++replaced;
-            } else {
-                for (; consumed < l_end && consumed < old_lines.size();
-                    ++consumed) {
-                    new_lines.push_back(old_lines[consumed]);
-                }
-                out += old;
-            }
+            out.append(content, cursor, match - cursor);
+            out += fresh;
+            ++replaced;
             cursor = m_end;
         }
         out += content.substr(cursor);
-        for (; consumed < old_lines.size(); ++consumed) {
-            new_lines.push_back(old_lines[consumed]);
-        }
+        const std::vector<std::string> new_lines = split_lines(out);
 
         if (!save_text(path, out, err)) {
             return error("edit: " + err);
         }
         return make_diff_result("edit: replaced " + std::to_string(replaced)
                 + " occurrence(s) in " + path,
-            path, old_lines, new_lines, edits);
+            path, old_lines, new_lines);
     }
 
     ToolOutput write_run(const Json::Value& args)
@@ -662,7 +631,6 @@ namespace {
         const std::vector<std::string> old_lines = split_lines(content);
         const std::vector<std::string> insert    = split_lines(text);
         std::vector<std::string> new_lines       = old_lines;
-        std::vector<EditSpan> edits;
 
         if (!overwrite) {
             const long line = get_int(args["line"], 0);
@@ -676,14 +644,13 @@ namespace {
             new_lines.insert(
                 new_lines.begin() + static_cast<std::ptrdiff_t>(at),
                 insert.begin(), insert.end());
-            edits.push_back({ at, at, at, at + insert.size() });
             const std::string out = rebuild_lines(new_lines, trailing_newline);
             if (!save_text(path, out, err)) {
                 return error("write: " + err);
             }
             return make_diff_result("write: inserted text below line "
                     + std::to_string(line) + " in " + path,
-                path, old_lines, new_lines, edits);
+                path, old_lines, new_lines);
         }
 
         if (!args["line_begin"].isIntegral()
@@ -700,39 +667,36 @@ namespace {
         if (lb < 0 || le < 0) {
             return error("write: line_begin/line_end must be 0 or greater");
         }
-        if (le < lb) {
+        if (le != 0 && lb != 0 && le < lb) {
             return error("write: line_end is before line_begin");
         }
 
         std::size_t begin_idx = lb == 0 ? 0 : static_cast<std::size_t>(lb - 1);
-        std::size_t end_incl
-            = le == 0 ? old_lines.size() : static_cast<std::size_t>(le - 1);
+        std::size_t end_exclusive
+            = le == 0 ? old_lines.size() : static_cast<std::size_t>(le);
         if (begin_idx > old_lines.size()) {
             begin_idx = old_lines.size();
         }
-        if (end_incl > old_lines.size()) {
-            end_incl = old_lines.size();
+        if (end_exclusive > old_lines.size()) {
+            end_exclusive = old_lines.size();
         }
-        if (end_incl < begin_idx) {
-            end_incl = begin_idx;
+        if (end_exclusive < begin_idx) {
+            end_exclusive = begin_idx;
         }
 
         new_lines.erase(
             new_lines.begin() + static_cast<std::ptrdiff_t>(begin_idx),
-            new_lines.begin() + static_cast<std::ptrdiff_t>(end_incl));
+            new_lines.begin() + static_cast<std::ptrdiff_t>(end_exclusive));
         new_lines.insert(
             new_lines.begin() + static_cast<std::ptrdiff_t>(begin_idx),
             insert.begin(), insert.end());
-        edits.push_back(
-            { begin_idx, end_incl, begin_idx, begin_idx + insert.size() });
-
         const std::string out = rebuild_lines(new_lines, trailing_newline);
         if (!save_text(path, out, err)) {
             return error("write: " + err);
         }
         return make_diff_result("write: replaced lines " + std::to_string(lb)
                 + "-" + std::to_string(le) + " in " + path,
-            path, old_lines, new_lines, edits);
+            path, old_lines, new_lines);
     }
 
 } // namespace

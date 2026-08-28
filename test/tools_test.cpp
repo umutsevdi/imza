@@ -1,8 +1,10 @@
 #include <doctest/doctest.h>
 #include <json/json.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 
 #include "tools.h"
 
@@ -21,6 +23,23 @@ namespace {
                     args.get("msg", "").asString() };
             } });
         return tools;
+    }
+
+    std::string read_file(const std::filesystem::path& path)
+    {
+        std::ifstream file(path, std::ios::binary);
+        std::ostringstream content;
+        content << file.rdbuf();
+        return content.str();
+    }
+
+    bool diff_has_right(const ToolOutput& out, std::string_view line)
+    {
+        if (!out.diff) {
+            return false;
+        }
+        return std::any_of(out.diff->rows.begin(), out.diff->rows.end(),
+            [&](const DiffRow& row) { return row.right == line; });
     }
 
 } // namespace
@@ -130,6 +149,92 @@ TEST_CASE("edit produces a diff whose right side holds the new content")
     }
     CHECK(saw_new);
     CHECK_FALSE(saw_old_on_right);
+
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+}
+
+TEST_CASE("edit preserves text around partial-line replacements")
+{
+    const auto path = std::filesystem::temp_directory_path()
+        / "ursa_edit_partial_test.txt";
+    {
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        file << "prefix old suffix\nsecond line\n";
+    }
+    const Tool tool = make_edit_tool();
+    const ToolOutput out = tool.run(parse_json(std::string(R"({"file_path":")")
+        + path.string()
+        + R"(","old_string":"old","new_string":"new"})"));
+
+    REQUIRE(out.kind == ToolOutput::Kind::OUTPUT);
+    CHECK(read_file(path) == "prefix new suffix\nsecond line\n");
+    CHECK(diff_has_right(out, "prefix new suffix"));
+
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+}
+
+TEST_CASE("edit preserves gaps while replacing multiple occurrences")
+{
+    const auto path = std::filesystem::temp_directory_path()
+        / "ursa_edit_multiple_test.txt";
+    {
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        file << "old middle old tail\n";
+    }
+    const Tool tool = make_edit_tool();
+    const ToolOutput out = tool.run(parse_json(std::string(R"({"file_path":")")
+        + path.string()
+        + R"(","old_string":"old","new_string":"new","replace_count":0})"));
+
+    REQUIRE(out.kind == ToolOutput::Kind::OUTPUT);
+    CHECK(read_file(path) == "new middle new tail\n");
+    CHECK(diff_has_right(out, "new middle new tail"));
+
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+}
+
+TEST_CASE("write replaces an inclusive line range and reports final content")
+{
+    const auto path = std::filesystem::temp_directory_path()
+        / "ursa_write_range_test.txt";
+    {
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        file << "one\ntwo\nthree\nfour\n";
+    }
+    const Tool tool = make_write_tool();
+    const ToolOutput out = tool.run(parse_json(std::string(R"({"file_path":")")
+        + path.string()
+        + R"(","text":"replacement","overwrite":true,"line_begin":2,"line_end":3})"));
+
+    REQUIRE(out.kind == ToolOutput::Kind::OUTPUT);
+    CHECK(read_file(path) == "one\nreplacement\nfour\n");
+    CHECK(diff_has_right(out, "replacement"));
+    CHECK_FALSE(diff_has_right(out, "two"));
+    CHECK_FALSE(diff_has_right(out, "three"));
+
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+}
+
+TEST_CASE("write line_end zero replaces through the end")
+{
+    const auto path = std::filesystem::temp_directory_path()
+        / "ursa_write_to_end_test.txt";
+    {
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        file << "one\ntwo\nthree\n";
+    }
+    const Tool tool = make_write_tool();
+    const ToolOutput out = tool.run(parse_json(std::string(R"({"file_path":")")
+        + path.string()
+        + R"(","text":"last","overwrite":true,"line_begin":2,"line_end":0})"));
+
+    REQUIRE(out.kind == ToolOutput::Kind::OUTPUT);
+    CHECK(read_file(path) == "one\nlast\n");
+    CHECK(diff_has_right(out, "last"));
 
     std::error_code ec;
     std::filesystem::remove(path, ec);

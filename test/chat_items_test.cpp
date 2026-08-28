@@ -27,6 +27,15 @@ TEST_CASE("render_item renders a user turn")
     CHECK(out.find("hello") != std::string::npos);
 }
 
+TEST_CASE("render_item renders user attachment labels")
+{
+    ursa::ConversationItem it = ursa::UserTurn {
+        "review", { { "src/main.cpp", "int main() {}" } } };
+    const std::string out
+        = to_text(ursa::render_item(it, { ursa::LayoutCtx::Kind::WIDE, 60 }));
+    CHECK(out.find("@src/main.cpp") != std::string::npos);
+}
+
 TEST_CASE("render_item renders assistant markdown")
 {
     ursa::ConversationItem it = ursa::AssistantTurn { "# Title\n" };

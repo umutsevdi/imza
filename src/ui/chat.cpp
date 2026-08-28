@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <string>
@@ -17,6 +18,7 @@
 #include <vector>
 
 #include "format.h"
+#include "attachments.h"
 #include "util.h"
 
 namespace ursa {
@@ -116,7 +118,16 @@ namespace {
 
     Element user_item(const UserTurn& t)
     {
-        return card(render_markdown_element(t.text), PANEL_COLOR, false);
+        Elements rows { render_markdown_element(t.text) };
+        if (!t.attachments.empty()) {
+            Elements chips { filler() };
+            for (const auto& attachment : t.attachments) {
+                chips.push_back(text(" @" + attachment.path + " ") | inverted);
+                chips.push_back(text(" "));
+            }
+            rows.push_back(hbox(std::move(chips)));
+        }
+        return card(vbox(std::move(rows)), PANEL_COLOR, false);
     }
 
     Element assistant_item(const AssistantTurn& t)
@@ -337,7 +348,7 @@ namespace {
             bottom.push_back(
                 hbox({
                     filler(),
-                    text("Tab: switch mode, Alt+Enter: multi line input")
+                    text("Tab switch mode · @ attach file · Alt+Enter add line")
                         | color(PANEL_FG_DIM),
                     text(" "),
                 })
@@ -389,6 +400,8 @@ namespace {
             if (event == Event::Escape) {
                 if (show_suggestions()) {
                     matches_.clear();
+                    file_matches_.clear();
+                    attachment_token_.reset();
                     return true;
                 }
                 if (!session_->queued().empty()) {
@@ -403,11 +416,11 @@ namespace {
             }
             if (show_suggestions()) {
                 if (event == Event::ArrowDown) {
-                    sel_ = (sel_ + 1) % static_cast<int>(matches_.size());
+                    sel_ = (sel_ + 1) % suggestion_count();
                     return true;
                 }
                 if (event == Event::ArrowUp) {
-                    const int n = static_cast<int>(matches_.size());
+                    const int n = suggestion_count();
                     sel_        = (sel_ - 1 + n) % n;
                     return true;
                 }
@@ -416,7 +429,11 @@ namespace {
                     return true;
                 }
                 if (event == Event::Return) {
-                    execute_selected();
+                    const bool file_suggestion = !file_matches_.empty();
+                    accept();
+                    if (!file_suggestion) {
+                        submit();
+                    }
                     return true;
                 }
             }
@@ -521,6 +538,7 @@ namespace {
         void on_input_changed()
         {
             controller_.clear_error();
+            retain_mentioned_attachments(input_buf_, attachments_);
             refresh_suggestions();
         }
 
@@ -536,7 +554,8 @@ namespace {
             const std::string text(input_buf_);
             input_buf_.clear();
             input_cursor_ = 0;
-            controller_.submit(std::move(text));
+            controller_.submit(std::move(text), std::move(attachments_));
+            attachments_.clear();
             follow_ = true;
             animation::RequestAnimationFrame();
         }
@@ -544,8 +563,17 @@ namespace {
         void refresh_suggestions()
         {
             matches_.clear();
+            file_matches_.clear();
+            attachment_token_.reset();
             sel_                   = 0;
             const std::string text = input_buf_;
+            attachment_token_ = attachment_token_at(
+                text, static_cast<std::size_t>(input_cursor_));
+            if (attachment_token_) {
+                file_matches_ = attachment_candidates(std::filesystem::current_path(),
+                    attachment_token_->query);
+                return;
+            }
             if (text.empty() || text[0] != '/'
                 || text.find(' ') != std::string::npos) {
                 return;
@@ -565,52 +593,113 @@ namespace {
 
         void accept()
         {
+            if (!file_matches_.empty() && attachment_token_) {
+                const AttachmentCandidate& candidate = file_matches_[sel_];
+                const std::string replacement = "@" + candidate.path;
+                input_buf_.replace(attachment_token_->begin,
+                    attachment_token_->end - attachment_token_->begin,
+                    replacement);
+                input_cursor_ = static_cast<int>(
+                    attachment_token_->begin + replacement.size());
+                if (candidate.directory) {
+                    refresh_suggestions();
+                    return;
+                }
+                AttachmentResult loaded = load_attachment(
+                    std::filesystem::current_path(), candidate.path);
+                if (!loaded.attachment) {
+                    controller_.set_error(std::move(loaded.error));
+                    refresh_suggestions();
+                    return;
+                }
+                const auto duplicate = std::find_if(attachments_.begin(),
+                    attachments_.end(), [&](const FileAttachment& attachment) {
+                        return attachment.path == loaded.attachment->path;
+                    });
+                if (duplicate == attachments_.end()) {
+                    constexpr std::size_t kMaxAttachments = 20;
+                    constexpr std::size_t kMaxTotalBytes  = 4 * 1024 * 1024;
+                    std::size_t total = loaded.attachment->content.size();
+                    for (const auto& attachment : attachments_) {
+                        total += attachment.content.size();
+                    }
+                    if (attachments_.size() >= kMaxAttachments
+                        || total > kMaxTotalBytes) {
+                        controller_.set_error(
+                            "attachments exceed the 20 file or 4 MiB total limit");
+                        refresh_suggestions();
+                        return;
+                    }
+                    attachments_.push_back(std::move(*loaded.attachment));
+                }
+                input_buf_.insert(input_cursor_, " ");
+                ++input_cursor_;
+                matches_.clear();
+                file_matches_.clear();
+                attachment_token_.reset();
+                return;
+            }
             const SlashCommand* cmd = matches_[sel_];
             input_buf_              = cmd->name;
             input_cursor_           = static_cast<int>(input_buf_.size());
             refresh_suggestions();
         }
 
-        void execute_selected()
+        int suggestion_count() const
         {
-            const SlashCommand* cmd = matches_[sel_];
-            input_buf_              = cmd->name;
-            input_cursor_           = static_cast<int>(input_buf_.size());
-            matches_.clear();
-            sel_ = 0;
-            submit();
+            return static_cast<int>(file_matches_.empty() ? matches_.size()
+                                                          : file_matches_.size());
         }
 
-        bool show_suggestions() const { return !matches_.empty(); }
+        bool show_suggestions() const { return suggestion_count() > 0; }
 
         Element render_suggestions()
         {
             const size_t max_rows = 8;
-            const size_t total    = matches_.size();
+            const size_t total = file_matches_.empty() ? matches_.size()
+                                                        : file_matches_.size();
             const size_t shown    = std::min(total, max_rows);
+            const size_t selected = static_cast<size_t>(std::max(0, sel_));
+            const size_t first    = selected < shown
+                ? 0
+                : std::min(selected - shown + 1, total - shown);
             Elements rows;
-            for (size_t i = 0; i < shown; ++i) {
-                const SlashCommand& c = *matches_[i];
+            if (first > 0) {
+                rows.push_back(text("  ↑ " + std::to_string(first) + " more")
+                    | dim | color(PANEL_FG_DIM));
+            }
+            for (size_t row_index = 0; row_index < shown; ++row_index) {
+                const size_t i        = first + row_index;
                 const bool sel        = static_cast<int>(i) == sel_;
-                Element name          = text(c.name);
+                const std::string name_text = file_matches_.empty()
+                    ? matches_[i]->name
+                    : "@" + file_matches_[i].path;
+                Element name = text(name_text);
                 if (sel) {
                     name = name | bold;
                 }
                 Element row = hbox({
-                    name,
-                    text("   "),
-                    text(c.desc) | dim | color(PANEL_FG_DIM),
+                    std::move(name) | xflex,
+                    text("  "),
+                    text(file_matches_.empty() ? matches_[i]->desc
+                                               : (file_matches_[i].directory
+                                                         ? "directory"
+                                                         : "file"))
+                        | dim | color(PANEL_FG_DIM),
                 });
-                row = row | (sel ? bgcolor(Color::Blue) : bgcolor(PANEL_COLOR));
+                row = row | xflex
+                    | (sel ? bgcolor(PANEL_COLOR_FOCUS)
+                           : bgcolor(PANEL_COLOR));
                 rows.push_back(std::move(row));
             }
-            if (total > shown) {
-                rows.push_back(
-                    text("  … " + std::to_string(total - shown) + " more") | dim
-                    | color(PANEL_FG_DIM));
+            const size_t remaining = total - first - shown;
+            if (remaining > 0) {
+                rows.push_back(text(
+                    "  ↓ " + std::to_string(remaining) + " more")
+                    | dim | color(PANEL_FG_DIM));
             }
-            return vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER)
-                | bgcolor(PANEL_COLOR) | color(PANEL_FG);
+            return vbox(std::move(rows)) | xflex | bgcolor(PANEL_COLOR)
+                | color(PANEL_FG);
         }
 
         std::shared_ptr<Session> session_;
@@ -878,6 +967,9 @@ namespace {
         Component input_;
 
         std::vector<const SlashCommand*> matches_;
+        std::vector<AttachmentCandidate> file_matches_;
+        std::optional<AttachmentToken> attachment_token_;
+        std::vector<FileAttachment> attachments_;
         int sel_          = 0;
         int input_cursor_ = 0;
         bool paste_mode_  = false;

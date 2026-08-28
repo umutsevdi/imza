@@ -17,6 +17,27 @@ std::string to_text(ftxui::Element element)
     return screen.ToString();
 }
 
+std::string without_ansi(std::string_view input)
+{
+    std::string out;
+    for (std::size_t i = 0; i < input.size();) {
+        if (input[i] != '\x1b' || i + 1 >= input.size()
+            || input[i + 1] != '[') {
+            out += input[i++];
+            continue;
+        }
+        i += 2;
+        while (i < input.size()
+            && (input[i] < '@' || input[i] > '~')) {
+            ++i;
+        }
+        if (i < input.size()) {
+            ++i;
+        }
+    }
+    return out;
+}
+
 } // namespace
 
 TEST_CASE("render_markdown_element renders paragraphs")
@@ -75,4 +96,17 @@ TEST_CASE("render_markdown_element empty input")
 {
     const std::string out = to_text(ursa::render_markdown_element(""));
     CHECK(!out.empty());
+}
+
+TEST_CASE("diff_split right aligns line number gutters")
+{
+    ursa::DiffView diff { "file.cpp",
+        {
+            { ursa::DiffRow::Kind::REMOVE, 9, std::nullopt, "old", "" },
+            { ursa::DiffRow::Kind::ADD, 10, 10, "before", "after" },
+        } };
+    const std::string out = without_ansi(to_text(ursa::diff_split(diff)));
+    CHECK(out.find(" 9 old") != std::string::npos);
+    CHECK(out.find("10 before") != std::string::npos);
+    CHECK(out.find("10 after") != std::string::npos);
 }

@@ -189,14 +189,6 @@ Element diff_split(const DiffView& diff)
     const Color addbg  = Color::Green;
 
     const std::size_t cap = 60;
-    auto fmt = [&](const std::optional<std::size_t>& no, const std::string& s) {
-        std::string g = no ? std::to_string(*no) : std::string();
-        while (g.size() < 4) {
-            g += " ";
-        }
-        return g + " " + s;
-    };
-
     struct Pair {
         std::string left;
         std::string right;
@@ -213,8 +205,8 @@ Element diff_split(const DiffView& diff)
             p.skip = true;
             p.left = "  " + r.left;
         } else {
-            p.left  = fmt(r.left_no, r.left);
-            p.right = fmt(r.right_no, r.right);
+            p.left  = r.left;
+            p.right = r.right;
         }
         max_l = std::max(max_l, p.left.size());
         max_r = std::max(max_r, p.right.size());
@@ -239,6 +231,25 @@ Element diff_split(const DiffView& diff)
         return s;
     };
 
+    std::size_t max_left_no  = 1;
+    std::size_t max_right_no = 1;
+    for (const auto& row : diff.rows) {
+        if (row.left_no) {
+            max_left_no = std::max(max_left_no, *row.left_no);
+        }
+        if (row.right_no) {
+            max_right_no = std::max(max_right_no, *row.right_no);
+        }
+    }
+    const std::size_t left_no_width  = digit_width(max_left_no);
+    const std::size_t right_no_width = digit_width(max_right_no);
+    const auto line_number = [&](const std::optional<std::size_t>& no,
+                                 std::size_t width) {
+        const std::string value = no ? std::to_string(*no) : std::string();
+        return text(std::string(width - value.size(), ' ') + value)
+            | color(gutter) | dim;
+    };
+
     Elements rows;
     for (std::size_t i = 0; i < diff.rows.size(); ++i) {
         const auto& r = diff.rows[i];
@@ -260,7 +271,15 @@ Element diff_split(const DiffView& diff)
             | (left_red ? bgcolor(red) | color(Color::Black) : color(fg));
         Element R = text(rs)
             | (right_add ? bgcolor(addbg) | color(Color::Black) : color(fg));
-        rows.push_back(hbox({ L, text(" │ ") | color(border), R }));
+        rows.push_back(hbox({
+            line_number(r.left_no, left_no_width),
+            text(" "),
+            L,
+            text(" │ ") | color(border),
+            line_number(r.right_no, right_no_width),
+            text(" "),
+            R,
+        }));
     }
     return vbox(std::move(rows)) | bgcolor(bg) | xflex;
 }
