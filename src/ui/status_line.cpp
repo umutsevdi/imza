@@ -4,7 +4,6 @@
 
 #include "environment.h"
 
-#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <ftxui/component/component.hpp>
@@ -19,16 +18,30 @@ using namespace ftxui;
 
 class StatusLine : public ComponentBase {
 public:
-    StatusLine(std::shared_ptr<Session> session, Controller& controller,
+    StatusLine(std::shared_ptr<Session> session, ProviderStore& providers,
         LayoutFn layout)
         : session_(std::move(session))
-        , controller_(controller)
-        , layout_(std::move(layout)) { };
+        , providers_(providers)
+        , layout_(std::move(layout))
+        , workspace_subscription_(
+              get_environment()->subscribe_to_workspace_change(
+                  [] { animation::RequestAnimationFrame(); }))
+        , repository_subscription_(
+              get_environment()->subscribe_to_repository_change(
+                  [] { animation::RequestAnimationFrame(); }))
+    {
+    }
+
+    ~StatusLine() override
+    {
+        repository_subscription_();
+        workspace_subscription_();
+    }
 
     Element OnRender() override
     {
         using namespace ftxui;
-        const StatusConfigView config   = controller_.status_config();
+        const StatusConfigView config   = providers_.status();
         const Session::StatusView state = session_->status_view();
         const LayoutCtx ctx             = layout_();
         const bool wide                 = ctx.kind == LayoutCtx::Kind::WIDE;
@@ -39,6 +52,7 @@ public:
             | bgcolor(plan ? Color::GreenLight : Color::RedLight);
         const std::string& active_model = config.active_model;
 
+        const auto repository = get_environment()->repository();
         Elements bar;
         bar.push_back(text(" "));
         bar.push_back(std::move(mode));
@@ -80,7 +94,10 @@ public:
             bar.push_back(text("  "));
         }
         if (wide) {
-            bar.push_back(text(_cached_cwd()) | color(PANEL_FG_DIM));
+            bar.push_back(text(_cwd()) | color(PANEL_FG_DIM));
+            if (repository && !repository->branch.empty()) {
+                bar.push_back(text(" (" + repository->branch + ")") | italic);
+            }
             bar.push_back(text("  "));
         }
         if (state.total_cost > 0) {
@@ -102,13 +119,13 @@ public:
 
 private:
     std::shared_ptr<Session> session_;
-    Controller& controller_;
+    ProviderStore& providers_;
     LayoutFn layout_;
     int frame_ = 0;
     std::string last_model_;
     ModelPricing cached_;
-    std::string cached_pwd;
-    std::chrono::steady_clock::time_point fetched_;
+    std::function<void()> workspace_subscription_;
+    std::function<void()> repository_subscription_;
 
     ModelPricing _cached_pricing(const std::string& model)
     {
@@ -142,17 +159,11 @@ private:
         return path;
     }
 
-    std::string _cached_cwd()
+    std::string _cwd()
     {
-        using namespace std::chrono_literals;
-        const auto now = std::chrono::steady_clock::now();
-        if (cached_pwd.empty() || now - fetched_ > 1s) {
-            std::error_code ec;
-            const std::filesystem::path cwd = std::filesystem::current_path(ec);
-            cached_pwd = ec ? "" : _abbreviate_home(cwd.string());
-            fetched_   = now;
-        }
-        return cached_pwd;
+        std::error_code ec;
+        const std::filesystem::path cwd = std::filesystem::current_path(ec);
+        return ec ? "" : _abbreviate_home(cwd.string());
     }
 
     std::string compact_tokens(std::uint64_t n)
@@ -172,9 +183,9 @@ private:
 };
 
 ftxui::Component make_status_line(
-    std::shared_ptr<Session> session, Controller& controller, LayoutFn layout)
+    std::shared_ptr<Session> session, ProviderStore& providers, LayoutFn layout)
 {
     return ftxui::Make<StatusLine>(
-        std::move(session), controller, std::move(layout));
+        std::move(session), providers, std::move(layout));
 }
 } // namespace ursa

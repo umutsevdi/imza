@@ -1,12 +1,10 @@
 #pragma once
 
 #include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <functional>
 #include <future>
-#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -14,7 +12,6 @@
 #include <string>
 #include <string_view>
 #include <thread>
-#include <variant>
 #include <vector>
 
 #include "commands.h"
@@ -29,7 +26,7 @@ namespace ursa {
 struct LayoutCtx {
     enum class Kind { WIDE, NARROW };
     static constexpr int wide_threshold = 100;
-    static constexpr int panel_width    = 30;
+    static constexpr int panel_width    = 40;
     Kind kind;
     int width;
 };
@@ -40,7 +37,7 @@ using StreamFn
 struct TurnSettings {
     std::string model;
     std::string reasoning_effort;
-    Session::Mode mode = Session::Mode::PLAN;
+    Session::Mode mode  = Session::Mode::PLAN;
     ApiStandard dialect = ApiStandard::OPENAI;
     std::string connection_id;
     Route route;
@@ -48,9 +45,13 @@ struct TurnSettings {
 
 class Controller {
 public:
-    Controller(std::shared_ptr<Session> session, const Config& cfg,
-        PostFn post, std::function<void()> on_exit, StreamFn stream_fn = { },
+    Controller(std::shared_ptr<Session> session, const Config& cfg, PostFn post,
+        std::function<void()> on_exit, StreamFn stream_fn = { },
         ToolRegistry tools = { }, ModelsFn models_fn = { });
+    Controller(std::shared_ptr<Session> session,
+        std::shared_ptr<ProviderStore> providers, PostFn post,
+        std::function<void()> on_exit, StreamFn stream_fn = { },
+        ToolRegistry tools = { });
     ~Controller();
 
     Controller(const Controller&)            = delete;
@@ -67,14 +68,6 @@ public:
     void interrupt();
     size_t queue_size() const;
     const Session& session() const { return *session_; }
-    Config config() const;
-    StatusConfigView status_config() const;
-    std::vector<ConnectionView> connections() const;
-    ModelList models_for(const std::string& connection_id) const;
-    bool remove_connection(const std::string& connection_id);
-    void refetch_models(const std::string& connection_id);
-    void ensure_catalog_fresh();
-    std::vector<std::pair<std::string, std::string>> provider_options() const;
     const std::vector<SlashCommand>& commands() const { return commands_; }
 
 private:
@@ -84,10 +77,10 @@ private:
 
     void _post(std::function<void()> f);
     std::string _system_prompt() const;
-    void _spawn(std::vector<Message> history, StreamFn override,
-        TurnSettings settings);
-    void _drive(std::vector<Message> history, StreamFn override,
-        TurnSettings settings);
+    void _spawn(
+        std::vector<Message> history, StreamFn override, TurnSettings settings);
+    void _drive(
+        std::vector<Message> history, StreamFn override, TurnSettings settings);
     void _begin_connect(const ConnectResult& res);
     void _apply_pick(const ModelChoice& choice);
 
@@ -98,8 +91,8 @@ private:
         std::vector<Message>& tool_msgs);
     bool _model_reasons(const std::string& model) const;
     std::uint64_t _budget_for_effort(const std::string& effort) const;
-    void _set_reasoning(ChatRequest& req, ApiStandard dialect,
-        std::string_view effort);
+    void _set_reasoning(
+        ChatRequest& req, ApiStandard dialect, std::string_view effort);
     void _apply_question_result(
         const ModalResult& res, std::string& reply_buffer);
     void _apply_ask_result(const ToolCallRequest& req, const ModalResult& res,
@@ -130,10 +123,9 @@ private:
 
     std::vector<StreamEvent> stream_events_;
     std::atomic<bool> alive_ { true };
-    ProviderStore providers_;
+    std::shared_ptr<ProviderStore> providers_;
     std::optional<std::jthread> worker_;
     int retry_after_secs_ = 0;
-
 };
 
 std::string error_text(Status st);

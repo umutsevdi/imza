@@ -16,6 +16,8 @@
 
 namespace ursa {
 
+struct ChangedFile;
+
 using LayoutFn = std::function<LayoutCtx()>;
 
 inline const ftxui::Color PANEL_COLOR       = ftxui::Color::RGB(26, 34, 52);
@@ -57,7 +59,7 @@ ftxui::Element diff_split(const DiffView& diff);
 ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx);
 ftxui::Element render_todo(const TodoList& todo, const LayoutCtx& ctx);
 ftxui::Element render_changed_files(
-    const std::string& files, const LayoutCtx& ctx);
+    const std::vector<ChangedFile>& files, const LayoutCtx& ctx);
 ftxui::Element render_help(const std::vector<SlashCommand>& commands);
 
 int run_repl(const Config& cfg);
@@ -65,14 +67,16 @@ int run_repl(const Config& cfg);
 ftxui::Component make_chat(
     std::shared_ptr<Session> session, Controller& controller, LayoutFn layout);
 ftxui::Component make_side_panel(
-    std::shared_ptr<Session> session, Controller& controller, LayoutFn layout);
+    std::shared_ptr<Session> session, LayoutFn layout);
 ftxui::Component make_status_line(
-    std::shared_ptr<Session> session, Controller& controller, LayoutFn layout);
+    std::shared_ptr<Session> session, ProviderStore& providers, LayoutFn layout);
 ftxui::Component make_connect(
-    std::shared_ptr<Session> session, Controller& controller);
+    std::shared_ptr<Session> session, Controller& controller,
+    ProviderStore& providers);
 ftxui::Component make_variant(
     std::shared_ptr<Session> session, Controller& controller);
 ftxui::Component make_modal(
-    std::shared_ptr<Session> session, Controller& controller);
+    std::shared_ptr<Session> session, Controller& controller,
+    ProviderStore& providers);
 
 } // namespace ursa

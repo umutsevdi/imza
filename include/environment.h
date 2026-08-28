@@ -8,6 +8,7 @@
 #include <optional>
 #include <shared_mutex>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -39,9 +40,34 @@ public:
     explicit WorkspaceEnvironment(const std::filesystem::path& p);
 
     std::optional<std::filesystem::path> project_root;
-    std::string branch;
     std::optional<InstructionFile> instruction;
     std::unordered_map<std::string, std::filesystem::path> project_skills;
+};
+
+struct ChangedFile {
+    enum class Kind {
+        MODIFIED,
+        ADDED,
+        UNTRACKED,
+        DELETED,
+        RENAMED,
+        COPIED,
+        CONFLICTED,
+        UNKNOWN,
+    };
+
+    std::string path;
+    Kind kind = Kind::UNKNOWN;
+
+    bool operator==(const ChangedFile&) const = default;
+};
+
+std::vector<ChangedFile> parse_git_status(std::string_view status);
+std::string normalize_git_branch(std::string_view branch);
+
+struct RepositoryState {
+    std::string branch;
+    std::vector<ChangedFile> changed_files;
 };
 
 class Environment {
@@ -53,9 +79,14 @@ public:
         std::shared_lock lock(workspace_mutex_);
         return workspace_;
     }
+    std::shared_ptr<const RepositoryState> repository() const
+    {
+        std::shared_lock lock(workspace_mutex_);
+        return repository_;
+    }
 
     // True once the workspace scan has finished, whether or not a project
-    // root was found (a non-git folder yields a null workspace but is ready).
+    // root was found.
     bool ready() const { return ready_.load(); }
 
     std::optional<std::string> agent_rules_path() const;
@@ -63,27 +94,38 @@ public:
     std::size_t global_skills() const;
 
     bool chdir(const std::filesystem::path& dir);
-    // Subscribes to workspace changes. Returns a handle that, when invoked,
-    // removes the subscription.
     std::function<void()> subscribe_to_workspace_change(
-        const std::function<void(std::shared_ptr<const WorkspaceEnvironment>)>&
-            cb);
+        const std::function<void()>& cb);
+    std::function<void()> subscribe_to_repository_change(
+        const std::function<void()>& cb);
 
 private:
     struct Subscriber {
         std::uint64_t id;
-        std::function<void(std::shared_ptr<const WorkspaceEnvironment>)> cb;
+        std::function<void()> cb;
     };
 
-    void publish(std::shared_ptr<const WorkspaceEnvironment> ws);
+    void _publish_workspace(std::shared_ptr<const WorkspaceEnvironment> ws,
+        std::uint64_t generation);
+    void _publish_repository(std::shared_ptr<const RepositoryState> repository,
+        const std::shared_ptr<const WorkspaceEnvironment>& workspace);
+    std::function<void()> _subscribe(
+        std::vector<Subscriber>& subscribers, const std::function<void()>& cb,
+        bool workspace_events);
+    void _notify(const std::vector<Subscriber>& subscribers);
 
     std::shared_ptr<const SystemEnvironment> system_;
     mutable std::shared_mutex workspace_mutex_;
     std::shared_ptr<const WorkspaceEnvironment> workspace_;
-    std::vector<Subscriber> cbs_;
+    std::shared_ptr<const RepositoryState> repository_;
+    std::vector<Subscriber> workspace_cbs_;
+    std::vector<Subscriber> repository_cbs_;
     std::uint64_t next_id_ { 1 };
+    std::uint64_t workspace_generation_ { 0 };
     std::atomic<bool> ready_ { false };
     std::jthread worker_;
+
+    std::jthread git_worker_;
 };
 
 std::string shell_name(const SystemEnvironment& sys);

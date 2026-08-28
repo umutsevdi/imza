@@ -164,7 +164,7 @@ void Controller::_drive(
             if (attempt == Status::API_ERROR && !saw_stream
                 && route.dialect == ApiStandard::OPENAI) {
                 Route alt;
-                alt = providers_.route_for(
+                alt = providers_->route_for(
                     settings.connection_id, ApiStandard::ANTHROPIC);
                 const bool has_alt = !alt.endpoint.empty();
                 if (has_alt && alt.endpoint != route.endpoint) {
@@ -184,7 +184,7 @@ void Controller::_drive(
                     const Status retried
                         = error_status != Status::OK ? error_status : st;
                     if (retried == Status::OK) {
-                        providers_.remember_dialect(settings.connection_id,
+                        providers_->remember_dialect(settings.connection_id,
                             req.model, ApiStandard::ANTHROPIC);
                     }
                 }

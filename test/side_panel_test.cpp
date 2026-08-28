@@ -4,16 +4,22 @@
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/screen.hpp>
 
+#include "environment.h"
 #include "ui.h"
 
 namespace {
 
-std::string to_text(ftxui::Element element)
+ftxui::Screen to_screen(ftxui::Element element)
 {
     using namespace ftxui;
     auto screen = Screen::Create(Dimension::Fixed(60), Dimension::Fixed(30));
     Render(screen, element);
-    return screen.ToString();
+    return screen;
+}
+
+std::string to_text(ftxui::Element element)
+{
+    return to_screen(std::move(element)).ToString();
 }
 
 } // namespace
@@ -72,11 +78,43 @@ TEST_CASE("render_todo wraps to the offered width")
         == std::string::npos);
 }
 
-TEST_CASE("render_changed_files renders status and path")
+TEST_CASE("render_changed_files renders colored symbols and readable paths")
 {
-    ursa::ChangedFile f { "src/ui/app.cpp", "M" };
-    const std::string out = to_text(
-        ursa::render_changed_files({ f }, { ursa::LayoutCtx::Kind::WIDE, 30 }));
-    CHECK(out.find("M") != std::string::npos);
-    CHECK(out.find("src/ui/app.cpp") != std::string::npos);
+    using Kind = ursa::ChangedFile::Kind;
+    const std::vector<ursa::ChangedFile> files {
+        { "modified.cpp", Kind::MODIFIED },
+        { "added.cpp", Kind::ADDED },
+        { "untracked.cpp", Kind::UNTRACKED },
+        { "deleted.cpp", Kind::DELETED },
+        { "old.cpp -> renamed.cpp", Kind::RENAMED },
+        { "source.cpp -> copied.cpp", Kind::COPIED },
+        { "conflicted.cpp", Kind::CONFLICTED },
+        { "unknown.cpp", Kind::UNKNOWN },
+    };
+    auto screen = to_screen(ursa::render_changed_files(
+        files, { ursa::LayoutCtx::Kind::WIDE, 30 }));
+    const std::string out = screen.ToString();
+
+    CHECK(out.find("●") != std::string::npos);
+    CHECK(out.find("modified.cpp") != std::string::npos);
+    CHECK(out.find("+") != std::string::npos);
+    CHECK(out.find("added.cpp") != std::string::npos);
+    CHECK(out.find("?") != std::string::npos);
+    CHECK(out.find("untracked.cpp") != std::string::npos);
+    CHECK(out.find("−") != std::string::npos);
+    CHECK(out.find("deleted.cpp") != std::string::npos);
+    CHECK(out.find("→") != std::string::npos);
+    CHECK(out.find("old.cpp -> renamed.cpp") != std::string::npos);
+    CHECK(out.find("⧉") != std::string::npos);
+    CHECK(out.find("source.cpp -> copied.cpp") != std::string::npos);
+    CHECK(out.find("!") != std::string::npos);
+    CHECK(out.find("conflicted.cpp") != std::string::npos);
+    CHECK(out.find("•") != std::string::npos);
+    CHECK(out.find("unknown.cpp") != std::string::npos);
+
+    CHECK(screen.PixelAt(1, 2).foreground_color == ftxui::Color::YellowLight);
+    CHECK(screen.PixelAt(1, 3).foreground_color == ftxui::Color::GreenLight);
+    CHECK(screen.PixelAt(1, 4).foreground_color == ftxui::Color::CyanLight);
+    CHECK(screen.PixelAt(1, 5).foreground_color == ftxui::Color::RedLight);
+    CHECK(screen.PixelAt(3, 2).foreground_color == ursa::PANEL_FG);
 }

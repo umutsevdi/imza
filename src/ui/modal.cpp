@@ -113,9 +113,11 @@ namespace {
     class ModalImpl : public ComponentBase {
     public:
         explicit ModalImpl(
-            std::shared_ptr<Session> session, Controller& controller)
+            std::shared_ptr<Session> session, Controller& controller,
+            ProviderStore& providers)
             : session_(std::move(session))
             , controller_(controller)
+            , providers_(providers)
         {
         }
 
@@ -321,7 +323,7 @@ namespace {
 
         void build(const ConnectModal&)
         {
-            connect_ = make_connect(session_, controller_);
+            connect_ = make_connect(session_, controller_, providers_);
             body_    = connect_;
         }
 
@@ -350,7 +352,7 @@ namespace {
             };
             ButtonOption bo;
             bo.transform
-                = [&cs, idx, multi, &label](const EntryState& s) -> Element {
+                = [&cs, idx, multi, label](const EntryState& s) -> Element {
                 const bool selected      = multi
                     ? cs.checked[idx]
                     : (!cs.text_live && cs.radio == static_cast<int>(idx));
@@ -587,6 +589,7 @@ namespace {
 
         std::shared_ptr<Session> session_;
         Controller& controller_;
+        ProviderStore& providers_;
         bool built_           = false;
         std::uint64_t serial_ = 0;
 
@@ -616,9 +619,10 @@ namespace {
 } // namespace
 
 ftxui::Component make_modal(
-    std::shared_ptr<Session> session, Controller& controller)
+    std::shared_ptr<Session> session, Controller& controller,
+    ProviderStore& providers)
 {
-    return ftxui::Make<ModalImpl>(std::move(session), controller);
+    return ftxui::Make<ModalImpl>(std::move(session), controller, providers);
 }
 
 ftxui::Element render_help(const std::vector<SlashCommand>& commands)

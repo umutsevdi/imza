@@ -116,9 +116,11 @@ namespace {
 
     class ConnectImpl : public ComponentBase {
     public:
-        explicit ConnectImpl(std::shared_ptr<Session> session, Controller& controller)
+        explicit ConnectImpl(std::shared_ptr<Session> session,
+            Controller& controller, ProviderStore& providers)
             : session_(std::move(session))
             , controller_(controller)
+            , provider_store_(providers)
         {
         }
 
@@ -151,7 +153,7 @@ namespace {
         {
             if (event == Event::F5 || event == Event::CtrlR) {
                 for (const auto& view : views()) {
-                    controller_.refetch_models(view.id);
+                    provider_store_.refetch_models(view.id);
                 }
                 return true;
             }
@@ -262,7 +264,7 @@ namespace {
 
         std::vector<ConnectionView> views() const
         {
-            return controller_.connections();
+            return provider_store_.connections();
         }
 
         std::string row_id_at(int index)
@@ -402,7 +404,7 @@ namespace {
 
         void rebuild_manage()
         {
-            providers_ = controller_.provider_options();
+            providers_ = provider_store_.provider_options();
             refill_picker();
             if (selected_provider_ == kLocalProviderId
                 && trim(base_buf_).empty()) {
@@ -550,7 +552,7 @@ namespace {
 
         void confirm_remove(const std::string& id)
         {
-            if (!controller_.remove_connection(id)) {
+            if (!provider_store_.remove_connection(id)) {
                 row_error_ = "cannot remove the last connection";
                 confirm_.erase(id);
                 rebuild_manage();
@@ -708,7 +710,7 @@ namespace {
         void maybe_rebuild_pick()
         {
             const Session& st = *session_;
-            const Config cfg  = controller_.config();
+            const Config cfg  = provider_store_.config();
             std::uint64_t key = st.modal_serial() * 1000003ULL;
             key += std::hash<std::string> { }(cfg.last_used
                     ? cfg.last_used->provider + " " + cfg.last_used->model
@@ -717,7 +719,7 @@ namespace {
             for (const auto& view : views()) {
                 PickSnap snap;
                 snap.view = view;
-                snap.list = controller_.models_for(view.id);
+                snap.list = provider_store_.models_for(view.id);
                 key += std::hash<std::string> { }(view.id)
                         * (static_cast<std::uint64_t>(
                                static_cast<int>(snap.list.state))
@@ -757,7 +759,7 @@ namespace {
                     pick_rows_.push_back(std::move(row));
                 }
             }
-            const Config cfg = controller_.config();
+            const Config cfg = provider_store_.config();
             if (cfg.last_used && !cfg.last_used->model.empty()) {
                 for (std::size_t i = 0; i < pick_rows_.size(); ++i) {
                     ModelRow& row = pick_rows_[i];
@@ -876,8 +878,9 @@ namespace {
             return vbox(std::move(rows)) | xflex;
         }
 
-        Controller& controller_;
         std::shared_ptr<Session> session_;
+        Controller& controller_;
+        ProviderStore& provider_store_;
         ConnectModal::Entry entry_ = ConnectModal::Entry::MANAGE;
 
         Component container_;
@@ -923,9 +926,10 @@ namespace {
 } // namespace
 
 ftxui::Component make_connect(
-    std::shared_ptr<Session> session, Controller& controller)
+    std::shared_ptr<Session> session, Controller& controller,
+    ProviderStore& providers)
 {
-    return ftxui::Make<ConnectImpl>(std::move(session), controller);
+    return ftxui::Make<ConnectImpl>(std::move(session), controller, providers);
 }
 
 } // namespace ursa

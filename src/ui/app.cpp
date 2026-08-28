@@ -35,16 +35,16 @@ namespace {
     class Repl : public ComponentBase {
     public:
         Repl(ScreenInteractive& screen, std::shared_ptr<Session> session,
-            Controller& controller)
+            Controller& controller, ProviderStore& providers)
             : screen_(screen)
             , session_(std::move(session))
             , controller_(controller)
         {
             const LayoutFn layout = [this] { return layout_; };
-            side_        = make_side_panel(session_, controller, layout);
+            side_        = make_side_panel(session_, layout);
             chat_        = make_chat(session_, controller, layout);
-            status_line_ = make_status_line(session_, controller, layout);
-            modal_       = make_modal(session_, controller);
+            status_line_ = make_status_line(session_, providers, layout);
+            modal_       = make_modal(session_, controller, providers);
             Add(chat_);
         }
 
@@ -126,19 +126,20 @@ int run_repl(const Config& cfg)
     ScreenInteractive screen = ScreenInteractive::FullscreenAlternateScreen();
     ToolRegistry tools       = builtin_tools();
     auto session             = std::make_shared<Session>();
+    auto providers           = std::make_shared<ProviderStore>(cfg);
     Controller controller(
-        session, cfg,
+        session, providers,
         [&screen](std::function<void()> f) {
             screen.Post(std::move(f));
             screen.PostEvent(Event::Custom);
         },
         [&screen] { screen.Exit(); }, StreamFn { }, std::move(tools));
-    controller.ensure_catalog_fresh();
-    if (controller.config().providers.empty()) {
+    providers->ensure_catalog_fresh();
+    if (providers->config().providers.empty()) {
         controller.enqueue_user_modal(
             ConnectModal { ConnectModal::Entry::MANAGE });
     }
-    auto app = ftxui::Make<Repl>(screen, session, controller);
+    auto app = ftxui::Make<Repl>(screen, session, controller, *providers);
     screen.Loop(app);
     return 0;
 }

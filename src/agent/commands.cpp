@@ -48,7 +48,7 @@ void Controller::run_slash(std::string_view cmd)
         enqueue_user_modal(ConnectModal { ConnectModal::Entry::MANAGE });
         break;
     case SlashCommand::Action::MODEL: {
-        if (providers_.connections().empty()) {
+        if (providers_->connections().empty()) {
             set_error("no connections — run /connect first");
             break;
         }
@@ -56,7 +56,7 @@ void Controller::run_slash(std::string_view cmd)
         break;
     }
     case SlashCommand::Action::VARIANT: {
-        std::string current = providers_.status().reasoning_effort;
+        std::string current = providers_->status().reasoning_effort;
         if (current == "medium") {
             current = "default";
         }

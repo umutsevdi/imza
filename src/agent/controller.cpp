@@ -32,6 +32,16 @@ std::string error_text(Status st)
 Controller::Controller(std::shared_ptr<Session> session, const Config& cfg,
     PostFn post, std::function<void()> on_exit, StreamFn stream_fn,
     ToolRegistry tools, ModelsFn models_fn)
+    : Controller(std::move(session),
+          std::make_shared<ProviderStore>(cfg, std::move(models_fn)),
+          std::move(post), std::move(on_exit), std::move(stream_fn),
+          std::move(tools))
+{
+}
+
+Controller::Controller(std::shared_ptr<Session> session,
+    std::shared_ptr<ProviderStore> providers, PostFn post,
+    std::function<void()> on_exit, StreamFn stream_fn, ToolRegistry tools)
     : session_(std::move(session))
     , post_(std::move(post))
     , on_exit_(std::move(on_exit))
@@ -39,14 +49,14 @@ Controller::Controller(std::shared_ptr<Session> session, const Config& cfg,
     , stream_fn_(std::move(stream_fn))
     , has_stream_override_(static_cast<bool>(stream_fn_))
     , tools_(std::move(tools))
-    , providers_(cfg, std::move(models_fn))
+    , providers_(std::move(providers))
 {
     specs_plan_ = tools_.specs(ToolSafety::READ_ONLY);
     specs_all_  = tools_.specs();
 
     if (!stream_fn_) {
         stream_fn_ = [this](const ChatRequest& req, const StreamCallback& cb) {
-            const auto selection = providers_.active_selection();
+            const auto selection = providers_->active_selection();
             const Route route
                 = selection.has_value() ? selection->route : Route { };
             return stream(
@@ -54,7 +64,7 @@ Controller::Controller(std::shared_ptr<Session> session, const Config& cfg,
         };
     }
     env_sub_ = get_environment()->subscribe_to_workspace_change(
-        [this](std::shared_ptr<const WorkspaceEnvironment>) {
+        [this] {
             _post([this] {
                 _present_front();
                 if (session_->phase() == Session::Phase::IDLE
@@ -63,9 +73,9 @@ Controller::Controller(std::shared_ptr<Session> session, const Config& cfg,
                 }
             });
         });
-    provider_sub_ = providers_.subscribe(
+    provider_sub_ = providers_->subscribe(
         [this] { _post([this] { session_->bump_modal_serial(); }); });
-    _post([this] { providers_.start_model_fetches(); });
+    _post([this] { providers_->start_model_fetches(); });
 }
 
 Controller::~Controller()
@@ -144,7 +154,7 @@ void Controller::resolve_modal(ModalResult result)
         _apply_pick(*choice);
     }
     if (auto* variant = std::get_if<VariantChoice>(&result)) {
-        providers_.set_reasoning_effort(variant->effort);
+        providers_->set_reasoning_effort(variant->effort);
         session_->bump_modal_serial();
     }
     {
@@ -193,7 +203,7 @@ void Controller::submit(std::string text)
 void Controller::submit_message(std::string text)
 {
     const std::optional<ProviderSelection> selection
-        = providers_.active_selection();
+        = providers_->active_selection();
     if (!selection.has_value()) {
         session_->set_error("no model selected — run /model");
         return;
@@ -229,7 +239,7 @@ bool Controller::_model_reasons(const std::string& model) const
     if (model.empty()) {
         return false;
     }
-    return providers_.model_reasons(model);
+    return providers_->model_reasons(model);
 }
 
 std::uint64_t Controller::_budget_for_effort(const std::string& effort) const
@@ -290,44 +300,9 @@ void Controller::finish(std::string error)
     _drain_queued();
 }
 
-Config Controller::config() const { return providers_.config(); }
-
-StatusConfigView Controller::status_config() const
-{
-    return providers_.status();
-}
-
-std::vector<ConnectionView> Controller::connections() const
-{
-    return providers_.connections();
-}
-
-ModelList Controller::models_for(const std::string& connection_id) const
-{
-    return providers_.models_for(connection_id);
-}
-
-bool Controller::remove_connection(const std::string& connection_id)
-{
-    return providers_.remove_connection(connection_id);
-}
-
-void Controller::refetch_models(const std::string& connection_id)
-{
-    providers_.refetch_models(connection_id);
-}
-
-void Controller::ensure_catalog_fresh() { providers_.ensure_catalog_fresh(); }
-
-std::vector<std::pair<std::string, std::string>>
-Controller::provider_options() const
-{
-    return providers_.provider_options();
-}
-
 void Controller::_begin_connect(const ConnectResult& result)
 {
-    providers_.connect(result, [this](ConnectOutcome outcome) {
+    providers_->connect(result, [this](ConnectOutcome outcome) {
         _post([this, outcome] {
             if (outcome.status != Status::OK) {
                 session_->set_connect_status(error_text(outcome.status));
@@ -348,7 +323,7 @@ void Controller::_begin_connect(const ConnectResult& result)
 
 void Controller::_apply_pick(const ModelChoice& choice)
 {
-    providers_.select_model(choice);
+    providers_->select_model(choice);
 }
 
 } // namespace ursa

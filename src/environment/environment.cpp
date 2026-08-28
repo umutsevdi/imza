@@ -1,5 +1,6 @@
 #include "environment.h"
 
+#include "command.h"
 #include "types.h"
 #include "util.h"
 
@@ -24,6 +25,37 @@
 namespace ursa {
 
 namespace {
+
+    bool has_status(std::string_view status, char value)
+    {
+        return status.find(value) != std::string_view::npos;
+    }
+
+    ChangedFile::Kind changed_file_kind(std::string_view status)
+    {
+        if (has_status(status, 'U') || status == "AA" || status == "DD") {
+            return ChangedFile::Kind::CONFLICTED;
+        }
+        if (has_status(status, 'D')) {
+            return ChangedFile::Kind::DELETED;
+        }
+        if (has_status(status, 'R')) {
+            return ChangedFile::Kind::RENAMED;
+        }
+        if (has_status(status, 'C')) {
+            return ChangedFile::Kind::COPIED;
+        }
+        if (status == "??") {
+            return ChangedFile::Kind::UNTRACKED;
+        }
+        if (has_status(status, 'A')) {
+            return ChangedFile::Kind::ADDED;
+        }
+        if (has_status(status, 'M') || has_status(status, 'T')) {
+            return ChangedFile::Kind::MODIFIED;
+        }
+        return ChangedFile::Kind::UNKNOWN;
+    }
 
     std::string get_env(const char* key)
     {
@@ -232,6 +264,27 @@ namespace {
 
 } // namespace
 
+std::vector<ChangedFile> parse_git_status(std::string_view status)
+{
+    std::vector<ChangedFile> files;
+    for (std::string line : split_lines(status)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        if (line.size() < 4 || line[2] != ' ') {
+            continue;
+        }
+        files.push_back(ChangedFile { line.substr(3),
+            changed_file_kind(std::string_view(line).substr(0, 2)) });
+    }
+    return files;
+}
+
+std::string normalize_git_branch(std::string_view branch)
+{
+    return std::string(trim(branch));
+}
+
 std::optional<InstructionFile> load_agent_file(
     const std::filesystem::path& root)
 {
@@ -299,22 +352,92 @@ Environment::Environment()
     worker_ = std::jthread([this] {
         std::error_code ec;
         const std::filesystem::path dir = std::filesystem::current_path(ec);
-        auto ws = std::make_shared<const WorkspaceEnvironment>(dir);
-        publish(std::move(ws));
+        auto workspace = std::make_shared<WorkspaceEnvironment>(dir);
+        _publish_workspace(workspace->project_root.has_value()
+                ? std::move(workspace)
+                : nullptr,
+            0);
     });
+
+    if (system_->has_git) {
+        git_worker_ = std::jthread([this](const std::stop_token& stop) {
+            while (!stop.stop_requested()) {
+                const auto observed_workspace = workspace();
+                if (observed_workspace == nullptr) {
+                    std::this_thread::sleep_for(std::chrono::seconds { 2 });
+                    continue;
+                }
+                const CommandResult status = run_command(
+                    "git status --porcelain=v1", std::chrono::seconds { 1 });
+                const CommandResult branch = run_command(
+                    "git branch --show-current", std::chrono::seconds { 1 });
+                if (status.spawned && !status.timed_out && status.exit_code == 0
+                    && branch.spawned && !branch.timed_out
+                    && branch.exit_code == 0) {
+                    std::vector<ChangedFile> changed_files
+                        = parse_git_status(status.output);
+                    const std::string branch_name
+                        = normalize_git_branch(branch.output);
+                    const auto current = repository();
+                    if (current && changed_files == current->changed_files
+                        && branch_name == current->branch) {
+                        std::this_thread::sleep_for(
+                            std::chrono::seconds { 2 });
+                        continue;
+                    }
+                    RepositoryState next;
+                    next.changed_files = std::move(changed_files);
+                    next.branch        = branch_name;
+                    _publish_repository(
+                        std::make_shared<RepositoryState>(std::move(next)),
+                        observed_workspace);
+                }
+                std::this_thread::sleep_for(std::chrono::seconds { 2 });
+            }
+        });
+    }
 }
 
-void Environment::publish(std::shared_ptr<const WorkspaceEnvironment> ws)
+void Environment::_publish_workspace(
+    std::shared_ptr<const WorkspaceEnvironment> ws, std::uint64_t generation)
+{
+    std::vector<Subscriber> workspace_callbacks;
+    std::vector<Subscriber> repository_callbacks;
+    {
+        std::unique_lock lock(workspace_mutex_);
+        if (generation != workspace_generation_) {
+            return;
+        }
+        workspace_ = std::move(ws);
+        repository_ = std::make_shared<const RepositoryState>();
+        ready_.store(true);
+        workspace_callbacks  = workspace_cbs_;
+        repository_callbacks = repository_cbs_;
+    }
+    _notify(workspace_callbacks);
+    _notify(repository_callbacks);
+}
+
+void Environment::_publish_repository(
+    std::shared_ptr<const RepositoryState> repository,
+    const std::shared_ptr<const WorkspaceEnvironment>& workspace)
 {
     std::vector<Subscriber> callbacks;
     {
         std::unique_lock lock(workspace_mutex_);
-        workspace_ = std::move(ws);
-        ready_.store(true);
-        callbacks = cbs_;
+        if (workspace_ != workspace) {
+            return;
+        }
+        repository_ = std::move(repository);
+        callbacks   = repository_cbs_;
     }
-    for (const auto& sub : callbacks) {
-        sub.cb(workspace_);
+    _notify(callbacks);
+}
+
+void Environment::_notify(const std::vector<Subscriber>& subscribers)
+{
+    for (const auto& sub : subscribers) {
+        sub.cb();
     }
 }
 
@@ -325,34 +448,54 @@ bool Environment::chdir(const std::filesystem::path& dir)
     if (ec) {
         return false;
     }
-    auto next = std::make_shared<const WorkspaceEnvironment>(dir);
-    publish(std::move(next));
+    std::uint64_t generation;
+    {
+        std::unique_lock lock(workspace_mutex_);
+        generation = ++workspace_generation_;
+    }
+    auto workspace = std::make_shared<WorkspaceEnvironment>(dir);
+    _publish_workspace(workspace->project_root.has_value()
+            ? std::move(workspace)
+            : nullptr,
+        generation);
     return true;
 }
 
 std::function<void()> Environment::subscribe_to_workspace_change(
-    const std::function<void(std::shared_ptr<const WorkspaceEnvironment>)>& cb)
+    const std::function<void()>& cb)
 {
-    bool already;
-    std::shared_ptr<const WorkspaceEnvironment> current;
+    return _subscribe(workspace_cbs_, cb, true);
+}
+
+std::function<void()> Environment::subscribe_to_repository_change(
+    const std::function<void()>& cb)
+{
+    return _subscribe(repository_cbs_, cb, false);
+}
+
+std::function<void()> Environment::_subscribe(
+    std::vector<Subscriber>& subscribers, const std::function<void()>& cb,
+    bool workspace_events)
+{
     std::uint64_t id;
+    bool notify_now;
+    auto* list = &subscribers;
     {
         std::unique_lock lock(workspace_mutex_);
-        already = ready_.load();
-        id      = next_id_++;
-        cbs_.push_back(Subscriber { id, cb });
-        if (already) {
-            current = workspace_;
-        }
+        notify_now = workspace_events ? ready_.load() : repository_ != nullptr;
+        id = next_id_++;
+        subscribers.push_back(Subscriber { id, cb });
     }
-    if (already) {
-        cb(current);
+    if (notify_now) {
+        cb();
     }
-    return [this, id] {
+    return [this, id, list] {
         std::unique_lock lock(workspace_mutex_);
-        cbs_.erase(std::remove_if(cbs_.begin(), cbs_.end(),
-                        [id](const Subscriber& s) { return s.id == id; }),
-            cbs_.end());
+        auto& subscriptions = *list;
+        subscriptions.erase(
+            std::remove_if(subscriptions.begin(), subscriptions.end(),
+                [id](const Subscriber& s) { return s.id == id; }),
+            subscriptions.end());
     };
 }
 

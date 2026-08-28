@@ -53,11 +53,6 @@ struct TodoList {
     std::vector<TodoItem> items;
 };
 
-struct ChangedFile {
-    std::string path;
-    std::string status;
-};
-
 using ConversationItem
     = std::variant<UserTurn, AssistantTurn, ToolCall, TodoList, ModalAnswer>;
 
@@ -119,7 +114,6 @@ public:
     std::string error() const;
     std::string connect_status() const;
     const TodoList& todo() const { return todo_; }
-    const std::vector<ChangedFile>& changed_files() const { return changed_files_; }
     const std::vector<QueuedMessage>& queued() const { return queued_; }
     std::optional<Countdown> retry_countdown() const;
     Usage totals() const;
@@ -180,7 +174,6 @@ private:
     std::string connect_status_;
 
     TodoList todo_;
-    std::vector<ChangedFile> changed_files_;
     std::vector<QueuedMessage> queued_;
 
     std::optional<Countdown> retry_countdown_;
