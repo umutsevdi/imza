@@ -1,5 +1,5 @@
 #include "tools.h"
-#include "command.h"
+#include "command_runner.h"
 #include "util.h"
 
 #include <algorithm>
@@ -15,11 +15,10 @@
 
 namespace ursa {
 
-void ToolRegistry::add(Tool tool) { tools_.push_back(std::move(tool)); }
-
-const Tool* ToolRegistry::find(std::string_view name) const
+const Tool* find_tool(
+    std::span<const Tool> tools, std::string_view name)
 {
-    for (const auto& t : tools_) {
+    for (const auto& t : tools) {
         if (t.spec.name == name) {
             return &t;
         }
@@ -27,31 +26,20 @@ const Tool* ToolRegistry::find(std::string_view name) const
     return nullptr;
 }
 
-std::vector<ToolSpec> ToolRegistry::specs() const
+std::vector<ToolSpec> tool_specs(std::span<const Tool> tools)
 {
     std::vector<ToolSpec> out;
-    out.reserve(tools_.size());
-    for (const auto& t : tools_) {
+    out.reserve(tools.size());
+    for (const auto& t : tools) {
         out.push_back(t.spec);
     }
     return out;
 }
 
-std::vector<ToolSpec> ToolRegistry::specs(ToolSafety safety) const
+std::vector<ToolSpec> plan_tool_specs(std::span<const Tool> tools)
 {
     std::vector<ToolSpec> out;
-    for (const auto& t : tools_) {
-        if (t.safety == safety) {
-            out.push_back(t.spec);
-        }
-    }
-    return out;
-}
-
-std::vector<ToolSpec> ToolRegistry::plan_specs() const
-{
-    std::vector<ToolSpec> out;
-    for (const auto& tool : tools_) {
+    for (const auto& tool : tools) {
         if (tool.safety == ToolSafety::READ_ONLY || tool.available_in_plan) {
             out.push_back(tool.spec);
         }
@@ -59,9 +47,10 @@ std::vector<ToolSpec> ToolRegistry::plan_specs() const
     return out;
 }
 
-ToolOutput ToolRegistry::dispatch(const ToolCallRequest& req) const
+ToolOutput dispatch_tool(
+    std::span<const Tool> tools, const ToolCallRequest& req)
 {
-    const Tool* tool = find(req.name);
+    const Tool* tool = find_tool(tools, req.name);
     if (tool == nullptr) {
         return { ToolOutput::Kind::ERROR, "unknown tool: " + req.name };
     }
@@ -76,16 +65,16 @@ ToolOutput ToolRegistry::dispatch(const ToolCallRequest& req) const
     return tool->run(args);
 }
 
-ToolRegistry builtin_tools()
+std::vector<Tool> default_tools()
 {
-    ToolRegistry tools;
-    tools.add(make_read_tool());
-    tools.add(make_list_tool());
-    tools.add(make_ask_tool());
-    tools.add(make_shell_tool());
-    tools.add(make_todo_tool());
-    tools.add(make_edit_tool());
-    tools.add(make_write_tool());
+    std::vector<Tool> tools;
+    tools.push_back(make_read_tool());
+    tools.push_back(make_list_tool());
+    tools.push_back(make_ask_tool());
+    tools.push_back(make_shell_tool());
+    tools.push_back(make_todo_tool());
+    tools.push_back(make_edit_tool());
+    tools.push_back(make_write_tool());
     return tools;
 }
 

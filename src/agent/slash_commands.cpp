@@ -1,4 +1,4 @@
-#include "commands.h"
+#include "slash_commands.h"
 
 #include "controller.h"
 #include "util.h"
@@ -8,9 +8,9 @@
 
 namespace ursa {
 
-std::vector<SlashCommand> slash_commands()
+std::span<const SlashCommand> slash_commands()
 {
-    return {
+    static constexpr SlashCommand commands[] = {
         { "/help", "show available commands", SlashCommand::Action::HELP },
         { "/exit", "quit ursa", SlashCommand::Action::EXIT },
         { "/connect", "manage provider connections",
@@ -20,13 +20,13 @@ std::vector<SlashCommand> slash_commands()
         { "/prompt", "show the generated system prompt",
             SlashCommand::Action::SYSTEM_PROMPT },
     };
+    return commands;
 }
 
-const SlashCommand* find_command(
-    const std::vector<SlashCommand>& commands, std::string_view name)
+const SlashCommand* find_command(std::string_view name)
 {
     const std::string key = to_lower(name);
-    for (const auto& c : commands) {
+    for (const auto& c : slash_commands()) {
         if (to_lower(c.name) == key) {
             return &c;
         }
@@ -36,7 +36,7 @@ const SlashCommand* find_command(
 
 void Controller::run_slash(std::string_view cmd)
 {
-    const SlashCommand* found = find_command(commands_, cmd);
+    const SlashCommand* found = find_command(cmd);
     if (found == nullptr) {
         set_error("unknown command: " + std::string(cmd));
         return;

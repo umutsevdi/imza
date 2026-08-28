@@ -12,17 +12,15 @@ namespace ursa {
 
 namespace {
 
-    ToolRegistry echo_registry()
+    std::vector<Tool> echo_tools()
     {
-        ToolRegistry tools;
-        tools.add({ { "echo", "echo the message",
+        return { { { "echo", "echo the message",
                         parse_json(
                             R"({"type":"object","properties":{"msg":{"type":"string"}}})") },
             [](const Json::Value& args) {
                 return ToolOutput { ToolOutput::Kind::OUTPUT,
                     args.get("msg", "").asString() };
-            } });
-        return tools;
+            } } };
     }
 
     std::string read_file(const std::filesystem::path& path)
@@ -44,20 +42,20 @@ namespace {
 
 } // namespace
 
-TEST_CASE("registry finds and lists specs")
+TEST_CASE("tool helpers find and list specs")
 {
-    const ToolRegistry tools = echo_registry();
-    REQUIRE(tools.tools().size() == 1);
+    const std::vector<Tool> tools = echo_tools();
+    REQUIRE(tools.size() == 1);
 
-    const Tool* found = tools.find("echo");
+    const Tool* found = find_tool(tools, "echo");
     REQUIRE(found != nullptr);
     CHECK(found->spec.name == "echo");
     CHECK(found->spec.description == "echo the message");
     CHECK(found->spec.parameters["properties"].isMember("msg"));
     CHECK(found->safety == ToolSafety::MUTATING);
-    CHECK(tools.find("missing") == nullptr);
+    CHECK(find_tool(tools, "missing") == nullptr);
 
-    const auto specs = tools.specs();
+    const auto specs = tool_specs(tools);
     REQUIRE(specs.size() == 1);
     CHECK(specs[0].name == "echo");
 }
@@ -78,41 +76,44 @@ TEST_CASE("tool safety defaults to mutating and can be overridden")
 
 TEST_CASE("dispatch parses object args for the handler")
 {
-    const ToolRegistry tools = echo_registry();
-    const ToolOutput out
-        = tools.dispatch(ToolCallRequest { "echo", R"({"msg":"hi"})", "", "" });
+    const std::vector<Tool> tools = echo_tools();
+    const ToolOutput out = dispatch_tool(
+        tools, ToolCallRequest { "echo", R"({"msg":"hi"})", "", "" });
     CHECK(out.kind == ToolOutput::Kind::OUTPUT);
     CHECK(out.text == "hi");
 }
 
 TEST_CASE("dispatch passes non-JSON args through as a string value")
 {
-    ToolRegistry tools;
-    tools.add({ { "raw", "takes raw text", Json::Value(Json::objectValue) },
+    std::vector<Tool> tools { {
+        { "raw", "takes raw text", Json::Value(Json::objectValue) },
         [](const Json::Value& args) {
             return ToolOutput { ToolOutput::Kind::OUTPUT, args.asString() };
-        } });
-    const ToolOutput out = tools.dispatch({ "raw", "ls -la", "", "" });
+        } } };
+    const ToolOutput out
+        = dispatch_tool(tools, { "raw", "ls -la", "", "" });
     CHECK(out.kind == ToolOutput::Kind::OUTPUT);
     CHECK(out.text == "ls -la");
 }
 
 TEST_CASE("dispatch reports unknown tools as errors")
 {
-    const ToolRegistry tools;
-    const ToolOutput out = tools.dispatch({ "nope", "{}", "", "" });
+    const std::vector<Tool> tools;
+    const ToolOutput out
+        = dispatch_tool(tools, { "nope", "{}", "", "" });
     CHECK(out.kind == ToolOutput::Kind::ERROR);
     CHECK(out.text.find("unknown tool: nope") != std::string::npos);
 }
 
 TEST_CASE("dispatch propagates handler errors")
 {
-    ToolRegistry tools;
-    tools.add({ { "boom", "always fails", Json::Value(Json::objectValue) },
+    std::vector<Tool> tools { {
+        { "boom", "always fails", Json::Value(Json::objectValue) },
         [](const Json::Value&) {
             return ToolOutput { ToolOutput::Kind::ERROR, "it broke" };
-        } });
-    const ToolOutput out = tools.dispatch({ "boom", "{}", "", "" });
+        } } };
+    const ToolOutput out
+        = dispatch_tool(tools, { "boom", "{}", "", "" });
     CHECK(out.kind == ToolOutput::Kind::ERROR);
     CHECK(out.text == "it broke");
 }
@@ -126,9 +127,8 @@ TEST_CASE("edit produces a diff whose right side holds the new content")
         f << "original line\nappended line\n";
     }
 
-    ToolRegistry tools;
-    tools.add(make_edit_tool());
-    const ToolOutput out = tools.dispatch(ToolCallRequest { "edit",
+    std::vector<Tool> tools { make_edit_tool() };
+    const ToolOutput out = dispatch_tool(tools, ToolCallRequest { "edit",
         R"({"file_path":")"
             + path.string()
             + R"(","old_string":"original line","new_string":"edited line"})",

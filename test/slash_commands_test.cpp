@@ -1,4 +1,4 @@
-#include "commands.h"
+#include "slash_commands.h"
 #include "types.h"
 
 #include <doctest/doctest.h>
@@ -52,15 +52,14 @@ TEST_CASE("slash_commands names start with slash")
 
 TEST_CASE("find_command matches case-insensitively")
 {
-    const auto cmds = slash_commands();
-    CHECK(find_command(cmds, "/help") != nullptr);
-    CHECK(find_command(cmds, "/HELP") != nullptr);
-    CHECK(find_command(cmds, "/exit")->action == SlashCommand::Action::EXIT);
-    CHECK(find_command(cmds, "/connect")->action
+    CHECK(find_command("/help") != nullptr);
+    CHECK(find_command("/HELP") != nullptr);
+    CHECK(find_command("/exit")->action == SlashCommand::Action::EXIT);
+    CHECK(find_command("/connect")->action
         == SlashCommand::Action::CONNECT);
-    CHECK(find_command(cmds, "/model")->action
+    CHECK(find_command("/model")->action
         == SlashCommand::Action::MODEL);
-    CHECK(find_command(cmds, "/foo") == nullptr);
+    CHECK(find_command("/foo") == nullptr);
 }
 
 } // namespace ursa

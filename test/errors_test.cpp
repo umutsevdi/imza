@@ -160,7 +160,7 @@ struct AgentEnv {
         [this](const ursa::ChatRequest& req, const ursa::StreamCallback& cb) {
             return stream(req, cb);
         },
-        ursa::ToolRegistry { } };
+        std::vector<ursa::Tool> { } };
 };
 
 bool idle(const ursa::Session& st)

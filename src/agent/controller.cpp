@@ -1,6 +1,6 @@
 #include "controller.h"
 
-#include "commands.h"
+#include "slash_commands.h"
 #include "environment.h"
 #include "prompt.h"
 #include "util.h"
@@ -31,7 +31,7 @@ std::string error_text(Status st)
 
 Controller::Controller(std::shared_ptr<Session> session, const Config& cfg,
     PostFn post, std::function<void()> on_exit, StreamFn stream_fn,
-    ToolRegistry tools, ModelsFn models_fn)
+    std::vector<Tool> tools, ModelsFn models_fn)
     : Controller(std::move(session),
           std::make_shared<ProviderStore>(cfg, std::move(models_fn)),
           std::move(post), std::move(on_exit), std::move(stream_fn),
@@ -41,18 +41,18 @@ Controller::Controller(std::shared_ptr<Session> session, const Config& cfg,
 
 Controller::Controller(std::shared_ptr<Session> session,
     std::shared_ptr<ProviderStore> providers, PostFn post,
-    std::function<void()> on_exit, StreamFn stream_fn, ToolRegistry tools)
+    std::function<void()> on_exit, StreamFn stream_fn,
+    std::vector<Tool> tools)
     : session_(std::move(session))
     , post_(std::move(post))
     , on_exit_(std::move(on_exit))
-    , commands_(slash_commands())
     , stream_fn_(std::move(stream_fn))
     , has_stream_override_(static_cast<bool>(stream_fn_))
     , tools_(std::move(tools))
     , providers_(std::move(providers))
 {
-    specs_plan_ = tools_.plan_specs();
-    specs_all_  = tools_.specs();
+    specs_plan_ = plan_tool_specs(tools_);
+    specs_all_  = tool_specs(tools_);
 
     if (!stream_fn_) {
         stream_fn_ = [this](const ChatRequest& req, const StreamCallback& cb) {

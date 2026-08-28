@@ -189,31 +189,31 @@ TEST_CASE("list rejects non-directories and reports empty output")
     CHECK(empty.text.empty());
 }
 
-TEST_CASE("builtin registry exposes the current tool set")
+TEST_CASE("builtin tools expose the current tool set")
 {
-    const auto tools = ursa::builtin_tools();
-    REQUIRE(tools.tools().size() == 7);
+    const auto tools = ursa::default_tools();
+    REQUIRE(tools.size() == 7);
 
-    const auto* read = tools.find("read");
+    const auto* read = find_tool(tools, "read");
     REQUIRE(read != nullptr);
     CHECK(read->safety == ursa::ToolSafety::READ_ONLY);
     CHECK(read->spec.parameters["properties"].isMember("path"));
 
-    const auto* list = tools.find("list");
+    const auto* list = find_tool(tools, "list");
     REQUIRE(list != nullptr);
     CHECK(list->safety == ursa::ToolSafety::READ_ONLY);
     CHECK(list->spec.parameters["properties"].isMember("path"));
 
-    const auto* ask = tools.find("ask");
+    const auto* ask = find_tool(tools, "ask");
     REQUIRE(ask != nullptr);
     CHECK(ask->safety == ursa::ToolSafety::READ_ONLY);
     CHECK(ask->spec.parameters["properties"].isMember("questions"));
 
-    REQUIRE(tools.find("shell") != nullptr);
-    REQUIRE(tools.find("todo") != nullptr);
-    REQUIRE(tools.find("edit") != nullptr);
-    REQUIRE(tools.find("write") != nullptr);
-    CHECK(tools.specs().size() == 7);
+    REQUIRE(find_tool(tools, "shell") != nullptr);
+    REQUIRE(find_tool(tools, "todo") != nullptr);
+    REQUIRE(find_tool(tools, "edit") != nullptr);
+    REQUIRE(find_tool(tools, "write") != nullptr);
+    CHECK(tool_specs(tools).size() == 7);
 }
 
 TEST_CASE("shell tool runs a command and reports the exit code")

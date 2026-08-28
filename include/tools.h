@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -30,19 +31,12 @@ struct Tool {
     bool available_in_plan = false;
 };
 
-class ToolRegistry {
-public:
-    void add(Tool tool);
-    const Tool* find(std::string_view name) const;
-    const std::vector<Tool>& tools() const { return tools_; }
-    std::vector<ToolSpec> specs() const;
-    std::vector<ToolSpec> specs(ToolSafety safety) const;
-    std::vector<ToolSpec> plan_specs() const;
-    ToolOutput dispatch(const ToolCallRequest& req) const;
-
-private:
-    std::vector<Tool> tools_;
-};
+const Tool* find_tool(
+    std::span<const Tool> tools, std::string_view name);
+std::vector<ToolSpec> tool_specs(std::span<const Tool> tools);
+std::vector<ToolSpec> plan_tool_specs(std::span<const Tool> tools);
+ToolOutput dispatch_tool(
+    std::span<const Tool> tools, const ToolCallRequest& req);
 
 Tool make_read_tool();
 Tool make_list_tool();
@@ -51,6 +45,6 @@ Tool make_shell_tool();
 Tool make_todo_tool();
 Tool make_edit_tool();
 Tool make_write_tool();
-ToolRegistry builtin_tools();
+std::vector<Tool> default_tools();
 
 } // namespace ursa

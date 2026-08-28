@@ -142,11 +142,11 @@ add_library(ursa_agent
     src/agent/attachments.cpp
     src/agent/controller.cpp
     src/agent/stream_loop.cpp
-    src/agent/commands.cpp
+    src/agent/slash_commands.cpp
     src/agent/session.cpp
     src/agent/format.cpp
     src/agent/tools.cpp
-    src/agent/command.cpp
+    src/agent/command_runner.cpp
 )
 target_include_directories(ursa_agent PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include

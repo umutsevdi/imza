@@ -82,8 +82,8 @@ struct Env {
             return stream(req, cb);
         },
         [this] {
-            ursa::ToolRegistry tools;
-            tools.add({ { "bash", "run a shell command",
+            std::vector<ursa::Tool> tools;
+            tools.push_back({ { "bash", "run a shell command",
                             Json::Value(Json::objectValue) },
                 [this](const Json::Value& args) {
                     const std::string raw = args.isString()
@@ -94,7 +94,7 @@ struct Env {
                     return ursa::ToolOutput {
                         ursa::ToolOutput::Kind::OUTPUT, "ran: " + raw };
                 } });
-            tools.add({ { "peek", "read-only probe",
+            tools.push_back({ { "peek", "read-only probe",
                             Json::Value(Json::objectValue) },
                 [this](const Json::Value& args) {
                     const std::string raw = args.isString()

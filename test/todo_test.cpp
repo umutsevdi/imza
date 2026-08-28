@@ -69,10 +69,10 @@ TEST_CASE("todo_summary renders one line per item with marks")
 
 TEST_CASE("todo tool is registered read-only without a direct handler")
 {
-    const auto tools    = ursa::builtin_tools();
-    const ursa::Tool* t = tools.find("todo");
+    const auto tools    = ursa::default_tools();
+    const ursa::Tool* t = ursa::find_tool(tools, "todo");
     REQUIRE(t != nullptr);
     CHECK(t->safety == ursa::ToolSafety::READ_ONLY);
-    const auto out = tools.dispatch({ "todo", "{}" });
+    const auto out = ursa::dispatch_tool(tools, { "todo", "{}" });
     CHECK(out.kind == ursa::ToolOutput::Kind::ERROR);
 }

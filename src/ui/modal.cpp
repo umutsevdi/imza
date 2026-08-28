@@ -625,14 +625,14 @@ ftxui::Component make_modal(
     return ftxui::Make<ModalImpl>(std::move(session), controller, providers);
 }
 
-ftxui::Element render_help(const std::vector<SlashCommand>& commands)
+ftxui::Element render_help(std::span<const SlashCommand> commands)
 {
     Elements rows;
     for (const auto& c : commands) {
         rows.push_back(hbox({
-            text(c.name) | bold | color(PANEL_FG),
+            text(std::string(c.name)) | bold | color(PANEL_FG),
             text("   "),
-            text(c.desc) | dim | color(PANEL_FG_DIM),
+            text(std::string(c.desc)) | dim | color(PANEL_FG_DIM),
         }));
     }
     return vbox({

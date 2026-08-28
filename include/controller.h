@@ -14,7 +14,7 @@
 #include <thread>
 #include <vector>
 
-#include "commands.h"
+#include "slash_commands.h"
 #include "network.h"
 #include "provider_store.h"
 #include "session.h"
@@ -47,11 +47,11 @@ class Controller {
 public:
     Controller(std::shared_ptr<Session> session, const Config& cfg, PostFn post,
         std::function<void()> on_exit, StreamFn stream_fn = { },
-        ToolRegistry tools = { }, ModelsFn models_fn = { });
+        std::vector<Tool> tools = { }, ModelsFn models_fn = { });
     Controller(std::shared_ptr<Session> session,
         std::shared_ptr<ProviderStore> providers, PostFn post,
         std::function<void()> on_exit, StreamFn stream_fn = { },
-        ToolRegistry tools = { });
+        std::vector<Tool> tools = { });
     ~Controller();
 
     Controller(const Controller&)            = delete;
@@ -69,7 +69,7 @@ public:
     void interrupt();
     size_t queue_size() const;
     const Session& session() const { return *session_; }
-    const std::vector<SlashCommand>& commands() const { return commands_; }
+    std::span<const SlashCommand> commands() const { return slash_commands(); }
 
 private:
     void submit_message(
@@ -107,10 +107,9 @@ private:
     std::shared_ptr<Session> session_;
     PostFn post_;
     std::function<void()> on_exit_;
-    std::vector<SlashCommand> commands_;
     StreamFn stream_fn_;
     bool has_stream_override_ { false };
-    ToolRegistry tools_;
+    std::vector<Tool> tools_;
     std::vector<ToolSpec> specs_plan_;
     std::vector<ToolSpec> specs_all_;
     std::function<void()> env_sub_;

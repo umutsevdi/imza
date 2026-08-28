@@ -325,7 +325,7 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
                 tool_msgs.push_back({ Message::Type::TOOL, text, { }, req.id });
                 continue;
             }
-            const Tool* tool    = tools_.find(ev.tool_call.name);
+            const Tool* tool    = find_tool(tools_, ev.tool_call.name);
             bool needs_approval = tool != nullptr
                 && tool->safety == ToolSafety::MUTATING
                 && allowed_tools_.count(ev.tool_call.name) == 0;
@@ -433,7 +433,7 @@ void Controller::_apply_tool_result(const ToolCallRequest& req,
         return;
     }
     if (verdict->decision == ToolDecision::ACCEPT_ALWAYS) {
-        const Tool* tool = tools_.find(req.name);
+        const Tool* tool = find_tool(tools_, req.name);
         if (tool == nullptr || tool->persistent) {
             allowed_tools_.insert(req.name);
         }
@@ -480,7 +480,7 @@ void Controller::_apply_ask_result(const ToolCallRequest& req,
 void Controller::_run_tool(
     const ToolCallRequest& req, std::vector<Message>& tool_msgs)
 {
-    const ToolOutput out = tools_.dispatch(req);
+    const ToolOutput out = dispatch_tool(tools_, req);
     const auto kind      = out.kind == ToolOutput::Kind::OUTPUT
         ? ToolCall::Result::Kind::OUTPUT
         : ToolCall::Result::Kind::ERROR;

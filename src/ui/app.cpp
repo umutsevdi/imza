@@ -124,7 +124,7 @@ int run_repl(const Config& cfg)
     }
 
     ScreenInteractive screen = ScreenInteractive::FullscreenAlternateScreen();
-    ToolRegistry tools       = builtin_tools();
+    std::vector<Tool> tools  = default_tools();
     auto session             = std::make_shared<Session>();
     auto providers           = std::make_shared<ProviderStore>(cfg);
     Controller controller(

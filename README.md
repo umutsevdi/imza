@@ -15,6 +15,8 @@ supports OpenAI-compatible and Anthropic-compatible APIs.
 - Queued prompts, interruption, rate-limit retries, and countdowns
 - Project instructions from `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`
 - Workspace and repository status, changed files, branch, and todo widgets
+- Derive a local title from the first prompt, support
+   manual rename, and consider background AI titles later.
 
 ## Priority roadmap
 
@@ -26,8 +28,6 @@ The next capabilities are ordered by dependency and user value:
    sessions.
 3. **Context management** — compact or summarize long histories before they
    exceed a model's context window.
-4. **Session titles** — derive a local title from the first prompt, support
-   manual rename, and consider background AI titles later.
 5. **Skills** — discover and load reusable instruction packages with explicit
    scope and invocation rules.
 6. **MCP** — expose external MCP tools through the existing flat

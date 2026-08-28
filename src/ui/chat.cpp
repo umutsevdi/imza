@@ -688,7 +688,7 @@ namespace {
                 const size_t i              = first + row_index;
                 const bool sel              = static_cast<int>(i) == sel_;
                 const std::string name_text = file_matches_.empty()
-                    ? matches_[i]->name
+                    ? std::string(matches_[i]->name)
                     : "@" + file_matches_[i].path;
                 Element name                = text(name_text);
                 if (sel) {

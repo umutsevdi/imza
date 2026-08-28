@@ -78,9 +78,9 @@ TEST_CASE("mode reminders carry unique detectable tags")
 
 TEST_CASE("specs can be filtered by safety for plan mode")
 {
-    const ToolRegistry tools = builtin_tools();
-    const auto all = tools.specs();
-    const auto plan = tools.plan_specs();
+    const std::vector<Tool> tools = default_tools();
+    const auto all = tool_specs(tools);
+    const auto plan = plan_tool_specs(tools);
     REQUIRE(plan.size() < all.size());
 
     bool has_shell = false;

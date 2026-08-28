@@ -11,7 +11,7 @@
 #include <string_view>
 #include <vector>
 
-#include "commands.h"
+#include "slash_commands.h"
 #include "controller.h"
 
 namespace ursa {
@@ -60,7 +60,7 @@ ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx);
 ftxui::Element render_todo(const TodoList& todo, const LayoutCtx& ctx);
 ftxui::Element render_changed_files(
     const std::vector<ChangedFile>& files, const LayoutCtx& ctx);
-ftxui::Element render_help(const std::vector<SlashCommand>& commands);
+ftxui::Element render_help(std::span<const SlashCommand> commands);
 
 int run_repl(const Config& cfg);
 
