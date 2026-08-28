@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -123,6 +124,7 @@ private:
     std::uint64_t next_id_ { 1 };
     std::uint64_t workspace_generation_ { 0 };
     std::atomic<bool> ready_ { false };
+    std::condition_variable_any workspace_ready_cv_;
     std::jthread worker_;
 
     std::jthread git_worker_;

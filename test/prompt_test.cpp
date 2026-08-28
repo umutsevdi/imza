@@ -80,18 +80,18 @@ TEST_CASE("specs can be filtered by safety for plan mode")
 {
     const ToolRegistry tools = builtin_tools();
     const auto all = tools.specs();
-    const auto read_only = tools.specs(ToolSafety::READ_ONLY);
-    REQUIRE(read_only.size() < all.size());
+    const auto plan = tools.plan_specs();
+    REQUIRE(plan.size() < all.size());
 
     bool has_shell = false;
     bool has_read = false;
     bool has_ask = false;
-    for (const auto& s : read_only) {
+    for (const auto& s : plan) {
         has_shell = has_shell || s.name == "shell";
         has_read  = has_read || s.name == "read";
         has_ask   = has_ask || s.name == "ask";
     }
-    CHECK_FALSE(has_shell);
+    CHECK(has_shell);
     CHECK(has_read);
     CHECK(has_ask);
 }

@@ -22,6 +22,8 @@ public:
         , repository_subscription_(
               get_environment()->subscribe_to_repository_change(
                   [] { animation::RequestAnimationFrame(); }))
+        , title_subscription_(session_->subscribe_to_title_change(
+              [] { animation::RequestAnimationFrame(); }))
     {
     }
 
@@ -29,6 +31,7 @@ public:
     {
         repository_subscription_();
         workspace_subscription_();
+        title_subscription_();
     }
 
     Element OnRender() override
@@ -36,6 +39,10 @@ public:
         const LayoutCtx ctx = layout_();
         const bool narrow   = ctx.kind == LayoutCtx::Kind::NARROW;
         Elements parts;
+        const std::string title = session_->title();
+        parts.push_back(paragraph(title.empty() ? "New Session" : title) | bold
+            | color(PANEL_FG));
+        parts.push_back(separator());
         if (session_->todo().items.size()) {
             parts.push_back(render_todo(session_->todo(), ctx) | yflex);
         }
@@ -80,6 +87,7 @@ private:
     LayoutFn layout_;
     std::function<void()> workspace_subscription_;
     std::function<void()> repository_subscription_;
+    std::function<void()> title_subscription_;
 };
 
 ftxui::Component make_side_panel(

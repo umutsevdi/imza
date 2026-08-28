@@ -17,6 +17,7 @@ std::string tool_request_summary(const std::string& name,
 std::string tool_call_head(const ToolCall& call);
 std::string tool_header_args(const ToolCall& call);
 std::string tool_code_language(const ToolCall& call);
+std::string shell_status_text(const ShellStatus& status);
 std::size_t read_start_line(const ToolCall& call);
 
 } // namespace ursa

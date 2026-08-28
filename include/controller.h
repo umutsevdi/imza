@@ -57,7 +57,8 @@ public:
     Controller(const Controller&)            = delete;
     Controller& operator=(const Controller&) = delete;
 
-    void submit(std::string text);
+    void submit(std::string text,
+        std::vector<FileAttachment> attachments = { });
     void toggle_mode();
     void set_error(std::string msg);
     void clear_error();
@@ -71,7 +72,8 @@ public:
     const std::vector<SlashCommand>& commands() const { return commands_; }
 
 private:
-    void submit_message(std::string text);
+    void submit_message(
+        std::string text, std::vector<FileAttachment> attachments);
     void run_slash(std::string_view cmd);
     void finish(std::string error);
 
@@ -79,6 +81,7 @@ private:
     std::string _system_prompt() const;
     void _spawn(
         std::vector<Message> history, StreamFn override, TurnSettings settings);
+    void _spawn_title(std::string input, TurnSettings settings);
     void _drive(
         std::vector<Message> history, StreamFn override, TurnSettings settings);
     void _begin_connect(const ConnectResult& res);
@@ -125,6 +128,7 @@ private:
     std::atomic<bool> alive_ { true };
     std::shared_ptr<ProviderStore> providers_;
     std::optional<std::jthread> worker_;
+    std::optional<std::jthread> title_worker_;
     int retry_after_secs_ = 0;
 };
 

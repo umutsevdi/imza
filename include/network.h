@@ -121,6 +121,7 @@ struct ParseState {
     std::map<int, ThinkingAccum> thinking_accums;
     Usage usage;
     bool usage_emitted = false;
+    bool terminal      = false;
 };
 
 struct Provider {

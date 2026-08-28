@@ -12,12 +12,14 @@
 #include <vector>
 
 #include "network.h"
+#include "attachments.h"
 #include "types.h"
 
 namespace ursa {
 
 struct UserTurn {
     std::string text;
+    std::vector<FileAttachment> attachments;
 };
 
 struct AssistantTurn {
@@ -34,7 +36,8 @@ struct ToolCall {
         enum class Kind { OUTPUT, ERROR, REJECT, CANCEL };
         Kind kind;
         std::string text;
-        std::optional<DiffView> diff;
+        std::optional<DiffView> diff { };
+        std::optional<ShellStatus> shell_status { };
     };
     std::size_t id = 0;
     std::string call_id;
@@ -83,6 +86,7 @@ using ModalPayload = std::variant<std::monostate, HelpModal, ViewerModal,
 struct QueuedMessage {
     std::size_t id;
     std::string text;
+    std::vector<FileAttachment> attachments;
 };
 
 std::optional<TodoList> parse_todo_args(const Json::Value& args);
@@ -113,6 +117,7 @@ public:
     Mode mode() const;
     std::string error() const;
     std::string connect_status() const;
+    std::string title() const;
     const TodoList& todo() const { return todo_; }
     const std::vector<QueuedMessage>& queued() const { return queued_; }
     std::optional<Countdown> retry_countdown() const;
@@ -126,11 +131,15 @@ public:
     void set_error(std::string msg);
     void clear_error();
     void set_connect_status(std::string status);
+    bool claim_title_generation();
+    void set_title(std::string title);
     void cancel_queued(std::size_t id);
-    void enqueue_message(std::string text);
+    void enqueue_message(std::string text,
+        std::vector<FileAttachment> attachments = { });
     std::optional<QueuedMessage> pop_queued();
 
-    void begin_send(std::string text);
+    void begin_send(std::string text,
+        std::vector<FileAttachment> attachments = { });
     void append_assistant(std::string model = "", std::string reasoning_effort = "");
     void set_last_assistant_metadata(std::string model,
         std::string reasoning_effort);
@@ -157,11 +166,20 @@ public:
     void clear_interrupt();
     bool interrupt_requested() const;
 
+    std::function<void()> subscribe_to_title_change(
+        const std::function<void()>& cb);
+
 private:
+    struct Subscriber {
+        std::uint64_t id;
+        std::function<void()> cb;
+    };
+
     AssistantTurn* last_assistant_locked();
     void finalize_reasoning(AssistantTurn& a);
     void finish_session_locked(const std::string& error);
     void update_usage(const StreamEvent& usage_event, const ModelPricing& pricing);
+    void _notify_title_change();
 
     mutable std::mutex mutex_;
 
@@ -172,6 +190,8 @@ private:
     Mode mode_                  = Mode::PLAN;
     std::string error_;
     std::string connect_status_;
+    std::string title_;
+    bool title_generation_claimed_ = false;
 
     TodoList todo_;
     std::vector<QueuedMessage> queued_;
@@ -187,6 +207,9 @@ private:
     std::size_t next_queued_id_ = 0;
     std::optional<std::chrono::steady_clock::time_point> reasoning_start_;
     std::atomic<bool> interrupt_requested_ { false };
+
+    std::vector<Subscriber> title_cbs_;
+    std::uint64_t next_title_id_ { 1 };
 };
 
 } // namespace ursa

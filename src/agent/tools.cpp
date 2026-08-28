@@ -48,6 +48,17 @@ std::vector<ToolSpec> ToolRegistry::specs(ToolSafety safety) const
     return out;
 }
 
+std::vector<ToolSpec> ToolRegistry::plan_specs() const
+{
+    std::vector<ToolSpec> out;
+    for (const auto& tool : tools_) {
+        if (tool.safety == ToolSafety::READ_ONLY || tool.available_in_plan) {
+            out.push_back(tool.spec);
+        }
+    }
+    return out;
+}
+
 ToolOutput ToolRegistry::dispatch(const ToolCallRequest& req) const
 {
     const Tool* tool = find(req.name);
@@ -305,18 +316,15 @@ namespace {
             return error("shell: failed to execute command");
         }
 
-        std::string out = command + "\n";
-        out += r.output;
+        std::string out = r.output;
         if (!out.empty() && out.back() != '\n') {
             out += '\n';
         }
-        if (r.timed_out) {
-            out += "[command timed out after " + std::to_string(timeout.count())
-                + "s]\n";
-        } else {
-            out += "[exit code: " + std::to_string(r.exit_code) + "]\n";
-        }
-        return { ToolOutput::Kind::OUTPUT, std::move(out) };
+        ToolOutput result { ToolOutput::Kind::OUTPUT, std::move(out) };
+        result.shell_status = r.timed_out
+            ? ShellStatus { ShellTimeout { timeout } }
+            : ShellStatus { ShellExit { r.exit_code } };
+        return result;
     }
 
     bool load_text(const std::string& path, std::string& out, std::string& err)
@@ -748,7 +756,7 @@ Tool make_shell_tool()
           "terminated.";
     spec.parameters = parse_json(
         R"json({"type":"object","properties":{"command":{"type":"string","description":"the shell command to run"},"timeout":{"type":"integer","description":"maximum runtime in seconds before the command is killed (default 10)"}},"required":["command"]})json");
-    return { std::move(spec), shell_run, ToolSafety::MUTATING, false };
+    return { std::move(spec), shell_run, ToolSafety::MUTATING, false, true };
 }
 
 Tool make_todo_tool()

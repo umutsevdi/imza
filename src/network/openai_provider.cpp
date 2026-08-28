@@ -138,6 +138,7 @@ namespace {
         std::vector<StreamEvent>& outs)
     {
         if (data == "[DONE]") {
+            state.terminal = true;
             flush_tools(state, outs);
             outs.push_back(make_done_event());
             return;

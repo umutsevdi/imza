@@ -3,6 +3,7 @@
 #include <cctype>
 #include <filesystem>
 #include <string>
+#include <type_traits>
 
 namespace ursa {
 
@@ -233,6 +234,23 @@ std::string tool_code_language(const ToolCall& call)
         ext.erase(0, 1);
     }
     return ext;
+}
+
+std::string shell_status_text(const ShellStatus& status)
+{
+    return std::visit(
+        [](const auto& value) -> std::string {
+            using T = std::decay_t<decltype(value)>;
+            if constexpr (std::is_same_v<T, ShellExit>) {
+                return value.code == 0
+                    ? ""
+                    : "exited with code " + std::to_string(value.code);
+            } else {
+                return "timed out after "
+                    + std::to_string(value.duration.count()) + "s";
+            }
+        },
+        status);
 }
 
 std::size_t read_start_line(const ToolCall& call)

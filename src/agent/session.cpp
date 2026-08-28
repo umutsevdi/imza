@@ -97,7 +97,20 @@ std::string tool_result_text(const ToolCall& call)
     case ToolCall::Result::Kind::REJECT:
     case ToolCall::Result::Kind::CANCEL: return denial_text(call.result->text);
     case ToolCall::Result::Kind::OUTPUT:
-    case ToolCall::Result::Kind::ERROR: return call.result->text;
+    case ToolCall::Result::Kind::ERROR: {
+        std::string text = call.result->text;
+        if (call.result->shell_status.has_value()) {
+            const std::string status
+                = shell_status_text(*call.result->shell_status);
+            if (!status.empty()) {
+                if (!text.empty() && text.back() != '\n') {
+                    text += '\n';
+                }
+                text += "[" + status + "]";
+            }
+        }
+        return text;
+    }
     }
     return "";
 }
@@ -200,6 +213,33 @@ void Session::set_connect_status(std::string status)
     connect_status_ = std::move(status);
 }
 
+std::string Session::title() const
+{
+    std::lock_guard lock(mutex_);
+    return title_;
+}
+
+bool Session::claim_title_generation()
+{
+    std::lock_guard lock(mutex_);
+    if (title_generation_claimed_ || !items_.empty()) {
+        return false;
+    }
+    title_generation_claimed_ = true;
+    return true;
+}
+
+void Session::set_title(std::string title)
+{
+    {
+        std::lock_guard lock(mutex_);
+        if (title_.empty()) {
+            title_ = std::move(title);
+        }
+    }
+    _notify_title_change();
+}
+
 void Session::cancel_queued(std::size_t id)
 {
     std::lock_guard lock(mutex_);
@@ -211,10 +251,12 @@ void Session::cancel_queued(std::size_t id)
     }
 }
 
-void Session::enqueue_message(std::string text)
+void Session::enqueue_message(
+    std::string text, std::vector<FileAttachment> attachments)
 {
     std::lock_guard lock(mutex_);
-    queued_.push_back(QueuedMessage { next_queued_id_++, std::move(text) });
+    queued_.push_back(QueuedMessage {
+        next_queued_id_++, std::move(text), std::move(attachments) });
 }
 
 std::optional<QueuedMessage> Session::pop_queued()
@@ -228,10 +270,11 @@ std::optional<QueuedMessage> Session::pop_queued()
     return next;
 }
 
-void Session::begin_send(std::string text)
+void Session::begin_send(
+    std::string text, std::vector<FileAttachment> attachments)
 {
     std::lock_guard lock(mutex_);
-    items_.push_back(UserTurn { std::move(text) });
+    items_.push_back(UserTurn { std::move(text), std::move(attachments) });
     error_.clear();
     phase_ = Phase::CONNECTING;
 }
@@ -385,7 +428,8 @@ std::vector<Message> Session::build_history(
     history.push_back({ Message::Type::SYSTEM, std::string(system_prompt) });
     for (const auto& item : items_) {
         if (const auto* u = std::get_if<UserTurn>(&item)) {
-            history.push_back({ Message::Type::USER, u->text });
+            history.push_back({ Message::Type::USER,
+                message_with_attachments(u->text, u->attachments) });
         } else if (const auto* a = std::get_if<AssistantTurn>(&item)) {
             Message m { Message::Type::ASSISTANT, a->markdown };
             if (dialect == ApiStandard::ANTHROPIC && !a->reasoning.empty()) {
@@ -531,6 +575,38 @@ void Session::update_usage(
     totals_.total += usage_event.usage.total;
     last_cost_ = compute_cost(usage_event.usage, pricing);
     total_cost_ += last_cost_;
+}
+
+std::function<void()> Session::subscribe_to_title_change(
+    const std::function<void()>& cb)
+{
+    std::uint64_t id;
+    {
+        std::lock_guard lock(mutex_);
+        id = next_title_id_++;
+        title_cbs_.push_back(Subscriber { id, cb });
+    }
+    return [this, id] {
+        std::lock_guard lock(mutex_);
+        title_cbs_.erase(std::remove_if(title_cbs_.begin(), title_cbs_.end(),
+                             [id](const Subscriber& s) { return s.id == id; }),
+            title_cbs_.end());
+    };
+}
+
+void Session::_notify_title_change()
+{
+    std::vector<std::function<void()>> callbacks;
+    {
+        std::lock_guard lock(mutex_);
+        callbacks.reserve(title_cbs_.size());
+        for (const auto& sub : title_cbs_) {
+            callbacks.push_back(sub.cb);
+        }
+    }
+    for (const auto& cb : callbacks) {
+        cb();
+    }
 }
 
 } // namespace ursa

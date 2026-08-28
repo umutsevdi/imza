@@ -126,3 +126,13 @@ TEST_CASE("tool_code_language derives the extension for read only")
     ursa::ToolCall other { 1, "", "bash", "git status", { } };
     CHECK(ursa::tool_code_language(other).empty());
 }
+
+TEST_CASE("shell status text hides success and preserves arbitrary timeout")
+{
+    CHECK(ursa::shell_status_text(ursa::ShellExit { 0 }).empty());
+    CHECK(ursa::shell_status_text(ursa::ShellExit { 7 })
+        == "exited with code 7");
+    CHECK(ursa::shell_status_text(
+              ursa::ShellTimeout { std::chrono::seconds { 47 } })
+        == "timed out after 47s");
+}

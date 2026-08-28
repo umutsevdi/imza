@@ -165,6 +165,7 @@ TEST_CASE("OpenAI done")
     const auto outs = parse_all(p, state, { { "", "[DONE]" } });
     REQUIRE(outs.size() == 1);
     CHECK(outs[0].kind == ursa::StreamEvent::Kind::DONE);
+    CHECK(state.terminal);
 }
 
 TEST_CASE("OpenAI accumulates fragmented tool calls and flushes")
@@ -226,6 +227,7 @@ TEST_CASE("Anthropic stop")
     const auto outs = parse_all(p, state, { { "message_stop", "{}" } });
     REQUIRE(outs.size() == 1);
     CHECK(outs[0].kind == ursa::StreamEvent::Kind::DONE);
+    CHECK(state.terminal);
 }
 
 TEST_CASE("Anthropic assembles tool_use block across deltas")

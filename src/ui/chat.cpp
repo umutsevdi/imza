@@ -17,8 +17,8 @@
 #include <string_view>
 #include <vector>
 
-#include "format.h"
 #include "attachments.h"
+#include "format.h"
 #include "util.h"
 
 namespace ursa {
@@ -29,7 +29,7 @@ namespace {
 
     using namespace ftxui;
 
-    constexpr std::size_t kLargeOutputLines = 30;
+    constexpr std::size_t kLargeOutputLines = 10;
     constexpr std::size_t kInvalidVersion   = ~std::size_t { 0 };
     constexpr int kWheelStep                = 3;
 
@@ -177,6 +177,16 @@ namespace {
             const bool streaming  = st.phase() == Session::Phase::STREAMING;
             const bool connecting = st.phase() == Session::Phase::CONNECTING;
             const bool busy       = streaming || connecting;
+            const bool shell_running = busy
+                && std::any_of(st.items().begin(), st.items().end(),
+                    [](const ConversationItem& item) {
+                        const auto* tc = std::get_if<ToolCall>(&item);
+                        return tc != nullptr && tc->name == "shell"
+                            && !tc->result.has_value();
+                    });
+            if (shell_running) {
+                animation::RequestAnimationFrame();
+            }
 
             Elements items;
             if (follow_) {
@@ -202,6 +212,11 @@ namespace {
                         || std::holds_alternative<UserTurn>(
                             st.items()[item_index + 1]));
                 std::size_t eff_version = version;
+                if (const auto* tc = std::get_if<ToolCall>(&it);
+                    tc != nullptr && tc->name == "shell"
+                    && !tc->result.has_value()) {
+                    eff_version = static_cast<std::size_t>(frame_);
+                }
                 if (final_segment) {
                     eff_version ^= std::size_t { 1 } << 62;
                 }
@@ -235,9 +250,10 @@ namespace {
                                 } else if (tc.name == "list") {
                                     item_cache_[item_index]
                                         = render_list_collapsed(tc);
-                                } else if (tc.name == "shell" && big) {
-                                    item_cache_[item_index]
-                                        = render_shell_collapsed(tc);
+                                } else if (tc.name == "shell") {
+                                    item_cache_[item_index] = big
+                                        ? render_shell_collapsed(tc)
+                                        : render_shell_item(tc);
                                 } else if (tc.name == "edit"
                                     || tc.name == "write") {
                                     item_cache_[item_index]
@@ -567,11 +583,11 @@ namespace {
             attachment_token_.reset();
             sel_                   = 0;
             const std::string text = input_buf_;
-            attachment_token_ = attachment_token_at(
+            attachment_token_      = attachment_token_at(
                 text, static_cast<std::size_t>(input_cursor_));
             if (attachment_token_) {
-                file_matches_ = attachment_candidates(std::filesystem::current_path(),
-                    attachment_token_->query);
+                file_matches_ = attachment_candidates(
+                    std::filesystem::current_path(), attachment_token_->query);
                 return;
             }
             if (text.empty() || text[0] != '/'
@@ -595,7 +611,7 @@ namespace {
         {
             if (!file_matches_.empty() && attachment_token_) {
                 const AttachmentCandidate& candidate = file_matches_[sel_];
-                const std::string replacement = "@" + candidate.path;
+                const std::string replacement        = "@" + candidate.path;
                 input_buf_.replace(attachment_token_->begin,
                     attachment_token_->end - attachment_token_->begin,
                     replacement);
@@ -625,8 +641,8 @@ namespace {
                     }
                     if (attachments_.size() >= kMaxAttachments
                         || total > kMaxTotalBytes) {
-                        controller_.set_error(
-                            "attachments exceed the 20 file or 4 MiB total limit");
+                        controller_.set_error("attachments exceed the 20 file "
+                                              "or 4 MiB total limit");
                         refresh_suggestions();
                         return;
                     }
@@ -647,8 +663,8 @@ namespace {
 
         int suggestion_count() const
         {
-            return static_cast<int>(file_matches_.empty() ? matches_.size()
-                                                          : file_matches_.size());
+            return static_cast<int>(
+                file_matches_.empty() ? matches_.size() : file_matches_.size());
         }
 
         bool show_suggestions() const { return suggestion_count() > 0; }
@@ -657,8 +673,8 @@ namespace {
         {
             const size_t max_rows = 8;
             const size_t total = file_matches_.empty() ? matches_.size()
-                                                        : file_matches_.size();
-            const size_t shown    = std::min(total, max_rows);
+                                                       : file_matches_.size();
+            const size_t shown = std::min(total, max_rows);
             const size_t selected = static_cast<size_t>(std::max(0, sel_));
             const size_t first    = selected < shown
                 ? 0
@@ -669,34 +685,33 @@ namespace {
                     | dim | color(PANEL_FG_DIM));
             }
             for (size_t row_index = 0; row_index < shown; ++row_index) {
-                const size_t i        = first + row_index;
-                const bool sel        = static_cast<int>(i) == sel_;
+                const size_t i              = first + row_index;
+                const bool sel              = static_cast<int>(i) == sel_;
                 const std::string name_text = file_matches_.empty()
                     ? matches_[i]->name
                     : "@" + file_matches_[i].path;
-                Element name = text(name_text);
+                Element name                = text(name_text);
                 if (sel) {
                     name = name | bold;
                 }
                 Element row = hbox({
                     std::move(name) | xflex,
                     text("  "),
-                    text(file_matches_.empty() ? matches_[i]->desc
-                                               : (file_matches_[i].directory
-                                                         ? "directory"
-                                                         : "file"))
+                    text(file_matches_.empty()
+                            ? matches_[i]->desc
+                            : (file_matches_[i].directory ? "directory"
+                                                          : "file"))
                         | dim | color(PANEL_FG_DIM),
                 });
-                row = row | xflex
-                    | (sel ? bgcolor(PANEL_COLOR_FOCUS)
-                           : bgcolor(PANEL_COLOR));
+                row         = row | xflex
+                    | (sel ? bgcolor(PANEL_COLOR_FOCUS) : bgcolor(PANEL_COLOR));
                 rows.push_back(std::move(row));
             }
             const size_t remaining = total - first - shown;
             if (remaining > 0) {
-                rows.push_back(text(
-                    "  ↓ " + std::to_string(remaining) + " more")
-                    | dim | color(PANEL_FG_DIM));
+                rows.push_back(
+                    text("  ↓ " + std::to_string(remaining) + " more") | dim
+                    | color(PANEL_FG_DIM));
             }
             return vbox(std::move(rows)) | xflex | bgcolor(PANEL_COLOR)
                 | color(PANEL_FG);
@@ -719,11 +734,22 @@ namespace {
 
         Element tool_header_element(const ToolCall& tc)
         {
-            return hbox({
-                text(tool_display_name(tc.name) + ": ") | bold
+            Elements parts {
+                text(tool_display_name(tc.name)) | bold
                     | color(Color::GreenLight),
+                text(" "),
                 text(tool_header_args(tc)) | color(PANEL_FG),
-            });
+            };
+            if (tc.result.has_value()
+                && tc.result->shell_status.has_value()) {
+                const std::string status
+                    = shell_status_text(*tc.result->shell_status);
+                if (!status.empty()) {
+                    parts.push_back(filler());
+                    parts.push_back(text(status) | color(Color::RedLight));
+                }
+            }
+            return hbox(std::move(parts));
         }
 
         Element render_read_item(const ToolCall& tc)
@@ -773,6 +799,16 @@ namespace {
                 btn->Render(),
                 separatorEmpty(),
             });
+        }
+
+        Element render_shell_item(const ToolCall& tc)
+        {
+            Elements parts { tool_header_element(tc) };
+            if (!tc.result->text.empty()) {
+                parts.push_back(code_block(tc.result->text, ""));
+            }
+            parts.push_back(separatorEmpty());
+            return vbox(std::move(parts));
         }
 
         Element render_write_item(const ToolCall& tc)
@@ -834,6 +870,17 @@ namespace {
 
         Element render_tool_pending(const ToolCall& tc)
         {
+            if (tc.name == "shell") {
+                return vbox({
+                    hbox({
+                        spinner(15, static_cast<std::size_t>(frame_))
+                            | color(Color::GreenLight),
+                        text(" "),
+                        tool_header_element(tc),
+                    }),
+                    separatorEmpty(),
+                });
+            }
             return vbox({
                 tool_header_element(tc),
                 separatorEmpty(),

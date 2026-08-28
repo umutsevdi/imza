@@ -196,9 +196,12 @@ namespace {
             }
             process_line(*ctx, line);
             pos = nl + 1;
+            if (ctx->parse_state.terminal) {
+                break;
+            }
         }
         ctx->buf.erase(0, pos);
-        return n;
+        return ctx->parse_state.terminal ? 0 : n;
     }
 
     int progress_callback(void* userdata, curl_off_t, curl_off_t, curl_off_t,
@@ -283,6 +286,9 @@ Status stream(const Provider& provider, const Route& route,
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code);
     curl_slist_free_all(list);
 
+    if (res == CURLE_WRITE_ERROR && ctx.parse_state.terminal) {
+        return Status::OK;
+    }
     if (res != CURLE_OK) {
         if (res == CURLE_ABORTED_BY_CALLBACK && req.interrupted
             && req.interrupted()) {

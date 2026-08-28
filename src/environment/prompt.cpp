@@ -46,7 +46,7 @@ namespace {
 
 # Modes
 - You operate in one of two modes: PLAN or BUILD. The current mode is announced via <system-reminder> messages.
-- In PLAN mode only read-only tools are available. Research the request, ask the user clarifying questions when intent is ambiguous, weigh tradeoffs, and present a concise, well-structured plan in your reply. Do not attempt to make changes.
+- In PLAN mode tools may only be used for read-only operations. Shell commands must inspect without modifying state. Research the request, ask the user clarifying questions when intent is ambiguous, weigh tradeoffs, and present a concise, well-structured plan in your reply. Do not attempt to make changes.
 - In BUILD mode all tools are available. Implement the plan, then verify the result if possible.)prompt";
 
     std::string environment_block(const SystemEnvironment& sys,

@@ -15,6 +15,7 @@ struct ToolOutput {
     Kind kind;
     std::string text;
     std::optional<DiffView> diff { };
+    std::optional<ShellStatus> shell_status { };
 };
 
 using ToolHandler = std::function<ToolOutput(const Json::Value& args)>;
@@ -26,6 +27,7 @@ struct Tool {
     ToolHandler run;
     ToolSafety safety = ToolSafety::MUTATING;
     bool persistent = true;
+    bool available_in_plan = false;
 };
 
 class ToolRegistry {
@@ -35,6 +37,7 @@ public:
     const std::vector<Tool>& tools() const { return tools_; }
     std::vector<ToolSpec> specs() const;
     std::vector<ToolSpec> specs(ToolSafety safety) const;
+    std::vector<ToolSpec> plan_specs() const;
     ToolOutput dispatch(const ToolCallRequest& req) const;
 
 private:

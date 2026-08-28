@@ -210,6 +210,7 @@ namespace {
             return;
         }
         if (event == "message_stop") {
+            state.terminal = true;
             flush_pending_tools(state, outs);
             if (state.usage.prompt > 0 || state.usage.completion > 0
                 || state.usage.total > 0) {

@@ -361,6 +361,13 @@ Environment::Environment()
 
     if (system_->has_git) {
         git_worker_ = std::jthread([this](const std::stop_token& stop) {
+            {
+                std::unique_lock lock(workspace_mutex_);
+                if (!workspace_ready_cv_.wait(
+                        lock, stop, [this] { return ready_.load(); })) {
+                    return;
+                }
+            }
             while (!stop.stop_requested()) {
                 const auto observed_workspace = workspace();
                 if (observed_workspace == nullptr) {
@@ -414,6 +421,7 @@ void Environment::_publish_workspace(
         workspace_callbacks  = workspace_cbs_;
         repository_callbacks = repository_cbs_;
     }
+    workspace_ready_cv_.notify_all();
     _notify(workspace_callbacks);
     _notify(repository_callbacks);
 }

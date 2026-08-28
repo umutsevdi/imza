@@ -486,10 +486,22 @@ void Controller::_run_tool(
         : ToolCall::Result::Kind::ERROR;
     _post([this, req, kind, out] {
         ToolCall::Result result { kind, out.text };
-        result.diff = out.diff;
+        result.diff         = out.diff;
+        result.shell_status = out.shell_status;
         session_->fill_tool_result(req, std::move(result));
     });
-    tool_msgs.push_back({ Message::Type::TOOL, out.text, { }, req.id });
+    std::string model_text = out.text;
+    if (out.shell_status.has_value()) {
+        const std::string status = shell_status_text(*out.shell_status);
+        if (!status.empty()) {
+            if (!model_text.empty() && model_text.back() != '\n') {
+                model_text += '\n';
+            }
+            model_text += "[" + status + "]";
+        }
+    }
+    tool_msgs.push_back(
+        { Message::Type::TOOL, std::move(model_text), { }, req.id });
 }
 
 } // namespace ursa

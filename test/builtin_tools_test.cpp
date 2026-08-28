@@ -220,6 +220,7 @@ TEST_CASE("shell tool runs a command and reports the exit code")
 {
     const auto tool = ursa::make_shell_tool();
     REQUIRE(tool.safety == ursa::ToolSafety::MUTATING);
+    CHECK(tool.available_in_plan);
     CHECK(tool.persistent == false);
     CHECK(tool.spec.parameters["properties"].isMember("command"));
     CHECK(tool.spec.parameters["properties"].isMember("timeout"));
@@ -228,7 +229,12 @@ TEST_CASE("shell tool runs a command and reports the exit code")
         ursa::parse_json(R"({"command":"echo hi-from-shell"})"));
     CHECK(out.kind == ursa::ToolOutput::Kind::OUTPUT);
     CHECK(out.text.find("hi-from-shell") != std::string::npos);
-    CHECK(out.text.find("[exit code: 0]") != std::string::npos);
+    CHECK_FALSE(out.text.starts_with("echo hi-from-shell"));
+    CHECK(out.text.find("exit code") == std::string::npos);
+    REQUIRE(out.shell_status.has_value());
+    const auto* status = std::get_if<ursa::ShellExit>(&*out.shell_status);
+    REQUIRE(status != nullptr);
+    CHECK(status->code == 0);
 }
 
 TEST_CASE("shell tool rejects a missing command and honors timeout clamp")
@@ -243,4 +249,17 @@ TEST_CASE("shell tool rejects a missing command and honors timeout clamp")
         = tool.run(ursa::parse_json(R"({"command":"true","timeout":0})"));
     CHECK(bad_timeout.kind == ursa::ToolOutput::Kind::ERROR);
     CHECK(bad_timeout.text.find("timeout") != std::string::npos);
+}
+
+TEST_CASE("shell tool carries non-zero exit status separately from output")
+{
+    const auto tool = ursa::make_shell_tool();
+    const auto out = tool.run(ursa::parse_json(R"({"command":"false"})"));
+
+    CHECK(out.kind == ursa::ToolOutput::Kind::OUTPUT);
+    CHECK(out.text.empty());
+    REQUIRE(out.shell_status.has_value());
+    const auto* status = std::get_if<ursa::ShellExit>(&*out.shell_status);
+    REQUIRE(status != nullptr);
+    CHECK(status->code != 0);
 }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <map>
@@ -21,6 +22,16 @@ struct DiffView {
     std::string file;
     std::vector<DiffRow> rows;
 };
+
+struct ShellExit {
+    int code;
+};
+
+struct ShellTimeout {
+    std::chrono::seconds duration;
+};
+
+using ShellStatus = std::variant<ShellExit, ShellTimeout>;
 
 enum class Status {
     OK,

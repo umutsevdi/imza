@@ -51,7 +51,7 @@ Controller::Controller(std::shared_ptr<Session> session,
     , tools_(std::move(tools))
     , providers_(std::move(providers))
 {
-    specs_plan_ = tools_.specs(ToolSafety::READ_ONLY);
+    specs_plan_ = tools_.plan_specs();
     specs_all_  = tools_.specs();
 
     if (!stream_fn_) {
@@ -135,7 +135,7 @@ void Controller::_drain_queued()
     if (!next.has_value()) {
         return;
     }
-    submit(std::move(next->text));
+    submit(std::move(next->text), std::move(next->attachments));
 }
 
 size_t Controller::queue_size() const
@@ -183,7 +183,8 @@ void Controller::_present_front()
     session_->present_modal(queue_.front().payload);
 }
 
-void Controller::submit(std::string text)
+void Controller::submit(
+    std::string text, std::vector<FileAttachment> attachments)
 {
     const std::string_view t = trim(text);
     if (t.empty()) {
@@ -194,13 +195,14 @@ void Controller::submit(std::string text)
         return;
     }
     if (session_->phase() == Session::Phase::IDLE) {
-        submit_message(std::string(t));
+        submit_message(std::string(t), std::move(attachments));
     } else {
-        session_->enqueue_message(std::string(t));
+        session_->enqueue_message(std::string(t), std::move(attachments));
     }
 }
 
-void Controller::submit_message(std::string text)
+void Controller::submit_message(
+    std::string text, std::vector<FileAttachment> attachments)
 {
     const std::optional<ProviderSelection> selection
         = providers_->active_selection();
@@ -219,13 +221,23 @@ void Controller::submit_message(std::string text)
     settings.dialect = settings.route.dialect;
     settings.mode    = session_->mode();
     if (!get_environment()->ready()) {
-        session_->enqueue_message(std::move(text));
+        session_->enqueue_message(std::move(text), std::move(attachments));
         return;
     }
+    const bool generate_title = session_->claim_title_generation();
+    const std::string title_input = text;
     session_->clear_interrupt();
-    session_->begin_send(std::move(text));
+    session_->begin_send(std::move(text), std::move(attachments));
     _spawn(session_->build_history(_system_prompt(), settings.dialect),
         has_stream_override_ ? stream_fn_ : StreamFn { }, std::move(settings));
+    if (generate_title && !has_stream_override_) {
+        TurnSettings title_settings;
+        title_settings.model         = selection->model;
+        title_settings.connection_id = selection->connection_id;
+        title_settings.route         = selection->route;
+        title_settings.dialect       = selection->route.dialect;
+        _spawn_title(title_input, std::move(title_settings));
+    }
 }
 
 std::string Controller::_system_prompt() const
@@ -287,6 +299,52 @@ void Controller::_spawn(
                         override = std::move(override),
                         settings = std::move(settings)]() mutable {
         _drive(std::move(history), std::move(override), std::move(settings));
+    });
+}
+
+void Controller::_spawn_title(std::string input, TurnSettings settings)
+{
+    title_worker_.emplace([this, input = std::move(input),
+                              settings = std::move(settings)] {
+        ChatRequest req;
+        req.model       = settings.model;
+        req.temperature = 0.2;
+        req.interrupted = [] { return false; };
+        req.messages = {
+            { Message::Type::SYSTEM,
+                "Create a concise 3-7 word title for the user's request. "
+                "Return only the title, without quotes or punctuation." },
+            { Message::Type::USER, input },
+        };
+        std::string title;
+        const StreamCallback cb = [&](const StreamEvent& event) {
+            if (event.kind == StreamEvent::Kind::CONTENT_DELTA
+                && title.size() < 200) {
+                title += event.text;
+            }
+        };
+        Route route = settings.route;
+        const Status status
+            = stream(get_provider(route), route, req, cb, nullptr);
+        if (status != Status::OK) {
+            return;
+        }
+        title = std::string(trim(title));
+        const std::size_t newline = title.find_first_of("\r\n");
+        if (newline != std::string::npos) {
+            title.erase(newline);
+        }
+        if (title.size() >= 2
+            && ((title.front() == '"' && title.back() == '"')
+                || (title.front() == '\'' && title.back() == '\''))) {
+            title = title.substr(1, title.size() - 2);
+        }
+        if (title.empty()) {
+            return;
+        }
+        _post([this, title = std::move(title)]() mutable {
+            session_->set_title(std::move(title));
+        });
     });
 }
 
