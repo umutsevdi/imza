@@ -18,33 +18,73 @@ namespace ursa {
 
 namespace {
 
-    bool auto_approved_in_project(
+    enum class ProjectTarget { INSIDE, OUTSIDE, INVALID };
+
+    ProjectTarget classify_project_target(
         const std::string& name, const std::string& args)
     {
-        if (name != "edit" && name != "write") {
-            return false;
-        }
         const Json::Value parsed = parse_json(args);
-        if (!parsed.isObject() || !parsed["file_path"].isString()) {
-            return false;
+        if (!parsed.isObject()) {
+            return ProjectTarget::INVALID;
+        }
+        const char* key = name == "edit" || name == "write" ? "file_path"
+                                                               : "path";
+        std::string path;
+        if (parsed[key].isString()) {
+            path = parsed[key].asString();
+        } else if (name == "list" && parsed[key].isNull()) {
+            path = ".";
+        } else {
+            return ProjectTarget::INVALID;
+        }
+        if (path.empty()) {
+            path = name == "list" ? "." : "";
+        }
+        if (path.empty()) {
+            return ProjectTarget::INVALID;
         }
         std::error_code ec;
         const std::filesystem::path target = std::filesystem::weakly_canonical(
-            std::filesystem::absolute(parsed["file_path"].asString()), ec);
+            std::filesystem::absolute(path), ec);
         if (ec) {
-            return false;
+            return ProjectTarget::INVALID;
+        }
+        const bool exists = std::filesystem::exists(target, ec);
+        if (ec) {
+            return ProjectTarget::INVALID;
+        }
+        if ((name == "read" || name == "edit")
+            && (!exists || !std::filesystem::is_regular_file(target, ec))) {
+            return ProjectTarget::INVALID;
+        }
+        if (name == "list"
+            && (!exists || !std::filesystem::is_directory(target, ec))) {
+            return ProjectTarget::INVALID;
+        }
+        if (name == "write" && !exists) {
+            if ((parsed["overwrite"].isBool()
+                    && parsed["overwrite"].asBool())
+                || !std::filesystem::is_directory(target.parent_path(), ec)) {
+                return ProjectTarget::INVALID;
+            }
+        }
+        if (ec) {
+            return ProjectTarget::INVALID;
         }
         const std::filesystem::path root = std::filesystem::weakly_canonical(
             std::filesystem::current_path(ec), ec);
         if (ec) {
-            return false;
+            return ProjectTarget::INVALID;
+        }
+        if (target == root) {
+            return ProjectTarget::INSIDE;
         }
         const auto rel = target.lexically_relative(root);
         if (rel.empty()) {
-            return true;
+            return ProjectTarget::OUTSIDE;
         }
-        const std::string rel_str = rel.string();
-        return rel_str.rfind("..", 0) != 0;
+        return *rel.begin() == ".." ? ProjectTarget::OUTSIDE
+                                    : ProjectTarget::INSIDE;
     }
 
     std::optional<QuestionForm> parse_ask_args(const std::string& args)
@@ -329,10 +369,24 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
             bool needs_approval = tool != nullptr
                 && tool->safety == ToolSafety::MUTATING
                 && allowed_tools_.count(ev.tool_call.name) == 0;
-            if (needs_approval
-                && auto_approved_in_project(
-                    ev.tool_call.name, ev.tool_call.args)) {
-                needs_approval = false;
+            ToolCallRequest approval_request = ev.tool_call;
+            const bool path_scoped = ev.tool_call.name == "read"
+                || ev.tool_call.name == "list" || ev.tool_call.name == "edit"
+                || ev.tool_call.name == "write";
+            if (path_scoped
+                && allowed_tools_.count(ev.tool_call.name) == 0) {
+                const ProjectTarget target
+                    = classify_project_target(
+                        ev.tool_call.name, ev.tool_call.args);
+                if (target == ProjectTarget::INSIDE) {
+                    needs_approval = false;
+                } else if (target == ProjectTarget::OUTSIDE) {
+                    needs_approval = true;
+                    approval_request.approval_reason
+                        = ToolCallRequest::ApprovalReason::OUTSIDE_WORKSPACE;
+                } else {
+                    needs_approval = false;
+                }
             }
             if (!needs_approval) {
                 _run_tool(ev.tool_call, tool_msgs);
@@ -343,9 +397,9 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
             {
                 std::lock_guard lock(queue_mutex_);
                 queue_.push_back(
-                    PendingModal { ev.tool_call, std::move(promise) });
+                    PendingModal { approval_request, std::move(promise) });
             }
-            asks.push_back(Ask { .payload = ev.tool_call,
+            asks.push_back(Ask { .payload = approval_request,
                 .future                   = std::move(future),
                 .tool_req                 = std::nullopt });
         } else if (ev.kind == StreamEvent::Kind::QUESTION) {

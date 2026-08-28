@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <deque>
+#include <filesystem>
 #include <string>
 #include <utility>
 #include <vector>
@@ -27,6 +28,158 @@ namespace {
     using namespace ftxui;
 
     enum class ToolPhase { DECIDE, REASON };
+
+    std::string tool_action_description(const ToolCallRequest& req)
+    {
+        if (!req.description.empty()) {
+            return req.description;
+        }
+        if (req.name == "shell") {
+            return "Run a shell command";
+        }
+        if (req.name == "edit") {
+            return "Replace text in a file";
+        }
+        if (req.name == "write") {
+            return "Write text to a file";
+        }
+        if (req.name == "read") {
+            return "Read text from a file";
+        }
+        if (req.name == "list") {
+            return "List a directory";
+        }
+        return "Allow this tool to run";
+    }
+
+    std::string preview_text(const std::string& content)
+    {
+        constexpr std::size_t max_lines = 8;
+        const std::vector<std::string> lines = split_lines(content);
+        std::string out;
+        const std::size_t shown = std::min(lines.size(), max_lines);
+        for (std::size_t i = 0; i < shown; ++i) {
+            if (!out.empty()) {
+                out += '\n';
+            }
+            out += lines[i];
+        }
+        if (lines.size() > shown) {
+            out += "\n… " + std::to_string(lines.size() - shown)
+                + " more line" + (lines.size() - shown == 1 ? "" : "s");
+        }
+        return out;
+    }
+
+    Element tool_approval_reason(const ToolCallRequest& req)
+    {
+        const Json::Value args = parse_json(req.args);
+        const auto string_arg = [&args](const char* name) {
+            return args.isObject() && args[name].isString()
+                ? args[name].asString()
+                : std::string { };
+        };
+        std::string message;
+        const char* path_key = req.name == "edit" || req.name == "write"
+            ? "file_path"
+            : "path";
+        if (req.approval_reason
+            == ToolCallRequest::ApprovalReason::OUTSIDE_WORKSPACE) {
+            const std::string path = string_arg(path_key);
+            message = path.empty() ? "Outside workspace"
+                                   : "Outside workspace · " + path;
+        } else if (req.name == "shell") {
+            message = "May modify files or run external processes";
+        } else if (req.name == "edit" || req.name == "write") {
+            const std::string path = string_arg("file_path");
+            message
+                = path.empty() ? "Will modify a file" : "Will modify " + path;
+        } else if (req.name == "read") {
+            const std::string path = string_arg("path");
+            message = path.empty() ? "Will read a file" : "Will read " + path;
+        } else if (req.name == "list") {
+            const std::string path = string_arg("path");
+            message = path.empty() ? "Will list a directory"
+                                   : "Will list " + path;
+        } else {
+            message = "Permission required";
+        }
+        return text(message) | color(Color::YellowLight);
+    }
+
+    Element tool_request_body(const ToolCallRequest& req)
+    {
+        const Json::Value args = parse_json(req.args);
+        const auto string_arg = [&args](const char* name) {
+            return args.isObject() && args[name].isString()
+                ? args[name].asString()
+                : std::string { };
+        };
+
+        if (req.name == "shell") {
+            const std::string command = string_arg("command").empty()
+                ? req.args
+                : string_arg("command");
+            long timeout = 10;
+            if (args.isObject() && args["timeout"].isIntegral()) {
+                timeout = args["timeout"].asInt64();
+            }
+            std::error_code ec;
+            const std::string cwd = std::filesystem::current_path(ec).string();
+            const std::string metadata = (ec ? std::string { } : cwd + " · ")
+                + "timeout " + std::to_string(timeout) + "s";
+            return vbox({ code_block(preview_text(command),
+                              shell_name(*get_environment()->system())),
+                hbox({ filler(), text(metadata) | dim }) });
+        }
+
+        if (req.name == "edit") {
+            Elements rows {
+                section_title("Existing text"),
+                code_block(preview_text(string_arg("old_string"))),
+                section_title("Replacement"),
+                code_block(preview_text(string_arg("new_string"))),
+            };
+            return vbox(std::move(rows));
+        }
+
+        if (req.name == "write") {
+            return vbox({
+                section_title("Content"),
+                code_block(preview_text(string_arg("text"))),
+            });
+        }
+
+        if (req.name == "read") {
+            std::string range;
+            if (args["line_begin"].isIntegral()) {
+                range = "lines " + std::to_string(args["line_begin"].asInt64());
+                if (args["line_end"].isIntegral()) {
+                    range += "–" + std::to_string(args["line_end"].asInt64());
+                } else {
+                    range += " onward";
+                }
+            }
+            return range.empty() ? text("") : text(range) | color(PANEL_FG_DIM);
+        }
+
+        if (req.name == "list") {
+            return text("");
+        }
+
+        if (args.isObject() && !args.empty()) {
+            Elements rows;
+            for (const std::string& key : args.getMemberNames()) {
+                const Json::Value& value = args[key];
+                const std::string rendered
+                    = value.isString() ? value.asString() : write_json(value);
+                rows.push_back(hbox({ text(key) | bold | color(PANEL_FG),
+                    text("  "), paragraph(preview_text(rendered)) | xflex }));
+            }
+            return vbox(std::move(rows));
+        }
+        return code_block(preview_text(req.args), "json");
+    }
 
     Decorator modal_content_height(int* out)
     {
@@ -222,15 +375,15 @@ namespace {
             reason_cursor_ = 0;
 
             reason_input_ = Input(field_option(&reason_buf_, &reason_cursor_,
-                "Reason", { }, [this] { _confirm_reject(); }));
+                "optional reason", { }, [this] { _confirm_reject(); }));
 
             auto resolve = [this](ToolDecision d, std::string r) {
                 controller_.resolve_modal(
                     ModalResult { ToolVerdict { d, std::move(r) } });
             };
             accept_ = action_button(
-                "Accept", [resolve] { resolve(ToolDecision::ACCEPT, ""); });
-            accept_always_ = action_button("Accept Always",
+                "Allow once", [resolve] { resolve(ToolDecision::ACCEPT, ""); });
+            accept_always_ = action_button("Always allow",
                 [resolve] { resolve(ToolDecision::ACCEPT_ALWAYS, ""); });
             reject_        = action_button(
                 "Reject", [this] { _set_tool_phase(ToolPhase::REASON); });
@@ -416,25 +569,15 @@ namespace {
 
         Element tool_body(const ToolCallRequest& req)
         {
-            Elements rows { header_line("Tool call") };
+            Elements rows { header_line(tool_display_name(req.name)) };
+            rows.push_back(
+                text(tool_action_description(req)) | color(PANEL_FG_DIM));
+            rows.push_back(tool_approval_reason(req));
             rows.push_back(separatorEmpty());
-            if (req.name == "shell") {
-                const Json::Value parsed = parse_json(req.args);
-                std::string cmd          = req.args;
-                if (parsed.isObject() && parsed["command"].isString()) {
-                    cmd = parsed["command"].asString();
-                }
-                rows.push_back(
-                    code_block(cmd, shell_name(*get_environment()->system())));
-            } else if (req.name == "edit" || req.name == "write") {
-                rows.push_back(text(tool_request_summary(req.name, req.args))
-                    | color(PANEL_FG));
-            } else {
-                rows.push_back(text(tool_request_summary(req.name, req.args))
-                    | color(PANEL_FG));
-            }
+            rows.push_back(tool_request_body(req));
             rows.push_back(separatorEmpty());
             if (tool_phase_ == ToolPhase::REASON) {
+                rows.push_back(section_title("Reason for rejecting", PANEL_FG));
                 rows.push_back(reason_input_->Render());
                 rows.push_back(hbox({
                     confirm_reject_->Render(),
@@ -442,8 +585,8 @@ namespace {
                     back_->Render(),
                 }));
                 rows.push_back(separatorEmpty());
-                rows.push_back(
-                    text("Enter confirm rejection · Esc back") | dim);
+                rows.push_back(hbox({ filler(),
+                    text("Enter confirm rejection · Esc back") | dim }));
             } else {
                 rows.push_back(hbox({
                     accept_->Render(),
@@ -453,7 +596,10 @@ namespace {
                     reject_->Render(),
                 }));
                 rows.push_back(separatorEmpty());
-                rows.push_back(text("Esc cancel") | dim);
+                rows.push_back(hbox({ filler(),
+                    text("Always allow applies for this session") | dim }));
+                rows.push_back(
+                    hbox({ filler(), text("Esc reject") | dim }));
             }
             return vbox(std::move(rows)) | xflex;
         }
@@ -651,28 +797,36 @@ namespace {
         {
             const auto modal = std::get<VariantModal>(session_->modal());
             options_         = modal.options;
-            selected_        = 0;
+            current_         = 0;
             for (size_t i = 0; i < options_.size(); ++i) {
                 if (options_[i] == modal.current) {
-                    selected_ = static_cast<int>(i);
+                    current_ = static_cast<int>(i);
                     break;
                 }
             }
-            radiobox_  = Radiobox(&options_, &selected_);
-            apply_     = action_button("Apply (Enter)", [&] { apply(); });
-            container_ = Container::Vertical({ radiobox_, apply_ });
-            Add(container_);
+            cursor_ = current_;
         }
 
         Element OnRender() override
         {
             Elements rows;
             rows.push_back(section_title("Reasoning effort", Color::GrayLight));
-            rows.push_back(radiobox_->Render());
+            for (int i = 0; i < static_cast<int>(options_.size()); ++i) {
+                Element label = text(options_[static_cast<std::size_t>(i)]);
+                if (i == cursor_) {
+                    label = std::move(label) | bold | color(PANEL_FG) | inverted;
+                } else if (i == current_) {
+                    label = std::move(label) | bold | color(PANEL_FG);
+                } else {
+                    label = std::move(label) | color(PANEL_FG_DIM);
+                }
+                rows.push_back(hbox({
+                    text(i == current_ ? "◉ " : "○ "),
+                    std::move(label),
+                }));
+            }
             rows.push_back(separatorEmpty());
-            rows.push_back(apply_->Render() | center);
-            rows.push_back(separatorEmpty());
-            rows.push_back(text("arrows navigate · Enter apply · Esc close")
+            rows.push_back(text("arrows navigate · Enter select · Esc close")
                 | dim | center);
             return vbox({ separatorEmpty(), vbox(std::move(rows)),
                        separatorEmpty() })
@@ -689,26 +843,32 @@ namespace {
                 apply();
                 return true;
             }
-            return container_->OnEvent(event);
+            if (event == Event::ArrowDown
+                && cursor_ + 1 < static_cast<int>(options_.size())) {
+                ++cursor_;
+                return true;
+            }
+            if (event == Event::ArrowUp && cursor_ > 0) {
+                --cursor_;
+                return true;
+            }
+            return false;
         }
 
     private:
         void apply()
         {
-            if (selected_ >= 0
-                && selected_ < static_cast<int>(options_.size())) {
+            if (cursor_ >= 0 && cursor_ < static_cast<int>(options_.size())) {
                 controller_.resolve_modal(
-                    ModalResult { VariantChoice { options_[selected_] } });
+                    ModalResult { VariantChoice { options_[cursor_] } });
             }
         }
 
         std::shared_ptr<Session> session_;
         Controller& controller_;
         std::vector<std::string> options_;
-        int selected_ = 0;
-        Component radiobox_;
-        Component apply_;
-        Component container_;
+        int current_ = 0;
+        int cursor_  = 0;
     };
 
 } // namespace

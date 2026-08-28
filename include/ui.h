@@ -42,7 +42,7 @@ ftxui::InputOption password_option(std::string* content, int* cursor,
     std::string placeholder, std::function<void()> on_change = { });
 ftxui::Component action_button(std::string label,
     std::function<void()> on_click, const ftxui::Color& color = PANEL_BORDER,
-    const ftxui::Color& color_focussed = PANEL_COLOR);
+    const ftxui::Color& color_focussed = PANEL_COLOR_FOCUS);
 
 ftxui::Element render_markdown_element(std::string_view md);
 

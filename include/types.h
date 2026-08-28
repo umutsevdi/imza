@@ -55,10 +55,16 @@ struct ToolVerdict {
 };
 
 struct ToolCallRequest {
+    enum class ApprovalReason {
+        TOOL_PERMISSION,
+        OUTSIDE_WORKSPACE
+    };
+
     std::string name;
     std::string args;
     std::string description { };
     std::string id { };
+    ApprovalReason approval_reason = ApprovalReason::TOOL_PERMISSION;
 };
 
 struct QuestionCard {

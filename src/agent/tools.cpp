@@ -782,15 +782,16 @@ Tool make_write_tool()
     ToolSpec spec;
     spec.name = "write";
     spec.description
-        = "Add text to a file by line. In insert mode (default), "
+        = "Create a new text file or modify an existing one. If the file "
+          "does not exist, insert mode creates it with the supplied text. "
+          "In insert mode (default), "
           "text is inserted below the 1-based line given by 'line' "
           "(0 = prepend, >=last = append). In block-replace mode "
           "(overwrite=true), the inclusive line range "
           "line_begin..line_end is replaced with text (line_begin 0 "
-          "= from start, line_end 0 = to end). Missing files are "
-          "created in insert mode.";
+          "= from start, line_end 0 = to end).";
     spec.parameters = parse_json(
-        R"json({"type":"object","properties":{"file_path":{"type":"string","description":"file to write to"},"text":{"type":"string","description":"text to insert or write"},"line":{"type":"integer","description":"insert below this 1-based line (insert mode only)"},"overwrite":{"type":"boolean","description":"replace a line range instead of inserting (default false)"},"line_begin":{"type":"integer","description":"first line of the range to replace (block mode)"},"line_end":{"type":"integer","description":"last line of the range to replace, inclusive (block mode)"}},"required":["file_path","text"]})json");
+        R"json({"type":"object","properties":{"file_path":{"type":"string","description":"path of the file to create or modify"},"text":{"type":"string","description":"text to insert or write"},"line":{"type":"integer","description":"insert below this 1-based line (insert mode only)"},"overwrite":{"type":"boolean","description":"replace a line range instead of inserting (default false)"},"line_begin":{"type":"integer","description":"first line of the range to replace (block mode)"},"line_end":{"type":"integer","description":"last line of the range to replace, inclusive (block mode)"}},"required":["file_path","text"]})json");
     return { std::move(spec), write_run, ToolSafety::MUTATING };
 }
 
