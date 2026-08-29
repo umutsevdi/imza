@@ -14,6 +14,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "signal.h"
+
 namespace ursa {
 
 struct InstructionFile {
@@ -95,33 +97,22 @@ public:
     std::size_t global_skills() const;
 
     bool chdir(const std::filesystem::path& dir);
-    std::function<void()> subscribe_to_workspace_change(
-        const std::function<void()>& cb);
-    std::function<void()> subscribe_to_repository_change(
-        const std::function<void()>& cb);
+    [[nodiscard]] Signal<>::Subscription subscribe_to_workspace_change(
+        Signal<>::Callback callback);
+    [[nodiscard]] Signal<>::Subscription subscribe_to_repository_change(
+        Signal<>::Callback callback);
 
 private:
-    struct Subscriber {
-        std::uint64_t id;
-        std::function<void()> cb;
-    };
-
     void _publish_workspace(std::shared_ptr<const WorkspaceEnvironment> ws,
         std::uint64_t generation);
     void _publish_repository(std::shared_ptr<const RepositoryState> repository,
         const std::shared_ptr<const WorkspaceEnvironment>& workspace);
-    std::function<void()> _subscribe(
-        std::vector<Subscriber>& subscribers, const std::function<void()>& cb,
-        bool workspace_events);
-    void _notify(const std::vector<Subscriber>& subscribers);
-
     std::shared_ptr<const SystemEnvironment> system_;
     mutable std::shared_mutex workspace_mutex_;
     std::shared_ptr<const WorkspaceEnvironment> workspace_;
     std::shared_ptr<const RepositoryState> repository_;
-    std::vector<Subscriber> workspace_cbs_;
-    std::vector<Subscriber> repository_cbs_;
-    std::uint64_t next_id_ { 1 };
+    Signal<> workspace_changed_;
+    Signal<> repository_changed_;
     std::uint64_t workspace_generation_ { 0 };
     std::atomic<bool> ready_ { false };
     std::condition_variable_any workspace_ready_cv_;

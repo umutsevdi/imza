@@ -4,14 +4,18 @@
 #include <ftxui/component/component_base.hpp>
 #include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
+#include <ftxui/screen/screen.hpp>
+#include <ftxui/screen/terminal.hpp>
 
 #include <algorithm>
 #include <cstdio>
 #include <functional>
+#include <iostream>
 #include <map>
 #include <string>
 #include <vector>
 
+#include "session_store.h"
 #include "util.h"
 
 namespace ursa {
@@ -378,7 +382,7 @@ namespace {
         bool test_ok()
         {
             return tested_signature_ == current_signature()
-            && session_->connect_status().rfind("✓", 0) == 0;
+                && session_->connect_status().rfind("✓", 0) == 0;
         }
 
         void maybe_rebuild_manage()
@@ -925,11 +929,55 @@ namespace {
 
 } // namespace
 
-ftxui::Component make_connect(
-    std::shared_ptr<Session> session, Controller& controller,
-    ProviderStore& providers)
+ftxui::Component make_connect(std::shared_ptr<Session> session,
+    Controller& controller, ProviderStore& providers)
 {
     return ftxui::Make<ConnectImpl>(std::move(session), controller, providers);
+}
+
+void print_session_saved_box()
+{
+    using namespace ftxui;
+    const int term_w = Terminal::Size().dimx;
+    const int width  = std::max(40, std::min(term_w, 80));
+
+    std::vector<SavedSession> sessions = saved_sessions();
+    if (static_cast<int>(sessions.size()) > 5) {
+        sessions.resize(5);
+    }
+
+    const int inner  = width - 2;
+    const int body_w = std::max(inner, 48);
+
+    Elements rows;
+    if (sessions.empty()) {
+        rows.push_back(text("No other saved sessions.") | dim);
+    } else {
+        rows.push_back(text("Previous Sessions") | bold);
+        const int stamp_col = 16;
+        const int title_col = std::max(body_w - 2 - stamp_col, 1);
+        for (const auto& session : sessions) {
+            const std::string title
+                = session.title.empty() ? "Untitled session" : session.title;
+            rows.push_back(
+                hbox({ text(fit(title, title_col)) | color(PANEL_FG) | xflex,
+                    text(session.saved_at) | color(PANEL_FG_DIM) }));
+        }
+    }
+
+    const int height = static_cast<int>(rows.size() + 6);
+    Element frame    = vbox({
+        text("Session has been saved."),
+        text("Continue with /session next time you launch.") | dim | italic,
+        separatorEmpty(),
+        vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER)
+            | bgcolor(PANEL_COLOR) | color(PANEL_FG),
+    });
+
+    auto screen
+        = Screen::Create(Dimension::Fixed(body_w), Dimension::Fixed(height));
+    Render(screen, frame);
+    std::cout << screen.ToString() << std::endl;
 }
 
 } // namespace ursa

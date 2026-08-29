@@ -27,23 +27,9 @@ ProviderStore::~ProviderStore()
     workers_.clear();
 }
 
-std::function<void()> ProviderStore::subscribe(ProviderChangedFn callback)
+Signal<>::Subscription ProviderStore::subscribe(ProviderChangedFn callback)
 {
-    std::uint64_t id;
-    {
-        std::lock_guard lock(mutex_);
-        id = next_subscriber_id_++;
-        subscribers_.push_back(Subscriber { id, std::move(callback) });
-    }
-    return [this, id] {
-        std::lock_guard lock(mutex_);
-        subscribers_.erase(
-            std::remove_if(subscribers_.begin(), subscribers_.end(),
-                [id](const Subscriber& subscriber) {
-                    return subscriber.id == id;
-                }),
-            subscribers_.end());
-    };
+    return changed_.subscribe(std::move(callback));
 }
 
 Config ProviderStore::config() const
@@ -509,17 +495,7 @@ Status ProviderStore::_commit_connection_locked(const ConnectResult& result,
 
 void ProviderStore::_notify_changed()
 {
-    std::vector<ProviderChangedFn> callbacks;
-    {
-        std::lock_guard lock(mutex_);
-        callbacks.reserve(subscribers_.size());
-        for (const Subscriber& subscriber : subscribers_) {
-            callbacks.push_back(subscriber.callback);
-        }
-    }
-    for (const ProviderChangedFn& callback : callbacks) {
-        callback();
-    }
+    changed_.publish();
 }
 
 } // namespace ursa

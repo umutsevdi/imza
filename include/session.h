@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <json/json.h>
 #include <mutex>
 #include <optional>
@@ -13,6 +14,7 @@
 
 #include "network.h"
 #include "attachments.h"
+#include "signal.h"
 #include "types.h"
 
 namespace ursa {
@@ -66,6 +68,14 @@ using ConversationItem
     = std::variant<UserTurn, AssistantTurn, ToolCall, TodoList, ModalAnswer,
         CompactionEvent>;
 
+struct UnsavedSession { };
+
+struct PersistedSession {
+    std::filesystem::path path;
+};
+
+using SessionPersistence = std::variant<UnsavedSession, PersistedSession>;
+
 struct SessionSnapshot {
     std::string title;
     std::vector<ConversationItem> items;
@@ -73,6 +83,7 @@ struct SessionSnapshot {
     std::string compacted_summary;
     std::size_t compacted_item_count = 0;
     bool plan_mode = true;
+    SessionPersistence persistence = UnsavedSession { };
 };
 
 struct ConnectModal {
@@ -141,6 +152,7 @@ public:
     std::string error() const;
     std::string connect_status() const;
     std::string title() const;
+    std::vector<std::string> attachment_names() const;
     const TodoList& todo() const { return todo_; }
     const std::vector<QueuedMessage>& queued() const { return queued_; }
     std::optional<Countdown> retry_countdown() const;
@@ -152,6 +164,7 @@ public:
     bool has_pending_work() const;
     SessionSnapshot snapshot() const;
     void restore(SessionSnapshot snapshot);
+    void set_persistence(SessionPersistence persistence);
 
     void toggle_mode();
     void set_error(std::string msg);
@@ -195,15 +208,12 @@ public:
     void clear_interrupt();
     bool interrupt_requested() const;
 
-    std::function<void()> subscribe_to_title_change(
-        const std::function<void()>& cb);
+    [[nodiscard]] Signal<>::Subscription subscribe_to_title_change(
+        Signal<>::Callback callback);
+    [[nodiscard]] Signal<>::Subscription subscribe_to_attachments_change(
+        Signal<>::Callback callback);
 
 private:
-    struct Subscriber {
-        std::uint64_t id;
-        std::function<void()> cb;
-    };
-
     AssistantTurn* last_assistant_locked();
     void finalize_reasoning(AssistantTurn& a);
     void finish_session_locked(const std::string& error);
@@ -241,9 +251,10 @@ private:
 
     std::string compacted_summary_;
     std::size_t compacted_item_count_ = 0;
+    SessionPersistence persistence_ = UnsavedSession { };
 
-    std::vector<Subscriber> title_cbs_;
-    std::uint64_t next_title_id_ { 1 };
+    Signal<> title_changed_;
+    Signal<> attachments_changed_;
 };
 
 } // namespace ursa

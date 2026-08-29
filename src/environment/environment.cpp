@@ -408,8 +408,6 @@ Environment::Environment()
 void Environment::_publish_workspace(
     std::shared_ptr<const WorkspaceEnvironment> ws, std::uint64_t generation)
 {
-    std::vector<Subscriber> workspace_callbacks;
-    std::vector<Subscriber> repository_callbacks;
     {
         std::unique_lock lock(workspace_mutex_);
         if (generation != workspace_generation_) {
@@ -418,35 +416,24 @@ void Environment::_publish_workspace(
         workspace_ = std::move(ws);
         repository_ = std::make_shared<const RepositoryState>();
         ready_.store(true);
-        workspace_callbacks  = workspace_cbs_;
-        repository_callbacks = repository_cbs_;
     }
     workspace_ready_cv_.notify_all();
-    _notify(workspace_callbacks);
-    _notify(repository_callbacks);
+    workspace_changed_.publish();
+    repository_changed_.publish();
 }
 
 void Environment::_publish_repository(
     std::shared_ptr<const RepositoryState> repository,
     const std::shared_ptr<const WorkspaceEnvironment>& workspace)
 {
-    std::vector<Subscriber> callbacks;
     {
         std::unique_lock lock(workspace_mutex_);
         if (workspace_ != workspace) {
             return;
         }
         repository_ = std::move(repository);
-        callbacks   = repository_cbs_;
     }
-    _notify(callbacks);
-}
-
-void Environment::_notify(const std::vector<Subscriber>& subscribers)
-{
-    for (const auto& sub : subscribers) {
-        sub.cb();
-    }
+    repository_changed_.publish();
 }
 
 bool Environment::chdir(const std::filesystem::path& dir)
@@ -469,42 +456,36 @@ bool Environment::chdir(const std::filesystem::path& dir)
     return true;
 }
 
-std::function<void()> Environment::subscribe_to_workspace_change(
-    const std::function<void()>& cb)
+Signal<>::Subscription Environment::subscribe_to_workspace_change(
+    Signal<>::Callback callback)
 {
-    return _subscribe(workspace_cbs_, cb, true);
-}
-
-std::function<void()> Environment::subscribe_to_repository_change(
-    const std::function<void()>& cb)
-{
-    return _subscribe(repository_cbs_, cb, false);
-}
-
-std::function<void()> Environment::_subscribe(
-    std::vector<Subscriber>& subscribers, const std::function<void()>& cb,
-    bool workspace_events)
-{
-    std::uint64_t id;
+    Signal<>::Subscription subscription;
     bool notify_now;
-    auto* list = &subscribers;
     {
         std::unique_lock lock(workspace_mutex_);
-        notify_now = workspace_events ? ready_.load() : repository_ != nullptr;
-        id = next_id_++;
-        subscribers.push_back(Subscriber { id, cb });
+        subscription = workspace_changed_.subscribe(callback);
+        notify_now   = ready_.load();
     }
     if (notify_now) {
-        cb();
+        callback();
     }
-    return [this, id, list] {
+    return subscription;
+}
+
+Signal<>::Subscription Environment::subscribe_to_repository_change(
+    Signal<>::Callback callback)
+{
+    Signal<>::Subscription subscription;
+    bool notify_now;
+    {
         std::unique_lock lock(workspace_mutex_);
-        auto& subscriptions = *list;
-        subscriptions.erase(
-            std::remove_if(subscriptions.begin(), subscriptions.end(),
-                [id](const Subscriber& s) { return s.id == id; }),
-            subscriptions.end());
-    };
+        subscription = repository_changed_.subscribe(callback);
+        notify_now   = repository_ != nullptr;
+    }
+    if (notify_now) {
+        callback();
+    }
+    return subscription;
 }
 
 std::optional<std::string> Environment::agent_rules_path() const

@@ -90,8 +90,8 @@ Controller::~Controller()
             }
         }
     }
-    provider_sub_();
-    env_sub_();
+    provider_sub_.disconnect();
+    env_sub_.disconnect();
     worker_.reset();
 }
 

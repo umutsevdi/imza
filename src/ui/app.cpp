@@ -45,8 +45,8 @@ namespace {
             , saved_before_exit_(saved_before_exit)
         {
             const LayoutFn layout = [this] { return layout_; };
-            side_        = make_side_panel(session_, layout);
-            chat_        = make_chat(session_, controller, layout);
+            side_                 = make_side_panel(session_, layout);
+            chat_                 = make_chat(session_, controller, layout);
             status_line_ = make_status_line(session_, providers, layout);
             modal_       = make_modal(session_, controller, providers);
             Add(chat_);
@@ -99,6 +99,7 @@ namespace {
         {
             if (event == Event::CtrlC || event == Event::CtrlD) {
                 saved_before_exit_ = save_session(*session_) == Status::OK;
+                print_session_saved_box();
                 screen_.Exit();
                 return true;
             }
@@ -147,14 +148,16 @@ int run_repl(const Config& cfg)
             controller.enqueue_user_modal(
                 ConnectModal { ConnectModal::Entry::MANAGE });
         }
-        auto app = ftxui::Make<Repl>(screen, session, controller, *providers,
-            saved_before_exit);
+        auto app = ftxui::Make<Repl>(
+            screen, session, controller, *providers, saved_before_exit);
         screen.Loop(app);
     }
     if (saved_before_exit) {
         return 0;
     }
-    return save_session(*session) == Status::OK ? 0 : 1;
+    const bool saved = save_session(*session) == Status::OK;
+    print_session_saved_box();
+    return saved ? 0 : 1;
 }
 
 } // namespace ursa

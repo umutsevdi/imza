@@ -6,6 +6,7 @@
 #include <ftxui/component/component.hpp>
 #include <ftxui/dom/elements.hpp>
 
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -24,14 +25,12 @@ public:
                   [] { animation::RequestAnimationFrame(); }))
         , title_subscription_(session_->subscribe_to_title_change(
               [] { animation::RequestAnimationFrame(); }))
+        , attachments_subscription_(
+              session_->subscribe_to_attachments_change([this] {
+                  attachments_dirty_.store(true);
+                  animation::RequestAnimationFrame();
+              }))
     {
-    }
-
-    ~SidePanel() override
-    {
-        repository_subscription_();
-        workspace_subscription_();
-        title_subscription_();
     }
 
     Element OnRender() override
@@ -48,32 +47,20 @@ public:
         }
 
         if (!narrow) {
-            auto env                = get_environment();
-            const int global_skills = static_cast<int>(env->global_skills());
-            const auto repository   = env->repository();
+            if (attachments_dirty_.exchange(false)) {
+                attachment_names_ = session_->attachment_names();
+            }
+            auto env              = get_environment();
+            const auto repository = env->repository();
             if (repository && !repository->changed_files.empty()) {
                 parts.push_back(
                     render_changed_files(repository->changed_files, ctx)
                     | yflex);
-            }
-            const std::optional<std::string> rules = env->agent_rules_path();
-            if (rules) {
-                parts.push_back(text(" " + *rules + " ") | bold
-                    | color(Color::Black) | bgcolor(Color::Yellow) | xflex);
-            }
-            const int project_skills = static_cast<int>(env->project_skills());
-            if (project_skills > 0) {
-                parts.push_back(
-                    text(std::format(" {} Project Skills ", project_skills))
-                    | bold | color(Color::Black) | bgcolor(Color::BlueLight)
-                    | xflex);
-            }
-            if (global_skills > 0) {
-                parts.push_back(
-                    text(std::format(" {} Global Skills ", global_skills))
-                    | bold | color(Color::Black) | bgcolor(Color::GrayLight)
-                    | xflex);
-            }
+            };
+            parts.push_back(render_context_box(env->agent_rules_path(),
+                attachment_names_,
+                static_cast<int>(env->project_skills()),
+                static_cast<int>(env->global_skills())));
         }
         Element body = vbox(std::move(parts));
         if (narrow) {
@@ -85,9 +72,12 @@ public:
 private:
     std::shared_ptr<Session> session_;
     LayoutFn layout_;
-    std::function<void()> workspace_subscription_;
-    std::function<void()> repository_subscription_;
-    std::function<void()> title_subscription_;
+    Signal<>::Subscription workspace_subscription_;
+    Signal<>::Subscription repository_subscription_;
+    Signal<>::Subscription title_subscription_;
+    std::atomic<bool> attachments_dirty_ { true };
+    std::vector<std::string> attachment_names_;
+    Signal<>::Subscription attachments_subscription_;
 };
 
 ftxui::Component make_side_panel(
@@ -181,4 +171,43 @@ Element render_changed_files(
     return vbox({ section_title("Changed files"), std::move(body) });
 }
 
+Element render_context_box(const std::optional<std::string>& rules,
+    const std::vector<std::string>& attachments, int project_skills,
+    int global_skills)
+{
+    Elements context_box;
+    if (rules || !attachments.empty()) {
+        Elements files;
+        if (rules) {
+            files.push_back(paragraph(*rules) | color(PANEL_FG) | dim);
+        }
+        for (const std::string& attachment : attachments) {
+            files.push_back(paragraph(attachment) | color(PANEL_FG) | dim);
+        }
+        context_box.push_back(hbox({
+            text("Files") | bold | color(PANEL_FG) | xflex,
+            vbox(std::move(files)),
+        }));
+    }
+    if (project_skills > 0) {
+        context_box.push_back(hbox({
+            text("Project Skills") | bold | color(PANEL_FG) | xflex,
+            text(std::format("{}", project_skills)) | color(PANEL_FG) | dim,
+        }));
+    }
+    if (global_skills > 0) {
+        context_box.push_back(hbox({
+            text("Global Skills") | bold | color(PANEL_FG) | xflex,
+            text(std::format("{}", global_skills)) | color(PANEL_FG) | dim,
+        }));
+    }
+    if (!context_box.empty()) {
+        Element body = vbox(std::move(context_box))
+            | borderStyled(ROUNDED, PANEL_BORDER);
+        return vbox({ section_title("Context"), std::move(body) });
+    }
+    return vbox();
+}
+
 } // namespace ursa
+//

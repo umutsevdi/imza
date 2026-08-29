@@ -100,6 +100,30 @@ TEST_CASE("session history keeps queued attachment snapshots")
     CHECK(history.back().content.find("src/main.cpp") != std::string::npos);
 }
 
+TEST_CASE("session exposes unique attachment basenames and publishes changes")
+{
+    ursa::Session session;
+    int changes = 0;
+    auto subscription
+        = session.subscribe_to_attachments_change([&] { ++changes; });
+
+    session.begin_send("review",
+        { { "src/main.cpp", "one" }, { "docs/main.cpp", "two" },
+            { "docs/design.md", "three" } });
+
+    CHECK(session.attachment_names()
+        == std::vector<std::string> { "main.cpp", "design.md" });
+    CHECK(changes == 1);
+
+    ursa::SessionSnapshot snapshot;
+    snapshot.items.push_back(ursa::UserTurn {
+        "restored", { { "notes/plan.txt", "content" } } });
+    session.restore(std::move(snapshot));
+
+    CHECK(session.attachment_names() == std::vector<std::string> { "plan.txt" });
+    CHECK(changes == 2);
+}
+
 TEST_CASE("session compaction replaces only old model history")
 {
     ursa::Session session;

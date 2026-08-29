@@ -8,6 +8,7 @@
 #include <cassert>
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
 #include <string>
 #include <utility>
 
@@ -213,40 +214,52 @@ SessionSnapshot Session::snapshot() const
 {
     std::lock_guard lock(mutex_);
     return { title_, items_, todo_, compacted_summary_,
-        compacted_item_count_, mode_ == Mode::PLAN };
+        compacted_item_count_, mode_ == Mode::PLAN, persistence_ };
 }
 
 void Session::restore(SessionSnapshot snapshot)
 {
-    std::lock_guard lock(mutex_);
-    title_                    = std::move(snapshot.title);
-    items_                    = std::move(snapshot.items);
-    todo_                     = std::move(snapshot.todo);
-    compacted_summary_        = std::move(snapshot.compacted_summary);
-    compacted_item_count_     = snapshot.compacted_item_count;
-    mode_                     = snapshot.plan_mode ? Mode::PLAN : Mode::BUILD;
-    modal_                    = std::monostate { };
-    queued_.clear();
-    error_.clear();
-    retry_countdown_.reset();
-    phase_                    = Phase::IDLE;
-    totals_                   = { };
-    last_                     = { };
-    total_cost_               = 0.0;
-    last_cost_                = 0.0;
-    title_generation_claimed_ = !title_.empty();
-    interrupt_requested_.store(false);
-    next_tool_id_ = 1;
-    next_compaction_id_ = 1;
-    for (const auto& item : items_) {
-        if (const auto* tool = std::get_if<ToolCall>(&item)) {
-            next_tool_id_ = std::max(next_tool_id_, tool->id + 1);
-        } else if (const auto* event = std::get_if<CompactionEvent>(&item)) {
-            next_compaction_id_ = std::max(next_compaction_id_, event->id + 1);
+    {
+        std::lock_guard lock(mutex_);
+        title_                    = std::move(snapshot.title);
+        items_                    = std::move(snapshot.items);
+        todo_                     = std::move(snapshot.todo);
+        compacted_summary_        = std::move(snapshot.compacted_summary);
+        compacted_item_count_     = snapshot.compacted_item_count;
+        persistence_              = std::move(snapshot.persistence);
+        mode_ = snapshot.plan_mode ? Mode::PLAN : Mode::BUILD;
+        modal_                    = std::monostate { };
+        queued_.clear();
+        error_.clear();
+        retry_countdown_.reset();
+        phase_                    = Phase::IDLE;
+        totals_                   = { };
+        last_                     = { };
+        total_cost_               = 0.0;
+        last_cost_                = 0.0;
+        title_generation_claimed_ = !title_.empty();
+        interrupt_requested_.store(false);
+        next_tool_id_       = 1;
+        next_compaction_id_ = 1;
+        for (const auto& item : items_) {
+            if (const auto* tool = std::get_if<ToolCall>(&item)) {
+                next_tool_id_ = std::max(next_tool_id_, tool->id + 1);
+            } else if (const auto* event
+                = std::get_if<CompactionEvent>(&item)) {
+                next_compaction_id_
+                    = std::max(next_compaction_id_, event->id + 1);
+            }
         }
+        ++modal_serial_;
+        ++content_serial_;
     }
-    ++modal_serial_;
-    ++content_serial_;
+    attachments_changed_.publish();
+}
+
+void Session::set_persistence(SessionPersistence persistence)
+{
+    std::lock_guard lock(mutex_);
+    persistence_ = std::move(persistence);
 }
 
 void Session::toggle_mode()
@@ -277,6 +290,27 @@ std::string Session::title() const
 {
     std::lock_guard lock(mutex_);
     return title_;
+}
+
+std::vector<std::string> Session::attachment_names() const
+{
+    std::lock_guard lock(mutex_);
+    std::vector<std::string> names;
+    for (const ConversationItem& item : items_) {
+        const auto* user = std::get_if<UserTurn>(&item);
+        if (user == nullptr) {
+            continue;
+        }
+        for (const FileAttachment& attachment : user->attachments) {
+            std::string name
+                = std::filesystem::path(attachment.path).filename().string();
+            if (!name.empty()
+                && std::find(names.begin(), names.end(), name) == names.end()) {
+                names.push_back(std::move(name));
+            }
+        }
+    }
+    return names;
 }
 
 bool Session::claim_title_generation()
@@ -333,10 +367,16 @@ std::optional<QueuedMessage> Session::pop_queued()
 void Session::begin_send(
     std::string text, std::vector<FileAttachment> attachments)
 {
-    std::lock_guard lock(mutex_);
-    items_.push_back(UserTurn { std::move(text), std::move(attachments) });
-    error_.clear();
-    phase_ = Phase::CONNECTING;
+    const bool has_attachments = !attachments.empty();
+    {
+        std::lock_guard lock(mutex_);
+        items_.push_back(UserTurn { std::move(text), std::move(attachments) });
+        error_.clear();
+        phase_ = Phase::CONNECTING;
+    }
+    if (has_attachments) {
+        attachments_changed_.publish();
+    }
 }
 
 void Session::append_assistant(std::string model, std::string reasoning_effort)
@@ -678,36 +718,21 @@ void Session::update_usage(
     total_cost_ += last_cost_;
 }
 
-std::function<void()> Session::subscribe_to_title_change(
-    const std::function<void()>& cb)
+Signal<>::Subscription Session::subscribe_to_title_change(
+    Signal<>::Callback callback)
 {
-    std::uint64_t id;
-    {
-        std::lock_guard lock(mutex_);
-        id = next_title_id_++;
-        title_cbs_.push_back(Subscriber { id, cb });
-    }
-    return [this, id] {
-        std::lock_guard lock(mutex_);
-        title_cbs_.erase(std::remove_if(title_cbs_.begin(), title_cbs_.end(),
-                             [id](const Subscriber& s) { return s.id == id; }),
-            title_cbs_.end());
-    };
+    return title_changed_.subscribe(std::move(callback));
+}
+
+Signal<>::Subscription Session::subscribe_to_attachments_change(
+    Signal<>::Callback callback)
+{
+    return attachments_changed_.subscribe(std::move(callback));
 }
 
 void Session::_notify_title_change()
 {
-    std::vector<std::function<void()>> callbacks;
-    {
-        std::lock_guard lock(mutex_);
-        callbacks.reserve(title_cbs_.size());
-        for (const auto& sub : title_cbs_) {
-            callbacks.push_back(sub.cb);
-        }
-    }
-    for (const auto& cb : callbacks) {
-        cb();
-    }
+    title_changed_.publish();
 }
 
 } // namespace ursa

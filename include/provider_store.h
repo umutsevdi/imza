@@ -13,6 +13,7 @@
 
 #include "catalog.h"
 #include "network.h"
+#include "signal.h"
 #include "types.h"
 
 namespace ursa {
@@ -68,7 +69,8 @@ public:
     ProviderStore(const ProviderStore&)            = delete;
     ProviderStore& operator=(const ProviderStore&) = delete;
 
-    std::function<void()> subscribe(ProviderChangedFn callback);
+    [[nodiscard]] Signal<>::Subscription subscribe(
+        ProviderChangedFn callback);
 
     Config config() const;
     StatusConfigView status() const;
@@ -101,11 +103,6 @@ private:
         std::variant<Fetching, Ready, Failed> state;
     };
 
-    struct Subscriber {
-        std::uint64_t id = 0;
-        ProviderChangedFn callback;
-    };
-
     Connection* _find_locked(std::string_view id);
     const Connection* _find_locked(std::string_view id) const;
     std::string _unique_id_locked(std::string base) const;
@@ -125,8 +122,7 @@ private:
     mutable std::mutex mutex_;
     std::vector<std::jthread> workers_;
     std::optional<std::jthread> catalog_worker_;
-    std::vector<Subscriber> subscribers_;
-    std::uint64_t next_subscriber_id_ = 1;
+    Signal<> changed_;
     std::atomic<bool> alive_ { true };
 };
 

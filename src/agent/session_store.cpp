@@ -1,11 +1,11 @@
 #include "session_store.h"
 
+#include "environment.h"
 #include "network.h"
 #include "session.h"
-#include "environment.h"
 
-#include <chrono>
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
@@ -17,7 +17,7 @@ namespace {
 
     std::string timestamp(bool filename)
     {
-        const auto now = std::chrono::system_clock::now();
+        const auto now          = std::chrono::system_clock::now();
         const std::time_t value = std::chrono::system_clock::to_time_t(now);
         std::tm local { };
 #ifdef _WIN32
@@ -26,8 +26,8 @@ namespace {
         localtime_r(&value, &local);
 #endif
         std::ostringstream out;
-        out << std::put_time(&local,
-            filename ? "%Y-%m-%d_%H-%M-%S" : "%Y-%m-%d %H:%M:%S");
+        out << std::put_time(
+            &local, filename ? "%Y-%m-%d_%H-%M-%S" : "%Y-%m-%d %H:%M:%S");
         return out.str();
     }
 
@@ -54,7 +54,7 @@ namespace {
                 continue;
             }
             TodoItem item;
-            item.content = entry["content"].asString();
+            item.content     = entry["content"].asString();
             const int status = entry.get("status", 0).asInt();
             if (status >= 0 && status <= 3) {
                 item.status = static_cast<TodoItem::Status>(status);
@@ -86,8 +86,8 @@ namespace {
             out["model"]               = assistant->model;
             out["reasoning_effort"]    = assistant->reasoning_effort;
             if (assistant->reasoning_ms) {
-                out["reasoning_ms"]
-                    = static_cast<Json::Int64>(assistant->reasoning_ms->count());
+                out["reasoning_ms"] = static_cast<Json::Int64>(
+                    assistant->reasoning_ms->count());
             }
         } else if (const auto* tool = std::get_if<ToolCall>(&item)) {
             out["type"]    = "tool";
@@ -127,16 +127,15 @@ namespace {
                             if constexpr (std::is_same_v<T, ShellExit>) {
                                 out["shell_exit"] = status.code;
                             } else {
-                                out["shell_timeout"]
-                                    = static_cast<Json::Int64>(
-                                        status.duration.count());
+                                out["shell_timeout"] = static_cast<Json::Int64>(
+                                    status.duration.count());
                             }
                         },
                         *tool->result->shell_status);
                 }
             }
         } else if (const auto* todo = std::get_if<TodoList>(&item)) {
-            out["type"] = "todo";
+            out["type"]  = "todo";
             out["items"] = todo_json(*todo);
         } else if (const auto* event = std::get_if<CompactionEvent>(&item)) {
             out["type"]   = "compaction";
@@ -175,7 +174,7 @@ namespace {
         }
         if (type == "assistant") {
             AssistantTurn assistant;
-            assistant.markdown = value.get("markdown", "").asString();
+            assistant.markdown  = value.get("markdown", "").asString();
             assistant.reasoning = value.get("reasoning", "").asString();
             assistant.reasoning_signature
                 = value.get("reasoning_signature", "").asString();
@@ -199,7 +198,8 @@ namespace {
                 if (kind >= 0 && kind <= 3) {
                     tool.result = ToolCall::Result {
                         static_cast<ToolCall::Result::Kind>(kind),
-                        value.get("result", "").asString() };
+                        value.get("result", "").asString()
+                    };
                     if (value["diff"].isObject()) {
                         DiffView diff;
                         diff.file = value["diff"].get("file", "").asString();
@@ -210,16 +210,13 @@ namespace {
                             if (row_kind >= 0 && row_kind <= 2) {
                                 row.kind = static_cast<DiffRow::Kind>(row_kind);
                             }
-                            row.left
-                                = row_value.get("left", "").asString();
-                            row.right
-                                = row_value.get("right", "").asString();
+                            row.left  = row_value.get("left", "").asString();
+                            row.right = row_value.get("right", "").asString();
                             if (row_value.isMember("left_no")) {
                                 row.left_no = row_value["left_no"].asUInt64();
                             }
                             if (row_value.isMember("right_no")) {
-                                row.right_no
-                                    = row_value["right_no"].asUInt64();
+                                row.right_no = row_value["right_no"].asUInt64();
                             }
                             diff.rows.push_back(std::move(row));
                         }
@@ -229,8 +226,8 @@ namespace {
                         tool.result->shell_status
                             = ShellExit { value["shell_exit"].asInt() };
                     } else if (value.isMember("shell_timeout")) {
-                        tool.result->shell_status = ShellTimeout {
-                            std::chrono::seconds(
+                        tool.result->shell_status
+                            = ShellTimeout { std::chrono::seconds(
                                 value["shell_timeout"].asInt64()) };
                     }
                 }
@@ -242,9 +239,9 @@ namespace {
         }
         if (type == "compaction") {
             CompactionEvent event;
-            event.id = value.get("id", 0).asUInt64();
+            event.id         = value.get("id", 0).asUInt64();
             const int status = value.get("status", 1).asInt();
-            event.status = status >= 0 && status <= 2
+            event.status     = status >= 0 && status <= 2
                 ? static_cast<CompactionEvent::Status>(status)
                 : CompactionEvent::Status::COMPLETED;
             return event;
@@ -253,9 +250,8 @@ namespace {
             ModalAnswer answer;
             for (const auto& card_value : value["cards"]) {
                 QuestionAnswer card;
-                card.prompt = card_value.get("prompt", "").asString();
-                card.free_text
-                    = card_value.get("free_text", "").asString();
+                card.prompt    = card_value.get("prompt", "").asString();
+                card.free_text = card_value.get("free_text", "").asString();
                 for (const auto& choice : card_value["selected"]) {
                     if (choice.isString()) {
                         card.selected.push_back(choice.asString());
@@ -268,7 +264,7 @@ namespace {
         return std::nullopt;
     }
 
-}
+} // namespace
 
 std::filesystem::path data_dir()
 {
@@ -285,14 +281,14 @@ std::filesystem::path data_dir()
         return std::filesystem::path(xdg) / "ursa";
     }
     const char* home = std::getenv("HOME");
-    return std::filesystem::path(home && *home ? home : ".")
-        / ".local" / "share" / "ursa";
+    return std::filesystem::path(home && *home ? home : ".") / ".local"
+        / "share" / "ursa";
 #endif
 }
 
 std::filesystem::path sessions_dir() { return data_dir(); }
 
-Status save_session(const Session& session)
+Status save_session(Session& session)
 {
     const SessionSnapshot snapshot = session.snapshot();
     if (snapshot.items.empty()) {
@@ -305,14 +301,14 @@ Status save_session(const Session& session)
     if (workspace_ec) {
         return Status::CONFIG_ERROR;
     }
-    root["version"]                = 1;
-    root["title"]                  = snapshot.title;
-    root["saved_at"]               = timestamp(false);
-    root["todo"]                   = todo_json(snapshot.todo);
-    root["compacted_summary"]      = snapshot.compacted_summary;
+    root["version"]           = 1;
+    root["title"]             = snapshot.title;
+    root["saved_at"]          = timestamp(false);
+    root["todo"]              = todo_json(snapshot.todo);
+    root["compacted_summary"] = snapshot.compacted_summary;
     root["compacted_item_count"]
         = static_cast<Json::UInt64>(snapshot.compacted_item_count);
-    root["mode"] = snapshot.plan_mode ? "plan" : "build";
+    root["mode"]      = snapshot.plan_mode ? "plan" : "build";
     root["workspace"] = workspace.string();
     Json::Value items(Json::arrayValue);
     for (const auto& item : snapshot.items) {
@@ -325,17 +321,48 @@ Status save_session(const Session& session)
     if (ec) {
         return Status::CONFIG_ERROR;
     }
-    std::filesystem::path path = sessions_dir() / (timestamp(true) + ".json");
-    for (int suffix = 1; std::filesystem::exists(path); ++suffix) {
-        path = sessions_dir()
-            / (timestamp(true) + "_" + std::to_string(suffix) + ".json");
+
+    std::filesystem::path path;
+    if (const auto* persisted
+        = std::get_if<PersistedSession>(&snapshot.persistence)) {
+        const std::filesystem::path session_root
+            = std::filesystem::weakly_canonical(sessions_dir(), ec);
+        if (ec) {
+            return Status::CONFIG_ERROR;
+        }
+        const std::filesystem::path parent = std::filesystem::weakly_canonical(
+            persisted->path.parent_path(), ec);
+        if (ec || parent != session_root
+            || persisted->path.extension() != ".json") {
+            return Status::CONFIG_ERROR;
+        }
+        path = persisted->path;
+    } else {
+        const std::string created_at = timestamp(true);
+        path                         = sessions_dir() / (created_at + ".json");
+        for (int suffix = 1; std::filesystem::exists(path); ++suffix) {
+            path = sessions_dir()
+                / (created_at + "_" + std::to_string(suffix) + ".json");
+        }
     }
-    std::ofstream file(path, std::ios::binary);
-    if (!file) {
+
+    const std::filesystem::path temporary = path.string() + ".tmp";
+    {
+        std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
+        if (!file) {
+            return Status::CONFIG_ERROR;
+        }
+        file << write_json(root);
+        if (!file) {
+            return Status::CONFIG_ERROR;
+        }
+    }
+    std::filesystem::rename(temporary, path, ec);
+    if (ec) {
         return Status::CONFIG_ERROR;
     }
-    file << write_json(root);
-    return file ? Status::OK : Status::CONFIG_ERROR;
+    session.set_persistence(PersistedSession { path });
+    return Status::OK;
 }
 
 Status load_session(const std::filesystem::path& path, Session& session)
@@ -350,8 +377,7 @@ Status load_session(const std::filesystem::path& path, Session& session)
     if (!root.isObject() || !root["items"].isArray()) {
         return Status::JSON_ERROR;
     }
-    if (!root["workspace"].isString()
-        || root["workspace"].asString().empty()) {
+    if (!root["workspace"].isString() || root["workspace"].asString().empty()) {
         return Status::CONFIG_ERROR;
     }
     const std::filesystem::path workspace = root["workspace"].asString();
@@ -361,10 +387,10 @@ Status load_session(const std::filesystem::path& path, Session& session)
         return Status::CONFIG_ERROR;
     }
     SessionSnapshot snapshot;
-    snapshot.title = root.get("title", "").asString();
-    snapshot.todo = parse_todo(root["todo"]);
-    snapshot.compacted_summary
-        = root.get("compacted_summary", "").asString();
+    snapshot.persistence       = PersistedSession { path };
+    snapshot.title             = root.get("title", "").asString();
+    snapshot.todo              = parse_todo(root["todo"]);
+    snapshot.compacted_summary = root.get("compacted_summary", "").asString();
     snapshot.compacted_item_count
         = root.get("compacted_item_count", 0).asUInt64();
     snapshot.plan_mode = root.get("mode", "plan").asString() != "build";
@@ -387,8 +413,10 @@ std::vector<SavedSession> saved_sessions()
     if (!std::filesystem::exists(sessions_dir(), ec)) {
         return out;
     }
-    for (const auto& entry : std::filesystem::directory_iterator(sessions_dir(), ec)) {
-        if (ec || !entry.is_regular_file() || entry.path().extension() != ".json") {
+    for (const auto& entry :
+        std::filesystem::directory_iterator(sessions_dir(), ec)) {
+        if (ec || !entry.is_regular_file()
+            || entry.path().extension() != ".json") {
             continue;
         }
         std::ifstream file(entry.path());
@@ -411,4 +439,4 @@ std::vector<SavedSession> saved_sessions()
     return out;
 }
 
-}
+} // namespace ursa

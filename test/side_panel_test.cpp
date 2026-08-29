@@ -118,3 +118,14 @@ TEST_CASE("render_changed_files renders colored symbols and readable paths")
     CHECK(screen.PixelAt(1, 5).foreground_color == ftxui::Color::RedLight);
     CHECK(screen.PixelAt(3, 2).foreground_color == ursa::PANEL_FG);
 }
+
+TEST_CASE("render_context_box lists attachment basenames under files")
+{
+    const std::string out = to_text(ursa::render_context_box(
+        "AGENTS.md", { "main.cpp", "design.md" }, 0, 0));
+
+    CHECK(out.find("Files") != std::string::npos);
+    CHECK(out.find("AGENTS.md") != std::string::npos);
+    CHECK(out.find("main.cpp") != std::string::npos);
+    CHECK(out.find("design.md") != std::string::npos);
+}

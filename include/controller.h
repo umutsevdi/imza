@@ -116,8 +116,8 @@ private:
     std::vector<Tool> tools_;
     std::vector<ToolSpec> specs_plan_;
     std::vector<ToolSpec> specs_all_;
-    std::function<void()> env_sub_;
-    std::function<void()> provider_sub_;
+    Signal<>::Subscription env_sub_;
+    Signal<>::Subscription provider_sub_;
 
     struct PendingModal {
         ModalPayload payload;

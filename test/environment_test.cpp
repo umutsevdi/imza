@@ -128,7 +128,7 @@ namespace {
     {
         ursa::Environment env;
         std::shared_ptr<const ursa::WorkspaceEnvironment> captured;
-        env.subscribe_to_workspace_change(
+        auto subscription = env.subscribe_to_workspace_change(
             [&] { captured = env.workspace(); });
         REQUIRE(wait_until_ready(env));
         CHECK(env.ready());

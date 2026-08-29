@@ -32,12 +32,6 @@ public:
     {
     }
 
-    ~StatusLine() override
-    {
-        repository_subscription_();
-        workspace_subscription_();
-    }
-
     Element OnRender() override
     {
         using namespace ftxui;
@@ -124,8 +118,8 @@ private:
     int frame_ = 0;
     std::string last_model_;
     ModelPricing cached_;
-    std::function<void()> workspace_subscription_;
-    std::function<void()> repository_subscription_;
+    Signal<>::Subscription workspace_subscription_;
+    Signal<>::Subscription repository_subscription_;
 
     ModelPricing _cached_pricing(const std::string& model)
     {

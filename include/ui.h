@@ -11,8 +11,8 @@
 #include <string_view>
 #include <vector>
 
-#include "slash_commands.h"
 #include "controller.h"
+#include "slash_commands.h"
 
 namespace ursa {
 
@@ -60,25 +60,27 @@ ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx);
 ftxui::Element render_todo(const TodoList& todo, const LayoutCtx& ctx);
 ftxui::Element render_changed_files(
     const std::vector<ChangedFile>& files, const LayoutCtx& ctx);
+ftxui::Element render_context_box(const std::optional<std::string>& rules,
+    const std::vector<std::string>& attachments, int project_skills,
+    int global_skills);
 ftxui::Element render_help(std::span<const SlashCommand> commands);
 
 int run_repl(const Config& cfg);
+void print_session_saved_box();
 
 ftxui::Component make_chat(
     std::shared_ptr<Session> session, Controller& controller, LayoutFn layout);
 ftxui::Component make_side_panel(
     std::shared_ptr<Session> session, LayoutFn layout);
-ftxui::Component make_status_line(
-    std::shared_ptr<Session> session, ProviderStore& providers, LayoutFn layout);
-ftxui::Component make_connect(
-    std::shared_ptr<Session> session, Controller& controller,
-    ProviderStore& providers);
+ftxui::Component make_status_line(std::shared_ptr<Session> session,
+    ProviderStore& providers, LayoutFn layout);
+ftxui::Component make_connect(std::shared_ptr<Session> session,
+    Controller& controller, ProviderStore& providers);
 ftxui::Component make_variant(
     std::shared_ptr<Session> session, Controller& controller);
 ftxui::Component make_sessions(
     std::shared_ptr<Session> session, Controller& controller);
-ftxui::Component make_modal(
-    std::shared_ptr<Session> session, Controller& controller,
-    ProviderStore& providers);
+ftxui::Component make_modal(std::shared_ptr<Session> session,
+    Controller& controller, ProviderStore& providers);
 
 } // namespace ursa

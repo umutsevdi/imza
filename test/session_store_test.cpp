@@ -66,9 +66,16 @@ TEST_CASE("sessions save, list and load")
     source.apply(ursa::make_delta_event("world"), { });
 
     REQUIRE(ursa::save_session(source) == ursa::Status::OK);
-    const auto saved = ursa::saved_sessions();
+    auto saved = ursa::saved_sessions();
     REQUIRE(saved.size() == 1);
     CHECK(saved.front().title == "Saved title");
+    const std::filesystem::path saved_path = saved.front().path;
+
+    source.begin_send("follow-up");
+    REQUIRE(ursa::save_session(source) == ursa::Status::OK);
+    saved = ursa::saved_sessions();
+    REQUIRE(saved.size() == 1);
+    CHECK(saved.front().path == saved_path);
 
     CurrentDirectory directory;
     const auto other = home.path / "other-workspace";
@@ -76,12 +83,19 @@ TEST_CASE("sessions save, list and load")
     REQUIRE(ursa::get_environment()->chdir(other));
 
     ursa::Session loaded;
-    REQUIRE(ursa::load_session(saved.front().path, loaded) == ursa::Status::OK);
+    REQUIRE(ursa::load_session(saved_path, loaded) == ursa::Status::OK);
     CHECK(std::filesystem::current_path() == directory.original);
     CHECK(loaded.title() == "Saved title");
-    REQUIRE(loaded.items().size() == 2);
+    REQUIRE(loaded.items().size() == 3);
     CHECK(std::get<ursa::UserTurn>(loaded.items()[0]).text == "hello");
     CHECK(std::get<ursa::AssistantTurn>(loaded.items()[1]).markdown == "world");
+    CHECK(std::get<ursa::UserTurn>(loaded.items()[2]).text == "follow-up");
+
+    loaded.append_assistant();
+    REQUIRE(ursa::save_session(loaded) == ursa::Status::OK);
+    saved = ursa::saved_sessions();
+    REQUIRE(saved.size() == 1);
+    CHECK(saved.front().path == saved_path);
 #endif
 }
 
