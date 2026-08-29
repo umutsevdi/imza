@@ -187,10 +187,10 @@ TEST_CASE("controller retries rate-limited requests and then completes")
         return ursa::Status::OK;
     };
     env.controller.submit("hello");
-    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.session()); }));
+    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
     CHECK(env.requests.size() == 2);
-    CHECK(env.controller.session().error().empty());
-    const auto& items = env.controller.session().items();
+    CHECK(env.session->error().empty());
+    const auto& items = env.session->items();
     bool found = false;
     for (const auto& it : items) {
         if (const auto* a = std::get_if<ursa::AssistantTurn>(&it)) {
@@ -213,9 +213,9 @@ TEST_CASE("controller does not retry budget errors")
         return ursa::Status::BUDGET_EXCEEDED;
     };
     env.controller.submit("hello");
-    REQUIRE(env.pump.wait_for([&] { return idle(env.controller.session()); }));
+    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
     CHECK(env.requests.size() == 1);
-    CHECK(env.controller.session().error()
+    CHECK(env.session->error()
         == "out of budget / insufficient credits: insufficient credits");
 }
 

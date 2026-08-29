@@ -8,9 +8,7 @@ namespace ursa {
 
 SubagentManager::~SubagentManager()
 {
-    for (auto& worker : workers_) {
-        worker.request_stop();
-    }
+    stop();
 }
 
 SubagentHandle SubagentManager::start(std::string prompt, std::string model,
@@ -68,6 +66,18 @@ SubagentHandle SubagentManager::start(std::string prompt, std::string model,
         });
     }
     return handle;
+}
+
+void SubagentManager::stop()
+{
+    std::vector<std::jthread> workers;
+    {
+        std::lock_guard lock(mutex_);
+        workers.swap(workers_);
+    }
+    for (auto& worker : workers) {
+        worker.request_stop();
+    }
 }
 
 std::vector<SubagentTask> SubagentManager::tasks(bool visible_only) const

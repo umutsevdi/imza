@@ -61,3 +61,22 @@ TEST_CASE("subagent failures retain a typed status")
     CHECK(manager.tasks().front().state
         == ursa::SubagentTask::State::FAILED);
 }
+
+TEST_CASE("stopping subagents joins active workers")
+{
+    ursa::SubagentManager manager;
+    auto handle = manager.start("inspect", "model", "low", true,
+        [](std::stop_token stop) {
+            while (!stop.stop_requested()) {
+                std::this_thread::yield();
+            }
+            return ursa::SubagentResult {
+                ursa::Status::API_ERROR, "cancelled" };
+        });
+
+    manager.stop();
+
+    CHECK(handle.completion.wait_for(std::chrono::seconds(1))
+        == std::future_status::ready);
+    CHECK(manager.running_count() == 0);
+}

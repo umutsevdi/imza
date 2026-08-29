@@ -14,20 +14,21 @@ namespace ursa {
 using namespace ftxui;
 class SidePanel : public ComponentBase {
 public:
-    SidePanel(std::shared_ptr<Session> session, Controller& controller, LayoutFn layout)
-        : session_(std::move(session))
+    SidePanel(std::shared_ptr<ApplicationState> state, Controller& controller,
+        LayoutFn layout)
+        : state_(std::move(state))
         , controller_(controller)
         , layout_(std::move(layout))
         , workspace_subscription_(
-              get_environment()->subscribe_to_workspace_change(
+              state_->environment->subscribe_to_workspace_change(
                   [] { animation::RequestAnimationFrame(); }))
         , repository_subscription_(
-              get_environment()->subscribe_to_repository_change(
+              state_->environment->subscribe_to_repository_change(
                   [] { animation::RequestAnimationFrame(); }))
-        , title_subscription_(session_->subscribe_to_title_change(
+        , title_subscription_(state_->session->subscribe_to_title_change(
               [] { animation::RequestAnimationFrame(); }))
         , attachments_subscription_(
-              session_->subscribe_to_attachments_change([this] {
+              state_->session->subscribe_to_attachments_change([this] {
                   attachments_dirty_.store(true);
                   animation::RequestAnimationFrame();
               }))
@@ -39,19 +40,19 @@ public:
         const LayoutCtx ctx = layout_();
         const bool narrow   = ctx.kind == LayoutCtx::Kind::NARROW;
         Elements parts;
-        const std::string title = session_->title();
+        const std::string title = state_->session->title();
         parts.push_back(paragraph(title.empty() ? "New Session" : title) | bold
             | color(PANEL_FG));
         parts.push_back(separator());
-        if (session_->todo().items.size()) {
-            parts.push_back(render_todo(session_->todo(), ctx) | yflex);
+        if (state_->session->todo().items.size()) {
+            parts.push_back(render_todo(state_->session->todo(), ctx) | yflex);
         }
 
         if (!narrow) {
             if (attachments_dirty_.exchange(false)) {
-                attachment_names_ = session_->attachment_names();
+                attachment_names_ = state_->session->attachment_names();
             }
-            auto env              = get_environment();
+            const auto& env       = state_->environment;
             const auto repository = env->repository();
             if (repository && !repository->changed_files.empty()) {
                 parts.push_back(
@@ -69,7 +70,7 @@ public:
     }
 
 private:
-    std::shared_ptr<Session> session_;
+    std::shared_ptr<ApplicationState> state_;
     Controller& controller_;
     LayoutFn layout_;
     Signal<>::Subscription workspace_subscription_;
@@ -81,9 +82,11 @@ private:
 };
 
 ftxui::Component make_side_panel(
-    std::shared_ptr<Session> session, Controller& controller, LayoutFn layout)
+    std::shared_ptr<ApplicationState> state, Controller& controller,
+    LayoutFn layout)
 {
-    return ftxui::Make<SidePanel>(std::move(session), controller, std::move(layout));
+    return ftxui::Make<SidePanel>(
+        std::move(state), controller, std::move(layout));
 }
 
 namespace {

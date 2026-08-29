@@ -10,16 +10,18 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
 
-#include "slash_commands.h"
+#include "application_state.h"
 #include "environment.h"
 #include "network.h"
 #include "provider_store.h"
 #include "session.h"
+#include "slash_commands.h"
 #include "subagent_manager.h"
 #include "tools.h"
 #include "types.h"
@@ -48,6 +50,9 @@ struct TurnSettings {
 
 class Controller {
 public:
+    Controller(std::shared_ptr<ApplicationState> state, PostFn post,
+        std::function<void()> on_exit, StreamFn stream_fn = { },
+        std::vector<Tool> tools = { });
     Controller(std::shared_ptr<Session> session, const Config& cfg, PostFn post,
         std::function<void()> on_exit, StreamFn stream_fn = { },
         std::vector<Tool> tools = { }, ModelsFn models_fn = { });
@@ -76,9 +81,6 @@ public:
     std::vector<Skill> available_skills() const;
     SubagentHandle run_subagent(std::string prompt, std::string model,
         std::string variant, bool visible);
-    SubagentManager& subagents() { return subagents_; }
-    const SubagentManager& subagents() const { return subagents_; }
-    const Session& session() const { return *session_; }
     std::span<const SlashCommand> commands() const { return slash_commands(); }
 
 private:
@@ -126,7 +128,7 @@ private:
     void _present_front();
     void _drain_queued();
 
-    std::shared_ptr<Session> session_;
+    std::shared_ptr<ApplicationState> state_;
     PostFn post_;
     std::function<void()> on_exit_;
     StreamFn stream_fn_;
@@ -158,9 +160,7 @@ private:
 
     std::vector<StreamEvent> stream_events_;
     std::atomic<bool> alive_ { true };
-    std::shared_ptr<ProviderStore> providers_;
     std::optional<std::jthread> worker_;
-    SubagentManager subagents_;
     int retry_after_secs_ = 0;
 };
 

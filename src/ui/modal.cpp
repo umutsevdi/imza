@@ -54,7 +54,7 @@ namespace {
 
     std::string preview_text(const std::string& content)
     {
-        constexpr std::size_t max_lines = 8;
+        constexpr std::size_t max_lines      = 8;
         const std::vector<std::string> lines = split_lines(content);
         std::string out;
         const std::size_t shown = std::min(lines.size(), max_lines);
@@ -65,8 +65,8 @@ namespace {
             out += lines[i];
         }
         if (lines.size() > shown) {
-            out += "\n… " + std::to_string(lines.size() - shown)
-                + " more line" + (lines.size() - shown == 1 ? "" : "s");
+            out += "\n… " + std::to_string(lines.size() - shown) + " more line"
+                + (lines.size() - shown == 1 ? "" : "s");
         }
         return out;
     }
@@ -74,15 +74,14 @@ namespace {
     Element tool_approval_reason(const ToolCallRequest& req)
     {
         const Json::Value args = parse_json(req.args);
-        const auto string_arg = [&args](const char* name) {
+        const auto string_arg  = [&args](const char* name) {
             return args.isObject() && args[name].isString()
                 ? args[name].asString()
                 : std::string { };
         };
         std::string message;
-        const char* path_key = req.name == "edit" || req.name == "write"
-            ? "file_path"
-            : "path";
+        const char* path_key
+            = req.name == "edit" || req.name == "write" ? "file_path" : "path";
         if (req.approval_reason
             == ToolCallRequest::ApprovalReason::OUTSIDE_WORKSPACE) {
             const std::string path = string_arg(path_key);
@@ -99,18 +98,19 @@ namespace {
             message = path.empty() ? "Will read a file" : "Will read " + path;
         } else if (req.name == "list") {
             const std::string path = string_arg("path");
-            message = path.empty() ? "Will list a directory"
-                                   : "Will list " + path;
+            message
+                = path.empty() ? "Will list a directory" : "Will list " + path;
         } else {
             message = "Permission required";
         }
         return text(message) | color(Color::YellowLight);
     }
 
-    Element tool_request_body(const ToolCallRequest& req)
+    Element tool_request_body(
+        const ToolCallRequest& req, const SystemEnvironment& system)
     {
         const Json::Value args = parse_json(req.args);
-        const auto string_arg = [&args](const char* name) {
+        const auto string_arg  = [&args](const char* name) {
             return args.isObject() && args[name].isString()
                 ? args[name].asString()
                 : std::string { };
@@ -120,7 +120,7 @@ namespace {
             const std::string command = string_arg("command").empty()
                 ? req.args
                 : string_arg("command");
-            long timeout = 10;
+            long timeout              = 10;
             if (args.isObject() && args["timeout"].isIntegral()) {
                 timeout = args["timeout"].asInt64();
             }
@@ -128,8 +128,7 @@ namespace {
             const std::string cwd = std::filesystem::current_path(ec).string();
             const std::string metadata = (ec ? std::string { } : cwd + " · ")
                 + "timeout " + std::to_string(timeout) + "s";
-            return vbox({ code_block(preview_text(command),
-                              shell_name(*get_environment()->system())),
+            return vbox({ code_block(preview_text(command), shell_name(system)),
                 hbox({ filler(), text(metadata) | dim }) });
         }
 
@@ -263,14 +262,14 @@ namespace {
         return out;
     }
 
-    class ModalImpl : public ComponentBase {
+    class ModalView : public ComponentBase {
     public:
-        explicit ModalImpl(
-            std::shared_ptr<Session> session, Controller& controller,
-            ProviderStore& providers)
-            : session_(std::move(session))
+        explicit ModalView(
+            std::shared_ptr<ApplicationState> state, Controller& controller)
+            : state_(std::move(state))
+            , session_(state_->session)
             , controller_(controller)
-            , providers_(providers)
+            , providers_(*state_->providers)
         {
         }
 
@@ -320,8 +319,8 @@ namespace {
                     controller_.close_modal();
                     return true;
                 }
-                if (std::holds_alternative<SessionsModal>(st.modal())
-                    && body_ && body_->OnEvent(event)) {
+                if (std::holds_alternative<SessionsModal>(st.modal()) && body_
+                    && body_->OnEvent(event)) {
                     return true;
                 }
                 if (std::holds_alternative<ToolCallRequest>(st.modal())
@@ -476,25 +475,25 @@ namespace {
 
         void build(const ConnectModal&)
         {
-            connect_ = make_connect(session_, controller_, providers_);
+            connect_ = make_connect(state_, controller_);
             body_    = connect_;
         }
 
         void build(const VariantModal&)
         {
-            variant_ = make_variant(session_, controller_);
+            variant_ = make_variant(state_, controller_);
             body_    = variant_;
         }
 
         void build(const SessionsModal&)
         {
-            sessions_ = make_sessions(session_, controller_);
+            sessions_ = make_sessions(state_, controller_);
             body_     = sessions_;
         }
 
         void build(const SkillsModal&)
         {
-            skills_ = make_skills(session_, controller_);
+            skills_ = make_skills(state_, controller_);
             body_   = skills_;
         }
 
@@ -584,7 +583,8 @@ namespace {
                 text(tool_action_description(req)) | color(PANEL_FG_DIM));
             rows.push_back(tool_approval_reason(req));
             rows.push_back(separatorEmpty());
-            rows.push_back(tool_request_body(req));
+            rows.push_back(
+                tool_request_body(req, *state_->environment->system()));
             rows.push_back(separatorEmpty());
             if (tool_phase_ == ToolPhase::REASON) {
                 rows.push_back(section_title("Reason for rejecting", PANEL_FG));
@@ -608,8 +608,7 @@ namespace {
                 rows.push_back(separatorEmpty());
                 rows.push_back(hbox({ filler(),
                     text("Always allow applies for this session") | dim }));
-                rows.push_back(
-                    hbox({ filler(), text("Esc reject") | dim }));
+                rows.push_back(hbox({ filler(), text("Esc reject") | dim }));
             }
             return vbox(std::move(rows)) | xflex;
         }
@@ -738,6 +737,7 @@ namespace {
                 = std::clamp(static_scroll_ + delta, 0, max_static_scroll());
         }
 
+        std::shared_ptr<ApplicationState> state_;
         std::shared_ptr<Session> session_;
         Controller& controller_;
         ProviderStore& providers_;
@@ -772,17 +772,16 @@ namespace {
 } // namespace
 
 ftxui::Component make_modal(
-    std::shared_ptr<Session> session, Controller& controller,
-    ProviderStore& providers)
+    std::shared_ptr<ApplicationState> state, Controller& controller)
 {
-    return ftxui::Make<ModalImpl>(std::move(session), controller, providers);
+    return ftxui::Make<ModalView>(std::move(state), controller);
 }
 
 namespace {
 
-    class VariantImpl : public ComponentBase {
+    class VariantView : public ComponentBase {
     public:
-        VariantImpl(std::shared_ptr<Session> session, Controller& controller)
+        VariantView(std::shared_ptr<Session> session, Controller& controller)
             : session_(std::move(session))
             , controller_(controller)
         {
@@ -806,7 +805,8 @@ namespace {
             for (int i = 0; i < static_cast<int>(options_.size()); ++i) {
                 Element label = text(options_[static_cast<std::size_t>(i)]);
                 if (i == cursor_) {
-                    label = std::move(label) | bold | color(PANEL_FG) | inverted;
+                    label
+                        = std::move(label) | bold | color(PANEL_FG) | inverted;
                 } else if (i == current_) {
                     label = std::move(label) | bold | color(PANEL_FG);
                 } else {
@@ -820,8 +820,7 @@ namespace {
             rows.push_back(separatorEmpty());
             rows.push_back(text("arrows navigate · Enter select · Esc close")
                 | dim | center);
-            return vbox({ vbox(std::move(rows)), separatorEmpty() })
-                | xflex;
+            return vbox({ vbox(std::move(rows)), separatorEmpty() }) | xflex;
         }
 
         bool OnEvent(Event event) override
@@ -865,23 +864,23 @@ namespace {
 } // namespace
 
 ftxui::Component make_variant(
-    std::shared_ptr<Session> session, Controller& controller)
+    std::shared_ptr<ApplicationState> state, Controller& controller)
 {
-    return ftxui::Make<VariantImpl>(std::move(session), controller);
+    return ftxui::Make<VariantView>(state->session, controller);
 }
 
 namespace {
 
-    class SessionsImpl : public ComponentBase {
+    class SessionsView : public ComponentBase {
     public:
-        SessionsImpl(std::shared_ptr<Session> session, Controller& controller)
+        SessionsView(std::shared_ptr<Session> session, Controller& controller)
             : session_(std::move(session))
             , controller_(controller)
         {
             const auto modal = std::get<SessionsModal>(session_->modal());
-            titles_ = modal.titles;
-            saved_at_ = modal.saved_at;
-            paths_  = modal.paths;
+            titles_          = modal.titles;
+            saved_at_        = modal.saved_at;
+            paths_           = modal.paths;
         }
 
         Element OnRender() override
@@ -891,14 +890,14 @@ namespace {
             if (titles_.empty()) {
                 rows.push_back(text("No saved sessions") | dim);
             } else if (confirming_) {
-                rows.push_back(text("Delete “" + titles_[cursor_] + "”?")
-                    | bold);
+                rows.push_back(
+                    text("Delete “" + titles_[cursor_] + "”?") | bold);
                 rows.push_back(separatorEmpty());
                 rows.push_back(hbox(
                     { filler(), text("Enter delete · Esc cancel") | dim }));
             } else {
                 for (int index = 0; index < static_cast<int>(titles_.size());
-                     ++index) {
+                    ++index) {
                     Element row = hbox({ text(titles_[index]), filler(),
                         text(saved_at_[index]) | color(PANEL_FG_DIM) });
                     if (index == cursor_) {
@@ -909,8 +908,8 @@ namespace {
                 }
                 rows.push_back(separatorEmpty());
                 if (loading_blocked) {
-                    rows.push_back(text(
-                        "Finish or interrupt pending work before loading")
+                    rows.push_back(
+                        text("Finish or interrupt pending work before loading")
                         | color(PANEL_FG));
                 }
                 rows.push_back(hbox({ filler(),
@@ -919,8 +918,7 @@ namespace {
                             : "↑↓ rows · Enter load · d delete · Esc close")
                         | dim }));
             }
-            return vbox({ vbox(std::move(rows)), separatorEmpty() })
-                | xflex;
+            return vbox({ vbox(std::move(rows)), separatorEmpty() }) | xflex;
         }
 
         bool OnEvent(Event event) override
@@ -972,24 +970,25 @@ namespace {
         std::vector<std::string> titles_;
         std::vector<std::string> saved_at_;
         std::vector<std::string> paths_;
-        int cursor_ = 0;
+        int cursor_      = 0;
         bool confirming_ = false;
     };
 
-}
+} // namespace
 
 ftxui::Component make_sessions(
-    std::shared_ptr<Session> session, Controller& controller)
+    std::shared_ptr<ApplicationState> state, Controller& controller)
 {
-    return ftxui::Make<SessionsImpl>(std::move(session), controller);
+    return ftxui::Make<SessionsView>(state->session, controller);
 }
 
 namespace {
 
-    class SkillsImpl : public ComponentBase {
+    class SkillsView : public ComponentBase {
     public:
-        SkillsImpl(std::shared_ptr<Session> session, Controller& controller)
-            : session_(std::move(session)), controller_(controller)
+        SkillsView(std::shared_ptr<Session> session, Controller& controller)
+            : session_(std::move(session))
+            , controller_(controller)
         {
             entries_ = std::get<SkillsModal>(session_->modal()).entries;
         }
@@ -997,23 +996,24 @@ namespace {
         Element OnRender() override
         {
             Elements rows { text("Skills") | bold, separatorEmpty() };
-            if (entries_.empty()) rows.push_back(text("No skills discovered") | dim);
+            if (entries_.empty())
+                rows.push_back(text("No skills discovered") | dim);
             std::string previous_scope;
             for (int i = 0; i < static_cast<int>(entries_.size()); ++i) {
                 const auto& entry = entries_[i];
-                const std::string scope = entry.project_root.empty() ? "Global" : "Project";
+                const std::string scope
+                    = entry.project_root.empty() ? "Global" : "Project";
                 if (scope != previous_scope) {
                     rows.push_back(section_title(scope + " skills"));
                     previous_scope = scope;
                 }
-                const auto choice = [&entry](SkillPolicy policy,
-                                        std::string label) {
+                const auto choice = [&entry](
+                                        SkillPolicy policy, std::string label) {
                     const bool selected = entry.policy == policy;
-                    Element value = text((selected ? "◉ " : "○ ")
-                        + std::move(label));
-                    return selected
-                        ? std::move(value) | bold | color(PANEL_FG)
-                        : std::move(value) | color(PANEL_FG_DIM);
+                    Element value
+                        = text((selected ? "◉ " : "○ ") + std::move(label));
+                    return selected ? std::move(value) | bold | color(PANEL_FG)
+                                    : std::move(value) | color(PANEL_FG_DIM);
                 };
                 Elements content {
                     hbox({ text(entry.name) | bold, filler(),
@@ -1022,8 +1022,8 @@ namespace {
                         choice(SkillPolicy::DENY, "Deny") }),
                 };
                 if (!entry.description.empty()) {
-                    content.push_back(text(fit(entry.description, 76))
-                        | color(PANEL_FG_DIM));
+                    content.push_back(
+                        text(fit(entry.description, 76)) | color(PANEL_FG_DIM));
                 }
                 Element row = vbox(std::move(content));
                 if (i == cursor_) {
@@ -1032,7 +1032,8 @@ namespace {
                 rows.push_back(std::move(row));
             }
             rows.push_back(separatorEmpty());
-            rows.push_back(hbox({ filler(), text("↑↓ rows · ←→ policy · Enter save · Esc close") | dim }));
+            rows.push_back(hbox({ filler(),
+                text("↑↓ rows · ←→ policy · Enter save · Esc close") | dim }));
             return vbox({ vbox(std::move(rows)) | vscroll_indicator | frame,
                        separatorEmpty() })
                 | xflex;
@@ -1040,18 +1041,33 @@ namespace {
 
         bool OnEvent(Event event) override
         {
-            if (event == Event::Escape) { controller_.close_modal(); return true; }
-            if (event == Event::ArrowDown && cursor_ + 1 < static_cast<int>(entries_.size())) { ++cursor_; return true; }
-            if (event == Event::ArrowUp && cursor_ > 0) { --cursor_; return true; }
-            if (!entries_.empty() && (event == Event::ArrowLeft || event == Event::ArrowRight || event == Event::Character(' '))) {
+            if (event == Event::Escape) {
+                controller_.close_modal();
+                return true;
+            }
+            if (event == Event::ArrowDown
+                && cursor_ + 1 < static_cast<int>(entries_.size())) {
+                ++cursor_;
+                return true;
+            }
+            if (event == Event::ArrowUp && cursor_ > 0) {
+                --cursor_;
+                return true;
+            }
+            if (!entries_.empty()
+                && (event == Event::ArrowLeft || event == Event::ArrowRight
+                    || event == Event::Character(' '))) {
                 int value = static_cast<int>(entries_[cursor_].policy);
-                value = event == Event::ArrowLeft ? (value + 2) % 3 : (value + 1) % 3;
+                value     = event == Event::ArrowLeft ? (value + 2) % 3
+                                                      : (value + 1) % 3;
                 entries_[cursor_].policy = static_cast<SkillPolicy>(value);
                 return true;
             }
             if (event == Event::Return) {
                 SkillPolicyChanges changes;
-                for (const auto& entry : entries_) changes.entries.push_back({ entry.name, entry.project_root, entry.policy });
+                for (const auto& entry : entries_)
+                    changes.entries.push_back(
+                        { entry.name, entry.project_root, entry.policy });
                 controller_.resolve_modal(ModalResult { std::move(changes) });
                 return true;
             }
@@ -1065,12 +1081,12 @@ namespace {
         int cursor_ = 0;
     };
 
-}
+} // namespace
 
 ftxui::Component make_skills(
-    std::shared_ptr<Session> session, Controller& controller)
+    std::shared_ptr<ApplicationState> state, Controller& controller)
 {
-    return ftxui::Make<SkillsImpl>(std::move(session), controller);
+    return ftxui::Make<SkillsView>(state->session, controller);
 }
 
 } // namespace ursa

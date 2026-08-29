@@ -57,6 +57,7 @@ public:
     SubagentHandle start(std::string prompt, std::string model,
         std::string variant, bool visible, SubagentRunFn run,
         SubagentCompleteFn complete = { });
+    void stop();
     std::vector<SubagentTask> tasks(bool visible_only = false) const;
     std::size_t running_count(bool visible_only = true) const;
     [[nodiscard]] Signal<const SubagentEvent&>::Subscription subscribe(

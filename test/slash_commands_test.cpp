@@ -1,3 +1,4 @@
+#include "application_state.h"
 #include "slash_commands.h"
 #include "types.h"
 
@@ -63,6 +64,32 @@ TEST_CASE("find_command matches case-insensitively")
     CHECK(find_command("/model")->action
         == SlashCommand::Action::MODEL);
     CHECK(find_command("/foo") == nullptr);
+}
+
+TEST_CASE("run_slash_command emits application effects")
+{
+    ApplicationState state;
+    bool exited = false;
+    ModalPayload modal;
+    std::string error;
+    SlashCommandContext context { state,
+        [&] { exited = true; },
+        [] { },
+        [&](ModalPayload next) { modal = std::move(next); },
+        [] { return SessionsModal { }; },
+        [] { return SkillsModal { }; },
+        [] { return std::string { }; },
+        [&](std::string next) { error = std::move(next); } };
+
+    run_slash_command(context, "/exit");
+    CHECK(exited);
+
+    run_slash_command(context, "/connect");
+    REQUIRE(std::holds_alternative<ConnectModal>(modal));
+    CHECK(std::get<ConnectModal>(modal).entry == ConnectModal::Entry::MANAGE);
+
+    run_slash_command(context, "/missing");
+    CHECK(error == "unknown command: /missing");
 }
 
 } // namespace ursa

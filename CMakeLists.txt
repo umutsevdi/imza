@@ -172,7 +172,6 @@ add_library(ursa_ui
     src/ui/side_panel.cpp
     src/ui/status_line.cpp
     src/ui/tab_chat.cpp
-    src/ui/tab_review.cpp
 )
 target_include_directories(ursa_ui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include

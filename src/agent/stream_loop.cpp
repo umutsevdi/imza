@@ -164,12 +164,14 @@ bool Controller::_compact_history(std::vector<Message>& history,
     }
     --tail;
 
-    const auto [event_id, prefix_size] = session_->begin_compaction();
+    const auto [event_id, prefix_size] = state_->session->begin_compaction();
     ChatRequest request;
     request.model = settings.model;
     request.temperature = 0.2;
     request.interrupted
-        = [session = session_] { return session->interrupt_requested(); };
+        = [session = state_->session] {
+              return session->interrupt_requested();
+          };
     request.messages = {
         { Message::Type::SYSTEM,
             "Summarize this coding-agent session for continuation. Preserve "
@@ -197,10 +199,10 @@ bool Controller::_compact_history(std::vector<Message>& history,
             callback, nullptr);
     }
     const bool success = status == Status::OK && error.empty()
-        && !summary.empty() && !session_->interrupt_requested();
-    session_->finish_compaction(event_id, summary, prefix_size, success);
+        && !summary.empty() && !state_->session->interrupt_requested();
+    state_->session->finish_compaction(event_id, summary, prefix_size, success);
     if (!success) {
-        return !session_->interrupt_requested();
+        return !state_->session->interrupt_requested();
     }
 
     std::vector<Message> recent(history.begin() + tail, history.end());
@@ -216,7 +218,7 @@ void Controller::_drive(
     std::vector<Message> history, StreamFn override, TurnSettings settings)
 {
     int retries = 0;
-    std::uint64_t prompt_tokens = session_->last().prompt;
+    std::uint64_t prompt_tokens = state_->session->last().prompt;
     bool compaction_attempted = false;
     for (;;) {
         const ModelPricing pricing = get_pricing(settings.model);
@@ -240,8 +242,10 @@ void Controller::_drive(
         req.tools
             = settings.mode == Session::Mode::PLAN ? specs_plan_ : specs_all_;
         req.interrupted
-            = [session = session_] { return session->interrupt_requested(); };
-        session_->reset_reasoning();
+            = [session = state_->session] {
+                  return session->interrupt_requested();
+              };
+        state_->session->reset_reasoning();
         stream_events_.clear();
         std::string text_buffer;
         std::string error_msg;
@@ -275,7 +279,7 @@ void Controller::_drive(
             const ModelPricing pricing = ev.kind == StreamEvent::Kind::USAGE
                 ? get_pricing(model)
                 : ModelPricing { };
-            _post([this, ev, pricing] { session_->apply(ev, pricing); });
+            _post([this, ev, pricing] { state_->session->apply(ev, pricing); });
         };
 
         StreamFn fn       = override ? override : stream_fn_;
@@ -292,7 +296,7 @@ void Controller::_drive(
                 : std::optional<std::string>(settings.reasoning_effort);
             current_model        = req.model;
             current_effort       = settings.reasoning_effort;
-            session_->set_last_assistant_metadata(
+            state_->session->set_last_assistant_metadata(
                 current_model, current_effort);
             st = fn(req, cb);
         } else {
@@ -304,7 +308,7 @@ void Controller::_drive(
                     || req.thinking_budget.has_value()
                 ? settings.reasoning_effort
                 : "off";
-            session_->set_last_assistant_metadata(
+            state_->session->set_last_assistant_metadata(
                 current_model, current_effort);
             st = stream(
                 get_provider(route), route, req, cb, &retry_after_secs_);
@@ -313,7 +317,7 @@ void Controller::_drive(
             if (attempt == Status::API_ERROR && !saw_stream
                 && route.dialect == ApiStandard::OPENAI) {
                 Route alt;
-                alt = providers_->route_for(
+                alt = state_->providers->route_for(
                     settings.connection_id, ApiStandard::ANTHROPIC);
                 const bool has_alt = !alt.endpoint.empty();
                 if (has_alt && alt.endpoint != route.endpoint) {
@@ -328,19 +332,19 @@ void Controller::_drive(
                     current_effort = req.thinking_budget.has_value()
                         ? settings.reasoning_effort
                         : "off";
-                    session_->set_last_assistant_metadata(
+                    state_->session->set_last_assistant_metadata(
                         current_model, current_effort);
                     const Status retried
                         = error_status != Status::OK ? error_status : st;
                     if (retried == Status::OK) {
-                        providers_->remember_dialect(settings.connection_id,
+                        state_->providers->remember_dialect(settings.connection_id,
                             req.model, ApiStandard::ANTHROPIC);
                     }
                 }
             }
         }
 
-        if (session_->interrupt_requested()) {
+        if (state_->session->interrupt_requested()) {
             _post([this] { finish(""); });
             return;
         }
@@ -353,12 +357,12 @@ void Controller::_drive(
                 wait = retries == 1 ? 2 : 5;
             }
             wait = std::clamp(wait, 1, 30);
-            _post([this, wait] { session_->mark_retry(wait); });
+            _post([this, wait] { state_->session->mark_retry(wait); });
             using namespace std::chrono_literals;
             const auto deadline
                 = std::chrono::steady_clock::now() + std::chrono::seconds(wait);
             while (std::chrono::steady_clock::now() < deadline) {
-                if (!alive_.load() || session_->interrupt_requested()) {
+                if (!alive_.load() || state_->session->interrupt_requested()) {
                     _post([this] { finish(""); });
                     return;
                 }
@@ -368,7 +372,7 @@ void Controller::_drive(
         }
         if (fail != Status::OK) {
             _post([this, fail, msg = error_msg] {
-                session_->clear_error();
+                state_->session->clear_error();
                 finish(msg.empty() ? error_text(fail)
                                    : error_text(fail) + ": " + msg);
             });
@@ -387,7 +391,7 @@ void Controller::_drive(
         if (!alive_.load()) {
             return;
         }
-        if (session_->interrupt_requested()) {
+        if (state_->session->interrupt_requested()) {
             _post([this] { finish(""); });
             return;
         }
@@ -397,7 +401,7 @@ void Controller::_drive(
             return;
         }
         _post([this, settings] {
-            session_->append_assistant(
+            state_->session->append_assistant(
                 settings.model, settings.reasoning_effort);
         });
     }
@@ -424,7 +428,7 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
                 if (!form) {
                     const ToolCallRequest req = ev.tool_call;
                     _post([this, req] {
-                        session_->fill_tool_result(req,
+                        state_->session->fill_tool_result(req,
                             ToolCall::Result { ToolCall::Result::Kind::ERROR,
                                 "ask: expected a non-empty 'questions' "
                                 "array" });
@@ -457,7 +461,7 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
                         = "todo: expected a 'todos' array of {content, status} "
                           "objects";
                     _post([this, req, msg] {
-                        session_->fill_tool_result(req,
+                        state_->session->fill_tool_result(req,
                             ToolCall::Result {
                                 ToolCall::Result::Kind::ERROR, msg });
                     });
@@ -467,8 +471,8 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
                 }
                 const std::string text = todo_summary(*list);
                 _post([this, req, todo = *list, text] {
-                    session_->set_todo(todo);
-                    session_->fill_tool_result(req,
+                    state_->session->set_todo(todo);
+                    state_->session->fill_tool_result(req,
                         ToolCall::Result {
                             ToolCall::Result::Kind::OUTPUT, text });
                 });
@@ -560,7 +564,7 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
 
     Message assistant { Message::Type::ASSISTANT, assistant_text };
     if (dialect == ApiStandard::ANTHROPIC) {
-        if (const std::optional<AssistantTurn> a = session_->last_assistant()) {
+        if (const std::optional<AssistantTurn> a = state_->session->last_assistant()) {
             if (!a->reasoning.empty()) {
                 assistant.thinking.push_back(
                     { a->reasoning, a->reasoning_signature });
@@ -590,7 +594,7 @@ void Controller::_apply_tool_result(const ToolCallRequest& req,
     const auto* verdict = std::get_if<ToolVerdict>(&res);
     if (verdict == nullptr) {
         _post([this, req] {
-            session_->fill_tool_result(
+            state_->session->fill_tool_result(
                 req, ToolCall::Result { ToolCall::Result::Kind::CANCEL, "" });
         });
         tool_msgs.push_back(
@@ -600,7 +604,7 @@ void Controller::_apply_tool_result(const ToolCallRequest& req,
     if (verdict->decision == ToolDecision::REJECT) {
         std::string reason = verdict->reason;
         _post([this, req, reason] {
-            session_->fill_tool_result(req,
+            state_->session->fill_tool_result(req,
                 ToolCall::Result { ToolCall::Result::Kind::REJECT, reason });
         });
         tool_msgs.push_back(
@@ -626,7 +630,7 @@ void Controller::_apply_question_result(
     ModalAnswer copy = *answer;
     reply_buffer += modal_answer_markdown(copy);
     _post([this, copy = std::move(copy)] {
-        session_->append_item(std::move(copy));
+        state_->session->append_item(std::move(copy));
     });
 }
 
@@ -636,7 +640,7 @@ void Controller::_apply_ask_result(const ToolCallRequest& req,
     const auto* answer = std::get_if<ModalAnswer>(&res);
     if (answer == nullptr) {
         _post([this, req] {
-            session_->fill_tool_result(
+            state_->session->fill_tool_result(
                 req, ToolCall::Result { ToolCall::Result::Kind::CANCEL, "" });
         });
         tool_msgs.push_back(
@@ -646,7 +650,7 @@ void Controller::_apply_ask_result(const ToolCallRequest& req,
     ModalAnswer copy       = *answer;
     const std::string text = ask_answer_markdown(copy);
     _post([this, req, text] {
-        session_->fill_tool_result(
+        state_->session->fill_tool_result(
             req, ToolCall::Result { ToolCall::Result::Kind::OUTPUT, text });
     });
     tool_msgs.push_back({ Message::Type::TOOL, text, { }, req.id });
@@ -670,7 +674,7 @@ void Controller::_run_tool(
         ToolCall::Result result { kind, out.text };
         result.diff         = out.diff;
         result.shell_status = out.shell_status;
-        session_->fill_tool_result(req, std::move(result));
+        state_->session->fill_tool_result(req, std::move(result));
     });
     std::string model_text = out.text;
     if (out.shell_status.has_value()) {

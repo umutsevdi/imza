@@ -18,20 +18,18 @@ using namespace ftxui;
 
 class StatusLine : public ComponentBase {
 public:
-    StatusLine(std::shared_ptr<Session> session, Controller& controller,
-        ProviderStore& providers, LayoutFn layout, WorkflowFn workflow)
-        : session_(std::move(session))
-        , controller_(controller)
-        , providers_(providers)
+    StatusLine(std::shared_ptr<ApplicationState> state, LayoutFn layout,
+        WorkflowFn workflow)
+        : state_(std::move(state))
         , layout_(std::move(layout))
         , workflow_(std::move(workflow))
         , workspace_subscription_(
-              get_environment()->subscribe_to_workspace_change(
+              state_->environment->subscribe_to_workspace_change(
                   [] { animation::RequestAnimationFrame(); }))
         , repository_subscription_(
-              get_environment()->subscribe_to_repository_change(
+              state_->environment->subscribe_to_repository_change(
                   [] { animation::RequestAnimationFrame(); }))
-        , subagent_subscription_(controller_.subagents().subscribe(
+        , subagent_subscription_(state_->subagents->subscribe(
               [](const SubagentEvent&) {
                   animation::RequestAnimationFrame();
               }))
@@ -41,12 +39,12 @@ public:
     Element OnRender() override
     {
         using namespace ftxui;
-        const StatusConfigView config   = providers_.status();
-        const Session::StatusView state = session_->status_view();
-        const LayoutCtx ctx             = layout_();
-        const bool wide                 = ctx.kind == LayoutCtx::Kind::WIDE;
-        const bool environment_ready    = get_environment()->ready();
-        const WorkflowPhase phase       = workflow_();
+        const StatusConfigView config = state_->providers->status();
+        const Session::StatusView session = state_->session->status_view();
+        const LayoutCtx ctx = layout_();
+        const bool wide = ctx.kind == LayoutCtx::Kind::WIDE;
+        const bool environment_ready = state_->environment->ready();
+        const WorkflowPhase phase = workflow_();
         std::string mode_label;
         Color mode_color;
         switch (phase) {
@@ -67,7 +65,7 @@ public:
             | color(PANEL_COLOR_FOCUS) | bgcolor(mode_color);
         const std::string& active_model = config.active_model;
 
-        const auto repository = get_environment()->repository();
+        const auto repository = state_->environment->repository();
         Elements bar;
         bar.push_back(text(" "));
         bar.push_back(std::move(mode));
@@ -84,9 +82,9 @@ public:
                 bar.push_back(text(" (" + shown + ")") | color(effort_color));
             }
         }
-        if (state.last.prompt > 0 || state.totals.total > 0) {
+        if (session.last.prompt > 0 || session.totals.total > 0) {
             const ModelPricing pricing = _cached_pricing(active_model);
-            const std::uint64_t used   = state.last.prompt;
+            const std::uint64_t used   = session.last.prompt;
             if (pricing.context_limit > 0) {
                 const std::uint64_t pct = used * 100 / pricing.context_limit;
                 bar.push_back(text(" · " + compact_tokens(used) + "/"
@@ -100,7 +98,7 @@ public:
         }
         bar.push_back(filler());
         const std::size_t running_agents
-            = controller_.subagents().running_count();
+            = state_->subagents->running_count();
         if (running_agents > 0) {
             animation::RequestAnimationFrame();
             bar.push_back(spinner(15, static_cast<size_t>(frame_))
@@ -125,8 +123,8 @@ public:
             }
             bar.push_back(text("  "));
         }
-        if (state.total_cost > 0) {
-            bar.push_back(text(money_text(state.total_cost) + "  ")
+        if (session.total_cost > 0) {
+            bar.push_back(text(money_text(session.total_cost) + "  ")
                 | color(PANEL_FG_DIM));
         }
         bar.push_back(
@@ -137,16 +135,14 @@ public:
 
     void OnAnimation(animation::Params&) override
     {
-        if (!get_environment()->ready()
-            || controller_.subagents().running_count() > 0) {
+        if (!state_->environment->ready()
+            || state_->subagents->running_count() > 0) {
             ++frame_;
         }
     }
 
 private:
-    std::shared_ptr<Session> session_;
-    Controller& controller_;
-    ProviderStore& providers_;
+    std::shared_ptr<ApplicationState> state_;
     LayoutFn layout_;
     WorkflowFn workflow_;
     int frame_ = 0;
@@ -212,10 +208,10 @@ private:
 };
 
 ftxui::Component make_status_line(
-    std::shared_ptr<Session> session, Controller& controller,
-    ProviderStore& providers, LayoutFn layout, WorkflowFn workflow)
+    std::shared_ptr<ApplicationState> state, LayoutFn layout,
+    WorkflowFn workflow)
 {
-    return ftxui::Make<StatusLine>(std::move(session), controller, providers,
-        std::move(layout), std::move(workflow));
+    return ftxui::Make<StatusLine>(
+        std::move(state), std::move(layout), std::move(workflow));
 }
 } // namespace ursa

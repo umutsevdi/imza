@@ -1,6 +1,5 @@
 #include "controller.h"
 
-#include "slash_commands.h"
 #include "environment.h"
 #include "prompt.h"
 #include "session_store.h"
@@ -36,8 +35,10 @@ std::string error_text(Status st)
 Controller::Controller(std::shared_ptr<Session> session, const Config& cfg,
     PostFn post, std::function<void()> on_exit, StreamFn stream_fn,
     std::vector<Tool> tools, ModelsFn models_fn)
-    : Controller(std::move(session),
+    : Controller(std::make_shared<ApplicationState>(ApplicationState {
+          std::move(session),
           std::make_shared<ProviderStore>(cfg, std::move(models_fn)),
+          std::make_shared<SubagentManager>(), get_environment() }),
           std::move(post), std::move(on_exit), std::move(stream_fn),
           std::move(tools))
 {
@@ -47,13 +48,23 @@ Controller::Controller(std::shared_ptr<Session> session,
     std::shared_ptr<ProviderStore> providers, PostFn post,
     std::function<void()> on_exit, StreamFn stream_fn,
     std::vector<Tool> tools)
-    : session_(std::move(session))
+    : Controller(std::make_shared<ApplicationState>(ApplicationState {
+          std::move(session), std::move(providers),
+          std::make_shared<SubagentManager>(), get_environment() }),
+          std::move(post), std::move(on_exit), std::move(stream_fn),
+          std::move(tools))
+{
+}
+
+Controller::Controller(std::shared_ptr<ApplicationState> state, PostFn post,
+    std::function<void()> on_exit, StreamFn stream_fn,
+    std::vector<Tool> tools)
+    : state_(std::move(state))
     , post_(std::move(post))
     , on_exit_(std::move(on_exit))
     , stream_fn_(std::move(stream_fn))
     , has_stream_override_(static_cast<bool>(stream_fn_))
     , tools_(std::move(tools))
-    , providers_(std::move(providers))
 {
     for (Tool& tool : tools_) {
         if (tool.spec.name != "skill") continue;
@@ -80,26 +91,26 @@ Controller::Controller(std::shared_ptr<Session> session,
 
     if (!stream_fn_) {
         stream_fn_ = [this](const ChatRequest& req, const StreamCallback& cb) {
-            const auto selection = providers_->active_selection();
+            const auto selection = state_->providers->active_selection();
             const Route route
                 = selection.has_value() ? selection->route : Route { };
             return stream(
                 get_provider(route), route, req, cb, &retry_after_secs_);
         };
     }
-    env_sub_ = get_environment()->subscribe_to_workspace_change(
+    env_sub_ = state_->environment->subscribe_to_workspace_change(
         [this] {
             _post([this] {
                 _present_front();
-                if (session_->phase() == Session::Phase::IDLE
-                    && !session_->queued().empty()) {
+                if (state_->session->phase() == Session::Phase::IDLE
+                    && !state_->session->queued().empty()) {
                     _drain_queued();
                 }
             });
         });
-    provider_sub_ = providers_->subscribe(
-        [this] { _post([this] { session_->bump_modal_serial(); }); });
-    _post([this] { providers_->start_model_fetches(); });
+    provider_sub_ = state_->providers->subscribe(
+        [this] { _post([this] { state_->session->bump_modal_serial(); }); });
+    _post([this] { state_->providers->start_model_fetches(); });
 }
 
 std::optional<Skill> Controller::_resolve_skill(const Json::Value& args) const
@@ -108,7 +119,7 @@ std::optional<Skill> Controller::_resolve_skill(const Json::Value& args) const
     const std::string name = args["name"].asString();
     const std::string scope = args["scope"].isString() ? args["scope"].asString() : "";
     std::optional<Skill> global;
-    for (const Skill& skill : get_environment()->skills()) {
+    for (const Skill& skill : state_->environment->skills()) {
         if (skill.name != name) continue;
         if (scope == "project" && skill.scope != Skill::Scope::PROJECT) continue;
         if (scope == "global" && skill.scope != Skill::Scope::GLOBAL) continue;
@@ -120,7 +131,7 @@ std::optional<Skill> Controller::_resolve_skill(const Json::Value& args) const
 
 SkillPolicy Controller::_skill_policy(const Skill& skill) const
 {
-    const Config config = providers_->config();
+    const Config config = state_->providers->config();
     if (skill.scope == Skill::Scope::GLOBAL) {
         if (auto it = config.global_skills.find(skill.name); it != config.global_skills.end()) return it->second;
     } else if (skill.project_root) {
@@ -144,19 +155,20 @@ Controller::~Controller()
     provider_sub_.disconnect();
     env_sub_.disconnect();
     worker_.reset();
+    state_->subagents->stop();
 }
 
 void Controller::set_mode(Session::Mode next_mode)
 {
-    session_->set_mode(next_mode);
+    state_->session->set_mode(next_mode);
 }
 
 void Controller::set_error(std::string msg)
 {
-    session_->set_error(std::move(msg));
+    state_->session->set_error(std::move(msg));
 }
 
-void Controller::clear_error() { session_->clear_error(); }
+void Controller::clear_error() { state_->session->clear_error(); }
 
 void Controller::close_modal() { resolve_modal(std::monostate { }); }
 
@@ -167,15 +179,15 @@ void Controller::enqueue_user_modal(ModalPayload payload)
         queue_.push_back(PendingModal { std::move(payload),
             std::shared_ptr<std::promise<ModalResult>> { } });
     }
-    if (session_->modal().index() == 0
-        && (session_->phase() == Session::Phase::IDLE
-            || session_->phase() == Session::Phase::CONNECTING
-            || session_->phase() == Session::Phase::STREAMING)) {
+    if (state_->session->modal().index() == 0
+        && (state_->session->phase() == Session::Phase::IDLE
+            || state_->session->phase() == Session::Phase::CONNECTING
+            || state_->session->phase() == Session::Phase::STREAMING)) {
         _present_front();
     }
 }
 
-void Controller::cancel_queued(std::size_t id) { session_->cancel_queued(id); }
+void Controller::cancel_queued(std::size_t id) { state_->session->cancel_queued(id); }
 
 SessionsModal Controller::_sessions_modal() const
 {
@@ -191,8 +203,8 @@ SessionsModal Controller::_sessions_modal() const
 SkillsModal Controller::_skills_modal() const
 {
     SkillsModal modal;
-    const Config config = providers_->config();
-    for (const Skill& skill : get_environment()->skills()) {
+    const Config config = state_->providers->config();
+    for (const Skill& skill : state_->environment->skills()) {
         SkillPolicy policy = SkillPolicy::ASK;
         std::string root;
         if (skill.scope == Skill::Scope::GLOBAL) {
@@ -215,27 +227,27 @@ void Controller::delete_saved_session(const std::filesystem::path& path)
     const std::filesystem::path target
         = std::filesystem::weakly_canonical(path, ec);
     if (ec || target.parent_path() != root || target.extension() != ".json") {
-        session_->set_error("invalid session path");
+        state_->session->set_error("invalid session path");
         return;
     }
     if (!std::filesystem::remove(target, ec) || ec) {
-        session_->set_error("failed to delete session");
+        state_->session->set_error("failed to delete session");
         return;
     }
-    session_->set_modal(_sessions_modal());
-    session_->bump_modal_serial();
+    state_->session->set_modal(_sessions_modal());
+    state_->session->bump_modal_serial();
 }
 
 void Controller::interrupt()
 {
-    if (session_->phase() != Session::Phase::IDLE) {
-        session_->request_interrupt();
+    if (state_->session->phase() != Session::Phase::IDLE) {
+        state_->session->request_interrupt();
     }
 }
 
 void Controller::_drain_queued()
 {
-    std::optional<QueuedMessage> next = session_->pop_queued();
+    std::optional<QueuedMessage> next = state_->session->pop_queued();
     if (!next.has_value()) {
         return;
     }
@@ -253,7 +265,7 @@ std::pair<SkillCounts, SkillCounts> Controller::skill_counts() const
     SkillCounts project;
     SkillCounts global;
     std::lock_guard lock(loaded_skills_mutex_);
-    for (const Skill& skill : get_environment()->skills()) {
+    for (const Skill& skill : state_->environment->skills()) {
         SkillCounts& counts = skill.scope == Skill::Scope::PROJECT
             ? project
             : global;
@@ -268,7 +280,7 @@ std::pair<SkillCounts, SkillCounts> Controller::skill_counts() const
 std::vector<Skill> Controller::available_skills() const
 {
     std::vector<Skill> out;
-    for (const Skill& skill : get_environment()->skills()) {
+    for (const Skill& skill : state_->environment->skills()) {
         if (_skill_policy(skill) != SkillPolicy::DENY) out.push_back(skill);
     }
     return out;
@@ -297,11 +309,11 @@ bool Controller::_validate_skill_mentions(std::string_view text)
         args["name"] = std::string(text.substr(pos + 1, end - pos - 1));
         const auto skill = _resolve_skill(args);
         if (!skill) {
-            session_->set_error("unknown skill: " + args["name"].asString());
+            state_->session->set_error("unknown skill: " + args["name"].asString());
             return false;
         }
         if (_skill_policy(*skill) == SkillPolicy::DENY) {
-            session_->set_error("skill is denied: " + skill->name);
+            state_->session->set_error("skill is denied: " + skill->name);
             return false;
         }
         pos = end;
@@ -347,7 +359,7 @@ bool Controller::_load_skill(const Skill& skill)
     }
     std::ifstream file(skill.path, std::ios::binary);
     if (!file) {
-        session_->set_error("failed to read skill: " + skill.name);
+        state_->session->set_error("failed to read skill: " + skill.name);
         return false;
     }
     std::ostringstream buffer;
@@ -355,7 +367,7 @@ bool Controller::_load_skill(const Skill& skill)
     std::string content = buffer.str();
     constexpr std::size_t max_skill_bytes = 128 * 1024;
     if (content.size() > max_skill_bytes) {
-        session_->set_error("skill instructions exceed 128 KiB: " + skill.name);
+        state_->session->set_error("skill instructions exceed 128 KiB: " + skill.name);
         return false;
     }
     std::lock_guard lock(loaded_skills_mutex_);
@@ -370,7 +382,7 @@ void Controller::resolve_modal(ModalResult result)
 {
     bool manual_skill = false;
     bool manual_accepted = false;
-    const ModalPayload current_modal = session_->modal();
+    const ModalPayload current_modal = state_->session->modal();
     if (const auto* request = std::get_if<ToolCallRequest>(&current_modal);
         request != nullptr && request->id == "manual-skill") {
         manual_skill = true;
@@ -383,17 +395,17 @@ void Controller::resolve_modal(ModalResult result)
         }
     }
     if (auto* path = std::get_if<std::filesystem::path>(&result)) {
-        if (session_->has_pending_work()) {
-            session_->set_error(
+        if (state_->session->has_pending_work()) {
+            state_->session->set_error(
                 "finish or interrupt pending work before loading a session");
             return;
         }
-        if (save_session(*session_) != Status::OK) {
-            session_->set_error("failed to save current session");
+        if (save_session(*state_->session) != Status::OK) {
+            state_->session->set_error("failed to save current session");
             return;
         }
-        if (load_session(*path, *session_) != Status::OK) {
-            session_->set_error("failed to load session");
+        if (load_session(*path, *state_->session) != Status::OK) {
+            state_->session->set_error("failed to load session");
         }
     }
     if (auto* connect = std::get_if<ConnectResult>(&result)) {
@@ -404,12 +416,12 @@ void Controller::resolve_modal(ModalResult result)
         _apply_pick(*choice);
     }
     if (auto* variant = std::get_if<VariantChoice>(&result)) {
-        providers_->set_reasoning_effort(variant->effort);
-        session_->bump_modal_serial();
+        state_->providers->set_reasoning_effort(variant->effort);
+        state_->session->bump_modal_serial();
     }
     if (auto* skills = std::get_if<SkillPolicyChanges>(&result)) {
-        if (!providers_->set_skill_policies(*skills)) {
-            session_->set_error("failed to save skill policies");
+        if (!state_->providers->set_skill_policies(*skills)) {
+            state_->session->set_error("failed to save skill policies");
             return;
         }
     }
@@ -423,15 +435,15 @@ void Controller::resolve_modal(ModalResult result)
             }
         }
     }
-    session_->clear_modal();
-    if (session_->phase() == Session::Phase::AWAITING) {
-        session_->set_phase(Session::Phase::CONNECTING);
+    state_->session->clear_modal();
+    if (state_->session->phase() == Session::Phase::AWAITING) {
+        state_->session->set_phase(Session::Phase::CONNECTING);
     }
     _present_front();
     if (!manual_skill) return;
     if (!manual_accepted || !pending_skill_turn_) {
         pending_skill_turn_.reset();
-        session_->set_error("skill activation cancelled");
+        state_->session->set_error("skill activation cancelled");
         return;
     }
     ++pending_skill_turn_->next;
@@ -456,10 +468,10 @@ void Controller::resolve_modal(ModalResult result)
 void Controller::_present_front()
 {
     std::lock_guard lock(queue_mutex_);
-    if (session_->modal().index() != 0 || queue_.empty()) {
+    if (state_->session->modal().index() != 0 || queue_.empty()) {
         return;
     }
-    session_->present_modal(queue_.front().payload);
+    state_->session->present_modal(queue_.front().payload);
 }
 
 void Controller::submit(
@@ -473,10 +485,10 @@ void Controller::submit(
         run_slash(t);
         return;
     }
-    if (session_->phase() == Session::Phase::IDLE) {
+    if (state_->session->phase() == Session::Phase::IDLE) {
         _submit_with_skills(std::string(t), std::move(attachments));
     } else {
-        session_->enqueue_message(std::string(t), std::move(attachments));
+        state_->session->enqueue_message(std::string(t), std::move(attachments));
     }
 }
 
@@ -515,9 +527,9 @@ void Controller::submit_message(
     std::string text, std::vector<FileAttachment> attachments)
 {
     const std::optional<ProviderSelection> selection
-        = providers_->active_selection();
+        = state_->providers->active_selection();
     if (!selection.has_value()) {
-        session_->set_error("no model selected — run /model");
+        state_->session->set_error("no model selected — run /model");
         return;
     }
     TurnSettings settings;
@@ -529,20 +541,20 @@ void Controller::submit_message(
     }
     settings.route   = selection->route;
     settings.dialect = settings.route.dialect;
-    settings.mode    = session_->mode();
-    if (!get_environment()->ready()) {
-        session_->enqueue_message(std::move(text), std::move(attachments));
+    settings.mode    = state_->session->mode();
+    if (!state_->environment->ready()) {
+        state_->session->enqueue_message(std::move(text), std::move(attachments));
         return;
     }
-    const bool generate_title = session_->claim_title_generation();
+    const bool generate_title = state_->session->claim_title_generation();
     const std::string title_input = text;
-    session_->clear_interrupt();
-    session_->begin_send(std::move(text), std::move(attachments));
-    _spawn(session_->build_history(_system_prompt(), settings.dialect),
+    state_->session->clear_interrupt();
+    state_->session->begin_send(std::move(text), std::move(attachments));
+    _spawn(state_->session->build_history(_system_prompt(), settings.dialect),
         has_stream_override_ ? stream_fn_ : StreamFn { }, std::move(settings));
     if (generate_title && !has_stream_override_) {
         const auto title_selection
-            = providers_->subagent_selection(SubagentRole::BASIC);
+            = state_->providers->subagent_selection(SubagentRole::BASIC);
         const ProviderSelection& selected
             = title_selection ? *title_selection : *selection;
         TurnSettings title_settings;
@@ -557,8 +569,8 @@ void Controller::submit_message(
 
 std::string Controller::_system_prompt() const
 {
-    const std::shared_ptr<Environment> env = get_environment();
-    const Config config = providers_->config();
+    const std::shared_ptr<Environment> env = state_->environment;
+    const Config config = state_->providers->config();
     std::string prompt = build_system_prompt(
         env->system().get(), env->workspace().get(), &config);
     std::lock_guard lock(loaded_skills_mutex_);
@@ -573,7 +585,7 @@ bool Controller::_model_reasons(const std::string& model) const
     if (model.empty()) {
         return false;
     }
-    return providers_->model_reasons(model);
+    return state_->providers->model_reasons(model);
 }
 
 std::uint64_t Controller::_budget_for_effort(const std::string& effort) const
@@ -616,7 +628,7 @@ void Controller::_post(std::function<void()> f)
 void Controller::_spawn(
     std::vector<Message> history, StreamFn override, TurnSettings settings)
 {
-    session_->append_assistant(settings.model, settings.reasoning_effort);
+    state_->session->append_assistant(settings.model, settings.reasoning_effort);
     worker_.emplace([this, history = std::move(history),
                         override = std::move(override),
                         settings = std::move(settings)]() mutable {
@@ -630,7 +642,7 @@ void Controller::_spawn_title(std::string input, TurnSettings settings)
         = "Create a concise 3-7 word title for the user's request. Return only "
           "the title, without quotes or punctuation.\n\nUser request:\n"
         + input;
-    subagents_.start(prompt, settings.model, settings.reasoning_effort, false,
+    state_->subagents->start(prompt, settings.model, settings.reasoning_effort, false,
         [this, prompt, settings = std::move(settings)](std::stop_token stop) {
         ChatRequest req;
         req.model       = settings.model;
@@ -666,7 +678,7 @@ void Controller::_spawn_title(std::string input, TurnSettings settings)
             return;
         }
         _post([this, title = std::move(title)]() mutable {
-            session_->set_title(std::move(title));
+            state_->session->set_title(std::move(title));
         });
     });
 }
@@ -674,12 +686,12 @@ void Controller::_spawn_title(std::string input, TurnSettings settings)
 SubagentHandle Controller::run_subagent(std::string prompt, std::string model,
     std::string variant, bool visible)
 {
-    const auto selection = providers_->active_selection();
+    const auto selection = state_->providers->active_selection();
     Route route = selection ? selection->route : Route { };
     if (model.empty() && selection) model = selection->model;
     if (variant.empty() && selection) variant = selection->reasoning_effort;
     const std::string task_prompt = prompt;
-    return subagents_.start(std::move(prompt), model, variant, visible,
+    return state_->subagents->start(std::move(prompt), model, variant, visible,
         [this, task_prompt, model = std::move(model),
             variant = std::move(variant), route = std::move(route)](
             std::stop_token stop) mutable {
@@ -707,7 +719,7 @@ SubagentHandle Controller::run_subagent(std::string prompt, std::string model,
 
 void Controller::finish(std::string error)
 {
-    const bool ended = session_->finish_session(std::move(error));
+    const bool ended = state_->session->finish_session(std::move(error));
     if (!ended) {
         return;
     }
@@ -717,20 +729,20 @@ void Controller::finish(std::string error)
 
 void Controller::_begin_connect(const ConnectResult& result)
 {
-    providers_->connect(result, [this](ConnectOutcome outcome) {
+    state_->providers->connect(result, [this](ConnectOutcome outcome) {
         _post([this, outcome] {
             if (outcome.status != Status::OK) {
-                session_->set_connect_status(error_text(outcome.status));
+                state_->session->set_connect_status(error_text(outcome.status));
                 return;
             }
-            session_->set_connect_status(
+            state_->session->set_connect_status(
                 "✓ " + std::to_string(outcome.model_count) + " models");
             if (outcome.persisted
-                && std::holds_alternative<ConnectModal>(session_->modal())) {
-                session_->set_modal(ConnectModal { outcome.first_connection
+                && std::holds_alternative<ConnectModal>(state_->session->modal())) {
+                state_->session->set_modal(ConnectModal { outcome.first_connection
                         ? ConnectModal::Entry::PICK_MODEL
                         : ConnectModal::Entry::MANAGE });
-                session_->bump_modal_serial();
+                state_->session->bump_modal_serial();
             }
         });
     });
@@ -738,7 +750,49 @@ void Controller::_begin_connect(const ConnectResult& result)
 
 void Controller::_apply_pick(const ModelChoice& choice)
 {
-    providers_->select_model(choice);
+    state_->providers->select_model(choice);
+}
+
+void Controller::run_slash(std::string_view command)
+{
+    run_slash_command(SlashCommandContext { *state_, on_exit_,
+                          [this] { _new_session(); },
+                          [this](ModalPayload payload) {
+                              enqueue_user_modal(std::move(payload));
+                          },
+                          [this] { return _sessions_modal(); },
+                          [this] { return _skills_modal(); },
+                          [this] { return _system_prompt(); },
+                          [this](std::string error) {
+                              set_error(std::move(error));
+                          } },
+        command);
+}
+
+void Controller::_new_session()
+{
+    if (state_->session->has_pending_work()) {
+        state_->session->set_error(
+            "finish or interrupt pending work before starting a new session");
+        return;
+    }
+    if (save_session(*state_->session) != Status::OK) {
+        state_->session->set_error("failed to save current session");
+        return;
+    }
+    {
+        std::lock_guard lock(queue_mutex_);
+        queue_.clear();
+    }
+    {
+        std::lock_guard lock(loaded_skills_mutex_);
+        loaded_skills_.clear();
+        loaded_skill_contents_.clear();
+    }
+    allowed_tools_.clear();
+    pending_skill_turn_.reset();
+    stream_events_.clear();
+    state_->session->restore(SessionSnapshot { });
 }
 
 } // namespace ursa

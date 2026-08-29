@@ -124,7 +124,8 @@ TEST_CASE("connect commits a connection and lands models in the catalog")
     PostPump pump;
     auto providers = std::make_shared<ursa::ProviderStore>(
         ursa::Config { }, fake_models_ok());
-    ursa::Controller controller { std::make_shared<ursa::Session>(), providers,
+    auto session = std::make_shared<ursa::Session>();
+    ursa::Controller controller { session, providers,
         pump.fn(), [] { } };
     pump.drain();
 
@@ -142,7 +143,7 @@ TEST_CASE("connect commits a connection and lands models in the catalog")
     CHECK(views[0].id == "testprov");
     CHECK(views[0].provider_id == "testprov");
     CHECK(views[0].model_count == 2);
-    CHECK(controller.session().connect_status() == "✓ 2 models");
+    CHECK(session->connect_status() == "✓ 2 models");
 
     ursa::Config saved;
     REQUIRE(ursa::load_config(ursa::config_path(), saved)
@@ -158,7 +159,8 @@ TEST_CASE("connecting the same endpoint updates in place")
     PostPump pump;
     auto providers = std::make_shared<ursa::ProviderStore>(
         ursa::Config { }, fake_models_ok());
-    ursa::Controller controller { std::make_shared<ursa::Session>(), providers,
+    auto session = std::make_shared<ursa::Session>();
+    ursa::Controller controller { session, providers,
         pump.fn(), [] { } };
     pump.drain();
 
@@ -190,7 +192,8 @@ TEST_CASE("test-only connect does not persist")
     PostPump pump;
     auto providers = std::make_shared<ursa::ProviderStore>(
         ursa::Config { }, fake_models_ok());
-    ursa::Controller controller { std::make_shared<ursa::Session>(), providers,
+    auto session = std::make_shared<ursa::Session>();
+    ursa::Controller controller { session, providers,
         pump.fn(), [] { } };
     pump.drain();
 
@@ -198,7 +201,7 @@ TEST_CASE("test-only connect does not persist")
         ursa::ModalResult { ursa::ConnectResult { "testprov", "", "key",
             false } });
     REQUIRE(pump.wait_for([&] {
-        return controller.session().connect_status() == "✓ 2 models";
+        return session->connect_status() == "✓ 2 models";
     }));
     CHECK(providers->connections().empty());
 
@@ -214,7 +217,8 @@ TEST_CASE("failing test keeps the connection absent")
     PostPump pump;
     auto providers = std::make_shared<ursa::ProviderStore>(
         ursa::Config { }, fake_models_fail());
-    ursa::Controller controller { std::make_shared<ursa::Session>(), providers,
+    auto session = std::make_shared<ursa::Session>();
+    ursa::Controller controller { session, providers,
         pump.fn(), [] { } };
     pump.drain();
 
@@ -222,10 +226,10 @@ TEST_CASE("failing test keeps the connection absent")
         ursa::ModalResult { ursa::ConnectResult { "testprov", "", "key",
             true } });
     REQUIRE(pump.wait_for([&] {
-        return !controller.session().connect_status().empty();
+        return !session->connect_status().empty();
     }));
     CHECK(providers->connections().empty());
-    CHECK(controller.session().connect_status() == "API error");
+    CHECK(session->connect_status() == "API error");
 }
 
 TEST_CASE("model pick sets last_used and persists")
@@ -381,12 +385,13 @@ TEST_CASE("send guard blocks messages without an active model")
     PostPump pump;
     auto providers = std::make_shared<ursa::ProviderStore>(
         ursa::Config { }, fake_models_ok());
-    ursa::Controller controller { std::make_shared<ursa::Session>(), providers,
+    auto session = std::make_shared<ursa::Session>();
+    ursa::Controller controller { session, providers,
         pump.fn(), [] { } };
     pump.drain();
 
     controller.submit("hello");
-    CHECK(controller.session().items().empty());
-    CHECK(controller.session().error()
+    CHECK(session->items().empty());
+    CHECK(session->error()
         == "no model selected — run /model");
 }

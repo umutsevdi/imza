@@ -1168,10 +1168,11 @@ ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx)
 }
 
 ftxui::Component make_chat(
-    std::shared_ptr<Session> session, Controller& controller, LayoutFn layout)
+    std::shared_ptr<ApplicationState> state, Controller& controller,
+    LayoutFn layout)
 {
     return ftxui::Make<ChatImpl>(
-        std::move(session), controller, std::move(layout));
+        state->session, controller, std::move(layout));
 }
 
 } // namespace ursa

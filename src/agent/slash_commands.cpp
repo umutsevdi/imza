@@ -1,11 +1,10 @@
 #include "slash_commands.h"
 
-#include "controller.h"
-#include "session_store.h"
+#include "application_state.h"
+#include "provider_store.h"
 #include "util.h"
 
 #include <string>
-#include <string_view>
 
 namespace ursa {
 
@@ -33,83 +32,57 @@ std::span<const SlashCommand> slash_commands()
 const SlashCommand* find_command(std::string_view name)
 {
     const std::string key = to_lower(name);
-    for (const auto& c : slash_commands()) {
-        if (to_lower(c.name) == key) {
-            return &c;
-        }
+    for (const SlashCommand& command : slash_commands()) {
+        if (to_lower(command.name) == key) return &command;
     }
     return nullptr;
 }
 
-void Controller::run_slash(std::string_view cmd)
+void run_slash_command(
+    const SlashCommandContext& context, std::string_view command)
 {
-    const SlashCommand* found = find_command(cmd);
+    const SlashCommand* found = find_command(command);
     if (found == nullptr) {
-        set_error("unknown command: " + std::string(cmd));
+        context.set_error("unknown command: " + std::string(command));
         return;
     }
+
     switch (found->action) {
-    case SlashCommand::Action::EXIT: on_exit_(); break;
-    case SlashCommand::Action::NEW: _new_session(); break;
+    case SlashCommand::Action::EXIT: context.exit(); break;
+    case SlashCommand::Action::NEW: context.new_session(); break;
     case SlashCommand::Action::CONNECT:
-        enqueue_user_modal(ConnectModal { ConnectModal::Entry::MANAGE });
+        context.present_modal(ConnectModal { ConnectModal::Entry::MANAGE });
         break;
-    case SlashCommand::Action::MODEL: {
-        if (providers_->connections().empty()) {
-            set_error("no connections — run /connect first");
+    case SlashCommand::Action::MODEL:
+        if (context.state.providers->connections().empty()) {
+            context.set_error("no connections — run /connect first");
             break;
         }
-        enqueue_user_modal(ConnectModal { ConnectModal::Entry::PICK_MODEL });
+        context.present_modal(
+            ConnectModal { ConnectModal::Entry::PICK_MODEL });
         break;
-    }
     case SlashCommand::Action::VARIANT: {
-        std::string current = providers_->status().reasoning_effort;
-        if (current == "medium") {
-            current = "default";
-        }
-        enqueue_user_modal(VariantModal {
-            { "off", "low", "default", "high" }, current });
+        std::string current
+            = context.state.providers->status().reasoning_effort;
+        if (current == "medium") current = "default";
+        context.present_modal(VariantModal {
+            { "off", "low", "default", "high" }, std::move(current) });
         break;
     }
     case SlashCommand::Action::SUBAGENTS:
-        enqueue_user_modal(ConnectModal { ConnectModal::Entry::SUBAGENTS });
+        context.present_modal(ConnectModal { ConnectModal::Entry::SUBAGENTS });
         break;
     case SlashCommand::Action::SESSIONS:
-        enqueue_user_modal(_sessions_modal());
+        context.present_modal(context.sessions_modal());
         break;
     case SlashCommand::Action::SKILLS:
-        enqueue_user_modal(_skills_modal());
+        context.present_modal(context.skills_modal());
         break;
     case SlashCommand::Action::SYSTEM_PROMPT:
-        enqueue_user_modal(ViewerModal {
-            "System prompt", _system_prompt(), "text", 1, false });
+        context.present_modal(ViewerModal {
+            "System prompt", context.system_prompt(), "text", 1, false, "" });
         break;
     }
-}
-
-void Controller::_new_session()
-{
-    if (session_->has_pending_work()) {
-        session_->set_error("finish or interrupt pending work before starting a new session");
-        return;
-    }
-    if (save_session(*session_) != Status::OK) {
-        session_->set_error("failed to save current session");
-        return;
-    }
-    {
-        std::lock_guard lock(queue_mutex_);
-        queue_.clear();
-    }
-    {
-        std::lock_guard lock(loaded_skills_mutex_);
-        loaded_skills_.clear();
-        loaded_skill_contents_.clear();
-    }
-    allowed_tools_.clear();
-    pending_skill_turn_.reset();
-    stream_events_.clear();
-    session_->restore(SessionSnapshot { });
 }
 
 } // namespace ursa

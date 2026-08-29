@@ -12,7 +12,6 @@
 #include <vector>
 
 #include "controller.h"
-#include "slash_commands.h"
 
 namespace ursa {
 
@@ -82,23 +81,25 @@ int run_repl(const Config& cfg);
 void print_session_saved_box();
 
 ftxui::Component make_chat(
-    std::shared_ptr<Session> session, Controller& controller, LayoutFn layout);
+    std::shared_ptr<ApplicationState> state, Controller& controller,
+    LayoutFn layout);
 ftxui::Component make_side_panel(
-    std::shared_ptr<Session> session, Controller& controller, LayoutFn layout);
+    std::shared_ptr<ApplicationState> state, Controller& controller,
+    LayoutFn layout);
 ftxui::Component make_review(
-    std::shared_ptr<Session> session, Controller& controller, LayoutFn layout);
-ftxui::Component make_status_line(std::shared_ptr<Session> session,
-    Controller& controller, ProviderStore& providers, LayoutFn layout,
-    WorkflowFn workflow);
-ftxui::Component make_connect(std::shared_ptr<Session> session,
-    Controller& controller, ProviderStore& providers);
+    std::shared_ptr<ApplicationState> state, Controller& controller,
+    LayoutFn layout);
+ftxui::Component make_status_line(std::shared_ptr<ApplicationState> state,
+    LayoutFn layout, WorkflowFn workflow);
+ftxui::Component make_connect(
+    std::shared_ptr<ApplicationState> state, Controller& controller);
 ftxui::Component make_variant(
-    std::shared_ptr<Session> session, Controller& controller);
+    std::shared_ptr<ApplicationState> state, Controller& controller);
 ftxui::Component make_sessions(
-    std::shared_ptr<Session> session, Controller& controller);
+    std::shared_ptr<ApplicationState> state, Controller& controller);
 ftxui::Component make_skills(
-    std::shared_ptr<Session> session, Controller& controller);
-ftxui::Component make_modal(std::shared_ptr<Session> session,
-    Controller& controller, ProviderStore& providers);
+    std::shared_ptr<ApplicationState> state, Controller& controller);
+ftxui::Component make_modal(
+    std::shared_ptr<ApplicationState> state, Controller& controller);
 
 } // namespace ursa
