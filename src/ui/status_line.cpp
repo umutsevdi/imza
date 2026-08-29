@@ -19,10 +19,11 @@ using namespace ftxui;
 class StatusLine : public ComponentBase {
 public:
     StatusLine(std::shared_ptr<Session> session, ProviderStore& providers,
-        LayoutFn layout)
+        LayoutFn layout, WorkflowFn workflow)
         : session_(std::move(session))
         , providers_(providers)
         , layout_(std::move(layout))
+        , workflow_(std::move(workflow))
         , workspace_subscription_(
               get_environment()->subscribe_to_workspace_change(
                   [] { animation::RequestAnimationFrame(); }))
@@ -39,11 +40,26 @@ public:
         const Session::StatusView state = session_->status_view();
         const LayoutCtx ctx             = layout_();
         const bool wide                 = ctx.kind == LayoutCtx::Kind::WIDE;
-        const bool plan                 = state.mode == Session::Mode::PLAN;
         const bool environment_ready    = get_environment()->ready();
-        Element mode = text(plan ? " PLAN " : " BUILD ") | bold
-            | color(PANEL_COLOR_FOCUS)
-            | bgcolor(plan ? Color::GreenLight : Color::RedLight);
+        const WorkflowPhase phase       = workflow_();
+        std::string mode_label;
+        Color mode_color;
+        switch (phase) {
+        case WorkflowPhase::PLAN:
+            mode_label = " PLAN ";
+            mode_color = Color::GreenLight;
+            break;
+        case WorkflowPhase::BUILD:
+            mode_label = " BUILD ";
+            mode_color = Color::RedLight;
+            break;
+        case WorkflowPhase::REVIEW:
+            mode_label = " REVIEW ";
+            mode_color = Color::CyanLight;
+            break;
+        }
+        Element mode = text(std::move(mode_label)) | bold
+            | color(PANEL_COLOR_FOCUS) | bgcolor(mode_color);
         const std::string& active_model = config.active_model;
 
         const auto repository = get_environment()->repository();
@@ -115,6 +131,7 @@ private:
     std::shared_ptr<Session> session_;
     ProviderStore& providers_;
     LayoutFn layout_;
+    WorkflowFn workflow_;
     int frame_ = 0;
     std::string last_model_;
     ModelPricing cached_;
@@ -177,9 +194,10 @@ private:
 };
 
 ftxui::Component make_status_line(
-    std::shared_ptr<Session> session, ProviderStore& providers, LayoutFn layout)
+    std::shared_ptr<Session> session, ProviderStore& providers, LayoutFn layout,
+    WorkflowFn workflow)
 {
-    return ftxui::Make<StatusLine>(
-        std::move(session), providers, std::move(layout));
+    return ftxui::Make<StatusLine>(std::move(session), providers,
+        std::move(layout), std::move(workflow));
 }
 } // namespace ursa

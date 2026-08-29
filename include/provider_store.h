@@ -13,7 +13,7 @@
 
 #include "catalog.h"
 #include "network.h"
-#include "signal.h"
+#include "ursa_signal.h"
 #include "types.h"
 
 namespace ursa {

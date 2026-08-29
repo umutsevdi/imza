@@ -20,6 +20,16 @@ struct ChangedFile;
 
 using LayoutFn = std::function<LayoutCtx()>;
 
+enum class WorkflowPhase { PLAN, BUILD, REVIEW };
+
+WorkflowPhase next_workflow_phase(
+    WorkflowPhase phase, bool review_available);
+WorkflowPhase previous_workflow_phase(
+    WorkflowPhase phase, bool review_available);
+std::optional<Session::Mode> workflow_mode(WorkflowPhase phase);
+
+using WorkflowFn = std::function<WorkflowPhase()>;
+
 inline const ftxui::Color PANEL_COLOR       = ftxui::Color::RGB(26, 34, 52);
 inline const ftxui::Color PANEL_FG          = ftxui::Color::RGB(228, 232, 240);
 inline const ftxui::Color PANEL_FG_DIM      = ftxui::Color::RGB(148, 156, 172);
@@ -75,8 +85,10 @@ ftxui::Component make_chat(
     std::shared_ptr<Session> session, Controller& controller, LayoutFn layout);
 ftxui::Component make_side_panel(
     std::shared_ptr<Session> session, Controller& controller, LayoutFn layout);
+ftxui::Component make_review(
+    std::shared_ptr<Session> session, Controller& controller, LayoutFn layout);
 ftxui::Component make_status_line(std::shared_ptr<Session> session,
-    ProviderStore& providers, LayoutFn layout);
+    ProviderStore& providers, LayoutFn layout, WorkflowFn workflow);
 ftxui::Component make_connect(std::shared_ptr<Session> session,
     Controller& controller, ProviderStore& providers);
 ftxui::Component make_variant(

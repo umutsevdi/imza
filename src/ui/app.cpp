@@ -11,6 +11,7 @@
 #include <functional>
 #include <print>
 
+#include "environment.h"
 #include "session_store.h"
 
 #ifdef _WIN32
@@ -20,6 +21,40 @@
 #endif
 
 namespace ursa {
+
+WorkflowPhase next_workflow_phase(
+    WorkflowPhase phase, bool review_available)
+{
+    switch (phase) {
+    case WorkflowPhase::PLAN: return WorkflowPhase::BUILD;
+    case WorkflowPhase::BUILD:
+        return review_available ? WorkflowPhase::REVIEW : WorkflowPhase::PLAN;
+    case WorkflowPhase::REVIEW: return WorkflowPhase::PLAN;
+    }
+    return WorkflowPhase::PLAN;
+}
+
+WorkflowPhase previous_workflow_phase(
+    WorkflowPhase phase, bool review_available)
+{
+    switch (phase) {
+    case WorkflowPhase::PLAN:
+        return review_available ? WorkflowPhase::REVIEW : WorkflowPhase::BUILD;
+    case WorkflowPhase::BUILD: return WorkflowPhase::PLAN;
+    case WorkflowPhase::REVIEW: return WorkflowPhase::BUILD;
+    }
+    return WorkflowPhase::PLAN;
+}
+
+std::optional<Session::Mode> workflow_mode(WorkflowPhase phase)
+{
+    switch (phase) {
+    case WorkflowPhase::PLAN: return Session::Mode::PLAN;
+    case WorkflowPhase::BUILD: return Session::Mode::BUILD;
+    case WorkflowPhase::REVIEW: return std::nullopt;
+    }
+    return std::nullopt;
+}
 
 namespace {
 
@@ -34,50 +69,77 @@ namespace {
 #endif
     }
 
+    bool is_reverse_tab(const Event& event)
+    {
+        return event == Event::TabReverse
+            || event == Event::Special("\x1B[9;2u")
+            || event == Event::Special("\x1B[27;2;9~");
+    }
+
     class Repl : public ComponentBase {
     public:
         Repl(ScreenInteractive& screen, std::shared_ptr<Session> session,
-            Controller& controller, ProviderStore& providers,
-            bool& saved_before_exit)
+            Controller& controller, ProviderStore& providers)
             : screen_(screen)
             , session_(std::move(session))
             , controller_(controller)
-            , saved_before_exit_(saved_before_exit)
         {
             const LayoutFn layout = [this] { return layout_; };
-            side_                 = make_side_panel(session_, controller, layout);
-            chat_                 = make_chat(session_, controller, layout);
-            status_line_ = make_status_line(session_, providers, layout);
+            const WorkflowFn workflow = [this] { return phase_; };
+            side_        = make_side_panel(session_, controller, layout);
+            status_line_
+                = make_status_line(session_, providers, layout, workflow);
+            chat_        = make_chat(session_, controller, layout);
+            review_      = make_review(session_, controller, layout);
             modal_       = make_modal(session_, controller, providers);
-            Add(chat_);
+
+            workspace_subscription_
+                = get_environment()->subscribe_to_workspace_change([] {
+                      animation::RequestAnimationFrame();
+                  });
+
+            phase_ = session_->mode() == Session::Mode::PLAN
+                ? WorkflowPhase::PLAN
+                : WorkflowPhase::BUILD;
+            selected_ = static_cast<int>(phase_);
+            review_available_ = _review_available();
+            tab_names_         = { "Plan", "Build" };
+            if (review_available_) {
+                tab_names_.push_back("Review");
+            }
+            tabs_         = CatchEvent(Menu(&tab_names_, &selected_,
+                                           MenuOption::HorizontalAnimated()),
+                [](const Event& event) {
+                    return event == Event::Tab || event == Event::TabReverse;
+                });
+            tabs_content_ = Container::Tab({ chat_, review_ }, &selected_pane_);
+            main_         = Container::Vertical({ tabs_, tabs_content_ });
+            Add(main_);
+            chat_->TakeFocus();
         }
 
         Element OnRender() override
         {
+            _sync_review_availability();
             const auto terminal_size = ftxui::Terminal::Size();
             layout_                  = layout_context(terminal_size.dimx);
             const int w              = layout_.width;
-
             Element side      = side_->Render();
-            Element right_col = chat_->Render();
+            Element tab       = tabs_->Render();
+            Element right_col = tabs_content_->Render();
             Element status    = status_line_->Render();
 
-            const int chat_w = (layout_.kind == LayoutCtx::Kind::WIDE)
-                ? w - LayoutCtx::panel_width - 1
-                : w;
-            right_col
-                = std::move(right_col) | size(WIDTH, EQUAL, chat_w) | yflex;
+            right_col = std::move(right_col) | xflex | yflex;
 
             Element root;
             if (layout_.kind == LayoutCtx::Kind::WIDE) {
-                root = vbox({ separatorEmpty(),
-                           hbox({ text(" "), side | yflex, text(" "),
-                               right_col })
+                root = vbox({ hbox({ text(" "), side | yflex, text(" "),
+                                  vbox({ tab, right_col }) | flex })
                                | flex,
                            separatorEmpty(), status })
                     | flex;
             } else {
-                root = vbox({ separatorEmpty(), side, right_col,
+                root = vbox({ side, tab, separatorEmpty(), right_col,
                            separatorEmpty(), status })
                     | flex;
             }
@@ -98,27 +160,92 @@ namespace {
         bool OnEvent(Event event) override
         {
             if (event == Event::CtrlC || event == Event::CtrlD) {
-                saved_before_exit_ = save_session(*session_) == Status::OK;
-                print_session_saved_box();
                 screen_.Exit();
                 return true;
             }
             if (session_->modal().index() != 0) {
                 return modal_->OnEvent(event);
             }
-            return chat_->OnEvent(event);
+            if (event == Event::Tab) {
+                _set_phase(next_workflow_phase(phase_, review_available_));
+                return true;
+            }
+            if (is_reverse_tab(event)) {
+                _set_phase(previous_workflow_phase(
+                    phase_, review_available_));
+                return true;
+            }
+            if (event.is_mouse()) {
+                const int previous = selected_;
+                if (tabs_->OnEvent(event)) {
+                    if (selected_ != previous) {
+                        _set_phase(static_cast<WorkflowPhase>(selected_));
+                    }
+                    return true;
+                }
+            }
+            return selected_pane_ == 0 ? chat_->OnEvent(event)
+                                       : review_->OnEvent(event);
         }
 
     private:
+        bool _review_available() const
+        {
+            const auto environment = get_environment();
+            return environment->ready() && environment->system()->has_git
+                && environment->workspace() != nullptr;
+        }
+
+        void _sync_review_availability()
+        {
+            const bool available = _review_available();
+            if (available == review_available_) {
+                return;
+            }
+            review_available_ = available;
+            tab_names_        = { "Plan", "Build" };
+            if (review_available_) {
+                tab_names_.push_back("Review");
+                return;
+            }
+            if (phase_ == WorkflowPhase::REVIEW) {
+                _set_phase(WorkflowPhase::PLAN);
+            }
+        }
+
+        void _set_phase(WorkflowPhase phase)
+        {
+            phase_         = phase;
+            selected_      = static_cast<int>(phase);
+            selected_pane_ = phase == WorkflowPhase::REVIEW ? 1 : 0;
+            if (const auto mode = workflow_mode(phase)) {
+                controller_.set_mode(*mode);
+            }
+            if (selected_pane_ == 0) {
+                chat_->TakeFocus();
+            } else {
+                review_->TakeFocus();
+            }
+        }
+
         ScreenInteractive& screen_;
         std::shared_ptr<Session> session_;
         Controller& controller_;
-        bool& saved_before_exit_;
         Component side_;
-        Component chat_;
         Component modal_;
         Component status_line_;
+        Component chat_;
+        Component review_;
+        Component tabs_content_;
+        Component tabs_;
+        Component main_;
+        Signal<>::Subscription workspace_subscription_;
         LayoutCtx layout_ = layout_context(0);
+        WorkflowPhase phase_ { WorkflowPhase::PLAN };
+        std::vector<std::string> tab_names_;
+        bool review_available_ { false };
+        int selected_ { 0 };
+        int selected_pane_ { 0 };
     };
 
 } // namespace
@@ -134,7 +261,6 @@ int run_repl(const Config& cfg)
     std::vector<Tool> tools  = default_tools();
     auto session             = std::make_shared<Session>();
     auto providers           = std::make_shared<ProviderStore>(cfg);
-    bool saved_before_exit   = false;
     {
         Controller controller(
             session, providers,
@@ -148,11 +274,10 @@ int run_repl(const Config& cfg)
             controller.enqueue_user_modal(
                 ConnectModal { ConnectModal::Entry::MANAGE });
         }
-        auto app = ftxui::Make<Repl>(
-            screen, session, controller, *providers, saved_before_exit);
+        auto app = ftxui::Make<Repl>(screen, session, controller, *providers);
         screen.Loop(app);
     }
-    if (saved_before_exit) {
+    if (session->snapshot().items.empty()) {
         return 0;
     }
     const bool saved = save_session(*session) == Status::OK;

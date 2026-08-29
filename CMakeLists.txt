@@ -164,13 +164,14 @@ target_link_libraries(ursa_agent PUBLIC
 # UI: ftxui components + renderers
 add_library(ursa_ui
     src/ui/app.cpp
-    src/ui/chat.cpp
+    src/ui/components.cpp
     src/ui/connect.cpp
     src/ui/markdown.cpp
     src/ui/modal.cpp
-    src/ui/components.cpp
     src/ui/side_panel.cpp
     src/ui/status_line.cpp
+    src/ui/tab_chat.cpp
+    src/ui/tab_review.cpp
 )
 target_include_directories(ursa_ui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include

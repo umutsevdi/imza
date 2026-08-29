@@ -411,15 +411,19 @@ namespace {
                             | color(PANEL_FG_DIM),
                         text(" "),
                     }),
+                    hbox({
+                        filler(),
+                        text("Tab next phase · Shift+Tab previous phase")
+                            | color(PANEL_FG_DIM),
+                        text(" "),
+                    }),
                 })
                 | xflex);
             if (show_suggestions()) {
                 bottom.push_back(render_suggestions());
             }
             bottom.push_back(vbox({ std::move(input_box) | yflex,
-                text("  Tab switch mode · Alt+Enter add line · @ attach file · "
-                     "$ "
-                     "use skill ")
+                text("  Alt+Enter add line · @ attach file · $ use skill ")
                     | color(PANEL_FG_DIM) | bgcolor(PANEL_COLOR) }));
             if (!st.error().empty() || st.retry_countdown()) {
                 bottom.push_back(error_element(st));
@@ -489,10 +493,6 @@ namespace {
                     sel_        = (sel_ - 1 + n) % n;
                     return true;
                 }
-                if (event == Event::Tab) {
-                    accept();
-                    return true;
-                }
                 if (event == Event::Return) {
                     const bool insertion_suggestion
                         = !file_matches_.empty() || !skill_matches_.empty();
@@ -502,10 +502,6 @@ namespace {
                     }
                     return true;
                 }
-            }
-            if (event == Event::Tab && !show_suggestions()) {
-                controller_.toggle_mode();
-                return true;
             }
             if (event.is_mouse()) {
                 const Mouse& m = event.mouse();

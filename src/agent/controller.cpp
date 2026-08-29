@@ -146,7 +146,10 @@ Controller::~Controller()
     worker_.reset();
 }
 
-void Controller::toggle_mode() { session_->toggle_mode(); }
+void Controller::set_mode(Session::Mode next_mode)
+{
+    session_->set_mode(next_mode);
+}
 
 void Controller::set_error(std::string msg)
 {

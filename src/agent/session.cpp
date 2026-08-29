@@ -262,10 +262,10 @@ void Session::set_persistence(SessionPersistence persistence)
     persistence_ = std::move(persistence);
 }
 
-void Session::toggle_mode()
+void Session::set_mode(Mode next_mode)
 {
     std::lock_guard lock(mutex_);
-    mode_ = (mode_ == Mode::PLAN) ? Mode::BUILD : Mode::PLAN;
+    mode_ = next_mode;
 }
 
 void Session::set_error(std::string msg)
@@ -370,6 +370,7 @@ void Session::begin_send(
     const bool has_attachments = !attachments.empty();
     {
         std::lock_guard lock(mutex_);
+        persistence_ = UnsavedSession { };
         items_.push_back(UserTurn { std::move(text), std::move(attachments) });
         error_.clear();
         phase_ = Phase::CONNECTING;

@@ -14,7 +14,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "signal.h"
+#include "ursa_signal.h"
 #include "types.h"
 
 namespace ursa {

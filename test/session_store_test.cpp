@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 
@@ -53,7 +54,7 @@ struct CurrentDirectory {
 
 }
 
-TEST_CASE("sessions save, list and load")
+TEST_CASE("saved sessions are immutable and fork on a new prompt")
 {
 #ifdef _WIN32
     return;
@@ -68,14 +69,18 @@ TEST_CASE("sessions save, list and load")
     REQUIRE(ursa::save_session(source) == ursa::Status::OK);
     auto saved = ursa::saved_sessions();
     REQUIRE(saved.size() == 1);
+    CHECK(saved.front().path.parent_path() == ursa::sessions_dir());
+    CHECK(ursa::sessions_dir() == ursa::data_dir() / "sessions");
     CHECK(saved.front().title == "Saved title");
     const std::filesystem::path saved_path = saved.front().path;
 
     source.begin_send("follow-up");
     REQUIRE(ursa::save_session(source) == ursa::Status::OK);
     saved = ursa::saved_sessions();
-    REQUIRE(saved.size() == 1);
-    CHECK(saved.front().path == saved_path);
+    REQUIRE(saved.size() == 2);
+    CHECK(std::any_of(saved.begin(), saved.end(), [&](const auto& entry) {
+        return entry.path == saved_path;
+    }));
 
     CurrentDirectory directory;
     const auto other = home.path / "other-workspace";
@@ -86,16 +91,17 @@ TEST_CASE("sessions save, list and load")
     REQUIRE(ursa::load_session(saved_path, loaded) == ursa::Status::OK);
     CHECK(std::filesystem::current_path() == directory.original);
     CHECK(loaded.title() == "Saved title");
-    REQUIRE(loaded.items().size() == 3);
+    REQUIRE(loaded.items().size() == 2);
     CHECK(std::get<ursa::UserTurn>(loaded.items()[0]).text == "hello");
     CHECK(std::get<ursa::AssistantTurn>(loaded.items()[1]).markdown == "world");
-    CHECK(std::get<ursa::UserTurn>(loaded.items()[2]).text == "follow-up");
 
-    loaded.append_assistant();
+    loaded.begin_send("parallel continuation");
     REQUIRE(ursa::save_session(loaded) == ursa::Status::OK);
     saved = ursa::saved_sessions();
-    REQUIRE(saved.size() == 1);
-    CHECK(saved.front().path == saved_path);
+    REQUIRE(saved.size() == 3);
+
+    REQUIRE(ursa::save_session(loaded) == ursa::Status::OK);
+    CHECK(ursa::saved_sessions().size() == 3);
 #endif
 }
 

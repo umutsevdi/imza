@@ -61,7 +61,7 @@ public:
 
     void submit(std::string text,
         std::vector<FileAttachment> attachments = { });
-    void toggle_mode();
+    void set_mode(Session::Mode next_mode);
     void set_error(std::string msg);
     void clear_error();
     void close_modal();

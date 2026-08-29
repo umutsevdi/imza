@@ -6,16 +6,18 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
+#include <random>
 #include <sstream>
 
 namespace ursa {
 
 namespace {
 
-    std::string timestamp(bool filename)
+    std::string timestamp()
     {
         const auto now          = std::chrono::system_clock::now();
         const std::time_t value = std::chrono::system_clock::to_time_t(now);
@@ -26,8 +28,20 @@ namespace {
         localtime_r(&value, &local);
 #endif
         std::ostringstream out;
-        out << std::put_time(
-            &local, filename ? "%Y-%m-%d_%H-%M-%S" : "%Y-%m-%d %H:%M:%S");
+        out << std::put_time(&local, "%Y-%m-%d %H:%M:%S");
+        return out.str();
+    }
+
+    std::string session_filename()
+    {
+        const auto now = std::chrono::system_clock::now().time_since_epoch();
+        const auto milliseconds
+            = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+        std::random_device random;
+        const std::uint32_t suffix = static_cast<std::uint32_t>(random());
+        std::ostringstream out;
+        out << milliseconds << '-' << std::hex << std::setw(8)
+            << std::setfill('0') << suffix << ".json";
         return out.str();
     }
 
@@ -286,12 +300,15 @@ std::filesystem::path data_dir()
 #endif
 }
 
-std::filesystem::path sessions_dir() { return data_dir(); }
+std::filesystem::path sessions_dir() { return data_dir() / "sessions"; }
 
 Status save_session(Session& session)
 {
     const SessionSnapshot snapshot = session.snapshot();
     if (snapshot.items.empty()) {
+        return Status::OK;
+    }
+    if (std::holds_alternative<PersistedSession>(snapshot.persistence)) {
         return Status::OK;
     }
     Json::Value root;
@@ -303,7 +320,7 @@ Status save_session(Session& session)
     }
     root["version"]           = 1;
     root["title"]             = snapshot.title;
-    root["saved_at"]          = timestamp(false);
+    root["saved_at"]          = timestamp();
     root["todo"]              = todo_json(snapshot.todo);
     root["compacted_summary"] = snapshot.compacted_summary;
     root["compacted_item_count"]
@@ -323,27 +340,11 @@ Status save_session(Session& session)
     }
 
     std::filesystem::path path;
-    if (const auto* persisted
-        = std::get_if<PersistedSession>(&snapshot.persistence)) {
-        const std::filesystem::path session_root
-            = std::filesystem::weakly_canonical(sessions_dir(), ec);
-        if (ec) {
-            return Status::CONFIG_ERROR;
-        }
-        const std::filesystem::path parent = std::filesystem::weakly_canonical(
-            persisted->path.parent_path(), ec);
-        if (ec || parent != session_root
-            || persisted->path.extension() != ".json") {
-            return Status::CONFIG_ERROR;
-        }
-        path = persisted->path;
-    } else {
-        const std::string created_at = timestamp(true);
-        path                         = sessions_dir() / (created_at + ".json");
-        for (int suffix = 1; std::filesystem::exists(path); ++suffix) {
-            path = sessions_dir()
-                / (created_at + "_" + std::to_string(suffix) + ".json");
-        }
+    do {
+        path = sessions_dir() / session_filename();
+    } while (std::filesystem::exists(path, ec) && !ec);
+    if (ec) {
+        return Status::CONFIG_ERROR;
     }
 
     const std::filesystem::path temporary = path.string() + ".tmp";

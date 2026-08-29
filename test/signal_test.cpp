@@ -1,6 +1,6 @@
 #include <doctest/doctest.h>
 
-#include "signal.h"
+#include "ursa_signal.h"
 
 TEST_CASE("signal publishes to active subscriptions")
 {

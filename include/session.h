@@ -1,10 +1,10 @@
 #pragma once
 
+#include <json/json.h>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
-#include <json/json.h>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -12,9 +12,9 @@
 #include <variant>
 #include <vector>
 
-#include "network.h"
 #include "attachments.h"
-#include "signal.h"
+#include "network.h"
+#include "ursa_signal.h"
 #include "types.h"
 
 namespace ursa {
@@ -61,12 +61,11 @@ struct TodoList {
 struct CompactionEvent {
     enum class Status { RUNNING, COMPLETED, FAILED };
     std::size_t id = 0;
-    Status status = Status::RUNNING;
+    Status status  = Status::RUNNING;
 };
 
-using ConversationItem
-    = std::variant<UserTurn, AssistantTurn, ToolCall, TodoList, ModalAnswer,
-        CompactionEvent>;
+using ConversationItem = std::variant<UserTurn, AssistantTurn, ToolCall,
+    TodoList, ModalAnswer, CompactionEvent>;
 
 struct UnsavedSession { };
 
@@ -82,8 +81,8 @@ struct SessionSnapshot {
     TodoList todo;
     std::string compacted_summary;
     std::size_t compacted_item_count = 0;
-    bool plan_mode = true;
-    SessionPersistence persistence = UnsavedSession { };
+    bool plan_mode                   = true;
+    SessionPersistence persistence   = UnsavedSession { };
 };
 
 struct ConnectModal {
@@ -121,9 +120,8 @@ struct SkillsModal {
     std::vector<Entry> entries;
 };
 
-using ModalPayload = std::variant<std::monostate, ViewerModal,
-    ToolCallRequest, QuestionForm, ConnectModal, VariantModal, SessionsModal,
-    SkillsModal>;
+using ModalPayload = std::variant<std::monostate, ViewerModal, ToolCallRequest,
+    QuestionForm, ConnectModal, VariantModal, SessionsModal, SkillsModal>;
 
 struct QueuedMessage {
     std::size_t id;
@@ -175,22 +173,23 @@ public:
     void restore(SessionSnapshot snapshot);
     void set_persistence(SessionPersistence persistence);
 
-    void toggle_mode();
+    void set_mode(Mode next_mode);
     void set_error(std::string msg);
     void clear_error();
     void set_connect_status(std::string status);
     bool claim_title_generation();
     void set_title(std::string title);
     void cancel_queued(std::size_t id);
-    void enqueue_message(std::string text,
-        std::vector<FileAttachment> attachments = { });
+    void enqueue_message(
+        std::string text, std::vector<FileAttachment> attachments = { });
     std::optional<QueuedMessage> pop_queued();
 
-    void begin_send(std::string text,
-        std::vector<FileAttachment> attachments = { });
-    void append_assistant(std::string model = "", std::string reasoning_effort = "");
-    void set_last_assistant_metadata(std::string model,
-        std::string reasoning_effort);
+    void begin_send(
+        std::string text, std::vector<FileAttachment> attachments = { });
+    void append_assistant(
+        std::string model = "", std::string reasoning_effort = "");
+    void set_last_assistant_metadata(
+        std::string model, std::string reasoning_effort);
     void append_item(ConversationItem item);
     std::pair<std::size_t, std::size_t> begin_compaction();
     void finish_compaction(std::size_t id, std::string summary,
@@ -207,8 +206,8 @@ public:
 
     void apply(const StreamEvent& ev, const ModelPricing& pricing);
     bool finish_session(std::string error);
-    std::vector<Message> build_history(
-        std::string_view system_prompt, ApiStandard dialect = ApiStandard::OPENAI) const;
+    std::vector<Message> build_history(std::string_view system_prompt,
+        ApiStandard dialect = ApiStandard::OPENAI) const;
 
     std::optional<AssistantTurn> last_assistant() const;
     void reset_reasoning();
@@ -226,17 +225,18 @@ private:
     AssistantTurn* last_assistant_locked();
     void finalize_reasoning(AssistantTurn& a);
     void finish_session_locked(const std::string& error);
-    void update_usage(const StreamEvent& usage_event, const ModelPricing& pricing);
+    void update_usage(
+        const StreamEvent& usage_event, const ModelPricing& pricing);
     void _notify_title_change();
 
     mutable std::mutex mutex_;
 
     std::vector<ConversationItem> items_;
-    ModalPayload modal_         = std::monostate { };
-    std::uint64_t modal_serial_ = 0;
+    ModalPayload modal_           = std::monostate { };
+    std::uint64_t modal_serial_   = 0;
     std::uint64_t content_serial_ = 0;
-    Phase phase_                = Phase::IDLE;
-    Mode mode_                  = Mode::PLAN;
+    Phase phase_                  = Phase::IDLE;
+    Mode mode_                    = Mode::PLAN;
     std::string error_;
     std::string connect_status_;
     std::string title_;
@@ -252,15 +252,15 @@ private:
     double total_cost_ = 0.0;
     double last_cost_  = 0.0;
 
-    std::size_t next_tool_id_   = 1;
+    std::size_t next_tool_id_       = 1;
     std::size_t next_compaction_id_ = 1;
-    std::size_t next_queued_id_ = 0;
+    std::size_t next_queued_id_     = 0;
     std::optional<std::chrono::steady_clock::time_point> reasoning_start_;
     std::atomic<bool> interrupt_requested_ { false };
 
     std::string compacted_summary_;
     std::size_t compacted_item_count_ = 0;
-    SessionPersistence persistence_ = UnsavedSession { };
+    SessionPersistence persistence_   = UnsavedSession { };
 
     Signal<> title_changed_;
     Signal<> attachments_changed_;

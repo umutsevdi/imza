@@ -20,18 +20,18 @@ supports OpenAI-compatible and Anthropic-compatible APIs.
 - Project instructions from `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`
 - Workspace and repository status, changed files, branch, and todo widgets
 - Background generation of a concise session title from the first prompt
+- Skills: discover and load reusable instruction packages with explicit
+   scope and invocation rules.
 
 ## Priority roadmap
 
 The next capabilities are ordered by dependency and user value:
 
-1. **Skills** — discover and load reusable instruction packages with explicit
-   scope and invocation rules.
-2. **MCP** — expose external MCP tools through the existing flat
+1. **MCP** — expose external MCP tools through the existing flat
    `ToolRegistry`.
-3. **Subagents** — run bounded parallel tasks, show live status in the sidebar,
+2. **Subagents** — run bounded parallel tasks, show live status in the sidebar,
    and keep durable results in chat.
-4. **LSP** — add definitions, references, symbols, hover, and diagnostics after
+3. **LSP** — add definitions, references, symbols, hover, and diagnostics after
    the core session and extension systems are stable.
 
 ## Build and test
