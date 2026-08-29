@@ -139,10 +139,20 @@ struct LastUsed {
     std::string model;
 };
 
+enum class SubagentRole { BUILDER, RESEARCH, BASIC };
+std::string_view subagent_default_variant(SubagentRole role);
+
+struct SubagentModelConfig {
+    std::string provider;
+    std::string model;
+    std::string variant;
+};
+
 struct Config {
     std::vector<Connection> providers;
     std::optional<LastUsed> last_used;
     std::optional<std::string> reasoning_effort;
+    std::map<SubagentRole, SubagentModelConfig> subagents;
     std::map<std::string, SkillPolicy> global_skills;
     std::map<std::string, std::map<std::string, SkillPolicy>> project_skills;
 };

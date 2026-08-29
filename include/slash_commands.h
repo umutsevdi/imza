@@ -8,7 +8,8 @@ namespace ursa {
 struct SlashCommand {
     std::string_view name;
     std::string_view desc;
-    enum class Action { EXIT, NEW, SYSTEM_PROMPT, CONNECT, MODEL, VARIANT, SESSIONS, SKILLS };
+    enum class Action { EXIT, NEW, SYSTEM_PROMPT, CONNECT, MODEL, VARIANT,
+        SUBAGENTS, SESSIONS, SKILLS };
     Action action = Action::EXIT;
 };
 

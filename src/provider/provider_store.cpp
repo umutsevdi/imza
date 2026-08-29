@@ -162,6 +162,36 @@ std::optional<ProviderSelection> ProviderStore::active_selection() const
         _route_locked(*connection, dialect) };
 }
 
+std::optional<ProviderSelection> ProviderStore::subagent_selection(
+    SubagentRole role) const
+{
+    std::lock_guard lock(mutex_);
+    const auto configured = config_.subagents.find(role);
+    const bool use_default = configured == config_.subagents.end()
+        || configured->second.provider.empty();
+    if (use_default
+        && (!config_.last_used || config_.last_used->model.empty())) {
+        return std::nullopt;
+    }
+    const std::string& provider = use_default
+        ? config_.last_used->provider : configured->second.provider;
+    const std::string& model = use_default
+        ? config_.last_used->model : configured->second.model;
+    const Connection* connection = _find_locked(provider);
+    if (connection == nullptr) return std::nullopt;
+    ApiStandard dialect = ApiStandard::OPENAI;
+    if (const auto found = connection->dialects.find(model);
+        found != connection->dialects.end()) {
+        dialect = found->second;
+    }
+    const std::string variant = configured != config_.subagents.end()
+            && !configured->second.variant.empty()
+        ? configured->second.variant
+        : std::string(subagent_default_variant(role));
+    return ProviderSelection { model, variant, connection->id,
+        _route_locked(*connection, dialect) };
+}
+
 Route ProviderStore::route_for(
     std::string_view connection_id, ApiStandard dialect) const
 {
@@ -273,6 +303,10 @@ bool ProviderStore::remove_connection(std::string_view connection_id)
             && candidate.last_used->provider == connection_id) {
             candidate.last_used = LastUsed { providers.front().id, "" };
         }
+        std::erase_if(candidate.subagents,
+            [&](const auto& entry) {
+                return entry.second.provider == connection_id;
+            });
         if (save_config(config_path(), candidate) != Status::OK) {
             return false;
         }
@@ -312,6 +346,28 @@ bool ProviderStore::set_reasoning_effort(std::string effort)
         if (save_config(config_path(), candidate) != Status::OK) {
             return false;
         }
+        config_ = std::move(candidate);
+    }
+    _notify_changed();
+    return true;
+}
+
+bool ProviderStore::set_subagent_model(
+    SubagentRole role, SubagentModelConfig selection)
+{
+    {
+        std::lock_guard lock(mutex_);
+        if (selection.provider.empty() != selection.model.empty()
+            || (!selection.provider.empty()
+                && _find_locked(selection.provider) == nullptr)) {
+            return false;
+        }
+        if (selection.variant.empty()) {
+            selection.variant = subagent_default_variant(role);
+        }
+        Config candidate = config_;
+        candidate.subagents[role] = std::move(selection);
+        if (save_config(config_path(), candidate) != Status::OK) return false;
         config_ = std::move(candidate);
     }
     _notify_changed();

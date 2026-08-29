@@ -261,6 +261,72 @@ TEST_CASE("model pick sets last_used and persists")
     CHECK(saved.last_used->model == "m1");
 }
 
+TEST_CASE("provider store resolves configured subagent model")
+{
+    ursa::Config cfg;
+    ursa::Connection connection;
+    connection.id          = "configured";
+    connection.provider_id = "openai";
+    connection.endpoint    = "https://example.test/v1/chat/completions";
+    connection.dialects["research-model"] = ursa::ApiStandard::ANTHROPIC;
+    cfg.providers.push_back(connection);
+    cfg.subagents[ursa::SubagentRole::RESEARCH]
+        = { "configured", "research-model", "high" };
+    ursa::ProviderStore providers(cfg, fake_models_ok());
+
+    const auto selection
+        = providers.subagent_selection(ursa::SubagentRole::RESEARCH);
+    REQUIRE(selection.has_value());
+    CHECK(selection->connection_id == "configured");
+    CHECK(selection->model == "research-model");
+    CHECK(selection->reasoning_effort == "high");
+}
+
+TEST_CASE("subagent defaults follow the active chat model")
+{
+    ursa::Config cfg;
+    ursa::Connection connection;
+    connection.id          = "configured";
+    connection.provider_id = "openai";
+    connection.endpoint    = "https://example.test/v1/chat/completions";
+    cfg.providers.push_back(connection);
+    cfg.last_used = ursa::LastUsed { "configured", "chat-model" };
+    ursa::ProviderStore providers(cfg, fake_models_ok());
+
+    const auto builder
+        = providers.subagent_selection(ursa::SubagentRole::BUILDER);
+    const auto research
+        = providers.subagent_selection(ursa::SubagentRole::RESEARCH);
+    const auto basic
+        = providers.subagent_selection(ursa::SubagentRole::BASIC);
+    REQUIRE(builder.has_value());
+    REQUIRE(research.has_value());
+    REQUIRE(basic.has_value());
+    CHECK(builder->model == "chat-model");
+    CHECK(builder->reasoning_effort == "medium");
+    CHECK(research->reasoning_effort == "low");
+    CHECK(basic->reasoning_effort == "off");
+}
+
+TEST_CASE("subagent configuration does not change main model reasoning")
+{
+    ursa::Config cfg;
+    ursa::Connection connection;
+    connection.id          = "configured";
+    connection.provider_id = "openai";
+    connection.endpoint    = "https://example.test/v1/chat/completions";
+    cfg.providers.push_back(connection);
+    cfg.last_used = ursa::LastUsed { "configured", "chat-model" };
+    cfg.reasoning_effort = "high";
+    cfg.subagents[ursa::SubagentRole::BASIC] = { "", "", "off" };
+    ursa::ProviderStore providers(cfg, fake_models_ok());
+
+    const auto main = providers.active_selection();
+    REQUIRE(main.has_value());
+    CHECK(main->model == "chat-model");
+    CHECK(main->reasoning_effort == "high");
+}
+
 TEST_CASE("removing the active connection re-points last_used")
 {
     IsolatedConfig iso;

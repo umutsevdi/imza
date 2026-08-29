@@ -98,6 +98,9 @@ namespace {
         Element OnRender() override
         {
             sync_phase();
+            if (entry_ == ConnectModal::Entry::SUBAGENTS) {
+                return render_subagents();
+            }
             if (entry_ == ConnectModal::Entry::PICK_MODEL) {
                 maybe_rebuild_pick();
                 return render_pick();
@@ -108,6 +111,9 @@ namespace {
 
         bool OnEvent(Event event) override
         {
+            if (entry_ == ConnectModal::Entry::SUBAGENTS) {
+                return handle_subagent_event(event);
+            }
             if (entry_ == ConnectModal::Entry::PICK_MODEL) {
                 return handle_pick_event(event);
             }
@@ -119,6 +125,180 @@ namespace {
             ConnectionView view;
             ModelList list;
         };
+
+        static SubagentRole role_at(int index)
+        {
+            if (index == 0) return SubagentRole::BUILDER;
+            if (index == 1) return SubagentRole::RESEARCH;
+            return SubagentRole::BASIC;
+        }
+
+        static std::string role_name(SubagentRole role)
+        {
+            if (role == SubagentRole::BUILDER) return "Builder";
+            if (role == SubagentRole::RESEARCH) return "Research";
+            return "Basic";
+        }
+
+        static std::string role_description(SubagentRole role)
+        {
+            if (role == SubagentRole::BUILDER) {
+                return "edits code and runs build tasks";
+            }
+            if (role == SubagentRole::RESEARCH) {
+                return "read-only discovery and code review";
+            }
+            return "small UI tasks such as session titles";
+        }
+
+        bool handle_subagent_event(Event event)
+        {
+            if (subagent_picking_) {
+                if (event == Event::Escape) {
+                    subagent_picking_ = false;
+                    return true;
+                }
+                if (event == Event::ArrowDown) { pick_move(1); return true; }
+                if (event == Event::ArrowUp) { pick_move(-1); return true; }
+                if (event == Event::Return) {
+                    save_subagent_model();
+                    return true;
+                }
+                return false;
+            }
+            if (event == Event::ArrowDown) {
+                subagent_selected_ = std::min(subagent_selected_ + 1, 2);
+                return true;
+            }
+            if (event == Event::ArrowUp) {
+                subagent_selected_ = std::max(subagent_selected_ - 1, 0);
+                return true;
+            }
+            if (event == Event::ArrowLeft || event == Event::ArrowRight) {
+                change_subagent_variant(event == Event::ArrowRight ? 1 : -1);
+                return true;
+            }
+            if (event == Event::Return) {
+                begin_subagent_pick();
+                return true;
+            }
+            return false;
+        }
+
+        void begin_subagent_pick()
+        {
+            pick_rows_.clear();
+            pick_rows_.push_back(ModelRow { "", "", "<Default>",
+                "use main chat model" });
+            for (const auto& view : views()) {
+                const ModelList list = provider_store_.models_for(view.id);
+                for (const ModelInfo& info : list.models) {
+                    ModelRow row;
+                    row.connection_id = view.id;
+                    row.model_id      = info.id;
+                    const auto slash  = info.id.find('/');
+                    row.name = slash == std::string::npos
+                        ? info.id : info.id.substr(slash + 1);
+                    row.tag = slash == std::string::npos
+                        ? view.name : info.id.substr(0, slash);
+                    pick_rows_.push_back(std::move(row));
+                }
+            }
+            pick_buf_.clear();
+            pick_selected_ = 0;
+            refill_pick_visible();
+            subagent_picking_ = true;
+        }
+
+        std::string subagent_variant(SubagentRole role) const
+        {
+            const Config config = provider_store_.config();
+            const auto found = config.subagents.find(role);
+            if (found != config.subagents.end() && !found->second.variant.empty()) {
+                return found->second.variant == "default"
+                    ? "medium" : found->second.variant;
+            }
+            return std::string(subagent_default_variant(role));
+        }
+
+        void change_subagent_variant(int delta)
+        {
+            const SubagentRole role = role_at(subagent_selected_);
+            static const std::vector<std::string> variants {
+                "off", "low", "medium", "high" };
+            const Config config = provider_store_.config();
+            const auto found = config.subagents.find(role);
+            auto current = std::find(
+                variants.begin(), variants.end(), subagent_variant(role));
+            int index = current == variants.end() ? 2
+                : static_cast<int>(current - variants.begin());
+            index = std::clamp(index + delta, 0,
+                static_cast<int>(variants.size()) - 1);
+            SubagentModelConfig next;
+            if (found != config.subagents.end()) next = found->second;
+            next.variant = variants[static_cast<std::size_t>(index)];
+            provider_store_.set_subagent_model(role, std::move(next));
+        }
+
+        void save_subagent_model()
+        {
+            if (pick_visible_.empty()) return;
+            const ModelRow& row = pick_rows_[pick_visible_[static_cast<std::size_t>(
+                pick_selected_)]];
+            const SubagentRole role = role_at(subagent_selected_);
+            provider_store_.set_subagent_model(role,
+                SubagentModelConfig { row.connection_id, row.model_id,
+                    subagent_variant(role) });
+            subagent_picking_ = false;
+        }
+
+        Element render_subagents()
+        {
+            if (subagent_picking_) {
+                Elements rows { text(role_name(role_at(subagent_selected_))
+                    + " Subagent Model") | bold, separatorEmpty() };
+                if (pick_visible_.empty()) {
+                    rows.push_back(text("no models available") | dim);
+                }
+                for (int i = 0; i < static_cast<int>(pick_visible_.size()); ++i) {
+                    const ModelRow& row = pick_rows_[pick_visible_[static_cast<std::size_t>(i)]];
+                    Element value = hbox({ text(i == pick_selected_ ? "› " : "  "),
+                        text(row.name), filler(), text(row.tag) | dim });
+                    if (i == pick_selected_) value |= bold;
+                    rows.push_back(std::move(value));
+                }
+                rows.push_back(separatorEmpty());
+                rows.push_back(hbox({ filler(),
+                    text("arrows navigate · Enter select · Esc back") | dim }));
+                return vbox(std::move(rows)) | xflex;
+            }
+            const Config config = provider_store_.config();
+            Elements rows { text("Subagent Models") | bold,
+                text("Tune subagent tasks. Choose <Default> to follow the main chat model.") | dim,
+                separatorEmpty() };
+            for (int index = 0; index < 3; ++index) {
+                const SubagentRole role = role_at(index);
+                const auto found = config.subagents.find(role);
+                std::string model = "<Default>";
+                if (found != config.subagents.end()
+                    && !found->second.model.empty()) {
+                    model = found->second.model;
+                }
+                Element row = hbox({ text(role_name(role) + " Subagent"),
+                    text("  " + role_description(role)) | dim,
+                    filler(), text(model),
+                    text("  < " + subagent_variant(role) + " >") | dim });
+                if (index == subagent_selected_) {
+                    row |= bgcolor(PANEL_COLOR_FOCUS);
+                    row |= bold;
+                }
+                rows.push_back(std::move(row));
+            }
+            rows.push_back(separatorEmpty());
+            rows.push_back(hbox({ filler(),
+                text("↑↓ rows · ←→ variant · Enter model · Esc close") | dim }));
+            return vbox(std::move(rows)) | xflex;
+        }
 
         bool handle_pick_event(Event event)
         {
@@ -229,6 +409,7 @@ namespace {
                     in_add_       = false;
                     row_selected_ = 0;
                     entry_        = m->entry;
+                    subagent_picking_ = false;
                 }
             }
         }
@@ -852,6 +1033,8 @@ namespace {
         Controller& controller_;
         ProviderStore& provider_store_;
         ConnectModal::Entry entry_ = ConnectModal::Entry::MANAGE;
+        int subagent_selected_ = 0;
+        bool subagent_picking_ = false;
 
         Component container_;
         Component rows_container_;

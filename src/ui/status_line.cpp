@@ -18,9 +18,10 @@ using namespace ftxui;
 
 class StatusLine : public ComponentBase {
 public:
-    StatusLine(std::shared_ptr<Session> session, ProviderStore& providers,
-        LayoutFn layout, WorkflowFn workflow)
+    StatusLine(std::shared_ptr<Session> session, Controller& controller,
+        ProviderStore& providers, LayoutFn layout, WorkflowFn workflow)
         : session_(std::move(session))
+        , controller_(controller)
         , providers_(providers)
         , layout_(std::move(layout))
         , workflow_(std::move(workflow))
@@ -30,6 +31,10 @@ public:
         , repository_subscription_(
               get_environment()->subscribe_to_repository_change(
                   [] { animation::RequestAnimationFrame(); }))
+        , subagent_subscription_(controller_.subagents().subscribe(
+              [](const SubagentEvent&) {
+                  animation::RequestAnimationFrame();
+              }))
     {
     }
 
@@ -94,6 +99,16 @@ public:
             }
         }
         bar.push_back(filler());
+        const std::size_t running_agents
+            = controller_.subagents().running_count();
+        if (running_agents > 0) {
+            animation::RequestAnimationFrame();
+            bar.push_back(spinner(15, static_cast<size_t>(frame_))
+                | color(Color::GrayLight));
+            bar.push_back(text(" " + std::to_string(running_agents)
+                                  + (running_agents == 1 ? " agent  " : " agents  "))
+                | color(PANEL_FG_DIM));
+        }
         if (!environment_ready) {
             animation::RequestAnimationFrame();
             bar.push_back(spinner(15, static_cast<size_t>(frame_))
@@ -122,13 +137,15 @@ public:
 
     void OnAnimation(animation::Params&) override
     {
-        if (!get_environment()->ready()) {
+        if (!get_environment()->ready()
+            || controller_.subagents().running_count() > 0) {
             ++frame_;
         }
     }
 
 private:
     std::shared_ptr<Session> session_;
+    Controller& controller_;
     ProviderStore& providers_;
     LayoutFn layout_;
     WorkflowFn workflow_;
@@ -137,6 +154,7 @@ private:
     ModelPricing cached_;
     Signal<>::Subscription workspace_subscription_;
     Signal<>::Subscription repository_subscription_;
+    Signal<const SubagentEvent&>::Subscription subagent_subscription_;
 
     ModelPricing _cached_pricing(const std::string& model)
     {
@@ -194,10 +212,10 @@ private:
 };
 
 ftxui::Component make_status_line(
-    std::shared_ptr<Session> session, ProviderStore& providers, LayoutFn layout,
-    WorkflowFn workflow)
+    std::shared_ptr<Session> session, Controller& controller,
+    ProviderStore& providers, LayoutFn layout, WorkflowFn workflow)
 {
-    return ftxui::Make<StatusLine>(std::move(session), providers,
+    return ftxui::Make<StatusLine>(std::move(session), controller, providers,
         std::move(layout), std::move(workflow));
 }
 } // namespace ursa

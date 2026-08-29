@@ -86,7 +86,7 @@ struct SessionSnapshot {
 };
 
 struct ConnectModal {
-    enum class Entry { MANAGE, PICK_MODEL };
+    enum class Entry { MANAGE, PICK_MODEL, SUBAGENTS };
     Entry entry = Entry::MANAGE;
 };
 

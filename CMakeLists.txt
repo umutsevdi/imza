@@ -145,6 +145,7 @@ add_library(ursa_agent
     src/agent/slash_commands.cpp
     src/agent/session.cpp
     src/agent/session_store.cpp
+    src/agent/subagent_manager.cpp
     src/agent/format.cpp
     src/agent/tools.cpp
     src/agent/command_runner.cpp

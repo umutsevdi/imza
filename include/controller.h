@@ -20,6 +20,7 @@
 #include "network.h"
 #include "provider_store.h"
 #include "session.h"
+#include "subagent_manager.h"
 #include "tools.h"
 #include "types.h"
 
@@ -73,6 +74,10 @@ public:
     size_t queue_size() const;
     std::pair<SkillCounts, SkillCounts> skill_counts() const;
     std::vector<Skill> available_skills() const;
+    SubagentHandle run_subagent(std::string prompt, std::string model,
+        std::string variant, bool visible);
+    SubagentManager& subagents() { return subagents_; }
+    const SubagentManager& subagents() const { return subagents_; }
     const Session& session() const { return *session_; }
     std::span<const SlashCommand> commands() const { return slash_commands(); }
 
@@ -155,7 +160,7 @@ private:
     std::atomic<bool> alive_ { true };
     std::shared_ptr<ProviderStore> providers_;
     std::optional<std::jthread> worker_;
-    std::optional<std::jthread> title_worker_;
+    SubagentManager subagents_;
     int retry_after_secs_ = 0;
 };
 

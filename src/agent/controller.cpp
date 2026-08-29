@@ -541,11 +541,16 @@ void Controller::submit_message(
     _spawn(session_->build_history(_system_prompt(), settings.dialect),
         has_stream_override_ ? stream_fn_ : StreamFn { }, std::move(settings));
     if (generate_title && !has_stream_override_) {
+        const auto title_selection
+            = providers_->subagent_selection(SubagentRole::BASIC);
+        const ProviderSelection& selected
+            = title_selection ? *title_selection : *selection;
         TurnSettings title_settings;
-        title_settings.model         = selection->model;
-        title_settings.connection_id = selection->connection_id;
-        title_settings.route         = selection->route;
-        title_settings.dialect       = selection->route.dialect;
+        title_settings.model         = selected.model;
+        title_settings.connection_id = selected.connection_id;
+        title_settings.reasoning_effort = selected.reasoning_effort;
+        title_settings.route         = selected.route;
+        title_settings.dialect       = selected.route.dialect;
         _spawn_title(title_input, std::move(title_settings));
     }
 }
@@ -621,18 +626,18 @@ void Controller::_spawn(
 
 void Controller::_spawn_title(std::string input, TurnSettings settings)
 {
-    title_worker_.emplace([this, input = std::move(input),
-                              settings = std::move(settings)] {
+    const std::string prompt
+        = "Create a concise 3-7 word title for the user's request. Return only "
+          "the title, without quotes or punctuation.\n\nUser request:\n"
+        + input;
+    subagents_.start(prompt, settings.model, settings.reasoning_effort, false,
+        [this, prompt, settings = std::move(settings)](std::stop_token stop) {
         ChatRequest req;
         req.model       = settings.model;
         req.temperature = 0.2;
-        req.interrupted = [] { return false; };
-        req.messages = {
-            { Message::Type::SYSTEM,
-                "Create a concise 3-7 word title for the user's request. "
-                "Return only the title, without quotes or punctuation." },
-            { Message::Type::USER, input },
-        };
+        req.interrupted = [stop] { return stop.stop_requested(); };
+        req.messages    = { { Message::Type::USER, prompt } };
+        _set_reasoning(req, settings.dialect, settings.reasoning_effort);
         std::string title;
         const StreamCallback cb = [&](const StreamEvent& event) {
             if (event.kind == StreamEvent::Kind::CONTENT_DELTA
@@ -643,10 +648,11 @@ void Controller::_spawn_title(std::string input, TurnSettings settings)
         Route route = settings.route;
         const Status status
             = stream(get_provider(route), route, req, cb, nullptr);
-        if (status != Status::OK) {
-            return;
-        }
-        title = std::string(trim(title));
+        if (status != Status::OK) return SubagentResult { status, { } };
+        return SubagentResult { Status::OK, std::move(title) };
+    }, [this](const SubagentResult& result) {
+        if (result.status != Status::OK) return;
+        std::string title = std::string(trim(result.output));
         const std::size_t newline = title.find_first_of("\r\n");
         if (newline != std::string::npos) {
             title.erase(newline);
@@ -663,6 +669,40 @@ void Controller::_spawn_title(std::string input, TurnSettings settings)
             session_->set_title(std::move(title));
         });
     });
+}
+
+SubagentHandle Controller::run_subagent(std::string prompt, std::string model,
+    std::string variant, bool visible)
+{
+    const auto selection = providers_->active_selection();
+    Route route = selection ? selection->route : Route { };
+    if (model.empty() && selection) model = selection->model;
+    if (variant.empty() && selection) variant = selection->reasoning_effort;
+    const std::string task_prompt = prompt;
+    return subagents_.start(std::move(prompt), model, variant, visible,
+        [this, task_prompt, model = std::move(model),
+            variant = std::move(variant), route = std::move(route)](
+            std::stop_token stop) mutable {
+            if (model.empty() || route.api.empty()) {
+                return SubagentResult { Status::CONFIG_ERROR, { } };
+            }
+            ChatRequest req;
+            req.model       = model;
+            req.interrupted = [stop] { return stop.stop_requested(); };
+            req.messages = { { Message::Type::SYSTEM, _system_prompt() },
+                { Message::Type::USER, task_prompt } };
+            _set_reasoning(req, route.dialect, variant);
+            std::string output;
+            const StreamCallback callback = [&](const StreamEvent& event) {
+                if (event.kind == StreamEvent::Kind::CONTENT_DELTA) {
+                    output += event.text;
+                }
+            };
+            const Status status = has_stream_override_
+                ? stream_fn_(req, callback)
+                : stream(get_provider(route), route, req, callback, nullptr);
+            return SubagentResult { status, std::move(output) };
+        });
 }
 
 void Controller::finish(std::string error)

@@ -88,7 +88,8 @@ namespace {
             const WorkflowFn workflow = [this] { return phase_; };
             side_        = make_side_panel(session_, controller, layout);
             status_line_
-                = make_status_line(session_, providers, layout, workflow);
+                = make_status_line(session_, controller_, providers, layout,
+                    workflow);
             chat_        = make_chat(session_, controller, layout);
             review_      = make_review(session_, controller, layout);
             modal_       = make_modal(session_, controller, providers);

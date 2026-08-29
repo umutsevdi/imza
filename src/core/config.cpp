@@ -1,11 +1,19 @@
 #include "types.h"
 
 #include <json/json.h>
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
 
 namespace ursa {
+
+std::string_view subagent_default_variant(SubagentRole role)
+{
+    if (role == SubagentRole::BUILDER) return "medium";
+    if (role == SubagentRole::RESEARCH) return "low";
+    return "off";
+}
 
 std::filesystem::path base_config_dir()
 {
@@ -138,6 +146,7 @@ Status load_config(const std::filesystem::path& path, Config& out,
             Connection conn;
             conn.id          = string_or_empty(entry, "id");
             conn.provider_id = string_or_empty(entry, "provider_id");
+            if (!entry.isMember("id")) conn.id = conn.provider_id;
             conn.endpoint    = string_or_empty(entry, "endpoint");
             conn.api_key     = string_or_empty(entry, "api_key");
             if (conn.id.empty() || conn.provider_id.empty()) {
@@ -163,31 +172,66 @@ Status load_config(const std::filesystem::path& path, Config& out,
         }
     }
 
-    const Json::Value& last = root["last_used"];
-    if (!last.isNull()) {
-        if (!last.isObject()) {
-            return fail(Status::CONFIG_ERROR, "'last_used' must be an object");
+    const Json::Value& models = root["models"];
+    if (!models.isNull()) {
+        if (!models.isObject()) {
+            return fail(Status::CONFIG_ERROR, "'models' must be an object");
         }
-        LastUsed used;
-        used.provider = string_or_empty(last, "provider");
-        used.model    = string_or_empty(last, "model");
-        bool found    = false;
-        for (const Connection& conn : out.providers) {
-            if (conn.id == used.provider) {
-                found = true;
-                break;
+        const auto connection_exists = [&](const std::string& id) {
+            return std::any_of(out.providers.begin(), out.providers.end(),
+                [&](const Connection& connection) {
+                    return connection.id == id;
+                });
+        };
+        const Json::Value& main = models["main"];
+        if (!main.isNull()) {
+            if (!main.isObject()) {
+                return fail(Status::CONFIG_ERROR, "'models.main' must be an object");
             }
+            const std::string provider = string_or_empty(main, "provider");
+            const std::string model    = string_or_empty(main, "model");
+            if (provider.empty() && !model.empty()) {
+                return fail(Status::CONFIG_ERROR,
+                    "'models.main.model' requires a provider");
+            }
+            if (!provider.empty() && !connection_exists(provider)) {
+                return fail(Status::CONFIG_ERROR,
+                    "'models.main.provider' does not resolve to a connection");
+            }
+            if (!provider.empty()) {
+                out.last_used = LastUsed { provider, model };
+            }
+            const std::string reasoning
+                = string_or_empty(main, "reasoning_effort");
+            out.reasoning_effort = reasoning.empty()
+                ? std::optional<std::string> { }
+                : std::optional<std::string> { reasoning };
         }
-        if (!found) {
-            return fail(Status::CONFIG_ERROR,
-                "'last_used.provider' does not resolve to a connection");
+        const auto parse_model = [&](const char* key, SubagentRole role) {
+            const Json::Value& value = models[key];
+            if (value.isNull()) return true;
+            if (!value.isObject()) return false;
+            SubagentModelConfig config;
+            config.provider = string_or_empty(value, "provider");
+            config.model    = string_or_empty(value, "model");
+            config.variant  = string_or_empty(value, "reasoning_effort");
+            if (config.provider.empty() != config.model.empty()) return false;
+            if (!config.provider.empty() && !connection_exists(config.provider)) {
+                return false;
+            }
+            if (!config.variant.empty() && config.variant != "off"
+                && config.variant != "low" && config.variant != "default"
+                && config.variant != "medium" && config.variant != "high") {
+                return false;
+            }
+            out.subagents[role] = std::move(config);
+            return true;
+        };
+        if (!parse_model("builder", SubagentRole::BUILDER)
+            || !parse_model("researcher", SubagentRole::RESEARCH)
+            || !parse_model("basic", SubagentRole::BASIC)) {
+            return fail(Status::CONFIG_ERROR, "invalid models configuration");
         }
-        out.last_used = std::move(used);
-    }
-
-    const Json::Value& effort = root["reasoning_effort"];
-    if (effort.isString() && !effort.asString().empty()) {
-        out.reasoning_effort = effort.asString();
     }
 
     const Json::Value& skills = root["skills"];
@@ -225,7 +269,7 @@ Status save_config(const std::filesystem::path& path, const Config& cfg)
     Json::Value providers(Json::arrayValue);
     for (const Connection& conn : cfg.providers) {
         Json::Value entry(Json::objectValue);
-        entry["id"]          = conn.id;
+        if (conn.id != conn.provider_id) entry["id"] = conn.id;
         entry["provider_id"] = conn.provider_id;
         if (!conn.endpoint.empty()) {
             entry["endpoint"] = conn.endpoint;
@@ -242,16 +286,38 @@ Status save_config(const std::filesystem::path& path, const Config& cfg)
     }
     root["providers"] = providers;
 
-    if (cfg.last_used) {
-        Json::Value last(Json::objectValue);
-        last["provider"] = cfg.last_used->provider;
-        last["model"]    = cfg.last_used->model;
-        root["last_used"] = last;
+    Json::Value models(Json::objectValue);
+    if (cfg.last_used || (cfg.reasoning_effort
+            && !cfg.reasoning_effort->empty())) {
+        Json::Value main(Json::objectValue);
+        if (cfg.last_used) {
+            main["provider"] = cfg.last_used->provider;
+            main["model"]    = cfg.last_used->model;
+        }
+        if (cfg.reasoning_effort && !cfg.reasoning_effort->empty()) {
+            main["reasoning_effort"] = *cfg.reasoning_effort;
+        }
+        models["main"] = std::move(main);
     }
-
-    if (cfg.reasoning_effort && !cfg.reasoning_effort->empty()) {
-        root["reasoning_effort"] = *cfg.reasoning_effort;
+    if (!cfg.subagents.empty()) {
+        const auto write_subagent = [&](const char* key, SubagentRole role) {
+            const auto found = cfg.subagents.find(role);
+            if (found == cfg.subagents.end()) return;
+            Json::Value value(Json::objectValue);
+            if (!found->second.provider.empty()) {
+                value["provider"] = found->second.provider;
+                value["model"]    = found->second.model;
+            }
+            if (!found->second.variant.empty()) {
+                value["reasoning_effort"] = found->second.variant;
+            }
+            models[key] = std::move(value);
+        };
+        write_subagent("builder", SubagentRole::BUILDER);
+        write_subagent("researcher", SubagentRole::RESEARCH);
+        write_subagent("basic", SubagentRole::BASIC);
     }
+    if (!models.empty()) root["models"] = std::move(models);
 
 
     Json::Value skills(Json::objectValue);

@@ -85,6 +85,7 @@ TEST_CASE("config roundtrip preserves connections and last_used")
     cfg.providers.push_back(local);
 
     cfg.last_used = ursa::LastUsed { "openrouter", "" };
+    cfg.reasoning_effort = "high";
 
     REQUIRE(ursa::save_config(path, cfg) == ursa::Status::OK);
 
@@ -103,6 +104,17 @@ TEST_CASE("config roundtrip preserves connections and last_used")
     REQUIRE(loaded.last_used.has_value());
     CHECK(loaded.last_used->provider == "openrouter");
     CHECK(loaded.last_used->model.empty());
+    CHECK(loaded.reasoning_effort == "high");
+    Json::Value written;
+    Json::CharReaderBuilder reader;
+    std::string errors;
+    std::istringstream stream(read_all(path));
+    REQUIRE(Json::parseFromStream(reader, stream, &written, &errors));
+    CHECK_FALSE(written["providers"][0].isMember("id"));
+    CHECK(written["models"]["main"]["provider"] == "openrouter");
+    CHECK(written["models"]["main"]["reasoning_effort"] == "high");
+    CHECK_FALSE(written.isMember("last_used"));
+    CHECK_FALSE(written.isMember("reasoning_effort"));
 }
 
 TEST_CASE("load_config rejects providers without id or provider_id")
@@ -128,13 +140,13 @@ TEST_CASE("load_config rejects unknown dialect")
     CHECK(ursa::load_config(path, cfg) == ursa::Status::CONFIG_ERROR);
 }
 
-TEST_CASE("load_config rejects unresolved last_used.provider")
+TEST_CASE("load_config rejects unresolved models main provider")
 {
     const auto path = temp_file("last.json");
     {
         std::ofstream out(path);
-        out << R"({"providers": [], "last_used": {"provider": "x",
-            "model": "m"}})";
+        out << R"({"providers": [], "models": {"main": {"provider": "x",
+            "model": "m"}}})";
     }
     ursa::Config cfg;
     CHECK(ursa::load_config(path, cfg) == ursa::Status::CONFIG_ERROR);
@@ -180,6 +192,82 @@ TEST_CASE("config roundtrip preserves global and project skill policies")
     CHECK(loaded.global_skills.at("deploy") == ursa::SkillPolicy::DENY);
     CHECK(loaded.project_skills.at("/work/project").at("release")
         == ursa::SkillPolicy::ASK);
+}
+
+TEST_CASE("config roundtrip preserves subagent models")
+{
+    const auto path = temp_file("subagents.json");
+    ursa::Config cfg;
+    cfg.providers.push_back(ursa::Connection { "openai", "openai", "", "" });
+    cfg.subagents[ursa::SubagentRole::BUILDER]
+        = { "openai", "gpt-builder", "" };
+    cfg.subagents[ursa::SubagentRole::RESEARCH]
+        = { "openai", "gpt-research", "high" };
+    cfg.subagents[ursa::SubagentRole::BASIC]
+        = { "openai", "gpt-basic", "low" };
+
+    REQUIRE(ursa::save_config(path, cfg) == ursa::Status::OK);
+    ursa::Config loaded;
+    REQUIRE(ursa::load_config(path, loaded) == ursa::Status::OK);
+    CHECK(loaded.subagents.at(ursa::SubagentRole::BUILDER).model
+        == "gpt-builder");
+    CHECK(loaded.subagents.at(ursa::SubagentRole::RESEARCH).variant == "high");
+    CHECK(loaded.subagents.at(ursa::SubagentRole::BASIC).variant == "low");
+    const std::string json = read_all(path);
+    CHECK(json.find("\"models\"") != std::string::npos);
+    CHECK(json.find("\"researcher\"") != std::string::npos);
+    CHECK(json.find("\"subagents\"") == std::string::npos);
+}
+
+TEST_CASE("config preserves main reasoning before a model is selected")
+{
+    const auto path = temp_file("reasoning-only.json");
+    ursa::Config cfg;
+    cfg.reasoning_effort = "low";
+    REQUIRE(ursa::save_config(path, cfg) == ursa::Status::OK);
+    ursa::Config loaded;
+    REQUIRE(ursa::load_config(path, loaded) == ursa::Status::OK);
+    CHECK_FALSE(loaded.last_used.has_value());
+    CHECK(loaded.reasoning_effort == "low");
+}
+
+TEST_CASE("config preserves default model with a variant override")
+{
+    const auto path = temp_file("default-subagent.json");
+    ursa::Config cfg;
+    cfg.subagents[ursa::SubagentRole::RESEARCH] = { "", "", "high" };
+    REQUIRE(ursa::save_config(path, cfg) == ursa::Status::OK);
+    ursa::Config loaded;
+    REQUIRE(ursa::load_config(path, loaded) == ursa::Status::OK);
+    const auto& research = loaded.subagents.at(ursa::SubagentRole::RESEARCH);
+    CHECK(research.provider.empty());
+    CHECK(research.model.empty());
+    CHECK(research.variant == "high");
+}
+
+TEST_CASE("load_config rejects subagent with unknown connection")
+{
+    const auto path = temp_file("invalid-subagents.json");
+    {
+        std::ofstream out(path);
+        out << R"({"providers": [], "models": {"basic": {
+            "provider": "missing", "model": "small", "reasoning_effort": "low"}}})";
+    }
+    ursa::Config cfg;
+    CHECK(ursa::load_config(path, cfg) == ursa::Status::CONFIG_ERROR);
+}
+
+TEST_CASE("load_config rejects invalid subagent variant")
+{
+    const auto path = temp_file("invalid-subagent-variant.json");
+    {
+        std::ofstream out(path);
+        out << R"({"providers": [{"id": "p", "provider_id": "openai"}],
+            "models": {"researcher": {"provider": "p", "model": "small",
+            "reasoning_effort": "maximum"}}})";
+    }
+    ursa::Config cfg;
+    CHECK(ursa::load_config(path, cfg) == ursa::Status::CONFIG_ERROR);
 }
 
 TEST_CASE("config rejects invalid skill policies")

@@ -88,7 +88,8 @@ ftxui::Component make_side_panel(
 ftxui::Component make_review(
     std::shared_ptr<Session> session, Controller& controller, LayoutFn layout);
 ftxui::Component make_status_line(std::shared_ptr<Session> session,
-    ProviderStore& providers, LayoutFn layout, WorkflowFn workflow);
+    Controller& controller, ProviderStore& providers, LayoutFn layout,
+    WorkflowFn workflow);
 ftxui::Component make_connect(std::shared_ptr<Session> session,
     Controller& controller, ProviderStore& providers);
 ftxui::Component make_variant(

@@ -19,6 +19,8 @@ std::span<const SlashCommand> slash_commands()
             SlashCommand::Action::CONNECT },
         { "/model", "pick the active model", SlashCommand::Action::MODEL },
         { "/variant", "pick reasoning effort", SlashCommand::Action::VARIANT },
+        { "/subagents", "configure subagent models",
+            SlashCommand::Action::SUBAGENTS },
         { "/sessions", "load or delete saved sessions",
             SlashCommand::Action::SESSIONS },
         { "/skills", "manage discovered skills", SlashCommand::Action::SKILLS },
@@ -69,6 +71,9 @@ void Controller::run_slash(std::string_view cmd)
             { "off", "low", "default", "high" }, current });
         break;
     }
+    case SlashCommand::Action::SUBAGENTS:
+        enqueue_user_modal(ConnectModal { ConnectModal::Entry::SUBAGENTS });
+        break;
     case SlashCommand::Action::SESSIONS:
         enqueue_user_modal(_sessions_modal());
         break;

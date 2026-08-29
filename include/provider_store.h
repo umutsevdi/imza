@@ -78,6 +78,8 @@ public:
     ModelList models_for(std::string_view connection_id) const;
     std::vector<std::pair<std::string, std::string>> provider_options() const;
     std::optional<ProviderSelection> active_selection() const;
+    std::optional<ProviderSelection> subagent_selection(
+        SubagentRole role) const;
     Route route_for(std::string_view connection_id, ApiStandard dialect) const;
     bool model_reasons(std::string_view model) const;
 
@@ -87,6 +89,8 @@ public:
     bool remove_connection(std::string_view connection_id);
     bool select_model(const ModelChoice& choice);
     bool set_reasoning_effort(std::string effort);
+    bool set_subagent_model(
+        SubagentRole role, SubagentModelConfig selection);
     bool set_skill_policies(const SkillPolicyChanges& changes);
     void remember_dialect(std::string_view connection_id,
         std::string_view model, ApiStandard dialect);
