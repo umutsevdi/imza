@@ -6,6 +6,7 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -15,6 +16,7 @@
 #include <vector>
 
 #include "slash_commands.h"
+#include "environment.h"
 #include "network.h"
 #include "provider_store.h"
 #include "session.h"
@@ -69,11 +71,15 @@ public:
     void delete_saved_session(const std::filesystem::path& path);
     void interrupt();
     size_t queue_size() const;
+    std::pair<SkillCounts, SkillCounts> skill_counts() const;
+    std::vector<Skill> available_skills() const;
     const Session& session() const { return *session_; }
     std::span<const SlashCommand> commands() const { return slash_commands(); }
 
 private:
     void submit_message(
+        std::string text, std::vector<FileAttachment> attachments);
+    void _submit_with_skills(
         std::string text, std::vector<FileAttachment> attachments);
     void run_slash(std::string_view cmd);
     void finish(std::string error);
@@ -88,8 +94,15 @@ private:
     bool _compact_history(std::vector<Message>& history, StreamFn override,
         const TurnSettings& settings, std::uint64_t prompt_tokens);
     void _begin_connect(const ConnectResult& res);
+    void _new_session();
     void _apply_pick(const ModelChoice& choice);
     SessionsModal _sessions_modal() const;
+    SkillsModal _skills_modal() const;
+    std::optional<Skill> _resolve_skill(const Json::Value& args) const;
+    SkillPolicy _skill_policy(const Skill& skill) const;
+    bool _validate_skill_mentions(std::string_view text);
+    std::vector<Skill> _mentioned_skills(std::string_view text) const;
+    bool _load_skill(const Skill& skill);
 
     void _drain_pending_asks(std::vector<Message>& history,
         std::string& reply_buffer, const std::string& assistant_text,
@@ -126,6 +139,17 @@ private:
     std::deque<PendingModal> queue_;
     mutable std::mutex queue_mutex_;
     std::set<std::string> allowed_tools_;
+    std::set<std::string> loaded_skills_;
+    std::map<std::string, std::string> loaded_skill_contents_;
+    mutable std::mutex loaded_skills_mutex_;
+
+    struct PendingSkillTurn {
+        std::string text;
+        std::vector<FileAttachment> attachments;
+        std::vector<Skill> awaiting;
+        std::size_t next = 0;
+    };
+    std::optional<PendingSkillTurn> pending_skill_turn_;
 
     std::vector<StreamEvent> stream_events_;
     std::atomic<bool> alive_ { true };

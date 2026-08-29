@@ -210,8 +210,42 @@ namespace {
         }
     }
 
-    void detect_global_skills(
-        std::unordered_map<std::string, std::filesystem::path>& global_skills)
+    std::string skill_description(const std::filesystem::path& path)
+    {
+        std::ifstream in(path);
+        std::string line;
+        bool frontmatter = false;
+        while (std::getline(in, line)) {
+            if (line == "---") {
+                if (frontmatter) break;
+                frontmatter = true;
+                continue;
+            }
+            if (frontmatter && line.starts_with("description:")) {
+                std::string value = std::string(trim(std::string_view(line).substr(12)));
+                if (value.size() >= 2 && value.front() == '"' && value.back() == '"')
+                    value = value.substr(1, value.size() - 2);
+                return value;
+            }
+        }
+        return {};
+    }
+
+    void add_skills(const std::filesystem::path& directory, Skill::Scope scope,
+        const std::optional<std::filesystem::path>& root,
+        std::unordered_map<std::string, Skill>& skills)
+    {
+        std::error_code ec;
+        if (!std::filesystem::is_directory(directory, ec)) return;
+        for (std::filesystem::directory_iterator it(directory, ec), end; !ec && it != end; it.increment(ec)) {
+            const auto file = it->path() / "SKILL.md";
+            if (!it->is_directory(ec) || !std::filesystem::is_regular_file(file, ec)) continue;
+            const std::string name = it->path().filename().string();
+            skills.emplace(name, Skill { name, skill_description(file), file, scope, root });
+        }
+    }
+
+    void detect_global_skills(std::unordered_map<std::string, Skill>& global_skills)
     {
         auto config_dir            = base_config_dir();
         std::filesystem::path home = { home_dir() };
@@ -219,46 +253,21 @@ namespace {
             ".gemini", ".agents", ".cursor", ".openclaw" };
         for (const auto& skill_path : home_dir_skills) {
             auto p = home / skill_path / "skills";
-            if (std::filesystem::exists(p)) {
-                for (auto& skill : std::filesystem::directory_iterator(p)) {
-                    if (skill.is_directory()
-                        && std::filesystem::exists(skill.path() / "SKILL.md")) {
-                        global_skills.emplace(skill.path().filename().string(),
-                            skill.path() / "SKILL.md");
-                    }
-                }
-            }
+            add_skills(p, Skill::Scope::GLOBAL, std::nullopt, global_skills);
         }
         auto skills_generic_cfg
             = config_dir.parent_path() / "agents" / "skills";
-        if (std::filesystem::exists(skills_generic_cfg)) {
-            for (auto& skill :
-                std::filesystem::directory_iterator(skills_generic_cfg)) {
-                if (skill.is_directory()
-                    && std::filesystem::exists(skill.path() / "SKILL.md")) {
-                    global_skills.emplace(skill.path().filename().string(),
-                        skill.path() / "SKILL.md");
-                }
-            }
-        }
+        add_skills(skills_generic_cfg, Skill::Scope::GLOBAL, std::nullopt, global_skills);
     }
 
     void detect_project_skills(const std::filesystem::path& root,
-        std::unordered_map<std::string, std::filesystem::path>& project_skills)
+        std::unordered_map<std::string, Skill>& project_skills)
     {
         auto home_dir_skills = { ".opencode", ".claude", ".codex", ".grok",
             ".gemini", ".agents", ".cursor", ".openclaw" };
         for (const auto& skill_path : home_dir_skills) {
             auto p = root / skill_path / "skills";
-            if (std::filesystem::exists(p)) {
-                for (auto& skill : std::filesystem::directory_iterator(p)) {
-                    if (skill.is_directory()
-                        && std::filesystem::exists(skill.path() / "SKILL.md")) {
-                        project_skills.emplace(skill.path().filename().string(),
-                            skill.path() / "SKILL.md");
-                    }
-                }
-            }
+            add_skills(p, Skill::Scope::PROJECT, root, project_skills);
         }
     }
 
@@ -506,6 +515,19 @@ std::size_t Environment::project_skills() const
 std::size_t Environment::global_skills() const
 {
     return system_->global_skills.size();
+}
+
+std::vector<Skill> Environment::skills() const
+{
+    std::vector<Skill> out;
+    for (const auto& [name, skill] : system_->global_skills) out.push_back(skill);
+    const auto ws = workspace();
+    if (ws) for (const auto& [name, skill] : ws->project_skills) out.push_back(skill);
+    std::sort(out.begin(), out.end(), [](const Skill& a, const Skill& b) {
+        if (a.scope != b.scope) return a.scope == Skill::Scope::PROJECT;
+        return a.name < b.name;
+    });
+    return out;
 }
 
 std::string shell_name(const SystemEnvironment& sys)

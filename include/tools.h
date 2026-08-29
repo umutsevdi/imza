@@ -39,6 +39,7 @@ ToolOutput dispatch_tool(
     std::span<const Tool> tools, const ToolCallRequest& req);
 
 Tool make_read_tool();
+Tool make_skill_tool();
 Tool make_list_tool();
 Tool make_ask_tool();
 Tool make_shell_tool();

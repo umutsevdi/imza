@@ -8,14 +8,10 @@ namespace ursa {
 TEST_CASE("slash_commands includes built-ins")
 {
     const auto cmds = slash_commands();
-    bool has_help   = false;
     bool has_exit   = false;
     bool has_connect = false;
     bool has_model   = false;
     for (const auto& c : cmds) {
-        if (c.name == "/help") {
-            has_help = true;
-        }
         if (c.name == "/exit") {
             has_exit = true;
         }
@@ -26,18 +22,18 @@ TEST_CASE("slash_commands includes built-ins")
             has_model = true;
         }
     }
-    CHECK(has_help);
     CHECK(has_exit);
     CHECK(has_connect);
     CHECK(has_model);
     for (const auto& c : cmds) {
         const bool known = c.action == SlashCommand::Action::EXIT
-            || c.action == SlashCommand::Action::HELP
+            || c.action == SlashCommand::Action::NEW
             || c.action == SlashCommand::Action::SYSTEM_PROMPT
             || c.action == SlashCommand::Action::CONNECT
             || c.action == SlashCommand::Action::MODEL
             || c.action == SlashCommand::Action::VARIANT
-            || c.action == SlashCommand::Action::SESSIONS;
+            || c.action == SlashCommand::Action::SESSIONS
+            || c.action == SlashCommand::Action::SKILLS;
         CHECK(known);
     }
 }
@@ -53,9 +49,9 @@ TEST_CASE("slash_commands names start with slash")
 
 TEST_CASE("find_command matches case-insensitively")
 {
-    CHECK(find_command("/help") != nullptr);
-    CHECK(find_command("/HELP") != nullptr);
+    CHECK(find_command("/help") == nullptr);
     CHECK(find_command("/exit")->action == SlashCommand::Action::EXIT);
+    CHECK(find_command("/new")->action == SlashCommand::Action::NEW);
     CHECK(find_command("/connect")->action
         == SlashCommand::Action::CONNECT);
     CHECK(find_command("/model")->action

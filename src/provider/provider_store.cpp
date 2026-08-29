@@ -318,6 +318,22 @@ bool ProviderStore::set_reasoning_effort(std::string effort)
     return true;
 }
 
+bool ProviderStore::set_skill_policies(const SkillPolicyChanges& changes)
+{
+    {
+        std::lock_guard lock(mutex_);
+        Config candidate = config_;
+        for (const auto& entry : changes.entries) {
+            if (entry.project_root.empty()) candidate.global_skills[entry.name] = entry.policy;
+            else candidate.project_skills[entry.project_root][entry.name] = entry.policy;
+        }
+        if (save_config(config_path(), candidate) != Status::OK) return false;
+        config_ = std::move(candidate);
+    }
+    _notify_changed();
+    return true;
+}
+
 void ProviderStore::remember_dialect(
     std::string_view connection_id, std::string_view model, ApiStandard dialect)
 {

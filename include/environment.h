@@ -15,12 +15,27 @@
 #include <vector>
 
 #include "signal.h"
+#include "types.h"
 
 namespace ursa {
 
 struct InstructionFile {
     std::string path;
     std::string content;
+};
+
+struct Skill {
+    enum class Scope { GLOBAL, PROJECT };
+    std::string name;
+    std::string description;
+    std::filesystem::path path;
+    Scope scope = Scope::GLOBAL;
+    std::optional<std::filesystem::path> project_root;
+};
+
+struct SkillCounts {
+    std::size_t active = 0;
+    std::size_t total  = 0;
 };
 
 std::optional<InstructionFile> load_agent_file(
@@ -34,7 +49,7 @@ public:
     std::string default_shell;
     std::vector<std::string> package_managers;
     std::string today;
-    std::unordered_map<std::string, std::filesystem::path> global_skills;
+    std::unordered_map<std::string, Skill> global_skills;
     bool has_git { false };
 };
 
@@ -44,7 +59,7 @@ public:
 
     std::optional<std::filesystem::path> project_root;
     std::optional<InstructionFile> instruction;
-    std::unordered_map<std::string, std::filesystem::path> project_skills;
+    std::unordered_map<std::string, Skill> project_skills;
 };
 
 struct ChangedFile {
@@ -95,6 +110,7 @@ public:
     std::optional<std::string> agent_rules_path() const;
     std::size_t project_skills() const;
     std::size_t global_skills() const;
+    std::vector<Skill> skills() const;
 
     bool chdir(const std::filesystem::path& dir);
     [[nodiscard]] Signal<>::Subscription subscribe_to_workspace_change(

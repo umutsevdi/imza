@@ -165,3 +165,27 @@ TEST_CASE("save_config leaves no temp file behind")
     CHECK_FALSE(std::filesystem::exists(path.string() + ".tmp"));
     CHECK_FALSE(read_all(path).empty());
 }
+
+TEST_CASE("config roundtrip preserves global and project skill policies")
+{
+    const auto path = temp_file("skills.json");
+    ursa::Config cfg;
+    cfg.global_skills["docs"] = ursa::SkillPolicy::ALLOW;
+    cfg.global_skills["deploy"] = ursa::SkillPolicy::DENY;
+    cfg.project_skills["/work/project"]["release"] = ursa::SkillPolicy::ASK;
+    REQUIRE(ursa::save_config(path, cfg) == ursa::Status::OK);
+    ursa::Config loaded;
+    REQUIRE(ursa::load_config(path, loaded) == ursa::Status::OK);
+    CHECK(loaded.global_skills.at("docs") == ursa::SkillPolicy::ALLOW);
+    CHECK(loaded.global_skills.at("deploy") == ursa::SkillPolicy::DENY);
+    CHECK(loaded.project_skills.at("/work/project").at("release")
+        == ursa::SkillPolicy::ASK);
+}
+
+TEST_CASE("config rejects invalid skill policies")
+{
+    const auto path = temp_file("bad-skills.json");
+    { std::ofstream out(path); out << R"({"skills":{"global":{"x":"maybe"}}})"; }
+    ursa::Config cfg;
+    CHECK(ursa::load_config(path, cfg) == ursa::Status::CONFIG_ERROR);
+}

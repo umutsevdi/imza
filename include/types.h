@@ -47,6 +47,8 @@ enum class Status {
 
 enum class ApiStandard { OPENAI, ANTHROPIC };
 
+enum class SkillPolicy { ALLOW, ASK, DENY };
+
 enum class ToolDecision { ACCEPT, ACCEPT_ALWAYS, REJECT };
 
 struct ToolVerdict {
@@ -102,8 +104,19 @@ struct VariantChoice {
     std::string effort;
 };
 
+struct SkillPolicyChange {
+    std::string name;
+    std::string project_root;
+    SkillPolicy policy = SkillPolicy::ASK;
+};
+
+struct SkillPolicyChanges {
+    std::vector<SkillPolicyChange> entries;
+};
+
 using ModalResult = std::variant<std::monostate, ToolVerdict, ModalAnswer,
-    ConnectResult, ModelChoice, VariantChoice, std::filesystem::path>;
+    ConnectResult, ModelChoice, VariantChoice, SkillPolicyChanges,
+    std::filesystem::path>;
 
 struct ModelPricing {
     double input_per_1k  = 0.0;
@@ -130,6 +143,8 @@ struct Config {
     std::vector<Connection> providers;
     std::optional<LastUsed> last_used;
     std::optional<std::string> reasoning_effort;
+    std::map<std::string, SkillPolicy> global_skills;
+    std::map<std::string, std::map<std::string, SkillPolicy>> project_skills;
 };
 
 Status load_config(const std::filesystem::path& path, Config& out,

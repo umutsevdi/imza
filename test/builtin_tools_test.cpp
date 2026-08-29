@@ -192,7 +192,7 @@ TEST_CASE("list rejects non-directories and reports empty output")
 TEST_CASE("builtin tools expose the current tool set")
 {
     const auto tools = ursa::default_tools();
-    REQUIRE(tools.size() == 7);
+    REQUIRE(tools.size() == 8);
 
     const auto* read = find_tool(tools, "read");
     REQUIRE(read != nullptr);
@@ -209,11 +209,16 @@ TEST_CASE("builtin tools expose the current tool set")
     CHECK(ask->safety == ursa::ToolSafety::READ_ONLY);
     CHECK(ask->spec.parameters["properties"].isMember("questions"));
 
+    const auto* skill = find_tool(tools, "skill");
+    REQUIRE(skill != nullptr);
+    CHECK(skill->safety == ursa::ToolSafety::READ_ONLY);
+    CHECK(skill->spec.parameters["properties"].isMember("name"));
+
     REQUIRE(find_tool(tools, "shell") != nullptr);
     REQUIRE(find_tool(tools, "todo") != nullptr);
     REQUIRE(find_tool(tools, "edit") != nullptr);
     REQUIRE(find_tool(tools, "write") != nullptr);
-    CHECK(tool_specs(tools).size() == 7);
+    CHECK(tool_specs(tools).size() == 8);
 }
 
 TEST_CASE("shell tool runs a command and reports the exit code")

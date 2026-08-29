@@ -7,10 +7,13 @@
 #include "util.h"
 
 #include <functional>
+#include <cctype>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <fstream>
+#include <sstream>
 
 namespace ursa {
 
@@ -52,6 +55,26 @@ Controller::Controller(std::shared_ptr<Session> session,
     , tools_(std::move(tools))
     , providers_(std::move(providers))
 {
+    for (Tool& tool : tools_) {
+        if (tool.spec.name != "skill") continue;
+        tool.run = [this](const Json::Value& args) {
+            const auto skill = _resolve_skill(args);
+            if (!skill) return ToolOutput { ToolOutput::Kind::ERROR, "skill: unknown or unavailable skill" };
+            if (_skill_policy(*skill) == SkillPolicy::DENY)
+                return ToolOutput { ToolOutput::Kind::ERROR, "skill: access denied by configuration" };
+            std::ifstream file(skill->path, std::ios::binary);
+            if (!file) return ToolOutput { ToolOutput::Kind::ERROR, "skill: cannot read instructions" };
+            std::ostringstream buffer;
+            buffer << file.rdbuf();
+            std::string content = buffer.str();
+            constexpr std::size_t max_skill_bytes = 128 * 1024;
+            if (content.size() > max_skill_bytes)
+                return ToolOutput { ToolOutput::Kind::ERROR, "skill: instructions exceed 128 KiB" };
+            return ToolOutput { ToolOutput::Kind::OUTPUT,
+                "<skill name=\"" + skill->name + "\" directory=\"" + skill->path.parent_path().string() + "\">\n" + content + "\n</skill>" };
+        };
+        break;
+    }
     specs_plan_ = plan_tool_specs(tools_);
     specs_all_  = tool_specs(tools_);
 
@@ -77,6 +100,34 @@ Controller::Controller(std::shared_ptr<Session> session,
     provider_sub_ = providers_->subscribe(
         [this] { _post([this] { session_->bump_modal_serial(); }); });
     _post([this] { providers_->start_model_fetches(); });
+}
+
+std::optional<Skill> Controller::_resolve_skill(const Json::Value& args) const
+{
+    if (!args.isObject() || !args["name"].isString()) return std::nullopt;
+    const std::string name = args["name"].asString();
+    const std::string scope = args["scope"].isString() ? args["scope"].asString() : "";
+    std::optional<Skill> global;
+    for (const Skill& skill : get_environment()->skills()) {
+        if (skill.name != name) continue;
+        if (scope == "project" && skill.scope != Skill::Scope::PROJECT) continue;
+        if (scope == "global" && skill.scope != Skill::Scope::GLOBAL) continue;
+        if (skill.scope == Skill::Scope::PROJECT) return skill;
+        global = skill;
+    }
+    return global;
+}
+
+SkillPolicy Controller::_skill_policy(const Skill& skill) const
+{
+    const Config config = providers_->config();
+    if (skill.scope == Skill::Scope::GLOBAL) {
+        if (auto it = config.global_skills.find(skill.name); it != config.global_skills.end()) return it->second;
+    } else if (skill.project_root) {
+        if (auto project = config.project_skills.find(skill.project_root->string()); project != config.project_skills.end())
+            if (auto it = project->second.find(skill.name); it != project->second.end()) return it->second;
+    }
+    return SkillPolicy::ASK;
 }
 
 Controller::~Controller()
@@ -134,6 +185,25 @@ SessionsModal Controller::_sessions_modal() const
     return modal;
 }
 
+SkillsModal Controller::_skills_modal() const
+{
+    SkillsModal modal;
+    const Config config = providers_->config();
+    for (const Skill& skill : get_environment()->skills()) {
+        SkillPolicy policy = SkillPolicy::ASK;
+        std::string root;
+        if (skill.scope == Skill::Scope::GLOBAL) {
+            if (auto it = config.global_skills.find(skill.name); it != config.global_skills.end()) policy = it->second;
+        } else if (skill.project_root) {
+            root = skill.project_root->string();
+            if (auto p = config.project_skills.find(root); p != config.project_skills.end())
+                if (auto it = p->second.find(skill.name); it != p->second.end()) policy = it->second;
+        }
+        modal.entries.push_back({ skill.name, skill.description, root, policy });
+    }
+    return modal;
+}
+
 void Controller::delete_saved_session(const std::filesystem::path& path)
 {
     std::error_code ec;
@@ -175,8 +245,140 @@ size_t Controller::queue_size() const
     return queue_.size();
 }
 
+std::pair<SkillCounts, SkillCounts> Controller::skill_counts() const
+{
+    SkillCounts project;
+    SkillCounts global;
+    std::lock_guard lock(loaded_skills_mutex_);
+    for (const Skill& skill : get_environment()->skills()) {
+        SkillCounts& counts = skill.scope == Skill::Scope::PROJECT
+            ? project
+            : global;
+        ++counts.total;
+        if (loaded_skills_.contains(skill.path.string())) {
+            ++counts.active;
+        }
+    }
+    return { project, global };
+}
+
+std::vector<Skill> Controller::available_skills() const
+{
+    std::vector<Skill> out;
+    for (const Skill& skill : get_environment()->skills()) {
+        if (_skill_policy(skill) != SkillPolicy::DENY) out.push_back(skill);
+    }
+    return out;
+}
+
+bool Controller::_validate_skill_mentions(std::string_view text)
+{
+    for (std::size_t pos = 0; pos < text.size();) {
+        pos = text.find('$', pos);
+        if (pos == std::string_view::npos) break;
+        if (pos > 0 && !std::isspace(static_cast<unsigned char>(text[pos - 1]))) {
+            ++pos;
+            continue;
+        }
+        std::size_t end = pos + 1;
+        while (end < text.size()) {
+            const unsigned char c = static_cast<unsigned char>(text[end]);
+            if (!std::isalnum(c) && c != '-' && c != '_') break;
+            ++end;
+        }
+        if (end == pos + 1) {
+            ++pos;
+            continue;
+        }
+        Json::Value args(Json::objectValue);
+        args["name"] = std::string(text.substr(pos + 1, end - pos - 1));
+        const auto skill = _resolve_skill(args);
+        if (!skill) {
+            session_->set_error("unknown skill: " + args["name"].asString());
+            return false;
+        }
+        if (_skill_policy(*skill) == SkillPolicy::DENY) {
+            session_->set_error("skill is denied: " + skill->name);
+            return false;
+        }
+        pos = end;
+    }
+    return true;
+}
+
+std::vector<Skill> Controller::_mentioned_skills(std::string_view text) const
+{
+    std::vector<Skill> out;
+    std::set<std::string> paths;
+    for (std::size_t pos = 0; pos < text.size();) {
+        pos = text.find('$', pos);
+        if (pos == std::string_view::npos) break;
+        if (pos > 0 && !std::isspace(static_cast<unsigned char>(text[pos - 1]))) {
+            ++pos;
+            continue;
+        }
+        std::size_t end = pos + 1;
+        while (end < text.size()) {
+            const unsigned char c = static_cast<unsigned char>(text[end]);
+            if (!std::isalnum(c) && c != '-' && c != '_') break;
+            ++end;
+        }
+        if (end > pos + 1) {
+            Json::Value args(Json::objectValue);
+            args["name"] = std::string(text.substr(pos + 1, end - pos - 1));
+            if (const auto skill = _resolve_skill(args);
+                skill && paths.insert(skill->path.string()).second) {
+                out.push_back(*skill);
+            }
+        }
+        pos = end;
+    }
+    return out;
+}
+
+bool Controller::_load_skill(const Skill& skill)
+{
+    {
+        std::lock_guard lock(loaded_skills_mutex_);
+        if (loaded_skills_.contains(skill.path.string())) return true;
+    }
+    std::ifstream file(skill.path, std::ios::binary);
+    if (!file) {
+        session_->set_error("failed to read skill: " + skill.name);
+        return false;
+    }
+    std::ostringstream buffer;
+    buffer << file.rdbuf();
+    std::string content = buffer.str();
+    constexpr std::size_t max_skill_bytes = 128 * 1024;
+    if (content.size() > max_skill_bytes) {
+        session_->set_error("skill instructions exceed 128 KiB: " + skill.name);
+        return false;
+    }
+    std::lock_guard lock(loaded_skills_mutex_);
+    loaded_skills_.insert(skill.path.string());
+    loaded_skill_contents_[skill.path.string()] = "<skill name=\""
+        + skill.name + "\" directory=\"" + skill.path.parent_path().string()
+        + "\">\n" + content + "\n</skill>";
+    return true;
+}
+
 void Controller::resolve_modal(ModalResult result)
 {
+    bool manual_skill = false;
+    bool manual_accepted = false;
+    const ModalPayload current_modal = session_->modal();
+    if (const auto* request = std::get_if<ToolCallRequest>(&current_modal);
+        request != nullptr && request->id == "manual-skill") {
+        manual_skill = true;
+        const auto* verdict = std::get_if<ToolVerdict>(&result);
+        manual_accepted = verdict != nullptr
+            && verdict->decision != ToolDecision::REJECT;
+        if (manual_accepted && pending_skill_turn_) {
+            manual_accepted = _load_skill(
+                pending_skill_turn_->awaiting[pending_skill_turn_->next]);
+        }
+    }
     if (auto* path = std::get_if<std::filesystem::path>(&result)) {
         if (session_->has_pending_work()) {
             session_->set_error(
@@ -202,6 +404,12 @@ void Controller::resolve_modal(ModalResult result)
         providers_->set_reasoning_effort(variant->effort);
         session_->bump_modal_serial();
     }
+    if (auto* skills = std::get_if<SkillPolicyChanges>(&result)) {
+        if (!providers_->set_skill_policies(*skills)) {
+            session_->set_error("failed to save skill policies");
+            return;
+        }
+    }
     {
         std::lock_guard lock(queue_mutex_);
         if (!queue_.empty()) {
@@ -217,6 +425,29 @@ void Controller::resolve_modal(ModalResult result)
         session_->set_phase(Session::Phase::CONNECTING);
     }
     _present_front();
+    if (!manual_skill) return;
+    if (!manual_accepted || !pending_skill_turn_) {
+        pending_skill_turn_.reset();
+        session_->set_error("skill activation cancelled");
+        return;
+    }
+    ++pending_skill_turn_->next;
+    if (pending_skill_turn_->next < pending_skill_turn_->awaiting.size()) {
+        const Skill& skill
+            = pending_skill_turn_->awaiting[pending_skill_turn_->next];
+        Json::Value args(Json::objectValue);
+        args["name"] = skill.name;
+        args["scope"] = skill.scope == Skill::Scope::PROJECT
+            ? "project"
+            : "global";
+        enqueue_user_modal(ToolCallRequest { "skill", write_json(args),
+            "Load skill " + skill.name, "manual-skill",
+            ToolCallRequest::ApprovalReason::TOOL_PERMISSION });
+        return;
+    }
+    PendingSkillTurn turn = std::move(*pending_skill_turn_);
+    pending_skill_turn_.reset();
+    submit_message(std::move(turn.text), std::move(turn.attachments));
 }
 
 void Controller::_present_front()
@@ -240,10 +471,41 @@ void Controller::submit(
         return;
     }
     if (session_->phase() == Session::Phase::IDLE) {
-        submit_message(std::string(t), std::move(attachments));
+        _submit_with_skills(std::string(t), std::move(attachments));
     } else {
         session_->enqueue_message(std::string(t), std::move(attachments));
     }
+}
+
+void Controller::_submit_with_skills(
+    std::string text, std::vector<FileAttachment> attachments)
+{
+    if (!_validate_skill_mentions(text)) return;
+    std::vector<Skill> awaiting;
+    for (const Skill& skill : _mentioned_skills(text)) {
+        {
+            std::lock_guard lock(loaded_skills_mutex_);
+            if (loaded_skills_.contains(skill.path.string())) continue;
+        }
+        if (_skill_policy(skill) == SkillPolicy::ALLOW) {
+            if (!_load_skill(skill)) return;
+        } else {
+            awaiting.push_back(skill);
+        }
+    }
+    if (awaiting.empty()) {
+        submit_message(std::move(text), std::move(attachments));
+        return;
+    }
+    pending_skill_turn_ = PendingSkillTurn { std::move(text),
+        std::move(attachments), std::move(awaiting), 0 };
+    const Skill& skill = pending_skill_turn_->awaiting.front();
+    Json::Value args(Json::objectValue);
+    args["name"] = skill.name;
+    args["scope"] = skill.scope == Skill::Scope::PROJECT ? "project" : "global";
+    enqueue_user_modal(ToolCallRequest { "skill", write_json(args),
+        "Load skill " + skill.name, "manual-skill",
+        ToolCallRequest::ApprovalReason::TOOL_PERMISSION });
 }
 
 void Controller::submit_message(
@@ -288,7 +550,14 @@ void Controller::submit_message(
 std::string Controller::_system_prompt() const
 {
     const std::shared_ptr<Environment> env = get_environment();
-    return build_system_prompt(env->system().get(), env->workspace().get());
+    const Config config = providers_->config();
+    std::string prompt = build_system_prompt(
+        env->system().get(), env->workspace().get(), &config);
+    std::lock_guard lock(loaded_skills_mutex_);
+    for (const auto& [path, content] : loaded_skill_contents_) {
+        prompt += "\n\n" + content;
+    }
+    return prompt;
 }
 
 bool Controller::_model_reasons(const std::string& model) const

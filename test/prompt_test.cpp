@@ -66,6 +66,23 @@ TEST_CASE("system prompt omits the instructions block when absent")
     CHECK(prompt.find("<instructions") == std::string::npos);
 }
 
+TEST_CASE("system prompt advertises active skills and hides denied skills")
+{
+    SystemEnvironment sys;
+    sys.global_skills.clear();
+    sys.global_skills.emplace("docs", Skill { "docs", "Write documentation",
+        "/tmp/docs/SKILL.md", Skill::Scope::GLOBAL, std::nullopt });
+    sys.global_skills.emplace("secret", Skill { "secret", "Hidden",
+        "/tmp/secret/SKILL.md", Skill::Scope::GLOBAL, std::nullopt });
+    Config config;
+    config.global_skills["docs"] = SkillPolicy::ALLOW;
+    config.global_skills["secret"] = SkillPolicy::DENY;
+    const std::string prompt = build_system_prompt(&sys, nullptr, &config);
+    CHECK(prompt.find("docs [global]: Write documentation") != std::string::npos);
+    CHECK(prompt.find("secret [global]") == std::string::npos);
+    CHECK(prompt.find("`skill` tool") != std::string::npos);
+}
+
 TEST_CASE("mode reminders carry unique detectable tags")
 {
     const std::string_view plan = plan_mode_reminder();

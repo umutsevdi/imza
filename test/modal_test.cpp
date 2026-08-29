@@ -443,7 +443,8 @@ TEST_CASE("FIFO order preserved and queue_size counts overlays")
     REQUIRE(env.pump.wait_for(
         [&] { return showing_question(env.controller.session()); }));
 
-    env.controller.enqueue_user_modal(ursa::HelpModal { });
+    env.controller.enqueue_user_modal(
+        ursa::ViewerModal { "Queued", "content" });
     env.pump.pump();
     CHECK(env.controller.queue_size() == 3);
 
@@ -455,7 +456,7 @@ TEST_CASE("FIFO order preserved and queue_size counts overlays")
 
     env.controller.close_modal();
     REQUIRE(env.pump.wait_for([&] {
-        return std::holds_alternative<ursa::HelpModal>(
+        return std::holds_alternative<ursa::ViewerModal>(
             env.controller.session().modal());
     }));
     CHECK(env.controller.queue_size() == 1);

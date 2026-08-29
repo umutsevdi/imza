@@ -69,6 +69,25 @@ namespace {
         return standard == ApiStandard::ANTHROPIC ? "anthropic" : "openai";
     }
 
+    bool parse_skill_policy(const std::string& text, SkillPolicy& out)
+    {
+        if (text == "allow") out = SkillPolicy::ALLOW;
+        else if (text == "ask") out = SkillPolicy::ASK;
+        else if (text == "deny") out = SkillPolicy::DENY;
+        else return false;
+        return true;
+    }
+
+    const char* skill_policy_str(SkillPolicy policy)
+    {
+        switch (policy) {
+        case SkillPolicy::ALLOW: return "allow";
+        case SkillPolicy::ASK: return "ask";
+        case SkillPolicy::DENY: return "deny";
+        }
+        return "ask";
+    }
+
 } // namespace
 
 Status load_config(const std::filesystem::path& path, Config& out,
@@ -171,6 +190,31 @@ Status load_config(const std::filesystem::path& path, Config& out,
         out.reasoning_effort = effort.asString();
     }
 
+    const Json::Value& skills = root["skills"];
+    if (!skills.isNull()) {
+        if (!skills.isObject()) return fail(Status::CONFIG_ERROR, "'skills' must be an object");
+        auto parse_map = [&](const Json::Value& value, auto& target) -> bool {
+            if (!value.isObject()) return false;
+            for (const auto& name : value.getMemberNames()) {
+                SkillPolicy policy;
+                if (!value[name].isString() || !parse_skill_policy(value[name].asString(), policy)) return false;
+                target[name] = policy;
+            }
+            return true;
+        };
+        if (skills.isMember("global") && !parse_map(skills["global"], out.global_skills))
+            return fail(Status::CONFIG_ERROR, "invalid global skill policy");
+        const Json::Value& projects = skills["projects"];
+        if (!projects.isNull()) {
+            if (!projects.isObject()) return fail(Status::CONFIG_ERROR, "'skills.projects' must be an object");
+            for (const auto& project_path : projects.getMemberNames()) {
+                if (!parse_map(projects[project_path],
+                        out.project_skills[project_path]))
+                    return fail(Status::CONFIG_ERROR, "invalid project skill policy");
+            }
+        }
+    }
+
     return Status::OK;
 }
 
@@ -208,6 +252,20 @@ Status save_config(const std::filesystem::path& path, const Config& cfg)
     if (cfg.reasoning_effort && !cfg.reasoning_effort->empty()) {
         root["reasoning_effort"] = *cfg.reasoning_effort;
     }
+
+
+    Json::Value skills(Json::objectValue);
+    Json::Value global(Json::objectValue);
+    for (const auto& [name, policy] : cfg.global_skills) global[name] = skill_policy_str(policy);
+    skills["global"] = global;
+    Json::Value projects(Json::objectValue);
+    for (const auto& [project_path, policies] : cfg.project_skills) {
+        Json::Value entry(Json::objectValue);
+        for (const auto& [name, policy] : policies) entry[name] = skill_policy_str(policy);
+        projects[project_path] = entry;
+    }
+    skills["projects"] = projects;
+    root["skills"] = skills;
 
     const std::filesystem::path parent = path.parent_path();
     std::error_code ec;

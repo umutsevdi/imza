@@ -91,8 +91,6 @@ struct ConnectModal {
     Entry entry = Entry::MANAGE;
 };
 
-struct HelpModal { };
-
 struct ViewerModal {
     std::string title;
     std::string content;
@@ -113,8 +111,19 @@ struct SessionsModal {
     std::vector<std::string> paths;
 };
 
-using ModalPayload = std::variant<std::monostate, HelpModal, ViewerModal,
-    ToolCallRequest, QuestionForm, ConnectModal, VariantModal, SessionsModal>;
+struct SkillsModal {
+    struct Entry {
+        std::string name;
+        std::string description;
+        std::string project_root;
+        SkillPolicy policy = SkillPolicy::ASK;
+    };
+    std::vector<Entry> entries;
+};
+
+using ModalPayload = std::variant<std::monostate, ViewerModal,
+    ToolCallRequest, QuestionForm, ConnectModal, VariantModal, SessionsModal,
+    SkillsModal>;
 
 struct QueuedMessage {
     std::size_t id;

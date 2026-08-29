@@ -1,6 +1,7 @@
 #include "ui.h"
 #include "util.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/event.hpp>
@@ -12,6 +13,28 @@
 #include <vector>
 
 namespace ursa {
+
+std::string fit(const std::string& value, int width)
+{
+    const std::size_t max = static_cast<std::size_t>(std::max(width, 0));
+    std::string out;
+    std::size_t seen = 0;
+    std::size_t i    = 0;
+    while (i < value.size() && seen < max) {
+        const auto lead = static_cast<unsigned char>(value[i]);
+        std::size_t length = 1;
+        if ((lead & 0xE0) == 0xC0) length = 2;
+        else if ((lead & 0xF0) == 0xE0) length = 3;
+        else if ((lead & 0xF8) == 0xF0) length = 4;
+        length = std::min(length, value.size() - i);
+        if (seen + 1 == max && i + length < value.size()) return out + "…";
+        out.append(value, i, length);
+        ++seen;
+        i += length;
+    }
+    out.append(max - seen, ' ');
+    return out;
+}
 
 LayoutCtx layout_context(int width)
 {

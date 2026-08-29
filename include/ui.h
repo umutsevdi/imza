@@ -28,6 +28,8 @@ inline const ftxui::Color PANEL_COLOR_FOCUS = ftxui::Color::RGB(44, 56, 84);
 
 inline constexpr int MODAL_MAX_WIDTH = 100;
 
+std::string fit(const std::string& text, int width);
+
 ftxui::Element panel(ftxui::Element e);
 
 LayoutCtx layout_context(int width);
@@ -61,17 +63,18 @@ ftxui::Element render_todo(const TodoList& todo, const LayoutCtx& ctx);
 ftxui::Element render_changed_files(
     const std::vector<ChangedFile>& files, const LayoutCtx& ctx);
 ftxui::Element render_context_box(const std::optional<std::string>& rules,
+    const std::vector<std::string>& attachments, SkillCounts project_skills,
+    SkillCounts global_skills);
+ftxui::Element render_context_box(const std::optional<std::string>& rules,
     const std::vector<std::string>& attachments, int project_skills,
     int global_skills);
-ftxui::Element render_help(std::span<const SlashCommand> commands);
-
 int run_repl(const Config& cfg);
 void print_session_saved_box();
 
 ftxui::Component make_chat(
     std::shared_ptr<Session> session, Controller& controller, LayoutFn layout);
 ftxui::Component make_side_panel(
-    std::shared_ptr<Session> session, LayoutFn layout);
+    std::shared_ptr<Session> session, Controller& controller, LayoutFn layout);
 ftxui::Component make_status_line(std::shared_ptr<Session> session,
     ProviderStore& providers, LayoutFn layout);
 ftxui::Component make_connect(std::shared_ptr<Session> session,
@@ -79,6 +82,8 @@ ftxui::Component make_connect(std::shared_ptr<Session> session,
 ftxui::Component make_variant(
     std::shared_ptr<Session> session, Controller& controller);
 ftxui::Component make_sessions(
+    std::shared_ptr<Session> session, Controller& controller);
+ftxui::Component make_skills(
     std::shared_ptr<Session> session, Controller& controller);
 ftxui::Component make_modal(std::shared_ptr<Session> session,
     Controller& controller, ProviderStore& providers);

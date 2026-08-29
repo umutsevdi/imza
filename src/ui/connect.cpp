@@ -42,39 +42,6 @@ namespace {
         return "••••••" + key.substr(key.size() - 4);
     }
 
-    std::size_t utf8_step(const std::string& text, std::size_t i)
-    {
-        const auto lead = static_cast<unsigned char>(text[i]);
-        std::size_t len = 1;
-        if ((lead & 0xE0) == 0xC0) {
-            len = 2;
-        } else if ((lead & 0xF0) == 0xE0) {
-            len = 3;
-        } else if ((lead & 0xF8) == 0xF0) {
-            len = 4;
-        }
-        return std::min(len, text.size() - i);
-    }
-
-    std::string fit(const std::string& text, int width)
-    {
-        const std::size_t max = static_cast<std::size_t>(width);
-        std::string out;
-        std::size_t seen = 0;
-        std::size_t i    = 0;
-        while (i < text.size()) {
-            const std::size_t len = utf8_step(text, i);
-            if (seen + 1 == max && i + len < text.size()) {
-                return out + "…";
-            }
-            out.append(text, i, len);
-            ++seen;
-            i += len;
-        }
-        out.append(max - seen, ' ');
-        return out;
-    }
-
     std::string compact(std::uint64_t n)
     {
         if (n >= 1'000'000) {
@@ -829,8 +796,7 @@ namespace {
 
         Element render_pick()
         {
-            Elements rows { hbox(
-                { text("Models") | bold, text("  —  all providers") | dim }) };
+            Elements rows { text("Models") | bold };
             rows.push_back(separatorEmpty());
             rows.push_back(pick_filter_->Render() | xflex);
 

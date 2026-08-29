@@ -289,8 +289,6 @@ namespace {
                         return tool_body(payload);
                     } else if constexpr (std::is_same_v<T, QuestionForm>) {
                         return question_body();
-                    } else if constexpr (std::is_same_v<T, HelpModal>) {
-                        return help_body();
                     } else if constexpr (std::is_same_v<T, ViewerModal>) {
                         return viewer_body(payload);
                     } else if constexpr (std::is_same_v<T, ConnectModal>) {
@@ -299,6 +297,8 @@ namespace {
                         return variant_->Render();
                     } else if constexpr (std::is_same_v<T, SessionsModal>) {
                         return sessions_->Render();
+                    } else if constexpr (std::is_same_v<T, SkillsModal>) {
+                        return skills_->Render();
                     }
                     return text("");
                 },
@@ -332,13 +332,7 @@ namespace {
                 controller_.close_modal();
                 return true;
             }
-            if (std::holds_alternative<HelpModal>(st.modal())) {
-                if (event == Event::Return) {
-                    controller_.close_modal();
-                    return true;
-                }
-                return scroll_static(event);
-            } else if (std::holds_alternative<ViewerModal>(st.modal())) {
+            if (std::holds_alternative<ViewerModal>(st.modal())) {
                 if (event == Event::Return) {
                     controller_.close_modal();
                     return true;
@@ -498,7 +492,11 @@ namespace {
             body_     = sessions_;
         }
 
-        void build(const HelpModal&) { reset_static_scroll(); }
+        void build(const SkillsModal&)
+        {
+            skills_ = make_skills(session_, controller_);
+            body_   = skills_;
+        }
 
         void build(const ViewerModal&) { reset_static_scroll(); }
 
@@ -634,11 +632,6 @@ namespace {
             return vbox(std::move(rows)) | xflex;
         }
 
-        Element help_body()
-        {
-            return static_viewport(render_help(controller_.commands()), { });
-        }
-
         Element viewer_body(const ViewerModal& payload)
         {
             Element body;
@@ -771,6 +764,7 @@ namespace {
         Component connect_;
         Component variant_;
         Component sessions_;
+        Component skills_;
 
         Component body_;
     };
@@ -782,22 +776,6 @@ ftxui::Component make_modal(
     ProviderStore& providers)
 {
     return ftxui::Make<ModalImpl>(std::move(session), controller, providers);
-}
-
-ftxui::Element render_help(std::span<const SlashCommand> commands)
-{
-    Elements rows;
-    for (const auto& c : commands) {
-        rows.push_back(hbox({
-            text(std::string(c.name)) | bold | color(PANEL_FG),
-            text("   "),
-            text(std::string(c.desc)) | dim | color(PANEL_FG_DIM),
-        }));
-    }
-    return vbox({
-        section_title("Commands"),
-        vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER),
-    });
 }
 
 namespace {
@@ -823,7 +801,8 @@ namespace {
         Element OnRender() override
         {
             Elements rows;
-            rows.push_back(section_title("Reasoning effort", Color::GrayLight));
+            rows.push_back(text("Reasoning effort") | bold);
+            rows.push_back(separatorEmpty());
             for (int i = 0; i < static_cast<int>(options_.size()); ++i) {
                 Element label = text(options_[static_cast<std::size_t>(i)]);
                 if (i == cursor_) {
@@ -841,8 +820,7 @@ namespace {
             rows.push_back(separatorEmpty());
             rows.push_back(text("arrows navigate · Enter select · Esc close")
                 | dim | center);
-            return vbox({ separatorEmpty(), vbox(std::move(rows)),
-                       separatorEmpty() })
+            return vbox({ vbox(std::move(rows)), separatorEmpty() })
                 | xflex;
         }
 
@@ -908,7 +886,7 @@ namespace {
 
         Element OnRender() override
         {
-            Elements rows { section_title("Sessions", Color::GrayLight) };
+            Elements rows { text("Sessions") | bold, separatorEmpty() };
             const bool loading_blocked = session_->has_pending_work();
             if (titles_.empty()) {
                 rows.push_back(text("No saved sessions") | dim);
@@ -941,8 +919,7 @@ namespace {
                             : "↑↓ rows · Enter load · d delete · Esc close")
                         | dim }));
             }
-            return vbox({ separatorEmpty(), vbox(std::move(rows)),
-                       separatorEmpty() })
+            return vbox({ vbox(std::move(rows)), separatorEmpty() })
                 | xflex;
         }
 
@@ -1005,6 +982,95 @@ ftxui::Component make_sessions(
     std::shared_ptr<Session> session, Controller& controller)
 {
     return ftxui::Make<SessionsImpl>(std::move(session), controller);
+}
+
+namespace {
+
+    class SkillsImpl : public ComponentBase {
+    public:
+        SkillsImpl(std::shared_ptr<Session> session, Controller& controller)
+            : session_(std::move(session)), controller_(controller)
+        {
+            entries_ = std::get<SkillsModal>(session_->modal()).entries;
+        }
+
+        Element OnRender() override
+        {
+            Elements rows { text("Skills") | bold, separatorEmpty() };
+            if (entries_.empty()) rows.push_back(text("No skills discovered") | dim);
+            std::string previous_scope;
+            for (int i = 0; i < static_cast<int>(entries_.size()); ++i) {
+                const auto& entry = entries_[i];
+                const std::string scope = entry.project_root.empty() ? "Global" : "Project";
+                if (scope != previous_scope) {
+                    rows.push_back(section_title(scope + " skills"));
+                    previous_scope = scope;
+                }
+                const auto choice = [&entry](SkillPolicy policy,
+                                        std::string label) {
+                    const bool selected = entry.policy == policy;
+                    Element value = text((selected ? "◉ " : "○ ")
+                        + std::move(label));
+                    return selected
+                        ? std::move(value) | bold | color(PANEL_FG)
+                        : std::move(value) | color(PANEL_FG_DIM);
+                };
+                Elements content {
+                    hbox({ text(entry.name) | bold, filler(),
+                        choice(SkillPolicy::ALLOW, "Allow"), text("  "),
+                        choice(SkillPolicy::ASK, "Ask"), text("  "),
+                        choice(SkillPolicy::DENY, "Deny") }),
+                };
+                if (!entry.description.empty()) {
+                    content.push_back(text(fit(entry.description, 76))
+                        | color(PANEL_FG_DIM));
+                }
+                Element row = vbox(std::move(content));
+                if (i == cursor_) {
+                    row = std::move(row) | bgcolor(PANEL_COLOR_FOCUS) | focus;
+                }
+                rows.push_back(std::move(row));
+            }
+            rows.push_back(separatorEmpty());
+            rows.push_back(hbox({ filler(), text("↑↓ rows · ←→ policy · Enter save · Esc close") | dim }));
+            return vbox({ vbox(std::move(rows)) | vscroll_indicator | frame,
+                       separatorEmpty() })
+                | xflex;
+        }
+
+        bool OnEvent(Event event) override
+        {
+            if (event == Event::Escape) { controller_.close_modal(); return true; }
+            if (event == Event::ArrowDown && cursor_ + 1 < static_cast<int>(entries_.size())) { ++cursor_; return true; }
+            if (event == Event::ArrowUp && cursor_ > 0) { --cursor_; return true; }
+            if (!entries_.empty() && (event == Event::ArrowLeft || event == Event::ArrowRight || event == Event::Character(' '))) {
+                int value = static_cast<int>(entries_[cursor_].policy);
+                value = event == Event::ArrowLeft ? (value + 2) % 3 : (value + 1) % 3;
+                entries_[cursor_].policy = static_cast<SkillPolicy>(value);
+                return true;
+            }
+            if (event == Event::Return) {
+                SkillPolicyChanges changes;
+                for (const auto& entry : entries_) changes.entries.push_back({ entry.name, entry.project_root, entry.policy });
+                controller_.resolve_modal(ModalResult { std::move(changes) });
+                return true;
+            }
+            return false;
+        }
+
+    private:
+        std::shared_ptr<Session> session_;
+        Controller& controller_;
+        std::vector<SkillsModal::Entry> entries_;
+        int cursor_ = 0;
+    };
+
+}
+
+ftxui::Component make_skills(
+    std::shared_ptr<Session> session, Controller& controller)
+{
+    return ftxui::Make<SkillsImpl>(std::move(session), controller);
 }
 
 } // namespace ursa

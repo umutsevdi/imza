@@ -14,8 +14,10 @@ namespace ursa {
 using namespace ftxui;
 class SidePanel : public ComponentBase {
 public:
-    SidePanel(std::shared_ptr<Session> session, LayoutFn layout)
+    SidePanel(std::shared_ptr<Session> session, Controller& controller,
+        LayoutFn layout)
         : session_(std::move(session))
+        , controller_(controller)
         , layout_(std::move(layout))
         , workspace_subscription_(
               get_environment()->subscribe_to_workspace_change(
@@ -42,25 +44,25 @@ public:
         parts.push_back(paragraph(title.empty() ? "New Session" : title) | bold
             | color(PANEL_FG));
         parts.push_back(separator());
-        if (session_->todo().items.size()) {
-            parts.push_back(render_todo(session_->todo(), ctx) | yflex);
-        }
-
+        auto env = get_environment();
         if (!narrow) {
             if (attachments_dirty_.exchange(false)) {
                 attachment_names_ = session_->attachment_names();
             }
-            auto env              = get_environment();
+            const auto [project, global] = controller_.skill_counts();
+            parts.push_back(render_context_box(
+                env->agent_rules_path(), attachment_names_, project, global));
+        }
+        if (session_->todo().items.size()) {
+            parts.push_back(render_todo(session_->todo(), ctx) | yflex);
+        }
+        if (!narrow) {
             const auto repository = env->repository();
             if (repository && !repository->changed_files.empty()) {
                 parts.push_back(
                     render_changed_files(repository->changed_files, ctx)
                     | yflex);
             };
-            parts.push_back(render_context_box(env->agent_rules_path(),
-                attachment_names_,
-                static_cast<int>(env->project_skills()),
-                static_cast<int>(env->global_skills())));
         }
         Element body = vbox(std::move(parts));
         if (narrow) {
@@ -71,6 +73,7 @@ public:
 
 private:
     std::shared_ptr<Session> session_;
+    Controller& controller_;
     LayoutFn layout_;
     Signal<>::Subscription workspace_subscription_;
     Signal<>::Subscription repository_subscription_;
@@ -81,9 +84,10 @@ private:
 };
 
 ftxui::Component make_side_panel(
-    std::shared_ptr<Session> session, LayoutFn layout)
+    std::shared_ptr<Session> session, Controller& controller, LayoutFn layout)
 {
-    return ftxui::Make<SidePanel>(std::move(session), std::move(layout));
+    return ftxui::Make<SidePanel>(
+        std::move(session), controller, std::move(layout));
 }
 
 namespace {
@@ -172,8 +176,8 @@ Element render_changed_files(
 }
 
 Element render_context_box(const std::optional<std::string>& rules,
-    const std::vector<std::string>& attachments, int project_skills,
-    int global_skills)
+    const std::vector<std::string>& attachments, SkillCounts project_skills,
+    SkillCounts global_skills)
 {
     Elements context_box;
     if (rules || !attachments.empty()) {
@@ -189,16 +193,20 @@ Element render_context_box(const std::optional<std::string>& rules,
             vbox(std::move(files)),
         }));
     }
-    if (project_skills > 0) {
+    if (project_skills.total > 0) {
         context_box.push_back(hbox({
             text("Project Skills") | bold | color(PANEL_FG) | xflex,
-            text(std::format("{}", project_skills)) | color(PANEL_FG) | dim,
+            text(std::format(
+                "{}/{}", project_skills.active, project_skills.total))
+                | color(PANEL_FG) | dim,
         }));
     }
-    if (global_skills > 0) {
+    if (global_skills.total > 0) {
         context_box.push_back(hbox({
             text("Global Skills") | bold | color(PANEL_FG) | xflex,
-            text(std::format("{}", global_skills)) | color(PANEL_FG) | dim,
+            text(
+                std::format("{}/{}", global_skills.active, global_skills.total))
+                | color(PANEL_FG) | dim,
         }));
     }
     if (!context_box.empty()) {
@@ -207,6 +215,17 @@ Element render_context_box(const std::optional<std::string>& rules,
         return vbox({ section_title("Context"), std::move(body) });
     }
     return vbox();
+}
+
+Element render_context_box(const std::optional<std::string>& rules,
+    const std::vector<std::string>& attachments, int project_skills,
+    int global_skills)
+{
+    return render_context_box(rules, attachments,
+        SkillCounts { static_cast<std::size_t>(project_skills),
+            static_cast<std::size_t>(project_skills) },
+        SkillCounts { static_cast<std::size_t>(global_skills),
+            static_cast<std::size_t>(global_skills) });
 }
 
 } // namespace ursa

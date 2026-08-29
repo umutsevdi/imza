@@ -87,6 +87,7 @@ public:
     bool remove_connection(std::string_view connection_id);
     bool select_model(const ModelChoice& choice);
     bool set_reasoning_effort(std::string effort);
+    bool set_skill_policies(const SkillPolicyChanges& changes);
     void remember_dialect(std::string_view connection_id,
         std::string_view model, ApiStandard dialect);
     void ensure_catalog_fresh();

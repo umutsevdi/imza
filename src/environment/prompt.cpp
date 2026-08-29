@@ -3,6 +3,7 @@
 #include "util.h"
 
 #include <filesystem>
+#include <algorithm>
 #include <string_view>
 #include <vector>
 
@@ -94,7 +95,8 @@ namespace {
 } // namespace
 
 std::string build_system_prompt(
-    const SystemEnvironment* sys, const WorkspaceEnvironment* ws)
+    const SystemEnvironment* sys, const WorkspaceEnvironment* ws,
+    const Config* config)
 {
     std::string out(BASE_PROMPT);
     if (sys != nullptr) {
@@ -103,6 +105,34 @@ std::string build_system_prompt(
         if (ws != nullptr && ws->instruction) {
             out += "\n\n";
             out += instructions_block(*ws->instruction);
+        }
+        std::vector<Skill> skills;
+        for (const auto& [name, skill] : sys->global_skills) skills.push_back(skill);
+        if (ws != nullptr) for (const auto& [name, skill] : ws->project_skills) skills.push_back(skill);
+        std::sort(skills.begin(), skills.end(), [](const Skill& a, const Skill& b) {
+            if (a.scope != b.scope) return a.scope == Skill::Scope::PROJECT;
+            return a.name < b.name;
+        });
+        std::string catalog;
+        for (const Skill& skill : skills) {
+            SkillPolicy policy = SkillPolicy::ASK;
+            if (config != nullptr) {
+                if (skill.scope == Skill::Scope::GLOBAL) {
+                    if (auto it = config->global_skills.find(skill.name); it != config->global_skills.end()) policy = it->second;
+                } else if (skill.project_root) {
+                    auto project = config->project_skills.find(skill.project_root->string());
+                    if (project != config->project_skills.end())
+                        if (auto it = project->second.find(skill.name); it != project->second.end()) policy = it->second;
+                }
+            }
+            if (policy == SkillPolicy::DENY) continue;
+            catalog += "\n- ";
+            catalog += skill.name + " [" + (skill.scope == Skill::Scope::PROJECT ? "project" : "global") + "]";
+            if (!skill.description.empty()) catalog += ": " + skill.description;
+        }
+        if (!catalog.empty()) {
+            out += "\n\n# Available skills\nCall the `skill` tool to load a relevant skill when it was not explicitly mentioned. Ursa loads `$skill-name` mentions before the request; use the enclosed skill instructions directly and do not load the same skill again. Project skills take precedence over global skills with the same name.";
+            out += catalog;
         }
     }
     return out;

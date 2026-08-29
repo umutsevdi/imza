@@ -69,6 +69,7 @@ std::vector<Tool> default_tools()
 {
     std::vector<Tool> tools;
     tools.push_back(make_read_tool());
+    tools.push_back(make_skill_tool());
     tools.push_back(make_list_tool());
     tools.push_back(make_ask_tool());
     tools.push_back(make_shell_tool());
@@ -709,6 +710,15 @@ Tool make_read_tool()
     spec.parameters  = parse_json(
         R"json({"type":"object","properties":{"path":{"type":"string","description":"file path to read"},"line_begin":{"type":"integer","description":"first line to return (1-based, inclusive)"},"line_end":{"type":"integer","description":"last line to return (1-based, inclusive)"}},"required":["path"]})json");
     return { std::move(spec), read_run, ToolSafety::READ_ONLY };
+}
+
+Tool make_skill_tool()
+{
+    ToolSpec spec;
+    spec.name = "skill";
+    spec.description = "Load the instructions for a discovered skill by name. Optionally specify scope as project or global.";
+    spec.parameters = parse_json(R"json({"type":"object","properties":{"name":{"type":"string"},"scope":{"type":"string","enum":["project","global"]}},"required":["name"]})json");
+    return { std::move(spec), { }, ToolSafety::READ_ONLY, false, true };
 }
 
 Tool make_list_tool()

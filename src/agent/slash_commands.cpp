@@ -1,6 +1,7 @@
 #include "slash_commands.h"
 
 #include "controller.h"
+#include "session_store.h"
 #include "util.h"
 
 #include <string>
@@ -11,7 +12,8 @@ namespace ursa {
 std::span<const SlashCommand> slash_commands()
 {
     static constexpr SlashCommand commands[] = {
-        { "/help", "show available commands", SlashCommand::Action::HELP },
+        { "/new", "save this session and start a new one",
+            SlashCommand::Action::NEW },
         { "/exit", "quit ursa", SlashCommand::Action::EXIT },
         { "/connect", "manage provider connections",
             SlashCommand::Action::CONNECT },
@@ -19,6 +21,7 @@ std::span<const SlashCommand> slash_commands()
         { "/variant", "pick reasoning effort", SlashCommand::Action::VARIANT },
         { "/sessions", "load or delete saved sessions",
             SlashCommand::Action::SESSIONS },
+        { "/skills", "manage discovered skills", SlashCommand::Action::SKILLS },
         { "/prompt", "show the generated system prompt",
             SlashCommand::Action::SYSTEM_PROMPT },
     };
@@ -45,7 +48,7 @@ void Controller::run_slash(std::string_view cmd)
     }
     switch (found->action) {
     case SlashCommand::Action::EXIT: on_exit_(); break;
-    case SlashCommand::Action::HELP: enqueue_user_modal(HelpModal { }); break;
+    case SlashCommand::Action::NEW: _new_session(); break;
     case SlashCommand::Action::CONNECT:
         enqueue_user_modal(ConnectModal { ConnectModal::Entry::MANAGE });
         break;
@@ -69,11 +72,39 @@ void Controller::run_slash(std::string_view cmd)
     case SlashCommand::Action::SESSIONS:
         enqueue_user_modal(_sessions_modal());
         break;
+    case SlashCommand::Action::SKILLS:
+        enqueue_user_modal(_skills_modal());
+        break;
     case SlashCommand::Action::SYSTEM_PROMPT:
         enqueue_user_modal(ViewerModal {
             "System prompt", _system_prompt(), "text", 1, false });
         break;
     }
+}
+
+void Controller::_new_session()
+{
+    if (session_->has_pending_work()) {
+        session_->set_error("finish or interrupt pending work before starting a new session");
+        return;
+    }
+    if (save_session(*session_) != Status::OK) {
+        session_->set_error("failed to save current session");
+        return;
+    }
+    {
+        std::lock_guard lock(queue_mutex_);
+        queue_.clear();
+    }
+    {
+        std::lock_guard lock(loaded_skills_mutex_);
+        loaded_skills_.clear();
+        loaded_skill_contents_.clear();
+    }
+    allowed_tools_.clear();
+    pending_skill_turn_.reset();
+    stream_events_.clear();
+    session_->restore(SessionSnapshot { });
 }
 
 } // namespace ursa

@@ -95,6 +95,11 @@ TEST_CASE("tool_call_head shows the file path for read, args otherwise")
 
     ursa::ToolCall todo_bad { 1, "", "todo", "not json", { } };
     CHECK(ursa::tool_call_head(todo_bad) == "Todo");
+
+    ursa::ToolCall skill { 1, "", "skill",
+        R"({"name":"code-review","scope":"project"})", { } };
+    CHECK(ursa::tool_call_head(skill) == "Load Skill code-review");
+    CHECK(ursa::tool_header_args(skill) == "code-review");
 }
 
 TEST_CASE("ask_answer_markdown numbers questions and blockquotes answers")

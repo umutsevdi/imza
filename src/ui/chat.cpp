@@ -77,6 +77,34 @@ namespace {
         };
     }
 
+    Decorator block_cursor()
+    {
+        class Impl : public Node {
+        public:
+            explicit Impl(Element child)
+                : Node(Elements { std::move(child) })
+            {
+            }
+
+            void ComputeRequirement() override
+            {
+                Node::ComputeRequirement();
+                requirement_ = children_[0]->requirement();
+                requirement_.focused.cursor_shape
+                    = Screen::Cursor::BlockBlinking;
+            }
+
+            void SetBox(Box box) override
+            {
+                Node::SetBox(box);
+                children_[0]->SetBox(box);
+            }
+        };
+        return [](Element child) {
+            return std::make_shared<Impl>(std::move(child));
+        };
+    }
+
     Element error_element(const Session& st)
     {
         std::string msg = st.error();
@@ -163,7 +191,7 @@ namespace {
                 if (state.is_placeholder) {
                     state.element |= dim;
                 }
-                state.element |= bgcolor(PANEL_COLOR);
+                state.element |= bgcolor(PANEL_COLOR) | block_cursor();
                 return state.element;
             };
             input_     = ftxui::Input(input_options_);
@@ -177,9 +205,9 @@ namespace {
             const Session& st   = *session_;
             const LayoutCtx ctx = layout_();
 
-            const bool streaming  = st.phase() == Session::Phase::STREAMING;
-            const bool connecting = st.phase() == Session::Phase::CONNECTING;
-            const bool busy       = streaming || connecting;
+            const bool streaming     = st.phase() == Session::Phase::STREAMING;
+            const bool connecting    = st.phase() == Session::Phase::CONNECTING;
+            const bool busy          = streaming || connecting;
             const bool shell_running = busy
                 && std::any_of(st.items().begin(), st.items().end(),
                     [](const ConversationItem& item) {
@@ -209,7 +237,7 @@ namespace {
                 item_cache_.clear();
                 item_cache_.resize(st.items().size());
                 item_versions_.assign(st.items().size(), kInvalidVersion);
-                cache_kind_ = ctx.kind;
+                cache_kind_     = ctx.kind;
                 content_serial_ = content_serial;
             }
             std::size_t item_index = 0;
@@ -223,9 +251,8 @@ namespace {
                         || std::holds_alternative<UserTurn>(
                             st.items()[item_index + 1]));
                 std::size_t eff_version = version;
-                if (const auto* tc = std::get_if<ToolCall>(&it);
-                    tc != nullptr && tc->name == "shell"
-                    && !tc->result.has_value()) {
+                if (const auto* tc = std::get_if<ToolCall>(&it); tc != nullptr
+                    && tc->name == "shell" && !tc->result.has_value()) {
                     eff_version = static_cast<std::size_t>(frame_);
                 }
                 if (final_segment) {
@@ -258,6 +285,9 @@ namespace {
                                 if (tc.name == "read") {
                                     item_cache_[item_index]
                                         = render_read_item(tc);
+                                } else if (tc.name == "skill") {
+                                    item_cache_[item_index]
+                                        = render_skill_item(tc);
                                 } else if (tc.name == "list") {
                                     item_cache_[item_index]
                                         = render_list_collapsed(tc);
@@ -374,25 +404,23 @@ namespace {
 
             Elements bottom;
             bottom.push_back(
-                hbox({
-                    filler(),
-                    text("↑/↓ scroll · click a card to open in viewer")
-                        | color(PANEL_FG_DIM),
-                    text(" "),
-                })
-                | xflex);
-            bottom.push_back(
-                hbox({
-                    filler(),
-                    text("Tab switch mode · @ attach file · Alt+Enter add line")
-                        | color(PANEL_FG_DIM),
-                    text(" "),
+                vbox({
+                    hbox({
+                        filler(),
+                        text("↑/↓ scroll · click a card to open in viewer")
+                            | color(PANEL_FG_DIM),
+                        text(" "),
+                    }),
                 })
                 | xflex);
             if (show_suggestions()) {
                 bottom.push_back(render_suggestions());
             }
-            bottom.push_back(std::move(input_box));
+            bottom.push_back(vbox({ std::move(input_box) | yflex,
+                text("  Tab switch mode · Alt+Enter add line · @ attach file · "
+                     "$ "
+                     "use skill ")
+                    | color(PANEL_FG_DIM) | bgcolor(PANEL_COLOR) }));
             if (!st.error().empty() || st.retry_countdown()) {
                 bottom.push_back(error_element(st));
             }
@@ -436,6 +464,7 @@ namespace {
             if (event == Event::Escape) {
                 if (show_suggestions()) {
                     matches_.clear();
+                    skill_matches_.clear();
                     file_matches_.clear();
                     attachment_token_.reset();
                     return true;
@@ -465,9 +494,10 @@ namespace {
                     return true;
                 }
                 if (event == Event::Return) {
-                    const bool file_suggestion = !file_matches_.empty();
+                    const bool insertion_suggestion
+                        = !file_matches_.empty() || !skill_matches_.empty();
                     accept();
-                    if (!file_suggestion) {
+                    if (!insertion_suggestion) {
                         submit();
                     }
                     return true;
@@ -562,6 +592,9 @@ namespace {
                 controller_.enqueue_user_modal(
                     ViewerModal { tool_call_head(tc), tc.result->text,
                         tool_code_language(tc), read_start_line(tc) });
+            } else if (tc.name == "skill") {
+                controller_.enqueue_user_modal(ViewerModal {
+                    tool_call_head(tc), tc.result->text, "markdown", 1, true });
             } else if (tc.name == "list") {
                 controller_.enqueue_user_modal(ViewerModal {
                     "Directory listing", tc.result->text, "", 1 });
@@ -599,6 +632,7 @@ namespace {
         void refresh_suggestions()
         {
             matches_.clear();
+            skill_matches_.clear();
             file_matches_.clear();
             attachment_token_.reset();
             sel_                   = 0;
@@ -610,6 +644,25 @@ namespace {
                     std::filesystem::current_path(), attachment_token_->query);
                 return;
             }
+            std::size_t token_begin = static_cast<std::size_t>(input_cursor_);
+            while (token_begin > 0
+                && !std::isspace(
+                    static_cast<unsigned char>(text[token_begin - 1]))) {
+                --token_begin;
+            }
+            if (token_begin < static_cast<std::size_t>(input_cursor_)
+                && text[token_begin] == '$') {
+                skill_token_begin_    = token_begin;
+                const std::string key = to_lower(text.substr(token_begin + 1,
+                    static_cast<std::size_t>(input_cursor_) - token_begin - 1));
+                for (const Skill& skill : controller_.available_skills()) {
+                    const std::string name = to_lower(skill.name);
+                    if (name.starts_with(key))
+                        skill_matches_.push_back(skill);
+                }
+                return;
+            }
+            skill_token_begin_.reset();
             if (text.empty() || text[0] != '/'
                 || text.find(' ') != std::string::npos) {
                 return;
@@ -675,6 +728,20 @@ namespace {
                 attachment_token_.reset();
                 return;
             }
+            if (!skill_matches_.empty() && skill_token_begin_) {
+                const std::string replacement
+                    = "$" + skill_matches_[static_cast<std::size_t>(sel_)].name;
+                input_buf_.replace(*skill_token_begin_,
+                    static_cast<std::size_t>(input_cursor_)
+                        - *skill_token_begin_,
+                    replacement);
+                input_cursor_ = static_cast<int>(
+                    *skill_token_begin_ + replacement.size());
+                input_buf_.insert(static_cast<std::size_t>(input_cursor_), " ");
+                ++input_cursor_;
+                refresh_suggestions();
+                return;
+            }
             const SlashCommand* cmd = matches_[sel_];
             input_buf_              = cmd->name;
             input_cursor_           = static_cast<int>(input_buf_.size());
@@ -683,17 +750,27 @@ namespace {
 
         int suggestion_count() const
         {
-            return static_cast<int>(
-                file_matches_.empty() ? matches_.size() : file_matches_.size());
+            if (!file_matches_.empty())
+                return static_cast<int>(file_matches_.size());
+            if (!skill_matches_.empty())
+                return static_cast<int>(skill_matches_.size());
+            return static_cast<int>(matches_.size());
         }
 
         bool show_suggestions() const { return suggestion_count() > 0; }
 
         Element render_suggestions()
         {
-            const size_t max_rows = 8;
-            const size_t total = file_matches_.empty() ? matches_.size()
-                                                       : file_matches_.size();
+            const size_t max_rows     = 8;
+            const LayoutCtx ctx       = layout_();
+            const int available_width = ctx.kind == LayoutCtx::Kind::WIDE
+                ? ctx.width - LayoutCtx::panel_width
+                : ctx.width;
+            const int description_width
+                = std::clamp(available_width - 28, 8, 56);
+            const size_t total = !file_matches_.empty() ? file_matches_.size()
+                : !skill_matches_.empty()               ? skill_matches_.size()
+                                                        : matches_.size();
             const size_t shown = std::min(total, max_rows);
             const size_t selected = static_cast<size_t>(std::max(0, sel_));
             const size_t first    = selected < shown
@@ -707,23 +784,25 @@ namespace {
             for (size_t row_index = 0; row_index < shown; ++row_index) {
                 const size_t i              = first + row_index;
                 const bool sel              = static_cast<int>(i) == sel_;
-                const std::string name_text = file_matches_.empty()
-                    ? std::string(matches_[i]->name)
-                    : "@" + file_matches_[i].path;
+                const std::string name_text = !file_matches_.empty()
+                    ? "@" + file_matches_[i].path
+                    : !skill_matches_.empty() ? "$" + skill_matches_[i].name
+                                              : std::string(matches_[i]->name);
                 Element name                = text(name_text);
                 if (sel) {
                     name = name | bold;
                 }
-                Element row = hbox({
+                const std::string description = !file_matches_.empty()
+                    ? (file_matches_[i].directory ? "directory" : "file")
+                    : !skill_matches_.empty() ? skill_matches_[i].description
+                                              : std::string(matches_[i]->desc);
+                Element row                   = hbox({
                     std::move(name) | xflex,
                     text("  "),
-                    text(file_matches_.empty()
-                            ? matches_[i]->desc
-                            : (file_matches_[i].directory ? "directory"
-                                                          : "file"))
-                        | dim | color(PANEL_FG_DIM),
+                    text(fit(description, description_width)) | dim
+                        | color(PANEL_FG_DIM),
                 });
-                row         = row | xflex
+                row                           = row | xflex
                     | (sel ? bgcolor(PANEL_COLOR_FOCUS) : bgcolor(PANEL_COLOR));
                 rows.push_back(std::move(row));
             }
@@ -755,13 +834,13 @@ namespace {
         Element tool_header_element(const ToolCall& tc)
         {
             Elements parts {
-                text(tool_display_name(tc.name)) | bold
-                    | color(Color::GreenLight),
+                text(tc.name == "skill" ? "Load Skill"
+                                        : tool_display_name(tc.name))
+                    | bold | color(Color::GreenLight),
                 text(" "),
                 text(tool_header_args(tc)) | color(PANEL_FG),
             };
-            if (tc.result.has_value()
-                && tc.result->shell_status.has_value()) {
+            if (tc.result.has_value() && tc.result->shell_status.has_value()) {
                 const std::string status
                     = shell_status_text(*tc.result->shell_status);
                 if (!status.empty()) {
@@ -770,6 +849,18 @@ namespace {
                 }
             }
             return hbox(std::move(parts));
+        }
+
+        Element render_skill_item(const ToolCall& tc)
+        {
+            const std::string label = "▸ open skill instructions in viewer ("
+                + std::to_string(count_lines(tc.result->text)) + " lines)";
+            Component btn = make_viewer_button(tc.id, label);
+            return vbox({
+                tool_header_element(tc),
+                btn->Render(),
+                separatorEmpty(),
+            });
         }
 
         Element render_read_item(const ToolCall& tc)
@@ -1037,14 +1128,16 @@ namespace {
         std::vector<AttachmentCandidate> file_matches_;
         std::optional<AttachmentToken> attachment_token_;
         std::vector<FileAttachment> attachments_;
+        std::vector<Skill> skill_matches_;
+        std::optional<std::size_t> skill_token_begin_;
         int sel_          = 0;
         int input_cursor_ = 0;
         bool paste_mode_  = false;
 
-        int scroll_top_     = 0;
-        bool follow_        = true;
-        int frame_          = 0;
-        int content_height_ = 0;
+        int scroll_top_               = 0;
+        bool follow_                  = true;
+        int frame_                    = 0;
+        int content_height_           = 0;
         std::uint64_t content_serial_ = 0;
         ftxui::Box frame_box_ { };
     };

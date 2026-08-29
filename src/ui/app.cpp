@@ -45,7 +45,7 @@ namespace {
             , saved_before_exit_(saved_before_exit)
         {
             const LayoutFn layout = [this] { return layout_; };
-            side_                 = make_side_panel(session_, layout);
+            side_                 = make_side_panel(session_, controller, layout);
             chat_                 = make_chat(session_, controller, layout);
             status_line_ = make_status_line(session_, providers, layout);
             modal_       = make_modal(session_, controller, providers);

@@ -479,6 +479,17 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
             bool needs_approval = tool != nullptr
                 && tool->safety == ToolSafety::MUTATING
                 && allowed_tools_.count(ev.tool_call.name) == 0;
+            if (ev.tool_call.name == "skill") {
+                const auto skill = _resolve_skill(parse_json(ev.tool_call.args));
+                bool loaded = false;
+                if (skill) {
+                    std::lock_guard lock(loaded_skills_mutex_);
+                    loaded = loaded_skills_.contains(skill->path.string());
+                }
+                needs_approval = skill.has_value()
+                    && _skill_policy(*skill) == SkillPolicy::ASK
+                    && !loaded;
+            }
             ToolCallRequest approval_request = ev.tool_call;
             const bool path_scoped = ev.tool_call.name == "read"
                 || ev.tool_call.name == "list" || ev.tool_call.name == "edit"
@@ -645,6 +656,13 @@ void Controller::_run_tool(
     const ToolCallRequest& req, std::vector<Message>& tool_msgs)
 {
     const ToolOutput out = dispatch_tool(tools_, req);
+    if (req.name == "skill" && out.kind == ToolOutput::Kind::OUTPUT) {
+        if (const auto skill = _resolve_skill(parse_json(req.args))) {
+            std::lock_guard lock(loaded_skills_mutex_);
+            loaded_skills_.insert(skill->path.string());
+            loaded_skill_contents_[skill->path.string()] = out.text;
+        }
+    }
     const auto kind      = out.kind == ToolOutput::Kind::OUTPUT
         ? ToolCall::Result::Kind::OUTPUT
         : ToolCall::Result::Kind::ERROR;

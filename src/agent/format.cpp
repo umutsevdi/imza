@@ -107,6 +107,9 @@ std::string tool_request_summary(const std::string& name,
         }
         return out;
     }
+    if (name == "skill") {
+        return "Load Skill " + get_str("name");
+    }
     std::string head = tool_display_name(name);
     const std::string summary = tool_args_summary(args);
     if (name == "todo") {
@@ -143,6 +146,13 @@ std::string tool_call_head(const ToolCall& call)
     }
     if (call.name == "shell") {
         return "shell";
+    }
+    if (call.name == "skill") {
+        const Json::Value parsed = parse_json(call.args);
+        if (parsed.isObject() && parsed["name"].isString()) {
+            return "Load Skill " + parsed["name"].asString();
+        }
+        return "Load Skill";
     }
     if (call.name == "ask") {
         const Json::Value parsed = parse_json(call.args);
@@ -219,6 +229,12 @@ std::string tool_header_args(const ToolCall& call)
             n = static_cast<int>(parsed["todos"].size());
         }
         return std::to_string(n) + (n == 1 ? " task" : " tasks");
+    }
+    if (call.name == "skill") {
+        const Json::Value parsed = parse_json(call.args);
+        return parsed.isObject() && parsed["name"].isString()
+            ? parsed["name"].asString()
+            : std::string { };
     }
     return tool_args_summary(call.args);
 }

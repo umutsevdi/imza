@@ -10,13 +10,11 @@
 
 namespace ursa {
 
-template<typename... Args>
-class Signal {
+template <typename... Args> class Signal {
 public:
     using Callback = std::function<void(Args...)>;
 
-    Signal() = default;
-
+    Signal()                         = default;
     Signal(const Signal&)            = delete;
     Signal& operator=(const Signal&) = delete;
     Signal(Signal&&)                 = delete;
@@ -92,8 +90,7 @@ public:
     {
         std::lock_guard lock(_state->mutex);
         const std::uint64_t id = _state->next_id++;
-        _state->subscribers.push_back(
-            Subscriber { id, std::move(callback) });
+        _state->subscribers.push_back(Subscriber { id, std::move(callback) });
         return Subscription(_state, id);
     }
 
@@ -116,4 +113,4 @@ private:
     std::shared_ptr<State> _state = std::make_shared<State>();
 };
 
-}
+} // namespace ursa
