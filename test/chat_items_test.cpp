@@ -52,3 +52,12 @@ TEST_CASE("render_item renders a modal answer")
     CHECK(out_a.find("User answered:") != std::string::npos);
     CHECK(out_a.find("opt") != std::string::npos);
 }
+
+TEST_CASE("render_item renders completed compaction")
+{
+    ursa::ConversationItem item = ursa::CompactionEvent {
+        1, ursa::CompactionEvent::Status::COMPLETED };
+    const std::string out
+        = to_text(ursa::render_item(item, { ursa::LayoutCtx::Kind::WIDE, 60 }));
+    CHECK(out.find("✓ Session compacted") != std::string::npos);
+}

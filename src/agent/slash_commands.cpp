@@ -17,6 +17,8 @@ std::span<const SlashCommand> slash_commands()
             SlashCommand::Action::CONNECT },
         { "/model", "pick the active model", SlashCommand::Action::MODEL },
         { "/variant", "pick reasoning effort", SlashCommand::Action::VARIANT },
+        { "/sessions", "load or delete saved sessions",
+            SlashCommand::Action::SESSIONS },
         { "/prompt", "show the generated system prompt",
             SlashCommand::Action::SYSTEM_PROMPT },
     };
@@ -64,6 +66,9 @@ void Controller::run_slash(std::string_view cmd)
             { "off", "low", "default", "high" }, current });
         break;
     }
+    case SlashCommand::Action::SESSIONS:
+        enqueue_user_modal(_sessions_modal());
+        break;
     case SlashCommand::Action::SYSTEM_PROMPT:
         enqueue_user_modal(ViewerModal {
             "System prompt", _system_prompt(), "text", 1, false });

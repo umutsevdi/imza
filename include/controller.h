@@ -66,6 +66,7 @@ public:
     void resolve_modal(ModalResult result);
     void enqueue_user_modal(ModalPayload payload);
     void cancel_queued(std::size_t id);
+    void delete_saved_session(const std::filesystem::path& path);
     void interrupt();
     size_t queue_size() const;
     const Session& session() const { return *session_; }
@@ -84,8 +85,11 @@ private:
     void _spawn_title(std::string input, TurnSettings settings);
     void _drive(
         std::vector<Message> history, StreamFn override, TurnSettings settings);
+    bool _compact_history(std::vector<Message>& history, StreamFn override,
+        const TurnSettings& settings, std::uint64_t prompt_tokens);
     void _begin_connect(const ConnectResult& res);
     void _apply_pick(const ModelChoice& choice);
+    SessionsModal _sessions_modal() const;
 
     void _drain_pending_asks(std::vector<Message>& history,
         std::string& reply_buffer, const std::string& assistant_text,

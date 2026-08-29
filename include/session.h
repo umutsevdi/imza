@@ -56,8 +56,24 @@ struct TodoList {
     std::vector<TodoItem> items;
 };
 
+struct CompactionEvent {
+    enum class Status { RUNNING, COMPLETED, FAILED };
+    std::size_t id = 0;
+    Status status = Status::RUNNING;
+};
+
 using ConversationItem
-    = std::variant<UserTurn, AssistantTurn, ToolCall, TodoList, ModalAnswer>;
+    = std::variant<UserTurn, AssistantTurn, ToolCall, TodoList, ModalAnswer,
+        CompactionEvent>;
+
+struct SessionSnapshot {
+    std::string title;
+    std::vector<ConversationItem> items;
+    TodoList todo;
+    std::string compacted_summary;
+    std::size_t compacted_item_count = 0;
+    bool plan_mode = true;
+};
 
 struct ConnectModal {
     enum class Entry { MANAGE, PICK_MODEL };
@@ -80,8 +96,14 @@ struct VariantModal {
     std::string current;
 };
 
+struct SessionsModal {
+    std::vector<std::string> titles;
+    std::vector<std::string> saved_at;
+    std::vector<std::string> paths;
+};
+
 using ModalPayload = std::variant<std::monostate, HelpModal, ViewerModal,
-    ToolCallRequest, QuestionForm, ConnectModal, VariantModal>;
+    ToolCallRequest, QuestionForm, ConnectModal, VariantModal, SessionsModal>;
 
 struct QueuedMessage {
     std::size_t id;
@@ -113,6 +135,7 @@ public:
     const std::vector<ConversationItem>& items() const { return items_; }
     ModalPayload modal() const;
     std::uint64_t modal_serial() const;
+    std::uint64_t content_serial() const;
     Phase phase() const;
     Mode mode() const;
     std::string error() const;
@@ -126,6 +149,9 @@ public:
     double total_cost() const;
     double last_cost() const;
     StatusView status_view() const;
+    bool has_pending_work() const;
+    SessionSnapshot snapshot() const;
+    void restore(SessionSnapshot snapshot);
 
     void toggle_mode();
     void set_error(std::string msg);
@@ -144,6 +170,9 @@ public:
     void set_last_assistant_metadata(std::string model,
         std::string reasoning_effort);
     void append_item(ConversationItem item);
+    std::pair<std::size_t, std::size_t> begin_compaction();
+    void finish_compaction(std::size_t id, std::string summary,
+        std::size_t compacted_item_count, bool success);
     void append_tool(const ToolCallRequest& req);
     void fill_tool_result(const ToolCallRequest& req, ToolCall::Result result);
     void set_todo(TodoList todo);
@@ -186,6 +215,7 @@ private:
     std::vector<ConversationItem> items_;
     ModalPayload modal_         = std::monostate { };
     std::uint64_t modal_serial_ = 0;
+    std::uint64_t content_serial_ = 0;
     Phase phase_                = Phase::IDLE;
     Mode mode_                  = Mode::PLAN;
     std::string error_;
@@ -204,9 +234,13 @@ private:
     double last_cost_  = 0.0;
 
     std::size_t next_tool_id_   = 1;
+    std::size_t next_compaction_id_ = 1;
     std::size_t next_queued_id_ = 0;
     std::optional<std::chrono::steady_clock::time_point> reasoning_start_;
     std::atomic<bool> interrupt_requested_ { false };
+
+    std::string compacted_summary_;
+    std::size_t compacted_item_count_ = 0;
 
     std::vector<Subscriber> title_cbs_;
     std::uint64_t next_title_id_ { 1 };

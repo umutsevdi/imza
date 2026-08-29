@@ -103,7 +103,7 @@ struct VariantChoice {
 };
 
 using ModalResult = std::variant<std::monostate, ToolVerdict, ModalAnswer,
-    ConnectResult, ModelChoice, VariantChoice>;
+    ConnectResult, ModelChoice, VariantChoice, std::filesystem::path>;
 
 struct ModelPricing {
     double input_per_1k  = 0.0;

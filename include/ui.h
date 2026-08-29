@@ -75,6 +75,8 @@ ftxui::Component make_connect(
     ProviderStore& providers);
 ftxui::Component make_variant(
     std::shared_ptr<Session> session, Controller& controller);
+ftxui::Component make_sessions(
+    std::shared_ptr<Session> session, Controller& controller);
 ftxui::Component make_modal(
     std::shared_ptr<Session> session, Controller& controller,
     ProviderStore& providers);

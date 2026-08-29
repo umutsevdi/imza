@@ -100,6 +100,52 @@ TEST_CASE("session history keeps queued attachment snapshots")
     CHECK(history.back().content.find("src/main.cpp") != std::string::npos);
 }
 
+TEST_CASE("session compaction replaces only old model history")
+{
+    ursa::Session session;
+    session.begin_send("old request");
+    session.append_assistant();
+    session.apply(ursa::make_delta_event("old answer"), { });
+    session.begin_send("current request");
+    session.append_assistant();
+
+    const auto [id, prefix] = session.begin_compaction();
+    session.finish_compaction(id, "preserved summary", prefix, true);
+
+    CHECK(session.items().size() == 5);
+    const auto history = session.build_history("system");
+    REQUIRE(history.size() == 4);
+    CHECK(history[1].content.find("preserved summary") != std::string::npos);
+    CHECK(history[2].content == "current request");
+    CHECK(history[3].type == ursa::Message::Type::ASSISTANT);
+}
+
+TEST_CASE("session reports pending turns, queued messages and tools")
+{
+    ursa::Session session;
+    CHECK_FALSE(session.has_pending_work());
+
+    session.begin_send("request");
+    CHECK(session.has_pending_work());
+    REQUIRE(session.finish_session(""));
+    CHECK_FALSE(session.has_pending_work());
+
+    session.enqueue_message("queued");
+    CHECK(session.has_pending_work());
+    REQUIRE(session.pop_queued());
+    CHECK_FALSE(session.has_pending_work());
+
+    ursa::ToolCallRequest request;
+    request.id   = "call-1";
+    request.name = "shell";
+    request.args = R"({"command":"sleep 2"})";
+    session.append_tool(request);
+    CHECK(session.has_pending_work());
+    session.fill_tool_result(request,
+        { ursa::ToolCall::Result::Kind::OUTPUT, "done" });
+    CHECK_FALSE(session.has_pending_work());
+}
+
 TEST_CASE("removing a selected mention detaches its snapshot")
 {
     std::vector<ursa::FileAttachment> attachments {

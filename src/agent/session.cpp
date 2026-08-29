@@ -6,6 +6,7 @@
 #include "prompt.h"
 
 #include <cassert>
+#include <algorithm>
 #include <chrono>
 #include <string>
 #include <utility>
@@ -129,6 +130,12 @@ std::uint64_t Session::modal_serial() const
     return modal_serial_;
 }
 
+std::uint64_t Session::content_serial() const
+{
+    std::lock_guard lock(mutex_);
+    return content_serial_;
+}
+
 Session::Phase Session::phase() const
 {
     std::lock_guard lock(mutex_);
@@ -187,6 +194,59 @@ Session::StatusView Session::status_view() const
 {
     std::lock_guard lock(mutex_);
     return { mode_, totals_, last_, total_cost_ };
+}
+
+bool Session::has_pending_work() const
+{
+    std::lock_guard lock(mutex_);
+    if (phase_ != Phase::IDLE || !queued_.empty()) {
+        return true;
+    }
+    return std::any_of(items_.begin(), items_.end(),
+        [](const ConversationItem& item) {
+            const auto* tool = std::get_if<ToolCall>(&item);
+            return tool != nullptr && !tool->result.has_value();
+        });
+}
+
+SessionSnapshot Session::snapshot() const
+{
+    std::lock_guard lock(mutex_);
+    return { title_, items_, todo_, compacted_summary_,
+        compacted_item_count_, mode_ == Mode::PLAN };
+}
+
+void Session::restore(SessionSnapshot snapshot)
+{
+    std::lock_guard lock(mutex_);
+    title_                    = std::move(snapshot.title);
+    items_                    = std::move(snapshot.items);
+    todo_                     = std::move(snapshot.todo);
+    compacted_summary_        = std::move(snapshot.compacted_summary);
+    compacted_item_count_     = snapshot.compacted_item_count;
+    mode_                     = snapshot.plan_mode ? Mode::PLAN : Mode::BUILD;
+    modal_                    = std::monostate { };
+    queued_.clear();
+    error_.clear();
+    retry_countdown_.reset();
+    phase_                    = Phase::IDLE;
+    totals_                   = { };
+    last_                     = { };
+    total_cost_               = 0.0;
+    last_cost_                = 0.0;
+    title_generation_claimed_ = !title_.empty();
+    interrupt_requested_.store(false);
+    next_tool_id_ = 1;
+    next_compaction_id_ = 1;
+    for (const auto& item : items_) {
+        if (const auto* tool = std::get_if<ToolCall>(&item)) {
+            next_tool_id_ = std::max(next_tool_id_, tool->id + 1);
+        } else if (const auto* event = std::get_if<CompactionEvent>(&item)) {
+            next_compaction_id_ = std::max(next_compaction_id_, event->id + 1);
+        }
+    }
+    ++modal_serial_;
+    ++content_serial_;
 }
 
 void Session::toggle_mode()
@@ -300,6 +360,40 @@ void Session::append_item(ConversationItem item)
 {
     std::lock_guard lock(mutex_);
     items_.push_back(std::move(item));
+}
+
+std::pair<std::size_t, std::size_t> Session::begin_compaction()
+{
+    std::lock_guard lock(mutex_);
+    const std::size_t id = next_compaction_id_++;
+    std::size_t prefix = 0;
+    for (std::size_t index = items_.size(); index > 0; --index) {
+        if (std::holds_alternative<UserTurn>(items_[index - 1])) {
+            prefix = index - 1;
+            break;
+        }
+    }
+    items_.push_back(CompactionEvent { id, CompactionEvent::Status::RUNNING });
+    return { id, prefix };
+}
+
+void Session::finish_compaction(std::size_t id, std::string summary,
+    std::size_t compacted_item_count, bool success)
+{
+    std::lock_guard lock(mutex_);
+    for (auto& item : items_) {
+        auto* event = std::get_if<CompactionEvent>(&item);
+        if (event == nullptr || event->id != id) {
+            continue;
+        }
+        event->status = success ? CompactionEvent::Status::COMPLETED
+                                : CompactionEvent::Status::FAILED;
+        if (success) {
+            compacted_summary_      = std::move(summary);
+            compacted_item_count_   = compacted_item_count;
+        }
+        return;
+    }
 }
 
 void Session::append_tool(const ToolCallRequest& req)
@@ -426,7 +520,14 @@ std::vector<Message> Session::build_history(
     std::lock_guard lock(mutex_);
     std::vector<Message> history;
     history.push_back({ Message::Type::SYSTEM, std::string(system_prompt) });
-    for (const auto& item : items_) {
+    if (!compacted_summary_.empty()) {
+        history.push_back({ Message::Type::USER,
+            "<session-summary>\n" + compacted_summary_
+                + "\n</session-summary>" });
+    }
+    const std::size_t begin = std::min(compacted_item_count_, items_.size());
+    for (std::size_t index = begin; index < items_.size(); ++index) {
+        const auto& item = items_[index];
         if (const auto* u = std::get_if<UserTurn>(&item)) {
             history.push_back({ Message::Type::USER,
                 message_with_attachments(u->text, u->attachments) });

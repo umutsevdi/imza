@@ -36,7 +36,8 @@ TEST_CASE("slash_commands includes built-ins")
             || c.action == SlashCommand::Action::SYSTEM_PROMPT
             || c.action == SlashCommand::Action::CONNECT
             || c.action == SlashCommand::Action::MODEL
-            || c.action == SlashCommand::Action::VARIANT;
+            || c.action == SlashCommand::Action::VARIANT
+            || c.action == SlashCommand::Action::SESSIONS;
         CHECK(known);
     }
 }

@@ -11,6 +11,8 @@
 #include <functional>
 #include <print>
 
+#include "session_store.h"
+
 #ifdef _WIN32
 #include <io.h>
 #else
@@ -35,10 +37,12 @@ namespace {
     class Repl : public ComponentBase {
     public:
         Repl(ScreenInteractive& screen, std::shared_ptr<Session> session,
-            Controller& controller, ProviderStore& providers)
+            Controller& controller, ProviderStore& providers,
+            bool& saved_before_exit)
             : screen_(screen)
             , session_(std::move(session))
             , controller_(controller)
+            , saved_before_exit_(saved_before_exit)
         {
             const LayoutFn layout = [this] { return layout_; };
             side_        = make_side_panel(session_, layout);
@@ -94,6 +98,7 @@ namespace {
         bool OnEvent(Event event) override
         {
             if (event == Event::CtrlC || event == Event::CtrlD) {
+                saved_before_exit_ = save_session(*session_) == Status::OK;
                 screen_.Exit();
                 return true;
             }
@@ -107,6 +112,7 @@ namespace {
         ScreenInteractive& screen_;
         std::shared_ptr<Session> session_;
         Controller& controller_;
+        bool& saved_before_exit_;
         Component side_;
         Component chat_;
         Component modal_;
@@ -127,21 +133,28 @@ int run_repl(const Config& cfg)
     std::vector<Tool> tools  = default_tools();
     auto session             = std::make_shared<Session>();
     auto providers           = std::make_shared<ProviderStore>(cfg);
-    Controller controller(
-        session, providers,
-        [&screen](std::function<void()> f) {
-            screen.Post(std::move(f));
-            screen.PostEvent(Event::Custom);
-        },
-        [&screen] { screen.Exit(); }, StreamFn { }, std::move(tools));
-    providers->ensure_catalog_fresh();
-    if (providers->config().providers.empty()) {
-        controller.enqueue_user_modal(
-            ConnectModal { ConnectModal::Entry::MANAGE });
+    bool saved_before_exit   = false;
+    {
+        Controller controller(
+            session, providers,
+            [&screen](std::function<void()> f) {
+                screen.Post(std::move(f));
+                screen.PostEvent(Event::Custom);
+            },
+            [&screen] { screen.Exit(); }, StreamFn { }, std::move(tools));
+        providers->ensure_catalog_fresh();
+        if (providers->config().providers.empty()) {
+            controller.enqueue_user_modal(
+                ConnectModal { ConnectModal::Entry::MANAGE });
+        }
+        auto app = ftxui::Make<Repl>(screen, session, controller, *providers,
+            saved_before_exit);
+        screen.Loop(app);
     }
-    auto app = ftxui::Make<Repl>(screen, session, controller, *providers);
-    screen.Loop(app);
-    return 0;
+    if (saved_before_exit) {
+        return 0;
+    }
+    return save_session(*session) == Status::OK ? 0 : 1;
 }
 
 } // namespace ursa

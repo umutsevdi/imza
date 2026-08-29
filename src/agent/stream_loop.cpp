@@ -18,6 +18,25 @@ namespace ursa {
 
 namespace {
 
+    constexpr std::uint64_t COMPACTION_PERCENT = 80;
+
+    std::string compaction_transcript(
+        const std::vector<Message>& history, std::size_t end)
+    {
+        std::string out;
+        for (std::size_t index = 1; index < end; ++index) {
+            const Message& message = history[index];
+            out += message.type == Message::Type::USER ? "\nUSER:\n"
+                : message.type == Message::Type::ASSISTANT ? "\nASSISTANT:\n"
+                                                          : "\nTOOL:\n";
+            out += message.content;
+            for (const auto& call : message.tool_calls) {
+                out += "\nTOOL CALL " + call.name + ": " + call.args;
+            }
+        }
+        return out;
+    }
+
     enum class ProjectTarget { INSIDE, OUTSIDE, INVALID };
 
     ProjectTarget classify_project_target(
@@ -125,11 +144,96 @@ namespace {
 
 } // namespace
 
+bool Controller::_compact_history(std::vector<Message>& history,
+    StreamFn override, const TurnSettings& settings,
+    std::uint64_t prompt_tokens)
+{
+    const ModelPricing pricing = get_pricing(settings.model);
+    if (pricing.context_limit == 0 || prompt_tokens == 0
+        || prompt_tokens * 100 < pricing.context_limit * COMPACTION_PERCENT
+        || history.size() < 4) {
+        return true;
+    }
+
+    std::size_t tail = history.size();
+    while (tail > 1 && history[tail - 1].type != Message::Type::USER) {
+        --tail;
+    }
+    if (tail <= 1) {
+        return true;
+    }
+    --tail;
+
+    const auto [event_id, prefix_size] = session_->begin_compaction();
+    ChatRequest request;
+    request.model = settings.model;
+    request.temperature = 0.2;
+    request.interrupted
+        = [session = session_] { return session->interrupt_requested(); };
+    request.messages = {
+        { Message::Type::SYSTEM,
+            "Summarize this coding-agent session for continuation. Preserve "
+            "the user's requirements, decisions, files changed, commands and "
+            "test results, unresolved problems, and the exact current task. "
+            "Be concise and do not continue the task." },
+        { Message::Type::USER, compaction_transcript(history, tail) },
+    };
+
+    std::string summary;
+    std::string error;
+    const StreamCallback callback = [&](const StreamEvent& event) {
+        if (event.kind == StreamEvent::Kind::CONTENT_DELTA) {
+            summary += event.text;
+        } else if (event.kind == StreamEvent::Kind::ERROR) {
+            error = event.text;
+        }
+    };
+
+    Status status;
+    if (override) {
+        status = override(request, callback);
+    } else {
+        status = stream(get_provider(settings.route), settings.route, request,
+            callback, nullptr);
+    }
+    const bool success = status == Status::OK && error.empty()
+        && !summary.empty() && !session_->interrupt_requested();
+    session_->finish_compaction(event_id, summary, prefix_size, success);
+    if (!success) {
+        return !session_->interrupt_requested();
+    }
+
+    std::vector<Message> recent(history.begin() + tail, history.end());
+    history.erase(history.begin() + 1, history.end());
+    history.push_back({ Message::Type::USER,
+        "<session-summary>\n" + summary + "\n</session-summary>" });
+    history.insert(history.end(), std::make_move_iterator(recent.begin()),
+        std::make_move_iterator(recent.end()));
+    return true;
+}
+
 void Controller::_drive(
     std::vector<Message> history, StreamFn override, TurnSettings settings)
 {
     int retries = 0;
+    std::uint64_t prompt_tokens = session_->last().prompt;
+    bool compaction_attempted = false;
     for (;;) {
+        const ModelPricing pricing = get_pricing(settings.model);
+        const bool should_compact = !compaction_attempted
+            && pricing.context_limit > 0 && prompt_tokens > 0
+            && prompt_tokens * 100
+                >= pricing.context_limit * COMPACTION_PERCENT
+            && history.size() >= 4;
+        if (should_compact) {
+            compaction_attempted = true;
+        }
+        if (should_compact
+            && !_compact_history(history, override, settings, prompt_tokens)) {
+            _post([this] { finish(""); });
+            return;
+        }
+        prompt_tokens = 0;
         ChatRequest req;
         req.model    = settings.model;
         req.messages = history;
@@ -143,10 +247,12 @@ void Controller::_drive(
         std::string error_msg;
         Status error_status = Status::OK;
         bool saw_stream     = false;
+        std::uint64_t request_prompt_tokens = 0;
 
         StreamCallback cb = [this, model = req.model, &text_buffer, &error_msg,
                                 &error_status,
-                                &saw_stream](const StreamEvent& ev) {
+                                &saw_stream,
+                                &request_prompt_tokens](const StreamEvent& ev) {
             if (ev.kind == StreamEvent::Kind::ERROR) {
                 error_status = ev.error;
                 error_msg    = ev.text;
@@ -162,6 +268,9 @@ void Controller::_drive(
             }
             if (ev.kind == StreamEvent::Kind::CONTENT_DELTA) {
                 text_buffer += ev.text;
+            }
+            if (ev.kind == StreamEvent::Kind::USAGE) {
+                request_prompt_tokens = ev.usage.prompt;
             }
             const ModelPricing pricing = ev.kind == StreamEvent::Kind::USAGE
                 ? get_pricing(model)
@@ -266,6 +375,7 @@ void Controller::_drive(
             return;
         }
         retries = 0;
+        prompt_tokens = request_prompt_tokens;
 
         if (!alive_.load()) {
             return;

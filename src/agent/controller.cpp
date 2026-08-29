@@ -3,6 +3,7 @@
 #include "slash_commands.h"
 #include "environment.h"
 #include "prompt.h"
+#include "session_store.h"
 #include "util.h"
 
 #include <functional>
@@ -122,6 +123,36 @@ void Controller::enqueue_user_modal(ModalPayload payload)
 
 void Controller::cancel_queued(std::size_t id) { session_->cancel_queued(id); }
 
+SessionsModal Controller::_sessions_modal() const
+{
+    SessionsModal modal;
+    for (const auto& saved : saved_sessions()) {
+        modal.titles.push_back(saved.title);
+        modal.saved_at.push_back(saved.saved_at);
+        modal.paths.push_back(saved.path.string());
+    }
+    return modal;
+}
+
+void Controller::delete_saved_session(const std::filesystem::path& path)
+{
+    std::error_code ec;
+    const std::filesystem::path root
+        = std::filesystem::weakly_canonical(sessions_dir(), ec);
+    const std::filesystem::path target
+        = std::filesystem::weakly_canonical(path, ec);
+    if (ec || target.parent_path() != root || target.extension() != ".json") {
+        session_->set_error("invalid session path");
+        return;
+    }
+    if (!std::filesystem::remove(target, ec) || ec) {
+        session_->set_error("failed to delete session");
+        return;
+    }
+    session_->set_modal(_sessions_modal());
+    session_->bump_modal_serial();
+}
+
 void Controller::interrupt()
 {
     if (session_->phase() != Session::Phase::IDLE) {
@@ -146,6 +177,20 @@ size_t Controller::queue_size() const
 
 void Controller::resolve_modal(ModalResult result)
 {
+    if (auto* path = std::get_if<std::filesystem::path>(&result)) {
+        if (session_->has_pending_work()) {
+            session_->set_error(
+                "finish or interrupt pending work before loading a session");
+            return;
+        }
+        if (save_session(*session_) != Status::OK) {
+            session_->set_error("failed to save current session");
+            return;
+        }
+        if (load_session(*path, *session_) != Status::OK) {
+            session_->set_error("failed to load session");
+        }
+    }
     if (auto* connect = std::get_if<ConnectResult>(&result)) {
         _begin_connect(*connect);
         return;

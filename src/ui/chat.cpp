@@ -113,6 +113,9 @@ namespace {
             }
             return 1 + tc->result->text.size();
         }
+        if (const auto* event = std::get_if<CompactionEvent>(&it)) {
+            return static_cast<std::size_t>(event->status);
+        }
         return 0;
     }
 
@@ -184,7 +187,13 @@ namespace {
                         return tc != nullptr && tc->name == "shell"
                             && !tc->result.has_value();
                     });
-            if (shell_running) {
+            const bool compaction_running = std::any_of(st.items().begin(),
+                st.items().end(), [](const ConversationItem& item) {
+                    const auto* event = std::get_if<CompactionEvent>(&item);
+                    return event != nullptr
+                        && event->status == CompactionEvent::Status::RUNNING;
+                });
+            if (shell_running || compaction_running) {
                 animation::RequestAnimationFrame();
             }
 
@@ -194,12 +203,14 @@ namespace {
             } else {
                 scroll_top_ = std::clamp(scroll_top_, 0, max_scroll());
             }
-            if (cache_kind_ != ctx.kind
+            const std::uint64_t content_serial = st.content_serial();
+            if (cache_kind_ != ctx.kind || content_serial_ != content_serial
                 || item_cache_.size() != st.items().size()) {
                 item_cache_.clear();
                 item_cache_.resize(st.items().size());
                 item_versions_.assign(st.items().size(), kInvalidVersion);
                 cache_kind_ = ctx.kind;
+                content_serial_ = content_serial;
             }
             std::size_t item_index = 0;
             for (const auto& it : st.items()) {
@@ -290,6 +301,15 @@ namespace {
                     item_versions_[item_index] = eff_version;
                 }
                 Element el = item_cache_[item_index];
+                if (const auto* event = std::get_if<CompactionEvent>(&it);
+                    event != nullptr
+                    && event->status == CompactionEvent::Status::RUNNING) {
+                    el = hbox({
+                        spinner(15, static_cast<size_t>(frame_))
+                            | color(Color::GrayLight),
+                        text(" Compacting…") | dim,
+                    });
+                }
                 if ((streaming || connecting)
                     && std::holds_alternative<AssistantTurn>(it)
                     && &it == &st.items().back()) {
@@ -1025,6 +1045,7 @@ namespace {
         bool follow_        = true;
         int frame_          = 0;
         int content_height_ = 0;
+        std::uint64_t content_serial_ = 0;
         ftxui::Box frame_box_ { };
     };
 
@@ -1043,6 +1064,14 @@ ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx)
                 return render_todo(v, ctx);
             } else if constexpr (std::is_same_v<T, ModalAnswer>) {
                 return modal_answer_item(v);
+            } else if constexpr (std::is_same_v<T, CompactionEvent>) {
+                if (v.status == CompactionEvent::Status::COMPLETED) {
+                    return text("✓ Session compacted") | dim;
+                }
+                if (v.status == CompactionEvent::Status::FAILED) {
+                    return text("Compaction failed") | dim;
+                }
+                return text("Compacting…") | dim;
             }
             return text("");
         },

@@ -297,6 +297,8 @@ namespace {
                         return connect_->Render();
                     } else if constexpr (std::is_same_v<T, VariantModal>) {
                         return variant_->Render();
+                    } else if constexpr (std::is_same_v<T, SessionsModal>) {
+                        return sessions_->Render();
                     }
                     return text("");
                 },
@@ -316,6 +318,10 @@ namespace {
                         return true;
                     }
                     controller_.close_modal();
+                    return true;
+                }
+                if (std::holds_alternative<SessionsModal>(st.modal())
+                    && body_ && body_->OnEvent(event)) {
                     return true;
                 }
                 if (std::holds_alternative<ToolCallRequest>(st.modal())
@@ -484,6 +490,12 @@ namespace {
         {
             variant_ = make_variant(session_, controller_);
             body_    = variant_;
+        }
+
+        void build(const SessionsModal&)
+        {
+            sessions_ = make_sessions(session_, controller_);
+            body_     = sessions_;
         }
 
         void build(const HelpModal&) { reset_static_scroll(); }
@@ -758,6 +770,7 @@ namespace {
         Component back_;
         Component connect_;
         Component variant_;
+        Component sessions_;
 
         Component body_;
     };
@@ -877,6 +890,121 @@ ftxui::Component make_variant(
     std::shared_ptr<Session> session, Controller& controller)
 {
     return ftxui::Make<VariantImpl>(std::move(session), controller);
+}
+
+namespace {
+
+    class SessionsImpl : public ComponentBase {
+    public:
+        SessionsImpl(std::shared_ptr<Session> session, Controller& controller)
+            : session_(std::move(session))
+            , controller_(controller)
+        {
+            const auto modal = std::get<SessionsModal>(session_->modal());
+            titles_ = modal.titles;
+            saved_at_ = modal.saved_at;
+            paths_  = modal.paths;
+        }
+
+        Element OnRender() override
+        {
+            Elements rows { section_title("Sessions", Color::GrayLight) };
+            const bool loading_blocked = session_->has_pending_work();
+            if (titles_.empty()) {
+                rows.push_back(text("No saved sessions") | dim);
+            } else if (confirming_) {
+                rows.push_back(text("Delete “" + titles_[cursor_] + "”?")
+                    | bold);
+                rows.push_back(separatorEmpty());
+                rows.push_back(hbox(
+                    { filler(), text("Enter delete · Esc cancel") | dim }));
+            } else {
+                for (int index = 0; index < static_cast<int>(titles_.size());
+                     ++index) {
+                    Element row = hbox({ text(titles_[index]), filler(),
+                        text(saved_at_[index]) | color(PANEL_FG_DIM) });
+                    if (index == cursor_) {
+                        row = std::move(row) | bgcolor(PANEL_COLOR_FOCUS)
+                            | bold;
+                    }
+                    rows.push_back(std::move(row));
+                }
+                rows.push_back(separatorEmpty());
+                if (loading_blocked) {
+                    rows.push_back(text(
+                        "Finish or interrupt pending work before loading")
+                        | color(PANEL_FG));
+                }
+                rows.push_back(hbox({ filler(),
+                    text(loading_blocked
+                            ? "↑↓ rows · d delete · Esc close"
+                            : "↑↓ rows · Enter load · d delete · Esc close")
+                        | dim }));
+            }
+            return vbox({ separatorEmpty(), vbox(std::move(rows)),
+                       separatorEmpty() })
+                | xflex;
+        }
+
+        bool OnEvent(Event event) override
+        {
+            if (confirming_) {
+                if (event == Event::Escape) {
+                    confirming_ = false;
+                    return true;
+                }
+                if (event == Event::Return) {
+                    controller_.delete_saved_session(paths_[cursor_]);
+                    return true;
+                }
+                return true;
+            }
+            if (event == Event::Escape) {
+                controller_.close_modal();
+                return true;
+            }
+            if (event == Event::ArrowDown
+                && cursor_ + 1 < static_cast<int>(titles_.size())) {
+                ++cursor_;
+                return true;
+            }
+            if (event == Event::ArrowUp && cursor_ > 0) {
+                --cursor_;
+                return true;
+            }
+            if ((event == Event::Character('d')
+                    || event == Event::Character('D'))
+                && !titles_.empty()) {
+                confirming_ = true;
+                return true;
+            }
+            if (event == Event::Return && !paths_.empty()) {
+                if (session_->has_pending_work()) {
+                    return true;
+                }
+                controller_.resolve_modal(
+                    ModalResult { std::filesystem::path(paths_[cursor_]) });
+                return true;
+            }
+            return false;
+        }
+
+    private:
+        std::shared_ptr<Session> session_;
+        Controller& controller_;
+        std::vector<std::string> titles_;
+        std::vector<std::string> saved_at_;
+        std::vector<std::string> paths_;
+        int cursor_ = 0;
+        bool confirming_ = false;
+    };
+
+}
+
+ftxui::Component make_sessions(
+    std::shared_ptr<Session> session, Controller& controller)
+{
+    return ftxui::Make<SessionsImpl>(std::move(session), controller);
 }
 
 } // namespace ursa
