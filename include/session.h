@@ -33,6 +33,11 @@ struct AssistantTurn {
     std::string reasoning_effort;
 };
 
+struct SubagentChat {
+    std::string title;
+    std::string transcript;
+};
+
 struct ToolCall {
     struct Result {
         enum class Kind { OUTPUT, ERROR, REJECT, CANCEL };
@@ -45,6 +50,8 @@ struct ToolCall {
     std::string call_id;
     std::string name;
     std::string args;
+    std::vector<std::size_t> subagent_ids;
+    std::vector<SubagentChat> subagent_chats;
     std::optional<Result> result;
 };
 
@@ -196,6 +203,10 @@ public:
         std::size_t compacted_item_count, bool success);
     void append_tool(const ToolCallRequest& req);
     void fill_tool_result(const ToolCallRequest& req, ToolCall::Result result);
+    void set_tool_subagents(
+        const ToolCallRequest& req, std::vector<std::size_t> ids);
+    void set_tool_subagent_chats(
+        const ToolCallRequest& req, std::vector<SubagentChat> chats);
     void set_todo(TodoList todo);
     void set_modal(ModalPayload payload);
     void clear_modal();

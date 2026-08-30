@@ -116,3 +116,35 @@ TEST_CASE("empty sessions are not saved")
     CHECK(ursa::saved_sessions().empty());
 #endif
 }
+
+TEST_CASE("saved sessions retain delegated-agent chat transcripts")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    ursa::Session source;
+    source.begin_send("delegate");
+    source.append_assistant("model", "off");
+    const ursa::ToolCallRequest request { "subagent", "{}", "", "call-1" };
+    source.append_tool(request);
+    source.set_tool_subagent_chats(request,
+        { { "Agent 1 (research)", "## Assistant\n\nreport" } });
+    source.fill_tool_result(request,
+        { ursa::ToolCall::Result::Kind::OUTPUT, "report" });
+    source.finish_session("");
+
+    REQUIRE(ursa::save_session(source) == ursa::Status::OK);
+    const auto saved = ursa::saved_sessions();
+    REQUIRE(saved.size() == 1);
+    ursa::Session loaded;
+    REQUIRE(ursa::load_session(saved.front().path, loaded)
+        == ursa::Status::OK);
+    REQUIRE(loaded.items().size() == 3);
+    const auto& call = std::get<ursa::ToolCall>(loaded.items()[2]);
+    REQUIRE(call.subagent_chats.size() == 1);
+    CHECK(call.subagent_chats[0].title == "Agent 1 (research)");
+    CHECK(call.subagent_chats[0].transcript.find("report")
+        != std::string::npos);
+#endif
+}

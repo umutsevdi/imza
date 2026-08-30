@@ -58,10 +58,13 @@ Controller::Controller(std::shared_ptr<Session> session,
 
 Controller::Controller(std::shared_ptr<ApplicationState> state, PostFn post,
     std::function<void()> on_exit, StreamFn stream_fn,
-    std::vector<Tool> tools)
+    std::vector<Tool> tools, ModalRequestFn modal_request,
+    std::string agent_label)
     : state_(std::move(state))
     , post_(std::move(post))
     , on_exit_(std::move(on_exit))
+    , modal_request_(std::move(modal_request))
+    , agent_label_(std::move(agent_label))
     , stream_fn_(std::move(stream_fn))
     , has_stream_override_(static_cast<bool>(stream_fn_))
     , tools_(std::move(tools))
@@ -154,8 +157,8 @@ Controller::~Controller()
     }
     provider_sub_.disconnect();
     env_sub_.disconnect();
-    worker_.reset();
     state_->subagents->stop();
+    worker_.reset();
 }
 
 void Controller::set_mode(Session::Mode next_mode)
@@ -185,6 +188,32 @@ void Controller::enqueue_user_modal(ModalPayload payload)
             || state_->session->phase() == Session::Phase::STREAMING)) {
         _present_front();
     }
+}
+
+std::future<ModalResult> Controller::_request_modal(ModalPayload payload)
+{
+    if (!agent_label_.empty()) {
+        if (auto* request = std::get_if<ToolCallRequest>(&payload)) {
+            request->description = agent_label_ + " · "
+                + (request->description.empty() ? request->name
+                                                : request->description);
+        } else if (auto* form = std::get_if<QuestionForm>(&payload)) {
+            if (!form->empty()) {
+                form->front().prompt
+                    = agent_label_ + " · " + form->front().prompt;
+            }
+        }
+    }
+    if (modal_request_) return modal_request_(std::move(payload));
+
+    auto promise = std::make_shared<std::promise<ModalResult>>();
+    auto future  = promise->get_future();
+    {
+        std::lock_guard lock(queue_mutex_);
+        queue_.push_back(PendingModal { std::move(payload), promise });
+    }
+    _post([this] { _present_front(); });
+    return future;
 }
 
 void Controller::cancel_queued(std::size_t id) { state_->session->cancel_queued(id); }

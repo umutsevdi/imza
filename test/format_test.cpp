@@ -100,6 +100,12 @@ TEST_CASE("tool_call_head shows the file path for read, args otherwise")
         R"({"name":"code-review","scope":"project"})", { } };
     CHECK(ursa::tool_call_head(skill) == "Load Skill code-review");
     CHECK(ursa::tool_header_args(skill) == "code-review");
+
+    ursa::ToolCall subagent { 1, "", "subagent",
+        R"({"tasks":[{"mode":"research","prompt":"Inspect parser behavior"},{"mode":"build","prompt":"Implement the fix"}]})",
+        { } };
+    CHECK(ursa::tool_call_head(subagent) == "Subagent");
+    CHECK(ursa::tool_header_args(subagent) == "1 research, 1 builder");
 }
 
 TEST_CASE("ask_answer_markdown numbers questions and blockquotes answers")

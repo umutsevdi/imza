@@ -44,6 +44,29 @@ std::string tool_args_summary(const std::string& args)
 
 namespace {
 
+    std::string subagent_args(const ToolCall& call)
+    {
+        const Json::Value parsed = parse_json(call.args);
+        if (!parsed.isObject() || !parsed["tasks"].isArray()) return call.args;
+        int research_count = 0;
+        int build_count = 0;
+        for (const Json::Value& task : parsed["tasks"]) {
+            if (!task.isObject() || !task["mode"].isString()) continue;
+            if (task["mode"].asString() == "research") ++research_count;
+            if (task["mode"].asString() == "build") ++build_count;
+        }
+        std::string summary;
+        if (research_count > 0) {
+            summary = std::to_string(research_count) + " research";
+        }
+        if (build_count > 0) {
+            if (!summary.empty()) summary += ", ";
+            summary += std::to_string(build_count)
+                + (build_count == 1 ? " builder" : " builders");
+        }
+        return summary;
+    }
+
     std::string read_path(const ToolCall& call)
     {
         const Json::Value parsed = parse_json(call.args);
@@ -175,6 +198,9 @@ std::string tool_call_head(const ToolCall& call)
         return tool_display_name(call.name) + " (" + std::to_string(n)
             + " task" + (n == 1 ? "" : "s") + ")";
     }
+    if (call.name == "subagent") {
+        return tool_display_name(call.name);
+    }
     std::string head = tool_display_name(call.name);
     const std::string args = tool_args_summary(call.args);
     if (!args.empty()) {
@@ -235,6 +261,9 @@ std::string tool_header_args(const ToolCall& call)
         return parsed.isObject() && parsed["name"].isString()
             ? parsed["name"].asString()
             : std::string { };
+    }
+    if (call.name == "subagent") {
+        return subagent_args(call);
     }
     return tool_args_summary(call.args);
 }

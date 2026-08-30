@@ -39,6 +39,8 @@ struct LayoutCtx {
 using PostFn = std::function<void(std::function<void()>)>;
 using StreamFn
     = std::function<Status(const ChatRequest&, const StreamCallback&)>;
+using ModalRequestFn
+    = std::function<std::future<ModalResult>(ModalPayload)>;
 struct TurnSettings {
     std::string model;
     std::string reasoning_effort;
@@ -52,7 +54,8 @@ class Controller {
 public:
     Controller(std::shared_ptr<ApplicationState> state, PostFn post,
         std::function<void()> on_exit, StreamFn stream_fn = { },
-        std::vector<Tool> tools = { });
+        std::vector<Tool> tools = { }, ModalRequestFn modal_request = { },
+        std::string agent_label = { });
     Controller(std::shared_ptr<Session> session, const Config& cfg, PostFn post,
         std::function<void()> on_exit, StreamFn stream_fn = { },
         std::vector<Tool> tools = { }, ModelsFn models_fn = { });
@@ -81,6 +84,10 @@ public:
     std::vector<Skill> available_skills() const;
     SubagentHandle run_subagent(std::string prompt, std::string model,
         std::string variant, bool visible);
+    void submit_delegated(std::string text,
+        const ProviderSelection& selection, Session::Mode mode);
+    SubagentChat subagent_chat(
+        const ToolCall& call, std::size_t index) const;
     std::span<const SlashCommand> commands() const { return slash_commands(); }
 
 private:
@@ -125,12 +132,17 @@ private:
     void _apply_ask_result(const ToolCallRequest& req, const ModalResult& res,
         std::vector<Message>& tool_msgs);
     void _run_tool(const ToolCallRequest& req, std::vector<Message>& tool_msgs);
+    void _run_subagents(
+        const ToolCallRequest& req, std::vector<Message>& tool_msgs);
+    std::future<ModalResult> _request_modal(ModalPayload payload);
     void _present_front();
     void _drain_queued();
 
     std::shared_ptr<ApplicationState> state_;
     PostFn post_;
     std::function<void()> on_exit_;
+    ModalRequestFn modal_request_;
+    std::string agent_label_;
     StreamFn stream_fn_;
     bool has_stream_override_ { false };
     std::vector<Tool> tools_;

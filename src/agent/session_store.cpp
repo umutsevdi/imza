@@ -109,6 +109,16 @@ namespace {
             out["call_id"] = tool->call_id;
             out["name"]    = tool->name;
             out["args"]    = tool->args;
+            if (!tool->subagent_chats.empty()) {
+                Json::Value chats(Json::arrayValue);
+                for (const SubagentChat& chat : tool->subagent_chats) {
+                    Json::Value value;
+                    value["title"]      = chat.title;
+                    value["transcript"] = chat.transcript;
+                    chats.append(std::move(value));
+                }
+                out["subagent_chats"] = std::move(chats);
+            }
             if (tool->result) {
                 out["result_kind"] = static_cast<int>(tool->result->kind);
                 out["result"]      = tool->result->text;
@@ -207,6 +217,12 @@ namespace {
             tool.call_id = value.get("call_id", "").asString();
             tool.name    = value.get("name", "").asString();
             tool.args    = value.get("args", "").asString();
+            for (const Json::Value& chat : value["subagent_chats"]) {
+                if (!chat.isObject()) continue;
+                tool.subagent_chats.push_back(SubagentChat {
+                    chat.get("title", "Agent").asString(),
+                    chat.get("transcript", "").asString() });
+            }
             if (value.isMember("result_kind")) {
                 const int kind = value["result_kind"].asInt();
                 if (kind >= 0 && kind <= 3) {

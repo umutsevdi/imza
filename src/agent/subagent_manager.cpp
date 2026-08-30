@@ -13,7 +13,7 @@ SubagentManager::~SubagentManager()
 
 SubagentHandle SubagentManager::start(std::string prompt, std::string model,
     std::string variant, bool visible, SubagentRunFn run,
-    SubagentCompleteFn complete)
+    SubagentCompleteFn complete, std::shared_ptr<Session> session)
 {
     auto promise = std::make_shared<std::promise<SubagentResult>>();
     SubagentHandle handle { 0, promise->get_future().share() };
@@ -23,7 +23,8 @@ SubagentHandle SubagentManager::start(std::string prompt, std::string model,
         handle.id = next_id_++;
         started = SubagentTask { handle.id, std::move(prompt),
             std::move(model), std::move(variant), visible,
-            SubagentTask::State::RUNNING, Status::OK, { } };
+            SubagentTask::State::RUNNING, Status::OK, { },
+            std::move(session) };
         tasks_.push_back(started);
     }
     changed_.publish(SubagentEvent { SubagentEvent::Kind::STARTED, started });

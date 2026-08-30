@@ -44,6 +44,7 @@ Tool make_list_tool();
 Tool make_ask_tool();
 Tool make_shell_tool();
 Tool make_todo_tool();
+Tool make_subagent_tool();
 Tool make_edit_tool();
 Tool make_write_tool();
 std::vector<Tool> default_tools();

@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <future>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <stop_token>
 #include <string>
@@ -13,6 +14,8 @@
 #include "ursa_signal.h"
 
 namespace ursa {
+
+class Session;
 
 struct SubagentResult {
     Status status = Status::OK;
@@ -30,6 +33,7 @@ struct SubagentTask {
     State state  = State::RUNNING;
     Status status = Status::OK;
     std::string output;
+    std::shared_ptr<Session> session;
 };
 
 struct SubagentEvent {
@@ -56,7 +60,8 @@ public:
 
     SubagentHandle start(std::string prompt, std::string model,
         std::string variant, bool visible, SubagentRunFn run,
-        SubagentCompleteFn complete = { });
+        SubagentCompleteFn complete = { },
+        std::shared_ptr<Session> session = { });
     void stop();
     std::vector<SubagentTask> tasks(bool visible_only = false) const;
     std::size_t running_count(bool visible_only = true) const;

@@ -141,6 +141,7 @@ target_link_libraries(ursa_provider PUBLIC
 add_library(ursa_agent
     src/agent/attachments.cpp
     src/agent/controller.cpp
+    src/agent/delegation.cpp
     src/agent/stream_loop.cpp
     src/agent/slash_commands.cpp
     src/agent/session.cpp

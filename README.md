@@ -1,40 +1,88 @@
-# ursa
+# Ursa
 
-Ursa is a native C++23 coding agent with an ftxui terminal interface. It
-streams markdown responses, calls tools, edits the current workspace, and
-supports OpenAI-compatible and Anthropic-compatible APIs.
+Ursa is a lightweight coding agent that runs in your terminal. 
 
-## What works today
+Bring your own model connection, open Ursa in a project, and describe the
+outcome you want. Ursa reads the repository instructions, gathers context,
+asks for decisions when needed, and works through the task with visible tool
+calls and approval prompts.
 
-- Streaming chat with markdown, reasoning, usage, and cost display
-- Multiple provider connections with runtime model and reasoning selection
-- OpenAI Chat Completions and Anthropic Messages wire formats
-- Plan mode with read-only tools and build mode with the complete toolset
-- `read`, `list`, `shell`, `edit`, `write`, `ask`, and `todo` tools
-- Approval flows, structured question forms, diff views, and tool errors
-- Queued prompts, interruption, rate-limit retries, and countdowns
-- Automatic context compaction before the active model reaches its context
-  limit, with visible progress in the transcript
-- Automatic session saving and a recent-first `/sessions` picker for loading
-  and deleting saved sessions
-- Project instructions from `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`
-- Workspace and repository status, changed files, branch, and todo widgets
-- Background generation of a concise session title from the first prompt
-- Skills: discover and load reusable instruction packages with explicit
-   scope and invocation rules.
+## Why Ursa?
 
-## Priority roadmap
+Ursa aims to keep the useful core of tools such as OpenCode, Claude Code, and
+Codex in a small native application:
 
-The next capabilities are ordered by dependency and user value:
+- A responsive terminal interface instead of a browser or Electron shell;
+- An approximately 8–15 MB runtime memory footprint;
+- Explicit Plan and Build modes;
+- Visible reasoning, tool activity, diffs, token usage, and cost;
+- Provider choice without tying the application to one model vendor;
+- Durable local sessions that can be reopened later;
+- Bounded parallel delegation without hiding the delegated agents' work.
 
-1. **MCP** — expose external MCP tools through the existing flat
-   `ToolRegistry`.
-2. **Subagents** — run bounded parallel tasks, show live status in the sidebar,
-   and keep durable results in chat.
-3. **LSP** — add definitions, references, symbols, hover, and diagnostics after
-   the core session and extension systems are stable.
+It is intentionally narrower than those larger tools. The checklist below is
+also the current project status, not a promise that every competing product
+implements a feature in exactly the same way.
 
-## Build and test
+## Capabilities
+
+- [x] Stream Markdown responses and reasoning in the terminal
+- [x] Read and list files, run shell commands, and create or edit text files
+- [x] Preview file changes as diffs
+- [x] Require approval for mutating tools, with allow-once, allow-for-session,
+      and reject flows
+- [x] Separate read-oriented Plan mode from full Build mode
+- [x] Ask structured single-choice, multiple-choice, and free-text questions
+- [x] Maintain a visible task list for longer work
+- [x] Delegate up to five concurrent research or build subagents
+- [x] Show a separate, persistent transcript for every delegated agent
+- [x] Configure different models and reasoning variants for subagent roles
+- [x] Discover and load project or global skills
+- [x] Read project instructions from `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`
+- [x] Attach workspace text files to a prompt with `@path`
+- [x] Attach skills with `$skill`
+- [x] Queue prompts and interrupt active generation
+- [x] Retry rate-limited requests with a visible countdown
+- [x] Compact model context automatically while retaining the visible chat
+- [x] Save, load, and delete local sessions
+- [x] Display repository state, changed files, context, and usage in the UI
+- [x] Connect to OpenAI-compatible and Anthropic Messages APIs
+- [x] Connect to local OpenAI-compatible servers
+
+Compared with the broader extension ecosystems around OpenCode, Claude Code,
+and Codex, Ursa does not currently provide:
+
+- [ ] MCP servers or tools
+- [ ] LSP-powered definitions, references, hover, or diagnostics
+- [ ] Image or other multimodal prompt attachments
+- [ ] Built-in web search or browser automation
+- [ ] IDE integrations or a graphical desktop client
+- [ ] Remote agents, cloud workspaces, or hosted session synchronization
+
+## How it works
+
+Ursa starts in Plan mode, where the model can inspect the workspace and
+prepare an approach without changing files. Switch to Build mode when you want
+it to edit code or run commands. Potentially mutating actions are presented for
+approval before execution.
+
+For independent work, the main agent can delegate one to five tasks in
+parallel. Research agents remain read-oriented. Build agents are available only
+when the main agent is in Build mode. Ursa waits for the group, returns every
+report to the main agent, and keeps each agent's full chat available from its
+own transcript button. Delegated agents cannot recursively delegate or alter
+the main task list.
+
+Sessions are saved locally and include the conversation, tool calls and
+results, diffs, attachments, task list, active mode, compacted context, and
+workspace. When the active model has a known context limit, Ursa compacts older
+model-facing history at 80% usage without removing it from the visible
+transcript.
+
+## Build
+
+Ursa requires a C++23 compiler, CMake, OpenSSL, and CURL. CMake fetches ftxui,
+jsoncpp, cmark-gfm, and doctest.
 
 ```sh
 cmake -B build -DCMAKE_BUILD_TYPE=Debug -DTESTS=ON \
@@ -43,98 +91,47 @@ cmake --build build --target ursa ursa_tests
 ./build/debug/ursa_tests
 ```
 
-Dependencies are fetched by CMake: ftxui, jsoncpp, cmark-gfm, and doctest.
-OpenSSL and CURL must be available on the system.
-
-Run the application with:
+Start Ursa from the repository you want it to work in:
 
 ```sh
 ./build/debug/ursa
 ```
 
-On first launch, use `/connect` to add a provider and `/model` to select a
-model. `/help` lists all commands.
+On first launch, open `/connect` to add a provider, then use `/model` to choose
+a model. Type `/` in the chat input to browse the available commands.
 
-## Sessions
+## Commands
 
-Ursa automatically saves non-empty sessions when exiting, including exits via
-Ctrl+C and Ctrl+D. Before loading another session, the current session is also
-saved. Saved state includes the title, transcript, attachments, reasoning,
-tool calls and results, diffs, todos, active mode, compacted context, and the
-workspace directory. Loading a session changes back to its saved workspace
-before restoring the transcript; loading fails if that directory is no longer
-available.
+| Command | Purpose |
+| --- | --- |
+| `/new` | Save the current session and start another |
+| `/connect` | Add and manage provider connections |
+| `/model` | Select the active model |
+| `/variant` | Select the reasoning effort |
+| `/subagents` | Configure models for delegated roles |
+| `/sessions` | Load or delete saved sessions |
+| `/skills` | Manage discovered skills |
+| `/prompt` | Inspect the generated system prompt |
+| `/exit` | Save and quit |
 
-Run `/sessions` to open the session picker. Sessions are sorted newest first:
-
-- `↑` and `↓` move the cursor
-- `Enter` loads the selected session
-- `d` asks for confirmation before deleting the selected session
-- `Esc` closes the picker or cancels deletion
-
-Loading is disabled while the model is connecting, thinking, or streaming,
-while a tool is unresolved, or while user messages are queued. Finish or
-interrupt the pending work before loading another session. Deleting saved
-sessions remains available while work is pending.
-
-Session files are timestamped JSON files stored in the platform data directory:
-
-- Linux: `$XDG_DATA_HOME/ursa`, falling back to
-  `$HOME/.local/share/ursa`
-- macOS: `$HOME/Library/Application Support/ursa`
-- Windows: `%APPDATA%\ursa`
-
-## Context compaction
-
-When reported prompt usage reaches 80% of the active model's known context
-limit, Ursa summarizes older model-facing history while preserving the current
-turn verbatim. The complete visible transcript is retained. During compaction,
-the transcript shows `Compacting…`; after the summary is committed it changes
-to `✓ Session compacted`. Providers or models without a known context limit do
-not trigger automatic compaction.
-
-## Configuration
+## Local data
 
 Ursa stores `ursa/config.json` in the platform configuration directory:
 
-- Linux: `$XDG_CONFIG_HOME/ursa/config.json`, falling back to
+- Linux: `$XDG_CONFIG_HOME/ursa/config.json`, or
   `$HOME/.config/ursa/config.json`
 - macOS: `$HOME/Library/Application Support/ursa/config.json`
 - Windows: `%APPDATA%\ursa\config.json`
 
-The UI normally writes this file. A minimal custom OpenAI-compatible connection
-looks like this:
+Saved sessions use the platform data directory:
 
-```json
-{
-  "providers": [
-    {
-      "id": "openai",
-      "provider_id": "custom",
-      "endpoint": "https://api.openai.com/v1/chat/completions",
-      "api_key": "sk-..."
-    }
-  ],
-  "last_used": {
-    "provider": "openai",
-    "model": "gpt-4.1"
-  },
-  "reasoning_effort": "off"
-}
-```
+- Linux: `$XDG_DATA_HOME/ursa`, or `$HOME/.local/share/ursa`
+- macOS: `$HOME/Library/Application Support/ursa`
+- Windows: `%APPDATA%\ursa`
 
-Provider catalog metadata is cached beside the config as `presets.json`.
-Credentials are currently stored as plain JSON; protect the config file with
-normal user-only filesystem permissions.
+Provider credentials are currently stored as plain JSON. Protect the config
+file with user-only filesystem permissions.
 
-## Documentation
+## Project status
 
-- [Documentation index](docs/README.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [Developer guide](docs/DEVELOPER-GUIDE.md)
-- [Provider connections](docs/connect.md)
-- [Modal system](docs/modal-system.md)
-- [Agent and tool design](docs/coding-agent-design.md)
-- [Known limitations](docs/CODEBASE-REVIEW.md)
-
-Project rules and coding conventions live in [AGENTS.md](AGENTS.md).
+Ursa is under active development. 

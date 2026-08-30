@@ -438,16 +438,9 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
                         req.id });
                     continue;
                 }
-                auto promise = std::make_shared<std::promise<ModalResult>>();
-                auto future  = promise->get_future();
-                {
-                    std::lock_guard lock(queue_mutex_);
-                    queue_.push_back(
-                        PendingModal { *form, std::move(promise) });
-                }
                 Ask ask;
                 ask.payload  = *form;
-                ask.future   = std::move(future);
+                ask.future   = _request_modal(*form);
                 ask.tool_req = ev.tool_call;
                 asks.push_back(std::move(ask));
                 continue;
@@ -477,6 +470,10 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
                             ToolCall::Result::Kind::OUTPUT, text });
                 });
                 tool_msgs.push_back({ Message::Type::TOOL, text, { }, req.id });
+                continue;
+            }
+            if (ev.tool_call.name == "subagent") {
+                _run_subagents(ev.tool_call, tool_msgs);
                 continue;
             }
             const Tool* tool    = find_tool(tools_, ev.tool_call.name);
@@ -517,31 +514,14 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
                 _run_tool(ev.tool_call, tool_msgs);
                 continue;
             }
-            auto promise = std::make_shared<std::promise<ModalResult>>();
-            auto future  = promise->get_future();
-            {
-                std::lock_guard lock(queue_mutex_);
-                queue_.push_back(
-                    PendingModal { approval_request, std::move(promise) });
-            }
             asks.push_back(Ask { .payload = approval_request,
-                .future                   = std::move(future),
+                .future = _request_modal(approval_request),
                 .tool_req                 = std::nullopt });
         } else if (ev.kind == StreamEvent::Kind::QUESTION) {
-            auto promise = std::make_shared<std::promise<ModalResult>>();
-            auto future  = promise->get_future();
-            {
-                std::lock_guard lock(queue_mutex_);
-                queue_.push_back(
-                    PendingModal { ev.question, std::move(promise) });
-            }
             asks.push_back(Ask { .payload = ev.question,
-                .future                   = std::move(future),
+                .future = _request_modal(ev.question),
                 .tool_req                 = std::nullopt });
         }
-    }
-    if (!asks.empty()) {
-        _post([this] { _present_front(); });
     }
 
     for (auto& ask : asks) {

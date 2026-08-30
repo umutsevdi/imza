@@ -74,6 +74,7 @@ std::vector<Tool> default_tools()
     tools.push_back(make_ask_tool());
     tools.push_back(make_shell_tool());
     tools.push_back(make_todo_tool());
+    tools.push_back(make_subagent_tool());
     tools.push_back(make_edit_tool());
     tools.push_back(make_write_tool());
     return tools;
@@ -770,6 +771,19 @@ Tool make_todo_tool()
     spec.parameters  = parse_json(
         R"json({"type":"object","properties":{"todos":{"type":"array","description":"the updated todo list","items":{"type":"object","properties":{"content":{"type":"string","description":"short imperative description of the task"},"status":{"type":"string","enum":["pending","in_progress","completed","cancelled"],"description":"task state (default pending)"}},"required":["content"]}}},"required":["todos"]})json");
     return { std::move(spec), ToolHandler { }, ToolSafety::READ_ONLY };
+}
+
+Tool make_subagent_tool()
+{
+    ToolSpec spec;
+    spec.name = "subagent";
+    spec.description
+        = "Delegate one to five independent tasks to concurrent research or "
+          "build agents and wait for their reports. Build agents are only "
+          "available while the main agent is in build mode.";
+    spec.parameters = parse_json(
+        R"json({"type":"object","properties":{"tasks":{"type":"array","minItems":1,"maxItems":5,"items":{"type":"object","properties":{"mode":{"type":"string","enum":["research","build"]},"prompt":{"type":"string","minLength":1}},"required":["mode","prompt"],"additionalProperties":false}}},"required":["tasks"],"additionalProperties":false})json");
+    return Tool { std::move(spec), { }, ToolSafety::READ_ONLY, true, true };
 }
 
 Tool make_edit_tool()

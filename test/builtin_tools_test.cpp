@@ -192,7 +192,7 @@ TEST_CASE("list rejects non-directories and reports empty output")
 TEST_CASE("builtin tools expose the current tool set")
 {
     const auto tools = ursa::default_tools();
-    REQUIRE(tools.size() == 8);
+    REQUIRE(tools.size() == 9);
 
     const auto* read = find_tool(tools, "read");
     REQUIRE(read != nullptr);
@@ -216,9 +216,13 @@ TEST_CASE("builtin tools expose the current tool set")
 
     REQUIRE(find_tool(tools, "shell") != nullptr);
     REQUIRE(find_tool(tools, "todo") != nullptr);
+    const auto* subagent = find_tool(tools, "subagent");
+    REQUIRE(subagent != nullptr);
+    CHECK(subagent->safety == ursa::ToolSafety::READ_ONLY);
+    CHECK(subagent->spec.parameters["properties"].isMember("tasks"));
     REQUIRE(find_tool(tools, "edit") != nullptr);
     REQUIRE(find_tool(tools, "write") != nullptr);
-    CHECK(tool_specs(tools).size() == 8);
+    CHECK(tool_specs(tools).size() == 9);
 }
 
 TEST_CASE("shell tool runs a command and reports the exit code")

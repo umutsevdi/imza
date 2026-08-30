@@ -1,10 +1,15 @@
 #include <doctest/doctest.h>
+#include <ftxui/component/event.hpp>
+#include <ftxui/component/mouse.hpp>
 #include <json/json.h>
+#include <ftxui/screen/screen.hpp>
 
 #include "format.h"
 #include "tools.h"
 #include "ui.h"
+#include "util.h"
 
+#include <algorithm>
 #include <chrono>
 #include <deque>
 #include <functional>
@@ -106,6 +111,7 @@ struct Env {
                         ursa::ToolOutput::Kind::OUTPUT, "peeked: " + raw };
                 },
                 ursa::ToolSafety::READ_ONLY });
+            tools.push_back(ursa::make_subagent_tool());
             return tools;
         }() };
 
@@ -152,6 +158,279 @@ bool idle(const ursa::Session& st)
 }
 
 } // namespace
+
+TEST_CASE("subagent tool waits for a research agent and retains its chat")
+{
+    Env env;
+    env.stream = [&env](const ursa::ChatRequest& req,
+                     const ursa::StreamCallback& cb) {
+        env.requests.push_back(req);
+        const std::string last = req.messages.empty()
+            ? std::string { }
+            : req.messages.back().content;
+        if (last.starts_with("delegate")) {
+            cb(ursa::make_tool_call_event({ "subagent",
+                R"({"tasks":[{"mode":"research","prompt":"inspect"}]})",
+                "delegate inspection", "delegate-1" }));
+        } else if (last.starts_with("inspect")) {
+            cb(ursa::make_delta_event("research report"));
+        } else {
+            cb(ursa::make_delta_event("main complete"));
+        }
+        cb(ursa::make_done_event());
+        return ursa::Status::OK;
+    };
+
+    env.controller.submit("delegate");
+    const bool finished = env.pump.wait_for([&] {
+        return idle(*env.session) && env.pending_tool() != nullptr;
+    });
+    CAPTURE(env.requests.size());
+    if (!env.requests.empty() && !env.requests.front().messages.empty()) {
+        CAPTURE(env.requests.front().messages.back().content);
+    }
+    CAPTURE(env.session->items().size());
+    CAPTURE(static_cast<int>(env.session->phase()));
+    CAPTURE(env.session->error());
+    REQUIRE(finished);
+    const ursa::ToolCall* call = env.pending_tool();
+    REQUIRE(call != nullptr);
+    REQUIRE(call->result.has_value());
+    CHECK(call->result->kind == ursa::ToolCall::Result::Kind::OUTPUT);
+    CHECK(call->result->text.find("research report") != std::string::npos);
+    REQUIRE(call->subagent_chats.size() == 1);
+    CHECK(call->subagent_chats[0].transcript.find("inspect")
+        != std::string::npos);
+    CHECK(call->subagent_chats[0].transcript.find("research report")
+        != std::string::npos);
+    const auto child_request = std::find_if(env.requests.begin(),
+        env.requests.end(), [](const ursa::ChatRequest& request) {
+            return !request.messages.empty()
+                && request.messages.back().content.starts_with("inspect");
+        });
+    REQUIRE(child_request != env.requests.end());
+    CHECK(std::none_of(child_request->tools.begin(), child_request->tools.end(),
+        [](const ursa::ToolSpec& tool) {
+            return tool.name == "subagent" || tool.name == "todo";
+        }));
+}
+
+TEST_CASE("subagent tool captures two concurrent agents separately")
+{
+    Env env;
+    env.stream = [](const ursa::ChatRequest& req,
+                     const ursa::StreamCallback& cb) {
+        const std::string last = req.messages.empty()
+            ? std::string { }
+            : req.messages.back().content;
+        if (last.starts_with("delegate two")) {
+            cb(ursa::make_tool_call_event({ "subagent",
+                R"({"tasks":[{"mode":"research","prompt":"alpha"},{"mode":"research","prompt":"beta"}]})",
+                "delegate two checks", "delegate-2" }));
+        } else if (last.starts_with("alpha")) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+            cb(ursa::make_delta_event("alpha report"));
+        } else if (last.starts_with("beta")) {
+            cb(ursa::make_delta_event("beta report"));
+        } else {
+            cb(ursa::make_delta_event("main joined reports"));
+        }
+        cb(ursa::make_done_event());
+        return ursa::Status::OK;
+    };
+
+    env.controller.submit("delegate two");
+    REQUIRE(env.pump.wait_for([&] {
+        return idle(*env.session) && env.pending_tool() != nullptr;
+    }));
+    const ursa::ToolCall& call = *env.pending_tool();
+    REQUIRE(call.result.has_value());
+    CHECK(call.result->text.find("alpha report") != std::string::npos);
+    CHECK(call.result->text.find("beta report") != std::string::npos);
+    REQUIRE(call.subagent_chats.size() == 2);
+    CHECK(call.subagent_chats[0].transcript.find("alpha report")
+        != std::string::npos);
+    CHECK(call.subagent_chats[0].transcript.find("beta report")
+        == std::string::npos);
+    CHECK(call.subagent_chats[1].transcript.find("beta report")
+        != std::string::npos);
+    CHECK(call.subagent_chats[1].transcript.find("alpha report")
+        == std::string::npos);
+    const ursa::SubagentChat first = env.controller.subagent_chat(call, 0);
+    const ursa::SubagentChat second = env.controller.subagent_chat(call, 1);
+    CHECK(first.title == "Agent 1 (research)");
+    CHECK(second.title == "Agent 2 (research)");
+    CHECK(first.transcript != second.transcript);
+
+    auto view_state = std::make_shared<ursa::ApplicationState>();
+    view_state->session = env.session;
+    auto chat = ursa::make_chat(view_state, env.controller,
+        [] { return ursa::LayoutCtx { ursa::LayoutCtx::Kind::WIDE, 100 }; });
+    auto click_agent = [&](std::string_view label) {
+        auto screen = ftxui::Screen::Create(
+            ftxui::Dimension::Fixed(120), ftxui::Dimension::Fixed(50));
+        ftxui::Render(screen, chat->Render());
+        const std::vector<std::string> lines
+            = ursa::split_lines(screen.ToString());
+        for (std::size_t y = 0; y < lines.size(); ++y) {
+            const std::size_t x = lines[y].find(label);
+            if (x == std::string::npos) continue;
+            ftxui::Mouse mouse;
+            mouse.button = ftxui::Mouse::Left;
+            mouse.motion = ftxui::Mouse::Pressed;
+            mouse.x      = static_cast<int>(x);
+            mouse.y      = static_cast<int>(y);
+            return chat->OnEvent(ftxui::Event::Mouse("", mouse));
+        }
+        return false;
+    };
+
+    REQUIRE(click_agent("View Agent 1"));
+    REQUIRE(std::holds_alternative<ursa::ViewerModal>(env.session->modal()));
+    CHECK(std::get<ursa::ViewerModal>(env.session->modal()).title
+        == "Agent 1 (research)");
+    env.controller.close_modal();
+    REQUIRE(click_agent("View Agent 2"));
+    REQUIRE(std::holds_alternative<ursa::ViewerModal>(env.session->modal()));
+    CHECK(std::get<ursa::ViewerModal>(env.session->modal()).title
+        == "Agent 2 (research)");
+    env.controller.close_modal();
+}
+
+TEST_CASE("delegated-agent approvals surface through the main modal queue")
+{
+    Env env;
+    env.stream = [](const ursa::ChatRequest& req,
+                     const ursa::StreamCallback& cb) {
+        const bool child = std::any_of(req.messages.begin(), req.messages.end(),
+            [](const ursa::Message& message) {
+                return message.type == ursa::Message::Type::USER
+                    && message.content.starts_with("inspect");
+            });
+        const bool has_tool_result = std::any_of(req.messages.begin(),
+            req.messages.end(), [](const ursa::Message& message) {
+                return message.type == ursa::Message::Type::TOOL;
+            });
+        if (!child && !has_tool_result) {
+            cb(ursa::make_tool_call_event({ "subagent",
+                R"({"tasks":[{"mode":"research","prompt":"inspect"}]})",
+                "delegate inspection", "delegate-1" }));
+        } else if (child && !has_tool_result) {
+            cb(ursa::make_tool_call_event({ "shell",
+                R"({"command":"echo child"})", "run probe", "child-shell" }));
+        } else {
+            cb(ursa::make_delta_event(
+                child ? "child approved" : "main complete"));
+        }
+        cb(ursa::make_done_event());
+        return ursa::Status::OK;
+    };
+
+    env.controller.submit("delegate");
+    REQUIRE(env.pump.wait_for([&] {
+        return std::holds_alternative<ursa::ToolCallRequest>(
+            env.session->modal());
+    }));
+    const auto request = std::get<ursa::ToolCallRequest>(env.session->modal());
+    CHECK(request.description.find("Agent 1 (research)")
+        != std::string::npos);
+    env.controller.resolve_modal(ursa::ToolVerdict {
+        ursa::ToolDecision::ACCEPT, "" });
+    REQUIRE(env.pump.wait_for([&] {
+        return idle(*env.session) && env.pending_tool() != nullptr;
+    }));
+    const ursa::ToolCall* call = env.pending_tool();
+    REQUIRE(call != nullptr);
+    REQUIRE(call->result.has_value());
+    CHECK(call->result->text.find("child approved") != std::string::npos);
+}
+
+TEST_CASE("subagent failure reports preserve the last completed tool output")
+{
+    Env env;
+    env.stream = [](const ursa::ChatRequest& req,
+                     const ursa::StreamCallback& cb) {
+        const bool child = std::any_of(req.messages.begin(), req.messages.end(),
+            [](const ursa::Message& message) {
+                return message.type == ursa::Message::Type::USER
+                    && message.content.starts_with("failing child");
+            });
+        const bool has_tool_result = std::any_of(req.messages.begin(),
+            req.messages.end(), [](const ursa::Message& message) {
+                return message.type == ursa::Message::Type::TOOL;
+            });
+        if (!child && !has_tool_result) {
+            cb(ursa::make_tool_call_event({ "subagent",
+                R"({"tasks":[{"mode":"research","prompt":"failing child"}]})",
+                "delegate failing child", "delegate-failure" }));
+        } else if (child && !has_tool_result) {
+            cb(ursa::make_tool_call_event({ "shell",
+                R"({"command":"printf child-output"})", "run command",
+                "child-shell" }));
+        } else if (child) {
+            cb(ursa::make_error_event(
+                ursa::Status::API_ERROR, "follow-up failed"));
+        } else {
+            cb(ursa::make_delta_event("main complete"));
+        }
+        cb(ursa::make_done_event());
+        return ursa::Status::OK;
+    };
+
+    env.controller.submit("delegate failure");
+    REQUIRE(env.pump.wait_for([&] {
+        return std::holds_alternative<ursa::ToolCallRequest>(
+            env.session->modal());
+    }));
+    env.controller.resolve_modal(ursa::ToolVerdict {
+        ursa::ToolDecision::ACCEPT, "" });
+    REQUIRE(env.pump.wait_for([&] {
+        return idle(*env.session) && env.pending_tool() != nullptr;
+    }));
+    const ursa::ToolCall& call = *env.pending_tool();
+    REQUIRE(call.result.has_value());
+    CHECK(call.result->text.find("Failed: API error") != std::string::npos);
+    CHECK(call.result->text.find("Last completed tool output")
+        != std::string::npos);
+    CHECK(call.result->text.find("child-output") != std::string::npos);
+    REQUIRE(call.subagent_chats.size() == 1);
+    CHECK(call.subagent_chats[0].transcript.find("child-output")
+        != std::string::npos);
+}
+
+TEST_CASE("subagent tool rejects build tasks while main agent is planning")
+{
+    Env env;
+    env.stream = [](const ursa::ChatRequest& req,
+                     const ursa::StreamCallback& cb) {
+        if (!req.messages.empty()
+            && req.messages.back().content.starts_with("delegate")) {
+            cb(ursa::make_tool_call_event({ "subagent",
+                R"({"tasks":[{"mode":"build","prompt":"change it"}]})",
+                "delegate change", "delegate-1" }));
+        } else {
+            cb(ursa::make_delta_event("main complete"));
+        }
+        cb(ursa::make_done_event());
+        return ursa::Status::OK;
+    };
+
+    env.controller.submit("delegate");
+    const bool finished = env.pump.wait_for([&] {
+        return idle(*env.session) && env.pending_tool() != nullptr;
+    });
+    CAPTURE(env.session->items().size());
+    CAPTURE(static_cast<int>(env.session->phase()));
+    CAPTURE(env.session->error());
+    REQUIRE(finished);
+    const ursa::ToolCall* call = env.pending_tool();
+    REQUIRE(call != nullptr);
+    REQUIRE(call->result.has_value());
+    CHECK(call->result->kind == ursa::ToolCall::Result::Kind::ERROR);
+    CHECK(call->result->text.find("require main-agent build mode")
+        != std::string::npos);
+    CHECK(env.controller.queue_size() == 0);
+}
 
 TEST_CASE(
     "question round-trip: AWAITING while pending, reply folded, ask stable")
@@ -265,9 +544,10 @@ TEST_CASE("tool accept: output fills result, request half byte-stable")
     CHECK(prev.tool_calls[0].name == "bash");
     CHECK(prev.tool_calls[0].args == "ls -la");
 
-    REQUIRE(env.last_request().tools.size() == 2);
+    REQUIRE(env.last_request().tools.size() == 3);
     CHECK(env.last_request().tools[0].name == "bash");
     CHECK(env.last_request().tools[1].name == "peek");
+    CHECK(env.last_request().tools[2].name == "subagent");
     CHECK(env.user_turn_count() == 1);
 }
 

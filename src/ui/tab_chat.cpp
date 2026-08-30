@@ -208,11 +208,13 @@ namespace {
             const bool streaming     = st.phase() == Session::Phase::STREAMING;
             const bool connecting    = st.phase() == Session::Phase::CONNECTING;
             const bool busy          = streaming || connecting;
-            const bool shell_running = busy
+            const bool tool_running = busy
                 && std::any_of(st.items().begin(), st.items().end(),
                     [](const ConversationItem& item) {
                         const auto* tc = std::get_if<ToolCall>(&item);
-                        return tc != nullptr && tc->name == "shell"
+                        return tc != nullptr
+                            && (tc->name == "shell"
+                                || tc->name == "subagent")
                             && !tc->result.has_value();
                     });
             const bool compaction_running = std::any_of(st.items().begin(),
@@ -221,7 +223,7 @@ namespace {
                     return event != nullptr
                         && event->status == CompactionEvent::Status::RUNNING;
                 });
-            if (shell_running || compaction_running) {
+            if (tool_running || compaction_running) {
                 animation::RequestAnimationFrame();
             }
 
@@ -252,7 +254,8 @@ namespace {
                             st.items()[item_index + 1]));
                 std::size_t eff_version = version;
                 if (const auto* tc = std::get_if<ToolCall>(&it); tc != nullptr
-                    && tc->name == "shell" && !tc->result.has_value()) {
+                    && (tc->name == "shell" || tc->name == "subagent")
+                    && !tc->result.has_value()) {
                     eff_version = static_cast<std::size_t>(frame_);
                 }
                 if (final_segment) {
@@ -282,7 +285,10 @@ namespace {
                             case ToolCall::Result::Kind::OUTPUT: {
                                 const bool big = count_lines(tc.result->text)
                                     > kLargeOutputLines;
-                                if (tc.name == "read") {
+                                if (tc.name == "subagent") {
+                                    item_cache_[item_index]
+                                        = render_subagent_item(tc);
+                                } else if (tc.name == "read") {
                                     item_cache_[item_index]
                                         = render_read_item(tc);
                                 } else if (tc.name == "skill") {
@@ -459,6 +465,11 @@ namespace {
                         return true;
                     }
                 }
+                for (auto& [key, button] : subagent_buttons_) {
+                    if (button->OnEvent(event)) {
+                        return true;
+                    }
+                }
                 for (auto& [id, btn] : reasoning_comps_) {
                     if (btn->OnEvent(event)) {
                         return true;
@@ -598,6 +609,13 @@ namespace {
                 controller_.enqueue_user_modal(
                     ViewerModal { "Shell output", tc.result->text, "", 1 });
             }
+        }
+
+        void open_subagent_viewer(const ToolCall& tc, std::size_t index)
+        {
+            SubagentChat chat = controller_.subagent_chat(tc, index);
+            controller_.enqueue_user_modal(ViewerModal { std::move(chat.title),
+                std::move(chat.transcript), "markdown", 1, true, "" });
         }
 
         void on_input_changed()
@@ -818,6 +836,8 @@ namespace {
 
         Component container_;
         std::map<std::size_t, Component> read_buttons_;
+        std::map<std::pair<std::size_t, std::size_t>, Component>
+            subagent_buttons_;
         std::map<std::size_t, std::shared_ptr<std::string>> reasoning_labels_;
         std::map<std::size_t, std::shared_ptr<std::string>> reasoning_content_;
         std::map<std::size_t, std::shared_ptr<std::string>> reasoning_metadata_;
@@ -977,6 +997,25 @@ namespace {
 
         Element render_tool_pending(const ToolCall& tc)
         {
+            if (tc.name == "subagent") {
+                Elements rows {
+                    hbox({
+                        spinner(15, static_cast<std::size_t>(frame_))
+                            | color(Color::GrayLight),
+                        text(" Delegating…") | dim,
+                    }),
+                };
+                for (std::size_t index = 0; index < tc.subagent_ids.size();
+                    ++index) {
+                    const SubagentChat chat
+                        = controller_.subagent_chat(tc, index);
+                    rows.push_back(make_subagent_viewer_button(tc.id, index,
+                        "‹ View " + chat.title + " chat ›")
+                                           ->Render());
+                }
+                rows.push_back(separatorEmpty());
+                return vbox(std::move(rows));
+            }
             if (tc.name == "shell") {
                 return vbox({
                     hbox({
@@ -992,6 +1031,57 @@ namespace {
                 tool_header_element(tc),
                 separatorEmpty(),
             });
+        }
+
+        Element render_subagent_item(const ToolCall& tc)
+        {
+            Elements rows { tool_header_element(tc) };
+            const std::size_t count = std::max(
+                tc.subagent_ids.size(), tc.subagent_chats.size());
+            for (std::size_t index = 0; index < count; ++index) {
+                const SubagentChat chat = controller_.subagent_chat(tc, index);
+                rows.push_back(make_subagent_viewer_button(tc.id, index,
+                    "‹ View " + chat.title + " chat ›")
+                                       ->Render());
+            }
+            rows.push_back(separatorEmpty());
+            return vbox(std::move(rows));
+        }
+
+        Component make_subagent_viewer_button(
+            std::size_t id, std::size_t index, std::string label)
+        {
+            const auto key = std::pair { id, index };
+            if (const auto found = subagent_buttons_.find(key);
+                found != subagent_buttons_.end()) {
+                return found->second;
+            }
+            const auto on_click = [this, id, index] {
+                for (const ConversationItem& item : session_->items()) {
+                    const auto* call = std::get_if<ToolCall>(&item);
+                    if (call != nullptr && call->id == id) {
+                        open_subagent_viewer(*call, index);
+                        return;
+                    }
+                }
+            };
+            ButtonOption option;
+            option.label     = std::move(label);
+            option.on_click  = on_click;
+            option.transform = [](EntryState state) -> Element {
+                Element element = text(state.label);
+                if (state.focused) {
+                    element = element | bold | underlined | color(PANEL_FG);
+                } else {
+                    element = element | color(PANEL_FG_DIM);
+                }
+                return element;
+            };
+            Component button
+                = space_activates(Button(option), std::move(on_click));
+            subagent_buttons_.emplace(key, button);
+            container_->Add(button);
+            return button;
         }
 
         Component make_viewer_button(std::size_t id, std::string label)

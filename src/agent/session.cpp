@@ -444,7 +444,42 @@ void Session::append_tool(const ToolCallRequest& req)
         finalize_reasoning(*a);
     }
     items_.push_back(
-        ToolCall { next_tool_id_++, req.id, req.name, req.args, std::nullopt });
+        ToolCall { next_tool_id_++, req.id, req.name, req.args, { },
+            { }, std::nullopt });
+}
+
+void Session::set_tool_subagent_chats(
+    const ToolCallRequest& req, std::vector<SubagentChat> chats)
+{
+    std::lock_guard lock(mutex_);
+    for (auto it = items_.rbegin(); it != items_.rend(); ++it) {
+        auto* call = std::get_if<ToolCall>(&*it);
+        if (call == nullptr) continue;
+        const bool matched = !req.id.empty()
+            ? call->call_id == req.id
+            : call->name == req.name && call->args == req.args;
+        if (!matched) continue;
+        call->subagent_chats = std::move(chats);
+        ++content_serial_;
+        return;
+    }
+}
+
+void Session::set_tool_subagents(
+    const ToolCallRequest& req, std::vector<std::size_t> ids)
+{
+    std::lock_guard lock(mutex_);
+    for (auto it = items_.rbegin(); it != items_.rend(); ++it) {
+        auto* call = std::get_if<ToolCall>(&*it);
+        if (call == nullptr || call->result.has_value()) continue;
+        const bool matched = !req.id.empty()
+            ? call->call_id == req.id
+            : call->name == req.name && call->args == req.args;
+        if (!matched) continue;
+        call->subagent_ids = std::move(ids);
+        ++content_serial_;
+        return;
+    }
 }
 
 void Session::fill_tool_result(
@@ -644,7 +679,7 @@ void Session::apply(const StreamEvent& ev, const ModelPricing& pricing)
             finalize_reasoning(*a);
         }
         items_.push_back(ToolCall { next_tool_id_++, ev.tool_call.id,
-            ev.tool_call.name, ev.tool_call.args, std::nullopt });
+            ev.tool_call.name, ev.tool_call.args, { }, { }, std::nullopt });
         break;
     case StreamEvent::Kind::QUESTION:
         if (!items_.empty()) {

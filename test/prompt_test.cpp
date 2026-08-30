@@ -103,14 +103,17 @@ TEST_CASE("specs can be filtered by safety for plan mode")
     bool has_shell = false;
     bool has_read = false;
     bool has_ask = false;
+    bool has_subagent = false;
     for (const auto& s : plan) {
         has_shell = has_shell || s.name == "shell";
         has_read  = has_read || s.name == "read";
         has_ask   = has_ask || s.name == "ask";
+        has_subagent = has_subagent || s.name == "subagent";
     }
     CHECK(has_shell);
     CHECK(has_read);
     CHECK(has_ask);
+    CHECK(has_subagent);
 }
 
 } // namespace ursa
