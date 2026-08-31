@@ -1,8 +1,6 @@
 #include <doctest/doctest.h>
 
-#include "catalog.h"
-#include "pricing.h"
-#include "types.h"
+#include "provider/pricing.h"
 
 namespace {
 

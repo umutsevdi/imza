@@ -1,14 +1,13 @@
-#include "network.h"
+#include "network/json_io.h"
+#include "network/network.h"
+#include "network/sse_parse.h"
+#include "common/util.h"
 
 #include <curl/curl.h>
-
 #include <algorithm>
 #include <cctype>
 #include <charconv>
-#include <memory>
 #include <string_view>
-
-#include "util.h"
 
 namespace ursa {
 
@@ -79,7 +78,7 @@ namespace {
     constexpr std::size_t kRawCap = 16 * 1024;
 
     struct StreamCtx {
-        const Provider* provider;
+        const Provider* provider = nullptr;
         StreamCallback cb;
         ParseState parse_state;
         std::string buf;
@@ -233,11 +232,12 @@ namespace {
 
 } // namespace
 
-Status stream(const Provider& provider, const Route& route,
-    const ChatRequest& req, StreamCallback cb, int* retry_after)
+Status stream(const Route& route, const ChatRequest& req, StreamCallback cb,
+    int* retry_after)
 {
-    const std::string body = write_json(provider.build(req));
-    const std::string& url = route.endpoint;
+    const Provider& provider = get_provider(route);
+    const std::string body   = write_json(provider.build(req));
+    const std::string& url   = route.endpoint;
 
     std::vector<std::string> header_strs = provider.headers();
     for (auto& h : auth_headers(route.auth, route.api_key)) {
@@ -251,8 +251,7 @@ Status stream(const Provider& provider, const Route& route,
     StreamCtx ctx;
     ctx.provider = &provider;
     ctx.cb       = std::move(cb);
-
-    CURL* curl = reuse_handle();
+    CURL* curl   = reuse_handle();
     if (!curl) {
         curl_slist_free_all(list);
         return Status::NETWORK_ERROR;
@@ -319,28 +318,6 @@ Provider get_provider(const Route& route)
     return openai_provider;
 }
 
-std::string write_json(const Json::Value& value)
-{
-    Json::StreamWriterBuilder builder;
-    builder["indentation"] = "";
-    return Json::writeString(builder, value);
-}
-
-Json::Value parse_json(std::string_view text)
-{
-    static thread_local Json::CharReaderBuilder builder;
-    static thread_local std::unique_ptr<Json::CharReader> reader(
-        builder.newCharReader());
-    Json::Value value;
-    std::string err;
-    if (text.empty()
-        || !reader->parse(
-            text.data(), text.data() + text.size(), &value, &err)) {
-        return Json::Value::null;
-    }
-    return value;
-}
-
 ToolCallRequest finish_accum(const ToolAccum& acc)
 {
     ToolCallRequest req;
@@ -378,70 +355,6 @@ const char* role_str(Message::Type type)
     case Message::Type::TOOL: return "tool";
     }
     return "user";
-}
-
-StreamEvent make_delta_event(std::string text)
-{
-    StreamEvent ev;
-    ev.kind = StreamEvent::Kind::CONTENT_DELTA;
-    ev.text = std::move(text);
-    return ev;
-}
-
-StreamEvent make_tool_call_event(ToolCallRequest request)
-{
-    StreamEvent ev;
-    ev.kind      = StreamEvent::Kind::TOOL_CALL;
-    ev.tool_call = std::move(request);
-    return ev;
-}
-
-StreamEvent make_question_event(QuestionForm form)
-{
-    StreamEvent ev;
-    ev.kind     = StreamEvent::Kind::QUESTION;
-    ev.question = std::move(form);
-    return ev;
-}
-
-StreamEvent make_done_event()
-{
-    StreamEvent ev;
-    ev.kind = StreamEvent::Kind::DONE;
-    return ev;
-}
-
-StreamEvent make_error_event(Status error, std::string message)
-{
-    StreamEvent ev;
-    ev.kind  = StreamEvent::Kind::ERROR;
-    ev.error = error;
-    ev.text  = std::move(message);
-    return ev;
-}
-
-StreamEvent make_usage_event(Usage usage)
-{
-    StreamEvent ev;
-    ev.kind  = StreamEvent::Kind::USAGE;
-    ev.usage = usage;
-    return ev;
-}
-
-StreamEvent make_connected_event()
-{
-    StreamEvent ev;
-    ev.kind = StreamEvent::Kind::CONNECTED;
-    return ev;
-}
-
-StreamEvent make_reasoning_event(std::string text, std::string signature)
-{
-    StreamEvent ev;
-    ev.kind               = StreamEvent::Kind::REASONING;
-    ev.text               = std::move(text);
-    ev.thinking_signature = std::move(signature);
-    return ev;
 }
 
 Status parse_api_error(std::string_view body, std::string& message)

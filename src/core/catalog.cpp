@@ -1,6 +1,6 @@
-#include "catalog.h"
-
-#include "io.h"
+#include "core/io.h"
+#include "network/json_io.h"
+#include "provider/pricing.h"
 
 #include <algorithm>
 #include <array>
@@ -8,7 +8,7 @@
 #include <fstream>
 #include <sstream>
 
-#include "util.h"
+#include "common/util.h"
 
 namespace ursa {
 
@@ -311,6 +311,19 @@ Route resolve_route(
         + (dialect == ApiStandard::ANTHROPIC ? "/messages"
                                              : "/chat/completions");
     return route;
+}
+
+std::string endpoint_for_base(std::string_view base)
+{
+    if (base.empty()) {
+        return { };
+    }
+    constexpr std::string_view kSuffix = "/chat/completions";
+    if (base.size() >= kSuffix.size()
+        && base.substr(base.size() - kSuffix.size()) == kSuffix) {
+        return std::string(base);
+    }
+    return std::string(base) + std::string(kSuffix);
 }
 
 } // namespace ursa

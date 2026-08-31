@@ -1,10 +1,13 @@
 #include <doctest/doctest.h>
 #include <json/json.h>
 
-#include "controller.h"
-#include "network.h"
-#include "review.h"
-#include "types.h"
+#include "agent/flows.h"
+#include "agent/subsystems/skill_store.h"
+#include "network/sse_parse.h"
+#include "common/types.h"
+#include "network/network.h"
+#include "agent/review.h"
+#include "common/types.h"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -155,18 +158,11 @@ struct AgentEnv {
     PostPump pump;
     std::vector<ursa::ChatRequest> requests;
     ursa::StreamFn stream;
-    std::shared_ptr<ursa::Session> session = std::make_shared<ursa::Session>();
-    ursa::Controller controller {
-        std::make_shared<ursa::ApplicationState>(ursa::ApplicationState {
-            session, std::make_shared<ursa::ProviderStore>(test_config()),
-            std::make_shared<ursa::SubagentManager>(), ursa::get_environment(),
-            std::make_shared<ursa::ReviewState>() }),
-        pump.fn(), [] { },
-        [this](const ursa::ChatRequest& req, const ursa::StreamCallback& cb) {
-            return stream(req, cb);
-        },
-        std::vector<ursa::Tool> { }
-    };
+    std::shared_ptr<ursa::ApplicationState> state
+        = ursa::make_application_state(pump.fn(), test_config(),
+            [this](const ursa::ChatRequest& req,
+                const ursa::StreamCallback& cb) { return stream(req, cb); });
+    std::shared_ptr<ursa::Session> session = state->session;
 };
 
 bool idle(const ursa::Session& st)
@@ -191,7 +187,7 @@ TEST_CASE("controller retries rate-limited requests and then completes")
         cb(ursa::make_done_event());
         return ursa::Status::OK;
     };
-    env.controller.submit("hello");
+    ursa::submit(*env.state, "hello");
     REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
     CHECK(env.requests.size() == 2);
     CHECK(env.session->error().empty());
@@ -217,7 +213,7 @@ TEST_CASE("controller does not retry budget errors")
             ursa::Status::BUDGET_EXCEEDED, "insufficient credits"));
         return ursa::Status::BUDGET_EXCEEDED;
     };
-    env.controller.submit("hello");
+    ursa::submit(*env.state, "hello");
     REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
     CHECK(env.requests.size() == 1);
     CHECK(env.session->error()
@@ -310,9 +306,7 @@ TEST_CASE("stream reports rate limit, retry-after and provider message")
 
     std::vector<ursa::StreamEvent> events;
     int retry_after       = 0;
-    const auto p          = ursa::get_provider(route);
-    const ursa::Status st = ursa::stream(
-        p, route, req,
+    const ursa::Status st = ursa::stream(route, req,
         [&](const ursa::StreamEvent& ev) { events.push_back(ev); },
         &retry_after);
 
@@ -341,8 +335,7 @@ TEST_CASE("stream emits CONNECTED then parses SSE on success")
     req.model = "gpt-4o";
 
     std::vector<ursa::StreamEvent> events;
-    const auto p          = ursa::get_provider(route);
-    const ursa::Status st = ursa::stream(p, route, req,
+    const ursa::Status st = ursa::stream(route, req,
         [&](const ursa::StreamEvent& ev) { events.push_back(ev); });
 
     CHECK(st == ursa::Status::OK);

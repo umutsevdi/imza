@@ -1,5 +1,5 @@
-#include "ui.h"
-#include "util.h"
+#include "ui/ui.h"
+#include "common/util.h"
 
 #include <algorithm>
 #include <cctype>
@@ -69,6 +69,64 @@ void ScrollView::scroll_lines(int delta)
     scroll = std::clamp(scroll + delta, 0, max_scroll());
 }
 
+ModelRow make_model_row(const std::string& connection_id,
+    const std::string& provider_name, const ModelInfo& info)
+{
+    ModelRow row;
+    row.connection_id = connection_id;
+    row.model_id      = info.id;
+    const auto slash  = info.id.find('/');
+    row.name = slash == std::string::npos ? info.id : info.id.substr(slash + 1);
+    row.tag
+        = slash == std::string::npos ? provider_name : info.id.substr(0, slash);
+    return row;
+}
+
+ftxui::Element model_picker_row(const ModelRow& row, bool selected)
+{
+    ftxui::Element e = ftxui::hbox({
+        ftxui::text(selected ? "› " : "  "),
+        ftxui::text(row.name),
+        ftxui::filler(),
+        ftxui::text(row.tag) | ftxui::dim,
+    });
+    if (selected) {
+        e = std::move(e) | ftxui::bold;
+    }
+    return e;
+}
+
+void ModelPickList::refill_visible()
+{
+    const std::string needle = to_lower(trim(filter));
+    visible.clear();
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        if (!needle.empty()
+            && to_lower(rows[i].model_id).find(needle) == std::string::npos
+            && to_lower(rows[i].name).find(needle) == std::string::npos) {
+            continue;
+        }
+        visible.push_back(i);
+    }
+}
+
+void ModelPickList::move(int delta)
+{
+    if (visible.empty()) {
+        return;
+    }
+    selected
+        = std::clamp(selected + delta, 0, static_cast<int>(visible.size()) - 1);
+}
+
+const ModelRow* ModelPickList::chosen() const
+{
+    if (visible.empty() || selected >= static_cast<int>(visible.size())) {
+        return nullptr;
+    }
+    return &rows[visible[static_cast<std::size_t>(selected)]];
+}
+
 std::string compact_number(std::uint64_t n)
 {
     const auto scaled
@@ -134,15 +192,17 @@ std::string fit(const std::string& value, int width)
     while (i < value.size() && seen < max) {
         const auto lead    = static_cast<unsigned char>(value[i]);
         std::size_t length = 1;
-        if ((lead & 0xE0) == 0xC0)
+        if ((lead & 0xE0) == 0xC0) {
             length = 2;
-        else if ((lead & 0xF0) == 0xE0)
+        } else if ((lead & 0xF0) == 0xE0) {
             length = 3;
-        else if ((lead & 0xF8) == 0xF0)
+        } else if ((lead & 0xF8) == 0xF0) {
             length = 4;
+        }
         length = std::min(length, value.size() - i);
-        if (seen + 1 == max && i + length < value.size())
+        if (seen + 1 == max && i + length < value.size()) {
             return out + "…";
+        }
         out.append(value, i, length);
         ++seen;
         i += length;
@@ -159,12 +219,13 @@ std::string fit(const std::string& value, int width, int offset)
     while (pos < value.size() && seen < skip) {
         const auto lead    = static_cast<unsigned char>(value[pos]);
         std::size_t length = 1;
-        if ((lead & 0xE0) == 0xC0)
+        if ((lead & 0xE0) == 0xC0) {
             length = 2;
-        else if ((lead & 0xF0) == 0xE0)
+        } else if ((lead & 0xF0) == 0xE0) {
             length = 3;
-        else if ((lead & 0xF8) == 0xF0)
+        } else if ((lead & 0xF8) == 0xF0) {
             length = 4;
+        }
         pos += std::min(length, value.size() - pos);
         ++seen;
     }
@@ -446,10 +507,12 @@ Element diff_split(const DiffView& diff, int available_width)
 {
     std::size_t max_line = 1;
     for (const DiffRow& row : diff.rows) {
-        if (row.left_no)
+        if (row.left_no) {
             max_line = std::max(max_line, *row.left_no);
-        if (row.right_no)
+        }
+        if (row.right_no) {
             max_line = std::max(max_line, *row.right_no);
+        }
     }
     const std::size_t number_width = digit_width(max_line);
     const auto line_number = [number_width](
@@ -510,8 +573,9 @@ Element diff_split(const DiffView& diff, int available_width)
                   text(std::move(marker) + " " + content) | color(PANEL_FG),
                   filler() })
             | size(WIDTH, EQUAL, side_width);
-        if (background)
+        if (background) {
             line = std::move(line) | bgcolor(*background);
+        }
         return line;
     };
     for (const DiffRow& row : diff.rows) {

@@ -2,9 +2,9 @@
 
 #include <doctest/doctest.h>
 
-#include "format.h"
+#include "agent/format.h"
 #include "test_helpers.h"
-#include "ui.h"
+#include "ui/ui.h"
 
 using ursa::test::to_text;
 

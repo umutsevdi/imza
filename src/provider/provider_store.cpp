@@ -1,11 +1,22 @@
-#include "provider_store.h"
+#include "provider/provider_store.h"
 
-#include "pricing.h"
+#include "provider/pricing.h"
 
 #include <algorithm>
 #include <utility>
 
 namespace ursa {
+
+std::string_view subagent_default_variant(SubagentRole role)
+{
+    if (role == SubagentRole::BUILDER) {
+        return "medium";
+    }
+    if (role == SubagentRole::RESEARCH) {
+        return "low";
+    }
+    return "off";
+}
 
 ProviderStore::ProviderStore(Config config, ModelsFn models_fn)
     : config_(std::move(config))
@@ -178,8 +189,9 @@ std::optional<ProviderSelection> ProviderStore::subagent_selection(
     const std::string& model
         = use_default ? config_.last_used->model : configured->second.model;
     const Connection* connection = _find_locked(provider);
-    if (connection == nullptr)
+    if (connection == nullptr) {
         return std::nullopt;
+    }
     ApiStandard dialect = ApiStandard::OPENAI;
     if (const auto found = connection->dialects.find(model);
         found != connection->dialects.end()) {
@@ -353,13 +365,7 @@ bool ProviderStore::set_subagent_model(
 bool ProviderStore::set_skill_policies(const SkillPolicyChanges& changes)
 {
     return _update_config([&](Config& candidate) {
-        for (const auto& entry : changes.entries) {
-            if (entry.project_root.empty())
-                candidate.global_skills[entry.name] = entry.policy;
-            else
-                candidate.project_skills[entry.project_root][entry.name]
-                    = entry.policy;
-        }
+        apply_skill_policies(candidate, changes);
         return true;
     });
 }

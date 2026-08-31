@@ -4,9 +4,10 @@
 
 #include <doctest/doctest.h>
 
-#include "environment.h"
-#include "session.h"
-#include "session_store.h"
+#include "environment/environment.h"
+#include "agent/subsystems/session.h"
+#include "provider/pricing.h"
+#include "agent/subsystems/session_store.h"
 
 namespace {
 
@@ -84,8 +85,11 @@ TEST_CASE("saved sessions are immutable and fork on a new prompt")
     REQUIRE(ursa::get_environment()->chdir(other));
 
     ursa::Session loaded;
-    REQUIRE(ursa::load_session(saved_path, loaded) == ursa::Status::OK);
-    CHECK(std::filesystem::current_path() == directory.original);
+    std::filesystem::path workspace;
+    REQUIRE(ursa::load_session(saved_path, loaded, &workspace)
+        == ursa::Status::OK);
+    CHECK(workspace == directory.original);
+    CHECK(std::filesystem::current_path() == other);
     CHECK(loaded.title() == "Saved title");
     REQUIRE(loaded.items().size() == 2);
     CHECK(std::get<ursa::UserTurn>(loaded.items()[0]).text == "hello");

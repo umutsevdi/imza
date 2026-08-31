@@ -82,6 +82,8 @@ file(GLOB TEST_SOURCES "test/*.cpp")
 
 # Network transport (no ftxui, no cmark)
 add_library(ursa_network
+    src/network/json_io.cpp
+    src/network/stream_event.cpp
     src/network/transport.cpp
     src/network/openai_provider.cpp
     src/network/anthropic_provider.cpp
@@ -98,8 +100,10 @@ target_link_libraries(ursa_network PRIVATE
 
 # Shared app configuration + catalog cache (no ftxui, no cmark)
 add_library(ursa_core
-    src/core/config.cpp
     src/core/catalog.cpp
+    src/core/command_runner.cpp
+    src/core/config.cpp
+    src/core/git.cpp
     src/core/io.cpp
 )
 target_include_directories(ursa_core PRIVATE
@@ -111,10 +115,9 @@ target_link_libraries(ursa_core PUBLIC
     jsoncpp_static
 )
 
-# System/workspace environment + prompt building (no ftxui, no cmark)
+# System/workspace environment (no ftxui, no cmark)
 add_library(ursa_environment
     src/environment/environment.cpp
-    src/environment/prompt.cpp
 )
 target_include_directories(ursa_environment PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -138,20 +141,24 @@ target_link_libraries(ursa_provider PUBLIC
     ursa_network
 )
 
-# Agent: orchestration, formatting, slash commands (ftxui-free)
+# Agent: orchestration, prompts, formatting, slash commands (ftxui-free)
 add_library(ursa_agent
+    src/agent/application_state.cpp
     src/agent/attachments.cpp
-    src/agent/controller.cpp
-    src/agent/delegation.cpp
-    src/agent/stream_loop.cpp
-    src/agent/slash_commands.cpp
-    src/agent/session.cpp
-    src/agent/session_store.cpp
-    src/agent/subagent_manager.cpp
+    src/agent/delegation_runner.cpp
+    src/agent/flows.cpp
     src/agent/format.cpp
+    src/agent/modal_queue.cpp
+    src/agent/prompt.cpp
+    src/agent/review.cpp
+    src/agent/slash_commands.cpp
+    src/agent/tool_args.cpp
     src/agent/tools.cpp
-    src/agent/command_runner.cpp
-    src/environment/review.cpp
+    src/agent/turn_runner.cpp
+    src/agent/subsystems/session.cpp
+    src/agent/subsystems/session_store.cpp
+    src/agent/subsystems/skill_store.cpp
+    src/agent/subsystems/subagent_manager.cpp
 )
 target_include_directories(ursa_agent PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -168,14 +175,20 @@ target_link_libraries(ursa_agent PUBLIC
 # UI: ftxui components + renderers
 add_library(ursa_ui
     src/ui/app.cpp
+    src/ui/autocomplete.cpp
     src/ui/components.cpp
-    src/ui/connect.cpp
     src/ui/markdown.cpp
-    src/ui/modal.cpp
+    src/ui/modals/connect.cpp
+    src/ui/modals/sessions.cpp
+    src/ui/modals/skills.cpp
+    src/ui/modals/subagents.cpp
+    src/ui/modals/tools.cpp
+    src/ui/modals/variant.cpp
     src/ui/side_panel.cpp
     src/ui/status_line.cpp
     src/ui/tab_chat.cpp
     src/ui/tab_review.cpp
+    src/ui/tool_format.cpp
 )
 target_include_directories(ursa_ui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include

@@ -1,6 +1,7 @@
-#include "tools.h"
-#include "command_runner.h"
-#include "util.h"
+#include "agent/tools.h"
+#include "core/command_runner.h"
+#include "network/json_io.h"
+#include "common/util.h"
 
 #include <algorithm>
 #include <chrono>
@@ -9,9 +10,8 @@
 #include <iomanip>
 #include <sstream>
 #include <string>
-#include <vector>
-
 #include <utility>
+#include <vector>
 
 namespace ursa {
 
@@ -425,13 +425,8 @@ namespace {
             const std::size_t len  = std::max(olen, nlen);
             for (std::size_t k = 0; k < len; ++k) {
                 DiffRow r;
-                if (k < olen && k < nlen) {
-                    r.kind = DiffRow::Kind::ADD;
-                } else if (k < olen) {
-                    r.kind = DiffRow::Kind::REMOVE;
-                } else {
-                    r.kind = DiffRow::Kind::ADD;
-                }
+                r.kind = (k < olen && k >= nlen) ? DiffRow::Kind::REMOVE
+                                                 : DiffRow::Kind::ADD;
                 if (k < olen) {
                     r.left_no = ed.old_begin + k + 1;
                     r.left    = old_lines[ed.old_begin + k];
@@ -704,7 +699,7 @@ Tool make_skill_tool()
     spec.name        = "skill";
     spec.description = "Load the instructions for a discovered skill by name. "
                        "Optionally specify scope as project or global.";
-    spec.parameters = parse_json(
+    spec.parameters  = parse_json(
         R"json({"type":"object","properties":{"name":{"type":"string"},"scope":{"type":"string","enum":["project","global"]}},"required":["name"]})json");
     return { std::move(spec), { }, ToolSafety::READ_ONLY, false, true };
 }

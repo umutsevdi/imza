@@ -3,7 +3,8 @@
 #include <fstream>
 #include <string>
 
-#include "tools.h"
+#include "agent/tools.h"
+#include "network/json_io.h"
 
 namespace fs = std::filesystem;
 

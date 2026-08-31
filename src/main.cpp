@@ -1,7 +1,7 @@
 #include <print>
 
-#include "types.h"
-#include "ui.h"
+#include "core/config.h"
+#include "ui/repl.h"
 
 int main()
 {

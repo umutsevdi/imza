@@ -6,7 +6,8 @@
 #include <fstream>
 #include <sstream>
 
-#include "tools.h"
+#include "agent/tools.h"
+#include "network/json_io.h"
 
 namespace ursa {
 

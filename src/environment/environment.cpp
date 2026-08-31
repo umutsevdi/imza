@@ -1,8 +1,8 @@
-#include "environment.h"
+#include "environment/environment.h"
 
-#include "command_runner.h"
-#include "types.h"
-#include "util.h"
+#include "core/command_runner.h"
+#include "core/config.h"
+#include "common/util.h"
 
 #include <algorithm>
 #include <array>
@@ -11,11 +11,9 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <iomanip>
 #include <iterator>
 #include <mutex>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <vector>
 #ifdef _WIN32
@@ -74,14 +72,16 @@ namespace {
         const std::vector<ChangedFile>& files, ChangeSummary& summary)
     {
         for (const ChangedFile& file : files) {
-            if (file.kind != ChangedFile::Kind::UNTRACKED)
+            if (file.kind != ChangedFile::Kind::UNTRACKED) {
                 continue;
+            }
             hash_bytes(summary.signature, file.path);
             summary.signature ^= 0xFF;
             summary.signature *= FNV_PRIME;
             std::ifstream input(root / file.path, std::ios::binary);
-            if (!input)
+            if (!input) {
                 continue;
+            }
             std::array<char, 8192> buffer;
             std::size_t lines = 0;
             bool binary       = false;
@@ -90,8 +90,9 @@ namespace {
             while (input) {
                 input.read(buffer.data(), buffer.size());
                 const std::streamsize count = input.gcount();
-                if (count <= 0)
+                if (count <= 0) {
                     continue;
+                }
                 const std::string_view chunk(
                     buffer.data(), static_cast<std::size_t>(count));
                 hash_bytes(summary.signature, chunk);
@@ -101,8 +102,9 @@ namespace {
                 lines += std::ranges::count(chunk, '\n');
             }
             if (!binary) {
-                if (has_content && last != '\n')
+                if (has_content && last != '\n') {
                     ++lines;
+                }
                 summary.additions += lines;
             }
         }
@@ -224,7 +226,7 @@ namespace {
             "nix-env", "snap", "flatpak", "winget", "choco", "scoop" };
         for (const char* pm : candidates) {
             if (find_in_path(pm)) {
-                package_managers.push_back(pm);
+                package_managers.emplace_back(pm);
             }
         }
     }
@@ -236,8 +238,9 @@ namespace {
         bool frontmatter = false;
         while (std::getline(in, line)) {
             if (line == "---") {
-                if (frontmatter)
+                if (frontmatter) {
                     break;
+                }
                 frontmatter = true;
                 continue;
             }
@@ -245,8 +248,9 @@ namespace {
                 std::string value
                     = std::string(trim(std::string_view(line).substr(12)));
                 if (value.size() >= 2 && value.front() == '"'
-                    && value.back() == '"')
+                    && value.back() == '"') {
                     value = value.substr(1, value.size() - 2);
+                }
                 return value;
             }
         }
@@ -258,14 +262,16 @@ namespace {
         std::unordered_map<std::string, Skill>& skills)
     {
         std::error_code ec;
-        if (!std::filesystem::is_directory(directory, ec))
+        if (!std::filesystem::is_directory(directory, ec)) {
             return;
+        }
         for (std::filesystem::directory_iterator it(directory, ec), end;
             !ec && it != end; it.increment(ec)) {
             const auto file = it->path() / "SKILL.md";
             if (!it->is_directory(ec)
-                || !std::filesystem::is_regular_file(file, ec))
+                || !std::filesystem::is_regular_file(file, ec)) {
                 continue;
+            }
             const std::string name = it->path().filename().string();
             skills.emplace(name,
                 Skill { name, skill_description(file), file, scope, root });
@@ -336,14 +342,17 @@ ChangeSummary summarize_git_diff(std::string_view diff)
                                                : line_end - line_start);
         line_start
             = line_end == std::string_view::npos ? diff.size() : line_end + 1;
-        if (line.empty())
+        if (line.empty()) {
             break;
+        }
         const std::size_t first_tab = line.find('\t');
-        if (first_tab == std::string_view::npos)
+        if (first_tab == std::string_view::npos) {
             break;
+        }
         const std::size_t second_tab = line.find('\t', first_tab + 1);
-        if (second_tab == std::string_view::npos)
+        if (second_tab == std::string_view::npos) {
             break;
+        }
         std::size_t additions        = 0;
         std::size_t deletions        = 0;
         const std::string_view added = line.substr(0, first_tab);
@@ -592,26 +601,22 @@ std::optional<std::string> Environment::agent_rules_path() const
 std::vector<Skill> Environment::skills() const
 {
     std::vector<Skill> out;
-    for (const auto& [name, skill] : system_->global_skills)
+    for (const auto& [name, skill] : system_->global_skills) {
         out.push_back(skill);
+    }
     const auto ws = workspace();
-    if (ws)
-        for (const auto& [name, skill] : ws->project_skills)
+    if (ws) {
+        for (const auto& [name, skill] : ws->project_skills) {
             out.push_back(skill);
+        }
+    }
     std::sort(out.begin(), out.end(), [](const Skill& a, const Skill& b) {
-        if (a.scope != b.scope)
+        if (a.scope != b.scope) {
             return a.scope == Skill::Scope::PROJECT;
+        }
         return a.name < b.name;
     });
     return out;
-}
-
-std::string shell_name(const SystemEnvironment& sys)
-{
-    if (sys.default_shell.empty()) {
-        return "sh";
-    }
-    return std::filesystem::path(sys.default_shell).filename().string();
 }
 
 std::shared_ptr<Environment> get_environment()

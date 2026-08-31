@@ -1,4 +1,6 @@
-#include "network.h"
+#include "network/json_io.h"
+#include "network/network.h"
+#include "network/sse_parse.h"
 
 namespace ursa {
 

@@ -4,8 +4,8 @@
 #include <string>
 #include <string_view>
 
-#include "prompt.h"
-#include "tools.h"
+#include "agent/prompt.h"
+#include "agent/tools.h"
 
 namespace ursa {
 

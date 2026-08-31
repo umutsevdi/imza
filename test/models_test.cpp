@@ -1,6 +1,6 @@
 #include <doctest/doctest.h>
 
-#include "network.h"
+#include "network/models.h"
 
 namespace {
 

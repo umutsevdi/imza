@@ -4,7 +4,7 @@
 #include <ftxui/component/component.hpp>
 
 #include "test_helpers.h"
-#include "ui.h"
+#include "ui/ui.h"
 
 using ursa::test::to_text;
 

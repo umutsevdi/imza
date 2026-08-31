@@ -1,4 +1,4 @@
-#include "ui.h"
+#include "ui/ui.h"
 
 #include <cmark-gfm-core-extensions.h>
 #include <cmark-gfm.h>
@@ -305,7 +305,7 @@ namespace {
             add(std::move(body) | bgcolor(Color::Palette256(237)));
         }
 
-        void list_begin(bool) { lists_.push_back(ListFrame { }); }
+        void list_begin(bool) { lists_.emplace_back(); }
         void list_end()
         {
             ListFrame list = std::move(lists_.back());
@@ -318,7 +318,7 @@ namespace {
         void item_begin(std::string_view prefix)
         {
             frames_.emplace_back();
-            item_prefixes_.push_back(std::string(prefix));
+            item_prefixes_.emplace_back(prefix);
         }
 
         void item_end()
@@ -412,7 +412,7 @@ namespace {
 
         static Element passthrough(Element e) { return e; }
 
-        void flush_words(Decorator extra)
+        void flush_words(const Decorator& extra)
         {
             if (words_.empty()) {
                 return;

@@ -1,8 +1,9 @@
-#include "pricing.h"
-#include "ui.h"
-#include "util.h"
-
-#include "environment.h"
+#include "agent/application_state.h"
+#include "agent/subsystems/subagent_manager.h"
+#include "provider/pricing.h"
+#include "provider/provider_store.h"
+#include "ui/ui.h"
+#include "common/util.h"
 
 #include <cstdlib>
 #include <filesystem>

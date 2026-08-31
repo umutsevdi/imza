@@ -4,8 +4,9 @@
 
 #include <doctest/doctest.h>
 
-#include "attachments.h"
-#include "session.h"
+#include "agent/attachments.h"
+#include "provider/pricing.h"
+#include "agent/subsystems/session.h"
 
 namespace fs = std::filesystem;
 

@@ -1,10 +1,10 @@
-#include "network.h"
+#include "network/models.h"
+#include "network/json_io.h"
+#include "common/util.h"
 
 #include <algorithm>
 #include <array>
 #include <string_view>
-
-#include "util.h"
 
 namespace ursa {
 

@@ -1,8 +1,10 @@
 #include <doctest/doctest.h>
 #include <json/json.h>
 
-#include "network.h"
-#include "types.h"
+#include "network/network.h"
+#include "network/json_io.h"
+#include "network/sse_parse.h"
+#include "common/types.h"
 
 namespace {
 

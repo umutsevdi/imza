@@ -1,4 +1,6 @@
-#include "ui.h"
+#include "agent/delegation_runner.h"
+#include "agent/flows.h"
+#include "ui/ui.h"
 
 #include <ftxui/component/animation.hpp>
 #include <ftxui/component/component.hpp>
@@ -9,7 +11,6 @@
 #include <ftxui/dom/node.hpp>
 
 #include <algorithm>
-#include <filesystem>
 #include <functional>
 #include <map>
 #include <string>
@@ -17,9 +18,11 @@
 #include <utility>
 #include <vector>
 
-#include "attachments.h"
-#include "format.h"
-#include "util.h"
+#include "agent/attachments.h"
+#include "agent/format.h"
+#include "ui/autocomplete.h"
+#include "ui/tool_format.h"
+#include "common/util.h"
 
 namespace ursa {
 
@@ -125,10 +128,9 @@ namespace {
 
     class ChatImpl : public ComponentBase {
     public:
-        ChatImpl(std::shared_ptr<Session> session, Controller& controller,
-            LayoutFn layout)
-            : session_(std::move(session))
-            , controller_(controller)
+        ChatImpl(std::shared_ptr<ApplicationState> state, LayoutFn layout)
+            : state_(std::move(state))
+            , session_(state_->session)
             , layout_(std::move(layout))
         {
             input_options_.content     = &input_buf_;
@@ -391,8 +393,8 @@ namespace {
                     }),
                 })
                 | xflex);
-            if (show_suggestions()) {
-                bottom.push_back(render_suggestions());
+            if (autocomplete_.active()) {
+                bottom.push_back(autocomplete_.render(ctx));
             }
             bottom.push_back(vbox({ std::move(input_box) | yflex,
                 text("  Alt+Enter add line · @ attach file · $ use skill ")
@@ -446,40 +448,30 @@ namespace {
                 }
             }
             if (event == Event::Escape) {
-                if (show_suggestions()) {
-                    matches_.clear();
-                    skill_matches_.clear();
-                    file_matches_.clear();
-                    attachment_token_.reset();
+                if (autocomplete_.active()) {
+                    autocomplete_.clear();
                     return true;
                 }
                 if (!session_->queued().empty()) {
-                    controller_.cancel_queued(session_->queued().back().id);
+                    session_->cancel_queued(session_->queued().back().id);
                     return true;
                 }
                 if (session_->phase() != Session::Phase::IDLE) {
-                    controller_.interrupt();
+                    ursa::interrupt(*state_);
                     return true;
                 }
                 return true;
             }
-            if (show_suggestions()) {
-                if (event == Event::ArrowDown) {
-                    sel_ = (sel_ + 1) % suggestion_count();
-                    return true;
-                }
-                if (event == Event::ArrowUp) {
-                    const int n = suggestion_count();
-                    sel_        = (sel_ - 1 + n) % n;
+            if (autocomplete_.active()) {
+                if (autocomplete_.handle_event(event)) {
                     return true;
                 }
                 if (event == Event::Return) {
-                    const bool insertion_suggestion
-                        = !file_matches_.empty() || !skill_matches_.empty();
-                    accept();
-                    if (!insertion_suggestion) {
-                        submit();
+                    if (!autocomplete_.accept(*state_, input_buf_,
+                            input_cursor_, attachments_)) {
+                        return true;
                     }
+                    submit();
                     return true;
                 }
             }
@@ -554,33 +546,33 @@ namespace {
         void open_viewer_for(const ToolCall& tc)
         {
             if (tc.name == "read") {
-                controller_.enqueue_user_modal(
+                ursa::enqueue_user_modal(*state_, 
                     ViewerModal { tool_call_head(tc), tc.result->text,
                         tool_code_language(tc), read_start_line(tc) });
             } else if (tc.name == "skill") {
-                controller_.enqueue_user_modal(ViewerModal {
+                ursa::enqueue_user_modal(*state_, ViewerModal {
                     tool_call_head(tc), tc.result->text, "markdown", 1, true });
             } else if (tc.name == "list") {
-                controller_.enqueue_user_modal(ViewerModal {
+                ursa::enqueue_user_modal(*state_, ViewerModal {
                     "Directory listing", tc.result->text, "", 1 });
             } else {
-                controller_.enqueue_user_modal(
+                ursa::enqueue_user_modal(*state_, 
                     ViewerModal { "Shell output", tc.result->text, "", 1 });
             }
         }
 
         void open_subagent_viewer(const ToolCall& tc, std::size_t index)
         {
-            SubagentChat chat = controller_.subagent_chat(tc, index);
-            controller_.enqueue_user_modal(ViewerModal { std::move(chat.title),
+            SubagentChat chat = state_->delegation->subagent_chat(tc, index);
+            ursa::enqueue_user_modal(*state_, ViewerModal { std::move(chat.title),
                 std::move(chat.transcript), "markdown", 1, true, "" });
         }
 
         void on_input_changed()
         {
-            controller_.clear_error();
+            session_->clear_error();
             retain_mentioned_attachments(input_buf_, attachments_);
-            refresh_suggestions();
+            autocomplete_.refresh(*state_, input_buf_, input_cursor_);
         }
 
         void insert_newline()
@@ -595,201 +587,15 @@ namespace {
             const std::string text(input_buf_);
             input_buf_.clear();
             input_cursor_ = 0;
-            controller_.submit(std::move(text), std::move(attachments_));
+            ursa::submit(*state_, text, std::move(attachments_));
             attachments_.clear();
+            autocomplete_.clear();
             follow_ = true;
             animation::RequestAnimationFrame();
         }
 
-        void refresh_suggestions()
-        {
-            matches_.clear();
-            skill_matches_.clear();
-            file_matches_.clear();
-            attachment_token_.reset();
-            sel_                   = 0;
-            const std::string text = input_buf_;
-            attachment_token_      = attachment_token_at(
-                text, static_cast<std::size_t>(input_cursor_));
-            if (attachment_token_) {
-                file_matches_ = attachment_candidates(
-                    std::filesystem::current_path(), attachment_token_->query);
-                return;
-            }
-            std::size_t token_begin = static_cast<std::size_t>(input_cursor_);
-            while (token_begin > 0
-                && !std::isspace(
-                    static_cast<unsigned char>(text[token_begin - 1]))) {
-                --token_begin;
-            }
-            if (token_begin < static_cast<std::size_t>(input_cursor_)
-                && text[token_begin] == '$') {
-                skill_token_begin_    = token_begin;
-                const std::string key = to_lower(text.substr(token_begin + 1,
-                    static_cast<std::size_t>(input_cursor_) - token_begin - 1));
-                for (const Skill& skill : controller_.available_skills()) {
-                    const std::string name = to_lower(skill.name);
-                    if (name.starts_with(key))
-                        skill_matches_.push_back(skill);
-                }
-                return;
-            }
-            skill_token_begin_.reset();
-            if (text.empty() || text[0] != '/'
-                || text.find(' ') != std::string::npos) {
-                return;
-            }
-            const std::string key = to_lower(text);
-            for (const auto& c : controller_.commands()) {
-                const std::string name = to_lower(c.name);
-                if (name.size() >= key.size()
-                    && name.compare(0, key.size(), key) == 0) {
-                    matches_.push_back(&c);
-                }
-            }
-            if (matches_.size() == 1 && matches_[0]->name == text) {
-                matches_.clear();
-            }
-        }
-
-        void accept()
-        {
-            if (!file_matches_.empty() && attachment_token_) {
-                const AttachmentCandidate& candidate = file_matches_[sel_];
-                const std::string replacement        = "@" + candidate.path;
-                input_buf_.replace(attachment_token_->begin,
-                    attachment_token_->end - attachment_token_->begin,
-                    replacement);
-                input_cursor_ = static_cast<int>(
-                    attachment_token_->begin + replacement.size());
-                if (candidate.directory) {
-                    refresh_suggestions();
-                    return;
-                }
-                AttachmentResult loaded = load_attachment(
-                    std::filesystem::current_path(), candidate.path);
-                if (!loaded.attachment) {
-                    controller_.set_error(std::move(loaded.error));
-                    refresh_suggestions();
-                    return;
-                }
-                const auto duplicate = std::find_if(attachments_.begin(),
-                    attachments_.end(), [&](const FileAttachment& attachment) {
-                        return attachment.path == loaded.attachment->path;
-                    });
-                if (duplicate == attachments_.end()) {
-                    constexpr std::size_t kMaxAttachments = 20;
-                    constexpr std::size_t kMaxTotalBytes  = 4 * 1024 * 1024;
-                    std::size_t total = loaded.attachment->content.size();
-                    for (const auto& attachment : attachments_) {
-                        total += attachment.content.size();
-                    }
-                    if (attachments_.size() >= kMaxAttachments
-                        || total > kMaxTotalBytes) {
-                        controller_.set_error("Attachments exceed the 20-file "
-                                              "or 4 MiB total limit.");
-                        refresh_suggestions();
-                        return;
-                    }
-                    attachments_.push_back(std::move(*loaded.attachment));
-                }
-                input_buf_.insert(input_cursor_, " ");
-                ++input_cursor_;
-                matches_.clear();
-                file_matches_.clear();
-                attachment_token_.reset();
-                return;
-            }
-            if (!skill_matches_.empty() && skill_token_begin_) {
-                const std::string replacement
-                    = "$" + skill_matches_[static_cast<std::size_t>(sel_)].name;
-                input_buf_.replace(*skill_token_begin_,
-                    static_cast<std::size_t>(input_cursor_)
-                        - *skill_token_begin_,
-                    replacement);
-                input_cursor_ = static_cast<int>(
-                    *skill_token_begin_ + replacement.size());
-                input_buf_.insert(static_cast<std::size_t>(input_cursor_), " ");
-                ++input_cursor_;
-                refresh_suggestions();
-                return;
-            }
-            const SlashCommand* cmd = matches_[sel_];
-            input_buf_              = cmd->name;
-            input_cursor_           = static_cast<int>(input_buf_.size());
-            refresh_suggestions();
-        }
-
-        int suggestion_count() const
-        {
-            if (!file_matches_.empty())
-                return static_cast<int>(file_matches_.size());
-            if (!skill_matches_.empty())
-                return static_cast<int>(skill_matches_.size());
-            return static_cast<int>(matches_.size());
-        }
-
-        bool show_suggestions() const { return suggestion_count() > 0; }
-
-        Element render_suggestions()
-        {
-            const size_t max_rows     = 8;
-            const LayoutCtx ctx       = layout_();
-            const int available_width = ctx.kind == LayoutCtx::Kind::WIDE
-                ? ctx.width - LayoutCtx::panel_width
-                : ctx.width;
-            const int description_width
-                = std::clamp(available_width - 28, 8, 56);
-            const size_t total = !file_matches_.empty() ? file_matches_.size()
-                : !skill_matches_.empty()               ? skill_matches_.size()
-                                                        : matches_.size();
-            const size_t shown = std::min(total, max_rows);
-            const size_t selected = static_cast<size_t>(std::max(0, sel_));
-            const size_t first    = selected < shown
-                ? 0
-                : std::min(selected - shown + 1, total - shown);
-            Elements rows;
-            if (first > 0) {
-                rows.push_back(text("  ↑ " + std::to_string(first) + " more")
-                    | dim | color(PANEL_FG_DIM));
-            }
-            for (size_t row_index = 0; row_index < shown; ++row_index) {
-                const size_t i              = first + row_index;
-                const bool sel              = static_cast<int>(i) == sel_;
-                const std::string name_text = !file_matches_.empty()
-                    ? "@" + file_matches_[i].path
-                    : !skill_matches_.empty() ? "$" + skill_matches_[i].name
-                                              : std::string(matches_[i]->name);
-                Element name                = text(name_text);
-                if (sel) {
-                    name = name | bold;
-                }
-                const std::string description = !file_matches_.empty()
-                    ? (file_matches_[i].directory ? "directory" : "file")
-                    : !skill_matches_.empty() ? skill_matches_[i].description
-                                              : std::string(matches_[i]->desc);
-                Element row                   = hbox({
-                    std::move(name) | xflex,
-                    text("  "),
-                    text(fit(description, description_width)) | dim
-                        | color(PANEL_FG_DIM),
-                });
-                row                           = row | xflex
-                    | (sel ? bgcolor(PANEL_COLOR_FOCUS) : bgcolor(PANEL_COLOR));
-                rows.push_back(std::move(row));
-            }
-            const size_t remaining = total - first - shown;
-            if (remaining > 0) {
-                rows.push_back(
-                    text("  ↓ " + std::to_string(remaining) + " more") | dim
-                    | color(PANEL_FG_DIM));
-            }
-            return vbox(std::move(rows)) | xflex | bgcolor(PANEL_COLOR)
-                | color(PANEL_FG);
-        }
-
+        std::shared_ptr<ApplicationState> state_;
         std::shared_ptr<Session> session_;
-        Controller& controller_;
         LayoutFn layout_;
 
         Component container_;
@@ -985,7 +791,7 @@ namespace {
                 for (std::size_t index = 0; index < tc.subagent_ids.size();
                     ++index) {
                     const SubagentChat chat
-                        = controller_.subagent_chat(tc, index);
+                        = state_->delegation->subagent_chat(tc, index);
                     rows.push_back(make_subagent_viewer_button(
                         tc.id, index, "‹ View " + chat.title + " chat ›")
                             ->Render());
@@ -1016,7 +822,7 @@ namespace {
             const std::size_t count
                 = std::max(tc.subagent_ids.size(), tc.subagent_chats.size());
             for (std::size_t index = 0; index < count; ++index) {
-                const SubagentChat chat = controller_.subagent_chat(tc, index);
+                const SubagentChat chat = state_->delegation->subagent_chat(tc, index);
                 rows.push_back(make_subagent_viewer_button(
                     tc.id, index, "‹ View " + chat.title + " chat ›")
                         ->Render());
@@ -1139,7 +945,7 @@ namespace {
                 ViewerModal vm { " Thinking", *content_ptr, "", 1 };
                 vm.line_numbers = false;
                 vm.metadata     = *metadata_ptr;
-                controller_.enqueue_user_modal(vm);
+                ursa::enqueue_user_modal(*state_, vm);
             };
             Component btn
                 = inline_link_button([label_ptr] { return text(*label_ptr); },
@@ -1158,13 +964,8 @@ namespace {
         InputOption input_options_;
         Component input_;
 
-        std::vector<const SlashCommand*> matches_;
-        std::vector<AttachmentCandidate> file_matches_;
-        std::optional<AttachmentToken> attachment_token_;
+        Autocomplete autocomplete_;
         std::vector<FileAttachment> attachments_;
-        std::vector<Skill> skill_matches_;
-        std::optional<std::size_t> skill_token_begin_;
-        int sel_          = 0;
         int input_cursor_ = 0;
         bool paste_mode_  = false;
 
@@ -1204,10 +1005,10 @@ ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx)
         item);
 }
 
-ftxui::Component make_chat(std::shared_ptr<ApplicationState> state,
-    Controller& controller, LayoutFn layout)
+ftxui::Component make_chat(
+    std::shared_ptr<ApplicationState> state, LayoutFn layout)
 {
-    return ftxui::Make<ChatImpl>(state->session, controller, std::move(layout));
+    return ftxui::Make<ChatImpl>(std::move(state), std::move(layout));
 }
 
 } // namespace ursa

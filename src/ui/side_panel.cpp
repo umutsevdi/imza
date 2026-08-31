@@ -1,7 +1,9 @@
-#include "ui.h"
+#include "agent/application_state.h"
+#include "agent/flows.h"
+#include "ui/ui.h"
 
-#include "environment.h"
-#include "review.h"
+#include "agent/review.h"
+#include "agent/subsystems/skill_store.h"
 
 #include <ftxui/component/app.hpp>
 #include <ftxui/component/component.hpp>
@@ -52,10 +54,9 @@ namespace {
 
 class SidePanel : public ComponentBase {
 public:
-    SidePanel(std::shared_ptr<ApplicationState> state, Controller& controller,
+    SidePanel(std::shared_ptr<ApplicationState> state,
         LayoutFn layout, WorkflowFn workflow, WorkflowNavigateFn navigate)
         : state_(std::move(state))
-        , controller_(controller)
         , layout_(std::move(layout))
         , workflow_(std::move(workflow))
         , navigate_(std::move(navigate))
@@ -105,7 +106,8 @@ public:
             if (attachments_dirty_.exchange(false)) {
                 attachment_names_ = state_->session->attachment_names();
             }
-            const auto [project, global] = controller_.skill_counts();
+            const auto [project, global]
+                = state_->skills->counts(state_->environment->skills());
             parts.push_back(render_context_box(
                 env->agent_rules_path(), attachment_names_, project, global));
         }
@@ -119,8 +121,9 @@ public:
     bool OnEvent(Event event) override
     {
         for (const Component& link : active_links_) {
-            if (link->OnEvent(event))
+            if (link->OnEvent(event)) {
                 return true;
+            }
         }
         return false;
     }
@@ -218,7 +221,6 @@ private:
     }
 
     std::shared_ptr<ApplicationState> state_;
-    Controller& controller_;
     LayoutFn layout_;
     WorkflowFn workflow_;
     WorkflowNavigateFn navigate_;
@@ -236,10 +238,10 @@ private:
 };
 
 ftxui::Component make_side_panel(std::shared_ptr<ApplicationState> state,
-    Controller& controller, LayoutFn layout, WorkflowFn workflow,
+    LayoutFn layout, WorkflowFn workflow,
     WorkflowNavigateFn navigate)
 {
-    return ftxui::Make<SidePanel>(std::move(state), controller,
+    return ftxui::Make<SidePanel>(std::move(state),
         std::move(layout), std::move(workflow), std::move(navigate));
 }
 

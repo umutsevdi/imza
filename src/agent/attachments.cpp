@@ -1,6 +1,5 @@
-#include "attachments.h"
-
-#include "util.h"
+#include "agent/attachments.h"
+#include "common/util.h"
 
 #include <algorithm>
 #include <cctype>
@@ -13,6 +12,8 @@ namespace ursa {
 namespace {
 
     constexpr std::uintmax_t kMaxAttachmentBytes = 1024 * 1024;
+    constexpr std::size_t kMaxAttachments        = 20;
+    constexpr std::size_t kMaxTotalBytes         = 4 * 1024 * 1024;
 
     bool ignored_directory(std::string_view name)
     {
@@ -60,12 +61,8 @@ namespace {
 std::optional<AttachmentToken> attachment_token_at(
     std::string_view text, std::size_t cursor)
 {
-    cursor            = std::min(cursor, text.size());
-    std::size_t begin = cursor;
-    while (begin > 0
-        && !std::isspace(static_cast<unsigned char>(text[begin - 1]))) {
-        --begin;
-    }
+    cursor                  = std::min(cursor, text.size());
+    const std::size_t begin = word_begin(text, cursor);
     if (begin >= cursor || text[begin] != '@') {
         return std::nullopt;
     }
@@ -74,6 +71,20 @@ std::optional<AttachmentToken> attachment_token_at(
         return std::nullopt;
     }
     return AttachmentToken { begin, cursor, std::string(token) };
+}
+
+bool can_add_attachment(const std::vector<FileAttachment>& existing,
+    const FileAttachment& next, std::string& error)
+{
+    std::size_t total = next.content.size();
+    for (const auto& attachment : existing) {
+        total += attachment.content.size();
+    }
+    if (existing.size() >= kMaxAttachments || total > kMaxTotalBytes) {
+        error = "Attachments exceed the 20-file or 4 MiB total limit.";
+        return false;
+    }
+    return true;
 }
 
 std::vector<AttachmentCandidate> attachment_candidates(

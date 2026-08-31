@@ -1,6 +1,6 @@
-#include "types.h"
+#include "core/config.h"
 
-#include "io.h"
+#include "core/io.h"
 
 #include <json/json.h>
 #include <algorithm>
@@ -9,15 +9,6 @@
 #include <sstream>
 
 namespace ursa {
-
-std::string_view subagent_default_variant(SubagentRole role)
-{
-    if (role == SubagentRole::BUILDER)
-        return "medium";
-    if (role == SubagentRole::RESEARCH)
-        return "low";
-    return "off";
-}
 
 std::filesystem::path base_config_dir()
 {
@@ -54,6 +45,28 @@ std::filesystem::path presets_path()
 {
     return base_config_dir() / "presets.json";
 }
+
+std::filesystem::path data_dir()
+{
+#if defined(_WIN32)
+    const char* appdata = std::getenv("APPDATA");
+    return std::filesystem::path(appdata && *appdata ? appdata : ".") / "ursa";
+#elif defined(__APPLE__)
+    const char* home = std::getenv("HOME");
+    return std::filesystem::path(home && *home ? home : ".") / "Library"
+        / "Application Support" / "ursa";
+#else
+    const char* xdg = std::getenv("XDG_DATA_HOME");
+    if (xdg && *xdg) {
+        return std::filesystem::path(xdg) / "ursa";
+    }
+    const char* home = std::getenv("HOME");
+    return std::filesystem::path(home && *home ? home : ".") / ".local"
+        / "share" / "ursa";
+#endif
+}
+
+std::filesystem::path sessions_dir() { return data_dir() / "sessions"; }
 
 namespace {
 
@@ -284,11 +297,20 @@ Status load_config(
     return Status::OK;
 }
 
+void apply_skill_policies(Config& config, const SkillPolicyChanges& changes)
+{
+    for (const auto& entry : changes.entries) {
+        if (entry.project_root.empty())
+            config.global_skills[entry.name] = entry.policy;
+        else
+            config.project_skills[entry.project_root][entry.name]
+                = entry.policy;
+    }
+}
+
 Status save_config(const std::filesystem::path& path, const Config& cfg)
 {
-    Json::Value root(Json::objectValue);
-
-    Json::Value providers(Json::arrayValue);
+    Json::Value root(Json::objectValue);    Json::Value providers(Json::arrayValue);
     for (const Connection& conn : cfg.providers) {
         Json::Value entry(Json::objectValue);
         if (conn.id != conn.provider_id)

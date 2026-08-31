@@ -1,6 +1,6 @@
 #include <doctest/doctest.h>
 
-#include "review.h"
+#include "agent/review.h"
 
 TEST_CASE("git diff parser builds files hunks and line numbers")
 {

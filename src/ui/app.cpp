@@ -1,4 +1,5 @@
-#include "ui.h"
+#include "agent/flows.h"
+#include "ui/ui.h"
 
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_base.hpp>
@@ -9,11 +10,13 @@
 
 #include <algorithm>
 #include <functional>
+#include <iostream>
 #include <print>
 
-#include "environment.h"
-#include "review.h"
-#include "session_store.h"
+#include "environment/environment.h"
+#include "agent/review.h"
+#include "agent/subsystems/session_store.h"
+#include "agent/subsystems/skill_store.h"
 
 #ifdef _WIN32
 #include <io.h>
@@ -23,42 +26,53 @@
 
 namespace ursa {
 
-WorkflowPhase next_workflow_phase(WorkflowPhase phase, bool review_available)
-{
-    switch (phase) {
-    case WorkflowPhase::PLAN: return WorkflowPhase::BUILD;
-    case WorkflowPhase::BUILD:
-        return review_available ? WorkflowPhase::REVIEW : WorkflowPhase::PLAN;
-    case WorkflowPhase::REVIEW: return WorkflowPhase::PLAN;
-    }
-    return WorkflowPhase::PLAN;
-}
-
-WorkflowPhase previous_workflow_phase(
-    WorkflowPhase phase, bool review_available)
-{
-    switch (phase) {
-    case WorkflowPhase::PLAN:
-        return review_available ? WorkflowPhase::REVIEW : WorkflowPhase::BUILD;
-    case WorkflowPhase::BUILD: return WorkflowPhase::PLAN;
-    case WorkflowPhase::REVIEW: return WorkflowPhase::BUILD;
-    }
-    return WorkflowPhase::PLAN;
-}
-
-std::optional<Session::Mode> workflow_mode(WorkflowPhase phase)
-{
-    switch (phase) {
-    case WorkflowPhase::PLAN: return Session::Mode::PLAN;
-    case WorkflowPhase::BUILD: return Session::Mode::BUILD;
-    case WorkflowPhase::REVIEW: return std::nullopt;
-    }
-    return std::nullopt;
-}
-
 namespace {
 
     using namespace ftxui;
+
+    void print_session_saved_box()
+    {
+        const int term_w = Terminal::Size().dimx;
+        const int width  = std::max(40, std::min(term_w, 80));
+
+        std::vector<SavedSession> sessions = saved_sessions();
+        if (static_cast<int>(sessions.size()) > 5) {
+            sessions.resize(5);
+        }
+
+        const int inner  = width - 2;
+        const int body_w = std::max(inner, 48);
+
+        Elements rows;
+        if (sessions.empty()) {
+            rows.push_back(text("No other saved sessions.") | dim);
+        } else {
+            rows.push_back(text("Previous Sessions") | bold);
+            const int stamp_col = 16;
+            const int title_col = std::max(body_w - 2 - stamp_col, 1);
+            for (const auto& session : sessions) {
+                const std::string title
+                    = session.title.empty() ? "Untitled session" : session.title;
+                rows.push_back(
+                    hbox({ text(fit(title, title_col)) | color(PANEL_FG) | xflex,
+                        text(session.saved_at) | color(PANEL_FG_DIM) }));
+            }
+        }
+
+        const int height = static_cast<int>(rows.size() + 6);
+        Element frame    = vbox({
+            text("Session has been saved."),
+            text("Continue with /session next time you launch.") | dim | italic,
+            separatorEmpty(),
+            vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER)
+                | bgcolor(PANEL_COLOR) | color(PANEL_FG),
+        });
+
+        auto screen
+            = Screen::Create(Dimension::Fixed(body_w), Dimension::Fixed(height));
+        Render(screen, frame);
+        std::cout << screen.ToString() << std::endl;
+    }
 
     bool is_interactive_terminal()
     {
@@ -78,24 +92,19 @@ namespace {
 
     class Repl : public ComponentBase {
     public:
-        Repl(ScreenInteractive& screen, std::shared_ptr<ApplicationState> state,
-            Controller& controller)
+        Repl(ScreenInteractive& screen, std::shared_ptr<ApplicationState> state)
             : screen_(screen)
             , state_(std::move(state))
-            , controller_(controller)
         {
             const LayoutFn layout     = [this] { return layout_; };
             const WorkflowFn workflow = [this] { return phase_; };
-            if (!state_->review) {
-                state_->review = std::make_shared<ReviewState>();
-            }
-            side_        = make_side_panel(state_, controller, layout, workflow,
+            side_        = make_side_panel(state_, layout, workflow,
                 [this](WorkflowPhase phase) { _set_phase(phase); });
             status_line_ = make_status_line(state_, layout, workflow);
-            chat_        = make_chat(state_, controller, layout);
-            review_      = make_review(state_, controller, layout,
+            chat_        = make_chat(state_, layout);
+            review_      = make_review(state_, layout,
                 [this](WorkflowPhase phase) { _set_phase(phase); });
-            modal_       = make_modal(state_, controller);
+            modal_       = make_modal(state_);
 
             workspace_subscription_
                 = state_->environment->subscribe_to_workspace_change(
@@ -228,7 +237,7 @@ namespace {
             selected_      = static_cast<int>(phase);
             selected_pane_ = phase == WorkflowPhase::REVIEW ? 1 : 0;
             if (const auto mode = workflow_mode(phase)) {
-                controller_.set_mode(*mode);
+                state_->session->set_mode(*mode);
             }
             if (selected_pane_ == 0) {
                 chat_->TakeFocus();
@@ -239,7 +248,6 @@ namespace {
 
         ScreenInteractive& screen_;
         std::shared_ptr<ApplicationState> state_;
-        Controller& controller_;
         Component side_;
         Component modal_;
         Component status_line_;
@@ -266,27 +274,21 @@ int run_repl(const Config& cfg)
     }
 
     ScreenInteractive screen = ScreenInteractive::FullscreenAlternateScreen();
-    std::vector<Tool> tools  = default_tools();
-    auto state = std::make_shared<ApplicationState>(ApplicationState {
-        std::make_shared<Session>(), std::make_shared<ProviderStore>(cfg),
-        std::make_shared<SubagentManager>(), get_environment(),
-        std::make_shared<ReviewState>() });
-    {
-        Controller controller(
-            state,
-            [&screen](std::function<void()> f) {
-                screen.Post(std::move(f));
-                screen.PostEvent(Event::Custom);
-            },
-            [&screen] { screen.Exit(); }, StreamFn { }, std::move(tools));
-        state->providers->ensure_catalog_fresh();
-        if (state->providers->config().providers.empty()) {
-            controller.enqueue_user_modal(
-                ConnectModal { ConnectModal::Entry::MANAGE });
-        }
-        auto app = ftxui::Make<Repl>(screen, state, controller);
-        screen.Loop(app);
+    screen.ForceHandleCtrlC(false);
+    std::vector<Tool> tools = default_tools();
+    auto state = make_application_state(
+        [&screen](std::function<void()> f) {
+            screen.Post(std::move(f));
+            screen.PostEvent(Event::Custom);
+        },
+        cfg, StreamFn { }, std::move(tools));
+    state->on_exit = [&screen] { screen.Exit(); };
+    state->providers->ensure_catalog_fresh();
+    if (state->providers->config().providers.empty()) {
+        ursa::enqueue_user_modal(*state, ConnectModal { ConnectModal::Entry::MANAGE });
     }
+    auto app = ftxui::Make<Repl>(screen, state);
+    screen.Loop(app);
     if (state->session->snapshot().items.empty()) {
         return 0;
     }

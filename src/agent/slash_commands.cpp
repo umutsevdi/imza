@@ -1,8 +1,7 @@
-#include "slash_commands.h"
-
-#include "application_state.h"
-#include "provider_store.h"
-#include "util.h"
+#include "agent/slash_commands.h"
+#include "agent/application_state.h"
+#include "provider/provider_store.h"
+#include "common/util.h"
 
 #include <string>
 
@@ -33,8 +32,9 @@ const SlashCommand* find_command(std::string_view name)
 {
     const std::string key = to_lower(name);
     for (const SlashCommand& command : slash_commands()) {
-        if (to_lower(command.name) == key)
+        if (to_lower(command.name) == key) {
             return &command;
+        }
     }
     return nullptr;
 }

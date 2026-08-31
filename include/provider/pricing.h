@@ -1,0 +1,70 @@
+#pragma once
+
+#include <cstdint>
+#include <filesystem>
+#include <map>
+#include <optional>
+#include <string>
+#include <string_view>
+
+#include <json/json.h>
+
+#include "core/config.h"
+#include "network/network.h"
+#include "common/types.h"
+
+namespace ursa {
+
+struct CachedModel {
+    std::string name;
+    std::optional<double> cost_input;
+    std::optional<double> cost_output;
+    std::optional<double> cost_cache_read;
+    std::optional<double> cost_cache_write;
+    std::optional<std::uint64_t> context;
+    std::optional<std::uint64_t> output;
+    std::optional<bool> tool_call;
+    std::optional<bool> reasoning;
+};
+
+struct CachedProvider {
+    std::string name;
+    std::string api;
+    std::string npm;
+    std::map<std::string, CachedModel> models;
+};
+
+struct Catalog {
+    std::int64_t fetched_at = 0;
+    std::map<std::string, CachedProvider> providers;
+};
+
+struct ModelPricing {
+    double input_per_1k         = 0.0;
+    double output_per_1k        = 0.0;
+    double cache_read_per_1k    = 0.0;
+    double cache_write_per_1k   = 0.0;
+    std::uint64_t context_limit = 0;
+};
+
+inline constexpr std::string_view kLocalProviderId  = "local";
+inline constexpr std::string_view kCustomProviderId = "custom";
+
+bool catalog_stale(const Catalog& catalog);
+Status load_catalog(const std::filesystem::path& path, Catalog& out);
+Status save_catalog(const std::filesystem::path& path, const Catalog& catalog);
+Status fetch_catalog(Catalog& out);
+bool whitelisted_provider(std::string_view id);
+Status trim_provider(const Json::Value& src, CachedProvider& out);
+
+AuthType auth_from_npm(std::string_view npm);
+std::string catalog_base(const CachedProvider& provider);
+Route resolve_route(
+    const Connection& conn, const Catalog& catalog, ApiStandard dialect);
+std::string endpoint_for_base(std::string_view base);
+
+void set_pricing_catalog(const Catalog& catalog);
+ModelPricing get_pricing(std::string_view model);
+double compute_cost(const Usage& usage, const ModelPricing& pricing);
+
+} // namespace ursa
