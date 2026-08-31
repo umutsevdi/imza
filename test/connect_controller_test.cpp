@@ -24,7 +24,7 @@ struct IsolatedConfig {
     IsolatedConfig()
     {
         static int counter = 0;
-        dir = std::filesystem::temp_directory_path()
+        dir                = std::filesystem::temp_directory_path()
             / ("ursa-ctrl-test-" + std::to_string(::getpid()) + "-"
                 + std::to_string(counter++));
         std::filesystem::create_directories(dir);
@@ -35,17 +35,15 @@ struct IsolatedConfig {
         setenv("XDG_CONFIG_HOME", dir.string().c_str(), 1);
 
         ursa::Catalog catalog;
-        catalog.fetched_at
-            = static_cast<std::int64_t>(std::time(nullptr));
-        const auto src = ursa::parse_json(R"({
+        catalog.fetched_at = static_cast<std::int64_t>(std::time(nullptr));
+        const auto src     = ursa::parse_json(R"({
             "name": "Test Provider",
             "api": "http://127.0.0.1:9/v1",
             "npm": "@ai-sdk/openai-compatible"
         })");
-        std::ignore = ursa::trim_provider(src,
-            catalog.providers["testprov"]);
-        std::ignore = ursa::save_catalog(
-            dir / "ursa" / "presets.json", catalog);
+        std::ignore = ursa::trim_provider(src, catalog.providers["testprov"]);
+        std::ignore
+            = ursa::save_catalog(dir / "ursa" / "presets.json", catalog);
     }
 
     ~IsolatedConfig()
@@ -88,8 +86,7 @@ struct PostPump {
         }
     }
 
-    template <typename Pred>
-    bool wait_for(Pred pred)
+    template <typename Pred> bool wait_for(Pred pred)
     {
         for (int i = 0; i < 10000; ++i) {
             drain();
@@ -136,18 +133,16 @@ TEST_CASE("connect commits a connection and lands models in the catalog")
     PostPump pump;
     auto providers = std::make_shared<ursa::ProviderStore>(
         ursa::Config { }, fake_models_ok());
-    auto session = std::make_shared<ursa::Session>();
+    auto session    = std::make_shared<ursa::Session>();
     auto controller = make_controller(session, providers, pump.fn());
     pump.drain();
 
-    controller.resolve_modal(
-        ursa::ModalResult { ursa::ConnectResult { "testprov", "", "key1",
-            true } });
+    controller.resolve_modal(ursa::ModalResult {
+        ursa::ConnectResult { "testprov", "", "key1", true } });
     REQUIRE(pump.wait_for([&] {
         const auto views = providers->connections();
         return views.size() == 1
-            && views[0].state
-            == ursa::ConnectionView::State::READY;
+            && views[0].state == ursa::ConnectionView::State::READY;
     }));
 
     const auto views = providers->connections();
@@ -157,8 +152,7 @@ TEST_CASE("connect commits a connection and lands models in the catalog")
     CHECK(session->connect_status() == "✓ 2 models");
 
     ursa::Config saved;
-    REQUIRE(ursa::load_config(ursa::config_path(), saved)
-        == ursa::Status::OK);
+    REQUIRE(ursa::load_config(ursa::config_path(), saved) == ursa::Status::OK);
     REQUIRE(saved.providers.size() == 1);
     CHECK(saved.providers[0].provider_id == "testprov");
     CHECK(saved.providers[0].api_key == "key1");
@@ -170,20 +164,17 @@ TEST_CASE("connecting the same endpoint updates in place")
     PostPump pump;
     auto providers = std::make_shared<ursa::ProviderStore>(
         ursa::Config { }, fake_models_ok());
-    auto session = std::make_shared<ursa::Session>();
+    auto session    = std::make_shared<ursa::Session>();
     auto controller = make_controller(session, providers, pump.fn());
     pump.drain();
 
-    controller.resolve_modal(
-        ursa::ModalResult { ursa::ConnectResult { "testprov", "", "key1",
-            true } });
-    REQUIRE(pump.wait_for([&] {
-        return providers->connections().size() == 1;
-    }));
+    controller.resolve_modal(ursa::ModalResult {
+        ursa::ConnectResult { "testprov", "", "key1", true } });
+    REQUIRE(
+        pump.wait_for([&] { return providers->connections().size() == 1; }));
 
-    controller.resolve_modal(
-        ursa::ModalResult { ursa::ConnectResult { "testprov", "", "key2",
-            true } });
+    controller.resolve_modal(ursa::ModalResult {
+        ursa::ConnectResult { "testprov", "", "key2", true } });
     REQUIRE(pump.wait_for([&] {
         const auto views = providers->connections();
         return views.size() == 1 && views[0].api_key == "key2";
@@ -202,21 +193,18 @@ TEST_CASE("test-only connect does not persist")
     PostPump pump;
     auto providers = std::make_shared<ursa::ProviderStore>(
         ursa::Config { }, fake_models_ok());
-    auto session = std::make_shared<ursa::Session>();
+    auto session    = std::make_shared<ursa::Session>();
     auto controller = make_controller(session, providers, pump.fn());
     pump.drain();
 
-    controller.resolve_modal(
-        ursa::ModalResult { ursa::ConnectResult { "testprov", "", "key",
-            false } });
-    REQUIRE(pump.wait_for([&] {
-        return session->connect_status() == "✓ 2 models";
-    }));
+    controller.resolve_modal(ursa::ModalResult {
+        ursa::ConnectResult { "testprov", "", "key", false } });
+    REQUIRE(pump.wait_for(
+        [&] { return session->connect_status() == "✓ 2 models"; }));
     CHECK(providers->connections().empty());
 
     ursa::Config saved;
-    REQUIRE(ursa::load_config(ursa::config_path(), saved)
-        == ursa::Status::OK);
+    REQUIRE(ursa::load_config(ursa::config_path(), saved) == ursa::Status::OK);
     CHECK(saved.providers.empty());
 }
 
@@ -226,16 +214,13 @@ TEST_CASE("failing test keeps the connection absent")
     PostPump pump;
     auto providers = std::make_shared<ursa::ProviderStore>(
         ursa::Config { }, fake_models_fail());
-    auto session = std::make_shared<ursa::Session>();
+    auto session    = std::make_shared<ursa::Session>();
     auto controller = make_controller(session, providers, pump.fn());
     pump.drain();
 
-    controller.resolve_modal(
-        ursa::ModalResult { ursa::ConnectResult { "testprov", "", "key",
-            true } });
-    REQUIRE(pump.wait_for([&] {
-        return !session->connect_status().empty();
-    }));
+    controller.resolve_modal(ursa::ModalResult {
+        ursa::ConnectResult { "testprov", "", "key", true } });
+    REQUIRE(pump.wait_for([&] { return !session->connect_status().empty(); }));
     CHECK(providers->connections().empty());
     CHECK(session->connect_status() == "API error.");
 }
@@ -267,8 +252,7 @@ TEST_CASE("model pick sets last_used and persists")
     CHECK(snapshot.last_used->model == "m1");
 
     ursa::Config saved;
-    REQUIRE(ursa::load_config(ursa::config_path(), saved)
-        == ursa::Status::OK);
+    REQUIRE(ursa::load_config(ursa::config_path(), saved) == ursa::Status::OK);
     REQUIRE(saved.last_used.has_value());
     CHECK(saved.last_used->model == "m1");
 }
@@ -309,8 +293,7 @@ TEST_CASE("subagent defaults follow the active chat model")
         = providers.subagent_selection(ursa::SubagentRole::BUILDER);
     const auto research
         = providers.subagent_selection(ursa::SubagentRole::RESEARCH);
-    const auto basic
-        = providers.subagent_selection(ursa::SubagentRole::BASIC);
+    const auto basic = providers.subagent_selection(ursa::SubagentRole::BASIC);
     REQUIRE(builder.has_value());
     REQUIRE(research.has_value());
     REQUIRE(basic.has_value());
@@ -328,7 +311,7 @@ TEST_CASE("subagent configuration does not change main model reasoning")
     connection.provider_id = "openai";
     connection.endpoint    = "https://example.test/v1/chat/completions";
     cfg.providers.push_back(connection);
-    cfg.last_used = ursa::LastUsed { "configured", "chat-model" };
+    cfg.last_used        = ursa::LastUsed { "configured", "chat-model" };
     cfg.reasoning_effort = "high";
     cfg.subagents[ursa::SubagentRole::BASIC] = { "", "", "off" };
     ursa::ProviderStore providers(cfg, fake_models_ok());
@@ -393,12 +376,11 @@ TEST_CASE("send guard blocks messages without an active model")
     PostPump pump;
     auto providers = std::make_shared<ursa::ProviderStore>(
         ursa::Config { }, fake_models_ok());
-    auto session = std::make_shared<ursa::Session>();
+    auto session    = std::make_shared<ursa::Session>();
     auto controller = make_controller(session, providers, pump.fn());
     pump.drain();
 
     controller.submit("hello");
     CHECK(session->items().empty());
-    CHECK(session->error()
-        == "No model selected — run /model.");
+    CHECK(session->error() == "No model selected — run /model.");
 }

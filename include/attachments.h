@@ -37,8 +37,8 @@ std::optional<AttachmentToken> attachment_token_at(
 std::vector<AttachmentCandidate> attachment_candidates(
     const std::filesystem::path& root, std::string_view query,
     std::size_t limit = 50);
-AttachmentResult load_attachment(const std::filesystem::path& root,
-    std::string_view relative_path);
+AttachmentResult load_attachment(
+    const std::filesystem::path& root, std::string_view relative_path);
 std::string message_with_attachments(
     std::string_view text, const std::vector<FileAttachment>& attachments);
 void retain_mentioned_attachments(

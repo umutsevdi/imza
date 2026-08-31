@@ -5,8 +5,8 @@
 #include <deque>
 #include <functional>
 #include <future>
-#include <memory>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -39,8 +39,7 @@ struct LayoutCtx {
 using PostFn = std::function<void(std::function<void()>)>;
 using StreamFn
     = std::function<Status(const ChatRequest&, const StreamCallback&)>;
-using ModalRequestFn
-    = std::function<std::future<ModalResult>(ModalPayload)>;
+using ModalRequestFn = std::function<std::future<ModalResult>(ModalPayload)>;
 struct TurnSettings {
     std::string model;
     std::string reasoning_effort;
@@ -68,8 +67,8 @@ public:
     Controller(const Controller&)            = delete;
     Controller& operator=(const Controller&) = delete;
 
-    void submit(std::string text,
-        std::vector<FileAttachment> attachments = { });
+    void submit(
+        std::string text, std::vector<FileAttachment> attachments = { });
     void set_mode(Session::Mode next_mode);
     void set_error(std::string msg);
     void clear_error();
@@ -85,11 +84,10 @@ public:
     SubagentHandle run_subagent(std::string prompt, std::string model,
         std::string variant, SubagentOptions options = { },
         SubagentCompleteFn complete = { });
-    void submit_delegated(std::string text,
-        const ProviderSelection& selection, Session::Mode mode);
+    void submit_delegated(std::string text, const ProviderSelection& selection,
+        Session::Mode mode);
     SubagentChat subagent_chat(std::size_t id, std::string title) const;
-    SubagentChat subagent_chat(
-        const ToolCall& call, std::size_t index) const;
+    SubagentChat subagent_chat(const ToolCall& call, std::size_t index) const;
     std::span<const SlashCommand> commands() const { return slash_commands(); }
 
 private:

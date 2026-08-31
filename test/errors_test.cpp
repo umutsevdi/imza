@@ -27,8 +27,7 @@ TEST_CASE("parse_api_error reads OpenAI-style error objects")
 {
     std::string msg;
     const ursa::Status st = ursa::parse_api_error(
-        R"({"error":{"message":"Rate limit reached","type":"requests"}})",
-        msg);
+        R"({"error":{"message":"Rate limit reached","type":"requests"}})", msg);
     CHECK(st == ursa::Status::RATE_LIMITED);
     CHECK(msg == "Rate limit reached");
 }
@@ -64,8 +63,7 @@ TEST_CASE("parse_api_error falls back to top-level message")
 TEST_CASE("parse_api_error ignores non-error bodies")
 {
     std::string msg;
-    const ursa::Status st
-        = ursa::parse_api_error(R"({"choices":[]})", msg);
+    const ursa::Status st = ursa::parse_api_error(R"({"choices":[]})", msg);
     CHECK(st == ursa::Status::OK);
     CHECK(msg.empty());
 
@@ -89,8 +87,7 @@ TEST_CASE("OpenAI parse turns mid-stream error blocks into ERROR events")
     ursa::ParseState state;
     std::vector<ursa::StreamEvent> outs;
     p.parse(state, "",
-        R"({"error":{"message":"Provider had an incident","code":502}})",
-        outs);
+        R"({"error":{"message":"Provider had an incident","code":502}})", outs);
     REQUIRE(outs.size() == 1);
     CHECK(outs[0].kind == ursa::StreamEvent::Kind::ERROR);
     CHECK(outs[0].error == ursa::Status::API_ERROR);
@@ -158,20 +155,18 @@ struct AgentEnv {
     PostPump pump;
     std::vector<ursa::ChatRequest> requests;
     ursa::StreamFn stream;
-    std::shared_ptr<ursa::Session> session
-        = std::make_shared<ursa::Session>();
+    std::shared_ptr<ursa::Session> session = std::make_shared<ursa::Session>();
     ursa::Controller controller {
         std::make_shared<ursa::ApplicationState>(ursa::ApplicationState {
-            session,
-            std::make_shared<ursa::ProviderStore>(test_config()),
-            std::make_shared<ursa::SubagentManager>(),
-            ursa::get_environment(),
+            session, std::make_shared<ursa::ProviderStore>(test_config()),
+            std::make_shared<ursa::SubagentManager>(), ursa::get_environment(),
             std::make_shared<ursa::ReviewState>() }),
         pump.fn(), [] { },
         [this](const ursa::ChatRequest& req, const ursa::StreamCallback& cb) {
             return stream(req, cb);
         },
-        std::vector<ursa::Tool> { } };
+        std::vector<ursa::Tool> { }
+    };
 };
 
 bool idle(const ursa::Session& st)
@@ -185,11 +180,10 @@ TEST_CASE("controller retries rate-limited requests and then completes")
     auto round   = std::make_shared<int>(0);
     AgentEnv* ep = &env;
     env.stream   = [ep, round](const ursa::ChatRequest& req,
-                      const ursa::StreamCallback& cb) -> ursa::Status {
+                       const ursa::StreamCallback& cb) -> ursa::Status {
         ep->requests.push_back(req);
         if ((*round)++ == 0) {
-            cb(ursa::make_error_event(
-                ursa::Status::RATE_LIMITED, "slow down"));
+            cb(ursa::make_error_event(ursa::Status::RATE_LIMITED, "slow down"));
             return ursa::Status::RATE_LIMITED;
         }
         cb(ursa::make_connected_event());
@@ -202,7 +196,7 @@ TEST_CASE("controller retries rate-limited requests and then completes")
     CHECK(env.requests.size() == 2);
     CHECK(env.session->error().empty());
     const auto& items = env.session->items();
-    bool found = false;
+    bool found        = false;
     for (const auto& it : items) {
         if (const auto* a = std::get_if<ursa::AssistantTurn>(&it)) {
             found = found || a->markdown == "recovered";
@@ -217,7 +211,7 @@ TEST_CASE("controller does not retry budget errors")
     auto round   = std::make_shared<int>(0);
     AgentEnv* ep = &env;
     env.stream   = [ep, round](const ursa::ChatRequest& req,
-                      const ursa::StreamCallback& cb) -> ursa::Status {
+                       const ursa::StreamCallback& cb) -> ursa::Status {
         ep->requests.push_back(req);
         cb(ursa::make_error_event(
             ursa::Status::BUDGET_EXCEEDED, "insufficient credits"));
@@ -233,8 +227,8 @@ TEST_CASE("controller does not retry budget errors")
 struct FakeApi {
     std::string response;
     std::string request;
-    int port    = 0;
-    int fd      = -1;
+    int port = 0;
+    int fd   = -1;
     std::thread server;
 
     explicit FakeApi(std::string resp)
@@ -282,7 +276,7 @@ struct FakeApi {
                 break;
             }
         }
-        request = acc;
+        request     = acc;
         ssize_t off = 0;
         while (off < static_cast<ssize_t>(response.size())) {
             const ssize_t n = ::send(c, response.data() + off,
@@ -306,8 +300,8 @@ TEST_CASE("stream reports rate limit, retry-after and provider message")
                 R"({"error":{"message":"Rate limit exceeded"}})");
 
     ursa::Route route;
-    route.endpoint = "http://127.0.0.1:" + std::to_string(api.port)
-        + "/chat/completions";
+    route.endpoint
+        = "http://127.0.0.1:" + std::to_string(api.port) + "/chat/completions";
     route.api     = "http://127.0.0.1:" + std::to_string(api.port);
     route.api_key = "k";
 
@@ -315,12 +309,12 @@ TEST_CASE("stream reports rate limit, retry-after and provider message")
     req.model = "gpt-4o";
 
     std::vector<ursa::StreamEvent> events;
-    int retry_after = 0;
-    const auto p    = ursa::get_provider(route);
-    const ursa::Status st
-        = ursa::stream(p, route, req,
-            [&](const ursa::StreamEvent& ev) { events.push_back(ev); },
-            &retry_after);
+    int retry_after       = 0;
+    const auto p          = ursa::get_provider(route);
+    const ursa::Status st = ursa::stream(
+        p, route, req,
+        [&](const ursa::StreamEvent& ev) { events.push_back(ev); },
+        &retry_after);
 
     CHECK(st == ursa::Status::RATE_LIMITED);
     CHECK(retry_after == 7);
@@ -339,15 +333,15 @@ TEST_CASE("stream emits CONNECTED then parses SSE on success")
                 "data: [DONE]\n\n");
 
     ursa::Route route;
-    route.endpoint = "http://127.0.0.1:" + std::to_string(api.port)
-        + "/chat/completions";
+    route.endpoint
+        = "http://127.0.0.1:" + std::to_string(api.port) + "/chat/completions";
     route.api_key = "k";
 
     ursa::ChatRequest req;
     req.model = "gpt-4o";
 
     std::vector<ursa::StreamEvent> events;
-    const auto p     = ursa::get_provider(route);
+    const auto p          = ursa::get_provider(route);
     const ursa::Status st = ursa::stream(p, route, req,
         [&](const ursa::StreamEvent& ev) { events.push_back(ev); });
 

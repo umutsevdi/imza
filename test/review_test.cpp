@@ -4,15 +4,15 @@
 
 TEST_CASE("git diff parser builds files hunks and line numbers")
 {
-    const auto result = ursa::parse_git_diff(
-        "diff --git a/file.cpp b/file.cpp\n"
-        "--- a/file.cpp\n"
-        "+++ b/file.cpp\n"
-        "@@ -9,2 +9,3 @@\n"
-        " same\n"
-        "-old\n"
-        "+new\n"
-        "+more\n");
+    const auto result
+        = ursa::parse_git_diff("diff --git a/file.cpp b/file.cpp\n"
+                               "--- a/file.cpp\n"
+                               "+++ b/file.cpp\n"
+                               "@@ -9,2 +9,3 @@\n"
+                               " same\n"
+                               "-old\n"
+                               "+new\n"
+                               "+more\n");
     REQUIRE(std::holds_alternative<ursa::RepositoryReview>(result));
     const auto& review = std::get<ursa::RepositoryReview>(result);
     REQUIRE(review.files.size() == 1);
@@ -30,12 +30,12 @@ TEST_CASE("git diff parser builds files hunks and line numbers")
 
 TEST_CASE("git diff parser recognizes rename and binary files")
 {
-    const auto result = ursa::parse_git_diff(
-        "diff --git a/old.png b/new.png\n"
-        "similarity index 100%\n"
-        "rename from old.png\n"
-        "rename to new.png\n"
-        "Binary files a/old.png and b/new.png differ\n");
+    const auto result
+        = ursa::parse_git_diff("diff --git a/old.png b/new.png\n"
+                               "similarity index 100%\n"
+                               "rename from old.png\n"
+                               "rename to new.png\n"
+                               "Binary files a/old.png and b/new.png differ\n");
     const auto& file = std::get<ursa::RepositoryReview>(result).files[0];
     CHECK(file.old_path == "old.png");
     CHECK(file.new_path == "new.png");
@@ -44,13 +44,13 @@ TEST_CASE("git diff parser recognizes rename and binary files")
 
 TEST_CASE("git diff parser defaults omitted hunk counts to one")
 {
-    const auto result = ursa::parse_git_diff(
-        "diff --git a/file.cpp b/file.cpp\n"
-        "--- a/file.cpp\n"
-        "+++ b/file.cpp\n"
-        "@@ -8 +9 @@ function\n"
-        "-old\n"
-        "+new\n");
+    const auto result
+        = ursa::parse_git_diff("diff --git a/file.cpp b/file.cpp\n"
+                               "--- a/file.cpp\n"
+                               "+++ b/file.cpp\n"
+                               "@@ -8 +9 @@ function\n"
+                               "-old\n"
+                               "+new\n");
     const auto& hunk
         = std::get<ursa::RepositoryReview>(result).files[0].hunks[0];
     CHECK(hunk.old_start == 8);
@@ -103,8 +103,8 @@ TEST_CASE("review state marks comments stale when their line disappears")
     state.add_comment({ "file.cpp", 2, 3, "line" }, "note");
     ursa::RepositoryReview review;
     review.files.push_back(ursa::ReviewFile { .old_path = "file.cpp",
-        .new_path = "file.cpp",
-        .hunks = { { "@@ -1 +1 @@",
+        .new_path                                       = "file.cpp",
+        .hunks                                          = { { "@@ -1 +1 @@",
             { { ursa::ReviewLine::Kind::CONTEXT, 2, 3, "other" } } } } });
     state.set_result(std::move(review));
     CHECK(state.snapshot().comments[0].stale);
@@ -114,8 +114,8 @@ TEST_CASE("AI review prompt includes diff and existing comments")
 {
     ursa::RepositoryReview review;
     review.files.push_back(ursa::ReviewFile { .old_path = "src/app.cpp",
-        .new_path = "src/app.cpp",
-        .hunks = { { "@@ -4 +4 @@",
+        .new_path                                       = "src/app.cpp",
+        .hunks                                          = { { "@@ -4 +4 @@",
             { { ursa::ReviewLine::Kind::DELETION, 4, std::nullopt, "old" },
                 { ursa::ReviewLine::Kind::ADDITION, std::nullopt, 4,
                     "updated" } } } } });
@@ -123,8 +123,7 @@ TEST_CASE("AI review prompt includes diff and existing comments")
         { "src/app.cpp", std::nullopt, 4, "updated" }, "existing issue",
         false } };
 
-    const std::string prompt
-        = ursa::format_ai_review_prompt(review, comments);
+    const std::string prompt = ursa::format_ai_review_prompt(review, comments);
     CHECK(prompt.find("diff --git a/src/app.cpp b/src/app.cpp")
         != std::string::npos);
     CHECK(prompt.find("-old\\n+updated") != std::string::npos);
@@ -135,8 +134,8 @@ TEST_CASE("AI review response resolves changed-line anchors")
 {
     ursa::RepositoryReview review;
     review.files.push_back(ursa::ReviewFile { .old_path = "src/app.cpp",
-        .new_path = "src/app.cpp",
-        .hunks = { { "@@ -8 +8 @@",
+        .new_path                                       = "src/app.cpp",
+        .hunks                                          = { { "@@ -8 +8 @@",
             { { ursa::ReviewLine::Kind::DELETION, 8, std::nullopt, "old" },
                 { ursa::ReviewLine::Kind::ADDITION, std::nullopt, 8,
                     "updated" } } } } });
@@ -147,8 +146,8 @@ TEST_CASE("AI review response resolves changed-line anchors")
         "\"body\":\"The update loses the error.\"}]}\n```",
         review);
 
-    REQUIRE(std::holds_alternative<
-        std::vector<ursa::ReviewCommentDraft>>(result));
+    REQUIRE(
+        std::holds_alternative<std::vector<ursa::ReviewCommentDraft>>(result));
     const auto& comments
         = std::get<std::vector<ursa::ReviewCommentDraft>>(result);
     REQUIRE(comments.size() == 1);
@@ -162,8 +161,8 @@ TEST_CASE("AI review rejects findings outside changed lines")
 {
     ursa::RepositoryReview review;
     review.files.push_back(ursa::ReviewFile { .old_path = "src/app.cpp",
-        .new_path = "src/app.cpp",
-        .hunks = { { "@@ -1 +1 @@",
+        .new_path                                       = "src/app.cpp",
+        .hunks                                          = { { "@@ -1 +1 @@",
             { { ursa::ReviewLine::Kind::CONTEXT, 1, 1, "same" } } } } });
 
     const auto result = ursa::parse_ai_review_response(
@@ -176,13 +175,12 @@ TEST_CASE("AI review rejects findings outside changed lines")
 TEST_CASE("review state adds AI comments without exact duplicates")
 {
     ursa::ReviewState state;
-    const ursa::ReviewLineAnchor anchor {
-        "src/app.cpp", std::nullopt, 8, "updated"
-    };
+    const ursa::ReviewLineAnchor anchor { "src/app.cpp", std::nullopt, 8,
+        "updated" };
     state.add_comment(anchor, "The update loses the error.");
 
-    const std::size_t added = state.add_comments(
-        { { anchor, "[P2] The update loses the error." },
+    const std::size_t added
+        = state.add_comments({ { anchor, "[P2] The update loses the error." },
             { anchor, "[P3] A separate issue." } });
 
     CHECK(added == 1);

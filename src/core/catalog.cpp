@@ -1,5 +1,7 @@
 #include "catalog.h"
 
+#include "io.h"
+
 #include <algorithm>
 #include <array>
 #include <ctime>
@@ -13,15 +15,14 @@ namespace ursa {
 namespace {
 
     constexpr std::string_view kCatalogUrl = "https://models.dev/api.json";
-    constexpr long kFetchTimeoutSecs = 60;
+    constexpr long kFetchTimeoutSecs       = 60;
     constexpr std::int64_t kStaleAfterSecs = 7 * 24 * 3600;
 
-    constexpr std::array<std::string_view, 20> kWhitelist = {
-        "openai", "anthropic", "zai", "zai-coding-plan", "zhipuai",
-        "openrouter", "groq", "mistral", "deepseek", "moonshotai", "xai",
-        "opencode", "google", "minimax", "fireworks", "together-ai",
-        "cerebras", "perplexity", "azure", "amazon-bedrock"
-    };
+    constexpr std::array<std::string_view, 20> kWhitelist
+        = { "openai", "anthropic", "zai", "zai-coding-plan", "zhipuai",
+              "openrouter", "groq", "mistral", "deepseek", "moonshotai", "xai",
+              "opencode", "google", "minimax", "fireworks", "together-ai",
+              "cerebras", "perplexity", "azure", "amazon-bedrock" };
 
     std::optional<double> cost_field(const Json::Value& cost, const char* key)
     {
@@ -88,9 +89,9 @@ Status trim_provider(const Json::Value& src, CachedProvider& out)
         }
         const Json::Value& cost = entry["cost"];
         if (cost.isObject()) {
-            model.cost_input      = cost_field(cost, "input");
-            model.cost_output     = cost_field(cost, "output");
-            model.cost_cache_read = cost_field(cost, "cache_read");
+            model.cost_input       = cost_field(cost, "input");
+            model.cost_output      = cost_field(cost, "output");
+            model.cost_cache_read  = cost_field(cost, "cache_read");
             model.cost_cache_write = cost_field(cost, "cache_write");
         }
         const Json::Value& limit = entry["limit"];
@@ -175,8 +176,8 @@ Status save_catalog(const std::filesystem::path& path, const Catalog& catalog)
             if (!model.name.empty()) {
                 entry["name"] = model.name;
             }
-            if (model.cost_input || model.cost_output
-                || model.cost_cache_read || model.cost_cache_write) {
+            if (model.cost_input || model.cost_output || model.cost_cache_read
+                || model.cost_cache_write) {
                 Json::Value cost(Json::objectValue);
                 if (model.cost_input) {
                     cost["input"] = *model.cost_input;
@@ -215,36 +216,15 @@ Status save_catalog(const std::filesystem::path& path, const Catalog& catalog)
     }
     root["providers"] = providers;
 
-    std::error_code ec;
-    std::filesystem::create_directories(path.parent_path(), ec);
-
-    const std::filesystem::path tmp = path.string() + ".tmp";
-    {
-        std::ofstream file(tmp, std::ios::trunc);
-        if (!file) {
-            return Status::CONFIG_ERROR;
-        }
-        Json::StreamWriterBuilder builder;
-        builder["indentation"] = "  ";
-        file << Json::writeString(builder, root) << "\n";
-        if (!file) {
-            return Status::CONFIG_ERROR;
-        }
-    }
-    std::filesystem::rename(tmp, path, ec);
-    if (ec) {
-        return Status::CONFIG_ERROR;
-    }
-    return Status::OK;
+    return write_json_file(path, root, "  ");
 }
 
 Status fetch_catalog(Catalog& out)
 {
     std::string body;
-    long code = 0;
-    const Status st
-        = http_get(std::string(kCatalogUrl), { }, kFetchTimeoutSecs, body,
-            &code);
+    long code       = 0;
+    const Status st = http_get(
+        std::string(kCatalogUrl), { }, kFetchTimeoutSecs, body, &code);
     if (st != Status::OK) {
         return st;
     }
@@ -276,9 +256,8 @@ Status fetch_catalog(Catalog& out)
 
 AuthType auth_from_npm(std::string_view npm)
 {
-    return npm.find("anthropic") != std::string_view::npos
-        ? AuthType::ANTHROPIC
-        : AuthType::BEARER;
+    return npm.find("anthropic") != std::string_view::npos ? AuthType::ANTHROPIC
+                                                           : AuthType::BEARER;
 }
 
 std::string catalog_base(const CachedProvider& provider)
@@ -295,15 +274,15 @@ std::string catalog_base(const CachedProvider& provider)
     return { };
 }
 
-Route resolve_route(const Connection& conn, const Catalog& catalog,
-    ApiStandard dialect)
+Route resolve_route(
+    const Connection& conn, const Catalog& catalog, ApiStandard dialect)
 {
     Route route;
     route.api_key = conn.api_key;
 
     if (endpoint_backed(conn)) {
-        route.endpoint = conn.endpoint;
-        route.api      = strip_slash(conn.endpoint);
+        route.endpoint                     = conn.endpoint;
+        route.api                          = strip_slash(conn.endpoint);
         constexpr std::string_view kSuffix = "/chat/completions";
         if (route.api.size() > kSuffix.size()
             && std::string_view(route.api).substr(
@@ -312,8 +291,7 @@ Route resolve_route(const Connection& conn, const Catalog& catalog,
             route.api.resize(route.api.size() - kSuffix.size());
         }
         route.dialect = ApiStandard::OPENAI;
-        route.auth    = conn.api_key.empty() ? AuthType::NONE
-                                             : AuthType::BEARER;
+        route.auth = conn.api_key.empty() ? AuthType::NONE : AuthType::BEARER;
         return route;
     }
 
@@ -327,8 +305,8 @@ Route resolve_route(const Connection& conn, const Catalog& catalog,
         return route;
     }
     route.dialect = dialect;
-    route.auth    = conn.api_key.empty() ? AuthType::NONE
-                                         : auth_from_npm(provider.npm);
+    route.auth
+        = conn.api_key.empty() ? AuthType::NONE : auth_from_npm(provider.npm);
     route.endpoint = route.api
         + (dialect == ApiStandard::ANTHROPIC ? "/messages"
                                              : "/chat/completions");

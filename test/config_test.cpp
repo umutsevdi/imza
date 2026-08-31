@@ -14,7 +14,7 @@ namespace {
 std::filesystem::path temp_file(const std::string& name)
 {
     static int counter = 0;
-    auto dir = std::filesystem::temp_directory_path()
+    auto dir           = std::filesystem::temp_directory_path()
         / ("ursa-config-test-" + std::to_string(::getpid()) + "-"
             + std::to_string(counter++));
     std::filesystem::create_directories(dir);
@@ -77,14 +77,14 @@ TEST_CASE("config roundtrip preserves connections and last_used")
     cfg.providers.push_back(conn);
 
     ursa::Connection local;
-    local.id          = "local";
-    local.provider_id = "local";
-    local.endpoint    = "http://localhost:11434/v1/chat/completions";
-    local.api_key     = "";
+    local.id                  = "local";
+    local.provider_id         = "local";
+    local.endpoint            = "http://localhost:11434/v1/chat/completions";
+    local.api_key             = "";
     local.dialects["glm-5.3"] = ursa::ApiStandard::ANTHROPIC;
     cfg.providers.push_back(local);
 
-    cfg.last_used = ursa::LastUsed { "openrouter", "" };
+    cfg.last_used        = ursa::LastUsed { "openrouter", "" };
     cfg.reasoning_effort = "high";
 
     REQUIRE(ursa::save_config(path, cfg) == ursa::Status::OK);
@@ -155,8 +155,8 @@ TEST_CASE("load_config rejects unresolved models main provider")
 TEST_CASE("save_config creates parent directories")
 {
     auto path = std::filesystem::temp_directory_path()
-        / ("ursa-config-nested-" + std::to_string(::getpid()))
-        / "deep" / "nested" / "config.json";
+        / ("ursa-config-nested-" + std::to_string(::getpid())) / "deep"
+        / "nested" / "config.json";
     std::filesystem::remove_all(path.parent_path().parent_path());
 
     ursa::Config cfg;
@@ -182,8 +182,8 @@ TEST_CASE("config roundtrip preserves global and project skill policies")
 {
     const auto path = temp_file("skills.json");
     ursa::Config cfg;
-    cfg.global_skills["docs"] = ursa::SkillPolicy::ALLOW;
-    cfg.global_skills["deploy"] = ursa::SkillPolicy::DENY;
+    cfg.global_skills["docs"]                      = ursa::SkillPolicy::ALLOW;
+    cfg.global_skills["deploy"]                    = ursa::SkillPolicy::DENY;
     cfg.project_skills["/work/project"]["release"] = ursa::SkillPolicy::ASK;
     REQUIRE(ursa::save_config(path, cfg) == ursa::Status::OK);
     ursa::Config loaded;
@@ -203,8 +203,7 @@ TEST_CASE("config roundtrip preserves subagent models")
         = { "openai", "gpt-builder", "" };
     cfg.subagents[ursa::SubagentRole::RESEARCH]
         = { "openai", "gpt-research", "high" };
-    cfg.subagents[ursa::SubagentRole::BASIC]
-        = { "openai", "gpt-basic", "low" };
+    cfg.subagents[ursa::SubagentRole::BASIC] = { "openai", "gpt-basic", "low" };
 
     REQUIRE(ursa::save_config(path, cfg) == ursa::Status::OK);
     ursa::Config loaded;
@@ -273,7 +272,10 @@ TEST_CASE("load_config rejects invalid subagent variant")
 TEST_CASE("config rejects invalid skill policies")
 {
     const auto path = temp_file("bad-skills.json");
-    { std::ofstream out(path); out << R"({"skills":{"global":{"x":"maybe"}}})"; }
+    {
+        std::ofstream out(path);
+        out << R"({"skills":{"global":{"x":"maybe"}}})";
+    }
     ursa::Config cfg;
     CHECK(ursa::load_config(path, cfg) == ursa::Status::CONFIG_ERROR);
 }

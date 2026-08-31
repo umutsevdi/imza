@@ -9,6 +9,19 @@
 #include <variant>
 #include <vector>
 namespace ursa {
+
+// Reasoning-effort alias: config displays/stores "default" where the wire
+// API spells it "medium".
+inline std::string to_config_effort(std::string_view effort)
+{
+    return effort == "medium" ? "default" : std::string(effort);
+}
+
+inline std::string to_wire_effort(std::string_view effort)
+{
+    return effort == "default" ? "medium" : std::string(effort);
+}
+
 struct DiffRow {
     enum class Kind { SAME, REMOVE, ADD };
     Kind kind = Kind::SAME;
@@ -58,10 +71,7 @@ struct ToolVerdict {
 };
 
 struct ToolCallRequest {
-    enum class ApprovalReason {
-        TOOL_PERMISSION,
-        OUTSIDE_WORKSPACE
-    };
+    enum class ApprovalReason { TOOL_PERMISSION, OUTSIDE_WORKSPACE };
 
     std::string name;
     std::string args;
@@ -115,15 +125,15 @@ struct SkillPolicyChanges {
     std::vector<SkillPolicyChange> entries;
 };
 
-using ModalResult = std::variant<std::monostate, ToolVerdict, ModalAnswer,
-    ConnectResult, ModelChoice, VariantChoice, SkillPolicyChanges,
-    std::filesystem::path>;
+using ModalResult
+    = std::variant<std::monostate, ToolVerdict, ModalAnswer, ConnectResult,
+        ModelChoice, VariantChoice, SkillPolicyChanges, std::filesystem::path>;
 
 struct ModelPricing {
-    double input_per_1k  = 0.0;
-    double output_per_1k = 0.0;
-    double cache_read_per_1k = 0.0;
-    double cache_write_per_1k = 0.0;
+    double input_per_1k         = 0.0;
+    double output_per_1k        = 0.0;
+    double cache_read_per_1k    = 0.0;
+    double cache_write_per_1k   = 0.0;
     std::uint64_t context_limit = 0;
 };
 
@@ -148,6 +158,14 @@ struct SubagentModelConfig {
     std::string model;
     std::string variant;
 };
+
+inline std::string subagent_variant_or_default(
+    const SubagentModelConfig* configured, SubagentRole role)
+{
+    return configured != nullptr && !configured->variant.empty()
+        ? configured->variant
+        : std::string(subagent_default_variant(role));
+}
 
 struct Config {
     std::vector<Connection> providers;

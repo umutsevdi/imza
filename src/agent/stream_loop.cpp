@@ -2,6 +2,7 @@
 
 #include "format.h"
 #include "pricing.h"
+#include "util.h"
 
 #include <algorithm>
 #include <chrono>
@@ -26,9 +27,9 @@ namespace {
         std::string out;
         for (std::size_t index = 1; index < end; ++index) {
             const Message& message = history[index];
-            out += message.type == Message::Type::USER ? "\nUSER:\n"
+            out += message.type == Message::Type::USER     ? "\nUSER:\n"
                 : message.type == Message::Type::ASSISTANT ? "\nASSISTANT:\n"
-                                                          : "\nTOOL:\n";
+                                                           : "\nTOOL:\n";
             out += message.content;
             for (const auto& call : message.tool_calls) {
                 out += "\nTOOL CALL " + call.name + ": " + call.args;
@@ -46,8 +47,8 @@ namespace {
         if (!parsed.isObject()) {
             return ProjectTarget::INVALID;
         }
-        const char* key = name == "edit" || name == "write" ? "file_path"
-                                                               : "path";
+        const char* key
+            = name == "edit" || name == "write" ? "file_path" : "path";
         std::string path;
         if (parsed[key].isString()) {
             path = parsed[key].asString();
@@ -81,8 +82,7 @@ namespace {
             return ProjectTarget::INVALID;
         }
         if (name == "write" && !exists) {
-            if ((parsed["overwrite"].isBool()
-                    && parsed["overwrite"].asBool())
+            if ((parsed["overwrite"].isBool() && parsed["overwrite"].asBool())
                 || !std::filesystem::is_directory(target.parent_path(), ec)) {
                 return ProjectTarget::INVALID;
             }
@@ -166,12 +166,11 @@ bool Controller::_compact_history(std::vector<Message>& history,
 
     const auto [event_id, prefix_size] = state_->session->begin_compaction();
     ChatRequest request;
-    request.model = settings.model;
+    request.model       = settings.model;
     request.temperature = 0.2;
-    request.interrupted
-        = [session = state_->session] {
-              return session->interrupt_requested();
-          };
+    request.interrupted = [session = state_->session] {
+        return session->interrupt_requested();
+    };
     request.messages = {
         { Message::Type::SYSTEM,
             "Summarize this coding-agent session for continuation. Preserve "
@@ -217,15 +216,14 @@ bool Controller::_compact_history(std::vector<Message>& history,
 void Controller::_drive(
     std::vector<Message> history, StreamFn override, TurnSettings settings)
 {
-    int retries = 0;
+    int retries                 = 0;
     std::uint64_t prompt_tokens = state_->session->last().prompt;
-    bool compaction_attempted = false;
+    bool compaction_attempted   = false;
     for (;;) {
         const ModelPricing pricing = get_pricing(settings.model);
-        const bool should_compact = !compaction_attempted
+        const bool should_compact  = !compaction_attempted
             && pricing.context_limit > 0 && prompt_tokens > 0
-            && prompt_tokens * 100
-                >= pricing.context_limit * COMPACTION_PERCENT
+            && prompt_tokens * 100 >= pricing.context_limit * COMPACTION_PERCENT
             && history.size() >= 4;
         if (should_compact) {
             compaction_attempted = true;
@@ -241,21 +239,19 @@ void Controller::_drive(
         req.messages = history;
         req.tools
             = settings.mode == Session::Mode::PLAN ? specs_plan_ : specs_all_;
-        req.interrupted
-            = [session = state_->session] {
-                  return session->interrupt_requested();
-              };
+        req.interrupted = [session = state_->session] {
+            return session->interrupt_requested();
+        };
         state_->session->reset_reasoning();
         stream_events_.clear();
         std::string text_buffer;
         std::string error_msg;
-        Status error_status = Status::OK;
-        bool saw_stream     = false;
+        Status error_status                 = Status::OK;
+        bool saw_stream                     = false;
         std::uint64_t request_prompt_tokens = 0;
 
         StreamCallback cb = [this, model = req.model, &text_buffer, &error_msg,
-                                &error_status,
-                                &saw_stream,
+                                &error_status, &saw_stream,
                                 &request_prompt_tokens](const StreamEvent& ev) {
             if (ev.kind == StreamEvent::Kind::ERROR) {
                 error_status = ev.error;
@@ -289,11 +285,10 @@ void Controller::_drive(
         std::string current_model;
         std::string current_effort;
         if (override) {
-            req.reasoning_effort = settings.reasoning_effort == "default"
-                ? std::optional<std::string>("medium")
-                : settings.reasoning_effort == "off"
+            req.reasoning_effort = settings.reasoning_effort == "off"
                 ? std::nullopt
-                : std::optional<std::string>(settings.reasoning_effort);
+                : std::optional<std::string>(
+                      to_wire_effort(settings.reasoning_effort));
             current_model        = req.model;
             current_effort       = settings.reasoning_effort;
             state_->session->set_last_assistant_metadata(
@@ -337,8 +332,9 @@ void Controller::_drive(
                     const Status retried
                         = error_status != Status::OK ? error_status : st;
                     if (retried == Status::OK) {
-                        state_->providers->remember_dialect(settings.connection_id,
-                            req.model, ApiStandard::ANTHROPIC);
+                        state_->providers->remember_dialect(
+                            settings.connection_id, req.model,
+                            ApiStandard::ANTHROPIC);
                     }
                 }
             }
@@ -379,17 +375,13 @@ void Controller::_drive(
                         error.pop_back();
                     }
                     error += ": " + msg;
-                    if (!error.ends_with('.') && !error.ends_with('!')
-                        && !error.ends_with('?')
-                        && !error.ends_with("…")) {
-                        error += '.';
-                    }
+                    error = ensure_sentence_end(std::move(error));
                 }
                 finish(std::move(error));
             });
             return;
         }
-        retries = 0;
+        retries       = 0;
         prompt_tokens = request_prompt_tokens;
 
         if (!alive_.load()) {
@@ -492,25 +484,23 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
                 && tool->safety == ToolSafety::MUTATING
                 && allowed_tools_.count(ev.tool_call.name) == 0;
             if (ev.tool_call.name == "skill") {
-                const auto skill = _resolve_skill(parse_json(ev.tool_call.args));
+                const auto skill
+                    = _resolve_skill(parse_json(ev.tool_call.args));
                 bool loaded = false;
                 if (skill) {
                     std::lock_guard lock(loaded_skills_mutex_);
                     loaded = loaded_skills_.contains(skill->path.string());
                 }
                 needs_approval = skill.has_value()
-                    && _skill_policy(*skill) == SkillPolicy::ASK
-                    && !loaded;
+                    && _skill_policy(*skill) == SkillPolicy::ASK && !loaded;
             }
             ToolCallRequest approval_request = ev.tool_call;
-            const bool path_scoped = ev.tool_call.name == "read"
+            const bool path_scoped           = ev.tool_call.name == "read"
                 || ev.tool_call.name == "list" || ev.tool_call.name == "edit"
                 || ev.tool_call.name == "write";
-            if (path_scoped
-                && allowed_tools_.count(ev.tool_call.name) == 0) {
-                const ProjectTarget target
-                    = classify_project_target(
-                        ev.tool_call.name, ev.tool_call.args);
+            if (path_scoped && allowed_tools_.count(ev.tool_call.name) == 0) {
+                const ProjectTarget target = classify_project_target(
+                    ev.tool_call.name, ev.tool_call.args);
                 if (target == ProjectTarget::INSIDE) {
                     needs_approval = false;
                 } else if (target == ProjectTarget::OUTSIDE) {
@@ -526,11 +516,11 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
                 continue;
             }
             asks.push_back(Ask { .payload = approval_request,
-                .future = _request_modal(approval_request),
+                .future                   = _request_modal(approval_request),
                 .tool_req                 = std::nullopt });
         } else if (ev.kind == StreamEvent::Kind::QUESTION) {
             asks.push_back(Ask { .payload = ev.question,
-                .future = _request_modal(ev.question),
+                .future                   = _request_modal(ev.question),
                 .tool_req                 = std::nullopt });
         }
     }
@@ -555,7 +545,8 @@ void Controller::_drain_pending_asks(std::vector<Message>& history,
 
     Message assistant { Message::Type::ASSISTANT, assistant_text };
     if (dialect == ApiStandard::ANTHROPIC) {
-        if (const std::optional<AssistantTurn> a = state_->session->last_assistant()) {
+        if (const std::optional<AssistantTurn> a
+            = state_->session->last_assistant()) {
             if (!a->reasoning.empty()) {
                 assistant.thinking.push_back(
                     { a->reasoning, a->reasoning_signature });
@@ -658,7 +649,7 @@ void Controller::_run_tool(
             loaded_skill_contents_[skill->path.string()] = out.text;
         }
     }
-    const auto kind      = out.kind == ToolOutput::Kind::OUTPUT
+    const auto kind = out.kind == ToolOutput::Kind::OUTPUT
         ? ToolCall::Result::Kind::OUTPUT
         : ToolCall::Result::Kind::ERROR;
     _post([this, req, kind, out] {
@@ -667,18 +658,9 @@ void Controller::_run_tool(
         result.shell_status = out.shell_status;
         state_->session->fill_tool_result(req, std::move(result));
     });
-    std::string model_text = out.text;
-    if (out.shell_status.has_value()) {
-        const std::string status = shell_status_text(*out.shell_status);
-        if (!status.empty()) {
-            if (!model_text.empty() && model_text.back() != '\n') {
-                model_text += '\n';
-            }
-            model_text += "[" + status + "]";
-        }
-    }
-    tool_msgs.push_back(
-        { Message::Type::TOOL, std::move(model_text), { }, req.id });
+    tool_msgs.push_back({ Message::Type::TOOL,
+        append_shell_status(std::move(out.text), out.shell_status), { },
+        req.id });
 }
 
 } // namespace ursa

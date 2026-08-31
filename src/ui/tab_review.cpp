@@ -74,8 +74,8 @@ namespace {
             ai_review_button_
                 = action_button("AI Review", [this] { _provide_review(); });
             ButtonOption viewer_option;
-            viewer_option.label    = "Reviewing…";
-            viewer_option.on_click = [this] { _open_review_viewer(); };
+            viewer_option.label     = "Reviewing…";
+            viewer_option.on_click  = [this] { _open_review_viewer(); };
             viewer_option.transform = [this](EntryState entry) {
                 Element label
                     = text(entry.label + " " + _review_elapsed_text());
@@ -85,20 +85,19 @@ namespace {
                 } else {
                     label = std::move(label) | color(PANEL_FG_DIM);
                 }
-                return hbox({ spinner(15,
-                                  static_cast<std::size_t>(review_frame_))
-                                  | color(Color::GrayLight),
-                    text(" "), std::move(label) });
+                return hbox(
+                    { spinner(15, static_cast<std::size_t>(review_frame_))
+                            | color(Color::GrayLight),
+                        text(" "), std::move(label) });
             };
             review_viewer_button_ = space_activates(
                 Button(viewer_option), viewer_option.on_click);
             ButtonOption cancel_option;
-            cancel_option.label    = "cancel";
-            cancel_option.on_click = [this] { _cancel_review(); };
+            cancel_option.label     = "cancel";
+            cancel_option.on_click  = [this] { _cancel_review(); };
             cancel_option.transform = [this](EntryState entry) {
-                Element label = text(review_cancelling_->load()
-                        ? "cancelling…"
-                        : entry.label);
+                Element label = text(
+                    review_cancelling_->load() ? "cancelling…" : entry.label);
                 if (entry.focused) {
                     label = std::move(label) | bold | underlined
                         | color(PANEL_FG);
@@ -333,7 +332,7 @@ namespace {
         }
 
     private:
-        static constexpr int RENDER_RADIUS = 80;
+        static constexpr int RENDER_RADIUS = 120;
 
         static bool _is_user_interaction(Event event)
         {
@@ -354,7 +353,8 @@ namespace {
 
         void _send_to_plan()
         {
-            if (review_running_->load()) return;
+            if (review_running_->load())
+                return;
             const auto snapshot = state_->review->comments_snapshot();
             if (snapshot.comments.empty()) {
                 controller_.set_error("Add a review comment before sending.");
@@ -374,10 +374,11 @@ namespace {
 
         void _provide_review()
         {
-            if (review_running_->exchange(true)) return;
+            if (review_running_->exchange(true))
+                return;
             review_cancelling_->store(false);
-            review_frame_   = 0;
-            review_started_ = std::chrono::steady_clock::now();
+            review_frame_        = 0;
+            review_started_      = std::chrono::steady_clock::now();
             const auto selection = state_->providers->active_selection();
             if (!selection) {
                 review_running_->store(false);
@@ -401,17 +402,18 @@ namespace {
                     "or review it in smaller commits.");
                 return;
             }
-            auto transcript = std::make_shared<Session>();
+            auto transcript             = std::make_shared<Session>();
             const SubagentHandle handle = controller_.run_subagent(
                 std::move(prompt), selection->model, "low",
                 SubagentOptions { .visible = false,
-                    .timeout = std::chrono::minutes { 5 },
-                    .max_output_tokens = 4096,
-                    .transcript = std::move(transcript) },
+                    .timeout               = std::chrono::minutes { 5 },
+                    .max_output_tokens     = 4096,
+                    .transcript            = std::move(transcript) },
                 [state = state_, running = review_running_](
                     const SubagentResult& result) {
                     running->store(false);
-                    if (result.status == Status::CANCELLED) return;
+                    if (result.status == Status::CANCELLED)
+                        return;
                     if (result.status != Status::OK) {
                         state->session->set_error(
                             "AI review failed: " + error_text(result.status));
@@ -433,7 +435,8 @@ namespace {
 
         void _cancel_review()
         {
-            if (!review_task_id_ || review_cancelling_->exchange(true)) return;
+            if (!review_task_id_ || review_cancelling_->exchange(true))
+                return;
             if (!state_->subagents->cancel(*review_task_id_)) {
                 review_cancelling_->store(false);
             }
@@ -441,7 +444,8 @@ namespace {
 
         void _open_review_viewer()
         {
-            if (!review_task_id_) return;
+            if (!review_task_id_)
+                return;
             SubagentChat chat
                 = controller_.subagent_chat(*review_task_id_, "AI Review");
             controller_.enqueue_user_modal(ViewerModal { std::move(chat.title),
@@ -450,11 +454,9 @@ namespace {
 
         std::string _review_elapsed_text() const
         {
-            const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-                std::chrono::steady_clock::now() - review_started_);
-            const auto minutes = elapsed.count() / 60;
-            const auto seconds = elapsed.count() % 60;
-            return std::format("{}:{:02}", minutes, seconds);
+            return elapsed_text(
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - review_started_));
         }
 
         struct VisibleRow {

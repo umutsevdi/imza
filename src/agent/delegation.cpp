@@ -73,7 +73,8 @@ namespace {
             + task.mode_name + ")\n\n";
         if (result.status != Status::OK) {
             output += "Failed: " + error_text(result.status);
-            if (!result.output.empty()) output += "\n\n" + result.output;
+            if (!result.output.empty())
+                output += "\n\n" + result.output;
             return output;
         }
         output += result.output.empty() ? "Completed without a report."
@@ -91,24 +92,23 @@ namespace {
             } else if (const auto* assistant
                 = std::get_if<AssistantTurn>(&item)) {
                 if (!assistant->reasoning.empty()) {
-                    transcript += "## Reasoning\n\n"
-                        + assistant->reasoning + "\n\n";
+                    transcript
+                        += "## Reasoning\n\n" + assistant->reasoning + "\n\n";
                 }
                 if (!assistant->markdown.empty()) {
-                    transcript += "## Assistant\n\n"
-                        + assistant->markdown + "\n\n";
+                    transcript
+                        += "## Assistant\n\n" + assistant->markdown + "\n\n";
                 }
             } else if (const auto* tool = std::get_if<ToolCall>(&item)) {
                 transcript += "## Tool: " + tool->name + "\n\n";
                 transcript += "```json\n" + tool->args + "\n```\n\n";
                 if (tool->result) {
-                    transcript += "```text\n" + tool->result->text
-                        + "\n```\n\n";
+                    transcript
+                        += "```text\n" + tool->result->text + "\n```\n\n";
                 }
-            } else if (const auto* answer
-                = std::get_if<ModalAnswer>(&item)) {
-                transcript += "## Answer\n\n"
-                    + modal_answer_markdown(*answer) + "\n\n";
+            } else if (const auto* answer = std::get_if<ModalAnswer>(&item)) {
+                transcript += "## Answer\n\n" + modal_answer_markdown(*answer)
+                    + "\n\n";
             }
         }
         return transcript;
@@ -123,9 +123,8 @@ namespace {
                 assistant != nullptr && !assistant->markdown.empty()) {
                 return assistant->markdown;
             }
-            if (const auto* tool = std::get_if<ToolCall>(&*it);
-                tool != nullptr && tool->result.has_value()
-                && !tool->result->text.empty()) {
+            if (const auto* tool = std::get_if<ToolCall>(&*it); tool != nullptr
+                && tool->result.has_value() && !tool->result->text.empty()) {
                 return "Last completed tool output:\n\n```text\n"
                     + tool->result->text + "\n```";
             }
@@ -135,8 +134,8 @@ namespace {
 
 } // namespace
 
-void Controller::submit_delegated(std::string text,
-    const ProviderSelection& selection, Session::Mode mode)
+void Controller::submit_delegated(
+    std::string text, const ProviderSelection& selection, Session::Mode mode)
 {
     TurnSettings settings;
     settings.model            = selection.model;
@@ -150,18 +149,17 @@ void Controller::submit_delegated(std::string text,
     const std::string task = text;
     state_->session->begin_send(std::move(text));
     const std::shared_ptr<Environment> env = state_->environment;
-    const Config config = state_->providers->config();
-    const SubagentRole role = mode == Session::Mode::PLAN
+    const Config config                    = state_->providers->config();
+    const SubagentRole role                = mode == Session::Mode::PLAN
         ? SubagentRole::RESEARCH
         : SubagentRole::BUILDER;
     std::vector<Message> history {
         { Message::Type::SYSTEM,
-            build_subagent_system_prompt(env->system().get(),
-                env->workspace().get(), role, &config) },
+            build_subagent_system_prompt(
+                env->system().get(), env->workspace().get(), role, &config) },
         { Message::Type::USER, task },
     };
-    _spawn(std::move(history),
-        has_stream_override_ ? stream_fn_ : StreamFn { },
+    _spawn(std::move(history), has_stream_override_ ? stream_fn_ : StreamFn { },
         std::move(settings));
 }
 
@@ -197,22 +195,22 @@ void Controller::_run_subagents(
         }
         auto child_session = std::make_shared<Session>();
         sessions.push_back(child_session);
-        const std::string label = "Agent " + std::to_string(index + 1)
-            + " (" + task.mode_name + ")";
+        const std::string label = "Agent " + std::to_string(index + 1) + " ("
+            + task.mode_name + ")";
         const ProviderSelection selected = *selection;
-        const std::string prompt          = task.prompt;
-        const Session::Mode mode          = task.mode;
-        handles.push_back(state_->subagents->start(prompt, selected.model,
-            selected.reasoning_effort, true,
+        const std::string prompt         = task.prompt;
+        const Session::Mode mode         = task.mode;
+        handles.push_back(state_->subagents->start(
+            prompt, selected.model, selected.reasoning_effort, true,
             [this, child_session, selected, prompt, mode, label](
                 std::stop_token stop) mutable {
                 auto child_state = std::make_shared<ApplicationState>(
                     ApplicationState { child_session, state_->providers,
                         std::make_shared<SubagentManager>(),
                         state_->environment, std::make_shared<ReviewState>() });
-                Controller child(child_state,
-                    [](std::function<void()> action) { action(); }, [] { },
-                    has_stream_override_ ? stream_fn_ : StreamFn { },
+                Controller child(
+                    child_state, [](std::function<void()> action) { action(); },
+                    [] { }, has_stream_override_ ? stream_fn_ : StreamFn { },
                     delegated_tools(),
                     [this](ModalPayload payload) {
                         return _request_modal(std::move(payload));
@@ -231,8 +229,8 @@ void Controller::_run_subagents(
                     = child_session->last_assistant();
                 const std::string error = child_session->error();
                 if (!error.empty()) {
-                    return SubagentResult {
-                        Status::API_ERROR, last_useful_output(*child_session) };
+                    return SubagentResult { Status::API_ERROR,
+                        last_useful_output(*child_session) };
                 }
                 return SubagentResult { Status::OK,
                     answer ? answer->markdown : std::string { } };
@@ -242,22 +240,24 @@ void Controller::_run_subagents(
 
     std::vector<std::size_t> ids;
     ids.reserve(handles.size());
-    for (const SubagentHandle& handle : handles) ids.push_back(handle.id);
+    for (const SubagentHandle& handle : handles)
+        ids.push_back(handle.id);
     _post([this, req, ids] { state_->session->set_tool_subagents(req, ids); });
 
     std::string output;
     std::vector<SubagentChat> chats;
     for (std::size_t index = 0; index < handles.size(); ++index) {
         const SubagentResult result = handles[index].completion.get();
-        if (!output.empty()) output += "\n\n";
+        if (!output.empty())
+            output += "\n\n";
         output += task_report(index, (*parsed)[index], result);
-        chats.push_back(SubagentChat {
-            "Agent " + std::to_string(index + 1) + " ("
-                + (*parsed)[index].mode_name + ")",
+        chats.push_back(SubagentChat { "Agent " + std::to_string(index + 1)
+                + " (" + (*parsed)[index].mode_name + ")",
             session_transcript(*sessions[index]) });
     }
     if (!validation_error.empty()) {
-        if (!output.empty()) output += "\n\n";
+        if (!output.empty())
+            output += "\n\n";
         output += validation_error;
     }
     const ToolCall::Result::Kind kind = validation_error.empty()
@@ -278,31 +278,28 @@ SubagentChat Controller::subagent_chat(
         return call.subagent_chats[index];
     }
     const Json::Value args = parse_json(call.args);
-    std::string title = "Agent " + std::to_string(index + 1);
+    std::string title      = "Agent " + std::to_string(index + 1);
     if (args["tasks"].isArray() && index < args["tasks"].size()
         && args["tasks"][static_cast<Json::ArrayIndex>(index)]["mode"]
-               .isString()) {
+            .isString()) {
         title += " ("
             + args["tasks"][static_cast<Json::ArrayIndex>(index)]["mode"]
                   .asString()
             + ")";
     }
     if (index >= call.subagent_ids.size()) {
-        return { std::move(title),
-            "No delegated-agent history is available." };
+        return { std::move(title), "No delegated-agent history is available." };
     }
     return subagent_chat(call.subagent_ids[index], std::move(title));
 }
 
-SubagentChat Controller::subagent_chat(
-    std::size_t id, std::string title) const
+SubagentChat Controller::subagent_chat(std::size_t id, std::string title) const
 {
     const std::vector<SubagentTask> tasks = state_->subagents->tasks();
     const auto found = std::find_if(tasks.begin(), tasks.end(),
         [id](const SubagentTask& task) { return task.id == id; });
     if (found == tasks.end()) {
-        return { std::move(title),
-            "No delegated-agent history is available." };
+        return { std::move(title), "No delegated-agent history is available." };
     }
     std::string transcript = "**Task:** " + found->prompt + "\n\n";
     if (found->session) {

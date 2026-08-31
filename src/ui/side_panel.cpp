@@ -24,6 +24,19 @@ namespace {
 
     Element changed_file_item(const ChangedFile& file);
 
+    Element changed_files_panel(Elements rows, const ChangeSummary& changes)
+    {
+        Element body
+            = vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER);
+        Element title = hbox({ section_title("Changed files"), filler(),
+            text("+" + std::to_string(changes.additions))
+                | color(Color::GreenLight),
+            text(" "),
+            text("−" + std::to_string(changes.deletions))
+                | color(Color::RedLight) });
+        return vbox({ std::move(title), std::move(body) });
+    }
+
     std::string changed_file_target(const ChangedFile& file)
     {
         if (file.kind != ChangedFile::Kind::RENAMED
@@ -35,7 +48,7 @@ namespace {
                                           : file.path.substr(arrow + 4);
     }
 
-}
+} // namespace
 
 class SidePanel : public ComponentBase {
 public:
@@ -77,7 +90,7 @@ public:
         const std::string title = state_->session->title();
         parts.push_back(paragraph(title.empty() ? "New Session" : title) | bold
             | color(PANEL_FG));
-        parts.push_back(separator());
+        parts.push_back(separatorLight());
         _append_review_comments(parts);
         if (state_->session->todo().items.size()) {
             parts.push_back(render_todo(state_->session->todo(), ctx) | yflex);
@@ -106,21 +119,40 @@ public:
     bool OnEvent(Event event) override
     {
         for (const Component& link : active_links_) {
-            if (link->OnEvent(event)) return true;
+            if (link->OnEvent(event))
+                return true;
         }
         return false;
     }
 
 private:
-    struct FileLink {
-        std::shared_ptr<ChangedFile> file;
+    template <typename Payload> struct Link {
+        std::shared_ptr<Payload> data;
         Component component;
     };
 
-    struct CommentLink {
-        std::shared_ptr<std::string> label;
-        Component component;
-    };
+    template <typename Key, typename Payload, typename Render, typename Click,
+        typename Update>
+    Component memoized_link(std::map<Key, Link<Payload>>& cache, Key key,
+        std::shared_ptr<Payload> payload, Render render, Click on_click,
+        Update update)
+    {
+        auto found = cache.find(key);
+        if (found == cache.end()) {
+            Component component = inline_link_button(
+                [payload, render] { return render(*payload); },
+                std::move(on_click), PANEL_FG_DIM);
+            links_container_->Add(component);
+            found = cache
+                        .emplace(std::move(key),
+                            Link<Payload> { std::move(payload), component })
+                        .first;
+        } else {
+            update(*found->second.data);
+        }
+        active_links_.push_back(found->second.component);
+        return found->second.component;
+    }
 
     Element _render_changed_files(const RepositoryState& repository)
     {
@@ -128,15 +160,7 @@ private:
         for (const ChangedFile& file : repository.changed_files) {
             rows.push_back(_changed_file_link(file)->Render());
         }
-        Element body
-            = vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER);
-        Element title = hbox({ section_title("Changed files"), filler(),
-            text("+" + std::to_string(repository.changes.additions))
-                | color(Color::GreenLight),
-            text(" "),
-            text("−" + std::to_string(repository.changes.deletions))
-                | color(Color::RedLight) });
-        return vbox({ std::move(title), std::move(body) });
+        return changed_files_panel(std::move(rows), repository.changes);
     }
 
     void _append_review_comments(Elements& parts)
@@ -158,11 +182,10 @@ private:
             std::filesystem::path path(comment.anchor.file);
             const std::string label = path.filename().string() + ":" + line
                 + (comment.stale ? "  stale" : "");
-            rows.push_back(hbox({ _comment_link(comment.id, label)->Render(),
-                               filler(),
-                               text(fit(comment.body,
-                                   LayoutCtx::panel_width / 2 - 6))
-                                   | color(PANEL_FG_DIM) })
+            rows.push_back(
+                hbox({ _comment_link(comment.id, label)->Render(), filler(),
+                    text(fit(comment.body, LayoutCtx::panel_width / 2 - 6))
+                        | color(PANEL_FG_DIM) })
                 | xflex);
         }
         parts.push_back(vbox({
@@ -173,49 +196,25 @@ private:
 
     Component _changed_file_link(const ChangedFile& file)
     {
-        const std::string key = file.path;
-        auto found            = file_links_.find(key);
-        if (found == file_links_.end()) {
-            auto current = std::make_shared<ChangedFile>(file);
-            const std::string target = changed_file_target(file);
-            Component component = inline_link_button(
-                [current] { return changed_file_item(*current); },
-                [this, target] {
-                    state_->review->request_file_jump(target);
-                    navigate_(WorkflowPhase::REVIEW);
-                },
-                PANEL_FG_DIM);
-            links_container_->Add(component);
-            found = file_links_
-                        .emplace(key,
-                            FileLink { std::move(current), component })
-                        .first;
-        } else {
-            *found->second.file = file;
-        }
-        active_links_.push_back(found->second.component);
-        return found->second.component;
+        return memoized_link(
+            file_links_, file.path, std::make_shared<ChangedFile>(file),
+            [](const ChangedFile& current) {
+                return changed_file_item(current);
+            },
+            [this, target = changed_file_target(file)] {
+                state_->review->request_file_jump(target);
+                navigate_(WorkflowPhase::REVIEW);
+            },
+            [&file](ChangedFile& existing) { existing = file; });
     }
 
     Component _comment_link(std::size_t id, std::string label)
     {
-        auto found = comment_links_.find(id);
-        if (found == comment_links_.end()) {
-            auto current = std::make_shared<std::string>(std::move(label));
-            Component component = inline_link_button(
-                [current] { return text(*current) | bold; },
-                [this, id] { state_->review->request_jump(id); },
-                PANEL_FG_DIM);
-            links_container_->Add(component);
-            found = comment_links_
-                        .emplace(id,
-                            CommentLink { std::move(current), component })
-                        .first;
-        } else {
-            *found->second.label = std::move(label);
-        }
-        active_links_.push_back(found->second.component);
-        return found->second.component;
+        return memoized_link(
+            comment_links_, id, std::make_shared<std::string>(label),
+            [](const std::string& current) { return text(current) | bold; },
+            [this, id] { state_->review->request_jump(id); },
+            [&label](std::string& existing) { existing = std::move(label); });
     }
 
     std::shared_ptr<ApplicationState> state_;
@@ -231,8 +230,8 @@ private:
     Signal<>::Subscription attachments_subscription_;
     Signal<>::Subscription review_subscription_;
     Component links_container_;
-    std::map<std::string, FileLink> file_links_;
-    std::map<std::size_t, CommentLink> comment_links_;
+    std::map<std::string, Link<ChangedFile>> file_links_;
+    std::map<std::size_t, Link<std::string>> comment_links_;
     std::vector<Component> active_links_;
 };
 
@@ -325,14 +324,7 @@ Element render_changed_files(
     for (const ChangedFile& file : repository.changed_files) {
         rows.push_back(changed_file_item(file));
     }
-    Element body  = vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER);
-    Element title = hbox({ section_title("Changed files"), filler(),
-        text("+" + std::to_string(repository.changes.additions))
-            | color(Color::GreenLight),
-        text(" "),
-        text("−" + std::to_string(repository.changes.deletions))
-            | color(Color::RedLight) });
-    return vbox({ std::move(title), std::move(body) });
+    return changed_files_panel(std::move(rows), repository.changes);
 }
 
 Element render_context_box(const std::optional<std::string>& rules,

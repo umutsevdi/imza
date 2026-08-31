@@ -13,8 +13,8 @@
 
 #include "catalog.h"
 #include "network.h"
-#include "ursa_signal.h"
 #include "types.h"
+#include "ursa_signal.h"
 
 namespace ursa {
 
@@ -53,7 +53,7 @@ struct ProviderSelection {
 };
 
 struct ConnectOutcome {
-    Status status = Status::OK;
+    Status status           = Status::OK;
     std::size_t model_count = 0;
     bool first_connection   = false;
     bool persisted          = false;
@@ -69,8 +69,7 @@ public:
     ProviderStore(const ProviderStore&)            = delete;
     ProviderStore& operator=(const ProviderStore&) = delete;
 
-    [[nodiscard]] Signal<>::Subscription subscribe(
-        ProviderChangedFn callback);
+    [[nodiscard]] Signal<>::Subscription subscribe(ProviderChangedFn callback);
 
     Config config() const;
     StatusConfigView status() const;
@@ -89,8 +88,7 @@ public:
     bool remove_connection(std::string_view connection_id);
     bool select_model(const ModelChoice& choice);
     bool set_reasoning_effort(std::string effort);
-    bool set_subagent_model(
-        SubagentRole role, SubagentModelConfig selection);
+    bool set_subagent_model(SubagentRole role, SubagentModelConfig selection);
     bool set_skill_policies(const SkillPolicyChanges& changes);
     void remember_dialect(std::string_view connection_id,
         std::string_view model, ApiStandard dialect);
@@ -111,10 +109,13 @@ private:
     Connection* _find_locked(std::string_view id);
     const Connection* _find_locked(std::string_view id) const;
     std::string _unique_id_locked(std::string base) const;
-    Route _route_locked(const Connection& connection, ApiStandard dialect) const;
+    Route _route_locked(
+        const Connection& connection, ApiStandard dialect) const;
     void _start_fetch_locked(const std::string& connection_id);
     Status _commit_connection_locked(const ConnectResult& result,
         const std::vector<ModelInfo>& models, bool& first);
+    bool _update_config(std::function<bool(Config&)> mutate,
+        std::function<void()> on_commit = { });
     void _notify_changed();
 
     Config config_;

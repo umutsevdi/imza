@@ -39,7 +39,7 @@ struct Catalog {
     std::map<std::string, CachedProvider> providers;
 };
 
-inline constexpr std::string_view kLocalProviderId = "local";
+inline constexpr std::string_view kLocalProviderId  = "local";
 inline constexpr std::string_view kCustomProviderId = "custom";
 
 bool catalog_stale(const Catalog& catalog);
@@ -51,7 +51,7 @@ Status trim_provider(const Json::Value& src, CachedProvider& out);
 
 AuthType auth_from_npm(std::string_view npm);
 std::string catalog_base(const CachedProvider& provider);
-Route resolve_route(const Connection& conn, const Catalog& catalog,
-    ApiStandard dialect);
+Route resolve_route(
+    const Connection& conn, const Catalog& catalog, ApiStandard dialect);
 
 } // namespace ursa

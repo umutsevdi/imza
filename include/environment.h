@@ -14,8 +14,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "ursa_signal.h"
 #include "types.h"
+#include "ursa_signal.h"
 
 namespace ursa {
 
@@ -84,8 +84,8 @@ std::vector<ChangedFile> parse_git_status(std::string_view status);
 std::string normalize_git_branch(std::string_view branch);
 
 struct ChangeSummary {
-    std::size_t additions = 0;
-    std::size_t deletions = 0;
+    std::size_t additions   = 0;
+    std::size_t deletions   = 0;
     std::uint64_t signature = 0;
 
     bool operator==(const ChangeSummary&) const = default;

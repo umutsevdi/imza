@@ -12,8 +12,17 @@ namespace ursa {
 struct ApplicationState;
 
 struct SlashCommand {
-    enum class Action { EXIT, NEW, SYSTEM_PROMPT, CONNECT, MODEL, VARIANT,
-        SUBAGENTS, SESSIONS, SKILLS };
+    enum class Action {
+        EXIT,
+        NEW,
+        SYSTEM_PROMPT,
+        CONNECT,
+        MODEL,
+        VARIANT,
+        SUBAGENTS,
+        SESSIONS,
+        SKILLS
+    };
 
     std::string_view name;
     std::string_view desc;
@@ -33,7 +42,7 @@ struct SlashCommandContext {
 
 std::span<const SlashCommand> slash_commands();
 const SlashCommand* find_command(std::string_view name);
-void run_slash_command(const SlashCommandContext& context,
-    std::string_view command);
+void run_slash_command(
+    const SlashCommandContext& context, std::string_view command);
 
 } // namespace ursa

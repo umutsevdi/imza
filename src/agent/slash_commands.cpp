@@ -33,7 +33,8 @@ const SlashCommand* find_command(std::string_view name)
 {
     const std::string key = to_lower(name);
     for (const SlashCommand& command : slash_commands()) {
-        if (to_lower(command.name) == key) return &command;
+        if (to_lower(command.name) == key)
+            return &command;
     }
     return nullptr;
 }
@@ -58,13 +59,11 @@ void run_slash_command(
             context.set_error("No connections — run /connect first.");
             break;
         }
-        context.present_modal(
-            ConnectModal { ConnectModal::Entry::PICK_MODEL });
+        context.present_modal(ConnectModal { ConnectModal::Entry::PICK_MODEL });
         break;
     case SlashCommand::Action::VARIANT: {
-        std::string current
-            = context.state.providers->status().reasoning_effort;
-        if (current == "medium") current = "default";
+        std::string current = to_config_effort(
+            context.state.providers->status().reasoning_effort);
         context.present_modal(VariantModal {
             { "off", "low", "default", "high" }, std::move(current) });
         break;

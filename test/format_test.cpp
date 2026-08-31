@@ -30,9 +30,8 @@ TEST_CASE("modal_answer_markdown renders Q/A pairs with prompt")
     ans.cards.push_back(
         ursa::QuestionAnswer { { "Auth", "Billing" }, "", "features?" });
     ans.cards.push_back(
-        ursa::QuestionAnswer { {}, "my own region", "region?" });
-    ans.cards.push_back(
-        ursa::QuestionAnswer { {}, "", "anything else?" });
+        ursa::QuestionAnswer { { }, "my own region", "region?" });
+    ans.cards.push_back(ursa::QuestionAnswer { { }, "", "anything else?" });
     const std::string md = ursa::modal_answer_markdown(ans);
     CHECK(md.find("**storage backend?**") != std::string::npos);
     CHECK(md.find("PostgreSQL") != std::string::npos);
@@ -86,8 +85,8 @@ TEST_CASE("tool_call_head shows the file path for read, args otherwise")
         { } };
     CHECK(ursa::tool_call_head(todo) == "Todo (3 tasks)");
 
-    ursa::ToolCall todo_one { 1, "", "todo",
-        R"({"todos":[{"content":"a"}]})", { } };
+    ursa::ToolCall todo_one { 1, "", "todo", R"({"todos":[{"content":"a"}]})",
+        { } };
     CHECK(ursa::tool_call_head(todo_one) == "Todo (1 task)");
 
     ursa::ToolCall todo_clear { 1, "", "todo", R"({"todos":[]})", { } };
@@ -113,8 +112,9 @@ TEST_CASE("ask_answer_markdown numbers questions and blockquotes answers")
     ursa::ModalAnswer ans;
     ans.cards.push_back(
         ursa::QuestionAnswer { { "Sunny" }, "", "What's the weather today?" });
-    ans.cards.push_back(ursa::QuestionAnswer {
-        { "Reading files", "Listing directories" }, "", "Which capabilities?" });
+    ans.cards.push_back(
+        ursa::QuestionAnswer { { "Reading files", "Listing directories" }, "",
+            "Which capabilities?" });
 
     const std::string md = ursa::ask_answer_markdown(ans);
     CHECK(md
@@ -141,8 +141,8 @@ TEST_CASE("tool_code_language derives the extension for read only")
 TEST_CASE("shell status text hides success and preserves arbitrary timeout")
 {
     CHECK(ursa::shell_status_text(ursa::ShellExit { 0 }).empty());
-    CHECK(ursa::shell_status_text(ursa::ShellExit { 7 })
-        == "exited with code 7");
+    CHECK(
+        ursa::shell_status_text(ursa::ShellExit { 7 }) == "exited with code 7");
     CHECK(ursa::shell_status_text(
               ursa::ShellTimeout { std::chrono::seconds { 47 } })
         == "timed out after 47s");

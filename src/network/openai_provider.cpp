@@ -12,23 +12,23 @@ namespace {
         Json::Value tools(Json::arrayValue);
         for (const auto& t : req.tools) {
             Json::Value fn;
-            fn["type"]        = "function";
-            fn["function"]    = Json::Value(Json::objectValue);
-            fn["function"]["name"] = t.name;
+            fn["type"]                    = "function";
+            fn["function"]                = Json::Value(Json::objectValue);
+            fn["function"]["name"]        = t.name;
             fn["function"]["description"] = t.description;
-            fn["function"]["parameters"] = t.parameters;
+            fn["function"]["parameters"]  = t.parameters;
             tools.append(fn);
         }
-        root["tools"]      = tools;
+        root["tools"]       = tools;
         root["tool_choice"] = "auto";
     }
 
     Json::Value build(const ChatRequest& req)
     {
         Json::Value root;
-        root["model"]       = req.model;
-        root["stream"]      = true;
-        root["temperature"] = req.temperature;
+        root["model"]                           = req.model;
+        root["stream"]                          = true;
+        root["temperature"]                     = req.temperature;
         root["stream_options"]["include_usage"] = true;
         if (req.reasoning_effort) {
             root["reasoning_effort"] = *req.reasoning_effort;
@@ -48,10 +48,10 @@ namespace {
                 Json::Value calls(Json::arrayValue);
                 for (const auto& tc : m.tool_calls) {
                     Json::Value c;
-                    c["id"]       = tc.id;
-                    c["type"]     = "function";
-                    c["function"] = Json::Value(Json::objectValue);
-                    c["function"]["name"] = tc.name;
+                    c["id"]                    = tc.id;
+                    c["type"]                  = "function";
+                    c["function"]              = Json::Value(Json::objectValue);
+                    c["function"]["name"]      = tc.name;
                     c["function"]["arguments"] = tc.args;
                     calls.append(c);
                 }
@@ -64,25 +64,6 @@ namespace {
         }
         root["messages"] = messages;
         return root;
-    }
-
-    std::vector<std::string> headers()
-    {
-        return {
-            "Content-Type: application/json",
-            "Accept: text/event-stream",
-        };
-    }
-
-    void flush_tools(ParseState& state, std::vector<StreamEvent>& outs)
-    {
-        for (auto& [index, acc] : state.tool_accums) {
-            if (acc.name.empty()) {
-                continue;
-            }
-            outs.push_back(make_tool_call_event(finish_accum(acc)));
-        }
-        state.tool_accums.clear();
     }
 
     void take_delta(const Json::Value& delta, ParseState& state)
@@ -108,34 +89,33 @@ namespace {
         }
     }
 
+    Usage read_usage_fields(const Json::Value& u)
+    {
+        Usage out;
+        out.prompt                 = u.get("prompt_tokens", 0).asUInt64();
+        out.completion             = u.get("completion_tokens", 0).asUInt64();
+        out.total                  = u.get("total_tokens", 0).asUInt64();
+        const Json::Value& details = u["prompt_tokens_details"];
+        if (details.isObject()) {
+            out.cached_read = details.get("cached_tokens", 0).asUInt64();
+        }
+        return out;
+    }
+
     Usage read_usage(const Json::Value& root)
     {
-        Usage u;
         const Json::Value& top = root["usage"];
         if (top.isObject()) {
-            u.prompt    = top.get("prompt_tokens", 0).asUInt64();
-            u.completion = top.get("completion_tokens", 0).asUInt64();
-            u.total     = top.get("total_tokens", 0).asUInt64();
-            const Json::Value& details = top["prompt_tokens_details"];
-            if (details.isObject()) {
-                u.cached_read = details.get("cached_tokens", 0).asUInt64();
-            }
-            return u;
+            return read_usage_fields(top);
         }
         const Json::Value& choices = root["choices"];
         if (choices.isArray() && choices.size() > 0) {
             const Json::Value& cu = choices[0]["usage"];
             if (cu.isObject()) {
-                u.prompt    = cu.get("prompt_tokens", 0).asUInt64();
-                u.completion = cu.get("completion_tokens", 0).asUInt64();
-                u.total     = cu.get("total_tokens", 0).asUInt64();
-                const Json::Value& details = cu["prompt_tokens_details"];
-                if (details.isObject()) {
-                    u.cached_read = details.get("cached_tokens", 0).asUInt64();
-                }
+                return read_usage_fields(cu);
             }
         }
-        return u;
+        return Usage { };
     }
 
     void parse(ParseState& state, std::string_view, std::string_view data,
@@ -143,7 +123,7 @@ namespace {
     {
         if (data == "[DONE]") {
             state.terminal = true;
-            flush_tools(state, outs);
+            flush_tool_accums(state, outs);
             outs.push_back(make_done_event());
             return;
         }
@@ -161,14 +141,15 @@ namespace {
             outs.push_back(make_error_event(status, msg));
             return;
         }
-        const Usage u = read_usage(root);
+        const Usage u              = read_usage(root);
         const Json::Value& choices = root["choices"];
-        bool done = false;
+        bool done                  = false;
         if (choices.isArray() && choices.size() > 0) {
             const Json::Value& delta = choices[0]["delta"];
             if (delta.isObject()) {
                 if (delta["content"].isString()) {
-                    outs.push_back(make_delta_event(delta["content"].asString()));
+                    outs.push_back(
+                        make_delta_event(delta["content"].asString()));
                 }
                 if (delta["reasoning"].isString()) {
                     outs.push_back(
@@ -180,7 +161,7 @@ namespace {
                 take_delta(delta, state);
             }
             if (choices[0]["finish_reason"].isString()) {
-                flush_tools(state, outs);
+                flush_tool_accums(state, outs);
                 done = true;
             }
         }
@@ -198,6 +179,6 @@ namespace {
 
 } // namespace
 
-    extern const Provider openai_provider = { build, headers, parse };
+extern const Provider openai_provider = { build, stream_headers, parse };
 
 } // namespace ursa

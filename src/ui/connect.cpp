@@ -42,29 +42,6 @@ namespace {
         return "••••••" + key.substr(key.size() - 4);
     }
 
-    std::string compact(std::uint64_t n)
-    {
-        if (n >= 1'000'000) {
-            const double m = static_cast<double>(n) / 1'000'000.0;
-            char buf[32];
-            std::snprintf(buf, sizeof(buf), m >= 10 ? "%.0fM" : "%.1fM", m);
-            return buf;
-        }
-        if (n >= 1'000) {
-            const double k = static_cast<double>(n) / 1'000.0;
-            char buf[32];
-            std::snprintf(buf, sizeof(buf), k >= 10 ? "%.0fK" : "%.1fK", k);
-            return buf;
-        }
-        return std::to_string(n);
-    }
-
-    bool ends_with(std::string_view text, std::string_view suffix)
-    {
-        return text.size() >= suffix.size()
-            && text.substr(text.size() - suffix.size()) == suffix;
-    }
-
     Element status_element(const std::string& text_value, bool ok)
     {
         if (ok) {
@@ -84,6 +61,34 @@ namespace {
         std::string name;
         std::string tag;
     };
+
+    ModelRow make_model_row(const std::string& connection_id,
+        const std::string& provider_name, const ModelInfo& info)
+    {
+        ModelRow row;
+        row.connection_id = connection_id;
+        row.model_id      = info.id;
+        const auto slash  = info.id.find('/');
+        row.name
+            = slash == std::string::npos ? info.id : info.id.substr(slash + 1);
+        row.tag = slash == std::string::npos ? provider_name
+                                             : info.id.substr(0, slash);
+        return row;
+    }
+
+    Element model_picker_row(const ModelRow& row, bool selected)
+    {
+        Element e = hbox({
+            text(selected ? "› " : "  "),
+            text(row.name),
+            filler(),
+            text(row.tag) | dim,
+        });
+        if (selected) {
+            e = std::move(e) | bold;
+        }
+        return e;
+    }
 
     class ConnectView : public ComponentBase {
     public:
@@ -203,17 +208,8 @@ namespace {
             for (const auto& view : views()) {
                 const ModelList list = provider_store_.models_for(view.id);
                 for (const ModelInfo& info : list.models) {
-                    ModelRow row;
-                    row.connection_id = view.id;
-                    row.model_id      = info.id;
-                    const auto slash  = info.id.find('/');
-                    row.name          = slash == std::string::npos
-                        ? info.id
-                        : info.id.substr(slash + 1);
-                    row.tag           = slash == std::string::npos
-                        ? view.name
-                        : info.id.substr(0, slash);
-                    pick_rows_.push_back(std::move(row));
+                    pick_rows_.push_back(
+                        make_model_row(view.id, view.name, info));
                 }
             }
             pick_buf_.clear();
@@ -226,13 +222,9 @@ namespace {
         {
             const Config config = provider_store_.config();
             const auto found    = config.subagents.find(role);
-            if (found != config.subagents.end()
-                && !found->second.variant.empty()) {
-                return found->second.variant == "default"
-                    ? "medium"
-                    : found->second.variant;
-            }
-            return std::string(subagent_default_variant(role));
+            return to_wire_effort(subagent_variant_or_default(
+                found != config.subagents.end() ? &found->second : nullptr,
+                role));
         }
 
         void change_subagent_variant(int delta)
@@ -285,16 +277,11 @@ namespace {
                     const ModelRow& row
                         = pick_rows_[pick_visible_[static_cast<std::size_t>(
                             i)]];
-                    Element value
-                        = hbox({ text(i == pick_selected_ ? "› " : "  "),
-                            text(row.name), filler(), text(row.tag) | dim });
-                    if (i == pick_selected_)
-                        value |= bold;
-                    rows.push_back(std::move(value));
+                    rows.push_back(model_picker_row(row, i == pick_selected_));
                 }
                 rows.push_back(separatorEmpty());
-                rows.push_back(hbox({ filler(),
-                    text("arrows navigate · Enter select · Esc back") | dim }));
+                rows.push_back(
+                    hint_bar("arrows navigate · Enter select · Esc back"));
                 return vbox(std::move(rows)) | xflex;
             }
             const Config config = provider_store_.config();
@@ -322,9 +309,8 @@ namespace {
                 rows.push_back(std::move(row));
             }
             rows.push_back(separatorEmpty());
-            rows.push_back(hbox({ filler(),
-                text("↑↓ rows · ←→ variant · Enter model · Esc close")
-                    | dim }));
+            rows.push_back(
+                hint_bar("↑↓ rows · ←→ variant · Enter model · Esc close"));
             return vbox(std::move(rows)) | xflex;
         }
 
@@ -544,7 +530,7 @@ namespace {
             if (base.empty()) {
                 return "";
             }
-            return ends_with(base, "/chat/completions")
+            return base.ends_with("/chat/completions")
                 ? base
                 : base + "/chat/completions";
         }
@@ -869,7 +855,7 @@ namespace {
             if (!confirm_.empty()) {
                 hint = "y confirm · n cancel";
             }
-            rows.push_back(hbox({ filler(), text(hint) | dim }));
+            rows.push_back(hint_bar(hint));
             return vbox(std::move(rows)) | xflex;
         }
 
@@ -922,19 +908,10 @@ namespace {
             pick_visible_.clear();
             for (const auto& snap : pick_snapshot_) {
                 for (const ModelInfo& info : snap.list.models) {
-                    ModelRow row;
-                    row.connection_id = snap.view.id;
-                    row.model_id      = info.id;
-                    const auto slash  = info.id.find('/');
-                    if (slash == std::string::npos) {
-                        row.name = info.id;
-                        row.tag  = snap.view.name;
-                    } else {
-                        row.name = info.id.substr(slash + 1);
-                        row.tag  = info.id.substr(0, slash);
-                    }
+                    ModelRow row
+                        = make_model_row(snap.view.id, snap.view.name, info);
                     if (info.context_length && *info.context_length > 0) {
-                        row.tag += " · " + compact(*info.context_length);
+                        row.tag += " · " + compact_number(*info.context_length);
                     }
                     pick_rows_.push_back(std::move(row));
                 }
@@ -1026,34 +1003,23 @@ namespace {
             if (pick_visible_.empty()) {
                 if (!any_fetching) {
                     rows.push_back(any_failed
-                            ? status_element(
-                                  "✗ Some providers failed — press F5 to retry.",
+                            ? status_element("✗ Some providers failed — press "
+                                             "F5 to retry.",
                                   false)
                             : text("no models") | dim);
                 }
             } else {
                 for (int i = 0; i < static_cast<int>(pick_visible_.size());
                     ++i) {
-                    const bool selected = i == pick_selected_;
                     const ModelRow& row
                         = pick_rows_[pick_visible_[static_cast<std::size_t>(
                             i)]];
-                    Element e = hbox({
-                        text(selected ? "› " : "  "),
-                        text(row.name),
-                        filler(),
-                        text(row.tag) | dim,
-                    });
-                    if (selected) {
-                        e = std::move(e) | bold;
-                    }
-                    rows.push_back(std::move(e));
+                    rows.push_back(model_picker_row(row, i == pick_selected_));
                 }
             }
 
             rows.push_back(separatorEmpty());
-            rows.push_back(hbox({ filler(),
-                text("Enter pick · F5 refresh · Esc close") | dim }));
+            rows.push_back(hint_bar("Enter pick · F5 refresh · Esc close"));
             return vbox(std::move(rows)) | xflex;
         }
 

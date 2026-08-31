@@ -87,12 +87,10 @@ TEST_CASE("attachments outside the workspace and binary files are rejected")
 TEST_CASE("session history keeps queued attachment snapshots")
 {
     ursa::Session session;
-    session.enqueue_message(
-        "review", { { "src/main.cpp", "snapshot\n" } });
+    session.enqueue_message("review", { { "src/main.cpp", "snapshot\n" } });
     auto queued = session.pop_queued();
     REQUIRE(queued);
-    session.begin_send(
-        std::move(queued->text), std::move(queued->attachments));
+    session.begin_send(std::move(queued->text), std::move(queued->attachments));
 
     const auto history = session.build_history("system");
     REQUIRE(history.size() == 2);
@@ -116,11 +114,12 @@ TEST_CASE("session exposes unique attachment basenames and publishes changes")
     CHECK(changes == 1);
 
     ursa::SessionSnapshot snapshot;
-    snapshot.items.push_back(ursa::UserTurn {
-        "restored", { { "notes/plan.txt", "content" } } });
+    snapshot.items.push_back(
+        ursa::UserTurn { "restored", { { "notes/plan.txt", "content" } } });
     session.restore(std::move(snapshot));
 
-    CHECK(session.attachment_names() == std::vector<std::string> { "plan.txt" });
+    CHECK(
+        session.attachment_names() == std::vector<std::string> { "plan.txt" });
     CHECK(changes == 2);
 }
 
@@ -165,16 +164,15 @@ TEST_CASE("session reports pending turns, queued messages and tools")
     request.args = R"({"command":"sleep 2"})";
     session.append_tool(request);
     CHECK(session.has_pending_work());
-    session.fill_tool_result(request,
-        { ursa::ToolCall::Result::Kind::OUTPUT, "done" });
+    session.fill_tool_result(
+        request, { ursa::ToolCall::Result::Kind::OUTPUT, "done" });
     CHECK_FALSE(session.has_pending_work());
 }
 
 TEST_CASE("removing a selected mention detaches its snapshot")
 {
-    std::vector<ursa::FileAttachment> attachments {
-        { "src/main.cpp", "main" }, { "docs/design notes.md", "notes" }
-    };
+    std::vector<ursa::FileAttachment> attachments { { "src/main.cpp", "main" },
+        { "docs/design notes.md", "notes" } };
     ursa::retain_mentioned_attachments(
         "review @docs/design notes.md", attachments);
 

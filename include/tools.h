@@ -26,13 +26,12 @@ enum class ToolSafety { READ_ONLY, MUTATING };
 struct Tool {
     ToolSpec spec;
     ToolHandler run;
-    ToolSafety safety = ToolSafety::MUTATING;
-    bool persistent = true;
+    ToolSafety safety      = ToolSafety::MUTATING;
+    bool persistent        = true;
     bool available_in_plan = false;
 };
 
-const Tool* find_tool(
-    std::span<const Tool> tools, std::string_view name);
+const Tool* find_tool(std::span<const Tool> tools, std::string_view name);
 std::vector<ToolSpec> tool_specs(std::span<const Tool> tools);
 std::vector<ToolSpec> plan_tool_specs(std::span<const Tool> tools);
 ToolOutput dispatch_tool(

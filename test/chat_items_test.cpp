@@ -1,23 +1,12 @@
 #include <string>
 
 #include <doctest/doctest.h>
-#include <ftxui/dom/elements.hpp>
-#include <ftxui/screen/screen.hpp>
 
 #include "format.h"
+#include "test_helpers.h"
 #include "ui.h"
 
-namespace {
-
-std::string to_text(ftxui::Element element)
-{
-    using namespace ftxui;
-    auto screen = Screen::Create(Dimension::Fixed(60), Dimension::Fixed(30));
-    Render(screen, element);
-    return screen.ToString();
-}
-
-} // namespace
+using ursa::test::to_text;
 
 TEST_CASE("render_item renders a user turn")
 {
@@ -29,8 +18,8 @@ TEST_CASE("render_item renders a user turn")
 
 TEST_CASE("render_item renders user attachment labels")
 {
-    ursa::ConversationItem it = ursa::UserTurn {
-        "review", { { "src/main.cpp", "int main() {}" } } };
+    ursa::ConversationItem it
+        = ursa::UserTurn { "review", { { "src/main.cpp", "int main() {}" } } };
     const std::string out
         = to_text(ursa::render_item(it, { ursa::LayoutCtx::Kind::WIDE, 60 }));
     CHECK(out.find("@src/main.cpp") != std::string::npos);
@@ -55,8 +44,8 @@ TEST_CASE("render_item renders a modal answer")
 
 TEST_CASE("render_item renders completed compaction")
 {
-    ursa::ConversationItem item = ursa::CompactionEvent {
-        1, ursa::CompactionEvent::Status::COMPLETED };
+    ursa::ConversationItem item
+        = ursa::CompactionEvent { 1, ursa::CompactionEvent::Status::COMPLETED };
     const std::string out
         = to_text(ursa::render_item(item, { ursa::LayoutCtx::Kind::WIDE, 60 }));
     CHECK(out.find("✓ Session compacted") != std::string::npos);

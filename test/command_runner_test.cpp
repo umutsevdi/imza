@@ -9,10 +9,10 @@ using namespace std::chrono_literals;
 
 namespace {
 
-    ursa::CommandResult run(const std::string& cmd, std::chrono::seconds t)
-    {
-        return ursa::run_command(cmd, t);
-    }
+ursa::CommandResult run(const std::string& cmd, std::chrono::seconds t)
+{
+    return ursa::run_command(cmd, t);
+}
 
 } // namespace
 

@@ -1,8 +1,8 @@
 #pragma once
 
 #include <cstddef>
-#include <future>
 #include <functional>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <stop_token>
@@ -30,8 +30,8 @@ struct SubagentTask {
     std::string prompt;
     std::string model;
     std::string variant;
-    bool visible = true;
-    State state  = State::RUNNING;
+    bool visible  = true;
+    State state   = State::RUNNING;
     Status status = Status::OK;
     std::string output;
     std::shared_ptr<Session> session;
@@ -48,7 +48,7 @@ struct SubagentHandle {
     std::shared_future<SubagentResult> completion;
 };
 
-using SubagentRunFn = std::function<SubagentResult(std::stop_token)>;
+using SubagentRunFn      = std::function<SubagentResult(std::stop_token)>;
 using SubagentCompleteFn = std::function<void(const SubagentResult&)>;
 
 class SubagentManager {
@@ -56,12 +56,12 @@ public:
     SubagentManager() = default;
     ~SubagentManager();
 
-    SubagentManager(const SubagentManager&) = delete;
+    SubagentManager(const SubagentManager&)            = delete;
     SubagentManager& operator=(const SubagentManager&) = delete;
 
     SubagentHandle start(std::string prompt, std::string model,
         std::string variant, bool visible, SubagentRunFn run,
-        SubagentCompleteFn complete = { },
+        SubagentCompleteFn complete      = { },
         std::shared_ptr<Session> session = { });
     bool cancel(std::size_t id);
     void stop();

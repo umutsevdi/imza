@@ -13,8 +13,8 @@ std::string tool_display_name(const std::string& name)
         return name;
     }
     std::string out = name;
-    out[0] = static_cast<char>(
-        std::toupper(static_cast<unsigned char>(out[0])));
+    out[0]
+        = static_cast<char>(std::toupper(static_cast<unsigned char>(out[0])));
     return out;
 }
 
@@ -47,24 +47,48 @@ namespace {
     std::string subagent_args(const ToolCall& call)
     {
         const Json::Value parsed = parse_json(call.args);
-        if (!parsed.isObject() || !parsed["tasks"].isArray()) return call.args;
+        if (!parsed.isObject() || !parsed["tasks"].isArray())
+            return call.args;
         int research_count = 0;
-        int build_count = 0;
+        int build_count    = 0;
         for (const Json::Value& task : parsed["tasks"]) {
-            if (!task.isObject() || !task["mode"].isString()) continue;
-            if (task["mode"].asString() == "research") ++research_count;
-            if (task["mode"].asString() == "build") ++build_count;
+            if (!task.isObject() || !task["mode"].isString())
+                continue;
+            if (task["mode"].asString() == "research")
+                ++research_count;
+            if (task["mode"].asString() == "build")
+                ++build_count;
         }
         std::string summary;
         if (research_count > 0) {
             summary = std::to_string(research_count) + " research";
         }
         if (build_count > 0) {
-            if (!summary.empty()) summary += ", ";
+            if (!summary.empty())
+                summary += ", ";
             summary += std::to_string(build_count)
                 + (build_count == 1 ? " builder" : " builders");
         }
         return summary;
+    }
+
+    int json_array_count(const std::string& args, std::string_view key)
+    {
+        const Json::Value parsed = parse_json(args);
+        if (parsed.isObject() && parsed[std::string(key)].isArray()) {
+            return static_cast<int>(parsed[std::string(key)].size());
+        }
+        return 0;
+    }
+
+    std::string plural_count(int n, std::string_view word)
+    {
+        std::string out = std::to_string(n) + ' ';
+        out += word;
+        if (n != 1) {
+            out += 's';
+        }
+        return out;
     }
 
     std::string read_path(const ToolCall& call)
@@ -78,11 +102,11 @@ namespace {
 
 } // namespace
 
-std::string tool_request_summary(const std::string& name,
-    const std::string& args)
+std::string tool_request_summary(
+    const std::string& name, const std::string& args)
 {
     const Json::Value parsed = parse_json(args);
-    const auto get_str = [&](const char* key) -> std::string {
+    const auto get_str       = [&](const char* key) -> std::string {
         if (parsed.isObject() && parsed[key].isString()) {
             return parsed[key].asString();
         }
@@ -90,7 +114,7 @@ std::string tool_request_summary(const std::string& name,
     };
     if (name == "edit") {
         std::string out = tool_display_name(name) + ": " + get_str("file_path");
-        long offset = 0;
+        long offset     = 0;
         if (parsed.isObject() && parsed["offset"].isIntegral()) {
             offset = parsed["offset"].asInt64();
         }
@@ -101,8 +125,8 @@ std::string tool_request_summary(const std::string& name,
     }
     if (name == "write") {
         const std::string path = get_str("file_path");
-        bool overwrite         = parsed.isObject()
-            && parsed["overwrite"].isBool() && parsed["overwrite"].asBool();
+        bool overwrite = parsed.isObject() && parsed["overwrite"].isBool()
+            && parsed["overwrite"].asBool();
         std::string out = tool_display_name(name) + ": " + path;
         if (!overwrite) {
             long line = 0;
@@ -133,25 +157,16 @@ std::string tool_request_summary(const std::string& name,
     if (name == "skill") {
         return "Load Skill " + get_str("name");
     }
-    std::string head = tool_display_name(name);
+    std::string head          = tool_display_name(name);
     const std::string summary = tool_args_summary(args);
     if (name == "todo") {
-        const Json::Value parsed = parse_json(args);
-        int n = 0;
-        if (parsed.isObject() && parsed["todos"].isArray()) {
-            n = static_cast<int>(parsed["todos"].size());
-        }
-        return tool_display_name(name) + " (" + std::to_string(n)
-            + " task" + (n == 1 ? "" : "s") + ")";
+        return tool_display_name(name) + " ("
+            + plural_count(json_array_count(args, "todos"), "task") + ")";
     }
     if (name == "ask") {
-        const Json::Value parsed = parse_json(args);
-        int n = 0;
-        if (parsed.isObject() && parsed["questions"].isArray()) {
-            n = static_cast<int>(parsed["questions"].size());
-        }
-        return tool_display_name(name) + " (" + std::to_string(n)
-            + " question" + (n == 1 ? "" : "s") + ")";
+        return tool_display_name(name) + " ("
+            + plural_count(json_array_count(args, "questions"), "question")
+            + ")";
     }
     if (!summary.empty()) {
         head += " " + summary;
@@ -178,30 +193,22 @@ std::string tool_call_head(const ToolCall& call)
         return "Load Skill";
     }
     if (call.name == "ask") {
-        const Json::Value parsed = parse_json(call.args);
-        int n = 0;
-        if (parsed.isObject() && parsed["questions"].isArray()) {
-            n = static_cast<int>(parsed["questions"].size());
-        }
-        return tool_display_name(call.name) + " (" + std::to_string(n)
-            + " question" + (n == 1 ? "" : "s") + ")";
+        return tool_display_name(call.name) + " ("
+            + plural_count(json_array_count(call.args, "questions"), "question")
+            + ")";
     }
     if (call.name == "todo") {
-        const Json::Value parsed = parse_json(call.args);
-        int n = 0;
-        if (parsed.isObject() && parsed["todos"].isArray()) {
-            n = static_cast<int>(parsed["todos"].size());
-        }
+        const int n = json_array_count(call.args, "todos");
         if (n == 0) {
             return tool_display_name(call.name);
         }
-        return tool_display_name(call.name) + " (" + std::to_string(n)
-            + " task" + (n == 1 ? "" : "s") + ")";
+        return tool_display_name(call.name) + " (" + plural_count(n, "task")
+            + ")";
     }
     if (call.name == "subagent") {
         return tool_display_name(call.name);
     }
-    std::string head = tool_display_name(call.name);
+    std::string head       = tool_display_name(call.name);
     const std::string args = tool_args_summary(call.args);
     if (!args.empty()) {
         head += " " + args;
@@ -241,20 +248,11 @@ std::string tool_header_args(const ToolCall& call)
         return cmd;
     }
     if (call.name == "ask") {
-        const Json::Value parsed = parse_json(call.args);
-        int n = 0;
-        if (parsed.isObject() && parsed["questions"].isArray()) {
-            n = static_cast<int>(parsed["questions"].size());
-        }
-        return std::to_string(n) + (n == 1 ? " question" : " questions");
+        return plural_count(
+            json_array_count(call.args, "questions"), "question");
     }
     if (call.name == "todo") {
-        const Json::Value parsed = parse_json(call.args);
-        int n = 0;
-        if (parsed.isObject() && parsed["todos"].isArray()) {
-            n = static_cast<int>(parsed["todos"].size());
-        }
-        return std::to_string(n) + (n == 1 ? " task" : " tasks");
+        return plural_count(json_array_count(call.args, "todos"), "task");
     }
     if (call.name == "skill") {
         const Json::Value parsed = parse_json(call.args);
@@ -296,6 +294,21 @@ std::string shell_status_text(const ShellStatus& status)
             }
         },
         status);
+}
+
+std::string append_shell_status(
+    std::string text, const std::optional<ShellStatus>& status)
+{
+    if (status.has_value()) {
+        const std::string status_text = shell_status_text(*status);
+        if (!status_text.empty()) {
+            if (!text.empty() && text.back() != '\n') {
+                text += '\n';
+            }
+            text += "[" + status_text + "]";
+        }
+    }
+    return text;
 }
 
 std::size_t read_start_line(const ToolCall& call)

@@ -14,13 +14,15 @@ namespace {
 
     std::vector<Tool> echo_tools()
     {
-        return { { { "echo", "echo the message",
-                        parse_json(
-                            R"({"type":"object","properties":{"msg":{"type":"string"}}})") },
-            [](const Json::Value& args) {
-                return ToolOutput { ToolOutput::Kind::OUTPUT,
-                    args.get("msg", "").asString() };
-            } } };
+        return {
+            { { "echo", "echo the message",
+                  parse_json(
+                      R"({"type":"object","properties":{"msg":{"type":"string"}}})") },
+                [](const Json::Value& args) {
+                    return ToolOutput { ToolOutput::Kind::OUTPUT,
+                        args.get("msg", "").asString() };
+                } }
+        };
     }
 
     std::string read_file(const std::filesystem::path& path)
@@ -77,7 +79,7 @@ TEST_CASE("tool safety defaults to mutating and can be overridden")
 TEST_CASE("dispatch parses object args for the handler")
 {
     const std::vector<Tool> tools = echo_tools();
-    const ToolOutput out = dispatch_tool(
+    const ToolOutput out          = dispatch_tool(
         tools, ToolCallRequest { "echo", R"({"msg":"hi"})", "", "" });
     CHECK(out.kind == ToolOutput::Kind::OUTPUT);
     CHECK(out.text == "hi");
@@ -85,13 +87,13 @@ TEST_CASE("dispatch parses object args for the handler")
 
 TEST_CASE("dispatch passes non-JSON args through as a string value")
 {
-    std::vector<Tool> tools { {
-        { "raw", "takes raw text", Json::Value(Json::objectValue) },
-        [](const Json::Value& args) {
-            return ToolOutput { ToolOutput::Kind::OUTPUT, args.asString() };
-        } } };
-    const ToolOutput out
-        = dispatch_tool(tools, { "raw", "ls -la", "", "" });
+    std::vector<Tool> tools {
+        { { "raw", "takes raw text", Json::Value(Json::objectValue) },
+            [](const Json::Value& args) {
+                return ToolOutput { ToolOutput::Kind::OUTPUT, args.asString() };
+            } }
+    };
+    const ToolOutput out = dispatch_tool(tools, { "raw", "ls -la", "", "" });
     CHECK(out.kind == ToolOutput::Kind::OUTPUT);
     CHECK(out.text == "ls -la");
 }
@@ -99,21 +101,20 @@ TEST_CASE("dispatch passes non-JSON args through as a string value")
 TEST_CASE("dispatch reports unknown tools as errors")
 {
     const std::vector<Tool> tools;
-    const ToolOutput out
-        = dispatch_tool(tools, { "nope", "{}", "", "" });
+    const ToolOutput out = dispatch_tool(tools, { "nope", "{}", "", "" });
     CHECK(out.kind == ToolOutput::Kind::ERROR);
     CHECK(out.text.find("unknown tool: nope") != std::string::npos);
 }
 
 TEST_CASE("dispatch propagates handler errors")
 {
-    std::vector<Tool> tools { {
-        { "boom", "always fails", Json::Value(Json::objectValue) },
-        [](const Json::Value&) {
-            return ToolOutput { ToolOutput::Kind::ERROR, "it broke" };
-        } } };
-    const ToolOutput out
-        = dispatch_tool(tools, { "boom", "{}", "", "" });
+    std::vector<Tool> tools {
+        { { "boom", "always fails", Json::Value(Json::objectValue) },
+            [](const Json::Value&) {
+                return ToolOutput { ToolOutput::Kind::ERROR, "it broke" };
+            } }
+    };
+    const ToolOutput out = dispatch_tool(tools, { "boom", "{}", "", "" });
     CHECK(out.kind == ToolOutput::Kind::ERROR);
     CHECK(out.text == "it broke");
 }
@@ -128,16 +129,16 @@ TEST_CASE("edit produces a diff whose right side holds the new content")
     }
 
     std::vector<Tool> tools { make_edit_tool() };
-    const ToolOutput out = dispatch_tool(tools, ToolCallRequest { "edit",
-        R"({"file_path":")"
-            + path.string()
-            + R"(","old_string":"original line","new_string":"edited line"})",
-        "", "" });
+    const ToolOutput out = dispatch_tool(tools,
+        ToolCallRequest { "edit",
+            R"({"file_path":")" + path.string()
+                + R"(","old_string":"original line","new_string":"edited line"})",
+            "", "" });
 
     CHECK(out.kind == ToolOutput::Kind::OUTPUT);
     REQUIRE(out.diff.has_value());
 
-    bool saw_new = false;
+    bool saw_new          = false;
     bool saw_old_on_right = false;
     for (const auto& row : out.diff->rows) {
         if (row.right.find("edited line") != std::string::npos) {
@@ -156,16 +157,15 @@ TEST_CASE("edit produces a diff whose right side holds the new content")
 
 TEST_CASE("edit preserves text around partial-line replacements")
 {
-    const auto path = std::filesystem::temp_directory_path()
-        / "ursa_edit_partial_test.txt";
+    const auto path
+        = std::filesystem::temp_directory_path() / "ursa_edit_partial_test.txt";
     {
         std::ofstream file(path, std::ios::binary | std::ios::trunc);
         file << "prefix old suffix\nsecond line\n";
     }
-    const Tool tool = make_edit_tool();
+    const Tool tool      = make_edit_tool();
     const ToolOutput out = tool.run(parse_json(std::string(R"({"file_path":")")
-        + path.string()
-        + R"(","old_string":"old","new_string":"new"})"));
+        + path.string() + R"(","old_string":"old","new_string":"new"})"));
 
     REQUIRE(out.kind == ToolOutput::Kind::OUTPUT);
     CHECK(read_file(path) == "prefix new suffix\nsecond line\n");
@@ -184,9 +184,9 @@ TEST_CASE("edit preserves gaps while replacing multiple occurrences")
         file << "old middle old tail\n";
     }
     const Tool tool = make_edit_tool();
-    const ToolOutput out = tool.run(parse_json(std::string(R"({"file_path":")")
-        + path.string()
-        + R"(","old_string":"old","new_string":"new","replace_count":0})"));
+    const ToolOutput out
+        = tool.run(parse_json(std::string(R"({"file_path":")") + path.string()
+            + R"(","old_string":"old","new_string":"new","replace_count":0})"));
 
     REQUIRE(out.kind == ToolOutput::Kind::OUTPUT);
     CHECK(read_file(path) == "new middle new tail\n");
@@ -198,13 +198,13 @@ TEST_CASE("edit preserves gaps while replacing multiple occurrences")
 
 TEST_CASE("write replaces an inclusive line range and reports final content")
 {
-    const auto path = std::filesystem::temp_directory_path()
-        / "ursa_write_range_test.txt";
+    const auto path
+        = std::filesystem::temp_directory_path() / "ursa_write_range_test.txt";
     {
         std::ofstream file(path, std::ios::binary | std::ios::trunc);
         file << "one\ntwo\nthree\nfour\n";
     }
-    const Tool tool = make_write_tool();
+    const Tool tool      = make_write_tool();
     const ToolOutput out = tool.run(parse_json(std::string(R"({"file_path":")")
         + path.string()
         + R"(","text":"replacement","overwrite":true,"line_begin":2,"line_end":3})"));
@@ -221,13 +221,13 @@ TEST_CASE("write replaces an inclusive line range and reports final content")
 
 TEST_CASE("write line_end zero replaces through the end")
 {
-    const auto path = std::filesystem::temp_directory_path()
-        / "ursa_write_to_end_test.txt";
+    const auto path
+        = std::filesystem::temp_directory_path() / "ursa_write_to_end_test.txt";
     {
         std::ofstream file(path, std::ios::binary | std::ios::trunc);
         file << "one\ntwo\nthree\n";
     }
-    const Tool tool = make_write_tool();
+    const Tool tool      = make_write_tool();
     const ToolOutput out = tool.run(parse_json(std::string(R"({"file_path":")")
         + path.string()
         + R"(","text":"last","overwrite":true,"line_begin":2,"line_end":0})"));

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <cstdint>
 #include <json/json.h>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <optional>
@@ -40,15 +40,24 @@ struct Message {
 };
 
 struct Usage {
-    std::uint64_t prompt    = 0;
-    std::uint64_t completion = 0;
-    std::uint64_t cached_read = 0;
+    std::uint64_t prompt       = 0;
+    std::uint64_t completion   = 0;
+    std::uint64_t cached_read  = 0;
     std::uint64_t cached_write = 0;
-    std::uint64_t total     = 0;
+    std::uint64_t total        = 0;
 };
 
 struct StreamEvent {
-    enum class Kind { CONTENT_DELTA, TOOL_CALL, QUESTION, DONE, ERROR, USAGE, CONNECTED, REASONING };
+    enum class Kind {
+        CONTENT_DELTA,
+        TOOL_CALL,
+        QUESTION,
+        DONE,
+        ERROR,
+        USAGE,
+        CONNECTED,
+        REASONING
+    };
     Kind kind = Kind::CONTENT_DELTA;
     std::string text;
     Status error = Status::OK;
@@ -96,7 +105,8 @@ struct ModelInfo {
     std::optional<std::uint64_t> context_length;
 };
 
-Status parse_models_response(std::string_view body, std::vector<ModelInfo>& out);
+Status parse_models_response(
+    std::string_view body, std::vector<ModelInfo>& out);
 Status fetch_models(const Route& route, std::vector<ModelInfo>& out);
 
 Status http_get(const std::string& url, const std::vector<std::string>& headers,
@@ -124,6 +134,9 @@ struct ParseState {
     bool usage_emitted = false;
     bool terminal      = false;
 };
+
+std::vector<std::string> stream_headers();
+void flush_tool_accums(ParseState& state, std::vector<StreamEvent>& outs);
 
 struct Provider {
     Json::Value (*build)(const ChatRequest& req);

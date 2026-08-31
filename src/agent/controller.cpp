@@ -6,16 +6,71 @@
 #include "session_store.h"
 #include "util.h"
 
-#include <functional>
 #include <cctype>
+#include <fstream>
+#include <functional>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
-#include <fstream>
-#include <sstream>
 
 namespace ursa {
+
+namespace {
+
+    struct SkillRead {
+        enum class Kind { OK, READ_FAILED, TOO_LARGE };
+        Kind kind = Kind::OK;
+        std::string body;
+    };
+
+    SkillRead read_skill(const Skill& skill)
+    {
+        std::ifstream file(skill.path, std::ios::binary);
+        if (!file)
+            return { SkillRead::Kind::READ_FAILED, "" };
+        std::ostringstream buffer;
+        buffer << file.rdbuf();
+        std::string content                   = buffer.str();
+        constexpr std::size_t max_skill_bytes = 128 * 1024;
+        if (content.size() > max_skill_bytes) {
+            return { SkillRead::Kind::TOO_LARGE, "" };
+        }
+        return { SkillRead::Kind::OK,
+            "<skill name=\"" + skill.name + "\" directory=\""
+                + skill.path.parent_path().string() + "\">\n" + content
+                + "\n</skill>" };
+    }
+
+    std::vector<std::string> skill_mention_names(std::string_view text)
+    {
+        std::vector<std::string> names;
+        for (std::size_t pos = 0; pos < text.size();) {
+            pos = text.find('$', pos);
+            if (pos == std::string_view::npos)
+                break;
+            if (pos > 0
+                && !std::isspace(static_cast<unsigned char>(text[pos - 1]))) {
+                ++pos;
+                continue;
+            }
+            std::size_t end = pos + 1;
+            while (end < text.size()) {
+                const unsigned char c = static_cast<unsigned char>(text[end]);
+                if (!std::isalnum(c) && c != '-' && c != '_')
+                    break;
+                ++end;
+            }
+            if (end > pos + 1) {
+                names.emplace_back(text.substr(pos + 1, end - pos - 1));
+            }
+            pos = end;
+        }
+        return names;
+    }
+
+} // namespace
 
 std::string error_text(Status st)
 {
@@ -26,7 +81,8 @@ std::string error_text(Status st)
     case Status::JSON_ERROR: return "Malformed response from provider.";
     case Status::API_ERROR: return "API error.";
     case Status::RATE_LIMITED: return "Rate limited by provider.";
-    case Status::BUDGET_EXCEEDED: return "Out of budget / insufficient credits.";
+    case Status::BUDGET_EXCEEDED:
+        return "Out of budget / insufficient credits.";
     case Status::CANCELLED: return "Cancelled.";
     case Status::TIMEOUT: return "Timed out.";
     case Status::CONFIG_ERROR: return "Configuration error.";
@@ -35,9 +91,8 @@ std::string error_text(Status st)
 }
 
 Controller::Controller(std::shared_ptr<ApplicationState> state, PostFn post,
-    std::function<void()> on_exit, StreamFn stream_fn,
-    std::vector<Tool> tools, ModalRequestFn modal_request,
-    std::string agent_label)
+    std::function<void()> on_exit, StreamFn stream_fn, std::vector<Tool> tools,
+    ModalRequestFn modal_request, std::string agent_label)
     : state_(std::move(state))
     , post_(std::move(post))
     , on_exit_(std::move(on_exit))
@@ -48,22 +103,24 @@ Controller::Controller(std::shared_ptr<ApplicationState> state, PostFn post,
     , tools_(std::move(tools))
 {
     for (Tool& tool : tools_) {
-        if (tool.spec.name != "skill") continue;
+        if (tool.spec.name != "skill")
+            continue;
         tool.run = [this](const Json::Value& args) {
             const auto skill = _resolve_skill(args);
-            if (!skill) return ToolOutput { ToolOutput::Kind::ERROR, "skill: unknown or unavailable skill" };
+            if (!skill)
+                return ToolOutput { ToolOutput::Kind::ERROR,
+                    "skill: unknown or unavailable skill" };
             if (_skill_policy(*skill) == SkillPolicy::DENY)
-                return ToolOutput { ToolOutput::Kind::ERROR, "skill: access denied by configuration" };
-            std::ifstream file(skill->path, std::ios::binary);
-            if (!file) return ToolOutput { ToolOutput::Kind::ERROR, "skill: cannot read instructions" };
-            std::ostringstream buffer;
-            buffer << file.rdbuf();
-            std::string content = buffer.str();
-            constexpr std::size_t max_skill_bytes = 128 * 1024;
-            if (content.size() > max_skill_bytes)
-                return ToolOutput { ToolOutput::Kind::ERROR, "skill: instructions exceed 128 KiB" };
-            return ToolOutput { ToolOutput::Kind::OUTPUT,
-                "<skill name=\"" + skill->name + "\" directory=\"" + skill->path.parent_path().string() + "\">\n" + content + "\n</skill>" };
+                return ToolOutput { ToolOutput::Kind::ERROR,
+                    "skill: access denied by configuration" };
+            const SkillRead read = read_skill(*skill);
+            if (read.kind == SkillRead::Kind::READ_FAILED)
+                return ToolOutput { ToolOutput::Kind::ERROR,
+                    "skill: cannot read instructions" };
+            if (read.kind == SkillRead::Kind::TOO_LARGE)
+                return ToolOutput { ToolOutput::Kind::ERROR,
+                    "skill: instructions exceed 128 KiB" };
+            return ToolOutput { ToolOutput::Kind::OUTPUT, read.body };
         };
         break;
     }
@@ -79,16 +136,15 @@ Controller::Controller(std::shared_ptr<ApplicationState> state, PostFn post,
                 get_provider(route), route, req, cb, &retry_after_secs_);
         };
     }
-    env_sub_ = state_->environment->subscribe_to_workspace_change(
-        [this] {
-            _post([this] {
-                _present_front();
-                if (state_->session->phase() == Session::Phase::IDLE
-                    && !state_->session->queued().empty()) {
-                    _drain_queued();
-                }
-            });
+    env_sub_      = state_->environment->subscribe_to_workspace_change([this] {
+        _post([this] {
+            _present_front();
+            if (state_->session->phase() == Session::Phase::IDLE
+                && !state_->session->queued().empty()) {
+                _drain_queued();
+            }
         });
+    });
     provider_sub_ = state_->providers->subscribe(
         [this] { _post([this] { state_->session->bump_modal_serial(); }); });
     _post([this] { state_->providers->start_model_fetches(); });
@@ -96,15 +152,21 @@ Controller::Controller(std::shared_ptr<ApplicationState> state, PostFn post,
 
 std::optional<Skill> Controller::_resolve_skill(const Json::Value& args) const
 {
-    if (!args.isObject() || !args["name"].isString()) return std::nullopt;
+    if (!args.isObject() || !args["name"].isString())
+        return std::nullopt;
     const std::string name = args["name"].asString();
-    const std::string scope = args["scope"].isString() ? args["scope"].asString() : "";
+    const std::string scope
+        = args["scope"].isString() ? args["scope"].asString() : "";
     std::optional<Skill> global;
     for (const Skill& skill : state_->environment->skills()) {
-        if (skill.name != name) continue;
-        if (scope == "project" && skill.scope != Skill::Scope::PROJECT) continue;
-        if (scope == "global" && skill.scope != Skill::Scope::GLOBAL) continue;
-        if (skill.scope == Skill::Scope::PROJECT) return skill;
+        if (skill.name != name)
+            continue;
+        if (scope == "project" && skill.scope != Skill::Scope::PROJECT)
+            continue;
+        if (scope == "global" && skill.scope != Skill::Scope::GLOBAL)
+            continue;
+        if (skill.scope == Skill::Scope::PROJECT)
+            return skill;
         global = skill;
     }
     return global;
@@ -114,10 +176,16 @@ SkillPolicy Controller::_skill_policy(const Skill& skill) const
 {
     const Config config = state_->providers->config();
     if (skill.scope == Skill::Scope::GLOBAL) {
-        if (auto it = config.global_skills.find(skill.name); it != config.global_skills.end()) return it->second;
+        if (auto it = config.global_skills.find(skill.name);
+            it != config.global_skills.end())
+            return it->second;
     } else if (skill.project_root) {
-        if (auto project = config.project_skills.find(skill.project_root->string()); project != config.project_skills.end())
-            if (auto it = project->second.find(skill.name); it != project->second.end()) return it->second;
+        if (auto project
+            = config.project_skills.find(skill.project_root->string());
+            project != config.project_skills.end())
+            if (auto it = project->second.find(skill.name);
+                it != project->second.end())
+                return it->second;
     }
     return SkillPolicy::ASK;
 }
@@ -182,7 +250,8 @@ std::future<ModalResult> Controller::_request_modal(ModalPayload payload)
             }
         }
     }
-    if (modal_request_) return modal_request_(std::move(payload));
+    if (modal_request_)
+        return modal_request_(std::move(payload));
 
     auto promise = std::make_shared<std::promise<ModalResult>>();
     auto future  = promise->get_future();
@@ -194,7 +263,10 @@ std::future<ModalResult> Controller::_request_modal(ModalPayload payload)
     return future;
 }
 
-void Controller::cancel_queued(std::size_t id) { state_->session->cancel_queued(id); }
+void Controller::cancel_queued(std::size_t id)
+{
+    state_->session->cancel_queued(id);
+}
 
 SessionsModal Controller::_sessions_modal() const
 {
@@ -210,18 +282,13 @@ SessionsModal Controller::_sessions_modal() const
 SkillsModal Controller::_skills_modal() const
 {
     SkillsModal modal;
-    const Config config = state_->providers->config();
     for (const Skill& skill : state_->environment->skills()) {
-        SkillPolicy policy = SkillPolicy::ASK;
-        std::string root;
-        if (skill.scope == Skill::Scope::GLOBAL) {
-            if (auto it = config.global_skills.find(skill.name); it != config.global_skills.end()) policy = it->second;
-        } else if (skill.project_root) {
-            root = skill.project_root->string();
-            if (auto p = config.project_skills.find(root); p != config.project_skills.end())
-                if (auto it = p->second.find(skill.name); it != p->second.end()) policy = it->second;
-        }
-        modal.entries.push_back({ skill.name, skill.description, root, policy });
+        const std::string root
+            = skill.scope == Skill::Scope::PROJECT && skill.project_root
+            ? skill.project_root->string()
+            : std::string { };
+        modal.entries.push_back(
+            { skill.name, skill.description, root, _skill_policy(skill) });
     }
     return modal;
 }
@@ -273,9 +340,8 @@ std::pair<SkillCounts, SkillCounts> Controller::skill_counts() const
     SkillCounts global;
     std::lock_guard lock(loaded_skills_mutex_);
     for (const Skill& skill : state_->environment->skills()) {
-        SkillCounts& counts = skill.scope == Skill::Scope::PROJECT
-            ? project
-            : global;
+        SkillCounts& counts
+            = skill.scope == Skill::Scope::PROJECT ? project : global;
         ++counts.total;
         if (loaded_skills_.contains(skill.path.string())) {
             ++counts.active;
@@ -288,43 +354,26 @@ std::vector<Skill> Controller::available_skills() const
 {
     std::vector<Skill> out;
     for (const Skill& skill : state_->environment->skills()) {
-        if (_skill_policy(skill) != SkillPolicy::DENY) out.push_back(skill);
+        if (_skill_policy(skill) != SkillPolicy::DENY)
+            out.push_back(skill);
     }
     return out;
 }
 
 bool Controller::_validate_skill_mentions(std::string_view text)
 {
-    for (std::size_t pos = 0; pos < text.size();) {
-        pos = text.find('$', pos);
-        if (pos == std::string_view::npos) break;
-        if (pos > 0 && !std::isspace(static_cast<unsigned char>(text[pos - 1]))) {
-            ++pos;
-            continue;
-        }
-        std::size_t end = pos + 1;
-        while (end < text.size()) {
-            const unsigned char c = static_cast<unsigned char>(text[end]);
-            if (!std::isalnum(c) && c != '-' && c != '_') break;
-            ++end;
-        }
-        if (end == pos + 1) {
-            ++pos;
-            continue;
-        }
+    for (const std::string& name : skill_mention_names(text)) {
         Json::Value args(Json::objectValue);
-        args["name"] = std::string(text.substr(pos + 1, end - pos - 1));
+        args["name"]     = name;
         const auto skill = _resolve_skill(args);
         if (!skill) {
-            state_->session->set_error(
-                "Unknown skill: " + args["name"].asString() + ".");
+            state_->session->set_error("Unknown skill: " + name + ".");
             return false;
         }
         if (_skill_policy(*skill) == SkillPolicy::DENY) {
             state_->session->set_error("Skill is denied: " + skill->name + ".");
             return false;
         }
-        pos = end;
     }
     return true;
 }
@@ -333,28 +382,13 @@ std::vector<Skill> Controller::_mentioned_skills(std::string_view text) const
 {
     std::vector<Skill> out;
     std::set<std::string> paths;
-    for (std::size_t pos = 0; pos < text.size();) {
-        pos = text.find('$', pos);
-        if (pos == std::string_view::npos) break;
-        if (pos > 0 && !std::isspace(static_cast<unsigned char>(text[pos - 1]))) {
-            ++pos;
-            continue;
+    for (const std::string& name : skill_mention_names(text)) {
+        Json::Value args(Json::objectValue);
+        args["name"] = name;
+        if (const auto skill = _resolve_skill(args);
+            skill && paths.insert(skill->path.string()).second) {
+            out.push_back(*skill);
         }
-        std::size_t end = pos + 1;
-        while (end < text.size()) {
-            const unsigned char c = static_cast<unsigned char>(text[end]);
-            if (!std::isalnum(c) && c != '-' && c != '_') break;
-            ++end;
-        }
-        if (end > pos + 1) {
-            Json::Value args(Json::objectValue);
-            args["name"] = std::string(text.substr(pos + 1, end - pos - 1));
-            if (const auto skill = _resolve_skill(args);
-                skill && paths.insert(skill->path.string()).second) {
-                out.push_back(*skill);
-            }
-        }
-        pos = end;
     }
     return out;
 }
@@ -363,41 +397,36 @@ bool Controller::_load_skill(const Skill& skill)
 {
     {
         std::lock_guard lock(loaded_skills_mutex_);
-        if (loaded_skills_.contains(skill.path.string())) return true;
+        if (loaded_skills_.contains(skill.path.string()))
+            return true;
     }
-    std::ifstream file(skill.path, std::ios::binary);
-    if (!file) {
+    const SkillRead read = read_skill(skill);
+    if (read.kind == SkillRead::Kind::READ_FAILED) {
         state_->session->set_error("Failed to read skill: " + skill.name + ".");
         return false;
     }
-    std::ostringstream buffer;
-    buffer << file.rdbuf();
-    std::string content = buffer.str();
-    constexpr std::size_t max_skill_bytes = 128 * 1024;
-    if (content.size() > max_skill_bytes) {
+    if (read.kind == SkillRead::Kind::TOO_LARGE) {
         state_->session->set_error(
             "Skill instructions exceed 128 KiB: " + skill.name + ".");
         return false;
     }
     std::lock_guard lock(loaded_skills_mutex_);
     loaded_skills_.insert(skill.path.string());
-    loaded_skill_contents_[skill.path.string()] = "<skill name=\""
-        + skill.name + "\" directory=\"" + skill.path.parent_path().string()
-        + "\">\n" + content + "\n</skill>";
+    loaded_skill_contents_[skill.path.string()] = read.body;
     return true;
 }
 
 void Controller::resolve_modal(ModalResult result)
 {
-    bool manual_skill = false;
-    bool manual_accepted = false;
+    bool manual_skill                = false;
+    bool manual_accepted             = false;
     const ModalPayload current_modal = state_->session->modal();
     if (const auto* request = std::get_if<ToolCallRequest>(&current_modal);
         request != nullptr && request->id == "manual-skill") {
-        manual_skill = true;
+        manual_skill        = true;
         const auto* verdict = std::get_if<ToolVerdict>(&result);
-        manual_accepted = verdict != nullptr
-            && verdict->decision != ToolDecision::REJECT;
+        manual_accepted
+            = verdict != nullptr && verdict->decision != ToolDecision::REJECT;
         if (manual_accepted && pending_skill_turn_) {
             manual_accepted = _load_skill(
                 pending_skill_turn_->awaiting[pending_skill_turn_->next]);
@@ -449,7 +478,8 @@ void Controller::resolve_modal(ModalResult result)
         state_->session->set_phase(Session::Phase::CONNECTING);
     }
     _present_front();
-    if (!manual_skill) return;
+    if (!manual_skill)
+        return;
     if (!manual_accepted || !pending_skill_turn_) {
         pending_skill_turn_.reset();
         state_->session->set_error("Skill activation cancelled.");
@@ -461,9 +491,8 @@ void Controller::resolve_modal(ModalResult result)
             = pending_skill_turn_->awaiting[pending_skill_turn_->next];
         Json::Value args(Json::objectValue);
         args["name"] = skill.name;
-        args["scope"] = skill.scope == Skill::Scope::PROJECT
-            ? "project"
-            : "global";
+        args["scope"]
+            = skill.scope == Skill::Scope::PROJECT ? "project" : "global";
         enqueue_user_modal(ToolCallRequest { "skill", write_json(args),
             "Load skill " + skill.name, "manual-skill",
             ToolCallRequest::ApprovalReason::TOOL_PERMISSION });
@@ -497,22 +526,26 @@ void Controller::submit(
     if (state_->session->phase() == Session::Phase::IDLE) {
         _submit_with_skills(std::string(t), std::move(attachments));
     } else {
-        state_->session->enqueue_message(std::string(t), std::move(attachments));
+        state_->session->enqueue_message(
+            std::string(t), std::move(attachments));
     }
 }
 
 void Controller::_submit_with_skills(
     std::string text, std::vector<FileAttachment> attachments)
 {
-    if (!_validate_skill_mentions(text)) return;
+    if (!_validate_skill_mentions(text))
+        return;
     std::vector<Skill> awaiting;
     for (const Skill& skill : _mentioned_skills(text)) {
         {
             std::lock_guard lock(loaded_skills_mutex_);
-            if (loaded_skills_.contains(skill.path.string())) continue;
+            if (loaded_skills_.contains(skill.path.string()))
+                continue;
         }
         if (_skill_policy(skill) == SkillPolicy::ALLOW) {
-            if (!_load_skill(skill)) return;
+            if (!_load_skill(skill))
+                return;
         } else {
             awaiting.push_back(skill);
         }
@@ -523,13 +556,13 @@ void Controller::_submit_with_skills(
     }
     pending_skill_turn_ = PendingSkillTurn { std::move(text),
         std::move(attachments), std::move(awaiting), 0 };
-    const Skill& skill = pending_skill_turn_->awaiting.front();
+    const Skill& skill  = pending_skill_turn_->awaiting.front();
     Json::Value args(Json::objectValue);
-    args["name"] = skill.name;
+    args["name"]  = skill.name;
     args["scope"] = skill.scope == Skill::Scope::PROJECT ? "project" : "global";
-    enqueue_user_modal(ToolCallRequest { "skill", write_json(args),
-        "Load skill " + skill.name, "manual-skill",
-        ToolCallRequest::ApprovalReason::TOOL_PERMISSION });
+    enqueue_user_modal(
+        ToolCallRequest { "skill", write_json(args), "Load skill " + skill.name,
+            "manual-skill", ToolCallRequest::ApprovalReason::TOOL_PERMISSION });
 }
 
 void Controller::submit_message(
@@ -544,18 +577,16 @@ void Controller::submit_message(
     TurnSettings settings;
     settings.model            = selection->model;
     settings.connection_id    = selection->connection_id;
-    settings.reasoning_effort = selection->reasoning_effort;
-    if (settings.reasoning_effort == "medium") {
-        settings.reasoning_effort = "default";
-    }
-    settings.route   = selection->route;
-    settings.dialect = settings.route.dialect;
-    settings.mode    = state_->session->mode();
+    settings.reasoning_effort = to_config_effort(selection->reasoning_effort);
+    settings.route            = selection->route;
+    settings.dialect          = settings.route.dialect;
+    settings.mode             = state_->session->mode();
     if (!state_->environment->ready()) {
-        state_->session->enqueue_message(std::move(text), std::move(attachments));
+        state_->session->enqueue_message(
+            std::move(text), std::move(attachments));
         return;
     }
-    const bool generate_title = state_->session->claim_title_generation();
+    const bool generate_title     = state_->session->claim_title_generation();
     const std::string title_input = text;
     state_->session->clear_interrupt();
     state_->session->begin_send(std::move(text), std::move(attachments));
@@ -567,11 +598,11 @@ void Controller::submit_message(
         const ProviderSelection& selected
             = title_selection ? *title_selection : *selection;
         TurnSettings title_settings;
-        title_settings.model         = selected.model;
-        title_settings.connection_id = selected.connection_id;
+        title_settings.model            = selected.model;
+        title_settings.connection_id    = selected.connection_id;
         title_settings.reasoning_effort = selected.reasoning_effort;
-        title_settings.route         = selected.route;
-        title_settings.dialect       = selected.route.dialect;
+        title_settings.route            = selected.route;
+        title_settings.dialect          = selected.route.dialect;
         _spawn_title(title_input, std::move(title_settings));
     }
 }
@@ -579,8 +610,8 @@ void Controller::submit_message(
 std::string Controller::_system_prompt() const
 {
     const std::shared_ptr<Environment> env = state_->environment;
-    const Config config = state_->providers->config();
-    std::string prompt = build_system_prompt(
+    const Config config                    = state_->providers->config();
+    std::string prompt                     = build_system_prompt(
         env->system().get(), env->workspace().get(), &config);
     std::lock_guard lock(loaded_skills_mutex_);
     for (const auto& [path, content] : loaded_skill_contents_) {
@@ -613,17 +644,14 @@ void Controller::_set_reasoning(
 {
     req.reasoning_effort.reset();
     req.thinking_budget.reset();
-    std::string effort(configured_effort);
-    if (effort == "medium") {
-        effort = "default";
-    }
+    std::string effort = to_config_effort(configured_effort);
     if (effort == "off" || !_model_reasons(req.model)) {
         return;
     }
     if (dialect == ApiStandard::ANTHROPIC) {
         req.thinking_budget = _budget_for_effort(effort);
     } else {
-        req.reasoning_effort = effort == "default" ? "medium" : effort;
+        req.reasoning_effort = to_wire_effort(effort);
     }
 }
 
@@ -637,7 +665,8 @@ void Controller::_post(std::function<void()> f)
 void Controller::_spawn(
     std::vector<Message> history, StreamFn override, TurnSettings settings)
 {
-    state_->session->append_assistant(settings.model, settings.reasoning_effort);
+    state_->session->append_assistant(
+        settings.model, settings.reasoning_effort);
     worker_.emplace([this, history = std::move(history),
                         override = std::move(override),
                         settings = std::move(settings)]() mutable {
@@ -651,55 +680,60 @@ void Controller::_spawn_title(std::string input, TurnSettings settings)
         = "Create a concise 3-7 word title for the user's request. Return only "
           "the title, without quotes or punctuation.\n\nUser request:\n"
         + input;
-    state_->subagents->start(prompt, settings.model, settings.reasoning_effort, false,
+    state_->subagents->start(
+        prompt, settings.model, settings.reasoning_effort, false,
         [this, prompt, settings = std::move(settings)](std::stop_token stop) {
-        ChatRequest req;
-        req.model       = settings.model;
-        req.temperature = 0.2;
-        req.interrupted = [stop] { return stop.stop_requested(); };
-        req.messages    = { { Message::Type::USER, prompt } };
-        _set_reasoning(req, settings.dialect, settings.reasoning_effort);
-        std::string title;
-        const StreamCallback cb = [&](const StreamEvent& event) {
-            if (event.kind == StreamEvent::Kind::CONTENT_DELTA
-                && title.size() < 200) {
-                title += event.text;
+            ChatRequest req;
+            req.model       = settings.model;
+            req.temperature = 0.2;
+            req.interrupted = [stop] { return stop.stop_requested(); };
+            req.messages    = { { Message::Type::USER, prompt } };
+            _set_reasoning(req, settings.dialect, settings.reasoning_effort);
+            std::string title;
+            const StreamCallback cb = [&](const StreamEvent& event) {
+                if (event.kind == StreamEvent::Kind::CONTENT_DELTA
+                    && title.size() < 200) {
+                    title += event.text;
+                }
+            };
+            Route route = settings.route;
+            const Status status
+                = stream(get_provider(route), route, req, cb, nullptr);
+            if (status != Status::OK)
+                return SubagentResult { status, { } };
+            return SubagentResult { Status::OK, std::move(title) };
+        },
+        [this](const SubagentResult& result) {
+            if (result.status != Status::OK)
+                return;
+            std::string title         = std::string(trim(result.output));
+            const std::size_t newline = title.find_first_of("\r\n");
+            if (newline != std::string::npos) {
+                title.erase(newline);
             }
-        };
-        Route route = settings.route;
-        const Status status
-            = stream(get_provider(route), route, req, cb, nullptr);
-        if (status != Status::OK) return SubagentResult { status, { } };
-        return SubagentResult { Status::OK, std::move(title) };
-    }, [this](const SubagentResult& result) {
-        if (result.status != Status::OK) return;
-        std::string title = std::string(trim(result.output));
-        const std::size_t newline = title.find_first_of("\r\n");
-        if (newline != std::string::npos) {
-            title.erase(newline);
-        }
-        if (title.size() >= 2
-            && ((title.front() == '"' && title.back() == '"')
-                || (title.front() == '\'' && title.back() == '\''))) {
-            title = title.substr(1, title.size() - 2);
-        }
-        if (title.empty()) {
-            return;
-        }
-        _post([this, title = std::move(title)]() mutable {
-            state_->session->set_title(std::move(title));
+            if (title.size() >= 2
+                && ((title.front() == '"' && title.back() == '"')
+                    || (title.front() == '\'' && title.back() == '\''))) {
+                title = title.substr(1, title.size() - 2);
+            }
+            if (title.empty()) {
+                return;
+            }
+            _post([this, title = std::move(title)]() mutable {
+                state_->session->set_title(std::move(title));
+            });
         });
-    });
 }
 
 SubagentHandle Controller::run_subagent(std::string prompt, std::string model,
-    std::string variant, SubagentOptions options,
-    SubagentCompleteFn complete)
+    std::string variant, SubagentOptions options, SubagentCompleteFn complete)
 {
     const auto selection = state_->providers->active_selection();
-    Route route = selection ? selection->route : Route { };
-    if (model.empty() && selection) model = selection->model;
-    if (variant.empty() && selection) variant = selection->reasoning_effort;
+    Route route          = selection ? selection->route : Route { };
+    if (model.empty() && selection)
+        model = selection->model;
+    if (variant.empty() && selection)
+        variant = selection->reasoning_effort;
     const std::string task_prompt = prompt;
     if (options.transcript) {
         options.transcript->begin_send(task_prompt);
@@ -708,9 +742,9 @@ SubagentHandle Controller::run_subagent(std::string prompt, std::string model,
     const auto deadline = options.timeout > std::chrono::seconds { 0 }
         ? std::optional { std::chrono::steady_clock::now() + options.timeout }
         : std::nullopt;
-    auto transcript = options.transcript;
-    return state_->subagents->start(std::move(prompt), model, variant,
-        options.visible,
+    auto transcript     = options.transcript;
+    return state_->subagents->start(
+        std::move(prompt), model, variant, options.visible,
         [this, task_prompt, model, variant, route = std::move(route),
             transcript, deadline,
             max_output_tokens = options.max_output_tokens](
@@ -723,9 +757,9 @@ SubagentHandle Controller::run_subagent(std::string prompt, std::string model,
                 return SubagentResult { Status::CONFIG_ERROR, { } };
             }
             ChatRequest req;
-            req.model       = model;
+            req.model             = model;
             req.max_output_tokens = max_output_tokens;
-            req.interrupted = [stop, deadline] {
+            req.interrupted       = [stop, deadline] {
                 return stop.stop_requested()
                     || (deadline
                         && std::chrono::steady_clock::now() >= *deadline);
@@ -735,7 +769,8 @@ SubagentHandle Controller::run_subagent(std::string prompt, std::string model,
             _set_reasoning(req, route.dialect, variant);
             std::string output;
             const StreamCallback callback = [&](const StreamEvent& event) {
-                if (transcript) transcript->apply(event, ModelPricing { });
+                if (transcript)
+                    transcript->apply(event, ModelPricing { });
                 if (event.kind == StreamEvent::Kind::CONTENT_DELTA) {
                     output += event.text;
                 }
@@ -754,7 +789,8 @@ SubagentHandle Controller::run_subagent(std::string prompt, std::string model,
                     status == Status::OK ? "" : error_text(status));
             }
             return SubagentResult { status, std::move(output) };
-        }, std::move(complete), std::move(transcript));
+        },
+        std::move(complete), std::move(transcript));
 }
 
 void Controller::finish(std::string error)
@@ -778,10 +814,11 @@ void Controller::_begin_connect(const ConnectResult& result)
             state_->session->set_connect_status(
                 "✓ " + std::to_string(outcome.model_count) + " models");
             if (outcome.persisted
-                && std::holds_alternative<ConnectModal>(state_->session->modal())) {
-                state_->session->set_modal(ConnectModal { outcome.first_connection
-                        ? ConnectModal::Entry::PICK_MODEL
-                        : ConnectModal::Entry::MANAGE });
+                && std::holds_alternative<ConnectModal>(
+                    state_->session->modal())) {
+                state_->session->set_modal(ConnectModal {
+                    outcome.first_connection ? ConnectModal::Entry::PICK_MODEL
+                                             : ConnectModal::Entry::MANAGE });
                 state_->session->bump_modal_serial();
             }
         });
@@ -795,17 +832,15 @@ void Controller::_apply_pick(const ModelChoice& choice)
 
 void Controller::run_slash(std::string_view command)
 {
-    run_slash_command(SlashCommandContext { *state_, on_exit_,
-                          [this] { _new_session(); },
-                          [this](ModalPayload payload) {
-                              enqueue_user_modal(std::move(payload));
-                          },
-                          [this] { return _sessions_modal(); },
-                          [this] { return _skills_modal(); },
-                          [this] { return _system_prompt(); },
-                          [this](std::string error) {
-                              set_error(std::move(error));
-                          } },
+    run_slash_command(
+        SlashCommandContext { *state_, on_exit_, [this] { _new_session(); },
+            [this](ModalPayload payload) {
+                enqueue_user_modal(std::move(payload));
+            },
+            [this] { return _sessions_modal(); },
+            [this] { return _skills_modal(); },
+            [this] { return _system_prompt(); },
+            [this](std::string error) { set_error(std::move(error)); } },
         command);
 }
 

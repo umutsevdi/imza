@@ -2,11 +2,13 @@
 
 #include <ftxui/component/component_base.hpp>
 #include <ftxui/component/component_options.hpp>
+#include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
+#include <ftxui/screen/box.hpp>
 #include <ftxui/screen/color.hpp>
 
-#include <functional>
 #include <chrono>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -22,13 +24,12 @@ using LayoutFn = std::function<LayoutCtx()>;
 
 enum class WorkflowPhase { PLAN, BUILD, REVIEW };
 
-WorkflowPhase next_workflow_phase(
-    WorkflowPhase phase, bool review_available);
+WorkflowPhase next_workflow_phase(WorkflowPhase phase, bool review_available);
 WorkflowPhase previous_workflow_phase(
     WorkflowPhase phase, bool review_available);
 std::optional<Session::Mode> workflow_mode(WorkflowPhase phase);
 
-using WorkflowFn = std::function<WorkflowPhase()>;
+using WorkflowFn         = std::function<WorkflowPhase()>;
 using WorkflowNavigateFn = std::function<void(WorkflowPhase)>;
 
 inline const ftxui::Color PANEL_COLOR       = ftxui::Color::RGB(26, 34, 52);
@@ -61,13 +62,34 @@ ftxui::InputOption password_option(std::string* content, int* cursor,
 ftxui::Component action_button(std::string label,
     std::function<void()> on_click, const ftxui::Color& color = PANEL_BORDER,
     const ftxui::Color& color_focussed = PANEL_COLOR_FOCUS);
-ftxui::Component inline_link_button(
-    std::function<ftxui::Element()> render, std::function<void()> on_click,
+ftxui::Component inline_link_button(std::function<ftxui::Element()> render,
+    std::function<void()> on_click,
     const ftxui::Color& inactive_color = PANEL_FG_DIM);
-ftxui::Component inline_link_button(
-    std::string label, std::function<void()> on_click,
+ftxui::Component inline_link_button(std::string label,
+    std::function<void()> on_click,
     const ftxui::Color& inactive_color = PANEL_FG_DIM);
 std::string elapsed_text(std::chrono::milliseconds elapsed);
+std::string compact_number(std::uint64_t n);
+ftxui::Element hint_bar(std::string hint);
+
+// ◉/○ for single choice, ▣/☐ for multi choice.
+std::string choice_marker(bool multi, bool selected);
+ftxui::Element choice_label(std::string label, bool selected, bool focused);
+bool move_list_cursor(const ftxui::Event& event, int& cursor, int count);
+
+// Captures the unclipped content height of a child element (yframe renders
+// report the clipped viewport instead).
+ftxui::Decorator capture_content_height(int* out);
+
+struct ScrollView {
+    int scroll         = 0;
+    int content_height = 0;
+    ftxui::Box box { };
+
+    int viewport_lines() const;
+    int max_scroll() const;
+    void scroll_lines(int delta);
+};
 
 ftxui::Element render_markdown_element(std::string_view md);
 
@@ -80,6 +102,8 @@ ftxui::Element code_block(
 ftxui::Element code_block_with_lines(
     const std::string& code, const std::string& lang, std::size_t start_line);
 ftxui::Element diff_split(const DiffView& diff, int available_width = 120);
+bool diff_row_left_changed(const DiffRow& row);
+bool diff_row_right_changed(const DiffRow& row);
 ftxui::Element session_error_element(const Session& session);
 
 ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx);
@@ -92,15 +116,13 @@ ftxui::Element render_context_box(const std::optional<std::string>& rules,
 int run_repl(const Config& cfg);
 void print_session_saved_box();
 
-ftxui::Component make_chat(
-    std::shared_ptr<ApplicationState> state, Controller& controller,
-    LayoutFn layout);
-ftxui::Component make_side_panel(
-    std::shared_ptr<ApplicationState> state, Controller& controller,
-    LayoutFn layout, WorkflowFn workflow, WorkflowNavigateFn navigate);
-ftxui::Component make_review(
-    std::shared_ptr<ApplicationState> state, Controller& controller,
-    LayoutFn layout, WorkflowNavigateFn navigate);
+ftxui::Component make_chat(std::shared_ptr<ApplicationState> state,
+    Controller& controller, LayoutFn layout);
+ftxui::Component make_side_panel(std::shared_ptr<ApplicationState> state,
+    Controller& controller, LayoutFn layout, WorkflowFn workflow,
+    WorkflowNavigateFn navigate);
+ftxui::Component make_review(std::shared_ptr<ApplicationState> state,
+    Controller& controller, LayoutFn layout, WorkflowNavigateFn navigate);
 ftxui::Component make_status_line(std::shared_ptr<ApplicationState> state,
     LayoutFn layout, WorkflowFn workflow);
 ftxui::Component make_connect(

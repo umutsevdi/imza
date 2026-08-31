@@ -100,6 +100,7 @@ target_link_libraries(ursa_network PRIVATE
 add_library(ursa_core
     src/core/config.cpp
     src/core/catalog.cpp
+    src/core/io.cpp
 )
 target_include_directories(ursa_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include

@@ -8,10 +8,10 @@ namespace ursa {
 
 TEST_CASE("slash_commands includes built-ins")
 {
-    const auto cmds = slash_commands();
-    bool has_exit   = false;
-    bool has_connect = false;
-    bool has_model   = false;
+    const auto cmds    = slash_commands();
+    bool has_exit      = false;
+    bool has_connect   = false;
+    bool has_model     = false;
     bool has_subagents = false;
     for (const auto& c : cmds) {
         if (c.name == "/exit") {
@@ -59,10 +59,8 @@ TEST_CASE("find_command matches case-insensitively")
     CHECK(find_command("/help") == nullptr);
     CHECK(find_command("/exit")->action == SlashCommand::Action::EXIT);
     CHECK(find_command("/new")->action == SlashCommand::Action::NEW);
-    CHECK(find_command("/connect")->action
-        == SlashCommand::Action::CONNECT);
-    CHECK(find_command("/model")->action
-        == SlashCommand::Action::MODEL);
+    CHECK(find_command("/connect")->action == SlashCommand::Action::CONNECT);
+    CHECK(find_command("/model")->action == SlashCommand::Action::MODEL);
     CHECK(find_command("/foo") == nullptr);
 }
 
@@ -72,12 +70,9 @@ TEST_CASE("run_slash_command emits application effects")
     bool exited = false;
     ModalPayload modal;
     std::string error;
-    SlashCommandContext context { state,
-        [&] { exited = true; },
-        [] { },
+    SlashCommandContext context { state, [&] { exited = true; }, [] { },
         [&](ModalPayload next) { modal = std::move(next); },
-        [] { return SessionsModal { }; },
-        [] { return SkillsModal { }; },
+        [] { return SessionsModal { }; }, [] { return SkillsModal { }; },
         [] { return std::string { }; },
         [&](std::string next) { error = std::move(next); } };
 

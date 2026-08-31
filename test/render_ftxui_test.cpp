@@ -2,21 +2,13 @@
 
 #include <doctest/doctest.h>
 #include <ftxui/component/component.hpp>
-#include <ftxui/dom/elements.hpp>
-#include <ftxui/screen/screen.hpp>
 
+#include "test_helpers.h"
 #include "ui.h"
 
-namespace {
+using ursa::test::to_text;
 
-// Renders an element into a fixed-size screen and returns it as text.
-std::string to_text(ftxui::Element element)
-{
-    using namespace ftxui;
-    auto screen = Screen::Create(Dimension::Fixed(60), Dimension::Fixed(30));
-    Render(screen, element);
-    return screen.ToString();
-}
+namespace {
 
 std::string without_ansi(std::string_view input)
 {
@@ -28,8 +20,7 @@ std::string without_ansi(std::string_view input)
             continue;
         }
         i += 2;
-        while (i < input.size()
-            && (input[i] < '@' || input[i] > '~')) {
+        while (i < input.size() && (input[i] < '@' || input[i] > '~')) {
             ++i;
         }
         if (i < input.size()) {
@@ -123,13 +114,13 @@ TEST_CASE("session error element renders a full-width error bar")
 TEST_CASE("multiline field underlines only its last row")
 {
     std::string content = "first\nsecond";
-    int cursor = static_cast<int>(content.size());
-    const auto input = ftxui::Input(
+    int cursor          = static_cast<int>(content.size());
+    const auto input    = ftxui::Input(
         &content, ursa::multiline_field_option(&content, &cursor, "Comment"));
     auto screen = ftxui::Screen::Create(
         ftxui::Dimension::Fixed(20), ftxui::Dimension::Fixed(2));
-    ftxui::Render(screen,
-        input->Render() | ftxui::size(ftxui::WIDTH, ftxui::EQUAL, 20));
+    ftxui::Render(
+        screen, input->Render() | ftxui::size(ftxui::WIDTH, ftxui::EQUAL, 20));
     CHECK_FALSE(screen.PixelAt(0, 0).underlined);
     CHECK(screen.PixelAt(0, 1).underlined);
     CHECK(screen.PixelAt(0, 0).foreground_color == ursa::PANEL_FG);
@@ -155,8 +146,7 @@ TEST_CASE("diff_split renders unified changes on narrow screens")
         {
             { ursa::DiffRow::Kind::ADD, 10, 10, "before", "after" },
         } };
-    const std::string out
-        = without_ansi(to_text(ursa::diff_split(diff, 80)));
+    const std::string out = without_ansi(to_text(ursa::diff_split(diff, 80)));
     CHECK(out.find("10    − before") != std::string::npos);
     CHECK(out.find("   10 + after") != std::string::npos);
 }

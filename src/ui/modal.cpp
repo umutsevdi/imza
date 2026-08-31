@@ -129,7 +129,7 @@ namespace {
             const std::string metadata = (ec ? std::string { } : cwd + " · ")
                 + "timeout " + std::to_string(timeout) + "s";
             return vbox({ code_block(preview_text(command), shell_name(system)),
-                hbox({ filler(), text(metadata) | dim }) });
+                hint_bar(metadata) });
         }
 
         if (req.name == "edit") {
@@ -180,37 +180,6 @@ namespace {
         return code_block(preview_text(req.args), "json");
     }
 
-    Decorator modal_content_height(int* out)
-    {
-        class Impl : public Node {
-        public:
-            Impl(Element child, int* out)
-                : Node(Elements { std::move(child) })
-                , out_(out)
-            {
-            }
-
-            void ComputeRequirement() override
-            {
-                Node::ComputeRequirement();
-                requirement_ = children_[0]->requirement();
-                *out_        = requirement_.min_y;
-            }
-
-            void SetBox(Box box) override
-            {
-                Node::SetBox(box);
-                children_[0]->SetBox(box);
-            }
-
-        private:
-            int* out_;
-        };
-        return [out](Element child) {
-            return std::make_shared<Impl>(std::move(child), out);
-        };
-    }
-
     std::vector<std::string> wrapped_lines(
         const std::string& body, std::size_t width)
     {
@@ -246,18 +215,6 @@ namespace {
         flush_word();
         if (!line.empty()) {
             out.push_back(std::move(line));
-        }
-        return out;
-    }
-
-    std::string join_lines(const std::vector<std::string>& lines)
-    {
-        std::string out;
-        for (std::size_t i = 0; i < lines.size(); ++i) {
-            if (i != 0) {
-                out += '\n';
-            }
-            out += lines[i];
         }
         return out;
     }
@@ -451,10 +408,8 @@ namespace {
                     Component input_row = Renderer(cs.input, [&cs, multi] {
                         const bool live
                             = cs.text_live && !trim(cs.free_text).empty();
-                        const std::string marker = multi ? (live ? "▣ " : "☐ ")
-                                                         : (live ? "◉ " : "○ ");
-                        return hbox(
-                            { text(marker), text(" "), cs.input->Render() });
+                        return hbox({ text(choice_marker(multi, live)),
+                            text(" "), cs.input->Render() });
                     });
                     rows.push_back(input_row);
                 }
@@ -515,20 +470,11 @@ namespace {
             ButtonOption bo;
             bo.transform
                 = [&cs, idx, multi, label](const EntryState& s) -> Element {
-                const bool selected      = multi
+                const bool selected = multi
                     ? cs.checked[idx]
                     : (!cs.text_live && cs.radio == static_cast<int>(idx));
-                const std::string marker = multi ? (selected ? "▣ " : "☐ ")
-                                                 : (selected ? "◉ " : "○ ");
-                Element e                = text(label);
-                if (s.focused) {
-                    e = std::move(e) | bold | color(PANEL_FG) | inverted;
-                } else if (selected) {
-                    e = std::move(e) | bold | color(PANEL_FG);
-                } else {
-                    e = std::move(e) | color(PANEL_FG_DIM);
-                }
-                return hbox({ text(marker), std::move(e) });
+                return hbox({ text(choice_marker(multi, selected)),
+                    choice_label(label, selected, s.focused) });
             };
             bo.on_click   = toggle;
             Component row = Button(label, bo.on_click, bo);
@@ -595,8 +541,7 @@ namespace {
                     back_->Render(),
                 }));
                 rows.push_back(separatorEmpty());
-                rows.push_back(hbox({ filler(),
-                    text("Enter confirm rejection · Esc back") | dim }));
+                rows.push_back(hint_bar("Enter confirm rejection · Esc back"));
             } else {
                 rows.push_back(hbox({
                     accept_->Render(),
@@ -606,9 +551,9 @@ namespace {
                     reject_->Render(),
                 }));
                 rows.push_back(separatorEmpty());
-                rows.push_back(hbox({ filler(),
-                    text("Always allow applies for this session") | dim }));
-                rows.push_back(hbox({ filler(), text("Esc reject") | dim }));
+                rows.push_back(
+                    hint_bar("Always allow applies for this session"));
+                rows.push_back(hint_bar("Esc reject"));
             }
             return vbox(std::move(rows)) | xflex;
         }
@@ -626,8 +571,7 @@ namespace {
             rows.push_back(separatorEmpty());
             rows.push_back(submit_->Render() | center);
             rows.push_back(separatorEmpty());
-            rows.push_back(
-                hbox({ filler(), text("↑/↓ navigate · Enter confirm") | dim }));
+            rows.push_back(hint_bar("↑/↓ navigate · Enter confirm"));
             return vbox(std::move(rows)) | xflex;
         }
 
@@ -653,89 +597,65 @@ namespace {
 
         Element static_viewport(Element content, const std::string& metadata)
         {
-            static_scroll_ = std::clamp(static_scroll_, 0, max_static_scroll());
+            static_view_.scroll_lines(0);
             Element viewport = std::move(content)
-                | modal_content_height(&static_content_height_)
+                | capture_content_height(&static_view_.content_height)
                 | vscroll_indicator
                 | focusPosition(0,
-                    static_scroll_
-                        + std::max(0, static_viewport_lines() - 1) / 2)
-                | yframe | yflex | reflect(static_viewport_box_);
+                    static_view_.scroll
+                        + std::max(0, static_view_.viewport_lines() - 1) / 2)
+                | yframe | yflex | reflect(static_view_.box);
             Elements rows { std::move(viewport), separatorEmpty() };
             if (!metadata.empty()) {
-                rows.push_back(hbox({ filler(), text(metadata) | dim }));
+                rows.push_back(hint_bar(metadata));
             }
-            rows.push_back(
-                hbox({ filler(), text("↑/↓ scroll · Esc close") | dim }));
+            rows.push_back(hint_bar("↑/↓ scroll · Esc close"));
             return vbox(std::move(rows)) | xflex | yflex;
         }
 
         bool scroll_static(Event event)
         {
             if (event == Event::ArrowUp) {
-                scroll_static_lines(-1);
+                static_view_.scroll_lines(-1);
                 return true;
             }
             if (event == Event::ArrowDown) {
-                scroll_static_lines(1);
+                static_view_.scroll_lines(1);
                 return true;
             }
             if (event == Event::PageUp) {
-                scroll_static_lines(-std::max(1, static_viewport_lines() - 1));
+                static_view_.scroll_lines(
+                    -std::max(1, static_view_.viewport_lines() - 1));
                 return true;
             }
             if (event == Event::PageDown) {
-                scroll_static_lines(std::max(1, static_viewport_lines() - 1));
+                static_view_.scroll_lines(
+                    std::max(1, static_view_.viewport_lines() - 1));
                 return true;
             }
             if (event == Event::Home) {
-                static_scroll_ = 0;
+                static_view_.scroll = 0;
                 return true;
             }
             if (event == Event::End) {
-                static_scroll_ = max_static_scroll();
+                static_view_.scroll = static_view_.max_scroll();
                 return true;
             }
             if (event.is_mouse()) {
                 const Mouse& m = event.mouse();
                 if (m.button == Mouse::WheelUp) {
-                    scroll_static_lines(-3);
+                    static_view_.scroll_lines(-3);
                     return true;
                 }
                 if (m.button == Mouse::WheelDown) {
-                    scroll_static_lines(3);
+                    static_view_.scroll_lines(3);
                     return true;
                 }
             }
             return false;
         }
 
-        void reset_static_scroll()
-        {
-            static_scroll_         = 0;
-            static_content_height_ = 0;
-            static_viewport_box_   = { };
-        }
-
-        int static_viewport_lines() const
-        {
-            if (static_viewport_box_.y_max < static_viewport_box_.y_min) {
-                return 0;
-            }
-            return static_viewport_box_.y_max - static_viewport_box_.y_min + 1;
-        }
-
-        int max_static_scroll() const
-        {
-            return std::max(
-                0, static_content_height_ - static_viewport_lines());
-        }
-
-        void scroll_static_lines(int delta)
-        {
-            static_scroll_
-                = std::clamp(static_scroll_ + delta, 0, max_static_scroll());
-        }
+        void reset_static_scroll() { static_view_ = { }; }
 
         std::shared_ptr<ApplicationState> state_;
         std::shared_ptr<Session> session_;
@@ -751,10 +671,8 @@ namespace {
 
         ToolPhase tool_phase_ = ToolPhase::DECIDE;
         std::string reason_buf_;
-        int reason_cursor_         = 0;
-        int static_scroll_         = 0;
-        int static_content_height_ = 0;
-        Box static_viewport_box_;
+        int reason_cursor_ = 0;
+        ScrollView static_view_ { };
         Component reason_input_;
         Component accept_;
         Component accept_always_;
@@ -803,18 +721,11 @@ namespace {
             rows.push_back(text("Reasoning effort") | bold);
             rows.push_back(separatorEmpty());
             for (int i = 0; i < static_cast<int>(options_.size()); ++i) {
-                Element label = text(options_[static_cast<std::size_t>(i)]);
-                if (i == cursor_) {
-                    label
-                        = std::move(label) | bold | color(PANEL_FG) | inverted;
-                } else if (i == current_) {
-                    label = std::move(label) | bold | color(PANEL_FG);
-                } else {
-                    label = std::move(label) | color(PANEL_FG_DIM);
-                }
+                const std::string option
+                    = options_[static_cast<std::size_t>(i)];
                 rows.push_back(hbox({
-                    text(i == current_ ? "◉ " : "○ "),
-                    std::move(label),
+                    text(choice_marker(false, i == current_)),
+                    choice_label(option, i == current_, i == cursor_),
                 }));
             }
             rows.push_back(separatorEmpty());
@@ -833,16 +744,8 @@ namespace {
                 apply();
                 return true;
             }
-            if (event == Event::ArrowDown
-                && cursor_ + 1 < static_cast<int>(options_.size())) {
-                ++cursor_;
-                return true;
-            }
-            if (event == Event::ArrowUp && cursor_ > 0) {
-                --cursor_;
-                return true;
-            }
-            return false;
+            return move_list_cursor(
+                event, cursor_, static_cast<int>(options_.size()));
         }
 
     private:
@@ -912,11 +815,9 @@ namespace {
                         text("Finish or interrupt pending work before loading")
                         | color(PANEL_FG));
                 }
-                rows.push_back(hbox({ filler(),
-                    text(loading_blocked
-                            ? "↑↓ rows · d delete · Esc close"
-                            : "↑↓ rows · Enter load · d delete · Esc close")
-                        | dim }));
+                rows.push_back(hint_bar(loading_blocked
+                        ? "↑↓ rows · d delete · Esc close"
+                        : "↑↓ rows · Enter load · d delete · Esc close"));
             }
             return vbox({ vbox(std::move(rows)), separatorEmpty() }) | xflex;
         }
@@ -938,13 +839,8 @@ namespace {
                 controller_.close_modal();
                 return true;
             }
-            if (event == Event::ArrowDown
-                && cursor_ + 1 < static_cast<int>(titles_.size())) {
-                ++cursor_;
-                return true;
-            }
-            if (event == Event::ArrowUp && cursor_ > 0) {
-                --cursor_;
+            if (move_list_cursor(
+                    event, cursor_, static_cast<int>(titles_.size()))) {
                 return true;
             }
             if ((event == Event::Character('d')
@@ -1007,14 +903,13 @@ namespace {
                     rows.push_back(section_title(scope + " skills"));
                     previous_scope = scope;
                 }
-                const auto choice = [&entry](
-                                        SkillPolicy policy, std::string label) {
-                    const bool selected = entry.policy == policy;
-                    Element value
-                        = text((selected ? "◉ " : "○ ") + std::move(label));
-                    return selected ? std::move(value) | bold | color(PANEL_FG)
-                                    : std::move(value) | color(PANEL_FG_DIM);
-                };
+                const auto choice
+                    = [&entry](SkillPolicy policy, std::string label) {
+                          const bool selected = entry.policy == policy;
+                          return choice_label(
+                              choice_marker(false, selected) + std::move(label),
+                              selected, false);
+                      };
                 Elements content {
                     hbox({ text(entry.name) | bold, filler(),
                         choice(SkillPolicy::ALLOW, "Allow"), text("  "),
@@ -1032,8 +927,8 @@ namespace {
                 rows.push_back(std::move(row));
             }
             rows.push_back(separatorEmpty());
-            rows.push_back(hbox({ filler(),
-                text("↑↓ rows · ←→ policy · Enter save · Esc close") | dim }));
+            rows.push_back(
+                hint_bar("↑↓ rows · ←→ policy · Enter save · Esc close"));
             return vbox({ vbox(std::move(rows)) | vscroll_indicator | frame,
                        separatorEmpty() })
                 | xflex;
@@ -1045,13 +940,8 @@ namespace {
                 controller_.close_modal();
                 return true;
             }
-            if (event == Event::ArrowDown
-                && cursor_ + 1 < static_cast<int>(entries_.size())) {
-                ++cursor_;
-                return true;
-            }
-            if (event == Event::ArrowUp && cursor_ > 0) {
-                --cursor_;
+            if (move_list_cursor(
+                    event, cursor_, static_cast<int>(entries_.size()))) {
                 return true;
             }
             if (!entries_.empty()

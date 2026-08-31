@@ -15,8 +15,7 @@
 
 namespace ursa {
 
-const Tool* find_tool(
-    std::span<const Tool> tools, std::string_view name)
+const Tool* find_tool(std::span<const Tool> tools, std::string_view name)
 {
     for (const auto& t : tools) {
         if (t.spec.name == name) {
@@ -86,19 +85,6 @@ namespace {
 
     constexpr std::size_t MAX_READ_LINES   = 2000;
     constexpr std::size_t MAX_LIST_ENTRIES = 2000;
-
-    std::string join_lines(const std::vector<std::string>& lines,
-        std::size_t begin, std::size_t end)
-    {
-        std::string out;
-        for (std::size_t i = begin; i <= end && i < lines.size(); ++i) {
-            if (!out.empty()) {
-                out += '\n';
-            }
-            out += lines[i];
-        }
-        return out;
-    }
 
     ToolOutput error(std::string text)
     {
@@ -504,8 +490,7 @@ namespace {
         }
         std::vector<EditSpan> edits;
         if (prefix != old_lines.size() || prefix != new_lines.size()) {
-            edits.push_back(
-                { prefix, old_suffix, prefix, new_suffix });
+            edits.push_back({ prefix, old_suffix, prefix, new_suffix });
         }
         ToolOutput out { ToolOutput::Kind::OUTPUT, std::move(summary) };
         out.diff = build_diff_view(path, old_lines, new_lines, edits);
@@ -573,13 +558,13 @@ namespace {
             : std::min(static_cast<std::size_t>(replace_count), matches.size());
 
         const std::vector<std::string> old_lines = split_lines(content);
-        std::size_t replaced = 0;
+        std::size_t replaced                     = 0;
         std::string out;
         out.reserve(content.size() + n * fresh.size());
         std::size_t cursor = 0;
         for (std::size_t idx = 0; idx < n; ++idx) {
-            const std::size_t match   = matches[idx];
-            const std::size_t m_end   = match + old.size();
+            const std::size_t match = matches[idx];
+            const std::size_t m_end = match + old.size();
             out.append(content, cursor, match - cursor);
             out += fresh;
             ++replaced;
@@ -716,9 +701,11 @@ Tool make_read_tool()
 Tool make_skill_tool()
 {
     ToolSpec spec;
-    spec.name = "skill";
-    spec.description = "Load the instructions for a discovered skill by name. Optionally specify scope as project or global.";
-    spec.parameters = parse_json(R"json({"type":"object","properties":{"name":{"type":"string"},"scope":{"type":"string","enum":["project","global"]}},"required":["name"]})json");
+    spec.name        = "skill";
+    spec.description = "Load the instructions for a discovered skill by name. "
+                       "Optionally specify scope as project or global.";
+    spec.parameters = parse_json(
+        R"json({"type":"object","properties":{"name":{"type":"string"},"scope":{"type":"string","enum":["project","global"]}},"required":["name"]})json");
     return { std::move(spec), { }, ToolSafety::READ_ONLY, false, true };
 }
 

@@ -10,8 +10,7 @@ int main()
     std::string error;
     const auto status = ursa::load_config(path, cfg, &error);
     if (status != ursa::Status::OK) {
-        std::println("config error ({}): {}",
-            static_cast<int>(status),
+        std::println("config error ({}): {}", static_cast<int>(status),
             error.empty() ? path.string() : error);
         return 1;
     }

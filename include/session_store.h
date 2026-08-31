@@ -22,4 +22,4 @@ Status save_session(Session& session);
 Status load_session(const std::filesystem::path& path, Session& session);
 std::vector<SavedSession> saved_sessions();
 
-}
+} // namespace ursa

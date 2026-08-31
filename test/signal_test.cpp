@@ -5,8 +5,8 @@
 TEST_CASE("signal publishes to active subscriptions")
 {
     ursa::Signal<int> signal;
-    int total = 0;
-    auto first = signal.subscribe([&](int value) { total += value; });
+    int total   = 0;
+    auto first  = signal.subscribe([&](int value) { total += value; });
     auto second = signal.subscribe([&](int value) { total += value * 2; });
 
     signal.publish(3);
@@ -31,8 +31,8 @@ TEST_CASE("signal subscription disconnects on destruction")
 TEST_CASE("signal subscriptions are move-only ownership tokens")
 {
     ursa::Signal<> signal;
-    int calls = 0;
-    auto first = signal.subscribe([&] { ++calls; });
+    int calls   = 0;
+    auto first  = signal.subscribe([&] { ++calls; });
     auto second = std::move(first);
 
     signal.publish();

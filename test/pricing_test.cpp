@@ -40,9 +40,8 @@ ursa::Catalog test_catalog()
 
     ursa::Catalog catalog;
     catalog.fetched_at = 1;
-    catalog.providers  = { { "openai", openai },
-          { "anthropic", anthropic },
-          { "zai", zai } };
+    catalog.providers
+        = { { "openai", openai }, { "anthropic", anthropic }, { "zai", zai } };
     return catalog;
 }
 
@@ -119,14 +118,14 @@ TEST_CASE("compute_cost bills cached tokens at cache rates when present")
     p.cache_write_per_1k = 0.00375;
 
     ursa::Usage u;
-    u.prompt      = 100000;
-    u.completion  = 1000;
-    u.cached_read = 60000;
+    u.prompt       = 100000;
+    u.completion   = 1000;
+    u.cached_read  = 60000;
     u.cached_write = 10000;
-    u.total       = 101000;
+    u.total        = 101000;
 
-    const double expected = 30.0 * 0.003 + 60.0 * 0.0003 + 10.0 * 0.00375
-        + 1.0 * 0.015;
+    const double expected
+        = 30.0 * 0.003 + 60.0 * 0.0003 + 10.0 * 0.00375 + 1.0 * 0.015;
     CHECK(ursa::compute_cost(u, p) == doctest::Approx(expected));
 }
 
@@ -153,11 +152,11 @@ TEST_CASE("compute_cost is safe when cached tokens exceed prompt")
     p.cache_read_per_1k = 0.0001;
 
     ursa::Usage u;
-    u.prompt      = 1000;
-    u.completion  = 0;
-    u.cached_read = 800;
+    u.prompt       = 1000;
+    u.completion   = 0;
+    u.cached_read  = 800;
     u.cached_write = 900;
-    u.total       = 1000;
+    u.total        = 1000;
 
     const double expected = 0.8 * 0.0001 + 0.2 * 0.001;
     CHECK(ursa::compute_cost(u, p) == doctest::Approx(expected));

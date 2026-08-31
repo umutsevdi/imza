@@ -17,240 +17,244 @@
 namespace ursa {
 namespace {
 
-std::string strip_prefix(std::string path)
-{
-    if (path.starts_with("a/") || path.starts_with("b/")) {
-        path.erase(0, 2);
-    }
-    return path;
-}
-
-std::string header_path(std::string_view line)
-{
-    constexpr std::string_view prefix = "diff --git ";
-    if (!line.starts_with(prefix)) {
-        return { };
-    }
-    const std::string_view body = line.substr(prefix.size());
-    std::size_t split = body.rfind(" b/");
-    if (split == std::string_view::npos) {
-        split = body.rfind("\"b/");
-    }
-    if (split == std::string_view::npos) {
-        return { };
-    }
-    std::string path(body.substr(split + 1));
-    if (!path.empty() && path.front() == '"') path.erase(0, 1);
-    if (!path.empty() && path.back() == '"') path.pop_back();
-    return strip_prefix(std::move(path));
-}
-
-bool parse_range(std::string_view value, std::size_t& start,
-    std::size_t& count)
-{
-    const auto start_result
-        = std::from_chars(value.data(), value.data() + value.size(), start);
-    if (start_result.ec != std::errc { }) return false;
-    count = 1;
-    if (start_result.ptr == value.data() + value.size()
-        || *start_result.ptr != ',') {
-        return true;
-    }
-    const char* count_begin = start_result.ptr + 1;
-    const auto count_result = std::from_chars(
-        count_begin, value.data() + value.size(), count);
-    return count_result.ec == std::errc { };
-}
-
-bool parse_hunk_header(std::string_view line, ReviewHunk& hunk)
-{
-    const std::size_t minus = line.find('-');
-    const std::size_t plus  = line.find('+', minus);
-    if (minus == std::string_view::npos || plus == std::string_view::npos) {
-        return false;
-    }
-    const std::string_view old_part = line.substr(minus + 1);
-    const std::string_view new_part = line.substr(plus + 1);
-    return parse_range(old_part, hunk.old_start, hunk.old_count)
-        && parse_range(new_part, hunk.new_start, hunk.new_count);
-}
-
-std::string quote_arg(const std::filesystem::path& path)
-{
-    std::string value = path.string();
-    std::string out = "\"";
-    for (const char ch : value) {
-        if (ch == '"') {
-            out += "\\\"";
-        } else {
-            out += ch;
+    std::string strip_prefix(std::string path)
+    {
+        if (path.starts_with("a/") || path.starts_with("b/")) {
+            path.erase(0, 2);
         }
+        return path;
     }
-    return out + "\"";
-}
 
-void append_untracked(RepositoryReview& review,
-    const std::filesystem::path& root, std::string_view paths)
-{
-    for (const std::string& path : split_lines(paths)) {
-        if (path.empty()) {
-            continue;
+    std::string header_path(std::string_view line)
+    {
+        constexpr std::string_view prefix = "diff --git ";
+        if (!line.starts_with(prefix)) {
+            return { };
         }
-        std::ifstream input(root / path, std::ios::binary);
-        if (!input) {
-            continue;
+        const std::string_view body = line.substr(prefix.size());
+        std::size_t split           = body.rfind(" b/");
+        if (split == std::string_view::npos) {
+            split = body.rfind("\"b/");
         }
-        ReviewFile file;
-        file.new_path = path;
-        file.kind = ReviewFile::Kind::UNTRACKED;
-        ReviewHunk hunk;
-        hunk.header = "@@ -0,0 +1 @@";
-        hunk.new_start = 1;
-        std::size_t line_no = 1;
-        std::string line;
-        while (std::getline(input, line)) {
-            if (line.find('\0') != std::string::npos) {
-                file.kind = ReviewFile::Kind::BINARY;
-                file.additions = 0;
-                hunk.lines.clear();
-                break;
+        if (split == std::string_view::npos) {
+            return { };
+        }
+        std::string path(body.substr(split + 1));
+        if (!path.empty() && path.front() == '"')
+            path.erase(0, 1);
+        if (!path.empty() && path.back() == '"')
+            path.pop_back();
+        return strip_prefix(std::move(path));
+    }
+
+    bool parse_range(
+        std::string_view value, std::size_t& start, std::size_t& count)
+    {
+        const auto start_result
+            = std::from_chars(value.data(), value.data() + value.size(), start);
+        if (start_result.ec != std::errc { })
+            return false;
+        count = 1;
+        if (start_result.ptr == value.data() + value.size()
+            || *start_result.ptr != ',') {
+            return true;
+        }
+        const char* count_begin = start_result.ptr + 1;
+        const auto count_result
+            = std::from_chars(count_begin, value.data() + value.size(), count);
+        return count_result.ec == std::errc { };
+    }
+
+    bool parse_hunk_header(std::string_view line, ReviewHunk& hunk)
+    {
+        const std::size_t minus = line.find('-');
+        const std::size_t plus  = line.find('+', minus);
+        if (minus == std::string_view::npos || plus == std::string_view::npos) {
+            return false;
+        }
+        const std::string_view old_part = line.substr(minus + 1);
+        const std::string_view new_part = line.substr(plus + 1);
+        return parse_range(old_part, hunk.old_start, hunk.old_count)
+            && parse_range(new_part, hunk.new_start, hunk.new_count);
+    }
+
+    std::string quote_arg(const std::filesystem::path& path)
+    {
+        std::string value = path.string();
+        std::string out   = "\"";
+        for (const char ch : value) {
+            if (ch == '"') {
+                out += "\\\"";
+            } else {
+                out += ch;
             }
-            if (!line.empty() && line.back() == '\r') {
-                line.pop_back();
-            }
-            hunk.lines.push_back(ReviewLine { ReviewLine::Kind::ADDITION,
-                std::nullopt, line_no++, std::move(line) });
-            ++file.additions;
         }
-        if (file.kind == ReviewFile::Kind::BINARY) {
+        return out + "\"";
+    }
+
+    void append_untracked(RepositoryReview& review,
+        const std::filesystem::path& root, std::string_view paths)
+    {
+        for (const std::string& path : split_lines(paths)) {
+            if (path.empty()) {
+                continue;
+            }
+            std::ifstream input(root / path, std::ios::binary);
+            if (!input) {
+                continue;
+            }
+            ReviewFile file;
+            file.new_path = path;
+            file.kind     = ReviewFile::Kind::UNTRACKED;
+            ReviewHunk hunk;
+            hunk.header         = "@@ -0,0 +1 @@";
+            hunk.new_start      = 1;
+            std::size_t line_no = 1;
+            std::string line;
+            while (std::getline(input, line)) {
+                if (line.find('\0') != std::string::npos) {
+                    file.kind      = ReviewFile::Kind::BINARY;
+                    file.additions = 0;
+                    hunk.lines.clear();
+                    break;
+                }
+                if (!line.empty() && line.back() == '\r') {
+                    line.pop_back();
+                }
+                hunk.lines.push_back(ReviewLine { ReviewLine::Kind::ADDITION,
+                    std::nullopt, line_no++, std::move(line) });
+                ++file.additions;
+            }
+            if (file.kind == ReviewFile::Kind::BINARY) {
+                review.files.push_back(std::move(file));
+                continue;
+            }
+            hunk.new_count = file.additions;
+            file.hunks.push_back(std::move(hunk));
             review.files.push_back(std::move(file));
-            continue;
         }
-        hunk.new_count = file.additions;
-        file.hunks.push_back(std::move(hunk));
-        review.files.push_back(std::move(file));
     }
-}
 
-std::string review_path(const ReviewFile& file)
-{
-    return file.new_path.empty() ? file.old_path : file.new_path;
-}
+    std::string review_path(const ReviewFile& file)
+    {
+        return file.new_path.empty() ? file.old_path : file.new_path;
+    }
 
-std::string format_review_patch(const RepositoryReview& review)
-{
-    std::string patch;
-    for (const ReviewFile& file : review.files) {
-        const std::string old_path
-            = file.old_path.empty() ? file.new_path : file.old_path;
-        const std::string new_path
-            = file.new_path.empty() ? file.old_path : file.new_path;
-        patch += "diff --git a/" + old_path + " b/" + new_path + "\n";
-        if (file.kind == ReviewFile::Kind::BINARY) {
-            patch += "Binary files a/" + old_path + " and b/" + new_path
-                + " differ\n";
-            continue;
-        }
-        patch += "--- "
-            + (file.kind == ReviewFile::Kind::ADDED
-                    || file.kind == ReviewFile::Kind::UNTRACKED
-                ? std::string("/dev/null")
-                : "a/" + old_path)
-            + "\n";
-        patch += "+++ "
-            + (file.kind == ReviewFile::Kind::DELETED
-                ? std::string("/dev/null")
-                : "b/" + new_path)
-            + "\n";
-        for (const ReviewHunk& hunk : file.hunks) {
-            patch += hunk.header + "\n";
-            for (const ReviewLine& line : hunk.lines) {
-                switch (line.kind) {
-                case ReviewLine::Kind::CONTEXT: patch += ' '; break;
-                case ReviewLine::Kind::ADDITION: patch += '+'; break;
-                case ReviewLine::Kind::DELETION: patch += '-'; break;
-                case ReviewLine::Kind::META: break;
-                }
-                patch += line.content + "\n";
+    std::string format_review_patch(const RepositoryReview& review)
+    {
+        std::string patch;
+        for (const ReviewFile& file : review.files) {
+            const std::string old_path
+                = file.old_path.empty() ? file.new_path : file.old_path;
+            const std::string new_path
+                = file.new_path.empty() ? file.old_path : file.new_path;
+            patch += "diff --git a/" + old_path + " b/" + new_path + "\n";
+            if (file.kind == ReviewFile::Kind::BINARY) {
+                patch += "Binary files a/" + old_path + " and b/" + new_path
+                    + " differ\n";
+                continue;
             }
-        }
-    }
-    return patch;
-}
-
-std::string normalized_comment_body(std::string_view body)
-{
-    if (body.size() >= 5 && body[0] == '[' && body[1] == 'P'
-        && body[2] >= '0' && body[2] <= '3' && body[3] == ']'
-        && body[4] == ' ') {
-        body.remove_prefix(5);
-    }
-    std::string normalized;
-    bool pending_space = false;
-    for (const unsigned char ch : body) {
-        if (std::isspace(ch)) {
-            pending_space = !normalized.empty();
-            continue;
-        }
-        if (pending_space) normalized += ' ';
-        normalized += static_cast<char>(std::tolower(ch));
-        pending_space = false;
-    }
-    return normalized;
-}
-
-std::optional<ReviewLineAnchor> resolve_finding_anchor(
-    const RepositoryReview& review, std::string_view requested_path,
-    std::string_view side, std::size_t line_number)
-{
-    for (const ReviewFile& file : review.files) {
-        if (requested_path != file.old_path && requested_path != file.new_path) {
-            continue;
-        }
-        for (const ReviewHunk& hunk : file.hunks) {
-            for (const ReviewLine& line : hunk.lines) {
-                const bool matches = side == "new"
-                    ? line.kind == ReviewLine::Kind::ADDITION
-                        && line.new_line == line_number
-                    : line.kind == ReviewLine::Kind::DELETION
-                        && line.old_line == line_number;
-                if (matches) {
-                    return ReviewLineAnchor { review_path(file), line.old_line,
-                        line.new_line, line.content };
+            patch += "--- "
+                + (file.kind == ReviewFile::Kind::ADDED
+                            || file.kind == ReviewFile::Kind::UNTRACKED
+                        ? std::string("/dev/null")
+                        : "a/" + old_path)
+                + "\n";
+            patch += "+++ "
+                + (file.kind == ReviewFile::Kind::DELETED
+                        ? std::string("/dev/null")
+                        : "b/" + new_path)
+                + "\n";
+            for (const ReviewHunk& hunk : file.hunks) {
+                patch += hunk.header + "\n";
+                for (const ReviewLine& line : hunk.lines) {
+                    switch (line.kind) {
+                    case ReviewLine::Kind::CONTEXT: patch += ' '; break;
+                    case ReviewLine::Kind::ADDITION: patch += '+'; break;
+                    case ReviewLine::Kind::DELETION: patch += '-'; break;
+                    case ReviewLine::Kind::META: break;
+                    }
+                    patch += line.content + "\n";
                 }
             }
         }
+        return patch;
     }
-    return std::nullopt;
-}
 
-}
+    std::string normalized_comment_body(std::string_view body)
+    {
+        if (body.size() >= 5 && body[0] == '[' && body[1] == 'P'
+            && body[2] >= '0' && body[2] <= '3' && body[3] == ']'
+            && body[4] == ' ') {
+            body.remove_prefix(5);
+        }
+        std::string normalized;
+        bool pending_space = false;
+        for (const unsigned char ch : body) {
+            if (std::isspace(ch)) {
+                pending_space = !normalized.empty();
+                continue;
+            }
+            if (pending_space)
+                normalized += ' ';
+            normalized += static_cast<char>(std::tolower(ch));
+            pending_space = false;
+        }
+        return normalized;
+    }
+
+    std::optional<ReviewLineAnchor> resolve_finding_anchor(
+        const RepositoryReview& review, std::string_view requested_path,
+        std::string_view side, std::size_t line_number)
+    {
+        for (const ReviewFile& file : review.files) {
+            if (requested_path != file.old_path
+                && requested_path != file.new_path) {
+                continue;
+            }
+            for (const ReviewHunk& hunk : file.hunks) {
+                for (const ReviewLine& line : hunk.lines) {
+                    const bool matches = side == "new"
+                        ? line.kind == ReviewLine::Kind::ADDITION
+                            && line.new_line == line_number
+                        : line.kind == ReviewLine::Kind::DELETION
+                            && line.old_line == line_number;
+                    if (matches) {
+                        return ReviewLineAnchor { review_path(file),
+                            line.old_line, line.new_line, line.content };
+                    }
+                }
+            }
+        }
+        return std::nullopt;
+    }
+
+} // namespace
 
 ReviewLoadResult parse_git_diff(std::string_view patch)
 {
     RepositoryReview review;
-    ReviewFile* file = nullptr;
-    ReviewHunk* hunk = nullptr;
+    ReviewFile* file     = nullptr;
+    ReviewHunk* hunk     = nullptr;
     std::size_t old_line = 0;
     std::size_t new_line = 0;
 
     std::size_t line_start = 0;
     while (line_start < patch.size()) {
         const std::size_t line_end = patch.find('\n', line_start);
-        std::string_view line = patch.substr(line_start,
-            line_end == std::string_view::npos
-                ? patch.size() - line_start
-                : line_end - line_start);
-        line_start = line_end == std::string_view::npos
-            ? patch.size()
-            : line_end + 1;
-        if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+        std::string_view line      = patch.substr(line_start,
+            line_end == std::string_view::npos ? patch.size() - line_start
+                                               : line_end - line_start);
+        line_start
+            = line_end == std::string_view::npos ? patch.size() : line_end + 1;
+        if (!line.empty() && line.back() == '\r')
+            line.remove_suffix(1);
         if (line.starts_with("diff --git ")) {
             review.files.push_back(ReviewFile { });
-            file = &review.files.back();
+            file           = &review.files.back();
             file->new_path = header_path(line);
             file->old_path = file->new_path;
-            hunk = nullptr;
+            hunk           = nullptr;
             continue;
         }
         if (file == nullptr) {
@@ -264,12 +268,12 @@ ReviewLoadResult parse_git_diff(std::string_view patch)
         } else if (line.starts_with("deleted file mode ")) {
             file->kind = ReviewFile::Kind::DELETED;
         } else if (line.starts_with("rename from ")) {
-            file->kind = ReviewFile::Kind::RENAMED;
+            file->kind     = ReviewFile::Kind::RENAMED;
             file->old_path = std::string(line.substr(12));
         } else if (line.starts_with("rename to ")) {
             file->new_path = std::string(line.substr(10));
         } else if (line.starts_with("copy from ")) {
-            file->kind = ReviewFile::Kind::COPIED;
+            file->kind     = ReviewFile::Kind::COPIED;
             file->old_path = std::string(line.substr(10));
         } else if (line.starts_with("copy to ")) {
             file->new_path = std::string(line.substr(8));
@@ -318,28 +322,30 @@ ReviewLoadResult parse_git_diff(std::string_view patch)
 ReviewLoadResult load_repository_review(const std::filesystem::path& root)
 {
     const std::string prefix = "git -C " + quote_arg(root);
-    CommandResult diff = run_command(prefix
-            + " diff --no-ext-diff --no-color --find-renames --find-copies HEAD --",
+    CommandResult diff       = run_command(prefix
+            + " diff --no-ext-diff --no-color --find-renames --find-copies "
+              "HEAD --",
         std::chrono::seconds { 10 });
     if (!diff.spawned || diff.timed_out) {
         return "Git diff could not be loaded.";
     }
     if (diff.exit_code != 0) {
         diff = run_command(prefix
-                + " diff --cached --no-ext-diff --no-color --find-renames --find-copies --",
+                + " diff --cached --no-ext-diff --no-color --find-renames "
+                  "--find-copies --",
             std::chrono::seconds { 10 });
     }
     if (!diff.spawned || diff.timed_out || diff.exit_code != 0) {
         return diff.output.empty() ? "git diff failed" : diff.output;
     }
     ReviewLoadResult parsed = parse_git_diff(diff.output);
-    auto* review = std::get_if<RepositoryReview>(&parsed);
+    auto* review            = std::get_if<RepositoryReview>(&parsed);
     if (review == nullptr) {
         return parsed;
     }
-    const CommandResult untracked = run_command(
-        prefix + " ls-files --others --exclude-standard",
-        std::chrono::seconds { 5 });
+    const CommandResult untracked
+        = run_command(prefix + " ls-files --others --exclude-standard",
+            std::chrono::seconds { 5 });
     if (untracked.spawned && !untracked.timed_out && untracked.exit_code == 0) {
         append_untracked(*review, root, untracked.output);
     }
@@ -357,9 +363,8 @@ std::string format_review_plan_prompt(
     for (const ReviewComment& comment : comments) {
         const std::string line = comment.anchor.new_line
             ? std::to_string(*comment.anchor.new_line)
-            : comment.anchor.old_line
-            ? std::to_string(*comment.anchor.old_line)
-            : "?";
+            : comment.anchor.old_line ? std::to_string(*comment.anchor.old_line)
+                                      : "?";
         prompt += "\n\n- `" + comment.anchor.file + ":" + line + "`";
         if (comment.stale) {
             prompt += " (stale)";
@@ -375,10 +380,11 @@ std::string format_review_plan_prompt(
     return prompt;
 }
 
-std::string format_ai_review_prompt(const RepositoryReview& review,
-    const std::vector<ReviewComment>& comments)
+std::string format_ai_review_prompt(
+    const RepositoryReview& review, const std::vector<ReviewComment>& comments)
 {
-    constexpr std::string_view instructions = R"prompt(Review the supplied git diff.
+    constexpr std::string_view instructions
+        = R"prompt(Review the supplied git diff.
 
 Report only concrete, actionable defects introduced or materially affected by
 the diff. Prioritize correctness, security, reliability, performance, contract
@@ -442,16 +448,15 @@ AiReviewParseResult parse_ai_review_response(
     for (const Json::Value& finding : root["findings"]) {
         if (!finding.isObject() || !finding["file"].isString()
             || !finding["side"].isString() || !finding["line"].isUInt64()
-            || !finding["severity"].isString()
-            || !finding["body"].isString()) {
+            || !finding["severity"].isString() || !finding["body"].isString()) {
             rejected = true;
             continue;
         }
-        const std::string file = finding["file"].asString();
-        const std::string side = finding["side"].asString();
+        const std::string file     = finding["file"].asString();
+        const std::string side     = finding["side"].asString();
         const std::string severity = finding["severity"].asString();
-        const std::string body = finding["body"].asString();
-        const Json::UInt64 line = finding["line"].asUInt64();
+        const std::string body     = finding["body"].asString();
+        const Json::UInt64 line    = finding["line"].asUInt64();
         if ((side != "old" && side != "new")
             || (severity != "P0" && severity != "P1" && severity != "P2"
                 && severity != "P3")
@@ -465,15 +470,15 @@ AiReviewParseResult parse_ai_review_response(
             rejected = true;
             continue;
         }
-        ReviewCommentDraft comment { *anchor,
-            "[" + severity + "] " + body };
-        const bool duplicate = std::ranges::any_of(comments,
-            [&comment](const ReviewCommentDraft& candidate) {
+        ReviewCommentDraft comment { *anchor, "[" + severity + "] " + body };
+        const bool duplicate = std::ranges::any_of(
+            comments, [&comment](const ReviewCommentDraft& candidate) {
                 return candidate.anchor == comment.anchor
                     && normalized_comment_body(candidate.body)
-                        == normalized_comment_body(comment.body);
+                    == normalized_comment_body(comment.body);
             });
-        if (!duplicate) comments.push_back(std::move(comment));
+        if (!duplicate)
+            comments.push_back(std::move(comment));
     }
     if (comments.empty() && rejected && !root["findings"].empty()) {
         return "AI review did not reference any valid changed lines.";
@@ -514,30 +519,31 @@ void ReviewState::set_result(ReviewLoadResult result)
     {
         std::lock_guard lock(mutex_);
         if (auto* review = std::get_if<RepositoryReview>(&result)) {
-            auto next = std::make_shared<const RepositoryReview>(
-                std::move(*review));
+            auto next
+                = std::make_shared<const RepositoryReview>(std::move(*review));
             for (ReviewComment& comment : state_.comments) {
                 comment.stale = true;
                 for (const ReviewFile& file : next->files) {
-                    const std::string& path = file.new_path.empty()
-                        ? file.old_path
-                        : file.new_path;
-                    if (path != comment.anchor.file) continue;
+                    const std::string& path
+                        = file.new_path.empty() ? file.old_path : file.new_path;
+                    if (path != comment.anchor.file)
+                        continue;
                     for (const ReviewHunk& hunk : file.hunks) {
-                        if (std::ranges::any_of(hunk.lines,
-                                [&comment](const ReviewLine& line) {
+                        if (std::ranges::any_of(
+                                hunk.lines, [&comment](const ReviewLine& line) {
                                     return line.old_line
-                                            == comment.anchor.old_line
+                                        == comment.anchor.old_line
                                         && line.new_line
-                                            == comment.anchor.new_line
+                                        == comment.anchor.new_line
                                         && line.content
-                                            == comment.anchor.content;
+                                        == comment.anchor.content;
                                 })) {
                             comment.stale = false;
                             break;
                         }
                     }
-                    if (!comment.stale) break;
+                    if (!comment.stale)
+                        break;
                 }
             }
             state_.review = std::move(next);
@@ -545,15 +551,14 @@ void ReviewState::set_result(ReviewLoadResult result)
             state_.error.clear();
         } else {
             state_.status = LoadStatus::ERROR;
-            state_.error = std::move(std::get<std::string>(result));
+            state_.error  = std::move(std::get<std::string>(result));
         }
         ++state_.generation;
     }
     _publish();
 }
 
-std::size_t ReviewState::add_comment(
-    ReviewLineAnchor anchor, std::string body)
+std::size_t ReviewState::add_comment(ReviewLineAnchor anchor, std::string body)
 {
     std::size_t id;
     {
@@ -567,27 +572,29 @@ std::size_t ReviewState::add_comment(
     return id;
 }
 
-std::size_t ReviewState::add_comments(
-    std::vector<ReviewCommentDraft> comments)
+std::size_t ReviewState::add_comments(std::vector<ReviewCommentDraft> comments)
 {
     std::size_t added = 0;
     {
         std::lock_guard lock(mutex_);
         for (ReviewCommentDraft& comment : comments) {
-            const bool duplicate = std::ranges::any_of(state_.comments,
-                [&comment](const ReviewComment& candidate) {
+            const bool duplicate = std::ranges::any_of(
+                state_.comments, [&comment](const ReviewComment& candidate) {
                     return candidate.anchor == comment.anchor
                         && normalized_comment_body(candidate.body)
-                            == normalized_comment_body(comment.body);
+                        == normalized_comment_body(comment.body);
                 });
-            if (duplicate) continue;
+            if (duplicate)
+                continue;
             state_.comments.push_back(ReviewComment { next_comment_id_++,
                 std::move(comment.anchor), std::move(comment.body), false });
             ++added;
         }
-        if (added > 0) ++state_.generation;
+        if (added > 0)
+            ++state_.generation;
     }
-    if (added > 0) _publish();
+    if (added > 0)
+        _publish();
     return added;
 }
 
@@ -595,9 +602,10 @@ void ReviewState::update_comment(std::size_t id, std::string body)
 {
     {
         std::lock_guard lock(mutex_);
-        const auto it = std::ranges::find(state_.comments, id,
-            &ReviewComment::id);
-        if (it == state_.comments.end()) return;
+        const auto it
+            = std::ranges::find(state_.comments, id, &ReviewComment::id);
+        if (it == state_.comments.end())
+            return;
         it->body = std::move(body);
         ++state_.generation;
     }
@@ -668,4 +676,4 @@ Signal<>::Subscription ReviewState::subscribe(Signal<>::Callback callback)
 
 void ReviewState::_publish() { changed_.publish(); }
 
-}
+} // namespace ursa

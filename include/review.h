@@ -45,7 +45,7 @@ struct ReviewFile {
 
     std::string old_path;
     std::string new_path;
-    Kind kind = Kind::MODIFIED;
+    Kind kind             = Kind::MODIFIED;
     std::size_t additions = 0;
     std::size_t deletions = 0;
     std::vector<ReviewHunk> hunks;
@@ -81,8 +81,8 @@ using AiReviewParseResult
 
 std::string format_review_plan_prompt(
     const std::vector<ReviewComment>& comments);
-std::string format_ai_review_prompt(const RepositoryReview& review,
-    const std::vector<ReviewComment>& comments);
+std::string format_ai_review_prompt(
+    const RepositoryReview& review, const std::vector<ReviewComment>& comments);
 AiReviewParseResult parse_ai_review_response(
     std::string_view response, const RepositoryReview& review);
 
@@ -135,4 +135,4 @@ private:
     Signal<> changed_;
 };
 
-}
+} // namespace ursa

@@ -246,7 +246,7 @@ namespace {
         {
             in_paragraph_ = true;
             words_.clear();
-            needs_sep_      = false;
+            needs_sep_     = false;
             heading_level_ = lvl;
         }
 

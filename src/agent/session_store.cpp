@@ -1,8 +1,10 @@
 #include "session_store.h"
 
 #include "environment.h"
+#include "io.h"
 #include "network.h"
 #include "session.h"
+#include "util.h"
 
 #include <algorithm>
 #include <chrono>
@@ -17,26 +19,12 @@ namespace ursa {
 
 namespace {
 
-    std::string timestamp()
-    {
-        const auto now          = std::chrono::system_clock::now();
-        const std::time_t value = std::chrono::system_clock::to_time_t(now);
-        std::tm local { };
-#ifdef _WIN32
-        localtime_s(&local, &value);
-#else
-        localtime_r(&value, &local);
-#endif
-        std::ostringstream out;
-        out << std::put_time(&local, "%Y-%m-%d %H:%M:%S");
-        return out.str();
-    }
-
     std::string session_filename()
     {
         const auto now = std::chrono::system_clock::now().time_since_epoch();
         const auto milliseconds
-            = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+            = std::chrono::duration_cast<std::chrono::milliseconds>(now)
+                  .count();
         std::random_device random;
         const std::uint32_t suffix = static_cast<std::uint32_t>(random());
         std::ostringstream out;
@@ -218,10 +206,11 @@ namespace {
             tool.name    = value.get("name", "").asString();
             tool.args    = value.get("args", "").asString();
             for (const Json::Value& chat : value["subagent_chats"]) {
-                if (!chat.isObject()) continue;
-                tool.subagent_chats.push_back(SubagentChat {
-                    chat.get("title", "Agent").asString(),
-                    chat.get("transcript", "").asString() });
+                if (!chat.isObject())
+                    continue;
+                tool.subagent_chats.push_back(
+                    SubagentChat { chat.get("title", "Agent").asString(),
+                        chat.get("transcript", "").asString() });
             }
             if (value.isMember("result_kind")) {
                 const int kind = value["result_kind"].asInt();
@@ -336,7 +325,7 @@ Status save_session(Session& session)
     }
     root["version"]           = 1;
     root["title"]             = snapshot.title;
-    root["saved_at"]          = timestamp();
+    root["saved_at"]          = format_local_time("%Y-%m-%d %H:%M:%S");
     root["todo"]              = todo_json(snapshot.todo);
     root["compacted_summary"] = snapshot.compacted_summary;
     root["compacted_item_count"]
@@ -350,11 +339,6 @@ Status save_session(Session& session)
     root["items"] = std::move(items);
 
     std::error_code ec;
-    std::filesystem::create_directories(sessions_dir(), ec);
-    if (ec) {
-        return Status::CONFIG_ERROR;
-    }
-
     std::filesystem::path path;
     do {
         path = sessions_dir() / session_filename();
@@ -363,20 +347,9 @@ Status save_session(Session& session)
         return Status::CONFIG_ERROR;
     }
 
-    const std::filesystem::path temporary = path.string() + ".tmp";
-    {
-        std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
-        if (!file) {
-            return Status::CONFIG_ERROR;
-        }
-        file << write_json(root);
-        if (!file) {
-            return Status::CONFIG_ERROR;
-        }
-    }
-    std::filesystem::rename(temporary, path, ec);
-    if (ec) {
-        return Status::CONFIG_ERROR;
+    const Status st = write_json_file(path, root, "");
+    if (st != Status::OK) {
+        return st;
     }
     session.set_persistence(PersistedSession { path });
     return Status::OK;

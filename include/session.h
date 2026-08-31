@@ -14,8 +14,8 @@
 
 #include "attachments.h"
 #include "network.h"
-#include "ursa_signal.h"
 #include "types.h"
+#include "ursa_signal.h"
 
 namespace ursa {
 
@@ -170,9 +170,7 @@ public:
     const TodoList& todo() const { return todo_; }
     const std::vector<QueuedMessage>& queued() const { return queued_; }
     std::optional<Countdown> retry_countdown() const;
-    Usage totals() const;
     Usage last() const;
-    double total_cost() const;
     std::optional<std::chrono::milliseconds> turn_elapsed() const;
     StatusView status_view() const;
     bool has_pending_work() const;
@@ -234,6 +232,9 @@ public:
 
 private:
     AssistantTurn* last_assistant_locked();
+    const AssistantTurn* last_assistant_locked() const;
+    ToolCall* _find_tool_locked(
+        const ToolCallRequest& req, bool unfinished_only);
     void finalize_reasoning(AssistantTurn& a);
     void finish_session_locked(const std::string& error);
     void update_usage(

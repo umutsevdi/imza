@@ -1,7 +1,7 @@
 #include <doctest/doctest.h>
+#include <json/json.h>
 #include <ftxui/component/event.hpp>
 #include <ftxui/component/mouse.hpp>
-#include <json/json.h>
 #include <ftxui/screen/screen.hpp>
 
 #include "format.h"
@@ -84,14 +84,11 @@ struct Env {
     std::vector<ursa::ChatRequest> requests;
     std::vector<ursa::ToolCallRequest> ran_tools;
     ursa::StreamFn stream;
-    std::shared_ptr<ursa::Session> session
-        = std::make_shared<ursa::Session>();
+    std::shared_ptr<ursa::Session> session = std::make_shared<ursa::Session>();
     ursa::Controller controller {
         std::make_shared<ursa::ApplicationState>(ursa::ApplicationState {
-            session,
-            std::make_shared<ursa::ProviderStore>(test_config()),
-            std::make_shared<ursa::SubagentManager>(),
-            ursa::get_environment(),
+            session, std::make_shared<ursa::ProviderStore>(test_config()),
+            std::make_shared<ursa::SubagentManager>(), ursa::get_environment(),
             std::make_shared<ursa::ReviewState>() }),
         pump.fn(), [] { },
         [this](const ursa::ChatRequest& req, const ursa::StreamCallback& cb) {
@@ -100,31 +97,33 @@ struct Env {
         [this] {
             std::vector<ursa::Tool> tools;
             tools.push_back({ { "bash", "run a shell command",
-                            Json::Value(Json::objectValue) },
+                                  Json::Value(Json::objectValue) },
                 [this](const Json::Value& args) {
                     const std::string raw = args.isString()
                         ? args.asString()
                         : ursa::write_json(args);
                     ran_tools.push_back(
                         ursa::ToolCallRequest { "bash", raw, "", "" });
-                    return ursa::ToolOutput {
-                        ursa::ToolOutput::Kind::OUTPUT, "ran: " + raw };
+                    return ursa::ToolOutput { ursa::ToolOutput::Kind::OUTPUT,
+                        "ran: " + raw };
                 } });
-            tools.push_back({ { "peek", "read-only probe",
-                            Json::Value(Json::objectValue) },
-                [this](const Json::Value& args) {
-                    const std::string raw = args.isString()
-                        ? args.asString()
-                        : ursa::write_json(args);
-                    ran_tools.push_back(
-                        ursa::ToolCallRequest { "peek", raw, "", "" });
-                    return ursa::ToolOutput {
-                        ursa::ToolOutput::Kind::OUTPUT, "peeked: " + raw };
-                },
-                ursa::ToolSafety::READ_ONLY });
+            tools.push_back(
+                { { "peek", "read-only probe", Json::Value(Json::objectValue) },
+                    [this](const Json::Value& args) {
+                        const std::string raw = args.isString()
+                            ? args.asString()
+                            : ursa::write_json(args);
+                        ran_tools.push_back(
+                            ursa::ToolCallRequest { "peek", raw, "", "" });
+                        return ursa::ToolOutput {
+                            ursa::ToolOutput::Kind::OUTPUT, "peeked: " + raw
+                        };
+                    },
+                    ursa::ToolSafety::READ_ONLY });
             tools.push_back(ursa::make_subagent_tool());
             return tools;
-        }() };
+        }()
+    };
 
     const ursa::ChatRequest& last_request() const { return requests.back(); }
 
@@ -141,8 +140,8 @@ struct Env {
 
     const ursa::ToolCall* pending_tool() const
     {
-        for (auto it = session->items().rbegin();
-            it != session->items().rend(); ++it) {
+        for (auto it = session->items().rbegin(); it != session->items().rend();
+            ++it) {
             if (const auto* tc = std::get_if<ursa::ToolCall>(&*it)) {
                 return tc;
             }
@@ -173,29 +172,28 @@ bool idle(const ursa::Session& st)
 TEST_CASE("subagent tool waits for a research agent and retains its chat")
 {
     Env env;
-    env.stream = [&env](const ursa::ChatRequest& req,
-                     const ursa::StreamCallback& cb) {
-        env.requests.push_back(req);
-        const std::string last = req.messages.empty()
-            ? std::string { }
-            : req.messages.back().content;
-        if (last.starts_with("delegate")) {
-            cb(ursa::make_tool_call_event({ "subagent",
-                R"({"tasks":[{"mode":"research","prompt":"inspect"}]})",
-                "delegate inspection", "delegate-1" }));
-        } else if (last.starts_with("inspect")) {
-            cb(ursa::make_delta_event("research report"));
-        } else {
-            cb(ursa::make_delta_event("main complete"));
-        }
-        cb(ursa::make_done_event());
-        return ursa::Status::OK;
-    };
+    env.stream
+        = [&env](const ursa::ChatRequest& req, const ursa::StreamCallback& cb) {
+              env.requests.push_back(req);
+              const std::string last = req.messages.empty()
+                  ? std::string { }
+                  : req.messages.back().content;
+              if (last.starts_with("delegate")) {
+                  cb(ursa::make_tool_call_event({ "subagent",
+                      R"({"tasks":[{"mode":"research","prompt":"inspect"}]})",
+                      "delegate inspection", "delegate-1" }));
+              } else if (last.starts_with("inspect")) {
+                  cb(ursa::make_delta_event("research report"));
+              } else {
+                  cb(ursa::make_delta_event("main complete"));
+              }
+              cb(ursa::make_done_event());
+              return ursa::Status::OK;
+          };
 
     env.controller.submit("delegate");
-    const bool finished = env.pump.wait_for([&] {
-        return idle(*env.session) && env.pending_tool() != nullptr;
-    });
+    const bool finished = env.pump.wait_for(
+        [&] { return idle(*env.session) && env.pending_tool() != nullptr; });
     CAPTURE(env.requests.size());
     if (!env.requests.empty() && !env.requests.front().messages.empty()) {
         CAPTURE(env.requests.front().messages.back().content);
@@ -260,9 +258,8 @@ TEST_CASE("subagent tool captures two concurrent agents separately")
     };
 
     env.controller.submit("delegate two");
-    REQUIRE(env.pump.wait_for([&] {
-        return idle(*env.session) && env.pending_tool() != nullptr;
-    }));
+    REQUIRE(env.pump.wait_for(
+        [&] { return idle(*env.session) && env.pending_tool() != nullptr; }));
     const ursa::ToolCall& call = *env.pending_tool();
     REQUIRE(call.result.has_value());
     CHECK(call.result->text.find("alpha report") != std::string::npos);
@@ -276,17 +273,17 @@ TEST_CASE("subagent tool captures two concurrent agents separately")
         != std::string::npos);
     CHECK(call.subagent_chats[1].transcript.find("alpha report")
         == std::string::npos);
-    const ursa::SubagentChat first = env.controller.subagent_chat(call, 0);
+    const ursa::SubagentChat first  = env.controller.subagent_chat(call, 0);
     const ursa::SubagentChat second = env.controller.subagent_chat(call, 1);
     CHECK(first.title == "Agent 1 (research)");
     CHECK(second.title == "Agent 2 (research)");
     CHECK(first.transcript != second.transcript);
 
-    auto view_state = std::make_shared<ursa::ApplicationState>();
+    auto view_state     = std::make_shared<ursa::ApplicationState>();
     view_state->session = env.session;
-    auto chat = ursa::make_chat(view_state, env.controller,
+    auto chat           = ursa::make_chat(view_state, env.controller,
         [] { return ursa::LayoutCtx { ursa::LayoutCtx::Kind::WIDE, 100 }; });
-    auto click_agent = [&](std::string_view label) {
+    auto click_agent    = [&](std::string_view label) {
         auto screen = ftxui::Screen::Create(
             ftxui::Dimension::Fixed(120), ftxui::Dimension::Fixed(50));
         ftxui::Render(screen, chat->Render());
@@ -294,7 +291,8 @@ TEST_CASE("subagent tool captures two concurrent agents separately")
             = ursa::split_lines(screen.ToString());
         for (std::size_t y = 0; y < lines.size(); ++y) {
             const std::size_t x = lines[y].find(label);
-            if (x == std::string::npos) continue;
+            if (x == std::string::npos)
+                continue;
             ftxui::Mouse mouse;
             mouse.button = ftxui::Mouse::Left;
             mouse.motion = ftxui::Mouse::Pressed;
@@ -352,13 +350,11 @@ TEST_CASE("delegated-agent approvals surface through the main modal queue")
             env.session->modal());
     }));
     const auto request = std::get<ursa::ToolCallRequest>(env.session->modal());
-    CHECK(request.description.find("Agent 1 (research)")
-        != std::string::npos);
-    env.controller.resolve_modal(ursa::ToolVerdict {
-        ursa::ToolDecision::ACCEPT, "" });
-    REQUIRE(env.pump.wait_for([&] {
-        return idle(*env.session) && env.pending_tool() != nullptr;
-    }));
+    CHECK(request.description.find("Agent 1 (research)") != std::string::npos);
+    env.controller.resolve_modal(
+        ursa::ToolVerdict { ursa::ToolDecision::ACCEPT, "" });
+    REQUIRE(env.pump.wait_for(
+        [&] { return idle(*env.session) && env.pending_tool() != nullptr; }));
     const ursa::ToolCall* call = env.pending_tool();
     REQUIRE(call != nullptr);
     REQUIRE(call->result.has_value());
@@ -384,9 +380,9 @@ TEST_CASE("subagent failure reports preserve the last completed tool output")
                 R"({"tasks":[{"mode":"research","prompt":"failing child"}]})",
                 "delegate failing child", "delegate-failure" }));
         } else if (child && !has_tool_result) {
-            cb(ursa::make_tool_call_event({ "shell",
-                R"({"command":"printf child-output"})", "run command",
-                "child-shell" }));
+            cb(ursa::make_tool_call_event(
+                { "shell", R"({"command":"printf child-output"})",
+                    "run command", "child-shell" }));
         } else if (child) {
             cb(ursa::make_error_event(
                 ursa::Status::API_ERROR, "follow-up failed"));
@@ -402,11 +398,10 @@ TEST_CASE("subagent failure reports preserve the last completed tool output")
         return std::holds_alternative<ursa::ToolCallRequest>(
             env.session->modal());
     }));
-    env.controller.resolve_modal(ursa::ToolVerdict {
-        ursa::ToolDecision::ACCEPT, "" });
-    REQUIRE(env.pump.wait_for([&] {
-        return idle(*env.session) && env.pending_tool() != nullptr;
-    }));
+    env.controller.resolve_modal(
+        ursa::ToolVerdict { ursa::ToolDecision::ACCEPT, "" });
+    REQUIRE(env.pump.wait_for(
+        [&] { return idle(*env.session) && env.pending_tool() != nullptr; }));
     const ursa::ToolCall& call = *env.pending_tool();
     REQUIRE(call.result.has_value());
     CHECK(call.result->text.find("Failed: API error") != std::string::npos);
@@ -421,24 +416,23 @@ TEST_CASE("subagent failure reports preserve the last completed tool output")
 TEST_CASE("subagent tool rejects build tasks while main agent is planning")
 {
     Env env;
-    env.stream = [](const ursa::ChatRequest& req,
-                     const ursa::StreamCallback& cb) {
-        if (!req.messages.empty()
-            && req.messages.back().content.starts_with("delegate")) {
-            cb(ursa::make_tool_call_event({ "subagent",
-                R"({"tasks":[{"mode":"build","prompt":"change it"}]})",
-                "delegate change", "delegate-1" }));
-        } else {
-            cb(ursa::make_delta_event("main complete"));
-        }
-        cb(ursa::make_done_event());
-        return ursa::Status::OK;
-    };
+    env.stream
+        = [](const ursa::ChatRequest& req, const ursa::StreamCallback& cb) {
+              if (!req.messages.empty()
+                  && req.messages.back().content.starts_with("delegate")) {
+                  cb(ursa::make_tool_call_event({ "subagent",
+                      R"({"tasks":[{"mode":"build","prompt":"change it"}]})",
+                      "delegate change", "delegate-1" }));
+              } else {
+                  cb(ursa::make_delta_event("main complete"));
+              }
+              cb(ursa::make_done_event());
+              return ursa::Status::OK;
+          };
 
     env.controller.submit("delegate");
-    const bool finished = env.pump.wait_for([&] {
-        return idle(*env.session) && env.pending_tool() != nullptr;
-    });
+    const bool finished = env.pump.wait_for(
+        [&] { return idle(*env.session) && env.pending_tool() != nullptr; });
     CAPTURE(env.session->items().size());
     CAPTURE(static_cast<int>(env.session->phase()));
     CAPTURE(env.session->error());
@@ -472,8 +466,7 @@ TEST_CASE(
     };
 
     env.controller.submit("go");
-    REQUIRE(env.pump.wait_for(
-        [&] { return showing_question(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return showing_question(*env.session); }));
     CHECK(env.controller.queue_size() == 1);
 
     const std::string ask_md = ursa::question_form_markdown(
@@ -531,8 +524,7 @@ TEST_CASE("tool accept: output fills result, request half byte-stable")
     };
 
     env.controller.submit("go");
-    REQUIRE(env.pump.wait_for(
-        [&] { return showing_tool_ask(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
 
     const ursa::ToolCall* pending = env.pending_tool();
     REQUIRE(pending != nullptr);
@@ -586,8 +578,7 @@ TEST_CASE("reject with reason reaches transcript and injected result")
     };
 
     env.controller.submit("go");
-    REQUIRE(env.pump.wait_for(
-        [&] { return showing_tool_ask(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
 
     env.controller.resolve_modal(ursa::ModalResult { ursa::ToolVerdict {
         ursa::ToolDecision::REJECT, "needs approval first" } });
@@ -622,8 +613,7 @@ TEST_CASE("esc on tool injects generic denial, appends nothing to transcript")
     };
 
     env.controller.submit("go");
-    REQUIRE(env.pump.wait_for(
-        [&] { return showing_tool_ask(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
 
     env.controller.close_modal();
 
@@ -654,8 +644,7 @@ TEST_CASE("esc on question skips form, appends nothing, no exception")
           };
 
     env.controller.submit("go");
-    REQUIRE(env.pump.wait_for(
-        [&] { return showing_question(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return showing_question(*env.session); }));
 
     env.controller.close_modal();
 
@@ -688,14 +677,12 @@ TEST_CASE("one drain cycle folds question answer and tool output correctly")
 
     env.controller.submit("go");
 
-    REQUIRE(env.pump.wait_for(
-        [&] { return showing_question(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return showing_question(*env.session); }));
     CHECK(env.controller.queue_size() == 2);
     env.controller.resolve_modal(
         ursa::ModalResult { ursa::ModalAnswer { { { { "pg" }, "", "" } } } });
 
-    REQUIRE(env.pump.wait_for(
-        [&] { return showing_tool_ask(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
     env.controller.resolve_modal(ursa::ModalResult {
         ursa::ToolVerdict { ursa::ToolDecision::ACCEPT, "" } });
 
@@ -740,8 +727,7 @@ TEST_CASE("FIFO order preserved and queue_size counts overlays")
     };
 
     env.controller.submit("go");
-    REQUIRE(env.pump.wait_for(
-        [&] { return showing_question(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return showing_question(*env.session); }));
 
     env.controller.enqueue_user_modal(
         ursa::ViewerModal { "Queued", "content" });
@@ -750,14 +736,12 @@ TEST_CASE("FIFO order preserved and queue_size counts overlays")
 
     env.controller.resolve_modal(
         ursa::ModalResult { ursa::ModalAnswer { { { { "a" }, "", "" } } } });
-    REQUIRE(env.pump.wait_for(
-        [&] { return showing_tool_ask(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
     CHECK(env.controller.queue_size() == 2);
 
     env.controller.close_modal();
     REQUIRE(env.pump.wait_for([&] {
-        return std::holds_alternative<ursa::ViewerModal>(
-            env.session->modal());
+        return std::holds_alternative<ursa::ViewerModal>(env.session->modal());
     }));
     CHECK(env.controller.queue_size() == 1);
 
@@ -787,8 +771,7 @@ TEST_CASE("accept-always records tool and later calls never queue")
     };
 
     env.controller.submit("go");
-    REQUIRE(env.pump.wait_for(
-        [&] { return showing_tool_ask(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
 
     env.controller.resolve_modal(ursa::ModalResult {
         ursa::ToolVerdict { ursa::ToolDecision::ACCEPT_ALWAYS, "" } });
@@ -826,20 +809,17 @@ TEST_CASE("user modal enqueued mid-stream surfaces after the ask resolves")
     };
 
     env.controller.submit("go");
-    REQUIRE(env.pump.wait_for(
-        [&] { return showing_question(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return showing_question(*env.session); }));
 
     env.controller.enqueue_user_modal(
         ursa::VariantModal { { "off", "default" }, "default" });
     env.pump.pump();
-    CHECK(std::holds_alternative<ursa::QuestionForm>(
-        env.session->modal()));
+    CHECK(std::holds_alternative<ursa::QuestionForm>(env.session->modal()));
 
     env.controller.resolve_modal(
         ursa::ModalResult { ursa::ModalAnswer { { { { "a" }, "", "" } } } });
     REQUIRE(env.pump.wait_for([&] {
-        return std::holds_alternative<ursa::VariantModal>(
-            env.session->modal());
+        return std::holds_alternative<ursa::VariantModal>(env.session->modal());
     }));
 
     env.controller.close_modal();

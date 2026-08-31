@@ -65,7 +65,7 @@ TEST_CASE("catalog roundtrip through presets file")
 {
     ursa::Catalog catalog;
     catalog.fetched_at = 1756390000;
-    const auto src = parse_value(R"({
+    const auto src     = parse_value(R"({
         "name": "OpenRouter",
         "api": "https://openrouter.ai/api/v1",
         "npm": "@ai-sdk/openai-compatible",
@@ -82,8 +82,8 @@ TEST_CASE("catalog roundtrip through presets file")
     CHECK(ursa::load_catalog(path, loaded) == ursa::Status::OK);
     REQUIRE(loaded.providers.count("openrouter") == 1);
     CHECK(loaded.providers.at("openrouter").name == "OpenRouter");
-    CHECK(loaded.providers.at("openrouter").models.count("openai/gpt-5.5")
-        == 1);
+    CHECK(
+        loaded.providers.at("openrouter").models.count("openai/gpt-5.5") == 1);
     CHECK(loaded.fetched_at == 1756390000);
     std::filesystem::remove(path);
 }
@@ -103,8 +103,7 @@ TEST_CASE("catalog_stale respects the 7-day window")
     CHECK(catalog_stale(catalog));
     catalog.fetched_at = static_cast<std::int64_t>(std::time(nullptr));
     CHECK_FALSE(catalog_stale(catalog));
-    catalog.fetched_at
-        -= 8 * 24 * 3600;
+    catalog.fetched_at -= 8 * 24 * 3600;
     CHECK(catalog_stale(catalog));
 }
 
@@ -117,8 +116,8 @@ TEST_CASE("whitelist gates providers")
 
 TEST_CASE("auth_from_npm maps ai-sdk packages")
 {
-    CHECK(ursa::auth_from_npm("@ai-sdk/anthropic")
-        == ursa::AuthType::ANTHROPIC);
+    CHECK(
+        ursa::auth_from_npm("@ai-sdk/anthropic") == ursa::AuthType::ANTHROPIC);
     CHECK(ursa::auth_from_npm("@ai-sdk/anthropic/vertex")
         == ursa::AuthType::ANTHROPIC);
     CHECK(ursa::auth_from_npm("@ai-sdk/openai-compatible")
@@ -161,8 +160,7 @@ TEST_CASE("resolve_route derives endpoints per dialect")
 
     const ursa::Route openai
         = ursa::resolve_route(conn, catalog, ursa::ApiStandard::OPENAI);
-    CHECK(openai.endpoint
-        == "https://openrouter.ai/api/v1/chat/completions");
+    CHECK(openai.endpoint == "https://openrouter.ai/api/v1/chat/completions");
     CHECK(openai.api == "https://openrouter.ai/api/v1");
     CHECK(openai.auth == ursa::AuthType::BEARER);
     CHECK(openai.api_key == "sk-or");
@@ -189,8 +187,7 @@ TEST_CASE("resolve_route routes anthropic providers with x-api-key")
 
     const ursa::Route openai
         = ursa::resolve_route(conn, catalog, ursa::ApiStandard::OPENAI);
-    CHECK(openai.endpoint
-        == "https://api.anthropic.com/v1/chat/completions");
+    CHECK(openai.endpoint == "https://api.anthropic.com/v1/chat/completions");
     CHECK(openai.api == "https://api.anthropic.com/v1");
     CHECK(openai.auth == ursa::AuthType::ANTHROPIC);
 

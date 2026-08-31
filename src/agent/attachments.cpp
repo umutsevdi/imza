@@ -1,5 +1,7 @@
 #include "attachments.h"
 
+#include "util.h"
+
 #include <algorithm>
 #include <cctype>
 #include <fstream>
@@ -14,16 +16,15 @@ namespace {
 
     bool ignored_directory(std::string_view name)
     {
-        static const std::unordered_set<std::string> ignored {
-            ".git", ".hg", ".svn", ".cache", ".next", ".nuxt", ".idea",
-            ".vscode", ".venv", "venv", "node_modules", "build", "dist",
-            "out", "target", "vendor", "coverage", "__pycache__"
-        };
+        static const std::unordered_set<std::string> ignored { ".git", ".hg",
+            ".svn", ".cache", ".next", ".nuxt", ".idea", ".vscode", ".venv",
+            "venv", "node_modules", "build", "dist", "out", "target", "vendor",
+            "coverage", "__pycache__" };
         return ignored.contains(std::string(name));
     }
 
-    bool within(const std::filesystem::path& root,
-        const std::filesystem::path& path)
+    bool within(
+        const std::filesystem::path& root, const std::filesystem::path& path)
     {
         auto root_it = root.begin();
         auto path_it = path.begin();
@@ -33,13 +34,6 @@ namespace {
             ++path_it;
         }
         return root_it == root.end();
-    }
-
-    std::string lower(std::string value)
-    {
-        std::transform(value.begin(), value.end(), value.begin(),
-            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        return value;
     }
 
     std::string escape_attribute(std::string_view value)
@@ -66,9 +60,10 @@ namespace {
 std::optional<AttachmentToken> attachment_token_at(
     std::string_view text, std::size_t cursor)
 {
-    cursor = std::min(cursor, text.size());
+    cursor            = std::min(cursor, text.size());
     std::size_t begin = cursor;
-    while (begin > 0 && !std::isspace(static_cast<unsigned char>(text[begin - 1]))) {
+    while (begin > 0
+        && !std::isspace(static_cast<unsigned char>(text[begin - 1]))) {
         --begin;
     }
     if (begin >= cursor || text[begin] != '@') {
@@ -82,11 +77,12 @@ std::optional<AttachmentToken> attachment_token_at(
 }
 
 std::vector<AttachmentCandidate> attachment_candidates(
-    const std::filesystem::path& root, std::string_view query, std::size_t limit)
+    const std::filesystem::path& root, std::string_view query,
+    std::size_t limit)
 {
     std::filesystem::path typed(query);
     std::filesystem::path directory = typed.parent_path();
-    const std::string needle        = lower(typed.filename().string());
+    const std::string needle        = to_lower(typed.filename().string());
     std::error_code ec;
     const auto canonical_root = std::filesystem::weakly_canonical(root, ec);
     if (ec) {
@@ -98,9 +94,8 @@ std::vector<AttachmentCandidate> attachment_candidates(
         return { };
     }
     std::vector<AttachmentCandidate> out;
-    std::filesystem::directory_iterator it(
-        search_dir, std::filesystem::directory_options::skip_permission_denied,
-        ec);
+    std::filesystem::directory_iterator it(search_dir,
+        std::filesystem::directory_options::skip_permission_denied, ec);
     constexpr std::size_t kMaxInspected = 2000;
     std::size_t inspected               = 0;
     for (const auto& entry : it) {
@@ -108,7 +103,8 @@ std::vector<AttachmentCandidate> attachment_candidates(
             break;
         }
         const std::string name = entry.path().filename().string();
-        if (!needle.empty() && lower(name).find(needle) == std::string::npos) {
+        if (!needle.empty()
+            && to_lower(name).find(needle) == std::string::npos) {
             continue;
         }
         const bool is_dir = entry.is_directory(ec) && !entry.is_symlink(ec);
@@ -141,7 +137,7 @@ AttachmentResult load_attachment(
 {
     std::error_code ec;
     const auto canonical_root = std::filesystem::weakly_canonical(root, ec);
-    const auto path = std::filesystem::weakly_canonical(
+    const auto path           = std::filesystem::weakly_canonical(
         canonical_root / std::filesystem::path(relative_path), ec);
     if (ec || !within(canonical_root, path)) {
         return { Status::CONFIG_ERROR, std::nullopt,
@@ -149,14 +145,14 @@ AttachmentResult load_attachment(
     }
     if (!std::filesystem::is_regular_file(path, ec) || ec) {
         return { Status::CONFIG_ERROR, std::nullopt,
-            "Attachment is not a readable file: "
-                + std::string(relative_path) + "." };
+            "Attachment is not a readable file: " + std::string(relative_path)
+                + "." };
     }
     const std::uintmax_t size = std::filesystem::file_size(path, ec);
     if (ec || size > kMaxAttachmentBytes) {
         return { Status::CONFIG_ERROR, std::nullopt,
-            "Attachment exceeds the 1 MiB limit: "
-                + std::string(relative_path) + "." };
+            "Attachment exceeds the 1 MiB limit: " + std::string(relative_path)
+                + "." };
     }
     std::ifstream file(path, std::ios::binary);
     std::ostringstream buffer;
@@ -168,8 +164,8 @@ AttachmentResult load_attachment(
     std::string content = buffer.str();
     if (content.find('\0') != std::string::npos) {
         return { Status::CONFIG_ERROR, std::nullopt,
-            "Binary files cannot be attached: "
-                + std::string(relative_path) + "." };
+            "Binary files cannot be attached: " + std::string(relative_path)
+                + "." };
     }
     const std::string display
         = std::filesystem::relative(path, canonical_root, ec).generic_string();
@@ -201,9 +197,9 @@ void retain_mentioned_attachments(
 {
     std::erase_if(attachments, [&](const FileAttachment& attachment) {
         const std::string mention = "@" + attachment.path;
-        std::size_t pos            = text.find(mention);
+        std::size_t pos           = text.find(mention);
         while (pos != std::string_view::npos) {
-            const std::size_t end = pos + mention.size();
+            const std::size_t end   = pos + mention.size();
             const bool begins_token = pos == 0
                 || std::isspace(static_cast<unsigned char>(text[pos - 1]));
             const bool ends_token = end == text.size()

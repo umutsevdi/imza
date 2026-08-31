@@ -9,51 +9,51 @@ namespace fs = std::filesystem;
 
 namespace {
 
-    int next_dir_id()
+int next_dir_id()
+{
+    static int n = 0;
+    return ++n;
+}
+
+struct TmpDir {
+    fs::path path;
+
+    TmpDir()
+        : path(fs::temp_directory_path()
+              / ("ursa_tools_test_" + std::to_string(next_dir_id())))
     {
-        static int n = 0;
-        return ++n;
+        fs::create_directories(path);
     }
 
-    struct TmpDir {
-        fs::path path;
-
-        TmpDir()
-            : path(fs::temp_directory_path()
-                  / ("ursa_tools_test_" + std::to_string(next_dir_id())))
-        {
-            fs::create_directories(path);
-        }
-
-        ~TmpDir()
-        {
-            std::error_code ec;
-            fs::remove_all(path, ec);
-        }
-
-        fs::path file(const std::string& name) const { return path / name; }
-    };
-
-    void write_file(const fs::path& p, const std::string& body)
+    ~TmpDir()
     {
-        std::ofstream out(p);
-        out << body;
+        std::error_code ec;
+        fs::remove_all(path, ec);
     }
 
-    ursa::ToolOutput run(const ursa::Tool& tool, std::string_view path)
-    {
-        return tool.run(ursa::parse_json(
-            std::string(R"({"path":")") + std::string(path) + "\"}"));
-    }
+    fs::path file(const std::string& name) const { return path / name; }
+};
 
-    ursa::ToolOutput run_window(const ursa::Tool& tool, std::string_view path,
-        int begin, int end)
-    {
-        const std::string args = std::string(R"({"path":")")
-            + std::string(path) + "\",\"line_begin\":" + std::to_string(begin)
-            + ",\"line_end\":" + std::to_string(end) + "}";
-        return tool.run(ursa::parse_json(args));
-    }
+void write_file(const fs::path& p, const std::string& body)
+{
+    std::ofstream out(p);
+    out << body;
+}
+
+ursa::ToolOutput run(const ursa::Tool& tool, std::string_view path)
+{
+    return tool.run(ursa::parse_json(
+        std::string(R"({"path":")") + std::string(path) + "\"}"));
+}
+
+ursa::ToolOutput run_window(
+    const ursa::Tool& tool, std::string_view path, int begin, int end)
+{
+    const std::string args = std::string(R"({"path":")") + std::string(path)
+        + "\",\"line_begin\":" + std::to_string(begin)
+        + ",\"line_end\":" + std::to_string(end) + "}";
+    return tool.run(ursa::parse_json(args));
+}
 
 } // namespace
 
@@ -83,7 +83,7 @@ TEST_CASE("read reports range and path errors")
 {
     TmpDir tmp;
     write_file(tmp.file("small.txt"), "a\nb\n");
-    const auto tool = ursa::make_read_tool();
+    const auto tool     = ursa::make_read_tool();
     const std::string p = tmp.file("small.txt").string();
 
     const auto beyond = run_window(tool, p, 5, 9);
@@ -132,7 +132,8 @@ TEST_CASE("read truncates unbounded reads of long files")
     CHECK(out.text.find("line2000\n") != std::string::npos);
     CHECK(out.text.find("\nline2001") == std::string::npos);
 
-    const auto window = run_window(tool, tmp.file("long.txt").string(), 2400, 2500);
+    const auto window
+        = run_window(tool, tmp.file("long.txt").string(), 2400, 2500);
     CHECK(window.kind == ursa::ToolOutput::Kind::OUTPUT);
     CHECK(window.text.find("truncated") == std::string::npos);
     CHECK(window.text.find("line2500") != std::string::npos);
@@ -234,8 +235,8 @@ TEST_CASE("shell tool runs a command and reports the exit code")
     CHECK(tool.spec.parameters["properties"].isMember("command"));
     CHECK(tool.spec.parameters["properties"].isMember("timeout"));
 
-    const auto out = tool.run(
-        ursa::parse_json(R"({"command":"echo hi-from-shell"})"));
+    const auto out
+        = tool.run(ursa::parse_json(R"({"command":"echo hi-from-shell"})"));
     CHECK(out.kind == ursa::ToolOutput::Kind::OUTPUT);
     CHECK(out.text.find("hi-from-shell") != std::string::npos);
     CHECK_FALSE(out.text.starts_with("echo hi-from-shell"));
@@ -263,7 +264,7 @@ TEST_CASE("shell tool rejects a missing command and honors timeout clamp")
 TEST_CASE("shell tool carries non-zero exit status separately from output")
 {
     const auto tool = ursa::make_shell_tool();
-    const auto out = tool.run(ursa::parse_json(R"({"command":"false"})"));
+    const auto out  = tool.run(ursa::parse_json(R"({"command":"false"})"));
 
     CHECK(out.kind == ursa::ToolOutput::Kind::OUTPUT);
     CHECK(out.text.empty());

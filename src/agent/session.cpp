@@ -5,8 +5,8 @@
 #include "pricing.h"
 #include "prompt.h"
 
-#include <cassert>
 #include <algorithm>
+#include <cassert>
 #include <chrono>
 #include <filesystem>
 #include <string>
@@ -99,20 +99,9 @@ std::string tool_result_text(const ToolCall& call)
     case ToolCall::Result::Kind::REJECT:
     case ToolCall::Result::Kind::CANCEL: return denial_text(call.result->text);
     case ToolCall::Result::Kind::OUTPUT:
-    case ToolCall::Result::Kind::ERROR: {
-        std::string text = call.result->text;
-        if (call.result->shell_status.has_value()) {
-            const std::string status
-                = shell_status_text(*call.result->shell_status);
-            if (!status.empty()) {
-                if (!text.empty() && text.back() != '\n') {
-                    text += '\n';
-                }
-                text += "[" + status + "]";
-            }
-        }
-        return text;
-    }
+    case ToolCall::Result::Kind::ERROR:
+        return append_shell_status(
+            call.result->text, call.result->shell_status);
     }
     return "";
 }
@@ -167,28 +156,17 @@ std::optional<Session::Countdown> Session::retry_countdown() const
     return retry_countdown_;
 }
 
-Usage Session::totals() const
-{
-    std::lock_guard lock(mutex_);
-    return totals_;
-}
-
 Usage Session::last() const
 {
     std::lock_guard lock(mutex_);
     return last_;
 }
 
-double Session::total_cost() const
-{
-    std::lock_guard lock(mutex_);
-    return total_cost_;
-}
-
 std::optional<std::chrono::milliseconds> Session::turn_elapsed() const
 {
     std::lock_guard lock(mutex_);
-    if (!turn_started_) return std::nullopt;
+    if (!turn_started_)
+        return std::nullopt;
     return std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - *turn_started_);
 }
@@ -205,8 +183,8 @@ bool Session::has_pending_work() const
     if (phase_ != Phase::IDLE || !queued_.empty()) {
         return true;
     }
-    return std::any_of(items_.begin(), items_.end(),
-        [](const ConversationItem& item) {
+    return std::any_of(
+        items_.begin(), items_.end(), [](const ConversationItem& item) {
             const auto* tool = std::get_if<ToolCall>(&item);
             return tool != nullptr && !tool->result.has_value();
         });
@@ -215,22 +193,22 @@ bool Session::has_pending_work() const
 SessionSnapshot Session::snapshot() const
 {
     std::lock_guard lock(mutex_);
-    return { title_, items_, todo_, compacted_summary_,
-        compacted_item_count_, mode_ == Mode::PLAN, persistence_ };
+    return { title_, items_, todo_, compacted_summary_, compacted_item_count_,
+        mode_ == Mode::PLAN, persistence_ };
 }
 
 void Session::restore(SessionSnapshot snapshot)
 {
     {
         std::lock_guard lock(mutex_);
-        title_                    = std::move(snapshot.title);
-        items_                    = std::move(snapshot.items);
-        todo_                     = std::move(snapshot.todo);
-        compacted_summary_        = std::move(snapshot.compacted_summary);
-        compacted_item_count_     = snapshot.compacted_item_count;
-        persistence_              = std::move(snapshot.persistence);
-        mode_ = snapshot.plan_mode ? Mode::PLAN : Mode::BUILD;
-        modal_                    = std::monostate { };
+        title_                = std::move(snapshot.title);
+        items_                = std::move(snapshot.items);
+        todo_                 = std::move(snapshot.todo);
+        compacted_summary_    = std::move(snapshot.compacted_summary);
+        compacted_item_count_ = snapshot.compacted_item_count;
+        persistence_          = std::move(snapshot.persistence);
+        mode_                 = snapshot.plan_mode ? Mode::PLAN : Mode::BUILD;
+        modal_                = std::monostate { };
         queued_.clear();
         error_.clear();
         retry_countdown_.reset();
@@ -376,8 +354,8 @@ void Session::begin_send(
         persistence_ = UnsavedSession { };
         items_.push_back(UserTurn { std::move(text), std::move(attachments) });
         error_.clear();
-        phase_          = Phase::CONNECTING;
-        turn_started_   = std::chrono::steady_clock::now();
+        phase_        = Phase::CONNECTING;
+        turn_started_ = std::chrono::steady_clock::now();
     }
     if (has_attachments) {
         attachments_changed_.publish();
@@ -411,7 +389,7 @@ std::pair<std::size_t, std::size_t> Session::begin_compaction()
 {
     std::lock_guard lock(mutex_);
     const std::size_t id = next_compaction_id_++;
-    std::size_t prefix = 0;
+    std::size_t prefix   = 0;
     for (std::size_t index = items_.size(); index > 0; --index) {
         if (std::holds_alternative<UserTurn>(items_[index - 1])) {
             prefix = index - 1;
@@ -434,8 +412,8 @@ void Session::finish_compaction(std::size_t id, std::string summary,
         event->status = success ? CompactionEvent::Status::COMPLETED
                                 : CompactionEvent::Status::FAILED;
         if (success) {
-            compacted_summary_      = std::move(summary);
-            compacted_item_count_   = compacted_item_count;
+            compacted_summary_    = std::move(summary);
+            compacted_item_count_ = compacted_item_count;
         }
         return;
     }
@@ -449,24 +427,34 @@ void Session::append_tool(const ToolCallRequest& req)
     }
     const std::size_t id = next_tool_id_++;
     items_.push_back(
-        ToolCall { id, req.id, req.name, req.args, { },
-            { }, std::nullopt });
+        ToolCall { id, req.id, req.name, req.args, { }, { }, std::nullopt });
+}
+
+ToolCall* Session::_find_tool_locked(
+    const ToolCallRequest& req, const bool unfinished_only)
+{
+    for (auto it = items_.rbegin(); it != items_.rend(); ++it) {
+        auto* call = std::get_if<ToolCall>(&*it);
+        if (call == nullptr || (unfinished_only && call->result.has_value())) {
+            continue;
+        }
+        const bool matched = !req.id.empty()
+            ? call->call_id == req.id
+            : call->name == req.name && call->args == req.args;
+        if (matched) {
+            return call;
+        }
+    }
+    return nullptr;
 }
 
 void Session::set_tool_subagent_chats(
     const ToolCallRequest& req, std::vector<SubagentChat> chats)
 {
     std::lock_guard lock(mutex_);
-    for (auto it = items_.rbegin(); it != items_.rend(); ++it) {
-        auto* call = std::get_if<ToolCall>(&*it);
-        if (call == nullptr) continue;
-        const bool matched = !req.id.empty()
-            ? call->call_id == req.id
-            : call->name == req.name && call->args == req.args;
-        if (!matched) continue;
+    if (auto* call = _find_tool_locked(req, false)) {
         call->subagent_chats = std::move(chats);
         ++content_serial_;
-        return;
     }
 }
 
@@ -474,16 +462,9 @@ void Session::set_tool_subagents(
     const ToolCallRequest& req, std::vector<std::size_t> ids)
 {
     std::lock_guard lock(mutex_);
-    for (auto it = items_.rbegin(); it != items_.rend(); ++it) {
-        auto* call = std::get_if<ToolCall>(&*it);
-        if (call == nullptr || call->result.has_value()) continue;
-        const bool matched = !req.id.empty()
-            ? call->call_id == req.id
-            : call->name == req.name && call->args == req.args;
-        if (!matched) continue;
+    if (auto* call = _find_tool_locked(req, true)) {
         call->subagent_ids = std::move(ids);
         ++content_serial_;
-        return;
     }
 }
 
@@ -491,18 +472,8 @@ void Session::fill_tool_result(
     const ToolCallRequest& req, ToolCall::Result result)
 {
     std::lock_guard lock(mutex_);
-    for (auto it = items_.rbegin(); it != items_.rend(); ++it) {
-        auto* tc = std::get_if<ToolCall>(&*it);
-        if (tc == nullptr || tc->result.has_value()) {
-            continue;
-        }
-        const bool matched = !req.id.empty()
-            ? tc->call_id == req.id
-            : tc->name == req.name && tc->args == req.args;
-        if (matched) {
-            tc->result = std::move(result);
-            return;
-        }
+    if (auto* call = _find_tool_locked(req, true)) {
+        call->result = std::move(result);
     }
 }
 
@@ -573,10 +544,8 @@ bool Session::interrupt_requested() const
 std::optional<AssistantTurn> Session::last_assistant() const
 {
     std::lock_guard lock(mutex_);
-    for (auto it = items_.rbegin(); it != items_.rend(); ++it) {
-        if (const auto* a = std::get_if<AssistantTurn>(&*it)) {
-            return *a;
-        }
+    if (const auto* assistant = last_assistant_locked()) {
+        return *assistant;
     }
     return std::nullopt;
 }
@@ -584,15 +553,9 @@ std::optional<AssistantTurn> Session::last_assistant() const
 bool Session::finish_session(std::string error)
 {
     std::lock_guard lock(mutex_);
-    if (phase_ == Phase::IDLE) {
-        return false;
-    }
-    retry_countdown_.reset();
-    if (!error.empty() && error_.empty()) {
-        error_ = std::move(error);
-    }
-    phase_ = Phase::IDLE;
-    return true;
+    const bool finished = phase_ != Phase::IDLE;
+    finish_session_locked(error);
+    return finished;
 }
 
 std::vector<Message> Session::build_history(
@@ -717,8 +680,14 @@ void Session::apply(const StreamEvent& ev, const ModelPricing& pricing)
 
 AssistantTurn* Session::last_assistant_locked()
 {
+    return const_cast<AssistantTurn*>(
+        static_cast<const Session*>(this)->last_assistant_locked());
+}
+
+const AssistantTurn* Session::last_assistant_locked() const
+{
     for (auto it = items_.rbegin(); it != items_.rend(); ++it) {
-        if (auto* a = std::get_if<AssistantTurn>(&*it)) {
+        if (const auto* a = std::get_if<AssistantTurn>(&*it)) {
             return a;
         }
     }
@@ -772,9 +741,6 @@ Signal<>::Subscription Session::subscribe_to_attachments_change(
     return attachments_changed_.subscribe(std::move(callback));
 }
 
-void Session::_notify_title_change()
-{
-    title_changed_.publish();
-}
+void Session::_notify_title_change() { title_changed_.publish(); }
 
 } // namespace ursa

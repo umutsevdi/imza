@@ -23,8 +23,7 @@
 
 namespace ursa {
 
-WorkflowPhase next_workflow_phase(
-    WorkflowPhase phase, bool review_available)
+WorkflowPhase next_workflow_phase(WorkflowPhase phase, bool review_available)
 {
     switch (phase) {
     case WorkflowPhase::PLAN: return WorkflowPhase::BUILD;
@@ -79,18 +78,18 @@ namespace {
 
     class Repl : public ComponentBase {
     public:
-        Repl(ScreenInteractive& screen,
-            std::shared_ptr<ApplicationState> state, Controller& controller)
+        Repl(ScreenInteractive& screen, std::shared_ptr<ApplicationState> state,
+            Controller& controller)
             : screen_(screen)
             , state_(std::move(state))
             , controller_(controller)
         {
-            const LayoutFn layout = [this] { return layout_; };
+            const LayoutFn layout     = [this] { return layout_; };
             const WorkflowFn workflow = [this] { return phase_; };
             if (!state_->review) {
                 state_->review = std::make_shared<ReviewState>();
             }
-            side_ = make_side_panel(state_, controller, layout, workflow,
+            side_        = make_side_panel(state_, controller, layout, workflow,
                 [this](WorkflowPhase phase) { _set_phase(phase); });
             status_line_ = make_status_line(state_, layout, workflow);
             chat_        = make_chat(state_, controller, layout);
@@ -99,21 +98,20 @@ namespace {
             modal_       = make_modal(state_, controller);
 
             workspace_subscription_
-                = state_->environment->subscribe_to_workspace_change([] {
-                      animation::RequestAnimationFrame();
-                  });
+                = state_->environment->subscribe_to_workspace_change(
+                    [] { animation::RequestAnimationFrame(); });
 
-            phase_ = state_->session->mode() == Session::Mode::PLAN
+            phase_            = state_->session->mode() == Session::Mode::PLAN
                 ? WorkflowPhase::PLAN
                 : WorkflowPhase::BUILD;
-            selected_ = static_cast<int>(phase_);
+            selected_         = static_cast<int>(phase_);
             review_available_ = _review_available();
-            tab_names_         = { "Plan", "Build" };
+            tab_names_        = { "Plan", "Build" };
             if (review_available_) {
                 tab_names_.push_back("Review");
             }
-            tabs_         = CatchEvent(Menu(&tab_names_, &selected_,
-                                           MenuOption::HorizontalAnimated()),
+            tabs_ = CatchEvent(
+                Menu(&tab_names_, &selected_, MenuOption::HorizontalAnimated()),
                 [](const Event& event) {
                     return event == Event::Tab || event == Event::TabReverse;
                 });
@@ -133,10 +131,10 @@ namespace {
             const auto terminal_size = ftxui::Terminal::Size();
             layout_                  = layout_context(terminal_size.dimx);
             const int w              = layout_.width;
-            Element side      = side_->Render();
-            Element tab       = tabs_->Render();
-            Element right_col = tabs_content_->Render();
-            Element status    = status_line_->Render();
+            Element side             = side_->Render();
+            Element tab              = tabs_->Render();
+            Element right_col        = tabs_content_->Render();
+            Element status           = status_line_->Render();
 
             right_col = std::move(right_col) | xflex | yflex;
 
@@ -180,8 +178,7 @@ namespace {
                 return true;
             }
             if (is_reverse_tab(event)) {
-                _set_phase(previous_workflow_phase(
-                    phase_, review_available_));
+                _set_phase(previous_workflow_phase(phase_, review_available_));
                 return true;
             }
             if (event.is_mouse()) {

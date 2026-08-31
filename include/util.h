@@ -1,11 +1,82 @@
 #pragma once
 
 #include <cctype>
+#include <chrono>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace ursa {
+
+inline std::string env_or_empty(const char* key)
+{
+#ifdef _WIN32
+    char* buf = nullptr;
+    size_t sz = 0;
+    if (_dupenv_s(&buf, &sz, key) != 0 || buf == nullptr) {
+        return "";
+    }
+    std::string value(buf);
+    free(buf);
+    return value;
+#else
+    const char* value = std::getenv(key);
+    return value != nullptr ? std::string(value) : "";
+#endif
+}
+
+// Appends '.' unless the text already ends with sentence punctuation.
+inline std::string ensure_sentence_end(std::string text)
+{
+    if (!text.empty() && !text.ends_with('.') && !text.ends_with('!')
+        && !text.ends_with('?') && !text.ends_with("…")) {
+        text += '.';
+    }
+    return text;
+}
+
+inline std::string join_lines(const std::vector<std::string>& lines)
+{
+    std::string out;
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        if (i != 0) {
+            out += '\n';
+        }
+        out += lines[i];
+    }
+    return out;
+}
+
+inline std::string join_lines(
+    const std::vector<std::string>& lines, std::size_t begin, std::size_t end)
+{
+    std::string out;
+    for (std::size_t i = begin; i <= end && i < lines.size(); ++i) {
+        if (!out.empty()) {
+            out += '\n';
+        }
+        out += lines[i];
+    }
+    return out;
+}
+
+inline std::string format_local_time(const char* fmt)
+{
+    const auto now          = std::chrono::system_clock::now();
+    const std::time_t value = std::chrono::system_clock::to_time_t(now);
+    std::tm local { };
+#ifdef _WIN32
+    localtime_s(&local, &value);
+#else
+    localtime_r(&value, &local);
+#endif
+    std::ostringstream out;
+    out << std::put_time(&local, fmt);
+    return out.str();
+}
 
 inline std::string_view trim(std::string_view s)
 {
@@ -102,19 +173,13 @@ std::string join(const Container& items, std::string_view sep)
 
 inline std::string home_dir()
 {
+    return env_or_empty(
 #ifdef _WIN32
-    char* buf = nullptr;
-    size_t sz = 0;
-    if (_dupenv_s(&buf, &sz, "USERPROFILE") != 0 || buf == nullptr) {
-        return "";
-    }
-    std::string value(buf);
-    free(buf);
-    return value;
+        "USERPROFILE"
 #else
-    const char* value = std::getenv("HOME");
-    return value != nullptr ? std::string(value) : "";
+        "HOME"
 #endif
+    );
 }
 
 } // namespace ursa

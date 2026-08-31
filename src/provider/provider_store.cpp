@@ -166,28 +166,28 @@ std::optional<ProviderSelection> ProviderStore::subagent_selection(
     SubagentRole role) const
 {
     std::lock_guard lock(mutex_);
-    const auto configured = config_.subagents.find(role);
+    const auto configured  = config_.subagents.find(role);
     const bool use_default = configured == config_.subagents.end()
         || configured->second.provider.empty();
     if (use_default
         && (!config_.last_used || config_.last_used->model.empty())) {
         return std::nullopt;
     }
-    const std::string& provider = use_default
-        ? config_.last_used->provider : configured->second.provider;
-    const std::string& model = use_default
-        ? config_.last_used->model : configured->second.model;
+    const std::string& provider = use_default ? config_.last_used->provider
+                                              : configured->second.provider;
+    const std::string& model
+        = use_default ? config_.last_used->model : configured->second.model;
     const Connection* connection = _find_locked(provider);
-    if (connection == nullptr) return std::nullopt;
+    if (connection == nullptr)
+        return std::nullopt;
     ApiStandard dialect = ApiStandard::OPENAI;
     if (const auto found = connection->dialects.find(model);
         found != connection->dialects.end()) {
         dialect = found->second;
     }
-    const std::string variant = configured != config_.subagents.end()
-            && !configured->second.variant.empty()
-        ? configured->second.variant
-        : std::string(subagent_default_variant(role));
+    const std::string variant = subagent_variant_or_default(
+        configured != config_.subagents.end() ? &configured->second : nullptr,
+        role);
     return ProviderSelection { model, variant, connection->id,
         _route_locked(*connection, dialect) };
 }
@@ -283,80 +283,60 @@ void ProviderStore::connect(ConnectResult result, ConnectCompleteFn complete)
 
 bool ProviderStore::remove_connection(std::string_view connection_id)
 {
-    {
-        std::lock_guard lock(mutex_);
-        if (config_.providers.size() <= 1) {
-            return false;
-        }
-        Config candidate    = config_;
-        auto& providers     = candidate.providers;
-        const auto old_size = providers.size();
-        providers.erase(std::remove_if(providers.begin(), providers.end(),
-                            [connection_id](const Connection& connection) {
-                                return connection.id == connection_id;
-                            }),
-            providers.end());
-        if (providers.size() == old_size) {
-            return false;
-        }
-        if (candidate.last_used
-            && candidate.last_used->provider == connection_id) {
-            candidate.last_used = LastUsed { providers.front().id, "" };
-        }
-        std::erase_if(candidate.subagents,
-            [&](const auto& entry) {
+    return _update_config(
+        [&](Config& candidate) {
+            if (candidate.providers.size() <= 1) {
+                return false;
+            }
+            auto& providers     = candidate.providers;
+            const auto old_size = providers.size();
+            providers.erase(std::remove_if(providers.begin(), providers.end(),
+                                [connection_id](const Connection& connection) {
+                                    return connection.id == connection_id;
+                                }),
+                providers.end());
+            if (providers.size() == old_size) {
+                return false;
+            }
+            if (candidate.last_used
+                && candidate.last_used->provider == connection_id) {
+                candidate.last_used = LastUsed { providers.front().id, "" };
+            }
+            std::erase_if(candidate.subagents, [&](const auto& entry) {
                 return entry.second.provider == connection_id;
             });
-        if (save_config(config_path(), candidate) != Status::OK) {
-            return false;
-        }
-        config_ = std::move(candidate);
-        ++generations_[std::string(connection_id)];
-        model_catalog_.erase(std::string(connection_id));
-    }
-    _notify_changed();
-    return true;
+            return true;
+        },
+        [&] {
+            ++generations_[std::string(connection_id)];
+            model_catalog_.erase(std::string(connection_id));
+        });
 }
 
 bool ProviderStore::select_model(const ModelChoice& choice)
 {
-    {
-        std::lock_guard lock(mutex_);
+    return _update_config([&](Config& candidate) {
         if (_find_locked(choice.connection_id) == nullptr) {
             return false;
         }
-        Config candidate = config_;
         candidate.last_used
             = LastUsed { choice.connection_id, choice.model_id };
-        if (save_config(config_path(), candidate) != Status::OK) {
-            return false;
-        }
-        config_ = std::move(candidate);
-    }
-    _notify_changed();
-    return true;
+        return true;
+    });
 }
 
 bool ProviderStore::set_reasoning_effort(std::string effort)
 {
-    {
-        std::lock_guard lock(mutex_);
-        Config candidate           = config_;
+    return _update_config([&](Config& candidate) {
         candidate.reasoning_effort = std::move(effort);
-        if (save_config(config_path(), candidate) != Status::OK) {
-            return false;
-        }
-        config_ = std::move(candidate);
-    }
-    _notify_changed();
-    return true;
+        return true;
+    });
 }
 
 bool ProviderStore::set_subagent_model(
     SubagentRole role, SubagentModelConfig selection)
 {
-    {
-        std::lock_guard lock(mutex_);
+    return _update_config([&](Config& candidate) {
         if (selection.provider.empty() != selection.model.empty()
             || (!selection.provider.empty()
                 && _find_locked(selection.provider) == nullptr)) {
@@ -365,51 +345,39 @@ bool ProviderStore::set_subagent_model(
         if (selection.variant.empty()) {
             selection.variant = subagent_default_variant(role);
         }
-        Config candidate = config_;
         candidate.subagents[role] = std::move(selection);
-        if (save_config(config_path(), candidate) != Status::OK) return false;
-        config_ = std::move(candidate);
-    }
-    _notify_changed();
-    return true;
+        return true;
+    });
 }
 
 bool ProviderStore::set_skill_policies(const SkillPolicyChanges& changes)
 {
-    {
-        std::lock_guard lock(mutex_);
-        Config candidate = config_;
+    return _update_config([&](Config& candidate) {
         for (const auto& entry : changes.entries) {
-            if (entry.project_root.empty()) candidate.global_skills[entry.name] = entry.policy;
-            else candidate.project_skills[entry.project_root][entry.name] = entry.policy;
+            if (entry.project_root.empty())
+                candidate.global_skills[entry.name] = entry.policy;
+            else
+                candidate.project_skills[entry.project_root][entry.name]
+                    = entry.policy;
         }
-        if (save_config(config_path(), candidate) != Status::OK) return false;
-        config_ = std::move(candidate);
-    }
-    _notify_changed();
-    return true;
+        return true;
+    });
 }
 
 void ProviderStore::remember_dialect(
     std::string_view connection_id, std::string_view model, ApiStandard dialect)
 {
-    {
-        std::lock_guard lock(mutex_);
-        Config candidate = config_;
-        auto it          = std::find_if(candidate.providers.begin(),
+    std::ignore = _update_config([&](Config& candidate) {
+        auto it = std::find_if(candidate.providers.begin(),
             candidate.providers.end(), [connection_id](const Connection& item) {
                 return item.id == connection_id;
             });
         if (it == candidate.providers.end()) {
-            return;
+            return false;
         }
         it->dialects[std::string(model)] = dialect;
-        if (save_config(config_path(), candidate) != Status::OK) {
-            return;
-        }
-        config_ = std::move(candidate);
-    }
-    _notify_changed();
+        return true;
+    });
 }
 
 void ProviderStore::ensure_catalog_fresh()
@@ -441,12 +409,32 @@ void ProviderStore::ensure_catalog_fresh()
     });
 }
 
+bool ProviderStore::_update_config(
+    std::function<bool(Config&)> mutate, std::function<void()> on_commit)
+{
+    bool committed = false;
+    {
+        std::lock_guard lock(mutex_);
+        Config candidate = config_;
+        if (mutate(candidate)
+            && save_config(config_path(), candidate) == Status::OK) {
+            config_   = std::move(candidate);
+            committed = true;
+            if (on_commit) {
+                on_commit();
+            }
+        }
+    }
+    if (committed) {
+        _notify_changed();
+    }
+    return committed;
+}
+
 Connection* ProviderStore::_find_locked(std::string_view id)
 {
-    const auto it
-        = std::find_if(config_.providers.begin(), config_.providers.end(),
-            [id](const Connection& connection) { return connection.id == id; });
-    return it == config_.providers.end() ? nullptr : &*it;
+    return const_cast<Connection*>(
+        static_cast<const ProviderStore*>(this)->_find_locked(id));
 }
 
 const Connection* ProviderStore::_find_locked(std::string_view id) const
@@ -565,9 +553,6 @@ Status ProviderStore::_commit_connection_locked(const ConnectResult& result,
     return Status::OK;
 }
 
-void ProviderStore::_notify_changed()
-{
-    changed_.publish();
-}
+void ProviderStore::_notify_changed() { changed_.publish(); }
 
 } // namespace ursa

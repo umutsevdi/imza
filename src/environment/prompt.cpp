@@ -2,8 +2,8 @@
 
 #include "util.h"
 
-#include <filesystem>
 #include <algorithm>
+#include <filesystem>
 #include <string_view>
 #include <vector>
 
@@ -68,18 +68,23 @@ Your final response is returned to the calling agent and may also be viewed by t
         = R"prompt(# Research mode
 Work read-only. Do not create, modify, rename, or delete files, and do not run commands that mutate the workspace or external state. The task may request investigation, explanation, review, comparison, planning, or another read-only result. Return the result requested by the task; do not automatically turn every task into an implementation plan.)prompt";
 
-    constexpr std::string_view BUILD_SUBAGENT_PROMPT
-        = R"prompt(# Build mode
+    constexpr std::string_view BUILD_SUBAGENT_PROMPT = R"prompt(# Build mode
 You may modify files and run commands needed to complete the assigned task. Inspect existing code before editing, keep changes focused, and run relevant validation when practical. The task may not require edits; do not make changes merely because build access is available.)prompt";
 
     constexpr std::string_view MAIN_SKILL_PROMPT
-        = "Call the `skill` tool to load a relevant skill when it was not explicitly mentioned. Ursa loads `$skill-name` mentions before the request; use the enclosed skill instructions directly and do not load the same skill again. Project skills take precedence over global skills with the same name.";
+        = "Call the `skill` tool to load a relevant skill when it was not "
+          "explicitly mentioned. Ursa loads `$skill-name` mentions before the "
+          "request; use the enclosed skill instructions directly and do not "
+          "load the same skill again. Project skills take precedence over "
+          "global skills with the same name.";
 
     constexpr std::string_view SUBAGENT_SKILL_PROMPT
-        = "Call the `skill` tool when a skill is relevant to the assigned task. Project skills take precedence over global skills with the same name.";
+        = "Call the `skill` tool when a skill is relevant to the assigned "
+          "task. Project skills take precedence over global skills with the "
+          "same name.";
 
-    std::string environment_block(const SystemEnvironment& sys,
-        const WorkspaceEnvironment* ws)
+    std::string environment_block(
+        const SystemEnvironment& sys, const WorkspaceEnvironment* ws)
     {
         std::string out = "<env>";
         std::error_code ec;
@@ -98,9 +103,8 @@ You may modify files and run commands needed to complete the assigned task. Insp
         out += "\n  Shell: ";
         out += sys.default_shell;
         out += "\n  Package managers: ";
-        out += sys.package_managers.empty()
-            ? std::string("none")
-            : join(sys.package_managers, ", ");
+        out += sys.package_managers.empty() ? std::string("none")
+                                            : join(sys.package_managers, ", ");
         out += "\n  Today's date: ";
         out += sys.today;
         out += "\n</env>";
@@ -124,7 +128,8 @@ You may modify files and run commands needed to complete the assigned task. Insp
         const WorkspaceEnvironment* ws, const Config* config,
         std::string_view skill_prompt)
     {
-        if (sys == nullptr) return;
+        if (sys == nullptr)
+            return;
         out += "\n\n";
         out += environment_block(*sys, ws);
         if (ws != nullptr && ws->instruction) {
@@ -138,8 +143,8 @@ You may modify files and run commands needed to complete the assigned task. Insp
             for (const auto& [name, skill] : ws->project_skills)
                 skills.push_back(skill);
         }
-        std::sort(skills.begin(), skills.end(),
-            [](const Skill& a, const Skill& b) {
+        std::sort(
+            skills.begin(), skills.end(), [](const Skill& a, const Skill& b) {
                 if (a.scope != b.scope)
                     return a.scope == Skill::Scope::PROJECT;
                 return a.name < b.name;
@@ -162,7 +167,8 @@ You may modify files and run commands needed to complete the assigned task. Insp
                     }
                 }
             }
-            if (policy == SkillPolicy::DENY) continue;
+            if (policy == SkillPolicy::DENY)
+                continue;
             catalog += "\n- ";
             catalog += skill.name + " ["
                 + (skill.scope == Skill::Scope::PROJECT ? "project" : "global")
@@ -179,9 +185,8 @@ You may modify files and run commands needed to complete the assigned task. Insp
 
 } // namespace
 
-std::string build_system_prompt(
-    const SystemEnvironment* sys, const WorkspaceEnvironment* ws,
-    const Config* config)
+std::string build_system_prompt(const SystemEnvironment* sys,
+    const WorkspaceEnvironment* ws, const Config* config)
 {
     std::string out(BASE_PROMPT);
     append_context(out, sys, ws, config, MAIN_SKILL_PROMPT);
@@ -191,7 +196,8 @@ std::string build_system_prompt(
 std::string build_subagent_system_prompt(const SystemEnvironment* sys,
     const WorkspaceEnvironment* ws, SubagentRole role, const Config* config)
 {
-    if (role == SubagentRole::BASIC) return { };
+    if (role == SubagentRole::BASIC)
+        return { };
     std::string out(SUBAGENT_PROMPT);
     out += "\n\n";
     out += role == SubagentRole::RESEARCH ? RESEARCH_SUBAGENT_PROMPT

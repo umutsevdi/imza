@@ -3,8 +3,8 @@
 #include <curl/curl.h>
 
 #include <algorithm>
-#include <charconv>
 #include <cctype>
+#include <charconv>
 #include <memory>
 #include <string_view>
 
@@ -33,9 +33,8 @@ namespace {
 
 } // namespace
 
-Status http_get(const std::string& url,
-    const std::vector<std::string>& headers, long timeout_secs,
-    std::string& body, long* http_code)
+Status http_get(const std::string& url, const std::vector<std::string>& headers,
+    long timeout_secs, std::string& body, long* http_code)
 {
     static thread_local CURL* handle = curl_easy_init();
     if (!handle) {
@@ -104,7 +103,7 @@ namespace {
 
     size_t header_callback(char* ptr, size_t size, size_t nmemb, void* userdata)
     {
-        auto* ctx         = static_cast<StreamCtx*>(userdata);
+        auto* ctx          = static_cast<StreamCtx*>(userdata);
         const size_t total = size * nmemb;
         std::string_view line(ptr, total);
         while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) {
@@ -114,24 +113,22 @@ namespace {
             const auto sp = line.find(' ');
             if (sp != std::string_view::npos) {
                 std::string_view v = line.substr(sp + 1);
-                std::from_chars(v.data(), v.data() + v.size(),
-                    ctx->http_status);
+                std::from_chars(
+                    v.data(), v.data() + v.size(), ctx->http_status);
             }
         }
         constexpr std::string_view key = "retry-after:";
         if (line.size() > key.size()
-            && std::equal(key.begin(), key.end(), line.begin(),
-                [](char a, char b) {
-                    return a
-                        == std::tolower(static_cast<unsigned char>(b));
+            && std::equal(
+                key.begin(), key.end(), line.begin(), [](char a, char b) {
+                    return a == std::tolower(static_cast<unsigned char>(b));
                 })) {
             std::string_view v = line.substr(key.size());
             while (!v.empty() && v.front() == ' ') {
                 v.remove_prefix(1);
             }
             ctx->retry_after = 0;
-            std::from_chars(
-                v.data(), v.data() + v.size(), ctx->retry_after);
+            std::from_chars(v.data(), v.data() + v.size(), ctx->retry_after);
         }
         mark_connected(*ctx);
         return total;
@@ -204,15 +201,15 @@ namespace {
         return ctx->parse_state.terminal ? 0 : n;
     }
 
-    int progress_callback(void* userdata, curl_off_t, curl_off_t, curl_off_t,
-        curl_off_t)
+    int progress_callback(
+        void* userdata, curl_off_t, curl_off_t, curl_off_t, curl_off_t)
     {
         const auto* req = static_cast<const ChatRequest*>(userdata);
         return req->interrupted && req->interrupted() ? 1 : 0;
     }
 
-    Status classify_failure(long code, const std::string& raw,
-        std::string& message)
+    Status classify_failure(
+        long code, const std::string& raw, std::string& message)
     {
         Status st = parse_api_error(raw, message);
         if (code == 429) {
@@ -246,7 +243,7 @@ Status stream(const Provider& provider, const Route& route,
     for (auto& h : auth_headers(route.auth, route.api_key)) {
         header_strs.push_back(std::move(h));
     }
-    curl_slist* list                     = nullptr;
+    curl_slist* list = nullptr;
     for (const auto& h : header_strs) {
         list = curl_slist_append(list, h.c_str());
     }
@@ -294,7 +291,8 @@ Status stream(const Provider& provider, const Route& route,
             && req.interrupted()) {
             return Status::OK;
         }
-        std::string detail(errbuf[0] != '\0' ? errbuf : curl_easy_strerror(res));
+        std::string detail(
+            errbuf[0] != '\0' ? errbuf : curl_easy_strerror(res));
         ctx.cb(make_error_event(Status::NETWORK_ERROR, std::move(detail)));
         return Status::NETWORK_ERROR;
     }
@@ -350,6 +348,25 @@ ToolCallRequest finish_accum(const ToolAccum& acc)
     req.args = acc.args.empty() ? "{}" : acc.args;
     req.id   = acc.id;
     return req;
+}
+
+std::vector<std::string> stream_headers()
+{
+    return {
+        "Content-Type: application/json",
+        "Accept: text/event-stream",
+    };
+}
+
+void flush_tool_accums(ParseState& state, std::vector<StreamEvent>& outs)
+{
+    for (auto& [index, acc] : state.tool_accums) {
+        if (acc.name.empty()) {
+            continue;
+        }
+        outs.push_back(make_tool_call_event(finish_accum(acc)));
+    }
+    state.tool_accums.clear();
 }
 
 const char* role_str(Message::Type type)
@@ -421,8 +438,8 @@ StreamEvent make_connected_event()
 StreamEvent make_reasoning_event(std::string text, std::string signature)
 {
     StreamEvent ev;
-    ev.kind              = StreamEvent::Kind::REASONING;
-    ev.text              = std::move(text);
+    ev.kind               = StreamEvent::Kind::REASONING;
+    ev.text               = std::move(text);
     ev.thinking_signature = std::move(signature);
     return ev;
 }

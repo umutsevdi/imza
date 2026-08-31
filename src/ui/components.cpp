@@ -5,13 +5,13 @@
 #include <cctype>
 #include <chrono>
 #include <cstdlib>
+#include <format>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/dom/node.hpp>
 #include <ftxui/screen/screen.hpp>
 #include <functional>
-#include <format>
 #include <memory>
 #include <optional>
 #include <string>
@@ -20,6 +20,111 @@
 
 namespace ursa {
 
+ftxui::Decorator capture_content_height(int* out)
+{
+    class Impl : public ftxui::Node {
+    public:
+        Impl(ftxui::Element child, int* out)
+            : ftxui::Node(ftxui::Elements { std::move(child) })
+            , out_(out)
+        {
+        }
+
+        void ComputeRequirement() override
+        {
+            ftxui::Node::ComputeRequirement();
+            requirement_ = children_[0]->requirement();
+            *out_        = requirement_.min_y;
+        }
+
+        void SetBox(ftxui::Box box) override
+        {
+            ftxui::Node::SetBox(box);
+            children_[0]->SetBox(box);
+        }
+
+    private:
+        int* out_;
+    };
+    return [out](ftxui::Element child) {
+        return std::make_shared<Impl>(std::move(child), out);
+    };
+}
+
+int ScrollView::viewport_lines() const
+{
+    if (box.y_max < box.y_min) {
+        return 0;
+    }
+    return box.y_max - box.y_min + 1;
+}
+
+int ScrollView::max_scroll() const
+{
+    return std::max(0, content_height - viewport_lines());
+}
+
+void ScrollView::scroll_lines(int delta)
+{
+    scroll = std::clamp(scroll + delta, 0, max_scroll());
+}
+
+std::string compact_number(std::uint64_t n)
+{
+    const auto scaled
+        = [n](double divisor) { return static_cast<double>(n) / divisor; };
+    char buf[32];
+    if (n >= 1'000'000) {
+        const double m = scaled(1'000'000.0);
+        std::snprintf(buf, sizeof(buf), m >= 10 ? "%.0fM" : "%.1fM", m);
+        return buf;
+    }
+    if (n >= 1'000) {
+        const double k = scaled(1'000.0);
+        std::snprintf(buf, sizeof(buf), k >= 10 ? "%.0fK" : "%.1fK", k);
+        return buf;
+    }
+    return std::to_string(n);
+}
+
+std::string choice_marker(bool multi, bool selected)
+{
+    return multi ? (selected ? "▣ " : "☐ ") : (selected ? "◉ " : "○ ");
+}
+
+ftxui::Element hint_bar(std::string hint)
+{
+    return ftxui::hbox(
+        { ftxui::filler(), ftxui::text(std::move(hint)) | ftxui::dim });
+}
+
+ftxui::Element choice_label(std::string label, bool selected, bool focused)
+{
+    ftxui::Element e = ftxui::text(std::move(label));
+    if (focused) {
+        e = std::move(e) | ftxui::bold | ftxui::color(PANEL_FG)
+            | ftxui::inverted;
+    } else if (selected) {
+        e = std::move(e) | ftxui::bold | ftxui::color(PANEL_FG);
+    } else {
+        e = std::move(e) | ftxui::color(PANEL_FG_DIM);
+    }
+    return e;
+}
+
+bool move_list_cursor(const ftxui::Event& event, int& cursor, int count)
+{
+    if (event == ftxui::Event::ArrowDown && cursor + 1 < count) {
+        ++cursor;
+        return true;
+    }
+    if (event == ftxui::Event::ArrowUp && cursor > 0) {
+        --cursor;
+        return true;
+    }
+    return false;
+}
+
 std::string fit(const std::string& value, int width)
 {
     const std::size_t max = static_cast<std::size_t>(std::max(width, 0));
@@ -27,13 +132,17 @@ std::string fit(const std::string& value, int width)
     std::size_t seen = 0;
     std::size_t i    = 0;
     while (i < value.size() && seen < max) {
-        const auto lead = static_cast<unsigned char>(value[i]);
+        const auto lead    = static_cast<unsigned char>(value[i]);
         std::size_t length = 1;
-        if ((lead & 0xE0) == 0xC0) length = 2;
-        else if ((lead & 0xF0) == 0xE0) length = 3;
-        else if ((lead & 0xF8) == 0xF0) length = 4;
+        if ((lead & 0xE0) == 0xC0)
+            length = 2;
+        else if ((lead & 0xF0) == 0xE0)
+            length = 3;
+        else if ((lead & 0xF8) == 0xF0)
+            length = 4;
         length = std::min(length, value.size() - i);
-        if (seen + 1 == max && i + length < value.size()) return out + "…";
+        if (seen + 1 == max && i + length < value.size())
+            return out + "…";
         out.append(value, i, length);
         ++seen;
         i += length;
@@ -44,16 +153,18 @@ std::string fit(const std::string& value, int width)
 
 std::string fit(const std::string& value, int width, int offset)
 {
-    const std::size_t skip
-        = static_cast<std::size_t>(std::max(offset, 0));
-    std::size_t seen = 0;
-    std::size_t pos  = 0;
+    const std::size_t skip = static_cast<std::size_t>(std::max(offset, 0));
+    std::size_t seen       = 0;
+    std::size_t pos        = 0;
     while (pos < value.size() && seen < skip) {
-        const auto lead = static_cast<unsigned char>(value[pos]);
+        const auto lead    = static_cast<unsigned char>(value[pos]);
         std::size_t length = 1;
-        if ((lead & 0xE0) == 0xC0) length = 2;
-        else if ((lead & 0xF0) == 0xE0) length = 3;
-        else if ((lead & 0xF8) == 0xF0) length = 4;
+        if ((lead & 0xE0) == 0xC0)
+            length = 2;
+        else if ((lead & 0xF0) == 0xE0)
+            length = 3;
+        else if ((lead & 0xF8) == 0xF0)
+            length = 4;
         pos += std::min(length, value.size() - pos);
         ++seen;
     }
@@ -82,14 +193,10 @@ namespace {
         }
         message.front() = static_cast<char>(
             std::toupper(static_cast<unsigned char>(message.front())));
-        if (!message.ends_with('.') && !message.ends_with('!')
-            && !message.ends_with('?') && !message.ends_with("…")) {
-            message += '.';
-        }
-        return message;
+        return ensure_sentence_end(std::move(message));
     }
 
-}
+} // namespace
 
 Element session_error_element(const Session& session)
 {
@@ -102,8 +209,8 @@ Element session_error_element(const Session& session)
         if (remaining < 0) {
             remaining = 0;
         }
-        message = "Rate limited — retrying in " + std::to_string(remaining)
-            + "s…";
+        message
+            = "Rate limited — retrying in " + std::to_string(remaining) + "s…";
     }
     if (message.empty()) {
         return text("");
@@ -116,8 +223,8 @@ Element session_error_element(const Session& session)
 }
 
 namespace {
-std::size_t digit_width(std::size_t n) { return std::to_string(n).size(); }
-}
+    std::size_t digit_width(std::size_t n) { return std::to_string(n).size(); }
+} // namespace
 
 Element code_block(const std::string& code, const std::string& lang)
 {
@@ -283,30 +390,26 @@ Component inline_link_button(std::function<Element()> render,
                            const EntryState& state) {
         Element element = render();
         if (state.focused) {
-            return hbox({ std::move(element) | bold | underlined
-                              | color(PANEL_FG),
-                filler() });
+            return hbox(
+                { std::move(element) | bold | underlined | color(PANEL_FG),
+                    filler() });
         }
-        return hbox(
-            { std::move(element) | color(inactive_color), filler() });
+        return hbox({ std::move(element) | color(inactive_color), filler() });
     };
     return space_activates(Button(std::move(option)), std::move(on_click));
 }
 
-Component inline_link_button(std::string label,
-    std::function<void()> on_click, const Color& inactive_color)
+Component inline_link_button(std::string label, std::function<void()> on_click,
+    const Color& inactive_color)
 {
-    auto shared_label
-        = std::make_shared<const std::string>(std::move(label));
-    return inline_link_button(
-        [shared_label] { return text(*shared_label); }, std::move(on_click),
-        inactive_color);
+    auto shared_label = std::make_shared<const std::string>(std::move(label));
+    return inline_link_button([shared_label] { return text(*shared_label); },
+        std::move(on_click), inactive_color);
 }
 
 std::string elapsed_text(std::chrono::milliseconds elapsed)
 {
-    const auto total
-        = std::max<std::int64_t>(0, elapsed.count()) / 1000;
+    const auto total = std::max<std::int64_t>(0, elapsed.count()) / 1000;
     return std::format("{}:{:02}", total / 60, total % 60);
 }
 
@@ -326,15 +429,27 @@ Element card(Element body, std::optional<Color> bg, bool pad)
 
 Element section_title(std::string_view title, Color fg)
 {
-    return text(std::string(title)) | bold | color(fg);
+    return text(" " + std::string(title)) | bold | color(fg);
+}
+
+bool diff_row_left_changed(const DiffRow& row)
+{
+    return !row.left.empty() && (row.right.empty() || row.left != row.right);
+}
+
+bool diff_row_right_changed(const DiffRow& row)
+{
+    return !row.right.empty() && (row.left.empty() || row.left != row.right);
 }
 
 Element diff_split(const DiffView& diff, int available_width)
 {
     std::size_t max_line = 1;
     for (const DiffRow& row : diff.rows) {
-        if (row.left_no) max_line = std::max(max_line, *row.left_no);
-        if (row.right_no) max_line = std::max(max_line, *row.right_no);
+        if (row.left_no)
+            max_line = std::max(max_line, *row.left_no);
+        if (row.right_no)
+            max_line = std::max(max_line, *row.right_no);
     }
     const std::size_t number_width = digit_width(max_line);
     const auto line_number = [number_width](
@@ -348,22 +463,13 @@ Element diff_split(const DiffView& diff, int available_width)
         return !row.left.empty() && row.left == row.right
             && row.left.find("unchanged line") != std::string::npos;
     };
-    const auto left_changed = [](const DiffRow& row) {
-        return !row.left.empty()
-            && (row.right.empty() || row.left != row.right);
-    };
-    const auto right_changed = [](const DiffRow& row) {
-        return !row.right.empty()
-            && (row.left.empty() || row.left != row.right);
-    };
 
     Elements rows;
     if (available_width < 100) {
         for (const DiffRow& row : diff.rows) {
             if (is_skip(row)) {
-                rows.push_back(hbox({ text("  " + row.left)
-                                              | color(PANEL_FG_DIM),
-                    filler() }));
+                rows.push_back(hbox(
+                    { text("  " + row.left) | color(PANEL_FG_DIM), filler() }));
                 continue;
             }
             const auto append = [&](const std::optional<std::size_t>& old_no,
@@ -373,57 +479,56 @@ Element diff_split(const DiffView& diff, int available_width)
                                     std::optional<Color> background) {
                 Element line = hbox({ line_number(old_no), text(" "),
                     line_number(new_no), text(" "),
-                    text(std::move(marker) + " " + content)
-                        | color(PANEL_FG),
+                    text(std::move(marker) + " " + content) | color(PANEL_FG),
                     filler() });
                 if (background) {
                     line = std::move(line) | bgcolor(*background);
                 }
                 rows.push_back(std::move(line));
             };
-            if (left_changed(row)) {
-                append(row.left_no, std::nullopt, "−", row.left,
-                    DIFF_DELETION_BG);
+            if (diff_row_left_changed(row)) {
+                append(
+                    row.left_no, std::nullopt, "−", row.left, DIFF_DELETION_BG);
             }
-            if (right_changed(row)) {
+            if (diff_row_right_changed(row)) {
                 append(std::nullopt, row.right_no, "+", row.right,
                     DIFF_ADDITION_BG);
             }
-            if (!left_changed(row) && !right_changed(row)) {
-                append(row.left_no, row.right_no, " ", row.right,
-                    std::nullopt);
+            if (!diff_row_left_changed(row) && !diff_row_right_changed(row)) {
+                append(row.left_no, row.right_no, " ", row.right, std::nullopt);
             }
         }
         return panel(vbox(std::move(rows))) | xflex;
     }
 
     const int side_width = std::max(20, (available_width - 3) / 2);
-    const auto side = [&](const std::optional<std::size_t>& number,
-                          std::string marker, const std::string& content,
-                          std::optional<Color> background) {
-        Element line = hbox({ line_number(number), text(" "),
-            text(std::move(marker) + " " + content) | color(PANEL_FG),
-            filler() }) | size(WIDTH, EQUAL, side_width);
-        if (background) line = std::move(line) | bgcolor(*background);
+    const auto side      = [&](const std::optional<std::size_t>& number,
+                               std::string marker, const std::string& content,
+                               std::optional<Color> background) {
+        Element line
+            = hbox({ line_number(number), text(" "),
+                  text(std::move(marker) + " " + content) | color(PANEL_FG),
+                  filler() })
+            | size(WIDTH, EQUAL, side_width);
+        if (background)
+            line = std::move(line) | bgcolor(*background);
         return line;
     };
     for (const DiffRow& row : diff.rows) {
         if (is_skip(row)) {
-            rows.push_back(hbox({ text("  " + row.left)
-                                          | color(PANEL_FG_DIM),
-                filler() }));
+            rows.push_back(hbox(
+                { text("  " + row.left) | color(PANEL_FG_DIM), filler() }));
             continue;
         }
-        const bool removed = left_changed(row);
-        const bool added = right_changed(row);
+        const bool removed = diff_row_left_changed(row);
+        const bool added   = diff_row_right_changed(row);
         rows.push_back(hbox({
             side(row.left_no, removed ? "−" : " ", row.left,
                 removed ? std::optional<Color>(DIFF_DELETION_BG)
                         : std::nullopt),
             text(" │ ") | color(PANEL_BORDER),
             side(row.right_no, added ? "+" : " ", row.right,
-                added ? std::optional<Color>(DIFF_ADDITION_BG)
-                      : std::nullopt),
+                added ? std::optional<Color>(DIFF_ADDITION_BG) : std::nullopt),
         }));
     }
     return panel(vbox(std::move(rows))) | xflex;

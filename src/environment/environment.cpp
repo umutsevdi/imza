@@ -74,12 +74,14 @@ namespace {
         const std::vector<ChangedFile>& files, ChangeSummary& summary)
     {
         for (const ChangedFile& file : files) {
-            if (file.kind != ChangedFile::Kind::UNTRACKED) continue;
+            if (file.kind != ChangedFile::Kind::UNTRACKED)
+                continue;
             hash_bytes(summary.signature, file.path);
             summary.signature ^= 0xFF;
             summary.signature *= FNV_PRIME;
             std::ifstream input(root / file.path, std::ios::binary);
-            if (!input) continue;
+            if (!input)
+                continue;
             std::array<char, 8192> buffer;
             std::size_t lines = 0;
             bool binary       = false;
@@ -88,7 +90,8 @@ namespace {
             while (input) {
                 input.read(buffer.data(), buffer.size());
                 const std::streamsize count = input.gcount();
-                if (count <= 0) continue;
+                if (count <= 0)
+                    continue;
                 const std::string_view chunk(
                     buffer.data(), static_cast<std::size_t>(count));
                 hash_bytes(summary.signature, chunk);
@@ -98,27 +101,11 @@ namespace {
                 lines += std::ranges::count(chunk, '\n');
             }
             if (!binary) {
-                if (has_content && last != '\n') ++lines;
+                if (has_content && last != '\n')
+                    ++lines;
                 summary.additions += lines;
             }
         }
-    }
-
-    std::string get_env(const char* key)
-    {
-#ifdef _WIN32
-        char* buf = nullptr;
-        size_t sz = 0;
-        if (_dupenv_s(&buf, &sz, key) != 0 || buf == nullptr) {
-            return "";
-        }
-        std::string value(buf);
-        free(buf);
-        return value;
-#else
-        const char* value = std::getenv(key);
-        return value != nullptr ? std::string(value) : "";
-#endif
     }
 
     std::string read_command_output(const std::string& cmd)
@@ -158,35 +145,20 @@ namespace {
 #endif
     }
 
-    std::string today_string()
-    {
-        const auto now      = std::chrono::system_clock::now();
-        const std::time_t t = std::chrono::system_clock::to_time_t(now);
-        std::tm tm { };
-#ifdef _WIN32
-        localtime_s(&tm, &t);
-#else
-        localtime_r(&t, &tm);
-#endif
-        std::ostringstream os;
-        os << std::put_time(&tm, "%Y-%m-%d");
-        return os.str();
-    }
-
     void detect_os(std::string& os_name, std::string& os_version,
         std::string& default_shell)
     {
 #ifdef __APPLE__
         os_name       = "macOS";
         os_version    = read_command_output("sw_vers -productVersion");
-        default_shell = get_env("SHELL");
+        default_shell = env_or_empty("SHELL");
         if (default_shell.empty()) {
             default_shell = "/bin/zsh";
         }
 
 #elif defined(_WIN32)
         os_name       = "Windows";
-        default_shell = get_env("COMSPEC");
+        default_shell = env_or_empty("COMSPEC");
         if (default_shell.empty()) {
             default_shell = "cmd.exe";
         }
@@ -238,7 +210,7 @@ namespace {
             os_name = "Linux";
         }
         os_version    = read_command_output("uname -r");
-        default_shell = get_env("SHELL");
+        default_shell = env_or_empty("SHELL");
         if (default_shell.empty()) {
             default_shell = "/bin/sh";
         }
@@ -264,18 +236,21 @@ namespace {
         bool frontmatter = false;
         while (std::getline(in, line)) {
             if (line == "---") {
-                if (frontmatter) break;
+                if (frontmatter)
+                    break;
                 frontmatter = true;
                 continue;
             }
             if (frontmatter && line.starts_with("description:")) {
-                std::string value = std::string(trim(std::string_view(line).substr(12)));
-                if (value.size() >= 2 && value.front() == '"' && value.back() == '"')
+                std::string value
+                    = std::string(trim(std::string_view(line).substr(12)));
+                if (value.size() >= 2 && value.front() == '"'
+                    && value.back() == '"')
                     value = value.substr(1, value.size() - 2);
                 return value;
             }
         }
-        return {};
+        return { };
     }
 
     void add_skills(const std::filesystem::path& directory, Skill::Scope scope,
@@ -283,16 +258,22 @@ namespace {
         std::unordered_map<std::string, Skill>& skills)
     {
         std::error_code ec;
-        if (!std::filesystem::is_directory(directory, ec)) return;
-        for (std::filesystem::directory_iterator it(directory, ec), end; !ec && it != end; it.increment(ec)) {
+        if (!std::filesystem::is_directory(directory, ec))
+            return;
+        for (std::filesystem::directory_iterator it(directory, ec), end;
+            !ec && it != end; it.increment(ec)) {
             const auto file = it->path() / "SKILL.md";
-            if (!it->is_directory(ec) || !std::filesystem::is_regular_file(file, ec)) continue;
+            if (!it->is_directory(ec)
+                || !std::filesystem::is_regular_file(file, ec))
+                continue;
             const std::string name = it->path().filename().string();
-            skills.emplace(name, Skill { name, skill_description(file), file, scope, root });
+            skills.emplace(name,
+                Skill { name, skill_description(file), file, scope, root });
         }
     }
 
-    void detect_global_skills(std::unordered_map<std::string, Skill>& global_skills)
+    void detect_global_skills(
+        std::unordered_map<std::string, Skill>& global_skills)
     {
         auto config_dir            = base_config_dir();
         std::filesystem::path home = { home_dir() };
@@ -304,7 +285,8 @@ namespace {
         }
         auto skills_generic_cfg
             = config_dir.parent_path() / "agents" / "skills";
-        add_skills(skills_generic_cfg, Skill::Scope::GLOBAL, std::nullopt, global_skills);
+        add_skills(skills_generic_cfg, Skill::Scope::GLOBAL, std::nullopt,
+            global_skills);
     }
 
     void detect_project_skills(const std::filesystem::path& root,
@@ -348,19 +330,22 @@ ChangeSummary summarize_git_diff(std::string_view diff)
     hash_bytes(summary.signature, diff);
     std::size_t line_start = 0;
     while (line_start < diff.size()) {
-        const std::size_t line_end = diff.find('\n', line_start);
+        const std::size_t line_end  = diff.find('\n', line_start);
         const std::string_view line = diff.substr(line_start,
             line_end == std::string_view::npos ? diff.size() - line_start
                                                : line_end - line_start);
-        line_start = line_end == std::string_view::npos ? diff.size()
-                                                        : line_end + 1;
-        if (line.empty()) break;
+        line_start
+            = line_end == std::string_view::npos ? diff.size() : line_end + 1;
+        if (line.empty())
+            break;
         const std::size_t first_tab = line.find('\t');
-        if (first_tab == std::string_view::npos) break;
+        if (first_tab == std::string_view::npos)
+            break;
         const std::size_t second_tab = line.find('\t', first_tab + 1);
-        if (second_tab == std::string_view::npos) break;
-        std::size_t additions = 0;
-        std::size_t deletions = 0;
+        if (second_tab == std::string_view::npos)
+            break;
+        std::size_t additions        = 0;
+        std::size_t deletions        = 0;
         const std::string_view added = line.substr(0, first_tab);
         const std::string_view deleted
             = line.substr(first_tab + 1, second_tab - first_tab - 1);
@@ -413,7 +398,7 @@ SystemEnvironment::SystemEnvironment()
     detect_package_managers(package_managers);
     detect_global_skills(global_skills);
     has_git = find_in_path("git");
-    today   = today_string();
+    today   = format_local_time("%Y-%m-%d");
 }
 
 WorkspaceEnvironment::WorkspaceEnvironment(const std::filesystem::path& dir)
@@ -471,32 +456,32 @@ Environment::Environment()
                     std::chrono::seconds { 1 });
                 const CommandResult branch = run_command(
                     "git branch --show-current", std::chrono::seconds { 1 });
-                CommandResult diff = run_command(
-                    "git diff --no-ext-diff --no-color --numstat --patch HEAD --",
-                    std::chrono::seconds { 10 });
+                CommandResult diff
+                    = run_command("git diff --no-ext-diff --no-color --numstat "
+                                  "--patch HEAD --",
+                        std::chrono::seconds { 10 });
                 if (diff.spawned && !diff.timed_out && diff.exit_code != 0) {
-                    diff = run_command(
-                        "git diff --cached --no-ext-diff --no-color --numstat --patch --",
+                    diff = run_command("git diff --cached --no-ext-diff "
+                                       "--no-color --numstat --patch --",
                         std::chrono::seconds { 10 });
                 }
                 if (status.spawned && !status.timed_out && status.exit_code == 0
                     && branch.spawned && !branch.timed_out
-                    && branch.exit_code == 0 && diff.spawned
-                    && !diff.timed_out && diff.exit_code == 0) {
+                    && branch.exit_code == 0 && diff.spawned && !diff.timed_out
+                    && diff.exit_code == 0) {
                     std::vector<ChangedFile> changed_files
                         = parse_git_status(status.output);
                     const std::string branch_name
                         = normalize_git_branch(branch.output);
                     ChangeSummary changes = summarize_git_diff(diff.output);
-                    append_untracked_summary(observed_workspace->project_root
-                            .value(),
-                        changed_files, changes);
+                    append_untracked_summary(
+                        observed_workspace->project_root.value(), changed_files,
+                        changes);
                     const auto current = repository();
                     if (current && changed_files == current->changed_files
                         && branch_name == current->branch
                         && changes == current->changes) {
-                        std::this_thread::sleep_for(
-                            std::chrono::seconds { 2 });
+                        std::this_thread::sleep_for(std::chrono::seconds { 2 });
                         continue;
                     }
                     RepositoryState next;
@@ -521,7 +506,7 @@ void Environment::_publish_workspace(
         if (generation != workspace_generation_) {
             return;
         }
-        workspace_ = std::move(ws);
+        workspace_  = std::move(ws);
         repository_ = std::make_shared<const RepositoryState>();
         ready_.store(true);
     }
@@ -557,9 +542,8 @@ bool Environment::chdir(const std::filesystem::path& dir)
         generation = ++workspace_generation_;
     }
     auto workspace = std::make_shared<WorkspaceEnvironment>(dir);
-    _publish_workspace(workspace->project_root.has_value()
-            ? std::move(workspace)
-            : nullptr,
+    _publish_workspace(
+        workspace->project_root.has_value() ? std::move(workspace) : nullptr,
         generation);
     return true;
 }
@@ -608,11 +592,15 @@ std::optional<std::string> Environment::agent_rules_path() const
 std::vector<Skill> Environment::skills() const
 {
     std::vector<Skill> out;
-    for (const auto& [name, skill] : system_->global_skills) out.push_back(skill);
+    for (const auto& [name, skill] : system_->global_skills)
+        out.push_back(skill);
     const auto ws = workspace();
-    if (ws) for (const auto& [name, skill] : ws->project_skills) out.push_back(skill);
+    if (ws)
+        for (const auto& [name, skill] : ws->project_skills)
+            out.push_back(skill);
     std::sort(out.begin(), out.end(), [](const Skill& a, const Skill& b) {
-        if (a.scope != b.scope) return a.scope == Skill::Scope::PROJECT;
+        if (a.scope != b.scope)
+            return a.scope == Skill::Scope::PROJECT;
         return a.name < b.name;
     });
     return out;

@@ -6,8 +6,8 @@
 
 namespace {
 
-std::vector<ursa::StreamEvent> parse_all(
-    const ursa::Provider& p, ursa::ParseState& state,
+std::vector<ursa::StreamEvent> parse_all(const ursa::Provider& p,
+    ursa::ParseState& state,
     std::initializer_list<std::pair<std::string_view, std::string_view>> blocks)
 {
     std::vector<ursa::StreamEvent> all;
@@ -44,7 +44,7 @@ TEST_CASE("Anthropic request shape via factory")
 {
     ursa::Route route;
     route.dialect = ursa::ApiStandard::ANTHROPIC;
-    const auto p = ursa::get_provider(route);
+    const auto p  = ursa::get_provider(route);
 
     ursa::ChatRequest req;
     req.model = "claude";
@@ -93,12 +93,12 @@ TEST_CASE("OpenAI serializes tool specs and tool messages")
     ursa::ToolSpec spec;
     spec.name        = "read";
     spec.description = "read a file";
-    spec.parameters   = ursa::parse_json(
+    spec.parameters  = ursa::parse_json(
         R"({"type":"object","properties":{"path":{"type":"string"}}})");
 
     ursa::ChatRequest req;
-    req.model     = "gpt-4o";
-    req.tools     = { spec };
+    req.model = "gpt-4o";
+    req.tools = { spec };
     ursa::Message assistant { ursa::Message::Type::ASSISTANT, "" };
     assistant.tool_calls.push_back({ "call_1", "read", R"({"path":"a"})" });
     req.messages.push_back(assistant);
@@ -110,8 +110,8 @@ TEST_CASE("OpenAI serializes tool specs and tool messages")
     CHECK(v["tools"][0]["type"].asString() == "function");
     CHECK(v["tools"][0]["function"]["name"].asString() == "read");
     CHECK(v["tools"][0]["function"]["description"].asString() == "read a file");
-    CHECK(v["tools"][0]["function"]["parameters"]["properties"].isMember(
-        "path"));
+    CHECK(
+        v["tools"][0]["function"]["parameters"]["properties"].isMember("path"));
     CHECK(v["tool_choice"].asString() == "auto");
 
     const Json::Value& asst = v["messages"][0];
@@ -132,17 +132,17 @@ TEST_CASE("Anthropic serializes tool specs and tool_result blocks")
 {
     ursa::Route route;
     route.dialect = ursa::ApiStandard::ANTHROPIC;
-    const auto p = ursa::get_provider(route);
+    const auto p  = ursa::get_provider(route);
 
     ursa::ToolSpec spec;
     spec.name        = "grep";
     spec.description = "search files";
-    spec.parameters   = ursa::parse_json(
+    spec.parameters  = ursa::parse_json(
         R"({"type":"object","properties":{"pattern":{"type":"string"}}})");
 
     ursa::ChatRequest req;
-    req.model     = "claude";
-    req.tools     = { spec };
+    req.model = "claude";
+    req.tools = { spec };
     ursa::Message assistant { ursa::Message::Type::ASSISTANT, "looking" };
     assistant.tool_calls.push_back({ "tu_1", "grep", R"({"pattern":"foo"})" });
     req.messages.push_back(assistant);
@@ -175,8 +175,8 @@ TEST_CASE("OpenAI content delta")
     const auto p = ursa::get_provider(ursa::Route { });
 
     ursa::ParseState state;
-    const auto outs = parse_all(p, state,
-        { { "", R"({"choices":[{"delta":{"content":"Hello"}}]})" } });
+    const auto outs = parse_all(
+        p, state, { { "", R"({"choices":[{"delta":{"content":"Hello"}}]})" } });
     REQUIRE(outs.size() == 1);
     CHECK(outs[0].kind == ursa::StreamEvent::Kind::CONTENT_DELTA);
     CHECK(outs[0].text == "Hello");
@@ -200,12 +200,13 @@ TEST_CASE("OpenAI accumulates fragmented tool calls and flushes")
     ursa::ParseState state;
     const auto outs = parse_all(p, state,
         { { "",
-            R"({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"read","arguments":"{\"pa"}}]}}]})" },
+              R"({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"read","arguments":"{\"pa"}}]}}]})" },
             { "",
-            R"({"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"th\":\"src/main.cpp\"}"}}]}}]})" },
+                R"({"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"th\":\"src/main.cpp\"}"}}]}}]})" },
             { "",
-            R"({"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call_b","type":"function","function":{"name":"grep","arguments":"{}"}}]}}]})" },
-            { "", R"({"choices":[{"delta":{},"finish_reason":"tool_calls"}]})" } });
+                R"({"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call_b","type":"function","function":{"name":"grep","arguments":"{}"}}]}}]})" },
+            { "",
+                R"({"choices":[{"delta":{},"finish_reason":"tool_calls"}]})" } });
 
     REQUIRE(outs.size() == 6);
     for (size_t i = 0; i < 3; ++i) {
@@ -230,13 +231,12 @@ TEST_CASE("Anthropic content delta")
 {
     ursa::Route route;
     route.dialect = ursa::ApiStandard::ANTHROPIC;
-    const auto p = ursa::get_provider(route);
+    const auto p  = ursa::get_provider(route);
 
     ursa::ParseState state;
-    const auto outs
-        = parse_all(p, state,
-            { { "content_block_delta",
-                R"({"type":"content_block_delta","delta":{"type":"text_delta","text":"Hi"}})" } });
+    const auto outs = parse_all(p, state,
+        { { "content_block_delta",
+            R"({"type":"content_block_delta","delta":{"type":"text_delta","text":"Hi"}})" } });
     REQUIRE(outs.size() == 1);
     CHECK(outs[0].kind == ursa::StreamEvent::Kind::CONTENT_DELTA);
     CHECK(outs[0].text == "Hi");
@@ -246,7 +246,7 @@ TEST_CASE("Anthropic stop")
 {
     ursa::Route route;
     route.dialect = ursa::ApiStandard::ANTHROPIC;
-    const auto p = ursa::get_provider(route);
+    const auto p  = ursa::get_provider(route);
 
     ursa::ParseState state;
     const auto outs = parse_all(p, state, { { "message_stop", "{}" } });
@@ -259,19 +259,19 @@ TEST_CASE("Anthropic assembles tool_use block across deltas")
 {
     ursa::Route route;
     route.dialect = ursa::ApiStandard::ANTHROPIC;
-    const auto p = ursa::get_provider(route);
+    const auto p  = ursa::get_provider(route);
 
     ursa::ParseState state;
     const auto outs = parse_all(p, state,
         { { "content_block_start",
-            R"({"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tu_9","name":"write"}})" },
+              R"({"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tu_9","name":"write"}})" },
             { "content_block_delta",
-            R"({"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"path\":"}})" },
+                R"({"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"path\":"}})" },
             { "content_block_delta",
-            R"({"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\"b.txt\"}"}})" },
-            { "content_block_stop", R"({"type":"content_block_stop","index":1})" },
-            { "message_stop",
-                R"({"type":"message_stop"})" } });
+                R"({"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\"b.txt\"}"}})" },
+            { "content_block_stop",
+                R"({"type":"content_block_stop","index":1})" },
+            { "message_stop", R"({"type":"message_stop"})" } });
 
     REQUIRE(outs.size() == 2);
     CHECK(outs[0].kind == ursa::StreamEvent::Kind::TOOL_CALL);
@@ -288,8 +288,8 @@ TEST_CASE("get_provider selects by dialect")
 
     ursa::Route openai;
     CHECK(ursa::get_provider(openai)
-              .build(req)["stream_options"]["include_usage"]
-              .asBool());
+            .build(req)["stream_options"]["include_usage"]
+            .asBool());
 
     ursa::Route anthropic;
     anthropic.dialect = ursa::ApiStandard::ANTHROPIC;
@@ -307,7 +307,7 @@ TEST_CASE("OpenAI requests include_usage and emits a single usage event")
     const auto outs = parse_all(p, state,
         { { "",
               R"({"choices":[{"delta":{"content":"Hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":3,"total_tokens":13}})" },
-          { "", "[DONE]" } });
+            { "", "[DONE]" } });
     REQUIRE(outs.size() == 4);
     CHECK(outs[0].kind == ursa::StreamEvent::Kind::CONTENT_DELTA);
     CHECK(outs[0].text == "Hi");
@@ -326,7 +326,7 @@ TEST_CASE("OpenAI reads usage from choice when top-level absent (Kimi native)")
     ursa::ParseState state;
     const auto outs = parse_all(p, state,
         { { "",
-              R"({"choices":[{"delta":{},"finish_reason":"stop","usage":{"prompt_tokens":12,"completion_tokens":5,"total_tokens":17}}]})" } });
+            R"({"choices":[{"delta":{},"finish_reason":"stop","usage":{"prompt_tokens":12,"completion_tokens":5,"total_tokens":17}}]})" } });
     REQUIRE(outs.size() == 2);
     CHECK(outs[0].kind == ursa::StreamEvent::Kind::USAGE);
     CHECK(outs[0].usage.total == 17);
@@ -354,15 +354,15 @@ TEST_CASE("Anthropic usage folds cache tokens into prompt")
 {
     ursa::Route route;
     route.dialect = ursa::ApiStandard::ANTHROPIC;
-    const auto p = ursa::get_provider(route);
+    const auto p  = ursa::get_provider(route);
 
     ursa::ParseState state;
     const auto outs = parse_all(p, state,
         { { "message_start",
               R"({"type":"message_start","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":60,"cache_creation_input_tokens":30}}})" },
-          { "message_delta",
-              R"({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}})" },
-          { "message_stop", R"({"type":"message_stop"})" } });
+            { "message_delta",
+                R"({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}})" },
+            { "message_stop", R"({"type":"message_stop"})" } });
     REQUIRE(outs.size() == 2);
     CHECK(outs[0].kind == ursa::StreamEvent::Kind::USAGE);
     CHECK(outs[0].usage.cached_read == 60);
@@ -377,17 +377,17 @@ TEST_CASE("Anthropic emits usage from message_start and message_delta")
 {
     ursa::Route route;
     route.dialect = ursa::ApiStandard::ANTHROPIC;
-    const auto p = ursa::get_provider(route);
+    const auto p  = ursa::get_provider(route);
 
     ursa::ParseState state;
     const auto outs = parse_all(p, state,
         { { "message_start",
               R"({"type":"message_start","message":{"usage":{"input_tokens":21,"output_tokens":0}}})" },
-          { "content_block_delta",
-              R"({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}})" },
-          { "message_delta",
-              R"({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}})" },
-          { "message_stop", R"({"type":"message_stop"})" } });
+            { "content_block_delta",
+                R"({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}})" },
+            { "message_delta",
+                R"({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}})" },
+            { "message_stop", R"({"type":"message_stop"})" } });
     REQUIRE(outs.size() == 3);
     CHECK(outs[0].kind == ursa::StreamEvent::Kind::CONTENT_DELTA);
     CHECK(outs[1].kind == ursa::StreamEvent::Kind::USAGE);

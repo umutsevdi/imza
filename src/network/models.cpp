@@ -10,9 +10,8 @@ namespace ursa {
 
 namespace {
 
-    constexpr std::array<std::string_view, 5> kDenyList = {
-        "embed", "whisper", "tts", "dall-e", "moderation"
-    };
+    constexpr std::array<std::string_view, 5> kDenyList
+        = { "embed", "whisper", "tts", "dall-e", "moderation" };
 
     bool denied(std::string_view id)
     {
@@ -81,7 +80,7 @@ Status fetch_models(const Route& route, std::vector<ModelInfo>& out)
     }
 
     std::string body;
-    long code = 0;
+    long code       = 0;
     const Status st = http_get(url, headers, 10, body, &code);
     if (st != Status::OK) {
         return st;

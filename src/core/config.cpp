@@ -1,5 +1,7 @@
 #include "types.h"
 
+#include "io.h"
+
 #include <json/json.h>
 #include <algorithm>
 #include <cstdlib>
@@ -10,8 +12,10 @@ namespace ursa {
 
 std::string_view subagent_default_variant(SubagentRole role)
 {
-    if (role == SubagentRole::BUILDER) return "medium";
-    if (role == SubagentRole::RESEARCH) return "low";
+    if (role == SubagentRole::BUILDER)
+        return "medium";
+    if (role == SubagentRole::RESEARCH)
+        return "low";
     return "off";
 }
 
@@ -79,10 +83,14 @@ namespace {
 
     bool parse_skill_policy(const std::string& text, SkillPolicy& out)
     {
-        if (text == "allow") out = SkillPolicy::ALLOW;
-        else if (text == "ask") out = SkillPolicy::ASK;
-        else if (text == "deny") out = SkillPolicy::DENY;
-        else return false;
+        if (text == "allow")
+            out = SkillPolicy::ALLOW;
+        else if (text == "ask")
+            out = SkillPolicy::ASK;
+        else if (text == "deny")
+            out = SkillPolicy::DENY;
+        else
+            return false;
         return true;
     }
 
@@ -98,8 +106,8 @@ namespace {
 
 } // namespace
 
-Status load_config(const std::filesystem::path& path, Config& out,
-    std::string* error)
+Status load_config(
+    const std::filesystem::path& path, Config& out, std::string* error)
 {
     const auto fail = [&](Status st, const std::string& msg) {
         if (error != nullptr) {
@@ -146,9 +154,10 @@ Status load_config(const std::filesystem::path& path, Config& out,
             Connection conn;
             conn.id          = string_or_empty(entry, "id");
             conn.provider_id = string_or_empty(entry, "provider_id");
-            if (!entry.isMember("id")) conn.id = conn.provider_id;
-            conn.endpoint    = string_or_empty(entry, "endpoint");
-            conn.api_key     = string_or_empty(entry, "api_key");
+            if (!entry.isMember("id"))
+                conn.id = conn.provider_id;
+            conn.endpoint = string_or_empty(entry, "endpoint");
+            conn.api_key  = string_or_empty(entry, "api_key");
             if (conn.id.empty() || conn.provider_id.empty()) {
                 return fail(Status::CONFIG_ERROR,
                     "provider entry requires non-empty 'id' and 'provider_id'");
@@ -156,8 +165,8 @@ Status load_config(const std::filesystem::path& path, Config& out,
             const Json::Value& dialects = entry["dialects"];
             if (!dialects.isNull()) {
                 if (!dialects.isObject()) {
-                    return fail(Status::CONFIG_ERROR,
-                        "'dialects' must be an object");
+                    return fail(
+                        Status::CONFIG_ERROR, "'dialects' must be an object");
                 }
                 for (const std::string& model : dialects.getMemberNames()) {
                     ApiStandard standard;
@@ -186,7 +195,8 @@ Status load_config(const std::filesystem::path& path, Config& out,
         const Json::Value& main = models["main"];
         if (!main.isNull()) {
             if (!main.isObject()) {
-                return fail(Status::CONFIG_ERROR, "'models.main' must be an object");
+                return fail(
+                    Status::CONFIG_ERROR, "'models.main' must be an object");
             }
             const std::string provider = string_or_empty(main, "provider");
             const std::string model    = string_or_empty(main, "model");
@@ -209,14 +219,18 @@ Status load_config(const std::filesystem::path& path, Config& out,
         }
         const auto parse_model = [&](const char* key, SubagentRole role) {
             const Json::Value& value = models[key];
-            if (value.isNull()) return true;
-            if (!value.isObject()) return false;
+            if (value.isNull())
+                return true;
+            if (!value.isObject())
+                return false;
             SubagentModelConfig config;
             config.provider = string_or_empty(value, "provider");
             config.model    = string_or_empty(value, "model");
             config.variant  = string_or_empty(value, "reasoning_effort");
-            if (config.provider.empty() != config.model.empty()) return false;
-            if (!config.provider.empty() && !connection_exists(config.provider)) {
+            if (config.provider.empty() != config.model.empty())
+                return false;
+            if (!config.provider.empty()
+                && !connection_exists(config.provider)) {
                 return false;
             }
             if (!config.variant.empty() && config.variant != "off"
@@ -236,25 +250,33 @@ Status load_config(const std::filesystem::path& path, Config& out,
 
     const Json::Value& skills = root["skills"];
     if (!skills.isNull()) {
-        if (!skills.isObject()) return fail(Status::CONFIG_ERROR, "'skills' must be an object");
+        if (!skills.isObject())
+            return fail(Status::CONFIG_ERROR, "'skills' must be an object");
         auto parse_map = [&](const Json::Value& value, auto& target) -> bool {
-            if (!value.isObject()) return false;
+            if (!value.isObject())
+                return false;
             for (const auto& name : value.getMemberNames()) {
                 SkillPolicy policy;
-                if (!value[name].isString() || !parse_skill_policy(value[name].asString(), policy)) return false;
+                if (!value[name].isString()
+                    || !parse_skill_policy(value[name].asString(), policy))
+                    return false;
                 target[name] = policy;
             }
             return true;
         };
-        if (skills.isMember("global") && !parse_map(skills["global"], out.global_skills))
+        if (skills.isMember("global")
+            && !parse_map(skills["global"], out.global_skills))
             return fail(Status::CONFIG_ERROR, "invalid global skill policy");
         const Json::Value& projects = skills["projects"];
         if (!projects.isNull()) {
-            if (!projects.isObject()) return fail(Status::CONFIG_ERROR, "'skills.projects' must be an object");
+            if (!projects.isObject())
+                return fail(Status::CONFIG_ERROR,
+                    "'skills.projects' must be an object");
             for (const auto& project_path : projects.getMemberNames()) {
                 if (!parse_map(projects[project_path],
                         out.project_skills[project_path]))
-                    return fail(Status::CONFIG_ERROR, "invalid project skill policy");
+                    return fail(
+                        Status::CONFIG_ERROR, "invalid project skill policy");
             }
         }
     }
@@ -269,7 +291,8 @@ Status save_config(const std::filesystem::path& path, const Config& cfg)
     Json::Value providers(Json::arrayValue);
     for (const Connection& conn : cfg.providers) {
         Json::Value entry(Json::objectValue);
-        if (conn.id != conn.provider_id) entry["id"] = conn.id;
+        if (conn.id != conn.provider_id)
+            entry["id"] = conn.id;
         entry["provider_id"] = conn.provider_id;
         if (!conn.endpoint.empty()) {
             entry["endpoint"] = conn.endpoint;
@@ -287,8 +310,8 @@ Status save_config(const std::filesystem::path& path, const Config& cfg)
     root["providers"] = providers;
 
     Json::Value models(Json::objectValue);
-    if (cfg.last_used || (cfg.reasoning_effort
-            && !cfg.reasoning_effort->empty())) {
+    if (cfg.last_used
+        || (cfg.reasoning_effort && !cfg.reasoning_effort->empty())) {
         Json::Value main(Json::objectValue);
         if (cfg.last_used) {
             main["provider"] = cfg.last_used->provider;
@@ -302,7 +325,8 @@ Status save_config(const std::filesystem::path& path, const Config& cfg)
     if (!cfg.subagents.empty()) {
         const auto write_subagent = [&](const char* key, SubagentRole role) {
             const auto found = cfg.subagents.find(role);
-            if (found == cfg.subagents.end()) return;
+            if (found == cfg.subagents.end())
+                return;
             Json::Value value(Json::objectValue);
             if (!found->second.provider.empty()) {
                 value["provider"] = found->second.provider;
@@ -317,44 +341,25 @@ Status save_config(const std::filesystem::path& path, const Config& cfg)
         write_subagent("researcher", SubagentRole::RESEARCH);
         write_subagent("basic", SubagentRole::BASIC);
     }
-    if (!models.empty()) root["models"] = std::move(models);
-
+    if (!models.empty())
+        root["models"] = std::move(models);
 
     Json::Value skills(Json::objectValue);
     Json::Value global(Json::objectValue);
-    for (const auto& [name, policy] : cfg.global_skills) global[name] = skill_policy_str(policy);
+    for (const auto& [name, policy] : cfg.global_skills)
+        global[name] = skill_policy_str(policy);
     skills["global"] = global;
     Json::Value projects(Json::objectValue);
     for (const auto& [project_path, policies] : cfg.project_skills) {
         Json::Value entry(Json::objectValue);
-        for (const auto& [name, policy] : policies) entry[name] = skill_policy_str(policy);
+        for (const auto& [name, policy] : policies)
+            entry[name] = skill_policy_str(policy);
         projects[project_path] = entry;
     }
     skills["projects"] = projects;
-    root["skills"] = skills;
+    root["skills"]     = skills;
 
-    const std::filesystem::path parent = path.parent_path();
-    std::error_code ec;
-    std::filesystem::create_directories(parent, ec);
-
-    const std::filesystem::path tmp = path.string() + ".tmp";
-    {
-        std::ofstream file(tmp, std::ios::trunc);
-        if (!file) {
-            return Status::CONFIG_ERROR;
-        }
-        Json::StreamWriterBuilder builder;
-        builder["indentation"] = "  ";
-        file << Json::writeString(builder, root) << "\n";
-        if (!file) {
-            return Status::CONFIG_ERROR;
-        }
-    }
-    std::filesystem::rename(tmp, path, ec);
-    if (ec) {
-        return Status::CONFIG_ERROR;
-    }
-    return Status::OK;
+    return write_json_file(path, root, "  ");
 }
 
 } // namespace ursa

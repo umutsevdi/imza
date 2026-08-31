@@ -4,9 +4,9 @@
 
 #include <doctest/doctest.h>
 
+#include "environment.h"
 #include "session.h"
 #include "session_store.h"
-#include "environment.h"
 
 namespace {
 
@@ -19,7 +19,7 @@ struct DataHome {
     DataHome()
     {
         if (const char* value = std::getenv("XDG_DATA_HOME")) {
-            previous = value;
+            previous     = value;
             had_previous = true;
         }
         std::error_code ec;
@@ -46,13 +46,10 @@ struct DataHome {
 struct CurrentDirectory {
     std::filesystem::path original = std::filesystem::current_path();
 
-    ~CurrentDirectory()
-    {
-        ursa::get_environment()->chdir(original);
-    }
+    ~CurrentDirectory() { ursa::get_environment()->chdir(original); }
 };
 
-}
+} // namespace
 
 TEST_CASE("saved sessions are immutable and fork on a new prompt")
 {
@@ -78,9 +75,8 @@ TEST_CASE("saved sessions are immutable and fork on a new prompt")
     REQUIRE(ursa::save_session(source) == ursa::Status::OK);
     saved = ursa::saved_sessions();
     REQUIRE(saved.size() == 2);
-    CHECK(std::any_of(saved.begin(), saved.end(), [&](const auto& entry) {
-        return entry.path == saved_path;
-    }));
+    CHECK(std::any_of(saved.begin(), saved.end(),
+        [&](const auto& entry) { return entry.path == saved_path; }));
 
     CurrentDirectory directory;
     const auto other = home.path / "other-workspace";
@@ -128,23 +124,22 @@ TEST_CASE("saved sessions retain delegated-agent chat transcripts")
     source.append_assistant("model", "off");
     const ursa::ToolCallRequest request { "subagent", "{}", "", "call-1" };
     source.append_tool(request);
-    source.set_tool_subagent_chats(request,
-        { { "Agent 1 (research)", "## Assistant\n\nreport" } });
-    source.fill_tool_result(request,
-        { ursa::ToolCall::Result::Kind::OUTPUT, "report" });
+    source.set_tool_subagent_chats(
+        request, { { "Agent 1 (research)", "## Assistant\n\nreport" } });
+    source.fill_tool_result(
+        request, { ursa::ToolCall::Result::Kind::OUTPUT, "report" });
     source.finish_session("");
 
     REQUIRE(ursa::save_session(source) == ursa::Status::OK);
     const auto saved = ursa::saved_sessions();
     REQUIRE(saved.size() == 1);
     ursa::Session loaded;
-    REQUIRE(ursa::load_session(saved.front().path, loaded)
-        == ursa::Status::OK);
+    REQUIRE(ursa::load_session(saved.front().path, loaded) == ursa::Status::OK);
     REQUIRE(loaded.items().size() == 3);
     const auto& call = std::get<ursa::ToolCall>(loaded.items()[2]);
     REQUIRE(call.subagent_chats.size() == 1);
     CHECK(call.subagent_chats[0].title == "Agent 1 (research)");
-    CHECK(call.subagent_chats[0].transcript.find("report")
-        != std::string::npos);
+    CHECK(
+        call.subagent_chats[0].transcript.find("report") != std::string::npos);
 #endif
 }

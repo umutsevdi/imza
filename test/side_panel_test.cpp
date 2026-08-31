@@ -1,28 +1,13 @@
 #include <string>
 
 #include <doctest/doctest.h>
-#include <ftxui/dom/elements.hpp>
-#include <ftxui/screen/screen.hpp>
 
 #include "environment.h"
+#include "test_helpers.h"
 #include "ui.h"
 
-namespace {
-
-ftxui::Screen to_screen(ftxui::Element element)
-{
-    using namespace ftxui;
-    auto screen = Screen::Create(Dimension::Fixed(60), Dimension::Fixed(30));
-    Render(screen, element);
-    return screen;
-}
-
-std::string to_text(ftxui::Element element)
-{
-    return to_screen(std::move(element)).ToString();
-}
-
-} // namespace
+using ursa::test::to_screen;
+using ursa::test::to_text;
 
 TEST_CASE("render_todo renders as panel when wide, strip when narrow")
 {
@@ -44,13 +29,13 @@ TEST_CASE("render_todo renders as panel when wide, strip when narrow")
 TEST_CASE("render_todo wraps long items instead of clipping")
 {
     using Status = ursa::TodoItem::Status;
-    ursa::TodoList todo { { { "investigate the flaky parser regression test",
-        Status::PENDING } } };
+    ursa::TodoList todo {
+        { { "investigate the flaky parser regression test", Status::PENDING } }
+    };
     auto screen = ftxui::Screen::Create(
         ftxui::Dimension::Fixed(30), ftxui::Dimension::Fixed(10));
     ftxui::Render(screen,
-        ursa::render_todo(
-            todo, { ursa::LayoutCtx::Kind::WIDE, 30 })
+        ursa::render_todo(todo, { ursa::LayoutCtx::Kind::WIDE, 30 })
             | ftxui::size(ftxui::WIDTH, ftxui::EQUAL, 30));
     const std::string out = screen.ToString();
     CHECK(out.find("investigate") != std::string::npos);
@@ -62,8 +47,9 @@ TEST_CASE("render_todo wraps long items instead of clipping")
 TEST_CASE("render_todo wraps to the offered width")
 {
     using Status = ursa::TodoItem::Status;
-    ursa::TodoList todo { { { "rectification certification verification",
-        Status::PENDING } } };
+    ursa::TodoList todo {
+        { { "rectification certification verification", Status::PENDING } }
+    };
     auto render_at = [&todo](int width) {
         auto screen = ftxui::Screen::Create(
             ftxui::Dimension::Fixed(width), ftxui::Dimension::Fixed(8));
@@ -72,10 +58,10 @@ TEST_CASE("render_todo wraps to the offered width")
                 | ftxui::size(ftxui::WIDTH, ftxui::EQUAL, width));
         return screen.ToString();
     };
-    CHECK(render_at(80).find("rectification certification")
-        != std::string::npos);
-    CHECK(render_at(30).find("rectification certification")
-        == std::string::npos);
+    CHECK(
+        render_at(80).find("rectification certification") != std::string::npos);
+    CHECK(
+        render_at(30).find("rectification certification") == std::string::npos);
 }
 
 TEST_CASE("render_changed_files renders colored symbols and readable paths")
@@ -95,7 +81,7 @@ TEST_CASE("render_changed_files renders colored symbols and readable paths")
         },
         .changes = { 12, 4, 1 },
     };
-    auto screen = to_screen(ursa::render_changed_files(
+    auto screen           = to_screen(ursa::render_changed_files(
         repository, { ursa::LayoutCtx::Kind::WIDE, 30 }));
     const std::string out = screen.ToString();
 
