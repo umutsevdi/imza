@@ -109,3 +109,84 @@ TEST_CASE("review state marks comments stale when their line disappears")
     state.set_result(std::move(review));
     CHECK(state.snapshot().comments[0].stale);
 }
+
+TEST_CASE("AI review prompt includes diff and existing comments")
+{
+    ursa::RepositoryReview review;
+    review.files.push_back(ursa::ReviewFile { .old_path = "src/app.cpp",
+        .new_path = "src/app.cpp",
+        .hunks = { { "@@ -4 +4 @@",
+            { { ursa::ReviewLine::Kind::DELETION, 4, std::nullopt, "old" },
+                { ursa::ReviewLine::Kind::ADDITION, std::nullopt, 4,
+                    "updated" } } } } });
+    const std::vector<ursa::ReviewComment> comments { { 1,
+        { "src/app.cpp", std::nullopt, 4, "updated" }, "existing issue",
+        false } };
+
+    const std::string prompt
+        = ursa::format_ai_review_prompt(review, comments);
+    CHECK(prompt.find("diff --git a/src/app.cpp b/src/app.cpp")
+        != std::string::npos);
+    CHECK(prompt.find("-old\\n+updated") != std::string::npos);
+    CHECK(prompt.find("existing issue") != std::string::npos);
+}
+
+TEST_CASE("AI review response resolves changed-line anchors")
+{
+    ursa::RepositoryReview review;
+    review.files.push_back(ursa::ReviewFile { .old_path = "src/app.cpp",
+        .new_path = "src/app.cpp",
+        .hunks = { { "@@ -8 +8 @@",
+            { { ursa::ReviewLine::Kind::DELETION, 8, std::nullopt, "old" },
+                { ursa::ReviewLine::Kind::ADDITION, std::nullopt, 8,
+                    "updated" } } } } });
+
+    const auto result = ursa::parse_ai_review_response(
+        "```json\n{\"findings\":[{\"file\":\"src/app.cpp\","
+        "\"side\":\"new\",\"line\":8,\"severity\":\"P2\","
+        "\"body\":\"The update loses the error.\"}]}\n```",
+        review);
+
+    REQUIRE(std::holds_alternative<
+        std::vector<ursa::ReviewCommentDraft>>(result));
+    const auto& comments
+        = std::get<std::vector<ursa::ReviewCommentDraft>>(result);
+    REQUIRE(comments.size() == 1);
+    CHECK(comments[0].anchor.file == "src/app.cpp");
+    CHECK(comments[0].anchor.new_line == 8);
+    CHECK(comments[0].anchor.content == "updated");
+    CHECK(comments[0].body == "[P2] The update loses the error.");
+}
+
+TEST_CASE("AI review rejects findings outside changed lines")
+{
+    ursa::RepositoryReview review;
+    review.files.push_back(ursa::ReviewFile { .old_path = "src/app.cpp",
+        .new_path = "src/app.cpp",
+        .hunks = { { "@@ -1 +1 @@",
+            { { ursa::ReviewLine::Kind::CONTEXT, 1, 1, "same" } } } } });
+
+    const auto result = ursa::parse_ai_review_response(
+        R"({"findings":[{"file":"src/app.cpp","side":"new","line":1,"severity":"P1","body":"Invalid anchor."}]})",
+        review);
+
+    REQUIRE(std::holds_alternative<std::string>(result));
+}
+
+TEST_CASE("review state adds AI comments without exact duplicates")
+{
+    ursa::ReviewState state;
+    const ursa::ReviewLineAnchor anchor {
+        "src/app.cpp", std::nullopt, 8, "updated"
+    };
+    state.add_comment(anchor, "The update loses the error.");
+
+    const std::size_t added = state.add_comments(
+        { { anchor, "[P2] The update loses the error." },
+            { anchor, "[P3] A separate issue." } });
+
+    CHECK(added == 1);
+    const auto comments = state.comments_snapshot().comments;
+    REQUIRE(comments.size() == 2);
+    CHECK(comments[1].body == "[P3] A separate issue.");
+}

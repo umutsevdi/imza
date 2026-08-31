@@ -118,8 +118,12 @@ namespace {
                     return event == Event::Tab || event == Event::TabReverse;
                 });
             tabs_content_ = Container::Tab({ chat_, review_ }, &selected_pane_);
-            main_         = Container::Vertical({ tabs_, tabs_content_ });
-            Add(main_);
+            Add(Container::Stacked({
+                Container::Vertical({ tabs_, tabs_content_ }),
+                side_,
+                status_line_,
+                modal_,
+            }));
             chat_->TakeFocus();
         }
 
@@ -246,7 +250,6 @@ namespace {
         Component review_;
         Component tabs_content_;
         Component tabs_;
-        Component main_;
         Signal<>::Subscription workspace_subscription_;
         LayoutCtx layout_ = layout_context(0);
         WorkflowPhase phase_ { WorkflowPhase::PLAN };

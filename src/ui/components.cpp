@@ -11,6 +11,7 @@
 #include <ftxui/dom/node.hpp>
 #include <ftxui/screen/screen.hpp>
 #include <functional>
+#include <format>
 #include <memory>
 #include <optional>
 #include <string>
@@ -269,6 +270,42 @@ Component action_button(std::string label, std::function<void()> on_click,
         return e;
     };
     return space_activates(Button(std::move(label), on_click, bo), on_click);
+}
+
+Component inline_link_button(std::function<Element()> render,
+    std::function<void()> on_click, const Color& inactive_color)
+{
+    ButtonOption option;
+    option.on_click  = on_click;
+    option.transform = [render = std::move(render), inactive_color](
+                           const EntryState& state) {
+        Element element = render();
+        if (state.focused) {
+            return hbox({ std::move(element) | bold | underlined
+                              | color(PANEL_FG),
+                filler() });
+        }
+        return hbox(
+            { std::move(element) | color(inactive_color), filler() });
+    };
+    return space_activates(Button(std::move(option)), std::move(on_click));
+}
+
+Component inline_link_button(std::string label,
+    std::function<void()> on_click, const Color& inactive_color)
+{
+    auto shared_label
+        = std::make_shared<const std::string>(std::move(label));
+    return inline_link_button(
+        [shared_label] { return text(*shared_label); }, std::move(on_click),
+        inactive_color);
+}
+
+std::string elapsed_text(std::chrono::milliseconds elapsed)
+{
+    const auto total
+        = std::max<std::int64_t>(0, elapsed.count()) / 1000;
+    return std::format("{}:{:02}", total / 60, total % 60);
 }
 
 Element card(Element body, std::optional<Color> bg, bool pad)

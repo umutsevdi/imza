@@ -291,7 +291,12 @@ SubagentChat Controller::subagent_chat(
         return { std::move(title),
             "No delegated-agent history is available." };
     }
-    const std::size_t id = call.subagent_ids[index];
+    return subagent_chat(call.subagent_ids[index], std::move(title));
+}
+
+SubagentChat Controller::subagent_chat(
+    std::size_t id, std::string title) const
+{
     const std::vector<SubagentTask> tasks = state_->subagents->tasks();
     const auto found = std::find_if(tasks.begin(), tasks.end(),
         [id](const SubagentTask& task) { return task.id == id; });

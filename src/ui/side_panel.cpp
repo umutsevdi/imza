@@ -10,9 +10,10 @@
 #include <ftxui/screen/box.hpp>
 
 #include <atomic>
-#include <deque>
 #include <filesystem>
 #include <format>
+#include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -63,14 +64,15 @@ public:
         })
                                               : Signal<>::Subscription { })
     {
+        links_container_ = Container::Vertical({ });
+        Add(links_container_);
     }
 
     Element OnRender() override
     {
         const LayoutCtx ctx = layout_();
         const bool narrow   = ctx.kind == LayoutCtx::Kind::NARROW;
-        changed_file_boxes_.clear();
-        changed_file_paths_.clear();
+        active_links_.clear();
         Elements parts;
         const std::string title = state_->session->title();
         parts.push_back(paragraph(title.empty() ? "New Session" : title) | bold
@@ -103,39 +105,28 @@ public:
 
     bool OnEvent(Event event) override
     {
-        if (!event.is_mouse() || event.mouse().button != Mouse::Left
-            || event.mouse().motion != Mouse::Pressed) {
-            return false;
-        }
-        for (std::size_t i = 0; i < changed_file_boxes_.size(); ++i) {
-            if (changed_file_boxes_[i].Contain(
-                    event.mouse().x, event.mouse().y)) {
-                state_->review->request_file_jump(changed_file_paths_[i]);
-                navigate_(WorkflowPhase::REVIEW);
-                return true;
-            }
-        }
-        if (!state_->review) {
-            return false;
-        }
-        for (std::size_t i = 0; i < comment_boxes_.size(); ++i) {
-            if (comment_boxes_[i].Contain(event.mouse().x, event.mouse().y)) {
-                state_->review->request_jump(comment_ids_[i]);
-                return true;
-            }
+        for (const Component& link : active_links_) {
+            if (link->OnEvent(event)) return true;
         }
         return false;
     }
 
 private:
+    struct FileLink {
+        std::shared_ptr<ChangedFile> file;
+        Component component;
+    };
+
+    struct CommentLink {
+        std::shared_ptr<std::string> label;
+        Component component;
+    };
+
     Element _render_changed_files(const RepositoryState& repository)
     {
         Elements rows;
         for (const ChangedFile& file : repository.changed_files) {
-            changed_file_boxes_.push_back(Box { });
-            changed_file_paths_.push_back(changed_file_target(file));
-            rows.push_back(changed_file_item(file)
-                | reflect(changed_file_boxes_.back()));
+            rows.push_back(_changed_file_link(file)->Render());
         }
         Element body
             = vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER);
@@ -150,8 +141,6 @@ private:
 
     void _append_review_comments(Elements& parts)
     {
-        comment_boxes_.clear();
-        comment_ids_.clear();
         if (workflow_() != WorkflowPhase::REVIEW || !state_->review) {
             return;
         }
@@ -161,29 +150,72 @@ private:
         }
         Elements rows;
         for (const ReviewComment& comment : snapshot.comments) {
-            comment_boxes_.push_back(Box { });
-            comment_ids_.push_back(comment.id);
             const std::string line = comment.anchor.new_line
                 ? std::to_string(*comment.anchor.new_line)
                 : comment.anchor.old_line
                 ? std::to_string(*comment.anchor.old_line)
                 : "?";
             std::filesystem::path path(comment.anchor.file);
-            rows.push_back(
-                hbox({
-                    text(path.filename().string() + ":" + line
-                        + (comment.stale ? "  stale" : ""))
-                        | bold | color(PANEL_FG),
-                    filler(),
-                    text(fit(comment.body, LayoutCtx::panel_width / 2 - 6))
-                        | color(PANEL_FG_DIM),
-                })
-                | xflex | reflect(comment_boxes_.back()));
+            const std::string label = path.filename().string() + ":" + line
+                + (comment.stale ? "  stale" : "");
+            rows.push_back(hbox({ _comment_link(comment.id, label)->Render(),
+                               filler(),
+                               text(fit(comment.body,
+                                   LayoutCtx::panel_width / 2 - 6))
+                                   | color(PANEL_FG_DIM) })
+                | xflex);
         }
         parts.push_back(vbox({
             section_title("Review Comments"),
             vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER),
         }));
+    }
+
+    Component _changed_file_link(const ChangedFile& file)
+    {
+        const std::string key = file.path;
+        auto found            = file_links_.find(key);
+        if (found == file_links_.end()) {
+            auto current = std::make_shared<ChangedFile>(file);
+            const std::string target = changed_file_target(file);
+            Component component = inline_link_button(
+                [current] { return changed_file_item(*current); },
+                [this, target] {
+                    state_->review->request_file_jump(target);
+                    navigate_(WorkflowPhase::REVIEW);
+                },
+                PANEL_FG_DIM);
+            links_container_->Add(component);
+            found = file_links_
+                        .emplace(key,
+                            FileLink { std::move(current), component })
+                        .first;
+        } else {
+            *found->second.file = file;
+        }
+        active_links_.push_back(found->second.component);
+        return found->second.component;
+    }
+
+    Component _comment_link(std::size_t id, std::string label)
+    {
+        auto found = comment_links_.find(id);
+        if (found == comment_links_.end()) {
+            auto current = std::make_shared<std::string>(std::move(label));
+            Component component = inline_link_button(
+                [current] { return text(*current) | bold; },
+                [this, id] { state_->review->request_jump(id); },
+                PANEL_FG_DIM);
+            links_container_->Add(component);
+            found = comment_links_
+                        .emplace(id,
+                            CommentLink { std::move(current), component })
+                        .first;
+        } else {
+            *found->second.label = std::move(label);
+        }
+        active_links_.push_back(found->second.component);
+        return found->second.component;
     }
 
     std::shared_ptr<ApplicationState> state_;
@@ -198,10 +230,10 @@ private:
     std::vector<std::string> attachment_names_;
     Signal<>::Subscription attachments_subscription_;
     Signal<>::Subscription review_subscription_;
-    std::deque<Box> comment_boxes_;
-    std::vector<std::size_t> comment_ids_;
-    std::deque<Box> changed_file_boxes_;
-    std::vector<std::string> changed_file_paths_;
+    Component links_container_;
+    std::map<std::string, FileLink> file_links_;
+    std::map<std::size_t, CommentLink> comment_links_;
+    std::vector<Component> active_links_;
 };
 
 ftxui::Component make_side_panel(std::shared_ptr<ApplicationState> state,

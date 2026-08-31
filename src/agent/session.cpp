@@ -191,6 +191,32 @@ double Session::last_cost() const
     return last_cost_;
 }
 
+std::optional<std::chrono::milliseconds> Session::reasoning_elapsed() const
+{
+    std::lock_guard lock(mutex_);
+    if (!reasoning_start_) return std::nullopt;
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - *reasoning_start_);
+}
+
+std::optional<std::chrono::milliseconds> Session::tool_elapsed(
+    std::size_t id) const
+{
+    std::lock_guard lock(mutex_);
+    const auto started = tool_started_.find(id);
+    if (started == tool_started_.end()) return std::nullopt;
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started->second);
+}
+
+std::optional<std::chrono::milliseconds> Session::turn_elapsed() const
+{
+    std::lock_guard lock(mutex_);
+    if (!turn_started_) return std::nullopt;
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - *turn_started_);
+}
+
 Session::StatusView Session::status_view() const
 {
     std::lock_guard lock(mutex_);
@@ -232,6 +258,9 @@ void Session::restore(SessionSnapshot snapshot)
         queued_.clear();
         error_.clear();
         retry_countdown_.reset();
+        reasoning_start_.reset();
+        turn_started_.reset();
+        tool_started_.clear();
         phase_                    = Phase::IDLE;
         totals_                   = { };
         last_                     = { };
@@ -373,7 +402,8 @@ void Session::begin_send(
         persistence_ = UnsavedSession { };
         items_.push_back(UserTurn { std::move(text), std::move(attachments) });
         error_.clear();
-        phase_ = Phase::CONNECTING;
+        phase_          = Phase::CONNECTING;
+        turn_started_   = std::chrono::steady_clock::now();
     }
     if (has_attachments) {
         attachments_changed_.publish();
@@ -443,8 +473,10 @@ void Session::append_tool(const ToolCallRequest& req)
     if (auto* a = last_assistant_locked()) {
         finalize_reasoning(*a);
     }
+    const std::size_t id = next_tool_id_++;
+    tool_started_[id]    = std::chrono::steady_clock::now();
     items_.push_back(
-        ToolCall { next_tool_id_++, req.id, req.name, req.args, { },
+        ToolCall { id, req.id, req.name, req.args, { },
             { }, std::nullopt });
 }
 
@@ -496,6 +528,7 @@ void Session::fill_tool_result(
             : tc->name == req.name && tc->args == req.args;
         if (matched) {
             tc->result = std::move(result);
+            tool_started_.erase(tc->id);
             return;
         }
     }
@@ -553,7 +586,7 @@ void Session::mark_retry(int wait_seconds)
 void Session::reset_reasoning()
 {
     std::lock_guard lock(mutex_);
-    reasoning_start_.reset();
+    reasoning_start_ = std::chrono::steady_clock::now();
 }
 
 void Session::request_interrupt() { interrupt_requested_.store(true); }
@@ -722,8 +755,7 @@ AssistantTurn* Session::last_assistant_locked()
 
 void Session::finalize_reasoning(AssistantTurn& a)
 {
-    if (!reasoning_start_.has_value() || a.reasoning.empty()
-        || a.reasoning_ms.has_value()) {
+    if (!reasoning_start_.has_value() || a.reasoning_ms.has_value()) {
         return;
     }
     const auto now = std::chrono::steady_clock::now();
@@ -735,6 +767,9 @@ void Session::finish_session_locked(const std::string& error)
 {
     if (phase_ == Phase::IDLE) {
         return;
+    }
+    if (auto* a = last_assistant_locked()) {
+        finalize_reasoning(*a);
     }
     retry_countdown_.reset();
     if (!error.empty() && error_.empty()) {

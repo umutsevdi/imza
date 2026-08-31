@@ -30,21 +30,19 @@ public:
               state_->environment->subscribe_to_repository_change(
                   [] { animation::RequestAnimationFrame(); }))
         , subagent_subscription_(state_->subagents->subscribe(
-              [](const SubagentEvent&) {
-                  animation::RequestAnimationFrame();
-              }))
+              [](const SubagentEvent&) { animation::RequestAnimationFrame(); }))
     {
     }
 
     Element OnRender() override
     {
         using namespace ftxui;
-        const StatusConfigView config = state_->providers->status();
+        const StatusConfigView config     = state_->providers->status();
         const Session::StatusView session = state_->session->status_view();
-        const LayoutCtx ctx = layout_();
-        const bool wide = ctx.kind == LayoutCtx::Kind::WIDE;
-        const bool environment_ready = state_->environment->ready();
-        const WorkflowPhase phase = workflow_();
+        const LayoutCtx ctx               = layout_();
+        const bool wide                   = ctx.kind == LayoutCtx::Kind::WIDE;
+        const bool environment_ready      = state_->environment->ready();
+        const WorkflowPhase phase         = workflow_();
         std::string mode_label;
         Color mode_color;
         switch (phase) {
@@ -98,21 +96,18 @@ public:
         }
         bar.push_back(filler());
         const std::size_t running_agents
-            = state_->subagents->running_count();
-        if (running_agents > 0) {
-            animation::RequestAnimationFrame();
-            bar.push_back(spinner(15, static_cast<size_t>(frame_))
-                | color(Color::GrayLight));
-            bar.push_back(text(" " + std::to_string(running_agents)
-                                  + (running_agents == 1 ? " agent  " : " agents  "))
-                | color(PANEL_FG_DIM));
-        }
-        if (!environment_ready) {
+            = state_->subagents->running_count(false);
+        if (!environment_ready || running_agents > 0) {
             animation::RequestAnimationFrame();
             bar.push_back(spinner(15, static_cast<size_t>(frame_))
                 | color(Color::GrayLight));
             if (wide) {
-                bar.push_back(text(" Caching…") | color(PANEL_FG_DIM));
+                bar.push_back(!environment_ready
+                        ? text(" Caching…")
+                        : text(" " + std::to_string(running_agents)
+                              + (running_agents == 1 ? " agent  "
+                                                     : " agents  "))
+                            | color(PANEL_FG_DIM));
             }
             bar.push_back(text("  "));
         }
@@ -136,8 +131,9 @@ public:
     void OnAnimation(animation::Params&) override
     {
         if (!state_->environment->ready()
-            || state_->subagents->running_count() > 0) {
+            || state_->subagents->running_count(false) > 0) {
             ++frame_;
+            animation::RequestAnimationFrame();
         }
     }
 
@@ -207,9 +203,8 @@ private:
     }
 };
 
-ftxui::Component make_status_line(
-    std::shared_ptr<ApplicationState> state, LayoutFn layout,
-    WorkflowFn workflow)
+ftxui::Component make_status_line(std::shared_ptr<ApplicationState> state,
+    LayoutFn layout, WorkflowFn workflow)
 {
     return ftxui::Make<StatusLine>(
         std::move(state), std::move(layout), std::move(workflow));

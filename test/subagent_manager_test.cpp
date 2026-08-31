@@ -80,3 +80,22 @@ TEST_CASE("stopping subagents joins active workers")
         == std::future_status::ready);
     CHECK(manager.running_count() == 0);
 }
+
+TEST_CASE("a single subagent can be cancelled")
+{
+    ursa::SubagentManager manager;
+    auto handle = manager.start("inspect", "model", "low", true,
+        [](std::stop_token stop) {
+            while (!stop.stop_requested()) {
+                std::this_thread::yield();
+            }
+            return ursa::SubagentResult {
+                ursa::Status::CANCELLED, "cancelled" };
+        });
+
+    CHECK(manager.cancel(handle.id));
+    REQUIRE(handle.completion.wait_for(std::chrono::seconds(1))
+        == std::future_status::ready);
+    CHECK(handle.completion.get().status == ursa::Status::CANCELLED);
+    CHECK_FALSE(manager.cancel(handle.id + 1));
+}

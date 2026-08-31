@@ -61,6 +61,31 @@ TEST_CASE("Anthropic request shape via factory")
     CHECK_FALSE(v.isMember("tools"));
 }
 
+TEST_CASE("providers cap requested output tokens")
+{
+    ursa::ChatRequest openai_request;
+    openai_request.model             = "gpt-4o";
+    openai_request.max_output_tokens = 2048;
+    Json::Value openai
+        = ursa::get_provider(ursa::Route { }).build(openai_request);
+    CHECK(openai["max_tokens"].asUInt64() == 2048);
+
+    openai_request.reasoning_effort = "low";
+    openai = ursa::get_provider(ursa::Route { }).build(openai_request);
+    CHECK_FALSE(openai.isMember("max_tokens"));
+    CHECK(openai["max_completion_tokens"].asUInt64() == 2048);
+
+    ursa::Route route;
+    route.dialect = ursa::ApiStandard::ANTHROPIC;
+    ursa::ChatRequest anthropic_request;
+    anthropic_request.model             = "claude";
+    anthropic_request.thinking_budget   = 2000;
+    anthropic_request.max_output_tokens = 2048;
+    const Json::Value anthropic
+        = ursa::get_provider(route).build(anthropic_request);
+    CHECK(anthropic["max_tokens"].asUInt64() == 4048);
+}
+
 TEST_CASE("OpenAI serializes tool specs and tool messages")
 {
     const auto p = ursa::get_provider(ursa::Route { });

@@ -8,6 +8,7 @@
 #include <stop_token>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "types.h"
@@ -62,6 +63,7 @@ public:
         std::string variant, bool visible, SubagentRunFn run,
         SubagentCompleteFn complete = { },
         std::shared_ptr<Session> session = { });
+    bool cancel(std::size_t id);
     void stop();
     std::vector<SubagentTask> tasks(bool visible_only = false) const;
     std::size_t running_count(bool visible_only = true) const;
@@ -71,7 +73,7 @@ public:
 private:
     mutable std::mutex mutex_;
     std::vector<SubagentTask> tasks_;
-    std::vector<std::jthread> workers_;
+    std::vector<std::pair<std::size_t, std::jthread>> workers_;
     std::size_t next_id_ = 1;
     Signal<const SubagentEvent&> changed_;
 };

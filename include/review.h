@@ -72,8 +72,20 @@ struct ReviewComment {
     bool stale = false;
 };
 
+struct ReviewCommentDraft {
+    ReviewLineAnchor anchor;
+    std::string body;
+};
+
+using AiReviewParseResult
+    = std::variant<std::vector<ReviewCommentDraft>, std::string>;
+
 std::string format_review_plan_prompt(
     const std::vector<ReviewComment>& comments);
+std::string format_ai_review_prompt(const RepositoryReview& review,
+    const std::vector<ReviewComment>& comments);
+AiReviewParseResult parse_ai_review_response(
+    std::string_view response, const RepositoryReview& review);
 
 using ReviewLoadResult = std::variant<RepositoryReview, std::string>;
 
@@ -106,6 +118,7 @@ public:
     void set_loading();
     void set_result(ReviewLoadResult result);
     std::size_t add_comment(ReviewLineAnchor anchor, std::string body);
+    std::size_t add_comments(std::vector<ReviewCommentDraft> comments);
     void update_comment(std::size_t id, std::string body);
     void delete_comment(std::size_t id);
     void request_jump(std::size_t id);

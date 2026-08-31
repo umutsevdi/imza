@@ -6,6 +6,7 @@
 #include <ftxui/screen/color.hpp>
 
 #include <functional>
+#include <chrono>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -60,6 +61,13 @@ ftxui::InputOption password_option(std::string* content, int* cursor,
 ftxui::Component action_button(std::string label,
     std::function<void()> on_click, const ftxui::Color& color = PANEL_BORDER,
     const ftxui::Color& color_focussed = PANEL_COLOR_FOCUS);
+ftxui::Component inline_link_button(
+    std::function<ftxui::Element()> render, std::function<void()> on_click,
+    const ftxui::Color& inactive_color = PANEL_FG_DIM);
+ftxui::Component inline_link_button(
+    std::string label, std::function<void()> on_click,
+    const ftxui::Color& inactive_color = PANEL_FG_DIM);
+std::string elapsed_text(std::chrono::milliseconds elapsed);
 
 ftxui::Element render_markdown_element(std::string_view md);
 

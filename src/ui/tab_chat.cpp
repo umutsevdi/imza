@@ -14,6 +14,7 @@
 #include <map>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "attachments.h"
@@ -40,6 +41,15 @@ namespace {
         const std::string effort
             = turn.reasoning_effort.empty() ? "off" : turn.reasoning_effort;
         return turn.model + " · " + effort;
+    }
+
+    std::string elapsed_suffix(const Session& session)
+    {
+        const auto elapsed = session.turn_elapsed();
+        if (!elapsed) {
+            return "";
+        }
+        return " " + elapsed_text(*elapsed);
     }
 
     // reflect() clips the recorded box to the screen stencil at render time,
@@ -209,26 +219,34 @@ namespace {
                 scroll_top_ = std::clamp(scroll_top_, 0, max_scroll());
             }
             const std::uint64_t content_serial = st.content_serial();
+            const std::vector<ConversationItem>& conversation = st.items();
+            const std::size_t item_count = conversation.size();
             if (cache_kind_ != ctx.kind || cache_width_ != ctx.width
                 || content_serial_ != content_serial
-                || item_cache_.size() != st.items().size()) {
+                || item_cache_.size() != item_count) {
                 item_cache_.clear();
-                item_cache_.resize(st.items().size());
-                item_versions_.assign(st.items().size(), kInvalidVersion);
+                item_cache_.resize(item_count);
+                item_versions_.assign(item_count, kInvalidVersion);
                 cache_kind_     = ctx.kind;
                 cache_width_    = ctx.width;
                 content_serial_ = content_serial;
             }
+            if (std::exchange(hover_dirty_, false)) {
+                item_versions_.assign(item_cache_.size(), kInvalidVersion);
+            }
             std::size_t item_index = 0;
-            for (const auto& it : st.items()) {
+            for (const auto& it : conversation) {
+                if (item_index >= item_cache_.size()) {
+                    break;
+                }
                 const std::size_t version = item_version(it);
-                const bool is_trailing    = &it == &st.items().back();
+                const bool is_trailing    = item_index + 1 == item_count;
                 const bool active         = is_trailing && streaming
                     && std::holds_alternative<AssistantTurn>(it);
                 const bool final_segment = !(is_trailing && busy)
-                    && (item_index + 1 == st.items().size()
+                    && (is_trailing
                         || std::holds_alternative<UserTurn>(
-                            st.items()[item_index + 1]));
+                            conversation[item_index + 1]));
                 std::size_t eff_version = version;
                 if (const auto* tc = std::get_if<ToolCall>(&it); tc != nullptr
                     && (tc->name == "shell" || tc->name == "subagent")
@@ -325,16 +343,21 @@ namespace {
                 }
                 if ((streaming || connecting)
                     && std::holds_alternative<AssistantTurn>(it)
-                    && &it == &st.items().back()) {
+                    && is_trailing) {
                     const auto& at = std::get<AssistantTurn>(it);
                     if (at.reasoning.empty()
                         && (!reasoning_enabled(at) || connecting)) {
+                        std::string status
+                            = connecting ? " Connecting…" : " Thinking…";
+                        status += elapsed_suffix(st);
                         el = vbox({
                             hbox({
                                 spinner(15, static_cast<size_t>(frame_))
                                     | color(Color::GrayLight),
-                                text(connecting ? " Connecting…" : " Thinking…")
-                                    | dim,
+                                make_reasoning_button(item_index,
+                                    std::move(status), at.reasoning,
+                                    assistant_metadata(at))
+                                    ->Render(),
                                 filler(),
                                 text(interrupt_hint()) | dim,
                             }),
@@ -435,8 +458,11 @@ namespace {
                 insert_newline();
                 return true;
             }
-            if (event.is_mouse() && event.mouse().button == Mouse::Left
-                && event.mouse().motion == Mouse::Pressed) {
+            if (event.is_mouse()) {
+                if (event.mouse().motion == Mouse::Moved) {
+                    hover_dirty_ = true;
+                    animation::RequestAnimationFrame();
+                }
                 for (auto& [id, btn] : read_buttons_) {
                     if (btn->OnEvent(event)) {
                         return true;
@@ -494,10 +520,12 @@ namespace {
             if (event.is_mouse()) {
                 const Mouse& m = event.mouse();
                 if (m.button == Mouse::WheelUp) {
+                    hover_dirty_ = true;
                     scroll_lines(-kWheelStep);
                     return true;
                 }
                 if (m.button == Mouse::WheelDown) {
+                    hover_dirty_ = true;
                     scroll_lines(kWheelStep);
                     return true;
                 }
@@ -1004,7 +1032,8 @@ namespace {
                     hbox({
                         spinner(15, static_cast<std::size_t>(frame_))
                             | color(Color::GrayLight),
-                        text(" Delegating…") | dim,
+                        text(" Delegating…" + elapsed_suffix(*session_))
+                            | dim,
                     }),
                 };
                 for (std::size_t index = 0; index < tc.subagent_ids.size();
@@ -1067,20 +1096,11 @@ namespace {
                     }
                 }
             };
-            ButtonOption option;
-            option.label     = std::move(label);
-            option.on_click  = on_click;
-            option.transform = [](EntryState state) -> Element {
-                Element element = text(state.label);
-                if (state.focused) {
-                    element = element | bold | underlined | color(PANEL_FG);
-                } else {
-                    element = element | color(PANEL_FG_DIM);
-                }
-                return element;
-            };
-            Component button
-                = space_activates(Button(option), std::move(on_click));
+            auto shared_label
+                = std::make_shared<const std::string>(std::move(label));
+            Component button = inline_link_button(
+                [shared_label] { return text(*shared_label); }, on_click,
+                PANEL_FG_DIM);
             subagent_buttons_.emplace(key, button);
             container_->Add(button);
             return button;
@@ -1088,9 +1108,9 @@ namespace {
 
         Component make_viewer_button(std::size_t id, std::string label)
         {
-            auto it = read_buttons_.find(id);
-            if (it != read_buttons_.end()) {
-                return it->second;
+            if (const auto found = read_buttons_.find(id);
+                found != read_buttons_.end()) {
+                return found->second;
             }
             const auto on_click = [this, id] {
                 for (const auto& item : session_->items()) {
@@ -1101,19 +1121,11 @@ namespace {
                     }
                 }
             };
-            ButtonOption bo;
-            bo.label     = std::move(label);
-            bo.on_click  = on_click;
-            bo.transform = [](EntryState s) -> Element {
-                Element e = text(s.label);
-                if (s.focused) {
-                    e = e | bold | underlined | color(PANEL_FG);
-                } else {
-                    e = e | color(PANEL_FG_DIM);
-                }
-                return e;
-            };
-            Component btn = space_activates(Button(bo), on_click);
+            auto shared_label
+                = std::make_shared<const std::string>(std::move(label));
+            Component btn = inline_link_button(
+                [shared_label] { return text(*shared_label); }, on_click,
+                PANEL_FG_DIM);
             read_buttons_.emplace(id, btn);
             container_->Add(btn);
             return btn;
@@ -1130,10 +1142,11 @@ namespace {
         {
             Elements parts;
             const bool has_reasoning = !t.reasoning.empty();
-            const bool placeholder   = active && !has_reasoning
-                && !t.reasoning_ms.has_value() && reasoning_enabled(t);
-            if (has_reasoning || placeholder) {
-                const bool done = t.reasoning_ms.has_value();
+            const bool expected      = reasoning_enabled(t);
+            const bool done          = t.reasoning_ms.has_value();
+            const bool placeholder   = active && !has_reasoning && !done
+                && expected;
+            if (has_reasoning || placeholder || (done && expected)) {
                 std::string label;
                 if (done) {
                     const double secs
@@ -1142,18 +1155,22 @@ namespace {
                     std::snprintf(buf, sizeof(buf), "%.1f", secs);
                     label = "▸ Thought " + std::string(buf) + "s";
                 } else {
-                    label = " Thinking…";
+                    label = " Thinking…" + elapsed_suffix(*session_);
                 }
-                Component btn = make_reasoning_button(index, label,
-                    placeholder ? std::string() : t.reasoning,
-                    assistant_metadata(t));
-                Element row   = done
-                    ? btn->Render()
-                    : hbox({ spinner(15, static_cast<size_t>(frame_))
-                              | color(Color::GrayLight),
-                          btn->Render(), filler(),
-                          text(interrupt_hint()) | dim });
-                parts.push_back(row);
+                if (done && !has_reasoning) {
+                    parts.push_back(text(label) | dim);
+                } else {
+                    Component btn = make_reasoning_button(index, label,
+                        placeholder ? std::string() : t.reasoning,
+                        assistant_metadata(t));
+                    Element row = done
+                        ? btn->Render()
+                        : hbox({ spinner(15, static_cast<size_t>(frame_))
+                                  | color(Color::GrayLight),
+                              btn->Render(), filler(),
+                              text(interrupt_hint()) | dim });
+                    parts.push_back(row);
+                }
             }
             if (!t.markdown.empty()) {
                 parts.push_back(assistant_item(t));
@@ -1185,19 +1202,9 @@ namespace {
                 vm.metadata     = *metadata_ptr;
                 controller_.enqueue_user_modal(vm);
             };
-            ButtonOption bo;
-            bo.label     = *label_ptr;
-            bo.on_click  = on_click;
-            bo.transform = [label_ptr](EntryState s) -> Element {
-                Element e = text(*label_ptr);
-                if (s.focused) {
-                    e = e | bold | underlined | color(PANEL_FG);
-                } else {
-                    e = e | color(PANEL_FG_DIM);
-                }
-                return e;
-            };
-            Component btn              = space_activates(Button(bo), on_click);
+            Component btn = inline_link_button(
+                [label_ptr] { return text(*label_ptr); }, on_click,
+                PANEL_FG_DIM);
             reasoning_labels_[index]   = label_ptr;
             reasoning_content_[index]  = content_ptr;
             reasoning_metadata_[index] = metadata_ptr;
@@ -1224,6 +1231,7 @@ namespace {
 
         int scroll_top_               = 0;
         bool follow_                  = true;
+        bool hover_dirty_             = false;
         int frame_                    = 0;
         int content_height_           = 0;
         std::uint64_t content_serial_ = 0;

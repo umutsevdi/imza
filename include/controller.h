@@ -50,6 +50,13 @@ struct TurnSettings {
     Route route;
 };
 
+struct SubagentOptions {
+    bool visible = true;
+    std::chrono::seconds timeout { 0 };
+    std::optional<std::uint64_t> max_output_tokens;
+    std::shared_ptr<Session> transcript;
+};
+
 class Controller {
 public:
     Controller(std::shared_ptr<ApplicationState> state, PostFn post,
@@ -83,9 +90,11 @@ public:
     std::pair<SkillCounts, SkillCounts> skill_counts() const;
     std::vector<Skill> available_skills() const;
     SubagentHandle run_subagent(std::string prompt, std::string model,
-        std::string variant, bool visible);
+        std::string variant, SubagentOptions options = { },
+        SubagentCompleteFn complete = { });
     void submit_delegated(std::string text,
         const ProviderSelection& selection, Session::Mode mode);
+    SubagentChat subagent_chat(std::size_t id, std::string title) const;
     SubagentChat subagent_chat(
         const ToolCall& call, std::size_t index) const;
     std::span<const SlashCommand> commands() const { return slash_commands(); }

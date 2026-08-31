@@ -41,6 +41,8 @@ enum class Status {
     API_ERROR,
     RATE_LIMITED,
     BUDGET_EXCEEDED,
+    CANCELLED,
+    TIMEOUT,
     UNSUPPORTED,
     CONFIG_ERROR
 };

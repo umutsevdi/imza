@@ -30,7 +30,7 @@ SubagentHandle SubagentManager::start(std::string prompt, std::string model,
     changed_.publish(SubagentEvent { SubagentEvent::Kind::STARTED, started });
     {
         std::lock_guard lock(mutex_);
-        workers_.emplace_back([this, id = handle.id, promise,
+        workers_.emplace_back(handle.id, std::jthread([this, id = handle.id, promise,
                                   run = std::move(run),
                                   complete = std::move(complete)](
                                   std::stop_token stop) {
@@ -64,20 +64,30 @@ SubagentHandle SubagentManager::start(std::string prompt, std::string model,
                 complete(result);
             }
             promise->set_value(result);
-        });
+        }));
     }
     return handle;
 }
 
+bool SubagentManager::cancel(std::size_t id)
+{
+    std::lock_guard lock(mutex_);
+    const auto worker = std::ranges::find(workers_, id,
+        &std::pair<std::size_t, std::jthread>::first);
+    if (worker == workers_.end()) return false;
+    worker->second.request_stop();
+    return true;
+}
+
 void SubagentManager::stop()
 {
-    std::vector<std::jthread> workers;
+    std::vector<std::pair<std::size_t, std::jthread>> workers;
     {
         std::lock_guard lock(mutex_);
         workers.swap(workers_);
     }
     for (auto& worker : workers) {
-        worker.request_stop();
+        worker.second.request_stop();
     }
 }
 

@@ -27,6 +27,8 @@ std::string error_text(Status st)
     case Status::API_ERROR: return "API error.";
     case Status::RATE_LIMITED: return "Rate limited by provider.";
     case Status::BUDGET_EXCEEDED: return "Out of budget / insufficient credits.";
+    case Status::CANCELLED: return "Cancelled.";
+    case Status::TIMEOUT: return "Timed out.";
     case Status::UNSUPPORTED: return "Unsupported operation.";
     case Status::CONFIG_ERROR: return "Configuration error.";
     }
@@ -718,37 +720,68 @@ void Controller::_spawn_title(std::string input, TurnSettings settings)
 }
 
 SubagentHandle Controller::run_subagent(std::string prompt, std::string model,
-    std::string variant, bool visible)
+    std::string variant, SubagentOptions options,
+    SubagentCompleteFn complete)
 {
     const auto selection = state_->providers->active_selection();
     Route route = selection ? selection->route : Route { };
     if (model.empty() && selection) model = selection->model;
     if (variant.empty() && selection) variant = selection->reasoning_effort;
     const std::string task_prompt = prompt;
-    return state_->subagents->start(std::move(prompt), model, variant, visible,
-        [this, task_prompt, model = std::move(model),
-            variant = std::move(variant), route = std::move(route)](
+    if (options.transcript) {
+        options.transcript->begin_send(task_prompt);
+        options.transcript->append_assistant(model, variant);
+    }
+    const auto deadline = options.timeout > std::chrono::seconds { 0 }
+        ? std::optional { std::chrono::steady_clock::now() + options.timeout }
+        : std::nullopt;
+    auto transcript = options.transcript;
+    return state_->subagents->start(std::move(prompt), model, variant,
+        options.visible,
+        [this, task_prompt, model, variant, route = std::move(route),
+            transcript, deadline,
+            max_output_tokens = options.max_output_tokens](
             std::stop_token stop) mutable {
             if (model.empty() || route.api.empty()) {
+                if (transcript) {
+                    transcript->finish_session(
+                        error_text(Status::CONFIG_ERROR));
+                }
                 return SubagentResult { Status::CONFIG_ERROR, { } };
             }
             ChatRequest req;
             req.model       = model;
-            req.interrupted = [stop] { return stop.stop_requested(); };
+            req.max_output_tokens = max_output_tokens;
+            req.interrupted = [stop, deadline] {
+                return stop.stop_requested()
+                    || (deadline
+                        && std::chrono::steady_clock::now() >= *deadline);
+            };
             req.messages = { { Message::Type::SYSTEM, _system_prompt() },
                 { Message::Type::USER, task_prompt } };
             _set_reasoning(req, route.dialect, variant);
             std::string output;
             const StreamCallback callback = [&](const StreamEvent& event) {
+                if (transcript) transcript->apply(event, ModelPricing { });
                 if (event.kind == StreamEvent::Kind::CONTENT_DELTA) {
                     output += event.text;
                 }
             };
-            const Status status = has_stream_override_
+            Status status = has_stream_override_
                 ? stream_fn_(req, callback)
                 : stream(get_provider(route), route, req, callback, nullptr);
+            if (stop.stop_requested()) {
+                status = Status::CANCELLED;
+            } else if (deadline
+                && std::chrono::steady_clock::now() >= *deadline) {
+                status = Status::TIMEOUT;
+            }
+            if (transcript) {
+                transcript->finish_session(
+                    status == Status::OK ? "" : error_text(status));
+            }
             return SubagentResult { status, std::move(output) };
-        });
+        }, std::move(complete), std::move(transcript));
 }
 
 void Controller::finish(std::string error)

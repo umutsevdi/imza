@@ -33,6 +33,10 @@ namespace {
         if (req.reasoning_effort) {
             root["reasoning_effort"] = *req.reasoning_effort;
         }
+        if (req.max_output_tokens) {
+            root[req.reasoning_effort ? "max_completion_tokens" : "max_tokens"]
+                = static_cast<Json::UInt64>(*req.max_output_tokens);
+        }
         append_tools(root, req);
 
         Json::Value messages(Json::arrayValue);

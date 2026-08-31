@@ -10,16 +10,18 @@ namespace {
         root["model"]       = req.model;
         root["stream"]      = true;
         root["temperature"] = req.temperature;
+        const std::uint64_t output_tokens
+            = req.max_output_tokens.value_or(4096);
         if (req.thinking_budget) {
             root["max_tokens"] = static_cast<Json::UInt64>(
-                *req.thinking_budget + 4096);
+                *req.thinking_budget + output_tokens);
             Json::Value thinking(Json::objectValue);
             thinking["type"]          = "enabled";
             thinking["budget_tokens"] = static_cast<Json::UInt64>(
                 *req.thinking_budget);
             root["thinking"] = thinking;
         } else {
-            root["max_tokens"] = 4096;
+            root["max_tokens"] = static_cast<Json::UInt64>(output_tokens);
         }
 
         Json::Value messages(Json::arrayValue);

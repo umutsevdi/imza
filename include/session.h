@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -174,6 +175,10 @@ public:
     Usage last() const;
     double total_cost() const;
     double last_cost() const;
+    std::optional<std::chrono::milliseconds> reasoning_elapsed() const;
+    std::optional<std::chrono::milliseconds> tool_elapsed(
+        std::size_t id) const;
+    std::optional<std::chrono::milliseconds> turn_elapsed() const;
     StatusView status_view() const;
     bool has_pending_work() const;
     SessionSnapshot snapshot() const;
@@ -267,6 +272,8 @@ private:
     std::size_t next_compaction_id_ = 1;
     std::size_t next_queued_id_     = 0;
     std::optional<std::chrono::steady_clock::time_point> reasoning_start_;
+    std::optional<std::chrono::steady_clock::time_point> turn_started_;
+    std::map<std::size_t, std::chrono::steady_clock::time_point> tool_started_;
     std::atomic<bool> interrupt_requested_ { false };
 
     std::string compacted_summary_;

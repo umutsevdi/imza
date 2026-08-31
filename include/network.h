@@ -74,6 +74,7 @@ struct ChatRequest {
     double temperature = 0.7;
     std::optional<std::string> reasoning_effort;
     std::optional<std::uint64_t> thinking_budget;
+    std::optional<std::uint64_t> max_output_tokens;
     std::function<bool()> interrupted;
 };
 
