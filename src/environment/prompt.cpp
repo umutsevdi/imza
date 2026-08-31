@@ -50,6 +50,34 @@ namespace {
 - In PLAN mode tools may only be used for read-only operations. Shell commands must inspect without modifying state. Research the request, ask the user clarifying questions when intent is ambiguous, weigh tradeoffs, and present a concise, well-structured plan in your reply. Do not attempt to make changes.
 - In BUILD mode all tools are available. Implement the plan, then verify the result if possible.)prompt";
 
+    constexpr std::string_view SUBAGENT_PROMPT
+        = R"prompt(You are an Ursa subagent working on the task in the user message. You have a fresh context and do not know the parent conversation, so treat the provided task and workspace instructions as your complete assignment.
+
+# Working on tasks
+- Work only on the assigned task. Use the available tools to inspect the workspace and gather the information you need.
+- Follow workspace instructions and existing code conventions. Check the codebase before assuming that files, libraries, commands, or patterns exist.
+- Preserve unrelated user changes and avoid work outside the task's scope. Never commit changes unless the task explicitly requests it.
+- You may ask the user questions when required information is missing, the request is ambiguous, or a consequential choice needs confirmation. Otherwise, make reasonable assumptions and continue.
+- Complete the task as far as the available tools and information allow. Verify findings or changes when practical. Never claim that a command or test succeeded unless you ran it successfully.
+- Do not delegate to other agents or claim that the parent request is complete.
+
+# Response
+Your final response is returned to the calling agent and may also be viewed by the user. State the result directly and concisely. Include relevant file locations, changes made, validation performed, and unresolved blockers when applicable.)prompt";
+
+    constexpr std::string_view RESEARCH_SUBAGENT_PROMPT
+        = R"prompt(# Research mode
+Work read-only. Do not create, modify, rename, or delete files, and do not run commands that mutate the workspace or external state. The task may request investigation, explanation, review, comparison, planning, or another read-only result. Return the result requested by the task; do not automatically turn every task into an implementation plan.)prompt";
+
+    constexpr std::string_view BUILD_SUBAGENT_PROMPT
+        = R"prompt(# Build mode
+You may modify files and run commands needed to complete the assigned task. Inspect existing code before editing, keep changes focused, and run relevant validation when practical. The task may not require edits; do not make changes merely because build access is available.)prompt";
+
+    constexpr std::string_view MAIN_SKILL_PROMPT
+        = "Call the `skill` tool to load a relevant skill when it was not explicitly mentioned. Ursa loads `$skill-name` mentions before the request; use the enclosed skill instructions directly and do not load the same skill again. Project skills take precedence over global skills with the same name.";
+
+    constexpr std::string_view SUBAGENT_SKILL_PROMPT
+        = "Call the `skill` tool when a skill is relevant to the assigned task. Project skills take precedence over global skills with the same name.";
+
     std::string environment_block(const SystemEnvironment& sys,
         const WorkspaceEnvironment* ws)
     {
@@ -92,14 +120,11 @@ namespace {
         return out;
     }
 
-} // namespace
-
-std::string build_system_prompt(
-    const SystemEnvironment* sys, const WorkspaceEnvironment* ws,
-    const Config* config)
-{
-    std::string out(BASE_PROMPT);
-    if (sys != nullptr) {
+    void append_context(std::string& out, const SystemEnvironment* sys,
+        const WorkspaceEnvironment* ws, const Config* config,
+        std::string_view skill_prompt)
+    {
+        if (sys == nullptr) return;
         out += "\n\n";
         out += environment_block(*sys, ws);
         if (ws != nullptr && ws->instruction) {
@@ -107,34 +132,71 @@ std::string build_system_prompt(
             out += instructions_block(*ws->instruction);
         }
         std::vector<Skill> skills;
-        for (const auto& [name, skill] : sys->global_skills) skills.push_back(skill);
-        if (ws != nullptr) for (const auto& [name, skill] : ws->project_skills) skills.push_back(skill);
-        std::sort(skills.begin(), skills.end(), [](const Skill& a, const Skill& b) {
-            if (a.scope != b.scope) return a.scope == Skill::Scope::PROJECT;
-            return a.name < b.name;
-        });
+        for (const auto& [name, skill] : sys->global_skills)
+            skills.push_back(skill);
+        if (ws != nullptr) {
+            for (const auto& [name, skill] : ws->project_skills)
+                skills.push_back(skill);
+        }
+        std::sort(skills.begin(), skills.end(),
+            [](const Skill& a, const Skill& b) {
+                if (a.scope != b.scope)
+                    return a.scope == Skill::Scope::PROJECT;
+                return a.name < b.name;
+            });
         std::string catalog;
         for (const Skill& skill : skills) {
             SkillPolicy policy = SkillPolicy::ASK;
             if (config != nullptr) {
                 if (skill.scope == Skill::Scope::GLOBAL) {
-                    if (auto it = config->global_skills.find(skill.name); it != config->global_skills.end()) policy = it->second;
+                    if (auto it = config->global_skills.find(skill.name);
+                        it != config->global_skills.end())
+                        policy = it->second;
                 } else if (skill.project_root) {
-                    auto project = config->project_skills.find(skill.project_root->string());
-                    if (project != config->project_skills.end())
-                        if (auto it = project->second.find(skill.name); it != project->second.end()) policy = it->second;
+                    auto project = config->project_skills.find(
+                        skill.project_root->string());
+                    if (project != config->project_skills.end()) {
+                        if (auto it = project->second.find(skill.name);
+                            it != project->second.end())
+                            policy = it->second;
+                    }
                 }
             }
             if (policy == SkillPolicy::DENY) continue;
             catalog += "\n- ";
-            catalog += skill.name + " [" + (skill.scope == Skill::Scope::PROJECT ? "project" : "global") + "]";
-            if (!skill.description.empty()) catalog += ": " + skill.description;
+            catalog += skill.name + " ["
+                + (skill.scope == Skill::Scope::PROJECT ? "project" : "global")
+                + "]";
+            if (!skill.description.empty())
+                catalog += ": " + skill.description;
         }
         if (!catalog.empty()) {
-            out += "\n\n# Available skills\nCall the `skill` tool to load a relevant skill when it was not explicitly mentioned. Ursa loads `$skill-name` mentions before the request; use the enclosed skill instructions directly and do not load the same skill again. Project skills take precedence over global skills with the same name.";
+            out += "\n\n# Available skills\n";
+            out += skill_prompt;
             out += catalog;
         }
     }
+
+} // namespace
+
+std::string build_system_prompt(
+    const SystemEnvironment* sys, const WorkspaceEnvironment* ws,
+    const Config* config)
+{
+    std::string out(BASE_PROMPT);
+    append_context(out, sys, ws, config, MAIN_SKILL_PROMPT);
+    return out;
+}
+
+std::string build_subagent_system_prompt(const SystemEnvironment* sys,
+    const WorkspaceEnvironment* ws, SubagentRole role, const Config* config)
+{
+    if (role == SubagentRole::BASIC) return { };
+    std::string out(SUBAGENT_PROMPT);
+    out += "\n\n";
+    out += role == SubagentRole::RESEARCH ? RESEARCH_SUBAGENT_PROMPT
+                                          : BUILD_SUBAGENT_PROMPT;
+    append_context(out, sys, ws, config, SUBAGENT_SKILL_PROMPT);
     return out;
 }
 

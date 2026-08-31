@@ -39,6 +39,24 @@ std::string fit(const std::string& value, int width)
     return out;
 }
 
+std::string fit(const std::string& value, int width, int offset)
+{
+    const std::size_t skip
+        = static_cast<std::size_t>(std::max(offset, 0));
+    std::size_t seen = 0;
+    std::size_t pos  = 0;
+    while (pos < value.size() && seen < skip) {
+        const auto lead = static_cast<unsigned char>(value[pos]);
+        std::size_t length = 1;
+        if ((lead & 0xE0) == 0xC0) length = 2;
+        else if ((lead & 0xF0) == 0xE0) length = 3;
+        else if ((lead & 0xF8) == 0xF0) length = 4;
+        pos += std::min(length, value.size() - pos);
+        ++seen;
+    }
+    return fit(value.substr(pos), width);
+}
+
 LayoutCtx layout_context(int width)
 {
     return { width >= LayoutCtx::wide_threshold ? LayoutCtx::Kind::WIDE

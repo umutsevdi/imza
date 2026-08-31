@@ -83,6 +83,56 @@ TEST_CASE("system prompt advertises active skills and hides denied skills")
     CHECK(prompt.find("`skill` tool") != std::string::npos);
 }
 
+TEST_CASE("research subagent prompt is dedicated and read-only")
+{
+    const std::string prompt = build_subagent_system_prompt(
+        nullptr, nullptr, SubagentRole::RESEARCH);
+    CHECK(prompt.find("Ursa subagent") != std::string::npos);
+    CHECK(prompt.find("fresh context") != std::string::npos);
+    CHECK(prompt.find("Work read-only") != std::string::npos);
+    CHECK(prompt.find("implementation plan") != std::string::npos);
+    CHECK(prompt.find("# Todo list") == std::string::npos);
+    CHECK(prompt.find("interactive CLI coding agent") == std::string::npos);
+}
+
+TEST_CASE("build subagent prompt permits focused changes")
+{
+    const std::string prompt = build_subagent_system_prompt(
+        nullptr, nullptr, SubagentRole::BUILDER);
+    CHECK(prompt.find("may modify files") != std::string::npos);
+    CHECK(prompt.find("keep changes focused") != std::string::npos);
+    CHECK(prompt.find("Work read-only") == std::string::npos);
+}
+
+TEST_CASE("basic subagent has no system prompt")
+{
+    CHECK(build_subagent_system_prompt(
+              nullptr, nullptr, SubagentRole::BASIC)
+            .empty());
+}
+
+TEST_CASE("subagent prompt retains workspace context")
+{
+    SystemEnvironment sys;
+    sys.os_name       = "Linux";
+    sys.default_shell = "/bin/bash";
+    sys.today         = "Tue Sep 1 2026";
+    sys.global_skills.emplace("docs", Skill { "docs", "Write documentation",
+        "/tmp/docs/SKILL.md", Skill::Scope::GLOBAL, std::nullopt });
+    WorkspaceEnvironment ws { std::filesystem::temp_directory_path() };
+    ws.instruction = InstructionFile { "AGENTS.md", "Use project rules." };
+
+    const std::string prompt = build_subagent_system_prompt(
+        &sys, &ws, SubagentRole::BUILDER);
+    CHECK(prompt.find("Operating System: Linux") != std::string::npos);
+    CHECK(prompt.find("<instructions source=\"AGENTS.md\">")
+        != std::string::npos);
+    CHECK(prompt.find("Use project rules.") != std::string::npos);
+    CHECK(prompt.find("docs [global]: Write documentation")
+        != std::string::npos);
+    CHECK(prompt.find("$skill-name") == std::string::npos);
+}
+
 TEST_CASE("mode reminders carry unique detectable tags")
 {
     const std::string_view plan = plan_mode_reminder();

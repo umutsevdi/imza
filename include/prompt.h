@@ -14,6 +14,9 @@ constexpr std::string_view BUILD_REMINDER_TAG
 
 std::string build_system_prompt(const SystemEnvironment* sys,
     const WorkspaceEnvironment* ws, const Config* config = nullptr);
+std::string build_subagent_system_prompt(const SystemEnvironment* sys,
+    const WorkspaceEnvironment* ws, SubagentRole role,
+    const Config* config = nullptr);
 std::string_view plan_mode_reminder();
 std::string_view build_mode_reminder();
 

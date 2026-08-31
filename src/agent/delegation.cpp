@@ -2,6 +2,7 @@
 #include "review.h"
 
 #include "format.h"
+#include "prompt.h"
 #include "util.h"
 
 #include <algorithm>
@@ -146,8 +147,20 @@ void Controller::submit_delegated(std::string text,
     settings.mode             = mode;
     state_->session->set_mode(mode);
     state_->session->clear_interrupt();
+    const std::string task = text;
     state_->session->begin_send(std::move(text));
-    _spawn(state_->session->build_history(_system_prompt(), settings.dialect),
+    const std::shared_ptr<Environment> env = state_->environment;
+    const Config config = state_->providers->config();
+    const SubagentRole role = mode == Session::Mode::PLAN
+        ? SubagentRole::RESEARCH
+        : SubagentRole::BUILDER;
+    std::vector<Message> history {
+        { Message::Type::SYSTEM,
+            build_subagent_system_prompt(env->system().get(),
+                env->workspace().get(), role, &config) },
+        { Message::Type::USER, task },
+    };
+    _spawn(std::move(history),
         has_stream_override_ ? stream_fn_ : StreamFn { },
         std::move(settings));
 }

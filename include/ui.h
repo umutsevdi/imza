@@ -15,7 +15,7 @@
 
 namespace ursa {
 
-struct ChangedFile;
+struct RepositoryState;
 
 using LayoutFn = std::function<LayoutCtx()>;
 
@@ -40,6 +40,7 @@ inline const ftxui::Color DIFF_DELETION_BG  = ftxui::Color::RGB(78, 39, 46);
 inline constexpr int MODAL_MAX_WIDTH = 100;
 
 std::string fit(const std::string& text, int width);
+std::string fit(const std::string& text, int width, int offset);
 
 ftxui::Element panel(ftxui::Element e);
 
@@ -74,7 +75,7 @@ ftxui::Element diff_split(const DiffView& diff, int available_width = 120);
 ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx);
 ftxui::Element render_todo(const TodoList& todo, const LayoutCtx& ctx);
 ftxui::Element render_changed_files(
-    const std::vector<ChangedFile>& files, const LayoutCtx& ctx);
+    const RepositoryState& repository, const LayoutCtx& ctx);
 ftxui::Element render_context_box(const std::optional<std::string>& rules,
     const std::vector<std::string>& attachments, SkillCounts project_skills,
     SkillCounts global_skills);

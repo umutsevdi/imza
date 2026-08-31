@@ -81,18 +81,22 @@ TEST_CASE("render_todo wraps to the offered width")
 TEST_CASE("render_changed_files renders colored symbols and readable paths")
 {
     using Kind = ursa::ChangedFile::Kind;
-    const std::vector<ursa::ChangedFile> files {
-        { "modified.cpp", Kind::MODIFIED },
-        { "added.cpp", Kind::ADDED },
-        { "untracked.cpp", Kind::UNTRACKED },
-        { "deleted.cpp", Kind::DELETED },
-        { "old.cpp -> renamed.cpp", Kind::RENAMED },
-        { "source.cpp -> copied.cpp", Kind::COPIED },
-        { "conflicted.cpp", Kind::CONFLICTED },
-        { "unknown.cpp", Kind::UNKNOWN },
+    const ursa::RepositoryState repository {
+        .branch = "main",
+        .changed_files = {
+            { "modified.cpp", Kind::MODIFIED },
+            { "added.cpp", Kind::ADDED },
+            { "untracked.cpp", Kind::UNTRACKED },
+            { "deleted.cpp", Kind::DELETED },
+            { "old.cpp -> renamed.cpp", Kind::RENAMED },
+            { "source.cpp -> copied.cpp", Kind::COPIED },
+            { "conflicted.cpp", Kind::CONFLICTED },
+            { "unknown.cpp", Kind::UNKNOWN },
+        },
+        .changes = { 12, 4, 1 },
     };
     auto screen = to_screen(ursa::render_changed_files(
-        files, { ursa::LayoutCtx::Kind::WIDE, 30 }));
+        repository, { ursa::LayoutCtx::Kind::WIDE, 30 }));
     const std::string out = screen.ToString();
 
     CHECK(out.find("●") != std::string::npos);
@@ -111,6 +115,8 @@ TEST_CASE("render_changed_files renders colored symbols and readable paths")
     CHECK(out.find("conflicted.cpp") != std::string::npos);
     CHECK(out.find("•") != std::string::npos);
     CHECK(out.find("unknown.cpp") != std::string::npos);
+    CHECK(out.find("+12") != std::string::npos);
+    CHECK(out.find("−4") != std::string::npos);
 
     CHECK(screen.PixelAt(1, 2).foreground_color == ftxui::Color::YellowLight);
     CHECK(screen.PixelAt(1, 3).foreground_color == ftxui::Color::GreenLight);

@@ -9,6 +9,7 @@
 #include <ftxui/component/mouse.hpp>
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/box.hpp>
+#include <ftxui/screen/string.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -82,6 +83,7 @@ namespace {
             box_rows_.clear();
             rendered_y_     = 0;
             skipped_height_ = 0;
+            horizontal_limit_ = 0;
 
             if (snapshot.status == ReviewState::LoadStatus::IDLE
                 || snapshot.status == ReviewState::LoadStatus::LOADING) {
@@ -99,6 +101,9 @@ namespace {
                            text("Working tree is clean") | color(PANEL_FG_DIM))
                     | flex;
             }
+            horizontal_limit_ = _horizontal_limit(*snapshot.review);
+            horizontal_offset_
+                = std::clamp(horizontal_offset_, 0, horizontal_limit_);
 
             Elements rows;
             for (std::size_t file_index = 0;
@@ -136,6 +141,8 @@ namespace {
                 ? "Enter save · Alt+Enter new line · Esc cancel"
                 : selected_comment_
                 ? "↑↓ navigate · e edit · d delete"
+                : horizontal_limit_ > 0
+                ? "↑↓ navigate · ←→ scroll · [] files · Enter collapse · c comment"
                 : "↑↓ navigate · [] files · Enter collapse · c comment";
             return vbox({ std::move(content),
                        hbox({ filler(), text(hint) | dim }) })
@@ -185,6 +192,10 @@ namespace {
                 return _move(-1);
             if (event == Event::ArrowDown)
                 return _move(1);
+            if (event == Event::ArrowLeft)
+                return _scroll_horizontal(-4);
+            if (event == Event::ArrowRight)
+                return _scroll_horizontal(4);
             if (event == Event::PageUp)
                 return _move(-10);
             if (event == Event::PageDown)
@@ -323,7 +334,8 @@ namespace {
                     } else {
                         for (const ReviewLine& line : hunk.lines) {
                             _push_unified_line(
-                                file_rows, snapshot, file_index, path, line);
+                                file_rows, snapshot, file_index, path, line,
+                                review_width);
                         }
                     }
                 }
@@ -392,7 +404,7 @@ namespace {
 
         void _push_unified_line(Elements& rows,
             const ReviewState::Snapshot& snapshot, std::size_t file_index,
-            const std::string& path, const ReviewLine& line)
+            const std::string& path, const ReviewLine& line, int review_width)
         {
             const auto number = [](const std::optional<std::size_t>& value) {
                 return value ? std::format("{:>5}", *value)
@@ -409,13 +421,17 @@ namespace {
             }
             _push(
                 rows,
-                [&line, marker = std::move(marker), background, number] {
+                [this, &line, marker = std::move(marker), background, number,
+                    review_width] {
+                    const int content_width = std::max(1, review_width - 14);
                     Element row = hbox({
                         text(number(line.old_line)) | color(PANEL_FG_DIM),
                         text(" "),
                         text(number(line.new_line)) | color(PANEL_FG_DIM),
                         text(" "),
-                        text(marker + " " + line.content)
+                        text(marker + " "),
+                        text(fit(line.content, content_width,
+                            horizontal_offset_))
                             | color(line.kind == ReviewLine::Kind::META
                                     ? PANEL_FG_DIM
                                     : PANEL_FG),
@@ -456,7 +472,10 @@ namespace {
             Element side = hbox({
                                text(number_text) | color(PANEL_FG_DIM),
                                text(" "),
-                               text(marker + " " + line->content)
+                               text(marker + " "),
+                               text(fit(line->content,
+                                   std::max(1, side_width - 8),
+                                   horizontal_offset_))
                                    | color(PANEL_FG) | xflex,
                            })
                 | size(WIDTH, EQUAL, side_width);
@@ -539,7 +558,8 @@ namespace {
                     _push_side_by_side_pair(rows, snapshot, file_index, path,
                         &line, &line, side_width);
                 } else {
-                    _push_unified_line(rows, snapshot, file_index, path, line);
+                    _push_unified_line(rows, snapshot, file_index, path, line,
+                        side_width * 2 + 3);
                 }
                 ++index;
             }
@@ -553,6 +573,45 @@ namespace {
                 selected_ + delta, 0, static_cast<int>(visible_.size()) - 1);
             selected_comment_ = visible_[selected_].comment_id;
             return true;
+        }
+
+        bool _scroll_horizontal(int delta)
+        {
+            if (horizontal_limit_ == 0) return false;
+            horizontal_offset_ = std::clamp(
+                horizontal_offset_ + delta, 0, horizontal_limit_);
+            return true;
+        }
+
+        int _horizontal_limit(const RepositoryReview& review) const
+        {
+            const LayoutCtx ctx    = layout_();
+            const int review_width = ctx.kind == LayoutCtx::Kind::WIDE
+                ? ctx.width - LayoutCtx::panel_width - 4
+                : ctx.width;
+            const bool side_by_side = review_width >= 100;
+            const int side_content_width = side_by_side
+                ? std::max(1, std::max(20, (review_width - 3) / 2) - 8)
+                : std::max(1, review_width - 14);
+            const int unified_content_width = std::max(1, review_width - 14);
+            int limit = 0;
+            for (const ReviewFile& file : review.files) {
+                const std::string& path
+                    = file.new_path.empty() ? file.old_path : file.new_path;
+                if (collapsed_.contains(path)) continue;
+                for (const ReviewHunk& hunk : file.hunks) {
+                    for (const ReviewLine& line : hunk.lines) {
+                        const bool split_line = side_by_side
+                            && line.kind != ReviewLine::Kind::META;
+                        const int content_width = split_line
+                            ? side_content_width
+                            : unified_content_width;
+                        limit = std::max(limit,
+                            string_width(line.content) - content_width);
+                    }
+                }
+            }
+            return std::max(0, limit);
         }
 
         bool _activate(bool mouse)
@@ -725,6 +784,8 @@ namespace {
         int selected_       = 0;
         int rendered_y_     = 0;
         int skipped_height_ = 0;
+        int horizontal_offset_ = 0;
+        int horizontal_limit_  = 0;
         std::shared_ptr<std::atomic<std::uint64_t>> load_generation_
             = std::make_shared<std::atomic<std::uint64_t>>(0);
         std::shared_ptr<std::atomic<bool>> load_running_

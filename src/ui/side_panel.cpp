@@ -55,22 +55,20 @@ public:
         parts.push_back(paragraph(title.empty() ? "New Session" : title) | bold
             | color(PANEL_FG));
         parts.push_back(separator());
+        _append_review_comments(parts);
         if (state_->session->todo().items.size()) {
             parts.push_back(render_todo(state_->session->todo(), ctx) | yflex);
         }
 
         if (!narrow) {
-            if (attachments_dirty_.exchange(false)) {
-                attachment_names_ = state_->session->attachment_names();
-            }
             const auto& env       = state_->environment;
             const auto repository = env->repository();
             if (repository && !repository->changed_files.empty()) {
-                parts.push_back(
-                    render_changed_files(repository->changed_files, ctx)
-                    | yflex);
+                parts.push_back(render_changed_files(*repository, ctx) | yflex);
             };
-            _append_review_comments(parts);
+            if (attachments_dirty_.exchange(false)) {
+                attachment_names_ = state_->session->attachment_names();
+            }
             const auto [project, global] = controller_.skill_counts();
             parts.push_back(render_context_box(
                 env->agent_rules_path(), attachment_names_, project, global));
@@ -102,11 +100,13 @@ private:
     {
         comment_boxes_.clear();
         comment_ids_.clear();
-        if (workflow_() != WorkflowPhase::REVIEW || !state_->review)
+        if (workflow_() != WorkflowPhase::REVIEW || !state_->review) {
             return;
+        }
         const auto snapshot = state_->review->comments_snapshot();
-        if (snapshot.comments.empty())
+        if (snapshot.comments.empty()) {
             return;
+        }
         Elements rows;
         for (const ReviewComment& comment : snapshot.comments) {
             comment_boxes_.push_back(Box { });
@@ -118,18 +118,18 @@ private:
                 : "?";
             std::filesystem::path path(comment.anchor.file);
             rows.push_back(
-                vbox({
+                hbox({
                     text(path.filename().string() + ":" + line
                         + (comment.stale ? "  stale" : ""))
                         | bold | color(PANEL_FG),
-                    text(fit(comment.body, LayoutCtx::panel_width - 6))
+                    filler(),
+                    text(fit(comment.body, LayoutCtx::panel_width / 2 - 6))
                         | color(PANEL_FG_DIM),
                 })
                 | xflex | reflect(comment_boxes_.back()));
         }
         parts.push_back(vbox({
-            section_title(
-                std::format("Review comments · {}", snapshot.comments.size())),
+            section_title("Review Comments"),
             vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER),
         }));
     }
@@ -231,14 +231,20 @@ Element render_todo(const TodoList& todo, const LayoutCtx&)
 }
 
 Element render_changed_files(
-    const std::vector<ChangedFile>& files, const LayoutCtx&)
+    const RepositoryState& repository, const LayoutCtx&)
 {
     Elements rows;
-    for (const ChangedFile& file : files) {
+    for (const ChangedFile& file : repository.changed_files) {
         rows.push_back(changed_file_item(file));
     }
-    Element body = vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER);
-    return vbox({ section_title("Changed files"), std::move(body) });
+    Element body  = vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER);
+    Element title = hbox({ section_title("Changed files"), filler(),
+        text("+" + std::to_string(repository.changes.additions))
+            | color(Color::GreenLight),
+        text(" "),
+        text("−" + std::to_string(repository.changes.deletions))
+            | color(Color::RedLight) });
+    return vbox({ std::move(title), std::move(body) });
 }
 
 Element render_context_box(const std::optional<std::string>& rules,

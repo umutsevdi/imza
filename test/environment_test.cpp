@@ -68,6 +68,24 @@ namespace {
         CHECK(ursa::normalize_git_branch("").empty());
     }
 
+    TEST_CASE("git diff summary counts lines and fingerprints content")
+    {
+        const auto first = ursa::summarize_git_diff(
+            "2\t1\tfile.cpp\n"
+            "-\t-\timage.png\n\n"
+            "diff --git a/file.cpp b/file.cpp\n"
+            "-old\n+new\n+more\n");
+        const auto second = ursa::summarize_git_diff(
+            "2\t1\tfile.cpp\n"
+            "-\t-\timage.png\n\n"
+            "diff --git a/file.cpp b/file.cpp\n"
+            "-old\n+next\n+more\n");
+
+        CHECK(first.additions == 2);
+        CHECK(first.deletions == 1);
+        CHECK(first.signature != second.signature);
+    }
+
     void write_file(const std::filesystem::path& path, std::string_view content)
     {
         std::ofstream out(path, std::ios::binary | std::ios::trunc);

@@ -5,6 +5,8 @@
 #include "util.h"
 
 #include <algorithm>
+#include <array>
+#include <charconv>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -25,6 +27,17 @@
 namespace ursa {
 
 namespace {
+
+    constexpr std::uint64_t FNV_OFFSET = 14695981039346656037ULL;
+    constexpr std::uint64_t FNV_PRIME  = 1099511628211ULL;
+
+    void hash_bytes(std::uint64_t& signature, std::string_view value)
+    {
+        for (const unsigned char byte : value) {
+            signature ^= byte;
+            signature *= FNV_PRIME;
+        }
+    }
 
     bool has_status(std::string_view status, char value)
     {
@@ -55,6 +68,40 @@ namespace {
             return ChangedFile::Kind::MODIFIED;
         }
         return ChangedFile::Kind::UNKNOWN;
+    }
+
+    void append_untracked_summary(const std::filesystem::path& root,
+        const std::vector<ChangedFile>& files, ChangeSummary& summary)
+    {
+        for (const ChangedFile& file : files) {
+            if (file.kind != ChangedFile::Kind::UNTRACKED) continue;
+            hash_bytes(summary.signature, file.path);
+            summary.signature ^= 0xFF;
+            summary.signature *= FNV_PRIME;
+            std::ifstream input(root / file.path, std::ios::binary);
+            if (!input) continue;
+            std::array<char, 8192> buffer;
+            std::size_t lines = 0;
+            bool binary       = false;
+            bool has_content  = false;
+            char last         = '\0';
+            while (input) {
+                input.read(buffer.data(), buffer.size());
+                const std::streamsize count = input.gcount();
+                if (count <= 0) continue;
+                const std::string_view chunk(
+                    buffer.data(), static_cast<std::size_t>(count));
+                hash_bytes(summary.signature, chunk);
+                has_content = true;
+                last        = chunk.back();
+                binary = binary || chunk.find('\0') != std::string_view::npos;
+                lines += std::ranges::count(chunk, '\n');
+            }
+            if (!binary) {
+                if (has_content && last != '\n') ++lines;
+                summary.additions += lines;
+            }
+        }
     }
 
     std::string get_env(const char* key)
@@ -294,6 +341,42 @@ std::string normalize_git_branch(std::string_view branch)
     return std::string(trim(branch));
 }
 
+ChangeSummary summarize_git_diff(std::string_view diff)
+{
+    ChangeSummary summary;
+    summary.signature = FNV_OFFSET;
+    hash_bytes(summary.signature, diff);
+    std::size_t line_start = 0;
+    while (line_start < diff.size()) {
+        const std::size_t line_end = diff.find('\n', line_start);
+        const std::string_view line = diff.substr(line_start,
+            line_end == std::string_view::npos ? diff.size() - line_start
+                                               : line_end - line_start);
+        line_start = line_end == std::string_view::npos ? diff.size()
+                                                        : line_end + 1;
+        if (line.empty()) break;
+        const std::size_t first_tab = line.find('\t');
+        if (first_tab == std::string_view::npos) break;
+        const std::size_t second_tab = line.find('\t', first_tab + 1);
+        if (second_tab == std::string_view::npos) break;
+        std::size_t additions = 0;
+        std::size_t deletions = 0;
+        const std::string_view added = line.substr(0, first_tab);
+        const std::string_view deleted
+            = line.substr(first_tab + 1, second_tab - first_tab - 1);
+        const auto added_result = std::from_chars(
+            added.data(), added.data() + added.size(), additions);
+        const auto deleted_result = std::from_chars(
+            deleted.data(), deleted.data() + deleted.size(), deletions);
+        if (added_result.ec == std::errc { }
+            && deleted_result.ec == std::errc { }) {
+            summary.additions += additions;
+            summary.deletions += deletions;
+        }
+    }
+    return summary;
+}
+
 std::optional<InstructionFile> load_agent_file(
     const std::filesystem::path& root)
 {
@@ -384,19 +467,34 @@ Environment::Environment()
                     continue;
                 }
                 const CommandResult status = run_command(
-                    "git status --porcelain=v1", std::chrono::seconds { 1 });
+                    "git status --porcelain=v1 --untracked-files=all",
+                    std::chrono::seconds { 1 });
                 const CommandResult branch = run_command(
                     "git branch --show-current", std::chrono::seconds { 1 });
+                CommandResult diff = run_command(
+                    "git diff --no-ext-diff --no-color --numstat --patch HEAD --",
+                    std::chrono::seconds { 10 });
+                if (diff.spawned && !diff.timed_out && diff.exit_code != 0) {
+                    diff = run_command(
+                        "git diff --cached --no-ext-diff --no-color --numstat --patch --",
+                        std::chrono::seconds { 10 });
+                }
                 if (status.spawned && !status.timed_out && status.exit_code == 0
                     && branch.spawned && !branch.timed_out
-                    && branch.exit_code == 0) {
+                    && branch.exit_code == 0 && diff.spawned
+                    && !diff.timed_out && diff.exit_code == 0) {
                     std::vector<ChangedFile> changed_files
                         = parse_git_status(status.output);
                     const std::string branch_name
                         = normalize_git_branch(branch.output);
+                    ChangeSummary changes = summarize_git_diff(diff.output);
+                    append_untracked_summary(observed_workspace->project_root
+                            .value(),
+                        changed_files, changes);
                     const auto current = repository();
                     if (current && changed_files == current->changed_files
-                        && branch_name == current->branch) {
+                        && branch_name == current->branch
+                        && changes == current->changes) {
                         std::this_thread::sleep_for(
                             std::chrono::seconds { 2 });
                         continue;
@@ -404,6 +502,7 @@ Environment::Environment()
                     RepositoryState next;
                     next.changed_files = std::move(changed_files);
                     next.branch        = branch_name;
+                    next.changes       = changes;
                     _publish_repository(
                         std::make_shared<RepositoryState>(std::move(next)),
                         observed_workspace);

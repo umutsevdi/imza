@@ -41,6 +41,13 @@ std::string without_ansi(std::string_view input)
 
 } // namespace
 
+TEST_CASE("fit supports UTF-8-aware horizontal offsets")
+{
+    CHECK(ursa::fit("abcdefgh", 4, 3) == "def…");
+    CHECK(ursa::fit("●alpha", 4, 1) == "alp…");
+    CHECK(ursa::fit("abcdefgh", 4, 6) == "gh  ");
+}
+
 TEST_CASE("render_markdown_element renders paragraphs")
 {
     const std::string out

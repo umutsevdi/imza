@@ -209,6 +209,15 @@ TEST_CASE("subagent tool waits for a research agent and retains its chat")
                 && request.messages.back().content.starts_with("inspect");
         });
     REQUIRE(child_request != env.requests.end());
+    REQUIRE(child_request->messages.size() >= 2);
+    CHECK(child_request->messages.front().type == ursa::Message::Type::SYSTEM);
+    CHECK(child_request->messages.front().content.find("Ursa subagent")
+        != std::string::npos);
+    CHECK(child_request->messages.front().content.find("Work read-only")
+        != std::string::npos);
+    CHECK(child_request->messages.front().content.find("# Todo list")
+        == std::string::npos);
+    CHECK(child_request->messages.back().content == "inspect");
     CHECK(std::none_of(child_request->tools.begin(), child_request->tools.end(),
         [](const ursa::ToolSpec& tool) {
             return tool.name == "subagent" || tool.name == "todo";
