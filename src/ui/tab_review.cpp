@@ -44,9 +44,12 @@ namespace {
 
     class Review : public ComponentBase {
     public:
-        Review(std::shared_ptr<ApplicationState> state, LayoutFn layout)
+        Review(std::shared_ptr<ApplicationState> state, Controller& controller,
+            LayoutFn layout, WorkflowNavigateFn navigate)
             : state_(std::move(state))
+            , controller_(controller)
             , layout_(std::move(layout))
+            , navigate_(std::move(navigate))
             , comment_input_(Input(&draft_,
                   multiline_field_option(
                       &draft_, &draft_cursor_, "Leave a comment")))
@@ -65,7 +68,12 @@ namespace {
             , review_subscription_(state_->review->subscribe(
                   [] { animation::RequestAnimationFrame(); }))
         {
+            plan_button_
+                = action_button("Send to Plan", [this] { _send_to_plan(); });
+            ai_review_button_ = action_button("AI Review", [] { });
             Add(comment_input_);
+            Add(plan_button_);
+            Add(ai_review_button_);
         }
 
         ~Review() override { load_generation_->fetch_add(1); }
@@ -81,8 +89,8 @@ namespace {
             visible_.clear();
             boxes_.clear();
             box_rows_.clear();
-            rendered_y_     = 0;
-            skipped_height_ = 0;
+            rendered_y_       = 0;
+            skipped_height_   = 0;
             horizontal_limit_ = 0;
 
             if (snapshot.status == ReviewState::LoadStatus::IDLE
@@ -127,6 +135,19 @@ namespace {
                     }
                 }
             }
+            if (pending_file_jump_) {
+                for (std::size_t i = 0; i < visible_.size(); ++i) {
+                    if (visible_[i].kind == VisibleRow::Kind::FILE
+                        && _path(visible_[i].file_index)
+                            == *pending_file_jump_) {
+                        selected_ = static_cast<int>(i);
+                        selected_comment_.reset();
+                        animation::RequestAnimationFrame();
+                        break;
+                    }
+                }
+                pending_file_jump_.reset();
+            }
             if (visible_.empty()) {
                 return text("") | flex;
             }
@@ -139,18 +160,28 @@ namespace {
                 | flex;
             const std::string hint = editor_anchor_
                 ? "Enter save · Alt+Enter new line · Esc cancel"
-                : selected_comment_
-                ? "↑↓ navigate · e edit · d delete"
+                : selected_comment_ ? "↑↓ navigate · e edit · d delete"
                 : horizontal_limit_ > 0
-                ? "↑↓ navigate · ←→ scroll · [] files · Enter collapse · c comment"
+                ? "↑↓ navigate · ←→ scroll · [] files · Enter collapse · c "
+                  "comment"
                 : "↑↓ navigate · [] files · Enter collapse · c comment";
-            return vbox({ std::move(content),
-                       hbox({ filler(), text(hint) | dim }) })
-                | flex;
+            Elements bottom { };
+
+            if (!state_->session->error().empty()
+                || state_->session->retry_countdown()) {
+                bottom.push_back(session_error_element(*state_->session));
+            }
+            bottom.push_back(hbox({ plan_button_->Render(), text(" "),
+                ai_review_button_->Render(), filler(), text(hint) | dim }));
+            return vbox({ std::move(content), vbox(std::move(bottom)) }) | flex;
         }
 
         bool OnEvent(Event event) override
         {
+            if (!state_->session->error().empty()
+                && _is_user_interaction(event)) {
+                controller_.clear_error();
+            }
             if (editor_anchor_) {
                 if (event == Event::Escape) {
                     _close_editor();
@@ -169,6 +200,10 @@ namespace {
                     return true;
                 }
                 return comment_input_->OnEvent(event);
+            }
+            if (plan_button_->OnEvent(event)
+                || ai_review_button_->OnEvent(event)) {
+                return true;
             }
             if (event.is_mouse()) {
                 const Mouse& mouse = event.mouse();
@@ -226,6 +261,42 @@ namespace {
 
     private:
         static constexpr int RENDER_RADIUS = 80;
+
+        static bool _is_user_interaction(Event event)
+        {
+            const bool mouse_input = event.is_mouse()
+                && (event.mouse().motion == Mouse::Pressed
+                    || event.mouse().button == Mouse::WheelUp
+                    || event.mouse().button == Mouse::WheelDown);
+            return mouse_input || event.is_character()
+                || event == Event::Backspace || event == Event::Delete
+                || event == Event::Return || event == Event::Escape
+                || event == Event::ArrowUp || event == Event::ArrowDown
+                || event == Event::ArrowLeft || event == Event::ArrowRight
+                || event == Event::PageUp || event == Event::PageDown
+                || event == Event::Home || event == Event::End
+                || event == Event::Special("\x1B\r")
+                || event == Event::Special("\x1B\n");
+        }
+
+        void _send_to_plan()
+        {
+            const auto snapshot = state_->review->comments_snapshot();
+            if (snapshot.comments.empty()) {
+                controller_.set_error("Add a review comment before sending.");
+                return;
+            }
+            if (!state_->providers->active_selection()) {
+                controller_.set_error("No model selected — run /model.");
+                return;
+            }
+            std::string prompt = format_review_plan_prompt(snapshot.comments);
+            navigate_(WorkflowPhase::PLAN);
+            controller_.submit(std::move(prompt));
+            state_->review->clear_comments();
+            selected_comment_.reset();
+            pending_jump_.reset();
+        }
 
         struct VisibleRow {
             enum class Kind { FILE, HUNK, LINE, COMMENT };
@@ -333,9 +404,8 @@ namespace {
                             path, hunk, side_width);
                     } else {
                         for (const ReviewLine& line : hunk.lines) {
-                            _push_unified_line(
-                                file_rows, snapshot, file_index, path, line,
-                                review_width);
+                            _push_unified_line(file_rows, snapshot, file_index,
+                                path, line, review_width);
                         }
                     }
                 }
@@ -424,14 +494,14 @@ namespace {
                 [this, &line, marker = std::move(marker), background, number,
                     review_width] {
                     const int content_width = std::max(1, review_width - 14);
-                    Element row = hbox({
+                    Element row             = hbox({
                         text(number(line.old_line)) | color(PANEL_FG_DIM),
                         text(" "),
                         text(number(line.new_line)) | color(PANEL_FG_DIM),
                         text(" "),
                         text(marker + " "),
-                        text(fit(line.content, content_width,
-                            horizontal_offset_))
+                        text(fit(
+                            line.content, content_width, horizontal_offset_))
                             | color(line.kind == ReviewLine::Kind::META
                                     ? PANEL_FG_DIM
                                     : PANEL_FG),
@@ -469,15 +539,15 @@ namespace {
                 marker     = "+";
                 background = DIFF_ADDITION_BG;
             }
-            Element side = hbox({
-                               text(number_text) | color(PANEL_FG_DIM),
-                               text(" "),
-                               text(marker + " "),
-                               text(fit(line->content,
-                                   std::max(1, side_width - 8),
-                                   horizontal_offset_))
-                                   | color(PANEL_FG) | xflex,
-                           })
+            Element side
+                = hbox({
+                      text(number_text) | color(PANEL_FG_DIM),
+                      text(" "),
+                      text(marker + " "),
+                      text(fit(line->content, std::max(1, side_width - 8),
+                          horizontal_offset_))
+                          | color(PANEL_FG) | xflex,
+                  })
                 | size(WIDTH, EQUAL, side_width);
             if (background)
                 side = std::move(side) | bgcolor(*background);
@@ -577,28 +647,30 @@ namespace {
 
         bool _scroll_horizontal(int delta)
         {
-            if (horizontal_limit_ == 0) return false;
-            horizontal_offset_ = std::clamp(
-                horizontal_offset_ + delta, 0, horizontal_limit_);
+            if (horizontal_limit_ == 0)
+                return false;
+            horizontal_offset_
+                = std::clamp(horizontal_offset_ + delta, 0, horizontal_limit_);
             return true;
         }
 
         int _horizontal_limit(const RepositoryReview& review) const
         {
-            const LayoutCtx ctx    = layout_();
-            const int review_width = ctx.kind == LayoutCtx::Kind::WIDE
+            const LayoutCtx ctx             = layout_();
+            const int review_width          = ctx.kind == LayoutCtx::Kind::WIDE
                 ? ctx.width - LayoutCtx::panel_width - 4
                 : ctx.width;
-            const bool side_by_side = review_width >= 100;
-            const int side_content_width = side_by_side
+            const bool side_by_side         = review_width >= 100;
+            const int side_content_width    = side_by_side
                 ? std::max(1, std::max(20, (review_width - 3) / 2) - 8)
                 : std::max(1, review_width - 14);
             const int unified_content_width = std::max(1, review_width - 14);
-            int limit = 0;
+            int limit                       = 0;
             for (const ReviewFile& file : review.files) {
                 const std::string& path
                     = file.new_path.empty() ? file.old_path : file.new_path;
-                if (collapsed_.contains(path)) continue;
+                if (collapsed_.contains(path))
+                    continue;
                 for (const ReviewHunk& hunk : file.hunks) {
                     for (const ReviewLine& line : hunk.lines) {
                         const bool split_line = side_by_side
@@ -606,8 +678,8 @@ namespace {
                         const int content_width = split_line
                             ? side_content_width
                             : unified_content_width;
-                        limit = std::max(limit,
-                            string_width(line.content) - content_width);
+                        limit                   = std::max(
+                            limit, string_width(line.content) - content_width);
                     }
                 }
             }
@@ -724,6 +796,11 @@ namespace {
 
         void _consume_jump(const ReviewState::Snapshot& snapshot)
         {
+            if (snapshot.jump_file) {
+                collapsed_.erase(*snapshot.jump_file);
+                pending_file_jump_ = *snapshot.jump_file;
+                state_->review->clear_file_jump();
+            }
             if (!snapshot.jump_comment)
                 return;
             const auto comment = std::ranges::find(
@@ -766,9 +843,13 @@ namespace {
                 animation::RequestAnimationFrame();
             }).detach();
         }
+        Component plan_button_;
+        Component ai_review_button_;
 
         std::shared_ptr<ApplicationState> state_;
+        Controller& controller_;
         LayoutFn layout_;
+        WorkflowNavigateFn navigate_;
         Component comment_input_;
         std::string draft_;
         int draft_cursor_ = 0;
@@ -776,14 +857,15 @@ namespace {
         std::optional<std::size_t> editing_comment_;
         std::optional<std::size_t> selected_comment_;
         std::optional<std::size_t> pending_jump_;
+        std::optional<std::string> pending_file_jump_;
         std::set<std::string> collapsed_;
         std::vector<VisibleRow> visible_;
         std::shared_ptr<const RepositoryReview> rendered_review_;
         std::deque<Box> boxes_;
         std::vector<int> box_rows_;
-        int selected_       = 0;
-        int rendered_y_     = 0;
-        int skipped_height_ = 0;
+        int selected_          = 0;
+        int rendered_y_        = 0;
+        int skipped_height_    = 0;
         int horizontal_offset_ = 0;
         int horizontal_limit_  = 0;
         std::shared_ptr<std::atomic<std::uint64_t>> load_generation_
@@ -798,10 +880,11 @@ namespace {
 
 } // namespace
 
-Component make_review(
-    std::shared_ptr<ApplicationState> state, Controller&, LayoutFn layout)
+Component make_review(std::shared_ptr<ApplicationState> state,
+    Controller& controller, LayoutFn layout, WorkflowNavigateFn navigate)
 {
-    return ftxui::Make<Review>(std::move(state), std::move(layout));
+    return ftxui::Make<Review>(
+        std::move(state), controller, std::move(layout), std::move(navigate));
 }
 
 } // namespace ursa

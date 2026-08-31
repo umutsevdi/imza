@@ -68,8 +68,33 @@ TEST_CASE("review state stores updates and removes comments")
     CHECK(state.snapshot().comments[0].body == "updated");
     state.request_jump(id);
     CHECK(state.snapshot().jump_comment == id);
+    state.request_file_jump("other.cpp");
+    CHECK(state.snapshot().jump_file == "other.cpp");
+    state.clear_file_jump();
+    CHECK_FALSE(state.snapshot().jump_file);
     state.delete_comment(id);
     CHECK(state.snapshot().comments.empty());
+}
+
+TEST_CASE("review comments format as a plan prompt and clear together")
+{
+    std::vector<ursa::ReviewComment> comments {
+        { 1, { "src/app.cpp", 10, 12, "line" }, "handle the error", false },
+        { 2, { "include/app.h", 7, std::nullopt, "old" },
+            "change the return type\nand update callers", true },
+    };
+
+    CHECK(ursa::format_review_plan_prompt(comments)
+        == "Plan the changes needed to address the following review comments:"
+           "\n\n- `src/app.cpp:12`\n  handle the error"
+           "\n\n- `include/app.h:7` (stale)\n  change the return type"
+           "\n  and update callers");
+
+    ursa::ReviewState state;
+    state.add_comment(comments[0].anchor, comments[0].body);
+    state.clear_comments();
+    CHECK(state.snapshot().comments.empty());
+    CHECK(ursa::format_review_plan_prompt({ }).empty());
 }
 
 TEST_CASE("review state marks comments stale when their line disappears")

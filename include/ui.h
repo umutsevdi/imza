@@ -28,6 +28,7 @@ WorkflowPhase previous_workflow_phase(
 std::optional<Session::Mode> workflow_mode(WorkflowPhase phase);
 
 using WorkflowFn = std::function<WorkflowPhase()>;
+using WorkflowNavigateFn = std::function<void(WorkflowPhase)>;
 
 inline const ftxui::Color PANEL_COLOR       = ftxui::Color::RGB(26, 34, 52);
 inline const ftxui::Color PANEL_FG          = ftxui::Color::RGB(228, 232, 240);
@@ -71,6 +72,7 @@ ftxui::Element code_block(
 ftxui::Element code_block_with_lines(
     const std::string& code, const std::string& lang, std::size_t start_line);
 ftxui::Element diff_split(const DiffView& diff, int available_width = 120);
+ftxui::Element session_error_element(const Session& session);
 
 ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx);
 ftxui::Element render_todo(const TodoList& todo, const LayoutCtx& ctx);
@@ -90,10 +92,10 @@ ftxui::Component make_chat(
     LayoutFn layout);
 ftxui::Component make_side_panel(
     std::shared_ptr<ApplicationState> state, Controller& controller,
-    LayoutFn layout, WorkflowFn workflow);
+    LayoutFn layout, WorkflowFn workflow, WorkflowNavigateFn navigate);
 ftxui::Component make_review(
     std::shared_ptr<ApplicationState> state, Controller& controller,
-    LayoutFn layout);
+    LayoutFn layout, WorkflowNavigateFn navigate);
 ftxui::Component make_status_line(std::shared_ptr<ApplicationState> state,
     LayoutFn layout, WorkflowFn workflow);
 ftxui::Component make_connect(

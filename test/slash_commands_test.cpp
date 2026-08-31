@@ -89,7 +89,7 @@ TEST_CASE("run_slash_command emits application effects")
     CHECK(std::get<ConnectModal>(modal).entry == ConnectModal::Entry::MANAGE);
 
     run_slash_command(context, "/missing");
-    CHECK(error == "unknown command: /missing");
+    CHECK(error == "Unknown command: /missing.");
 }
 
 } // namespace ursa

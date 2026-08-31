@@ -733,7 +733,7 @@ namespace {
         void confirm_remove(const std::string& id)
         {
             if (!provider_store_.remove_connection(id)) {
-                row_error_ = "cannot remove the last connection";
+                row_error_ = "Cannot remove the last connection.";
                 confirm_.erase(id);
                 rebuild_manage();
                 return;
@@ -769,14 +769,14 @@ namespace {
             res.provider_id = selected_provider_;
             res.persist     = persist;
             if (res.provider_id.empty()) {
-                row_error_ = "select a provider";
+                row_error_ = "Select a provider.";
                 return res;
             }
             res.endpoint = current_endpoint();
             if ((res.provider_id == kCustomProviderId
                     || res.provider_id == kLocalProviderId)
                 && res.endpoint.empty()) {
-                row_error_      = "enter a base URL";
+                row_error_      = "Enter a base URL.";
                 res.provider_id = "";
                 return res;
             }
@@ -1027,7 +1027,7 @@ namespace {
                 if (!any_fetching) {
                     rows.push_back(any_failed
                             ? status_element(
-                                  "✗ some providers failed — press F5 to retry",
+                                  "✗ Some providers failed — press F5 to retry.",
                                   false)
                             : text("no models") | dim);
                 }

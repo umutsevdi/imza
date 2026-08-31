@@ -18,14 +18,33 @@
 
 namespace ursa {
 using namespace ftxui;
+
+namespace {
+
+    Element changed_file_item(const ChangedFile& file);
+
+    std::string changed_file_target(const ChangedFile& file)
+    {
+        if (file.kind != ChangedFile::Kind::RENAMED
+            && file.kind != ChangedFile::Kind::COPIED) {
+            return file.path;
+        }
+        const std::size_t arrow = file.path.rfind(" -> ");
+        return arrow == std::string::npos ? file.path
+                                          : file.path.substr(arrow + 4);
+    }
+
+}
+
 class SidePanel : public ComponentBase {
 public:
     SidePanel(std::shared_ptr<ApplicationState> state, Controller& controller,
-        LayoutFn layout, WorkflowFn workflow)
+        LayoutFn layout, WorkflowFn workflow, WorkflowNavigateFn navigate)
         : state_(std::move(state))
         , controller_(controller)
         , layout_(std::move(layout))
         , workflow_(std::move(workflow))
+        , navigate_(std::move(navigate))
         , workspace_subscription_(
               state_->environment->subscribe_to_workspace_change(
                   [] { animation::RequestAnimationFrame(); }))
@@ -50,6 +69,8 @@ public:
     {
         const LayoutCtx ctx = layout_();
         const bool narrow   = ctx.kind == LayoutCtx::Kind::NARROW;
+        changed_file_boxes_.clear();
+        changed_file_paths_.clear();
         Elements parts;
         const std::string title = state_->session->title();
         parts.push_back(paragraph(title.empty() ? "New Session" : title) | bold
@@ -64,7 +85,7 @@ public:
             const auto& env       = state_->environment;
             const auto repository = env->repository();
             if (repository && !repository->changed_files.empty()) {
-                parts.push_back(render_changed_files(*repository, ctx) | yflex);
+                parts.push_back(_render_changed_files(*repository) | yflex);
             };
             if (attachments_dirty_.exchange(false)) {
                 attachment_names_ = state_->session->attachment_names();
@@ -83,7 +104,18 @@ public:
     bool OnEvent(Event event) override
     {
         if (!event.is_mouse() || event.mouse().button != Mouse::Left
-            || event.mouse().motion != Mouse::Pressed || !state_->review) {
+            || event.mouse().motion != Mouse::Pressed) {
+            return false;
+        }
+        for (std::size_t i = 0; i < changed_file_boxes_.size(); ++i) {
+            if (changed_file_boxes_[i].Contain(
+                    event.mouse().x, event.mouse().y)) {
+                state_->review->request_file_jump(changed_file_paths_[i]);
+                navigate_(WorkflowPhase::REVIEW);
+                return true;
+            }
+        }
+        if (!state_->review) {
             return false;
         }
         for (std::size_t i = 0; i < comment_boxes_.size(); ++i) {
@@ -96,6 +128,26 @@ public:
     }
 
 private:
+    Element _render_changed_files(const RepositoryState& repository)
+    {
+        Elements rows;
+        for (const ChangedFile& file : repository.changed_files) {
+            changed_file_boxes_.push_back(Box { });
+            changed_file_paths_.push_back(changed_file_target(file));
+            rows.push_back(changed_file_item(file)
+                | reflect(changed_file_boxes_.back()));
+        }
+        Element body
+            = vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER);
+        Element title = hbox({ section_title("Changed files"), filler(),
+            text("+" + std::to_string(repository.changes.additions))
+                | color(Color::GreenLight),
+            text(" "),
+            text("−" + std::to_string(repository.changes.deletions))
+                | color(Color::RedLight) });
+        return vbox({ std::move(title), std::move(body) });
+    }
+
     void _append_review_comments(Elements& parts)
     {
         comment_boxes_.clear();
@@ -138,6 +190,7 @@ private:
     Controller& controller_;
     LayoutFn layout_;
     WorkflowFn workflow_;
+    WorkflowNavigateFn navigate_;
     Signal<>::Subscription workspace_subscription_;
     Signal<>::Subscription repository_subscription_;
     Signal<>::Subscription title_subscription_;
@@ -147,13 +200,16 @@ private:
     Signal<>::Subscription review_subscription_;
     std::deque<Box> comment_boxes_;
     std::vector<std::size_t> comment_ids_;
+    std::deque<Box> changed_file_boxes_;
+    std::vector<std::string> changed_file_paths_;
 };
 
 ftxui::Component make_side_panel(std::shared_ptr<ApplicationState> state,
-    Controller& controller, LayoutFn layout, WorkflowFn workflow)
+    Controller& controller, LayoutFn layout, WorkflowFn workflow,
+    WorkflowNavigateFn navigate)
 {
-    return ftxui::Make<SidePanel>(
-        std::move(state), controller, std::move(layout), std::move(workflow));
+    return ftxui::Make<SidePanel>(std::move(state), controller,
+        std::move(layout), std::move(workflow), std::move(navigate));
 }
 
 namespace {

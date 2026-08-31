@@ -90,10 +90,12 @@ namespace {
             if (!state_->review) {
                 state_->review = std::make_shared<ReviewState>();
             }
-            side_ = make_side_panel(state_, controller, layout, workflow);
+            side_ = make_side_panel(state_, controller, layout, workflow,
+                [this](WorkflowPhase phase) { _set_phase(phase); });
             status_line_ = make_status_line(state_, layout, workflow);
             chat_        = make_chat(state_, controller, layout);
-            review_      = make_review(state_, controller, layout);
+            review_      = make_review(state_, controller, layout,
+                [this](WorkflowPhase phase) { _set_phase(phase); });
             modal_       = make_modal(state_, controller);
 
             workspace_subscription_

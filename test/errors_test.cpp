@@ -75,10 +75,10 @@ TEST_CASE("parse_api_error ignores non-error bodies")
 TEST_CASE("error_text maps statuses to human strings")
 {
     CHECK(ursa::error_text(ursa::Status::RATE_LIMITED)
-        == "rate limited by provider");
+        == "Rate limited by provider.");
     CHECK(ursa::error_text(ursa::Status::BUDGET_EXCEEDED)
-        == "out of budget / insufficient credits");
-    CHECK(ursa::error_text(ursa::Status::NETWORK_ERROR) == "network error");
+        == "Out of budget / insufficient credits.");
+    CHECK(ursa::error_text(ursa::Status::NETWORK_ERROR) == "Network error.");
 }
 
 TEST_CASE("OpenAI parse turns mid-stream error blocks into ERROR events")
@@ -216,7 +216,7 @@ TEST_CASE("controller does not retry budget errors")
     REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
     CHECK(env.requests.size() == 1);
     CHECK(env.session->error()
-        == "out of budget / insufficient credits: insufficient credits");
+        == "Out of budget / insufficient credits: insufficient credits.");
 }
 
 struct FakeApi {

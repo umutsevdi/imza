@@ -106,6 +106,20 @@ TEST_CASE("render_markdown_element empty input")
     CHECK(!out.empty());
 }
 
+TEST_CASE("session error element renders a full-width error bar")
+{
+    ursa::Session session;
+    session.set_error("add a review comment before sending");
+    auto screen = ftxui::Screen::Create(
+        ftxui::Dimension::Fixed(60), ftxui::Dimension::Fixed(1));
+    ftxui::Render(screen, ursa::session_error_element(session));
+
+    CHECK(screen.ToString().find("Add a review comment before sending.")
+        != std::string::npos);
+    CHECK(screen.PixelAt(0, 0).background_color == ftxui::Color::Red);
+    CHECK(screen.PixelAt(59, 0).background_color == ftxui::Color::Red);
+}
+
 TEST_CASE("multiline field underlines only its last row")
 {
     std::string content = "first\nsecond";

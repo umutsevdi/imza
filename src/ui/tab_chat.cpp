@@ -9,7 +9,6 @@
 #include <ftxui/dom/node.hpp>
 
 #include <algorithm>
-#include <chrono>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -103,30 +102,6 @@ namespace {
         return [](Element child) {
             return std::make_shared<Impl>(std::move(child));
         };
-    }
-
-    Element error_element(const Session& st)
-    {
-        std::string msg = st.error();
-        if (st.retry_countdown()) {
-            auto remaining = std::chrono::duration_cast<std::chrono::seconds>(
-                st.retry_countdown()->deadline
-                - std::chrono::steady_clock::now())
-                                 .count();
-            if (remaining < 0) {
-                remaining = 0;
-            }
-            msg = "rate limited — retrying in " + std::to_string(remaining)
-                + "s…";
-        }
-        if (msg.empty()) {
-            return text("");
-        }
-        return hbox({
-            text(" ") | bgcolor(Color::Red),
-            text(" " + msg) | bgcolor(Color::Red),
-            filler() | bgcolor(Color::Red),
-        });
     }
 
     std::size_t item_version(const ConversationItem& it)
@@ -434,7 +409,7 @@ namespace {
                 text("  Alt+Enter add line · @ attach file · $ use skill ")
                     | color(PANEL_FG_DIM) | bgcolor(PANEL_COLOR) }));
             if (!st.error().empty() || st.retry_countdown()) {
-                bottom.push_back(error_element(st));
+                bottom.push_back(session_error_element(st));
             }
             Elements root;
             root.push_back(std::move(main));
@@ -730,8 +705,8 @@ namespace {
                     }
                     if (attachments_.size() >= kMaxAttachments
                         || total > kMaxTotalBytes) {
-                        controller_.set_error("attachments exceed the 20 file "
-                                              "or 4 MiB total limit");
+                        controller_.set_error("Attachments exceed the 20-file "
+                                              "or 4 MiB total limit.");
                         refresh_suggestions();
                         return;
                     }

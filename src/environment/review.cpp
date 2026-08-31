@@ -157,7 +157,7 @@ ReviewLoadResult parse_git_diff(std::string_view patch)
         }
         if (file == nullptr) {
             if (!line.empty()) {
-                return "invalid git patch: content before file header";
+                return "Invalid git patch: content before file header.";
             }
             continue;
         }
@@ -192,7 +192,7 @@ ReviewLoadResult parse_git_diff(std::string_view patch)
             file->hunks.push_back(ReviewHunk { std::string(line), { } });
             hunk = &file->hunks.back();
             if (!parse_hunk_header(line, *hunk)) {
-                return "invalid git patch: malformed hunk header";
+                return "Invalid git patch: malformed hunk header.";
             }
             old_line = hunk->old_start;
             new_line = hunk->new_start;
@@ -224,7 +224,7 @@ ReviewLoadResult load_repository_review(const std::filesystem::path& root)
             + " diff --no-ext-diff --no-color --find-renames --find-copies HEAD --",
         std::chrono::seconds { 10 });
     if (!diff.spawned || diff.timed_out) {
-        return "git diff could not be loaded";
+        return "Git diff could not be loaded.";
     }
     if (diff.exit_code != 0) {
         diff = run_command(prefix
@@ -246,6 +246,35 @@ ReviewLoadResult load_repository_review(const std::filesystem::path& root)
         append_untracked(*review, root, untracked.output);
     }
     return parsed;
+}
+
+std::string format_review_plan_prompt(
+    const std::vector<ReviewComment>& comments)
+{
+    if (comments.empty()) {
+        return { };
+    }
+    std::string prompt
+        = "Plan the changes needed to address the following review comments:";
+    for (const ReviewComment& comment : comments) {
+        const std::string line = comment.anchor.new_line
+            ? std::to_string(*comment.anchor.new_line)
+            : comment.anchor.old_line
+            ? std::to_string(*comment.anchor.old_line)
+            : "?";
+        prompt += "\n\n- `" + comment.anchor.file + ":" + line + "`";
+        if (comment.stale) {
+            prompt += " (stale)";
+        }
+        prompt += "\n  ";
+        for (const char c : comment.body) {
+            prompt += c;
+            if (c == '\n') {
+                prompt += "  ";
+            }
+        }
+    }
+    return prompt;
 }
 
 ReviewState::Snapshot::Snapshot()
@@ -372,6 +401,36 @@ void ReviewState::clear_jump()
 {
     std::lock_guard lock(mutex_);
     state_.jump_comment.reset();
+}
+
+void ReviewState::request_file_jump(std::string path)
+{
+    {
+        std::lock_guard lock(mutex_);
+        state_.jump_file = std::move(path);
+        ++state_.generation;
+    }
+    _publish();
+}
+
+void ReviewState::clear_file_jump()
+{
+    std::lock_guard lock(mutex_);
+    state_.jump_file.reset();
+}
+
+void ReviewState::clear_comments()
+{
+    {
+        std::lock_guard lock(mutex_);
+        if (state_.comments.empty()) {
+            return;
+        }
+        state_.comments.clear();
+        state_.jump_comment.reset();
+        ++state_.generation;
+    }
+    _publish();
 }
 
 Signal<>::Subscription ReviewState::subscribe(Signal<>::Callback callback)

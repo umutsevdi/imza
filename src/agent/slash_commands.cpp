@@ -43,7 +43,7 @@ void run_slash_command(
 {
     const SlashCommand* found = find_command(command);
     if (found == nullptr) {
-        context.set_error("unknown command: " + std::string(command));
+        context.set_error("Unknown command: " + std::string(command) + ".");
         return;
     }
 
@@ -55,7 +55,7 @@ void run_slash_command(
         break;
     case SlashCommand::Action::MODEL:
         if (context.state.providers->connections().empty()) {
-            context.set_error("no connections — run /connect first");
+            context.set_error("No connections — run /connect first.");
             break;
         }
         context.present_modal(

@@ -373,8 +373,19 @@ void Controller::_drive(
         if (fail != Status::OK) {
             _post([this, fail, msg = error_msg] {
                 state_->session->clear_error();
-                finish(msg.empty() ? error_text(fail)
-                                   : error_text(fail) + ": " + msg);
+                std::string error = error_text(fail);
+                if (!msg.empty()) {
+                    if (error.ends_with('.')) {
+                        error.pop_back();
+                    }
+                    error += ": " + msg;
+                    if (!error.ends_with('.') && !error.ends_with('!')
+                        && !error.ends_with('?')
+                        && !error.ends_with("…")) {
+                        error += '.';
+                    }
+                }
+                finish(std::move(error));
             });
             return;
         }

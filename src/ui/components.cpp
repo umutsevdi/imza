@@ -2,6 +2,8 @@
 #include "util.h"
 
 #include <algorithm>
+#include <cctype>
+#include <chrono>
 #include <cstdlib>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/event.hpp>
@@ -65,6 +67,52 @@ LayoutCtx layout_context(int width)
 }
 
 using namespace ftxui;
+
+namespace {
+
+    std::string error_sentence(std::string message)
+    {
+        while (!message.empty()
+            && std::isspace(static_cast<unsigned char>(message.back()))) {
+            message.pop_back();
+        }
+        if (message.empty()) {
+            return message;
+        }
+        message.front() = static_cast<char>(
+            std::toupper(static_cast<unsigned char>(message.front())));
+        if (!message.ends_with('.') && !message.ends_with('!')
+            && !message.ends_with('?') && !message.ends_with("…")) {
+            message += '.';
+        }
+        return message;
+    }
+
+}
+
+Element session_error_element(const Session& session)
+{
+    std::string message = error_sentence(session.error());
+    if (session.retry_countdown()) {
+        auto remaining = std::chrono::duration_cast<std::chrono::seconds>(
+            session.retry_countdown()->deadline
+            - std::chrono::steady_clock::now())
+                             .count();
+        if (remaining < 0) {
+            remaining = 0;
+        }
+        message = "Rate limited — retrying in " + std::to_string(remaining)
+            + "s…";
+    }
+    if (message.empty()) {
+        return text("");
+    }
+    return hbox({
+        text(" ") | bgcolor(Color::Red),
+        text(" " + message) | bgcolor(Color::Red),
+        filler() | bgcolor(Color::Red),
+    });
+}
 
 std::size_t digit_width(std::size_t n) { return std::to_string(n).size(); }
 

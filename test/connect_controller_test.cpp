@@ -229,7 +229,7 @@ TEST_CASE("failing test keeps the connection absent")
         return !session->connect_status().empty();
     }));
     CHECK(providers->connections().empty());
-    CHECK(session->connect_status() == "API error");
+    CHECK(session->connect_status() == "API error.");
 }
 
 TEST_CASE("model pick sets last_used and persists")
@@ -393,5 +393,5 @@ TEST_CASE("send guard blocks messages without an active model")
     controller.submit("hello");
     CHECK(session->items().empty());
     CHECK(session->error()
-        == "no model selected — run /model");
+        == "No model selected — run /model.");
 }

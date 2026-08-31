@@ -21,16 +21,16 @@ std::string error_text(Status st)
 {
     switch (st) {
     case Status::OK: return "";
-    case Status::NETWORK_ERROR: return "network error";
-    case Status::INVALID_URL: return "invalid API URL";
-    case Status::JSON_ERROR: return "malformed response from provider";
-    case Status::API_ERROR: return "API error";
-    case Status::RATE_LIMITED: return "rate limited by provider";
-    case Status::BUDGET_EXCEEDED: return "out of budget / insufficient credits";
-    case Status::UNSUPPORTED: return "unsupported operation";
-    case Status::CONFIG_ERROR: return "configuration error";
+    case Status::NETWORK_ERROR: return "Network error.";
+    case Status::INVALID_URL: return "Invalid API URL.";
+    case Status::JSON_ERROR: return "Malformed response from provider.";
+    case Status::API_ERROR: return "API error.";
+    case Status::RATE_LIMITED: return "Rate limited by provider.";
+    case Status::BUDGET_EXCEEDED: return "Out of budget / insufficient credits.";
+    case Status::UNSUPPORTED: return "Unsupported operation.";
+    case Status::CONFIG_ERROR: return "Configuration error.";
     }
-    return "unknown error";
+    return "Unknown error.";
 }
 
 Controller::Controller(std::shared_ptr<Session> session, const Config& cfg,
@@ -259,11 +259,11 @@ void Controller::delete_saved_session(const std::filesystem::path& path)
     const std::filesystem::path target
         = std::filesystem::weakly_canonical(path, ec);
     if (ec || target.parent_path() != root || target.extension() != ".json") {
-        state_->session->set_error("invalid session path");
+        state_->session->set_error("Invalid session path.");
         return;
     }
     if (!std::filesystem::remove(target, ec) || ec) {
-        state_->session->set_error("failed to delete session");
+        state_->session->set_error("Failed to delete session.");
         return;
     }
     state_->session->set_modal(_sessions_modal());
@@ -341,11 +341,12 @@ bool Controller::_validate_skill_mentions(std::string_view text)
         args["name"] = std::string(text.substr(pos + 1, end - pos - 1));
         const auto skill = _resolve_skill(args);
         if (!skill) {
-            state_->session->set_error("unknown skill: " + args["name"].asString());
+            state_->session->set_error(
+                "Unknown skill: " + args["name"].asString() + ".");
             return false;
         }
         if (_skill_policy(*skill) == SkillPolicy::DENY) {
-            state_->session->set_error("skill is denied: " + skill->name);
+            state_->session->set_error("Skill is denied: " + skill->name + ".");
             return false;
         }
         pos = end;
@@ -391,7 +392,7 @@ bool Controller::_load_skill(const Skill& skill)
     }
     std::ifstream file(skill.path, std::ios::binary);
     if (!file) {
-        state_->session->set_error("failed to read skill: " + skill.name);
+        state_->session->set_error("Failed to read skill: " + skill.name + ".");
         return false;
     }
     std::ostringstream buffer;
@@ -399,7 +400,8 @@ bool Controller::_load_skill(const Skill& skill)
     std::string content = buffer.str();
     constexpr std::size_t max_skill_bytes = 128 * 1024;
     if (content.size() > max_skill_bytes) {
-        state_->session->set_error("skill instructions exceed 128 KiB: " + skill.name);
+        state_->session->set_error(
+            "Skill instructions exceed 128 KiB: " + skill.name + ".");
         return false;
     }
     std::lock_guard lock(loaded_skills_mutex_);
@@ -429,15 +431,15 @@ void Controller::resolve_modal(ModalResult result)
     if (auto* path = std::get_if<std::filesystem::path>(&result)) {
         if (state_->session->has_pending_work()) {
             state_->session->set_error(
-                "finish or interrupt pending work before loading a session");
+                "Finish or interrupt pending work before loading a session.");
             return;
         }
         if (save_session(*state_->session) != Status::OK) {
-            state_->session->set_error("failed to save current session");
+            state_->session->set_error("Failed to save current session.");
             return;
         }
         if (load_session(*path, *state_->session) != Status::OK) {
-            state_->session->set_error("failed to load session");
+            state_->session->set_error("Failed to load session.");
         }
     }
     if (auto* connect = std::get_if<ConnectResult>(&result)) {
@@ -453,7 +455,7 @@ void Controller::resolve_modal(ModalResult result)
     }
     if (auto* skills = std::get_if<SkillPolicyChanges>(&result)) {
         if (!state_->providers->set_skill_policies(*skills)) {
-            state_->session->set_error("failed to save skill policies");
+            state_->session->set_error("Failed to save skill policies.");
             return;
         }
     }
@@ -475,7 +477,7 @@ void Controller::resolve_modal(ModalResult result)
     if (!manual_skill) return;
     if (!manual_accepted || !pending_skill_turn_) {
         pending_skill_turn_.reset();
-        state_->session->set_error("skill activation cancelled");
+        state_->session->set_error("Skill activation cancelled.");
         return;
     }
     ++pending_skill_turn_->next;
@@ -561,7 +563,7 @@ void Controller::submit_message(
     const std::optional<ProviderSelection> selection
         = state_->providers->active_selection();
     if (!selection.has_value()) {
-        state_->session->set_error("no model selected — run /model");
+        state_->session->set_error("No model selected — run /model.");
         return;
     }
     TurnSettings settings;
@@ -805,11 +807,11 @@ void Controller::_new_session()
 {
     if (state_->session->has_pending_work()) {
         state_->session->set_error(
-            "finish or interrupt pending work before starting a new session");
+            "Finish or interrupt pending work before starting a new session.");
         return;
     }
     if (save_session(*state_->session) != Status::OK) {
-        state_->session->set_error("failed to save current session");
+        state_->session->set_error("Failed to save current session.");
         return;
     }
     {

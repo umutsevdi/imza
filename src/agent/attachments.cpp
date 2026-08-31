@@ -145,28 +145,31 @@ AttachmentResult load_attachment(
         canonical_root / std::filesystem::path(relative_path), ec);
     if (ec || !within(canonical_root, path)) {
         return { Status::CONFIG_ERROR, std::nullopt,
-            "attachment must be inside the workspace" };
+            "Attachment must be inside the workspace." };
     }
     if (!std::filesystem::is_regular_file(path, ec) || ec) {
         return { Status::CONFIG_ERROR, std::nullopt,
-            "attachment is not a readable file: " + std::string(relative_path) };
+            "Attachment is not a readable file: "
+                + std::string(relative_path) + "." };
     }
     const std::uintmax_t size = std::filesystem::file_size(path, ec);
     if (ec || size > kMaxAttachmentBytes) {
         return { Status::CONFIG_ERROR, std::nullopt,
-            "attachment exceeds the 1 MiB limit: " + std::string(relative_path) };
+            "Attachment exceeds the 1 MiB limit: "
+                + std::string(relative_path) + "." };
     }
     std::ifstream file(path, std::ios::binary);
     std::ostringstream buffer;
     buffer << file.rdbuf();
     if (!file && !file.eof()) {
         return { Status::CONFIG_ERROR, std::nullopt,
-            "could not read attachment: " + std::string(relative_path) };
+            "Could not read attachment: " + std::string(relative_path) + "." };
     }
     std::string content = buffer.str();
     if (content.find('\0') != std::string::npos) {
         return { Status::CONFIG_ERROR, std::nullopt,
-            "binary files cannot be attached: " + std::string(relative_path) };
+            "Binary files cannot be attached: "
+                + std::string(relative_path) + "." };
     }
     const std::string display
         = std::filesystem::relative(path, canonical_root, ec).generic_string();

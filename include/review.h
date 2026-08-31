@@ -72,6 +72,9 @@ struct ReviewComment {
     bool stale = false;
 };
 
+std::string format_review_plan_prompt(
+    const std::vector<ReviewComment>& comments);
+
 using ReviewLoadResult = std::variant<RepositoryReview, std::string>;
 
 ReviewLoadResult parse_git_diff(std::string_view patch);
@@ -89,6 +92,7 @@ public:
         std::vector<ReviewComment> comments;
         std::string error;
         std::optional<std::size_t> jump_comment;
+        std::optional<std::string> jump_file;
         std::uint64_t generation = 0;
     };
 
@@ -106,6 +110,9 @@ public:
     void delete_comment(std::size_t id);
     void request_jump(std::size_t id);
     void clear_jump();
+    void request_file_jump(std::string path);
+    void clear_file_jump();
+    void clear_comments();
     [[nodiscard]] Signal<>::Subscription subscribe(Signal<>::Callback callback);
 
 private:
