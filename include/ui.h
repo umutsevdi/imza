@@ -85,7 +85,7 @@ ftxui::Component make_chat(
     LayoutFn layout);
 ftxui::Component make_side_panel(
     std::shared_ptr<ApplicationState> state, Controller& controller,
-    LayoutFn layout);
+    LayoutFn layout, WorkflowFn workflow);
 ftxui::Component make_review(
     std::shared_ptr<ApplicationState> state, Controller& controller,
     LayoutFn layout);

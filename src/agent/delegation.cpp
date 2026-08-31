@@ -1,4 +1,5 @@
 #include "controller.h"
+#include "review.h"
 
 #include "format.h"
 #include "util.h"
@@ -195,7 +196,7 @@ void Controller::_run_subagents(
                 auto child_state = std::make_shared<ApplicationState>(
                     ApplicationState { child_session, state_->providers,
                         std::make_shared<SubagentManager>(),
-                        state_->environment });
+                        state_->environment, std::make_shared<ReviewState>() });
                 Controller child(child_state,
                     [](std::function<void()> action) { action(); }, [] { },
                     has_stream_override_ ? stream_fn_ : StreamFn { },

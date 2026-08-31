@@ -12,6 +12,7 @@
 #include <print>
 
 #include "environment.h"
+#include "review.h"
 #include "session_store.h"
 
 #ifdef _WIN32
@@ -76,24 +77,6 @@ namespace {
             || event == Event::Special("\x1B[27;2;9~");
     }
 
-    class Review : public ComponentBase {
-    public:
-        Review(std::shared_ptr<Session> session, Controller& controller,
-            LayoutFn layout)
-            : session_(std::move(session))
-            , controller_(controller)
-            , layout_(std::move(layout))
-        {
-        }
-
-        Element OnRender() override { return text("No content"); }
-
-    private:
-        std::shared_ptr<Session> session_;
-        Controller& controller_;
-        LayoutFn layout_;
-    };
-
     class Repl : public ComponentBase {
     public:
         Repl(ScreenInteractive& screen,
@@ -104,7 +87,10 @@ namespace {
         {
             const LayoutFn layout = [this] { return layout_; };
             const WorkflowFn workflow = [this] { return phase_; };
-            side_        = make_side_panel(state_, controller, layout);
+            if (!state_->review) {
+                state_->review = std::make_shared<ReviewState>();
+            }
+            side_ = make_side_panel(state_, controller, layout, workflow);
             status_line_ = make_status_line(state_, layout, workflow);
             chat_        = make_chat(state_, controller, layout);
             review_      = make_review(state_, controller, layout);
@@ -200,6 +186,9 @@ namespace {
                     }
                     return true;
                 }
+                if (side_->OnEvent(event)) {
+                    return true;
+                }
             }
             return selected_pane_ == 0 ? chat_->OnEvent(event)
                                        : review_->OnEvent(event);
@@ -267,13 +256,6 @@ namespace {
 
 } // namespace
 
-Component make_review(std::shared_ptr<ApplicationState> state,
-    Controller& controller, LayoutFn layout)
-{
-    return ftxui::Make<Review>(
-        state->session, controller, std::move(layout));
-}
-
 int run_repl(const Config& cfg)
 {
     if (!is_interactive_terminal()) {
@@ -285,7 +267,8 @@ int run_repl(const Config& cfg)
     std::vector<Tool> tools  = default_tools();
     auto state = std::make_shared<ApplicationState>(ApplicationState {
         std::make_shared<Session>(), std::make_shared<ProviderStore>(cfg),
-        std::make_shared<SubagentManager>(), get_environment() });
+        std::make_shared<SubagentManager>(), get_environment(),
+        std::make_shared<ReviewState>() });
     {
         Controller controller(
             state,

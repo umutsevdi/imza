@@ -150,6 +150,7 @@ add_library(ursa_agent
     src/agent/format.cpp
     src/agent/tools.cpp
     src/agent/command_runner.cpp
+    src/environment/review.cpp
 )
 target_include_directories(ursa_agent PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -173,6 +174,7 @@ add_library(ursa_ui
     src/ui/side_panel.cpp
     src/ui/status_line.cpp
     src/ui/tab_chat.cpp
+    src/ui/tab_review.cpp
 )
 target_include_directories(ursa_ui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include

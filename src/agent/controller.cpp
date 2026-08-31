@@ -1,4 +1,5 @@
 #include "controller.h"
+#include "review.h"
 
 #include "environment.h"
 #include "prompt.h"
@@ -38,7 +39,8 @@ Controller::Controller(std::shared_ptr<Session> session, const Config& cfg,
     : Controller(std::make_shared<ApplicationState>(ApplicationState {
           std::move(session),
           std::make_shared<ProviderStore>(cfg, std::move(models_fn)),
-          std::make_shared<SubagentManager>(), get_environment() }),
+          std::make_shared<SubagentManager>(), get_environment(),
+          std::make_shared<ReviewState>() }),
           std::move(post), std::move(on_exit), std::move(stream_fn),
           std::move(tools))
 {
@@ -50,7 +52,8 @@ Controller::Controller(std::shared_ptr<Session> session,
     std::vector<Tool> tools)
     : Controller(std::make_shared<ApplicationState>(ApplicationState {
           std::move(session), std::move(providers),
-          std::make_shared<SubagentManager>(), get_environment() }),
+          std::make_shared<SubagentManager>(), get_environment(),
+          std::make_shared<ReviewState>() }),
           std::move(post), std::move(on_exit), std::move(stream_fn),
           std::move(tools))
 {

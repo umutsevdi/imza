@@ -1,0 +1,608 @@
+#include "ui.h"
+
+#include "environment.h"
+#include "review.h"
+
+#include <ftxui/component/component.hpp>
+#include <ftxui/component/event.hpp>
+#include <ftxui/component/mouse.hpp>
+#include <ftxui/dom/elements.hpp>
+#include <ftxui/screen/box.hpp>
+
+#include <algorithm>
+#include <atomic>
+#include <deque>
+#include <format>
+#include <set>
+#include <thread>
+
+namespace ursa {
+namespace {
+
+using namespace ftxui;
+
+const Color DIFF_ADDITION_BG = Color::RGB(24, 67, 50);
+const Color DIFF_DELETION_BG = Color::RGB(78, 39, 46);
+
+std::string line_range(std::size_t start, std::size_t count)
+{
+    if (count <= 1) return std::to_string(start);
+    return std::format("{}–{}", start, start + count - 1);
+}
+
+std::string hunk_label(const ReviewHunk& hunk)
+{
+    const std::string old_range = hunk.old_count == 0
+        ? "∅"
+        : line_range(hunk.old_start, hunk.old_count);
+    const std::string new_range = hunk.new_count == 0
+        ? "∅"
+        : line_range(hunk.new_start, hunk.new_count);
+    return old_range + " → " + new_range;
+}
+
+class Review : public ComponentBase {
+public:
+    Review(std::shared_ptr<ApplicationState> state, LayoutFn layout)
+        : state_(std::move(state))
+        , layout_(std::move(layout))
+        , comment_input_(Input(&draft_, field_option(&draft_, &draft_cursor_,
+              "Leave a comment", { }, [this] { _save_editor(); })))
+        , repository_subscription_(
+              state_->environment->subscribe_to_repository_change([this] {
+                  _reload();
+              }))
+        , workspace_subscription_(
+              state_->environment->subscribe_to_workspace_change([this] {
+                  _reload();
+              }))
+        , review_subscription_(state_->review->subscribe([] {
+              animation::RequestAnimationFrame();
+          }))
+    {
+        Add(comment_input_);
+        _reload();
+    }
+
+    ~Review() override { load_generation_->fetch_add(1); }
+
+    Element OnRender() override
+    {
+        const ReviewState::Snapshot snapshot = state_->review->snapshot();
+        _consume_jump(snapshot);
+        visible_.clear();
+        boxes_.clear();
+        rendered_y_ = 0;
+
+        if (snapshot.status == ReviewState::LoadStatus::IDLE
+            || snapshot.status == ReviewState::LoadStatus::LOADING) {
+            return center(text("Loading changes…") | color(PANEL_FG_DIM))
+                | flex;
+        }
+        if (snapshot.status == ReviewState::LoadStatus::ERROR) {
+            return center(vbox({ text("Unable to load changes") | bold,
+                              paragraph(snapshot.error) | color(PANEL_FG_DIM) }))
+                | flex;
+        }
+        if (snapshot.review.files.empty()) {
+            return center(text("Working tree is clean") | color(PANEL_FG_DIM))
+                | flex;
+        }
+
+        Elements rows;
+        for (std::size_t file_index = 0;
+             file_index < snapshot.review.files.size(); ++file_index) {
+            const ReviewFile& file = snapshot.review.files[file_index];
+            _push_file(rows, snapshot, file, file_index);
+            if (file_index + 1 < snapshot.review.files.size()) {
+                rows.push_back(separatorEmpty());
+                ++rendered_y_;
+            }
+        }
+        if (pending_jump_) {
+            for (std::size_t i = 0; i < visible_.size(); ++i) {
+                if (visible_[i].comment_id == pending_jump_) {
+                    selected_ = static_cast<int>(i);
+                    selected_comment_ = pending_jump_;
+                    pending_jump_.reset();
+                    animation::RequestAnimationFrame();
+                    break;
+                }
+            }
+        }
+        if (visible_.empty()) {
+            return text("") | flex;
+        }
+        selected_ = std::clamp(selected_, 0,
+            static_cast<int>(visible_.size()) - 1);
+
+        const int selected_y = visible_[selected_].display_y;
+        Element content = vbox(std::move(rows))
+            | focusPosition(0, selected_y) | yframe | vscroll_indicator | flex;
+        const std::string hint = editor_anchor_
+            ? "Enter save · Esc cancel"
+            : selected_comment_
+            ? "↑↓ navigate · e edit · d delete"
+            : "↑↓ navigate · [] files · Enter collapse · c comment";
+        return vbox({ std::move(content),
+                       hbox({ filler(), text(hint) | dim }) })
+            | flex;
+    }
+
+    bool OnEvent(Event event) override
+    {
+        if (editor_anchor_) {
+            if (event == Event::Escape) {
+                _close_editor();
+                return true;
+            }
+            return comment_input_->OnEvent(event);
+        }
+        if (event.is_mouse()) {
+            const Mouse& mouse = event.mouse();
+            if (mouse.button == Mouse::WheelUp) return _move(-3);
+            if (mouse.button == Mouse::WheelDown) return _move(3);
+            if (mouse.button == Mouse::Left
+                && mouse.motion == Mouse::Pressed) {
+                for (std::size_t i = 0; i < boxes_.size(); ++i) {
+                    if (boxes_[i].Contain(mouse.x, mouse.y)) {
+                        selected_ = static_cast<int>(i);
+                        _activate(true);
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+        if (event == Event::ArrowUp) return _move(-1);
+        if (event == Event::ArrowDown) return _move(1);
+        if (event == Event::PageUp) return _move(-10);
+        if (event == Event::PageDown) return _move(10);
+        if (event == Event::Home) {
+            selected_ = 0;
+            return true;
+        }
+        if (event == Event::End) {
+            selected_ = std::max(0, static_cast<int>(visible_.size()) - 1);
+            return true;
+        }
+        if (event == Event::Character("[")) return _jump_file(-1);
+        if (event == Event::Character("]")) return _jump_file(1);
+        if (event == Event::Return || event == Event::Character(" ")) {
+            return _activate(false);
+        }
+        if (event == Event::Character("c")) return _open_editor();
+        if (event == Event::Character("e")) return _edit_comment();
+        if (event == Event::Character("d")) return _delete_comment();
+        return false;
+    }
+
+private:
+    struct VisibleRow {
+        enum class Kind { FILE, HUNK, LINE, COMMENT };
+        Kind kind = Kind::HUNK;
+        std::size_t file_index = 0;
+        std::optional<ReviewLineAnchor> anchor;
+        std::optional<std::size_t> comment_id;
+        std::string path;
+        int display_y = 0;
+    };
+
+    void _push(Elements& rows, Element row, VisibleRow visible, bool selected)
+    {
+        if (selected) {
+            row = std::move(row) | bgcolor(PANEL_COLOR_FOCUS);
+        }
+        boxes_.push_back(Box { });
+        rows.push_back(std::move(row) | xflex | reflect(boxes_.back()));
+        visible.display_y = rendered_y_++;
+        visible_.push_back(std::move(visible));
+    }
+
+    void _push_file(Elements& rows, const ReviewState::Snapshot& snapshot,
+        const ReviewFile& file, std::size_t file_index)
+    {
+        Elements file_rows;
+        const std::string& path
+            = file.new_path.empty() ? file.old_path : file.new_path;
+        const bool collapsed = collapsed_.contains(path);
+        const std::size_t comments = std::ranges::count_if(snapshot.comments,
+            [&path](const ReviewComment& comment) {
+                return comment.anchor.file == path;
+            });
+        Elements header_parts {
+            text(collapsed ? "› " : "⌄ ") | color(PANEL_FG_DIM),
+            text(path) | bold | color(PANEL_FG), filler(),
+            text("+" + std::to_string(file.additions))
+                | color(Color::GreenLight),
+            text(" "),
+            text("−" + std::to_string(file.deletions))
+                | color(Color::RedLight),
+        };
+        if (comments > 0) {
+            header_parts.push_back(
+                text(std::format("  💬 {}", comments)) | color(PANEL_FG_DIM));
+        }
+        Element header = hbox(std::move(header_parts));
+        _push(file_rows, std::move(header),
+            VisibleRow { VisibleRow::Kind::FILE, file_index, std::nullopt,
+                std::nullopt, path, 0 },
+            selected_ == static_cast<int>(visible_.size()));
+        if (!collapsed && file.kind == ReviewFile::Kind::BINARY) {
+            _push(file_rows,
+                text("  Binary file changed") | color(PANEL_FG_DIM),
+                VisibleRow { VisibleRow::Kind::HUNK, file_index, std::nullopt,
+                    std::nullopt, { }, 0 },
+                selected_ == static_cast<int>(visible_.size()));
+        } else if (!collapsed) {
+            const LayoutCtx ctx = layout_();
+            const int review_width = ctx.kind == LayoutCtx::Kind::WIDE
+                ? ctx.width - LayoutCtx::panel_width - 4
+                : ctx.width;
+            const bool side_by_side = review_width >= 100;
+            const int side_width = std::max(20, (review_width - 3) / 2);
+            for (const ReviewHunk& hunk : file.hunks) {
+                _push(file_rows,
+                    hbox({ text("  "),
+                        text(hunk_label(hunk)) | bold | color(PANEL_FG_DIM),
+                        filler() }),
+                    VisibleRow { VisibleRow::Kind::HUNK, file_index,
+                        std::nullopt, std::nullopt, { }, 0 },
+                    selected_ == static_cast<int>(visible_.size()));
+                if (side_by_side) {
+                    _push_side_by_side_hunk(
+                        file_rows, snapshot, file_index, path, hunk,
+                        side_width);
+                } else {
+                    for (const ReviewLine& line : hunk.lines) {
+                        _push_unified_line(
+                            file_rows, snapshot, file_index, path, line);
+                    }
+                }
+            }
+        }
+        rows.push_back(panel(vbox(std::move(file_rows))));
+    }
+
+    static ReviewLineAnchor _anchor(
+        const std::string& path, const ReviewLine& line)
+    {
+        return { path, line.old_line, line.new_line, line.content };
+    }
+
+    void _push_comments(Elements& rows,
+        const ReviewState::Snapshot& snapshot, std::size_t file_index,
+        const std::string& path, const ReviewLineAnchor& anchor)
+    {
+        for (const ReviewComment& comment : snapshot.comments) {
+            if (comment.anchor != anchor) continue;
+            Element comment_row = hbox({ text("             ● ")
+                                             | color(Color::CyanLight),
+                text(comment.body) | color(PANEL_FG) });
+            _push(rows, std::move(comment_row),
+                VisibleRow { VisibleRow::Kind::COMMENT, file_index, anchor,
+                    comment.id, path, 0 },
+                selected_ == static_cast<int>(visible_.size()));
+        }
+    }
+
+    void _push_editor(Elements& rows, const ReviewLineAnchor& anchor)
+    {
+        if (!editor_anchor_ || *editor_anchor_ != anchor) return;
+        rows.push_back(vbox({
+            separatorEmpty(),
+            hbox({ text("               "), comment_input_->Render() | xflex,
+                text(" ") }),
+            separatorEmpty(),
+        }));
+        rendered_y_ += 3;
+    }
+
+    void _push_unified_line(Elements& rows,
+        const ReviewState::Snapshot& snapshot,
+        std::size_t file_index, const std::string& path,
+        const ReviewLine& line)
+    {
+        const auto number = [](const std::optional<std::size_t>& value) {
+            return value ? std::format("{:>5}", *value) : std::string(5, ' ');
+        };
+        std::string marker = " ";
+        std::optional<Color> background;
+        if (line.kind == ReviewLine::Kind::ADDITION) {
+            marker = "+";
+            background = DIFF_ADDITION_BG;
+        } else if (line.kind == ReviewLine::Kind::DELETION) {
+            marker = "−";
+            background = DIFF_DELETION_BG;
+        }
+        const ReviewLineAnchor anchor = _anchor(path, line);
+        Element row = hbox({
+            text(number(line.old_line)) | color(PANEL_FG_DIM), text(" "),
+            text(number(line.new_line)) | color(PANEL_FG_DIM), text(" "),
+            text(marker + " " + line.content)
+                | color(line.kind == ReviewLine::Kind::META ? PANEL_FG_DIM
+                                                            : PANEL_FG),
+        });
+        if (background) row = std::move(row) | bgcolor(*background);
+        _push(rows, std::move(row),
+            VisibleRow { VisibleRow::Kind::LINE, file_index, anchor,
+                std::nullopt, path, 0 },
+            selected_ == static_cast<int>(visible_.size()));
+        _push_comments(rows, snapshot, file_index, path, anchor);
+        _push_editor(rows, anchor);
+    }
+
+    Element _side_line(
+        const ReviewLine* line, bool old_side, int side_width)
+    {
+        const std::optional<std::size_t> number
+            = line == nullptr ? std::nullopt
+                              : old_side ? line->old_line : line->new_line;
+        const std::string number_text
+            = number ? std::format("{:>5}", *number) : std::string(5, ' ');
+        if (line == nullptr) {
+            return hbox({ text(number_text), text("  "), filler() })
+                | size(WIDTH, EQUAL, side_width);
+        }
+        std::string marker = " ";
+        std::optional<Color> background;
+        if (line->kind == ReviewLine::Kind::DELETION) {
+            marker = "−";
+            background = DIFF_DELETION_BG;
+        } else if (line->kind == ReviewLine::Kind::ADDITION) {
+            marker = "+";
+            background = DIFF_ADDITION_BG;
+        }
+        Element side = hbox({
+            text(number_text) | color(PANEL_FG_DIM), text(" "),
+            text(marker + " " + line->content) | color(PANEL_FG) | xflex,
+        }) | size(WIDTH, EQUAL, side_width);
+        if (background) side = std::move(side) | bgcolor(*background);
+        return side;
+    }
+
+    void _push_side_by_side_pair(Elements& rows,
+        const ReviewState::Snapshot& snapshot, std::size_t file_index,
+        const std::string& path, const ReviewLine* old_line,
+        const ReviewLine* new_line, int side_width)
+    {
+        const ReviewLine* target = new_line != nullptr ? new_line : old_line;
+        if (target == nullptr) return;
+        const ReviewLineAnchor anchor = _anchor(path, *target);
+        Element row = hbox({
+            _side_line(old_line, true, side_width),
+            text(" │ ") | color(PANEL_BORDER),
+            _side_line(new_line, false, side_width),
+        });
+        _push(rows, std::move(row),
+            VisibleRow { VisibleRow::Kind::LINE, file_index, anchor,
+                std::nullopt, path, 0 },
+            selected_ == static_cast<int>(visible_.size()));
+        if (old_line != nullptr && old_line != target) {
+            _push_comments(
+                rows, snapshot, file_index, path, _anchor(path, *old_line));
+            _push_editor(rows, _anchor(path, *old_line));
+        }
+        _push_comments(rows, snapshot, file_index, path, anchor);
+        _push_editor(rows, anchor);
+    }
+
+    void _push_side_by_side_hunk(Elements& rows,
+        const ReviewState::Snapshot& snapshot, std::size_t file_index,
+        const std::string& path, const ReviewHunk& hunk, int side_width)
+    {
+        std::size_t index = 0;
+        while (index < hunk.lines.size()) {
+            const ReviewLine& line = hunk.lines[index];
+            if (line.kind == ReviewLine::Kind::DELETION) {
+                const std::size_t removed_begin = index;
+                while (index < hunk.lines.size()
+                    && hunk.lines[index].kind
+                        == ReviewLine::Kind::DELETION) {
+                    ++index;
+                }
+                const std::size_t added_begin = index;
+                while (index < hunk.lines.size()
+                    && hunk.lines[index].kind
+                        == ReviewLine::Kind::ADDITION) {
+                    ++index;
+                }
+                const std::size_t removed_count = added_begin - removed_begin;
+                const std::size_t added_count = index - added_begin;
+                const std::size_t pair_count
+                    = std::max(removed_count, added_count);
+                for (std::size_t offset = 0; offset < pair_count; ++offset) {
+                    const ReviewLine* old_line = offset < removed_count
+                        ? &hunk.lines[removed_begin + offset]
+                        : nullptr;
+                    const ReviewLine* new_line = offset < added_count
+                        ? &hunk.lines[added_begin + offset]
+                        : nullptr;
+                    _push_side_by_side_pair(rows, snapshot, file_index, path,
+                        old_line, new_line, side_width);
+                }
+                continue;
+            }
+            if (line.kind == ReviewLine::Kind::ADDITION) {
+                _push_side_by_side_pair(
+                    rows, snapshot, file_index, path, nullptr, &line,
+                    side_width);
+            } else if (line.kind == ReviewLine::Kind::CONTEXT) {
+                _push_side_by_side_pair(
+                    rows, snapshot, file_index, path, &line, &line,
+                    side_width);
+            } else {
+                _push_unified_line(
+                    rows, snapshot, file_index, path, line);
+            }
+            ++index;
+        }
+    }
+
+    bool _move(int delta)
+    {
+        if (visible_.empty()) return false;
+        selected_ = std::clamp(selected_ + delta, 0,
+            static_cast<int>(visible_.size()) - 1);
+        selected_comment_ = visible_[selected_].comment_id;
+        return true;
+    }
+
+    bool _activate(bool mouse)
+    {
+        if (visible_.empty()) return false;
+        VisibleRow& row = visible_[selected_];
+        selected_comment_ = row.comment_id;
+        if (row.kind == VisibleRow::Kind::FILE) {
+            if (collapsed_.contains(row.path)) collapsed_.erase(row.path);
+            else collapsed_.insert(row.path);
+            animation::RequestAnimationFrame();
+            return true;
+        }
+        if (mouse && row.kind == VisibleRow::Kind::LINE) {
+            return _open_editor();
+        }
+        return row.kind == VisibleRow::Kind::COMMENT;
+    }
+
+    bool _open_editor()
+    {
+        if (visible_.empty()) return false;
+        const VisibleRow& row = visible_[selected_];
+        if (row.kind != VisibleRow::Kind::LINE || !row.anchor) return false;
+        editor_anchor_ = row.anchor;
+        editing_comment_.reset();
+        draft_.clear();
+        draft_cursor_ = 0;
+        comment_input_->TakeFocus();
+        return true;
+    }
+
+    bool _edit_comment()
+    {
+        if (!selected_comment_) return false;
+        const auto snapshot = state_->review->snapshot();
+        const auto it = std::ranges::find(snapshot.comments,
+            *selected_comment_, &ReviewComment::id);
+        if (it == snapshot.comments.end()) return false;
+        editor_anchor_ = it->anchor;
+        editing_comment_ = it->id;
+        draft_ = it->body;
+        draft_cursor_ = static_cast<int>(draft_.size());
+        comment_input_->TakeFocus();
+        return true;
+    }
+
+    bool _delete_comment()
+    {
+        if (!selected_comment_) return false;
+        state_->review->delete_comment(*selected_comment_);
+        selected_comment_.reset();
+        return true;
+    }
+
+    void _save_editor()
+    {
+        if (!editor_anchor_ || draft_.empty()) return;
+        if (editing_comment_) {
+            state_->review->update_comment(*editing_comment_, draft_);
+        } else {
+            state_->review->add_comment(*editor_anchor_, draft_);
+        }
+        _close_editor();
+    }
+
+    void _close_editor()
+    {
+        editor_anchor_.reset();
+        editing_comment_.reset();
+        draft_.clear();
+        draft_cursor_ = 0;
+    }
+
+    bool _jump_file(int direction)
+    {
+        if (visible_.empty()) return false;
+        const std::size_t current = visible_[selected_].file_index;
+        if (direction > 0) {
+            for (std::size_t i = selected_ + 1; i < visible_.size(); ++i) {
+                if (visible_[i].kind == VisibleRow::Kind::FILE
+                    && visible_[i].file_index > current) {
+                    selected_ = static_cast<int>(i);
+                    return true;
+                }
+            }
+        } else {
+            for (int i = selected_ - 1; i >= 0; --i) {
+                if (visible_[i].kind == VisibleRow::Kind::FILE
+                    && visible_[i].file_index < current) {
+                    selected_ = i;
+                    return true;
+                }
+            }
+        }
+        return true;
+    }
+
+    void _consume_jump(const ReviewState::Snapshot& snapshot)
+    {
+        if (!snapshot.jump_comment) return;
+        const auto comment = std::ranges::find(snapshot.comments,
+            *snapshot.jump_comment, &ReviewComment::id);
+        if (comment == snapshot.comments.end()) {
+            state_->review->clear_jump();
+            return;
+        }
+        collapsed_.erase(comment->anchor.file);
+        pending_jump_ = comment->id;
+        state_->review->clear_jump();
+    }
+
+    void _reload()
+    {
+        const auto workspace = state_->environment->workspace();
+        if (!workspace || !workspace->project_root) return;
+        const std::filesystem::path root = *workspace->project_root;
+        state_->review->set_loading();
+        const std::uint64_t generation
+            = load_generation_->fetch_add(1) + 1;
+        std::thread([review = state_->review, root,
+                        load_generation = load_generation_, generation] {
+            ReviewLoadResult result = load_repository_review(root);
+            if (load_generation->load() == generation) {
+                review->set_result(std::move(result));
+                animation::RequestAnimationFrame();
+            }
+        }).detach();
+    }
+
+    std::shared_ptr<ApplicationState> state_;
+    LayoutFn layout_;
+    Component comment_input_;
+    std::string draft_;
+    int draft_cursor_ = 0;
+    std::optional<ReviewLineAnchor> editor_anchor_;
+    std::optional<std::size_t> editing_comment_;
+    std::optional<std::size_t> selected_comment_;
+    std::optional<std::size_t> pending_jump_;
+    std::set<std::string> collapsed_;
+    std::vector<VisibleRow> visible_;
+    std::deque<Box> boxes_;
+    int selected_ = 0;
+    int rendered_y_ = 0;
+    std::shared_ptr<std::atomic<std::uint64_t>> load_generation_
+        = std::make_shared<std::atomic<std::uint64_t>>(0);
+    Signal<>::Subscription repository_subscription_;
+    Signal<>::Subscription workspace_subscription_;
+    Signal<>::Subscription review_subscription_;
+};
+
+}
+
+Component make_review(std::shared_ptr<ApplicationState> state,
+    Controller&, LayoutFn layout)
+{
+    return ftxui::Make<Review>(std::move(state), std::move(layout));
+}
+
+}
