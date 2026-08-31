@@ -91,16 +91,10 @@ void SubagentManager::stop()
     }
 }
 
-std::vector<SubagentTask> SubagentManager::tasks(bool visible_only) const
+std::vector<SubagentTask> SubagentManager::tasks() const
 {
     std::lock_guard lock(mutex_);
-    if (!visible_only) {
-        return tasks_;
-    }
-    std::vector<SubagentTask> visible;
-    std::copy_if(tasks_.begin(), tasks_.end(), std::back_inserter(visible),
-        [](const SubagentTask& task) { return task.visible; });
-    return visible;
+    return tasks_;
 }
 
 std::size_t SubagentManager::running_count(bool visible_only) const

@@ -63,13 +63,6 @@ public:
         std::function<void()> on_exit, StreamFn stream_fn = { },
         std::vector<Tool> tools = { }, ModalRequestFn modal_request = { },
         std::string agent_label = { });
-    Controller(std::shared_ptr<Session> session, const Config& cfg, PostFn post,
-        std::function<void()> on_exit, StreamFn stream_fn = { },
-        std::vector<Tool> tools = { }, ModelsFn models_fn = { });
-    Controller(std::shared_ptr<Session> session,
-        std::shared_ptr<ProviderStore> providers, PostFn post,
-        std::function<void()> on_exit, StreamFn stream_fn = { },
-        std::vector<Tool> tools = { });
     ~Controller();
 
     Controller(const Controller&)            = delete;

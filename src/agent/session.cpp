@@ -185,30 +185,6 @@ double Session::total_cost() const
     return total_cost_;
 }
 
-double Session::last_cost() const
-{
-    std::lock_guard lock(mutex_);
-    return last_cost_;
-}
-
-std::optional<std::chrono::milliseconds> Session::reasoning_elapsed() const
-{
-    std::lock_guard lock(mutex_);
-    if (!reasoning_start_) return std::nullopt;
-    return std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - *reasoning_start_);
-}
-
-std::optional<std::chrono::milliseconds> Session::tool_elapsed(
-    std::size_t id) const
-{
-    std::lock_guard lock(mutex_);
-    const auto started = tool_started_.find(id);
-    if (started == tool_started_.end()) return std::nullopt;
-    return std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - started->second);
-}
-
 std::optional<std::chrono::milliseconds> Session::turn_elapsed() const
 {
     std::lock_guard lock(mutex_);
@@ -260,12 +236,10 @@ void Session::restore(SessionSnapshot snapshot)
         retry_countdown_.reset();
         reasoning_start_.reset();
         turn_started_.reset();
-        tool_started_.clear();
         phase_                    = Phase::IDLE;
         totals_                   = { };
         last_                     = { };
         total_cost_               = 0.0;
-        last_cost_                = 0.0;
         title_generation_claimed_ = !title_.empty();
         interrupt_requested_.store(false);
         next_tool_id_       = 1;
@@ -474,7 +448,6 @@ void Session::append_tool(const ToolCallRequest& req)
         finalize_reasoning(*a);
     }
     const std::size_t id = next_tool_id_++;
-    tool_started_[id]    = std::chrono::steady_clock::now();
     items_.push_back(
         ToolCall { id, req.id, req.name, req.args, { },
             { }, std::nullopt });
@@ -528,7 +501,6 @@ void Session::fill_tool_result(
             : tc->name == req.name && tc->args == req.args;
         if (matched) {
             tc->result = std::move(result);
-            tool_started_.erase(tc->id);
             return;
         }
     }
@@ -785,8 +757,7 @@ void Session::update_usage(
     totals_.prompt += usage_event.usage.prompt;
     totals_.completion += usage_event.usage.completion;
     totals_.total += usage_event.usage.total;
-    last_cost_ = compute_cost(usage_event.usage, pricing);
-    total_cost_ += last_cost_;
+    total_cost_ += compute_cost(usage_event.usage, pricing);
 }
 
 Signal<>::Subscription Session::subscribe_to_title_change(

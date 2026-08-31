@@ -89,9 +89,6 @@ ftxui::Element render_changed_files(
 ftxui::Element render_context_box(const std::optional<std::string>& rules,
     const std::vector<std::string>& attachments, SkillCounts project_skills,
     SkillCounts global_skills);
-ftxui::Element render_context_box(const std::optional<std::string>& rules,
-    const std::vector<std::string>& attachments, int project_skills,
-    int global_skills);
 int run_repl(const Config& cfg);
 void print_session_saved_box();
 

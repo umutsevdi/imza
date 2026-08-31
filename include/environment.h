@@ -119,8 +119,6 @@ public:
     bool ready() const { return ready_.load(); }
 
     std::optional<std::string> agent_rules_path() const;
-    std::size_t project_skills() const;
-    std::size_t global_skills() const;
     std::vector<Skill> skills() const;
 
     bool chdir(const std::filesystem::path& dir);

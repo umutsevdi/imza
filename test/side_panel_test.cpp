@@ -128,7 +128,7 @@ TEST_CASE("render_changed_files renders colored symbols and readable paths")
 TEST_CASE("render_context_box lists attachment basenames under files")
 {
     const std::string out = to_text(ursa::render_context_box(
-        "AGENTS.md", { "main.cpp", "design.md" }, 0, 0));
+        "AGENTS.md", { "main.cpp", "design.md" }, { }, { }));
 
     CHECK(out.find("Files") != std::string::npos);
     CHECK(out.find("AGENTS.md") != std::string::npos);

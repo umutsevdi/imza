@@ -335,13 +335,4 @@ Route resolve_route(const Connection& conn, const Catalog& catalog,
     return route;
 }
 
-CachedProvider local_provider()
-{
-    CachedProvider provider;
-    provider.name = "Local";
-    provider.api  = "http://localhost:11434/v1";
-    provider.npm  = "@ai-sdk/openai-compatible";
-    return provider;
-}
-
 } // namespace ursa

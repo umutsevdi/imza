@@ -377,16 +377,5 @@ Element render_context_box(const std::optional<std::string>& rules,
     return vbox();
 }
 
-Element render_context_box(const std::optional<std::string>& rules,
-    const std::vector<std::string>& attachments, int project_skills,
-    int global_skills)
-{
-    return render_context_box(rules, attachments,
-        SkillCounts { static_cast<std::size_t>(project_skills),
-            static_cast<std::size_t>(project_skills) },
-        SkillCounts { static_cast<std::size_t>(global_skills),
-            static_cast<std::size_t>(global_skills) });
-}
-
 } // namespace ursa
 //

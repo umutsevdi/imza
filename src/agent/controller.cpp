@@ -29,36 +29,9 @@ std::string error_text(Status st)
     case Status::BUDGET_EXCEEDED: return "Out of budget / insufficient credits.";
     case Status::CANCELLED: return "Cancelled.";
     case Status::TIMEOUT: return "Timed out.";
-    case Status::UNSUPPORTED: return "Unsupported operation.";
     case Status::CONFIG_ERROR: return "Configuration error.";
     }
     return "Unknown error.";
-}
-
-Controller::Controller(std::shared_ptr<Session> session, const Config& cfg,
-    PostFn post, std::function<void()> on_exit, StreamFn stream_fn,
-    std::vector<Tool> tools, ModelsFn models_fn)
-    : Controller(std::make_shared<ApplicationState>(ApplicationState {
-          std::move(session),
-          std::make_shared<ProviderStore>(cfg, std::move(models_fn)),
-          std::make_shared<SubagentManager>(), get_environment(),
-          std::make_shared<ReviewState>() }),
-          std::move(post), std::move(on_exit), std::move(stream_fn),
-          std::move(tools))
-{
-}
-
-Controller::Controller(std::shared_ptr<Session> session,
-    std::shared_ptr<ProviderStore> providers, PostFn post,
-    std::function<void()> on_exit, StreamFn stream_fn,
-    std::vector<Tool> tools)
-    : Controller(std::make_shared<ApplicationState>(ApplicationState {
-          std::move(session), std::move(providers),
-          std::make_shared<SubagentManager>(), get_environment(),
-          std::make_shared<ReviewState>() }),
-          std::move(post), std::move(on_exit), std::move(stream_fn),
-          std::move(tools))
-{
 }
 
 Controller::Controller(std::shared_ptr<ApplicationState> state, PostFn post,

@@ -16,6 +16,8 @@
 namespace ursa {
 using namespace ftxui;
 
+namespace {
+
 class StatusLine : public ComponentBase {
 public:
     StatusLine(std::shared_ptr<ApplicationState> state, LayoutFn layout,
@@ -202,6 +204,8 @@ private:
         return o.str();
     }
 };
+
+} // namespace
 
 ftxui::Component make_status_line(std::shared_ptr<ApplicationState> state,
     LayoutFn layout, WorkflowFn workflow)

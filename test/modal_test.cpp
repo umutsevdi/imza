@@ -5,6 +5,7 @@
 #include <ftxui/screen/screen.hpp>
 
 #include "format.h"
+#include "review.h"
 #include "tools.h"
 #include "ui.h"
 #include "util.h"
@@ -67,6 +68,17 @@ private:
     std::deque<std::function<void()>> queue_;
 };
 
+ursa::Config test_config()
+{
+    ursa::Config cfg;
+    ursa::Connection conn;
+    conn.id          = "test";
+    conn.provider_id = "test";
+    cfg.providers.push_back(conn);
+    cfg.last_used = ursa::LastUsed { "test", "m" };
+    return cfg;
+}
+
 struct Env {
     PostPump pump;
     std::vector<ursa::ChatRequest> requests;
@@ -74,15 +86,14 @@ struct Env {
     ursa::StreamFn stream;
     std::shared_ptr<ursa::Session> session
         = std::make_shared<ursa::Session>();
-    ursa::Controller controller { session, [] {
-        ursa::Config cfg;
-        ursa::Connection conn;
-        conn.id          = "test";
-        conn.provider_id = "test";
-        cfg.providers.push_back(conn);
-        cfg.last_used = ursa::LastUsed { "test", "m" };
-        return cfg;
-    }(), pump.fn(), [] { },
+    ursa::Controller controller {
+        std::make_shared<ursa::ApplicationState>(ursa::ApplicationState {
+            session,
+            std::make_shared<ursa::ProviderStore>(test_config()),
+            std::make_shared<ursa::SubagentManager>(),
+            ursa::get_environment(),
+            std::make_shared<ursa::ReviewState>() }),
+        pump.fn(), [] { },
         [this](const ursa::ChatRequest& req, const ursa::StreamCallback& cb) {
             return stream(req, cb);
         },

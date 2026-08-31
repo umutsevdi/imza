@@ -11,6 +11,7 @@
 
 #include "catalog.h"
 #include "controller.h"
+#include "review.h"
 #include "types.h"
 
 namespace {
@@ -101,6 +102,17 @@ struct PostPump {
     }
 };
 
+ursa::Controller make_controller(std::shared_ptr<ursa::Session> session,
+    std::shared_ptr<ursa::ProviderStore> providers, ursa::PostFn post)
+{
+    return ursa::Controller(
+        std::make_shared<ursa::ApplicationState>(ursa::ApplicationState {
+            std::move(session), std::move(providers),
+            std::make_shared<ursa::SubagentManager>(), ursa::get_environment(),
+            std::make_shared<ursa::ReviewState>() }),
+        std::move(post), [] { });
+}
+
 ursa::ModelsFn fake_models_ok()
 {
     return [](const ursa::Route&, std::vector<ursa::ModelInfo>& out) {
@@ -125,8 +137,7 @@ TEST_CASE("connect commits a connection and lands models in the catalog")
     auto providers = std::make_shared<ursa::ProviderStore>(
         ursa::Config { }, fake_models_ok());
     auto session = std::make_shared<ursa::Session>();
-    ursa::Controller controller { session, providers,
-        pump.fn(), [] { } };
+    auto controller = make_controller(session, providers, pump.fn());
     pump.drain();
 
     controller.resolve_modal(
@@ -160,8 +171,7 @@ TEST_CASE("connecting the same endpoint updates in place")
     auto providers = std::make_shared<ursa::ProviderStore>(
         ursa::Config { }, fake_models_ok());
     auto session = std::make_shared<ursa::Session>();
-    ursa::Controller controller { session, providers,
-        pump.fn(), [] { } };
+    auto controller = make_controller(session, providers, pump.fn());
     pump.drain();
 
     controller.resolve_modal(
@@ -193,8 +203,7 @@ TEST_CASE("test-only connect does not persist")
     auto providers = std::make_shared<ursa::ProviderStore>(
         ursa::Config { }, fake_models_ok());
     auto session = std::make_shared<ursa::Session>();
-    ursa::Controller controller { session, providers,
-        pump.fn(), [] { } };
+    auto controller = make_controller(session, providers, pump.fn());
     pump.drain();
 
     controller.resolve_modal(
@@ -218,8 +227,7 @@ TEST_CASE("failing test keeps the connection absent")
     auto providers = std::make_shared<ursa::ProviderStore>(
         ursa::Config { }, fake_models_fail());
     auto session = std::make_shared<ursa::Session>();
-    ursa::Controller controller { session, providers,
-        pump.fn(), [] { } };
+    auto controller = make_controller(session, providers, pump.fn());
     pump.drain();
 
     controller.resolve_modal(
@@ -245,8 +253,8 @@ TEST_CASE("model pick sets last_used and persists")
 
     auto providers
         = std::make_shared<ursa::ProviderStore>(cfg, fake_models_ok());
-    ursa::Controller controller { std::make_shared<ursa::Session>(), providers,
-        pump.fn(), [] { } };
+    auto controller = make_controller(
+        std::make_shared<ursa::Session>(), providers, pump.fn());
     pump.drain();
 
     controller.resolve_modal(
@@ -347,8 +355,8 @@ TEST_CASE("removing the active connection re-points last_used")
 
     auto providers
         = std::make_shared<ursa::ProviderStore>(cfg, fake_models_ok());
-    ursa::Controller controller { std::make_shared<ursa::Session>(), providers,
-        pump.fn(), [] { } };
+    auto controller = make_controller(
+        std::make_shared<ursa::Session>(), providers, pump.fn());
     pump.drain();
 
     CHECK(providers->remove_connection("a"));
@@ -372,8 +380,8 @@ TEST_CASE("removing the last connection is refused")
 
     auto providers
         = std::make_shared<ursa::ProviderStore>(cfg, fake_models_ok());
-    ursa::Controller controller { std::make_shared<ursa::Session>(), providers,
-        pump.fn(), [] { } };
+    auto controller = make_controller(
+        std::make_shared<ursa::Session>(), providers, pump.fn());
 
     CHECK_FALSE(providers->remove_connection("a"));
     CHECK(providers->connections().size() == 1);
@@ -386,8 +394,7 @@ TEST_CASE("send guard blocks messages without an active model")
     auto providers = std::make_shared<ursa::ProviderStore>(
         ursa::Config { }, fake_models_ok());
     auto session = std::make_shared<ursa::Session>();
-    ursa::Controller controller { session, providers,
-        pump.fn(), [] { } };
+    auto controller = make_controller(session, providers, pump.fn());
     pump.drain();
 
     controller.submit("hello");

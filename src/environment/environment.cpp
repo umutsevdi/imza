@@ -605,17 +605,6 @@ std::optional<std::string> Environment::agent_rules_path() const
     return ws->instruction->path;
 }
 
-std::size_t Environment::project_skills() const
-{
-    const auto ws = workspace();
-    return ws == nullptr ? 0 : ws->project_skills.size();
-}
-
-std::size_t Environment::global_skills() const
-{
-    return system_->global_skills.size();
-}
-
 std::vector<Skill> Environment::skills() const
 {
     std::vector<Skill> out;

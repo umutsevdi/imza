@@ -43,7 +43,6 @@ enum class Status {
     BUDGET_EXCEEDED,
     CANCELLED,
     TIMEOUT,
-    UNSUPPORTED,
     CONFIG_ERROR
 };
 

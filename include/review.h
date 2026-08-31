@@ -40,7 +40,6 @@ struct ReviewFile {
         RENAMED,
         COPIED,
         UNTRACKED,
-        CONFLICTED,
         BINARY,
     };
 

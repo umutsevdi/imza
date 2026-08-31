@@ -115,7 +115,9 @@ Element session_error_element(const Session& session)
     });
 }
 
+namespace {
 std::size_t digit_width(std::size_t n) { return std::to_string(n).size(); }
+}
 
 Element code_block(const std::string& code, const std::string& lang)
 {

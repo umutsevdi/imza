@@ -53,6 +53,5 @@ AuthType auth_from_npm(std::string_view npm);
 std::string catalog_base(const CachedProvider& provider);
 Route resolve_route(const Connection& conn, const Catalog& catalog,
     ApiStandard dialect);
-CachedProvider local_provider();
 
 } // namespace ursa

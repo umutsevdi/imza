@@ -65,7 +65,7 @@ public:
         std::shared_ptr<Session> session = { });
     bool cancel(std::size_t id);
     void stop();
-    std::vector<SubagentTask> tasks(bool visible_only = false) const;
+    std::vector<SubagentTask> tasks() const;
     std::size_t running_count(bool visible_only = true) const;
     [[nodiscard]] Signal<const SubagentEvent&>::Subscription subscribe(
         Signal<const SubagentEvent&>::Callback callback);
