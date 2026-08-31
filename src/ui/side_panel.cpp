@@ -39,10 +39,10 @@ public:
                   attachments_dirty_.store(true);
                   animation::RequestAnimationFrame();
               }))
-        , review_subscription_(state_->review
-                  ? state_->review->subscribe(
-                        [] { animation::RequestAnimationFrame(); })
-                  : Signal<>::Subscription { })
+        , review_subscription_(state_->review ? state_->review->subscribe([] {
+            animation::RequestAnimationFrame();
+        })
+                                              : Signal<>::Subscription { })
     {
     }
 
@@ -72,7 +72,8 @@ public:
             };
             _append_review_comments(parts);
             const auto [project, global] = controller_.skill_counts();
-            parts.push_back(render_context_box(env->agent_rules_path(), attachment_names_, project, global));
+            parts.push_back(render_context_box(
+                env->agent_rules_path(), attachment_names_, project, global));
         }
         Element body = vbox(std::move(parts));
         if (narrow) {
@@ -101,9 +102,11 @@ private:
     {
         comment_boxes_.clear();
         comment_ids_.clear();
-        if (workflow_() != WorkflowPhase::REVIEW || !state_->review) return;
-        const auto snapshot = state_->review->snapshot();
-        if (snapshot.comments.empty()) return;
+        if (workflow_() != WorkflowPhase::REVIEW || !state_->review)
+            return;
+        const auto snapshot = state_->review->comments_snapshot();
+        if (snapshot.comments.empty())
+            return;
         Elements rows;
         for (const ReviewComment& comment : snapshot.comments) {
             comment_boxes_.push_back(Box { });
@@ -114,19 +117,20 @@ private:
                 ? std::to_string(*comment.anchor.old_line)
                 : "?";
             std::filesystem::path path(comment.anchor.file);
-            rows.push_back(vbox({
-                text(path.filename().string() + ":" + line
+            rows.push_back(
+                vbox({
+                    text(path.filename().string() + ":" + line
                         + (comment.stale ? "  stale" : ""))
-                    | bold
-                    | color(PANEL_FG),
-                text(fit(comment.body, LayoutCtx::panel_width - 6))
-                    | color(PANEL_FG_DIM),
-            }) | xflex | reflect(comment_boxes_.back()));
+                        | bold | color(PANEL_FG),
+                    text(fit(comment.body, LayoutCtx::panel_width - 6))
+                        | color(PANEL_FG_DIM),
+                })
+                | xflex | reflect(comment_boxes_.back()));
         }
         parts.push_back(vbox({
-            section_title(std::format(
-                "Review comments · {}", snapshot.comments.size())),
-            vbox(std::move(rows)),
+            section_title(
+                std::format("Review comments · {}", snapshot.comments.size())),
+            vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER),
         }));
     }
 
@@ -145,9 +149,8 @@ private:
     std::vector<std::size_t> comment_ids_;
 };
 
-ftxui::Component make_side_panel(
-    std::shared_ptr<ApplicationState> state, Controller& controller,
-    LayoutFn layout, WorkflowFn workflow)
+ftxui::Component make_side_panel(std::shared_ptr<ApplicationState> state,
+    Controller& controller, LayoutFn layout, WorkflowFn workflow)
 {
     return ftxui::Make<SidePanel>(
         std::move(state), controller, std::move(layout), std::move(workflow));
@@ -259,13 +262,17 @@ Element render_context_box(const std::optional<std::string>& rules,
     if (project_skills.total > 0) {
         context_box.push_back(hbox({
             text("Project Skills") | bold | color(PANEL_FG) | xflex,
-            text(std::format("{}/{}", project_skills.active, project_skills.total)) | color(PANEL_FG) | dim,
+            text(std::format(
+                "{}/{}", project_skills.active, project_skills.total))
+                | color(PANEL_FG) | dim,
         }));
     }
     if (global_skills.total > 0) {
         context_box.push_back(hbox({
             text("Global Skills") | bold | color(PANEL_FG) | xflex,
-            text(std::format("{}/{}", global_skills.active, global_skills.total)) | color(PANEL_FG) | dim,
+            text(
+                std::format("{}/{}", global_skills.active, global_skills.total))
+                | color(PANEL_FG) | dim,
         }));
     }
     if (!context_box.empty()) {
@@ -281,8 +288,10 @@ Element render_context_box(const std::optional<std::string>& rules,
     int global_skills)
 {
     return render_context_box(rules, attachments,
-        SkillCounts { static_cast<std::size_t>(project_skills), static_cast<std::size_t>(project_skills) },
-        SkillCounts { static_cast<std::size_t>(global_skills), static_cast<std::size_t>(global_skills) });
+        SkillCounts { static_cast<std::size_t>(project_skills),
+            static_cast<std::size_t>(project_skills) },
+        SkillCounts { static_cast<std::size_t>(global_skills),
+            static_cast<std::size_t>(global_skills) });
 }
 
 } // namespace ursa

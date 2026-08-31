@@ -234,12 +234,14 @@ namespace {
                 scroll_top_ = std::clamp(scroll_top_, 0, max_scroll());
             }
             const std::uint64_t content_serial = st.content_serial();
-            if (cache_kind_ != ctx.kind || content_serial_ != content_serial
+            if (cache_kind_ != ctx.kind || cache_width_ != ctx.width
+                || content_serial_ != content_serial
                 || item_cache_.size() != st.items().size()) {
                 item_cache_.clear();
                 item_cache_.resize(st.items().size());
                 item_versions_.assign(st.items().size(), kInvalidVersion);
                 cache_kind_     = ctx.kind;
+                cache_width_    = ctx.width;
                 content_serial_ = content_serial;
             }
             std::size_t item_index = 0;
@@ -846,6 +848,7 @@ namespace {
         std::vector<Element> item_cache_;
         std::vector<std::size_t> item_versions_;
         LayoutCtx::Kind cache_kind_ = LayoutCtx::Kind::NARROW;
+        int cache_width_ = 0;
 
         Element tool_header_element(const ToolCall& tc)
         {
@@ -941,13 +944,37 @@ namespace {
         Element render_write_item(const ToolCall& tc)
         {
             Element body;
+            Element header = tool_header_element(tc);
             if (tc.result->diff.has_value()) {
-                body = diff_split(*tc.result->diff);
+                const DiffView& diff = *tc.result->diff;
+                std::size_t additions = 0;
+                std::size_t deletions = 0;
+                for (const DiffRow& row : diff.rows) {
+                    if (!row.left.empty()
+                        && (row.right.empty() || row.left != row.right)) {
+                        ++deletions;
+                    }
+                    if (!row.right.empty()
+                        && (row.left.empty() || row.left != row.right)) {
+                        ++additions;
+                    }
+                }
+                header = hbox({ std::move(header), filler(),
+                    text("+" + std::to_string(additions))
+                        | color(Color::GreenLight),
+                    text(" "),
+                    text("−" + std::to_string(deletions))
+                        | color(Color::RedLight) });
+                const LayoutCtx ctx = layout_();
+                const int width = ctx.kind == LayoutCtx::Kind::WIDE
+                    ? ctx.width - LayoutCtx::panel_width - 4
+                    : ctx.width;
+                body = diff_split(diff, width);
             } else {
                 body = code_block(tc.result->text, tool_code_language(tc));
             }
             return vbox({
-                tool_header_element(tc),
+                std::move(header),
                 body,
                 separatorEmpty(),
             });

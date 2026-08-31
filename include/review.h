@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -80,14 +82,23 @@ public:
     enum class LoadStatus { IDLE, LOADING, LOADED, ERROR };
 
     struct Snapshot {
+        Snapshot();
+
         LoadStatus status = LoadStatus::IDLE;
-        RepositoryReview review;
+        std::shared_ptr<const RepositoryReview> review;
         std::vector<ReviewComment> comments;
         std::string error;
         std::optional<std::size_t> jump_comment;
+        std::uint64_t generation = 0;
+    };
+
+    struct CommentsSnapshot {
+        std::vector<ReviewComment> comments;
+        std::uint64_t generation = 0;
     };
 
     Snapshot snapshot() const;
+    CommentsSnapshot comments_snapshot() const;
     void set_loading();
     void set_result(ReviewLoadResult result);
     std::size_t add_comment(ReviewLineAnchor anchor, std::string body);

@@ -1,6 +1,7 @@
 #include <string>
 
 #include <doctest/doctest.h>
+#include <ftxui/component/component.hpp>
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/screen.hpp>
 
@@ -98,7 +99,23 @@ TEST_CASE("render_markdown_element empty input")
     CHECK(!out.empty());
 }
 
-TEST_CASE("diff_split right aligns line number gutters")
+TEST_CASE("multiline field underlines only its last row")
+{
+    std::string content = "first\nsecond";
+    int cursor = static_cast<int>(content.size());
+    const auto input = ftxui::Input(
+        &content, ursa::multiline_field_option(&content, &cursor, "Comment"));
+    auto screen = ftxui::Screen::Create(
+        ftxui::Dimension::Fixed(20), ftxui::Dimension::Fixed(2));
+    ftxui::Render(screen,
+        input->Render() | ftxui::size(ftxui::WIDTH, ftxui::EQUAL, 20));
+    CHECK_FALSE(screen.PixelAt(0, 0).underlined);
+    CHECK(screen.PixelAt(0, 1).underlined);
+    CHECK(screen.PixelAt(0, 0).foreground_color == ursa::PANEL_FG);
+    CHECK(screen.PixelAt(0, 1).foreground_color == ursa::PANEL_FG);
+}
+
+TEST_CASE("diff_split renders review-style side-by-side changes")
 {
     ursa::DiffView diff { "file.cpp",
         {
@@ -106,7 +123,19 @@ TEST_CASE("diff_split right aligns line number gutters")
             { ursa::DiffRow::Kind::ADD, 10, 10, "before", "after" },
         } };
     const std::string out = without_ansi(to_text(ursa::diff_split(diff)));
-    CHECK(out.find(" 9 old") != std::string::npos);
-    CHECK(out.find("10 before") != std::string::npos);
-    CHECK(out.find("10 after") != std::string::npos);
+    CHECK(out.find(" 9 − old") != std::string::npos);
+    CHECK(out.find("10 − before") != std::string::npos);
+    CHECK(out.find("10 + after") != std::string::npos);
+}
+
+TEST_CASE("diff_split renders unified changes on narrow screens")
+{
+    ursa::DiffView diff { "file.cpp",
+        {
+            { ursa::DiffRow::Kind::ADD, 10, 10, "before", "after" },
+        } };
+    const std::string out
+        = without_ansi(to_text(ursa::diff_split(diff, 80)));
+    CHECK(out.find("10    − before") != std::string::npos);
+    CHECK(out.find("   10 + after") != std::string::npos);
 }

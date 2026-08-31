@@ -34,6 +34,8 @@ inline const ftxui::Color PANEL_FG          = ftxui::Color::RGB(228, 232, 240);
 inline const ftxui::Color PANEL_FG_DIM      = ftxui::Color::RGB(148, 156, 172);
 inline const ftxui::Color PANEL_BORDER      = ftxui::Color::RGB(78, 89, 110);
 inline const ftxui::Color PANEL_COLOR_FOCUS = ftxui::Color::RGB(44, 56, 84);
+inline const ftxui::Color DIFF_ADDITION_BG  = ftxui::Color::RGB(24, 67, 50);
+inline const ftxui::Color DIFF_DELETION_BG  = ftxui::Color::RGB(78, 39, 46);
 
 inline constexpr int MODAL_MAX_WIDTH = 100;
 
@@ -49,6 +51,8 @@ ftxui::Component space_activates(
 ftxui::InputOption field_option(std::string* content, int* cursor,
     std::string placeholder, std::function<void()> on_change = { },
     std::function<void()> on_enter = { });
+ftxui::InputOption multiline_field_option(std::string* content, int* cursor,
+    std::string placeholder, std::function<void()> on_change = { });
 ftxui::InputOption password_option(std::string* content, int* cursor,
     std::string placeholder, std::function<void()> on_change = { });
 ftxui::Component action_button(std::string label,
@@ -65,7 +69,7 @@ ftxui::Element code_block(
     const std::string& code, const std::string& lang = "");
 ftxui::Element code_block_with_lines(
     const std::string& code, const std::string& lang, std::size_t start_line);
-ftxui::Element diff_split(const DiffView& diff);
+ftxui::Element diff_split(const DiffView& diff, int available_width = 120);
 
 ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx);
 ftxui::Element render_todo(const TodoList& todo, const LayoutCtx& ctx);

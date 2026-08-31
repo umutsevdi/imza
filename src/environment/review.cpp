@@ -7,7 +7,6 @@
 #include <charconv>
 #include <chrono>
 #include <fstream>
-#include <sstream>
 
 namespace ursa {
 namespace {
@@ -95,29 +94,31 @@ void append_untracked(RepositoryReview& review,
         if (!input) {
             continue;
         }
-        std::string content { std::istreambuf_iterator<char>(input),
-            std::istreambuf_iterator<char>() };
         ReviewFile file;
         file.new_path = path;
         file.kind = ReviewFile::Kind::UNTRACKED;
-        if (content.find('\0') != std::string::npos) {
-            file.kind = ReviewFile::Kind::BINARY;
-            review.files.push_back(std::move(file));
-            continue;
-        }
         ReviewHunk hunk;
         hunk.header = "@@ -0,0 +1 @@";
         hunk.new_start = 1;
         std::size_t line_no = 1;
-        std::istringstream stream(content);
         std::string line;
-        while (std::getline(stream, line)) {
+        while (std::getline(input, line)) {
+            if (line.find('\0') != std::string::npos) {
+                file.kind = ReviewFile::Kind::BINARY;
+                file.additions = 0;
+                hunk.lines.clear();
+                break;
+            }
             if (!line.empty() && line.back() == '\r') {
                 line.pop_back();
             }
             hunk.lines.push_back(ReviewLine { ReviewLine::Kind::ADDITION,
                 std::nullopt, line_no++, std::move(line) });
             ++file.additions;
+        }
+        if (file.kind == ReviewFile::Kind::BINARY) {
+            review.files.push_back(std::move(file));
+            continue;
         }
         hunk.new_count = file.additions;
         file.hunks.push_back(std::move(hunk));
@@ -135,10 +136,17 @@ ReviewLoadResult parse_git_diff(std::string_view patch)
     std::size_t old_line = 0;
     std::size_t new_line = 0;
 
-    for (std::string line : split_lines(patch)) {
-        if (!line.empty() && line.back() == '\r') {
-            line.pop_back();
-        }
+    std::size_t line_start = 0;
+    while (line_start < patch.size()) {
+        const std::size_t line_end = patch.find('\n', line_start);
+        std::string_view line = patch.substr(line_start,
+            line_end == std::string_view::npos
+                ? patch.size() - line_start
+                : line_end - line_start);
+        line_start = line_end == std::string_view::npos
+            ? patch.size()
+            : line_end + 1;
+        if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
         if (line.starts_with("diff --git ")) {
             review.files.push_back(ReviewFile { });
             file = &review.files.back();
@@ -159,29 +167,29 @@ ReviewLoadResult parse_git_diff(std::string_view patch)
             file->kind = ReviewFile::Kind::DELETED;
         } else if (line.starts_with("rename from ")) {
             file->kind = ReviewFile::Kind::RENAMED;
-            file->old_path = line.substr(12);
+            file->old_path = std::string(line.substr(12));
         } else if (line.starts_with("rename to ")) {
-            file->new_path = line.substr(10);
+            file->new_path = std::string(line.substr(10));
         } else if (line.starts_with("copy from ")) {
             file->kind = ReviewFile::Kind::COPIED;
-            file->old_path = line.substr(10);
+            file->old_path = std::string(line.substr(10));
         } else if (line.starts_with("copy to ")) {
-            file->new_path = line.substr(8);
+            file->new_path = std::string(line.substr(8));
         } else if (line.starts_with("Binary files ")
             || line.starts_with("GIT binary patch")) {
             file->kind = ReviewFile::Kind::BINARY;
         } else if (line.starts_with("--- ")) {
-            const std::string path = line.substr(4);
+            const std::string path(line.substr(4));
             if (path != "/dev/null") {
                 file->old_path = strip_prefix(path);
             }
         } else if (line.starts_with("+++ ")) {
-            const std::string path = line.substr(4);
+            const std::string path(line.substr(4));
             if (path != "/dev/null") {
                 file->new_path = strip_prefix(path);
             }
         } else if (line.starts_with("@@ ")) {
-            file->hunks.push_back(ReviewHunk { line, { } });
+            file->hunks.push_back(ReviewHunk { std::string(line), { } });
             hunk = &file->hunks.back();
             if (!parse_hunk_header(line, *hunk)) {
                 return "invalid git patch: malformed hunk header";
@@ -191,18 +199,18 @@ ReviewLoadResult parse_git_diff(std::string_view patch)
         } else if (hunk != nullptr && !line.empty()) {
             if (line.front() == '+') {
                 hunk->lines.push_back(ReviewLine { ReviewLine::Kind::ADDITION,
-                    std::nullopt, new_line++, line.substr(1) });
+                    std::nullopt, new_line++, std::string(line.substr(1)) });
                 ++file->additions;
             } else if (line.front() == '-') {
                 hunk->lines.push_back(ReviewLine { ReviewLine::Kind::DELETION,
-                    old_line++, std::nullopt, line.substr(1) });
+                    old_line++, std::nullopt, std::string(line.substr(1)) });
                 ++file->deletions;
             } else if (line.front() == ' ') {
                 hunk->lines.push_back(ReviewLine { ReviewLine::Kind::CONTEXT,
-                    old_line++, new_line++, line.substr(1) });
+                    old_line++, new_line++, std::string(line.substr(1)) });
             } else if (line.front() == '\\') {
                 hunk->lines.push_back(ReviewLine { ReviewLine::Kind::META,
-                    std::nullopt, std::nullopt, line });
+                    std::nullopt, std::nullopt, std::string(line) });
             }
         }
     }
@@ -240,10 +248,21 @@ ReviewLoadResult load_repository_review(const std::filesystem::path& root)
     return parsed;
 }
 
+ReviewState::Snapshot::Snapshot()
+    : review(std::make_shared<const RepositoryReview>())
+{
+}
+
 ReviewState::Snapshot ReviewState::snapshot() const
 {
     std::lock_guard lock(mutex_);
     return state_;
+}
+
+ReviewState::CommentsSnapshot ReviewState::comments_snapshot() const
+{
+    std::lock_guard lock(mutex_);
+    return { state_.comments, state_.generation };
 }
 
 void ReviewState::set_loading()
@@ -252,6 +271,7 @@ void ReviewState::set_loading()
         std::lock_guard lock(mutex_);
         state_.status = LoadStatus::LOADING;
         state_.error.clear();
+        ++state_.generation;
     }
     _publish();
 }
@@ -261,10 +281,11 @@ void ReviewState::set_result(ReviewLoadResult result)
     {
         std::lock_guard lock(mutex_);
         if (auto* review = std::get_if<RepositoryReview>(&result)) {
-            state_.review = std::move(*review);
+            auto next = std::make_shared<const RepositoryReview>(
+                std::move(*review));
             for (ReviewComment& comment : state_.comments) {
                 comment.stale = true;
-                for (const ReviewFile& file : state_.review.files) {
+                for (const ReviewFile& file : next->files) {
                     const std::string& path = file.new_path.empty()
                         ? file.old_path
                         : file.new_path;
@@ -286,12 +307,14 @@ void ReviewState::set_result(ReviewLoadResult result)
                     if (!comment.stale) break;
                 }
             }
+            state_.review = std::move(next);
             state_.status = LoadStatus::LOADED;
             state_.error.clear();
         } else {
             state_.status = LoadStatus::ERROR;
             state_.error = std::move(std::get<std::string>(result));
         }
+        ++state_.generation;
     }
     _publish();
 }
@@ -305,6 +328,7 @@ std::size_t ReviewState::add_comment(
         id = next_comment_id_++;
         state_.comments.push_back(
             ReviewComment { id, std::move(anchor), std::move(body), false });
+        ++state_.generation;
     }
     _publish();
     return id;
@@ -318,6 +342,7 @@ void ReviewState::update_comment(std::size_t id, std::string body)
             &ReviewComment::id);
         if (it == state_.comments.end()) return;
         it->body = std::move(body);
+        ++state_.generation;
     }
     _publish();
 }
@@ -328,6 +353,7 @@ void ReviewState::delete_comment(std::size_t id)
         std::lock_guard lock(mutex_);
         std::erase_if(state_.comments,
             [id](const ReviewComment& comment) { return comment.id == id; });
+        ++state_.generation;
     }
     _publish();
 }
@@ -337,6 +363,7 @@ void ReviewState::request_jump(std::size_t id)
     {
         std::lock_guard lock(mutex_);
         state_.jump_comment = id;
+        ++state_.generation;
     }
     _publish();
 }

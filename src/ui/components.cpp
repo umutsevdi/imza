@@ -6,7 +6,10 @@
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
+#include <ftxui/dom/node.hpp>
+#include <ftxui/screen/screen.hpp>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -167,6 +170,25 @@ InputOption password_option(std::string* content, int* cursor,
     return io;
 }
 
+InputOption multiline_field_option(std::string* content, int* cursor,
+    std::string placeholder, std::function<void()> on_change)
+{
+    InputOption option = field_option(
+        content, cursor, std::move(placeholder), std::move(on_change));
+    option.multiline = true;
+    option.transform = [](InputState state) {
+        if (state.is_placeholder) {
+            state.element |= dim | color(PANEL_FG_DIM);
+        } else {
+            state.element |= color(PANEL_FG);
+        }
+        state.element
+            |= bgcolor(state.focused ? PANEL_COLOR_FOCUS : PANEL_COLOR);
+        return state.element;
+    };
+    return option;
+}
+
 Component action_button(std::string label, std::function<void()> on_click,
     const Color& color_bg, const Color& color_focussed)
 {
@@ -202,108 +224,103 @@ Element section_title(std::string_view title, Color fg)
     return text(std::string(title)) | bold | color(fg);
 }
 
-Element diff_split(const DiffView& diff)
+Element diff_split(const DiffView& diff, int available_width)
 {
-    const Color bg     = PANEL_COLOR;
-    const Color fg     = PANEL_FG;
-    const Color gutter = PANEL_FG_DIM;
-    const Color border = PANEL_BORDER;
-    const Color red    = Color::Red;
-    const Color addbg  = Color::Green;
-
-    const std::size_t cap = 60;
-    struct Pair {
-        std::string left;
-        std::string right;
-        bool skip = false;
+    std::size_t max_line = 1;
+    for (const DiffRow& row : diff.rows) {
+        if (row.left_no) max_line = std::max(max_line, *row.left_no);
+        if (row.right_no) max_line = std::max(max_line, *row.right_no);
+    }
+    const std::size_t number_width = digit_width(max_line);
+    const auto line_number = [number_width](
+                                 const std::optional<std::size_t>& value) {
+        const std::string number
+            = value ? std::to_string(*value) : std::string();
+        return text(std::string(number_width - number.size(), ' ') + number)
+            | color(PANEL_FG_DIM);
     };
-    std::vector<Pair> pairs;
-    std::size_t max_l = 0;
-    std::size_t max_r = 0;
-    for (const auto& r : diff.rows) {
-        Pair p;
-        const bool is_skip = !r.left.empty() && r.left == r.right
-            && r.left.find("unchanged line") != std::string::npos;
-        if (is_skip) {
-            p.skip = true;
-            p.left = "  " + r.left;
-        } else {
-            p.left  = r.left;
-            p.right = r.right;
-        }
-        max_l = std::max(max_l, p.left.size());
-        max_r = std::max(max_r, p.right.size());
-        pairs.push_back(std::move(p));
-    }
-    if (max_l > cap) {
-        max_l = cap;
-    }
-    if (max_r > cap) {
-        max_r = cap;
-    }
-
-    auto clip = [](std::string s, std::size_t w) {
-        if (s.size() > w) {
-            s = s.substr(0, w > 1 ? w - 1 : w);
-            if (w > 1) {
-                s += "…";
-            }
-        } else if (s.size() < w) {
-            s.append(w - s.size(), ' ');
-        }
-        return s;
+    const auto is_skip = [](const DiffRow& row) {
+        return !row.left.empty() && row.left == row.right
+            && row.left.find("unchanged line") != std::string::npos;
     };
-
-    std::size_t max_left_no  = 1;
-    std::size_t max_right_no = 1;
-    for (const auto& row : diff.rows) {
-        if (row.left_no) {
-            max_left_no = std::max(max_left_no, *row.left_no);
-        }
-        if (row.right_no) {
-            max_right_no = std::max(max_right_no, *row.right_no);
-        }
-    }
-    const std::size_t left_no_width  = digit_width(max_left_no);
-    const std::size_t right_no_width = digit_width(max_right_no);
-    const auto line_number = [&](const std::optional<std::size_t>& no,
-                                 std::size_t width) {
-        const std::string value = no ? std::to_string(*no) : std::string();
-        return text(std::string(width - value.size(), ' ') + value)
-            | color(gutter) | dim;
+    const auto left_changed = [](const DiffRow& row) {
+        return !row.left.empty()
+            && (row.right.empty() || row.left != row.right);
+    };
+    const auto right_changed = [](const DiffRow& row) {
+        return !row.right.empty()
+            && (row.left.empty() || row.left != row.right);
     };
 
     Elements rows;
-    for (std::size_t i = 0; i < diff.rows.size(); ++i) {
-        const auto& r = diff.rows[i];
-        const auto& p = pairs[i];
-        if (p.skip) {
-            rows.push_back(
-                hbox({ text(clip(p.left, max_l + 2)) | dim | color(gutter),
-                    filler() })
-                | bgcolor(bg));
+    if (available_width < 100) {
+        for (const DiffRow& row : diff.rows) {
+            if (is_skip(row)) {
+                rows.push_back(hbox({ text("  " + row.left)
+                                              | color(PANEL_FG_DIM),
+                    filler() }));
+                continue;
+            }
+            const auto append = [&](const std::optional<std::size_t>& old_no,
+                                    const std::optional<std::size_t>& new_no,
+                                    std::string marker,
+                                    const std::string& content,
+                                    std::optional<Color> background) {
+                Element line = hbox({ line_number(old_no), text(" "),
+                    line_number(new_no), text(" "),
+                    text(std::move(marker) + " " + content)
+                        | color(PANEL_FG),
+                    filler() });
+                if (background) {
+                    line = std::move(line) | bgcolor(*background);
+                }
+                rows.push_back(std::move(line));
+            };
+            if (left_changed(row)) {
+                append(row.left_no, std::nullopt, "−", row.left,
+                    DIFF_DELETION_BG);
+            }
+            if (right_changed(row)) {
+                append(std::nullopt, row.right_no, "+", row.right,
+                    DIFF_ADDITION_BG);
+            }
+            if (!left_changed(row) && !right_changed(row)) {
+                append(row.left_no, row.right_no, " ", row.right,
+                    std::nullopt);
+            }
+        }
+        return panel(vbox(std::move(rows))) | xflex;
+    }
+
+    const int side_width = std::max(20, (available_width - 3) / 2);
+    const auto side = [&](const std::optional<std::size_t>& number,
+                          std::string marker, const std::string& content,
+                          std::optional<Color> background) {
+        Element line = hbox({ line_number(number), text(" "),
+            text(std::move(marker) + " " + content) | color(PANEL_FG),
+            filler() }) | size(WIDTH, EQUAL, side_width);
+        if (background) line = std::move(line) | bgcolor(*background);
+        return line;
+    };
+    for (const DiffRow& row : diff.rows) {
+        if (is_skip(row)) {
+            rows.push_back(hbox({ text("  " + row.left)
+                                          | color(PANEL_FG_DIM),
+                filler() }));
             continue;
         }
-        const std::string ls = clip(p.left, max_l);
-        const std::string rs = clip(p.right, max_r);
-        const bool left_red
-            = !r.left.empty() && (r.right.empty() || r.right != r.left);
-        const bool right_add
-            = !r.right.empty() && (r.left.empty() || r.left != r.right);
-        Element L = text(ls)
-            | (left_red ? bgcolor(red) | color(Color::Black) : color(fg));
-        Element R = text(rs)
-            | (right_add ? bgcolor(addbg) | color(Color::Black) : color(fg));
+        const bool removed = left_changed(row);
+        const bool added = right_changed(row);
         rows.push_back(hbox({
-            line_number(r.left_no, left_no_width),
-            text(" "),
-            L,
-            text(" │ ") | color(border),
-            line_number(r.right_no, right_no_width),
-            text(" "),
-            R,
+            side(row.left_no, removed ? "−" : " ", row.left,
+                removed ? std::optional<Color>(DIFF_DELETION_BG)
+                        : std::nullopt),
+            text(" │ ") | color(PANEL_BORDER),
+            side(row.right_no, added ? "+" : " ", row.right,
+                added ? std::optional<Color>(DIFF_ADDITION_BG)
+                      : std::nullopt),
         }));
     }
-    return vbox(std::move(rows)) | bgcolor(bg) | xflex;
+    return panel(vbox(std::move(rows))) | xflex;
 }
 } // namespace ursa
