@@ -76,6 +76,8 @@ std::vector<Tool> default_tools()
     tools.push_back(make_subagent_tool());
     tools.push_back(make_edit_tool());
     tools.push_back(make_write_tool());
+    tools.push_back(make_webfetch_tool());
+    tools.push_back(make_websearch_tool());
     return tools;
 }
 

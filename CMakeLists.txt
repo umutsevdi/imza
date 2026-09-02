@@ -88,6 +88,7 @@ add_library(ursa_network
     src/network/openai_provider.cpp
     src/network/anthropic_provider.cpp
     src/network/models.cpp
+    src/network/web.cpp
 )
 target_include_directories(ursa_network PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -155,6 +156,7 @@ add_library(ursa_agent
     src/agent/tool_args.cpp
     src/agent/tools.cpp
     src/agent/turn_runner.cpp
+    src/agent/web_tools.cpp
     src/agent/subsystems/session.cpp
     src/agent/subsystems/session_store.cpp
     src/agent/subsystems/skill_store.cpp

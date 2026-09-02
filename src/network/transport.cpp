@@ -24,16 +24,28 @@ std::vector<std::string> auth_headers(AuthType auth, const std::string& key)
 
 namespace {
 
+    struct BodySink {
+        std::string* body;
+        std::size_t cap;
+        bool hit_cap;
+    };
+
     size_t append_body(char* ptr, size_t, size_t n, void* userdata)
     {
-        static_cast<std::string*>(userdata)->append(ptr, n);
+        auto* sink = static_cast<BodySink*>(userdata);
+        if (sink->cap != 0 && sink->body->size() + n > sink->cap) {
+            sink->hit_cap = true;
+            return 0;
+        }
+        sink->body->append(ptr, n);
         return n;
     }
 
 } // namespace
 
 Status http_get(const std::string& url, const std::vector<std::string>& headers,
-    long timeout_secs, std::string& body, long* http_code)
+    long timeout_secs, std::string& body, long* http_code,
+    const HttpGetOptions& opts)
 {
     static thread_local CURL* handle = curl_easy_init();
     if (!handle) {
@@ -45,16 +57,73 @@ Status http_get(const std::string& url, const std::vector<std::string>& headers,
         list = curl_slist_append(list, h.c_str());
     }
 
+    BodySink sink { &body, opts.max_bytes, false };
     curl_easy_reset(handle);
     curl_easy_setopt(handle, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, timeout_secs);
     curl_easy_setopt(handle, CURLOPT_TIMEOUT, timeout_secs);
-    curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION,
+        opts.max_redirs > 0 ? 1L : 0L);
+    if (opts.max_redirs > 0) {
+        curl_easy_setopt(handle, CURLOPT_MAXREDIRS, opts.max_redirs);
+    }
     curl_easy_setopt(handle, CURLOPT_URL, url.c_str());
     curl_easy_setopt(handle, CURLOPT_HTTPHEADER, list);
     curl_easy_setopt(handle, CURLOPT_HTTPGET, 1L);
     curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, append_body);
-    curl_easy_setopt(handle, CURLOPT_WRITEDATA, &body);
+    curl_easy_setopt(handle, CURLOPT_WRITEDATA, &sink);
+
+    const CURLcode res = curl_easy_perform(handle);
+    curl_slist_free_all(list);
+
+    long code = 0;
+    curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &code);
+    if (http_code != nullptr) {
+        *http_code = code;
+    }
+    if (res != CURLE_OK) {
+        if (res == CURLE_WRITE_ERROR && sink.hit_cap) {
+            if (opts.truncated != nullptr) {
+                *opts.truncated = true;
+            }
+            return Status::OK;
+        }
+        return Status::NETWORK_ERROR;
+    }
+    return Status::OK;
+}
+
+Status http_post(const std::string& url, const std::vector<std::string>& headers,
+    const std::string& payload, long timeout_secs, std::string& body,
+    long* http_code, long max_redirs)
+{
+    static thread_local CURL* handle = curl_easy_init();
+    if (!handle) {
+        return Status::NETWORK_ERROR;
+    }
+
+    curl_slist* list = nullptr;
+    for (const auto& h : headers) {
+        list = curl_slist_append(list, h.c_str());
+    }
+
+    BodySink sink { &body, 0, false };
+    curl_easy_reset(handle);
+    curl_easy_setopt(handle, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, timeout_secs);
+    curl_easy_setopt(handle, CURLOPT_TIMEOUT, timeout_secs);
+    curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, max_redirs > 0 ? 1L : 0L);
+    if (max_redirs > 0) {
+        curl_easy_setopt(handle, CURLOPT_MAXREDIRS, max_redirs);
+    }
+    curl_easy_setopt(handle, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(handle, CURLOPT_HTTPHEADER, list);
+    curl_easy_setopt(handle, CURLOPT_POST, 1L);
+    curl_easy_setopt(handle, CURLOPT_POSTFIELDS, payload.c_str());
+    curl_easy_setopt(handle, CURLOPT_POSTFIELDSIZE,
+        static_cast<long>(payload.size()));
+    curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, append_body);
+    curl_easy_setopt(handle, CURLOPT_WRITEDATA, &sink);
 
     const CURLcode res = curl_easy_perform(handle);
     curl_slist_free_all(list);

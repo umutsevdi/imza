@@ -73,6 +73,8 @@ Tool make_todo_tool();
 Tool make_subagent_tool();
 Tool make_edit_tool();
 Tool make_write_tool();
+Tool make_webfetch_tool();
+Tool make_websearch_tool();
 std::vector<Tool> default_tools();
 
 } // namespace ursa

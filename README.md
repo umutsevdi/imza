@@ -71,11 +71,11 @@ or a locally hosted OpenAI-compatible model.
 - [X] OpenAI-compatible APIs
 - [X] Anthropic Messages API
 - [X] Local OpenAI-compatible servers
+- [X] Web search
 ### To Do
 - [ ] MCP
 - [ ] LSP integration
 - [ ] Image or other multimodal prompt attachments
-- [ ] Web search
 
 ## Build
 

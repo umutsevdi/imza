@@ -267,6 +267,10 @@ namespace {
                                     || tc.name == "write") {
                                     item_cache_[item_index]
                                         = render_write_item(tc);
+                                } else if (tc.name == "webfetch"
+                                    || tc.name == "websearch") {
+                                    item_cache_[item_index]
+                                        = render_web_item(tc);
                                 } else if (tc.name == "ask") {
                                     item_cache_[item_index]
                                         = render_ask_item(tc);
@@ -741,6 +745,27 @@ namespace {
             return vbox({
                 tool_header_element(tc),
                 render_markdown_element(tc.result->text),
+                separatorEmpty(),
+            });
+        }
+
+        Element render_web_item(const ToolCall& tc)
+        {
+            Element status = text("done") | dim;
+            if (!tc.result.has_value()) {
+                status = hbox({
+                    spinner(15, static_cast<std::size_t>(frame_)) | dim,
+                    text(" …") | dim,
+                });
+            } else if (tc.result->kind == ToolCall::Result::Kind::ERROR) {
+                status = text("failed") | color(Color::RedLight);
+            }
+            return vbox({
+                hbox({
+                    tool_header_element(tc),
+                    filler(),
+                    std::move(status),
+                }),
                 separatorEmpty(),
             });
         }

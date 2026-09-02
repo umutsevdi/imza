@@ -210,6 +210,14 @@ std::string tool_call_head(const ToolCall& call)
         return tool_display_name(call.name) + " (" + plural_count(n, "task")
             + ")";
     }
+    if (call.name == "webfetch" || call.name == "websearch") {
+        const Json::Value parsed = parse_json(call.args);
+        const auto* key = call.name == "webfetch" ? "url" : "query";
+        if (parsed.isObject() && parsed[key].isString()) {
+            return parsed[key].asString();
+        }
+        return call.args;
+    }
     if (call.name == "subagent") {
         return tool_display_name(call.name);
     }
@@ -264,6 +272,14 @@ std::string tool_header_args(const ToolCall& call)
         return parsed.isObject() && parsed["name"].isString()
             ? parsed["name"].asString()
             : std::string { };
+    }
+    if (call.name == "webfetch" || call.name == "websearch") {
+        const Json::Value parsed = parse_json(call.args);
+        const auto* key = call.name == "webfetch" ? "url" : "query";
+        if (parsed.isObject() && parsed[key].isString()) {
+            return parsed[key].asString();
+        }
+        return call.args;
     }
     if (call.name == "subagent") {
         return subagent_args(call);
