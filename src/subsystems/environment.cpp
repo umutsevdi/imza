@@ -1,4 +1,4 @@
-#include "environment/environment.h"
+#include "subsystems/environment.h"
 
 #include "core/command_runner.h"
 #include "core/config.h"
@@ -617,13 +617,6 @@ std::vector<Skill> Environment::skills() const
         return a.name < b.name;
     });
     return out;
-}
-
-std::shared_ptr<Environment> get_environment()
-{
-    static const std::shared_ptr<Environment> env
-        = std::make_shared<Environment>();
-    return env;
 }
 
 } // namespace ursa

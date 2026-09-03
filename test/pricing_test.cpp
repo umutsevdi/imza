@@ -1,6 +1,14 @@
 #include <doctest/doctest.h>
 
-#include "provider/pricing.h"
+#include <unistd.h>
+
+#include <cstdlib>
+#include <ctime>
+#include <filesystem>
+
+#include "core/catalog.h"
+#include "core/pricing.h"
+#include "subsystems/provider_store.h"
 
 namespace {
 
@@ -24,9 +32,12 @@ ursa::Catalog test_catalog()
     free_model.cost_output = 0.0;
     free_model.context     = 128000;
 
+    ursa::CachedModel costless;
+    costless.context = 4096;
+
     ursa::CachedProvider openai;
     openai.name   = "OpenAI";
-    openai.models = { { "gpt-4o-mini", mini } };
+    openai.models = { { "gpt-4o-mini", mini }, { "costless-model", costless } };
 
     ursa::CachedProvider anthropic;
     anthropic.name   = "Anthropic";
@@ -43,60 +54,121 @@ ursa::Catalog test_catalog()
     return catalog;
 }
 
+struct IsolatedCatalog {
+    std::filesystem::path dir;
+    std::string old_xdg;
+    bool had_xdg = false;
+
+    IsolatedCatalog()
+    {
+        static int counter = 0;
+        dir                = std::filesystem::temp_directory_path()
+            / ("ursa-pricing-test-" + std::to_string(::getpid()) + "-"
+                + std::to_string(counter++));
+        std::filesystem::create_directories(dir);
+        if (const char* xdg = std::getenv("XDG_CONFIG_HOME")) {
+            old_xdg = xdg;
+            had_xdg = true;
+        }
+        setenv("XDG_CONFIG_HOME", dir.string().c_str(), 1);
+        std::ignore
+            = ursa::save_catalog(dir / "ursa" / "presets.json", test_catalog());
+    }
+
+    ~IsolatedCatalog()
+    {
+        if (had_xdg) {
+            setenv("XDG_CONFIG_HOME", old_xdg.c_str(), 1);
+        } else {
+            unsetenv("XDG_CONFIG_HOME");
+        }
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+    }
+};
+
 } // namespace
 
-TEST_CASE("get_pricing reads the catalog snapshot")
+TEST_CASE("pricing_table_from builds bare and provider-qualified keys")
 {
-    ursa::set_pricing_catalog(test_catalog());
+    const auto table = ursa::pricing_table_from(test_catalog());
 
-    const auto p = ursa::get_pricing("gpt-4o-mini");
+    REQUIRE(table.count("gpt-4o-mini") == 1);
+    REQUIRE(table.count("openai/gpt-4o-mini") == 1);
+    const auto& mini = table.at("openai/gpt-4o-mini");
+    CHECK(mini.input_per_1k == doctest::Approx(0.00015));
+    CHECK(mini.output_per_1k == doctest::Approx(0.00060));
+    CHECK(mini.cache_read_per_1k == doctest::Approx(0.000075));
+    CHECK(mini.cache_write_per_1k == doctest::Approx(0.0));
+    CHECK(mini.context_limit == 128000);
+
+    REQUIRE(table.count("claude-sonnet-4") == 1);
+    REQUIRE(table.count("anthropic/claude-sonnet-4") == 1);
+    CHECK(table.at("anthropic/claude-sonnet-4").input_per_1k
+        == doctest::Approx(0.003));
+    CHECK(table.at("anthropic/claude-sonnet-4").cache_write_per_1k
+        == doctest::Approx(0.00375));
+}
+
+TEST_CASE("pricing_table_from keeps zero-cost models and drops costless ones")
+{
+    const auto table = ursa::pricing_table_from(test_catalog());
+
+    REQUIRE(table.count("glm-5-flash") == 1);
+    CHECK(table.at("glm-5-flash").input_per_1k == 0.0);
+    CHECK(table.at("glm-5-flash").context_limit == 128000);
+
+    CHECK(table.count("costless-model") == 0);
+}
+
+TEST_CASE("pricing_for reads the store's catalog snapshot")
+{
+    IsolatedCatalog isolated;
+    ursa::ProviderStore store { ursa::Config { } };
+
+    const auto p = store.pricing_for("gpt-4o-mini");
     CHECK(p.input_per_1k == doctest::Approx(0.00015));
-    CHECK(p.output_per_1k == doctest::Approx(0.00060));
-    CHECK(p.cache_read_per_1k == doctest::Approx(0.000075));
-    CHECK(p.cache_write_per_1k == doctest::Approx(0.0));
     CHECK(p.context_limit == 128000);
 }
 
-TEST_CASE("get_pricing matches provider-qualified ids and is case-insensitive")
+TEST_CASE("pricing_for matches provider-qualified ids and is case-insensitive")
 {
-    ursa::set_pricing_catalog(test_catalog());
+    IsolatedCatalog isolated;
+    ursa::ProviderStore store { ursa::Config { } };
 
-    const auto qualified = ursa::get_pricing("anthropic/claude-sonnet-4");
-    const auto bare      = ursa::get_pricing("Claude-Sonnet-4");
+    const auto qualified = store.pricing_for("anthropic/claude-sonnet-4");
+    const auto bare      = store.pricing_for("Claude-Sonnet-4");
     CHECK(qualified.input_per_1k == doctest::Approx(0.003));
     CHECK(bare.input_per_1k == doctest::Approx(0.003));
     CHECK(bare.cache_write_per_1k == doctest::Approx(0.00375));
 }
 
-TEST_CASE("get_pricing matches by substring")
+TEST_CASE("pricing_for matches by substring")
 {
-    ursa::set_pricing_catalog(test_catalog());
+    IsolatedCatalog isolated;
+    ursa::ProviderStore store { ursa::Config { } };
 
-    const auto p = ursa::get_pricing("openai/gpt-4o-mini-2024-07-18");
+    const auto p = store.pricing_for("openai/gpt-4o-mini-2024-07-18");
     CHECK(p.input_per_1k == doctest::Approx(0.00015));
 }
 
-TEST_CASE("get_pricing keeps zero-cost models and rejects unknown ones")
+TEST_CASE("pricing_for keeps zero-cost models and rejects unknown ones")
 {
-    ursa::set_pricing_catalog(test_catalog());
+    IsolatedCatalog isolated;
+    ursa::ProviderStore store { ursa::Config { } };
 
-    const auto free = ursa::get_pricing("zai/glm-5-flash");
+    const auto free = store.pricing_for("zai/glm-5-flash");
     CHECK(free.input_per_1k == 0.0);
     CHECK(free.output_per_1k == 0.0);
     CHECK(free.context_limit == 128000);
 
-    const auto unknown = ursa::get_pricing("some-unknown-model");
+    const auto unknown = store.pricing_for("some-unknown-model");
     CHECK(unknown.input_per_1k == 0.0);
     CHECK(unknown.output_per_1k == 0.0);
     CHECK(unknown.context_limit == 0);
-}
 
-TEST_CASE("get_pricing is empty before any catalog is set")
-{
-    ursa::set_pricing_catalog(ursa::Catalog { });
-    const auto p = ursa::get_pricing("gpt-4o-mini");
-    CHECK(p.context_limit == 0);
-    CHECK(p.input_per_1k == 0.0);
+    const auto empty = store.pricing_for("");
+    CHECK(empty.context_limit == 0);
 }
 
 TEST_CASE("compute_cost scales by token counts")

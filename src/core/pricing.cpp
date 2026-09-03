@@ -1,10 +1,8 @@
-#include "provider/pricing.h"
+#include "core/pricing.h"
 #include "common/util.h"
 
 #include <algorithm>
 #include <cstdint>
-#include <map>
-#include <mutex>
 #include <optional>
 #include <string>
 
@@ -14,36 +12,6 @@ namespace {
 
     constexpr double kPerMillionToPerK = 1.0 / 1000.0;
 
-    std::mutex& pricing_mutex()
-    {
-        static std::mutex mutex;
-        return mutex;
-    }
-
-    std::map<std::string, ModelPricing>& pricing_table()
-    {
-        static std::map<std::string, ModelPricing> table;
-        return table;
-    }
-
-    std::optional<ModelPricing> pricing_from_model(const CachedModel& model)
-    {
-        if (!model.cost_input && !model.cost_output) {
-            return std::nullopt;
-        }
-        ModelPricing pricing;
-        pricing.input_per_1k
-            = model.cost_input.value_or(0.0) * kPerMillionToPerK;
-        pricing.output_per_1k
-            = model.cost_output.value_or(0.0) * kPerMillionToPerK;
-        pricing.cache_read_per_1k
-            = model.cost_cache_read.value_or(0.0) * kPerMillionToPerK;
-        pricing.cache_write_per_1k
-            = model.cost_cache_write.value_or(0.0) * kPerMillionToPerK;
-        pricing.context_limit = model.context.value_or(0);
-        return pricing;
-    }
-
     void insert_pricing(std::map<std::string, ModelPricing>& table,
         const std::string& key, const ModelPricing& pricing)
     {
@@ -52,7 +20,25 @@ namespace {
 
 } // namespace
 
-void set_pricing_catalog(const Catalog& catalog)
+std::optional<ModelPricing> pricing_from_model(const CachedModel& model)
+{
+    if (!model.cost_input && !model.cost_output) {
+        return std::nullopt;
+    }
+    ModelPricing pricing;
+    pricing.input_per_1k
+        = model.cost_input.value_or(0.0) * kPerMillionToPerK;
+    pricing.output_per_1k
+        = model.cost_output.value_or(0.0) * kPerMillionToPerK;
+    pricing.cache_read_per_1k
+        = model.cost_cache_read.value_or(0.0) * kPerMillionToPerK;
+    pricing.cache_write_per_1k
+        = model.cost_cache_write.value_or(0.0) * kPerMillionToPerK;
+    pricing.context_limit = model.context.value_or(0);
+    return pricing;
+}
+
+std::map<std::string, ModelPricing> pricing_table_from(const Catalog& catalog)
 {
     std::map<std::string, ModelPricing> table;
     for (const auto& [provider_id, provider] : catalog.providers) {
@@ -66,28 +52,7 @@ void set_pricing_catalog(const Catalog& catalog)
             insert_pricing(table, provider_id + "/" + model_id, *pricing);
         }
     }
-    std::lock_guard lock(pricing_mutex());
-    pricing_table() = std::move(table);
-}
-
-ModelPricing get_pricing(std::string_view model_view)
-{
-    const std::string model = to_lower(model_view);
-    if (model.empty()) {
-        return { };
-    }
-    std::lock_guard lock(pricing_mutex());
-    const std::map<std::string, ModelPricing>& rows = pricing_table();
-    auto exact                                      = rows.find(model);
-    if (exact != rows.end()) {
-        return exact->second;
-    }
-    for (const auto& [key, row] : rows) {
-        if (model.find(key) != std::string::npos) {
-            return row;
-        }
-    }
-    return { };
+    return table;
 }
 
 double compute_cost(const Usage& usage, const ModelPricing& pricing)

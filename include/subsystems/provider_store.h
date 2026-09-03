@@ -11,10 +11,11 @@
 #include <variant>
 #include <vector>
 
+#include "core/catalog.h"
 #include "core/config.h"
+#include "core/pricing.h"
 #include "network/models.h"
 #include "network/network.h"
-#include "provider/pricing.h"
 #include "common/types.h"
 #include "common/ursa_signal.h"
 
@@ -92,6 +93,7 @@ public:
         SubagentRole role) const;
     Route route_for(std::string_view connection_id, ApiStandard dialect) const;
     bool model_reasons(std::string_view model) const;
+    ModelPricing pricing_for(std::string_view model) const;
 
     void start_model_fetches();
     void refetch_models(std::string_view connection_id);
@@ -131,6 +133,7 @@ private:
 
     Config config_;
     Catalog catalog_;
+    std::map<std::string, ModelPricing> pricing_;
     ModelsFn models_fn_;
 
     std::map<std::string, CatalogEntry> model_catalog_;

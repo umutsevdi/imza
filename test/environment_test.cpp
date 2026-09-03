@@ -7,7 +7,7 @@
 #include <string_view>
 #include <thread>
 
-#include "environment/environment.h"
+#include "subsystems/environment.h"
 
 namespace {
 
@@ -100,8 +100,8 @@ bool wait_until_ready(const ursa::Environment& env, int timeout_ms = 5000)
 
 TEST_CASE("system environment populates the core fields synchronously")
 {
-    const auto env = ursa::get_environment();
-    const auto sys = env->system();
+    ursa::Environment env;
+    const auto sys = env.system();
     REQUIRE(sys != nullptr);
     CHECK_FALSE(sys->os_name.empty());
     CHECK_FALSE(sys->default_shell.empty());
@@ -113,9 +113,9 @@ TEST_CASE("system environment populates the core fields synchronously")
 
 TEST_CASE("environment becomes ready after the workspace scan")
 {
-    const auto env = ursa::get_environment();
-    REQUIRE(wait_until_ready(*env));
-    CHECK(env->ready());
+    ursa::Environment env;
+    REQUIRE(wait_until_ready(env));
+    CHECK(env.ready());
 }
 
 TEST_CASE("workspace is null outside a project while environment is ready")

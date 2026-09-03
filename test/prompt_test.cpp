@@ -6,6 +6,7 @@
 
 #include "agent/prompt.h"
 #include "agent/tools.h"
+#include "subsystems/session.h"
 
 namespace ursa {
 

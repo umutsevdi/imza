@@ -1,6 +1,6 @@
 #include "agent/flows.h"
-#include "agent/subsystems/session_store.h"
-#include "provider/pricing.h"
+#include "subsystems/session_store.h"
+#include "core/catalog.h"
 #include "common/types.h"
 #include "ui/ui.h"
 #include "common/util.h"

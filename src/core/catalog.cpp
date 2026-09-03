@@ -1,6 +1,6 @@
+#include "core/catalog.h"
 #include "core/io.h"
 #include "network/json_io.h"
-#include "provider/pricing.h"
 
 #include <algorithm>
 #include <array>

@@ -99,13 +99,14 @@ target_link_libraries(ursa_network PRIVATE
     CURL::libcurl
 )
 
-# Shared app configuration + catalog cache (no ftxui, no cmark)
+# Shared app configuration + catalog/pricing cache (no ftxui, no cmark)
 add_library(ursa_core
     src/core/catalog.cpp
     src/core/command_runner.cpp
     src/core/config.cpp
     src/core/git.cpp
     src/core/io.cpp
+    src/core/pricing.cpp
 )
 target_include_directories(ursa_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -116,51 +117,40 @@ target_link_libraries(ursa_core PUBLIC
     jsoncpp_static
 )
 
-# System/workspace environment (no ftxui, no cmark)
-add_library(ursa_environment
-    src/environment/environment.cpp
+# Long-living state owned by ApplicationState (no ftxui, no cmark)
+add_library(ursa_subsystems
+    src/subsystems/attachments.cpp
+    src/subsystems/environment.cpp
+    src/subsystems/format.cpp
+    src/subsystems/provider_store.cpp
+    src/subsystems/review.cpp
+    src/subsystems/session.cpp
+    src/subsystems/session_store.cpp
+    src/subsystems/skill_store.cpp
+    src/subsystems/subagent_manager.cpp
 )
-target_include_directories(ursa_environment PRIVATE
+target_include_directories(ursa_subsystems PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${jsoncpp_SOURCE_DIR}/include
 )
-target_link_libraries(ursa_environment PUBLIC
+target_link_libraries(ursa_subsystems PUBLIC
     ursa_core
+    ursa_network
     jsoncpp_static
 )
 
-add_library(ursa_provider
-    src/provider/provider_store.cpp
-    src/provider/pricing.cpp
-)
-target_include_directories(ursa_provider PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${jsoncpp_SOURCE_DIR}/include
-)
-target_link_libraries(ursa_provider PUBLIC
-    ursa_core
-    ursa_network
-)
-
-# Agent: orchestration, prompts, formatting, slash commands (ftxui-free)
+# Agent: orchestration, prompts, slash commands (ftxui-free)
 add_library(ursa_agent
     src/agent/application_state.cpp
-    src/agent/attachments.cpp
     src/agent/delegation_runner.cpp
     src/agent/flows.cpp
-    src/agent/format.cpp
     src/agent/modal_queue.cpp
     src/agent/prompt.cpp
-    src/agent/review.cpp
     src/agent/slash_commands.cpp
     src/agent/tool_args.cpp
     src/agent/tools.cpp
     src/agent/turn_runner.cpp
     src/agent/web_tools.cpp
-    src/agent/subsystems/session.cpp
-    src/agent/subsystems/session_store.cpp
-    src/agent/subsystems/skill_store.cpp
-    src/agent/subsystems/subagent_manager.cpp
 )
 target_include_directories(ursa_agent PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -169,8 +159,7 @@ target_include_directories(ursa_agent PRIVATE
 target_link_libraries(ursa_agent PUBLIC
     ursa_core
     ursa_network
-    ursa_environment
-    ursa_provider
+    ursa_subsystems
     jsoncpp_static
 )
 

@@ -1,6 +1,6 @@
 #include "agent/slash_commands.h"
 #include "agent/application_state.h"
-#include "provider/provider_store.h"
+#include "subsystems/provider_store.h"
 #include "common/util.h"
 
 #include <string>

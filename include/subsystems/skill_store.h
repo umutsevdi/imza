@@ -10,8 +10,8 @@
 #include <utility>
 #include <vector>
 
-#include "agent/attachments.h"
-#include "environment/skills.h"
+#include "subsystems/attachments.h"
+#include "subsystems/skills.h"
 #include "common/types.h"
 
 namespace Json {

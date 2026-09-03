@@ -3,7 +3,7 @@
 #include <functional>
 #include <optional>
 
-#include "agent/subsystems/session.h"
+#include "subsystems/session.h"
 
 namespace ursa {
 

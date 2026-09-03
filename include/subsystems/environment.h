@@ -10,7 +10,7 @@
 #include <unordered_map>
 
 #include "core/git.h"
-#include "environment/skills.h"
+#include "subsystems/skills.h"
 #include "common/types.h"
 #include "common/ursa_signal.h"
 
@@ -83,8 +83,5 @@ private:
 
     std::jthread git_worker_;
 };
-
-// Returns the process-wide environment singleton.
-std::shared_ptr<Environment> get_environment();
 
 } // namespace ursa

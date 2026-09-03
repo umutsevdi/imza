@@ -2,7 +2,7 @@
 
 #include <doctest/doctest.h>
 
-#include "agent/format.h"
+#include "subsystems/format.h"
 #include "ui/tool_format.h"
 
 TEST_CASE("question_form_markdown renders prompt and options")

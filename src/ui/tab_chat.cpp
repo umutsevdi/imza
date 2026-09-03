@@ -18,8 +18,8 @@
 #include <utility>
 #include <vector>
 
-#include "agent/attachments.h"
-#include "agent/format.h"
+#include "subsystems/attachments.h"
+#include "subsystems/format.h"
 #include "ui/autocomplete.h"
 #include "ui/tool_format.h"
 #include "common/util.h"

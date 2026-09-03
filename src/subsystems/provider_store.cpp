@@ -1,6 +1,7 @@
-#include "provider/provider_store.h"
+#include "subsystems/provider_store.h"
 
-#include "provider/pricing.h"
+#include "core/pricing.h"
+#include "common/util.h"
 
 #include <algorithm>
 #include <utility>
@@ -23,7 +24,7 @@ ProviderStore::ProviderStore(Config config, ModelsFn models_fn)
     , models_fn_(std::move(models_fn))
 {
     load_catalog(presets_path(), catalog_);
-    set_pricing_catalog(catalog_);
+    pricing_ = pricing_table_from(catalog_);
     if (!models_fn_) {
         models_fn_ = [](const Route& route, std::vector<ModelInfo>& models) {
             return fetch_models(route, models);
@@ -228,6 +229,25 @@ bool ProviderStore::model_reasons(std::string_view model) const
     return false;
 }
 
+ModelPricing ProviderStore::pricing_for(std::string_view model) const
+{
+    const std::string key = to_lower(model);
+    if (key.empty()) {
+        return { };
+    }
+    std::lock_guard lock(mutex_);
+    const auto exact = pricing_.find(key);
+    if (exact != pricing_.end()) {
+        return exact->second;
+    }
+    for (const auto& [name, row] : pricing_) {
+        if (key.find(name) != std::string::npos) {
+            return row;
+        }
+    }
+    return { };
+}
+
 void ProviderStore::start_model_fetches()
 {
     {
@@ -409,7 +429,7 @@ void ProviderStore::ensure_catalog_fresh()
             }
             catalog_ = catalog;
             save_catalog(presets_path(), catalog_);
-            set_pricing_catalog(catalog_);
+            pricing_ = pricing_table_from(catalog_);
         }
         _notify_changed();
     });

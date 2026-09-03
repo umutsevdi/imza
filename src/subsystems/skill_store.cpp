@@ -1,4 +1,4 @@
-#include "agent/subsystems/skill_store.h"
+#include "subsystems/skill_store.h"
 
 #include <algorithm>
 #include <cctype>

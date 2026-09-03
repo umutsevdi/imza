@@ -3,7 +3,7 @@
 #include <doctest/doctest.h>
 
 #include "network/network.h"
-#include "agent/subsystems/session.h"
+#include "subsystems/session.h"
 #include "agent/tools.h"
 #include "network/json_io.h"
 

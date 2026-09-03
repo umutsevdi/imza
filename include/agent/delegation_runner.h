@@ -8,8 +8,8 @@
 #include <string>
 
 #include "agent/application_state.h"
-#include "agent/subsystems/session.h"
-#include "agent/subsystems/subagent_manager.h"
+#include "subsystems/session.h"
+#include "subsystems/subagent_manager.h"
 #include "agent/turn_runner.h"
 
 namespace ursa {

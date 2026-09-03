@@ -4,10 +4,8 @@
 
 #include <doctest/doctest.h>
 
-#include "environment/environment.h"
-#include "agent/subsystems/session.h"
-#include "provider/pricing.h"
-#include "agent/subsystems/session_store.h"
+#include "subsystems/session.h"
+#include "subsystems/session_store.h"
 
 namespace {
 
@@ -47,7 +45,10 @@ struct DataHome {
 struct CurrentDirectory {
     std::filesystem::path original = std::filesystem::current_path();
 
-    ~CurrentDirectory() { ursa::get_environment()->chdir(original); }
+    ~CurrentDirectory() {
+        std::error_code ec;
+        std::filesystem::current_path(original, ec);
+    }
 };
 
 } // namespace
@@ -82,7 +83,9 @@ TEST_CASE("saved sessions are immutable and fork on a new prompt")
     CurrentDirectory directory;
     const auto other = home.path / "other-workspace";
     std::filesystem::create_directories(other);
-    REQUIRE(ursa::get_environment()->chdir(other));
+    std::error_code ec;
+    std::filesystem::current_path(other, ec);
+    REQUIRE_FALSE(ec);
 
     ursa::Session loaded;
     std::filesystem::path workspace;

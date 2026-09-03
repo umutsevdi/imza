@@ -1,10 +1,10 @@
 #include "agent/turn_runner.h"
-#include "agent/format.h"
-#include "agent/subsystems/skill_store.h"
-#include "environment/environment.h"
+#include "subsystems/format.h"
+#include "subsystems/skill_store.h"
+#include "subsystems/environment.h"
 #include "network/json_io.h"
-#include "provider/pricing.h"
-#include "provider/provider_store.h"
+#include "core/pricing.h"
+#include "subsystems/provider_store.h"
 #include "common/types.h"
 #include "common/util.h"
 
@@ -162,7 +162,7 @@ void TurnRunner::_post(std::function<void()> f)
 bool TurnRunner::_compact_history(std::vector<Message>& history,
     const TurnSettings& settings, std::uint64_t prompt_tokens)
 {
-    const ModelPricing pricing = get_pricing(settings.model);
+    const ModelPricing pricing = state_->providers->pricing_for(settings.model);
     if (pricing.context_limit == 0 || prompt_tokens == 0
         || prompt_tokens * 100 < pricing.context_limit * COMPACTION_PERCENT
         || history.size() < 4) {
@@ -233,7 +233,7 @@ void TurnRunner::_drive(
     std::uint64_t prompt_tokens = state_->session->last().prompt;
     bool compaction_attempted   = false;
     for (;;) {
-        const ModelPricing pricing = get_pricing(settings.model);
+        const ModelPricing pricing = state_->providers->pricing_for(settings.model);
         const bool should_compact  = !compaction_attempted
             && pricing.context_limit > 0 && prompt_tokens > 0
             && prompt_tokens * 100 >= pricing.context_limit * COMPACTION_PERCENT
@@ -286,7 +286,7 @@ void TurnRunner::_drive(
                 request_prompt_tokens = ev.usage.prompt;
             }
             const ModelPricing pricing = ev.kind == StreamEvent::Kind::USAGE
-                ? get_pricing(model)
+                ? state_->providers->pricing_for(model)
                 : ModelPricing { };
             _post([this, ev, pricing] { state_->session->apply(ev, pricing); });
         };

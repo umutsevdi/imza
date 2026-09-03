@@ -39,14 +39,6 @@ struct Catalog {
     std::map<std::string, CachedProvider> providers;
 };
 
-struct ModelPricing {
-    double input_per_1k         = 0.0;
-    double output_per_1k        = 0.0;
-    double cache_read_per_1k    = 0.0;
-    double cache_write_per_1k   = 0.0;
-    std::uint64_t context_limit = 0;
-};
-
 inline constexpr std::string_view kLocalProviderId  = "local";
 inline constexpr std::string_view kCustomProviderId = "custom";
 
@@ -62,9 +54,5 @@ std::string catalog_base(const CachedProvider& provider);
 Route resolve_route(
     const Connection& conn, const Catalog& catalog, ApiStandard dialect);
 std::string endpoint_for_base(std::string_view base);
-
-void set_pricing_catalog(const Catalog& catalog);
-ModelPricing get_pricing(std::string_view model);
-double compute_cost(const Usage& usage, const ModelPricing& pricing);
 
 } // namespace ursa

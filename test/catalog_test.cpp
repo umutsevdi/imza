@@ -5,7 +5,7 @@
 
 #include <ctime>
 
-#include "provider/pricing.h"
+#include "core/catalog.h"
 #include "network/json_io.h"
 
 namespace {

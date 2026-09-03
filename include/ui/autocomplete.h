@@ -3,9 +3,9 @@
 #include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
 
-#include <agent/attachments.h>
+#include <subsystems/attachments.h>
 #include <agent/slash_commands.h>
-#include <environment/skills.h>
+#include <subsystems/skills.h>
 #include <ui/ui.h>
 
 #include <optional>

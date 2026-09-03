@@ -6,10 +6,10 @@
 
 #include "agent/delegation_runner.h"
 #include "agent/flows.h"
-#include "agent/subsystems/skill_store.h"
-#include "agent/format.h"
+#include "subsystems/skill_store.h"
+#include "subsystems/format.h"
 #include "network/json_io.h"
-#include "agent/review.h"
+#include "subsystems/review.h"
 #include "agent/tools.h"
 #include "ui/ui.h"
 #include "common/util.h"
@@ -123,6 +123,11 @@ struct Env {
         }());
 
     std::shared_ptr<ursa::Session> session = state->session;
+
+    Env()
+    {
+        REQUIRE(pump.wait_for([&] { return state->environment->ready(); }));
+    }
 
     const ursa::ChatRequest& last_request() const { return requests.back(); }
 

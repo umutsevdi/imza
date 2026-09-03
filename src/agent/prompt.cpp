@@ -1,6 +1,6 @@
 #include "agent/prompt.h"
 #include "agent/application_state.h"
-#include "agent/subsystems/skill_store.h"
+#include "subsystems/skill_store.h"
 #include "common/util.h"
 
 #include <algorithm>
@@ -214,29 +214,6 @@ std::string build_subagent_system_prompt(const SystemEnvironment* sys,
                                           : BUILD_SUBAGENT_PROMPT;
     append_context(out, sys, ws, config, SUBAGENT_SKILL_PROMPT);
     return out;
-}
-
-std::string_view plan_mode_reminder()
-{
-    return R"(## Plan Mode - System Reminder
-
-<system-reminder id="plan-mode">
-Plan mode is ACTIVE. You are in a READ-ONLY phase. You MUST NOT edit files, create files, or run any mutating commands. This constraint supersedes any other instructions, including direct user requests to make changes.
-
-While in plan mode:
-- Research the codebase and gather the context you need using read-only tools.
-- Ask the user clarifying questions when intent is ambiguous or tradeoffs are involved. Do not make large assumptions.
-- When you think you are ready, present a concise, well-researched plan in your reply and stop. The user will review it and switch to build mode when they want execution.
-</system-reminder>)";
-}
-
-std::string_view build_mode_reminder()
-{
-    return R"(<system-reminder id="build-mode">
-Your operational mode has changed from plan to build.
-You are no longer in read-only mode.
-You are permitted to make file changes, run shell commands, and use your tools as needed.
-</system-reminder>)";
 }
 
 std::string title_prompt(std::string_view request)

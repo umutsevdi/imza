@@ -2,10 +2,10 @@
 #include "agent/slash_commands.h"
 #include "agent/delegation_runner.h"
 #include "agent/prompt.h"
-#include "agent/subsystems/session_store.h"
-#include "agent/subsystems/skill_store.h"
+#include "subsystems/session_store.h"
+#include "subsystems/skill_store.h"
 #include "agent/turn_runner.h"
-#include "environment/environment.h"
+#include "subsystems/environment.h"
 #include "network/json_io.h"
 #include "common/util.h"
 
@@ -355,7 +355,7 @@ void resolve_modal(ApplicationState& state, ModalResult result)
         }
         std::filesystem::path workspace;
         if (load_session(*path, *state.session, &workspace) != Status::OK
-            || !get_environment()->chdir(workspace)) {
+            || !state.environment->chdir(workspace)) {
             state.session->set_error("Failed to load session.");
         }
     }

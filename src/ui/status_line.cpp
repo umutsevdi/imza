@@ -1,7 +1,7 @@
 #include "agent/application_state.h"
-#include "agent/subsystems/subagent_manager.h"
-#include "provider/pricing.h"
-#include "provider/provider_store.h"
+#include "subsystems/subagent_manager.h"
+#include "core/pricing.h"
+#include "subsystems/provider_store.h"
 #include "ui/ui.h"
 #include "common/util.h"
 
@@ -158,7 +158,7 @@ namespace {
         {
             if (last_model_ != model) {
                 last_model_ = model;
-                cached_     = get_pricing(model);
+                cached_     = state_->providers->pricing_for(model);
             }
             return cached_;
         }

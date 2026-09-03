@@ -17,9 +17,9 @@
 #include <vector>
 
 #include "common/diff.h"
-#include "environment/environment.h"
+#include "subsystems/environment.h"
 #include "network/models.h"
-#include "agent/subsystems/workflow.h"
+#include "subsystems/workflow.h"
 
 namespace ursa {
 

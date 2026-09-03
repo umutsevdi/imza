@@ -13,10 +13,10 @@
 #include <iostream>
 #include <print>
 
-#include "environment/environment.h"
-#include "agent/review.h"
-#include "agent/subsystems/session_store.h"
-#include "agent/subsystems/skill_store.h"
+#include "subsystems/environment.h"
+#include "subsystems/review.h"
+#include "subsystems/session_store.h"
+#include "subsystems/skill_store.h"
 
 #ifdef _WIN32
 #include <io.h>

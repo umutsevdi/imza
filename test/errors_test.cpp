@@ -2,11 +2,11 @@
 #include <json/json.h>
 
 #include "agent/flows.h"
-#include "agent/subsystems/skill_store.h"
+#include "subsystems/skill_store.h"
 #include "network/sse_parse.h"
 #include "common/types.h"
 #include "network/network.h"
-#include "agent/review.h"
+#include "subsystems/review.h"
 #include "common/types.h"
 
 #include <arpa/inet.h>
@@ -163,6 +163,11 @@ struct AgentEnv {
             [this](const ursa::ChatRequest& req,
                 const ursa::StreamCallback& cb) { return stream(req, cb); });
     std::shared_ptr<ursa::Session> session = state->session;
+
+    AgentEnv()
+    {
+        REQUIRE(pump.wait_for([&] { return state->environment->ready(); }));
+    }
 };
 
 bool idle(const ursa::Session& st)

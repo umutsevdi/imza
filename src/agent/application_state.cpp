@@ -1,8 +1,8 @@
 #include "agent/application_state.h"
 #include "agent/delegation_runner.h"
 #include "agent/flows.h"
-#include "agent/review.h"
-#include "agent/subsystems/skill_store.h"
+#include "subsystems/review.h"
+#include "subsystems/skill_store.h"
 #include "agent/turn_runner.h"
 
 #include <utility>
@@ -80,7 +80,7 @@ std::shared_ptr<ApplicationState> make_application_state(PostFn post,
     state->session     = std::make_shared<Session>();
     state->providers   = std::make_shared<ProviderStore>(std::move(config));
     state->subagents   = std::make_shared<SubagentManager>();
-    state->environment = get_environment();
+    state->environment = std::make_shared<Environment>();
     state->review      = std::make_shared<ReviewState>();
     state->skills      = std::make_shared<SkillStore>();
     state->post        = guarded_post(state.get(), std::move(post));

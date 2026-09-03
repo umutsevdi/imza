@@ -3,7 +3,7 @@
 #include "common/types.h"
 #include "ui/ui.h"
 
-#include "agent/review.h"
+#include "subsystems/review.h"
 #include "common/util.h"
 
 #include <ftxui/component/component.hpp>

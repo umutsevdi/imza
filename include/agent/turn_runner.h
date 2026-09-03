@@ -13,7 +13,7 @@
 #include <vector>
 
 #include "agent/application_state.h"
-#include "agent/subsystems/session.h"
+#include "subsystems/session.h"
 #include "agent/tools.h"
 #include "network/network.h"
 #include "common/types.h"

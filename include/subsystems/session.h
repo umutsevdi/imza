@@ -12,18 +12,25 @@
 #include <variant>
 #include <vector>
 
-#include "agent/attachments.h"
+#include "subsystems/attachments.h"
 #include "network/chat.h"
 #include "common/modal.h"
 #include "network/network.h"
 #include "common/tool_call.h"
 #include "agent/tools.h"
+#include "core/pricing.h"
 #include "common/types.h"
 #include "common/ursa_signal.h"
 
 namespace ursa {
 
-struct ModelPricing;
+inline constexpr std::string_view PLAN_REMINDER_TAG
+    = "<system-reminder id=\"plan-mode\">";
+inline constexpr std::string_view BUILD_REMINDER_TAG
+    = "<system-reminder id=\"build-mode\">";
+
+std::string_view plan_mode_reminder();
+std::string_view build_mode_reminder();
 
 struct UserTurn {
     std::string text;

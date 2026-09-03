@@ -7,13 +7,13 @@
 #include <vector>
 
 #include "agent/modal_queue.h"
-#include "agent/subsystems/session.h"
-#include "agent/subsystems/subagent_manager.h"
+#include "subsystems/session.h"
+#include "subsystems/subagent_manager.h"
 #include "common/tool_call.h"
 #include "core/config.h"
-#include "environment/environment.h"
+#include "subsystems/environment.h"
 #include "network/network.h"
-#include "provider/provider_store.h"
+#include "subsystems/provider_store.h"
 #include "common/types.h"
 #include "common/ursa_signal.h"
 

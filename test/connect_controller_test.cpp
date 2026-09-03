@@ -9,11 +9,11 @@
 #include <queue>
 #include <thread>
 
-#include "provider/pricing.h"
+#include "core/catalog.h"
 #include "network/json_io.h"
 #include "agent/flows.h"
-#include "agent/subsystems/skill_store.h"
-#include "agent/review.h"
+#include "subsystems/skill_store.h"
+#include "subsystems/review.h"
 #include "core/config.h"
 
 namespace {

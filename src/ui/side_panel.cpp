@@ -2,8 +2,8 @@
 #include "agent/flows.h"
 #include "ui/ui.h"
 
-#include "agent/review.h"
-#include "agent/subsystems/skill_store.h"
+#include "subsystems/review.h"
+#include "subsystems/skill_store.h"
 
 #include <ftxui/component/app.hpp>
 #include <ftxui/component/component.hpp>

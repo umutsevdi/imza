@@ -1,6 +1,6 @@
-#include "agent/subsystems/session_store.h"
+#include "subsystems/session_store.h"
 
-#include "agent/subsystems/session.h"
+#include "subsystems/session.h"
 #include "core/io.h"
 #include "network/json_io.h"
 #include "common/util.h"
