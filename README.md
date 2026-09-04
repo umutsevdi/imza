@@ -13,6 +13,8 @@ tool calls, diffs, and approval prompts.
 > Ursa is not lightweight because it does less.
 > It is lightweight because it was designed that way.
 
+![ursa-layout](./screenshots/layout.png)
+
 ## Why Ursa?
 
 Ursa organizes development around three modes.
@@ -41,6 +43,8 @@ comments, then send the findings directly back to Plan mode.
 - OpenAI-compatible, Anthropic Messages, and local model APIs
 - Lazy-loaded subsystems that consume resources only when needed
 - AGENTS.md, CLAUDE.md, and GEMINI.md support
+
+![ursa-layout](./screenshots/review.png)
 
 ## Bring Your Own Model
 Ursa is provider-independent.
