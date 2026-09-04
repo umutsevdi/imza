@@ -233,7 +233,7 @@ target_link_libraries(ursa PRIVATE
     ursa_ui
 )
 
-if (TESTS)
+if (URSA_BUILD_TESTS)
     add_executable(ursa_tests ${TEST_SOURCES})
     target_include_directories(ursa_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include

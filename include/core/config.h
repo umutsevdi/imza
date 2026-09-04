@@ -16,6 +16,7 @@ struct Connection {
     std::string provider_id;
     std::string endpoint;
     std::string api_key;
+    std::string label;
     std::map<std::string, ApiStandard> dialects;
 };
 

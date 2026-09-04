@@ -139,7 +139,7 @@ TEST_CASE("connect commits a connection and lands models in the catalog")
     pump.drain();
 
     resolve_modal(*state, ursa::ModalResult {
-        ursa::ConnectResult { "testprov", "", "key1", true } });
+        ursa::ConnectResult {"testprov", "", "key1", "", true} });
     REQUIRE(pump.wait_for([&] {
         const auto views = providers->connections();
         return views.size() == 1
@@ -160,6 +160,38 @@ TEST_CASE("connect commits a connection and lands models in the catalog")
     CHECK(saved.providers[0].api_key == "key1");
 }
 
+TEST_CASE("connecting a labeled custom endpoint stores the label")
+{
+    IsolatedConfig iso;
+    PostPump pump;
+    auto providers = std::make_shared<ursa::ProviderStore>(
+        ursa::Config { }, fake_models_ok());
+    auto session    = std::make_shared<ursa::Session>();
+    auto state = make_state(session, providers, pump.fn());
+    pump.drain();
+
+    resolve_modal(*state, ursa::ModalResult { ursa::ConnectResult {
+        "custom", "http://localhost:11434/v1/chat/completions", "", "my Ollama",
+        true } });
+    REQUIRE(pump.wait_for([&] {
+        const auto views = providers->connections();
+        return views.size() == 1
+            && views[0].state == ursa::ConnectionView::State::READY;
+    }));
+
+    const auto views = providers->connections();
+    CHECK(views[0].id == "custom");
+    CHECK(views[0].name == "my Ollama");
+
+    ursa::Config saved;
+    REQUIRE(ursa::load_config(ursa::config_path(), saved) == ursa::Status::OK);
+    REQUIRE(saved.providers.size() == 1);
+    CHECK(saved.providers[0].provider_id == "custom");
+    CHECK(saved.providers[0].endpoint
+        == "http://localhost:11434/v1/chat/completions");
+    CHECK(saved.providers[0].label == "my Ollama");
+}
+
 TEST_CASE("connecting the same endpoint updates in place")
 {
     IsolatedConfig iso;
@@ -171,12 +203,12 @@ TEST_CASE("connecting the same endpoint updates in place")
     pump.drain();
 
     resolve_modal(*state, ursa::ModalResult {
-        ursa::ConnectResult { "testprov", "", "key1", true } });
+        ursa::ConnectResult {"testprov", "", "key1", "", true} });
     REQUIRE(
         pump.wait_for([&] { return providers->connections().size() == 1; }));
 
     resolve_modal(*state, ursa::ModalResult {
-        ursa::ConnectResult { "testprov", "", "key2", true } });
+        ursa::ConnectResult {"testprov", "", "key2", "", true} });
     REQUIRE(pump.wait_for([&] {
         const auto views = providers->connections();
         return views.size() == 1 && views[0].api_key == "key2";
@@ -200,7 +232,7 @@ TEST_CASE("test-only connect does not persist")
     pump.drain();
 
     resolve_modal(*state, ursa::ModalResult {
-        ursa::ConnectResult { "testprov", "", "key", false } });
+        ursa::ConnectResult {"testprov", "", "key", "", false} });
     REQUIRE(pump.wait_for(
         [&] { return session->connect_status() == "✓ 2 models"; }));
     CHECK(providers->connections().empty());
@@ -221,7 +253,7 @@ TEST_CASE("failing test keeps the connection absent")
     pump.drain();
 
     resolve_modal(*state, ursa::ModalResult {
-        ursa::ConnectResult { "testprov", "", "key", true } });
+        ursa::ConnectResult {"testprov", "", "key", "", true} });
     REQUIRE(pump.wait_for([&] { return !session->connect_status().empty(); }));
     CHECK(providers->connections().empty());
     CHECK(session->connect_status() == "API error.");

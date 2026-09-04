@@ -356,6 +356,9 @@ namespace {
                 }));
 
             const bool base_visible = selected_provider_ == kCustomProviderId;
+            label_input_ = Input(field_option(&label_buf_, &label_cursor_,
+                "label (optional), e.g. my Ollama",
+                [this] { row_error_.clear(); }));
             base_input_ = Input(field_option(&base_buf_, &base_cursor_,
                 "base URL, e.g. http://localhost:1234/v1",
                 [this] { row_error_.clear(); }));
@@ -380,6 +383,7 @@ namespace {
             Components add_parts;
             add_parts.push_back(picker_input_);
             if (base_visible) {
+                add_parts.push_back(label_input_);
                 add_parts.push_back(base_input_);
             }
             add_parts.push_back(key_input_);
@@ -526,6 +530,7 @@ namespace {
                 return res;
             }
             res.api_key = trim(key_buf_);
+            res.label   = trim(label_buf_);
             row_error_.clear();
             return res;
         }
@@ -592,6 +597,10 @@ namespace {
                     picker_area() | xflex,
                 }));
                 if (selected_provider_ == kCustomProviderId) {
+                    rows.push_back(hbox({
+                        form_gutter("Label"),
+                        label_input_->Render() | xflex,
+                    }));
                     rows.push_back(hbox({
                         form_gutter("Base URL"),
                         base_input_->Render() | xflex,
@@ -779,10 +788,13 @@ namespace {
         int row_selected_ = 0;
 
         Component base_input_;
+        Component label_input_;
         Component key_input_;
         Component action_button_;
         std::string base_buf_;
         int base_cursor_ = 0;
+        std::string label_buf_;
+        int label_cursor_ = 0;
         std::string key_buf_;
         int key_cursor_ = 0;
         std::string tested_signature_;

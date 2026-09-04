@@ -33,6 +33,7 @@ struct ConnectResult {
     std::string provider_id;
     std::string endpoint;
     std::string api_key;
+    std::string label;
     bool persist = true;
 };
 
