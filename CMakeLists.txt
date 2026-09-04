@@ -219,9 +219,12 @@ target_link_libraries(ursa_ui PUBLIC
     jsoncpp_static
 )
 
-add_executable(ursa
-    src/main.cpp
-)
+if (WIN32)
+    file(GLOB SOURCES src/main.cpp misc/resource.rc)
+else()
+    file(GLOB SOURCES src/main.cpp)
+endif()
+add_executable(ursa ${SOURCES})
 target_include_directories(ursa PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
