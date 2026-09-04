@@ -1,6 +1,9 @@
 #include "agent/flows.h"
+#include "subsystems/session_store.h"
+#include "subsystems/skill_store.h"
 #include "ui/ui.h"
 
+#include <ftxui/component/animation.hpp>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_base.hpp>
 #include <ftxui/component/event.hpp>
@@ -12,11 +15,6 @@
 #include <functional>
 #include <iostream>
 #include <print>
-
-#include "subsystems/environment.h"
-#include "subsystems/review.h"
-#include "subsystems/session_store.h"
-#include "subsystems/skill_store.h"
 
 #ifdef _WIN32
 #include <io.h>
@@ -51,10 +49,11 @@ namespace {
             const int stamp_col = 16;
             const int title_col = std::max(body_w - 2 - stamp_col, 1);
             for (const auto& session : sessions) {
-                const std::string title
-                    = session.title.empty() ? "Untitled session" : session.title;
-                rows.push_back(
-                    hbox({ text(fit(title, title_col)) | color(PANEL_FG) | xflex,
+                const std::string title = session.title.empty()
+                    ? "Untitled session"
+                    : session.title;
+                rows.push_back(hbox(
+                    { text(fit(title, title_col)) | color(PANEL_FG) | xflex,
                         text(session.saved_at) | color(PANEL_FG_DIM) }));
             }
         }
@@ -68,8 +67,8 @@ namespace {
                 | bgcolor(PANEL_COLOR) | color(PANEL_FG),
         });
 
-        auto screen
-            = Screen::Create(Dimension::Fixed(body_w), Dimension::Fixed(height));
+        auto screen = Screen::Create(
+            Dimension::Fixed(body_w), Dimension::Fixed(height));
         Render(screen, frame);
         std::cout << screen.ToString() << std::endl;
     }
@@ -109,7 +108,8 @@ namespace {
             workspace_subscription_
                 = state_->environment->subscribe_to_workspace_change(
                     [] { animation::RequestAnimationFrame(); });
-
+            title_subscription_ = state_->session->subscribe_to_title_change(
+                [] { animation::RequestAnimationFrame(); });
             phase_            = state_->session->mode() == Session::Mode::PLAN
                 ? WorkflowPhase::PLAN
                 : WorkflowPhase::BUILD;
@@ -145,18 +145,25 @@ namespace {
             Element right_col        = tabs_content_->Render();
             Element status           = status_line_->Render();
 
+            const std::string title = state_->session->title();
+            Element title_p = paragraph(title.empty() ? "New Session" : title)
+                | bold | color(PANEL_FG);
             right_col = std::move(right_col) | xflex | yflex;
 
             Element root;
             if (layout_.kind == LayoutCtx::Kind::WIDE) {
                 root = vbox({ hbox({ text(" "), side | yflex, text(" "),
-                                  vbox({ tab, right_col }) | flex })
+                                  vbox({ hbox({ text(" "), title_p | xflex,
+                                             tab }),
+                                      right_col })
+                                      | xflex })
                                | flex,
                            separatorEmpty(), status })
                     | flex;
             } else {
-                root = vbox({ side, tab, separatorEmpty(), right_col,
-                           separatorEmpty(), status })
+                root = vbox({ hbox({ title_p | xflex, tab }), side,
+                           separatorEmpty(), right_col, separatorEmpty(),
+                           status })
                     | flex;
             }
 
@@ -256,6 +263,7 @@ namespace {
         Component tabs_content_;
         Component tabs_;
         Signal<>::Subscription workspace_subscription_;
+        Signal<>::Subscription title_subscription_;
         LayoutCtx layout_ = layout_context(0);
         WorkflowPhase phase_ { WorkflowPhase::PLAN };
         std::vector<std::string> tab_names_;
@@ -276,7 +284,7 @@ int run_repl(const Config& cfg)
     ScreenInteractive screen = ScreenInteractive::FullscreenAlternateScreen();
     screen.ForceHandleCtrlC(false);
     std::vector<Tool> tools = default_tools();
-    auto state = make_application_state(
+    auto state              = make_application_state(
         [&screen](std::function<void()> f) {
             screen.Post(std::move(f));
             screen.PostEvent(Event::Custom);
@@ -285,7 +293,8 @@ int run_repl(const Config& cfg)
     state->on_exit = [&screen] { screen.Exit(); };
     state->providers->ensure_catalog_fresh();
     if (state->providers->config().providers.empty()) {
-        ursa::enqueue_user_modal(*state, ConnectModal { ConnectModal::Entry::MANAGE });
+        ursa::enqueue_user_modal(
+            *state, ConnectModal { ConnectModal::Entry::MANAGE });
     }
     auto app = ftxui::Make<Repl>(screen, state);
     screen.Loop(app);

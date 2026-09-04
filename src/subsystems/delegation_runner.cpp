@@ -1,12 +1,11 @@
-#include "agent/delegation_runner.h"
+#include "subsystems/delegation_runner.h"
 #include "agent/flows.h"
-#include "subsystems/format.h"
 #include "agent/prompt.h"
-#include "subsystems/review.h"
-#include "subsystems/skill_store.h"
-#include "network/json_io.h"
 #include "common/types.h"
 #include "common/util.h"
+#include "network/json_io.h"
+#include "subsystems/format.h"
+#include "subsystems/skill_store.h"
 
 #include <algorithm>
 #include <memory>
@@ -209,8 +208,8 @@ void DelegationRunner::run_subagents(
         const ProviderSelection& selected = *selection;
         const std::string prompt          = task.prompt;
         const Session::Mode mode          = task.mode;
-        auto child_state = make_child_application_state(*state_,
-            [](const std::function<void()>& action) { action(); },
+        auto child_state                  = make_child_application_state(
+            *state_, [](const std::function<void()>& action) { action(); },
             runner_.has_stream_override() ? runner_.stream_fn() : StreamFn { },
             delegated_tools(),
             [modal_request = modal_request_](ModalPayload payload) {
@@ -367,9 +366,9 @@ SubagentHandle DelegationRunner::run_subagent(std::string prompt,
                     || (deadline
                         && std::chrono::steady_clock::now() >= *deadline);
             };
-            req.messages = { { Message::Type::SYSTEM,
-                                 full_system_prompt(*state_) },
-                { Message::Type::USER, task_prompt } };
+            req.messages
+                = { { Message::Type::SYSTEM, full_system_prompt(*state_) },
+                      { Message::Type::USER, task_prompt } };
             apply_reasoning(req, route.dialect, variant, *state_->providers);
             std::string output;
             const StreamCallback callback = [&](const StreamEvent& event) {

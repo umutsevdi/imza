@@ -1,9 +1,9 @@
 #include "agent/flows.h"
-#include "subsystems/session_store.h"
-#include "core/catalog.h"
 #include "common/types.h"
-#include "ui/ui.h"
 #include "common/util.h"
+#include "core/catalog.h"
+#include "subsystems/session_store.h"
+#include "ui/ui.h"
 
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_base.hpp>
@@ -58,8 +58,8 @@ namespace {
 
     class ConnectView : public ComponentBase {
     public:
-        explicit ConnectView(std::shared_ptr<ApplicationState> state,
-            ProviderStore& providers)
+        explicit ConnectView(
+            std::shared_ptr<ApplicationState> state, ProviderStore& providers)
             : state_(std::move(state))
             , session_(state_->session)
             , provider_store_(providers)
@@ -298,8 +298,7 @@ namespace {
 
         std::string current_endpoint()
         {
-            if (selected_provider_ != kCustomProviderId
-                && selected_provider_ != kLocalProviderId) {
+            if (selected_provider_ != kCustomProviderId) {
                 return "";
             }
             return endpoint_for_base(strip_slash(trim(base_buf_)));
@@ -324,8 +323,7 @@ namespace {
             for (const auto& [id, active] : confirm_) {
                 confirming = confirming || active;
             }
-            const bool base_visible = selected_provider_ == kCustomProviderId
-                || selected_provider_ == kLocalProviderId;
+            const bool base_visible = selected_provider_ == kCustomProviderId;
             const std::uint64_t status_key
                 = std::hash<std::string> { }(st.connect_status()) << 32;
             const std::uint64_t key = status_key + st.modal_serial() * 16ULL
@@ -342,11 +340,6 @@ namespace {
         {
             providers_ = provider_store_.provider_options();
             refill_picker();
-            if (selected_provider_ == kLocalProviderId
-                && trim(base_buf_).empty()) {
-                base_buf_ = "http://localhost:11434/v1";
-            }
-
             picker_input_ = Input(field_option(
                 &picker_buf_, &picker_cursor_, "type to search providers",
                 [this] {
@@ -362,8 +355,7 @@ namespace {
                     }
                 }));
 
-            const bool base_visible = selected_provider_ == kCustomProviderId
-                || selected_provider_ == kLocalProviderId;
+            const bool base_visible = selected_provider_ == kCustomProviderId;
             base_input_ = Input(field_option(&base_buf_, &base_cursor_,
                 "base URL, e.g. http://localhost:1234/v1",
                 [this] { row_error_.clear(); }));
@@ -527,8 +519,7 @@ namespace {
                 return res;
             }
             res.endpoint = current_endpoint();
-            if ((res.provider_id == kCustomProviderId
-                    || res.provider_id == kLocalProviderId)
+            if ((res.provider_id == kCustomProviderId)
                 && res.endpoint.empty()) {
                 row_error_      = "Enter a base URL.";
                 res.provider_id = "";
@@ -600,8 +591,7 @@ namespace {
                     form_gutter("Provider"),
                     picker_area() | xflex,
                 }));
-                if (selected_provider_ == kCustomProviderId
-                    || selected_provider_ == kLocalProviderId) {
+                if (selected_provider_ == kCustomProviderId) {
                     rows.push_back(hbox({
                         form_gutter("Base URL"),
                         base_input_->Render() | xflex,
@@ -715,8 +705,9 @@ namespace {
             if (!row) {
                 return;
             }
-            ursa::resolve_modal(*state_, ModalResult {
-                ModelChoice { row->connection_id, row->model_id } });
+            ursa::resolve_modal(*state_,
+                ModalResult {
+                    ModelChoice { row->connection_id, row->model_id } });
         }
 
         Element render_pick()

@@ -9,9 +9,9 @@
 
 #include <json/json.h>
 
+#include "common/types.h"
 #include "core/config.h"
 #include "network/network.h"
-#include "common/types.h"
 
 namespace ursa {
 
@@ -39,7 +39,6 @@ struct Catalog {
     std::map<std::string, CachedProvider> providers;
 };
 
-inline constexpr std::string_view kLocalProviderId  = "local";
 inline constexpr std::string_view kCustomProviderId = "custom";
 
 bool catalog_stale(const Catalog& catalog);

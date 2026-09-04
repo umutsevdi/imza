@@ -54,8 +54,8 @@ namespace {
 
 class SidePanel : public ComponentBase {
 public:
-    SidePanel(std::shared_ptr<ApplicationState> state,
-        LayoutFn layout, WorkflowFn workflow, WorkflowNavigateFn navigate)
+    SidePanel(std::shared_ptr<ApplicationState> state, LayoutFn layout,
+        WorkflowFn workflow, WorkflowNavigateFn navigate)
         : state_(std::move(state))
         , layout_(std::move(layout))
         , workflow_(std::move(workflow))
@@ -66,8 +66,6 @@ public:
         , repository_subscription_(
               state_->environment->subscribe_to_repository_change(
                   [] { animation::RequestAnimationFrame(); }))
-        , title_subscription_(state_->session->subscribe_to_title_change(
-              [] { animation::RequestAnimationFrame(); }))
         , attachments_subscription_(
               state_->session->subscribe_to_attachments_change([this] {
                   attachments_dirty_.store(true);
@@ -88,10 +86,6 @@ public:
         const bool narrow   = ctx.kind == LayoutCtx::Kind::NARROW;
         active_links_.clear();
         Elements parts;
-        const std::string title = state_->session->title();
-        parts.push_back(paragraph(title.empty() ? "New Session" : title) | bold
-            | color(PANEL_FG));
-        parts.push_back(separatorLight());
         _append_review_comments(parts);
         if (state_->session->todo().items.size()) {
             parts.push_back(render_todo(state_->session->todo(), ctx) | yflex);
@@ -113,7 +107,7 @@ public:
         }
         Element body = vbox(std::move(parts));
         if (narrow) {
-            return body | xflex;
+            return panel(body) | xflex;
         }
         return panel(body) | size(WIDTH, EQUAL, LayoutCtx::panel_width);
     }
@@ -226,7 +220,6 @@ private:
     WorkflowNavigateFn navigate_;
     Signal<>::Subscription workspace_subscription_;
     Signal<>::Subscription repository_subscription_;
-    Signal<>::Subscription title_subscription_;
     std::atomic<bool> attachments_dirty_ { true };
     std::vector<std::string> attachment_names_;
     Signal<>::Subscription attachments_subscription_;
@@ -238,11 +231,10 @@ private:
 };
 
 ftxui::Component make_side_panel(std::shared_ptr<ApplicationState> state,
-    LayoutFn layout, WorkflowFn workflow,
-    WorkflowNavigateFn navigate)
+    LayoutFn layout, WorkflowFn workflow, WorkflowNavigateFn navigate)
 {
-    return ftxui::Make<SidePanel>(std::move(state),
-        std::move(layout), std::move(workflow), std::move(navigate));
+    return ftxui::Make<SidePanel>(std::move(state), std::move(layout),
+        std::move(workflow), std::move(navigate));
 }
 
 namespace {

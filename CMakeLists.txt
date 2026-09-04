@@ -120,6 +120,7 @@ target_link_libraries(ursa_core PUBLIC
 # Long-living state owned by ApplicationState (no ftxui, no cmark)
 add_library(ursa_subsystems
     src/subsystems/attachments.cpp
+    src/subsystems/delegation_runner.cpp
     src/subsystems/environment.cpp
     src/subsystems/format.cpp
     src/subsystems/provider_store.cpp
@@ -142,7 +143,6 @@ target_link_libraries(ursa_subsystems PUBLIC
 # Agent: orchestration, prompts, slash commands (ftxui-free)
 add_library(ursa_agent
     src/agent/application_state.cpp
-    src/agent/delegation_runner.cpp
     src/agent/flows.cpp
     src/agent/modal_queue.cpp
     src/agent/prompt.cpp

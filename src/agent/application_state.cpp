@@ -1,9 +1,9 @@
 #include "agent/application_state.h"
-#include "agent/delegation_runner.h"
 #include "agent/flows.h"
+#include "agent/turn_runner.h"
+#include "subsystems/delegation_runner.h"
 #include "subsystems/review.h"
 #include "subsystems/skill_store.h"
-#include "agent/turn_runner.h"
 
 #include <utility>
 
@@ -24,8 +24,8 @@ namespace {
         std::vector<Tool> tools)
     {
         ApplicationState* raw = state.get();
-        state->runner = std::make_unique<TurnRunner>(*raw, state->post,
-            std::move(tools), std::move(stream_fn),
+        state->runner         = std::make_unique<TurnRunner>(
+            *raw, state->post, std::move(tools), std::move(stream_fn),
             [raw](ModalPayload payload) {
                 return request_modal(*raw, std::move(payload));
             },
@@ -54,9 +54,8 @@ namespace {
                       }
                   });
               });
-        state->provider_subscription = state->providers->subscribe([raw] {
-            raw->post([raw] { raw->session->bump_modal_serial(); });
-        });
+        state->provider_subscription = state->providers->subscribe(
+            [raw] { raw->post([raw] { raw->session->bump_modal_serial(); }); });
         state->post([raw] { raw->providers->start_model_fetches(); });
     }
 
@@ -77,14 +76,14 @@ std::shared_ptr<ApplicationState> make_application_state(PostFn post,
     ModalRequestFn parent_routing, std::string agent_label)
 {
     std::shared_ptr<ApplicationState> state(new ApplicationState());
-    state->session     = std::make_shared<Session>();
-    state->providers   = std::make_shared<ProviderStore>(std::move(config));
-    state->subagents   = std::make_shared<SubagentManager>();
-    state->environment = std::make_shared<Environment>();
-    state->review      = std::make_shared<ReviewState>();
-    state->skills      = std::make_shared<SkillStore>();
-    state->post        = guarded_post(state.get(), std::move(post));
-    state->on_exit     = [] { };
+    state->session        = std::make_shared<Session>();
+    state->providers      = std::make_shared<ProviderStore>(std::move(config));
+    state->subagents      = std::make_shared<SubagentManager>();
+    state->environment    = std::make_shared<Environment>();
+    state->review         = std::make_shared<ReviewState>();
+    state->skills         = std::make_shared<SkillStore>();
+    state->post           = guarded_post(state.get(), std::move(post));
+    state->on_exit        = [] { };
     state->parent_routing = std::move(parent_routing);
     state->agent_label    = std::move(agent_label);
     wire(state, std::move(stream_fn), std::move(tools));

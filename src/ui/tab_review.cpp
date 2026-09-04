@@ -1,10 +1,9 @@
-#include "agent/delegation_runner.h"
 #include "agent/flows.h"
 #include "common/types.h"
-#include "ui/ui.h"
-
-#include "subsystems/review.h"
 #include "common/util.h"
+#include "subsystems/delegation_runner.h"
+#include "subsystems/review.h"
+#include "ui/ui.h"
 
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/event.hpp>
@@ -373,7 +372,8 @@ namespace {
             }
             const auto snapshot = state_->review->comments_snapshot();
             if (snapshot.comments.empty()) {
-                state_->session->set_error("Add a review comment before sending.");
+                state_->session->set_error(
+                    "Add a review comment before sending.");
                 return;
             }
             if (!state_->providers->active_selection()) {
@@ -466,10 +466,11 @@ namespace {
             if (!review_task_id_) {
                 return;
             }
-            SubagentChat chat
-                = state_->delegation->subagent_chat(*review_task_id_, "AI Review");
-            ursa::enqueue_user_modal(*state_, ViewerModal { std::move(chat.title),
-                std::move(chat.transcript), "markdown", 1, true, "" });
+            SubagentChat chat = state_->delegation->subagent_chat(
+                *review_task_id_, "AI Review");
+            ursa::enqueue_user_modal(*state_,
+                ViewerModal { std::move(chat.title), std::move(chat.transcript),
+                    "markdown", 1, true, "" });
         }
 
         std::string _review_elapsed_text() const
@@ -1089,8 +1090,8 @@ namespace {
 
 } // namespace
 
-Component make_review(std::shared_ptr<ApplicationState> state,
-    LayoutFn layout, WorkflowNavigateFn navigate)
+Component make_review(std::shared_ptr<ApplicationState> state, LayoutFn layout,
+    WorkflowNavigateFn navigate)
 {
     return ftxui::Make<Review>(
         std::move(state), std::move(layout), std::move(navigate));

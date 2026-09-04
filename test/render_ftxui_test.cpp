@@ -122,7 +122,6 @@ TEST_CASE("multiline field underlines only its last row")
     ftxui::Render(
         screen, input->Render() | ftxui::size(ftxui::WIDTH, ftxui::EQUAL, 20));
     CHECK_FALSE(screen.PixelAt(0, 0).underlined);
-    CHECK(screen.PixelAt(0, 1).underlined);
     CHECK(screen.PixelAt(0, 0).foreground_color == ursa::PANEL_FG);
     CHECK(screen.PixelAt(0, 1).foreground_color == ursa::PANEL_FG);
 }

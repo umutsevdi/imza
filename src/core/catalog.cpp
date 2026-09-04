@@ -18,11 +18,53 @@ namespace {
     constexpr long kFetchTimeoutSecs       = 60;
     constexpr std::int64_t kStaleAfterSecs = 7 * 24 * 3600;
 
-    constexpr std::array<std::string_view, 20> kWhitelist
-        = { "openai", "anthropic", "zai", "zai-coding-plan", "zhipuai",
-              "openrouter", "groq", "mistral", "deepseek", "moonshotai", "xai",
-              "opencode", "google", "minimax", "fireworks", "together-ai",
-              "cerebras", "perplexity", "azure", "amazon-bedrock" };
+    constexpr std::array<std::string_view, 44> kWhitelist = {
+        "alibaba",
+        "alibaba-cn",
+        "alibaba-coding-plan",
+        "alibaba-coding-plan-cn",
+        "alibaba-token-plan",
+        "alibaba-token-plan-cn",
+        "amd",
+        "databricks",
+        "deepseek",
+        "digitalocean",
+        "fireworks",
+        "github-copilot",
+        "hetzner",
+        "huggingface",
+        "kilo",
+        "kimi-for-coding",
+        "llama",
+        "llmgateway",
+        "llmgateway-providers",
+        "llmtr",
+        "meta",
+        "minimax",
+        "hyper",
+        "moonshotai",
+        "moonshotai-cn",
+        "nebius",
+        "nvidia",
+        "ollama-cloud",
+        "opencode",
+        "opencode-go",
+        "openrouter",
+        "perplexity-agent",
+        "tencent-coding-plan",
+        "tencent-tokenhub",
+        "tencent-token-plan",
+        "thinkingmachines"
+        "together-ai",
+        "vultr",
+        "xiaomi-token-plan-ams",
+        "xiaomi-token-plan-cn",
+        "xiaomi-token-plan-sgp",
+        "zai",
+        "zai-coding-plan",
+        "zhipuai",
+        "zhipuai-coding-plan",
+    };
 
     std::optional<double> cost_field(const Json::Value& cost, const char* key)
     {
@@ -45,8 +87,7 @@ namespace {
 
     bool endpoint_backed(const Connection& conn)
     {
-        return conn.provider_id == kLocalProviderId
-            || conn.provider_id == kCustomProviderId || !conn.endpoint.empty();
+        return conn.provider_id == kCustomProviderId || !conn.endpoint.empty();
     }
 
 } // namespace

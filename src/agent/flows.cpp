@@ -1,13 +1,12 @@
 #include "agent/flows.h"
-#include "agent/slash_commands.h"
-#include "agent/delegation_runner.h"
 #include "agent/prompt.h"
+#include "agent/slash_commands.h"
+#include "agent/turn_runner.h"
+#include "common/util.h"
+#include "network/json_io.h"
+#include "subsystems/delegation_runner.h"
 #include "subsystems/session_store.h"
 #include "subsystems/skill_store.h"
-#include "agent/turn_runner.h"
-#include "subsystems/environment.h"
-#include "network/json_io.h"
-#include "common/util.h"
 
 #include <memory>
 #include <string>
@@ -51,8 +50,7 @@ namespace {
         return true;
     }
 
-    void submit_with_skills(
-        ApplicationState& state, std::string text,
+    void submit_with_skills(ApplicationState& state, std::string text,
         std::vector<FileAttachment> attachments)
     {
         if (!validate_skill_mentions(state, text)) {
@@ -77,14 +75,14 @@ namespace {
             start_turn(state, std::move(text), std::move(attachments));
             return;
         }
-        state.skills->set_pending_turn(PendingSkillTurn { std::move(text),
-            std::move(attachments), std::move(awaiting), 0 });
+        state.skills->set_pending_turn(PendingSkillTurn {
+            std::move(text), std::move(attachments), std::move(awaiting), 0 });
         const PendingSkillTurn* pending = state.skills->pending_turn();
         const Skill& skill              = pending->awaiting.front();
         Json::Value args(Json::objectValue);
-        args["name"]  = skill.name;
-        args["scope"] = skill.scope == Skill::Scope::PROJECT ? "project"
-                                                             : "global";
+        args["name"] = skill.name;
+        args["scope"]
+            = skill.scope == Skill::Scope::PROJECT ? "project" : "global";
         enqueue_user_modal(state,
             ToolCallRequest { "skill", write_json(args),
                 "Load skill " + skill.name, "manual-skill",
@@ -101,24 +99,24 @@ namespace {
             return;
         }
         TurnSettings settings;
-        settings.model            = selection->model;
-        settings.connection_id    = selection->connection_id;
-        settings.reasoning_effort = to_config_effort(selection->reasoning_effort);
-        settings.route            = selection->route;
-        settings.dialect          = settings.route.dialect;
-        settings.mode             = state.session->mode();
+        settings.model         = selection->model;
+        settings.connection_id = selection->connection_id;
+        settings.reasoning_effort
+            = to_config_effort(selection->reasoning_effort);
+        settings.route   = selection->route;
+        settings.dialect = settings.route.dialect;
+        settings.mode    = state.session->mode();
         if (!state.environment->ready()) {
             state.session->enqueue_message(
                 std::move(text), std::move(attachments));
             return;
         }
-        const bool generate_title = state.session->claim_title_generation();
+        const bool generate_title     = state.session->claim_title_generation();
         const std::string title_input = text;
         state.session->clear_interrupt();
         state.session->begin_send(std::move(text), std::move(attachments));
-        state.runner->spawn(
-            state.session->build_history(
-                full_system_prompt(state), settings.dialect),
+        state.runner->spawn(state.session->build_history(
+                                full_system_prompt(state), settings.dialect),
             std::move(settings));
         if (generate_title && !state.runner->has_stream_override()) {
             const auto title_selection
@@ -194,10 +192,10 @@ namespace {
                 if (outcome.persisted
                     && std::holds_alternative<ConnectModal>(
                         state.session->modal())) {
-                    state.session->set_modal(ConnectModal {
-                        outcome.first_connection
-                            ? ConnectModal::Entry::PICK_MODEL
-                            : ConnectModal::Entry::MANAGE });
+                    state.session->set_modal(
+                        ConnectModal { outcome.first_connection
+                                ? ConnectModal::Entry::PICK_MODEL
+                                : ConnectModal::Entry::MANAGE });
                     state.session->bump_modal_serial();
                 }
             });
@@ -232,16 +230,17 @@ namespace {
         if (pending->next < pending->awaiting.size()) {
             const Skill& skill = pending->awaiting[pending->next];
             Json::Value args(Json::objectValue);
-            args["name"]  = skill.name;
-            args["scope"] = skill.scope == Skill::Scope::PROJECT ? "project"
-                                                                 : "global";
+            args["name"] = skill.name;
+            args["scope"]
+                = skill.scope == Skill::Scope::PROJECT ? "project" : "global";
             enqueue_user_modal(state,
                 ToolCallRequest { "skill", write_json(args),
                     "Load skill " + skill.name, "manual-skill",
                     ToolCallRequest::ApprovalReason::TOOL_PERMISSION });
             return;
         }
-        std::optional<PendingSkillTurn> turn = state.skills->take_pending_turn();
+        std::optional<PendingSkillTurn> turn
+            = state.skills->take_pending_turn();
         start_turn(state, std::move(turn->text), std::move(turn->attachments));
     }
 
@@ -340,7 +339,8 @@ void resolve_modal(ApplicationState& state, ModalResult result)
             = verdict != nullptr && verdict->decision != ToolDecision::REJECT;
         PendingSkillTurn* pending = state.skills->pending_turn();
         if (manual_accepted && pending != nullptr) {
-            manual_accepted = load_skill(state, pending->awaiting[pending->next]);
+            manual_accepted
+                = load_skill(state, pending->awaiting[pending->next]);
         }
     }
     if (auto* path = std::get_if<std::filesystem::path>(&result)) {
@@ -401,18 +401,17 @@ void resolve_modal(ApplicationState& state, ModalResult result)
 
 void run_slash(ApplicationState& state, std::string_view command)
 {
-    run_slash_command(
-        SlashCommandContext { state, state.on_exit,
-            [&state] { new_session(state); },
-            [&state](ModalPayload payload) {
-                enqueue_user_modal(state, std::move(payload));
-            },
-            [&state] { return sessions_modal(state); },
-            [&state] { return skills_modal(state); },
-            [&state] { return full_system_prompt(state); },
-            [&state](std::string error) {
-                state.session->set_error(std::move(error));
-            } },
+    run_slash_command(SlashCommandContext { state, state.on_exit,
+                          [&state] { new_session(state); },
+                          [&state](ModalPayload payload) {
+                              enqueue_user_modal(state, std::move(payload));
+                          },
+                          [&state] { return sessions_modal(state); },
+                          [&state] { return skills_modal(state); },
+                          [&state] { return full_system_prompt(state); },
+                          [&state](std::string error) {
+                              state.session->set_error(std::move(error));
+                          } },
         command);
 }
 

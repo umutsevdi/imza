@@ -1,5 +1,10 @@
-#include "agent/delegation_runner.h"
 #include "agent/flows.h"
+#include "common/util.h"
+#include "subsystems/attachments.h"
+#include "subsystems/delegation_runner.h"
+#include "subsystems/format.h"
+#include "ui/autocomplete.h"
+#include "ui/tool_format.h"
 #include "ui/ui.h"
 
 #include <ftxui/component/animation.hpp>
@@ -17,12 +22,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-
-#include "subsystems/attachments.h"
-#include "subsystems/format.h"
-#include "ui/autocomplete.h"
-#include "ui/tool_format.h"
-#include "common/util.h"
 
 namespace ursa {
 
@@ -471,8 +470,8 @@ namespace {
                     return true;
                 }
                 if (event == Event::Return) {
-                    if (!autocomplete_.accept(*state_, input_buf_,
-                            input_cursor_, attachments_)) {
+                    if (!autocomplete_.accept(
+                            *state_, input_buf_, input_cursor_, attachments_)) {
                         return true;
                     }
                     submit();
@@ -550,17 +549,19 @@ namespace {
         void open_viewer_for(const ToolCall& tc)
         {
             if (tc.name == "read") {
-                ursa::enqueue_user_modal(*state_, 
+                ursa::enqueue_user_modal(*state_,
                     ViewerModal { tool_call_head(tc), tc.result->text,
                         tool_code_language(tc), read_start_line(tc) });
             } else if (tc.name == "skill") {
-                ursa::enqueue_user_modal(*state_, ViewerModal {
-                    tool_call_head(tc), tc.result->text, "markdown", 1, true });
+                ursa::enqueue_user_modal(*state_,
+                    ViewerModal { tool_call_head(tc), tc.result->text,
+                        "markdown", 1, true });
             } else if (tc.name == "list") {
-                ursa::enqueue_user_modal(*state_, ViewerModal {
-                    "Directory listing", tc.result->text, "", 1 });
+                ursa::enqueue_user_modal(*state_,
+                    ViewerModal {
+                        "Directory listing", tc.result->text, "", 1 });
             } else {
-                ursa::enqueue_user_modal(*state_, 
+                ursa::enqueue_user_modal(*state_,
                     ViewerModal { "Shell output", tc.result->text, "", 1 });
             }
         }
@@ -568,8 +569,9 @@ namespace {
         void open_subagent_viewer(const ToolCall& tc, std::size_t index)
         {
             SubagentChat chat = state_->delegation->subagent_chat(tc, index);
-            ursa::enqueue_user_modal(*state_, ViewerModal { std::move(chat.title),
-                std::move(chat.transcript), "markdown", 1, true, "" });
+            ursa::enqueue_user_modal(*state_,
+                ViewerModal { std::move(chat.title), std::move(chat.transcript),
+                    "markdown", 1, true, "" });
         }
 
         void on_input_changed()
@@ -847,7 +849,8 @@ namespace {
             const std::size_t count
                 = std::max(tc.subagent_ids.size(), tc.subagent_chats.size());
             for (std::size_t index = 0; index < count; ++index) {
-                const SubagentChat chat = state_->delegation->subagent_chat(tc, index);
+                const SubagentChat chat
+                    = state_->delegation->subagent_chat(tc, index);
                 rows.push_back(make_subagent_viewer_button(
                     tc.id, index, "‹ View " + chat.title + " chat ›")
                         ->Render());

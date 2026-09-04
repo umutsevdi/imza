@@ -1,7 +1,7 @@
 #include "subsystems/provider_store.h"
 
-#include "core/pricing.h"
 #include "common/util.h"
+#include "core/pricing.h"
 
 #include <algorithm>
 #include <utility>
@@ -69,9 +69,7 @@ std::vector<ConnectionView> ProviderStore::connections() const
         view.api_key     = connection.api_key;
         view.active
             = config_.last_used && config_.last_used->provider == connection.id;
-        if (connection.provider_id == kLocalProviderId) {
-            view.name = "Local";
-        } else if (connection.provider_id == kCustomProviderId) {
+        if (connection.provider_id == kCustomProviderId) {
             view.name = "Custom";
         } else if (const auto it
             = catalog_.providers.find(connection.provider_id);
@@ -149,7 +147,6 @@ ProviderStore::provider_options() const
         options.emplace_back(id, provider.name.empty() ? id : provider.name);
     }
     std::sort(options.begin(), options.end());
-    options.emplace_back(std::string(kLocalProviderId), "Local");
     options.emplace_back(std::string(kCustomProviderId), "Custom");
     return options;
 }
@@ -273,8 +270,7 @@ void ProviderStore::connect(ConnectResult result, ConnectCompleteFn complete)
     Route route;
     {
         std::lock_guard lock(mutex_);
-        const bool known = result.provider_id == kLocalProviderId
-            || result.provider_id == kCustomProviderId
+        const bool known = result.provider_id == kCustomProviderId
             || catalog_.providers.contains(result.provider_id);
         if (known) {
             Connection probe;
@@ -543,8 +539,7 @@ Status ProviderStore::_commit_connection_locked(const ConnectResult& result,
     Connection stored;
     stored.provider_id = result.provider_id;
     stored.api_key     = result.api_key;
-    if (result.provider_id == kLocalProviderId
-        || result.provider_id == kCustomProviderId) {
+    if (result.provider_id == kCustomProviderId) {
         stored.endpoint = result.endpoint;
     }
 
