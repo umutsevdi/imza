@@ -5,6 +5,13 @@ project(ursa LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+if (WIN32)
+    message(${CMAKE_SOURCE_DIR})
+    # If Win32 use vcpkg to get dependencies.
+    set(CMAKE_TOOLCHAIN_FILE
+       "${CMAKE_SOURCE_DIR}/vcpkg/scripts/buildsystems/vcpkg.cmake"
+        CACHE STRING "Vcpkg toolchain file")
+endif()
 
 if(MSVC)
     add_compile_options(/W4)
@@ -31,6 +38,13 @@ elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE})
 endif()
 
+# OPTIONS
+option(URSA_BUILD_TESTS "Build and run tests" YES)
+option(URSA_PACKAGE "Package the executable" YES)
+message(STATUS "Started CMake for ${PROJECT_NAME} v${PROJECT_VERSION}...\n")
+message("Build Tests: ${URSA_BUILD_TESTS}")
+message("Package: ${URSA_PACKAGE}")
+message("Build Type: ${CMAKE_BUILD_TYPE}")
 
 # CURL
 find_package(CURL REQUIRED)
@@ -42,10 +56,12 @@ include(FetchContent)
 set(FTXUI_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(FTXUI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(FTXUI_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+set(FTXUI_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
     ftxui
     GIT_REPOSITORY https://github.com/ArthurSonzogni/ftxui
     GIT_TAG v7.0.3
+    EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(ftxui)
 
@@ -59,6 +75,7 @@ FetchContent_Declare(
     jsoncpp
     GIT_REPOSITORY https://github.com/open-source-parsers/jsoncpp.git
     GIT_TAG        1.9.6
+    EXCLUDE_FROM_ALL
 )
 
 # doctest
@@ -66,6 +83,7 @@ FetchContent_Declare(
     doctest
     GIT_REPOSITORY https://github.com/doctest/doctest.git
     GIT_TAG v2.4.12
+    EXCLUDE_FROM_ALL
 )
 
 # cmark-gfm
@@ -75,6 +93,7 @@ FetchContent_Declare(
     cmarkgfm
     GIT_REPOSITORY https://github.com/github/cmark-gfm.git
     GIT_TAG 0.29.0.gfm.13
+    EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(jsoncpp doctest cmarkgfm)
 
@@ -229,4 +248,76 @@ if (TESTS)
         ursa_ui
         doctest::doctest
     )
+endif()
+
+
+add_custom_target(bundle)
+set(PKGDIR "${CMAKE_BINARY_DIR}/package")
+add_custom_command(TARGET bundle POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+                ${CMAKE_SOURCE_DIR}/misc/ursa.ico
+                "${PKGDIR}/win/ursa.ico")
+add_custom_command(TARGET bundle POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+        ${CMAKE_SOURCE_DIR}/CHANGELOG.txt
+        "${PKGDIR}/win/")
+add_custom_command(TARGET bundle POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+        ${CMAKE_SOURCE_DIR}/LICENSE
+        "${PKGDIR}/win/")
+
+
+add_custom_command(TARGET bundle POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+                ${CMAKE_SOURCE_DIR}/LICENSE
+                "${PKGDIR}/usr/share/${PROJECT_NAME}/LICENSE")
+add_custom_command(TARGET bundle POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+                ${CMAKE_SOURCE_DIR}/misc/icon.png
+                "${PKGDIR}/usr/share/${PROJECT_NAME}/ursa.png")
+add_custom_command(TARGET bundle POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+                ${CMAKE_SOURCE_DIR}/misc/ursa.desktop
+                "${PKGDIR}/usr/share/applications/ursa.desktop")
+add_custom_command(TARGET bundle POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+        ${CMAKE_SOURCE_DIR}/CHANGELOG.txt "${PKGDIR}/usr/share/${PROJECT_NAME}")
+add_dependencies(${PROJECT_NAME} bundle)
+
+if(CMAKE_BUILD_TYPE STREQUAL "Release" AND URSA_PACKAGE)
+    if(NOT WIN32)
+        set(CPACK_PACKAGE_NAME ${PROJECT_NAME})
+        set(CPACK_PACKAGE_VERSION "0.1.0")
+        set(CPACK_PACKAGE_DESCRIPTION "Open source multi-modal coding agent.")
+        set(CPACK_PACKAGE_DESCRIPTION_SUMMARY ${CPACK_PACKAGE_DESCRIPTION})
+        set(CPACK_PACKAGE_VENDOR "Umut Sevdi")
+        set(CPACK_PACKAGE_MAINTAINER "Umut Sevdi <mail@umutsevdi.com>")
+        set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+        set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
+
+        set(CPACK_GENERATOR "DEB;RPM")
+        set(CPACK_RPM_PACKAGE_LICENSE "GPL")
+        set(CPACK_RPM_PACKAGE_GROUP "Development")
+        set(CPACK_RPM_PACKAGE_REQUIRES "libcurl")
+        set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Umut Sevdi <mail@umutsevdi.com>")
+        set(CPACK_DEBIAN_PACKAGE_DEPENDS "libcurl4")
+
+        install(FILES "build/release/ursa"
+    DESTINATION "/usr/bin/"
+    PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
+          GROUP_EXECUTE GROUP_READ
+          WORLD_EXECUTE WORLD_READ
+  )
+
+        install(DIRECTORY ${PKGDIR}/usr/share/
+    DESTINATION /usr/share/
+    USE_SOURCE_PERMISSIONS
+    PATTERN "*.*"
+  )
+
+        install(FILES "LICENSE"
+   DESTINATION "/usr/share/ursa"
+  )
+        include(CPack)
+    endif()
 endif()

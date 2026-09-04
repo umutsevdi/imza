@@ -1,8 +1,10 @@
 #include "ui/ui.h"
 
+extern "C" {
 #include <cmark-gfm-core-extensions.h>
 #include <cmark-gfm.h>
 #include <table.h>
+}
 
 #include <ftxui/dom/flexbox_config.hpp>
 #include <ftxui/dom/table.hpp>

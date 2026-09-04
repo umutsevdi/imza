@@ -1,0 +1,12 @@
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Name=Ursa
+GenericName=Ursa
+Comment=Open source multi-modal coding agent.
+Categories=Development;IDE
+Exec=ursa %U
+Terminal=true
+Type=Application
+Icon=/usr/share/ursa/ursa.png
+Actions=New;
+Keywords=development;programming;IDE;

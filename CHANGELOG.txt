@@ -1,0 +1,15 @@
+ursa
+AUTHOR:           Umut Sevdi <mail@umutsevdi.com>
+WEBSITE:          https://github.com/umutsevdi/ursa
+SOURCE CODE:      https://github.com/umutsevdi/ursa
+RELEASES:         https://github.com/umutsevdi/ursa/releases
+ISSUES & SUPPORT: https://github.com/umutsevdi/ursa/issues
+
+CHANGELOG
+-------------------------------------------------------------------------------
+0.1.0 - Fri, Sep 4 2026
+-------------------------------------------------------------------------------
+[https://github.com/umutsevdi/ursa/releases/tag/v0.1.0]
+
+Changes:
+    - Initial version.

@@ -1,8 +1,8 @@
 #include "subsystems/environment.h"
 
+#include "common/util.h"
 #include "core/command_runner.h"
 #include "core/config.h"
-#include "common/util.h"
 
 #include <algorithm>
 #include <array>
@@ -169,8 +169,8 @@ namespace {
         const auto close      = ver.find(']');
         if (open != std::string::npos && close != std::string::npos
             && close > open) {
-            std::string inner = trim(ver.substr(open + 1, close - open - 1));
-            const auto pos    = inner.find("Version ");
+            std::string inner { trim(ver.substr(open + 1, close - open - 1)) };
+            const auto pos = inner.find("Version ");
             if (pos != std::string::npos) {
                 inner = trim(inner.substr(pos + 8));
             }

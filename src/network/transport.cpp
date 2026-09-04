@@ -1,7 +1,8 @@
+#define NOMINMAX
+#include "common/util.h"
 #include "network/json_io.h"
 #include "network/network.h"
 #include "network/sse_parse.h"
-#include "common/util.h"
 
 #include <curl/curl.h>
 #include <algorithm>
@@ -62,8 +63,8 @@ Status http_get(const std::string& url, const std::vector<std::string>& headers,
     curl_easy_setopt(handle, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, timeout_secs);
     curl_easy_setopt(handle, CURLOPT_TIMEOUT, timeout_secs);
-    curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION,
-        opts.max_redirs > 0 ? 1L : 0L);
+    curl_easy_setopt(
+        handle, CURLOPT_FOLLOWLOCATION, opts.max_redirs > 0 ? 1L : 0L);
     if (opts.max_redirs > 0) {
         curl_easy_setopt(handle, CURLOPT_MAXREDIRS, opts.max_redirs);
     }
@@ -93,9 +94,9 @@ Status http_get(const std::string& url, const std::vector<std::string>& headers,
     return Status::OK;
 }
 
-Status http_post(const std::string& url, const std::vector<std::string>& headers,
-    const std::string& payload, long timeout_secs, std::string& body,
-    long* http_code, long max_redirs)
+Status http_post(const std::string& url,
+    const std::vector<std::string>& headers, const std::string& payload,
+    long timeout_secs, std::string& body, long* http_code, long max_redirs)
 {
     static thread_local CURL* handle = curl_easy_init();
     if (!handle) {
@@ -120,8 +121,8 @@ Status http_post(const std::string& url, const std::vector<std::string>& headers
     curl_easy_setopt(handle, CURLOPT_HTTPHEADER, list);
     curl_easy_setopt(handle, CURLOPT_POST, 1L);
     curl_easy_setopt(handle, CURLOPT_POSTFIELDS, payload.c_str());
-    curl_easy_setopt(handle, CURLOPT_POSTFIELDSIZE,
-        static_cast<long>(payload.size()));
+    curl_easy_setopt(
+        handle, CURLOPT_POSTFIELDSIZE, static_cast<long>(payload.size()));
     curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, append_body);
     curl_easy_setopt(handle, CURLOPT_WRITEDATA, &sink);
 
