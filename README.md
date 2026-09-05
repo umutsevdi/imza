@@ -75,16 +75,25 @@ or a locally hosted OpenAI-compatible model.
 - [X] OpenAI-compatible APIs
 - [X] Anthropic Messages API
 - [X] Local OpenAI-compatible servers
-- [X] Web search
+- [X] Web search, fetch
+- [X] Subagent configuration
+- [X] Syntax Highlighting
 ### To Do
 - [ ] MCP
 - [ ] LSP integration
 - [ ] Image or other multimodal prompt attachments
+- [ ] Better Permission System
+- [ ] Mid session directory change
+- [ ] Usage analytics UI (Monthly)
+- [ ] Capabilities system (Exposing preconfigured Python based extensions as tools)
+- [ ] Headless mode
+- [ ] Notifications
 
 ## Build
 
-Ursa requires a C++23 compiler, CMake, and CURL.
+Ursa requires a C++23 compiler, CMake, Python 3, and CURL.
 ```sh
+git submodule update --init --recursive
 cmake -B build -DCMAKE_BUILD_TYPE=Debug -DTESTS=ON \
   -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 cmake --build build --target ursa ursa_tests

@@ -69,7 +69,9 @@ std::vector<ConnectionView> ProviderStore::connections() const
         view.api_key     = connection.api_key;
         view.active
             = config_.last_used && config_.last_used->provider == connection.id;
-        if (connection.provider_id == kCustomProviderId) {
+        if (!connection.label.empty()) {
+            view.name = connection.label;
+        } else if (connection.provider_id == kCustomProviderId) {
             view.name = "Custom";
         } else if (const auto it
             = catalog_.providers.find(connection.provider_id);
@@ -539,6 +541,7 @@ Status ProviderStore::_commit_connection_locked(const ConnectResult& result,
     Connection stored;
     stored.provider_id = result.provider_id;
     stored.api_key     = result.api_key;
+    stored.label       = result.label;
     if (result.provider_id == kCustomProviderId) {
         stored.endpoint = result.endpoint;
     }
@@ -557,6 +560,7 @@ Status ProviderStore::_commit_connection_locked(const ConnectResult& result,
     if (existing != nullptr) {
         existing->provider_id = stored.provider_id;
         existing->api_key     = stored.api_key;
+        existing->label       = stored.label;
         existing->endpoint    = stored.endpoint;
         existing->dialects.clear();
         id = existing->id;

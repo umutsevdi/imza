@@ -11,13 +11,13 @@
 #include <variant>
 #include <vector>
 
+#include "common/types.h"
+#include "common/ursa_signal.h"
 #include "core/catalog.h"
 #include "core/config.h"
 #include "core/pricing.h"
 #include "network/models.h"
 #include "network/network.h"
-#include "common/types.h"
-#include "common/ursa_signal.h"
 
 namespace ursa {
 

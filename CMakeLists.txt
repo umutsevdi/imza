@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 4.0)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-project(ursa LANGUAGES CXX)
+project(ursa LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -96,6 +96,44 @@ FetchContent_Declare(
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(jsoncpp doctest cmarkgfm)
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(TREE_SITTER_GENERATOR
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_tree_sitter.py")
+set(TREE_SITTER_VENDOR_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/tree-sitter")
+set(TREE_SITTER_GENERATED_DIR
+    "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${TREE_SITTER_GENERATOR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/.gitmodules")
+execute_process(
+    COMMAND
+        "${Python3_EXECUTABLE}"
+        "${TREE_SITTER_GENERATOR}"
+        --root "${TREE_SITTER_VENDOR_DIR}"
+        --output "${TREE_SITTER_GENERATED_DIR}"
+    COMMAND_ERROR_IS_FATAL ANY
+)
+include("${TREE_SITTER_GENERATED_DIR}/tree_sitter_sources.cmake")
+
+add_subdirectory("${TREE_SITTER_VENDOR_DIR}/core"
+    "${CMAKE_CURRENT_BINARY_DIR}/tree-sitter-core" EXCLUDE_FROM_ALL)
+add_library(ursa_tree_sitter_grammars STATIC
+    ${URSA_TREE_SITTER_GRAMMAR_SOURCES})
+get_target_property(TREE_SITTER_GRAMMAR_SOURCES
+    ursa_tree_sitter_grammars SOURCES)
+foreach(source IN LISTS TREE_SITTER_GRAMMAR_SOURCES)
+    get_filename_component(source_directory "${source}" DIRECTORY)
+    set_property(SOURCE "${source}" APPEND PROPERTY
+        INCLUDE_DIRECTORIES "${source_directory}")
+endforeach()
+if(MSVC)
+    target_compile_options(ursa_tree_sitter_grammars PRIVATE /w)
+else()
+    target_compile_options(ursa_tree_sitter_grammars PRIVATE -w)
+endif()
+target_link_libraries(ursa_tree_sitter_grammars PUBLIC tree-sitter)
 
 file(GLOB TEST_SOURCES "test/*.cpp")
 
@@ -194,8 +232,10 @@ add_library(ursa_ui
     src/ui/modals/subagents.cpp
     src/ui/modals/tools.cpp
     src/ui/modals/variant.cpp
+    src/ui/review_syntax.cpp
     src/ui/side_panel.cpp
     src/ui/status_line.cpp
+    src/ui/syntax.cpp
     src/ui/tab_chat.cpp
     src/ui/tab_review.cpp
     src/ui/tool_format.cpp
@@ -206,6 +246,7 @@ target_include_directories(ursa_ui PRIVATE
     ${cmarkgfm_BINARY_DIR}/src
     ${cmarkgfm_SOURCE_DIR}/extensions
     ${jsoncpp_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
 target_compile_definitions(ursa_ui PRIVATE
     CMARK_GFM_STATIC_DEFINE
@@ -217,6 +258,7 @@ target_link_libraries(ursa_ui PUBLIC
     libcmark-gfm-extensions_static
     libcmark-gfm_static
     jsoncpp_static
+    ursa_tree_sitter_grammars
 )
 
 if (WIN32)
@@ -233,7 +275,7 @@ target_link_libraries(ursa PRIVATE
     ursa_ui
 )
 
-if (TESTS)
+if (URSA_BUILD_TESTS)
     add_executable(ursa_tests ${TEST_SOURCES})
     target_include_directories(ursa_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -254,37 +296,39 @@ if (TESTS)
 endif()
 
 
-add_custom_target(bundle)
 set(PKGDIR "${CMAKE_BINARY_DIR}/package")
-add_custom_command(TARGET bundle POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy
-                ${CMAKE_SOURCE_DIR}/misc/ursa.ico
-                "${PKGDIR}/win/ursa.ico")
-add_custom_command(TARGET bundle POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy
-        ${CMAKE_SOURCE_DIR}/CHANGELOG.txt
-        "${PKGDIR}/win/")
-add_custom_command(TARGET bundle POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy
-        ${CMAKE_SOURCE_DIR}/LICENSE
-        "${PKGDIR}/win/")
+function(add_bundle_file source destination)
+    get_filename_component(destination_directory "${destination}" DIRECTORY)
+    add_custom_command(
+        OUTPUT "${destination}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${destination_directory}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${source}" "${destination}"
+        DEPENDS "${source}"
+        VERBATIM
+    )
+    set(BUNDLE_OUTPUTS ${BUNDLE_OUTPUTS} "${destination}" PARENT_SCOPE)
+endfunction()
 
+add_bundle_file("${CMAKE_SOURCE_DIR}/misc/ursa.ico"
+    "${PKGDIR}/win/ursa.ico")
+add_bundle_file("${CMAKE_SOURCE_DIR}/CHANGELOG.txt"
+    "${PKGDIR}/win/CHANGELOG.txt")
+add_bundle_file("${CMAKE_SOURCE_DIR}/LICENSE"
+    "${PKGDIR}/win/LICENSE")
+add_bundle_file("${CMAKE_SOURCE_DIR}/misc/LICENSE.thirdparty.txt"
+    "${PKGDIR}/win/LICENSE.thirdparty.txt")
+add_bundle_file("${CMAKE_SOURCE_DIR}/LICENSE"
+    "${PKGDIR}/usr/share/${PROJECT_NAME}/LICENSE")
+add_bundle_file("${CMAKE_SOURCE_DIR}/misc/LICENSE.thirdparty.txt"
+    "${PKGDIR}/usr/share/${PROJECT_NAME}/LICENSE.thirdparty.txt")
+add_bundle_file("${CMAKE_SOURCE_DIR}/misc/icon.png"
+    "${PKGDIR}/usr/share/${PROJECT_NAME}/ursa.png")
+add_bundle_file("${CMAKE_SOURCE_DIR}/misc/ursa.desktop"
+    "${PKGDIR}/usr/share/applications/ursa.desktop")
+add_bundle_file("${CMAKE_SOURCE_DIR}/CHANGELOG.txt"
+    "${PKGDIR}/usr/share/${PROJECT_NAME}/CHANGELOG.txt")
 
-add_custom_command(TARGET bundle POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy
-                ${CMAKE_SOURCE_DIR}/LICENSE
-                "${PKGDIR}/usr/share/${PROJECT_NAME}/LICENSE")
-add_custom_command(TARGET bundle POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy
-                ${CMAKE_SOURCE_DIR}/misc/icon.png
-                "${PKGDIR}/usr/share/${PROJECT_NAME}/ursa.png")
-add_custom_command(TARGET bundle POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy
-                ${CMAKE_SOURCE_DIR}/misc/ursa.desktop
-                "${PKGDIR}/usr/share/applications/ursa.desktop")
-add_custom_command(TARGET bundle POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy
-        ${CMAKE_SOURCE_DIR}/CHANGELOG.txt "${PKGDIR}/usr/share/${PROJECT_NAME}")
+add_custom_target(bundle DEPENDS ${BUNDLE_OUTPUTS})
 add_dependencies(${PROJECT_NAME} bundle)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release" AND URSA_PACKAGE)

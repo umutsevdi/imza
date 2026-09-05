@@ -2,15 +2,14 @@
 
 #include <chrono>
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
 
 #include "agent/application_state.h"
+#include "agent/turn_runner.h"
 #include "subsystems/session.h"
 #include "subsystems/subagent_manager.h"
-#include "agent/turn_runner.h"
 
 namespace ursa {
 

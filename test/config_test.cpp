@@ -81,6 +81,7 @@ TEST_CASE("config roundtrip preserves connections and last_used")
     local.provider_id         = "local";
     local.endpoint            = "http://localhost:11434/v1/chat/completions";
     local.api_key             = "";
+    local.label               = "my Ollama";
     local.dialects["glm-5.3"] = ursa::ApiStandard::ANTHROPIC;
     cfg.providers.push_back(local);
 
@@ -96,6 +97,8 @@ TEST_CASE("config roundtrip preserves connections and last_used")
     CHECK(loaded.providers[0].provider_id == "openrouter");
     CHECK(loaded.providers[0].api_key == "sk-or-test");
     CHECK(loaded.providers[0].endpoint.empty());
+    CHECK(loaded.providers[0].label.empty());
+    CHECK(loaded.providers[1].label == "my Ollama");
     CHECK(loaded.providers[1].endpoint
         == "http://localhost:11434/v1/chat/completions");
     REQUIRE(loaded.providers[1].dialects.count("glm-5.3") == 1);
@@ -111,6 +114,8 @@ TEST_CASE("config roundtrip preserves connections and last_used")
     std::istringstream stream(read_all(path));
     REQUIRE(Json::parseFromStream(reader, stream, &written, &errors));
     CHECK_FALSE(written["providers"][0].isMember("id"));
+    CHECK_FALSE(written["providers"][0].isMember("label"));
+    CHECK(written["providers"][1]["label"] == "my Ollama");
     CHECK(written["models"]["main"]["provider"] == "openrouter");
     CHECK(written["models"]["main"]["reasoning_effort"] == "high");
     CHECK_FALSE(written.isMember("last_used"));

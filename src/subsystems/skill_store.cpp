@@ -8,8 +8,8 @@
 
 #include <json/json.h>
 
-#include "core/config.h"
 #include "common/util.h"
+#include "core/config.h"
 
 namespace ursa {
 

@@ -22,7 +22,7 @@ using QuestionForm = std::vector<QuestionCard>;
 struct QuestionAnswer {
     std::vector<std::string> selected;
     std::string free_text;
-    std::string prompt { };
+    std::string prompt;
 };
 
 struct ModalAnswer {
@@ -33,6 +33,7 @@ struct ConnectResult {
     std::string provider_id;
     std::string endpoint;
     std::string api_key;
+    std::string label;
     bool persist = true;
 };
 

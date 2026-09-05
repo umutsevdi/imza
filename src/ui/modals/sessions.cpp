@@ -96,7 +96,7 @@ namespace {
                 if (session_->has_pending_work()) {
                     return true;
                 }
-                ursa::resolve_modal(*state_, 
+                ursa::resolve_modal(*state_,
                     ModalResult { std::filesystem::path(paths_[cursor_]) });
                 return true;
             }

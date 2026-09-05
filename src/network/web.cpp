@@ -6,20 +6,18 @@
 
 #include <json/json.h>
 
-#include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <map>
 #include <string_view>
 #include <vector>
 
-
 namespace ursa {
 
 namespace {
 
-    constexpr long FETCH_TIMEOUT_SECS = 30;
-    constexpr long SEARCH_TIMEOUT_SECS = 25;
+    constexpr long FETCH_TIMEOUT_SECS    = 30;
+    constexpr long SEARCH_TIMEOUT_SECS   = 25;
     constexpr std::size_t MAX_BODY_BYTES = 5 * 1024 * 1024;
 
 #if defined(_WIN32)
@@ -100,33 +98,27 @@ namespace {
     const std::map<std::string_view, std::string_view>& named_entities()
     {
         static const std::map<std::string_view, std::string_view> map = {
-            { "amp", "&" },       { "lt", "<" },        { "gt", ">" },
-            { "quot", "\"" },     { "apos", "'" },      { "nbsp", " " },
-            { "copy", "\u00A9" }, { "reg", "\u00AE" },  { "trade", "\u2122" },
-            { "mdash", "\u2014" }, { "ndash", "\u2013" },
-            { "hellip", "\u2026" }, { "lsquo", "\u2018" },
-            { "rsquo", "\u2019" }, { "ldquo", "\u201C" },
-            { "rdquo", "\u201D" }, { "middot", "\u00B7" },
-            { "bull", "\u2022" }, { "laquo", "\u00AB" },
-            { "raquo", "\u00BB" }, { "deg", "\u00B0" },
+            { "amp", "&" }, { "lt", "<" }, { "gt", ">" }, { "quot", "\"" },
+            { "apos", "'" }, { "nbsp", " " }, { "copy", "\u00A9" },
+            { "reg", "\u00AE" }, { "trade", "\u2122" }, { "mdash", "\u2014" },
+            { "ndash", "\u2013" }, { "hellip", "\u2026" },
+            { "lsquo", "\u2018" }, { "rsquo", "\u2019" }, { "ldquo", "\u201C" },
+            { "rdquo", "\u201D" }, { "middot", "\u00B7" }, { "bull", "\u2022" },
+            { "laquo", "\u00AB" }, { "raquo", "\u00BB" }, { "deg", "\u00B0" },
             { "plusmn", "\u00B1" }, { "times", "\u00D7" },
-            { "divide", "\u00F7" }, { "euro", "\u20AC" },
-            { "pound", "\u00A3" }, { "yen", "\u00A5" },
-            { "cent", "\u00A2" }, { "sect", "\u00A7" },
-            { "para", "\u00B6" }, { "szlig", "\u00DF" },
-            { "auml", "\u00E4" }, { "ouml", "\u00F6" },
-            { "uuml", "\u00FC" }, { "Auml", "\u00C4" },
-            { "Ouml", "\u00D6" }, { "Uuml", "\u00DC" },
-            { "sz", "\u00DF" },
+            { "divide", "\u00F7" }, { "euro", "\u20AC" }, { "pound", "\u00A3" },
+            { "yen", "\u00A5" }, { "cent", "\u00A2" }, { "sect", "\u00A7" },
+            { "para", "\u00B6" }, { "szlig", "\u00DF" }, { "auml", "\u00E4" },
+            { "ouml", "\u00F6" }, { "uuml", "\u00FC" }, { "Auml", "\u00C4" },
+            { "Ouml", "\u00D6" }, { "Uuml", "\u00DC" }, { "sz", "\u00DF" }
         };
         return map;
     }
 
     // Decodes an entity spanning [begin+1, semi); appends to out and returns
     // true on success.
-    bool decode_entity(
-        const std::string& low, std::size_t begin, std::size_t semi,
-        std::string& out)
+    bool decode_entity(const std::string& low, std::size_t begin,
+        std::size_t semi, std::string& out)
     {
         const std::string_view body(low.data() + begin + 1, semi - begin - 1);
         if (body.empty()) {
@@ -144,15 +136,14 @@ namespace {
                 return false;
             }
             const unsigned long cp = std::strtoul(start, nullptr, base);
-            if (cp == 0 || cp > 0x10FFFF
-                || (cp >= 0xD800 && cp <= 0xDFFF)) {
+            if (cp == 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
                 return false;
             }
             append_utf8(out, static_cast<unsigned int>(cp));
             return true;
         }
         const auto& entities = named_entities();
-        const auto it = entities.find(body);
+        const auto it        = entities.find(body);
         if (it == entities.end()) {
             return false;
         }
@@ -207,8 +198,8 @@ namespace {
 Status normalize_web_url(const std::string& raw, std::string& out)
 {
     const std::string url(trim(raw));
-    const std::string scheme = to_lower(
-        url.size() >= 8 ? url.substr(0, 8) : url);
+    const std::string scheme
+        = to_lower(url.size() >= 8 ? url.substr(0, 8) : url);
     if (scheme.starts_with("https://")) {
         out = url;
     } else if (scheme.starts_with("http://")) {
@@ -219,8 +210,8 @@ Status normalize_web_url(const std::string& raw, std::string& out)
     return Status::OK;
 }
 
-Status fetch_url(const std::string& raw_url, FetchedPage& page,
-    std::string& detail)
+Status fetch_url(
+    const std::string& raw_url, FetchedPage& page, std::string& detail)
 {
     detail.clear();
     std::string url;
@@ -237,7 +228,7 @@ Status fetch_url(const std::string& raw_url, FetchedPage& page,
         "Accept-Language: en-US,en;q=0.9",
     };
 
-    long code = 0;
+    long code      = 0;
     bool truncated = false;
     std::string body;
     const HttpGetOptions opts { MAX_BODY_BYTES, &truncated };
@@ -252,12 +243,12 @@ Status fetch_url(const std::string& raw_url, FetchedPage& page,
     }
     if (code < 200 || code >= 300) {
         page.http_code = code;
-        detail = "HTTP " + std::to_string(code);
+        detail         = "HTTP " + std::to_string(code);
         return Status::API_ERROR;
     }
 
-    page.url   = std::move(url);
-    page.body  = std::move(body);
+    page.url       = std::move(url);
+    page.body      = std::move(body);
     page.http_code = code;
     return Status::OK;
 }
@@ -296,7 +287,7 @@ std::string html_to_text(const std::string& html)
     while (i < html.size()) {
         if (low.compare(i, 4, "<!--") == 0) {
             const auto end = low.find("-->", i + 4);
-            i = end == std::string::npos ? html.size() : end + 3;
+            i              = end == std::string::npos ? html.size() : end + 3;
             continue;
         }
         if (html[i] == '<') {
@@ -308,16 +299,13 @@ std::string html_to_text(const std::string& html)
             if (!tag.empty() && tag.front() == '/') {
                 tag.remove_prefix(1);
             }
-            const auto space = tag.find_first_of(" \t\r\n/");
-            const std::string_view name
-                = tag.substr(0, space == std::string_view::npos
-                        ? tag.size()
-                        : space);
+            const auto space            = tag.find_first_of(" \t\r\n/");
+            const std::string_view name = tag.substr(
+                0, space == std::string_view::npos ? tag.size() : space);
             if (is_ignored_tag(name)) {
                 if (tag.empty() || tag.front() != '/') {
-                    const std::string close
-                        = "</" + std::string(name);
-                    const auto end = low.find(close, gt);
+                    const std::string close = "</" + std::string(name);
+                    const auto end          = low.find(close, gt);
                     if (end == std::string::npos) {
                         break;
                     }
@@ -336,7 +324,7 @@ std::string html_to_text(const std::string& html)
             if (is_block_tag(name)) {
                 newline();
             }
-            i = gt + 1;
+            i             = gt + 1;
             pending_space = false;
             continue;
         }
@@ -348,7 +336,7 @@ std::string html_to_text(const std::string& html)
                     flush_space();
                     out += decoded;
                     pending_space = false;
-                    i = semi + 1;
+                    i             = semi + 1;
                     continue;
                 }
             }
@@ -415,8 +403,8 @@ Status web_search(const std::string& query, int num_results, std::string& text)
         "Content-Type: application/json",
         "Accept: application/json, text/event-stream",
     };
-    if (http_post(url, headers, write_json(body), SEARCH_TIMEOUT_SECS,
-            response, &code, 0)
+    if (http_post(url, headers, write_json(body), SEARCH_TIMEOUT_SECS, response,
+            &code, 0)
         != Status::OK) {
         return Status::NETWORK_ERROR;
     }

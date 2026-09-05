@@ -1,6 +1,6 @@
 #include "agent/flows.h"
-#include "subsystems/environment.h"
 #include "network/json_io.h"
+#include "subsystems/environment.h"
 #include "ui/tool_format.h"
 #include "ui/ui.h"
 
@@ -80,6 +80,12 @@ namespace {
         return out;
     }
 
+    bool is_markdown_type(std::string_view type)
+    {
+        const std::string normalized = to_lower(trim(std::string(type)));
+        return normalized == "md" || normalized == "markdown";
+    }
+
     Element tool_approval_reason(const ToolCallRequest& req)
     {
         const Json::Value args = parse_json(req.args);
@@ -142,19 +148,23 @@ namespace {
         }
 
         if (req.name == "edit") {
+            const std::string lang
+                = syntax_type_for_path(string_arg("file_path"));
             Elements rows {
                 section_title("Existing text"),
-                code_block(preview_text(string_arg("old_string"))),
+                code_block(preview_text(string_arg("old_string")), lang),
                 section_title("Replacement"),
-                code_block(preview_text(string_arg("new_string"))),
+                code_block(preview_text(string_arg("new_string")), lang),
             };
             return vbox(std::move(rows));
         }
 
         if (req.name == "write") {
+            const std::string lang
+                = syntax_type_for_path(string_arg("file_path"));
             return vbox({
                 section_title("Content"),
-                code_block(preview_text(string_arg("text"))),
+                code_block(preview_text(string_arg("text")), lang),
             });
         }
 
@@ -341,8 +351,8 @@ namespace {
                 "optional reason", { }, [this] { _confirm_reject(); }));
 
             auto resolve = [this](ToolDecision d, std::string r) {
-                ursa::resolve_modal(*state_, 
-                    ModalResult { ToolVerdict { d, std::move(r) } });
+                ursa::resolve_modal(
+                    *state_, ModalResult { ToolVerdict { d, std::move(r) } });
             };
             accept_ = action_button(
                 "Allow once", [resolve] { resolve(ToolDecision::ACCEPT, ""); });
@@ -378,8 +388,9 @@ namespace {
 
         void _confirm_reject()
         {
-            ursa::resolve_modal(*state_, ModalResult {
-                ToolVerdict { ToolDecision::REJECT, reason_buf_ } });
+            ursa::resolve_modal(*state_,
+                ModalResult {
+                    ToolVerdict { ToolDecision::REJECT, reason_buf_ } });
         }
 
         void build(const QuestionForm& form)
@@ -463,7 +474,24 @@ namespace {
             body_   = skills_;
         }
 
-        void build(const ViewerModal&) { reset_static_scroll(); }
+        void build(const ViewerModal& payload)
+        {
+            reset_static_scroll();
+            if (is_markdown_type(payload.lang)) {
+                viewer_content_ = render_markdown_element(payload.content);
+            } else if (payload.line_numbers) {
+                viewer_content_ = code_block_with_lines(
+                    payload.content, payload.lang, payload.start_line);
+            } else {
+                const int popup_w
+                    = std::min(Terminal::Size().dimx - 4, MODAL_MAX_WIDTH);
+                const std::size_t content_w
+                    = static_cast<std::size_t>(std::max(40, popup_w - 8));
+                viewer_content_ = code_block(
+                    join_lines(wrapped_lines(payload.content, content_w)),
+                    payload.lang);
+            }
+        }
 
         void build(std::monostate) { }
 
@@ -588,21 +616,8 @@ namespace {
 
         Element viewer_body(const ViewerModal& payload)
         {
-            Element body;
-            if (payload.line_numbers) {
-                body = code_block_with_lines(
-                    payload.content, payload.lang, payload.start_line);
-            } else {
-                const int popup_w
-                    = std::min(Terminal::Size().dimx - 4, MODAL_MAX_WIDTH);
-                const std::size_t content_w
-                    = static_cast<std::size_t>(std::max(40, popup_w - 8));
-                body = code_block(
-                    join_lines(wrapped_lines(payload.content, content_w)),
-                    payload.lang);
-            }
             return vbox({ header_line(payload.title), separatorEmpty(),
-                       static_viewport(std::move(body), payload.metadata) })
+                       static_viewport(viewer_content_, payload.metadata) })
                 | xflex;
         }
 
@@ -693,6 +708,7 @@ namespace {
         Component variant_;
         Component sessions_;
         Component skills_;
+        Element viewer_content_;
 
         Component body_;
     };

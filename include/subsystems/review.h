@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -10,8 +11,8 @@
 #include <variant>
 #include <vector>
 
-#include "core/git.h"
 #include "common/ursa_signal.h"
+#include "core/git.h"
 
 namespace ursa {
 

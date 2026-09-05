@@ -1,7 +1,7 @@
 #include "agent/application_state.h"
-#include <functional>
 #include "agent/slash_commands.h"
 #include "core/config.h"
+#include <functional>
 
 #include <doctest/doctest.h>
 
@@ -67,9 +67,8 @@ TEST_CASE("find_command matches case-insensitively")
 
 TEST_CASE("run_slash_command emits application effects")
 {
-    auto state
-        = make_application_state([](std::function<void()> f) { f(); },
-            Config { });
+    auto state = make_application_state(
+        [](std::function<void()> f) { f(); }, Config { });
     bool exited = false;
     ModalPayload modal;
     std::string error;

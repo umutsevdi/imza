@@ -10,12 +10,12 @@
 #include <utility>
 #include <vector>
 
+#include "common/types.h"
 #include "subsystems/attachments.h"
 #include "subsystems/skills.h"
-#include "common/types.h"
 
 namespace Json {
-    class Value;
+class Value;
 }
 
 namespace ursa {

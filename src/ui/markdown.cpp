@@ -138,7 +138,8 @@ namespace {
                     s.heading_begin(cmark_node_get_heading_level(node));
                     break;
                 case CMARK_NODE_CODE_BLOCK:
-                    s.code_block(cmark_node_get_literal(node));
+                    s.code_block(cmark_node_get_literal(node),
+                        cmark_node_get_fence_info(node));
                     break;
                 case CMARK_NODE_BLOCK_QUOTE: s.quote_begin(); break;
                 case CMARK_NODE_LIST:
@@ -272,23 +273,30 @@ namespace {
             flush_words(std::move(decorate));
         }
 
-        void code_block(std::string_view lit)
+        void code_block(std::string_view lit, const char* fence_info)
         {
             Elements lines;
-            size_t start = 0;
-            while (start <= lit.size()) {
-                size_t end = lit.find('\n', start);
-                if (end == std::string_view::npos) {
-                    end = lit.size();
+            const std::string_view type = fence_info == nullptr
+                ? std::string_view { }
+                : std::string_view(fence_info);
+            if (syntax_type_supported(type)) {
+                lines = highlight_code(lit, type);
+            } else {
+                size_t start = 0;
+                while (start <= lit.size()) {
+                    size_t end = lit.find('\n', start);
+                    if (end == std::string_view::npos) {
+                        end = lit.size();
+                    }
+                    lines.push_back(
+                        ftxui::text(std::string(lit.substr(start, end - start)))
+                        | color(Color::Palette256(245))
+                        | bgcolor(Color::Palette256(234)));
+                    if (end == lit.size()) {
+                        break;
+                    }
+                    start = end + 1;
                 }
-                lines.push_back(
-                    ftxui::text(std::string(lit.substr(start, end - start)))
-                    | color(Color::Palette256(245))
-                    | bgcolor(Color::Palette256(234)));
-                if (end == lit.size()) {
-                    break;
-                }
-                start = end + 1;
             }
             if (lines.empty()) {
                 lines.push_back(ftxui::text(""));

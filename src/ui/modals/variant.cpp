@@ -69,7 +69,7 @@ namespace {
         void apply()
         {
             if (cursor_ >= 0 && cursor_ < static_cast<int>(options_.size())) {
-                ursa::resolve_modal(*state_, 
+                ursa::resolve_modal(*state_,
                     ModalResult { VariantChoice { options_[cursor_] } });
             }
         }

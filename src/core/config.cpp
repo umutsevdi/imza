@@ -171,6 +171,7 @@ Status load_config(
                 conn.id = conn.provider_id;
             conn.endpoint = string_or_empty(entry, "endpoint");
             conn.api_key  = string_or_empty(entry, "api_key");
+            conn.label    = string_or_empty(entry, "label");
             if (conn.id.empty() || conn.provider_id.empty()) {
                 return fail(Status::CONFIG_ERROR,
                     "provider entry requires non-empty 'id' and 'provider_id'");
@@ -310,7 +311,8 @@ void apply_skill_policies(Config& config, const SkillPolicyChanges& changes)
 
 Status save_config(const std::filesystem::path& path, const Config& cfg)
 {
-    Json::Value root(Json::objectValue);    Json::Value providers(Json::arrayValue);
+    Json::Value root(Json::objectValue);
+    Json::Value providers(Json::arrayValue);
     for (const Connection& conn : cfg.providers) {
         Json::Value entry(Json::objectValue);
         if (conn.id != conn.provider_id)
@@ -320,6 +322,9 @@ Status save_config(const std::filesystem::path& path, const Config& cfg)
             entry["endpoint"] = conn.endpoint;
         }
         entry["api_key"] = conn.api_key;
+        if (!conn.label.empty()) {
+            entry["label"] = conn.label;
+        }
         if (!conn.dialects.empty()) {
             Json::Value dialects(Json::objectValue);
             for (const auto& [model, standard] : conn.dialects) {
