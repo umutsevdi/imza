@@ -3,12 +3,13 @@
 #include <tree_sitter/api.h>
 
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <cstdint>
 #include <filesystem>
+#include <initializer_list>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <regex>
 #include <span>
 #include <string>
@@ -21,7 +22,27 @@ using namespace ftxui;
 
 namespace {
 
-    extern "C" const TSLanguage* tree_sitter_cpp();
+    extern "C" {
+    const TSLanguage* tree_sitter_cpp();
+    const TSLanguage* tree_sitter_html();
+    const TSLanguage* tree_sitter_css();
+    const TSLanguage* tree_sitter_javascript();
+    const TSLanguage* tree_sitter_typescript();
+    const TSLanguage* tree_sitter_go();
+    const TSLanguage* tree_sitter_rust();
+    const TSLanguage* tree_sitter_swift();
+    const TSLanguage* tree_sitter_dockerfile();
+    const TSLanguage* tree_sitter_java();
+    const TSLanguage* tree_sitter_cmake();
+    const TSLanguage* tree_sitter_dart();
+    const TSLanguage* tree_sitter_make();
+    const TSLanguage* tree_sitter_json();
+    const TSLanguage* tree_sitter_lua();
+    const TSLanguage* tree_sitter_python();
+    const TSLanguage* tree_sitter_php();
+    const TSLanguage* tree_sitter_bash();
+    const TSLanguage* tree_sitter_powershell();
+    }
 
 #include "syntax_queries.inc"
 
@@ -60,26 +81,12 @@ namespace {
     using CursorPtr = std::unique_ptr<TSQueryCursor, CursorDeleter>;
 
     struct LanguageDefinition {
-        constexpr LanguageDefinition(std::string_view name_value,
-            std::span<const std::string_view> alias_values,
-            std::span<const std::string_view> extension_values,
-            std::span<const std::string_view> filename_values,
-            const TSLanguage* (&language_value)(), TSQuery* (&query_value)())
-            : name(name_value)
-            , aliases(alias_values)
-            , extensions(extension_values)
-            , filenames(filename_values)
-            , language(language_value)
-            , query(query_value)
-        {
-        }
-
         std::string_view name;
-        std::span<const std::string_view> aliases;
-        std::span<const std::string_view> extensions;
-        std::span<const std::string_view> filenames;
-        const TSLanguage* (&language)();
-        TSQuery* (&query)();
+        std::vector<std::string_view> aliases;
+        std::vector<std::string_view> extensions;
+        std::vector<std::string_view> filenames;
+        const TSLanguage* language { };
+        QueryPtr query;
     };
 
     std::string lower(std::string_view value)
@@ -90,28 +97,85 @@ namespace {
         return out;
     }
 
-    QueryPtr make_cpp_query()
+    QueryPtr make_query(const TSLanguage* language, std::string_view source)
     {
-        uint32_t offset      = 0;
-        TSQueryError error   = TSQueryErrorNone;
-        const TSLanguage* ts = tree_sitter_cpp();
-        return QueryPtr(ts_query_new(ts, CPP_HIGHLIGHTS.data(),
-            static_cast<uint32_t>(CPP_HIGHLIGHTS.size()), &offset, &error));
+        uint32_t offset    = 0;
+        TSQueryError error = TSQueryErrorNone;
+        return QueryPtr(ts_query_new(language, source.data(),
+            static_cast<uint32_t>(source.size()), &offset, &error));
     }
 
-    TSQuery* cpp_query()
+    using LanguageFunction = const TSLanguage* (*)();
+
+    void add_language(std::vector<LanguageDefinition>& languages,
+        std::string_view name, LanguageFunction language,
+        std::string_view query, std::initializer_list<std::string_view> aliases,
+        std::initializer_list<std::string_view> extensions,
+        std::initializer_list<std::string_view> filenames = { })
     {
-        static QueryPtr query = make_cpp_query();
-        return query.get();
+        const TSLanguage* ts_language = language();
+        languages.push_back(LanguageDefinition { name, aliases, extensions,
+            filenames, ts_language, make_query(ts_language, query) });
     }
 
-    constexpr std::array<std::string_view, 2> CPP_ALIASES { "cpp", "c++" };
-    constexpr std::array<std::string_view, 7> CPP_EXTENSIONS { "cpp", "cc",
-        "cxx", "hpp", "hh", "hxx", "h" };
-    constexpr std::array<std::string_view, 0> CPP_FILENAMES { };
-    constexpr std::array<LanguageDefinition, 1> LANGUAGES { LanguageDefinition {
-        "cpp", CPP_ALIASES, CPP_EXTENSIONS, CPP_FILENAMES, tree_sitter_cpp,
-        cpp_query } };
+    std::vector<LanguageDefinition> make_languages()
+    {
+        std::vector<LanguageDefinition> languages;
+        languages.reserve(19);
+        add_language(languages, "cpp", tree_sitter_cpp, CPP_HIGHLIGHTS,
+            { "cpp", "c++", "c" },
+            { "cpp", "cc", "cxx", "c", "hpp", "hh", "hxx", "h" });
+        add_language(languages, "html", tree_sitter_html, HTML_HIGHLIGHTS,
+            { "html", "htm" }, { "html", "htm" });
+        add_language(languages, "css", tree_sitter_css, CSS_HIGHLIGHTS,
+            { "css" }, { "css" });
+        add_language(languages, "javascript", tree_sitter_javascript,
+            JAVASCRIPT_HIGHLIGHTS, { "javascript", "js", "jsx" },
+            { "js", "mjs", "cjs", "jsx" });
+        add_language(languages, "typescript", tree_sitter_typescript,
+            TYPESCRIPT_HIGHLIGHTS, { "typescript", "ts" },
+            { "ts", "mts", "cts" });
+        add_language(languages, "go", tree_sitter_go, GO_HIGHLIGHTS,
+            { "go", "golang" }, { "go" });
+        add_language(languages, "rust", tree_sitter_rust, RUST_HIGHLIGHTS,
+            { "rust", "rs" }, { "rs" });
+        add_language(languages, "swift", tree_sitter_swift, SWIFT_HIGHLIGHTS,
+            { "swift" }, { "swift" });
+        add_language(languages, "dockerfile", tree_sitter_dockerfile,
+            DOCKERFILE_HIGHLIGHTS, { "dockerfile", "docker", "containerfile" },
+            { }, { "dockerfile", "containerfile" });
+        add_language(languages, "java", tree_sitter_java, JAVA_HIGHLIGHTS,
+            { "java" }, { "java" });
+        add_language(languages, "cmake", tree_sitter_cmake, CMAKE_HIGHLIGHTS,
+            { "cmake" }, { "cmake" }, { "cmakelists.txt" });
+        add_language(languages, "dart", tree_sitter_dart, DART_HIGHLIGHTS,
+            { "dart" }, { "dart" });
+        add_language(languages, "make", tree_sitter_make, MAKE_HIGHLIGHTS,
+            { "make", "makefile" }, { "mk", "mak" },
+            { "makefile", "gnumakefile", "bsdmakefile" });
+        add_language(languages, "json", tree_sitter_json, JSON_HIGHLIGHTS,
+            { "json" }, { "json" });
+        add_language(languages, "lua", tree_sitter_lua, LUA_HIGHLIGHTS,
+            { "lua" }, { "lua" });
+        add_language(languages, "python", tree_sitter_python, PYTHON_HIGHLIGHTS,
+            { "python", "py" }, { "py", "pyw", "pyi" });
+        add_language(languages, "php", tree_sitter_php, PHP_HIGHLIGHTS,
+            { "php" }, { "php", "phtml" });
+        add_language(languages, "bash", tree_sitter_bash, BASH_HIGHLIGHTS,
+            { "bash", "sh", "shell" }, { "sh", "bash" },
+            { ".bashrc", ".bash_profile", ".profile" });
+        add_language(languages, "powershell", tree_sitter_powershell,
+            POWERSHELL_HIGHLIGHTS, { "powershell", "pwsh", "ps1" },
+            { "ps1", "psm1", "psd1" });
+        return languages;
+    }
+
+    const std::vector<LanguageDefinition>& languages()
+    {
+        static const std::vector<LanguageDefinition> registry
+            = make_languages();
+        return registry;
+    }
 
     bool contains(
         std::span<const std::string_view> values, std::string_view candidate)
@@ -126,13 +190,14 @@ namespace {
         if (!type.empty() && type.front() == '.') {
             type.erase(0, 1);
         }
+        const auto& registry = languages();
         const auto language
-            = std::ranges::find_if(LANGUAGES, [&type](const auto& candidate) {
+            = std::ranges::find_if(registry, [&type](const auto& candidate) {
                   return type == candidate.name
                       || contains(candidate.aliases, type)
                       || contains(candidate.extensions, type);
               });
-        return language == LANGUAGES.end() ? nullptr : &*language;
+        return language == registry.end() ? nullptr : &*language;
     }
 
     const LanguageDefinition* language_for_path(std::string_view path)
@@ -143,12 +208,13 @@ namespace {
             extension.erase(0, 1);
         }
         const std::string filename = lower(file.filename().string());
+        const auto& registry       = languages();
         const auto language        = std::ranges::find_if(
-            LANGUAGES, [&extension, &filename](const auto& candidate) {
+            registry, [&extension, &filename](const auto& candidate) {
                 return contains(candidate.extensions, extension)
                     || contains(candidate.filenames, filename);
             });
-        return language == LANGUAGES.end() ? nullptr : &*language;
+        return language == registry.end() ? nullptr : &*language;
     }
 
     SyntaxStyle capture_style(std::string_view capture)
@@ -163,14 +229,22 @@ namespace {
             || capture.starts_with("constant") || capture == "boolean") {
             return SyntaxStyle::NUMBER;
         }
-        if (capture.starts_with("type") || capture == "variable.builtin") {
+        if (capture.starts_with("type") || capture.starts_with("tag")
+            || capture.starts_with("attribute")
+            || capture == "variable.builtin") {
             return SyntaxStyle::TYPE;
         }
-        if (capture.starts_with("keyword") || capture.starts_with("operator")) {
+        if (capture.starts_with("keyword") || capture.starts_with("operator")
+            || capture.starts_with("conditional")
+            || capture.starts_with("repeat") || capture.starts_with("include")
+            || capture.starts_with("exception")) {
             return SyntaxStyle::KEYWORD;
         }
         if (capture.starts_with("preproc") || capture.starts_with("function")
-            || capture.starts_with("constructor") || capture == "module") {
+            || capture.starts_with("method")
+            || capture.starts_with("constructor")
+            || capture.starts_with("label") || capture.starts_with("escape")
+            || capture == "module") {
             return SyntaxStyle::SPECIAL;
         }
         return SyntaxStyle::PLAIN;
@@ -207,6 +281,25 @@ namespace {
         return { };
     }
 
+    std::string lua_regex(std::string_view pattern)
+    {
+        std::string converted;
+        for (std::size_t i = 0; i < pattern.size(); ++i) {
+            if (pattern[i] != '%' || i + 1 == pattern.size()) {
+                converted.push_back(pattern[i]);
+                continue;
+            }
+            switch (pattern[++i]) {
+            case 'u': converted += "A-Z"; break;
+            case 'l': converted += "a-z"; break;
+            case 'd': converted += "0-9"; break;
+            case 'w': converted += "A-Za-z0-9_"; break;
+            default: converted.push_back(pattern[i]); break;
+            }
+        }
+        return converted;
+    }
+
     bool predicates_match(
         const TSQuery* query, const TSQueryMatch& match, std::string_view code)
     {
@@ -230,45 +323,52 @@ namespace {
             if (operation.starts_with('#')) {
                 operation.remove_prefix(1);
             }
-            if (at + 1 >= count
-                || steps[at].type != TSQueryPredicateStepTypeCapture
-                || steps[at + 1].type != TSQueryPredicateStepTypeString) {
-                while (at < count
-                    && steps[at].type != TSQueryPredicateStepTypeDone) {
-                    ++at;
+            std::optional<uint32_t> capture_id;
+            std::vector<std::string_view> values;
+            while (
+                at < count && steps[at].type != TSQueryPredicateStepTypeDone) {
+                if (steps[at].type == TSQueryPredicateStepTypeCapture
+                    && !capture_id.has_value()) {
+                    capture_id = steps[at].value_id;
+                } else if (steps[at].type == TSQueryPredicateStepTypeString) {
+                    uint32_t value_size   = 0;
+                    const char* value_raw = ts_query_string_value_for_id(
+                        query, steps[at].value_id, &value_size);
+                    values.emplace_back(value_raw, value_size);
                 }
                 ++at;
+            }
+            ++at;
+            if (!capture_id.has_value() || values.empty()) {
                 continue;
             }
-            const uint32_t capture_id = steps[at++].value_id;
-            uint32_t value_size       = 0;
-            const char* value_raw     = ts_query_string_value_for_id(
-                query, steps[at++].value_id, &value_size);
-            const std::string_view value(value_raw, value_size);
-            const std::string_view body = capture_text(match, capture_id, code);
+            const std::string_view body
+                = capture_text(match, *capture_id, code);
 
             bool matched = true;
             if (operation == "eq?" || operation == "not-eq?") {
-                matched = body == value;
-            } else if (operation == "match?" || operation == "not-match?") {
+                matched = body == values.front();
+            } else if (operation == "any-of?" || operation == "not-any-of?") {
+                matched = std::ranges::find(values, body) != values.end();
+            } else if (operation == "match?" || operation == "not-match?"
+                || operation == "lua-match?") {
                 try {
-                    matched = std::regex_search(body.begin(), body.end(),
-                        std::regex(std::string(value)));
+                    const std::string pattern = operation == "lua-match?"
+                        ? lua_regex(values.front())
+                        : std::string(values.front());
+                    matched                   = std::regex_search(
+                        body.begin(), body.end(), std::regex(pattern));
                 } catch (const std::regex_error&) {
                     return false;
                 }
             }
-            if (operation == "not-eq?" || operation == "not-match?") {
+            if (operation == "not-eq?" || operation == "not-match?"
+                || operation == "not-any-of?") {
                 matched = !matched;
             }
             if (!matched) {
                 return false;
             }
-            while (
-                at < count && steps[at].type != TSQueryPredicateStepTypeDone) {
-                ++at;
-            }
-            ++at;
         }
         return true;
     }
@@ -281,13 +381,13 @@ namespace {
             || code.size() > std::numeric_limits<uint32_t>::max()) {
             return styles;
         }
-        const TSQuery* query = language.query();
+        const TSQuery* query = language.query.get();
         if (query == nullptr) {
             return styles;
         }
         ParserPtr parser(ts_parser_new());
         if (!parser
-            || !ts_parser_set_language(parser.get(), language.language())) {
+            || !ts_parser_set_language(parser.get(), language.language)) {
             return styles;
         }
         TreePtr tree(ts_parser_parse_string(parser.get(), nullptr, code.data(),

@@ -1,3 +1,4 @@
+#include <array>
 #include <string>
 
 #include <doctest/doctest.h>
@@ -58,7 +59,7 @@ TEST_CASE("C++ syntax highlighting uses standard terminal colors")
 {
     auto screen = ursa::test::to_screen(
         ursa::highlight_code_line("return 42; // done", "cpp"), 24, 1);
-    CHECK(screen.PixelAt(0, 0).foreground_color == ftxui::Color::Blue);
+    CHECK(screen.PixelAt(0, 0).foreground_color == ftxui::Color::Green);
     CHECK(screen.PixelAt(7, 0).foreground_color == ftxui::Color::Magenta);
     CHECK(screen.PixelAt(11, 0).foreground_color == ftxui::Color::GrayLight);
 }
@@ -67,7 +68,7 @@ TEST_CASE("typed markdown fences use syntax highlighting")
 {
     auto screen = ursa::test::to_screen(
         ursa::render_markdown_element("```cpp\nreturn 42;\n```"), 24, 4);
-    CHECK(screen.PixelAt(1, 1).foreground_color == ftxui::Color::Blue);
+    CHECK(screen.PixelAt(1, 1).foreground_color == ftxui::Color::Green);
     CHECK(screen.PixelAt(8, 1).foreground_color == ftxui::Color::Magenta);
 }
 
@@ -79,6 +80,65 @@ TEST_CASE("syntax type detection recognizes C++ paths and aliases")
     CHECK(ursa::syntax_type_for_path("include/example.h") == "cpp");
     CHECK_FALSE(ursa::syntax_type_supported("txt"));
     CHECK(ursa::syntax_type_for_path("notes.txt").empty());
+}
+
+TEST_CASE("syntax registry recognizes supported languages and special files")
+{
+    constexpr std::array<std::string_view, 20> TYPES { "html", "css", "js",
+        "ts", "golang", "rust", "c", "swift", "dockerfile", "java", "cmake",
+        "dart", "makefile", "json", "lua", "python", "php", "bash",
+        "powershell", "ps1" };
+    for (const std::string_view type : TYPES) {
+        CHECK_MESSAGE(ursa::syntax_type_supported(type), type);
+    }
+
+    CHECK(ursa::syntax_type_for_path("Dockerfile") == "dockerfile");
+    CHECK(ursa::syntax_type_for_path("Containerfile") == "dockerfile");
+    CHECK(ursa::syntax_type_for_path("CMakeLists.txt") == "cmake");
+    CHECK(ursa::syntax_type_for_path("Makefile") == "make");
+    CHECK(ursa::syntax_type_for_path("module.psm1") == "powershell");
+    CHECK(ursa::syntax_type_for_path("legacy.c") == "cpp");
+    CHECK_FALSE(ursa::syntax_type_supported("sql"));
+}
+
+TEST_CASE("all registered grammar queries produce highlighting")
+{
+    struct Sample {
+        std::string_view type;
+        std::string_view code;
+    };
+    constexpr std::array<Sample, 19> SAMPLES { {
+        { "cpp", "return 1;" },
+        { "html", "<div>text</div>" },
+        { "css", "body { color: red; }" },
+        { "javascript", "const value = true;" },
+        { "typescript", "const value: string = 'x';" },
+        { "go", "package main" },
+        { "rust", "fn main() {}" },
+        { "swift", "func value() -> Int { return 1 }" },
+        { "dockerfile", "FROM alpine" },
+        { "java", "class Main {}" },
+        { "cmake", "if(TRUE)" },
+        { "dart", "class Main {}" },
+        { "make", "include config.mk" },
+        { "json", "{\"key\": true}" },
+        { "lua", "local value = true" },
+        { "python", "def value(): return True" },
+        { "php", "<?php return true;" },
+        { "bash", "if true; then echo ok; fi" },
+        { "powershell", "function Test { return $true }" },
+    } };
+
+    for (const Sample& sample : SAMPLES) {
+        const auto screen = ursa::test::to_screen(
+            ursa::highlight_code_line(sample.code, sample.type),
+            static_cast<int>(sample.code.size()), 1);
+        bool styled = false;
+        for (int x = 0; x < static_cast<int>(sample.code.size()); ++x) {
+            styled |= screen.PixelAt(x, 0).foreground_color != ursa::PANEL_FG;
+        }
+        CHECK_MESSAGE(styled, sample.type);
+    }
 }
 
 TEST_CASE("Tree-sitter highlight predicates filter C++ constants")
@@ -200,8 +260,8 @@ TEST_CASE("diff_split combines syntax foregrounds with change backgrounds")
             { ursa::DiffRow::Kind::ADD, 1, 1, "return 0;", "return 1;" },
         } };
     auto screen = ursa::test::to_screen(ursa::diff_split(diff, 40), 40, 2);
-    CHECK(screen.PixelAt(6, 0).foreground_color == ftxui::Color::Blue);
+    CHECK(screen.PixelAt(6, 0).foreground_color == ftxui::Color::Green);
     CHECK(screen.PixelAt(6, 0).background_color == ursa::DIFF_DELETION_BG);
-    CHECK(screen.PixelAt(6, 1).foreground_color == ftxui::Color::Blue);
+    CHECK(screen.PixelAt(6, 1).foreground_color == ftxui::Color::Green);
     CHECK(screen.PixelAt(6, 1).background_color == ursa::DIFF_ADDITION_BG);
 }

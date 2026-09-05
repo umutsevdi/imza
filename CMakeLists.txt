@@ -118,25 +118,170 @@ FetchContent_Declare(
     SOURCE_SUBDIR ursa_no_cmake
     EXCLUDE_FROM_ALL
 )
+function(declare_tree_sitter_grammar name repository tag)
+    set(shallow TRUE)
+    if(tag MATCHES "^[0-9a-f]{40}$")
+        set(shallow FALSE)
+    endif()
+    FetchContent_Declare(
+        ${name}
+        GIT_REPOSITORY ${repository}
+        GIT_TAG ${tag}
+        GIT_SHALLOW ${shallow}
+        GIT_SUBMODULES ""
+        SOURCE_SUBDIR ursa_no_cmake
+        EXCLUDE_FROM_ALL
+    )
+endfunction()
+declare_tree_sitter_grammar(tree_sitter_html
+    https://github.com/tree-sitter/tree-sitter-html.git v0.23.2)
+declare_tree_sitter_grammar(tree_sitter_css
+    https://github.com/tree-sitter/tree-sitter-css.git v0.25.0)
+declare_tree_sitter_grammar(tree_sitter_javascript
+    https://github.com/tree-sitter/tree-sitter-javascript.git v0.25.0)
+declare_tree_sitter_grammar(tree_sitter_typescript
+    https://github.com/tree-sitter/tree-sitter-typescript.git v0.23.2)
+declare_tree_sitter_grammar(tree_sitter_go
+    https://github.com/tree-sitter/tree-sitter-go.git v0.25.0)
+declare_tree_sitter_grammar(tree_sitter_rust
+    https://github.com/tree-sitter/tree-sitter-rust.git v0.24.2)
+declare_tree_sitter_grammar(tree_sitter_swift
+    https://github.com/alex-pinkus/tree-sitter-swift.git
+    0.7.3-with-generated-files)
+declare_tree_sitter_grammar(tree_sitter_dockerfile
+    https://github.com/camdencheek/tree-sitter-dockerfile.git v0.2.0)
+declare_tree_sitter_grammar(tree_sitter_java
+    https://github.com/tree-sitter/tree-sitter-java.git v0.23.5)
+declare_tree_sitter_grammar(tree_sitter_cmake
+    https://github.com/uyha/tree-sitter-cmake.git v0.7.4)
+declare_tree_sitter_grammar(tree_sitter_dart
+    https://github.com/UserNobody14/tree-sitter-dart.git
+    be07cf7118d3dba06236a3f19541685a68209934)
+declare_tree_sitter_grammar(tree_sitter_make
+    https://github.com/alemuller/tree-sitter-make.git
+    a4b9187417d6be349ee5fd4b6e77b4172c6827dd)
+declare_tree_sitter_grammar(tree_sitter_json
+    https://github.com/tree-sitter/tree-sitter-json.git v0.24.8)
+declare_tree_sitter_grammar(tree_sitter_lua
+    https://github.com/tree-sitter-grammars/tree-sitter-lua.git v0.5.0)
+declare_tree_sitter_grammar(tree_sitter_python
+    https://github.com/tree-sitter/tree-sitter-python.git v0.25.0)
+declare_tree_sitter_grammar(tree_sitter_php
+    https://github.com/tree-sitter/tree-sitter-php.git v0.24.2)
+declare_tree_sitter_grammar(tree_sitter_bash
+    https://github.com/tree-sitter/tree-sitter-bash.git v0.25.1)
+declare_tree_sitter_grammar(tree_sitter_powershell
+    https://github.com/airbus-cert/tree-sitter-powershell.git v0.26.5)
 FetchContent_MakeAvailable(jsoncpp doctest cmarkgfm tree_sitter tree_sitter_c
-    tree_sitter_cpp)
+    tree_sitter_cpp tree_sitter_html tree_sitter_css tree_sitter_javascript
+    tree_sitter_typescript tree_sitter_go tree_sitter_rust tree_sitter_swift
+    tree_sitter_dockerfile tree_sitter_java tree_sitter_cmake
+    tree_sitter_dart tree_sitter_make tree_sitter_json tree_sitter_lua
+    tree_sitter_python tree_sitter_php tree_sitter_bash tree_sitter_powershell)
 
-file(READ "${tree_sitter_c_SOURCE_DIR}/queries/highlights.scm"
-    TREE_SITTER_C_HIGHLIGHTS)
-file(READ "${tree_sitter_cpp_SOURCE_DIR}/queries/highlights.scm"
-    TREE_SITTER_CPP_HIGHLIGHTS)
-set(TREE_SITTER_HIGHLIGHTS_SOURCE
-    "constexpr std::string_view CPP_HIGHLIGHTS = R\"ursa_query(\n${TREE_SITTER_C_HIGHLIGHTS}\n${TREE_SITTER_CPP_HIGHLIGHTS}\n)ursa_query\";\n")
+function(embed_tree_sitter_query name)
+    set(query "")
+    foreach(path IN LISTS ARGN)
+        file(READ "${path}" part)
+        string(APPEND query "${part}\n")
+    endforeach()
+    string(APPEND TREE_SITTER_HIGHLIGHTS_SOURCE
+        "constexpr std::string_view ${name}_HIGHLIGHTS = R\"ursa_query(\n${query})ursa_query\";\n")
+    set(TREE_SITTER_HIGHLIGHTS_SOURCE
+        "${TREE_SITTER_HIGHLIGHTS_SOURCE}" PARENT_SCOPE)
+endfunction()
+
+embed_tree_sitter_query(CPP
+    "${tree_sitter_c_SOURCE_DIR}/queries/highlights.scm"
+    "${tree_sitter_cpp_SOURCE_DIR}/queries/highlights.scm")
+embed_tree_sitter_query(HTML
+    "${tree_sitter_html_SOURCE_DIR}/queries/highlights.scm")
+embed_tree_sitter_query(CSS
+    "${tree_sitter_css_SOURCE_DIR}/queries/highlights.scm")
+embed_tree_sitter_query(JAVASCRIPT
+    "${tree_sitter_javascript_SOURCE_DIR}/queries/highlights.scm")
+embed_tree_sitter_query(TYPESCRIPT
+    "${tree_sitter_javascript_SOURCE_DIR}/queries/highlights.scm"
+    "${tree_sitter_typescript_SOURCE_DIR}/queries/highlights.scm")
+embed_tree_sitter_query(GO
+    "${tree_sitter_go_SOURCE_DIR}/queries/highlights.scm")
+embed_tree_sitter_query(RUST
+    "${tree_sitter_rust_SOURCE_DIR}/queries/highlights.scm")
+embed_tree_sitter_query(SWIFT
+    "${tree_sitter_swift_SOURCE_DIR}/queries/highlights.scm")
+embed_tree_sitter_query(DOCKERFILE
+    "${tree_sitter_dockerfile_SOURCE_DIR}/queries/highlights.scm")
+embed_tree_sitter_query(JAVA
+    "${tree_sitter_java_SOURCE_DIR}/queries/highlights.scm")
+embed_tree_sitter_query(CMAKE
+    "${tree_sitter_cmake_SOURCE_DIR}/queries/highlights.scm")
+embed_tree_sitter_query(DART
+    "${tree_sitter_dart_SOURCE_DIR}/queries/highlights.scm")
+embed_tree_sitter_query(MAKE
+    "${tree_sitter_make_SOURCE_DIR}/queries/highlights.scm")
+embed_tree_sitter_query(JSON
+    "${tree_sitter_json_SOURCE_DIR}/queries/highlights.scm")
+embed_tree_sitter_query(LUA
+    "${tree_sitter_lua_SOURCE_DIR}/queries/highlights.scm")
+embed_tree_sitter_query(PYTHON
+    "${tree_sitter_python_SOURCE_DIR}/queries/highlights.scm")
+embed_tree_sitter_query(PHP
+    "${tree_sitter_php_SOURCE_DIR}/queries/highlights.scm")
+embed_tree_sitter_query(BASH
+    "${tree_sitter_bash_SOURCE_DIR}/queries/highlights.scm")
+embed_tree_sitter_query(POWERSHELL
+    "${tree_sitter_powershell_SOURCE_DIR}/queries/highlights.scm")
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/syntax_queries.inc"
     CONTENT "${TREE_SITTER_HIGHLIGHTS_SOURCE}")
 
 add_library(ursa_tree_sitter_grammars STATIC
     ${tree_sitter_cpp_SOURCE_DIR}/src/parser.c
     ${tree_sitter_cpp_SOURCE_DIR}/src/scanner.c
+    ${tree_sitter_html_SOURCE_DIR}/src/parser.c
+    ${tree_sitter_html_SOURCE_DIR}/src/scanner.c
+    ${tree_sitter_css_SOURCE_DIR}/src/parser.c
+    ${tree_sitter_css_SOURCE_DIR}/src/scanner.c
+    ${tree_sitter_javascript_SOURCE_DIR}/src/parser.c
+    ${tree_sitter_javascript_SOURCE_DIR}/src/scanner.c
+    ${tree_sitter_typescript_SOURCE_DIR}/typescript/src/parser.c
+    ${tree_sitter_typescript_SOURCE_DIR}/typescript/src/scanner.c
+    ${tree_sitter_go_SOURCE_DIR}/src/parser.c
+    ${tree_sitter_rust_SOURCE_DIR}/src/parser.c
+    ${tree_sitter_rust_SOURCE_DIR}/src/scanner.c
+    ${tree_sitter_swift_SOURCE_DIR}/src/parser.c
+    ${tree_sitter_swift_SOURCE_DIR}/src/scanner.c
+    ${tree_sitter_dockerfile_SOURCE_DIR}/src/parser.c
+    ${tree_sitter_dockerfile_SOURCE_DIR}/src/scanner.c
+    ${tree_sitter_java_SOURCE_DIR}/src/parser.c
+    ${tree_sitter_cmake_SOURCE_DIR}/src/parser.c
+    ${tree_sitter_cmake_SOURCE_DIR}/src/scanner.c
+    ${tree_sitter_dart_SOURCE_DIR}/src/parser.c
+    ${tree_sitter_dart_SOURCE_DIR}/src/scanner.c
+    ${tree_sitter_make_SOURCE_DIR}/src/parser.c
+    ${tree_sitter_json_SOURCE_DIR}/src/parser.c
+    ${tree_sitter_lua_SOURCE_DIR}/src/parser.c
+    ${tree_sitter_lua_SOURCE_DIR}/src/scanner.c
+    ${tree_sitter_python_SOURCE_DIR}/src/parser.c
+    ${tree_sitter_python_SOURCE_DIR}/src/scanner.c
+    ${tree_sitter_php_SOURCE_DIR}/php/src/parser.c
+    ${tree_sitter_php_SOURCE_DIR}/php/src/scanner.c
+    ${tree_sitter_bash_SOURCE_DIR}/src/parser.c
+    ${tree_sitter_bash_SOURCE_DIR}/src/scanner.c
+    ${tree_sitter_powershell_SOURCE_DIR}/src/parser.c
+    ${tree_sitter_powershell_SOURCE_DIR}/src/scanner.c
 )
-target_include_directories(ursa_tree_sitter_grammars PRIVATE
-    ${tree_sitter_cpp_SOURCE_DIR}/src
-)
+get_target_property(TREE_SITTER_GRAMMAR_SOURCES
+    ursa_tree_sitter_grammars SOURCES)
+foreach(source IN LISTS TREE_SITTER_GRAMMAR_SOURCES)
+    get_filename_component(source_directory "${source}" DIRECTORY)
+    set_property(SOURCE "${source}" APPEND PROPERTY
+        INCLUDE_DIRECTORIES "${source_directory}")
+endforeach()
+if(MSVC)
+    target_compile_options(ursa_tree_sitter_grammars PRIVATE /w)
+else()
+    target_compile_options(ursa_tree_sitter_grammars PRIVATE -w)
+endif()
 target_link_libraries(ursa_tree_sitter_grammars PUBLIC tree-sitter)
 
 file(GLOB TEST_SOURCES "test/*.cpp")
