@@ -1,0 +1,30 @@
+{
+  "configurations": [
+    {
+      "name": "x64-Debug",
+      "generator": "Ninja",
+      "configurationType": "Debug",
+      "buildRoot": "${projectDir}\\build\\x64-Debug",
+      "installRoot": "${projectDir}\\build\\install\\debug-${name}",
+      "inheritEnvironments": [
+        "msvc_x64"
+      ],
+      "cmakeCommandArgs": "-DURSA_BUILD_TESTS=OFF",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": ""
+    },
+    {
+      "name": "x64-Release",
+      "generator": "Ninja",
+      "configurationType": "Release",
+      "buildRoot": "${projectDir}\\build\\x64-Release",
+      "installRoot": "${projectDir}\\build\\install\\release-${name}",
+      "inheritEnvironments": [
+        "msvc_x64"
+      ],
+      "cmakeCommandArgs": "-DURSA_BUILD_TESTS=OFF",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": ""
+    }
+  ]
+}
