@@ -68,6 +68,17 @@ std::filesystem::path data_dir()
 
 std::filesystem::path sessions_dir() { return data_dir() / "sessions"; }
 
+std::string_view subagent_default_variant(SubagentRole role)
+{
+    if (role == SubagentRole::BUILDER) {
+        return "medium";
+    }
+    if (role == SubagentRole::RESEARCH) {
+        return "low";
+    }
+    return "off";
+}
+
 namespace {
 
     std::string string_or_empty(const Json::Value& parent, const char* key)
@@ -315,61 +326,47 @@ Status save_config(const std::filesystem::path& path, const Config& cfg)
     Json::Value providers(Json::arrayValue);
     for (const Connection& conn : cfg.providers) {
         Json::Value entry(Json::objectValue);
-        if (conn.id != conn.provider_id)
-            entry["id"] = conn.id;
+        entry["id"]          = conn.id;
         entry["provider_id"] = conn.provider_id;
-        if (!conn.endpoint.empty()) {
-            entry["endpoint"] = conn.endpoint;
+        entry["endpoint"]    = conn.endpoint;
+        entry["api_key"]     = conn.api_key;
+        entry["label"]       = conn.label;
+        Json::Value dialects(Json::objectValue);
+        for (const auto& [model, standard] : conn.dialects) {
+            dialects[model] = dialect_str(standard);
         }
-        entry["api_key"] = conn.api_key;
-        if (!conn.label.empty()) {
-            entry["label"] = conn.label;
-        }
-        if (!conn.dialects.empty()) {
-            Json::Value dialects(Json::objectValue);
-            for (const auto& [model, standard] : conn.dialects) {
-                dialects[model] = dialect_str(standard);
-            }
-            entry["dialects"] = dialects;
+        if (!dialects.empty()) {
+            entry["dialects"] = std::move(dialects);
         }
         providers.append(entry);
     }
     root["providers"] = providers;
 
     Json::Value models(Json::objectValue);
-    if (cfg.last_used
-        || (cfg.reasoning_effort && !cfg.reasoning_effort->empty())) {
-        Json::Value main(Json::objectValue);
-        if (cfg.last_used) {
-            main["provider"] = cfg.last_used->provider;
-            main["model"]    = cfg.last_used->model;
-        }
-        if (cfg.reasoning_effort && !cfg.reasoning_effort->empty()) {
-            main["reasoning_effort"] = *cfg.reasoning_effort;
-        }
-        models["main"] = std::move(main);
+    Json::Value main(Json::objectValue);
+    if (cfg.last_used) {
+        main["provider"] = cfg.last_used->provider;
+        main["model"]    = cfg.last_used->model;
     }
-    if (!cfg.subagents.empty()) {
-        const auto write_subagent = [&](const char* key, SubagentRole role) {
-            const auto found = cfg.subagents.find(role);
-            if (found == cfg.subagents.end())
-                return;
-            Json::Value value(Json::objectValue);
-            if (!found->second.provider.empty()) {
-                value["provider"] = found->second.provider;
-                value["model"]    = found->second.model;
-            }
-            if (!found->second.variant.empty()) {
-                value["reasoning_effort"] = found->second.variant;
-            }
-            models[key] = std::move(value);
-        };
-        write_subagent("builder", SubagentRole::BUILDER);
-        write_subagent("researcher", SubagentRole::RESEARCH);
-        write_subagent("basic", SubagentRole::BASIC);
-    }
-    if (!models.empty())
-        root["models"] = std::move(models);
+    main["reasoning_effort"]  = cfg.reasoning_effort.value_or("off");
+    models["main"]            = std::move(main);
+    const auto write_subagent = [&](const char* key, SubagentRole role) {
+        const auto found = cfg.subagents.find(role);
+        Json::Value value(Json::objectValue);
+        if (found != cfg.subagents.end() && !found->second.provider.empty()) {
+            value["provider"] = found->second.provider;
+            value["model"]    = found->second.model;
+        }
+        value["reasoning_effort"]
+            = found == cfg.subagents.end() || found->second.variant.empty()
+            ? to_config_effort(subagent_default_variant(role))
+            : to_config_effort(found->second.variant);
+        models[key] = std::move(value);
+    };
+    write_subagent("builder", SubagentRole::BUILDER);
+    write_subagent("researcher", SubagentRole::RESEARCH);
+    write_subagent("basic", SubagentRole::BASIC);
+    root["models"] = std::move(models);
 
     Json::Value skills(Json::objectValue);
     Json::Value global(Json::objectValue);

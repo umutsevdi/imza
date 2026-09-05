@@ -58,9 +58,10 @@ namespace {
         return tasks;
     }
 
-    std::vector<Tool> delegated_tools()
+    std::vector<Tool> delegated_tools(const ApplicationState& state)
     {
-        std::vector<Tool> tools = default_tools();
+        std::vector<Tool> tools = default_tools(
+            state.is_interactive, state.web_enabled, state.shell_enabled);
         std::erase_if(tools, [](const Tool& tool) {
             return tool.spec.name == "subagent" || tool.spec.name == "todo";
         });
@@ -211,7 +212,7 @@ void DelegationRunner::run_subagents(
         auto child_state                  = make_child_application_state(
             *state_, [](const std::function<void()>& action) { action(); },
             runner_.has_stream_override() ? runner_.stream_fn() : StreamFn { },
-            delegated_tools(),
+            delegated_tools(*state_),
             [modal_request = modal_request_](ModalPayload payload) {
                 return modal_request(std::move(payload));
             },

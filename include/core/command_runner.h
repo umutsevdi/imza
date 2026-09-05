@@ -14,5 +14,6 @@ struct CommandResult {
 
 CommandResult run_command(
     const std::string& command, std::chrono::seconds timeout);
+CommandResult run_attached_command(const std::string& command);
 
 } // namespace ursa

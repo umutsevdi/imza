@@ -1,5 +1,6 @@
 #include "core/command_runner.h"
 
+#include <cerrno>
 #include <chrono>
 #include <cstring>
 #include <future>
@@ -97,6 +98,27 @@ namespace {
         return result;
     }
 
+    CommandResult run_windows_attached(
+        const std::string& command, CommandResult result)
+    {
+        std::wstring cmdline = to_wide(command);
+        STARTUPINFOW startup { };
+        startup.cb = sizeof(startup);
+        PROCESS_INFORMATION process { };
+        if (!CreateProcessW(nullptr, cmdline.data(), nullptr, nullptr, TRUE, 0,
+                nullptr, nullptr, &startup, &process)) {
+            return result;
+        }
+        result.spawned = true;
+        WaitForSingleObject(process.hProcess, INFINITE);
+        DWORD exit_code = 0;
+        GetExitCodeProcess(process.hProcess, &exit_code);
+        result.exit_code = static_cast<int>(exit_code);
+        CloseHandle(process.hProcess);
+        CloseHandle(process.hThread);
+        return result;
+    }
+
 #else
 
     CommandResult run_posix(const std::string& command,
@@ -164,6 +186,37 @@ namespace {
         return result;
     }
 
+    CommandResult run_posix_attached(
+        const std::string& command, CommandResult result)
+    {
+        const pid_t pid = fork();
+        if (pid < 0) {
+            return result;
+        }
+        if (pid == 0) {
+            execl("/bin/sh", "sh", "-c", command.c_str(),
+                static_cast<char*>(nullptr));
+            _exit(127);
+        }
+        int status = 0;
+        pid_t waited;
+        do {
+            waited = waitpid(pid, &status, 0);
+        } while (waited < 0 && errno == EINTR);
+        if (waited < 0) {
+            return result;
+        }
+        result.spawned = true;
+        if (WIFEXITED(status)) {
+            result.exit_code = WEXITSTATUS(status);
+        } else if (WIFSIGNALED(status)) {
+            result.exit_code = 128 + WTERMSIG(status);
+        } else {
+            result.exit_code = -1;
+        }
+        return result;
+    }
+
 #endif
 
 } // namespace
@@ -179,6 +232,19 @@ CommandResult run_command(
     return run_windows(command, timeout, std::move(result));
 #else
     return run_posix(command, timeout, std::move(result));
+#endif
+}
+
+CommandResult run_attached_command(const std::string& command)
+{
+    CommandResult result;
+    if (command.empty()) {
+        return result;
+    }
+#ifdef _WIN32
+    return run_windows_attached(command, std::move(result));
+#else
+    return run_posix_attached(command, std::move(result));
 #endif
 }
 

@@ -229,6 +229,18 @@ TEST_CASE("builtin tools expose the current tool set")
     CHECK(tool_specs(tools).size() == 11);
 }
 
+TEST_CASE("runtime defaults filter interactive shell and web tools")
+{
+    const auto tools = ursa::default_tools(false, false, false);
+
+    CHECK(ursa::find_tool(tools, "ask") == nullptr);
+    CHECK(ursa::find_tool(tools, "shell") == nullptr);
+    CHECK(ursa::find_tool(tools, "webfetch") == nullptr);
+    CHECK(ursa::find_tool(tools, "websearch") == nullptr);
+    CHECK(ursa::find_tool(tools, "read") != nullptr);
+    CHECK(ursa::find_tool(tools, "write") != nullptr);
+}
+
 TEST_CASE("shell tool runs a command and reports the exit code")
 {
     const auto tool = ursa::make_shell_tool();

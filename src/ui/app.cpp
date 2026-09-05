@@ -1,4 +1,5 @@
 #include "agent/flows.h"
+#include "subsystems/main_thread_queue.h"
 #include "subsystems/session_store.h"
 #include "subsystems/skill_store.h"
 #include "ui/ui.h"
@@ -274,7 +275,8 @@ namespace {
 
 } // namespace
 
-int run_repl(const Config& cfg)
+int run_repl(
+    std::shared_ptr<ApplicationState> state, MainThreadQueue& main_thread)
 {
     if (!is_interactive_terminal()) {
         std::println("ursa requires an interactive terminal");
@@ -283,14 +285,11 @@ int run_repl(const Config& cfg)
 
     ScreenInteractive screen = ScreenInteractive::FullscreenAlternateScreen();
     screen.ForceHandleCtrlC(false);
-    std::vector<Tool> tools = default_tools();
-    auto state              = make_application_state(
-        [&screen](std::function<void()> f) {
-            screen.Post(std::move(f));
-            screen.PostEvent(Event::Custom);
-        },
-        cfg, StreamFn { }, std::move(tools));
-    state->on_exit = [&screen] { screen.Exit(); };
+    auto task_subscription = main_thread.subscribe([&screen, &main_thread] {
+        screen.Post([&main_thread] { main_thread.drain(); });
+        screen.PostEvent(Event::Custom);
+    });
+    state->on_exit         = [&screen] { screen.Exit(); };
     state->providers->ensure_catalog_fresh();
     if (state->providers->config().providers.empty()) {
         ursa::enqueue_user_modal(

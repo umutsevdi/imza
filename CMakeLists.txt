@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 4.0)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 project(ursa LANGUAGES C CXX)
+set(PROJECT_VERSION 0.1.1)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -80,6 +81,17 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(ftxui)
 
+# CLI11
+set(CLI11_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(CLI11_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+set(CLI11_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(CLI11_PRECOMPILED ON CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    cli11
+    GIT_REPOSITORY https://github.com/CLIUtils/CLI11.git
+    GIT_TAG        v2.7.2
+    EXCLUDE_FROM_ALL
+)
 
 # jsoncpp
 set(JSONCPP_WITH_TESTS OFF)
@@ -111,7 +123,7 @@ FetchContent_Declare(
     GIT_TAG 0.29.0.gfm.13
     EXCLUDE_FROM_ALL
 )
-FetchContent_MakeAvailable(jsoncpp cmarkgfm)
+FetchContent_MakeAvailable(jsoncpp cmarkgfm cli11)
 if(URSA_BUILD_TESTS)
     FetchContent_MakeAvailable(doctest)
 endif()
@@ -199,6 +211,7 @@ add_library(ursa_subsystems
     src/subsystems/delegation_runner.cpp
     src/subsystems/environment.cpp
     src/subsystems/format.cpp
+    src/subsystems/main_thread_queue.cpp
     src/subsystems/provider_store.cpp
     src/subsystems/review.cpp
     src/subsystems/session.cpp
@@ -219,6 +232,7 @@ target_link_libraries(ursa_subsystems PUBLIC
 # Agent: orchestration, prompts, slash commands (ftxui-free)
 add_library(ursa_agent
     src/agent/application_state.cpp
+    src/agent/cli.cpp
     src/agent/flows.cpp
     src/agent/modal_queue.cpp
     src/agent/prompt.cpp
@@ -231,6 +245,11 @@ add_library(ursa_agent
 target_include_directories(ursa_agent PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${jsoncpp_SOURCE_DIR}/include
+)
+set_source_files_properties(src/agent/cli.cpp PROPERTIES
+    COMPILE_DEFINITIONS URSA_VERSION="${PROJECT_VERSION}")
+target_link_libraries(ursa_agent PRIVATE
+    CLI11::CLI11
 )
 target_link_libraries(ursa_agent PUBLIC
     ursa_core
@@ -353,19 +372,20 @@ add_dependencies(${PROJECT_NAME} bundle)
 if(CMAKE_BUILD_TYPE STREQUAL "Release" AND URSA_PACKAGE)
     if(NOT WIN32)
         set(CPACK_PACKAGE_NAME ${PROJECT_NAME})
-        set(CPACK_PACKAGE_VERSION "0.1.1")
+        set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
         set(CPACK_PACKAGE_DESCRIPTION "Open source multi-modal coding agent.")
         set(CPACK_PACKAGE_DESCRIPTION_SUMMARY ${CPACK_PACKAGE_DESCRIPTION})
-        set(CPACK_PACKAGE_VENDOR "Umut Sevdi")
+        set(CPACK_PACKAGE_VENDOR "Umut Sevdi <mail@umutsevdi.com>")
         set(CPACK_PACKAGE_MAINTAINER "Umut Sevdi <mail@umutsevdi.com>")
         set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
         set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 
         set(CPACK_GENERATOR "DEB;RPM")
-        set(CPACK_RPM_PACKAGE_LICENSE "GPL")
+        set(CPACK_RPM_PACKAGE_LICENSE "GNU GENERAL PUBLIC LICENSE")
         set(CPACK_RPM_PACKAGE_GROUP "Development")
-        set(CPACK_RPM_PACKAGE_REQUIRES "libcurl")
         set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Umut Sevdi <mail@umutsevdi.com>")
+
+        set(CPACK_RPM_PACKAGE_REQUIRES "libcurl")
         set(CPACK_DEBIAN_PACKAGE_DEPENDS "libcurl4")
 
         install(FILES "build/release/ursa"
