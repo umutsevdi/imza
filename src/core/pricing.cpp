@@ -26,10 +26,8 @@ std::optional<ModelPricing> pricing_from_model(const CachedModel& model)
         return std::nullopt;
     }
     ModelPricing pricing;
-    pricing.input_per_1k
-        = model.cost_input.value_or(0.0) * kPerMillionToPerK;
-    pricing.output_per_1k
-        = model.cost_output.value_or(0.0) * kPerMillionToPerK;
+    pricing.input_per_1k  = model.cost_input.value_or(0.0) * kPerMillionToPerK;
+    pricing.output_per_1k = model.cost_output.value_or(0.0) * kPerMillionToPerK;
     pricing.cache_read_per_1k
         = model.cost_cache_read.value_or(0.0) * kPerMillionToPerK;
     pricing.cache_write_per_1k

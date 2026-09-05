@@ -758,6 +758,25 @@ TEST_CASE("FIFO order preserved and queue_size counts overlays")
     CHECK(env.state->queue.size() == 0);
 }
 
+TEST_CASE("markdown viewer renders markdown instead of source lines")
+{
+    Env env;
+    ursa::enqueue_user_modal(*env.state,
+        ursa::ViewerModal { "Document", "# Heading\n\n```cpp\nreturn 1;\n```",
+            "markdown", 1, true, "" });
+    REQUIRE(env.pump.wait_for([&] {
+        return std::holds_alternative<ursa::ViewerModal>(env.session->modal());
+    }));
+
+    ftxui::Component modal = ursa::make_modal(env.state);
+    auto screen            = ftxui::Screen::Create(
+        ftxui::Dimension::Fixed(60), ftxui::Dimension::Fixed(12));
+    ftxui::Render(screen, modal->Render());
+    const std::string rendered = screen.ToString();
+    CHECK(rendered.find("Heading") != std::string::npos);
+    CHECK(rendered.find("# Heading") == std::string::npos);
+}
+
 TEST_CASE("accept-always records tool and later calls never queue")
 {
     Env env;

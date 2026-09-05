@@ -14,7 +14,6 @@
 #include "common/diff.h"
 #include "common/modal.h"
 #include "common/tool_call.h"
-#include "common/types.h"
 
 namespace ursa {
 

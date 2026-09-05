@@ -311,7 +311,8 @@ void apply_skill_policies(Config& config, const SkillPolicyChanges& changes)
 
 Status save_config(const std::filesystem::path& path, const Config& cfg)
 {
-    Json::Value root(Json::objectValue);    Json::Value providers(Json::arrayValue);
+    Json::Value root(Json::objectValue);
+    Json::Value providers(Json::arrayValue);
     for (const Connection& conn : cfg.providers) {
         Json::Value entry(Json::objectValue);
         if (conn.id != conn.provider_id)

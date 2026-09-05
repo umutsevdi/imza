@@ -45,7 +45,8 @@ struct DataHome {
 struct CurrentDirectory {
     std::filesystem::path original = std::filesystem::current_path();
 
-    ~CurrentDirectory() {
+    ~CurrentDirectory()
+    {
         std::error_code ec;
         std::filesystem::current_path(original, ec);
     }
@@ -89,8 +90,8 @@ TEST_CASE("saved sessions are immutable and fork on a new prompt")
 
     ursa::Session loaded;
     std::filesystem::path workspace;
-    REQUIRE(ursa::load_session(saved_path, loaded, &workspace)
-        == ursa::Status::OK);
+    REQUIRE(
+        ursa::load_session(saved_path, loaded, &workspace) == ursa::Status::OK);
     CHECK(workspace == directory.original);
     CHECK(std::filesystem::current_path() == other);
     CHECK(loaded.title() == "Saved title");

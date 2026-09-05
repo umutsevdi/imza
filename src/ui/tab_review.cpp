@@ -662,6 +662,7 @@ namespace {
             const ReviewState::Snapshot& snapshot, std::size_t file_index,
             const std::string& path, const ReviewLine& line, int review_width)
         {
+            const std::string syntax = syntax_type_for_path(path);
             const auto number = [](const std::optional<std::size_t>& value) {
                 return value ? std::format("{:>5}", *value)
                              : std::string(5, ' ');
@@ -678,19 +679,19 @@ namespace {
             _push(
                 rows,
                 [this, &line, marker = std::move(marker), background, number,
-                    review_width] {
+                    review_width, syntax] {
                     const int content_width = std::max(1, review_width - 14);
-                    Element row             = hbox({
+                    const std::string content
+                        = fit(line.content, content_width, horizontal_offset_);
+                    Element row = hbox({
                         text(number(line.old_line)) | color(PANEL_FG_DIM),
                         text(" "),
                         text(number(line.new_line)) | color(PANEL_FG_DIM),
                         text(" "),
                         text(marker + " "),
-                        text(fit(
-                            line.content, content_width, horizontal_offset_))
-                            | color(line.kind == ReviewLine::Kind::META
-                                    ? PANEL_FG_DIM
-                                    : PANEL_FG),
+                        line.kind == ReviewLine::Kind::META
+                            ? text(content) | color(PANEL_FG_DIM)
+                            : highlight_code_line(content, syntax),
                     });
                     if (background) {
                         row = std::move(row) | bgcolor(*background);
@@ -704,8 +705,8 @@ namespace {
             _push_editor(rows, path, line);
         }
 
-        Element _side_line(
-            const ReviewLine* line, bool old_side, int side_width) const
+        Element _side_line(const ReviewLine* line, bool old_side,
+            int side_width, std::string_view syntax) const
         {
             const std::optional<std::size_t> number = line == nullptr
                 ? std::nullopt
@@ -726,15 +727,14 @@ namespace {
                 marker     = "+";
                 background = DIFF_ADDITION_BG;
             }
-            Element side
-                = hbox({
-                      text(number_text) | color(PANEL_FG_DIM),
-                      text(" "),
-                      text(marker + " "),
-                      text(fit(line->content, std::max(1, side_width - 8),
-                          horizontal_offset_))
-                          | color(PANEL_FG) | xflex,
-                  })
+            const std::string content = fit(
+                line->content, std::max(1, side_width - 8), horizontal_offset_);
+            Element side = hbox({
+                               text(number_text) | color(PANEL_FG_DIM),
+                               text(" "),
+                               text(marker + " "),
+                               highlight_code_line(content, syntax) | xflex,
+                           })
                 | size(WIDTH, EQUAL, side_width);
             if (background) {
                 side = std::move(side) | bgcolor(*background);
@@ -747,6 +747,7 @@ namespace {
             const std::string& path, const ReviewLine* old_line,
             const ReviewLine* new_line, int side_width)
         {
+            const std::string syntax = syntax_type_for_path(path);
             const ReviewLine* target
                 = new_line != nullptr ? new_line : old_line;
             if (target == nullptr) {
@@ -754,11 +755,11 @@ namespace {
             }
             _push(
                 rows,
-                [this, old_line, new_line, side_width] {
+                [this, old_line, new_line, side_width, syntax] {
                     return hbox({
-                        _side_line(old_line, true, side_width),
+                        _side_line(old_line, true, side_width, syntax),
                         text(" │ ") | color(PANEL_BORDER),
-                        _side_line(new_line, false, side_width),
+                        _side_line(new_line, false, side_width, syntax),
                     });
                 },
                 VisibleRow { VisibleRow::Kind::LINE, file_index, target,

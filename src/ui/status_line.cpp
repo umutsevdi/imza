@@ -1,9 +1,9 @@
 #include "agent/application_state.h"
-#include "subsystems/subagent_manager.h"
+#include "common/util.h"
 #include "core/pricing.h"
 #include "subsystems/provider_store.h"
+#include "subsystems/subagent_manager.h"
 #include "ui/ui.h"
-#include "common/util.h"
 
 #include <cstdlib>
 #include <filesystem>

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 4.0)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-project(ursa LANGUAGES CXX)
+project(ursa LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -95,7 +95,49 @@ FetchContent_Declare(
     GIT_TAG 0.29.0.gfm.13
     EXCLUDE_FROM_ALL
 )
-FetchContent_MakeAvailable(jsoncpp doctest cmarkgfm)
+FetchContent_Declare(
+    tree_sitter
+    GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter.git
+    GIT_TAG v0.26.11
+    GIT_SHALLOW TRUE
+    EXCLUDE_FROM_ALL
+)
+FetchContent_Declare(
+    tree_sitter_c
+    GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-c.git
+    GIT_TAG v0.24.2
+    GIT_SHALLOW TRUE
+    SOURCE_SUBDIR ursa_no_cmake
+    EXCLUDE_FROM_ALL
+)
+FetchContent_Declare(
+    tree_sitter_cpp
+    URL https://github.com/tree-sitter/tree-sitter-cpp/archive/refs/tags/v0.23.4.tar.gz
+    URL_HASH SHA256=7a2c55afe3028f4105f25762ea58cc16537d1f5a1dcd9cca90410b3cd5d46051
+    DOWNLOAD_EXTRACT_TIMESTAMP FALSE
+    SOURCE_SUBDIR ursa_no_cmake
+    EXCLUDE_FROM_ALL
+)
+FetchContent_MakeAvailable(jsoncpp doctest cmarkgfm tree_sitter tree_sitter_c
+    tree_sitter_cpp)
+
+file(READ "${tree_sitter_c_SOURCE_DIR}/queries/highlights.scm"
+    TREE_SITTER_C_HIGHLIGHTS)
+file(READ "${tree_sitter_cpp_SOURCE_DIR}/queries/highlights.scm"
+    TREE_SITTER_CPP_HIGHLIGHTS)
+set(TREE_SITTER_HIGHLIGHTS_SOURCE
+    "constexpr std::string_view CPP_HIGHLIGHTS = R\"ursa_query(\n${TREE_SITTER_C_HIGHLIGHTS}\n${TREE_SITTER_CPP_HIGHLIGHTS}\n)ursa_query\";\n")
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/syntax_queries.inc"
+    CONTENT "${TREE_SITTER_HIGHLIGHTS_SOURCE}")
+
+add_library(ursa_tree_sitter_grammars STATIC
+    ${tree_sitter_cpp_SOURCE_DIR}/src/parser.c
+    ${tree_sitter_cpp_SOURCE_DIR}/src/scanner.c
+)
+target_include_directories(ursa_tree_sitter_grammars PRIVATE
+    ${tree_sitter_cpp_SOURCE_DIR}/src
+)
+target_link_libraries(ursa_tree_sitter_grammars PUBLIC tree-sitter)
 
 file(GLOB TEST_SOURCES "test/*.cpp")
 
@@ -196,6 +238,7 @@ add_library(ursa_ui
     src/ui/modals/variant.cpp
     src/ui/side_panel.cpp
     src/ui/status_line.cpp
+    src/ui/syntax.cpp
     src/ui/tab_chat.cpp
     src/ui/tab_review.cpp
     src/ui/tool_format.cpp
@@ -206,6 +249,7 @@ target_include_directories(ursa_ui PRIVATE
     ${cmarkgfm_BINARY_DIR}/src
     ${cmarkgfm_SOURCE_DIR}/extensions
     ${jsoncpp_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
 target_compile_definitions(ursa_ui PRIVATE
     CMARK_GFM_STATIC_DEFINE
@@ -217,6 +261,7 @@ target_link_libraries(ursa_ui PUBLIC
     libcmark-gfm-extensions_static
     libcmark-gfm_static
     jsoncpp_static
+    ursa_tree_sitter_grammars
 )
 
 if (WIN32)
@@ -268,12 +313,20 @@ add_custom_command(TARGET bundle POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy
         ${CMAKE_SOURCE_DIR}/LICENSE
         "${PKGDIR}/win/")
+add_custom_command(TARGET bundle POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+        ${CMAKE_SOURCE_DIR}/misc/LICENSE.tree-sitter
+        "${PKGDIR}/win/")
 
 
 add_custom_command(TARGET bundle POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy
                 ${CMAKE_SOURCE_DIR}/LICENSE
                 "${PKGDIR}/usr/share/${PROJECT_NAME}/LICENSE")
+add_custom_command(TARGET bundle POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+                ${CMAKE_SOURCE_DIR}/misc/LICENSE.tree-sitter
+                "${PKGDIR}/usr/share/${PROJECT_NAME}/LICENSE.tree-sitter")
 add_custom_command(TARGET bundle POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy
                 ${CMAKE_SOURCE_DIR}/misc/icon.png

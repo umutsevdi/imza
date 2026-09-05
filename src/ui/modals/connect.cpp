@@ -359,10 +359,10 @@ namespace {
             label_input_ = Input(field_option(&label_buf_, &label_cursor_,
                 "label (optional), e.g. my Ollama",
                 [this] { row_error_.clear(); }));
-            base_input_ = Input(field_option(&base_buf_, &base_cursor_,
+            base_input_  = Input(field_option(&base_buf_, &base_cursor_,
                 "base URL, e.g. http://localhost:1234/v1",
                 [this] { row_error_.clear(); }));
-            key_input_  = Input(password_option(&key_buf_, &key_cursor_,
+            key_input_   = Input(password_option(&key_buf_, &key_cursor_,
                 base_visible ? "API key (optional)" : "API key",
                 [this] { row_error_.clear(); }));
 

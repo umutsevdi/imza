@@ -97,7 +97,8 @@ namespace {
                     changes.entries.push_back(
                         { entry.name, entry.project_root, entry.policy });
                 }
-                ursa::resolve_modal(*state_, ModalResult { std::move(changes) });
+                ursa::resolve_modal(
+                    *state_, ModalResult { std::move(changes) });
                 return true;
             }
             return false;

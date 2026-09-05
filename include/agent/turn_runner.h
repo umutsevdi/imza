@@ -3,7 +3,6 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
-#include <future>
 #include <memory>
 #include <optional>
 #include <set>
@@ -13,18 +12,18 @@
 #include <vector>
 
 #include "agent/application_state.h"
-#include "subsystems/session.h"
 #include "agent/tools.h"
-#include "network/network.h"
 #include "common/types.h"
+#include "network/network.h"
+#include "subsystems/session.h"
 
 namespace ursa {
 
 class SkillStore;
 class ProviderStore;
 
-using SubagentToolFn = std::function<void(
-    const ToolCallRequest&, std::vector<Message>&)>;
+using SubagentToolFn
+    = std::function<void(const ToolCallRequest&, std::vector<Message>&)>;
 
 struct TurnSettings {
     std::string model;

@@ -54,6 +54,49 @@ TEST_CASE("render_markdown_element renders code blocks")
     CHECK(out.find("┌") != std::string::npos);
 }
 
+TEST_CASE("C++ syntax highlighting uses standard terminal colors")
+{
+    auto screen = ursa::test::to_screen(
+        ursa::highlight_code_line("return 42; // done", "cpp"), 24, 1);
+    CHECK(screen.PixelAt(0, 0).foreground_color == ftxui::Color::Blue);
+    CHECK(screen.PixelAt(7, 0).foreground_color == ftxui::Color::Magenta);
+    CHECK(screen.PixelAt(11, 0).foreground_color == ftxui::Color::GrayLight);
+}
+
+TEST_CASE("typed markdown fences use syntax highlighting")
+{
+    auto screen = ursa::test::to_screen(
+        ursa::render_markdown_element("```cpp\nreturn 42;\n```"), 24, 4);
+    CHECK(screen.PixelAt(1, 1).foreground_color == ftxui::Color::Blue);
+    CHECK(screen.PixelAt(8, 1).foreground_color == ftxui::Color::Magenta);
+}
+
+TEST_CASE("syntax type detection recognizes C++ paths and aliases")
+{
+    CHECK(ursa::syntax_type_supported("c++"));
+    CHECK(ursa::syntax_type_supported("hpp"));
+    CHECK(ursa::syntax_type_for_path("src/example.cpp") == "cpp");
+    CHECK(ursa::syntax_type_for_path("include/example.h") == "cpp");
+    CHECK_FALSE(ursa::syntax_type_supported("txt"));
+    CHECK(ursa::syntax_type_for_path("notes.txt").empty());
+}
+
+TEST_CASE("Tree-sitter highlight predicates filter C++ constants")
+{
+    auto screen = ursa::test::to_screen(
+        ursa::highlight_code_line("value + MAX_VALUE", "cpp"), 24, 1);
+    CHECK(screen.PixelAt(0, 0).foreground_color == ursa::PANEL_FG);
+    CHECK(screen.PixelAt(8, 0).foreground_color == ftxui::Color::Magenta);
+}
+
+TEST_CASE("untyped code keeps the panel foreground")
+{
+    auto screen = ursa::test::to_screen(
+        ursa::highlight_code_line("return 42;", ""), 16, 1);
+    CHECK(screen.PixelAt(0, 0).foreground_color == ursa::PANEL_FG);
+    CHECK(screen.PixelAt(7, 0).foreground_color == ursa::PANEL_FG);
+}
+
 TEST_CASE("render_markdown_element spaces inline code from neighbors")
 {
     const std::string out
@@ -148,4 +191,17 @@ TEST_CASE("diff_split renders unified changes on narrow screens")
     const std::string out = without_ansi(to_text(ursa::diff_split(diff, 80)));
     CHECK(out.find("10    − before") != std::string::npos);
     CHECK(out.find("   10 + after") != std::string::npos);
+}
+
+TEST_CASE("diff_split combines syntax foregrounds with change backgrounds")
+{
+    ursa::DiffView diff { "file.cpp",
+        {
+            { ursa::DiffRow::Kind::ADD, 1, 1, "return 0;", "return 1;" },
+        } };
+    auto screen = ursa::test::to_screen(ursa::diff_split(diff, 40), 40, 2);
+    CHECK(screen.PixelAt(6, 0).foreground_color == ftxui::Color::Blue);
+    CHECK(screen.PixelAt(6, 0).background_color == ursa::DIFF_DELETION_BG);
+    CHECK(screen.PixelAt(6, 1).foreground_color == ftxui::Color::Blue);
+    CHECK(screen.PixelAt(6, 1).background_color == ursa::DIFF_ADDITION_BG);
 }

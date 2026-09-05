@@ -17,8 +17,8 @@
 #include <vector>
 
 #include "common/diff.h"
-#include "subsystems/environment.h"
 #include "network/models.h"
+#include "subsystems/skills.h"
 #include "subsystems/workflow.h"
 
 namespace ursa {
@@ -121,6 +121,12 @@ struct ModelPickList {
 };
 
 ftxui::Element render_markdown_element(std::string_view md);
+
+bool syntax_type_supported(std::string_view type);
+std::string syntax_type_for_path(std::string_view path);
+ftxui::Element highlight_code_line(
+    std::string_view code, std::string_view type);
+ftxui::Elements highlight_code(std::string_view code, std::string_view type);
 
 ftxui::Element card(ftxui::Element body,
     std::optional<ftxui::Color> bg = std::nullopt, bool pad = true);

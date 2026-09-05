@@ -19,9 +19,9 @@ struct Message {
     enum class Type { SYSTEM, USER, ASSISTANT, TOOL };
     Type type;
     std::string content;
-    std::vector<ToolCallEntry> tool_calls { };
-    std::string tool_call_id { };
-    std::vector<ThinkingBlock> thinking { };
+    std::vector<ToolCallEntry> tool_calls;
+    std::string tool_call_id;
+    std::vector<ThinkingBlock> thinking;
 };
 
 struct Usage {

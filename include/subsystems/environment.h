@@ -9,10 +9,10 @@
 #include <thread>
 #include <unordered_map>
 
-#include "core/git.h"
-#include "subsystems/skills.h"
 #include "common/types.h"
 #include "common/ursa_signal.h"
+#include "core/git.h"
+#include "subsystems/skills.h"
 
 namespace ursa {
 

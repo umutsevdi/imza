@@ -12,9 +12,9 @@ namespace ursa {
 
 namespace {
 
-    constexpr std::size_t MAX_OUTPUT_CHARS    = 40000;
-    constexpr int DEFAULT_RESULTS             = 5;
-    constexpr int MAX_RESULTS                 = 10;
+    constexpr std::size_t MAX_OUTPUT_CHARS = 40000;
+    constexpr int DEFAULT_RESULTS          = 5;
+    constexpr int MAX_RESULTS              = 10;
 
     ToolOutput error(std::string text)
     {
@@ -27,8 +27,8 @@ namespace {
             return { ToolOutput::Kind::OUTPUT, std::move(text) };
         }
         std::string out(truncate_utf8(text, MAX_OUTPUT_CHARS));
-        out += "\n[truncated: showing first "
-            + std::to_string(out.size()) + " of the content]";
+        out += "\n[truncated: showing first " + std::to_string(out.size())
+            + " of the content]";
         return { ToolOutput::Kind::OUTPUT, std::move(out) };
     }
 
@@ -42,9 +42,8 @@ namespace {
         if (begin >= body.size() || body[begin] != '<') {
             return false;
         }
-        const std::string head
-            = to_lower(body.substr(begin, std::min(body.size() - begin,
-                std::size_t(200))));
+        const std::string head = to_lower(body.substr(
+            begin, std::min(body.size() - begin, std::size_t(200))));
         return head.starts_with("<!doctype html") || head.starts_with("<html")
             || head.starts_with("<head") || head.starts_with("<body")
             || head.starts_with("<div") || head.starts_with("<p")
@@ -73,9 +72,8 @@ namespace {
             return error("webfetch: " + detail + ": " + url);
         }
 
-        std::string text = looks_like_html(page.body)
-            ? html_to_text(page.body)
-            : page.body;
+        std::string text
+            = looks_like_html(page.body) ? html_to_text(page.body) : page.body;
         if (trim(text).empty()) {
             return error("webfetch: no readable content at " + page.url);
         }
@@ -92,8 +90,8 @@ namespace {
 
         int num_results = DEFAULT_RESULTS;
         if (args["num_results"].isInt()) {
-            num_results = std::clamp(
-                args["num_results"].asInt(), 1, MAX_RESULTS);
+            num_results
+                = std::clamp(args["num_results"].asInt(), 1, MAX_RESULTS);
         }
 
         std::string text;
@@ -102,8 +100,8 @@ namespace {
             return error("websearch: request failed for '" + query + "'");
         }
         if (st != Status::OK) {
-            return error("websearch: search request rejected for '" + query
-                + "'");
+            return error(
+                "websearch: search request rejected for '" + query + "'");
         }
         if (trim(text).empty()) {
             return { ToolOutput::Kind::OUTPUT,

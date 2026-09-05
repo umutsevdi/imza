@@ -7,10 +7,9 @@
 #include <string_view>
 #include <vector>
 
+#include "common/tool_call.h"
 #include "network/chat.h"
 #include "network/network.h"
-#include "common/tool_call.h"
-#include "common/types.h"
 
 namespace ursa {
 

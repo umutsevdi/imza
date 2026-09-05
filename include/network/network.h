@@ -2,18 +2,16 @@
 
 #include <json/json.h>
 
-#include <cstdint>
 #include <cstddef>
 #include <functional>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "network/chat.h"
 #include "common/modal.h"
 #include "common/tool_call.h"
 #include "common/types.h"
+#include "network/chat.h"
 
 namespace ursa {
 
@@ -34,7 +32,7 @@ struct StreamEvent {
     ToolCallRequest tool_call;
     QuestionForm question;
     Usage usage { };
-    std::string thinking_signature { };
+    std::string thinking_signature;
 };
 
 StreamEvent make_delta_event(std::string text);
@@ -60,17 +58,17 @@ std::vector<std::string> auth_headers(AuthType auth, const std::string& key);
 
 struct HttpGetOptions {
     std::size_t max_bytes = 0;
-    bool* truncated = nullptr;
-    long max_redirs = 5;
+    bool* truncated       = nullptr;
+    long max_redirs       = 5;
 };
 
 Status http_get(const std::string& url, const std::vector<std::string>& headers,
     long timeout_secs, std::string& body, long* http_code,
     const HttpGetOptions& opts = { });
 
-Status http_post(const std::string& url, const std::vector<std::string>& headers,
-    const std::string& payload, long timeout_secs, std::string& body,
-    long* http_code, long max_redirs = 5);
+Status http_post(const std::string& url,
+    const std::vector<std::string>& headers, const std::string& payload,
+    long timeout_secs, std::string& body, long* http_code, long max_redirs = 5);
 
 using StreamCallback = std::function<void(const StreamEvent&)>;
 

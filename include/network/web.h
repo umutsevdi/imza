@@ -15,7 +15,8 @@ struct FetchedPage {
 // Validates a raw URL (http/https only) and upgrades http:// to https://.
 Status normalize_web_url(const std::string& raw, std::string& out);
 
-Status fetch_url(const std::string& url, FetchedPage& page, std::string& detail);
+Status fetch_url(
+    const std::string& url, FetchedPage& page, std::string& detail);
 
 std::string html_to_text(const std::string& html);
 

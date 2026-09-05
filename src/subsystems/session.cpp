@@ -1,8 +1,8 @@
 #include "subsystems/session.h"
+#include "common/types.h"
+#include "core/pricing.h"
 #include "subsystems/format.h"
 #include "subsystems/workflow.h"
-#include "core/pricing.h"
-#include "common/types.h"
 
 #include <algorithm>
 #include <cassert>

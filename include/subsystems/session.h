@@ -12,15 +12,15 @@
 #include <variant>
 #include <vector>
 
-#include "subsystems/attachments.h"
-#include "network/chat.h"
-#include "common/modal.h"
-#include "network/network.h"
-#include "common/tool_call.h"
 #include "agent/tools.h"
-#include "core/pricing.h"
+#include "common/modal.h"
+#include "common/tool_call.h"
 #include "common/types.h"
 #include "common/ursa_signal.h"
+#include "core/pricing.h"
+#include "network/chat.h"
+#include "network/network.h"
+#include "subsystems/attachments.h"
 
 namespace ursa {
 
@@ -56,8 +56,8 @@ struct ToolCall {
         enum class Kind { OUTPUT, ERROR, REJECT, CANCEL };
         Kind kind;
         std::string text;
-        std::optional<DiffView> diff { };
-        std::optional<ShellStatus> shell_status { };
+        std::optional<DiffView> diff;
+        std::optional<ShellStatus> shell_status;
     };
     std::size_t id = 0;
     std::string call_id;

@@ -7,15 +7,14 @@
 #include <vector>
 
 #include "agent/modal_queue.h"
-#include "subsystems/session.h"
-#include "subsystems/subagent_manager.h"
-#include "common/tool_call.h"
-#include "core/config.h"
-#include "subsystems/environment.h"
-#include "network/network.h"
-#include "subsystems/provider_store.h"
 #include "common/types.h"
 #include "common/ursa_signal.h"
+#include "core/config.h"
+#include "network/network.h"
+#include "subsystems/environment.h"
+#include "subsystems/provider_store.h"
+#include "subsystems/session.h"
+#include "subsystems/subagent_manager.h"
 
 namespace ursa {
 

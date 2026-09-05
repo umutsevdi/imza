@@ -1,6 +1,6 @@
 #include "network/models.h"
-#include "network/json_io.h"
 #include "common/util.h"
+#include "network/json_io.h"
 
 #include <algorithm>
 #include <array>

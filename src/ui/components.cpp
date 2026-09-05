@@ -1,5 +1,5 @@
-#include "ui/ui.h"
 #include "common/util.h"
+#include "ui/ui.h"
 
 #include <algorithm>
 #include <cctype>
@@ -12,6 +12,7 @@
 #include <ftxui/dom/node.hpp>
 #include <ftxui/screen/screen.hpp>
 #include <functional>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <string>
@@ -295,20 +296,28 @@ Element code_block(const std::string& code, const std::string& lang)
     if (!lang.empty()) {
         body.push_back(text(lang) | color(PANEL_FG_DIM));
     }
-    size_t pos = 0;
-    for (;;) {
-        const size_t nl = code.find('\n', pos);
-        const std::string line
-            = code.substr(pos, nl == std::string::npos ? nl : nl - pos);
-        body.push_back(text(line) | color(fg));
-        if (nl == std::string::npos) {
-            break;
+    if (syntax_type_supported(lang)) {
+        Elements highlighted = highlight_code(code, lang);
+        body.insert(body.end(), std::make_move_iterator(highlighted.begin()),
+            std::make_move_iterator(highlighted.end()));
+    } else {
+        size_t pos = 0;
+        for (;;) {
+            const size_t nl = code.find('\n', pos);
+            const std::string line
+                = code.substr(pos, nl == std::string::npos ? nl : nl - pos);
+            body.push_back(text(line) | color(fg));
+            if (nl == std::string::npos) {
+                break;
+            }
+            pos = nl + 1;
         }
-        pos = nl + 1;
     }
     Element inner = vbox(std::move(body));
-    return hbox({ text(" "), std::move(inner) | xflex, text(" ") })
-        | bgcolor(bg) | dim;
+    Element block = hbox({ text(" "), std::move(inner) | xflex, text(" ") })
+        | bgcolor(bg);
+    return syntax_type_supported(lang) ? std::move(block)
+                                       : std::move(block) | dim;
 }
 
 Element code_block_with_lines(
@@ -318,6 +327,10 @@ Element code_block_with_lines(
     const Color fg                       = PANEL_FG;
     const Color gutter                   = PANEL_FG_DIM;
     const std::vector<std::string> lines = split_lines(code);
+    Elements highlighted;
+    if (syntax_type_supported(lang)) {
+        highlighted = highlight_code(code, lang);
+    }
 
     std::size_t footer = lines.size();
     for (std::size_t i = 0; i < lines.size(); ++i) {
@@ -350,12 +363,16 @@ Element code_block_with_lines(
         body.push_back(hbox({
             text(padded) | color(gutter),
             text(" "),
-            text(lines[i]) | color(fg),
+            syntax_type_supported(lang) && i < highlighted.size()
+                ? std::move(highlighted[i])
+                : text(lines[i]) | color(fg),
         }));
     }
     Element inner = vbox(std::move(body));
-    return hbox({ text(" "), std::move(inner) | xflex, text(" ") })
-        | bgcolor(bg) | dim;
+    Element block = hbox({ text(" "), std::move(inner) | xflex, text(" ") })
+        | bgcolor(bg);
+    return syntax_type_supported(lang) ? std::move(block)
+                                       : std::move(block) | dim;
 }
 
 Element panel(Element e)
@@ -505,7 +522,8 @@ bool diff_row_right_changed(const DiffRow& row)
 
 Element diff_split(const DiffView& diff, int available_width)
 {
-    std::size_t max_line = 1;
+    const std::string syntax = syntax_type_for_path(diff.file);
+    std::size_t max_line     = 1;
     for (const DiffRow& row : diff.rows) {
         if (row.left_no) {
             max_line = std::max(max_line, *row.left_no);
@@ -535,20 +553,20 @@ Element diff_split(const DiffView& diff, int available_width)
                     { text("  " + row.left) | color(PANEL_FG_DIM), filler() }));
                 continue;
             }
-            const auto append = [&](const std::optional<std::size_t>& old_no,
-                                    const std::optional<std::size_t>& new_no,
-                                    std::string marker,
-                                    const std::string& content,
-                                    std::optional<Color> background) {
-                Element line = hbox({ line_number(old_no), text(" "),
-                    line_number(new_no), text(" "),
-                    text(std::move(marker) + " " + content) | color(PANEL_FG),
-                    filler() });
-                if (background) {
-                    line = std::move(line) | bgcolor(*background);
-                }
-                rows.push_back(std::move(line));
-            };
+            const auto append
+                = [&](const std::optional<std::size_t>& old_no,
+                      const std::optional<std::size_t>& new_no,
+                      std::string marker, const std::string& content,
+                      std::optional<Color> background) {
+                      Element line = hbox(
+                          { line_number(old_no), text(" "), line_number(new_no),
+                              text(" "), text(std::move(marker) + " "),
+                              highlight_code_line(content, syntax), filler() });
+                      if (background) {
+                          line = std::move(line) | bgcolor(*background);
+                      }
+                      rows.push_back(std::move(line));
+                  };
             if (diff_row_left_changed(row)) {
                 append(
                     row.left_no, std::nullopt, "−", row.left, DIFF_DELETION_BG);
@@ -568,10 +586,9 @@ Element diff_split(const DiffView& diff, int available_width)
     const auto side      = [&](const std::optional<std::size_t>& number,
                                std::string marker, const std::string& content,
                                std::optional<Color> background) {
-        Element line
-            = hbox({ line_number(number), text(" "),
-                  text(std::move(marker) + " " + content) | color(PANEL_FG),
-                  filler() })
+        Element line = hbox({ line_number(number), text(" "),
+                           text(std::move(marker) + " "),
+                           highlight_code_line(content, syntax), filler() })
             | size(WIDTH, EQUAL, side_width);
         if (background) {
             line = std::move(line) | bgcolor(*background);

@@ -4,7 +4,6 @@
 #include <string>
 #include <vector>
 
-#include "core/config.h"
 #include "common/types.h"
 
 namespace ursa {

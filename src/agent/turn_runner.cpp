@@ -1,16 +1,14 @@
 #include "agent/turn_runner.h"
-#include "subsystems/format.h"
-#include "subsystems/skill_store.h"
-#include "subsystems/environment.h"
-#include "network/json_io.h"
-#include "core/pricing.h"
-#include "subsystems/provider_store.h"
 #include "common/types.h"
 #include "common/util.h"
+#include "core/pricing.h"
+#include "network/json_io.h"
+#include "subsystems/format.h"
+#include "subsystems/provider_store.h"
+#include "subsystems/skill_store.h"
 
 #include <algorithm>
 #include <chrono>
-#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -54,9 +52,9 @@ void apply_reasoning(ChatRequest& req, ApiStandard dialect,
         return;
     }
     if (dialect == ApiStandard::ANTHROPIC) {
-        req.thinking_budget = configured == "low"    ? 2000
-            : configured == "high" ? 16000
-                                   : 8000;
+        req.thinking_budget = configured == "low" ? 2000
+            : configured == "high"                ? 16000
+                                                  : 8000;
     } else {
         req.reasoning_effort = to_wire_effort(configured);
     }
@@ -226,15 +224,15 @@ bool TurnRunner::_compact_history(std::vector<Message>& history,
     return true;
 }
 
-void TurnRunner::_drive(
-    std::vector<Message> history, TurnSettings settings)
+void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
 {
     int retries                 = 0;
     std::uint64_t prompt_tokens = state_->session->last().prompt;
     bool compaction_attempted   = false;
     for (;;) {
-        const ModelPricing pricing = state_->providers->pricing_for(settings.model);
-        const bool should_compact  = !compaction_attempted
+        const ModelPricing pricing
+            = state_->providers->pricing_for(settings.model);
+        const bool should_compact = !compaction_attempted
             && pricing.context_limit > 0 && prompt_tokens > 0
             && prompt_tokens * 100 >= pricing.context_limit * COMPACTION_PERCENT
             && history.size() >= 4;
@@ -496,10 +494,9 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
                 && tool->safety == ToolSafety::MUTATING
                 && allowed_tools_.count(ev.tool_call.name) == 0;
             if (ev.tool_call.name == "skill") {
-                const auto skill
-                    = resolve_skill(state_->environment->skills(),
-                        parse_json(ev.tool_call.args));
-                needs_approval = skill.has_value()
+                const auto skill = resolve_skill(state_->environment->skills(),
+                    parse_json(ev.tool_call.args));
+                needs_approval   = skill.has_value()
                     && skill_policy(state_->providers->config(), *skill)
                         == SkillPolicy::ASK
                     && !skills_->is_loaded(skill->path);
@@ -651,9 +648,8 @@ void TurnRunner::_run_tool(
 {
     const ToolOutput out = dispatch_tool(tools_, req);
     if (req.name == "skill" && out.kind == ToolOutput::Kind::OUTPUT) {
-        if (const auto skill
-            = resolve_skill(state_->environment->skills(),
-                parse_json(req.args))) {
+        if (const auto skill = resolve_skill(
+                state_->environment->skills(), parse_json(req.args))) {
             skills_->record_tool_load(skill->path, out.text);
         }
     }

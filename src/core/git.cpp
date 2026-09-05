@@ -1,7 +1,5 @@
 #include "core/git.h"
 
-#include "common/util.h"
-
 #include <charconv>
 
 namespace ursa {

@@ -31,8 +31,8 @@ struct ToolCallRequest {
 
     std::string name;
     std::string args;
-    std::string description { };
-    std::string id { };
+    std::string description;
+    std::string id;
     ApprovalReason approval_reason = ApprovalReason::TOOL_PERMISSION;
 };
 

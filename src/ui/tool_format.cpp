@@ -212,7 +212,7 @@ std::string tool_call_head(const ToolCall& call)
     }
     if (call.name == "webfetch" || call.name == "websearch") {
         const Json::Value parsed = parse_json(call.args);
-        const auto* key = call.name == "webfetch" ? "url" : "query";
+        const auto* key          = call.name == "webfetch" ? "url" : "query";
         if (parsed.isObject() && parsed[key].isString()) {
             return parsed[key].asString();
         }
@@ -275,7 +275,7 @@ std::string tool_header_args(const ToolCall& call)
     }
     if (call.name == "webfetch" || call.name == "websearch") {
         const Json::Value parsed = parse_json(call.args);
-        const auto* key = call.name == "webfetch" ? "url" : "query";
+        const auto* key          = call.name == "webfetch" ? "url" : "query";
         if (parsed.isObject() && parsed[key].isString()) {
             return parsed[key].asString();
         }

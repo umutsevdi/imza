@@ -2,12 +2,11 @@
 #include <json/json.h>
 
 #include "agent/flows.h"
-#include "subsystems/skill_store.h"
-#include "network/sse_parse.h"
 #include "common/types.h"
 #include "network/network.h"
+#include "network/sse_parse.h"
 #include "subsystems/review.h"
-#include "common/types.h"
+#include "subsystems/skill_store.h"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -311,8 +310,8 @@ TEST_CASE("stream reports rate limit, retry-after and provider message")
 
     std::vector<ursa::StreamEvent> events;
     int retry_after       = 0;
-    const ursa::Status st = ursa::stream(route, req,
-        [&](const ursa::StreamEvent& ev) { events.push_back(ev); },
+    const ursa::Status st = ursa::stream(
+        route, req, [&](const ursa::StreamEvent& ev) { events.push_back(ev); },
         &retry_after);
 
     CHECK(st == ursa::Status::RATE_LIMITED);
@@ -340,8 +339,8 @@ TEST_CASE("stream emits CONNECTED then parses SSE on success")
     req.model = "gpt-4o";
 
     std::vector<ursa::StreamEvent> events;
-    const ursa::Status st = ursa::stream(route, req,
-        [&](const ursa::StreamEvent& ev) { events.push_back(ev); });
+    const ursa::Status st = ursa::stream(
+        route, req, [&](const ursa::StreamEvent& ev) { events.push_back(ev); });
 
     CHECK(st == ursa::Status::OK);
     REQUIRE(events.size() == 3);

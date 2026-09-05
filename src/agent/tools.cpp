@@ -1,7 +1,7 @@
 #include "agent/tools.h"
+#include "common/util.h"
 #include "core/command_runner.h"
 #include "network/json_io.h"
-#include "common/util.h"
 
 #include <algorithm>
 #include <chrono>

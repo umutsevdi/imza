@@ -2,10 +2,10 @@
 
 #include <doctest/doctest.h>
 
-#include "network/network.h"
-#include "subsystems/session.h"
 #include "agent/tools.h"
 #include "network/json_io.h"
+#include "network/network.h"
+#include "subsystems/session.h"
 
 TEST_CASE("parse_todo_args accepts a valid list with statuses")
 {
