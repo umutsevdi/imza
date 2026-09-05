@@ -1,6 +1,0 @@
-{
-    "name": "ursa",
-    "dependencies": [
-        "curl"
-    ]
-}

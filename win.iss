@@ -1,17 +1,17 @@
 ; ------------------------------------------------------------------------------
-; File: i18n/build.sh
-; Created: 08/22/25
+; File: win.iss
+; Created: 05/09/26
 ; Author: Umut Sevdi
 ; Description: Generates the Windows Installer.
 ;
-; Project: umutsevdi/imcircuit
+; Project: umutsevdi/ursa
 ; License: 
 ; GNU GENERAL PUBLIC LICENSE
 ; ------------------------------------------------------------------------------
 
 ; Change the following variable to path to the source code.
 #define Source "C:\Users\vboxuser\source\repos\ursa"
-#define Build Source + "\build\x86-Release"
+#define Build Source + "\build\x64-Release"
 
 #define ursaName "Ursa"
 #define ursaDescription "Open source multi-modal coding agent."
@@ -22,7 +22,7 @@
 #define ursaAssoc ursaName + " File"
 #define ursaCopyright "Copyright (C) 2026 Umut Sevdi"
 [Setup]
-AppId={{F8F8F40F-329B-4F1D-86A0-BC654325E25E}
+AppId={{AC922EA9-C1E0-4FA1-8529-8E9D701DF81C}
 AppName={#ursaName}
 AppVersion={#ursaVersion}
 AppVerName={#ursaName} - {#ursaVersion}
@@ -66,8 +66,6 @@ Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; Value
 
 [Files]
 Source: "{#Build}\release\{#ursaExe}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#Build}\release\libcurl.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#Build}\release\z.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Build}\package\win\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]

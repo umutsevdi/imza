@@ -5,16 +5,8 @@ project(ursa LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-if (WIN32)
-    message(${CMAKE_SOURCE_DIR})
-    # If Win32 use vcpkg to get dependencies.
-    set(CMAKE_TOOLCHAIN_FILE
-       "${CMAKE_SOURCE_DIR}/vcpkg/scripts/buildsystems/vcpkg.cmake"
-        CACHE STRING "Vcpkg toolchain file")
-endif()
-
 if(MSVC)
-    add_compile_options(/W4)
+    add_compile_options(/W4 /utf-8)
 else()
     add_compile_options(-Wall -Wextra)
     if (CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -46,9 +38,32 @@ message("Build Tests: ${URSA_BUILD_TESTS}")
 message("Package: ${URSA_PACKAGE}")
 message("Build Type: ${CMAKE_BUILD_TYPE}")
 
-# CURL
-find_package(CURL REQUIRED)
 include(FetchContent)
+if(WIN32)
+    set(BUILD_CURL_EXE OFF CACHE BOOL "" FORCE)
+    set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(CURL_USE_SCHANNEL ON CACHE BOOL "" FORCE)
+    set(CURL_USE_OPENSSL OFF CACHE BOOL "" FORCE)
+    set(CURL_ZLIB OFF CACHE BOOL "" FORCE)
+    set(CURL_BROTLI OFF CACHE BOOL "" FORCE)
+    set(CURL_ZSTD OFF CACHE BOOL "" FORCE)
+    set(USE_LIBIDN2 OFF CACHE BOOL "" FORCE)
+    set(USE_NGHTTP2 OFF CACHE BOOL "" FORCE)
+    set(CURL_USE_LIBPSL OFF CACHE BOOL "" FORCE)
+    set(CURL_DISABLE_LDAP ON CACHE BOOL "" FORCE)
+    set(CURL_DISABLE_LDAPS ON CACHE BOOL "" FORCE)
+    FetchContent_Declare(curl
+        GIT_REPOSITORY https://github.com/curl/curl.git
+        GIT_TAG curl-8_22_0
+        GIT_SHALLOW TRUE
+        EXCLUDE_FROM_ALL
+    )
+    FetchContent_MakeAvailable(curl)
+else()
+    find_package(CURL REQUIRED)
+endif()
 
 
 # ---- Dependencies ----
@@ -89,15 +104,19 @@ FetchContent_Declare(
 # cmark-gfm
 set(CMARK_STATIC ON CACHE BOOL "" FORCE)
 set(CMARK_SHARED OFF CACHE BOOL "" FORCE)
+set(CMARK_TESTS OFF CACHE BOOL "Disable cmark-gfm tests" FORCE)
 FetchContent_Declare(
     cmarkgfm
     GIT_REPOSITORY https://github.com/github/cmark-gfm.git
     GIT_TAG 0.29.0.gfm.13
     EXCLUDE_FROM_ALL
 )
-FetchContent_MakeAvailable(jsoncpp doctest cmarkgfm)
+FetchContent_MakeAvailable(jsoncpp cmarkgfm)
+if(URSA_BUILD_TESTS)
+    FetchContent_MakeAvailable(doctest)
+endif()
 
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
+find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
 set(TREE_SITTER_GENERATOR
     "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_tree_sitter.py")
 set(TREE_SITTER_VENDOR_DIR
