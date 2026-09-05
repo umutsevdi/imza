@@ -15,7 +15,7 @@
 
 #define ursaName "Ursa"
 #define ursaDescription "Open source multi-modal coding agent."
-#define ursaVersion "0.1.0"
+#define ursaVersion "0.1.1"
 #define ursaAuthor "Umut Sevdi"
 #define ursaURL "https://github.com/umutsevdi/ursa"
 #define ursaExe "ursa.exe"
