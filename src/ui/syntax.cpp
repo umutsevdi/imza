@@ -3,10 +3,10 @@
 #include <tree_sitter/api.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdint>
 #include <filesystem>
-#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -21,30 +21,6 @@ namespace ursa {
 using namespace ftxui;
 
 namespace {
-
-    extern "C" {
-    const TSLanguage* tree_sitter_cpp();
-    const TSLanguage* tree_sitter_html();
-    const TSLanguage* tree_sitter_css();
-    const TSLanguage* tree_sitter_javascript();
-    const TSLanguage* tree_sitter_typescript();
-    const TSLanguage* tree_sitter_go();
-    const TSLanguage* tree_sitter_rust();
-    const TSLanguage* tree_sitter_swift();
-    const TSLanguage* tree_sitter_dockerfile();
-    const TSLanguage* tree_sitter_java();
-    const TSLanguage* tree_sitter_cmake();
-    const TSLanguage* tree_sitter_dart();
-    const TSLanguage* tree_sitter_make();
-    const TSLanguage* tree_sitter_json();
-    const TSLanguage* tree_sitter_lua();
-    const TSLanguage* tree_sitter_python();
-    const TSLanguage* tree_sitter_php();
-    const TSLanguage* tree_sitter_bash();
-    const TSLanguage* tree_sitter_powershell();
-    }
-
-#include "syntax_queries.inc"
 
     enum class SyntaxStyle {
         PLAIN,
@@ -80,11 +56,22 @@ namespace {
     using TreePtr   = std::unique_ptr<TSTree, TreeDeleter>;
     using CursorPtr = std::unique_ptr<TSQueryCursor, CursorDeleter>;
 
+    using LanguageFunction = const TSLanguage* (*)();
+
+    struct LanguageSpec {
+        std::string_view name;
+        std::span<const std::string_view> extensions;
+        std::span<const std::string_view> filenames;
+        LanguageFunction load_language { };
+        std::string_view highlight_query;
+    };
+
+#include "syntax_registry.inc"
+
     struct LanguageDefinition {
         std::string_view name;
-        std::vector<std::string_view> aliases;
-        std::vector<std::string_view> extensions;
-        std::vector<std::string_view> filenames;
+        std::span<const std::string_view> extensions;
+        std::span<const std::string_view> filenames;
         const TSLanguage* language { };
         QueryPtr query;
     };
@@ -105,68 +92,16 @@ namespace {
             static_cast<uint32_t>(source.size()), &offset, &error));
     }
 
-    using LanguageFunction = const TSLanguage* (*)();
-
-    void add_language(std::vector<LanguageDefinition>& languages,
-        std::string_view name, LanguageFunction language,
-        std::string_view query, std::initializer_list<std::string_view> aliases,
-        std::initializer_list<std::string_view> extensions,
-        std::initializer_list<std::string_view> filenames = { })
-    {
-        const TSLanguage* ts_language = language();
-        languages.push_back(LanguageDefinition { name, aliases, extensions,
-            filenames, ts_language, make_query(ts_language, query) });
-    }
-
     std::vector<LanguageDefinition> make_languages()
     {
         std::vector<LanguageDefinition> languages;
-        languages.reserve(19);
-        add_language(languages, "cpp", tree_sitter_cpp, CPP_HIGHLIGHTS,
-            { "cpp", "c++", "c" },
-            { "cpp", "cc", "cxx", "c", "hpp", "hh", "hxx", "h" });
-        add_language(languages, "html", tree_sitter_html, HTML_HIGHLIGHTS,
-            { "html", "htm" }, { "html", "htm" });
-        add_language(languages, "css", tree_sitter_css, CSS_HIGHLIGHTS,
-            { "css" }, { "css" });
-        add_language(languages, "javascript", tree_sitter_javascript,
-            JAVASCRIPT_HIGHLIGHTS, { "javascript", "js", "jsx" },
-            { "js", "mjs", "cjs", "jsx" });
-        add_language(languages, "typescript", tree_sitter_typescript,
-            TYPESCRIPT_HIGHLIGHTS, { "typescript", "ts" },
-            { "ts", "mts", "cts" });
-        add_language(languages, "go", tree_sitter_go, GO_HIGHLIGHTS,
-            { "go", "golang" }, { "go" });
-        add_language(languages, "rust", tree_sitter_rust, RUST_HIGHLIGHTS,
-            { "rust", "rs" }, { "rs" });
-        add_language(languages, "swift", tree_sitter_swift, SWIFT_HIGHLIGHTS,
-            { "swift" }, { "swift" });
-        add_language(languages, "dockerfile", tree_sitter_dockerfile,
-            DOCKERFILE_HIGHLIGHTS, { "dockerfile", "docker", "containerfile" },
-            { }, { "dockerfile", "containerfile" });
-        add_language(languages, "java", tree_sitter_java, JAVA_HIGHLIGHTS,
-            { "java" }, { "java" });
-        add_language(languages, "cmake", tree_sitter_cmake, CMAKE_HIGHLIGHTS,
-            { "cmake" }, { "cmake" }, { "cmakelists.txt" });
-        add_language(languages, "dart", tree_sitter_dart, DART_HIGHLIGHTS,
-            { "dart" }, { "dart" });
-        add_language(languages, "make", tree_sitter_make, MAKE_HIGHLIGHTS,
-            { "make", "makefile" }, { "mk", "mak" },
-            { "makefile", "gnumakefile", "bsdmakefile" });
-        add_language(languages, "json", tree_sitter_json, JSON_HIGHLIGHTS,
-            { "json" }, { "json" });
-        add_language(languages, "lua", tree_sitter_lua, LUA_HIGHLIGHTS,
-            { "lua" }, { "lua" });
-        add_language(languages, "python", tree_sitter_python, PYTHON_HIGHLIGHTS,
-            { "python", "py" }, { "py", "pyw", "pyi" });
-        add_language(languages, "php", tree_sitter_php, PHP_HIGHLIGHTS,
-            { "php" }, { "php", "phtml" });
-        add_language(languages, "bash", tree_sitter_bash, BASH_HIGHLIGHTS,
-            { "bash", "sh", "shell" }, { "sh", "bash" },
-            { ".bashrc", ".bash_profile", ".profile" });
-        add_language(languages, "powershell", tree_sitter_powershell,
-            POWERSHELL_HIGHLIGHTS, { "powershell", "pwsh", "ps1" },
-            { "ps1", "psm1", "psd1" });
+        languages.reserve(LANGUAGE_SPECS.size());
+        for (const LanguageSpec& spec : LANGUAGE_SPECS) {
+            const TSLanguage* language = spec.load_language();
+            languages.push_back(
+                LanguageDefinition { spec.name, spec.extensions, spec.filenames,
+                    language, make_query(language, spec.highlight_query) });
+        }
         return languages;
     }
 
@@ -194,7 +129,6 @@ namespace {
         const auto language
             = std::ranges::find_if(registry, [&type](const auto& candidate) {
                   return type == candidate.name
-                      || contains(candidate.aliases, type)
                       || contains(candidate.extensions, type);
               });
         return language == registry.end() ? nullptr : &*language;
@@ -207,14 +141,21 @@ namespace {
         if (!extension.empty() && extension.front() == '.') {
             extension.erase(0, 1);
         }
-        const std::string filename = lower(file.filename().string());
-        const auto& registry       = languages();
-        const auto language        = std::ranges::find_if(
-            registry, [&extension, &filename](const auto& candidate) {
-                return contains(candidate.extensions, extension)
-                    || contains(candidate.filenames, filename);
+        const std::string filename   = lower(file.filename().string());
+        const auto& registry         = languages();
+        const auto filename_language = std::ranges::find_if(
+            registry, [&filename](const auto& candidate) {
+                return contains(candidate.filenames, filename);
             });
-        return language == registry.end() ? nullptr : &*language;
+        if (filename_language != registry.end()) {
+            return &*filename_language;
+        }
+        const auto extension_language = std::ranges::find_if(
+            registry, [&extension](const auto& candidate) {
+                return contains(candidate.extensions, extension);
+            });
+        return extension_language == registry.end() ? nullptr
+                                                    : &*extension_language;
     }
 
     SyntaxStyle capture_style(std::string_view capture)

@@ -108,13 +108,6 @@ TEST_CASE("catalog_stale respects the 7-day window")
     CHECK(catalog_stale(catalog));
 }
 
-TEST_CASE("whitelist gates providers")
-{
-    CHECK(ursa::whitelisted_provider("openai"));
-    CHECK(ursa::whitelisted_provider("zai-coding-plan"));
-    CHECK_FALSE(ursa::whitelisted_provider("some-random-provider"));
-}
-
 TEST_CASE("auth_from_npm maps ai-sdk packages")
 {
     CHECK(

@@ -1,0 +1,170 @@
+THIRD-PARTY SOFTWARE NOTICES
+
+Ursa uses the third-party projects listed below. Copyright notices and
+license terms are reproduced from the versions referenced by CMake and the
+git submodules in this repository.
+
+===============================================================================
+MIT-LICENSED PROJECTS
+===============================================================================
+
+FTXUI - Copyright (c) 2019 Arthur Sonzogni.
+doctest - Copyright (c) 2016-2023 Viktor Kirilov
+Tree-sitter runtime - Copyright (c) 2018 Max Brunsfeld
+
+Treesitter Grammers:
+- Bash grammar - Copyright (c) 2017 Max Brunsfeld
+- C grammar - Copyright (c) 2014 Max Brunsfeld
+- C++ grammar - Copyright (c) 2014 Max Brunsfeld
+- CMake grammar - Copyright (c) 2025 Uy Ha
+- CSS grammar - Copyright (c) 2018 Max Brunsfeld
+- Dart grammar - Copyright (c) 2020-2023 UserNobody14 and others
+- Dockerfile grammar - Copyright (c) 2021 Camden Cheek
+- Go grammar - Copyright (c) 2014 Max Brunsfeld
+- HTML grammar - Copyright (c) 2014 Max Brunsfeld
+- JSON grammar - Copyright (c) 2014 Max Brunsfeld
+- Java grammar - Copyright (c) 2017 Ayman Nadeem
+- JavaScript grammar - Copyright (c) 2014 Max Brunsfeld
+- Lua grammar - Copyright (c) 2021 Munif Tanjim
+- Make grammar - Copyright (c) 2021 Alexandre A. Muller
+- PHP grammar - Copyright (c) 2019 Max Brunsfeld, Amaan Qureshi, Christian Frøystad, Caleb White
+- PowerShell grammar - Copyright (c) 2023 Airbus CERT
+- Python grammar - Copyright (c) 2016 Max Brunsfeld
+- Rust grammar - Copyright (c) 2017 Maxim Sokolov
+- Swift grammar - Copyright (c) 2021 alex-pinkus
+- TypeScript grammar - Copyright (c) 2017 Max Brunsfeld
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+===============================================================================
+JSONCPP
+===============================================================================
+
+The JsonCpp library's source code, including accompanying documentation,
+tests and demonstration applications, are licensed under the following
+conditions.
+
+Baptiste Lepilleur and The JsonCpp Authors explicitly disclaim copyright in
+all jurisdictions which recognize such a disclaimer. In such jurisdictions,
+this software is released into the Public Domain.
+
+In jurisdictions which do not recognize Public Domain property, this software
+is Copyright (c) 2007-2010 by Baptiste Lepilleur and The JsonCpp Authors, and
+is released under the terms of the MIT License reproduced above.
+
+In jurisdictions which recognize Public Domain property, the user of this
+software may choose to accept it either as Public Domain, under the conditions
+of the MIT License, or under the dual Public Domain/MIT License conditions
+described here.
+
+===============================================================================
+CMARK-GFM
+===============================================================================
+
+Copyright (c) 2014, John MacFarlane
+
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+    * Redistributions of source code must retain the above copyright
+      notice, this list of conditions and the following disclaimer.
+
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+The cmark-gfm files houdini.h, houdini_href_e.c, houdini_html_e.c, and
+houdini_html_u.c derive from https://github.com/vmg/houdini, with some
+modifications.
+
+Copyright (C) 2012 Vicent Martí
+
+Those files are licensed under the MIT License reproduced above.
+
+The cmark-gfm files buffer.h, buffer.c, and chunk.h are derived from code:
+
+Copyright (C) 2012 GitHub, Inc.
+
+Those files are licensed under the MIT License reproduced above.
+
+The cmark-gfm utf8.c code is derived from utf8proc:
+
+Copyright (C) 2009 Public Software Group e. V., Berlin, Germany.
+
+That code is licensed under the MIT License reproduced above.
+
+The normalization code in normalize.py was derived from the markdowntest
+project:
+
+Copyright (c) 2013 Karl Dubost
+
+That code is licensed under the MIT License reproduced above.
+
+The CommonMark specification test/spec.txt is:
+
+Copyright (C) 2014-15 John MacFarlane
+
+It is released under the Creative Commons CC-BY-SA 4.0 license:
+https://creativecommons.org/licenses/by-sa/4.0/
+
+The cmark-gfm test software is:
+
+Copyright (c) 2014, John MacFarlane
+
+It is licensed under the same BSD terms reproduced at the beginning of this
+cmark-gfm section.
+
+===============================================================================
+LIBCURL
+===============================================================================
+
+Copyright (c) 1996 - 2025, Daniel Stenberg, <daniel@haxx.se>, and many
+contributors, see the curl THANKS file.
+
+All rights reserved.
+
+Permission to use, copy, modify, and distribute this software for any purpose
+with or without fee is hereby granted, provided that the above copyright
+notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF THIRD PARTY RIGHTS. IN
+NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE
+OR OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of a copyright holder shall not
+be used in advertising or otherwise to promote the sale, use or other dealings
+in this Software without prior written authorization of the copyright holder.

@@ -95,181 +95,32 @@ FetchContent_Declare(
     GIT_TAG 0.29.0.gfm.13
     EXCLUDE_FROM_ALL
 )
-FetchContent_Declare(
-    tree_sitter
-    GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter.git
-    GIT_TAG v0.26.11
-    GIT_SHALLOW TRUE
-    EXCLUDE_FROM_ALL
-)
-FetchContent_Declare(
-    tree_sitter_c
-    GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-c.git
-    GIT_TAG v0.24.2
-    GIT_SHALLOW TRUE
-    SOURCE_SUBDIR ursa_no_cmake
-    EXCLUDE_FROM_ALL
-)
-FetchContent_Declare(
-    tree_sitter_cpp
-    URL https://github.com/tree-sitter/tree-sitter-cpp/archive/refs/tags/v0.23.4.tar.gz
-    URL_HASH SHA256=7a2c55afe3028f4105f25762ea58cc16537d1f5a1dcd9cca90410b3cd5d46051
-    DOWNLOAD_EXTRACT_TIMESTAMP FALSE
-    SOURCE_SUBDIR ursa_no_cmake
-    EXCLUDE_FROM_ALL
-)
-function(declare_tree_sitter_grammar name repository tag)
-    set(shallow TRUE)
-    if(tag MATCHES "^[0-9a-f]{40}$")
-        set(shallow FALSE)
-    endif()
-    FetchContent_Declare(
-        ${name}
-        GIT_REPOSITORY ${repository}
-        GIT_TAG ${tag}
-        GIT_SHALLOW ${shallow}
-        GIT_SUBMODULES ""
-        SOURCE_SUBDIR ursa_no_cmake
-        EXCLUDE_FROM_ALL
-    )
-endfunction()
-declare_tree_sitter_grammar(tree_sitter_html
-    https://github.com/tree-sitter/tree-sitter-html.git v0.23.2)
-declare_tree_sitter_grammar(tree_sitter_css
-    https://github.com/tree-sitter/tree-sitter-css.git v0.25.0)
-declare_tree_sitter_grammar(tree_sitter_javascript
-    https://github.com/tree-sitter/tree-sitter-javascript.git v0.25.0)
-declare_tree_sitter_grammar(tree_sitter_typescript
-    https://github.com/tree-sitter/tree-sitter-typescript.git v0.23.2)
-declare_tree_sitter_grammar(tree_sitter_go
-    https://github.com/tree-sitter/tree-sitter-go.git v0.25.0)
-declare_tree_sitter_grammar(tree_sitter_rust
-    https://github.com/tree-sitter/tree-sitter-rust.git v0.24.2)
-declare_tree_sitter_grammar(tree_sitter_swift
-    https://github.com/alex-pinkus/tree-sitter-swift.git
-    0.7.3-with-generated-files)
-declare_tree_sitter_grammar(tree_sitter_dockerfile
-    https://github.com/camdencheek/tree-sitter-dockerfile.git v0.2.0)
-declare_tree_sitter_grammar(tree_sitter_java
-    https://github.com/tree-sitter/tree-sitter-java.git v0.23.5)
-declare_tree_sitter_grammar(tree_sitter_cmake
-    https://github.com/uyha/tree-sitter-cmake.git v0.7.4)
-declare_tree_sitter_grammar(tree_sitter_dart
-    https://github.com/UserNobody14/tree-sitter-dart.git
-    be07cf7118d3dba06236a3f19541685a68209934)
-declare_tree_sitter_grammar(tree_sitter_make
-    https://github.com/alemuller/tree-sitter-make.git
-    a4b9187417d6be349ee5fd4b6e77b4172c6827dd)
-declare_tree_sitter_grammar(tree_sitter_json
-    https://github.com/tree-sitter/tree-sitter-json.git v0.24.8)
-declare_tree_sitter_grammar(tree_sitter_lua
-    https://github.com/tree-sitter-grammars/tree-sitter-lua.git v0.5.0)
-declare_tree_sitter_grammar(tree_sitter_python
-    https://github.com/tree-sitter/tree-sitter-python.git v0.25.0)
-declare_tree_sitter_grammar(tree_sitter_php
-    https://github.com/tree-sitter/tree-sitter-php.git v0.24.2)
-declare_tree_sitter_grammar(tree_sitter_bash
-    https://github.com/tree-sitter/tree-sitter-bash.git v0.25.1)
-declare_tree_sitter_grammar(tree_sitter_powershell
-    https://github.com/airbus-cert/tree-sitter-powershell.git v0.26.5)
-FetchContent_MakeAvailable(jsoncpp doctest cmarkgfm tree_sitter tree_sitter_c
-    tree_sitter_cpp tree_sitter_html tree_sitter_css tree_sitter_javascript
-    tree_sitter_typescript tree_sitter_go tree_sitter_rust tree_sitter_swift
-    tree_sitter_dockerfile tree_sitter_java tree_sitter_cmake
-    tree_sitter_dart tree_sitter_make tree_sitter_json tree_sitter_lua
-    tree_sitter_python tree_sitter_php tree_sitter_bash tree_sitter_powershell)
+FetchContent_MakeAvailable(jsoncpp doctest cmarkgfm)
 
-function(embed_tree_sitter_query name)
-    set(query "")
-    foreach(path IN LISTS ARGN)
-        file(READ "${path}" part)
-        string(APPEND query "${part}\n")
-    endforeach()
-    string(APPEND TREE_SITTER_HIGHLIGHTS_SOURCE
-        "constexpr std::string_view ${name}_HIGHLIGHTS = R\"ursa_query(\n${query})ursa_query\";\n")
-    set(TREE_SITTER_HIGHLIGHTS_SOURCE
-        "${TREE_SITTER_HIGHLIGHTS_SOURCE}" PARENT_SCOPE)
-endfunction()
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(TREE_SITTER_GENERATOR
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_tree_sitter.py")
+set(TREE_SITTER_VENDOR_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/tree-sitter")
+set(TREE_SITTER_GENERATED_DIR
+    "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${TREE_SITTER_GENERATOR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/.gitmodules")
+execute_process(
+    COMMAND
+        "${Python3_EXECUTABLE}"
+        "${TREE_SITTER_GENERATOR}"
+        --root "${TREE_SITTER_VENDOR_DIR}"
+        --output "${TREE_SITTER_GENERATED_DIR}"
+    COMMAND_ERROR_IS_FATAL ANY
+)
+include("${TREE_SITTER_GENERATED_DIR}/tree_sitter_sources.cmake")
 
-embed_tree_sitter_query(CPP
-    "${tree_sitter_c_SOURCE_DIR}/queries/highlights.scm"
-    "${tree_sitter_cpp_SOURCE_DIR}/queries/highlights.scm")
-embed_tree_sitter_query(HTML
-    "${tree_sitter_html_SOURCE_DIR}/queries/highlights.scm")
-embed_tree_sitter_query(CSS
-    "${tree_sitter_css_SOURCE_DIR}/queries/highlights.scm")
-embed_tree_sitter_query(JAVASCRIPT
-    "${tree_sitter_javascript_SOURCE_DIR}/queries/highlights.scm")
-embed_tree_sitter_query(TYPESCRIPT
-    "${tree_sitter_javascript_SOURCE_DIR}/queries/highlights.scm"
-    "${tree_sitter_typescript_SOURCE_DIR}/queries/highlights.scm")
-embed_tree_sitter_query(GO
-    "${tree_sitter_go_SOURCE_DIR}/queries/highlights.scm")
-embed_tree_sitter_query(RUST
-    "${tree_sitter_rust_SOURCE_DIR}/queries/highlights.scm")
-embed_tree_sitter_query(SWIFT
-    "${tree_sitter_swift_SOURCE_DIR}/queries/highlights.scm")
-embed_tree_sitter_query(DOCKERFILE
-    "${tree_sitter_dockerfile_SOURCE_DIR}/queries/highlights.scm")
-embed_tree_sitter_query(JAVA
-    "${tree_sitter_java_SOURCE_DIR}/queries/highlights.scm")
-embed_tree_sitter_query(CMAKE
-    "${tree_sitter_cmake_SOURCE_DIR}/queries/highlights.scm")
-embed_tree_sitter_query(DART
-    "${tree_sitter_dart_SOURCE_DIR}/queries/highlights.scm")
-embed_tree_sitter_query(MAKE
-    "${tree_sitter_make_SOURCE_DIR}/queries/highlights.scm")
-embed_tree_sitter_query(JSON
-    "${tree_sitter_json_SOURCE_DIR}/queries/highlights.scm")
-embed_tree_sitter_query(LUA
-    "${tree_sitter_lua_SOURCE_DIR}/queries/highlights.scm")
-embed_tree_sitter_query(PYTHON
-    "${tree_sitter_python_SOURCE_DIR}/queries/highlights.scm")
-embed_tree_sitter_query(PHP
-    "${tree_sitter_php_SOURCE_DIR}/queries/highlights.scm")
-embed_tree_sitter_query(BASH
-    "${tree_sitter_bash_SOURCE_DIR}/queries/highlights.scm")
-embed_tree_sitter_query(POWERSHELL
-    "${tree_sitter_powershell_SOURCE_DIR}/queries/highlights.scm")
-file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/syntax_queries.inc"
-    CONTENT "${TREE_SITTER_HIGHLIGHTS_SOURCE}")
-
+add_subdirectory("${TREE_SITTER_VENDOR_DIR}/core"
+    "${CMAKE_CURRENT_BINARY_DIR}/tree-sitter-core" EXCLUDE_FROM_ALL)
 add_library(ursa_tree_sitter_grammars STATIC
-    ${tree_sitter_cpp_SOURCE_DIR}/src/parser.c
-    ${tree_sitter_cpp_SOURCE_DIR}/src/scanner.c
-    ${tree_sitter_html_SOURCE_DIR}/src/parser.c
-    ${tree_sitter_html_SOURCE_DIR}/src/scanner.c
-    ${tree_sitter_css_SOURCE_DIR}/src/parser.c
-    ${tree_sitter_css_SOURCE_DIR}/src/scanner.c
-    ${tree_sitter_javascript_SOURCE_DIR}/src/parser.c
-    ${tree_sitter_javascript_SOURCE_DIR}/src/scanner.c
-    ${tree_sitter_typescript_SOURCE_DIR}/typescript/src/parser.c
-    ${tree_sitter_typescript_SOURCE_DIR}/typescript/src/scanner.c
-    ${tree_sitter_go_SOURCE_DIR}/src/parser.c
-    ${tree_sitter_rust_SOURCE_DIR}/src/parser.c
-    ${tree_sitter_rust_SOURCE_DIR}/src/scanner.c
-    ${tree_sitter_swift_SOURCE_DIR}/src/parser.c
-    ${tree_sitter_swift_SOURCE_DIR}/src/scanner.c
-    ${tree_sitter_dockerfile_SOURCE_DIR}/src/parser.c
-    ${tree_sitter_dockerfile_SOURCE_DIR}/src/scanner.c
-    ${tree_sitter_java_SOURCE_DIR}/src/parser.c
-    ${tree_sitter_cmake_SOURCE_DIR}/src/parser.c
-    ${tree_sitter_cmake_SOURCE_DIR}/src/scanner.c
-    ${tree_sitter_dart_SOURCE_DIR}/src/parser.c
-    ${tree_sitter_dart_SOURCE_DIR}/src/scanner.c
-    ${tree_sitter_make_SOURCE_DIR}/src/parser.c
-    ${tree_sitter_json_SOURCE_DIR}/src/parser.c
-    ${tree_sitter_lua_SOURCE_DIR}/src/parser.c
-    ${tree_sitter_lua_SOURCE_DIR}/src/scanner.c
-    ${tree_sitter_python_SOURCE_DIR}/src/parser.c
-    ${tree_sitter_python_SOURCE_DIR}/src/scanner.c
-    ${tree_sitter_php_SOURCE_DIR}/php/src/parser.c
-    ${tree_sitter_php_SOURCE_DIR}/php/src/scanner.c
-    ${tree_sitter_bash_SOURCE_DIR}/src/parser.c
-    ${tree_sitter_bash_SOURCE_DIR}/src/scanner.c
-    ${tree_sitter_powershell_SOURCE_DIR}/src/parser.c
-    ${tree_sitter_powershell_SOURCE_DIR}/src/scanner.c
-)
+    ${URSA_TREE_SITTER_GRAMMAR_SOURCES})
 get_target_property(TREE_SITTER_GRAMMAR_SOURCES
     ursa_tree_sitter_grammars SOURCES)
 foreach(source IN LISTS TREE_SITTER_GRAMMAR_SOURCES)
@@ -444,45 +295,39 @@ if (URSA_BUILD_TESTS)
 endif()
 
 
-add_custom_target(bundle)
 set(PKGDIR "${CMAKE_BINARY_DIR}/package")
-add_custom_command(TARGET bundle POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy
-                ${CMAKE_SOURCE_DIR}/misc/ursa.ico
-                "${PKGDIR}/win/ursa.ico")
-add_custom_command(TARGET bundle POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy
-        ${CMAKE_SOURCE_DIR}/CHANGELOG.txt
-        "${PKGDIR}/win/")
-add_custom_command(TARGET bundle POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy
-        ${CMAKE_SOURCE_DIR}/LICENSE
-        "${PKGDIR}/win/")
-add_custom_command(TARGET bundle POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy
-        ${CMAKE_SOURCE_DIR}/misc/LICENSE.tree-sitter
-        "${PKGDIR}/win/")
+function(add_bundle_file source destination)
+    get_filename_component(destination_directory "${destination}" DIRECTORY)
+    add_custom_command(
+        OUTPUT "${destination}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${destination_directory}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${source}" "${destination}"
+        DEPENDS "${source}"
+        VERBATIM
+    )
+    set(BUNDLE_OUTPUTS ${BUNDLE_OUTPUTS} "${destination}" PARENT_SCOPE)
+endfunction()
 
+add_bundle_file("${CMAKE_SOURCE_DIR}/misc/ursa.ico"
+    "${PKGDIR}/win/ursa.ico")
+add_bundle_file("${CMAKE_SOURCE_DIR}/CHANGELOG.txt"
+    "${PKGDIR}/win/CHANGELOG.txt")
+add_bundle_file("${CMAKE_SOURCE_DIR}/LICENSE"
+    "${PKGDIR}/win/LICENSE")
+add_bundle_file("${CMAKE_SOURCE_DIR}/misc/LICENSE.thirdparty.txt"
+    "${PKGDIR}/win/LICENSE.thirdparty.txt")
+add_bundle_file("${CMAKE_SOURCE_DIR}/LICENSE"
+    "${PKGDIR}/usr/share/${PROJECT_NAME}/LICENSE")
+add_bundle_file("${CMAKE_SOURCE_DIR}/misc/LICENSE.thirdparty.txt"
+    "${PKGDIR}/usr/share/${PROJECT_NAME}/LICENSE.thirdparty.txt")
+add_bundle_file("${CMAKE_SOURCE_DIR}/misc/icon.png"
+    "${PKGDIR}/usr/share/${PROJECT_NAME}/ursa.png")
+add_bundle_file("${CMAKE_SOURCE_DIR}/misc/ursa.desktop"
+    "${PKGDIR}/usr/share/applications/ursa.desktop")
+add_bundle_file("${CMAKE_SOURCE_DIR}/CHANGELOG.txt"
+    "${PKGDIR}/usr/share/${PROJECT_NAME}/CHANGELOG.txt")
 
-add_custom_command(TARGET bundle POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy
-                ${CMAKE_SOURCE_DIR}/LICENSE
-                "${PKGDIR}/usr/share/${PROJECT_NAME}/LICENSE")
-add_custom_command(TARGET bundle POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy
-                ${CMAKE_SOURCE_DIR}/misc/LICENSE.tree-sitter
-                "${PKGDIR}/usr/share/${PROJECT_NAME}/LICENSE.tree-sitter")
-add_custom_command(TARGET bundle POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy
-                ${CMAKE_SOURCE_DIR}/misc/icon.png
-                "${PKGDIR}/usr/share/${PROJECT_NAME}/ursa.png")
-add_custom_command(TARGET bundle POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy
-                ${CMAKE_SOURCE_DIR}/misc/ursa.desktop
-                "${PKGDIR}/usr/share/applications/ursa.desktop")
-add_custom_command(TARGET bundle POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy
-        ${CMAKE_SOURCE_DIR}/CHANGELOG.txt "${PKGDIR}/usr/share/${PROJECT_NAME}")
+add_custom_target(bundle DEPENDS ${BUNDLE_OUTPUTS})
 add_dependencies(${PROJECT_NAME} bundle)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release" AND URSA_PACKAGE)
