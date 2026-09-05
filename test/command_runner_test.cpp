@@ -52,3 +52,20 @@ TEST_CASE("run_command enforces the timeout")
     CHECK(r.spawned);
     CHECK(r.timed_out);
 }
+
+TEST_CASE("run_attached_command reports completion")
+{
+#ifdef _WIN32
+    const auto result = ursa::run_attached_command("cmd.exe /c exit 7");
+#else
+    const auto result = ursa::run_attached_command("exit 7");
+#endif
+    CHECK(result.spawned);
+    CHECK(result.exit_code == 7);
+    CHECK_FALSE(result.timed_out);
+}
+
+TEST_CASE("run_attached_command rejects an empty command")
+{
+    CHECK_FALSE(ursa::run_attached_command("").spawned);
+}

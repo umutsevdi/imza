@@ -64,20 +64,26 @@ ToolOutput dispatch_tool(
     return tool->run(args);
 }
 
-std::vector<Tool> default_tools()
+std::vector<Tool> default_tools(bool is_interactive, bool web, bool shell)
 {
     std::vector<Tool> tools;
     tools.push_back(make_read_tool());
     tools.push_back(make_skill_tool());
     tools.push_back(make_list_tool());
-    tools.push_back(make_ask_tool());
-    tools.push_back(make_shell_tool());
+    if (is_interactive) {
+        tools.push_back(make_ask_tool());
+    }
+    if (shell) {
+        tools.push_back(make_shell_tool());
+    }
     tools.push_back(make_todo_tool());
     tools.push_back(make_subagent_tool());
     tools.push_back(make_edit_tool());
     tools.push_back(make_write_tool());
-    tools.push_back(make_webfetch_tool());
-    tools.push_back(make_websearch_tool());
+    if (web) {
+        tools.push_back(make_webfetch_tool());
+        tools.push_back(make_websearch_tool());
+    }
     return tools;
 }
 

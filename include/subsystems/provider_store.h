@@ -21,7 +21,6 @@
 
 namespace ursa {
 
-std::string_view subagent_default_variant(SubagentRole role);
 inline std::string subagent_variant_or_default(
     const SubagentModelConfig* configured, SubagentRole role)
 {

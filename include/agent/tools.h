@@ -74,6 +74,7 @@ Tool make_edit_tool();
 Tool make_write_tool();
 Tool make_webfetch_tool();
 Tool make_websearch_tool();
-std::vector<Tool> default_tools();
+std::vector<Tool> default_tools(
+    bool is_interactive = true, bool web = true, bool shell = true);
 
 } // namespace ursa

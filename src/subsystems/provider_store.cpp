@@ -8,17 +8,6 @@
 
 namespace ursa {
 
-std::string_view subagent_default_variant(SubagentRole role)
-{
-    if (role == SubagentRole::BUILDER) {
-        return "medium";
-    }
-    if (role == SubagentRole::RESEARCH) {
-        return "low";
-    }
-    return "off";
-}
-
 ProviderStore::ProviderStore(Config config, ModelsFn models_fn)
     : config_(std::move(config))
     , models_fn_(std::move(models_fn))

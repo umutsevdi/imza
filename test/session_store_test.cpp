@@ -4,6 +4,7 @@
 
 #include <doctest/doctest.h>
 
+#include "agent/flows.h"
 #include "subsystems/session.h"
 #include "subsystems/session_store.h"
 
@@ -149,5 +150,41 @@ TEST_CASE("saved sessions retain delegated-agent chat transcripts")
     CHECK(call.subagent_chats[0].title == "Agent 1 (research)");
     CHECK(
         call.subagent_chats[0].transcript.find("report") != std::string::npos);
+#endif
+}
+
+TEST_CASE("CLI opens and removes saved sessions by ID")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    ursa::Session source;
+    source.begin_send("remember this");
+    REQUIRE(ursa::save_session(source) == ursa::Status::OK);
+    const auto saved = ursa::saved_sessions();
+    REQUIRE(saved.size() == 1);
+    std::string id = saved.front().path.stem().string();
+
+    char program[]    = "ursa";
+    char directory[]  = ".";
+    char session[]    = "--session";
+    char* open_argv[] = { program, directory, session, id.data() };
+    const ursa::CliResult open_result = ursa::run_cli(4, open_argv);
+
+    CHECK(open_result.continue_as_interactive);
+    CHECK(open_result.exit_code == 0);
+    REQUIRE(open_result.working_directory.has_value());
+    CHECK(*open_result.working_directory == std::filesystem::path("."));
+    REQUIRE(open_result.session_path.has_value());
+    CHECK(*open_result.session_path == saved.front().path);
+
+    char remove[]       = "rm";
+    char* remove_argv[] = { program, session, remove, id.data() };
+    const ursa::CliResult remove_result = ursa::run_cli(4, remove_argv);
+
+    CHECK_FALSE(remove_result.continue_as_interactive);
+    CHECK(remove_result.exit_code == 0);
+    CHECK(ursa::saved_sessions().empty());
 #endif
 }

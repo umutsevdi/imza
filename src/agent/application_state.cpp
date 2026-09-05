@@ -106,6 +106,9 @@ std::shared_ptr<ApplicationState> make_child_application_state(
     state->on_exit        = [] { };
     state->parent_routing = std::move(parent_routing);
     state->agent_label    = std::move(agent_label);
+    state->is_interactive = parent.is_interactive;
+    state->web_enabled    = parent.web_enabled;
+    state->shell_enabled  = parent.shell_enabled;
     wire(state, std::move(stream_fn), std::move(tools));
     return state;
 }

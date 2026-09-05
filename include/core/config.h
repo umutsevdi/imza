@@ -4,6 +4,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "common/modal.h"
@@ -42,6 +43,7 @@ struct Config {
     std::map<std::string, std::map<std::string, SkillPolicy>> project_skills;
 };
 
+std::string_view subagent_default_variant(SubagentRole role);
 Status load_config(const std::filesystem::path& path, Config& out,
     std::string* error = nullptr);
 Status save_config(const std::filesystem::path& path, const Config& cfg);

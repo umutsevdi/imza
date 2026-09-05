@@ -44,6 +44,9 @@ struct ApplicationState {
     std::function<void()> on_exit;
     ModalRequestFn parent_routing;
     std::string agent_label;
+    bool is_interactive = true;
+    bool web_enabled    = true;
+    bool shell_enabled  = true;
     std::atomic<bool> alive { true };
     Signal<>::Subscription env_subscription;
     Signal<>::Subscription provider_subscription;
