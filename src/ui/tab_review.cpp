@@ -78,18 +78,14 @@ namespace {
             viewer_option.label     = "Reviewing…";
             viewer_option.on_click  = [this] { _open_review_viewer(); };
             viewer_option.transform = [this](const EntryState& entry) {
-                Element label
-                    = text(entry.label + " " + _review_elapsed_text());
+                Element label = text(entry.label);
                 if (entry.focused) {
                     label = std::move(label) | bold | underlined
                         | color(PANEL_FG);
                 } else {
                     label = std::move(label) | color(PANEL_FG_DIM);
                 }
-                return hbox(
-                    { spinner(15, static_cast<std::size_t>(review_frame_))
-                            | color(Color::GrayLight),
-                        text(" "), std::move(label) });
+                return label;
             };
             review_viewer_button_ = space_activates(
                 Button(viewer_option), viewer_option.on_click);
@@ -149,15 +145,30 @@ namespace {
                            text("Working tree is clean") | color(PANEL_FG_DIM))
                     | flex;
             }
-            horizontal_limit_ = _horizontal_limit(*snapshot.review);
+            const LayoutCtx ctx     = layout_();
+            const int review_width  = ctx.kind == LayoutCtx::Kind::WIDE
+                ? ctx.width - LayoutCtx::panel_width - 4
+                : ctx.width;
+            const bool side_by_side = review_width >= 100;
+            render_radius_ = ctx.height > 0 ? std::max(20, ctx.height) : 120;
+            if (horizontal_review_ != snapshot.review.get()
+                || horizontal_width_ != review_width || horizontal_dirty_) {
+                horizontal_limit_
+                    = _horizontal_limit(*snapshot.review, review_width);
+                horizontal_review_ = snapshot.review.get();
+                horizontal_width_  = review_width;
+                horizontal_dirty_  = false;
+            }
             horizontal_offset_
                 = std::clamp(horizontal_offset_, 0, horizontal_limit_);
+            _prepare_highlights(*snapshot.review, review_width, side_by_side);
 
             Elements rows;
             for (std::size_t file_index = 0;
                 file_index < snapshot.review->files.size(); ++file_index) {
                 const ReviewFile& file = snapshot.review->files[file_index];
-                _push_file(rows, snapshot, file, file_index);
+                _push_file(rows, snapshot, file, file_index, review_width,
+                    side_by_side);
                 if (file_index + 1 < snapshot.review->files.size()) {
                     _flush_spacer(rows);
                     rows.push_back(separatorEmpty());
@@ -221,7 +232,6 @@ namespace {
             Elements actions { std::move(plan_action), text(" "),
                 std::move(review_action) };
             if (review_running) {
-                animation::RequestAnimationFrame();
                 actions.push_back(text(" "));
                 actions.push_back(review_viewer_button_->Render());
                 actions.push_back(text(" · "));
@@ -231,14 +241,6 @@ namespace {
             actions.push_back(text(hint) | dim);
             bottom.push_back(hbox(std::move(actions)));
             return vbox({ std::move(content), vbox(std::move(bottom)) }) | flex;
-        }
-
-        void OnAnimation(animation::Params&) override
-        {
-            if (review_running_->load()) {
-                ++review_frame_;
-                animation::RequestAnimationFrame();
-            }
         }
 
         bool OnEvent(Event event) override
@@ -346,8 +348,6 @@ namespace {
         }
 
     private:
-        static constexpr int RENDER_RADIUS = 120;
-
         static bool _is_user_interaction(Event event)
         {
             const bool mouse_input = event.is_mouse()
@@ -394,8 +394,6 @@ namespace {
                 return;
             }
             review_cancelling_->store(false);
-            review_frame_        = 0;
-            review_started_      = std::chrono::steady_clock::now();
             const auto selection = state_->providers->active_selection();
             if (!selection) {
                 review_running_->store(false);
@@ -429,6 +427,7 @@ namespace {
                 [state = state_, running = review_running_](
                     const SubagentResult& result) {
                     running->store(false);
+                    animation::RequestAnimationFrame();
                     if (result.status == Status::CANCELLED) {
                         return;
                     }
@@ -473,13 +472,6 @@ namespace {
                     "markdown", 1, true, "" });
         }
 
-        std::string _review_elapsed_text() const
-        {
-            return elapsed_text(
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - review_started_));
-        }
-
         struct VisibleRow {
             enum class Kind { FILE, HUNK, LINE, COMMENT };
             Kind kind              = Kind::HUNK;
@@ -488,6 +480,36 @@ namespace {
             std::optional<std::size_t> comment_id;
             int display_y = 0;
         };
+
+        void _prepare_highlights(
+            const RepositoryReview& review, int review_width, bool side_by_side)
+        {
+            if (highlighted_review_ == &review
+                && highlighted_width_ == review_width
+                && highlighted_offset_ == horizontal_offset_
+                && highlighted_side_by_side_ == side_by_side) {
+                return;
+            }
+            highlights_.clear();
+            highlighted_review_       = &review;
+            highlighted_width_        = review_width;
+            highlighted_offset_       = horizontal_offset_;
+            highlighted_side_by_side_ = side_by_side;
+        }
+
+        Element _highlighted_line(const ReviewLine& line, bool old_side,
+            const std::string& fallback) const
+        {
+            const auto found = highlights_.find(&line);
+            if (found != highlights_.end()) {
+                const Element& highlighted = old_side ? found->second.old_side
+                                                      : found->second.new_side;
+                if (highlighted != nullptr) {
+                    return highlighted;
+                }
+            }
+            return text(fallback) | color(PANEL_FG);
+        }
 
         void _flush_spacer(Elements& rows)
         {
@@ -506,7 +528,7 @@ namespace {
             visible.display_y   = rendered_y_;
             rendered_y_ += height;
             visible_.push_back(std::move(visible));
-            if (std::abs(row_index - selected_) > RENDER_RADIUS) {
+            if (std::abs(row_index - selected_) > render_radius_) {
                 skipped_height_ += height;
                 return;
             }
@@ -521,7 +543,8 @@ namespace {
         }
 
         void _push_file(Elements& rows, const ReviewState::Snapshot& snapshot,
-            const ReviewFile& file, std::size_t file_index)
+            const ReviewFile& file, std::size_t file_index, int review_width,
+            bool side_by_side)
         {
             Elements file_rows;
             const std::string& path
@@ -565,13 +588,17 @@ namespace {
                         std::nullopt, 0 },
                     selected_ == static_cast<int>(visible_.size()));
             } else if (!collapsed) {
-                const LayoutCtx ctx     = layout_();
-                const int review_width  = ctx.kind == LayoutCtx::Kind::WIDE
-                    ? ctx.width - LayoutCtx::panel_width - 4
-                    : ctx.width;
-                const bool side_by_side = review_width >= 100;
-                const int side_width    = std::max(20, (review_width - 3) / 2);
+                const int side_width = std::max(20, (review_width - 3) / 2);
                 for (const ReviewHunk& hunk : file.hunks) {
+                    const int hunk_begin = static_cast<int>(visible_.size());
+                    const int hunk_end   = hunk_begin + 1
+                        + static_cast<int>(hunk.lines.size())
+                        + static_cast<int>(snapshot.comments.size());
+                    if (hunk_begin <= selected_ + render_radius_
+                        && hunk_end >= selected_ - render_radius_) {
+                        append_review_hunk_highlights(highlights_, hunk, path,
+                            review_width, horizontal_offset_, side_by_side);
+                    }
                     _push(
                         file_rows,
                         [&hunk] {
@@ -662,7 +689,6 @@ namespace {
             const ReviewState::Snapshot& snapshot, std::size_t file_index,
             const std::string& path, const ReviewLine& line, int review_width)
         {
-            const std::string syntax = syntax_type_for_path(path);
             const auto number = [](const std::optional<std::size_t>& value) {
                 return value ? std::format("{:>5}", *value)
                              : std::string(5, ' ');
@@ -679,10 +705,12 @@ namespace {
             _push(
                 rows,
                 [this, &line, marker = std::move(marker), background, number,
-                    review_width, syntax] {
+                    review_width] {
                     const int content_width = std::max(1, review_width - 14);
                     const std::string content
                         = fit(line.content, content_width, horizontal_offset_);
+                    const bool old_side
+                        = line.kind == ReviewLine::Kind::DELETION;
                     Element row = hbox({
                         text(number(line.old_line)) | color(PANEL_FG_DIM),
                         text(" "),
@@ -691,7 +719,7 @@ namespace {
                         text(marker + " "),
                         line.kind == ReviewLine::Kind::META
                             ? text(content) | color(PANEL_FG_DIM)
-                            : highlight_code_line(content, syntax),
+                            : _highlighted_line(line, old_side, content),
                     });
                     if (background) {
                         row = std::move(row) | bgcolor(*background);
@@ -705,8 +733,8 @@ namespace {
             _push_editor(rows, path, line);
         }
 
-        Element _side_line(const ReviewLine* line, bool old_side,
-            int side_width, std::string_view syntax) const
+        Element _side_line(
+            const ReviewLine* line, bool old_side, int side_width) const
         {
             const std::optional<std::size_t> number = line == nullptr
                 ? std::nullopt
@@ -729,12 +757,13 @@ namespace {
             }
             const std::string content = fit(
                 line->content, std::max(1, side_width - 8), horizontal_offset_);
-            Element side = hbox({
-                               text(number_text) | color(PANEL_FG_DIM),
-                               text(" "),
-                               text(marker + " "),
-                               highlight_code_line(content, syntax) | xflex,
-                           })
+            Element side
+                = hbox({
+                      text(number_text) | color(PANEL_FG_DIM),
+                      text(" "),
+                      text(marker + " "),
+                      _highlighted_line(*line, old_side, content) | xflex,
+                  })
                 | size(WIDTH, EQUAL, side_width);
             if (background) {
                 side = std::move(side) | bgcolor(*background);
@@ -747,7 +776,6 @@ namespace {
             const std::string& path, const ReviewLine* old_line,
             const ReviewLine* new_line, int side_width)
         {
-            const std::string syntax = syntax_type_for_path(path);
             const ReviewLine* target
                 = new_line != nullptr ? new_line : old_line;
             if (target == nullptr) {
@@ -755,11 +783,11 @@ namespace {
             }
             _push(
                 rows,
-                [this, old_line, new_line, side_width, syntax] {
+                [this, old_line, new_line, side_width] {
                     return hbox({
-                        _side_line(old_line, true, side_width, syntax),
+                        _side_line(old_line, true, side_width),
                         text(" │ ") | color(PANEL_BORDER),
-                        _side_line(new_line, false, side_width, syntax),
+                        _side_line(new_line, false, side_width),
                     });
                 },
                 VisibleRow { VisibleRow::Kind::LINE, file_index, target,
@@ -846,12 +874,9 @@ namespace {
             return true;
         }
 
-        int _horizontal_limit(const RepositoryReview& review) const
+        int _horizontal_limit(
+            const RepositoryReview& review, int review_width) const
         {
-            const LayoutCtx ctx             = layout_();
-            const int review_width          = ctx.kind == LayoutCtx::Kind::WIDE
-                ? ctx.width - LayoutCtx::panel_width - 4
-                : ctx.width;
             const bool side_by_side         = review_width >= 100;
             const int side_content_width    = side_by_side
                 ? std::max(1, std::max(20, (review_width - 3) / 2) - 8)
@@ -893,6 +918,7 @@ namespace {
                 } else {
                     collapsed_.insert(path);
                 }
+                horizontal_dirty_ = true;
                 animation::RequestAnimationFrame();
                 return true;
             }
@@ -1066,15 +1092,22 @@ namespace {
         std::set<std::string> collapsed_;
         std::vector<VisibleRow> visible_;
         std::shared_ptr<const RepositoryReview> rendered_review_;
+        ReviewHighlights highlights_;
+        const RepositoryReview* highlighted_review_ = nullptr;
+        const RepositoryReview* horizontal_review_  = nullptr;
         std::deque<Box> boxes_;
         std::vector<int> box_rows_;
-        int selected_          = 0;
-        int rendered_y_        = 0;
-        int skipped_height_    = 0;
-        int horizontal_offset_ = 0;
-        int horizontal_limit_  = 0;
-        int review_frame_      = 0;
-        std::chrono::steady_clock::time_point review_started_;
+        int selected_                  = 0;
+        int rendered_y_                = 0;
+        int skipped_height_            = 0;
+        int render_radius_             = 120;
+        int horizontal_offset_         = 0;
+        int horizontal_limit_          = 0;
+        int highlighted_width_         = 0;
+        int highlighted_offset_        = 0;
+        int horizontal_width_          = 0;
+        bool highlighted_side_by_side_ = false;
+        bool horizontal_dirty_         = true;
         std::shared_ptr<std::atomic<std::uint64_t>> load_generation_
             = std::make_shared<std::atomic<std::uint64_t>>(0);
         std::shared_ptr<std::atomic<bool>> load_running_

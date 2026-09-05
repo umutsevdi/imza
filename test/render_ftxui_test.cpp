@@ -3,6 +3,7 @@
 #include <doctest/doctest.h>
 #include <ftxui/component/component.hpp>
 
+#include "core/git.h"
 #include "test_helpers.h"
 #include "ui/ui.h"
 
@@ -101,6 +102,45 @@ TEST_CASE("Tree-sitter highlight predicates filter C++ constants")
         ursa::highlight_code_line("value + MAX_VALUE", "cpp"), 24, 1);
     CHECK(screen.PixelAt(0, 0).foreground_color == ursa::PANEL_FG);
     CHECK(screen.PixelAt(8, 0).foreground_color == ftxui::Color::Magenta);
+}
+
+TEST_CASE("Tree-sitter highlights multiline syntax in one parse")
+{
+    const auto lines = ursa::highlight_code("/* first\nsecond */", "cpp");
+    REQUIRE(lines.size() == 2);
+    auto first  = ursa::test::to_screen(lines[0], 16, 1);
+    auto second = ursa::test::to_screen(lines[1], 16, 1);
+    CHECK(first.PixelAt(0, 0).foreground_color == ftxui::Color::GrayLight);
+    CHECK(second.PixelAt(0, 0).foreground_color == ftxui::Color::GrayLight);
+}
+
+TEST_CASE("review highlighting parses old and new hunk sides as documents")
+{
+    ursa::RepositoryReview review;
+    ursa::ReviewFile file;
+    file.new_path = "example.cpp";
+    ursa::ReviewHunk hunk;
+    hunk.lines = {
+        { ursa::ReviewLine::Kind::CONTEXT, 1, 1, "/* first" },
+        { ursa::ReviewLine::Kind::DELETION, 2, std::nullopt, "old */" },
+        { ursa::ReviewLine::Kind::ADDITION, std::nullopt, 2, "new */" },
+    };
+    file.hunks.push_back(std::move(hunk));
+    review.files.push_back(std::move(file));
+
+    ursa::ReviewHighlights highlights;
+    const auto& lines = review.files[0].hunks[0].lines;
+    ursa::append_review_hunk_highlights(
+        highlights, review.files[0].hunks[0], "example.cpp", 80, 0, false);
+    REQUIRE(highlights.contains(&lines[0]));
+    REQUIRE(highlights.contains(&lines[1]));
+    REQUIRE(highlights.contains(&lines[2]));
+    const auto old_line
+        = ursa::test::to_screen(highlights.at(&lines[1]).old_side, 16, 1);
+    const auto new_line
+        = ursa::test::to_screen(highlights.at(&lines[2]).new_side, 16, 1);
+    CHECK(old_line.PixelAt(0, 0).foreground_color == ftxui::Color::GrayLight);
+    CHECK(new_line.PixelAt(0, 0).foreground_color == ftxui::Color::GrayLight);
 }
 
 TEST_CASE("untyped code keeps the panel foreground")

@@ -138,12 +138,12 @@ namespace {
         {
             _sync_review_availability();
             const auto terminal_size = ftxui::Terminal::Size();
-            layout_                  = layout_context(terminal_size.dimx);
-            const int w              = layout_.width;
-            Element side             = side_->Render();
-            Element tab              = tabs_->Render();
-            Element right_col        = tabs_content_->Render();
-            Element status           = status_line_->Render();
+            layout_ = layout_context(terminal_size.dimx, terminal_size.dimy);
+            const int w       = layout_.width;
+            Element side      = side_->Render();
+            Element tab       = tabs_->Render();
+            Element right_col = tabs_content_->Render();
+            Element status    = status_line_->Render();
 
             const std::string title = state_->session->title();
             Element title_p = paragraph(title.empty() ? "New Session" : title)

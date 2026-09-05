@@ -79,7 +79,7 @@ void run_slash_command(
         break;
     case SlashCommand::Action::SYSTEM_PROMPT:
         context.present_modal(ViewerModal {
-            "System prompt", context.system_prompt(), "text", 1, false, "" });
+            "System prompt", context.system_prompt(), "md", 1, false, "" });
         break;
     }
 }

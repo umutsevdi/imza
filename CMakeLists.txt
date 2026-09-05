@@ -232,6 +232,7 @@ add_library(ursa_ui
     src/ui/modals/subagents.cpp
     src/ui/modals/tools.cpp
     src/ui/modals/variant.cpp
+    src/ui/review_syntax.cpp
     src/ui/side_panel.cpp
     src/ui/status_line.cpp
     src/ui/syntax.cpp

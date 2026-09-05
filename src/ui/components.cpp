@@ -233,11 +233,11 @@ std::string fit(const std::string& value, int width, int offset)
     return fit(value.substr(pos), width);
 }
 
-LayoutCtx layout_context(int width)
+LayoutCtx layout_context(int width, int height)
 {
     return { width >= LayoutCtx::wide_threshold ? LayoutCtx::Kind::WIDE
                                                 : LayoutCtx::Kind::NARROW,
-        width };
+        width, height };
 }
 
 using namespace ftxui;

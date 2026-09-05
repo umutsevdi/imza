@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <regex>
 #include <span>
@@ -68,12 +69,39 @@ namespace {
 
 #include "syntax_registry.inc"
 
+    struct QueryPredicate {
+        enum class Kind {
+            EQUAL,
+            NOT_EQUAL,
+            ANY_OF,
+            NOT_ANY_OF,
+            MATCH,
+            NOT_MATCH,
+            INVALID,
+        };
+
+        Kind kind           = Kind::INVALID;
+        uint32_t capture_id = 0;
+        std::vector<std::string> values;
+        std::optional<std::regex> regex;
+    };
+
     struct LanguageDefinition {
         std::string_view name;
         std::span<const std::string_view> extensions;
         std::span<const std::string_view> filenames;
-        const TSLanguage* language { };
-        QueryPtr query;
+        LanguageFunction load_language { };
+        std::string_view highlight_query;
+        struct Runtime {
+            std::once_flag initialized;
+            const TSLanguage* language { };
+            QueryPtr query;
+            ParserPtr parser;
+            CursorPtr cursor;
+            std::vector<std::vector<QueryPredicate>> predicates;
+            std::mutex use_mutex;
+        };
+        std::unique_ptr<Runtime> runtime;
     };
 
     std::string lower(std::string_view value)
@@ -97,10 +125,9 @@ namespace {
         std::vector<LanguageDefinition> languages;
         languages.reserve(LANGUAGE_SPECS.size());
         for (const LanguageSpec& spec : LANGUAGE_SPECS) {
-            const TSLanguage* language = spec.load_language();
-            languages.push_back(
-                LanguageDefinition { spec.name, spec.extensions, spec.filenames,
-                    language, make_query(language, spec.highlight_query) });
+            languages.push_back(LanguageDefinition { spec.name, spec.extensions,
+                spec.filenames, spec.load_language, spec.highlight_query,
+                std::make_unique<LanguageDefinition::Runtime>() });
         }
         return languages;
     }
@@ -241,70 +268,146 @@ namespace {
         return converted;
     }
 
-    bool predicates_match(
-        const TSQuery* query, const TSQueryMatch& match, std::string_view code)
+    std::vector<std::vector<QueryPredicate>> compile_predicates(
+        const TSQuery* query)
     {
-        uint32_t count                    = 0;
-        const TSQueryPredicateStep* steps = ts_query_predicates_for_pattern(
-            query, match.pattern_index, &count);
-        uint32_t at = 0;
-        while (at < count) {
-            if (steps[at].type != TSQueryPredicateStepTypeString) {
+        std::vector<std::vector<QueryPredicate>> predicates(
+            ts_query_pattern_count(query));
+        for (uint32_t pattern = 0; pattern < predicates.size(); ++pattern) {
+            uint32_t count = 0;
+            const TSQueryPredicateStep* steps
+                = ts_query_predicates_for_pattern(query, pattern, &count);
+            uint32_t at = 0;
+            while (at < count) {
+                if (steps[at].type != TSQueryPredicateStepTypeString) {
+                    while (at < count
+                        && steps[at].type != TSQueryPredicateStepTypeDone) {
+                        ++at;
+                    }
+                    ++at;
+                    continue;
+                }
+                uint32_t operation_size   = 0;
+                const char* operation_raw = ts_query_string_value_for_id(
+                    query, steps[at++].value_id, &operation_size);
+                std::string_view operation(operation_raw, operation_size);
+                if (operation.starts_with('#')) {
+                    operation.remove_prefix(1);
+                }
+                std::optional<uint32_t> capture_id;
+                std::vector<std::string> values;
                 while (at < count
                     && steps[at].type != TSQueryPredicateStepTypeDone) {
+                    if (steps[at].type == TSQueryPredicateStepTypeCapture
+                        && !capture_id.has_value()) {
+                        capture_id = steps[at].value_id;
+                    } else if (steps[at].type
+                        == TSQueryPredicateStepTypeString) {
+                        uint32_t value_size   = 0;
+                        const char* value_raw = ts_query_string_value_for_id(
+                            query, steps[at].value_id, &value_size);
+                        values.emplace_back(value_raw, value_size);
+                    }
                     ++at;
                 }
                 ++at;
-                continue;
-            }
-            uint32_t operation_size   = 0;
-            const char* operation_raw = ts_query_string_value_for_id(
-                query, steps[at++].value_id, &operation_size);
-            std::string_view operation(operation_raw, operation_size);
-            if (operation.starts_with('#')) {
-                operation.remove_prefix(1);
-            }
-            std::optional<uint32_t> capture_id;
-            std::vector<std::string_view> values;
-            while (
-                at < count && steps[at].type != TSQueryPredicateStepTypeDone) {
-                if (steps[at].type == TSQueryPredicateStepTypeCapture
-                    && !capture_id.has_value()) {
-                    capture_id = steps[at].value_id;
-                } else if (steps[at].type == TSQueryPredicateStepTypeString) {
-                    uint32_t value_size   = 0;
-                    const char* value_raw = ts_query_string_value_for_id(
-                        query, steps[at].value_id, &value_size);
-                    values.emplace_back(value_raw, value_size);
+                if (!capture_id.has_value() || values.empty()) {
+                    continue;
                 }
-                ++at;
-            }
-            ++at;
-            if (!capture_id.has_value() || values.empty()) {
-                continue;
-            }
-            const std::string_view body
-                = capture_text(match, *capture_id, code);
 
-            bool matched = true;
-            if (operation == "eq?" || operation == "not-eq?") {
-                matched = body == values.front();
-            } else if (operation == "any-of?" || operation == "not-any-of?") {
-                matched = std::ranges::find(values, body) != values.end();
-            } else if (operation == "match?" || operation == "not-match?"
-                || operation == "lua-match?") {
-                try {
-                    const std::string pattern = operation == "lua-match?"
-                        ? lua_regex(values.front())
-                        : std::string(values.front());
-                    matched                   = std::regex_search(
-                        body.begin(), body.end(), std::regex(pattern));
-                } catch (const std::regex_error&) {
-                    return false;
+                std::optional<QueryPredicate::Kind> kind;
+                if (operation == "eq?") {
+                    kind = QueryPredicate::Kind::EQUAL;
+                } else if (operation == "not-eq?") {
+                    kind = QueryPredicate::Kind::NOT_EQUAL;
+                } else if (operation == "any-of?") {
+                    kind = QueryPredicate::Kind::ANY_OF;
+                } else if (operation == "not-any-of?") {
+                    kind = QueryPredicate::Kind::NOT_ANY_OF;
+                } else if (operation == "match?" || operation == "lua-match?") {
+                    kind = QueryPredicate::Kind::MATCH;
+                } else if (operation == "not-match?") {
+                    kind = QueryPredicate::Kind::NOT_MATCH;
                 }
+                if (!kind.has_value()) {
+                    continue;
+                }
+
+                std::optional<std::regex> regex;
+                if (*kind == QueryPredicate::Kind::MATCH
+                    || *kind == QueryPredicate::Kind::NOT_MATCH) {
+                    try {
+                        regex.emplace(operation == "lua-match?"
+                                ? lua_regex(values.front())
+                                : values.front());
+                    } catch (const std::regex_error&) {
+                        kind = QueryPredicate::Kind::INVALID;
+                    }
+                }
+                predicates[pattern].push_back(QueryPredicate {
+                    *kind, *capture_id, std::move(values), std::move(regex) });
             }
-            if (operation == "not-eq?" || operation == "not-match?"
-                || operation == "not-any-of?") {
+        }
+        return predicates;
+    }
+
+    LanguageDefinition::Runtime& language_runtime(
+        const LanguageDefinition& definition)
+    {
+        LanguageDefinition::Runtime& runtime = *definition.runtime;
+        std::call_once(runtime.initialized, [&definition, &runtime] {
+            runtime.language = definition.load_language();
+            if (runtime.language == nullptr) {
+                return;
+            }
+            runtime.query
+                = make_query(runtime.language, definition.highlight_query);
+            if (runtime.query != nullptr) {
+                runtime.predicates = compile_predicates(runtime.query.get());
+            }
+            runtime.parser.reset(ts_parser_new());
+            if (runtime.parser != nullptr
+                && !ts_parser_set_language(
+                    runtime.parser.get(), runtime.language)) {
+                runtime.parser.reset();
+            }
+            runtime.cursor.reset(ts_query_cursor_new());
+        });
+        return runtime;
+    }
+
+    bool predicates_match(const LanguageDefinition::Runtime& runtime,
+        const TSQueryMatch& match, std::string_view code)
+    {
+        if (match.pattern_index >= runtime.predicates.size()) {
+            return true;
+        }
+        for (const QueryPredicate& predicate :
+            runtime.predicates[match.pattern_index]) {
+            const std::string_view body
+                = capture_text(match, predicate.capture_id, code);
+            bool matched = true;
+            switch (predicate.kind) {
+            case QueryPredicate::Kind::EQUAL:
+            case QueryPredicate::Kind::NOT_EQUAL:
+                matched = body == predicate.values.front();
+                break;
+            case QueryPredicate::Kind::ANY_OF:
+            case QueryPredicate::Kind::NOT_ANY_OF:
+                matched = std::ranges::find(predicate.values, body)
+                    != predicate.values.end();
+                break;
+            case QueryPredicate::Kind::MATCH:
+            case QueryPredicate::Kind::NOT_MATCH:
+                matched = predicate.regex.has_value()
+                    && std::regex_search(
+                        body.begin(), body.end(), *predicate.regex);
+                break;
+            case QueryPredicate::Kind::INVALID: matched = false; break;
+            }
+            if (predicate.kind == QueryPredicate::Kind::NOT_EQUAL
+                || predicate.kind == QueryPredicate::Kind::NOT_ANY_OF
+                || predicate.kind == QueryPredicate::Kind::NOT_MATCH) {
                 matched = !matched;
             }
             if (!matched) {
@@ -322,31 +425,28 @@ namespace {
             || code.size() > std::numeric_limits<uint32_t>::max()) {
             return styles;
         }
-        const TSQuery* query = language.query.get();
-        if (query == nullptr) {
+        LanguageDefinition::Runtime& runtime = language_runtime(language);
+        const TSQuery* query                 = runtime.query.get();
+        if (runtime.language == nullptr || query == nullptr
+            || runtime.parser == nullptr || runtime.cursor == nullptr) {
             return styles;
         }
-        ParserPtr parser(ts_parser_new());
-        if (!parser
-            || !ts_parser_set_language(parser.get(), language.language)) {
-            return styles;
-        }
-        TreePtr tree(ts_parser_parse_string(parser.get(), nullptr, code.data(),
-            static_cast<uint32_t>(code.size())));
-        CursorPtr cursor(ts_query_cursor_new());
-        if (!tree || !cursor) {
+        std::lock_guard lock(runtime.use_mutex);
+        TreePtr tree(ts_parser_parse_string(runtime.parser.get(), nullptr,
+            code.data(), static_cast<uint32_t>(code.size())));
+        if (!tree) {
             return styles;
         }
         ts_query_cursor_exec(
-            cursor.get(), query, ts_tree_root_node(tree.get()));
+            runtime.cursor.get(), query, ts_tree_root_node(tree.get()));
 
         std::vector<uint32_t> span_sizes(
             code.size(), std::numeric_limits<uint32_t>::max());
         TSQueryMatch match { };
         uint32_t capture_index = 0;
         while (ts_query_cursor_next_capture(
-            cursor.get(), &match, &capture_index)) {
-            if (!predicates_match(query, match, code)) {
+            runtime.cursor.get(), &match, &capture_index)) {
+            if (!predicates_match(runtime, match, code)) {
                 continue;
             }
             const TSQueryCapture& capture = match.captures[capture_index];
@@ -411,9 +511,11 @@ std::string syntax_type_for_path(std::string_view path)
 
 Elements highlight_code(std::string_view code, std::string_view type)
 {
-    std::vector<SyntaxStyle> styles(code.size(), SyntaxStyle::PLAIN);
+    std::vector<SyntaxStyle> styles;
     if (const LanguageDefinition* language = language_for_type(type)) {
         styles = syntax_styles(code, *language);
+    } else {
+        styles.assign(code.size(), SyntaxStyle::PLAIN);
     }
 
     Elements lines;

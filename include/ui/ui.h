@@ -14,6 +14,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "common/diff.h"
@@ -25,14 +26,17 @@ namespace ursa {
 
 class ApplicationState;
 class Session;
+struct ReviewHunk;
+struct ReviewLine;
 struct RepositoryState;
 
 struct LayoutCtx {
     enum class Kind { WIDE, NARROW };
     static constexpr int wide_threshold = 100;
     static constexpr int panel_width    = 40;
-    Kind kind;
-    int width;
+    Kind kind                           = Kind::NARROW;
+    int width                           = 0;
+    int height                          = 0;
 };
 
 using LayoutFn = std::function<LayoutCtx()>;
@@ -52,7 +56,7 @@ std::string fit(const std::string& text, int width, int offset);
 
 ftxui::Element panel(ftxui::Element e);
 
-LayoutCtx layout_context(int width);
+LayoutCtx layout_context(int width, int height = 0);
 
 ftxui::Component space_activates(
     ftxui::Component child, std::function<void()> on_space);
@@ -127,6 +131,17 @@ std::string syntax_type_for_path(std::string_view path);
 ftxui::Element highlight_code_line(
     std::string_view code, std::string_view type);
 ftxui::Elements highlight_code(std::string_view code, std::string_view type);
+
+struct ReviewLineHighlights {
+    ftxui::Element old_side;
+    ftxui::Element new_side;
+};
+
+using ReviewHighlights
+    = std::unordered_map<const ReviewLine*, ReviewLineHighlights>;
+void append_review_hunk_highlights(ReviewHighlights& cache,
+    const ReviewHunk& hunk, std::string_view path, int review_width,
+    int horizontal_offset, bool side_by_side);
 
 ftxui::Element card(ftxui::Element body,
     std::optional<ftxui::Color> bg = std::nullopt, bool pad = true);
