@@ -7,6 +7,16 @@ ISSUES & SUPPORT: https://github.com/umutsevdi/ursa/issues
 
 CHANGELOG
 -------------------------------------------------------------------------------
+0.1.1 - Fri, Sep 5 2026
+-------------------------------------------------------------------------------
+[https://github.com/umutsevdi/ursa/releases/tag/v0.1.1]
+
+Changes:
+    - Added syntax highlighting for 20 languages.
+    - Markdown rendering for `ViewerModal`'s.
+    - Added labels for custom providers.
+
+-------------------------------------------------------------------------------
 0.1.0 - Fri, Sep 4 2026
 -------------------------------------------------------------------------------
 [https://github.com/umutsevdi/ursa/releases/tag/v0.1.0]
