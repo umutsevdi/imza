@@ -1,3 +1,4 @@
+#include "CLI/CLI.hpp"
 #include "agent/flows.h"
 
 #include "common/util.h"
@@ -126,7 +127,7 @@ namespace {
 CliResult run_cli(int argc, char** argv)
 {
     CLI::App app { "Open source multi-modal coding agent.", "ursa" };
-    app.set_version_flag("--version", "ursa " URSA_VERSION);
+    app.set_version_flag("-v,--version", "ursa " URSA_VERSION);
     std::vector<std::string> session_arguments;
     std::string working_directory;
     std::string model;
@@ -136,34 +137,36 @@ CliResult run_cli(int argc, char** argv)
     std::string ask;
     std::string exec;
     bool config_requested = false;
-    app.add_flag("--config", config_requested, "Open the config file");
+    app.add_flag("-c,--config", config_requested, "Open the config file");
     auto* ask_option  = app.add_option("--ask", ask,
                                "Run a one-shot read-only agent query "
                                "(unimplemented)")
-                            ->type_name("QUERY");
+                            ->type_name("<query>");
     auto* exec_option = app.add_option("--exec", exec,
                                "Run a one-shot build agent query "
                                "(unimplemented)")
-                            ->type_name("QUERY");
+                            ->type_name("<query>");
     ask_option->excludes(exec_option);
-    app.add_option("--session", session_arguments,
+    app.add_option("-s,--session", session_arguments,
            "Open a session by ID, list with 'ls', or delete with 'rm ID'")
-        ->type_name("ID|ls|rm ID")
+        ->type_name("<id>|ls|rm <id>")
         ->expected(1, 2);
     app.add_option("directory", working_directory,
            "Working directory for the interactive or command session")
+        ->type_name("")
         ->check(CLI::ExistingDirectory);
     app.add_option("--model", model, "Model to use for this session")
-        ->type_name("MODEL");
+        ->type_name("<model>");
     app.add_option(
            "--variant", variant, "Reasoning variant to use for this session")
-        ->type_name("VARIANT");
+        ->type_name("<variant>")
+        ->check(CLI::IsMember({ "off", "low", "default", "high" }));
     app.add_option("--web", web, "Enable or disable web tools (default: true)")
-        ->type_name("true|false")
+        ->type_name("<bool>")
         ->check(CLI::IsMember({ "true", "false" }));
     app.add_option("--shell", shell,
            "Enable or disable the shell tool (interactive default: true)")
-        ->type_name("true|false")
+        ->type_name("<bool>")
         ->check(CLI::IsMember({ "true", "false" }));
 
     try {
