@@ -1,0 +1,812 @@
+#include "tools/tool.h"
+#include "common/util.h"
+#include "network/json_io.h"
+#include "platform/command_runner.h"
+
+#include <algorithm>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <sstream>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace ursa {
+
+const Tool* find_tool(std::span<const Tool> tools, std::string_view name)
+{
+    for (const auto& t : tools) {
+        if (t.spec.name == name) {
+            return &t;
+        }
+    }
+    return nullptr;
+}
+
+std::vector<ToolSpec> tool_specs(std::span<const Tool> tools)
+{
+    std::vector<ToolSpec> out;
+    out.reserve(tools.size());
+    for (const auto& t : tools) {
+        out.push_back(t.spec);
+    }
+    return out;
+}
+
+std::vector<ToolSpec> plan_tool_specs(std::span<const Tool> tools)
+{
+    std::vector<ToolSpec> out;
+    for (const auto& tool : tools) {
+        if (tool.safety == ToolSafety::READ_ONLY || tool.available_in_plan) {
+            out.push_back(tool.spec);
+        }
+    }
+    return out;
+}
+
+ToolOutput dispatch_tool(
+    std::span<const Tool> tools, const ToolCallRequest& req)
+{
+    const Tool* tool = find_tool(tools, req.name);
+    if (tool == nullptr) {
+        return { ToolOutput::Kind::ERROR, "unknown tool: " + req.name };
+    }
+    Json::Value args = parse_json(req.args);
+    if (args.isNull()) {
+        args = Json::Value(req.args);
+    }
+    if (!tool->run) {
+        return { ToolOutput::Kind::ERROR,
+            "tool has no implementation: " + req.name };
+    }
+    return tool->run(args);
+}
+
+std::vector<Tool> default_tools(RuntimeFlag flags)
+{
+    std::vector<Tool> tools;
+    tools.push_back(make_read_tool());
+    tools.push_back(make_skill_tool());
+    tools.push_back(make_list_tool());
+    if ((flags & RuntimeFlag::ATTENDED) != RuntimeFlag::NONE) {
+        tools.push_back(make_ask_tool());
+    }
+    if ((flags & RuntimeFlag::SHELL) != RuntimeFlag::NONE) {
+        tools.push_back(make_shell_tool());
+    }
+    tools.push_back(make_todo_tool());
+    tools.push_back(make_subagent_tool());
+    tools.push_back(make_edit_tool());
+    tools.push_back(make_write_tool());
+    if ((flags & RuntimeFlag::WEB) != RuntimeFlag::NONE) {
+        tools.push_back(make_webfetch_tool());
+        tools.push_back(make_websearch_tool());
+    }
+    return tools;
+}
+
+namespace {
+
+    namespace fs = std::filesystem;
+
+    constexpr std::size_t MAX_READ_LINES   = 2000;
+    constexpr std::size_t MAX_LIST_ENTRIES = 2000;
+
+    ToolOutput error(std::string text)
+    {
+        return { ToolOutput::Kind::ERROR, std::move(text) };
+    }
+
+    std::string format_kb(std::uintmax_t bytes)
+    {
+        double kb = static_cast<double>(bytes) / 1024.0;
+        std::ostringstream os;
+        os << std::fixed << std::setprecision(1) << kb;
+        std::string s = os.str();
+        if (s.size() >= 2 && s.compare(s.size() - 2, 2, ".0") == 0) {
+            s = s.substr(0, s.size() - 2);
+        }
+        return s + " KB";
+    }
+
+    std::size_t utf8_width(const std::string& s)
+    {
+        std::size_t w = 0;
+        for (unsigned char c : s) {
+            if ((c & 0xC0) != 0x80) {
+                ++w;
+            }
+        }
+        return w;
+    }
+
+    ToolOutput read_run(const Json::Value& args)
+    {
+        if (!args.isObject() || !args["path"].isString()
+            || args["path"].asString().empty()) {
+            return error("read: 'path' must be a non-empty string");
+        }
+        const std::string path = args["path"].asString();
+
+        std::error_code ec;
+        const fs::path file(path);
+        if (!fs::exists(file, ec)) {
+            return error("read: no such file: " + path);
+        }
+        if (!fs::is_regular_file(file, ec)) {
+            return error("read: not a file: " + path);
+        }
+
+        std::ifstream in(file, std::ios::binary);
+        if (!in) {
+            return error("read: cannot open: " + path);
+        }
+        const std::string content((std::istreambuf_iterator<char>(in)),
+            std::istreambuf_iterator<char>());
+        if (content.find('\0') != std::string::npos) {
+            return error("read: binary file: " + path);
+        }
+
+        std::size_t begin = 1;
+        if (args["line_begin"].isIntegral()) {
+            const auto raw = args["line_begin"].asInt64();
+            if (raw < 1) {
+                return error("read: line_begin must be 1 or greater");
+            }
+            begin = static_cast<std::size_t>(raw);
+        }
+        bool end_given  = false;
+        std::size_t end = 0;
+        if (args["line_end"].isIntegral()) {
+            const auto raw = args["line_end"].asInt64();
+            if (raw < 1) {
+                return error("read: line_end must be 1 or greater");
+            }
+            end       = static_cast<std::size_t>(raw);
+            end_given = true;
+        }
+
+        const std::vector<std::string> lines = split_lines(content);
+        const std::size_t length             = lines.size();
+        if (length == 0) {
+            return { ToolOutput::Kind::OUTPUT, "(empty file)" };
+        }
+        if (begin > length) {
+            return error("read: line_begin " + std::to_string(begin)
+                + " exceeds file length " + std::to_string(length) + ": "
+                + path);
+        }
+        if (end_given && end > length) {
+            return error("read: line_end " + std::to_string(end)
+                + " exceeds file length " + std::to_string(length) + ": "
+                + path);
+        }
+        if (end_given && end < begin) {
+            return error("read: line_end is before line_begin");
+        }
+
+        bool truncated = false;
+        if (!end_given) {
+            const std::size_t capped = begin + MAX_READ_LINES - 1;
+            if (capped < length) {
+                end       = capped;
+                truncated = true;
+            } else {
+                end = length;
+            }
+        }
+
+        std::string out = join_lines(lines, begin - 1, end - 1);
+        if (truncated) {
+            out += "\n\n[truncated: showing lines " + std::to_string(begin)
+                + "-" + std::to_string(end) + " of " + std::to_string(length)
+                + "]";
+        }
+        return { ToolOutput::Kind::OUTPUT, std::move(out) };
+    }
+
+    ToolOutput list_run(const Json::Value& args)
+    {
+        std::string dir = ".";
+        if (args.isObject() && args["path"].isString()
+            && !args["path"].asString().empty()) {
+            dir = args["path"].asString();
+        }
+
+        std::error_code ec;
+        const fs::path root(dir);
+        if (!fs::exists(root, ec)) {
+            return error("list: no such directory: " + dir);
+        }
+        if (!fs::is_directory(root, ec)) {
+            return error("list: not a directory: " + dir);
+        }
+
+        std::vector<std::string> names;
+        try {
+            for (const auto& entry : fs::directory_iterator(root)) {
+                std::string name = entry.path().filename().string();
+                if (entry.is_directory(ec)) {
+                    name += "/";
+                }
+                names.push_back(std::move(name));
+            }
+        } catch (const std::filesystem::filesystem_error& e) {
+            return error(
+                std::string("list: cannot read directory: ") + e.what());
+        }
+        std::sort(names.begin(), names.end());
+
+        bool truncated    = false;
+        std::size_t count = names.size();
+        if (count > MAX_LIST_ENTRIES) {
+            names.resize(MAX_LIST_ENTRIES);
+            truncated = true;
+        }
+
+        std::size_t max_w = 0;
+        for (const auto& name : names) {
+            const std::size_t w = utf8_width(name);
+            if (w > max_w) {
+                max_w = w;
+            }
+        }
+        std::string out;
+        for (const auto& name : names) {
+            if (!out.empty()) {
+                out += '\n';
+            }
+            out += name;
+            const std::size_t pad = max_w + 2 > utf8_width(name)
+                ? max_w + 2 - utf8_width(name)
+                : 2;
+            out += std::string(pad, ' ');
+            if (name.empty() || name.back() == '/') {
+                out += "—";
+                continue;
+            }
+            std::error_code sec;
+            const auto sz = fs::file_size(root / name, sec);
+            out += sec ? "—" : format_kb(sz);
+        }
+        if (truncated) {
+            out += "\n[truncated: showing first "
+                + std::to_string(MAX_LIST_ENTRIES) + " of "
+                + std::to_string(count) + " entries]";
+        }
+        return { ToolOutput::Kind::OUTPUT, std::move(out) };
+    }
+
+    ToolOutput shell_run(const Json::Value& args)
+    {
+        if (!args.isObject() || !args["command"].isString()
+            || args["command"].asString().empty()) {
+            return error("shell: 'command' must be a non-empty string");
+        }
+        const std::string command = args["command"].asString();
+
+        std::chrono::seconds timeout = std::chrono::seconds(10);
+        if (args["timeout"].isIntegral()) {
+            const auto raw = args["timeout"].asInt64();
+            if (raw < 1) {
+                return error("shell: timeout must be 1 or greater");
+            }
+            timeout = std::chrono::seconds(static_cast<long>(raw));
+        }
+
+        CommandResult r = run_command(command, timeout);
+        if (!r.spawned) {
+            return error("shell: failed to execute command");
+        }
+
+        std::string out = std::move(r.output);
+        if (!out.empty() && out.back() != '\n') {
+            out += '\n';
+        }
+        ToolOutput result { ToolOutput::Kind::OUTPUT, std::move(out) };
+        result.shell_status = r.timed_out
+            ? ShellStatus { ShellTimeout { timeout } }
+            : ShellStatus { ShellExit { r.exit_code } };
+        return result;
+    }
+
+    bool load_text(const std::string& path, std::string& out, std::string& err)
+    {
+        std::error_code ec;
+        const fs::path file(path);
+        if (!fs::exists(file, ec)) {
+            err = "no such file: " + path;
+            return false;
+        }
+        if (!fs::is_regular_file(file, ec)) {
+            err = "not a file: " + path;
+            return false;
+        }
+        std::ifstream in(file, std::ios::binary);
+        if (!in) {
+            err = "cannot open: " + path;
+            return false;
+        }
+        const std::string content((std::istreambuf_iterator<char>(in)),
+            std::istreambuf_iterator<char>());
+        if (content.find('\0') != std::string::npos) {
+            err = "binary file: " + path;
+            return false;
+        }
+        out = content;
+        return true;
+    }
+
+    bool save_text(
+        const std::string& path, const std::string& content, std::string& err)
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            err = "cannot write: " + path;
+            return false;
+        }
+        out << content;
+        out.close();
+        if (!out) {
+            err = "cannot write: " + path;
+            return false;
+        }
+        return true;
+    }
+
+    std::string rebuild_lines(
+        const std::vector<std::string>& lines, bool trailing_newline)
+    {
+        std::string out;
+        for (std::size_t i = 0; i < lines.size(); ++i) {
+            if (i != 0) {
+                out += '\n';
+            }
+            out += lines[i];
+        }
+        if (!lines.empty() && trailing_newline) {
+            out += '\n';
+        }
+        return out;
+    }
+
+    struct EditSpan {
+        std::size_t old_begin;
+        std::size_t old_end;
+        std::size_t new_begin;
+        std::size_t new_end;
+    };
+
+    long get_int(const Json::Value& v, long def)
+    {
+        if (v.isIntegral()) {
+            return v.asInt64();
+        }
+        if (v.isString()) {
+            try {
+                return std::stol(v.asString());
+            } catch (...) {
+                return def;
+            }
+        }
+        return def;
+    }
+
+    DiffView build_diff_view(const std::string& path,
+        const std::vector<std::string>& old_lines,
+        const std::vector<std::string>& new_lines,
+        const std::vector<EditSpan>& edits, std::size_t context = 3)
+    {
+        DiffView dv;
+        dv.file = path;
+        if (old_lines.empty() && new_lines.empty()) {
+            return dv;
+        }
+        const auto push_same
+            = [&](std::size_t o0, std::size_t o1, std::size_t n0) {
+                  const std::size_t len = o1 - o0;
+                  for (std::size_t k = 0; k < len; ++k) {
+                      DiffRow r;
+                      r.kind     = DiffRow::Kind::SAME;
+                      r.left_no  = o0 + k + 1;
+                      r.right_no = n0 + k + 1;
+                      r.left     = old_lines[o0 + k];
+                      r.right    = new_lines[n0 + k];
+                      dv.rows.push_back(std::move(r));
+                  }
+              };
+        const auto push_skip = [&](std::size_t count, std::size_t lo,
+                                   std::size_t ln) {
+            DiffRow r;
+            r.kind     = DiffRow::Kind::SAME;
+            r.left_no  = lo;
+            r.right_no = ln;
+            r.left     = "… " + std::to_string(count) + " unchanged line(s) …";
+            r.right    = r.left;
+            dv.rows.push_back(std::move(r));
+        };
+        const auto push_edit = [&](const EditSpan& ed) {
+            const std::size_t olen = ed.old_end - ed.old_begin;
+            const std::size_t nlen = ed.new_end - ed.new_begin;
+            const std::size_t len  = std::max(olen, nlen);
+            for (std::size_t k = 0; k < len; ++k) {
+                DiffRow r;
+                r.kind = (k < olen && k >= nlen) ? DiffRow::Kind::REMOVE
+                                                 : DiffRow::Kind::ADD;
+                if (k < olen) {
+                    r.left_no = ed.old_begin + k + 1;
+                    r.left    = old_lines[ed.old_begin + k];
+                }
+                if (k < nlen) {
+                    r.right_no = ed.new_begin + k + 1;
+                    r.right    = new_lines[ed.new_begin + k];
+                }
+                dv.rows.push_back(std::move(r));
+            }
+        };
+
+        std::size_t oi = 0;
+        std::size_t ni = 0;
+        for (std::size_t e = 0; e < edits.size(); ++e) {
+            const EditSpan& ed        = edits[e];
+            const std::size_t gap_len = ed.old_begin - oi;
+            if (gap_len > 0) {
+                const std::size_t take  = std::min(gap_len, context);
+                const std::size_t start = ed.old_begin - take;
+                if (gap_len > context) {
+                    push_skip(gap_len - context, oi + 1, ni + 1);
+                }
+                push_same(start, ed.old_begin, ni + (start - oi));
+            }
+            push_edit(ed);
+            oi = ed.old_end;
+            ni = ed.new_end;
+        }
+        const std::size_t tail_len = old_lines.size() - oi;
+        if (tail_len > 0) {
+            const std::size_t take = std::min(tail_len, context);
+            push_same(oi, oi + take, ni);
+            if (tail_len > context) {
+                push_skip(tail_len - context, oi + take + 1, ni + take + 1);
+            }
+        }
+        return dv;
+    }
+
+    ToolOutput make_diff_result(std::string summary, const std::string& path,
+        const std::vector<std::string>& old_lines,
+        const std::vector<std::string>& new_lines)
+    {
+        std::size_t prefix = 0;
+        while (prefix < old_lines.size() && prefix < new_lines.size()
+            && old_lines[prefix] == new_lines[prefix]) {
+            ++prefix;
+        }
+        std::size_t old_suffix = old_lines.size();
+        std::size_t new_suffix = new_lines.size();
+        while (old_suffix > prefix && new_suffix > prefix
+            && old_lines[old_suffix - 1] == new_lines[new_suffix - 1]) {
+            --old_suffix;
+            --new_suffix;
+        }
+        std::vector<EditSpan> edits;
+        if (prefix != old_lines.size() || prefix != new_lines.size()) {
+            edits.push_back({ prefix, old_suffix, prefix, new_suffix });
+        }
+        ToolOutput out { ToolOutput::Kind::OUTPUT, std::move(summary) };
+        out.diff = build_diff_view(path, old_lines, new_lines, edits);
+        return out;
+    }
+
+    ToolOutput edit_run(const Json::Value& args)
+    {
+        if (!args.isObject() || !args["file_path"].isString()
+            || args["file_path"].asString().empty()) {
+            return error("edit: 'file_path' must be a non-empty string");
+        }
+        const std::string path = args["file_path"].asString();
+        if (!args["old_string"].isString()
+            || args["old_string"].asString().empty()) {
+            return error("edit: 'old_string' must be a non-empty string");
+        }
+        const std::string old   = args["old_string"].asString();
+        const std::string fresh = args["new_string"].isString()
+            ? args["new_string"].asString()
+            : "";
+
+        long replace_count = get_int(args["replace_count"], 1);
+        if (replace_count < 0) {
+            return error("edit: replace_count must be 0 or greater");
+        }
+        long offset = get_int(args["offset"], 0);
+        if (offset < 0) {
+            return error("edit: offset must be 0 or greater");
+        }
+
+        std::string content, err;
+        if (!load_text(path, content, err)) {
+            return error("edit: " + err);
+        }
+
+        std::size_t start = 0;
+        if (offset > 0) {
+            std::size_t line    = 1;
+            std::size_t i       = 0;
+            const std::size_t n = content.size();
+            while (i < n && line < static_cast<std::size_t>(offset)) {
+                if (content[i] == '\n') {
+                    ++line;
+                }
+                ++i;
+            }
+            start = i;
+        }
+
+        std::vector<std::size_t> matches;
+        std::size_t p = start;
+        while ((p = content.find(old, p)) != std::string::npos) {
+            matches.push_back(p);
+            p += old.size();
+        }
+        if (matches.empty()) {
+            return error(offset > 0
+                    ? "edit: old_string not found after offset line"
+                    : "edit: old_string not found");
+        }
+
+        const std::size_t n = replace_count == 0
+            ? matches.size()
+            : std::min(static_cast<std::size_t>(replace_count), matches.size());
+
+        const std::vector<std::string> old_lines = split_lines(content);
+        std::size_t replaced                     = 0;
+        std::string out;
+        out.reserve(content.size() + n * fresh.size());
+        std::size_t cursor = 0;
+        for (std::size_t idx = 0; idx < n; ++idx) {
+            const std::size_t match = matches[idx];
+            const std::size_t m_end = match + old.size();
+            out.append(content, cursor, match - cursor);
+            out += fresh;
+            ++replaced;
+            cursor = m_end;
+        }
+        out += content.substr(cursor);
+        const std::vector<std::string> new_lines = split_lines(out);
+
+        if (!save_text(path, out, err)) {
+            return error("edit: " + err);
+        }
+        return make_diff_result("edit: replaced " + std::to_string(replaced)
+                + " occurrence(s) in " + path,
+            path, old_lines, new_lines);
+    }
+
+    ToolOutput write_run(const Json::Value& args)
+    {
+        if (!args.isObject() || !args["file_path"].isString()
+            || args["file_path"].asString().empty()) {
+            return error("write: 'file_path' must be a non-empty string");
+        }
+        const std::string path = args["file_path"].asString();
+        if (!args["text"].isString()) {
+            return error("write: 'text' must be a string");
+        }
+        const std::string text = args["text"].asString();
+
+        const bool overwrite
+            = args["overwrite"].isBool() ? args["overwrite"].asBool() : false;
+
+        std::error_code ec;
+        const bool exists = fs::exists(fs::path(path), ec);
+
+        std::string content, err;
+        if (exists) {
+            if (!load_text(path, content, err)) {
+                return error("write: " + err);
+            }
+        } else {
+            if (overwrite) {
+                return error("write: no such file: " + path);
+            }
+            content.clear();
+        }
+
+        const bool trailing_newline = content.empty() || content.back() == '\n';
+        const std::vector<std::string> old_lines = split_lines(content);
+        const std::vector<std::string> insert    = split_lines(text);
+        std::vector<std::string> new_lines       = old_lines;
+
+        if (!overwrite) {
+            const long line = get_int(args["line"], 0);
+            if (line < 0) {
+                return error("write: line must be 0 or greater");
+            }
+            std::size_t at = static_cast<std::size_t>(line);
+            if (at > old_lines.size()) {
+                at = old_lines.size();
+            }
+            new_lines.insert(
+                new_lines.begin() + static_cast<std::ptrdiff_t>(at),
+                insert.begin(), insert.end());
+            const std::string out = rebuild_lines(new_lines, trailing_newline);
+            if (!save_text(path, out, err)) {
+                return error("write: " + err);
+            }
+            return make_diff_result("write: inserted text below line "
+                    + std::to_string(line) + " in " + path,
+                path, old_lines, new_lines);
+        }
+
+        if (!args["line_begin"].isIntegral()
+            && !args["line_begin"].isString()) {
+            return error(
+                "write: block-replace requires line_begin and line_end");
+        }
+        if (!args["line_end"].isIntegral() && !args["line_end"].isString()) {
+            return error(
+                "write: block-replace requires line_begin and line_end");
+        }
+        const long lb = get_int(args["line_begin"], 0);
+        const long le = get_int(args["line_end"], 0);
+        if (lb < 0 || le < 0) {
+            return error("write: line_begin/line_end must be 0 or greater");
+        }
+        if (le != 0 && lb != 0 && le < lb) {
+            return error("write: line_end is before line_begin");
+        }
+
+        std::size_t begin_idx = lb == 0 ? 0 : static_cast<std::size_t>(lb - 1);
+        std::size_t end_exclusive
+            = le == 0 ? old_lines.size() : static_cast<std::size_t>(le);
+        if (begin_idx > old_lines.size()) {
+            begin_idx = old_lines.size();
+        }
+        if (end_exclusive > old_lines.size()) {
+            end_exclusive = old_lines.size();
+        }
+        if (end_exclusive < begin_idx) {
+            end_exclusive = begin_idx;
+        }
+
+        new_lines.erase(
+            new_lines.begin() + static_cast<std::ptrdiff_t>(begin_idx),
+            new_lines.begin() + static_cast<std::ptrdiff_t>(end_exclusive));
+        new_lines.insert(
+            new_lines.begin() + static_cast<std::ptrdiff_t>(begin_idx),
+            insert.begin(), insert.end());
+        const std::string out = rebuild_lines(new_lines, trailing_newline);
+        if (!save_text(path, out, err)) {
+            return error("write: " + err);
+        }
+        return make_diff_result("write: replaced lines " + std::to_string(lb)
+                + "-" + std::to_string(le) + " in " + path,
+            path, old_lines, new_lines);
+    }
+
+} // namespace
+
+Tool make_read_tool()
+{
+    ToolSpec spec;
+    spec.name        = "read";
+    spec.description = "Read a text file and return its contents. Optionally "
+                       "restrict output to a 1-based inclusive line range via "
+                       "line_begin/line_end; without line_end, long files are "
+                       "truncated.";
+    spec.parameters  = parse_json(
+        R"json({"type":"object","properties":{"path":{"type":"string","description":"file path to read"},"line_begin":{"type":"integer","description":"first line to return (1-based, inclusive)"},"line_end":{"type":"integer","description":"last line to return (1-based, inclusive)"}},"required":["path"]})json");
+    return { std::move(spec), read_run, ToolSafety::READ_ONLY };
+}
+
+Tool make_skill_tool()
+{
+    ToolSpec spec;
+    spec.name        = "skill";
+    spec.description = "Load the instructions for a discovered skill by name. "
+                       "Optionally specify scope as project or global.";
+    spec.parameters  = parse_json(
+        R"json({"type":"object","properties":{"name":{"type":"string"},"scope":{"type":"string","enum":["project","global"]}},"required":["name"]})json");
+    return { std::move(spec), { }, ToolSafety::READ_ONLY, false, true };
+}
+
+Tool make_list_tool()
+{
+    ToolSpec spec;
+    spec.name        = "list";
+    spec.description = "List all entries of a directory (non-recursive), "
+                       "sorted, one per line; directories carry a trailing "
+                       "slash, along with their file sizes.";
+    spec.parameters  = parse_json(
+        R"json({"type":"object","properties":{"path":{"type":"string","description":"directory to list (defaults to the current directory)"}}})json");
+    return { std::move(spec), list_run, ToolSafety::READ_ONLY };
+}
+
+Tool make_ask_tool()
+{
+    ToolSpec spec;
+    spec.name        = "ask";
+    spec.description = "Ask the user one or more questions and wait for their "
+                       "answers. Returns the answers as the tool result.";
+    spec.parameters  = parse_json(
+        R"json({"type":"object","properties":{"questions":{"type":"array","description":"questions to ask (at least one)","minItems":1,"items":{"type":"object","properties":{"prompt":{"type":"string","description":"the question text"},"options":{"type":"array","items":{"type":"string"},"description":"selectable options (omit for free-text only)"},"multi":{"type":"boolean","description":"allow multiple option selections"},"free_text":{"type":"boolean","description":"allow a free-text answer in addition to options"}},"required":["prompt"]}}}},"required":["questions"]})json");
+    return { std::move(spec), ToolHandler { }, ToolSafety::READ_ONLY };
+}
+
+Tool make_shell_tool()
+{
+    ToolSpec spec;
+    spec.name = "shell";
+    spec.description
+        = "Run a single shell command (one-liner) on the host and "
+          "return its combined stdout/stderr. The command is subject "
+          "to a timeout (seconds, default 10) after which it is "
+          "terminated.";
+    spec.parameters = parse_json(
+        R"json({"type":"object","properties":{"command":{"type":"string","description":"the shell command to run"},"timeout":{"type":"integer","description":"maximum runtime in seconds before the command is killed (default 10)"}},"required":["command"]})json");
+    return { std::move(spec), shell_run, ToolSafety::MUTATING, false, true };
+}
+
+Tool make_todo_tool()
+{
+    ToolSpec spec;
+    spec.name        = "todo";
+    spec.description = "Create and maintain a structured task list for the "
+                       "current coding session. Tracks progress, organizes "
+                       "multi-step work, and surfaces status to the user. Pass "
+                       "the complete updated list each time; it replaces the "
+                       "previous one.";
+    spec.parameters  = parse_json(
+        R"json({"type":"object","properties":{"todos":{"type":"array","description":"the updated todo list","items":{"type":"object","properties":{"content":{"type":"string","description":"short imperative description of the task"},"status":{"type":"string","enum":["pending","in_progress","completed","cancelled"],"description":"task state (default pending)"}},"required":["content"]}}},"required":["todos"]})json");
+    return { std::move(spec), ToolHandler { }, ToolSafety::READ_ONLY };
+}
+
+Tool make_subagent_tool()
+{
+    ToolSpec spec;
+    spec.name = "subagent";
+    spec.description
+        = "Delegate one to five independent tasks to concurrent research or "
+          "build agents and wait for their reports. Build agents are only "
+          "available while the main agent is in build mode.";
+    spec.parameters = parse_json(
+        R"json({"type":"object","properties":{"tasks":{"type":"array","minItems":1,"maxItems":5,"items":{"type":"object","properties":{"mode":{"type":"string","enum":["research","build"]},"prompt":{"type":"string","minLength":1}},"required":["mode","prompt"],"additionalProperties":false}}},"required":["tasks"],"additionalProperties":false})json");
+    return Tool { std::move(spec), { }, ToolSafety::READ_ONLY, true, true };
+}
+
+Tool make_edit_tool()
+{
+    ToolSpec spec;
+    spec.name = "edit";
+    spec.description
+        = "Replace text in a file by pattern match. Replaces the "
+          "first N occurrences of old_string with new_string "
+          "(replace_count, default 1; 0 means all). Matching can be "
+          "limited to start at a given 1-based line via offset "
+          "(default 0 = whole file). The file must already exist.";
+    spec.parameters = parse_json(
+        R"json({"type":"object","properties":{"file_path":{"type":"string","description":"file to edit"},"old_string":{"type":"string","description":"existing text to match and replace (non-empty)"},"new_string":{"type":"string","description":"replacement text (empty string deletes the match)"},"replace_count":{"type":"integer","description":"replace the first N matches (default 1; 0 = all)"},"offset":{"type":"integer","description":"1-based line to start matching from (default 0 = whole file)"}},"required":["file_path","old_string","new_string"]})json");
+    return { std::move(spec), edit_run, ToolSafety::MUTATING };
+}
+
+Tool make_write_tool()
+{
+    ToolSpec spec;
+    spec.name = "write";
+    spec.description
+        = "Create a new text file or modify an existing one. If the file "
+          "does not exist, insert mode creates it with the supplied text. "
+          "In insert mode (default), "
+          "text is inserted below the 1-based line given by 'line' "
+          "(0 = prepend, >=last = append). In block-replace mode "
+          "(overwrite=true), the inclusive line range "
+          "line_begin..line_end is replaced with text (line_begin 0 "
+          "= from start, line_end 0 = to end).";
+    spec.parameters = parse_json(
+        R"json({"type":"object","properties":{"file_path":{"type":"string","description":"path of the file to create or modify"},"text":{"type":"string","description":"text to insert or write"},"line":{"type":"integer","description":"insert below this 1-based line (insert mode only)"},"overwrite":{"type":"boolean","description":"replace a line range instead of inserting (default false)"},"line_begin":{"type":"integer","description":"first line of the range to replace (block mode)"},"line_end":{"type":"integer","description":"last line of the range to replace, inclusive (block mode)"}},"required":["file_path","text"]})json");
+    return { std::move(spec), write_run, ToolSafety::MUTATING };
+}
+
+} // namespace ursa

@@ -1,6 +1,6 @@
 #include <doctest/doctest.h>
 
-#include "subsystems/main_thread_queue.h"
+#include "runtime/main_thread_queue.h"
 
 #include <atomic>
 #include <chrono>

@@ -3,9 +3,9 @@
 #include <doctest/doctest.h>
 #include <ftxui/component/component.hpp>
 
-#include "core/git.h"
 #include "test_helpers.h"
 #include "ui/ui.h"
+#include "workspace/git.h"
 
 using ursa::test::to_text;
 

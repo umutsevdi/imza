@@ -4,9 +4,9 @@
 
 #include <doctest/doctest.h>
 
-#include "agent/flows.h"
-#include "subsystems/session.h"
-#include "subsystems/session_store.h"
+#include "app/flows.h"
+#include "conversation/persistence.h"
+#include "conversation/session.h"
 
 namespace {
 

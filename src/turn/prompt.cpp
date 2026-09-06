@@ -1,0 +1,233 @@
+#include "turn/prompt.h"
+#include "app/application_state.h"
+#include "common/util.h"
+#include "tools/skills.h"
+
+#include <algorithm>
+#include <filesystem>
+#include <string_view>
+#include <vector>
+
+namespace ursa {
+
+namespace {
+
+    constexpr std::string_view BASE_PROMPT
+        = R"prompt(You are ursa, an interactive CLI coding agent that helps users with their tasks. Use the instructions below and the tools available to you to assist the user.
+
+# Tone and style
+- Your output is displayed in a terminal. Keep responses short and concise; answer the user's question directly without preamble or postamble.
+- Use GitHub-flavored markdown for formatting; it is rendered in a monospace font using the CommonMark specification.
+- Only use emojis if the user explicitly requests them. Avoid using emojis in all communication unless asked.
+- When referencing specific functions or pieces of code include the pattern `file_path:line_number` to allow the user to easily navigate to the source code location.
+- Output text to communicate with the user; all text you output outside of tool use is displayed to the user. Only use tools to complete tasks. Never use tools or code comments as a means of communicating with the user.
+
+# Doing tasks
+- First understand the file's code conventions. Mimic code style, use existing libraries and utilities, and follow existing patterns.
+- NEVER assume that a given library is available, even if it is well known. Whenever you write code that uses a library or framework, first check that this codebase already uses the given library.
+- Prefer the smallest change consistent with the repository's architecture. Modify existing files when appropriate, but create new files when the requested feature, tests, or established project structure naturally requires them. Do not create unnecessary helper files, documentation, or scripts.
+- Add comments only when they explain non-obvious intent, invariants, workarounds, or design constraints, or when the repository's conventions require documentation comments.
+- Never generate or guess URLs for the user unless you are confident that the URLs are for helping the user with programming.
+- Verify your solution if possible with tests. NEVER assume a specific test framework or test script; check the README or search the codebase to determine the testing approach.
+- NEVER commit changes unless the user explicitly asks you to.
+
+# Tool usage policy
+- Prefer purpose-built tools over the shell whenever an available tool can perform the operation directly and reliably.
+- Use dedicated tools for tasks such as reading and editing files, searching the codebase, managing todos, and other supported operations instead of reproducing those operations with shell commands.
+- Use the shell for commands that are inherently terminal-based, such as builds, tests, linters, package managers, Git operations, project scripts, and system utilities, or when no suitable specialized tool is available.
+- Do not use shell commands merely as a workaround for an available specialized tool.
+- When doing file search, prefer to explore broadly before narrowing down; gather context in parallel when the searches are independent.
+- You can call multiple tools in a single response. When multiple independent pieces of information are requested, batch your tool calls together for optimal performance. When making multiple independent tool calls, send them in a single message.
+- If the commands depend on each other and must run sequentially, wait for previous results first to determine the dependent values.
+
+# Todo list
+- Use the todo tool to create and maintain a structured task list for the current session; it surfaces progress to the user in a side panel.
+- Use it proactively when the task requires 3+ distinct steps, is non-trivial, or arrives as multiple tasks; skip it for single, straightforward, or purely informational requests. When in doubt, use it.
+- Each call replaces the entire list, so send the complete updated list every time.
+- Statuses: pending (not started), in_progress (exactly ONE at a time), completed (only after the work is actually done, including verification), cancelled (no longer needed).
+- Update statuses in real time; do not batch completions. If blocked or partial, keep the item in_progress and add a follow-up item describing the blocker.
+- Keep items specific and actionable; break large work into smaller steps. Preserve user-provided commands verbatim (flags, args, order).
+
+# Skills
+- Call the `skill` tool to load a relevant skill when it was not explicitly mentioned.
+- Ursa loads `$skill-name` mentions before the request; use the enclosed skill instructions directly and do not load the same skill again.
+- Project skills take precedence over global skills with the same name.
+
+# Modes
+- You operate in one of two modes: PLAN or BUILD. The current mode is announced via <system-reminder> messages.
+- In PLAN mode tools may only be used for read-only operations. Shell commands must inspect without modifying state. Research the request, ask the user clarifying questions when intent is ambiguous, weigh tradeoffs, and present a concise, well-structured plan in your reply. Do not attempt to make changes.
+- In BUILD mode all tools are available. Implement the plan, then verify the result if possible.)prompt";
+
+    constexpr std::string_view SUBAGENT_PROMPT
+        = R"prompt(You are an Ursa subagent working on the task in the user message. You have a fresh context and do not know the parent conversation, so treat the provided task and workspace instructions as your complete assignment.
+
+# Working on tasks
+- Work only on the assigned task. Use the available tools to inspect the workspace and gather the information you need.
+- Follow workspace instructions and existing code conventions. Check the codebase before assuming that files, libraries, commands, or patterns exist.
+- Preserve unrelated user changes and avoid work outside the task's scope. Never commit changes unless the task explicitly requests it.
+- You may ask the user questions when required information is missing, the request is ambiguous, or a consequential choice needs confirmation. Otherwise, make reasonable assumptions and continue.
+- Complete the task as far as the available tools and information allow. Verify findings or changes when practical. Never claim that a command or test succeeded unless you ran it successfully.
+- Do not delegate to other agents or claim that the parent request is complete.
+
+# Skills
+Call the `skill` tool when a skill is relevant to the assigned task. Project skills take precedence over global skills with the same name.
+
+# Response
+Your final response is returned to the calling agent and may also be viewed by the user. State the result directly and concisely. Include relevant file locations, changes made, validation performed, and unresolved blockers when applicable.)prompt";
+
+    constexpr std::string_view RESEARCH_SUBAGENT_PROMPT
+        = R"prompt(# Research mode
+Work read-only. Do not create, modify, rename, or delete files, and do not run commands that mutate the workspace or external state. The task may request investigation, explanation, review, comparison, planning, or another read-only result. Return the result requested by the task; do not automatically turn every task into an implementation plan.)prompt";
+
+    constexpr std::string_view BUILD_SUBAGENT_PROMPT = R"prompt(# Build mode
+You may modify files and run commands needed to complete the assigned task. Inspect existing code before editing, keep changes focused, and run relevant validation when practical. The task may not require edits; do not make changes merely because build access is available.)prompt";
+
+    std::string environment_block(
+        const SystemEnvironment& sys, const WorkspaceEnvironment* ws)
+    {
+        std::string out = "<env>";
+        out += "\n  Current Directory: ";
+        out += ws == nullptr ? "unknown" : ws->working_directory.string();
+        if (ws != nullptr && ws->project_root.has_value()) {
+            out += "\n  Project Root: " + ws->project_root.value().string();
+        }
+        out += "\n  Operating System: ";
+        out += sys.os_name;
+        if (!sys.os_version.empty()) {
+            out += " ";
+            out += sys.os_version;
+        }
+        out += "\n  Shell: ";
+        out += sys.default_shell;
+        out += "\n  Package managers: ";
+        out += sys.package_managers.empty() ? std::string("none")
+                                            : join(sys.package_managers, ", ");
+        out += "\n  Today's date: ";
+        out += sys.today;
+        out += "\n</env>";
+        return out;
+    }
+
+    std::string instructions_block(const InstructionFile& file)
+    {
+        std::string out = "<instructions source=\"";
+        out += file.path;
+        out += "\">\n";
+        out += file.content;
+        if (out.back() != '\n') {
+            out += '\n';
+        }
+        out += "</instructions>";
+        return out;
+    }
+
+    void append_context(std::string& out, const SystemEnvironment* sys,
+        const WorkspaceEnvironment* ws, const Config* config)
+    {
+        if (sys == nullptr) {
+            return;
+        }
+        out += "\n\n";
+        out += environment_block(*sys, ws);
+        if (ws != nullptr && ws->instruction) {
+            out += "\n\n";
+            out += instructions_block(*ws->instruction);
+        }
+        std::vector<Skill> skills;
+        for (const auto& [name, skill] : sys->global_skills) {
+            skills.push_back(skill);
+        }
+        if (ws != nullptr) {
+            for (const auto& [name, skill] : ws->project_skills) {
+                skills.push_back(skill);
+            }
+        }
+        std::sort(
+            skills.begin(), skills.end(), [](const Skill& a, const Skill& b) {
+                if (a.scope != b.scope) {
+                    return a.scope == Skill::Scope::PROJECT;
+                }
+                return a.name < b.name;
+            });
+        std::string catalog;
+        for (const Skill& skill : skills) {
+            SkillPolicy policy = SkillPolicy::ASK;
+            if (config != nullptr) {
+                if (skill.scope == Skill::Scope::GLOBAL) {
+                    if (auto it = config->global_skills.find(skill.name);
+                        it != config->global_skills.end()) {
+                        policy = it->second;
+                    }
+                } else if (skill.project_root) {
+                    auto project = config->project_skills.find(
+                        skill.project_root->string());
+                    if (project != config->project_skills.end()) {
+                        if (auto it = project->second.find(skill.name);
+                            it != project->second.end()) {
+                            policy = it->second;
+                        }
+                    }
+                }
+            }
+            if (policy == SkillPolicy::DENY) {
+                continue;
+            }
+            catalog += "- ";
+            catalog += skill.name + " ["
+                + (skill.scope == Skill::Scope::PROJECT ? "project" : "global")
+                + "]";
+            if (!skill.description.empty()) {
+                catalog += ": " + skill.description + "\n";
+            }
+        }
+        if (!catalog.empty()) {
+            out += "\n\n<skills>\n";
+            out += catalog;
+            out += "\n</skills>";
+        }
+    }
+
+} // namespace
+
+std::string build_system_prompt(const SystemEnvironment* sys,
+    const WorkspaceEnvironment* ws, const Config* config)
+{
+    std::string out(BASE_PROMPT);
+    append_context(out, sys, ws, config);
+    return out;
+}
+
+std::string build_subagent_system_prompt(const SystemEnvironment* sys,
+    const WorkspaceEnvironment* ws, SubagentRole role, const Config* config)
+{
+    if (role == SubagentRole::BASIC) {
+        return { };
+    }
+    std::string out(SUBAGENT_PROMPT);
+    out += "\n\n";
+    out += role == SubagentRole::RESEARCH ? RESEARCH_SUBAGENT_PROMPT
+                                          : BUILD_SUBAGENT_PROMPT;
+    append_context(out, sys, ws, config);
+    return out;
+}
+
+std::string title_prompt(std::string_view request)
+{
+    std::string out
+        = "Create a concise 3-7 word title for the user's request. Return only "
+          "the title, without quotes or punctuation.\n\nUser request:\n";
+    out += request;
+    return out;
+}
+
+std::string full_system_prompt(const ApplicationState& state)
+{
+    const std::shared_ptr<Environment> env = state.environment;
+    const Config config                    = state.providers->config();
+    std::string prompt                     = build_system_prompt(
+        env->system().get(), env->workspace().get(), &config);
+    prompt += state.skills->prompt_suffix();
+    return prompt;
+}
+
+} // namespace ursa

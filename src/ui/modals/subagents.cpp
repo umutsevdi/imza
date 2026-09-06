@@ -1,6 +1,6 @@
-#include "agent/application_state.h"
-#include "agent/flows.h"
-#include "subsystems/provider_store.h"
+#include "app/application_state.h"
+#include "app/flows.h"
+#include "providers/store.h"
 #include "ui/ui.h"
 
 #include <ftxui/component/component.hpp>

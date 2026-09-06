@@ -6,9 +6,9 @@
 #include <ctime>
 #include <filesystem>
 
-#include "core/catalog.h"
-#include "core/pricing.h"
-#include "subsystems/provider_store.h"
+#include "providers/catalog.h"
+#include "providers/pricing.h"
+#include "providers/store.h"
 
 namespace {
 

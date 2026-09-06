@@ -1,6 +1,6 @@
 #include <doctest/doctest.h>
 
-#include "subsystems/subagent_manager.h"
+#include "runtime/subagent_manager.h"
 
 #include <atomic>
 #include <chrono>

@@ -3,10 +3,10 @@
 #include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
 
-#include <agent/slash_commands.h>
-#include <subsystems/attachments.h>
-#include <subsystems/skills.h>
+#include <app/slash_commands.h>
+#include <tools/skills.h>
 #include <ui/ui.h>
+#include <workspace/attachments.h>
 
 #include <optional>
 #include <string>

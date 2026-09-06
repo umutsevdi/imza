@@ -4,13 +4,13 @@
 #include <ftxui/component/mouse.hpp>
 #include <ftxui/screen/screen.hpp>
 
-#include "agent/flows.h"
-#include "agent/tools.h"
+#include "app/flows.h"
 #include "common/util.h"
+#include "conversation/format.h"
 #include "network/json_io.h"
-#include "subsystems/delegation_runner.h"
-#include "subsystems/format.h"
-#include "subsystems/skill_store.h"
+#include "tools/skills.h"
+#include "tools/tool.h"
+#include "turn/delegation.h"
 #include "ui/ui.h"
 
 #include <algorithm>

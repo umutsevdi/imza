@@ -1,9 +1,9 @@
-#include "agent/flows.h"
+#include "app/flows.h"
 #include "common/types.h"
 #include "common/util.h"
-#include "subsystems/delegation_runner.h"
-#include "subsystems/review.h"
+#include "turn/delegation.h"
 #include "ui/ui.h"
+#include "workspace/review.h"
 
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/event.hpp>
@@ -370,8 +370,9 @@ namespace {
             if (review_running_->load()) {
                 return;
             }
-            const auto snapshot = state_->review->comments_snapshot();
-            if (snapshot.comments.empty()) {
+            const std::vector<ReviewComment> comments
+                = state_->review->comments();
+            if (comments.empty()) {
                 state_->session->set_error(
                     "Add a review comment before sending.");
                 return;
@@ -380,7 +381,7 @@ namespace {
                 state_->session->set_error("No model selected — run /model.");
                 return;
             }
-            std::string prompt = format_review_plan_prompt(snapshot.comments);
+            std::string prompt = format_review_plan_prompt(comments);
             navigate_(WorkflowPhase::PLAN);
             ursa::submit(*state_, std::move(prompt));
             state_->review->clear_comments();
