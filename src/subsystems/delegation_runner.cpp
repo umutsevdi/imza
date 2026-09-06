@@ -177,6 +177,7 @@ void DelegationRunner::submit_delegated(
 void DelegationRunner::run_subagents(
     const ToolCallRequest& req, std::vector<Message>& tool_msgs)
 {
+    state_->subagents->prune_completed();
     std::string validation_error;
     const auto parsed = parse_tasks(
         parse_json(req.args), state_->session->mode(), validation_error);
@@ -278,6 +279,7 @@ void DelegationRunner::run_subagents(
         state_->session->set_tool_subagent_chats(req, std::move(chats));
         state_->session->fill_tool_result(
             req, ToolCall::Result { kind, output });
+        state_->subagents->prune_completed();
     });
     tool_msgs.push_back({ Message::Type::TOOL, output, { }, req.id });
 }
@@ -329,6 +331,7 @@ SubagentHandle DelegationRunner::run_subagent(std::string prompt,
     std::string model, std::string variant, SubagentOptions options,
     SubagentCompleteFn complete)
 {
+    state_->subagents->prune_completed();
     const auto selection = state_->providers->active_selection();
     Route route          = selection ? selection->route : Route { };
     if (model.empty() && selection) {
@@ -400,6 +403,7 @@ SubagentHandle DelegationRunner::run_subagent(std::string prompt,
 
 void DelegationRunner::spawn_title(std::string input, TurnSettings settings)
 {
+    state_->subagents->prune_completed();
     const std::string prompt = title_prompt(input);
     state_->subagents->start(
         prompt, settings.model, settings.reasoning_effort, false,

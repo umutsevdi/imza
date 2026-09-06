@@ -646,25 +646,25 @@ void TurnRunner::_apply_ask_result(const ToolCallRequest& req,
 void TurnRunner::_run_tool(
     const ToolCallRequest& req, std::vector<Message>& tool_msgs)
 {
-    const ToolOutput out = dispatch_tool(tools_, req);
+    ToolOutput out = dispatch_tool(tools_, req);
     if (req.name == "skill" && out.kind == ToolOutput::Kind::OUTPUT) {
         if (const auto skill = resolve_skill(
                 state_->environment->skills(), parse_json(req.args))) {
             skills_->record_tool_load(skill->path, out.text);
         }
     }
-    const auto kind = out.kind == ToolOutput::Kind::OUTPUT
+    const auto kind          = out.kind == ToolOutput::Kind::OUTPUT
         ? ToolCall::Result::Kind::OUTPUT
         : ToolCall::Result::Kind::ERROR;
-    _post([this, req, kind, out] {
-        ToolCall::Result result { kind, out.text };
-        result.diff         = out.diff;
-        result.shell_status = out.shell_status;
+    std::string history_text = append_shell_status(out.text, out.shell_status);
+    _post([this, req, kind, out = std::move(out)]() mutable {
+        ToolCall::Result result { kind, std::move(out.text) };
+        result.diff         = std::move(out.diff);
+        result.shell_status = std::move(out.shell_status);
         state_->session->fill_tool_result(req, std::move(result));
     });
-    tool_msgs.push_back({ Message::Type::TOOL,
-        append_shell_status(std::move(out.text), out.shell_status), { },
-        req.id });
+    tool_msgs.push_back(
+        { Message::Type::TOOL, std::move(history_text), { }, req.id });
 }
 
 } // namespace ursa

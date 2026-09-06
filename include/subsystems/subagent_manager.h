@@ -64,6 +64,7 @@ public:
         SubagentCompleteFn complete      = { },
         std::shared_ptr<Session> session = { });
     bool cancel(std::size_t id);
+    void prune_completed();
     void stop();
     std::vector<SubagentTask> tasks() const;
     std::size_t running_count(bool visible_only = true) const;

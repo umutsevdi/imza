@@ -187,15 +187,27 @@ namespace {
             const std::uint64_t content_serial = st.content_serial();
             const std::vector<ConversationItem>& conversation = st.items();
             const std::size_t item_count = conversation.size();
-            if (cache_kind_ != ctx.kind || cache_width_ != ctx.width
-                || content_serial_ != content_serial
-                || item_cache_.size() != item_count) {
+            const bool content_changed   = content_serial_ != content_serial;
+            const bool reset_cache       = cache_kind_ != ctx.kind
+                || cache_width_ != ctx.width || content_changed
+                || item_cache_.size() > item_count;
+            if (reset_cache) {
                 item_cache_.clear();
                 item_cache_.resize(item_count);
                 item_versions_.assign(item_count, kInvalidVersion);
                 cache_kind_     = ctx.kind;
                 cache_width_    = ctx.width;
                 content_serial_ = content_serial;
+                if (content_changed) {
+                    clear_interaction_cache();
+                }
+            } else if (item_cache_.size() < item_count) {
+                const std::size_t previous_size = item_cache_.size();
+                item_cache_.resize(item_count);
+                item_versions_.resize(item_count, kInvalidVersion);
+                if (previous_size > 0) {
+                    item_versions_[previous_size - 1] = kInvalidVersion;
+                }
             }
             if (std::exchange(hover_dirty_, false)) {
                 item_versions_.assign(item_cache_.size(), kInvalidVersion);
@@ -617,6 +629,25 @@ namespace {
         std::vector<std::size_t> item_versions_;
         LayoutCtx::Kind cache_kind_ = LayoutCtx::Kind::NARROW;
         int cache_width_            = 0;
+
+        void clear_interaction_cache()
+        {
+            for (auto& [id, component] : read_buttons_) {
+                component->Detach();
+            }
+            for (auto& [key, component] : subagent_buttons_) {
+                component->Detach();
+            }
+            for (auto& [index, component] : reasoning_comps_) {
+                component->Detach();
+            }
+            read_buttons_.clear();
+            subagent_buttons_.clear();
+            reasoning_labels_.clear();
+            reasoning_content_.clear();
+            reasoning_metadata_.clear();
+            reasoning_comps_.clear();
+        }
 
         Element tool_header_element(const ToolCall& tc)
         {
