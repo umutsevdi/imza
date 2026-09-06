@@ -401,16 +401,47 @@ std::optional<InstructionFile> load_agent_file(
     return std::nullopt;
 }
 
+namespace {
+
+    std::filesystem::path prepare_temporary_directory()
+    {
+        std::error_code error;
+        const std::filesystem::path directory
+            = std::filesystem::temp_directory_path(error) / "ursa";
+        if (error) {
+            throw std::filesystem::filesystem_error(
+                "cannot resolve temporary directory", error);
+        }
+        std::filesystem::create_directories(directory, error);
+        if (error || !std::filesystem::is_directory(directory, error)
+            || error) {
+            throw std::filesystem::filesystem_error(
+                "cannot create Ursa temporary directory", directory, error);
+        }
+        const std::filesystem::path canonical
+            = std::filesystem::weakly_canonical(directory, error);
+        if (error) {
+            throw std::filesystem::filesystem_error(
+                "cannot canonicalize Ursa temporary directory", directory,
+                error);
+        }
+        return canonical;
+    }
+
+} // namespace
+
 SystemEnvironment::SystemEnvironment()
 {
     detect_os(os_name, os_version, default_shell);
     detect_package_managers(package_managers);
     detect_global_skills(global_skills);
-    has_git = find_in_path("git");
-    today   = format_local_time("%Y-%m-%d");
+    temporary_directory = prepare_temporary_directory();
+    has_git             = find_in_path("git");
+    today               = format_local_time("%Y-%m-%d");
 }
 
 WorkspaceEnvironment::WorkspaceEnvironment(const std::filesystem::path& dir)
+    : working_directory(dir)
 {
     std::error_code ec;
     auto p = std::filesystem::path { dir };
@@ -435,14 +466,24 @@ WorkspaceEnvironment::WorkspaceEnvironment(const std::filesystem::path& dir)
 Environment::Environment()
     : system_(std::make_shared<const SystemEnvironment>())
 {
-    worker_ = std::jthread([this] {
-        std::error_code ec;
-        const std::filesystem::path dir = std::filesystem::current_path(ec);
-        auto workspace = std::make_shared<WorkspaceEnvironment>(dir);
-        _publish_workspace(workspace->project_root.has_value()
-                ? std::move(workspace)
-                : nullptr,
-            0);
+    std::error_code initial_error;
+    const std::filesystem::path initial_directory
+        = std::filesystem::current_path(initial_error);
+    if (initial_error) {
+        throw std::filesystem::filesystem_error(
+            "cannot resolve working directory", initial_error);
+    }
+    const std::filesystem::path working_directory
+        = std::filesystem::weakly_canonical(initial_directory, initial_error);
+    if (initial_error) {
+        throw std::filesystem::filesystem_error(
+            "cannot canonicalize working directory", initial_directory,
+            initial_error);
+    }
+    worker_ = std::jthread([this, working_directory] {
+        auto workspace
+            = std::make_shared<WorkspaceEnvironment>(working_directory);
+        _publish_workspace(std::move(workspace), 0);
     });
 
     if (system_->has_git) {
@@ -456,7 +497,8 @@ Environment::Environment()
             }
             while (!stop.stop_requested()) {
                 const auto observed_workspace = workspace();
-                if (observed_workspace == nullptr) {
+                if (observed_workspace == nullptr
+                    || !observed_workspace->project_root) {
                     std::this_thread::sleep_for(std::chrono::seconds { 2 });
                     continue;
                 }
@@ -541,19 +583,25 @@ void Environment::_publish_repository(
 bool Environment::chdir(const std::filesystem::path& dir)
 {
     std::error_code ec;
-    std::filesystem::current_path(dir, ec);
+    const std::filesystem::path canonical
+        = std::filesystem::weakly_canonical(dir, ec);
+    if (ec) {
+        return false;
+    }
+    std::filesystem::current_path(canonical, ec);
     if (ec) {
         return false;
     }
     std::uint64_t generation;
     {
         std::unique_lock lock(workspace_mutex_);
+        if (workspace_ && workspace_->working_directory == canonical) {
+            return false;
+        }
         generation = ++workspace_generation_;
     }
-    auto workspace = std::make_shared<WorkspaceEnvironment>(dir);
-    _publish_workspace(
-        workspace->project_root.has_value() ? std::move(workspace) : nullptr,
-        generation);
+    auto workspace = std::make_shared<WorkspaceEnvironment>(canonical);
+    _publish_workspace(std::move(workspace), generation);
     return true;
 }
 

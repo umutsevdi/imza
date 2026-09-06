@@ -88,10 +88,8 @@ struct Env {
     std::vector<ursa::ToolCallRequest> ran_tools;
     ursa::StreamFn stream;
     std::shared_ptr<ursa::ApplicationState> state
-        = ursa::make_application_state(
+        = ursa::make_application_state_with_tools(
             pump.fn(), test_config(),
-            [this](const ursa::ChatRequest& req,
-                const ursa::StreamCallback& cb) { return stream(req, cb); },
             [this] {
                 std::vector<ursa::Tool> tools;
                 tools.push_back({ { "bash", "run a shell command",
@@ -121,7 +119,9 @@ struct Env {
                     ursa::ToolSafety::READ_ONLY });
                 tools.push_back(ursa::make_subagent_tool());
                 return tools;
-            }());
+            }(),
+            [this](const ursa::ChatRequest& req,
+                const ursa::StreamCallback& cb) { return stream(req, cb); });
 
     std::shared_ptr<ursa::Session> session = state->session;
 

@@ -64,23 +64,23 @@ ToolOutput dispatch_tool(
     return tool->run(args);
 }
 
-std::vector<Tool> default_tools(bool is_interactive, bool web, bool shell)
+std::vector<Tool> default_tools(RuntimeFlag flags)
 {
     std::vector<Tool> tools;
     tools.push_back(make_read_tool());
     tools.push_back(make_skill_tool());
     tools.push_back(make_list_tool());
-    if (is_interactive) {
+    if ((flags & RuntimeFlag::ATTENDED) != RuntimeFlag::NONE) {
         tools.push_back(make_ask_tool());
     }
-    if (shell) {
+    if ((flags & RuntimeFlag::SHELL) != RuntimeFlag::NONE) {
         tools.push_back(make_shell_tool());
     }
     tools.push_back(make_todo_tool());
     tools.push_back(make_subagent_tool());
     tools.push_back(make_edit_tool());
     tools.push_back(make_write_tool());
-    if (web) {
+    if ((flags & RuntimeFlag::WEB) != RuntimeFlag::NONE) {
         tools.push_back(make_webfetch_tool());
         tools.push_back(make_websearch_tool());
     }

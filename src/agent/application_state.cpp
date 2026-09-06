@@ -2,9 +2,11 @@
 #include "agent/flows.h"
 #include "agent/turn_runner.h"
 #include "subsystems/delegation_runner.h"
+#include "subsystems/permission_store.h"
 #include "subsystems/review.h"
 #include "subsystems/skill_store.h"
 
+#include <algorithm>
 #include <utility>
 
 namespace ursa {
@@ -61,6 +63,53 @@ namespace {
 
 } // namespace
 
+class ApplicationStateBuilder {
+public:
+    static std::shared_ptr<ApplicationState> root(PostFn post, Config config,
+        StreamFn stream_fn, std::vector<Tool> tools, RuntimeFlag runtime_flags)
+    {
+        std::shared_ptr<ApplicationState> state(new ApplicationState());
+        state->session     = std::make_shared<Session>();
+        state->providers   = std::make_shared<ProviderStore>(std::move(config));
+        state->subagents   = std::make_shared<SubagentManager>();
+        state->environment = std::make_shared<Environment>();
+        state->review      = std::make_shared<ReviewState>();
+        state->skills      = std::make_shared<SkillStore>();
+        state->permissions = std::make_shared<PermissionStore>();
+        state->post        = guarded_post(state.get(), std::move(post));
+        state->on_exit     = [] { };
+        state->runtime_flags = runtime_flags;
+        wire(state, std::move(stream_fn), std::move(tools));
+        return state;
+    }
+
+    static std::shared_ptr<ApplicationState> child(
+        const ApplicationState& parent, PostFn post, StreamFn stream_fn,
+        ModalRequestFn parent_routing, std::string agent_label)
+    {
+        std::vector<Tool> tools = default_tools(parent.runtime_flags);
+        std::erase_if(tools, [](const Tool& tool) {
+            return tool.spec.name == "subagent" || tool.spec.name == "todo";
+        });
+
+        std::shared_ptr<ApplicationState> state(new ApplicationState());
+        state->session        = std::make_shared<Session>();
+        state->providers      = parent.providers;
+        state->subagents      = std::make_shared<SubagentManager>();
+        state->environment    = parent.environment;
+        state->review         = std::make_shared<ReviewState>();
+        state->skills         = std::make_shared<SkillStore>();
+        state->permissions    = parent.permissions;
+        state->post           = guarded_post(state.get(), std::move(post));
+        state->on_exit        = [] { };
+        state->parent_routing = std::move(parent_routing);
+        state->agent_label    = std::move(agent_label);
+        state->runtime_flags  = parent.runtime_flags;
+        wire(state, std::move(stream_fn), std::move(tools));
+        return state;
+    }
+};
+
 ApplicationState::~ApplicationState()
 {
     alive.store(false);
@@ -71,46 +120,28 @@ ApplicationState::~ApplicationState()
     runner->stop();
 }
 
-std::shared_ptr<ApplicationState> make_application_state(PostFn post,
-    Config config, StreamFn stream_fn, std::vector<Tool> tools,
-    ModalRequestFn parent_routing, std::string agent_label)
+std::shared_ptr<ApplicationState> make_application_state(
+    PostFn post, Config config, StreamFn stream_fn, RuntimeFlag runtime_flags)
 {
-    std::shared_ptr<ApplicationState> state(new ApplicationState());
-    state->session        = std::make_shared<Session>();
-    state->providers      = std::make_shared<ProviderStore>(std::move(config));
-    state->subagents      = std::make_shared<SubagentManager>();
-    state->environment    = std::make_shared<Environment>();
-    state->review         = std::make_shared<ReviewState>();
-    state->skills         = std::make_shared<SkillStore>();
-    state->post           = guarded_post(state.get(), std::move(post));
-    state->on_exit        = [] { };
-    state->parent_routing = std::move(parent_routing);
-    state->agent_label    = std::move(agent_label);
-    wire(state, std::move(stream_fn), std::move(tools));
-    return state;
+    std::vector<Tool> tools = default_tools(runtime_flags);
+    return ApplicationStateBuilder::root(std::move(post), std::move(config),
+        std::move(stream_fn), std::move(tools), runtime_flags);
+}
+
+std::shared_ptr<ApplicationState> make_application_state_with_tools(
+    PostFn post, Config config, std::vector<Tool> tools, StreamFn stream_fn)
+{
+    return ApplicationStateBuilder::root(std::move(post), std::move(config),
+        std::move(stream_fn), std::move(tools), interactive_runtime_flags());
 }
 
 std::shared_ptr<ApplicationState> make_child_application_state(
     const ApplicationState& parent, PostFn post, StreamFn stream_fn,
-    std::vector<Tool> tools, ModalRequestFn parent_routing,
-    std::string agent_label)
+    ModalRequestFn parent_routing, std::string agent_label)
 {
-    std::shared_ptr<ApplicationState> state(new ApplicationState());
-    state->session        = std::make_shared<Session>();
-    state->providers      = parent.providers;
-    state->subagents      = std::make_shared<SubagentManager>();
-    state->environment    = parent.environment;
-    state->review         = std::make_shared<ReviewState>();
-    state->skills         = std::make_shared<SkillStore>();
-    state->post           = guarded_post(state.get(), std::move(post));
-    state->on_exit        = [] { };
-    state->parent_routing = std::move(parent_routing);
-    state->agent_label    = std::move(agent_label);
-    state->is_interactive = parent.is_interactive;
-    state->web_enabled    = parent.web_enabled;
-    state->shell_enabled  = parent.shell_enabled;
-    wire(state, std::move(stream_fn), std::move(tools));
-    return state;
+    return ApplicationStateBuilder::child(parent, std::move(post),
+        std::move(stream_fn), std::move(parent_routing),
+        std::move(agent_label));
 }
 
 } // namespace ursa

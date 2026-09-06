@@ -25,6 +25,7 @@ public:
     std::vector<std::string> package_managers;
     std::string today;
     std::unordered_map<std::string, Skill> global_skills;
+    std::filesystem::path temporary_directory;
     bool has_git { false };
 };
 
@@ -32,6 +33,7 @@ class WorkspaceEnvironment {
 public:
     explicit WorkspaceEnvironment(const std::filesystem::path& p);
 
+    std::filesystem::path working_directory;
     std::optional<std::filesystem::path> project_root;
     std::optional<InstructionFile> instruction;
     std::unordered_map<std::string, Skill> project_skills;
@@ -58,7 +60,6 @@ public:
 
     std::optional<std::string> agent_rules_path() const;
     std::vector<Skill> skills() const;
-
     bool chdir(const std::filesystem::path& dir);
     [[nodiscard]] Signal<>::Subscription subscribe_to_workspace_change(
         Signal<>::Callback callback);

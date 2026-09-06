@@ -1,4 +1,3 @@
-#include <cstdio>
 #include <filesystem>
 #include <functional>
 #include <print>
@@ -7,7 +6,6 @@
 
 #include "agent/application_state.h"
 #include "agent/flows.h"
-#include "agent/tools.h"
 #include "core/config.h"
 #include "subsystems/main_thread_queue.h"
 #include "subsystems/session_store.h"
@@ -39,16 +37,19 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    const bool web_enabled   = cli.web.value_or(true);
-    const bool shell_enabled = cli.shell.value_or(true);
+    int runtime = ursa::interactive_runtime_flags();
+    if (!cli.web.value_or(true)) {
+        runtime &= ~ursa::RuntimeFlag::WEB;
+    }
+    if (!cli.shell.value_or(true)) {
+        runtime &= ~ursa::RuntimeFlag::SHELL;
+    }
     ursa::MainThreadQueue main_thread;
     auto state = ursa::make_application_state(
         [&main_thread](
             std::function<void()> task) { main_thread.post(std::move(task)); },
         std::move(cfg), ursa::StreamFn { },
-        ursa::default_tools(true, web_enabled, shell_enabled));
-    state->web_enabled   = web_enabled;
-    state->shell_enabled = shell_enabled;
+        static_cast<ursa::RuntimeFlag>(runtime));
     if (cli.session_path) {
         std::filesystem::path workspace;
         if (ursa::load_session(*cli.session_path, *state->session, &workspace)

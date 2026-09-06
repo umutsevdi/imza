@@ -86,10 +86,8 @@ You may modify files and run commands needed to complete the assigned task. Insp
         const SystemEnvironment& sys, const WorkspaceEnvironment* ws)
     {
         std::string out = "<env>";
-        std::error_code ec;
-        const std::filesystem::path cwd = std::filesystem::current_path(ec);
         out += "\n  Current Directory: ";
-        out += ec ? "unknown" : cwd.string();
+        out += ws == nullptr ? "unknown" : ws->working_directory.string();
         if (ws != nullptr && ws->project_root.has_value()) {
             out += "\n  Project Root: " + ws->project_root.value().string();
         }
