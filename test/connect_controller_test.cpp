@@ -9,12 +9,12 @@
 #include <queue>
 #include <thread>
 
-#include "agent/flows.h"
-#include "core/catalog.h"
-#include "core/config.h"
+#include "app/flows.h"
 #include "network/json_io.h"
-#include "subsystems/review.h"
-#include "subsystems/skill_store.h"
+#include "platform/config.h"
+#include "providers/catalog.h"
+#include "tools/skills.h"
+#include "workspace/review.h"
 
 namespace {
 

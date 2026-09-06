@@ -1,12 +1,12 @@
 #include <doctest/doctest.h>
 #include <json/json.h>
 
-#include "agent/flows.h"
+#include "app/flows.h"
 #include "common/types.h"
 #include "network/network.h"
 #include "network/sse_parse.h"
-#include "subsystems/review.h"
-#include "subsystems/skill_store.h"
+#include "tools/skills.h"
+#include "workspace/review.h"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>

@@ -2,9 +2,9 @@
 
 #include <doctest/doctest.h>
 
-#include "subsystems/environment.h"
 #include "test_helpers.h"
 #include "ui/ui.h"
+#include "workspace/environment.h"
 
 using ursa::test::to_screen;
 using ursa::test::to_text;

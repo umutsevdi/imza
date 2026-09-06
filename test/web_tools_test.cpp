@@ -2,10 +2,10 @@
 
 #include <string>
 
-#include "agent/tools.h"
 #include "common/util.h"
 #include "network/json_io.h"
 #include "network/web.h"
+#include "tools/tool.h"
 
 TEST_CASE("normalize_web_url upgrades http and rejects bad schemes")
 {

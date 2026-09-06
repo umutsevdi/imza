@@ -1,6 +1,6 @@
 #include <doctest/doctest.h>
 
-#include "subsystems/review.h"
+#include "workspace/review.h"
 
 TEST_CASE("git diff parser builds files hunks and line numbers")
 {
@@ -184,7 +184,7 @@ TEST_CASE("review state adds AI comments without exact duplicates")
             { anchor, "[P3] A separate issue." } });
 
     CHECK(added == 1);
-    const auto comments = state.comments_snapshot().comments;
+    const auto comments = state.comments();
     REQUIRE(comments.size() == 2);
     CHECK(comments[1].body == "[P3] A separate issue.");
 }

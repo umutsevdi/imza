@@ -4,9 +4,9 @@
 #include <string>
 #include <string_view>
 
-#include "agent/prompt.h"
-#include "agent/tools.h"
-#include "subsystems/session.h"
+#include "conversation/session.h"
+#include "tools/tool.h"
+#include "turn/prompt.h"
 
 namespace ursa {
 
@@ -45,7 +45,8 @@ TEST_CASE("system prompt embeds workspace instructions when present")
     sys.os_name       = "Linux";
     sys.default_shell = "/bin/bash";
     sys.today         = "Fri Aug 28 2026";
-    WorkspaceEnvironment ws { std::filesystem::temp_directory_path() };
+    WorkspaceEnvironment ws;
+    ws.working_directory = std::filesystem::temp_directory_path();
     ws.instruction = InstructionFile { "AGENTS.md", "# Rules\nBe terse." };
 
     const std::string prompt = build_system_prompt(&sys, &ws);
@@ -61,7 +62,8 @@ TEST_CASE("system prompt omits the instructions block when absent")
     sys.os_name       = "Linux";
     sys.default_shell = "/bin/bash";
     sys.today         = "Fri Aug 28 2026";
-    WorkspaceEnvironment ws { std::filesystem::temp_directory_path() };
+    WorkspaceEnvironment ws;
+    ws.working_directory = std::filesystem::temp_directory_path();
 
     const std::string prompt = build_system_prompt(&sys, &ws);
     CHECK(prompt.find("<instructions") == std::string::npos);
@@ -123,7 +125,8 @@ TEST_CASE("subagent prompt retains workspace context")
     sys.global_skills.emplace("docs",
         Skill { "docs", "Write documentation", "/tmp/docs/SKILL.md",
             Skill::Scope::GLOBAL, std::nullopt });
-    WorkspaceEnvironment ws { std::filesystem::temp_directory_path() };
+    WorkspaceEnvironment ws;
+    ws.working_directory = std::filesystem::temp_directory_path();
     ws.instruction = InstructionFile { "AGENTS.md", "Use project rules." };
 
     const std::string prompt

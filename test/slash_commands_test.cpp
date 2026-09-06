@@ -1,7 +1,7 @@
-#include "agent/application_state.h"
-#include "agent/flows.h"
-#include "agent/slash_commands.h"
-#include "core/config.h"
+#include "app/application_state.h"
+#include "app/flows.h"
+#include "app/slash_commands.h"
+#include "platform/config.h"
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
@@ -171,28 +171,23 @@ TEST_CASE("CLI one-shot commands are explicit placeholders")
     CHECK(result.exit_code == 2);
 }
 
-TEST_CASE("run_slash_command emits application effects")
+TEST_CASE("run_slash emits application effects")
 {
     auto state = make_application_state(
         [](std::function<void()> f) { f(); }, Config { });
-    bool exited = false;
-    ModalPayload modal;
-    std::string error;
-    SlashCommandContext context { *state, [&] { exited = true; }, [] { },
-        [&](ModalPayload next) { modal = std::move(next); },
-        [] { return SessionsModal { }; }, [] { return SkillsModal { }; },
-        [] { return std::string { }; },
-        [&](std::string next) { error = std::move(next); } };
+    bool exited    = false;
+    state->on_exit = [&] { exited = true; };
 
-    run_slash_command(context, "/exit");
+    run_slash(*state, "/exit");
     CHECK(exited);
 
-    run_slash_command(context, "/connect");
+    run_slash(*state, "/connect");
+    const ModalPayload modal = state->session->modal();
     REQUIRE(std::holds_alternative<ConnectModal>(modal));
     CHECK(std::get<ConnectModal>(modal).entry == ConnectModal::Entry::MANAGE);
 
-    run_slash_command(context, "/missing");
-    CHECK(error == "Unknown command: /missing.");
+    run_slash(*state, "/missing");
+    CHECK(state->session->error() == "Unknown command: /missing.");
 }
 
 } // namespace ursa

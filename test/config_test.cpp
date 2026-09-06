@@ -7,7 +7,7 @@
 #include <filesystem>
 #include <fstream>
 
-#include "core/config.h"
+#include "platform/config.h"
 
 namespace {
 

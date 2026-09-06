@@ -1,8 +1,8 @@
-#include "agent/flows.h"
+#include "app/flows.h"
 #include "network/json_io.h"
-#include "subsystems/environment.h"
 #include "ui/tool_format.h"
 #include "ui/ui.h"
+#include "workspace/environment.h"
 
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_base.hpp>

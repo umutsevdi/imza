@@ -4,11 +4,11 @@
 #include <string>
 #include <utility>
 
-#include "agent/application_state.h"
-#include "agent/flows.h"
-#include "core/config.h"
-#include "subsystems/main_thread_queue.h"
-#include "subsystems/session_store.h"
+#include "app/application_state.h"
+#include "app/flows.h"
+#include "conversation/persistence.h"
+#include "platform/config.h"
+#include "runtime/main_thread_queue.h"
 #include "ui/repl.h"
 
 int main(int argc, char** argv)

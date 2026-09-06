@@ -1,9 +1,9 @@
-#include "agent/application_state.h"
-#include "agent/flows.h"
+#include "app/application_state.h"
+#include "app/flows.h"
 #include "ui/ui.h"
 
-#include "subsystems/review.h"
-#include "subsystems/skill_store.h"
+#include "tools/skills.h"
+#include "workspace/review.h"
 
 #include <ftxui/component/app.hpp>
 #include <ftxui/component/component.hpp>
@@ -165,12 +165,12 @@ private:
         if (workflow_() != WorkflowPhase::REVIEW || !state_->review) {
             return;
         }
-        const auto snapshot = state_->review->comments_snapshot();
-        if (snapshot.comments.empty()) {
+        const std::vector<ReviewComment> comments = state_->review->comments();
+        if (comments.empty()) {
             return;
         }
         Elements rows;
-        for (const ReviewComment& comment : snapshot.comments) {
+        for (const ReviewComment& comment : comments) {
             const std::string line = comment.anchor.new_line
                 ? std::to_string(*comment.anchor.new_line)
                 : comment.anchor.old_line

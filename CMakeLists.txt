@@ -187,76 +187,76 @@ target_link_libraries(ursa_network PRIVATE
     CURL::libcurl
 )
 
-# Shared app configuration + catalog/pricing cache (no ftxui, no cmark)
-add_library(ursa_core
-    src/core/catalog.cpp
-    src/core/command_runner.cpp
-    src/core/config.cpp
-    src/core/git.cpp
-    src/core/io.cpp
-    src/core/pricing.cpp
+# Platform services and stateless domain support (no ftxui, no cmark)
+add_library(ursa_foundation
+    src/platform/command_runner.cpp
+    src/platform/config.cpp
+    src/platform/json_file.cpp
+    src/providers/catalog.cpp
+    src/providers/pricing.cpp
+    src/workspace/git.cpp
 )
-target_include_directories(ursa_core PRIVATE
+target_include_directories(ursa_foundation PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${jsoncpp_SOURCE_DIR}/include
 )
-target_link_libraries(ursa_core PUBLIC
+target_link_libraries(ursa_foundation PUBLIC
     ursa_network
     jsoncpp_static
 )
 
-# Long-living state owned by ApplicationState (no ftxui, no cmark)
-add_library(ursa_subsystems
-    src/subsystems/attachments.cpp
-    src/subsystems/delegation_runner.cpp
-    src/subsystems/environment.cpp
-    src/subsystems/format.cpp
-    src/subsystems/main_thread_queue.cpp
-    src/subsystems/permission_store.cpp
-    src/subsystems/provider_store.cpp
-    src/subsystems/review.cpp
-    src/subsystems/session.cpp
-    src/subsystems/session_store.cpp
-    src/subsystems/skill_store.cpp
-    src/subsystems/subagent_manager.cpp
+# Domain state and runtime infrastructure (no ftxui, no cmark)
+add_library(ursa_runtime
+    src/conversation/format.cpp
+    src/conversation/persistence.cpp
+    src/conversation/session.cpp
+    src/permissions/store.cpp
+    src/providers/store.cpp
+    src/workspace/review.cpp
+    src/runtime/main_thread_queue.cpp
+    src/runtime/modal_queue.cpp
+    src/runtime/subagent_manager.cpp
+    src/tools/skills.cpp
+    src/workspace/attachments.cpp
+    src/workspace/environment.cpp
 )
-target_include_directories(ursa_subsystems PRIVATE
+target_include_directories(ursa_runtime PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${jsoncpp_SOURCE_DIR}/include
 )
-target_link_libraries(ursa_subsystems PUBLIC
-    ursa_core
+target_link_libraries(ursa_runtime PUBLIC
+    ursa_foundation
     ursa_network
     jsoncpp_static
 )
 
-# Agent: orchestration, prompts, slash commands (ftxui-free)
-add_library(ursa_agent
-    src/agent/application_state.cpp
-    src/agent/cli.cpp
-    src/agent/flows.cpp
-    src/agent/modal_queue.cpp
-    src/agent/permissions.cpp
-    src/agent/prompt.cpp
-    src/agent/slash_commands.cpp
-    src/agent/tool_args.cpp
-    src/agent/tools.cpp
-    src/agent/turn_runner.cpp
-    src/agent/web_tools.cpp
+# Application composition, turns, and tools (ftxui-free)
+add_library(ursa_execution
+    src/app/application_state.cpp
+    src/app/cli.cpp
+    src/app/flows.cpp
+    src/app/slash_commands.cpp
+    src/permissions/filesystem.cpp
+    src/tools/tool.cpp
+    src/tools/tool_args.cpp
+    src/tools/web.cpp
+    src/turn/delegation.cpp
+    src/turn/prompt.cpp
+    src/turn/turn_runner.cpp
 )
-target_include_directories(ursa_agent PRIVATE
+target_include_directories(ursa_execution PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${jsoncpp_SOURCE_DIR}/include
 )
-set_source_files_properties(src/agent/cli.cpp PROPERTIES
+set_source_files_properties(src/app/cli.cpp PROPERTIES
     COMPILE_DEFINITIONS URSA_VERSION="${PROJECT_VERSION}")
-target_link_libraries(ursa_agent PRIVATE
+target_link_libraries(ursa_execution PRIVATE
     CLI11::CLI11
 )
-target_link_libraries(ursa_agent PUBLIC
-    ursa_core
+target_link_libraries(ursa_execution PUBLIC
+    ursa_foundation
     ursa_network
-    ursa_subsystems
+    ursa_runtime
     jsoncpp_static
 )
 
@@ -293,7 +293,7 @@ target_compile_definitions(ursa_ui PRIVATE
     CMARK_GFM_EXTENSIONS_STATIC_DEFINE
 )
 target_link_libraries(ursa_ui PUBLIC
-    ursa_agent
+    ursa_execution
     ftxui::ftxui
     libcmark-gfm-extensions_static
     libcmark-gfm_static
@@ -311,7 +311,7 @@ target_include_directories(ursa PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 target_link_libraries(ursa PRIVATE
-    ursa_core
+    ursa_foundation
     ursa_ui
 )
 
@@ -329,7 +329,7 @@ if (URSA_BUILD_TESTS)
         CMARK_GFM_EXTENSIONS_STATIC_DEFINE
     )
     target_link_libraries(ursa_tests PRIVATE
-        ursa_agent
+        ursa_execution
         ursa_ui
         doctest::doctest
     )

@@ -4,13 +4,13 @@
 #include <filesystem>
 #include <fstream>
 
-#include "agent/application_state.h"
-#include "agent/flows.h"
-#include "agent/permissions.h"
-#include "agent/tools.h"
+#include "app/application_state.h"
+#include "app/flows.h"
 #include "network/json_io.h"
-#include "subsystems/environment.h"
-#include "subsystems/permission_store.h"
+#include "permissions/filesystem.h"
+#include "permissions/store.h"
+#include "tools/tool.h"
+#include "workspace/environment.h"
 
 namespace ursa {
 
@@ -35,8 +35,9 @@ namespace {
             write(outside / "outside.txt");
             system                      = std::make_shared<SystemEnvironment>();
             system->temporary_directory = temporary;
-            environment = std::make_shared<WorkspaceEnvironment>(workspace);
-            environment->project_root = workspace;
+            environment = std::make_shared<WorkspaceEnvironment>();
+            environment->working_directory = workspace;
+            environment->project_root      = workspace;
         }
 
         ~PermissionFixture()

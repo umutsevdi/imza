@@ -1,7 +1,7 @@
-#include "agent/flows.h"
-#include "subsystems/main_thread_queue.h"
-#include "subsystems/session_store.h"
-#include "subsystems/skill_store.h"
+#include "app/flows.h"
+#include "conversation/persistence.h"
+#include "runtime/main_thread_queue.h"
+#include "tools/skills.h"
 #include "ui/ui.h"
 
 #include <ftxui/component/animation.hpp>

@@ -1,11 +1,11 @@
-#include "agent/flows.h"
+#include "app/flows.h"
 #include "common/util.h"
-#include "subsystems/attachments.h"
-#include "subsystems/delegation_runner.h"
-#include "subsystems/format.h"
+#include "conversation/format.h"
+#include "turn/delegation.h"
 #include "ui/autocomplete.h"
 #include "ui/tool_format.h"
 #include "ui/ui.h"
+#include "workspace/attachments.h"
 
 #include <ftxui/component/animation.hpp>
 #include <ftxui/component/component.hpp>

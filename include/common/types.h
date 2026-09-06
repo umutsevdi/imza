@@ -6,6 +6,8 @@
 
 namespace ursa {
 
+struct ApplicationComponent { };
+
 enum RuntimeFlag : std::uint8_t {
     NONE             = 0,
     WEB              = 1U << 0,
