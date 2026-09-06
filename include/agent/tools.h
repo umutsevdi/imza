@@ -14,6 +14,7 @@
 #include "common/diff.h"
 #include "common/modal.h"
 #include "common/tool_call.h"
+#include "common/types.h"
 
 namespace ursa {
 
@@ -75,6 +76,6 @@ Tool make_write_tool();
 Tool make_webfetch_tool();
 Tool make_websearch_tool();
 std::vector<Tool> default_tools(
-    bool is_interactive = true, bool web = true, bool shell = true);
+    RuntimeFlag flags = interactive_runtime_flags());
 
 } // namespace ursa

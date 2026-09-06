@@ -212,6 +212,7 @@ add_library(ursa_subsystems
     src/subsystems/environment.cpp
     src/subsystems/format.cpp
     src/subsystems/main_thread_queue.cpp
+    src/subsystems/permission_store.cpp
     src/subsystems/provider_store.cpp
     src/subsystems/review.cpp
     src/subsystems/session.cpp
@@ -235,6 +236,7 @@ add_library(ursa_agent
     src/agent/cli.cpp
     src/agent/flows.cpp
     src/agent/modal_queue.cpp
+    src/agent/permissions.cpp
     src/agent/prompt.cpp
     src/agent/slash_commands.cpp
     src/agent/tool_args.cpp

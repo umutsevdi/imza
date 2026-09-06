@@ -219,7 +219,7 @@ namespace {
         {
             const auto& environment = state_->environment;
             return environment->ready() && environment->system()->has_git
-                && environment->workspace() != nullptr;
+                && environment->workspace()->project_root.has_value();
         }
 
         void _sync_review_availability()

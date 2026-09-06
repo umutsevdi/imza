@@ -22,6 +22,7 @@ class ReviewState;
 class SkillStore;
 class TurnRunner;
 class DelegationRunner;
+class PermissionStore;
 
 using PostFn = std::function<void(std::function<void()>)>;
 using StreamFn
@@ -35,6 +36,7 @@ struct ApplicationState {
     std::shared_ptr<Environment> environment;
     std::shared_ptr<ReviewState> review;
     std::shared_ptr<SkillStore> skills;
+    std::shared_ptr<PermissionStore> permissions;
 
     std::unique_ptr<TurnRunner> runner;
     std::unique_ptr<DelegationRunner> delegation;
@@ -44,9 +46,7 @@ struct ApplicationState {
     std::function<void()> on_exit;
     ModalRequestFn parent_routing;
     std::string agent_label;
-    bool is_interactive = true;
-    bool web_enabled    = true;
-    bool shell_enabled  = true;
+    RuntimeFlag runtime_flags = interactive_runtime_flags();
     std::atomic<bool> alive { true };
     Signal<>::Subscription env_subscription;
     Signal<>::Subscription provider_subscription;
@@ -58,20 +58,17 @@ struct ApplicationState {
 
 private:
     ApplicationState() = default;
-    friend std::shared_ptr<ApplicationState> make_application_state(PostFn,
-        Config, StreamFn, std::vector<Tool>, ModalRequestFn, std::string);
-    friend std::shared_ptr<ApplicationState> make_child_application_state(
-        const ApplicationState&, PostFn, StreamFn, std::vector<Tool>,
-        ModalRequestFn, std::string);
+    friend class ApplicationStateBuilder;
 };
 
 std::shared_ptr<ApplicationState> make_application_state(PostFn post,
-    Config config, StreamFn stream_fn = { }, std::vector<Tool> tools = { },
-    ModalRequestFn parent_routing = { }, std::string agent_label = { });
+    Config config, StreamFn stream_fn = { },
+    RuntimeFlag runtime_flags = interactive_runtime_flags());
+std::shared_ptr<ApplicationState> make_application_state_with_tools(PostFn post,
+    Config config, std::vector<Tool> tools, StreamFn stream_fn = { });
 
 std::shared_ptr<ApplicationState> make_child_application_state(
     const ApplicationState& parent, PostFn post, StreamFn stream_fn = { },
-    std::vector<Tool> tools = { }, ModalRequestFn parent_routing = { },
-    std::string agent_label = { });
+    ModalRequestFn parent_routing = { }, std::string agent_label = { });
 
 } // namespace ursa

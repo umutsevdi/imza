@@ -106,6 +106,8 @@ TEST_CASE("system environment populates the core fields synchronously")
     CHECK_FALSE(sys->os_name.empty());
     CHECK_FALSE(sys->default_shell.empty());
     CHECK_FALSE(sys->today.empty());
+    CHECK(std::filesystem::is_directory(sys->temporary_directory));
+    CHECK(sys->temporary_directory.filename() == "ursa");
     CHECK(sys->today.size() == 10);
     CHECK(sys->today[4] == '-');
     CHECK(sys->today[7] == '-');
@@ -118,7 +120,7 @@ TEST_CASE("environment becomes ready after the workspace scan")
     CHECK(env.ready());
 }
 
-TEST_CASE("workspace is null outside a project while environment is ready")
+TEST_CASE("workspace retains its directory outside a project")
 {
     const auto original = std::filesystem::current_path();
     const auto dir      = original.root_path();
@@ -127,7 +129,9 @@ TEST_CASE("workspace is null outside a project while environment is ready")
     REQUIRE(wait_until_ready(env));
     REQUIRE(env.chdir(dir));
     CHECK(env.ready());
-    CHECK(env.workspace() == nullptr);
+    REQUIRE(env.workspace() != nullptr);
+    CHECK(env.workspace()->working_directory == dir);
+    CHECK_FALSE(env.workspace()->project_root.has_value());
     REQUIRE(env.repository() != nullptr);
     CHECK(env.repository()->branch.empty());
     CHECK(env.repository()->changed_files.empty());

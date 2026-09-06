@@ -5,6 +5,7 @@
 #include "common/util.h"
 #include "network/json_io.h"
 #include "subsystems/delegation_runner.h"
+#include "subsystems/permission_store.h"
 #include "subsystems/session_store.h"
 #include "subsystems/skill_store.h"
 
@@ -15,6 +16,16 @@
 namespace ursa {
 
 namespace {
+    bool change_directory(
+        ApplicationState& state, const std::filesystem::path& directory)
+    {
+
+        bool r = state.environment->chdir(directory);
+        if (r) {
+            state.permissions->clear();
+        }
+        return r;
+    }
 
     void start_turn(ApplicationState& state, std::string text,
         std::vector<FileAttachment> attachments);
@@ -216,6 +227,7 @@ namespace {
         }
         state.queue.clear();
         state.skills->clear();
+        state.permissions->clear();
         state.runner->clear();
         state.subagents->prune_completed();
         state.session->restore(SessionSnapshot { });
@@ -355,8 +367,11 @@ void resolve_modal(ApplicationState& state, ModalResult result)
             return;
         }
         std::filesystem::path workspace;
-        if (load_session(*path, *state.session, &workspace) != Status::OK
-            || !state.environment->chdir(workspace)) {
+        const Status loaded = load_session(*path, *state.session, &workspace);
+        if (loaded == Status::OK) {
+            state.permissions->clear();
+        }
+        if (loaded != Status::OK || !change_directory(state, workspace)) {
             state.session->set_error("Failed to load session.");
         }
     }

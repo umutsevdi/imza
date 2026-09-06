@@ -229,9 +229,28 @@ TEST_CASE("builtin tools expose the current tool set")
     CHECK(tool_specs(tools).size() == 11);
 }
 
-TEST_CASE("runtime defaults filter interactive shell and web tools")
+TEST_CASE("runtime flags independently filter the tool roster")
 {
-    const auto tools = ursa::default_tools(false, false, false);
+    int flags = ursa::RuntimeFlag::WEB;
+    const auto web_only
+        = ursa::default_tools(static_cast<ursa::RuntimeFlag>(flags));
+
+    CHECK(ursa::find_tool(web_only, "ask") == nullptr);
+    CHECK(ursa::find_tool(web_only, "shell") == nullptr);
+    CHECK(ursa::find_tool(web_only, "webfetch") != nullptr);
+    CHECK(ursa::find_tool(web_only, "websearch") != nullptr);
+
+    flags = ursa::RuntimeFlag::SHELL | ursa::RuntimeFlag::ATTENDED
+        | ursa::RuntimeFlag::SKIP_PERMISSIONS;
+    const auto attended_shell
+        = ursa::default_tools(static_cast<ursa::RuntimeFlag>(flags));
+
+    CHECK(ursa::find_tool(attended_shell, "ask") != nullptr);
+    CHECK(ursa::find_tool(attended_shell, "shell") != nullptr);
+    CHECK(ursa::find_tool(attended_shell, "webfetch") == nullptr);
+    CHECK(ursa::find_tool(attended_shell, "websearch") == nullptr);
+
+    const auto tools = ursa::default_tools(ursa::RuntimeFlag::NONE);
 
     CHECK(ursa::find_tool(tools, "ask") == nullptr);
     CHECK(ursa::find_tool(tools, "shell") == nullptr);
