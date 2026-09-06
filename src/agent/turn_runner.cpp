@@ -247,7 +247,7 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
         prompt_tokens = 0;
         ChatRequest req;
         req.model    = settings.model;
-        req.messages = history;
+        req.messages = std::move(history);
         req.tools
             = settings.mode == Session::Mode::PLAN ? specs_plan_ : specs_all_;
         req.interrupted = [session = state_->session] {
@@ -349,6 +349,7 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
                 }
             }
         }
+        history = std::move(req.messages);
 
         if (state_->session->interrupt_requested()) {
             _post([this] { on_finish_(""); });
