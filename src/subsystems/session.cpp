@@ -131,6 +131,12 @@ Session::StatusView Session::status_view() const
     return { mode_, totals_, last_, total_cost_ };
 }
 
+bool Session::has_items() const
+{
+    std::lock_guard lock(mutex_);
+    return !items_.empty();
+}
+
 bool Session::has_pending_work() const
 {
     std::lock_guard lock(mutex_);
@@ -149,6 +155,17 @@ SessionSnapshot Session::snapshot() const
     std::lock_guard lock(mutex_);
     return { title_, items_, todo_, compacted_summary_, compacted_item_count_,
         mode_ == Mode::PLAN, persistence_ };
+}
+
+std::optional<SessionSnapshot> Session::snapshot_for_save() const
+{
+    std::lock_guard lock(mutex_);
+    if (items_.empty()
+        || std::holds_alternative<PersistedSession>(persistence_)) {
+        return std::nullopt;
+    }
+    return SessionSnapshot { title_, items_, todo_, compacted_summary_,
+        compacted_item_count_, mode_ == Mode::PLAN, persistence_ };
 }
 
 void Session::restore(SessionSnapshot snapshot)

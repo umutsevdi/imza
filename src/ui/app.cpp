@@ -297,7 +297,7 @@ int run_repl(
     }
     auto app = ftxui::Make<Repl>(screen, state);
     screen.Loop(app);
-    if (state->session->snapshot().items.empty()) {
+    if (!state->session->has_items()) {
         return 0;
     }
     const bool saved = save_session(*state->session) == Status::OK;

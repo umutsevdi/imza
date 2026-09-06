@@ -133,8 +133,10 @@ public:
     Usage last() const;
     std::optional<std::chrono::milliseconds> turn_elapsed() const;
     StatusView status_view() const;
+    bool has_items() const;
     bool has_pending_work() const;
     SessionSnapshot snapshot() const;
+    std::optional<SessionSnapshot> snapshot_for_save() const;
     void restore(SessionSnapshot snapshot);
     void set_persistence(SessionPersistence persistence);
 

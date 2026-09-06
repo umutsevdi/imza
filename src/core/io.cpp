@@ -1,6 +1,7 @@
 #include "core/io.h"
 
 #include <fstream>
+#include <memory>
 
 namespace ursa {
 
@@ -21,7 +22,11 @@ Status write_json_file(const std::filesystem::path& path,
         }
         Json::StreamWriterBuilder builder;
         builder["indentation"] = std::string(indentation);
-        file << Json::writeString(builder, root) << "\n";
+        std::unique_ptr<Json::StreamWriter> writer(builder.newStreamWriter());
+        if (!writer || writer->write(root, &file) != 0) {
+            return Status::CONFIG_ERROR;
+        }
+        file << '\n';
         if (!file) {
             return Status::CONFIG_ERROR;
         }
