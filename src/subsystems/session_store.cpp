@@ -12,6 +12,7 @@
 #include <iomanip>
 #include <random>
 #include <sstream>
+#include <utility>
 
 namespace ursa {
 
@@ -31,12 +32,18 @@ namespace {
         return out.str();
     }
 
-    Json::Value todo_json(const TodoList& todo)
+    Json::Value consume_string(std::string& source)
+    {
+        std::string owned = std::move(source);
+        return Json::Value(owned);
+    }
+
+    Json::Value todo_json(TodoList& todo)
     {
         Json::Value out(Json::arrayValue);
-        for (const auto& item : todo.items) {
+        for (auto& item : todo.items) {
             Json::Value value;
-            value["content"] = item.content;
+            value["content"] = consume_string(item.content);
             value["status"]  = static_cast<int>(item.status);
             out.append(std::move(value));
         }
@@ -64,59 +71,61 @@ namespace {
         return out;
     }
 
-    Json::Value item_json(const ConversationItem& item)
+    Json::Value item_json(ConversationItem& item)
     {
         Json::Value out;
-        if (const auto* user = std::get_if<UserTurn>(&item)) {
+        if (auto* user = std::get_if<UserTurn>(&item)) {
             out["type"] = "user";
-            out["text"] = user->text;
+            out["text"] = consume_string(user->text);
             Json::Value attachments(Json::arrayValue);
-            for (const auto& attachment : user->attachments) {
+            for (auto& attachment : user->attachments) {
                 Json::Value value;
-                value["path"]    = attachment.path;
-                value["content"] = attachment.content;
+                value["path"]    = consume_string(attachment.path);
+                value["content"] = consume_string(attachment.content);
                 attachments.append(std::move(value));
             }
             out["attachments"] = std::move(attachments);
-        } else if (const auto* assistant = std::get_if<AssistantTurn>(&item)) {
-            out["type"]                = "assistant";
-            out["markdown"]            = assistant->markdown;
-            out["reasoning"]           = assistant->reasoning;
-            out["reasoning_signature"] = assistant->reasoning_signature;
-            out["model"]               = assistant->model;
-            out["reasoning_effort"]    = assistant->reasoning_effort;
+        } else if (auto* assistant = std::get_if<AssistantTurn>(&item)) {
+            out["type"]      = "assistant";
+            out["markdown"]  = consume_string(assistant->markdown);
+            out["reasoning"] = consume_string(assistant->reasoning);
+            out["reasoning_signature"]
+                = consume_string(assistant->reasoning_signature);
+            out["model"] = consume_string(assistant->model);
+            out["reasoning_effort"]
+                = consume_string(assistant->reasoning_effort);
             if (assistant->reasoning_ms) {
                 out["reasoning_ms"] = static_cast<Json::Int64>(
                     assistant->reasoning_ms->count());
             }
-        } else if (const auto* tool = std::get_if<ToolCall>(&item)) {
+        } else if (auto* tool = std::get_if<ToolCall>(&item)) {
             out["type"]    = "tool";
             out["id"]      = static_cast<Json::UInt64>(tool->id);
-            out["call_id"] = tool->call_id;
-            out["name"]    = tool->name;
-            out["args"]    = tool->args;
+            out["call_id"] = consume_string(tool->call_id);
+            out["name"]    = consume_string(tool->name);
+            out["args"]    = consume_string(tool->args);
             if (!tool->subagent_chats.empty()) {
                 Json::Value chats(Json::arrayValue);
-                for (const SubagentChat& chat : tool->subagent_chats) {
+                for (SubagentChat& chat : tool->subagent_chats) {
                     Json::Value value;
-                    value["title"]      = chat.title;
-                    value["transcript"] = chat.transcript;
+                    value["title"]      = consume_string(chat.title);
+                    value["transcript"] = consume_string(chat.transcript);
                     chats.append(std::move(value));
                 }
                 out["subagent_chats"] = std::move(chats);
             }
             if (tool->result) {
                 out["result_kind"] = static_cast<int>(tool->result->kind);
-                out["result"]      = tool->result->text;
+                out["result"]      = consume_string(tool->result->text);
                 if (tool->result->diff) {
                     Json::Value diff;
-                    diff["file"] = tool->result->diff->file;
+                    diff["file"] = consume_string(tool->result->diff->file);
                     Json::Value rows(Json::arrayValue);
-                    for (const auto& row : tool->result->diff->rows) {
+                    for (auto& row : tool->result->diff->rows) {
                         Json::Value value;
                         value["kind"]  = static_cast<int>(row.kind);
-                        value["left"]  = row.left;
-                        value["right"] = row.right;
+                        value["left"]  = consume_string(row.left);
+                        value["right"] = consume_string(row.right);
                         if (row.left_no) {
                             value["left_no"]
                                 = static_cast<Json::UInt64>(*row.left_no);
@@ -144,23 +153,23 @@ namespace {
                         *tool->result->shell_status);
                 }
             }
-        } else if (const auto* todo = std::get_if<TodoList>(&item)) {
+        } else if (auto* todo = std::get_if<TodoList>(&item)) {
             out["type"]  = "todo";
             out["items"] = todo_json(*todo);
         } else if (const auto* event = std::get_if<CompactionEvent>(&item)) {
             out["type"]   = "compaction";
             out["id"]     = static_cast<Json::UInt64>(event->id);
             out["status"] = static_cast<int>(event->status);
-        } else if (const auto* answer = std::get_if<ModalAnswer>(&item)) {
+        } else if (auto* answer = std::get_if<ModalAnswer>(&item)) {
             out["type"] = "modal_answer";
             Json::Value cards(Json::arrayValue);
-            for (const auto& card : answer->cards) {
+            for (auto& card : answer->cards) {
                 Json::Value value;
-                value["prompt"]    = card.prompt;
-                value["free_text"] = card.free_text;
+                value["prompt"]    = consume_string(card.prompt);
+                value["free_text"] = consume_string(card.free_text);
                 Json::Value selected(Json::arrayValue);
-                for (const auto& choice : card.selected) {
-                    selected.append(choice);
+                for (auto& choice : card.selected) {
+                    selected.append(consume_string(choice));
                 }
                 value["selected"] = std::move(selected);
                 cards.append(std::move(value));
@@ -286,13 +295,11 @@ namespace {
 
 Status save_session(Session& session)
 {
-    const SessionSnapshot snapshot = session.snapshot();
-    if (snapshot.items.empty()) {
+    std::optional<SessionSnapshot> pending = session.snapshot_for_save();
+    if (!pending) {
         return Status::OK;
     }
-    if (std::holds_alternative<PersistedSession>(snapshot.persistence)) {
-        return Status::OK;
-    }
+    SessionSnapshot snapshot = std::move(*pending);
     Json::Value root;
     std::error_code workspace_ec;
     const std::filesystem::path workspace
@@ -301,16 +308,16 @@ Status save_session(Session& session)
         return Status::CONFIG_ERROR;
     }
     root["version"]           = 1;
-    root["title"]             = snapshot.title;
+    root["title"]             = consume_string(snapshot.title);
     root["saved_at"]          = format_local_time("%Y-%m-%d %H:%M:%S");
     root["todo"]              = todo_json(snapshot.todo);
-    root["compacted_summary"] = snapshot.compacted_summary;
+    root["compacted_summary"] = consume_string(snapshot.compacted_summary);
     root["compacted_item_count"]
         = static_cast<Json::UInt64>(snapshot.compacted_item_count);
     root["mode"]      = snapshot.plan_mode ? "plan" : "build";
     root["workspace"] = workspace.string();
     Json::Value items(Json::arrayValue);
-    for (const auto& item : snapshot.items) {
+    for (auto& item : snapshot.items) {
         items.append(item_json(item));
     }
     root["items"] = std::move(items);

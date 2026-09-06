@@ -68,6 +68,7 @@ TEST_CASE("saved sessions are immutable and fork on a new prompt")
     source.apply(ursa::make_delta_event("world"), { });
 
     REQUIRE(ursa::save_session(source) == ursa::Status::OK);
+    CHECK_FALSE(source.snapshot_for_save());
     auto saved = ursa::saved_sessions();
     REQUIRE(saved.size() == 1);
     CHECK(saved.front().path.parent_path() == ursa::sessions_dir());
@@ -76,6 +77,7 @@ TEST_CASE("saved sessions are immutable and fork on a new prompt")
     const std::filesystem::path saved_path = saved.front().path;
 
     source.begin_send("follow-up");
+    CHECK(source.snapshot_for_save().has_value());
     REQUIRE(ursa::save_session(source) == ursa::Status::OK);
     saved = ursa::saved_sessions();
     REQUIRE(saved.size() == 2);
@@ -117,6 +119,8 @@ TEST_CASE("empty sessions are not saved")
 #else
     DataHome home;
     ursa::Session session;
+    CHECK_FALSE(session.has_items());
+    CHECK_FALSE(session.snapshot_for_save());
     CHECK(ursa::save_session(session) == ursa::Status::OK);
     CHECK(ursa::saved_sessions().empty());
 #endif
