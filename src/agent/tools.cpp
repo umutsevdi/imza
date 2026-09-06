@@ -296,12 +296,12 @@ namespace {
             timeout = std::chrono::seconds(static_cast<long>(raw));
         }
 
-        const CommandResult r = run_command(command, timeout);
+        CommandResult r = run_command(command, timeout);
         if (!r.spawned) {
             return error("shell: failed to execute command");
         }
 
-        std::string out = r.output;
+        std::string out = std::move(r.output);
         if (!out.empty() && out.back() != '\n') {
             out += '\n';
         }

@@ -63,6 +63,23 @@ TEST_CASE("subagent failures retain a typed status")
     CHECK(manager.tasks().front().state == ursa::SubagentTask::State::FAILED);
 }
 
+TEST_CASE("completed subagents can release retained task state")
+{
+    ursa::SubagentManager manager;
+    auto handle = manager.start(
+        "large prompt", "model", "low", true, [](std::stop_token) {
+            return ursa::SubagentResult { ursa::Status::OK, "large output" };
+        });
+
+    REQUIRE(handle.completion.wait_for(std::chrono::seconds(1))
+        == std::future_status::ready);
+    manager.prune_completed();
+
+    CHECK(manager.tasks().empty());
+    CHECK_FALSE(manager.cancel(handle.id));
+    CHECK(handle.completion.get().output == "large output");
+}
+
 TEST_CASE("stopping subagents joins active workers")
 {
     ursa::SubagentManager manager;

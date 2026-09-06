@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <unordered_set>
 #include <utility>
 
 namespace ursa {
@@ -76,6 +77,31 @@ bool SubagentManager::cancel(std::size_t id)
     }
     worker->second.request_stop();
     return true;
+}
+
+void SubagentManager::prune_completed()
+{
+    std::vector<std::pair<std::size_t, std::jthread>> completed_workers;
+    {
+        std::lock_guard lock(mutex_);
+        std::unordered_set<std::size_t> completed_ids;
+        for (const SubagentTask& task : tasks_) {
+            if (task.state != SubagentTask::State::RUNNING) {
+                completed_ids.insert(task.id);
+            }
+        }
+        std::erase_if(tasks_, [&completed_ids](const SubagentTask& task) {
+            return completed_ids.contains(task.id);
+        });
+        for (auto it = workers_.begin(); it != workers_.end();) {
+            if (!completed_ids.contains(it->first)) {
+                ++it;
+                continue;
+            }
+            completed_workers.push_back(std::move(*it));
+            it = workers_.erase(it);
+        }
+    }
 }
 
 void SubagentManager::stop()

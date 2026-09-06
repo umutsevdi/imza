@@ -217,6 +217,7 @@ namespace {
         state.queue.clear();
         state.skills->clear();
         state.runner->clear();
+        state.subagents->prune_completed();
         state.session->restore(SessionSnapshot { });
     }
 

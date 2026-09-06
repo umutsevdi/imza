@@ -251,6 +251,9 @@ namespace {
         {
             const Session& st = *session_;
             if (st.modal().index() == 0) {
+                if (built_) {
+                    clear_built_content();
+                }
                 built_ = false;
                 return text("");
             }
@@ -493,7 +496,27 @@ namespace {
             }
         }
 
-        void build(std::monostate) { }
+        void build(std::monostate) { clear_built_content(); }
+
+        void clear_built_content()
+        {
+            viewer_content_.reset();
+            body_.reset();
+            form_.clear();
+            cards_.clear();
+            focusables_.clear();
+            submit_.reset();
+            reason_input_.reset();
+            accept_.reset();
+            accept_always_.reset();
+            reject_.reset();
+            confirm_reject_.reset();
+            back_.reset();
+            connect_.reset();
+            variant_.reset();
+            sessions_.reset();
+            skills_.reset();
+        }
 
         Component make_option_row(
             CardState& cs, const std::string& label, size_t idx, bool multi)
