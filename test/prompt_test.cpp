@@ -145,32 +145,20 @@ TEST_CASE("mode reminders carry unique detectable tags")
     const std::string_view plan  = plan_mode_reminder();
     const std::string_view build = build_mode_reminder();
     CHECK(plan.find(PLAN_REMINDER_TAG) != std::string_view::npos);
-    CHECK(plan.find("read-only") != std::string_view::npos);
+    CHECK(plan.find("permission") != std::string_view::npos);
     CHECK(build.find(BUILD_REMINDER_TAG) != std::string_view::npos);
     CHECK(plan != build);
 }
 
-TEST_CASE("specs can be filtered by safety for plan mode")
+TEST_CASE("enabled tools remain advertised in plan mode")
 {
     const std::vector<Tool> tools = default_tools();
     const auto all                = tool_specs(tools);
-    const auto plan               = plan_tool_specs(tools);
-    REQUIRE(plan.size() < all.size());
-
-    bool has_shell    = false;
-    bool has_read     = false;
-    bool has_ask      = false;
-    bool has_subagent = false;
-    for (const auto& s : plan) {
-        has_shell    = has_shell || s.name == "shell";
-        has_read     = has_read || s.name == "read";
-        has_ask      = has_ask || s.name == "ask";
-        has_subagent = has_subagent || s.name == "subagent";
-    }
-    CHECK(has_shell);
-    CHECK(has_read);
-    CHECK(has_ask);
-    CHECK(has_subagent);
+    CHECK(all.size() == tools.size());
+    CHECK(std::any_of(all.begin(), all.end(),
+        [](const ToolSpec& spec) { return spec.name == "edit"; }));
+    CHECK(std::any_of(all.begin(), all.end(),
+        [](const ToolSpec& spec) { return spec.name == "write"; }));
 }
 
 } // namespace ursa

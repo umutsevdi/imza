@@ -9,8 +9,11 @@
 #include "app/flows.h"
 #include "conversation/persistence.h"
 #include "network/json_io.h"
+#include "permissions/evaluator.h"
 #include "permissions/filesystem.h"
 #include "permissions/store.h"
+#include "platform/config.h"
+#include "tools/skills.h"
 #include "tools/tool.h"
 #include "workspace/environment.h"
 
@@ -137,8 +140,7 @@ TEST_CASE("permission store installs complete valid sets atomically")
     const std::vector<PermissionGrant> valid {
         PathGrant {
             PathGrant::Access::READ, PathGrant::Target::DIRECTORY, root },
-        ShellCommandGrant {
-            "git", { "status" }, ShellCommandGrant::Match::EXACT, root },
+        ShellCommandGrant { "git", { "status" }, root },
     };
     CHECK(store.install(valid));
     CHECK(empty_snapshot->empty());
@@ -146,8 +148,7 @@ TEST_CASE("permission store installs complete valid sets atomically")
     CHECK(store.size() == 2);
     CHECK(store.matches(PathGrant { PathGrant::Access::READ,
         PathGrant::Target::FILE, root / "child" / "file" }));
-    CHECK(store.matches(ShellCommandGrant {
-        "git", { "status" }, ShellCommandGrant::Match::EXACT, root }));
+    CHECK(store.matches(ShellCommandGrant { "git", { "status" }, root }));
     CHECK(store.install({ PathGrant { PathGrant::Access::READ,
         PathGrant::Target::FILE, root / "child" / "file" } }));
     CHECK(store.size() == 2);
@@ -164,21 +165,20 @@ TEST_CASE("permission store installs complete valid sets atomically")
     CHECK(store.size() == 0);
 }
 
-TEST_CASE("global-style shell prefixes and exact runtime commands differ")
+TEST_CASE("runtime shell grants match exact commands")
 {
     PermissionStore store;
     const auto root = std::filesystem::temp_directory_path().lexically_normal();
     const std::vector<PermissionGrant> grants { PermissionGrant {
-        ShellCommandGrant {
-            "git", { "status" }, ShellCommandGrant::Match::PREFIX, root } } };
+        ShellCommandGrant { "git", { "status" }, root } } };
     REQUIRE(store.install(grants));
-    CHECK(store.matches(ShellCommandGrant { "git", { "status", "--short" },
-        ShellCommandGrant::Match::EXACT, root }));
-    CHECK_FALSE(store.matches(ShellCommandGrant {
-        "git", { "diff" }, ShellCommandGrant::Match::EXACT, root }));
-    CHECK(store.install({ ShellCommandGrant { "git", { "status", "--short" },
-        ShellCommandGrant::Match::EXACT, root } }));
-    CHECK(store.size() == 1);
+    CHECK(store.matches(ShellCommandGrant { "git", { "status" }, root }));
+    CHECK_FALSE(store.matches(
+        ShellCommandGrant { "git", { "status", "--short" }, root }));
+    CHECK_FALSE(store.matches(ShellCommandGrant { "git", { "diff" }, root }));
+    CHECK(store.install(
+        { ShellCommandGrant { "git", { "status", "--short" }, root } }));
+    CHECK(store.size() == 2);
 }
 
 TEST_CASE("application state shares grants with children")
@@ -526,6 +526,138 @@ TEST_CASE("filesystem policy rejects malformed operation arguments")
     CHECK(evaluate_filesystem_request("write",
               R"({"file_path":")" + file + R"(","text":"x","line":"one"})",
               context)
+              .decision.kind
+        == PermissionDecision::Kind::REJECT);
+}
+
+TEST_CASE("central evaluator assigns explicit policies to built-in tools")
+{
+    PermissionFixture fixture;
+    const PermissionContext plan = fixture.context(Session::Mode::PLAN);
+    const Config config;
+    const std::vector<Skill> skills;
+    SkillStore loaded;
+
+    const auto evaluate = [&](std::string name, std::string arguments) {
+        return evaluate_tool_request(
+            { std::move(name), std::move(arguments), "", "", "", false }, plan,
+            config, skills, loaded);
+    };
+
+    CHECK(evaluate("ask", R"({"questions":[{"prompt":"Continue?"}]})")
+              .decision.kind
+        == PermissionDecision::Kind::ACCEPT);
+    CHECK(evaluate("todo", R"({"todos":[]})").decision.kind
+        == PermissionDecision::Kind::ACCEPT);
+    CHECK(evaluate("webfetch", R"({"url":"https://example.com"})").decision.kind
+        == PermissionDecision::Kind::ACCEPT);
+    CHECK(evaluate("websearch", R"({"query":"ursa"})").decision.kind
+        == PermissionDecision::Kind::ACCEPT);
+    CHECK(evaluate("subagent",
+              R"({"tasks":[{"mode":"research","prompt":"inspect"}]})")
+              .decision.kind
+        == PermissionDecision::Kind::ACCEPT);
+    CHECK(evaluate(
+              "subagent", R"({"tasks":[{"mode":"build","prompt":"change"}]})")
+              .decision.kind
+        == PermissionDecision::Kind::REJECT);
+    const auto shell = evaluate("shell", R"({"command":"git status"})");
+    CHECK(shell.decision.kind == PermissionDecision::Kind::ASK);
+    CHECK(shell.session_grants.empty());
+    CHECK_FALSE(shell.request.allow_for_session);
+    CHECK(evaluate("shell", R"({"command":""})").decision.kind
+        == PermissionDecision::Kind::REJECT);
+    CHECK(evaluate("custom", "{}").decision.kind
+        == PermissionDecision::Kind::REJECT);
+}
+
+TEST_CASE("central evaluator normalizes filesystem calls and derives grants")
+{
+    PermissionFixture fixture;
+    const Config config;
+    const std::vector<Skill> skills;
+    SkillStore loaded;
+    const auto evaluation = evaluate_tool_request(
+        { "write", write_args(fixture.outside / "new.txt"), "", "", "", false },
+        fixture.context(Session::Mode::BUILD), config, skills, loaded);
+
+    CHECK(evaluation.decision.kind == PermissionDecision::Kind::ASK);
+    CHECK(evaluation.request.allow_for_session);
+    REQUIRE(evaluation.session_grants.size() == 1);
+    const auto* grant
+        = std::get_if<PathGrant>(&evaluation.session_grants.front());
+    REQUIRE(grant != nullptr);
+    CHECK(grant->path == fixture.outside / "new.txt");
+    CHECK(parse_json(evaluation.request.args)["file_path"].asString()
+        == (fixture.outside / "new.txt").string());
+}
+
+TEST_CASE("skill policy and runtime grants use the same central evaluator")
+{
+    PermissionFixture fixture;
+    const auto path = fixture.outside / "SKILL.md";
+    {
+        std::ofstream file(path);
+        file << "Use the documented workflow.";
+    }
+    const Skill skill { "docs", "Documentation workflow", path,
+        Skill::Scope::GLOBAL, std::nullopt };
+    const std::vector<Skill> skills { skill };
+    SkillStore loaded;
+    Config config;
+    const ToolCallRequest request { "skill", R"({"name":"docs"})", "", "", "",
+        false };
+
+    auto evaluation = evaluate_tool_request(
+        request, fixture.context(Session::Mode::PLAN), config, skills, loaded);
+    CHECK(evaluation.decision.kind == PermissionDecision::Kind::ASK);
+    CHECK(evaluation.request.allow_for_session);
+    REQUIRE(evaluation.session_grants.size() == 1);
+
+    evaluation = evaluate_tool_request(request,
+        fixture.context(Session::Mode::PLAN, evaluation.session_grants), config,
+        skills, loaded);
+    CHECK(evaluation.decision.kind == PermissionDecision::Kind::ACCEPT);
+
+    config.global_skills["docs"] = SkillPolicy::ALLOW;
+    CHECK(evaluate_tool_request(request, fixture.context(Session::Mode::PLAN),
+              config, skills, loaded)
+              .decision.kind
+        == PermissionDecision::Kind::ACCEPT);
+    config.global_skills["docs"] = SkillPolicy::DENY;
+    CHECK(evaluate_tool_request(request, fixture.context(Session::Mode::PLAN),
+              config, skills, loaded)
+              .decision.kind
+        == PermissionDecision::Kind::REJECT);
+
+    config.global_skills["docs"] = SkillPolicy::ASK;
+    std::string error;
+    REQUIRE(loaded.load(skill, error));
+    CHECK(evaluate_tool_request(request, fixture.context(Session::Mode::PLAN),
+              config, skills, loaded)
+              .decision.kind
+        == PermissionDecision::Kind::ACCEPT);
+
+    const Skill missing { "missing", "Missing instructions",
+        fixture.outside / "missing.md", Skill::Scope::GLOBAL, std::nullopt };
+    CHECK(evaluate_tool_request(
+              { "skill", R"({"name":"missing"})", "", "", "", false },
+              fixture.context(Session::Mode::PLAN), config,
+              std::vector<Skill> { missing }, loaded)
+              .decision.kind
+        == PermissionDecision::Kind::REJECT);
+
+    const auto large_path = fixture.outside / "large.md";
+    {
+        std::ofstream file(large_path);
+        file << std::string(128 * 1024 + 1, 'x');
+    }
+    const Skill large { "large", "Large instructions", large_path,
+        Skill::Scope::GLOBAL, std::nullopt };
+    CHECK(evaluate_tool_request(
+              { "skill", R"({"name":"large"})", "", "", "", false },
+              fixture.context(Session::Mode::PLAN), config,
+              std::vector<Skill> { large }, loaded)
               .decision.kind
         == PermissionDecision::Kind::REJECT);
 }

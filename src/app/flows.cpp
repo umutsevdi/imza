@@ -3,6 +3,7 @@
 #include "common/util.h"
 #include "conversation/persistence.h"
 #include "network/json_io.h"
+#include "permissions/evaluator.h"
 #include "permissions/store.h"
 #include "tools/skills.h"
 #include "turn/delegation.h"
@@ -51,21 +52,37 @@ namespace {
         return true;
     }
 
+    ToolCallRequest skill_request(const Skill& skill)
+    {
+        Json::Value args(Json::objectValue);
+        args["name"] = skill.name;
+        args["scope"]
+            = skill.scope == Skill::Scope::PROJECT ? "project" : "global";
+        return { "skill", write_json(args), "Load skill " + skill.name,
+            "manual-skill", "", false };
+    }
+
+    PermissionEvaluation evaluate_permission(ApplicationState& state,
+        const ToolCallRequest& request, Session::Mode mode)
+    {
+        return evaluate_tool_request(request,
+            permission_context(*state.environment, *state.permissions, mode),
+            state.providers->config(), state.environment->skills(),
+            *state.skills);
+    }
+
     bool validate_skill_mentions(ApplicationState& state, std::string_view text)
     {
         const std::vector<Skill> catalog = state.environment->skills();
-        const Config config              = state.providers->config();
         for (const std::string& name : skill_mention_names(text)) {
             Json::Value args(Json::objectValue);
-            args["name"]     = name;
-            const auto skill = resolve_skill(catalog, args);
-            if (!skill) {
-                state.session->set_error("Unknown skill: " + name + ".");
-                return false;
-            }
-            if (skill_policy(config, *skill) == SkillPolicy::DENY) {
-                state.session->set_error(
-                    "Skill is denied: " + skill->name + ".");
+            args["name"]                          = name;
+            const PermissionEvaluation evaluation = evaluate_permission(state,
+                { "skill", write_json(args), "Load skill " + name,
+                    "manual-skill", "", false },
+                state.session->mode());
+            if (evaluation.decision.kind == PermissionDecision::Kind::REJECT) {
+                state.session->set_error(evaluation.decision.reason);
                 return false;
             }
         }
@@ -81,17 +98,23 @@ namespace {
         const std::vector<Skill> catalog = state.environment->skills();
         std::vector<Skill> awaiting;
         for (const Skill& skill : mentioned_skills(catalog, text)) {
-            if (state.skills->is_loaded(skill.path)) {
-                continue;
-            }
-            if (skill_policy(state.providers->config(), skill)
-                == SkillPolicy::ALLOW) {
+            const PermissionEvaluation evaluation = evaluate_permission(
+                state, skill_request(skill), state.session->mode());
+            if (evaluation.decision.kind == PermissionDecision::Kind::ACCEPT
+                || (state.runtime_flags & RuntimeFlag::SKIP_PERMISSIONS)
+                    != RuntimeFlag::NONE) {
                 if (!load_skill(state, skill)) {
                     return;
                 }
-            } else {
-                awaiting.push_back(skill);
+                continue;
             }
+            if ((state.runtime_flags & RuntimeFlag::ATTENDED)
+                == RuntimeFlag::NONE) {
+                state.session->set_error(
+                    "Skill permission is unavailable in unattended mode.");
+                return;
+            }
+            awaiting.push_back(skill);
         }
         if (awaiting.empty()) {
             start_turn(state, std::move(text), std::move(attachments));
@@ -100,14 +123,10 @@ namespace {
         const Skill first = awaiting.front();
         state.skills->set_pending_turn(PendingSkillTurn {
             std::move(text), std::move(attachments), std::move(awaiting), 0 });
-        Json::Value args(Json::objectValue);
-        args["name"] = first.name;
-        args["scope"]
-            = first.scope == Skill::Scope::PROJECT ? "project" : "global";
         enqueue_user_modal(state,
-            ToolCallRequest { "skill", write_json(args),
-                "Load skill " + first.name, "manual-skill",
-                ToolCallRequest::ApprovalReason::TOOL_PERMISSION });
+            evaluate_permission(
+                state, skill_request(first), state.session->mode())
+                .request);
     }
 
     void start_turn(ApplicationState& state, std::string text,
@@ -252,14 +271,10 @@ namespace {
         }
         if (pending->next < pending->awaiting.size()) {
             const Skill& skill = pending->awaiting[pending->next];
-            Json::Value args(Json::objectValue);
-            args["name"] = skill.name;
-            args["scope"]
-                = skill.scope == Skill::Scope::PROJECT ? "project" : "global";
             enqueue_user_modal(state,
-                ToolCallRequest { "skill", write_json(args),
-                    "Load skill " + skill.name, "manual-skill",
-                    ToolCallRequest::ApprovalReason::TOOL_PERMISSION });
+                evaluate_permission(
+                    state, skill_request(skill), state.session->mode())
+                    .request);
             return;
         }
         std::optional<PendingSkillTurn> turn
@@ -289,6 +304,9 @@ void submit(ApplicationState& state, std::string text,
 
 void close_modal(ApplicationState& state)
 {
+    if (std::holds_alternative<ToolCallRequest>(state.session->modal())) {
+        interrupt(state);
+    }
     resolve_modal(state, std::monostate { });
 }
 
@@ -362,6 +380,17 @@ void resolve_modal(ApplicationState& state, ModalResult result)
             = verdict != nullptr && verdict->decision != ToolDecision::REJECT;
         const std::optional<PendingSkillTurn> pending
             = state.skills->pending_turn();
+        if (manual_accepted) {
+            const PermissionEvaluation evaluation
+                = evaluate_permission(state, *request, state.session->mode());
+            manual_accepted
+                = evaluation.decision.kind != PermissionDecision::Kind::REJECT;
+            if (manual_accepted
+                && verdict->decision == ToolDecision::ACCEPT_FOR_SESSION) {
+                manual_accepted = !evaluation.session_grants.empty()
+                    && state.permissions->install(evaluation.session_grants);
+            }
+        }
         if (manual_accepted && pending
             && pending->next < pending->awaiting.size()) {
             manual_accepted

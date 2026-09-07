@@ -198,29 +198,24 @@ TEST_CASE("builtin tools expose the current tool set")
 
     const auto* read = find_tool(tools, "read");
     REQUIRE(read != nullptr);
-    CHECK(read->safety == ursa::ToolSafety::READ_ONLY);
     CHECK(read->spec.parameters["properties"].isMember("path"));
 
     const auto* list = find_tool(tools, "list");
     REQUIRE(list != nullptr);
-    CHECK(list->safety == ursa::ToolSafety::READ_ONLY);
     CHECK(list->spec.parameters["properties"].isMember("path"));
 
     const auto* ask = find_tool(tools, "ask");
     REQUIRE(ask != nullptr);
-    CHECK(ask->safety == ursa::ToolSafety::READ_ONLY);
     CHECK(ask->spec.parameters["properties"].isMember("questions"));
 
     const auto* skill = find_tool(tools, "skill");
     REQUIRE(skill != nullptr);
-    CHECK(skill->safety == ursa::ToolSafety::READ_ONLY);
     CHECK(skill->spec.parameters["properties"].isMember("name"));
 
     REQUIRE(find_tool(tools, "shell") != nullptr);
     REQUIRE(find_tool(tools, "todo") != nullptr);
     const auto* subagent = find_tool(tools, "subagent");
     REQUIRE(subagent != nullptr);
-    CHECK(subagent->safety == ursa::ToolSafety::READ_ONLY);
     CHECK(subagent->spec.parameters["properties"].isMember("tasks"));
     REQUIRE(find_tool(tools, "edit") != nullptr);
     REQUIRE(find_tool(tools, "write") != nullptr);
@@ -263,9 +258,6 @@ TEST_CASE("runtime flags independently filter the tool roster")
 TEST_CASE("shell tool runs a command and reports the exit code")
 {
     const auto tool = ursa::make_shell_tool();
-    REQUIRE(tool.safety == ursa::ToolSafety::MUTATING);
-    CHECK(tool.available_in_plan);
-    CHECK(tool.persistent == false);
     CHECK(tool.spec.parameters["properties"].isMember("command"));
     CHECK(tool.spec.parameters["properties"].isMember("timeout"));
 

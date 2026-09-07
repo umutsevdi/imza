@@ -94,28 +94,31 @@ namespace {
                 ? args[name].asString()
                 : std::string { };
         };
-        std::string message;
+        std::string message = req.permission_reason;
         const char* path_key
             = req.name == "edit" || req.name == "write" ? "file_path" : "path";
-        if (req.approval_reason
-            == ToolCallRequest::ApprovalReason::OUTSIDE_WORKSPACE) {
+        if (!message.empty()
+            && (req.name == "read" || req.name == "list" || req.name == "edit"
+                || req.name == "write")) {
             const std::string path = string_arg(path_key);
-            message = path.empty() ? "Outside workspace"
-                                   : "Outside workspace · " + path;
-        } else if (req.name == "shell") {
+            if (!path.empty()) {
+                message += " · " + path;
+            }
+        } else if (message.empty() && req.name == "shell") {
             message = "May modify files or run external processes";
-        } else if (req.name == "edit" || req.name == "write") {
+        } else if (message.empty()
+            && (req.name == "edit" || req.name == "write")) {
             const std::string path = string_arg("file_path");
             message
                 = path.empty() ? "Will modify a file" : "Will modify " + path;
-        } else if (req.name == "read") {
+        } else if (message.empty() && req.name == "read") {
             const std::string path = string_arg("path");
             message = path.empty() ? "Will read a file" : "Will read " + path;
-        } else if (req.name == "list") {
+        } else if (message.empty() && req.name == "list") {
             const std::string path = string_arg("path");
             message
                 = path.empty() ? "Will list a directory" : "Will list " + path;
-        } else {
+        } else if (message.empty()) {
             message = "Permission required";
         }
         return text(message) | color(Color::YellowLight);
@@ -344,7 +347,7 @@ namespace {
                 [this](const auto& payload) { build(payload); }, st.modal());
         }
 
-        void build(const ToolCallRequest&)
+        void build(const ToolCallRequest& request)
         {
             tool_phase_ = ToolPhase::DECIDE;
             reason_buf_.clear();
@@ -357,11 +360,15 @@ namespace {
                 ursa::resolve_modal(
                     *state_, ModalResult { ToolVerdict { d, std::move(r) } });
             };
-            accept_ = action_button(
-                "Allow once", [resolve] { resolve(ToolDecision::ACCEPT, ""); });
-            accept_always_ = action_button("Always allow",
-                [resolve] { resolve(ToolDecision::ACCEPT_ALWAYS, ""); });
-            reject_        = action_button(
+            accept_         = action_button("Allow once",
+                [resolve] { resolve(ToolDecision::ACCEPT_ONCE, ""); });
+            accept_session_ = request.allow_for_session
+                ? action_button("Allow for this session",
+                      [resolve] {
+                          resolve(ToolDecision::ACCEPT_FOR_SESSION, "");
+                      })
+                : Component { };
+            reject_         = action_button(
                 "Reject", [this] { _set_tool_phase(ToolPhase::REASON); });
             confirm_reject_
                 = action_button("Reject", [this] { _confirm_reject(); });
@@ -380,8 +387,12 @@ namespace {
         void _build_tool_body()
         {
             if (tool_phase_ == ToolPhase::DECIDE) {
-                body_ = Container::Horizontal(
-                    { accept_, accept_always_, reject_ });
+                Components buttons { accept_ };
+                if (accept_session_) {
+                    buttons.push_back(accept_session_);
+                }
+                buttons.push_back(reject_);
+                body_ = Container::Horizontal(std::move(buttons));
             } else {
                 body_ = Container::Vertical({ reason_input_,
                     Container::Horizontal({ confirm_reject_, back_ }) });
@@ -508,7 +519,7 @@ namespace {
             submit_.reset();
             reason_input_.reset();
             accept_.reset();
-            accept_always_.reset();
+            accept_session_.reset();
             reject_.reset();
             confirm_reject_.reset();
             back_.reset();
@@ -607,14 +618,17 @@ namespace {
             } else {
                 rows.push_back(hbox({
                     accept_->Render(),
-                    text(" "),
-                    accept_always_->Render(),
-                    text(" "),
+                    accept_session_
+                        ? hbox({ text(" "), accept_session_->Render(),
+                              text(" ") })
+                        : text(" "),
                     reject_->Render(),
                 }));
                 rows.push_back(separatorEmpty());
-                rows.push_back(
-                    hint_bar("Always allow applies for this session"));
+                if (accept_session_) {
+                    rows.push_back(hint_bar(
+                        "allow lasts until directory or session changes"));
+                }
                 rows.push_back(hint_bar("Esc reject"));
             }
             return vbox(std::move(rows)) | xflex;
@@ -723,7 +737,7 @@ namespace {
         ScrollView static_view_ { };
         Component reason_input_;
         Component accept_;
-        Component accept_always_;
+        Component accept_session_;
         Component reject_;
         Component confirm_reject_;
         Component back_;

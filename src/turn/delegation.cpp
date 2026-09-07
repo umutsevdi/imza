@@ -26,29 +26,15 @@ namespace {
     std::optional<std::vector<DelegatedTask>> parse_tasks(
         const Json::Value& args, Session::Mode main_mode, std::string& error)
     {
-        if (!args.isObject() || !args["tasks"].isArray()
-            || args["tasks"].empty() || args["tasks"].size() > 5) {
-            error = "subagent: expected one to five tasks";
+        if (const auto validation = validate_subagent_tool_arguments(
+                args, main_mode == Session::Mode::BUILD)) {
+            error = *validation;
             return std::nullopt;
         }
         std::vector<DelegatedTask> tasks;
         tasks.reserve(args["tasks"].size());
         for (const Json::Value& value : args["tasks"]) {
-            if (!value.isObject() || !value["mode"].isString()
-                || !value["prompt"].isString()
-                || trim(value["prompt"].asString()).empty()) {
-                error = "subagent: every task requires a mode and prompt";
-                return std::nullopt;
-            }
             const std::string mode = to_lower(value["mode"].asString());
-            if (mode != "research" && mode != "build") {
-                error = "subagent: mode must be research or build";
-                return std::nullopt;
-            }
-            if (mode == "build" && main_mode != Session::Mode::BUILD) {
-                error = "subagent: build agents require main-agent build mode";
-                return std::nullopt;
-            }
             tasks.push_back(DelegatedTask {
                 mode == "build" ? Session::Mode::BUILD : Session::Mode::PLAN,
                 mode == "build" ? SubagentRole::BUILDER

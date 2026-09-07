@@ -22,18 +22,13 @@ namespace {
             [](auto& value) {
                 using T = std::decay_t<decltype(value)>;
                 if constexpr (std::is_same_v<T, ShellCommandGrant>) {
-                    if (value.program.empty()) {
-                        return false;
-                    }
-                    if (!value.working_root) {
-                        return true;
-                    }
-                    if (!value.working_root->is_absolute()) {
+                    if (value.program.empty() || value.working_root.empty()
+                        || !value.working_root.is_absolute()) {
                         return false;
                     }
                     std::error_code error;
-                    *value.working_root = std::filesystem::weakly_canonical(
-                        *value.working_root, error);
+                    value.working_root = std::filesystem::weakly_canonical(
+                        value.working_root, error);
                     return !error;
                 } else {
                     if (!value.path.is_absolute() || value.path.empty()) {
@@ -104,7 +99,7 @@ bool PermissionStore::matches(const ShellCommandGrant& grant) const
     const Snapshot grants = snapshot();
     return std::any_of(grants->begin(), grants->end(), [&](const auto& entry) {
         const auto* stored = std::get_if<ShellCommandGrant>(&entry);
-        return stored != nullptr && _matches(*stored, grant);
+        return stored != nullptr && *stored == grant;
     });
 }
 
@@ -145,17 +140,7 @@ bool PermissionStore::_covers(
     }
     if (const auto* command = std::get_if<ShellCommandGrant>(&stored)) {
         const auto& other = std::get<ShellCommandGrant>(requested);
-        if (command->program != other.program
-            || command->working_root != other.working_root) {
-            return false;
-        }
-        if (command->match == ShellCommandGrant::Match::EXACT) {
-            return other.match == ShellCommandGrant::Match::EXACT
-                && command->argv == other.argv;
-        }
-        return other.argv.size() >= command->argv.size()
-            && std::equal(
-                command->argv.begin(), command->argv.end(), other.argv.begin());
+        return *command == other;
     }
     return std::get<SkillGrant>(stored) == std::get<SkillGrant>(requested);
 }
@@ -169,21 +154,6 @@ bool PermissionStore::_matches(
     return stored.target == PathGrant::Target::DIRECTORY
         ? is_descendant(requested.path, stored.path)
         : stored.path == requested.path;
-}
-
-bool PermissionStore::_matches(
-    const ShellCommandGrant& stored, const ShellCommandGrant& requested)
-{
-    if (stored.program != requested.program
-        || stored.working_root != requested.working_root) {
-        return false;
-    }
-    if (stored.match == ShellCommandGrant::Match::EXACT) {
-        return stored.argv == requested.argv;
-    }
-    return requested.argv.size() >= stored.argv.size()
-        && std::equal(
-            stored.argv.begin(), stored.argv.end(), requested.argv.begin());
 }
 
 } // namespace ursa

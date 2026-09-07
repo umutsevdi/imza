@@ -3,7 +3,6 @@
 #include <filesystem>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
@@ -24,12 +23,9 @@ struct PathGrant {
 };
 
 struct ShellCommandGrant {
-    enum class Match { EXACT, PREFIX };
-
     std::string program;
     std::vector<std::string> argv;
-    Match match = Match::EXACT;
-    std::optional<std::filesystem::path> working_root;
+    std::filesystem::path working_root;
 
     bool operator==(const ShellCommandGrant&) const = default;
 };
@@ -61,9 +57,6 @@ private:
     static bool _covers(
         const PermissionGrant& stored, const PermissionGrant& requested);
     static bool _matches(const PathGrant& stored, const PathGrant& requested);
-    static bool _matches(
-        const ShellCommandGrant& stored, const ShellCommandGrant& requested);
-
     mutable std::mutex _mutex;
     Snapshot _grants;
 };
