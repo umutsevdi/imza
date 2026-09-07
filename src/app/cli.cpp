@@ -137,13 +137,17 @@ CliResult run_cli(int argc, char** argv)
     std::string shell;
     std::string ask;
     std::string exec;
+    std::vector<std::string> allowed_directories;
     bool config_requested = false;
+    bool skip_permissions = false;
     app.add_flag("-c,--config", config_requested, "Open the config file");
-    auto* ask_option  = app.add_option("--ask", ask,
+    app.add_flag("--skip-permissions", skip_permissions,
+        "Automatically allow permission prompts for this process");
+    auto* ask_option  = app.add_option("-a,--ask", ask,
                                "Run a one-shot read-only agent query "
                                "(unimplemented)")
                             ->type_name("<query>");
-    auto* exec_option = app.add_option("--exec", exec,
+    auto* exec_option = app.add_option("-e,--exec", exec,
                                "Run a one-shot build agent query "
                                "(unimplemented)")
                             ->type_name("<query>");
@@ -156,19 +160,24 @@ CliResult run_cli(int argc, char** argv)
            "Working directory for the interactive or command session")
         ->type_name("")
         ->check(CLI::ExistingDirectory);
-    app.add_option("--model", model, "Model to use for this session")
+    app.add_option("-M,--model", model, "Model to use for this session")
         ->type_name("<model>");
     app.add_option(
-           "--variant", variant, "Reasoning variant to use for this session")
+           "-V,--variant", variant, "Reasoning variant to use for this session")
         ->type_name("<variant>")
         ->check(CLI::IsMember({ "off", "low", "default", "high" }));
-    app.add_option("--web", web, "Enable or disable web tools (default: true)")
+    app.add_option(
+           "-W,--web", web, "Enable or disable web tools (default: true)")
         ->type_name("<bool>")
         ->check(CLI::IsMember({ "true", "false" }));
-    app.add_option("--shell", shell,
+    app.add_option("-S,--shell", shell,
            "Enable or disable the shell tool (interactive default: true)")
         ->type_name("<bool>")
         ->check(CLI::IsMember({ "true", "false" }));
+    app.add_option("-A,--allow-dir", allowed_directories,
+           "Allow access to one or more additional directories")
+        ->type_name("<directory>...")
+        ->check(CLI::ExistingDirectory);
 
     try {
         app.parse(argc, argv);
@@ -177,6 +186,11 @@ CliResult run_cli(int argc, char** argv)
     }
 
     auto apply_runtime_options = [&](CliResult& result) {
+        result.skip_permissions = skip_permissions;
+        for (const std::string& directory : allowed_directories) {
+            result.allowed_directories.push_back(
+                std::filesystem::absolute(directory).lexically_normal());
+        }
         if (!working_directory.empty()) {
             result.working_directory = working_directory;
         }
@@ -233,6 +247,21 @@ CliResult run_cli(int argc, char** argv)
     apply_runtime_options(result);
     result.session_path = *path;
     return result;
+}
+
+RuntimeFlag runtime_flags_for(const CliResult& result)
+{
+    int flags = interactive_runtime_flags();
+    if (!result.web.value_or(true)) {
+        flags &= ~RuntimeFlag::WEB;
+    }
+    if (!result.shell.value_or(true)) {
+        flags &= ~RuntimeFlag::SHELL;
+    }
+    if (result.skip_permissions) {
+        flags |= RuntimeFlag::SKIP_PERMISSIONS;
+    }
+    return static_cast<RuntimeFlag>(flags);
 }
 
 } // namespace ursa

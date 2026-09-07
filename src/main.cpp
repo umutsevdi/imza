@@ -7,6 +7,7 @@
 #include "app/application_state.h"
 #include "app/flows.h"
 #include "conversation/persistence.h"
+#include "permissions/store.h"
 #include "platform/config.h"
 #include "runtime/main_thread_queue.h"
 #include "ui/repl.h"
@@ -37,19 +38,21 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    int runtime = ursa::interactive_runtime_flags();
-    if (!cli.web.value_or(true)) {
-        runtime &= ~ursa::RuntimeFlag::WEB;
-    }
-    if (!cli.shell.value_or(true)) {
-        runtime &= ~ursa::RuntimeFlag::SHELL;
-    }
+    const ursa::RuntimeFlag runtime = ursa::runtime_flags_for(cli);
     ursa::MainThreadQueue main_thread;
     auto state = ursa::make_application_state(
         [&main_thread](
             std::function<void()> task) { main_thread.post(std::move(task)); },
-        std::move(cfg), ursa::StreamFn { },
-        static_cast<ursa::RuntimeFlag>(runtime));
+        std::move(cfg), ursa::StreamFn { }, runtime);
+    ursa::PermissionStore::Grants startup_grants;
+    startup_grants.reserve(cli.allowed_directories.size());
+    for (const std::filesystem::path& directory : cli.allowed_directories) {
+        startup_grants.emplace_back(directory);
+    }
+    if (!state->permissions->install(std::move(startup_grants))) {
+        std::println(stderr, "failed to install allowed directories");
+        return 2;
+    }
     if (cli.session_path) {
         std::filesystem::path workspace;
         if (ursa::load_session(*cli.session_path, *state->session, &workspace)

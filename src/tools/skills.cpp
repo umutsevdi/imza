@@ -37,6 +37,17 @@ SkillRead read_skill(const Skill& skill)
             + "\n</skill>" };
 }
 
+std::optional<std::filesystem::path> canonical_skill_path(const Skill& skill)
+{
+    std::error_code error;
+    std::filesystem::path path
+        = std::filesystem::weakly_canonical(skill.path, error);
+    if (error || !path.is_absolute()) {
+        return std::nullopt;
+    }
+    return path;
+}
+
 std::vector<std::string> skill_mention_names(std::string_view text)
 {
     std::vector<std::string> names;

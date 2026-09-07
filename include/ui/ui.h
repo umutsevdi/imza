@@ -20,6 +20,7 @@
 #include "common/diff.h"
 #include "conversation/workflow.h"
 #include "network/models.h"
+#include "permissions/store.h"
 #include "tools/skills.h"
 
 namespace ursa {
@@ -163,6 +164,19 @@ ftxui::Element render_changed_files(
 ftxui::Element render_context_box(const std::optional<std::string>& rules,
     const std::vector<std::string>& attachments, SkillCounts project_skills,
     SkillCounts global_skills);
+
+struct PermissionView {
+    bool web_disabled      = false;
+    bool shell_disabled    = false;
+    bool approvals_skipped = false;
+    std::vector<std::string> folders;
+    std::vector<std::string> commands;
+};
+
+PermissionView make_permission_view(
+    RuntimeFlag flags, const PermissionStore::Grants& grants);
+bool has_custom_permissions(const PermissionView& view);
+ftxui::Element render_permissions_box(const PermissionView& view);
 
 ftxui::Component make_chat(
     std::shared_ptr<ApplicationState> state, LayoutFn layout);

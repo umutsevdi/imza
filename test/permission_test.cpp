@@ -138,31 +138,47 @@ TEST_CASE("permission store installs complete valid sets atomically")
     const std::filesystem::path root
         = std::filesystem::temp_directory_path().lexically_normal();
     const std::vector<PermissionGrant> valid {
-        PathGrant {
-            PathGrant::Access::READ, PathGrant::Target::DIRECTORY, root },
+        ExternalGrant { root },
         ShellCommandGrant { "git", { "status" }, root },
     };
     CHECK(store.install(valid));
     CHECK(empty_snapshot->empty());
     const auto installed_snapshot = store.snapshot();
     CHECK(store.size() == 2);
-    CHECK(store.matches(PathGrant { PathGrant::Access::READ,
-        PathGrant::Target::FILE, root / "child" / "file" }));
+    CHECK(store.matches_external_path(root / "child" / "file"));
     CHECK(store.matches(ShellCommandGrant { "git", { "status" }, root }));
-    CHECK(store.install({ PathGrant { PathGrant::Access::READ,
-        PathGrant::Target::FILE, root / "child" / "file" } }));
+    CHECK(store.install({ ExternalGrant { root } }));
     CHECK(store.size() == 2);
     CHECK(installed_snapshot->size() == 2);
 
     const std::vector<PermissionGrant> invalid {
         SkillGrant { root / "skill" },
-        PathGrant {
-            PathGrant::Access::WRITE, PathGrant::Target::FILE, "relative" },
+        ExternalGrant { "relative" },
     };
     CHECK_FALSE(store.install(invalid));
     CHECK(store.size() == 2);
     store.clear();
     CHECK(store.size() == 0);
+}
+
+TEST_CASE("permission store publishes only effective grant changes")
+{
+    PermissionStore store;
+    int changes = 0;
+    const auto subscription
+        = store.subscribe_to_grants_change([&changes] { ++changes; });
+    const PermissionGrant grant = ExternalGrant {
+        std::filesystem::temp_directory_path().lexically_normal()
+    };
+
+    REQUIRE(store.install({ grant }));
+    CHECK(changes == 1);
+    REQUIRE(store.install({ grant }));
+    CHECK(changes == 1);
+    store.clear();
+    CHECK(changes == 2);
+    store.clear();
+    CHECK(changes == 2);
 }
 
 TEST_CASE("runtime shell grants match exact commands")
@@ -185,10 +201,8 @@ TEST_CASE("application state shares grants with children")
 {
     const auto immediate = [](std::function<void()> task) { task(); };
     auto parent          = make_application_state(immediate, Config { });
-    const std::vector<PermissionGrant> grants { PermissionGrant {
-        PathGrant { PathGrant::Access::READ, PathGrant::Target::FILE,
-            (std::filesystem::current_path() / "shared.txt")
-                .lexically_normal() } } };
+    const std::vector<PermissionGrant> grants { ExternalGrant {
+        std::filesystem::current_path().lexically_normal() } };
     REQUIRE(parent->permissions->install(grants));
     auto child = make_child_application_state(*parent, immediate);
     CHECK(parent->permissions == child->permissions);
@@ -220,8 +234,7 @@ TEST_CASE("session lifecycle clears grants only after successful activation")
     PermissionFixture fixture;
     const auto immediate = [](std::function<void()> task) { task(); };
     auto state           = make_application_state(immediate, Config { });
-    const auto grant     = PathGrant { PathGrant::Access::READ,
-        PathGrant::Target::FILE, fixture.outside / "outside.txt" };
+    const auto grant     = ExternalGrant { fixture.outside };
     REQUIRE(state->permissions->install({ grant }));
     state->session->set_title("Current session");
 
@@ -252,8 +265,7 @@ TEST_CASE("failed directory changes and child creation retain grants")
     PermissionFixture fixture;
     const auto immediate = [](std::function<void()> task) { task(); };
     auto parent          = make_application_state(immediate, Config { });
-    const auto grant     = PathGrant { PathGrant::Access::READ,
-        PathGrant::Target::FILE, fixture.outside / "outside.txt" };
+    const auto grant     = ExternalGrant { fixture.outside };
     REQUIRE(parent->permissions->install({ grant }));
 
     CHECK_FALSE(parent->environment->chdir(fixture.root / "missing"));
@@ -265,9 +277,9 @@ TEST_CASE("failed directory changes and child creation retain grants")
 
 TEST_CASE("permission store snapshots remain valid during concurrent changes")
 {
+    PermissionFixture fixture;
     PermissionStore store;
-    const std::filesystem::path root
-        = std::filesystem::temp_directory_path().lexically_normal();
+    const std::filesystem::path root = fixture.outside;
     std::atomic<bool> start { false };
     std::atomic<bool> snapshots_valid { true };
     std::vector<std::jthread> readers;
@@ -279,8 +291,8 @@ TEST_CASE("permission store snapshots remain valid during concurrent changes")
             for (int iteration = 0; iteration < 500; ++iteration) {
                 const auto snapshot = store.snapshot();
                 for (const PermissionGrant& grant : *snapshot) {
-                    const auto* path = std::get_if<PathGrant>(&grant);
-                    if (path == nullptr || !path->path.is_absolute()) {
+                    const auto* path = std::get_if<ExternalGrant>(&grant);
+                    if (path == nullptr || !path->is_absolute()) {
                         snapshots_valid.store(false);
                     }
                 }
@@ -289,9 +301,10 @@ TEST_CASE("permission store snapshots remain valid during concurrent changes")
     }
     start.store(true);
     for (int iteration = 0; iteration < 100; ++iteration) {
-        REQUIRE(store.install(
-            { PathGrant { PathGrant::Access::READ, PathGrant::Target::FILE,
-                root / ("permission-" + std::to_string(iteration)) } }));
+        const auto directory
+            = root / ("permission-" + std::to_string(iteration));
+        std::filesystem::create_directory(directory);
+        REQUIRE(store.install({ ExternalGrant { directory } }));
         if (iteration % 7 == 0) {
             store.clear();
         }
@@ -309,10 +322,8 @@ TEST_CASE("filesystem policy distinguishes Plan and Build writes")
 
     const auto planned = evaluate_filesystem_request(
         "write", args, fixture.context(Session::Mode::PLAN));
-    CHECK(planned.decision.kind == PermissionDecision::Kind::ASK);
-    REQUIRE(planned.request.has_value());
-    CHECK(planned.request->target == fixture.workspace / "new.txt");
-    REQUIRE(filesystem_session_grant(*planned.request).has_value());
+    CHECK(planned.decision.kind == PermissionDecision::Kind::REJECT);
+    CHECK_FALSE(planned.request.has_value());
 
     const auto built = evaluate_filesystem_request(
         "write", args, fixture.context(Session::Mode::BUILD));
@@ -325,7 +336,7 @@ TEST_CASE("filesystem policy covers all trusted and granted write cases")
     const auto workspace_edit = evaluate_filesystem_request("edit",
         edit_args(fixture.workspace / "inside.txt"),
         fixture.context(Session::Mode::PLAN));
-    CHECK(workspace_edit.decision.kind == PermissionDecision::Kind::ASK);
+    CHECK(workspace_edit.decision.kind == PermissionDecision::Kind::REJECT);
 
     const auto temporary_write = evaluate_filesystem_request("write",
         write_args(fixture.temporary / "new.txt"),
@@ -337,11 +348,10 @@ TEST_CASE("filesystem policy covers all trusted and granted write cases")
         fixture.context(Session::Mode::BUILD));
     CHECK(outside_write.decision.kind == PermissionDecision::Kind::ASK);
 
-    const PermissionGrant grant = PathGrant { PathGrant::Access::WRITE,
-        PathGrant::Target::FILE, fixture.outside / "new.txt" };
+    const PermissionGrant grant = ExternalGrant { fixture.outside };
     const auto granted          = evaluate_filesystem_request("write",
         write_args(fixture.outside / "new.txt"),
-        fixture.context(Session::Mode::PLAN, { grant }));
+        fixture.context(Session::Mode::BUILD, { grant }));
     CHECK(granted.decision.kind == PermissionDecision::Kind::ACCEPT);
 }
 
@@ -402,19 +412,11 @@ TEST_CASE("filesystem policy trusts the repository above a nested cwd")
     CHECK(result.request->target == fixture.workspace / "inside.txt");
 }
 
-TEST_CASE("filesystem grants are exact unless a directory is granted")
+TEST_CASE("external directory grants cover descendants but not siblings")
 {
     PermissionFixture fixture;
-    const auto target           = fixture.outside / "outside.txt";
-    const PermissionGrant exact = PathGrant { PathGrant::Access::READ,
-        PathGrant::Target::FILE, target };
-    const auto accepted
-        = evaluate_filesystem_request("read", path_args("path", target),
-            fixture.context(Session::Mode::PLAN, { exact }));
-    CHECK(accepted.decision.kind == PermissionDecision::Kind::ACCEPT);
-
-    const PermissionGrant directory = PathGrant { PathGrant::Access::READ,
-        PathGrant::Target::DIRECTORY, fixture.outside };
+    const auto target               = fixture.outside / "outside.txt";
+    const PermissionGrant directory = ExternalGrant { fixture.outside };
     const auto recursive
         = evaluate_filesystem_request("read", path_args("path", target),
             fixture.context(Session::Mode::PLAN, { directory }));
@@ -427,6 +429,22 @@ TEST_CASE("filesystem grants are exact unless a directory is granted")
         path_args("path", sibling / "file.txt"),
         fixture.context(Session::Mode::PLAN, { directory }));
     CHECK(sibling_result.decision.kind == PermissionDecision::Kind::ASK);
+}
+
+TEST_CASE("one external grant authorizes mode-available operations")
+{
+    PermissionFixture fixture;
+    const auto target = fixture.outside / "outside.txt";
+    const auto read   = evaluate_filesystem_request("read",
+        path_args("path", target), fixture.context(Session::Mode::PLAN));
+    REQUIRE(read.decision.kind == PermissionDecision::Kind::ASK);
+    REQUIRE(read.request.has_value());
+    const auto grant = filesystem_session_grant(*read.request);
+    REQUIRE(grant.has_value());
+
+    const auto edit = evaluate_filesystem_request("edit", edit_args(target),
+        fixture.context(Session::Mode::BUILD, { *grant }));
+    CHECK(edit.decision.kind == PermissionDecision::Kind::ACCEPT);
 }
 
 TEST_CASE("filesystem normalization rejects malformed and wrong-type targets")
@@ -561,6 +579,12 @@ TEST_CASE("central evaluator assigns explicit policies to built-in tools")
               "subagent", R"({"tasks":[{"mode":"build","prompt":"change"}]})")
               .decision.kind
         == PermissionDecision::Kind::REJECT);
+    CHECK(evaluate("edit", edit_args(fixture.workspace / "inside.txt"))
+              .decision.kind
+        == PermissionDecision::Kind::REJECT);
+    CHECK(evaluate("write", write_args(fixture.workspace / "new.txt"))
+              .decision.kind
+        == PermissionDecision::Kind::REJECT);
     const auto shell = evaluate("shell", R"({"command":"git status"})");
     CHECK(shell.decision.kind == PermissionDecision::Kind::ASK);
     CHECK(shell.session_grants.empty());
@@ -585,9 +609,9 @@ TEST_CASE("central evaluator normalizes filesystem calls and derives grants")
     CHECK(evaluation.request.allow_for_session);
     REQUIRE(evaluation.session_grants.size() == 1);
     const auto* grant
-        = std::get_if<PathGrant>(&evaluation.session_grants.front());
+        = std::get_if<ExternalGrant>(&evaluation.session_grants.front());
     REQUIRE(grant != nullptr);
-    CHECK(grant->path == fixture.outside / "new.txt");
+    CHECK(*grant == fixture.outside);
     CHECK(parse_json(evaluation.request.args)["file_path"].asString()
         == (fixture.outside / "new.txt").string());
 }
@@ -660,6 +684,50 @@ TEST_CASE("skill policy and runtime grants use the same central evaluator")
               std::vector<Skill> { large }, loaded)
               .decision.kind
         == PermissionDecision::Kind::REJECT);
+}
+
+TEST_CASE("skill evaluation binds approval to the canonical instruction path")
+{
+#ifdef _WIN32
+    return;
+#else
+    PermissionFixture fixture;
+    const auto first  = fixture.outside / "first-skill.md";
+    const auto second = fixture.outside / "second-skill.md";
+    const auto link   = fixture.outside / "active-skill.md";
+    {
+        std::ofstream file(first);
+        file << "first";
+    }
+    {
+        std::ofstream file(second);
+        file << "second";
+    }
+    std::filesystem::create_symlink(first, link);
+
+    const Skill skill { "changing", "Changing skill", link,
+        Skill::Scope::GLOBAL, std::nullopt };
+    const std::vector<Skill> skills { skill };
+    const Config config;
+    SkillStore loaded;
+    const ToolCallRequest request { "skill", R"({"name":"changing"})", "", "",
+        "", false };
+    const PermissionEvaluation approved = evaluate_tool_request(
+        request, fixture.context(Session::Mode::PLAN), config, skills, loaded);
+    REQUIRE(approved.decision.kind == PermissionDecision::Kind::ASK);
+    CHECK(
+        parse_json(approved.request.args)["path"].asString() == first.string());
+
+    std::filesystem::remove(link);
+    std::filesystem::create_symlink(second, link);
+    const PermissionEvaluation current = evaluate_tool_request(approved.request,
+        fixture.context(Session::Mode::PLAN), config, skills, loaded);
+
+    REQUIRE(current.decision.kind == PermissionDecision::Kind::ASK);
+    CHECK(current.request.args != approved.request.args);
+    CHECK(
+        parse_json(current.request.args)["path"].asString() == second.string());
+#endif
 }
 
 } // namespace ursa

@@ -49,7 +49,7 @@ PermissionContext permission_context(const Environment& environment,
     const PermissionStore& permissions, Session::Mode mode);
 FilesystemEvaluation evaluate_filesystem_request(std::string_view tool,
     const std::string& arguments, const PermissionContext& context);
-std::optional<PathGrant> filesystem_session_grant(
+std::optional<ExternalGrant> filesystem_session_grant(
     const FilesystemRequest& request);
 
 } // namespace ursa

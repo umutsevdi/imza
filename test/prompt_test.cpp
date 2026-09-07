@@ -150,7 +150,7 @@ TEST_CASE("mode reminders carry unique detectable tags")
     CHECK(plan != build);
 }
 
-TEST_CASE("enabled tools remain advertised in plan mode")
+TEST_CASE("default tool set contains build mutation tools")
 {
     const std::vector<Tool> tools = default_tools();
     const auto all                = tool_specs(tools);
