@@ -1,13 +1,11 @@
-#include "CLI/CLI.hpp"
 #include "app/flows.h"
-
 #include "common/util.h"
 #include "conversation/persistence.h"
 #include "platform/command_runner.h"
 #include "platform/config.h"
 
 #include <CLI/CLI.hpp>
-#include <cstdio>
+
 #include <optional>
 #include <print>
 #include <string>
@@ -126,7 +124,10 @@ namespace {
 
 CliResult run_cli(int argc, char** argv)
 {
-    CLI::App app { "Open source multi-modal coding agent.", "ursa" };
+    CLI::App app { "ursa " URSA_VERSION "\r\n"
+                   "Umut Sevdi <mail@umutsevdi.com>\r\n"
+                   "Open source multi-modal coding agent.",
+        "ursa" };
     app.set_version_flag("-v,--version", "ursa " URSA_VERSION);
     std::vector<std::string> session_arguments;
     std::string working_directory;
