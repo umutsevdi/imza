@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
@@ -16,8 +17,7 @@ using ExternalGrant = std::filesystem::path;
 
 struct ShellCommandGrant {
     std::string program;
-    std::vector<std::string> argv;
-    std::filesystem::path working_root;
+    std::optional<std::string> subcommand;
 
     bool operator==(const ShellCommandGrant&) const = default;
 };

@@ -139,14 +139,14 @@ TEST_CASE("permission store installs complete valid sets atomically")
         = std::filesystem::temp_directory_path().lexically_normal();
     const std::vector<PermissionGrant> valid {
         ExternalGrant { root },
-        ShellCommandGrant { "git", { "status" }, root },
+        ShellCommandGrant { "git", "status" },
     };
     CHECK(store.install(valid));
     CHECK(empty_snapshot->empty());
     const auto installed_snapshot = store.snapshot();
     CHECK(store.size() == 2);
     CHECK(store.matches_external_path(root / "child" / "file"));
-    CHECK(store.matches(ShellCommandGrant { "git", { "status" }, root }));
+    CHECK(store.matches(ShellCommandGrant { "git", "status" }));
     CHECK(store.install({ ExternalGrant { root } }));
     CHECK(store.size() == 2);
     CHECK(installed_snapshot->size() == 2);
@@ -181,20 +181,52 @@ TEST_CASE("permission store publishes only effective grant changes")
     CHECK(changes == 2);
 }
 
-TEST_CASE("runtime shell grants match exact commands")
+TEST_CASE("runtime shell grants match subcommands and whole programs")
 {
     PermissionStore store;
-    const auto root = std::filesystem::temp_directory_path().lexically_normal();
     const std::vector<PermissionGrant> grants { PermissionGrant {
-        ShellCommandGrant { "git", { "status" }, root } } };
+        ShellCommandGrant { "git", "status" } } };
     REQUIRE(store.install(grants));
-    CHECK(store.matches(ShellCommandGrant { "git", { "status" }, root }));
-    CHECK_FALSE(store.matches(
-        ShellCommandGrant { "git", { "status", "--short" }, root }));
-    CHECK_FALSE(store.matches(ShellCommandGrant { "git", { "diff" }, root }));
-    CHECK(store.install(
-        { ShellCommandGrant { "git", { "status", "--short" }, root } }));
-    CHECK(store.size() == 2);
+    CHECK(store.matches(ShellCommandGrant { "git", "status" }));
+    CHECK_FALSE(store.matches(ShellCommandGrant { "git", "diff" }));
+    REQUIRE(store.install({ ShellCommandGrant { "git", std::nullopt } }));
+    CHECK(store.matches(ShellCommandGrant { "git", "diff" }));
+    CHECK(store.size() == 1);
+}
+
+TEST_CASE("shell analysis extracts compound command and subcommand pairs")
+{
+    const ShellAnalysis analysis
+        = analyze_shell("git status --short && cmake --build build | tee log");
+    REQUIRE(analysis.reuse == ShellAnalysis::Reuse::SESSION);
+    REQUIRE(analysis.invocations.size() == 3);
+    CHECK(analysis.invocations[0] == (ShellInvocation { "git", "status" }));
+    CHECK(analysis.invocations[1] == (ShellInvocation { "cmake", "--build" }));
+    CHECK(analysis.invocations[2] == (ShellInvocation { "tee", "log" }));
+
+    CHECK(
+        analyze_shell("ls > listing.txt").reuse == ShellAnalysis::Reuse::ONCE);
+    CHECK(analyze_shell("sh -c 'echo nested > listing.txt'").reuse
+        == ShellAnalysis::Reuse::ONCE);
+    CHECK(analyze_shell("echo $VALUE").reuse == ShellAnalysis::Reuse::ONCE);
+    CHECK(analyze_shell("printf '%s\\n' literal").reuse
+        == ShellAnalysis::Reuse::SESSION);
+}
+
+TEST_CASE("shell built-in catalog is platform specific")
+{
+#ifdef _WIN32
+    CHECK(shell_builtin_allowed("dir"));
+    CHECK(shell_builtin_allowed("findstr"));
+    CHECK(shell_builtin_allowed("tasklist"));
+    CHECK_FALSE(shell_builtin_allowed("ls"));
+#else
+    CHECK(shell_builtin_allowed("cat"));
+    CHECK(shell_builtin_allowed("grep"));
+    CHECK(shell_builtin_allowed("stat"));
+    CHECK_FALSE(shell_builtin_allowed("dir"));
+    CHECK_FALSE(shell_builtin_allowed("find"));
+#endif
 }
 
 TEST_CASE("application state shares grants with children")
@@ -587,12 +619,65 @@ TEST_CASE("central evaluator assigns explicit policies to built-in tools")
         == PermissionDecision::Kind::REJECT);
     const auto shell = evaluate("shell", R"({"command":"git status"})");
     CHECK(shell.decision.kind == PermissionDecision::Kind::ASK);
-    CHECK(shell.session_grants.empty());
-    CHECK_FALSE(shell.request.allow_for_session);
+    REQUIRE(shell.session_grants.size() == 1);
+    CHECK(shell.request.allow_for_session);
+    CHECK(std::get<ShellCommandGrant>(shell.session_grants.front())
+        == (ShellCommandGrant { "git", "status" }));
     CHECK(evaluate("shell", R"({"command":""})").decision.kind
         == PermissionDecision::Kind::REJECT);
     CHECK(evaluate("custom", "{}").decision.kind
         == PermissionDecision::Kind::REJECT);
+}
+
+TEST_CASE("shell policy reuses, combines, and broadens session grants")
+{
+    PermissionFixture fixture;
+    const Config config;
+    const std::vector<Skill> skills;
+    SkillStore loaded;
+    const auto evaluate
+        = [&](std::string command, PermissionStore::Grants grants = { }) {
+              Json::Value arguments(Json::objectValue);
+              arguments["command"] = std::move(command);
+              return evaluate_tool_request(
+                  { "shell", write_json(arguments), "", "", "", false },
+                  fixture.context(Session::Mode::BUILD, std::move(grants)),
+                  config, skills, loaded);
+          };
+
+#ifdef _WIN32
+    CHECK(evaluate("dir /b").decision.kind == PermissionDecision::Kind::ACCEPT);
+    CHECK_FALSE(shell_builtin_allowed("ls"));
+#else
+    CHECK(evaluate("ls -la").decision.kind == PermissionDecision::Kind::ACCEPT);
+    CHECK_FALSE(shell_builtin_allowed("dir"));
+#endif
+
+    const PermissionEvaluation first = evaluate("git status --short");
+    REQUIRE(first.decision.kind == PermissionDecision::Kind::ASK);
+    REQUIRE(first.session_grants.size() == 1);
+    CHECK(std::get<ShellCommandGrant>(first.session_grants.front())
+        == (ShellCommandGrant { "git", "status" }));
+    CHECK(evaluate("git status --porcelain", first.session_grants).decision.kind
+        == PermissionDecision::Kind::ACCEPT);
+
+    const PermissionEvaluation broader
+        = evaluate("git add file.cpp", first.session_grants);
+    REQUIRE(broader.decision.kind == PermissionDecision::Kind::ASK);
+    REQUIRE(broader.session_grants.size() == 1);
+    CHECK(std::get<ShellCommandGrant>(broader.session_grants.front())
+        == (ShellCommandGrant { "git", std::nullopt }));
+    CHECK(broader.decision.reason.find("git *") != std::string::npos);
+
+    const PermissionEvaluation compound
+        = evaluate("cargo test && ninja -C build");
+    REQUIRE(compound.decision.kind == PermissionDecision::Kind::ASK);
+    CHECK(compound.session_grants.size() == 2);
+
+    const PermissionEvaluation redirected = evaluate("ls > files.txt");
+    CHECK(redirected.decision.kind == PermissionDecision::Kind::ASK);
+    CHECK(redirected.session_grants.empty());
+    CHECK_FALSE(redirected.request.allow_for_session);
 }
 
 TEST_CASE("central evaluator normalizes filesystem calls and derives grants")

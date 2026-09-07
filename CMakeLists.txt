@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 4.0)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 project(
     ursa
-    VERSION 0.1.1
+    VERSION 0.1.2
     HOMEPAGE_URL "https://github.com/umutsevdi/ursa"
     LANGUAGES C CXX
 )
@@ -238,11 +238,13 @@ add_library(ursa_execution
     src/app/application_state.cpp
     src/app/cli.cpp
     src/app/flows.cpp
+    src/app/one_shot.cpp
     src/app/slash_commands.cpp
     src/permissions/evaluator.cpp
     src/permissions/filesystem.cpp
     src/tools/tool.cpp
     src/tools/tool_args.cpp
+    src/tools/shell.cpp
     src/tools/web.cpp
     src/turn/delegation.cpp
     src/turn/prompt.cpp

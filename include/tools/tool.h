@@ -28,6 +28,20 @@ struct ShellTimeout {
 
 using ShellStatus = std::variant<ShellExit, ShellTimeout>;
 
+struct ShellInvocation {
+    std::string program;
+    std::optional<std::string> subcommand;
+
+    bool operator==(const ShellInvocation&) const = default;
+};
+
+struct ShellAnalysis {
+    enum class Reuse { SESSION, ONCE };
+
+    std::vector<ShellInvocation> invocations;
+    Reuse reuse = Reuse::ONCE;
+};
+
 struct ToolOutput {
     enum class Kind { OUTPUT, ERROR };
     Kind kind;
@@ -59,6 +73,8 @@ std::optional<std::string> validate_web_tool_arguments(
 std::optional<std::string> validate_subagent_tool_arguments(
     const Json::Value& arguments, bool allow_build);
 std::string todo_summary(const TodoList& todo);
+ShellAnalysis analyze_shell(std::string_view command);
+bool shell_builtin_allowed(std::string_view program);
 
 Tool make_read_tool();
 Tool make_skill_tool();

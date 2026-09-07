@@ -12,10 +12,14 @@ CHANGELOG
 [https://github.com/umutsevdi/ursa/releases/tag/v0.1.2]
 
 Changes:
-    - Rewritten permission system.
     - Added CLI commands.
+    - Rewritten permission system.
+       - Permissions can be set using CLI options or using user responses.
+       - Added shell command evaluation based permissions.
+       - Added directory access management.
     - Performance improvements on large conversations.
     - Performance improvements on large diff reviews.
+    - Added headless mode.
 
 -------------------------------------------------------------------------------
 0.1.1 - 2026-09-05

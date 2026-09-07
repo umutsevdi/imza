@@ -7,7 +7,7 @@ capabilities, and cheap process isolation.
 
 Bring your own model connection, open Ursa in a project, and describe the 
 outcome you want. Ursa reads the project instructions, gathers context, asks 
-for questions when needed, and works through the task with visible reasoning, 
+questions when needed, and works through the task with visible reasoning,
 tool calls, diffs, and approval prompts.
 
 > Ursa is not lightweight because it does less.
@@ -79,15 +79,16 @@ or a locally hosted OpenAI-compatible model.
 - [X] Web search, fetch
 - [X] Subagent configuration
 - [X] Syntax Highlighting
+- [X] Headless mode
+- [X] Shell-aware command permissions and global command rules
+
 ### To Do
 - [ ] MCP
 - [ ] LSP integration
 - [ ] Image or other multimodal prompt attachments
-- [ ] Shell-aware command permissions and global command rules
 - [ ] Mid session directory change
 - [ ] Usage analytics UI (Monthly)
 - [ ] Capabilities system (Exposing preconfigured Python based extensions as tools)
-- [ ] Headless mode
 - [ ] Notifications
 
 ## Build
@@ -123,6 +124,26 @@ a model. Type `/` in the chat input to browse the available commands.
 | `/skills` | Manage discovered skills |
 | `/prompt` | Inspect the generated system prompt |
 | `/exit` | Save and quit |
+
+## Headless mode
+
+Use `--ask` for a one-shot Plan-mode query or `--exec` for a one-shot Build-mode
+task. Headless runs do not show permission prompts: operations that need
+approval are blocked unless they were granted at startup.
+
+Grant only the additional directory and command/subcommand pairs the task
+needs:
+
+```sh
+./build/debug/ursa --exec "build the project and summarize the changes" \
+  --allow-dir ../shared-assets \
+  --allow-cmd "git status" "cmake --build"
+```
+
+`--allow-dir` grants access beneath that directory. A quoted `--allow-cmd`
+value such as `"git status"` grants only that command/subcommand pair; a value
+containing only the program name grants all of its subcommands for the current
+session.
 
 ## Local data
 

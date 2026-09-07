@@ -398,10 +398,8 @@ PermissionView make_permission_view(
             continue;
         }
         const auto& command = std::get<ShellCommandGrant>(grant);
-        std::string label   = command.program;
-        for (const std::string& argument : command.argv) {
-            label += " " + argument;
-        }
+        std::string label
+            = command.program + " " + command.subcommand.value_or("*");
         view.commands.push_back(std::move(label));
     }
     const auto sort_unique = [](std::vector<std::string>& values) {
