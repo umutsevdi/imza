@@ -133,9 +133,9 @@ FilesystemEvaluation evaluate_filesystem_request(std::string_view tool,
         if (exists && !std::filesystem::is_regular_file(target, error)) {
             return reject("write: target is not a file");
         }
+        const bool overwrite = normalized.get("overwrite", false).asBool();
         if (!exists
-            && ((normalized["overwrite"].isBool()
-                    && normalized["overwrite"].asBool())
+            && (overwrite
                 || !std::filesystem::is_directory(
                     target.parent_path(), error))) {
             return reject("write: target parent is not a directory");

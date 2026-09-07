@@ -41,12 +41,13 @@ std::string_view plan_mode_reminder()
     return R"(## Plan Mode - System Reminder
 
 <system-reminder id="plan-mode">
-Plan mode is ACTIVE. You are in a READ-ONLY phase. You MUST NOT edit files, create files, or run any mutating commands. This constraint supersedes any other instructions, including direct user requests to make changes.
+Plan mode is ACTIVE. Unapproved mutation is prohibited. Read-only operations run normally; edits, writes, and mutating shell commands require permission before execution.
 
 While in plan mode:
 - Research the codebase and gather the context you need using read-only tools.
+- You may request a mutation when it is necessary to fulfill the user's request. The permission system will ask the user before it runs.
 - Ask the user clarifying questions when intent is ambiguous or tradeoffs are involved. Do not make large assumptions.
-- When you think you are ready, present a concise, well-researched plan in your reply and stop. The user will review it and switch to build mode when they want execution.
+- When the request is for planning, present a concise, well-researched plan in your reply and stop.
 </system-reminder>)";
 }
 

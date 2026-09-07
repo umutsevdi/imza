@@ -3,12 +3,14 @@
 #include "common/util.h"
 #include "conversation/format.h"
 #include "network/json_io.h"
+#include "permissions/evaluator.h"
 #include "providers/pricing.h"
 #include "providers/store.h"
 #include "tools/skills.h"
 
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -103,8 +105,7 @@ TurnRunner::TurnRunner(ApplicationState& state, PostFn post,
         };
         break;
     }
-    specs_plan_ = plan_tool_specs(tools_);
-    specs_all_  = tool_specs(tools_);
+    specs_all_ = tool_specs(tools_);
 
     if (!stream_fn_) {
         stream_fn_ = [this](const ChatRequest& req, const StreamCallback& cb) {
@@ -124,6 +125,7 @@ TurnRunner::~TurnRunner()
 
 void TurnRunner::spawn(std::vector<Message> history, TurnSettings settings)
 {
+    blocked_permission_.store(false);
     state_->session->append_assistant(
         settings.model, settings.reasoning_effort);
     worker_.emplace([this, history = std::move(history),
@@ -134,7 +136,7 @@ void TurnRunner::spawn(std::vector<Message> history, TurnSettings settings)
 
 void TurnRunner::clear()
 {
-    allowed_tools_.clear();
+    blocked_permission_.store(false);
     stream_events_.clear();
 }
 
@@ -246,10 +248,9 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
         }
         prompt_tokens = 0;
         ChatRequest req;
-        req.model    = settings.model;
-        req.messages = std::move(history);
-        req.tools
-            = settings.mode == Session::Mode::PLAN ? specs_plan_ : specs_all_;
+        req.model       = settings.model;
+        req.messages    = std::move(history);
+        req.tools       = specs_all_;
         req.interrupted = [session = state_->session] {
             return session->interrupt_requested();
         };
@@ -401,7 +402,8 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
 
         std::string reply_buffer;
         const size_t history_before = history.size();
-        _drain_pending_asks(history, reply_buffer, text_buffer, active_dialect);
+        _drain_pending_asks(
+            history, reply_buffer, text_buffer, active_dialect, settings.mode);
         if (!alive_.load()) {
             return;
         }
@@ -423,129 +425,104 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
 
 void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
     std::string& reply_buffer, const std::string& assistant_text,
-    ApiStandard dialect)
+    ApiStandard dialect, Session::Mode mode)
 {
-    struct Ask {
-        ModalPayload payload;
-        std::future<ModalResult> future;
-        std::optional<ToolCallRequest> tool_req;
-    };
-    std::vector<Ask> asks;
     std::vector<Message> tool_msgs;
     bool had_tool_calls = false;
 
     for (const auto& ev : stream_events_) {
-        if (ev.kind == StreamEvent::Kind::TOOL_CALL) {
-            had_tool_calls = true;
-            if (ev.tool_call.name == "ask") {
-                auto form = parse_ask_args(ev.tool_call.args);
-                if (!form) {
-                    const ToolCallRequest req = ev.tool_call;
-                    _post([this, req] {
-                        state_->session->fill_tool_result(req,
-                            ToolCall::Result { ToolCall::Result::Kind::ERROR,
-                                "ask: expected a non-empty 'questions' "
-                                "array" });
-                    });
-                    tool_msgs.push_back({ Message::Type::TOOL,
-                        "ask: expected a non-empty 'questions' array", { },
-                        req.id });
-                    continue;
-                }
-                Ask ask;
-                ask.payload  = *form;
-                ask.future   = modal_request_(*form);
-                ask.tool_req = ev.tool_call;
-                asks.push_back(std::move(ask));
-                continue;
-            }
-            if (ev.tool_call.name == "todo") {
-                const std::optional<TodoList> list
-                    = parse_todo_args(parse_json(ev.tool_call.args));
-                const ToolCallRequest req = ev.tool_call;
-                if (!list.has_value()) {
-                    const std::string msg
-                        = "todo: expected a 'todos' array of {content, status} "
-                          "objects";
-                    _post([this, req, msg] {
-                        state_->session->fill_tool_result(req,
-                            ToolCall::Result {
-                                ToolCall::Result::Kind::ERROR, msg });
-                    });
-                    tool_msgs.push_back(
-                        { Message::Type::TOOL, msg, { }, req.id });
-                    continue;
-                }
-                const std::string text = todo_summary(*list);
-                _post([this, req, todo = *list, text] {
-                    state_->session->set_todo(todo);
-                    state_->session->fill_tool_result(req,
-                        ToolCall::Result {
-                            ToolCall::Result::Kind::OUTPUT, text });
-                });
-                tool_msgs.push_back({ Message::Type::TOOL, text, { }, req.id });
-                continue;
-            }
-            if (ev.tool_call.name == "subagent") {
-                subagent_tool_(ev.tool_call, tool_msgs);
-                continue;
-            }
-            const Tool* tool    = find_tool(tools_, ev.tool_call.name);
-            bool needs_approval = tool != nullptr
-                && tool->safety == ToolSafety::MUTATING
-                && allowed_tools_.count(ev.tool_call.name) == 0;
-            if (ev.tool_call.name == "skill") {
-                const auto skill = resolve_skill(state_->environment->skills(),
-                    parse_json(ev.tool_call.args));
-                needs_approval   = skill.has_value()
-                    && skill_policy(state_->providers->config(), *skill)
-                        == SkillPolicy::ASK
-                    && !skills_->is_loaded(skill->path);
-            }
-            ToolCallRequest approval_request = ev.tool_call;
-            const bool path_scoped           = ev.tool_call.name == "read"
-                || ev.tool_call.name == "list" || ev.tool_call.name == "edit"
-                || ev.tool_call.name == "write";
-            if (path_scoped && allowed_tools_.count(ev.tool_call.name) == 0) {
-                const ProjectTarget target = classify_project_target(
-                    ev.tool_call.name, ev.tool_call.args);
-                if (target == ProjectTarget::OUTSIDE) {
-                    needs_approval = true;
-                    approval_request.approval_reason
-                        = ToolCallRequest::ApprovalReason::OUTSIDE_WORKSPACE;
-                } else {
-                    needs_approval = false;
-                }
-            }
-            if (!needs_approval) {
-                _run_tool(ev.tool_call, tool_msgs);
-                continue;
-            }
-            asks.push_back(Ask { .payload = approval_request,
-                .future                   = modal_request_(approval_request),
-                .tool_req                 = std::nullopt });
-        } else if (ev.kind == StreamEvent::Kind::QUESTION) {
-            asks.push_back(Ask { .payload = ev.question,
-                .future                   = modal_request_(ev.question),
-                .tool_req                 = std::nullopt });
-        }
-    }
-
-    for (auto& ask : asks) {
         if (!alive_.load()) {
             return;
         }
-        const ModalResult res = ask.future.get();
-        if (const auto* req = std::get_if<ToolCallRequest>(&ask.payload)) {
-            _apply_tool_result(*req, res, tool_msgs);
-        } else if (ask.tool_req.has_value()) {
-            _apply_ask_result(*ask.tool_req, res, tool_msgs);
-        } else {
+        if (ev.kind == StreamEvent::Kind::QUESTION) {
+            if ((state_->runtime_flags & RuntimeFlag::ATTENDED)
+                == RuntimeFlag::NONE) {
+                blocked_permission_.store(true);
+                continue;
+            }
+            const ModalResult res = modal_request_(ev.question).get();
             _apply_question_result(res, reply_buffer);
+            if (state_->session->interrupt_requested()) {
+                return;
+            }
+            continue;
+        }
+        if (ev.kind != StreamEvent::Kind::TOOL_CALL) {
+            continue;
+        }
+
+        had_tool_calls                  = true;
+        const ToolCallRequest& original = ev.tool_call;
+        if (find_tool(tools_, original.name) == nullptr) {
+            const std::string error = "unknown tool: " + original.name;
+            _post([this, req = original, error] {
+                state_->session->fill_tool_result(req,
+                    ToolCall::Result { ToolCall::Result::Kind::ERROR, error });
+            });
+            tool_msgs.push_back(
+                { Message::Type::TOOL, error, { }, original.id });
+            continue;
+        }
+
+        const PermissionEvaluation evaluation = evaluate_tool_request(original,
+            permission_context(
+                *state_->environment, *state_->permissions, mode),
+            state_->providers->config(), state_->environment->skills(),
+            *skills_);
+        if (evaluation.decision.kind == PermissionDecision::Kind::REJECT) {
+            _reject_tool(original, evaluation.decision.reason, tool_msgs);
+            continue;
+        }
+        if (original.name == "ask") {
+            const auto form       = parse_ask_args(evaluation.request.args);
+            const ModalResult res = modal_request_(*form).get();
+            _apply_ask_result(original, res, tool_msgs);
+            if (state_->session->interrupt_requested()) {
+                return;
+            }
+            continue;
+        }
+        if (original.name == "todo") {
+            const TodoList todo
+                = *parse_todo_args(parse_json(evaluation.request.args));
+            const std::string text = todo_summary(todo);
+            _post([this, req = original, todo, text] {
+                state_->session->set_todo(todo);
+                state_->session->fill_tool_result(req,
+                    ToolCall::Result { ToolCall::Result::Kind::OUTPUT, text });
+            });
+            tool_msgs.push_back(
+                { Message::Type::TOOL, text, { }, original.id });
+            continue;
+        }
+        if (original.name == "subagent") {
+            subagent_tool_(evaluation.request, tool_msgs);
+            continue;
+        }
+        if (evaluation.decision.kind == PermissionDecision::Kind::ACCEPT
+            || (state_->runtime_flags & RuntimeFlag::SKIP_PERMISSIONS)
+                != RuntimeFlag::NONE) {
+            _run_tool(evaluation, mode, tool_msgs);
+            continue;
+        }
+        if ((state_->runtime_flags & RuntimeFlag::ATTENDED)
+            == RuntimeFlag::NONE) {
+            blocked_permission_.store(true);
+            _reject_tool(original,
+                "permission is unavailable in unattended mode: "
+                    + evaluation.decision.reason,
+                tool_msgs);
+            continue;
+        }
+
+        const ModalResult res = modal_request_(evaluation.request).get();
+        _apply_tool_result(evaluation, res, mode, tool_msgs);
+        if (state_->session->interrupt_requested()) {
+            return;
         }
     }
 
-    if (!had_tool_calls && asks.empty()) {
+    if (!had_tool_calls && reply_buffer.empty()) {
         return;
     }
 
@@ -576,10 +553,11 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
     }
 }
 
-void TurnRunner::_apply_tool_result(const ToolCallRequest& req,
-    const ModalResult& res, std::vector<Message>& tool_msgs)
+void TurnRunner::_apply_tool_result(const PermissionEvaluation& evaluation,
+    const ModalResult& res, Session::Mode mode, std::vector<Message>& tool_msgs)
 {
-    const auto* verdict = std::get_if<ToolVerdict>(&res);
+    const ToolCallRequest& req = evaluation.request;
+    const auto* verdict        = std::get_if<ToolVerdict>(&res);
     if (verdict == nullptr) {
         _post([this, req] {
             state_->session->fill_tool_result(
@@ -599,13 +577,14 @@ void TurnRunner::_apply_tool_result(const ToolCallRequest& req,
             { Message::Type::TOOL, denial_text(reason), { }, req.id });
         return;
     }
-    if (verdict->decision == ToolDecision::ACCEPT_ALWAYS) {
-        const Tool* tool = find_tool(tools_, req.name);
-        if (tool == nullptr || tool->persistent) {
-            allowed_tools_.insert(req.name);
+    if (verdict->decision == ToolDecision::ACCEPT_FOR_SESSION) {
+        if (evaluation.session_grants.empty()
+            || !state_->permissions->install(evaluation.session_grants)) {
+            _reject_tool(req, "session approval is unavailable", tool_msgs);
+            return;
         }
     }
-    _run_tool(req, tool_msgs);
+    _run_tool(evaluation, mode, tool_msgs);
 }
 
 void TurnRunner::_apply_question_result(
@@ -644,14 +623,43 @@ void TurnRunner::_apply_ask_result(const ToolCallRequest& req,
     tool_msgs.push_back({ Message::Type::TOOL, text, { }, req.id });
 }
 
-void TurnRunner::_run_tool(
-    const ToolCallRequest& req, std::vector<Message>& tool_msgs)
+void TurnRunner::_reject_tool(const ToolCallRequest& req, std::string reason,
+    std::vector<Message>& tool_msgs)
 {
-    ToolOutput out = dispatch_tool(tools_, req);
+    _post([this, req, reason] {
+        state_->session->fill_tool_result(
+            req, ToolCall::Result { ToolCall::Result::Kind::REJECT, reason });
+    });
+    tool_msgs.push_back(
+        { Message::Type::TOOL, denial_text(reason), { }, req.id });
+}
+
+void TurnRunner::_run_tool(const PermissionEvaluation& evaluation,
+    Session::Mode mode, std::vector<Message>& tool_msgs)
+{
+    const PermissionEvaluation current = evaluate_tool_request(
+        evaluation.request,
+        permission_context(*state_->environment, *state_->permissions, mode),
+        state_->providers->config(), state_->environment->skills(), *skills_);
+    if (current.decision.kind == PermissionDecision::Kind::REJECT
+        || current.request.args != evaluation.request.args) {
+        const std::string reason
+            = current.decision.kind == PermissionDecision::Kind::REJECT
+            ? current.decision.reason
+            : "permission target changed before execution";
+        _reject_tool(evaluation.request, reason, tool_msgs);
+        return;
+    }
+
+    const ToolCallRequest& req = current.request;
+    ToolOutput out             = dispatch_tool(tools_, req);
     if (req.name == "skill" && out.kind == ToolOutput::Kind::OUTPUT) {
         if (const auto skill = resolve_skill(
                 state_->environment->skills(), parse_json(req.args))) {
-            skills_->record_tool_load(skill->path, out.text);
+            std::error_code error;
+            const std::filesystem::path path
+                = std::filesystem::weakly_canonical(skill->path, error);
+            skills_->record_tool_load(error ? skill->path : path, out.text);
         }
     }
     const auto kind          = out.kind == ToolOutput::Kind::OUTPUT

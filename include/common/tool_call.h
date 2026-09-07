@@ -19,7 +19,7 @@ struct ToolCallEntry {
     std::string args;
 };
 
-enum class ToolDecision { ACCEPT, ACCEPT_ALWAYS, REJECT };
+enum class ToolDecision { ACCEPT_ONCE, ACCEPT_FOR_SESSION, REJECT };
 
 struct ToolVerdict {
     ToolDecision decision = ToolDecision::REJECT;
@@ -27,13 +27,12 @@ struct ToolVerdict {
 };
 
 struct ToolCallRequest {
-    enum class ApprovalReason { TOOL_PERMISSION, OUTSIDE_WORKSPACE };
-
     std::string name;
     std::string args;
     std::string description;
     std::string id;
-    ApprovalReason approval_reason = ApprovalReason::TOOL_PERMISSION;
+    std::string permission_reason;
+    bool allow_for_session = false;
 };
 
 struct TodoItem {

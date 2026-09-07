@@ -5,7 +5,6 @@
 #include <functional>
 #include <memory>
 #include <optional>
-#include <set>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -21,6 +20,7 @@ namespace ursa {
 
 class SkillStore;
 class ProviderStore;
+struct PermissionEvaluation;
 
 using SubagentToolFn
     = std::function<void(const ToolCallRequest&, std::vector<Message>&)>;
@@ -52,6 +52,7 @@ public:
     void set_subagent_tool(SubagentToolFn subagent_tool);
     bool has_stream_override() const { return has_stream_override_; }
     const StreamFn& stream_fn() const { return stream_fn_; }
+    bool blocked_permission() const { return blocked_permission_.load(); }
 
 private:
     void _drive(std::vector<Message> history, TurnSettings settings);
@@ -59,14 +60,18 @@ private:
         const TurnSettings& settings, std::uint64_t prompt_tokens);
     void _drain_pending_asks(std::vector<Message>& history,
         std::string& reply_buffer, const std::string& assistant_text,
-        ApiStandard dialect);
-    void _apply_tool_result(const ToolCallRequest& req, const ModalResult& res,
+        ApiStandard dialect, Session::Mode mode);
+    void _apply_tool_result(const PermissionEvaluation& evaluation,
+        const ModalResult& res, Session::Mode mode,
         std::vector<Message>& tool_msgs);
     void _apply_ask_result(const ToolCallRequest& req, const ModalResult& res,
         std::vector<Message>& tool_msgs);
     void _apply_question_result(
         const ModalResult& res, std::string& reply_buffer);
-    void _run_tool(const ToolCallRequest& req, std::vector<Message>& tool_msgs);
+    void _reject_tool(const ToolCallRequest& req, std::string reason,
+        std::vector<Message>& tool_msgs);
+    void _run_tool(const PermissionEvaluation& evaluation, Session::Mode mode,
+        std::vector<Message>& tool_msgs);
     void _post(std::function<void()> f);
 
     ApplicationState* state_;
@@ -78,11 +83,10 @@ private:
     StreamFn stream_fn_;
     bool has_stream_override_ { false };
     std::vector<Tool> tools_;
-    std::vector<ToolSpec> specs_plan_;
     std::vector<ToolSpec> specs_all_;
-    std::set<std::string> allowed_tools_;
     std::vector<StreamEvent> stream_events_;
     std::atomic<bool> alive_ { true };
+    std::atomic<bool> blocked_permission_ { false };
     std::optional<std::jthread> worker_;
     int retry_after_secs_ = 0;
 };

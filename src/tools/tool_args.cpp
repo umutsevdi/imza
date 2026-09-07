@@ -1,3 +1,4 @@
+#include "common/util.h"
 #include "network/json_io.h"
 #include "tools/tool.h"
 
@@ -171,6 +172,65 @@ std::optional<std::string> validate_filesystem_tool_arguments(
     return std::nullopt;
 }
 
+std::optional<std::string> validate_shell_tool_arguments(
+    const Json::Value& arguments)
+{
+    if (!arguments.isObject() || !arguments["command"].isString()
+        || arguments["command"].asString().empty()) {
+        return "shell: 'command' must be a non-empty string";
+    }
+    if (arguments.isMember("timeout")
+        && (!arguments["timeout"].isInt64()
+            || arguments["timeout"].asInt64() < 1)) {
+        return "shell: timeout must be 1 or greater";
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> validate_web_tool_arguments(
+    std::string_view tool, const Json::Value& arguments)
+{
+    const char* key = tool == "webfetch" ? "url"
+        : tool == "websearch"            ? "query"
+                                         : nullptr;
+    if (key == nullptr) {
+        return std::string(tool) + ": unsupported web tool";
+    }
+    if (!arguments.isObject() || !arguments[key].isString()
+        || arguments[key].asString().empty()) {
+        return std::string(tool) + ": '" + key + "' must be a non-empty string";
+    }
+    if (tool == "websearch" && arguments.isMember("num_results")
+        && !arguments["num_results"].isInt()) {
+        return "websearch: 'num_results' must be an integer";
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> validate_subagent_tool_arguments(
+    const Json::Value& arguments, bool allow_build)
+{
+    if (!arguments.isObject() || !arguments["tasks"].isArray()
+        || arguments["tasks"].empty() || arguments["tasks"].size() > 5) {
+        return "subagent: expected one to five tasks";
+    }
+    for (const Json::Value& value : arguments["tasks"]) {
+        if (!value.isObject() || !value["mode"].isString()
+            || !value["prompt"].isString()
+            || trim(value["prompt"].asString()).empty()) {
+            return "subagent: every task requires a mode and prompt";
+        }
+        const std::string mode = to_lower(value["mode"].asString());
+        if (mode != "research" && mode != "build") {
+            return "subagent: mode must be research or build";
+        }
+        if (mode == "build" && !allow_build) {
+            return "subagent: build agents require main-agent build mode";
+        }
+    }
+    return std::nullopt;
+}
+
 std::string todo_summary(const TodoList& todo)
 {
     static constexpr std::string_view marks[] = { "[ ]", "[→]", "[x]", "[-]" };
@@ -184,71 +244,6 @@ std::string todo_summary(const TodoList& todo)
         out += it.content;
     }
     return out;
-}
-
-ProjectTarget classify_project_target(
-    const std::string& name, const std::string& args)
-{
-    const Json::Value parsed = parse_json(args);
-    if (!parsed.isObject()) {
-        return ProjectTarget::INVALID;
-    }
-    const char* key = name == "edit" || name == "write" ? "file_path" : "path";
-    std::string path;
-    if (parsed[key].isString()) {
-        path = parsed[key].asString();
-    } else if (name == "list" && parsed[key].isNull()) {
-        path = ".";
-    } else {
-        return ProjectTarget::INVALID;
-    }
-    if (path.empty()) {
-        path = name == "list" ? "." : "";
-    }
-    if (path.empty()) {
-        return ProjectTarget::INVALID;
-    }
-    std::error_code ec;
-    const std::filesystem::path target = std::filesystem::weakly_canonical(
-        std::filesystem::absolute(path), ec);
-    if (ec) {
-        return ProjectTarget::INVALID;
-    }
-    const bool exists = std::filesystem::exists(target, ec);
-    if (ec) {
-        return ProjectTarget::INVALID;
-    }
-    if ((name == "read" || name == "edit")
-        && (!exists || !std::filesystem::is_regular_file(target, ec))) {
-        return ProjectTarget::INVALID;
-    }
-    if (name == "list"
-        && (!exists || !std::filesystem::is_directory(target, ec))) {
-        return ProjectTarget::INVALID;
-    }
-    if (name == "write" && !exists) {
-        if ((parsed["overwrite"].isBool() && parsed["overwrite"].asBool())
-            || !std::filesystem::is_directory(target.parent_path(), ec)) {
-            return ProjectTarget::INVALID;
-        }
-    }
-    if (ec) {
-        return ProjectTarget::INVALID;
-    }
-    const std::filesystem::path root = std::filesystem::weakly_canonical(
-        std::filesystem::current_path(ec), ec);
-    if (ec) {
-        return ProjectTarget::INVALID;
-    }
-    if (target == root) {
-        return ProjectTarget::INSIDE;
-    }
-    const auto rel = target.lexically_relative(root);
-    if (rel.empty()) {
-        return ProjectTarget::OUTSIDE;
-    }
-    return *rel.begin() == ".." ? ProjectTarget::OUTSIDE
-                                : ProjectTarget::INSIDE;
 }
 
 } // namespace ursa

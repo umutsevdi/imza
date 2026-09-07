@@ -53,9 +53,9 @@ namespace {
 
     ToolOutput webfetch_run(const Json::Value& args)
     {
-        if (!args.isObject() || !args["url"].isString()
-            || args["url"].asString().empty()) {
-            return error("webfetch: 'url' must be a non-empty string");
+        if (const auto validation
+            = validate_web_tool_arguments("webfetch", args)) {
+            return error(*validation);
         }
         const std::string url = args["url"].asString();
 
@@ -82,9 +82,9 @@ namespace {
 
     ToolOutput websearch_run(const Json::Value& args)
     {
-        if (!args.isObject() || !args["query"].isString()
-            || args["query"].asString().empty()) {
-            return error("websearch: 'query' must be a non-empty string");
+        if (const auto validation
+            = validate_web_tool_arguments("websearch", args)) {
+            return error(*validation);
         }
         const std::string query = args["query"].asString();
 
@@ -123,7 +123,7 @@ Tool make_webfetch_tool()
           "output is truncated.";
     spec.parameters = parse_json(
         R"json({"type":"object","properties":{"url":{"type":"string","description":"fully-qualified URL to fetch (http:// is upgraded to https://)"}},"required":["url"]})json");
-    return { std::move(spec), webfetch_run, ToolSafety::READ_ONLY };
+    return { std::move(spec), webfetch_run };
 }
 
 Tool make_websearch_tool()
@@ -137,7 +137,7 @@ Tool make_websearch_tool()
           "Follow up with webfetch to read a specific result.";
     spec.parameters = parse_json(
         R"json({"type":"object","properties":{"query":{"type":"string","description":"search query"},"num_results":{"type":"integer","description":"number of results to return (default 5, max 10)"}},"required":["query"]})json");
-    return { std::move(spec), websearch_run, ToolSafety::READ_ONLY };
+    return { std::move(spec), websearch_run };
 }
 
 } // namespace ursa

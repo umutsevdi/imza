@@ -38,32 +38,26 @@ struct ToolOutput {
 
 using ToolHandler = std::function<ToolOutput(const Json::Value& args)>;
 
-enum class ToolSafety { READ_ONLY, MUTATING };
-
 struct Tool {
     ToolSpec spec;
     ToolHandler run;
-    ToolSafety safety      = ToolSafety::MUTATING;
-    bool persistent        = true;
-    bool available_in_plan = false;
 };
 
 const Tool* find_tool(std::span<const Tool> tools, std::string_view name);
 std::vector<ToolSpec> tool_specs(std::span<const Tool> tools);
-std::vector<ToolSpec> plan_tool_specs(std::span<const Tool> tools);
 ToolOutput dispatch_tool(
     std::span<const Tool> tools, const ToolCallRequest& req);
-
-// Where a tool call's filesystem path argument lands relative to the
-// workspace root.
-enum class ProjectTarget { INSIDE, OUTSIDE, INVALID };
-ProjectTarget classify_project_target(
-    const std::string& name, const std::string& args);
 
 std::optional<TodoList> parse_todo_args(const Json::Value& args);
 std::optional<QuestionForm> parse_ask_args(const std::string& args);
 std::optional<std::string> validate_filesystem_tool_arguments(
     std::string_view tool, const Json::Value& arguments);
+std::optional<std::string> validate_shell_tool_arguments(
+    const Json::Value& arguments);
+std::optional<std::string> validate_web_tool_arguments(
+    std::string_view tool, const Json::Value& arguments);
+std::optional<std::string> validate_subagent_tool_arguments(
+    const Json::Value& arguments, bool allow_build);
 std::string todo_summary(const TodoList& todo);
 
 Tool make_read_tool();

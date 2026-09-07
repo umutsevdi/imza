@@ -236,6 +236,7 @@ add_library(ursa_execution
     src/app/cli.cpp
     src/app/flows.cpp
     src/app/slash_commands.cpp
+    src/permissions/evaluator.cpp
     src/permissions/filesystem.cpp
     src/tools/tool.cpp
     src/tools/tool_args.cpp

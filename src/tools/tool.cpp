@@ -35,17 +35,6 @@ std::vector<ToolSpec> tool_specs(std::span<const Tool> tools)
     return out;
 }
 
-std::vector<ToolSpec> plan_tool_specs(std::span<const Tool> tools)
-{
-    std::vector<ToolSpec> out;
-    for (const auto& tool : tools) {
-        if (tool.safety == ToolSafety::READ_ONLY || tool.available_in_plan) {
-            out.push_back(tool.spec);
-        }
-    }
-    return out;
-}
-
 ToolOutput dispatch_tool(
     std::span<const Tool> tools, const ToolCallRequest& req)
 {
@@ -273,19 +262,15 @@ namespace {
 
     ToolOutput shell_run(const Json::Value& args)
     {
-        if (!args.isObject() || !args["command"].isString()
-            || args["command"].asString().empty()) {
-            return error("shell: 'command' must be a non-empty string");
+        if (const auto validation = validate_shell_tool_arguments(args)) {
+            return error(*validation);
         }
         const std::string command = args["command"].asString();
 
         std::chrono::seconds timeout = std::chrono::seconds(10);
-        if (args["timeout"].isIntegral()) {
+        if (args["timeout"].isInt64()) {
             const auto raw = args["timeout"].asInt64();
-            if (raw < 1) {
-                return error("shell: timeout must be 1 or greater");
-            }
-            timeout = std::chrono::seconds(static_cast<long>(raw));
+            timeout        = std::chrono::seconds(static_cast<long>(raw));
         }
 
         CommandResult r = run_command(command, timeout);
@@ -657,7 +642,7 @@ Tool make_read_tool()
                        "truncated.";
     spec.parameters  = parse_json(
         R"json({"type":"object","properties":{"path":{"type":"string","description":"file path to read"},"line_begin":{"type":"integer","description":"first line to return (1-based, inclusive)"},"line_end":{"type":"integer","description":"last line to return (1-based, inclusive)"}},"required":["path"]})json");
-    return { std::move(spec), read_run, ToolSafety::READ_ONLY };
+    return { std::move(spec), read_run };
 }
 
 Tool make_skill_tool()
@@ -668,7 +653,7 @@ Tool make_skill_tool()
                        "Optionally specify scope as project or global.";
     spec.parameters  = parse_json(
         R"json({"type":"object","properties":{"name":{"type":"string"},"scope":{"type":"string","enum":["project","global"]}},"required":["name"]})json");
-    return { std::move(spec), { }, ToolSafety::READ_ONLY, false, true };
+    return { std::move(spec), { } };
 }
 
 Tool make_list_tool()
@@ -680,7 +665,7 @@ Tool make_list_tool()
                        "slash, along with their file sizes.";
     spec.parameters  = parse_json(
         R"json({"type":"object","properties":{"path":{"type":"string","description":"directory to list (defaults to the current directory)"}}})json");
-    return { std::move(spec), list_run, ToolSafety::READ_ONLY };
+    return { std::move(spec), list_run };
 }
 
 Tool make_ask_tool()
@@ -691,7 +676,7 @@ Tool make_ask_tool()
                        "answers. Returns the answers as the tool result.";
     spec.parameters  = parse_json(
         R"json({"type":"object","properties":{"questions":{"type":"array","description":"questions to ask (at least one)","minItems":1,"items":{"type":"object","properties":{"prompt":{"type":"string","description":"the question text"},"options":{"type":"array","items":{"type":"string"},"description":"selectable options (omit for free-text only)"},"multi":{"type":"boolean","description":"allow multiple option selections"},"free_text":{"type":"boolean","description":"allow a free-text answer in addition to options"}},"required":["prompt"]}}}},"required":["questions"]})json");
-    return { std::move(spec), ToolHandler { }, ToolSafety::READ_ONLY };
+    return { std::move(spec), ToolHandler { } };
 }
 
 Tool make_shell_tool()
@@ -705,7 +690,7 @@ Tool make_shell_tool()
           "terminated.";
     spec.parameters = parse_json(
         R"json({"type":"object","properties":{"command":{"type":"string","description":"the shell command to run"},"timeout":{"type":"integer","description":"maximum runtime in seconds before the command is killed (default 10)"}},"required":["command"]})json");
-    return { std::move(spec), shell_run, ToolSafety::MUTATING, false, true };
+    return { std::move(spec), shell_run };
 }
 
 Tool make_todo_tool()
@@ -719,7 +704,7 @@ Tool make_todo_tool()
                        "previous one.";
     spec.parameters  = parse_json(
         R"json({"type":"object","properties":{"todos":{"type":"array","description":"the updated todo list","items":{"type":"object","properties":{"content":{"type":"string","description":"short imperative description of the task"},"status":{"type":"string","enum":["pending","in_progress","completed","cancelled"],"description":"task state (default pending)"}},"required":["content"]}}},"required":["todos"]})json");
-    return { std::move(spec), ToolHandler { }, ToolSafety::READ_ONLY };
+    return { std::move(spec), ToolHandler { } };
 }
 
 Tool make_subagent_tool()
@@ -732,7 +717,7 @@ Tool make_subagent_tool()
           "available while the main agent is in build mode.";
     spec.parameters = parse_json(
         R"json({"type":"object","properties":{"tasks":{"type":"array","minItems":1,"maxItems":5,"items":{"type":"object","properties":{"mode":{"type":"string","enum":["research","build"]},"prompt":{"type":"string","minLength":1}},"required":["mode","prompt"],"additionalProperties":false}}},"required":["tasks"],"additionalProperties":false})json");
-    return Tool { std::move(spec), { }, ToolSafety::READ_ONLY, true, true };
+    return Tool { std::move(spec), { } };
 }
 
 Tool make_edit_tool()
@@ -747,7 +732,7 @@ Tool make_edit_tool()
           "(default 0 = whole file). The file must already exist.";
     spec.parameters = parse_json(
         R"json({"type":"object","properties":{"file_path":{"type":"string","description":"file to edit"},"old_string":{"type":"string","description":"existing text to match and replace (non-empty)"},"new_string":{"type":"string","description":"replacement text (empty string deletes the match)"},"replace_count":{"type":"integer","description":"replace the first N matches (default 1; 0 = all)"},"offset":{"type":"integer","description":"1-based line to start matching from (default 0 = whole file)"}},"required":["file_path","old_string","new_string"]})json");
-    return { std::move(spec), edit_run, ToolSafety::MUTATING };
+    return { std::move(spec), edit_run };
 }
 
 Tool make_write_tool()
@@ -765,7 +750,7 @@ Tool make_write_tool()
           "= from start, line_end 0 = to end).";
     spec.parameters = parse_json(
         R"json({"type":"object","properties":{"file_path":{"type":"string","description":"path of the file to create or modify"},"text":{"type":"string","description":"text to insert or write"},"line":{"type":"integer","description":"insert below this 1-based line (insert mode only)"},"overwrite":{"type":"boolean","description":"replace a line range instead of inserting (default false)"},"line_begin":{"type":"integer","description":"first line of the range to replace (block mode)"},"line_end":{"type":"integer","description":"last line of the range to replace, inclusive (block mode)"}},"required":["file_path","text"]})json");
-    return { std::move(spec), write_run, ToolSafety::MUTATING };
+    return { std::move(spec), write_run };
 }
 
 } // namespace ursa
