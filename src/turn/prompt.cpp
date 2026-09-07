@@ -54,7 +54,7 @@ namespace {
 
 # Modes
 - You operate in one of two modes: PLAN or BUILD. The current mode is announced via <system-reminder> messages.
-- In PLAN mode read-only operations run normally. Mutating tool calls require user permission before execution. Research first, ask clarifying questions when intent is ambiguous, and request mutation only when it is necessary to fulfill the user's request.
+- In PLAN mode read-only operations run normally. Edit and write tools are unavailable. Research first and ask clarifying questions when intent is ambiguous.
 - In BUILD mode all tools are available. Implement the plan, then verify the result if possible.)prompt";
 
     constexpr std::string_view SUBAGENT_PROMPT

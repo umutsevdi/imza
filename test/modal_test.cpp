@@ -120,6 +120,7 @@ struct Env {
             } });
         tools.push_back(ursa::make_subagent_tool());
         tools.push_back(ursa::make_read_tool());
+        tools.push_back(ursa::make_edit_tool());
         tools.push_back(ursa::make_write_tool());
         state = ursa::make_application_state_with_tools(
             pump.fn(), test_config(), std::move(tools),
@@ -173,6 +174,53 @@ bool idle(const ursa::Session& st)
 }
 
 } // namespace
+
+TEST_CASE("plan requests omit edit and write tools")
+{
+    Env env;
+    env.stream
+        = [&env](const ursa::ChatRequest& req, const ursa::StreamCallback& cb) {
+              env.requests.push_back(req);
+              cb(ursa::make_done_event());
+              return ursa::Status::OK;
+          };
+
+    ursa::submit(*env.state, "inspect");
+    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE_FALSE(env.requests.empty());
+    const auto& tools = env.requests.front().tools;
+    CHECK(std::none_of(tools.begin(), tools.end(),
+        [](const ursa::ToolSpec& tool) { return tool.name == "edit"; }));
+    CHECK(std::none_of(tools.begin(), tools.end(),
+        [](const ursa::ToolSpec& tool) { return tool.name == "write"; }));
+    CHECK(std::any_of(tools.begin(), tools.end(),
+        [](const ursa::ToolSpec& tool) { return tool.name == "read"; }));
+}
+
+TEST_CASE("plan rejects fabricated write calls")
+{
+    Env env;
+    auto round = std::make_shared<int>(0);
+    env.stream
+        = [round](const ursa::ChatRequest&, const ursa::StreamCallback& cb) {
+              if ((*round)++ == 0) {
+                  cb(ursa::make_tool_call_event({ "write",
+                      R"({"file_path":"/tmp/ursa-plan-write","text":"no"})", "",
+                      "write-call" }));
+              }
+              cb(ursa::make_done_event());
+              return ursa::Status::OK;
+          };
+
+    ursa::submit(*env.state, "write");
+    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    const ursa::ToolCall* call = env.pending_tool();
+    REQUIRE(call != nullptr);
+    REQUIRE(call->result.has_value());
+    CHECK(call->result->kind == ursa::ToolCall::Result::Kind::REJECT);
+    CHECK(call->result->text.find("unavailable in Plan mode")
+        != std::string::npos);
+}
 
 TEST_CASE("subagent tool waits for a research agent and retains its chat")
 {
@@ -563,12 +611,13 @@ TEST_CASE("tool accept: output fills result, request half byte-stable")
     CHECK(prev.tool_calls[0].name == "shell");
     CHECK(prev.tool_calls[0].args == R"({"command":"ls -la"})");
 
-    REQUIRE(env.last_request().tools.size() == 5);
+    REQUIRE(env.last_request().tools.size() == 6);
     CHECK(env.last_request().tools[0].name == "shell");
     CHECK(env.last_request().tools[1].name == "websearch");
     CHECK(env.last_request().tools[2].name == "subagent");
     CHECK(env.last_request().tools[3].name == "read");
-    CHECK(env.last_request().tools[4].name == "write");
+    CHECK(env.last_request().tools[4].name == "edit");
+    CHECK(env.last_request().tools[5].name == "write");
     CHECK(env.user_turn_count() == 1);
 }
 

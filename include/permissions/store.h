@@ -8,19 +8,11 @@
 #include <vector>
 
 #include "common/types.h"
+#include "common/ursa_signal.h"
 
 namespace ursa {
 
-struct PathGrant {
-    enum class Access { READ, WRITE };
-    enum class Target { FILE, DIRECTORY };
-
-    Access access = Access::READ;
-    Target target = Target::FILE;
-    std::filesystem::path path;
-
-    bool operator==(const PathGrant&) const = default;
-};
+using ExternalGrant = std::filesystem::path;
 
 struct ShellCommandGrant {
     std::string program;
@@ -36,7 +28,8 @@ struct SkillGrant {
     bool operator==(const SkillGrant&) const = default;
 };
 
-using PermissionGrant = std::variant<PathGrant, ShellCommandGrant, SkillGrant>;
+using PermissionGrant
+    = std::variant<ExternalGrant, ShellCommandGrant, SkillGrant>;
 
 class PermissionStore final : public ApplicationComponent {
 public:
@@ -47,18 +40,20 @@ public:
 
     Snapshot snapshot() const;
     bool install(Grants grants);
-    bool matches(const PathGrant& grant) const;
+    bool matches_external_path(const std::filesystem::path& path) const;
     bool matches(const ShellCommandGrant& grant) const;
     bool matches(const SkillGrant& grant) const;
     void clear();
     std::size_t size() const;
+    [[nodiscard]] Signal<>::Subscription subscribe_to_grants_change(
+        Signal<>::Callback callback);
 
 private:
     static bool _covers(
         const PermissionGrant& stored, const PermissionGrant& requested);
-    static bool _matches(const PathGrant& stored, const PathGrant& requested);
     mutable std::mutex _mutex;
     Snapshot _grants;
+    Signal<> _changed;
 };
 
 } // namespace ursa

@@ -19,9 +19,12 @@ struct CliResult {
     std::optional<std::string> variant;
     std::optional<bool> web;
     std::optional<bool> shell;
+    std::vector<std::filesystem::path> allowed_directories;
+    bool skip_permissions = false;
 };
 
 CliResult run_cli(int argc, char** argv);
+RuntimeFlag runtime_flags_for(const CliResult& result);
 void submit(ApplicationState& state, std::string text,
     std::vector<FileAttachment> attachments = { });
 void resolve_modal(ApplicationState& state, ModalResult result);

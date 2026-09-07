@@ -41,17 +41,15 @@ namespace {
     }
 
     bool matches_path(const PermissionStore::Grants& grants,
-        PathGrant::Access access, const std::filesystem::path& target)
+        const std::filesystem::path& target)
     {
         return std::any_of(
             grants.begin(), grants.end(), [&](const auto& grant) {
-                const auto* path = std::get_if<PathGrant>(&grant);
-                if (path == nullptr || path->access != access) {
+                const auto* directory = std::get_if<ExternalGrant>(&grant);
+                if (directory == nullptr) {
                     return false;
                 }
-                return path->target == PathGrant::Target::DIRECTORY
-                    ? contains(path->path, target)
-                    : path->path == target;
+                return contains(*directory, target);
             });
     }
 
@@ -79,6 +77,11 @@ FilesystemEvaluation evaluate_filesystem_request(std::string_view tool,
     const auto operation = operation_for(tool);
     if (!operation) {
         return reject("unsupported filesystem tool");
+    }
+    if (context.mode == Session::Mode::PLAN
+        && (*operation == FilesystemRequest::Operation::EDIT
+            || *operation == FilesystemRequest::Operation::WRITE)) {
+        return reject(std::string(tool) + ": unavailable in Plan mode");
     }
     Json::Value normalized = parse_json(arguments);
     if (const auto error
@@ -153,9 +156,7 @@ FilesystemEvaluation evaluate_filesystem_request(std::string_view tool,
 
     const bool write = *operation == FilesystemRequest::Operation::EDIT
         || *operation == FilesystemRequest::Operation::WRITE;
-    const PathGrant::Access access
-        = write ? PathGrant::Access::WRITE : PathGrant::Access::READ;
-    const bool granted = matches_path(*context.grants, access, target);
+    const bool granted = matches_path(*context.grants, target);
     const std::filesystem::path& project_root = context.workspace->project_root
         ? *context.workspace->project_root
         : working_directory;
@@ -166,22 +167,17 @@ FilesystemEvaluation evaluate_filesystem_request(std::string_view tool,
         return { { PermissionDecision::Kind::ACCEPT, "" }, request };
     }
     return { { PermissionDecision::Kind::ASK,
-                 write ? "write access requires approval"
-                       : "read access requires approval" },
+                 "external directory access requires approval" },
         request };
 }
 
-std::optional<PathGrant> filesystem_session_grant(
+std::optional<ExternalGrant> filesystem_session_grant(
     const FilesystemRequest& request)
 {
     if (request.operation == FilesystemRequest::Operation::LIST) {
         return std::nullopt;
     }
-    const bool write = request.operation == FilesystemRequest::Operation::EDIT
-        || request.operation == FilesystemRequest::Operation::WRITE;
-    return PathGrant { write ? PathGrant::Access::WRITE
-                             : PathGrant::Access::READ,
-        PathGrant::Target::FILE, request.target };
+    return request.target.parent_path();
 }
 
 } // namespace ursa

@@ -42,8 +42,18 @@ namespace {
     void start_turn(ApplicationState& state, std::string text,
         std::vector<FileAttachment> attachments);
 
-    bool load_skill(ApplicationState& state, const Skill& skill)
+    bool load_skill(ApplicationState& state, const Skill& skill,
+        const ToolCallRequest& authorized)
     {
+        const std::optional<std::filesystem::path> path
+            = canonical_skill_path(skill);
+        const Json::Value arguments = parse_json(authorized.args);
+        if (!path || !arguments["path"].isString()
+            || arguments["path"].asString() != path->string()) {
+            state.session->set_error(
+                "Skill permission target changed before activation.");
+            return false;
+        }
         std::string error;
         if (!state.skills->load(skill, error)) {
             state.session->set_error(std::move(error));
@@ -73,7 +83,6 @@ namespace {
 
     bool validate_skill_mentions(ApplicationState& state, std::string_view text)
     {
-        const std::vector<Skill> catalog = state.environment->skills();
         for (const std::string& name : skill_mention_names(text)) {
             Json::Value args(Json::objectValue);
             args["name"]                          = name;
@@ -103,7 +112,7 @@ namespace {
             if (evaluation.decision.kind == PermissionDecision::Kind::ACCEPT
                 || (state.runtime_flags & RuntimeFlag::SKIP_PERMISSIONS)
                     != RuntimeFlag::NONE) {
-                if (!load_skill(state, skill)) {
+                if (!load_skill(state, skill, evaluation.request)) {
                     return;
                 }
                 continue;
@@ -369,8 +378,9 @@ void on_turn_finished(ApplicationState& state, std::string error)
 
 void resolve_modal(ApplicationState& state, ModalResult result)
 {
-    bool manual_skill                = false;
-    bool manual_accepted             = false;
+    bool manual_skill    = false;
+    bool manual_accepted = false;
+    std::optional<ToolCallRequest> manual_authorization;
     const ModalPayload current_modal = state.session->modal();
     if (const auto* request = std::get_if<ToolCallRequest>(&current_modal);
         request != nullptr && request->id == "manual-skill") {
@@ -384,17 +394,21 @@ void resolve_modal(ApplicationState& state, ModalResult result)
             const PermissionEvaluation evaluation
                 = evaluate_permission(state, *request, state.session->mode());
             manual_accepted
-                = evaluation.decision.kind != PermissionDecision::Kind::REJECT;
+                = evaluation.decision.kind != PermissionDecision::Kind::REJECT
+                && evaluation.request.args == request->args;
+            if (manual_accepted) {
+                manual_authorization = evaluation.request;
+            }
             if (manual_accepted
                 && verdict->decision == ToolDecision::ACCEPT_FOR_SESSION) {
                 manual_accepted = !evaluation.session_grants.empty()
                     && state.permissions->install(evaluation.session_grants);
             }
         }
-        if (manual_accepted && pending
+        if (manual_accepted && manual_authorization && pending
             && pending->next < pending->awaiting.size()) {
-            manual_accepted
-                = load_skill(state, pending->awaiting[pending->next]);
+            manual_accepted = load_skill(
+                state, pending->awaiting[pending->next], *manual_authorization);
         }
     }
     if (auto* path = std::get_if<std::filesystem::path>(&result)) {

@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <string>
@@ -23,6 +24,23 @@ namespace ursa {
 namespace {
 
     constexpr std::uint64_t COMPACTION_PERCENT = 80;
+
+    bool tool_available_in_mode(std::string_view name, Session::Mode mode)
+    {
+        return mode == Session::Mode::BUILD
+            || (name != "edit" && name != "write");
+    }
+
+    std::vector<ToolSpec> tool_specs_for_mode(
+        const std::vector<ToolSpec>& specs, Session::Mode mode)
+    {
+        std::vector<ToolSpec> available;
+        std::ranges::copy_if(
+            specs, std::back_inserter(available), [mode](const ToolSpec& spec) {
+                return tool_available_in_mode(spec.name, mode);
+            });
+        return available;
+    }
 
     std::string compaction_transcript(
         const std::vector<Message>& history, std::size_t end)
@@ -86,6 +104,13 @@ TurnRunner::TurnRunner(ApplicationState& state, PostFn post,
             if (!skill) {
                 return ToolOutput { ToolOutput::Kind::ERROR,
                     "skill: unknown or unavailable skill" };
+            }
+            const std::optional<std::filesystem::path> path
+                = canonical_skill_path(*skill);
+            if (!path || !args["path"].isString()
+                || args["path"].asString() != path->string()) {
+                return ToolOutput { ToolOutput::Kind::ERROR,
+                    "skill: permission target changed before execution" };
             }
             if (skill_policy(state_->providers->config(), *skill)
                 == SkillPolicy::DENY) {
@@ -250,7 +275,7 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
         ChatRequest req;
         req.model       = settings.model;
         req.messages    = std::move(history);
-        req.tools       = specs_all_;
+        req.tools       = tool_specs_for_mode(specs_all_, settings.mode);
         req.interrupted = [session = state_->session] {
             return session->interrupt_requested();
         };
@@ -453,6 +478,11 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
 
         had_tool_calls                  = true;
         const ToolCallRequest& original = ev.tool_call;
+        if (!tool_available_in_mode(original.name, mode)) {
+            _reject_tool(original,
+                original.name + " is unavailable in Plan mode", tool_msgs);
+            continue;
+        }
         if (find_tool(tools_, original.name) == nullptr) {
             const std::string error = "unknown tool: " + original.name;
             _post([this, req = original, error] {
@@ -656,10 +686,9 @@ void TurnRunner::_run_tool(const PermissionEvaluation& evaluation,
     if (req.name == "skill" && out.kind == ToolOutput::Kind::OUTPUT) {
         if (const auto skill = resolve_skill(
                 state_->environment->skills(), parse_json(req.args))) {
-            std::error_code error;
-            const std::filesystem::path path
-                = std::filesystem::weakly_canonical(skill->path, error);
-            skills_->record_tool_load(error ? skill->path : path, out.text);
+            const std::optional<std::filesystem::path> path
+                = canonical_skill_path(*skill);
+            skills_->record_tool_load(path.value_or(skill->path), out.text);
         }
     }
     const auto kind          = out.kind == ToolOutput::Kind::OUTPUT

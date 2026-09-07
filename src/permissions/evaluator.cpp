@@ -60,10 +60,9 @@ namespace {
         if (skill_policy(config, *skill) == SkillPolicy::DENY) {
             return reject(original, "skill: access denied by configuration");
         }
-        std::error_code error;
-        const std::filesystem::path path
-            = std::filesystem::weakly_canonical(skill->path, error);
-        if (error || !path.is_absolute()) {
+        const std::optional<std::filesystem::path> path
+            = canonical_skill_path(*skill);
+        if (!path) {
             return reject(original, "skill: cannot normalize instructions");
         }
         ToolCallRequest request = original;
@@ -71,11 +70,12 @@ namespace {
         normalized["name"] = skill->name;
         normalized["scope"]
             = skill->scope == Skill::Scope::PROJECT ? "project" : "global";
-        request.args = write_json(normalized);
+        normalized["path"] = path->string();
+        request.args       = write_json(normalized);
 
-        const SkillGrant grant { path };
+        const SkillGrant grant { *path };
         if (loaded_skills.is_loaded(skill->path)
-            || loaded_skills.is_loaded(path)
+            || loaded_skills.is_loaded(*path)
             || (context.grants && matches_skill(*context.grants, grant))) {
             return accept(std::move(request));
         }

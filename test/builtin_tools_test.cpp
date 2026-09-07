@@ -253,6 +253,11 @@ TEST_CASE("runtime flags independently filter the tool roster")
     CHECK(ursa::find_tool(tools, "websearch") == nullptr);
     CHECK(ursa::find_tool(tools, "read") != nullptr);
     CHECK(ursa::find_tool(tools, "write") != nullptr);
+
+    const auto disabled = ursa::dispatch_tool(
+        tools, { "shell", R"({"command":"echo unavailable"})", "", "" });
+    CHECK(disabled.kind == ursa::ToolOutput::Kind::ERROR);
+    CHECK(disabled.text == "unknown tool: shell");
 }
 
 TEST_CASE("shell tool runs a command and reports the exit code")

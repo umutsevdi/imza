@@ -121,3 +121,60 @@ TEST_CASE("render_context_box lists attachment basenames under files")
     CHECK(out.find("main.cpp") != std::string::npos);
     CHECK(out.find("design.md") != std::string::npos);
 }
+
+TEST_CASE("permissions box stays hidden for default permissions")
+{
+    const ursa::PermissionView view
+        = ursa::make_permission_view(ursa::interactive_runtime_flags(), { });
+
+    CHECK_FALSE(ursa::has_custom_permissions(view));
+    CHECK(to_text(ursa::render_permissions_box(view)).find("Permissions")
+        == std::string::npos);
+}
+
+TEST_CASE("permissions box renders only custom settings and grants")
+{
+    const std::vector<ursa::PermissionGrant> grants {
+        ursa::ExternalGrant { "/outside" },
+        ursa::ExternalGrant { "/outside/generated" },
+        ursa::SkillGrant { "/skills/docs/SKILL.md" },
+        ursa::ShellCommandGrant { "cmake", { "--build", "build" }, "/work" },
+    };
+    const auto flags = static_cast<ursa::RuntimeFlag>(
+        ursa::SHELL | ursa::ATTENDED | ursa::SKIP_PERMISSIONS);
+
+    const ursa::PermissionView view = ursa::make_permission_view(flags, grants);
+    const std::string out = to_text(ursa::render_permissions_box(view));
+
+    CHECK(ursa::has_custom_permissions(view));
+    CHECK(out.find("Permissions") != std::string::npos);
+    CHECK(out.find("Web") != std::string::npos);
+    CHECK(out.find("disabled") != std::string::npos);
+    CHECK(out.find("Approvals") != std::string::npos);
+    CHECK(out.find("skipped") != std::string::npos);
+    CHECK(out.find("Shell") == std::string::npos);
+    CHECK(out.find("Files") == std::string::npos);
+    CHECK(out.find("/outside") != std::string::npos);
+    CHECK(out.find("/outside/generated") != std::string::npos);
+    CHECK(out.find("read ") == std::string::npos);
+    CHECK(out.find("write ") == std::string::npos);
+    CHECK(out.find("Skills") == std::string::npos);
+    CHECK(out.find("docs") == std::string::npos);
+    CHECK(out.find("cmake --build build") != std::string::npos);
+}
+
+TEST_CASE("permissions view reflects installed external grants")
+{
+    ursa::PermissionStore permissions;
+    const std::filesystem::path folder = std::filesystem::temp_directory_path();
+    REQUIRE(permissions.install({ ursa::ExternalGrant { folder } }));
+
+    const auto grants               = permissions.snapshot();
+    const ursa::PermissionView view = ursa::make_permission_view(
+        ursa::interactive_runtime_flags(), *grants);
+    const std::string out = to_text(ursa::render_permissions_box(view));
+
+    CHECK(out.find("Folders") != std::string::npos);
+    CHECK(out.find(std::filesystem::weakly_canonical(folder).string())
+        != std::string::npos);
+}

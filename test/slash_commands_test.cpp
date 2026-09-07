@@ -117,6 +117,55 @@ TEST_CASE("CLI returns runtime session overrides")
     CHECK(result.shell == true);
 }
 
+TEST_CASE("CLI exposes dangerous permission skipping in interactive mode")
+{
+    char program[]  = "ursa";
+    char skip[]     = "--skip-permissions";
+    char shell[]    = "--shell";
+    char disabled[] = "false";
+    char* argv[]    = { program, skip, shell, disabled };
+
+    const CliResult result  = run_cli(4, argv);
+    const RuntimeFlag flags = runtime_flags_for(result);
+
+    CHECK(result.continue_as_interactive);
+    CHECK(result.skip_permissions);
+    CHECK((flags & RuntimeFlag::SKIP_PERMISSIONS) != RuntimeFlag::NONE);
+    CHECK((flags & RuntimeFlag::ATTENDED) != RuntimeFlag::NONE);
+    CHECK((flags & RuntimeFlag::SHELL) == RuntimeFlag::NONE);
+}
+
+TEST_CASE("CLI accepts multiple allowed directories")
+{
+    const std::filesystem::path root
+        = std::filesystem::temp_directory_path() / "ursa-cli-allowed-dirs";
+    const std::filesystem::path first  = root / "first";
+    const std::filesystem::path second = root / "second";
+    std::error_code error;
+    std::filesystem::create_directories(first, error);
+    REQUIRE_FALSE(error);
+    std::filesystem::create_directories(second, error);
+    REQUIRE_FALSE(error);
+
+    std::string first_string  = first.string();
+    std::string second_string = second.string();
+    char program[]            = "ursa";
+    char option[]             = "--allow-dir";
+    char* argv[]
+        = { program, option, first_string.data(), second_string.data() };
+
+    const CliResult result = run_cli(4, argv);
+
+    REQUIRE(result.continue_as_interactive);
+    REQUIRE(result.allowed_directories.size() == 2);
+    CHECK(result.allowed_directories[0]
+        == std::filesystem::weakly_canonical(first));
+    CHECK(result.allowed_directories[1]
+        == std::filesystem::weakly_canonical(second));
+
+    std::filesystem::remove_all(root, error);
+}
+
 TEST_CASE("CLI config creates the file and opens an editor")
 {
 #ifdef _WIN32
