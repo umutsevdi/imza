@@ -34,7 +34,6 @@ namespace {
 # Tool usage policy
 - Prefer purpose-built tools over the shell whenever an available tool can perform the operation directly and reliably.
 - Use dedicated tools for tasks such as reading and editing files, searching the codebase, managing todos, and other supported operations instead of reproducing those operations with shell commands.
-- Use the shell for commands that are inherently terminal-based, such as builds, tests, linters, package managers, Git operations, project scripts, and system utilities, or when no suitable specialized tool is available.
 - Do not use shell commands merely as a workaround for an available specialized tool.
 - When doing file search, prefer to explore broadly before narrowing down; gather context in parallel when the searches are independent.
 - You can call multiple tools in a single response. When multiple independent pieces of information are requested, batch your tool calls together for optimal performance. When making multiple independent tool calls, send them in a single message.

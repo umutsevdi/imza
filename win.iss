@@ -66,7 +66,11 @@ Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; Value
 
 [Files]
 Source: "{#Build}\release\{#ursaExe}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#Build}\package\win\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#Source}\misc\LICENSE.thirdparty.txt"; DestDir: "{app}"
+Source: "{#Source}\misc\ursa.ico"; DestDir: "{app}"
+Source: "{#Source}\LICENSE"; DestDir: "{app}"
+Source: "{#Source}\CHANGELOG.txt"; DestDir: "{app}"
+Source: "{#Source}\README.md"; DestDir: "{app}"
 
 [Icons]
 Name: "{autoprograms}\{#ursaName}"; Filename: "{app}\{#ursaExe}"

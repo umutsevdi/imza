@@ -33,7 +33,7 @@ comments, then send the findings directly back to Plan mode.
 ## Highlights
 - Native terminal UI
 - Visible reasoning, tool calls, diffs, token usage, and cost
-- Approval controls for mutating actions
+- Scoped one-time and session approval controls for filesystem and skill access
 - Up to five concurrent research or build subagents
 - Separate persistent transcript for every subagent
 - Different models and reasoning variants by agent role
@@ -61,6 +61,7 @@ or a locally hosted OpenAI-compatible model.
 - [X] Generated and manual review comments
 - [X] Review → Plan handoff
 - [X] Tool approval flows
+- [X] Scoped filesystem and skill permissions
 - [X] Structured questions
 - [X] Task tracking
 - [X] Concurrent subagents
@@ -82,7 +83,7 @@ or a locally hosted OpenAI-compatible model.
 - [ ] MCP
 - [ ] LSP integration
 - [ ] Image or other multimodal prompt attachments
-- [ ] Better Permission System
+- [ ] Shell-aware command permissions and global command rules
 - [ ] Mid session directory change
 - [ ] Usage analytics UI (Monthly)
 - [ ] Capabilities system (Exposing preconfigured Python based extensions as tools)
@@ -94,7 +95,7 @@ or a locally hosted OpenAI-compatible model.
 Ursa requires a C++23 compiler, CMake, Python 3, and CURL.
 ```sh
 git submodule update --init --recursive
-cmake -B build -DCMAKE_BUILD_TYPE=Debug -DTESTS=ON \
+cmake -B build -DCMAKE_BUILD_TYPE=Debug -DURSA_BUILD_TESTS=ON \
   -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 cmake --build build --target ursa ursa_tests
 ./build/debug/ursa_tests

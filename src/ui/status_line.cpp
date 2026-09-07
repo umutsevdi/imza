@@ -128,8 +128,8 @@ namespace {
                 }
                 bar.push_back(text("  "));
             }
-            bar.push_back(
-                text(" URSA ") | bold | bgcolor(PANEL_FG) | color(PANEL_COLOR));
+            bar.push_back(text(wide ? " URSA v" URSA_VERSION " " : " URSA ")
+                | bold | bgcolor(PANEL_FG) | color(PANEL_COLOR));
             return hbox(std::move(bar)) | bgcolor(PANEL_COLOR_FOCUS)
                 | color(PANEL_FG) | xflex;
         }
