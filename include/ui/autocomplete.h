@@ -14,7 +14,7 @@
 
 namespace ursa {
 
-class ApplicationState;
+struct ApplicationState;
 
 // Suggestion popup for the chat input: slash commands, $skill mentions and
 // @file attachments.
