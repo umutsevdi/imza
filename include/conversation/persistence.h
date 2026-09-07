@@ -9,6 +9,7 @@
 namespace ursa {
 
 class Session;
+struct LoadedSession;
 
 struct SavedSession {
     std::filesystem::path path;
@@ -17,6 +18,7 @@ struct SavedSession {
 };
 
 Status save_session(Session& session);
+Status read_session(const std::filesystem::path& path, LoadedSession& loaded);
 Status load_session(const std::filesystem::path& path, Session& session,
     std::filesystem::path* workspace = nullptr);
 std::vector<SavedSession> saved_sessions();

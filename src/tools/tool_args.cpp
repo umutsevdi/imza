@@ -5,6 +5,26 @@
 
 namespace ursa {
 
+namespace {
+
+    std::optional<std::string> validate_positive(std::string_view tool,
+        const Json::Value& arguments, const char* key, bool allow_zero)
+    {
+        if (!arguments.isMember(key)) {
+            return std::nullopt;
+        }
+        const Json::Value& value = arguments[key];
+        if (!value.isInt64()
+            || value.asInt64() < static_cast<Json::Int64>(allow_zero ? 0 : 1)) {
+            return std::string(tool) + ": " + key
+                + (allow_zero ? " must be 0 or greater"
+                              : " must be 1 or greater");
+        }
+        return std::nullopt;
+    }
+
+} // namespace
+
 std::optional<TodoList> parse_todo_args(const Json::Value& args)
 {
     if (!args.isObject() || !args["todos"].isArray()) {
@@ -69,6 +89,86 @@ std::optional<QuestionForm> parse_ask_args(const std::string& args)
         return std::nullopt;
     }
     return form;
+}
+
+std::optional<std::string> validate_filesystem_tool_arguments(
+    std::string_view tool, const Json::Value& arguments)
+{
+    if (!arguments.isObject()) {
+        return std::string(tool) + ": arguments must be an object";
+    }
+    const bool write = tool == "edit" || tool == "write";
+    const char* key  = write ? "file_path" : "path";
+    if (tool == "list") {
+        if (arguments.isMember(key) && !arguments[key].isNull()
+            && !arguments[key].isString()) {
+            return "list: path must be a string";
+        }
+    } else if (!arguments[key].isString()
+        || arguments[key].asString().empty()) {
+        return std::string(tool) + ": " + key + " must be a non-empty string";
+    }
+    if (tool == "read") {
+        if (auto error
+            = validate_positive(tool, arguments, "line_begin", false)) {
+            return error;
+        }
+        if (auto error
+            = validate_positive(tool, arguments, "line_end", false)) {
+            return error;
+        }
+        if (arguments.isMember("line_begin") && arguments.isMember("line_end")
+            && arguments["line_end"].asInt64()
+                < arguments["line_begin"].asInt64()) {
+            return "read: line_end is before line_begin";
+        }
+        return std::nullopt;
+    }
+    if (tool == "list") {
+        return std::nullopt;
+    }
+    if (tool == "edit") {
+        if (!arguments["old_string"].isString()
+            || arguments["old_string"].asString().empty()) {
+            return "edit: old_string must be a non-empty string";
+        }
+        if (!arguments["new_string"].isString()) {
+            return "edit: new_string must be a string";
+        }
+        if (auto error
+            = validate_positive(tool, arguments, "replace_count", true)) {
+            return error;
+        }
+        return validate_positive(tool, arguments, "offset", true);
+    }
+    if (tool != "write") {
+        return std::string(tool) + ": unsupported filesystem tool";
+    }
+    if (!arguments["text"].isString()) {
+        return "write: text must be a string";
+    }
+    if (arguments.isMember("overwrite") && !arguments["overwrite"].isBool()) {
+        return "write: overwrite must be a boolean";
+    }
+    const bool overwrite = arguments.get("overwrite", false).asBool();
+    if (!overwrite) {
+        return validate_positive(tool, arguments, "line", true);
+    }
+    if (!arguments.isMember("line_begin") || !arguments.isMember("line_end")) {
+        return "write: overwrite requires line_begin and line_end";
+    }
+    if (auto error = validate_positive(tool, arguments, "line_begin", true)) {
+        return error;
+    }
+    if (auto error = validate_positive(tool, arguments, "line_end", true)) {
+        return error;
+    }
+    const Json::Int64 begin = arguments["line_begin"].asInt64();
+    const Json::Int64 end   = arguments["line_end"].asInt64();
+    if (begin != 0 && end != 0 && end < begin) {
+        return "write: line_end is before line_begin";
+    }
+    return std::nullopt;
 }
 
 std::string todo_summary(const TodoList& todo)

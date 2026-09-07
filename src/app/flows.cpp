@@ -19,12 +19,23 @@ namespace {
     bool change_directory(
         ApplicationState& state, const std::filesystem::path& directory)
     {
-
-        bool r = state.environment->chdir(directory);
-        if (r) {
-            state.permissions->clear();
+        std::error_code error;
+        const std::filesystem::path canonical
+            = std::filesystem::weakly_canonical(directory, error);
+        if (error) {
+            return false;
         }
-        return r;
+        const auto current = state.environment->workspace();
+        if (current && current->working_directory == canonical) {
+            return true;
+        }
+        const bool changed = state.environment->chdir(canonical);
+        if (changed) {
+            state.permissions->clear();
+            return true;
+        }
+        const auto refreshed = state.environment->workspace();
+        return refreshed && refreshed->working_directory == canonical;
     }
 
     void start_turn(ApplicationState& state, std::string text,
@@ -367,13 +378,17 @@ void resolve_modal(ApplicationState& state, ModalResult result)
             state.session->set_error("Failed to save current session.");
             return;
         }
-        std::filesystem::path workspace;
-        const Status loaded = load_session(*path, *state.session, &workspace);
-        if (loaded == Status::OK) {
-            state.permissions->clear();
-        }
-        if (loaded != Status::OK || !change_directory(state, workspace)) {
+        LoadedSession loaded;
+        const Status status = read_session(*path, loaded);
+        if (status != Status::OK
+            || !change_directory(state, loaded.workspace)) {
             state.session->set_error("Failed to load session.");
+        } else {
+            state.session->restore(std::move(loaded.snapshot));
+            state.skills->clear();
+            state.permissions->clear();
+            state.runner->clear();
+            state.subagents->prune_completed();
         }
     }
     if (auto* connect = std::get_if<ConnectResult>(&result)) {

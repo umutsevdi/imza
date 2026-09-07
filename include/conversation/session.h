@@ -95,6 +95,11 @@ struct SessionSnapshot {
     SessionPersistence persistence   = UnsavedSession { };
 };
 
+struct LoadedSession {
+    SessionSnapshot snapshot;
+    std::filesystem::path workspace;
+};
+
 struct QueuedMessage {
     std::size_t id;
     std::string text;

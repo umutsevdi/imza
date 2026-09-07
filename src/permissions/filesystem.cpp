@@ -4,6 +4,7 @@
 #include <system_error>
 
 #include "network/json_io.h"
+#include "tools/tool.h"
 #include "workspace/environment.h"
 
 namespace ursa {
@@ -80,8 +81,9 @@ FilesystemEvaluation evaluate_filesystem_request(std::string_view tool,
         return reject("unsupported filesystem tool");
     }
     Json::Value normalized = parse_json(arguments);
-    if (!normalized.isObject()) {
-        return reject(std::string(tool) + ": arguments must be an object");
+    if (const auto error
+        = validate_filesystem_tool_arguments(tool, normalized)) {
+        return reject(*error);
     }
     const char* key = *operation == FilesystemRequest::Operation::EDIT
             || *operation == FilesystemRequest::Operation::WRITE
@@ -169,17 +171,17 @@ FilesystemEvaluation evaluate_filesystem_request(std::string_view tool,
         request };
 }
 
-std::vector<PermissionGrant> filesystem_session_grants(
+std::optional<PathGrant> filesystem_session_grant(
     const FilesystemRequest& request)
 {
     if (request.operation == FilesystemRequest::Operation::LIST) {
-        return { };
+        return std::nullopt;
     }
     const bool write = request.operation == FilesystemRequest::Operation::EDIT
         || request.operation == FilesystemRequest::Operation::WRITE;
-    return { PathGrant {
-        write ? PathGrant::Access::WRITE : PathGrant::Access::READ,
-        PathGrant::Target::FILE, request.target } };
+    return PathGrant { write ? PathGrant::Access::WRITE
+                             : PathGrant::Access::READ,
+        PathGrant::Target::FILE, request.target };
 }
 
 } // namespace ursa
