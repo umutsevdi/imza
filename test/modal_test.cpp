@@ -388,7 +388,7 @@ TEST_CASE("delegated-agent approvals surface through the main modal queue")
                 "delegate inspection", "delegate-1" }));
         } else if (child && !has_tool_result) {
             cb(ursa::make_tool_call_event({ "shell",
-                R"({"command":"echo child"})", "run probe", "child-shell" }));
+                R"({"command":"probe child"})", "run probe", "child-shell" }));
         } else {
             cb(ursa::make_delta_event(
                 child ? "child approved" : "main complete"));
@@ -434,7 +434,7 @@ TEST_CASE("subagent failure reports preserve the last completed tool output")
                 "delegate failing child", "delegate-failure" }));
         } else if (child && !has_tool_result) {
             cb(ursa::make_tool_call_event(
-                { "shell", R"({"command":"printf child-output"})",
+                { "shell", R"({"command":"sh -c 'printf child-output'"})",
                     "run command", "child-shell" }));
         } else if (child) {
             cb(ursa::make_error_event(
@@ -571,7 +571,7 @@ TEST_CASE("tool accept: output fills result, request half byte-stable")
         env.requests.push_back(req);
         if ((*round)++ == 0) {
             cb(ursa::make_tool_call_event(
-                { "shell", R"({"command":"ls -la"})", "list files" }));
+                { "shell", R"({"command":"inspect -la"})", "list files" }));
         }
         cb(ursa::make_done_event());
         return ursa::Status::OK;
@@ -583,7 +583,7 @@ TEST_CASE("tool accept: output fills result, request half byte-stable")
     const ursa::ToolCall* pending = env.pending_tool();
     REQUIRE(pending != nullptr);
     CHECK(pending->name == "shell");
-    CHECK(pending->args == R"({"command":"ls -la"})");
+    CHECK(pending->args == R"({"command":"inspect -la"})");
     CHECK_FALSE(pending->result.has_value());
 
     ursa::resolve_modal(*env.state,
@@ -596,20 +596,20 @@ TEST_CASE("tool accept: output fills result, request half byte-stable")
     const ursa::ToolCall* done = env.pending_tool();
     REQUIRE(done != nullptr);
     CHECK(done->name == "shell");
-    CHECK(done->args == R"({"command":"ls -la"})");
+    CHECK(done->args == R"({"command":"inspect -la"})");
     REQUIRE(done->result.has_value());
     CHECK(done->result->kind == ursa::ToolCall::Result::Kind::OUTPUT);
-    CHECK(done->result->text == "ran: ls -la");
+    CHECK(done->result->text == "ran: inspect -la");
 
     const auto& msgs = env.last_request().messages;
     REQUIRE(msgs.size() >= 2);
     CHECK(msgs.back().type == ursa::Message::Type::TOOL);
-    CHECK(msgs.back().content == "ran: ls -la");
+    CHECK(msgs.back().content == "ran: inspect -la");
     const auto& prev = msgs[msgs.size() - 2];
     CHECK(prev.type == ursa::Message::Type::ASSISTANT);
     REQUIRE(prev.tool_calls.size() == 1);
     CHECK(prev.tool_calls[0].name == "shell");
-    CHECK(prev.tool_calls[0].args == R"({"command":"ls -la"})");
+    CHECK(prev.tool_calls[0].args == R"({"command":"inspect -la"})");
 
     REQUIRE(env.last_request().tools.size() == 6);
     CHECK(env.last_request().tools[0].name == "shell");
@@ -667,7 +667,7 @@ TEST_CASE("esc on tool injects generic denial, appends nothing to transcript")
         env.requests.push_back(req);
         if ((*round)++ == 0) {
             cb(ursa::make_tool_call_event(
-                { "shell", R"({"command":"ls"})", "" }));
+                { "shell", R"({"command":"inspect"})", "" }));
         }
         cb(ursa::make_done_event());
         return ursa::Status::OK;
@@ -843,11 +843,11 @@ TEST_CASE("one-time shell approval does not authorize later calls")
         switch ((*round)++) {
         case 0:
             cb(ursa::make_tool_call_event(
-                { "shell", R"({"command":"echo one"})", "" }));
+                { "shell", R"({"command":"custom one"})", "" }));
             break;
         case 1:
             cb(ursa::make_tool_call_event(
-                { "shell", R"({"command":"echo two"})", "" }));
+                { "shell", R"({"command":"custom two"})", "" }));
             break;
         default: break;
         }
@@ -935,15 +935,15 @@ TEST_CASE("permission resolution follows attended and dangerous-skip flags")
     SUBCASE("attended asks")
     {
         Env env(static_cast<ursa::RuntimeFlag>(ursa::ATTENDED | ursa::SHELL));
-        env.stream = [](const ursa::ChatRequest& req,
-                         const ursa::StreamCallback& cb) {
-            if (req.messages.back().type == ursa::Message::Type::USER) {
-                cb(ursa::make_tool_call_event(
-                    { "shell", R"({"command":"echo attended"})", "", "call" }));
-            }
-            cb(ursa::make_done_event());
-            return ursa::Status::OK;
-        };
+        env.stream
+            = [](const ursa::ChatRequest& req, const ursa::StreamCallback& cb) {
+                  if (req.messages.back().type == ursa::Message::Type::USER) {
+                      cb(ursa::make_tool_call_event({ "shell",
+                          R"({"command":"custom attended"})", "", "call" }));
+                  }
+                  cb(ursa::make_done_event());
+                  return ursa::Status::OK;
+              };
         ursa::submit(*env.state, "go");
         REQUIRE(
             env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
@@ -958,15 +958,15 @@ TEST_CASE("permission resolution follows attended and dangerous-skip flags")
     {
         Env env(static_cast<ursa::RuntimeFlag>(
             ursa::ATTENDED | ursa::SHELL | ursa::SKIP_PERMISSIONS));
-        env.stream = [](const ursa::ChatRequest& req,
-                         const ursa::StreamCallback& cb) {
-            if (req.messages.back().type == ursa::Message::Type::USER) {
-                cb(ursa::make_tool_call_event(
-                    { "shell", R"({"command":"echo skipped"})", "", "call" }));
-            }
-            cb(ursa::make_done_event());
-            return ursa::Status::OK;
-        };
+        env.stream
+            = [](const ursa::ChatRequest& req, const ursa::StreamCallback& cb) {
+                  if (req.messages.back().type == ursa::Message::Type::USER) {
+                      cb(ursa::make_tool_call_event({ "shell",
+                          R"({"command":"custom skipped"})", "", "call" }));
+                  }
+                  cb(ursa::make_done_event());
+                  return ursa::Status::OK;
+              };
         ursa::submit(*env.state, "go");
         REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
         REQUIRE(env.ran_tools.size() == 1);
@@ -976,15 +976,15 @@ TEST_CASE("permission resolution follows attended and dangerous-skip flags")
     SUBCASE("unattended rejects without a modal")
     {
         Env env(ursa::SHELL);
-        env.stream = [](const ursa::ChatRequest& req,
-                         const ursa::StreamCallback& cb) {
-            if (req.messages.back().type == ursa::Message::Type::USER) {
-                cb(ursa::make_tool_call_event(
-                    { "shell", R"({"command":"echo blocked"})", "", "call" }));
-            }
-            cb(ursa::make_done_event());
-            return ursa::Status::OK;
-        };
+        env.stream
+            = [](const ursa::ChatRequest& req, const ursa::StreamCallback& cb) {
+                  if (req.messages.back().type == ursa::Message::Type::USER) {
+                      cb(ursa::make_tool_call_event({ "shell",
+                          R"({"command":"custom blocked"})", "", "call" }));
+                  }
+                  cb(ursa::make_done_event());
+                  return ursa::Status::OK;
+              };
         ursa::submit(*env.state, "go");
         REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
         CHECK(env.ran_tools.empty());
@@ -996,15 +996,15 @@ TEST_CASE("permission resolution follows attended and dangerous-skip flags")
     {
         Env env(static_cast<ursa::RuntimeFlag>(
             ursa::SHELL | ursa::SKIP_PERMISSIONS));
-        env.stream = [](const ursa::ChatRequest& req,
-                         const ursa::StreamCallback& cb) {
-            if (req.messages.back().type == ursa::Message::Type::USER) {
-                cb(ursa::make_tool_call_event(
-                    { "shell", R"({"command":"echo skipped"})", "", "call" }));
-            }
-            cb(ursa::make_done_event());
-            return ursa::Status::OK;
-        };
+        env.stream
+            = [](const ursa::ChatRequest& req, const ursa::StreamCallback& cb) {
+                  if (req.messages.back().type == ursa::Message::Type::USER) {
+                      cb(ursa::make_tool_call_event({ "shell",
+                          R"({"command":"custom skipped"})", "", "call" }));
+                  }
+                  cb(ursa::make_done_event());
+                  return ursa::Status::OK;
+              };
         ursa::submit(*env.state, "go");
         REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
         REQUIRE(env.ran_tools.size() == 1);

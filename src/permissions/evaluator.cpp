@@ -48,6 +48,91 @@ namespace {
             });
     }
 
+    bool matches_shell(const PermissionStore::Grants& grants,
+        const ShellCommandGrant& requested)
+    {
+        return std::any_of(
+            grants.begin(), grants.end(), [&](const auto& grant) {
+                const auto* shell = std::get_if<ShellCommandGrant>(&grant);
+                return shell != nullptr && shell->program == requested.program
+                    && (!shell->subcommand
+                        || shell->subcommand == requested.subcommand);
+            });
+    }
+
+    bool has_shell_program(
+        const PermissionStore::Grants& grants, std::string_view program)
+    {
+        return std::any_of(
+            grants.begin(), grants.end(), [&](const auto& grant) {
+                const auto* shell = std::get_if<ShellCommandGrant>(&grant);
+                return shell != nullptr && shell->program == program;
+            });
+    }
+
+    std::string shell_grant_reason(const PermissionStore::Grants& grants)
+    {
+        std::string reason
+            = "shell commands require approval · session scope: ";
+        for (const PermissionGrant& grant : grants) {
+            const auto& shell = std::get<ShellCommandGrant>(grant);
+            if (!reason.ends_with(": ")) {
+                reason += ", ";
+            }
+            reason += shell.program + " " + shell.subcommand.value_or("*");
+        }
+        return reason;
+    }
+
+    PermissionEvaluation evaluate_shell(const ToolCallRequest& original,
+        const Json::Value& arguments, const PermissionContext& context)
+    {
+        if (!context.grants) {
+            return reject(original, "permission grants are unavailable");
+        }
+        const ShellAnalysis analysis
+            = analyze_shell(arguments["command"].asString());
+        if (analysis.reuse == ShellAnalysis::Reuse::ONCE) {
+            return ask(
+                original, "shell syntax requires approval for each execution");
+        }
+
+        PermissionStore::Grants candidates;
+        for (const ShellInvocation& invocation : analysis.invocations) {
+            if (shell_builtin_allowed(invocation.program)) {
+                continue;
+            }
+            const ShellCommandGrant requested { invocation.program,
+                invocation.subcommand };
+            if (matches_shell(*context.grants, requested)) {
+                continue;
+            }
+            ShellCommandGrant candidate = requested;
+            if (has_shell_program(*context.grants, requested.program)) {
+                candidate.subcommand.reset();
+            }
+            for (PermissionGrant& pending : candidates) {
+                auto* shell = std::get_if<ShellCommandGrant>(&pending);
+                if (shell == nullptr || shell->program != candidate.program) {
+                    continue;
+                }
+                if (shell->subcommand != candidate.subcommand) {
+                    shell->subcommand.reset();
+                }
+                candidate.program.clear();
+                break;
+            }
+            if (!candidate.program.empty()) {
+                candidates.push_back(PermissionGrant { std::move(candidate) });
+            }
+        }
+        if (candidates.empty()) {
+            return accept(original);
+        }
+        const std::string reason = shell_grant_reason(candidates);
+        return ask(original, reason, std::move(candidates));
+    }
+
     PermissionEvaluation evaluate_skill(const ToolCallRequest& original,
         const PermissionContext& context, const Config& config,
         const std::vector<Skill>& skills, const SkillStore& loaded_skills)
@@ -161,8 +246,7 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
         if (const auto error = validate_shell_tool_arguments(arguments)) {
             return reject(std::move(request), *error);
         }
-        return ask(std::move(request),
-            "shell commands require approval until they can be classified");
+        return evaluate_shell(request, arguments, context);
     }
     return reject(
         std::move(request), "tool has no permission policy: " + original.name);

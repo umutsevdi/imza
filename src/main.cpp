@@ -45,12 +45,16 @@ int main(int argc, char** argv)
             std::function<void()> task) { main_thread.post(std::move(task)); },
         std::move(cfg), ursa::StreamFn { }, runtime);
     ursa::PermissionStore::Grants startup_grants;
-    startup_grants.reserve(cli.allowed_directories.size());
+    startup_grants.reserve(
+        cli.allowed_directories.size() + cli.allowed_commands.size());
     for (const std::filesystem::path& directory : cli.allowed_directories) {
         startup_grants.emplace_back(directory);
     }
+    for (const ursa::ShellCommandGrant& command : cli.allowed_commands) {
+        startup_grants.emplace_back(command);
+    }
     if (!state->permissions->install(std::move(startup_grants))) {
-        std::println(stderr, "failed to install allowed directories");
+        std::println(stderr, "failed to install startup permission grants");
         return 2;
     }
     if (cli.session_path) {
@@ -84,6 +88,17 @@ int main(int argc, char** argv)
     if (cli.variant && !state->providers->set_reasoning_effort(*cli.variant)) {
         std::println(stderr, "failed to select variant '{}'", *cli.variant);
         return 2;
+    }
+    if (cli.one_shot) {
+        const ursa::OneShotResult result
+            = ursa::run_one_shot(*state, main_thread, *cli.one_shot);
+        if (!result.output.empty()) {
+            std::println("{}", result.output);
+        }
+        if (!result.error.empty()) {
+            std::println(stderr, "{}", result.error);
+        }
+        return ursa::one_shot_exit_code(result.kind);
     }
     return ursa::run_repl(std::move(state), main_thread);
 }

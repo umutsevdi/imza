@@ -207,17 +207,71 @@ TEST_CASE("CLI config creates the file and opens an editor")
 #endif
 }
 
-TEST_CASE("CLI one-shot commands are explicit placeholders")
+TEST_CASE("CLI parses ask as an unattended Plan one-shot")
 {
     char program[] = "ursa";
     char ask[]     = "--ask";
     char query[]   = "summarize this project";
     char* argv[]   = { program, ask, query };
 
+    const CliResult result  = run_cli(3, argv);
+    const RuntimeFlag flags = runtime_flags_for(result);
+
+    REQUIRE(result.one_shot.has_value());
+    CHECK(result.one_shot->mode == OneShotRequest::Mode::ASK);
+    CHECK(result.one_shot->query == query);
+    CHECK((flags & RuntimeFlag::WEB) != RuntimeFlag::NONE);
+    CHECK((flags & RuntimeFlag::SHELL) != RuntimeFlag::NONE);
+    CHECK((flags & RuntimeFlag::ATTENDED) == RuntimeFlag::NONE);
+}
+
+TEST_CASE("CLI accepts command and command-subcommand startup grants")
+{
+    char program[]       = "ursa";
+    char option[]        = "--allow-cmd";
+    char command[]       = "git status";
+    char whole_command[] = "cmake";
+    char* argv[]         = { program, option, command, whole_command };
+
+    const CliResult result = run_cli(4, argv);
+
+    REQUIRE(result.allowed_commands.size() == 2);
+    CHECK(
+        result.allowed_commands[0] == (ShellCommandGrant { "git", "status" }));
+    CHECK(result.allowed_commands[1]
+        == (ShellCommandGrant { "cmake", std::nullopt }));
+}
+
+TEST_CASE("CLI rejects compound command startup grants")
+{
+    char program[] = "ursa";
+    char option[]  = "--allow-cmd";
+    char command[] = "git status && make";
+    char* argv[]   = { program, option, command };
+
     const CliResult result = run_cli(3, argv);
 
     CHECK_FALSE(result.continue_as_interactive);
     CHECK(result.exit_code == 2);
+}
+
+TEST_CASE("CLI parses exec with explicit shell access")
+{
+    char program[] = "ursa";
+    char exec[]    = "--exec";
+    char query[]   = "build this project";
+    char shell[]   = "--shell";
+    char enabled[] = "true";
+    char* argv[]   = { program, exec, query, shell, enabled };
+
+    const CliResult result  = run_cli(5, argv);
+    const RuntimeFlag flags = runtime_flags_for(result);
+
+    REQUIRE(result.one_shot.has_value());
+    CHECK(result.one_shot->mode == OneShotRequest::Mode::EXEC);
+    CHECK(result.one_shot->query == query);
+    CHECK((flags & RuntimeFlag::SHELL) != RuntimeFlag::NONE);
+    CHECK((flags & RuntimeFlag::ATTENDED) == RuntimeFlag::NONE);
 }
 
 TEST_CASE("run_slash emits application effects")

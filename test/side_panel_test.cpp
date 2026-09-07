@@ -138,7 +138,7 @@ TEST_CASE("permissions box renders only custom settings and grants")
         ursa::ExternalGrant { "/outside" },
         ursa::ExternalGrant { "/outside/generated" },
         ursa::SkillGrant { "/skills/docs/SKILL.md" },
-        ursa::ShellCommandGrant { "cmake", { "--build", "build" }, "/work" },
+        ursa::ShellCommandGrant { "cmake", "--build" },
     };
     const auto flags = static_cast<ursa::RuntimeFlag>(
         ursa::SHELL | ursa::ATTENDED | ursa::SKIP_PERMISSIONS);
@@ -160,7 +160,7 @@ TEST_CASE("permissions box renders only custom settings and grants")
     CHECK(out.find("write ") == std::string::npos);
     CHECK(out.find("Skills") == std::string::npos);
     CHECK(out.find("docs") == std::string::npos);
-    CHECK(out.find("cmake --build build") != std::string::npos);
+    CHECK(out.find("cmake --build") != std::string::npos);
 }
 
 TEST_CASE("permissions view reflects installed external grants")

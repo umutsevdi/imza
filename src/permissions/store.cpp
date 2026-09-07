@@ -30,14 +30,8 @@ namespace {
                     return !error && std::filesystem::is_directory(value, error)
                         && !error;
                 } else if constexpr (std::is_same_v<T, ShellCommandGrant>) {
-                    if (value.program.empty() || value.working_root.empty()
-                        || !value.working_root.is_absolute()) {
-                        return false;
-                    }
-                    std::error_code error;
-                    value.working_root = std::filesystem::weakly_canonical(
-                        value.working_root, error);
-                    return !error;
+                    return !value.program.empty()
+                        && (!value.subcommand || !value.subcommand->empty());
                 } else {
                     if (!value.path.is_absolute() || value.path.empty()) {
                         return false;
@@ -115,7 +109,8 @@ bool PermissionStore::matches(const ShellCommandGrant& grant) const
     const Snapshot grants = snapshot();
     return std::any_of(grants->begin(), grants->end(), [&](const auto& entry) {
         const auto* stored = std::get_if<ShellCommandGrant>(&entry);
-        return stored != nullptr && *stored == grant;
+        return stored != nullptr && stored->program == grant.program
+            && (!stored->subcommand || stored->subcommand == grant.subcommand);
     });
 }
 
@@ -162,7 +157,9 @@ bool PermissionStore::_covers(
     }
     if (const auto* command = std::get_if<ShellCommandGrant>(&stored)) {
         const auto& other = std::get<ShellCommandGrant>(requested);
-        return *command == other;
+        return command->program == other.program
+            && (!command->subcommand
+                || command->subcommand == other.subcommand);
     }
     return std::get<SkillGrant>(stored) == std::get<SkillGrant>(requested);
 }

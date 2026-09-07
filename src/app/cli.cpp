@@ -3,6 +3,7 @@
 #include "conversation/persistence.h"
 #include "platform/command_runner.h"
 #include "platform/config.h"
+#include "tools/tool.h"
 
 #include <CLI/CLI.hpp>
 
@@ -138,19 +139,18 @@ CliResult run_cli(int argc, char** argv)
     std::string ask;
     std::string exec;
     std::vector<std::string> allowed_directories;
+    std::vector<std::string> allowed_commands;
     bool config_requested = false;
     bool skip_permissions = false;
     app.add_flag("-c,--config", config_requested, "Open the config file");
     app.add_flag("--skip-permissions", skip_permissions,
         "Automatically allow permission prompts for this process");
-    auto* ask_option  = app.add_option("-a,--ask", ask,
-                               "Run a one-shot read-only agent query "
-                               "(unimplemented)")
-                            ->type_name("<query>");
-    auto* exec_option = app.add_option("-e,--exec", exec,
-                               "Run a one-shot build agent query "
-                               "(unimplemented)")
-                            ->type_name("<query>");
+    auto* ask_option = app.add_option("-a,--ask", ask,
+                              "Run a one-shot read-only agent query")
+                           ->type_name("<query>");
+    auto* exec_option
+        = app.add_option("-e,--exec", exec, "Run a one-shot build agent query")
+              ->type_name("<query>");
     ask_option->excludes(exec_option);
     app.add_option("-s,--session", session_arguments,
            "Open a session by ID, list with 'ls', or delete with 'rm ID'")
@@ -171,18 +171,34 @@ CliResult run_cli(int argc, char** argv)
         ->type_name("<bool>")
         ->check(CLI::IsMember({ "true", "false" }));
     app.add_option("-S,--shell", shell,
-           "Enable or disable the shell tool (interactive default: true)")
+           "Enable or disable the shell tool (default: true)")
         ->type_name("<bool>")
         ->check(CLI::IsMember({ "true", "false" }));
     app.add_option("-A,--allow-dir", allowed_directories,
            "Allow access to one or more additional directories")
         ->type_name("<directory>...")
         ->check(CLI::ExistingDirectory);
+    app.add_option("--allow-cmd", allowed_commands,
+           "Allow one or more shell commands for this session")
+        ->type_name("<command>...");
 
     try {
         app.parse(argc, argv);
     } catch (const CLI::ParseError& error) {
         return finished(app.exit(error));
+    }
+
+    std::vector<ShellCommandGrant> command_grants;
+    command_grants.reserve(allowed_commands.size());
+    for (const std::string& command : allowed_commands) {
+        const ShellAnalysis analysis = analyze_shell(command);
+        if (analysis.reuse != ShellAnalysis::Reuse::SESSION
+            || analysis.invocations.size() != 1) {
+            std::println(stderr, "invalid --allow-cmd value: '{}'", command);
+            return finished(2);
+        }
+        const ShellInvocation& invocation = analysis.invocations.front();
+        command_grants.push_back({ invocation.program, invocation.subcommand });
     }
 
     auto apply_runtime_options = [&](CliResult& result) {
@@ -191,6 +207,7 @@ CliResult run_cli(int argc, char** argv)
             result.allowed_directories.push_back(
                 std::filesystem::absolute(directory).lexically_normal());
         }
+        result.allowed_commands = command_grants;
         if (!working_directory.empty()) {
             result.working_directory = working_directory;
         }
@@ -207,18 +224,24 @@ CliResult run_cli(int argc, char** argv)
             result.shell = shell == "true";
         }
     };
+    auto apply_one_shot = [&](CliResult& result) {
+        if (ask_option->count() == 0 && exec_option->count() == 0) {
+            return;
+        }
+        result.one_shot = OneShotRequest { ask_option->count() > 0
+                ? OneShotRequest::Mode::ASK
+                : OneShotRequest::Mode::EXEC,
+            ask_option->count() > 0 ? std::move(ask) : std::move(exec) };
+    };
 
     if (config_requested) {
         return finished(edit_config());
-    }
-    if (ask_option->count() > 0 || exec_option->count() > 0) {
-        std::println("unimplemented");
-        return finished(2);
     }
 
     if (session_arguments.empty()) {
         CliResult result;
         apply_runtime_options(result);
+        apply_one_shot(result);
         return result;
     }
     if (session_arguments.size() == 1 && session_arguments.front() == "ls") {
@@ -245,18 +268,23 @@ CliResult run_cli(int argc, char** argv)
 
     CliResult result;
     apply_runtime_options(result);
+    apply_one_shot(result);
     result.session_path = *path;
     return result;
 }
 
 RuntimeFlag runtime_flags_for(const CliResult& result)
 {
-    int flags = interactive_runtime_flags();
+    int flags = result.one_shot.has_value()
+        ? RuntimeFlag::WEB | RuntimeFlag::SHELL
+        : interactive_runtime_flags();
     if (!result.web.value_or(true)) {
         flags &= ~RuntimeFlag::WEB;
     }
     if (!result.shell.value_or(true)) {
         flags &= ~RuntimeFlag::SHELL;
+    } else {
+        flags |= RuntimeFlag::SHELL;
     }
     if (result.skip_permissions) {
         flags |= RuntimeFlag::SKIP_PERMISSIONS;

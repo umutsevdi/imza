@@ -183,6 +183,15 @@ TEST_CASE("CLI opens and removes saved sessions by ID")
     REQUIRE(open_result.session_path.has_value());
     CHECK(*open_result.session_path == saved.front().path);
 
+    char ask[]                 = "--ask";
+    char query[]               = "continue";
+    char* one_shot_argv[]      = { program, ask, query, session, id.data() };
+    const auto one_shot_result = ursa::run_cli(5, one_shot_argv);
+
+    REQUIRE(one_shot_result.one_shot.has_value());
+    CHECK(one_shot_result.one_shot->mode == ursa::OneShotRequest::Mode::ASK);
+    CHECK(one_shot_result.session_path == saved.front().path);
+
     char remove[]       = "rm";
     char* remove_argv[] = { program, session, remove, id.data() };
     const ursa::CliResult remove_result = ursa::run_cli(4, remove_argv);
