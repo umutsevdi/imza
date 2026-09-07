@@ -81,29 +81,9 @@ namespace {
             *state.skills);
     }
 
-    bool validate_skill_mentions(ApplicationState& state, std::string_view text)
-    {
-        for (const std::string& name : skill_mention_names(text)) {
-            Json::Value args(Json::objectValue);
-            args["name"]                          = name;
-            const PermissionEvaluation evaluation = evaluate_permission(state,
-                { "skill", write_json(args), "Load skill " + name,
-                    "manual-skill", "", false },
-                state.session->mode());
-            if (evaluation.decision.kind == PermissionDecision::Kind::REJECT) {
-                state.session->set_error(evaluation.decision.reason);
-                return false;
-            }
-        }
-        return true;
-    }
-
     void submit_with_skills(ApplicationState& state, std::string text,
         std::vector<FileAttachment> attachments)
     {
-        if (!validate_skill_mentions(state, text)) {
-            return;
-        }
         const std::vector<Skill> catalog = state.environment->skills();
         std::vector<Skill> awaiting;
         for (const Skill& skill : mentioned_skills(catalog, text)) {

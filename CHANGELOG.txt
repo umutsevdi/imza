@@ -7,7 +7,7 @@ ISSUES & SUPPORT: https://github.com/umutsevdi/ursa/issues
 
 CHANGELOG
 -------------------------------------------------------------------------------
-0.1.2 - 2026-09-10
+0.1.2 - 2026-09-08
 -------------------------------------------------------------------------------
 [https://github.com/umutsevdi/ursa/releases/tag/v0.1.2]
 
@@ -20,6 +20,7 @@ Changes:
     - Performance improvements on large conversations.
     - Performance improvements on large diff reviews.
     - Added headless mode.
+    - Various other small bug fixes.
 
 -------------------------------------------------------------------------------
 0.1.1 - 2026-09-05
