@@ -771,6 +771,19 @@ TEST_CASE("skill policy and runtime grants use the same central evaluator")
         == PermissionDecision::Kind::REJECT);
 }
 
+TEST_CASE("unknown dollar tokens remain ordinary chat text")
+{
+    const auto immediate = [](std::function<void()> task) { task(); };
+    auto state           = make_application_state(immediate, Config { });
+
+    for (const char* text :
+        { "It costs $5", "Use $HOME", "Try $not-a-skill" }) {
+        state->session->clear_error();
+        submit(*state, text);
+        CHECK(state->session->error() == "No model selected — run /model.");
+    }
+}
+
 TEST_CASE("skill evaluation binds approval to the canonical instruction path")
 {
 #ifdef _WIN32

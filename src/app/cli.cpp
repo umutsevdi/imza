@@ -174,11 +174,11 @@ CliResult run_cli(int argc, char** argv)
            "Enable or disable the shell tool (default: true)")
         ->type_name("<bool>")
         ->check(CLI::IsMember({ "true", "false" }));
-    app.add_option("-A,--allow-dir", allowed_directories,
+    app.add_option("-D,--allow-dir", allowed_directories,
            "Allow access to one or more additional directories")
         ->type_name("<directory>...")
         ->check(CLI::ExistingDirectory);
-    app.add_option("--allow-cmd", allowed_commands,
+    app.add_option("-C,--allow-cmd", allowed_commands,
            "Allow one or more shell commands for this session")
         ->type_name("<command>...");
 
