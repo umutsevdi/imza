@@ -1,17 +1,19 @@
 # Ursa
 
-Ursa is a native C++ coding agent built around a small core, lazy-loaded 
-capabilities, and cheap process isolation.
+Ursa is a batteries-included, model-agnostic coding agent with native
+performance and a small runtime footprint.
 
-**\~4 MB binary · \~8 MB idle RAM · \~20–40 MB during typical agentic work**
+**\~20 MB binary · \~5-8 MB RAM at startup · \~20–40 MB during typical agentic work[^1]**
 
-Bring your own model connection, open Ursa in a project, and describe the 
+Bring your own model, open Ursa in a project, and describe the
 outcome you want. Ursa reads the project instructions, gathers context, asks 
 questions when needed, and works through the task with visible reasoning,
-tool calls, diffs, and approval prompts.
+tool calls, diffs, and approval prompts along the way.
 
 > Ursa is not lightweight because it does less.
 > It is lightweight because it was designed that way.
+
+Download the [latest release](https://github.com/umutsevdi/ursa/releases/latest).
 
 ![ursa-layout](./screenshots/layout.png)
 
@@ -31,26 +33,44 @@ comments, then send the findings directly back to Plan mode.
 **Plan → Build → Review → Plan → Build**
 
 ## Highlights
-- Native terminal UI
-- Visible reasoning, tool calls, diffs, token usage, and cost
-- Scoped one-time and session approval controls for filesystem and skill access
+
+- Native terminal UI with a small runtime footprint
+- Plan → Build → Review workflow
+- Interactive diffs and AI-assisted code review
 - Up to five concurrent research or build subagents
-- Separate persistent transcript for every subagent
-- Different models and reasoning variants by agent role
-- Automatic context compaction without removing visible chat history
-- Local persistent sessions
-- Project and global skills
-- OpenAI-compatible, Anthropic Messages, and local model APIs
-- Lazy-loaded subsystems that consume resources only when needed
-- AGENTS.md, CLAUDE.md, and GEMINI.md support
+- Shell-aware, scoped permission controls
+- Bring-your-own-model support
+- Persistent sessions, transcripts, and automatic context compaction
 
 ![ursa-layout](./screenshots/review.png)
 
 ## Bring Your Own Model
-Ursa is provider-independent.
+
+Ursa works with OpenAI-compatible endpoints and the Anthropic Messages API,
+including locally hosted OpenAI-compatible models.
 
 Use your own API connection, a subscription-backed connection where supported, 
 or a locally hosted OpenAI-compatible model.
+
+## Headless mode
+
+Run Ursa non-interactively from scripts, CI jobs, or other development tools.
+Use `--ask` for a one-shot read-only Plan query or `--exec` for a one-shot
+Build task.
+
+Grant only the additional directory and command/subcommand pairs the task
+needs:
+
+```sh
+./build/debug/ursa --exec "build the project and summarize the changes" \
+  --allow-dir ../shared-assets \
+  --allow-cmd "git status" "cmake --build"
+```
+
+`--allow-dir` grants access beneath that directory. A quoted `--allow-cmd`
+value such as `"git status"` grants only that command/subcommand pair; a value
+containing only the program name grants all of its subcommands for the current
+session.
 
 ## Capabilities
 
@@ -76,24 +96,23 @@ or a locally hosted OpenAI-compatible model.
 - [X] OpenAI-compatible APIs
 - [X] Anthropic Messages API
 - [X] Local OpenAI-compatible servers
-- [X] Web search, fetch
+- [X] Web search and page fetch
 - [X] Subagent configuration
-- [X] Syntax Highlighting
+- [X] Syntax highlighting
 - [X] Headless mode
-- [X] Shell-aware command permissions and global command rules
+- [X] Shell-aware permissions with program and subcommand grants
 
-### To Do
+### Roadmap
 - [ ] MCP
-- [ ] LSP integration
 - [ ] Image or other multimodal prompt attachments
-- [ ] Mid session directory change
-- [ ] Usage analytics UI (Monthly)
-- [ ] Capabilities system (Exposing preconfigured Python based extensions as tools)
+- [ ] Mid session directory changes
+- [ ] Monthly usage analytics (local)
+- [ ] Python based extensions
 - [ ] Notifications
 
-## Build
+## Build From Source
 
-Ursa requires a C++23 compiler, CMake, Python 3, and CURL.
+Ursa requires a C++23 compiler, CMake, Python 3, and libcurl development files.
 ```sh
 git submodule update --init --recursive
 cmake -B build -DCMAKE_BUILD_TYPE=Debug -DURSA_BUILD_TESTS=ON \
@@ -111,54 +130,5 @@ Start Ursa from the repository you want it to work in:
 On first launch, open `/connect` to add a provider, then use `/model` to choose
 a model. Type `/` in the chat input to browse the available commands.
 
-## Commands
-
-| Command | Purpose |
-| --- | --- |
-| `/new` | Save the current session and start another |
-| `/connect` | Add and manage provider connections |
-| `/model` | Select the active model |
-| `/variant` | Select the reasoning effort |
-| `/subagents` | Configure models for delegated roles |
-| `/sessions` | Load or delete saved sessions |
-| `/skills` | Manage discovered skills |
-| `/prompt` | Inspect the generated system prompt |
-| `/exit` | Save and quit |
-
-## Headless mode
-
-Use `--ask` for a one-shot Plan-mode query or `--exec` for a one-shot Build-mode
-task. Headless runs do not show permission prompts: operations that need
-approval are blocked unless they were granted at startup.
-
-Grant only the additional directory and command/subcommand pairs the task
-needs:
-
-```sh
-./build/debug/ursa --exec "build the project and summarize the changes" \
-  --allow-dir ../shared-assets \
-  --allow-cmd "git status" "cmake --build"
-```
-
-`--allow-dir` grants access beneath that directory. A quoted `--allow-cmd`
-value such as `"git status"` grants only that command/subcommand pair; a value
-containing only the program name grants all of its subcommands for the current
-session.
-
-## Local data
-
-Ursa stores `ursa/config.json` in the platform configuration directory:
-
-- Linux: `$XDG_CONFIG_HOME/ursa/config.json`, or
-  `$HOME/.config/ursa/config.json`
-- macOS: `$HOME/Library/Application Support/ursa/config.json`
-- Windows: `%APPDATA%\ursa\config.json`
-
-Saved sessions use the platform data directory:
-
-- Linux: `$XDG_DATA_HOME/ursa`, or `$HOME/.local/share/ursa`
-- macOS: `$HOME/Library/Application Support/ursa`
-- Windows: `%APPDATA%\ursa`
-
-Provider credentials are currently stored as plain JSON. Protect the config
-file with user-only filesystem permissions.
+[^1]: Memory use may increase with conversation history, loaded skills, and
+Tree-sitter languages used in Review mode.

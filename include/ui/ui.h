@@ -25,8 +25,8 @@
 
 namespace ursa {
 
-class ApplicationState;
 class Session;
+struct ApplicationState;
 struct ReviewHunk;
 struct ReviewLine;
 struct RepositoryState;
