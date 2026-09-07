@@ -339,8 +339,7 @@ Status save_session(Session& session)
     return Status::OK;
 }
 
-Status load_session(const std::filesystem::path& path, Session& session,
-    std::filesystem::path* workspace)
+Status read_session(const std::filesystem::path& path, LoadedSession& loaded)
 {
     std::ifstream file(path, std::ios::binary);
     if (!file) {
@@ -374,10 +373,22 @@ Status load_session(const std::filesystem::path& path, Session& session,
             snapshot.items.push_back(std::move(*item));
         }
     }
-    if (workspace != nullptr) {
-        *workspace = workspace_path;
+    loaded = LoadedSession { std::move(snapshot), workspace_path };
+    return Status::OK;
+}
+
+Status load_session(const std::filesystem::path& path, Session& session,
+    std::filesystem::path* workspace)
+{
+    LoadedSession loaded;
+    const Status status = read_session(path, loaded);
+    if (status != Status::OK) {
+        return status;
     }
-    session.restore(std::move(snapshot));
+    if (workspace != nullptr) {
+        *workspace = loaded.workspace;
+    }
+    session.restore(std::move(loaded.snapshot));
     return Status::OK;
 }
 

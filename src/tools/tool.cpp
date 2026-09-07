@@ -124,9 +124,9 @@ namespace {
 
     ToolOutput read_run(const Json::Value& args)
     {
-        if (!args.isObject() || !args["path"].isString()
-            || args["path"].asString().empty()) {
-            return error("read: 'path' must be a non-empty string");
+        if (const auto validation
+            = validate_filesystem_tool_arguments("read", args)) {
+            return error(*validation);
         }
         const std::string path = args["path"].asString();
 
@@ -150,21 +150,13 @@ namespace {
         }
 
         std::size_t begin = 1;
-        if (args["line_begin"].isIntegral()) {
-            const auto raw = args["line_begin"].asInt64();
-            if (raw < 1) {
-                return error("read: line_begin must be 1 or greater");
-            }
-            begin = static_cast<std::size_t>(raw);
+        if (args.isMember("line_begin")) {
+            begin = static_cast<std::size_t>(args["line_begin"].asInt64());
         }
         bool end_given  = false;
         std::size_t end = 0;
-        if (args["line_end"].isIntegral()) {
-            const auto raw = args["line_end"].asInt64();
-            if (raw < 1) {
-                return error("read: line_end must be 1 or greater");
-            }
-            end       = static_cast<std::size_t>(raw);
+        if (args.isMember("line_end")) {
+            end       = static_cast<std::size_t>(args["line_end"].asInt64());
             end_given = true;
         }
 
@@ -183,10 +175,6 @@ namespace {
                 + " exceeds file length " + std::to_string(length) + ": "
                 + path);
         }
-        if (end_given && end < begin) {
-            return error("read: line_end is before line_begin");
-        }
-
         bool truncated = false;
         if (!end_given) {
             const std::size_t capped = begin + MAX_READ_LINES - 1;
@@ -209,6 +197,10 @@ namespace {
 
     ToolOutput list_run(const Json::Value& args)
     {
+        if (const auto validation
+            = validate_filesystem_tool_arguments("list", args)) {
+            return error(*validation);
+        }
         std::string dir = ".";
         if (args.isObject() && args["path"].isString()
             && !args["path"].asString().empty()) {
@@ -502,28 +494,16 @@ namespace {
 
     ToolOutput edit_run(const Json::Value& args)
     {
-        if (!args.isObject() || !args["file_path"].isString()
-            || args["file_path"].asString().empty()) {
-            return error("edit: 'file_path' must be a non-empty string");
+        if (const auto validation
+            = validate_filesystem_tool_arguments("edit", args)) {
+            return error(*validation);
         }
-        const std::string path = args["file_path"].asString();
-        if (!args["old_string"].isString()
-            || args["old_string"].asString().empty()) {
-            return error("edit: 'old_string' must be a non-empty string");
-        }
+        const std::string path  = args["file_path"].asString();
         const std::string old   = args["old_string"].asString();
-        const std::string fresh = args["new_string"].isString()
-            ? args["new_string"].asString()
-            : "";
+        const std::string fresh = args["new_string"].asString();
 
         long replace_count = get_int(args["replace_count"], 1);
-        if (replace_count < 0) {
-            return error("edit: replace_count must be 0 or greater");
-        }
-        long offset = get_int(args["offset"], 0);
-        if (offset < 0) {
-            return error("edit: offset must be 0 or greater");
-        }
+        long offset        = get_int(args["offset"], 0);
 
         std::string content, err;
         if (!load_text(path, content, err)) {
@@ -586,14 +566,11 @@ namespace {
 
     ToolOutput write_run(const Json::Value& args)
     {
-        if (!args.isObject() || !args["file_path"].isString()
-            || args["file_path"].asString().empty()) {
-            return error("write: 'file_path' must be a non-empty string");
+        if (const auto validation
+            = validate_filesystem_tool_arguments("write", args)) {
+            return error(*validation);
         }
         const std::string path = args["file_path"].asString();
-        if (!args["text"].isString()) {
-            return error("write: 'text' must be a string");
-        }
         const std::string text = args["text"].asString();
 
         const bool overwrite
@@ -621,10 +598,7 @@ namespace {
 
         if (!overwrite) {
             const long line = get_int(args["line"], 0);
-            if (line < 0) {
-                return error("write: line must be 0 or greater");
-            }
-            std::size_t at = static_cast<std::size_t>(line);
+            std::size_t at  = static_cast<std::size_t>(line);
             if (at > old_lines.size()) {
                 at = old_lines.size();
             }
@@ -640,23 +614,8 @@ namespace {
                 path, old_lines, new_lines);
         }
 
-        if (!args["line_begin"].isIntegral()
-            && !args["line_begin"].isString()) {
-            return error(
-                "write: block-replace requires line_begin and line_end");
-        }
-        if (!args["line_end"].isIntegral() && !args["line_end"].isString()) {
-            return error(
-                "write: block-replace requires line_begin and line_end");
-        }
         const long lb = get_int(args["line_begin"], 0);
         const long le = get_int(args["line_end"], 0);
-        if (lb < 0 || le < 0) {
-            return error("write: line_begin/line_end must be 0 or greater");
-        }
-        if (le != 0 && lb != 0 && le < lb) {
-            return error("write: line_end is before line_begin");
-        }
 
         std::size_t begin_idx = lb == 0 ? 0 : static_cast<std::size_t>(lb - 1);
         std::size_t end_exclusive

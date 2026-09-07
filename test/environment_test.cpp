@@ -113,6 +113,34 @@ TEST_CASE("system environment populates the core fields synchronously")
     CHECK(sys->today[7] == '-');
 }
 
+TEST_CASE("Ursa temporary directory is reusable and canonical")
+{
+    const auto base = std::filesystem::temp_directory_path()
+        / "ursa_temporary_directory_test";
+    std::error_code error;
+    std::filesystem::remove_all(base, error);
+    std::filesystem::create_directories(base / "real", error);
+    REQUIRE_FALSE(error);
+#ifdef _WIN32
+    const auto input = base / "real";
+#else
+    std::filesystem::create_directory_symlink(base / "real", base / "link");
+    const auto input = base / "link";
+#endif
+
+    const auto first  = ursa::prepare_ursa_temporary_directory(input);
+    const auto second = ursa::prepare_ursa_temporary_directory(input);
+    CHECK(first == second);
+    CHECK(first == std::filesystem::weakly_canonical(input / "ursa"));
+    CHECK(std::filesystem::is_directory(first));
+
+    std::filesystem::remove_all(first, error);
+    write_file(first, "collision");
+    CHECK_THROWS_AS(ursa::prepare_ursa_temporary_directory(input),
+        std::filesystem::filesystem_error);
+    std::filesystem::remove_all(base, error);
+}
+
 TEST_CASE("environment becomes ready after the workspace scan")
 {
     ursa::Environment env;
@@ -173,6 +201,23 @@ TEST_CASE("workspace carries an instruction and project skills when rooted")
 
     std::filesystem::current_path(original);
     std::filesystem::remove_all(root);
+}
+
+TEST_CASE("workspace scan retains nested cwd and discovers repository root")
+{
+    const auto root
+        = std::filesystem::temp_directory_path() / "ursa_nested_wsroot";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root / ".git", error);
+    std::filesystem::create_directories(root / "nested" / "deeper", error);
+    REQUIRE_FALSE(error);
+
+    const auto workspace = ursa::scan_workspace(root / "nested" / "deeper");
+    CHECK(workspace.working_directory == root / "nested" / "deeper");
+    CHECK(workspace.project_root == root);
+
+    std::filesystem::remove_all(root, error);
 }
 
 TEST_CASE("load_agent_file prefers AGENTS.md over other candidates")

@@ -16,6 +16,38 @@ namespace {
             || (!relative.empty() && *relative.begin() != "..");
     }
 
+    bool normalize_grant(PermissionGrant& grant)
+    {
+        return std::visit(
+            [](auto& value) {
+                using T = std::decay_t<decltype(value)>;
+                if constexpr (std::is_same_v<T, ShellCommandGrant>) {
+                    if (value.program.empty()) {
+                        return false;
+                    }
+                    if (!value.working_root) {
+                        return true;
+                    }
+                    if (!value.working_root->is_absolute()) {
+                        return false;
+                    }
+                    std::error_code error;
+                    *value.working_root = std::filesystem::weakly_canonical(
+                        *value.working_root, error);
+                    return !error;
+                } else {
+                    if (!value.path.is_absolute() || value.path.empty()) {
+                        return false;
+                    }
+                    std::error_code error;
+                    value.path
+                        = std::filesystem::weakly_canonical(value.path, error);
+                    return !error;
+                }
+            },
+            grant);
+    }
+
 } // namespace
 
 PermissionStore::PermissionStore()
@@ -31,7 +63,7 @@ PermissionStore::Snapshot PermissionStore::snapshot() const
 
 bool PermissionStore::install(Grants grants)
 {
-    if (!std::all_of(grants.begin(), grants.end(), _valid)) {
+    if (!std::all_of(grants.begin(), grants.end(), normalize_grant)) {
         return false;
     }
     if (grants.empty()) {
@@ -126,25 +158,6 @@ bool PermissionStore::_covers(
                 command->argv.begin(), command->argv.end(), other.argv.begin());
     }
     return std::get<SkillGrant>(stored) == std::get<SkillGrant>(requested);
-}
-
-bool PermissionStore::_valid(const PermissionGrant& grant)
-{
-    return std::visit(
-        [](const auto& value) {
-            using T = std::decay_t<decltype(value)>;
-            if constexpr (std::is_same_v<T, PathGrant>) {
-                return value.path.is_absolute() && !value.path.empty()
-                    && value.path.lexically_normal() == value.path;
-            } else if constexpr (std::is_same_v<T, ShellCommandGrant>) {
-                return !value.program.empty()
-                    && (!value.working_root
-                        || value.working_root->is_absolute());
-            } else {
-                return value.path.is_absolute() && !value.path.empty();
-            }
-        },
-        grant);
 }
 
 bool PermissionStore::_matches(

@@ -252,34 +252,24 @@ std::optional<InstructionFile> load_agent_file(
     return std::nullopt;
 }
 
-namespace {
-
-    std::filesystem::path prepare_temporary_directory()
-    {
-        std::error_code error;
-        const std::filesystem::path directory
-            = std::filesystem::temp_directory_path(error) / "ursa";
-        if (error) {
-            throw std::filesystem::filesystem_error(
-                "cannot resolve temporary directory", error);
-        }
-        std::filesystem::create_directories(directory, error);
-        if (error || !std::filesystem::is_directory(directory, error)
-            || error) {
-            throw std::filesystem::filesystem_error(
-                "cannot create Ursa temporary directory", directory, error);
-        }
-        const std::filesystem::path canonical
-            = std::filesystem::weakly_canonical(directory, error);
-        if (error) {
-            throw std::filesystem::filesystem_error(
-                "cannot canonicalize Ursa temporary directory", directory,
-                error);
-        }
-        return canonical;
+std::filesystem::path prepare_ursa_temporary_directory(
+    const std::filesystem::path& base)
+{
+    std::error_code error;
+    const std::filesystem::path directory = base / "ursa";
+    std::filesystem::create_directories(directory, error);
+    if (error || !std::filesystem::is_directory(directory, error) || error) {
+        throw std::filesystem::filesystem_error(
+            "cannot create Ursa temporary directory", directory, error);
     }
-
-} // namespace
+    const std::filesystem::path canonical
+        = std::filesystem::weakly_canonical(directory, error);
+    if (error) {
+        throw std::filesystem::filesystem_error(
+            "cannot canonicalize Ursa temporary directory", directory, error);
+    }
+    return canonical;
+}
 
 SystemEnvironment detect_system_environment()
 {
@@ -288,9 +278,17 @@ SystemEnvironment detect_system_environment()
         environment.os_name, environment.os_version, environment.default_shell);
     detect_package_managers(environment.package_managers);
     detect_global_skills(environment.global_skills);
-    environment.temporary_directory = prepare_temporary_directory();
-    environment.has_git             = find_in_path("git");
-    environment.today               = format_local_time("%Y-%m-%d");
+    std::error_code error;
+    const std::filesystem::path temporary_directory
+        = std::filesystem::temp_directory_path(error);
+    if (error) {
+        throw std::filesystem::filesystem_error(
+            "cannot resolve temporary directory", error);
+    }
+    environment.temporary_directory
+        = prepare_ursa_temporary_directory(temporary_directory);
+    environment.has_git = find_in_path("git");
+    environment.today   = format_local_time("%Y-%m-%d");
     return environment;
 }
 

@@ -58,7 +58,6 @@ public:
     std::size_t size() const;
 
 private:
-    static bool _valid(const PermissionGrant& grant);
     static bool _covers(
         const PermissionGrant& stored, const PermissionGrant& requested);
     static bool _matches(const PathGrant& stored, const PathGrant& requested);

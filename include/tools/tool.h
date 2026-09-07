@@ -62,6 +62,8 @@ ProjectTarget classify_project_target(
 
 std::optional<TodoList> parse_todo_args(const Json::Value& args);
 std::optional<QuestionForm> parse_ask_args(const std::string& args);
+std::optional<std::string> validate_filesystem_tool_arguments(
+    std::string_view tool, const Json::Value& arguments);
 std::string todo_summary(const TodoList& todo);
 
 Tool make_read_tool();

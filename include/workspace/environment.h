@@ -35,6 +35,8 @@ struct WorkspaceEnvironment {
 };
 
 SystemEnvironment detect_system_environment();
+std::filesystem::path prepare_ursa_temporary_directory(
+    const std::filesystem::path& base);
 WorkspaceEnvironment scan_workspace(const std::filesystem::path& directory);
 
 class Environment final : public ApplicationComponent {
