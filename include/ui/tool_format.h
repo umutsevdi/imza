@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <string>
 
-#include "subsystems/session.h"
+#include "conversation/session.h"
 
 namespace ursa {
 

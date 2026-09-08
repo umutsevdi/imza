@@ -2,10 +2,10 @@
 
 #include <string>
 
-#include "agent/tools.h"
 #include "common/util.h"
 #include "network/json_io.h"
 #include "network/web.h"
+#include "tools/tool.h"
 
 TEST_CASE("normalize_web_url upgrades http and rejects bad schemes")
 {
@@ -143,21 +143,13 @@ TEST_CASE("websearch rejects invalid arguments")
     CHECK(empty.text.starts_with("websearch:"));
 }
 
-TEST_CASE("web tools are registered and read-only")
+TEST_CASE("web tools are registered")
 {
     const auto tools = ursa::default_tools();
 
     const auto* fetch = ursa::find_tool(tools, "webfetch");
     REQUIRE(fetch != nullptr);
-    CHECK(fetch->safety == ursa::ToolSafety::READ_ONLY);
 
     const auto* search = ursa::find_tool(tools, "websearch");
     REQUIRE(search != nullptr);
-    CHECK(search->safety == ursa::ToolSafety::READ_ONLY);
-
-    bool plan_has_web = false;
-    for (const auto& spec : ursa::plan_tool_specs(tools)) {
-        plan_has_web |= spec.name == "webfetch" || spec.name == "websearch";
-    }
-    CHECK(plan_has_web);
 }

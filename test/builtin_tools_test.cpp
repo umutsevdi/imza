@@ -3,8 +3,8 @@
 #include <fstream>
 #include <string>
 
-#include "agent/tools.h"
 #include "network/json_io.h"
+#include "tools/tool.h"
 
 namespace fs = std::filesystem;
 
@@ -198,29 +198,24 @@ TEST_CASE("builtin tools expose the current tool set")
 
     const auto* read = find_tool(tools, "read");
     REQUIRE(read != nullptr);
-    CHECK(read->safety == ursa::ToolSafety::READ_ONLY);
     CHECK(read->spec.parameters["properties"].isMember("path"));
 
     const auto* list = find_tool(tools, "list");
     REQUIRE(list != nullptr);
-    CHECK(list->safety == ursa::ToolSafety::READ_ONLY);
     CHECK(list->spec.parameters["properties"].isMember("path"));
 
     const auto* ask = find_tool(tools, "ask");
     REQUIRE(ask != nullptr);
-    CHECK(ask->safety == ursa::ToolSafety::READ_ONLY);
     CHECK(ask->spec.parameters["properties"].isMember("questions"));
 
     const auto* skill = find_tool(tools, "skill");
     REQUIRE(skill != nullptr);
-    CHECK(skill->safety == ursa::ToolSafety::READ_ONLY);
     CHECK(skill->spec.parameters["properties"].isMember("name"));
 
     REQUIRE(find_tool(tools, "shell") != nullptr);
     REQUIRE(find_tool(tools, "todo") != nullptr);
     const auto* subagent = find_tool(tools, "subagent");
     REQUIRE(subagent != nullptr);
-    CHECK(subagent->safety == ursa::ToolSafety::READ_ONLY);
     CHECK(subagent->spec.parameters["properties"].isMember("tasks"));
     REQUIRE(find_tool(tools, "edit") != nullptr);
     REQUIRE(find_tool(tools, "write") != nullptr);
@@ -229,12 +224,45 @@ TEST_CASE("builtin tools expose the current tool set")
     CHECK(tool_specs(tools).size() == 11);
 }
 
+TEST_CASE("runtime flags independently filter the tool roster")
+{
+    int flags = ursa::RuntimeFlag::WEB;
+    const auto web_only
+        = ursa::default_tools(static_cast<ursa::RuntimeFlag>(flags));
+
+    CHECK(ursa::find_tool(web_only, "ask") == nullptr);
+    CHECK(ursa::find_tool(web_only, "shell") == nullptr);
+    CHECK(ursa::find_tool(web_only, "webfetch") != nullptr);
+    CHECK(ursa::find_tool(web_only, "websearch") != nullptr);
+
+    flags = ursa::RuntimeFlag::SHELL | ursa::RuntimeFlag::ATTENDED
+        | ursa::RuntimeFlag::SKIP_PERMISSIONS;
+    const auto attended_shell
+        = ursa::default_tools(static_cast<ursa::RuntimeFlag>(flags));
+
+    CHECK(ursa::find_tool(attended_shell, "ask") != nullptr);
+    CHECK(ursa::find_tool(attended_shell, "shell") != nullptr);
+    CHECK(ursa::find_tool(attended_shell, "webfetch") == nullptr);
+    CHECK(ursa::find_tool(attended_shell, "websearch") == nullptr);
+
+    const auto tools = ursa::default_tools(ursa::RuntimeFlag::NONE);
+
+    CHECK(ursa::find_tool(tools, "ask") == nullptr);
+    CHECK(ursa::find_tool(tools, "shell") == nullptr);
+    CHECK(ursa::find_tool(tools, "webfetch") == nullptr);
+    CHECK(ursa::find_tool(tools, "websearch") == nullptr);
+    CHECK(ursa::find_tool(tools, "read") != nullptr);
+    CHECK(ursa::find_tool(tools, "write") != nullptr);
+
+    const auto disabled = ursa::dispatch_tool(
+        tools, { "shell", R"({"command":"echo unavailable"})", "", "" });
+    CHECK(disabled.kind == ursa::ToolOutput::Kind::ERROR);
+    CHECK(disabled.text == "unknown tool: shell");
+}
+
 TEST_CASE("shell tool runs a command and reports the exit code")
 {
     const auto tool = ursa::make_shell_tool();
-    REQUIRE(tool.safety == ursa::ToolSafety::MUTATING);
-    CHECK(tool.available_in_plan);
-    CHECK(tool.persistent == false);
     CHECK(tool.spec.parameters["properties"].isMember("command"));
     CHECK(tool.spec.parameters["properties"].isMember("timeout"));
 

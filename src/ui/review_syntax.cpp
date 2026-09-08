@@ -1,5 +1,5 @@
-#include "core/git.h"
 #include "ui/ui.h"
+#include "workspace/git.h"
 
 #include <algorithm>
 #include <string>

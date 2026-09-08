@@ -13,3 +13,5 @@ build/_deps/jsoncpp-src/include/
 build/_deps/cmarkgfm-src/src/
 -I
 build/_deps/ftxui-src/include/
+-I
+build/_deps/cli11-src/include/

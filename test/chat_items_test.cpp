@@ -2,7 +2,7 @@
 
 #include <doctest/doctest.h>
 
-#include "subsystems/format.h"
+#include "conversation/format.h"
 #include "test_helpers.h"
 #include "ui/ui.h"
 

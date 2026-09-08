@@ -1,9 +1,25 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 
 namespace ursa {
+
+struct ApplicationComponent { };
+
+enum RuntimeFlag : std::uint8_t {
+    NONE             = 0,
+    WEB              = 1U << 0,
+    SHELL            = 1U << 1,
+    ATTENDED         = 1U << 2,
+    SKIP_PERMISSIONS = 1U << 3,
+};
+
+constexpr RuntimeFlag interactive_runtime_flags()
+{
+    return static_cast<RuntimeFlag>(WEB | SHELL | ATTENDED);
+}
 
 // Reasoning-effort alias: config displays/stores "default" where the wire
 // API spells it "medium".

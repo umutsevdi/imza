@@ -4,9 +4,9 @@
 #include <string>
 #include <string_view>
 
-#include "agent/prompt.h"
-#include "agent/tools.h"
-#include "subsystems/session.h"
+#include "conversation/session.h"
+#include "tools/tool.h"
+#include "turn/prompt.h"
 
 namespace ursa {
 
@@ -45,7 +45,8 @@ TEST_CASE("system prompt embeds workspace instructions when present")
     sys.os_name       = "Linux";
     sys.default_shell = "/bin/bash";
     sys.today         = "Fri Aug 28 2026";
-    WorkspaceEnvironment ws { std::filesystem::temp_directory_path() };
+    WorkspaceEnvironment ws;
+    ws.working_directory = std::filesystem::temp_directory_path();
     ws.instruction = InstructionFile { "AGENTS.md", "# Rules\nBe terse." };
 
     const std::string prompt = build_system_prompt(&sys, &ws);
@@ -61,7 +62,8 @@ TEST_CASE("system prompt omits the instructions block when absent")
     sys.os_name       = "Linux";
     sys.default_shell = "/bin/bash";
     sys.today         = "Fri Aug 28 2026";
-    WorkspaceEnvironment ws { std::filesystem::temp_directory_path() };
+    WorkspaceEnvironment ws;
+    ws.working_directory = std::filesystem::temp_directory_path();
 
     const std::string prompt = build_system_prompt(&sys, &ws);
     CHECK(prompt.find("<instructions") == std::string::npos);
@@ -123,7 +125,8 @@ TEST_CASE("subagent prompt retains workspace context")
     sys.global_skills.emplace("docs",
         Skill { "docs", "Write documentation", "/tmp/docs/SKILL.md",
             Skill::Scope::GLOBAL, std::nullopt });
-    WorkspaceEnvironment ws { std::filesystem::temp_directory_path() };
+    WorkspaceEnvironment ws;
+    ws.working_directory = std::filesystem::temp_directory_path();
     ws.instruction = InstructionFile { "AGENTS.md", "Use project rules." };
 
     const std::string prompt
@@ -142,32 +145,20 @@ TEST_CASE("mode reminders carry unique detectable tags")
     const std::string_view plan  = plan_mode_reminder();
     const std::string_view build = build_mode_reminder();
     CHECK(plan.find(PLAN_REMINDER_TAG) != std::string_view::npos);
-    CHECK(plan.find("read-only") != std::string_view::npos);
+    CHECK(plan.find("permission") != std::string_view::npos);
     CHECK(build.find(BUILD_REMINDER_TAG) != std::string_view::npos);
     CHECK(plan != build);
 }
 
-TEST_CASE("specs can be filtered by safety for plan mode")
+TEST_CASE("default tool set contains build mutation tools")
 {
     const std::vector<Tool> tools = default_tools();
     const auto all                = tool_specs(tools);
-    const auto plan               = plan_tool_specs(tools);
-    REQUIRE(plan.size() < all.size());
-
-    bool has_shell    = false;
-    bool has_read     = false;
-    bool has_ask      = false;
-    bool has_subagent = false;
-    for (const auto& s : plan) {
-        has_shell    = has_shell || s.name == "shell";
-        has_read     = has_read || s.name == "read";
-        has_ask      = has_ask || s.name == "ask";
-        has_subagent = has_subagent || s.name == "subagent";
-    }
-    CHECK(has_shell);
-    CHECK(has_read);
-    CHECK(has_ask);
-    CHECK(has_subagent);
+    CHECK(all.size() == tools.size());
+    CHECK(std::any_of(all.begin(), all.end(),
+        [](const ToolSpec& spec) { return spec.name == "edit"; }));
+    CHECK(std::any_of(all.begin(), all.end(),
+        [](const ToolSpec& spec) { return spec.name == "write"; }));
 }
 
 } // namespace ursa

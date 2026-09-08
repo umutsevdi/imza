@@ -7,7 +7,23 @@ ISSUES & SUPPORT: https://github.com/umutsevdi/ursa/issues
 
 CHANGELOG
 -------------------------------------------------------------------------------
-0.1.1 - Fri, Sep 5 2026
+0.1.2 - 2026-09-08
+-------------------------------------------------------------------------------
+[https://github.com/umutsevdi/ursa/releases/tag/v0.1.2]
+
+Changes:
+    - Added CLI commands.
+    - Rewritten permission system.
+       - Permissions can be set using CLI options or using user responses.
+       - Added shell command evaluation based permissions.
+       - Added directory access management.
+    - Performance improvements on large conversations.
+    - Performance improvements on large diff reviews.
+    - Added headless mode.
+    - Various other small bug fixes.
+
+-------------------------------------------------------------------------------
+0.1.1 - 2026-09-05
 -------------------------------------------------------------------------------
 [https://github.com/umutsevdi/ursa/releases/tag/v0.1.1]
 
@@ -17,7 +33,7 @@ Changes:
     - Added labels for custom providers.
 
 -------------------------------------------------------------------------------
-0.1.0 - Fri, Sep 4 2026
+0.1.0 - 2026-09-04
 -------------------------------------------------------------------------------
 [https://github.com/umutsevdi/ursa/releases/tag/v0.1.0]
 

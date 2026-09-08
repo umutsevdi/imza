@@ -1,6 +1,6 @@
 #include <doctest/doctest.h>
 
-#include "subsystems/workflow.h"
+#include "conversation/workflow.h"
 
 TEST_CASE("workflow advances through plan build and review")
 {
