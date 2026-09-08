@@ -115,7 +115,6 @@ private:
 
     Connection* _find_locked(std::string_view id);
     const Connection* _find_locked(std::string_view id) const;
-    std::string _unique_id_locked(std::string base) const;
     Route _route_locked(
         const Connection& connection, ApiStandard dialect) const;
     void _start_fetch_locked(const std::string& connection_id);

@@ -17,7 +17,29 @@ namespace {
 
     constexpr std::size_t MAX_SKILL_BYTES = 128 * 1024;
 
-}
+    std::vector<std::string> skill_mention_names(std::string_view text)
+    {
+        std::vector<std::string> names;
+        for (std::size_t pos = 0; pos < text.size();) {
+            pos = text.find('$', pos);
+            if (pos == std::string_view::npos) {
+                break;
+            }
+            if (pos > 0
+                && !std::isspace(static_cast<unsigned char>(text[pos - 1]))) {
+                ++pos;
+                continue;
+            }
+            const std::size_t end = mention_end(text, pos);
+            if (end > pos + 1) {
+                names.emplace_back(text.substr(pos + 1, end - pos - 1));
+            }
+            pos = end;
+        }
+        return names;
+    }
+
+} // namespace
 
 SkillRead read_skill(const Skill& skill)
 {
@@ -46,28 +68,6 @@ std::optional<std::filesystem::path> canonical_skill_path(const Skill& skill)
         return std::nullopt;
     }
     return path;
-}
-
-std::vector<std::string> skill_mention_names(std::string_view text)
-{
-    std::vector<std::string> names;
-    for (std::size_t pos = 0; pos < text.size();) {
-        pos = text.find('$', pos);
-        if (pos == std::string_view::npos) {
-            break;
-        }
-        if (pos > 0
-            && !std::isspace(static_cast<unsigned char>(text[pos - 1]))) {
-            ++pos;
-            continue;
-        }
-        const std::size_t end = mention_end(text, pos);
-        if (end > pos + 1) {
-            names.emplace_back(text.substr(pos + 1, end - pos - 1));
-        }
-        pos = end;
-    }
-    return names;
 }
 
 std::optional<Skill> resolve_skill(

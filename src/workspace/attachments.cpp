@@ -24,19 +24,6 @@ namespace {
         return ignored.contains(std::string(name));
     }
 
-    bool within(
-        const std::filesystem::path& root, const std::filesystem::path& path)
-    {
-        auto root_it = root.begin();
-        auto path_it = path.begin();
-        while (root_it != root.end() && path_it != path.end()
-            && *root_it == *path_it) {
-            ++root_it;
-            ++path_it;
-        }
-        return root_it == root.end();
-    }
-
     std::string escape_attribute(std::string_view value)
     {
         std::string out;
@@ -101,7 +88,7 @@ std::vector<AttachmentCandidate> attachment_candidates(
     }
     const auto search_dir
         = std::filesystem::weakly_canonical(canonical_root / directory, ec);
-    if (ec || !within(canonical_root, search_dir)) {
+    if (ec || !path_within(canonical_root, search_dir)) {
         return { };
     }
     std::vector<AttachmentCandidate> out;
@@ -150,7 +137,7 @@ AttachmentResult load_attachment(
     const auto canonical_root = std::filesystem::weakly_canonical(root, ec);
     const auto path           = std::filesystem::weakly_canonical(
         canonical_root / std::filesystem::path(relative_path), ec);
-    if (ec || !within(canonical_root, path)) {
+    if (ec || !path_within(canonical_root, path)) {
         return { Status::CONFIG_ERROR, std::nullopt,
             "Attachment must be inside the workspace." };
     }

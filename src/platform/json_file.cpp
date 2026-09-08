@@ -3,6 +3,10 @@
 #include <fstream>
 #include <memory>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 namespace ursa {
 
 Status write_json_file(const std::filesystem::path& path,
@@ -31,7 +35,15 @@ Status write_json_file(const std::filesystem::path& path,
             return Status::CONFIG_ERROR;
         }
     }
+#ifdef _WIN32
+    if (!MoveFileExW(tmp.c_str(), path.c_str(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        ec = std::error_code(
+            static_cast<int>(GetLastError()), std::system_category());
+    }
+#else
     std::filesystem::rename(tmp, path, ec);
+#endif
     return ec ? Status::CONFIG_ERROR : Status::OK;
 }
 

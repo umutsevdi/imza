@@ -45,8 +45,6 @@ bool catalog_stale(const Catalog& catalog);
 Status load_catalog(const std::filesystem::path& path, Catalog& out);
 Status save_catalog(const std::filesystem::path& path, const Catalog& catalog);
 Status fetch_catalog(Catalog& out);
-bool whitelisted_provider(std::string_view id);
-Status trim_provider(const Json::Value& src, CachedProvider& out);
 
 AuthType auth_from_npm(std::string_view npm);
 std::string catalog_base(const CachedProvider& provider);

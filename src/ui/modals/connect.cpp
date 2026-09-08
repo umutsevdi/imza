@@ -117,15 +117,9 @@ namespace {
         bool handle_manage_event(const Event& event)
         {
             if (picker_open_) {
-                if (event == Event::ArrowDown) {
-                    if (!picker_ids_.empty()) {
-                        picker_selected_ = std::min(picker_selected_ + 1,
-                            static_cast<int>(picker_ids_.size()) - 1);
-                    }
-                    return true;
-                }
-                if (event == Event::ArrowUp) {
-                    picker_selected_ = std::max(picker_selected_ - 1, 0);
+                if (event == Event::ArrowDown || event == Event::ArrowUp) {
+                    move_list_cursor(event, picker_selected_,
+                        static_cast<int>(picker_ids_.size()));
                     return true;
                 }
                 if (event == Event::Escape) {
@@ -567,7 +561,7 @@ namespace {
 
         Element render_manage()
         {
-            Elements rows { text("Connections") | bold, separatorEmpty() };
+            Elements rows = modal_header("Connections");
 
             const auto all = views();
             if (all.empty()) {
@@ -721,8 +715,7 @@ namespace {
 
         Element render_pick()
         {
-            Elements rows { text("Models") | bold };
-            rows.push_back(separatorEmpty());
+            Elements rows = modal_header("Models");
             rows.push_back(pick_filter_->Render() | xflex);
 
             bool any_fetching = false;

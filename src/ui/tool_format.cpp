@@ -63,67 +63,53 @@ namespace {
     std::string read_path(const ToolCall& call)
     {
         const Json::Value parsed = parse_json(call.args);
-        if (parsed.isObject() && parsed["path"].isString()) {
-            return parsed["path"].asString();
-        }
-        return call.args;
+        const std::string path   = json_string(parsed, "path");
+        return path.empty() ? call.args : path;
+    }
+
+    std::string web_search_arg(const ToolCall& call)
+    {
+        const Json::Value parsed = parse_json(call.args);
+        const auto* key          = call.name == "webfetch" ? "url" : "query";
+        const std::string value  = json_string(parsed, key);
+        return value.empty() ? call.args : value;
     }
 
     std::string tool_request_summary(
         const std::string& name, const std::string& args)
     {
         const Json::Value parsed = parse_json(args);
-        const auto get_str       = [&](const char* key) -> std::string {
-            if (parsed.isObject() && parsed[key].isString()) {
-                return parsed[key].asString();
-            }
-            return "";
-        };
         if (name == "edit") {
-            std::string out
-                = tool_display_name(name) + ": " + get_str("file_path");
-            long offset = 0;
-            if (parsed.isObject() && parsed["offset"].isIntegral()) {
-                offset = parsed["offset"].asInt64();
-            }
-            if (offset > 0) {
-                out += " · line " + std::to_string(offset);
+            std::string out = tool_display_name(name) + ": "
+                + json_string(parsed, "file_path");
+            if (const auto offset = json_int(parsed, "offset");
+                offset.has_value() && *offset > 0) {
+                out += " · line " + std::to_string(*offset);
             }
             return out;
         }
         if (name == "write") {
-            const std::string path = get_str("file_path");
-            bool overwrite = parsed.isObject() && parsed["overwrite"].isBool()
-                && parsed["overwrite"].asBool();
+            const std::string path = json_string(parsed, "file_path");
+            const bool overwrite   = parsed.isObject()
+                && parsed["overwrite"].isBool() && parsed["overwrite"].asBool();
             std::string out = tool_display_name(name) + ": " + path;
             if (!overwrite) {
-                long line = 0;
-                if (parsed.isObject() && parsed["line"].isIntegral()) {
-                    line = parsed["line"].asInt64();
-                }
-                if (line > 0) {
-                    out += " · below line " + std::to_string(line);
+                const auto line = json_int(parsed, "line");
+                if (line.has_value() && *line > 0) {
+                    out += " · below line " + std::to_string(*line);
                 }
             } else {
-                long lb = 0;
-                long le = 0;
-                if (parsed.isObject()) {
-                    if (parsed["line_begin"].isIntegral()) {
-                        lb = parsed["line_begin"].asInt64();
-                    }
-                    if (parsed["line_end"].isIntegral()) {
-                        le = parsed["line_end"].asInt64();
-                    }
-                }
-                if (lb > 0 || le > 0) {
-                    out += " · lines " + std::to_string(lb) + "-"
-                        + std::to_string(le);
+                const auto lb = json_int(parsed, "line_begin");
+                const auto le = json_int(parsed, "line_end");
+                if ((lb && *lb > 0) || (le && *le > 0)) {
+                    out += " · lines " + std::to_string(lb.value_or(0)) + "-"
+                        + std::to_string(le.value_or(0));
                 }
             }
             return out;
         }
         if (name == "skill") {
-            return "Load Skill " + get_str("name");
+            return "Load Skill " + json_string(parsed, "name");
         }
         std::string head          = tool_display_name(name);
         const std::string summary = tool_args_summary(args);
@@ -192,10 +178,8 @@ std::string tool_call_head(const ToolCall& call)
     }
     if (call.name == "skill") {
         const Json::Value parsed = parse_json(call.args);
-        if (parsed.isObject() && parsed["name"].isString()) {
-            return "Load Skill " + parsed["name"].asString();
-        }
-        return "Load Skill";
+        const std::string name   = json_string(parsed, "name");
+        return name.empty() ? "Load Skill" : "Load Skill " + name;
     }
     if (call.name == "ask") {
         return tool_display_name(call.name) + " ("
@@ -211,12 +195,7 @@ std::string tool_call_head(const ToolCall& call)
             + ")";
     }
     if (call.name == "webfetch" || call.name == "websearch") {
-        const Json::Value parsed = parse_json(call.args);
-        const auto* key          = call.name == "webfetch" ? "url" : "query";
-        if (parsed.isObject() && parsed[key].isString()) {
-            return parsed[key].asString();
-        }
-        return call.args;
+        return web_search_arg(call);
     }
     if (call.name == "subagent") {
         return tool_display_name(call.name);
@@ -236,13 +215,9 @@ std::string tool_header_args(const ToolCall& call)
     }
     if (call.name == "edit" || call.name == "write") {
         const Json::Value parsed = parse_json(call.args);
-        std::string path;
-        if (parsed.isObject()) {
-            if (parsed["file_path"].isString()) {
-                path = parsed["file_path"].asString();
-            } else if (parsed["path"].isString()) {
-                path = parsed["path"].asString();
-            }
+        std::string path         = json_string(parsed, "file_path");
+        if (path.empty()) {
+            path = json_string(parsed, "path");
         }
         if (path.empty()) {
             path = call.args;
@@ -251,14 +226,8 @@ std::string tool_header_args(const ToolCall& call)
     }
     if (call.name == "shell") {
         const Json::Value parsed = parse_json(call.args);
-        std::string cmd;
-        if (parsed.isObject() && parsed["command"].isString()) {
-            cmd = parsed["command"].asString();
-        }
-        if (cmd.empty()) {
-            cmd = call.args;
-        }
-        return cmd;
+        const std::string cmd    = json_string(parsed, "command");
+        return cmd.empty() ? call.args : cmd;
     }
     if (call.name == "ask") {
         return plural_count(
@@ -268,18 +237,10 @@ std::string tool_header_args(const ToolCall& call)
         return plural_count(json_array_count(call.args, "todos"), "task");
     }
     if (call.name == "skill") {
-        const Json::Value parsed = parse_json(call.args);
-        return parsed.isObject() && parsed["name"].isString()
-            ? parsed["name"].asString()
-            : std::string { };
+        return json_string(parse_json(call.args), "name");
     }
     if (call.name == "webfetch" || call.name == "websearch") {
-        const Json::Value parsed = parse_json(call.args);
-        const auto* key          = call.name == "webfetch" ? "url" : "query";
-        if (parsed.isObject() && parsed[key].isString()) {
-            return parsed[key].asString();
-        }
-        return call.args;
+        return web_search_arg(call);
     }
     if (call.name == "subagent") {
         return subagent_args(call);
@@ -303,11 +264,9 @@ std::string tool_code_language(const ToolCall& call)
 std::size_t read_start_line(const ToolCall& call)
 {
     const Json::Value parsed = parse_json(call.args);
-    if (parsed.isObject() && parsed["line_begin"].isIntegral()) {
-        const auto raw = parsed["line_begin"].asInt64();
-        if (raw >= 1) {
-            return static_cast<std::size_t>(raw);
-        }
+    if (const auto raw = json_int(parsed, "line_begin");
+        raw.has_value() && *raw >= 1) {
+        return static_cast<std::size_t>(*raw);
     }
     return 1;
 }

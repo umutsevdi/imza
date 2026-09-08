@@ -66,11 +66,11 @@ struct IsolatedCatalog {
             / ("ursa-pricing-test-" + std::to_string(::getpid()) + "-"
                 + std::to_string(counter++));
         std::filesystem::create_directories(dir);
-        if (const char* xdg = std::getenv("XDG_CONFIG_HOME")) {
+        if (const char* xdg = std::getenv("XDG_DATA_HOME")) {
             old_xdg = xdg;
             had_xdg = true;
         }
-        setenv("XDG_CONFIG_HOME", dir.string().c_str(), 1);
+        setenv("XDG_DATA_HOME", dir.string().c_str(), 1);
         std::ignore
             = ursa::save_catalog(dir / "ursa" / "presets.json", test_catalog());
     }
@@ -78,9 +78,9 @@ struct IsolatedCatalog {
     ~IsolatedCatalog()
     {
         if (had_xdg) {
-            setenv("XDG_CONFIG_HOME", old_xdg.c_str(), 1);
+            setenv("XDG_DATA_HOME", old_xdg.c_str(), 1);
         } else {
-            unsetenv("XDG_CONFIG_HOME");
+            unsetenv("XDG_DATA_HOME");
         }
         std::error_code ec;
         std::filesystem::remove_all(dir, ec);

@@ -2,11 +2,13 @@
 #include "common/modal.h"
 #include "ui/ui.h"
 
+#include <ftxui/component/animation.hpp>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_base.hpp>
 #include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -23,29 +25,31 @@ namespace {
             : state_(std::move(state))
             , session_(state_->session)
         {
-            const auto modal = std::get<SessionsModal>(session_->modal());
-            titles_          = modal.titles;
-            saved_at_        = modal.saved_at;
-            paths_           = modal.paths;
+            store_subscription_ = state_->sessions->subscribe(
+                [] { animation::RequestAnimationFrame(); });
+            _refresh();
         }
 
         Element OnRender() override
         {
-            Elements rows { text("Sessions") | bold, separatorEmpty() };
+            _refresh();
+            Elements rows              = modal_header("Sessions");
             const bool loading_blocked = session_->has_pending_work();
-            if (titles_.empty()) {
+            if (!state_->sessions->ready()) {
+                rows.push_back(text("Loading sessions…") | dim);
+            } else if (sessions_.empty()) {
                 rows.push_back(text("No saved sessions") | dim);
             } else if (confirming_) {
                 rows.push_back(
-                    text("Delete “" + titles_[cursor_] + "”?") | bold);
+                    text("Delete “" + sessions_[cursor_].title + "”?") | bold);
                 rows.push_back(separatorEmpty());
-                rows.push_back(hbox(
-                    { filler(), text("Enter delete · Esc cancel") | dim }));
+                rows.push_back(hint_bar("Enter delete · Esc cancel"));
             } else {
-                for (int index = 0; index < static_cast<int>(titles_.size());
+                for (int index = 0; index < static_cast<int>(sessions_.size());
                     ++index) {
-                    Element row = hbox({ text(titles_[index]), filler(),
-                        text(saved_at_[index]) | color(PANEL_FG_DIM) });
+                    Element row = hbox({ text(sessions_[index].title), filler(),
+                        text(sessions_[index].saved_at)
+                            | color(PANEL_FG_DIM) });
                     if (index == cursor_) {
                         row = std::move(row) | bgcolor(PANEL_COLOR_FOCUS)
                             | bold;
@@ -67,13 +71,15 @@ namespace {
 
         bool OnEvent(Event event) override
         {
+            _refresh();
             if (confirming_) {
                 if (event == Event::Escape) {
                     confirming_ = false;
                     return true;
                 }
                 if (event == Event::Return) {
-                    ursa::delete_saved_session(*state_, paths_[cursor_]);
+                    ursa::delete_saved_session(
+                        *state_, sessions_[cursor_].path);
                     return true;
                 }
                 return true;
@@ -83,32 +89,48 @@ namespace {
                 return true;
             }
             if (move_list_cursor(
-                    event, cursor_, static_cast<int>(titles_.size()))) {
+                    event, cursor_, static_cast<int>(sessions_.size()))) {
                 return true;
             }
             if ((event == Event::Character('d')
                     || event == Event::Character('D'))
-                && !titles_.empty()) {
+                && !sessions_.empty()) {
                 confirming_ = true;
                 return true;
             }
-            if (event == Event::Return && !paths_.empty()) {
+            if (event == Event::Return && !sessions_.empty()) {
                 if (session_->has_pending_work()) {
                     return true;
                 }
-                ursa::resolve_modal(*state_,
-                    ModalResult { std::filesystem::path(paths_[cursor_]) });
+                ursa::resolve_modal(
+                    *state_, ModalResult { sessions_[cursor_].path });
                 return true;
             }
             return false;
         }
 
     private:
+        void _refresh()
+        {
+            const auto sessions = state_->sessions->sessions();
+            if (sessions == last_sessions_) {
+                return;
+            }
+            last_sessions_ = sessions;
+            sessions_      = sessions;
+            if (sessions_.empty()) {
+                cursor_ = 0;
+            } else {
+                cursor_ = std::clamp(
+                    cursor_, 0, static_cast<int>(sessions_.size()) - 1);
+            }
+        }
+
         std::shared_ptr<ApplicationState> state_;
         std::shared_ptr<Session> session_;
-        std::vector<std::string> titles_;
-        std::vector<std::string> saved_at_;
-        std::vector<std::string> paths_;
+        Signal<>::Subscription store_subscription_;
+        std::vector<SavedSession> last_sessions_;
+        std::vector<SavedSession> sessions_;
         int cursor_      = 0;
         bool confirming_ = false;
     };

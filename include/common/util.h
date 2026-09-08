@@ -4,6 +4,7 @@
 #include <cctype>
 #include <chrono>
 #include <ctime>
+#include <filesystem>
 #include <iomanip>
 #include <sstream>
 #include <string>
@@ -11,6 +12,18 @@
 #include <vector>
 
 namespace ursa {
+
+// True when `target` equals `root` or lies underneath it. Both paths are
+// expected to be canonical; an empty root contains nothing.
+inline bool path_within(
+    const std::filesystem::path& root, const std::filesystem::path& target)
+{
+    if (root.empty()) {
+        return false;
+    }
+    const std::filesystem::path relative = target.lexically_relative(root);
+    return target == root || (!relative.empty() && *relative.begin() != "..");
+}
 
 inline std::string env_or_empty(const char* key)
 {
@@ -47,6 +60,16 @@ inline std::string join_lines(const std::vector<std::string>& lines)
             out += '\n';
         }
         out += lines[i];
+    }
+    return out;
+}
+
+inline std::string join_lines(
+    const std::vector<std::string>& lines, bool trailing_newline)
+{
+    std::string out = join_lines(lines);
+    if (!lines.empty() && trailing_newline) {
+        out += '\n';
     }
     return out;
 }
@@ -141,6 +164,32 @@ inline std::string to_lower(std::string_view s)
         out += static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
     }
     return out;
+}
+
+// Length in bytes of the UTF-8 sequence whose lead byte is `lead`.
+inline std::size_t utf8_sequence_length(unsigned char lead)
+{
+    if ((lead & 0xE0) == 0xC0) {
+        return 2;
+    }
+    if ((lead & 0xF0) == 0xE0) {
+        return 3;
+    }
+    if ((lead & 0xF8) == 0xF0) {
+        return 4;
+    }
+    return 1;
+}
+
+// Number of display columns: one per UTF-8 sequence.
+inline std::size_t utf8_width(std::string_view s)
+{
+    std::size_t w = 0;
+    for (std::size_t i = 0; i < s.size();) {
+        i += utf8_sequence_length(static_cast<unsigned char>(s[i]));
+        ++w;
+    }
+    return w;
 }
 
 inline std::string strip_slash(std::string_view base)

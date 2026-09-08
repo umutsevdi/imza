@@ -34,6 +34,11 @@ struct TurnSettings {
     Route route;
 };
 
+struct ProviderSelection;
+
+TurnSettings make_turn_settings(
+    const ProviderSelection& selection, Session::Mode mode);
+
 class StreamUpdateBuffer {
 public:
     StreamUpdateBuffer(PostFn post, std::shared_ptr<Session> session);
@@ -70,6 +75,8 @@ public:
     void set_subagent_tool(SubagentToolFn subagent_tool);
     bool has_stream_override() const { return has_stream_override_; }
     const StreamFn& stream_fn() const { return stream_fn_; }
+    Status run_stream(const ChatRequest& req, const Route& route,
+        const StreamCallback& cb) const;
     bool blocked_permission() const { return blocked_permission_.load(); }
 
 private:
@@ -87,6 +94,11 @@ private:
     void _apply_question_result(
         const ModalResult& res, std::string& reply_buffer);
     void _reject_tool(const ToolCallRequest& req, std::string reason,
+        std::vector<Message>& tool_msgs);
+    void _finish_tool(const ToolCallRequest& req, ToolCall::Result::Kind kind,
+        const std::string& history_text, std::vector<Message>& tool_msgs);
+    void _finish_tool(const ToolCallRequest& req, ToolCall::Result::Kind kind,
+        std::string result_text, std::string history_text,
         std::vector<Message>& tool_msgs);
     void _run_tool(const PermissionEvaluation& evaluation, Session::Mode mode,
         std::vector<Message>& tool_msgs);

@@ -17,10 +17,8 @@ TEST_CASE("main thread queue defers tasks until drained")
     queue.post([&value] { value = 1; });
 
     CHECK(value == 0);
-    CHECK_FALSE(queue.empty());
     queue.drain();
     CHECK(value == 1);
-    CHECK(queue.empty());
 }
 
 TEST_CASE("main thread queue drains tasks in posting order")

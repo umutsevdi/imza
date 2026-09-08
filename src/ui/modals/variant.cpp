@@ -34,9 +34,7 @@ namespace {
 
         Element OnRender() override
         {
-            Elements rows;
-            rows.push_back(text("Reasoning effort") | bold);
-            rows.push_back(separatorEmpty());
+            Elements rows = modal_header("Reasoning effort");
             for (int i = 0; i < static_cast<int>(options_.size()); ++i) {
                 const std::string option
                     = options_[static_cast<std::size_t>(i)];

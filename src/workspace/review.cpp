@@ -14,20 +14,6 @@
 namespace ursa {
 namespace {
 
-    std::string quote_arg(const std::filesystem::path& path)
-    {
-        std::string value = path.string();
-        std::string out   = "\"";
-        for (const char ch : value) {
-            if (ch == '"') {
-                out += "\\\"";
-            } else {
-                out += ch;
-            }
-        }
-        return out + "\"";
-    }
-
     void append_untracked(RepositoryReview& review,
         const std::filesystem::path& root, std::string_view paths)
     {
@@ -170,7 +156,7 @@ namespace {
 
 ReviewLoadResult load_repository_review(const std::filesystem::path& root)
 {
-    const std::string prefix = "git -C " + quote_arg(root);
+    const std::string prefix = "git -C " + shell_quote(root);
     CommandResult diff       = run_command(prefix
             + " diff --no-ext-diff --no-color --find-renames --find-copies "
               "HEAD --",

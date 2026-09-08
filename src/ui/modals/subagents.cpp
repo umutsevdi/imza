@@ -162,12 +162,8 @@ namespace {
 
         bool handle_role_event(const Event& event)
         {
-            if (event == Event::ArrowDown) {
-                selected_ = std::min(selected_ + 1, kSubagentRoles - 1);
-                return true;
-            }
-            if (event == Event::ArrowUp) {
-                selected_ = std::max(selected_ - 1, 0);
+            if (event == Event::ArrowDown || event == Event::ArrowUp) {
+                move_list_cursor(event, selected_, kSubagentRoles);
                 return true;
             }
             if (event == Event::ArrowLeft || event == Event::ArrowRight) {
@@ -183,10 +179,8 @@ namespace {
 
         Element render_pick()
         {
-            Elements rows {
-                text(role_name(role_at(selected_)) + " Subagent Model") | bold,
-                separatorEmpty()
-            };
+            Elements rows { modal_header(
+                role_name(role_at(selected_)) + " Subagent Model") };
             if (pick_.visible.empty()) {
                 rows.push_back(text("no models available") | dim);
             }
@@ -204,11 +198,9 @@ namespace {
         Element render_roles()
         {
             const Config config = provider_store_.config();
-            Elements rows { text("Subagent Models") | bold,
-                text("Tune subagent tasks. Choose <Default> to follow the main "
-                     "chat model.")
-                    | dim,
-                separatorEmpty() };
+            Elements rows       = modal_header("Subagent Models",
+                "Tune subagent tasks. Choose <Default> to follow the main "
+                "chat model.");
             for (int index = 0; index < kSubagentRoles; ++index) {
                 const SubagentRole role = role_at(index);
                 const auto found        = config.subagents.find(role);

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <system_error>
 
+#include "common/util.h"
 #include "network/json_io.h"
 #include "tools/tool.h"
 #include "workspace/environment.h"
@@ -29,17 +30,6 @@ namespace {
         return std::nullopt;
     }
 
-    bool contains(
-        const std::filesystem::path& root, const std::filesystem::path& target)
-    {
-        if (root.empty()) {
-            return false;
-        }
-        const std::filesystem::path relative = target.lexically_relative(root);
-        return target == root
-            || (!relative.empty() && *relative.begin() != "..");
-    }
-
     bool matches_path(const PermissionStore::Grants& grants,
         const std::filesystem::path& target)
     {
@@ -49,7 +39,7 @@ namespace {
                 if (directory == nullptr) {
                     return false;
                 }
-                return contains(*directory, target);
+                return path_within(*directory, target);
             });
     }
 
@@ -160,8 +150,8 @@ FilesystemEvaluation evaluate_filesystem_request(std::string_view tool,
     const std::filesystem::path& project_root = context.workspace->project_root
         ? *context.workspace->project_root
         : working_directory;
-    const bool trusted                        = contains(project_root, target)
-        || contains(context.system->temporary_directory, target);
+    const bool trusted = path_within(project_root, target)
+        || path_within(context.system->temporary_directory, target);
     if (granted
         || (trusted && (!write || context.mode == Session::Mode::BUILD))) {
         return { { PermissionDecision::Kind::ACCEPT, "" }, request };

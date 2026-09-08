@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
@@ -43,12 +44,17 @@ struct Config {
     std::map<std::string, std::map<std::string, SkillPolicy>> project_skills;
 };
 
+enum class ConfigUpdateResult { UPDATED, UNCHANGED, ERROR };
+using ConfigMutator = std::function<bool(Config&)>;
+
 std::string_view subagent_default_variant(SubagentRole role);
 Status load_config(const std::filesystem::path& path, Config& out,
     std::string* error = nullptr);
 Status save_config(const std::filesystem::path& path, const Config& cfg);
+ConfigUpdateResult update_config(const std::filesystem::path& path,
+    const Config& initial, const ConfigMutator& mutate,
+    Config* result = nullptr);
 void apply_skill_policies(Config& config, const SkillPolicyChanges& changes);
-std::filesystem::path base_config_dir(void);
 std::filesystem::path config_path(void);
 std::filesystem::path presets_path(void);
 std::filesystem::path data_dir(void);

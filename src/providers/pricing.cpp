@@ -18,23 +18,25 @@ namespace {
         table[to_lower(key)] = pricing;
     }
 
-} // namespace
-
-std::optional<ModelPricing> pricing_from_model(const CachedModel& model)
-{
-    if (!model.cost_input && !model.cost_output) {
-        return std::nullopt;
+    std::optional<ModelPricing> pricing_from_model(const CachedModel& model)
+    {
+        if (!model.cost_input && !model.cost_output) {
+            return std::nullopt;
+        }
+        ModelPricing pricing;
+        pricing.input_per_1k
+            = model.cost_input.value_or(0.0) * kPerMillionToPerK;
+        pricing.output_per_1k
+            = model.cost_output.value_or(0.0) * kPerMillionToPerK;
+        pricing.cache_read_per_1k
+            = model.cost_cache_read.value_or(0.0) * kPerMillionToPerK;
+        pricing.cache_write_per_1k
+            = model.cost_cache_write.value_or(0.0) * kPerMillionToPerK;
+        pricing.context_limit = model.context.value_or(0);
+        return pricing;
     }
-    ModelPricing pricing;
-    pricing.input_per_1k  = model.cost_input.value_or(0.0) * kPerMillionToPerK;
-    pricing.output_per_1k = model.cost_output.value_or(0.0) * kPerMillionToPerK;
-    pricing.cache_read_per_1k
-        = model.cost_cache_read.value_or(0.0) * kPerMillionToPerK;
-    pricing.cache_write_per_1k
-        = model.cost_cache_write.value_or(0.0) * kPerMillionToPerK;
-    pricing.context_limit = model.context.value_or(0);
-    return pricing;
-}
+
+} // namespace
 
 std::map<std::string, ModelPricing> pricing_table_from(const Catalog& catalog)
 {

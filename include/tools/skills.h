@@ -59,7 +59,6 @@ struct PendingSkillTurn {
 
 SkillRead read_skill(const Skill& skill);
 std::optional<std::filesystem::path> canonical_skill_path(const Skill& skill);
-std::vector<std::string> skill_mention_names(std::string_view text);
 std::optional<Skill> resolve_skill(
     const std::vector<Skill>& catalog, const Json::Value& args);
 SkillPolicy skill_policy(const Config& config, const Skill& skill);

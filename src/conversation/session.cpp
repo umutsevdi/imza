@@ -549,11 +549,7 @@ std::vector<Message> Session::build_history(
             history.push_back({ Message::Type::USER,
                 message_with_attachments(u->text, u->attachments) });
         } else if (const auto* a = std::get_if<AssistantTurn>(&item)) {
-            Message m { Message::Type::ASSISTANT, a->markdown };
-            if (dialect == ApiStandard::ANTHROPIC && !a->reasoning.empty()) {
-                m.thinking.push_back({ a->reasoning, a->reasoning_signature });
-            }
-            history.push_back(std::move(m));
+            history.push_back(assistant_message(a->markdown, a, dialect));
         } else if (const auto* tc = std::get_if<ToolCall>(&item)) {
             if (history.empty()
                 || history.back().type != Message::Type::ASSISTANT) {

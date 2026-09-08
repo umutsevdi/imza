@@ -28,7 +28,7 @@ namespace {
 
         Element OnRender() override
         {
-            Elements rows { text("Skills") | bold, separatorEmpty() };
+            Elements rows = modal_header("Skills");
             if (entries_.empty()) {
                 rows.push_back(text("No skills discovered") | dim);
             }

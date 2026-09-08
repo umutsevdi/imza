@@ -73,6 +73,56 @@ void ScrollView::scroll_lines(int delta)
     scroll = std::clamp(scroll + delta, 0, max_scroll());
 }
 
+ftxui::Element scroll_viewport(ftxui::Element content, ScrollView& view)
+{
+    view.scroll_lines(0);
+    return std::move(content) | capture_content_height(&view.content_height)
+        | ftxui::vscroll_indicator
+        | ftxui::focusPosition(
+            0, view.scroll + std::max(0, view.viewport_lines() - 1) / 2)
+        | ftxui::yframe | ftxui::yflex | ftxui::reflect(view.box);
+}
+
+bool scroll_viewport_event(ScrollView& view, ftxui::Event& event)
+{
+    if (event == ftxui::Event::ArrowUp) {
+        view.scroll_lines(-1);
+        return true;
+    }
+    if (event == ftxui::Event::ArrowDown) {
+        view.scroll_lines(1);
+        return true;
+    }
+    if (event == ftxui::Event::PageUp) {
+        view.scroll_lines(-std::max(1, view.viewport_lines() - 1));
+        return true;
+    }
+    if (event == ftxui::Event::PageDown) {
+        view.scroll_lines(std::max(1, view.viewport_lines() - 1));
+        return true;
+    }
+    if (event == ftxui::Event::Home) {
+        view.scroll = 0;
+        return true;
+    }
+    if (event == ftxui::Event::End) {
+        view.scroll = view.max_scroll();
+        return true;
+    }
+    if (event.is_mouse()) {
+        const ftxui::Mouse& mouse = event.mouse();
+        if (mouse.button == ftxui::Mouse::WheelUp) {
+            view.scroll_lines(-3);
+            return true;
+        }
+        if (mouse.button == ftxui::Mouse::WheelDown) {
+            view.scroll_lines(3);
+            return true;
+        }
+    }
+    return false;
+}
+
 VirtualListState::VirtualListState(int estimated_height)
     : _estimated_height(std::max(1, estimated_height))
 {

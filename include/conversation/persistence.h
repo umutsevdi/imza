@@ -11,12 +11,6 @@ namespace ursa {
 class Session;
 struct LoadedSession;
 
-struct SavedSession {
-    std::filesystem::path path;
-    std::string title;
-    std::string saved_at;
-};
-
 Status save_session(Session& session);
 Status read_session(const std::filesystem::path& path, LoadedSession& loaded);
 Status load_session(const std::filesystem::path& path, Session& session,

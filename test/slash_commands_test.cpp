@@ -175,13 +175,13 @@ TEST_CASE("CLI config creates the file and opens an editor")
         = std::filesystem::temp_directory_path() / "ursa-cli-config-test";
     std::error_code error;
     std::filesystem::remove_all(root, error);
-    const char* previous_config = std::getenv("XDG_CONFIG_HOME");
+    const char* previous_config = std::getenv("XDG_DATA_HOME");
     const char* previous_visual = std::getenv("VISUAL");
     const std::string saved_config
         = previous_config == nullptr ? "" : previous_config;
     const std::string saved_visual
         = previous_visual == nullptr ? "" : previous_visual;
-    setenv("XDG_CONFIG_HOME", root.c_str(), 1);
+    setenv("XDG_DATA_HOME", root.c_str(), 1);
     setenv("VISUAL", "true", 1);
 
     char program[]         = "ursa";
@@ -194,9 +194,9 @@ TEST_CASE("CLI config creates the file and opens an editor")
     CHECK(std::filesystem::is_regular_file(root / "ursa" / "config.json"));
 
     if (previous_config == nullptr) {
-        unsetenv("XDG_CONFIG_HOME");
+        unsetenv("XDG_DATA_HOME");
     } else {
-        setenv("XDG_CONFIG_HOME", saved_config.c_str(), 1);
+        setenv("XDG_DATA_HOME", saved_config.c_str(), 1);
     }
     if (previous_visual == nullptr) {
         unsetenv("VISUAL");

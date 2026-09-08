@@ -17,6 +17,8 @@
 #include <string_view>
 #include <vector>
 
+#include "common/util.h"
+
 namespace ursa {
 
 using namespace ftxui;
@@ -104,14 +106,6 @@ namespace {
         std::unique_ptr<Runtime> runtime;
     };
 
-    std::string lower(std::string_view value)
-    {
-        std::string out(value);
-        std::ranges::transform(out, out.begin(),
-            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        return out;
-    }
-
     QueryPtr make_query(const TSLanguage* language, std::string_view source)
     {
         uint32_t offset    = 0;
@@ -148,7 +142,7 @@ namespace {
     const LanguageDefinition* language_for_type(std::string_view hint)
     {
         const std::size_t end = hint.find_first_of(" \t{");
-        std::string type      = lower(hint.substr(0, end));
+        std::string type      = to_lower(hint.substr(0, end));
         if (!type.empty() && type.front() == '.') {
             type.erase(0, 1);
         }
@@ -164,11 +158,11 @@ namespace {
     const LanguageDefinition* language_for_path(std::string_view path)
     {
         const std::filesystem::path file(path);
-        std::string extension = lower(file.extension().string());
+        std::string extension = to_lower(file.extension().string());
         if (!extension.empty() && extension.front() == '.') {
             extension.erase(0, 1);
         }
-        const std::string filename   = lower(file.filename().string());
+        const std::string filename   = to_lower(file.filename().string());
         const auto& registry         = languages();
         const auto filename_language = std::ranges::find_if(
             registry, [&filename](const auto& candidate) {

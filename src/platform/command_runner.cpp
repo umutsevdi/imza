@@ -221,6 +221,23 @@ namespace {
 
 } // namespace
 
+std::string shell_quote(const std::filesystem::path& path)
+{
+#ifdef _WIN32
+    return "\"" + path.string() + "\"";
+#else
+    std::string quoted = "'";
+    for (const char character : path.string()) {
+        if (character == '\'') {
+            quoted += "'\\''";
+        } else {
+            quoted += character;
+        }
+    }
+    return quoted + "'";
+#endif
+}
+
 CommandResult run_command(
     const std::string& command, std::chrono::seconds timeout)
 {

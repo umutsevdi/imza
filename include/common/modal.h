@@ -76,9 +76,7 @@ struct VariantModal {
 };
 
 struct SessionsModal {
-    std::vector<std::string> titles;
-    std::vector<std::string> saved_at;
-    std::vector<std::string> paths;
+    std::vector<SavedSession> sessions;
 };
 
 struct SkillsModal {

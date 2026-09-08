@@ -1,12 +1,21 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <string_view>
 
 namespace ursa {
 
 struct ApplicationComponent { };
+
+struct SavedSession {
+    std::filesystem::path path;
+    std::string title;
+    std::string saved_at;
+
+    bool operator==(const SavedSession&) const = default;
+};
 
 enum RuntimeFlag : std::uint8_t {
     NONE             = 0,

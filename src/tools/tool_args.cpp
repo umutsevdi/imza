@@ -231,6 +231,20 @@ std::optional<std::string> validate_subagent_tool_arguments(
     return std::nullopt;
 }
 
+std::string json_string(const Json::Value& value, const char* key)
+{
+    return value.isObject() && value[key].isString() ? value[key].asString()
+                                                     : std::string { };
+}
+
+std::optional<std::int64_t> json_int(const Json::Value& value, const char* key)
+{
+    if (!value.isObject() || !value[key].isIntegral()) {
+        return std::nullopt;
+    }
+    return value[key].asInt64();
+}
+
 std::string todo_summary(const TodoList& todo)
 {
     static constexpr std::string_view marks[] = { "[ ]", "[→]", "[x]", "[-]" };

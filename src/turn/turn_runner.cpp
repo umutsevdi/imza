@@ -59,7 +59,28 @@ namespace {
         return out;
     }
 
+    bool compaction_due(const ModelPricing& pricing,
+        std::uint64_t prompt_tokens, std::size_t history_size)
+    {
+        return pricing.context_limit > 0 && prompt_tokens > 0
+            && prompt_tokens * 100 >= pricing.context_limit * COMPACTION_PERCENT
+            && history_size >= 4;
+    }
+
 } // namespace
+
+TurnSettings make_turn_settings(
+    const ProviderSelection& selection, Session::Mode mode)
+{
+    TurnSettings settings;
+    settings.model            = selection.model;
+    settings.reasoning_effort = to_config_effort(selection.reasoning_effort);
+    settings.connection_id    = selection.connection_id;
+    settings.route            = selection.route;
+    settings.dialect          = selection.route.dialect;
+    settings.mode             = mode;
+    return settings;
+}
 
 void apply_reasoning(ChatRequest& req, ApiStandard dialect,
     std::string_view effort, const ProviderStore& providers)
@@ -184,13 +205,18 @@ void TurnRunner::_post(std::function<void()> f)
     }
 }
 
+Status TurnRunner::run_stream(
+    const ChatRequest& req, const Route& route, const StreamCallback& cb) const
+{
+    return has_stream_override_ ? stream_fn_(req, cb)
+                                : stream(route, req, cb, nullptr);
+}
+
 bool TurnRunner::_compact_history(std::vector<Message>& history,
     const TurnSettings& settings, std::uint64_t prompt_tokens)
 {
     const ModelPricing pricing = state_->providers->pricing_for(settings.model);
-    if (pricing.context_limit == 0 || prompt_tokens == 0
-        || prompt_tokens * 100 < pricing.context_limit * COMPACTION_PERCENT
-        || history.size() < 4) {
+    if (!compaction_due(pricing, prompt_tokens, history.size())) {
         return true;
     }
 
@@ -229,13 +255,8 @@ bool TurnRunner::_compact_history(std::vector<Message>& history,
         }
     };
 
-    Status status;
-    if (has_stream_override_) {
-        status = stream_fn_(request, callback);
-    } else {
-        status = stream(settings.route, request, callback, nullptr);
-    }
-    const bool success = status == Status::OK && error.empty()
+    const Status status = run_stream(request, settings.route, callback);
+    const bool success  = status == Status::OK && error.empty()
         && !summary.empty() && !state_->session->interrupt_requested();
     state_->session->finish_compaction(event_id, summary, prefix_size, success);
     if (!success) {
@@ -260,9 +281,7 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
         const ModelPricing pricing
             = state_->providers->pricing_for(settings.model);
         const bool should_compact = !compaction_attempted
-            && pricing.context_limit > 0 && prompt_tokens > 0
-            && prompt_tokens * 100 >= pricing.context_limit * COMPACTION_PERCENT
-            && history.size() >= 4;
+            && compaction_due(pricing, prompt_tokens, history.size());
         if (should_compact) {
             compaction_attempted = true;
         }
@@ -488,12 +507,8 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
         }
         if (find_tool(tools_, original.name) == nullptr) {
             const std::string error = "unknown tool: " + original.name;
-            _post([this, req = original, error] {
-                state_->session->fill_tool_result(req,
-                    ToolCall::Result { ToolCall::Result::Kind::ERROR, error });
-            });
-            tool_msgs.push_back(
-                { Message::Type::TOOL, error, { }, original.id });
+            _finish_tool(
+                original, ToolCall::Result::Kind::ERROR, error, tool_msgs);
             continue;
         }
 
@@ -559,16 +574,10 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
         return;
     }
 
-    Message assistant { Message::Type::ASSISTANT, assistant_text };
-    if (dialect == ApiStandard::ANTHROPIC) {
-        if (const std::optional<AssistantTurn> a
-            = state_->session->last_assistant()) {
-            if (!a->reasoning.empty()) {
-                assistant.thinking.push_back(
-                    { a->reasoning, a->reasoning_signature });
-            }
-        }
-    }
+    const std::optional<AssistantTurn> reasoning_source
+        = state_->session->last_assistant();
+    Message assistant = assistant_message(assistant_text,
+        reasoning_source.has_value() ? &*reasoning_source : nullptr, dialect);
     for (const auto& ev : stream_events_) {
         if (ev.kind == StreamEvent::Kind::TOOL_CALL) {
             assistant.tool_calls.push_back(ToolCallEntry {
@@ -592,22 +601,14 @@ void TurnRunner::_apply_tool_result(const PermissionEvaluation& evaluation,
     const ToolCallRequest& req = evaluation.request;
     const auto* verdict        = std::get_if<ToolVerdict>(&res);
     if (verdict == nullptr) {
-        _post([this, req] {
-            state_->session->fill_tool_result(
-                req, ToolCall::Result { ToolCall::Result::Kind::CANCEL, "" });
-        });
-        tool_msgs.push_back(
-            { Message::Type::TOOL, denial_text(""), { }, req.id });
+        _finish_tool(req, ToolCall::Result::Kind::CANCEL, "", denial_text(""),
+            tool_msgs);
         return;
     }
     if (verdict->decision == ToolDecision::REJECT) {
         std::string reason = verdict->reason;
-        _post([this, req, reason] {
-            state_->session->fill_tool_result(req,
-                ToolCall::Result { ToolCall::Result::Kind::REJECT, reason });
-        });
-        tool_msgs.push_back(
-            { Message::Type::TOOL, denial_text(reason), { }, req.id });
+        _finish_tool(req, ToolCall::Result::Kind::REJECT, std::move(reason),
+            denial_text(reason), tool_msgs);
         return;
     }
     if (verdict->decision == ToolDecision::ACCEPT_FOR_SESSION) {
@@ -639,32 +640,39 @@ void TurnRunner::_apply_ask_result(const ToolCallRequest& req,
 {
     const auto* answer = std::get_if<ModalAnswer>(&res);
     if (answer == nullptr) {
-        _post([this, req] {
-            state_->session->fill_tool_result(
-                req, ToolCall::Result { ToolCall::Result::Kind::CANCEL, "" });
-        });
-        tool_msgs.push_back(
-            { Message::Type::TOOL, denial_text(""), { }, req.id });
+        _finish_tool(req, ToolCall::Result::Kind::CANCEL, "", denial_text(""),
+            tool_msgs);
         return;
     }
     ModalAnswer copy       = *answer;
     const std::string text = ask_answer_markdown(copy);
-    _post([this, req, text] {
-        state_->session->fill_tool_result(
-            req, ToolCall::Result { ToolCall::Result::Kind::OUTPUT, text });
-    });
-    tool_msgs.push_back({ Message::Type::TOOL, text, { }, req.id });
+    _finish_tool(req, ToolCall::Result::Kind::OUTPUT, text, tool_msgs);
 }
 
 void TurnRunner::_reject_tool(const ToolCallRequest& req, std::string reason,
     std::vector<Message>& tool_msgs)
 {
-    _post([this, req, reason] {
+    _finish_tool(req, ToolCall::Result::Kind::REJECT, std::move(reason),
+        denial_text(reason), tool_msgs);
+}
+
+void TurnRunner::_finish_tool(const ToolCallRequest& req,
+    ToolCall::Result::Kind kind, const std::string& history_text,
+    std::vector<Message>& tool_msgs)
+{
+    _finish_tool(req, kind, history_text, history_text, tool_msgs);
+}
+
+void TurnRunner::_finish_tool(const ToolCallRequest& req,
+    ToolCall::Result::Kind kind, std::string result_text,
+    std::string history_text, std::vector<Message>& tool_msgs)
+{
+    _post([this, req, kind, result_text = std::move(result_text)]() mutable {
         state_->session->fill_tool_result(
-            req, ToolCall::Result { ToolCall::Result::Kind::REJECT, reason });
+            req, ToolCall::Result { kind, std::move(result_text) });
     });
     tool_msgs.push_back(
-        { Message::Type::TOOL, denial_text(reason), { }, req.id });
+        { Message::Type::TOOL, std::move(history_text), { }, req.id });
 }
 
 void TurnRunner::_run_tool(const PermissionEvaluation& evaluation,

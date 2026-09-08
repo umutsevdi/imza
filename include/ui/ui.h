@@ -81,6 +81,7 @@ ftxui::Component inline_link_button(std::string label,
 std::string elapsed_text(std::chrono::milliseconds elapsed);
 std::string compact_number(std::uint64_t n);
 ftxui::Element hint_bar(std::string hint);
+ftxui::Elements modal_header(std::string title, std::string subtitle = "");
 
 // ◉/○ for single choice, ▣/☐ for multi choice.
 std::string choice_marker(bool multi, bool selected);
@@ -101,6 +102,11 @@ struct ScrollView {
     int max_scroll() const;
     void scroll_lines(int delta);
 };
+
+// Renders a viewport over `content` driven by `view`'s scroll offset.
+ftxui::Element scroll_viewport(ftxui::Element content, ScrollView& view);
+// Shared arrow/page/home/end/wheel handling for a scroll_viewport.
+bool scroll_viewport_event(ScrollView& view, ftxui::Event& event);
 
 struct VirtualListWindow {
     std::size_t begin = 0;
@@ -184,6 +190,13 @@ ftxui::Element code_block_with_lines(
 ftxui::Element diff_split(const DiffView& diff, int available_width = 120);
 bool diff_row_left_changed(const DiffRow& row);
 bool diff_row_right_changed(const DiffRow& row);
+// One source for diff glyphs, change backgrounds, and width math.
+std::string diff_marker(bool added);
+ftxui::Color diff_background(bool added);
+int diff_side_width(int width);
+int diff_content_width(int width);
+int review_content_width(const LayoutCtx& ctx);
+ftxui::Element diffstat_chip(std::size_t additions, std::size_t deletions);
 ftxui::Element session_error_element(const Session& session);
 
 ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx);

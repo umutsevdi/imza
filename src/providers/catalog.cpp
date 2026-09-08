@@ -90,66 +90,79 @@ namespace {
         return conn.provider_id == kCustomProviderId || !conn.endpoint.empty();
     }
 
-} // namespace
+    constexpr std::string_view kChatSuffix = "/chat/completions";
 
-bool whitelisted_provider(std::string_view id)
-{
-    return std::find(kWhitelist.begin(), kWhitelist.end(), id)
-        != kWhitelist.end();
-}
+    std::string normalize_base(std::string_view base)
+    {
+        std::string out = strip_slash(base);
+        if (out.size() > kChatSuffix.size()
+            && std::string_view(out).substr(out.size() - kChatSuffix.size())
+                == kChatSuffix) {
+            out.resize(out.size() - kChatSuffix.size());
+        }
+        return out;
+    }
 
-Status trim_provider(const Json::Value& src, CachedProvider& out)
-{
-    if (!src.isObject()) {
-        return Status::JSON_ERROR;
+    bool whitelisted_provider(std::string_view id)
+    {
+        return std::find(kWhitelist.begin(), kWhitelist.end(), id)
+            != kWhitelist.end();
     }
-    if (src["name"].isString()) {
-        out.name = src["name"].asString();
-    }
-    if (src["api"].isString()) {
-        out.api = src["api"].asString();
-    }
-    if (src["npm"].isString()) {
-        out.npm = src["npm"].asString();
-    }
-    const Json::Value& models = src["models"];
-    if (models.isNull()) {
+
+    Status trim_provider(const Json::Value& src, CachedProvider& out)
+    {
+        if (!src.isObject()) {
+            return Status::JSON_ERROR;
+        }
+        if (src["name"].isString()) {
+            out.name = src["name"].asString();
+        }
+        if (src["api"].isString()) {
+            out.api = src["api"].asString();
+        }
+        if (src["npm"].isString()) {
+            out.npm = src["npm"].asString();
+        }
+        const Json::Value& models = src["models"];
+        if (models.isNull()) {
+            return Status::OK;
+        }
+        if (!models.isObject()) {
+            return Status::JSON_ERROR;
+        }
+        for (const std::string& id : models.getMemberNames()) {
+            const Json::Value& entry = models[id];
+            if (!entry.isObject()) {
+                continue;
+            }
+            CachedModel model;
+            if (entry["name"].isString()) {
+                model.name = entry["name"].asString();
+            }
+            const Json::Value& cost = entry["cost"];
+            if (cost.isObject()) {
+                model.cost_input       = cost_field(cost, "input");
+                model.cost_output      = cost_field(cost, "output");
+                model.cost_cache_read  = cost_field(cost, "cache_read");
+                model.cost_cache_write = cost_field(cost, "cache_write");
+            }
+            const Json::Value& limit = entry["limit"];
+            if (limit.isObject()) {
+                model.context = limit_field(limit, "context");
+                model.output  = limit_field(limit, "output");
+            }
+            if (entry["tool_call"].isBool()) {
+                model.tool_call = entry["tool_call"].asBool();
+            }
+            if (entry["reasoning"].isBool()) {
+                model.reasoning = entry["reasoning"].asBool();
+            }
+            out.models[id] = std::move(model);
+        }
         return Status::OK;
     }
-    if (!models.isObject()) {
-        return Status::JSON_ERROR;
-    }
-    for (const std::string& id : models.getMemberNames()) {
-        const Json::Value& entry = models[id];
-        if (!entry.isObject()) {
-            continue;
-        }
-        CachedModel model;
-        if (entry["name"].isString()) {
-            model.name = entry["name"].asString();
-        }
-        const Json::Value& cost = entry["cost"];
-        if (cost.isObject()) {
-            model.cost_input       = cost_field(cost, "input");
-            model.cost_output      = cost_field(cost, "output");
-            model.cost_cache_read  = cost_field(cost, "cache_read");
-            model.cost_cache_write = cost_field(cost, "cache_write");
-        }
-        const Json::Value& limit = entry["limit"];
-        if (limit.isObject()) {
-            model.context = limit_field(limit, "context");
-            model.output  = limit_field(limit, "output");
-        }
-        if (entry["tool_call"].isBool()) {
-            model.tool_call = entry["tool_call"].asBool();
-        }
-        if (entry["reasoning"].isBool()) {
-            model.reasoning = entry["reasoning"].asBool();
-        }
-        out.models[id] = std::move(model);
-    }
-    return Status::OK;
-}
+
+} // namespace
 
 bool catalog_stale(const Catalog& catalog)
 {
@@ -322,16 +335,9 @@ Route resolve_route(
     route.api_key = conn.api_key;
 
     if (endpoint_backed(conn)) {
-        route.endpoint                     = conn.endpoint;
-        route.api                          = strip_slash(conn.endpoint);
-        constexpr std::string_view kSuffix = "/chat/completions";
-        if (route.api.size() > kSuffix.size()
-            && std::string_view(route.api).substr(
-                   route.api.size() - kSuffix.size())
-                == kSuffix) {
-            route.api.resize(route.api.size() - kSuffix.size());
-        }
-        route.dialect = ApiStandard::OPENAI;
+        route.endpoint = conn.endpoint;
+        route.api      = normalize_base(conn.endpoint);
+        route.dialect  = ApiStandard::OPENAI;
         route.auth = conn.api_key.empty() ? AuthType::NONE : AuthType::BEARER;
         return route;
     }
@@ -359,12 +365,7 @@ std::string endpoint_for_base(std::string_view base)
     if (base.empty()) {
         return { };
     }
-    constexpr std::string_view kSuffix = "/chat/completions";
-    if (base.size() >= kSuffix.size()
-        && base.substr(base.size() - kSuffix.size()) == kSuffix) {
-        return std::string(base);
-    }
-    return std::string(base) + std::string(kSuffix);
+    return normalize_base(base) + std::string(kChatSuffix);
 }
 
 } // namespace ursa

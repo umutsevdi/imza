@@ -3,18 +3,11 @@
 #include <algorithm>
 #include <type_traits>
 
+#include "common/util.h"
+
 namespace ursa {
 
 namespace {
-
-    bool is_descendant(const std::filesystem::path& path,
-        const std::filesystem::path& directory)
-    {
-        const std::filesystem::path relative
-            = path.lexically_relative(directory);
-        return path == directory
-            || (!relative.empty() && *relative.begin() != "..");
-    }
 
     bool normalize_grant(PermissionGrant& grant)
     {
@@ -94,16 +87,6 @@ bool PermissionStore::install(Grants grants)
     return true;
 }
 
-bool PermissionStore::matches_external_path(
-    const std::filesystem::path& path) const
-{
-    const Snapshot grants = snapshot();
-    return std::any_of(grants->begin(), grants->end(), [&](const auto& entry) {
-        const auto* stored = std::get_if<ExternalGrant>(&entry);
-        return stored != nullptr && is_descendant(path, *stored);
-    });
-}
-
 bool PermissionStore::matches(const ShellCommandGrant& grant) const
 {
     const Snapshot grants = snapshot();
@@ -138,8 +121,6 @@ void PermissionStore::clear()
     }
 }
 
-std::size_t PermissionStore::size() const { return snapshot()->size(); }
-
 Signal<>::Subscription PermissionStore::subscribe_to_grants_change(
     Signal<>::Callback callback)
 {
@@ -153,7 +134,7 @@ bool PermissionStore::_covers(
         return false;
     }
     if (const auto* directory = std::get_if<ExternalGrant>(&stored)) {
-        return is_descendant(std::get<ExternalGrant>(requested), *directory);
+        return path_within(*directory, std::get<ExternalGrant>(requested));
     }
     if (const auto* command = std::get_if<ShellCommandGrant>(&stored)) {
         const auto& other = std::get<ShellCommandGrant>(requested);

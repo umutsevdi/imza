@@ -5,6 +5,7 @@
 #include "platform/config.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -13,6 +14,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 #ifdef _WIN32
 #include <windows.h>
@@ -23,6 +25,30 @@
 namespace ursa {
 
 namespace {
+    std::filesystem::path config_dir()
+    {
+#if defined(_WIN32)
+        const char* appdata = std::getenv("APPDATA");
+        return appdata ? appdata : ".";
+#elif defined(__APPLE__)
+        const char* home           = std::getenv("HOME");
+        std::filesystem::path base = home ? home : ".";
+        return base / "Library" / "Application Support";
+#else
+        const char* xdg  = std::getenv("XDG_CONFIG_HOME");
+        const char* home = std::getenv("HOME");
+        std::filesystem::path base;
+        if (xdg && *xdg) {
+            base = xdg;
+        } else if (home) {
+            base = home;
+            base /= ".config";
+        } else {
+            base = ".config";
+        }
+        return base;
+#endif
+    }
 
     std::string read_command_output(const std::string& cmd)
     {
@@ -198,19 +224,19 @@ namespace {
         }
     }
 
+    constexpr std::array<std::string_view, 8> kAgentSkillDirs
+        = { ".opencode", ".claude", ".codex", ".grok", ".gemini", ".agents",
+              ".cursor", ".openclaw" };
+
     void detect_global_skills(
         std::unordered_map<std::string, Skill>& global_skills)
     {
-        auto config_dir            = base_config_dir();
         std::filesystem::path home = { home_dir() };
-        auto home_dir_skills = { ".opencode", ".claude", ".codex", ".grok",
-            ".gemini", ".agents", ".cursor", ".openclaw" };
-        for (const auto& skill_path : home_dir_skills) {
+        for (const std::string_view skill_path : kAgentSkillDirs) {
             auto p = home / skill_path / "skills";
             add_skills(p, Skill::Scope::GLOBAL, std::nullopt, global_skills);
         }
-        auto skills_generic_cfg
-            = config_dir.parent_path() / "agents" / "skills";
+        auto skills_generic_cfg = config_dir() / "agents" / "skills";
         add_skills(skills_generic_cfg, Skill::Scope::GLOBAL, std::nullopt,
             global_skills);
     }
@@ -218,9 +244,7 @@ namespace {
     void detect_project_skills(const std::filesystem::path& root,
         std::unordered_map<std::string, Skill>& project_skills)
     {
-        auto home_dir_skills = { ".opencode", ".claude", ".codex", ".grok",
-            ".gemini", ".agents", ".cursor", ".openclaw" };
-        for (const auto& skill_path : home_dir_skills) {
+        for (const std::string_view skill_path : kAgentSkillDirs) {
             auto p = root / skill_path / "skills";
             add_skills(p, Skill::Scope::PROJECT, root, project_skills);
         }

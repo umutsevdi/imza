@@ -125,13 +125,7 @@ Delegation::Delegation(ApplicationState& state, PostFn post,
 void Delegation::submit_delegated(
     std::string text, const ProviderSelection& selection, Session::Mode mode)
 {
-    TurnSettings settings;
-    settings.model            = selection.model;
-    settings.reasoning_effort = selection.reasoning_effort;
-    settings.connection_id    = selection.connection_id;
-    settings.route            = selection.route;
-    settings.dialect          = selection.route.dialect;
-    settings.mode             = mode;
+    TurnSettings settings = make_turn_settings(selection, mode);
     state_->session->set_mode(mode);
     state_->session->clear_interrupt();
     const std::string task = text;
@@ -356,9 +350,7 @@ SubagentHandle Delegation::run_subagent(std::string prompt, std::string model,
                     output += event.text;
                 }
             };
-            Status status = runner_.has_stream_override()
-                ? runner_.stream_fn()(req, callback)
-                : stream(route, req, callback, nullptr);
+            Status status = runner_.run_stream(req, route, callback);
             if (stop.stop_requested()) {
                 status = Status::CANCELLED;
             } else if (deadline

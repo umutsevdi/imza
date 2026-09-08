@@ -10,7 +10,6 @@
 #include <thread>
 
 #include "app/flows.h"
-#include "network/json_io.h"
 #include "platform/config.h"
 #include "providers/catalog.h"
 #include "tools/skills.h"
@@ -30,20 +29,19 @@ struct IsolatedConfig {
             / ("ursa-ctrl-test-" + std::to_string(::getpid()) + "-"
                 + std::to_string(counter++));
         std::filesystem::create_directories(dir);
-        if (const char* xdg = std::getenv("XDG_CONFIG_HOME")) {
+        if (const char* xdg = std::getenv("XDG_DATA_HOME")) {
             old_xdg = xdg;
             had_xdg = true;
         }
-        setenv("XDG_CONFIG_HOME", dir.string().c_str(), 1);
+        setenv("XDG_DATA_HOME", dir.string().c_str(), 1);
 
         ursa::Catalog catalog;
         catalog.fetched_at = static_cast<std::int64_t>(std::time(nullptr));
-        const auto src     = ursa::parse_json(R"({
-            "name": "Test Provider",
-            "api": "http://127.0.0.1:9/v1",
-            "npm": "@ai-sdk/openai-compatible"
-        })");
-        std::ignore = ursa::trim_provider(src, catalog.providers["testprov"]);
+        ursa::CachedProvider provider;
+        provider.name                 = "Test Provider";
+        provider.api                  = "http://127.0.0.1:9/v1";
+        provider.npm                  = "@ai-sdk/openai-compatible";
+        catalog.providers["testprov"] = provider;
         std::ignore
             = ursa::save_catalog(dir / "ursa" / "presets.json", catalog);
     }
@@ -51,9 +49,9 @@ struct IsolatedConfig {
     ~IsolatedConfig()
     {
         if (had_xdg) {
-            setenv("XDG_CONFIG_HOME", old_xdg.c_str(), 1);
+            setenv("XDG_DATA_HOME", old_xdg.c_str(), 1);
         } else {
-            unsetenv("XDG_CONFIG_HOME");
+            unsetenv("XDG_DATA_HOME");
         }
         std::error_code ec;
         std::filesystem::remove_all(dir, ec);

@@ -144,11 +144,10 @@ TEST_CASE("permission store installs complete valid sets atomically")
     CHECK(store.install(valid));
     CHECK(empty_snapshot->empty());
     const auto installed_snapshot = store.snapshot();
-    CHECK(store.size() == 2);
-    CHECK(store.matches_external_path(root / "child" / "file"));
+    CHECK(installed_snapshot->size() == 2);
     CHECK(store.matches(ShellCommandGrant { "git", "status" }));
     CHECK(store.install({ ExternalGrant { root } }));
-    CHECK(store.size() == 2);
+    CHECK(store.snapshot()->size() == 2);
     CHECK(installed_snapshot->size() == 2);
 
     const std::vector<PermissionGrant> invalid {
@@ -156,9 +155,9 @@ TEST_CASE("permission store installs complete valid sets atomically")
         ExternalGrant { "relative" },
     };
     CHECK_FALSE(store.install(invalid));
-    CHECK(store.size() == 2);
+    CHECK(store.snapshot()->size() == 2);
     store.clear();
-    CHECK(store.size() == 0);
+    CHECK(store.snapshot()->empty());
 }
 
 TEST_CASE("permission store publishes only effective grant changes")
@@ -191,7 +190,7 @@ TEST_CASE("runtime shell grants match subcommands and whole programs")
     CHECK_FALSE(store.matches(ShellCommandGrant { "git", "diff" }));
     REQUIRE(store.install({ ShellCommandGrant { "git", std::nullopt } }));
     CHECK(store.matches(ShellCommandGrant { "git", "diff" }));
-    CHECK(store.size() == 1);
+    CHECK(store.snapshot()->size() == 1);
 }
 
 TEST_CASE("shell analysis extracts compound command and subcommand pairs")
@@ -238,7 +237,7 @@ TEST_CASE("application state shares grants with children")
     REQUIRE(parent->permissions->install(grants));
     auto child = make_child_application_state(*parent, immediate);
     CHECK(parent->permissions == child->permissions);
-    CHECK(child->permissions->size() == 1);
+    CHECK(child->permissions->snapshot()->size() == 1);
     CHECK(parent->runtime_flags == child->runtime_flags);
     CHECK(parent->environment == child->environment);
     CHECK(parent->environment->system() == child->environment->system());
@@ -273,7 +272,7 @@ TEST_CASE("session lifecycle clears grants only after successful activation")
     enqueue_user_modal(*state, SessionsModal { });
     resolve_modal(*state, fixture.root / "missing-session.json");
     CHECK(state->session->title() == "Current session");
-    CHECK(state->permissions->size() == 1);
+    CHECK(state->permissions->snapshot()->size() == 1);
 
     const auto path = fixture.root / "session.json";
     const auto workspace
@@ -283,13 +282,13 @@ TEST_CASE("session lifecycle clears grants only after successful activation")
     resolve_modal(*state, path);
     CHECK(state->session->title() == "Loaded session");
     CHECK(state->session->error().empty());
-    CHECK(state->permissions->size() == 0);
+    CHECK(state->permissions->snapshot()->empty());
 
     REQUIRE(state->permissions->install({ grant }));
     CHECK(save_session(*state->session) == Status::OK);
-    CHECK(state->permissions->size() == 1);
+    CHECK(state->permissions->snapshot()->size() == 1);
     run_slash(*state, "/new");
-    CHECK(state->permissions->size() == 0);
+    CHECK(state->permissions->snapshot()->empty());
 }
 
 TEST_CASE("failed directory changes and child creation retain grants")
@@ -301,10 +300,10 @@ TEST_CASE("failed directory changes and child creation retain grants")
     REQUIRE(parent->permissions->install({ grant }));
 
     CHECK_FALSE(parent->environment->chdir(fixture.root / "missing"));
-    CHECK(parent->permissions->size() == 1);
+    CHECK(parent->permissions->snapshot()->size() == 1);
     auto child = make_child_application_state(*parent, immediate);
     CHECK(child->permissions == parent->permissions);
-    CHECK(child->permissions->size() == 1);
+    CHECK(child->permissions->snapshot()->size() == 1);
 }
 
 TEST_CASE("permission store snapshots remain valid during concurrent changes")

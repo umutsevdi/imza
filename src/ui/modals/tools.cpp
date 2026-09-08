@@ -89,18 +89,13 @@ namespace {
     Element tool_approval_reason(const ToolCallRequest& req)
     {
         const Json::Value args = parse_json(req.args);
-        const auto string_arg  = [&args](const char* name) {
-            return args.isObject() && args[name].isString()
-                ? args[name].asString()
-                : std::string { };
-        };
-        std::string message = req.permission_reason;
+        std::string message    = req.permission_reason;
         const char* path_key
             = req.name == "edit" || req.name == "write" ? "file_path" : "path";
         if (!message.empty()
             && (req.name == "read" || req.name == "list" || req.name == "edit"
                 || req.name == "write")) {
-            const std::string path = string_arg(path_key);
+            const std::string path = json_string(args, path_key);
             if (!path.empty()) {
                 message += " · " + path;
             }
@@ -108,14 +103,14 @@ namespace {
             message = "May modify files or run external processes";
         } else if (message.empty()
             && (req.name == "edit" || req.name == "write")) {
-            const std::string path = string_arg("file_path");
+            const std::string path = json_string(args, "file_path");
             message
                 = path.empty() ? "Will modify a file" : "Will modify " + path;
         } else if (message.empty() && req.name == "read") {
-            const std::string path = string_arg("path");
+            const std::string path = json_string(args, "path");
             message = path.empty() ? "Will read a file" : "Will read " + path;
         } else if (message.empty() && req.name == "list") {
-            const std::string path = string_arg("path");
+            const std::string path = json_string(args, "path");
             message
                 = path.empty() ? "Will list a directory" : "Will list " + path;
         } else if (message.empty()) {
@@ -128,19 +123,15 @@ namespace {
         const ToolCallRequest& req, const SystemEnvironment& system)
     {
         const Json::Value args = parse_json(req.args);
-        const auto string_arg  = [&args](const char* name) {
-            return args.isObject() && args[name].isString()
-                ? args[name].asString()
-                : std::string { };
-        };
 
         if (req.name == "shell") {
-            const std::string command = string_arg("command").empty()
+            const std::string command = json_string(args, "command").empty()
                 ? req.args
-                : string_arg("command");
+                : json_string(args, "command");
             long timeout              = 10;
-            if (args.isObject() && args["timeout"].isIntegral()) {
-                timeout = args["timeout"].asInt64();
+            if (const auto value = json_int(args, "timeout");
+                value.has_value()) {
+                timeout = static_cast<long>(*value);
             }
             std::error_code ec;
             const std::string cwd = std::filesystem::current_path(ec).string();
@@ -152,31 +143,31 @@ namespace {
 
         if (req.name == "edit") {
             const std::string lang
-                = syntax_type_for_path(string_arg("file_path"));
+                = syntax_type_for_path(json_string(args, "file_path"));
             Elements rows {
                 section_title("Existing text"),
-                code_block(preview_text(string_arg("old_string")), lang),
+                code_block(preview_text(json_string(args, "old_string")), lang),
                 section_title("Replacement"),
-                code_block(preview_text(string_arg("new_string")), lang),
+                code_block(preview_text(json_string(args, "new_string")), lang),
             };
             return vbox(std::move(rows));
         }
 
         if (req.name == "write") {
             const std::string lang
-                = syntax_type_for_path(string_arg("file_path"));
+                = syntax_type_for_path(json_string(args, "file_path"));
             return vbox({
                 section_title("Content"),
-                code_block(preview_text(string_arg("text")), lang),
+                code_block(preview_text(json_string(args, "text")), lang),
             });
         }
 
         if (req.name == "read") {
             std::string range;
-            if (args["line_begin"].isIntegral()) {
-                range = "lines " + std::to_string(args["line_begin"].asInt64());
-                if (args["line_end"].isIntegral()) {
-                    range += "–" + std::to_string(args["line_end"].asInt64());
+            if (const auto begin = json_int(args, "line_begin")) {
+                range = "lines " + std::to_string(*begin);
+                if (const auto end = json_int(args, "line_end")) {
+                    range += "–" + std::to_string(*end);
                 } else {
                     range += " onward";
                 }
@@ -660,14 +651,8 @@ namespace {
 
         Element static_viewport(Element content, const std::string& metadata)
         {
-            static_view_.scroll_lines(0);
-            Element viewport = std::move(content)
-                | capture_content_height(&static_view_.content_height)
-                | vscroll_indicator
-                | focusPosition(0,
-                    static_view_.scroll
-                        + std::max(0, static_view_.viewport_lines() - 1) / 2)
-                | yframe | yflex | reflect(static_view_.box);
+            Element viewport
+                = scroll_viewport(std::move(content), static_view_);
             Elements rows { std::move(viewport), separatorEmpty() };
             if (!metadata.empty()) {
                 rows.push_back(hint_bar(metadata));
@@ -678,44 +663,7 @@ namespace {
 
         bool scroll_static(Event event)
         {
-            if (event == Event::ArrowUp) {
-                static_view_.scroll_lines(-1);
-                return true;
-            }
-            if (event == Event::ArrowDown) {
-                static_view_.scroll_lines(1);
-                return true;
-            }
-            if (event == Event::PageUp) {
-                static_view_.scroll_lines(
-                    -std::max(1, static_view_.viewport_lines() - 1));
-                return true;
-            }
-            if (event == Event::PageDown) {
-                static_view_.scroll_lines(
-                    std::max(1, static_view_.viewport_lines() - 1));
-                return true;
-            }
-            if (event == Event::Home) {
-                static_view_.scroll = 0;
-                return true;
-            }
-            if (event == Event::End) {
-                static_view_.scroll = static_view_.max_scroll();
-                return true;
-            }
-            if (event.is_mouse()) {
-                const Mouse& m = event.mouse();
-                if (m.button == Mouse::WheelUp) {
-                    static_view_.scroll_lines(-3);
-                    return true;
-                }
-                if (m.button == Mouse::WheelDown) {
-                    static_view_.scroll_lines(3);
-                    return true;
-                }
-            }
-            return false;
+            return scroll_viewport_event(static_view_, event);
         }
 
         void reset_static_scroll() { static_view_ = { }; }

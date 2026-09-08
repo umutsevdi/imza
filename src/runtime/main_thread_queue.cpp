@@ -36,12 +36,6 @@ bool MainThreadQueue::wait_for_task(std::chrono::milliseconds timeout)
     return _ready.wait_for(lock, timeout, [this] { return !_tasks.empty(); });
 }
 
-bool MainThreadQueue::empty() const
-{
-    std::lock_guard lock(_mutex);
-    return _tasks.empty();
-}
-
 Signal<>::Subscription MainThreadQueue::subscribe(Signal<>::Callback callback)
 {
     auto subscription = _posted.subscribe(callback);

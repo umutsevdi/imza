@@ -1,46 +1,61 @@
 #include <doctest/doctest.h>
-#include <json/json.h>
 
 #include <unistd.h>
 
 #include <ctime>
+#include <fstream>
 
-#include "network/json_io.h"
 #include "providers/catalog.h"
 
 namespace {
 
-Json::Value parse_value(const std::string& text)
+std::string provider_json()
 {
-    return ursa::parse_json(text);
-}
-
-TEST_CASE("trim_provider prunes models.dev fields")
-{
-    const auto src = parse_value(R"({
-        "id": "openai",
-        "name": "OpenAI",
-        "api": "https://api.openai.com/v1",
-        "npm": "@ai-sdk/openai",
-        "env": ["OPENAI_API_KEY"],
-        "doc": "https://platform.openai.com",
-        "models": {
-            "gpt-5.5": {
-                "name": "GPT 5.5",
-                "description": "long text",
-                "attachment": true,
-                "modalities": {"input": ["text"], "output": ["text"]},
-                "tool_call": true,
-                "reasoning": true,
-                "cost": {"input": 1.25, "output": 10.0,
-                         "cache_read": 0.125, "cache_write": null},
-                "limit": {"context": 272000, "output": 128000}
+    return R"({
+        "fetched_at": 0,
+        "providers": {
+            "openai": {
+                "id": "openai",
+                "name": "OpenAI",
+                "api": "https://api.openai.com/v1",
+                "npm": "@ai-sdk/openai",
+                "env": ["OPENAI_API_KEY"],
+                "doc": "https://platform.openai.com",
+                "models": {
+                    "gpt-5.5": {
+                        "name": "GPT 5.5",
+                        "description": "long text",
+                        "attachment": true,
+                        "modalities": {"input": ["text"], "output": ["text"]},
+                        "tool_call": true,
+                        "reasoning": true,
+                        "cost": {"input": 1.25, "output": 10.0,
+                                 "cache_read": 0.125, "cache_write": null},
+                        "limit": {"context": 272000, "output": 128000}
+                    }
+                }
             }
         }
-    })");
+    })";
+}
 
-    ursa::CachedProvider out;
-    REQUIRE(ursa::trim_provider(src, out) == ursa::Status::OK);
+} // namespace
+
+TEST_CASE("load_catalog prunes models.dev fields")
+{
+    const auto path = std::filesystem::temp_directory_path()
+        / ("ursa-catalog-test-" + std::to_string(::getpid()) + ".json");
+    {
+        std::ofstream file(path);
+        REQUIRE(file.good());
+        file << provider_json();
+    }
+
+    ursa::Catalog loaded;
+    REQUIRE(ursa::load_catalog(path, loaded) == ursa::Status::OK);
+    std::filesystem::remove(path);
+    REQUIRE(loaded.providers.size() == 1);
+    const auto& out = loaded.providers.at("openai");
     CHECK(out.name == "OpenAI");
     CHECK(out.api == "https://api.openai.com/v1");
     CHECK(out.npm == "@ai-sdk/openai");
@@ -66,14 +81,12 @@ TEST_CASE("catalog roundtrip through presets file")
 {
     ursa::Catalog catalog;
     catalog.fetched_at = 1756390000;
-    const auto src     = parse_value(R"({
-        "name": "OpenRouter",
-        "api": "https://openrouter.ai/api/v1",
-        "npm": "@ai-sdk/openai-compatible",
-        "models": {"openai/gpt-5.5": {"name": "GPT 5.5"}}
-    })");
-    REQUIRE(ursa::trim_provider(src, catalog.providers["openrouter"])
-        == ursa::Status::OK);
+    ursa::CachedProvider openrouter;
+    openrouter.name                          = "OpenRouter";
+    openrouter.api                           = "https://openrouter.ai/api/v1";
+    openrouter.npm                           = "@ai-sdk/openai-compatible";
+    openrouter.models["openai/gpt-5.5"].name = "GPT 5.5";
+    catalog.providers["openrouter"]          = openrouter;
 
     const auto path = std::filesystem::temp_directory_path()
         / ("ursa-catalog-test-" + std::to_string(::getpid()) + ".json");
@@ -139,13 +152,11 @@ TEST_CASE("catalog_base falls back for SDK-default providers")
 TEST_CASE("resolve_route derives endpoints per dialect")
 {
     ursa::Catalog catalog;
-    const auto src = parse_value(R"({
-        "name": "OpenRouter",
-        "api": "https://openrouter.ai/api/v1",
-        "npm": "@ai-sdk/openai-compatible"
-    })");
-    REQUIRE(ursa::trim_provider(src, catalog.providers["openrouter"])
-        == ursa::Status::OK);
+    ursa::CachedProvider openrouter;
+    openrouter.name                 = "OpenRouter";
+    openrouter.api                  = "https://openrouter.ai/api/v1";
+    openrouter.npm                  = "@ai-sdk/openai-compatible";
+    catalog.providers["openrouter"] = openrouter;
 
     ursa::Connection conn;
     conn.id          = "openrouter";
@@ -167,12 +178,10 @@ TEST_CASE("resolve_route derives endpoints per dialect")
 TEST_CASE("resolve_route routes anthropic providers with x-api-key")
 {
     ursa::Catalog catalog;
-    const auto src = parse_value(R"({
-        "name": "Anthropic",
-        "npm": "@ai-sdk/anthropic"
-    })");
-    REQUIRE(ursa::trim_provider(src, catalog.providers["anthropic"])
-        == ursa::Status::OK);
+    ursa::CachedProvider anthropic_provider;
+    anthropic_provider.name        = "Anthropic";
+    anthropic_provider.npm         = "@ai-sdk/anthropic";
+    catalog.providers["anthropic"] = anthropic_provider;
 
     ursa::Connection conn;
     conn.id          = "anthropic";
@@ -239,5 +248,3 @@ TEST_CASE("auth_headers by auth type")
     CHECK(anthropic[0] == "x-api-key: k");
     CHECK(anthropic[1] == "anthropic-version: 2023-06-01");
 }
-
-} // namespace

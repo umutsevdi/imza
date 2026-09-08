@@ -432,18 +432,8 @@ namespace {
             Elements bottom;
             bottom.push_back(
                 vbox({
-                    hbox({
-                        filler(),
-                        text("↑/↓ scroll · click a card to open in viewer")
-                            | color(PANEL_FG_DIM),
-                        text(" "),
-                    }),
-                    hbox({
-                        filler(),
-                        text("Tab next phase · Shift+Tab previous phase")
-                            | color(PANEL_FG_DIM),
-                        text(" "),
-                    }),
+                    hint_bar("↑/↓ scroll · click a card to open in viewer"),
+                    hint_bar("Tab next phase · Shift+Tab previous phase"),
                 })
                 | xflex);
             if (autocomplete_.active()) {
@@ -494,8 +484,8 @@ namespace {
                         return true;
                     }
                 }
-                for (auto& [id, btn] : reasoning_comps_) {
-                    if (btn->OnEvent(event)) {
+                for (auto& [id, link] : reasoning_links_) {
+                    if (link.component->OnEvent(event)) {
                         return true;
                     }
                 }
@@ -658,10 +648,13 @@ namespace {
         std::map<std::size_t, Component> read_buttons_;
         std::map<std::pair<std::size_t, std::size_t>, Component>
             subagent_buttons_;
-        std::map<std::size_t, std::shared_ptr<std::string>> reasoning_labels_;
-        std::map<std::size_t, std::shared_ptr<std::string>> reasoning_content_;
-        std::map<std::size_t, std::shared_ptr<std::string>> reasoning_metadata_;
-        std::map<std::size_t, Component> reasoning_comps_;
+        struct ReasoningLink {
+            std::shared_ptr<std::string> label;
+            std::shared_ptr<std::string> content;
+            std::shared_ptr<std::string> metadata;
+            Component component;
+        };
+        std::map<std::size_t, ReasoningLink> reasoning_links_;
 
         std::vector<Element> item_cache_;
         std::vector<std::size_t> item_versions_;
@@ -680,15 +673,12 @@ namespace {
             for (auto& [key, component] : subagent_buttons_) {
                 component->Detach();
             }
-            for (auto& [index, component] : reasoning_comps_) {
-                component->Detach();
+            for (auto& [index, link] : reasoning_links_) {
+                link.component->Detach();
             }
             read_buttons_.clear();
             subagent_buttons_.clear();
-            reasoning_labels_.clear();
-            reasoning_content_.clear();
-            reasoning_metadata_.clear();
-            reasoning_comps_.clear();
+            reasoning_links_.clear();
         }
 
         void evict_item(std::size_t index, const ConversationItem& item)
@@ -710,13 +700,10 @@ namespace {
                     subagent = subagent_buttons_.erase(subagent);
                 }
             }
-            const auto reasoning = reasoning_comps_.find(index);
-            if (reasoning != reasoning_comps_.end()) {
-                reasoning->second->Detach();
-                reasoning_comps_.erase(reasoning);
-                reasoning_labels_.erase(index);
-                reasoning_content_.erase(index);
-                reasoning_metadata_.erase(index);
+            const auto reasoning = reasoning_links_.find(index);
+            if (reasoning != reasoning_links_.end()) {
+                reasoning->second.component->Detach();
+                reasoning_links_.erase(reasoning);
             }
         }
 
@@ -760,30 +747,57 @@ namespace {
             return hbox(std::move(parts));
         }
 
-        Element render_skill_item(const ToolCall& tc)
+        Element tool_card(const ToolCall& tc, Element body)
         {
-            const std::string label = "▸ open skill instructions in viewer ("
-                + std::to_string(count_lines(tc.result->text)) + " lines)";
-            Component btn = make_viewer_button(tc.id, label);
             return vbox({
                 tool_header_element(tc),
-                btn->Render(),
+                std::move(body),
                 separatorEmpty(),
             });
         }
 
+        std::string viewer_label(
+            std::string what, std::size_t count, std::string_view unit)
+        {
+            return "▸ open " + std::move(what) + " in viewer ("
+                + std::to_string(count) + " " + std::string(unit) + ")";
+        }
+
+        const ToolCall* find_tool_call(std::size_t id) const
+        {
+            for (const ConversationItem& item : session_->items()) {
+                if (const auto* call = std::get_if<ToolCall>(&item);
+                    call != nullptr && call->id == id) {
+                    return call;
+                }
+            }
+            return nullptr;
+        }
+
+        Element render_tool_status(
+            const ToolCall& tc, std::string marker, ftxui::Color tone)
+        {
+            return tool_card(tc,
+                hbox({
+                    text(marker) | bold | color(tone),
+                    text(tc.result->text) | color(tone),
+                }));
+        }
+
+        Element render_skill_item(const ToolCall& tc)
+        {
+            const std::string label = viewer_label(
+                "skill instructions", count_lines(tc.result->text), "lines");
+            Component btn = make_viewer_button(tc.id, label);
+            return tool_card(tc, btn->Render());
+        }
+
         Element render_read_item(const ToolCall& tc)
         {
-            const std::string& content = tc.result->text;
-            const std::string label    = "▸ open " + tool_call_head(tc)
-                + " in viewer (" + std::to_string(count_lines(content))
-                + " lines)";
+            const std::string label = viewer_label(
+                tool_call_head(tc), count_lines(tc.result->text), "lines");
             Component btn = make_viewer_button(tc.id, label);
-            return vbox({
-                tool_header_element(tc),
-                btn->Render(),
-                separatorEmpty(),
-            });
+            return tool_card(tc, btn->Render());
         }
 
         Element render_list_collapsed(const ToolCall& tc)
@@ -793,14 +807,10 @@ namespace {
             if (full.find("\n[truncated:") != std::string::npos) {
                 --entries;
             }
-            const std::string label = "▸ open directory listing in viewer ("
-                + std::to_string(entries) + " entries)";
+            const std::string label
+                = viewer_label("directory listing", entries, "entries");
             Component btn = make_viewer_button(tc.id, label);
-            return vbox({
-                tool_header_element(tc),
-                btn->Render(),
-                separatorEmpty(),
-            });
+            return tool_card(tc, btn->Render());
         }
 
         Element render_shell_collapsed(const ToolCall& tc)
@@ -808,15 +818,11 @@ namespace {
             const std::string& full   = tc.result->text;
             const std::size_t total   = count_lines(full);
             const std::string preview = take_lines(full, kLargeOutputLines);
-            const std::string label   = "▸ open full shell output in viewer ("
-                + std::to_string(total) + " lines)";
+            const std::string label
+                = viewer_label("full shell output", total, "lines");
             Component btn = make_viewer_button(tc.id, label);
-            return vbox({
-                tool_header_element(tc),
-                code_block(preview, ""),
-                btn->Render(),
-                separatorEmpty(),
-            });
+            return tool_card(
+                tc, vbox({ code_block(preview, ""), btn->Render() }));
         }
 
         Element render_shell_item(const ToolCall& tc)
@@ -842,16 +848,9 @@ namespace {
                     additions += diff_row_right_changed(row) ? 1 : 0;
                 }
                 header              = hbox({ std::move(header), filler(),
-                    text("+" + std::to_string(additions))
-                        | color(Color::GreenLight),
-                    text(" "),
-                    text("−" + std::to_string(deletions))
-                        | color(Color::RedLight) });
+                    diffstat_chip(additions, deletions) });
                 const LayoutCtx ctx = layout_();
-                const int width     = ctx.kind == LayoutCtx::Kind::WIDE
-                    ? ctx.width - LayoutCtx::panel_width - 4
-                    : ctx.width;
-                body                = diff_split(diff, width);
+                body = diff_split(diff, review_content_width(ctx));
             } else {
                 body = code_block(tc.result->text, tool_code_language(tc));
             }
@@ -864,11 +863,7 @@ namespace {
 
         Element render_ask_item(const ToolCall& tc)
         {
-            return vbox({
-                tool_header_element(tc),
-                render_markdown_element(tc.result->text),
-                separatorEmpty(),
-            });
+            return tool_card(tc, render_markdown_element(tc.result->text));
         }
 
         Element render_web_item(const ToolCall& tc)
@@ -894,35 +889,17 @@ namespace {
 
         Element render_generic_tool(const ToolCall& tc)
         {
-            return vbox({
-                tool_header_element(tc),
-                code_block(tc.result->text, ""),
-                separatorEmpty(),
-            });
+            return tool_card(tc, code_block(tc.result->text, ""));
         }
 
         Element render_tool_error(const ToolCall& tc)
         {
-            return vbox({
-                tool_header_element(tc),
-                hbox({
-                    text("Error: ") | bold | color(Color::RedLight),
-                    text(tc.result->text) | color(Color::RedLight),
-                }),
-                separatorEmpty(),
-            });
+            return render_tool_status(tc, "Error: ", Color::RedLight);
         }
 
         Element render_tool_reject(const ToolCall& tc)
         {
-            return vbox({
-                tool_header_element(tc),
-                hbox({
-                    text("Rejected: ") | bold | color(Color::YellowLight),
-                    text(tc.result->text) | color(Color::YellowLight),
-                }),
-                separatorEmpty(),
-            });
+            return render_tool_status(tc, "Rejected: ", Color::YellowLight);
         }
 
         Element render_tool_pending(const ToolCall& tc)
@@ -1001,12 +978,9 @@ namespace {
         {
             return memoized_label_button(subagent_buttons_,
                 std::pair { id, index }, std::move(label), [this, id, index] {
-                    for (const ConversationItem& item : session_->items()) {
-                        const auto* call = std::get_if<ToolCall>(&item);
-                        if (call != nullptr && call->id == id) {
-                            open_subagent_viewer(*call, index);
-                            return;
-                        }
+                    if (const auto* call = find_tool_call(id);
+                        call != nullptr) {
+                        open_subagent_viewer(*call, index);
                     }
                 });
         }
@@ -1015,12 +989,8 @@ namespace {
         {
             return memoized_label_button(
                 read_buttons_, id, std::move(label), [this, id] {
-                    for (const auto& item : session_->items()) {
-                        const auto* tc = std::get_if<ToolCall>(&item);
-                        if (tc != nullptr && tc->id == id) {
-                            open_viewer_for(*tc);
-                            return;
-                        }
+                    if (const auto* tc = find_tool_call(id); tc != nullptr) {
+                        open_viewer_for(*tc);
                     }
                 });
         }
@@ -1078,32 +1048,32 @@ namespace {
         Component make_reasoning_button(std::size_t index, std::string label,
             const std::string& content, std::string metadata)
         {
-            auto it = reasoning_comps_.find(index);
-            if (it != reasoning_comps_.end()) {
-                *reasoning_labels_[index]   = label;
-                *reasoning_content_[index]  = content;
-                *reasoning_metadata_[index] = std::move(metadata);
-                return it->second;
+            if (auto it = reasoning_links_.find(index);
+                it != reasoning_links_.end()) {
+                *it->second.label    = std::move(label);
+                *it->second.content  = content;
+                *it->second.metadata = std::move(metadata);
+                return it->second.component;
             }
-            auto label_ptr   = std::make_shared<std::string>(std::move(label));
-            auto content_ptr = std::make_shared<std::string>(content);
-            auto metadata_ptr
-                = std::make_shared<std::string>(std::move(metadata));
-            const auto on_click = [this, content_ptr, metadata_ptr] {
-                ViewerModal vm { " Thinking", *content_ptr, "", 1 };
-                vm.line_numbers = false;
-                vm.metadata     = *metadata_ptr;
-                ursa::enqueue_user_modal(*state_, vm);
-            };
-            Component btn
+            ReasoningLink entry;
+            entry.label    = std::make_shared<std::string>(std::move(label));
+            entry.content  = std::make_shared<std::string>(content);
+            entry.metadata = std::make_shared<std::string>(std::move(metadata));
+            auto label_ptr = entry.label;
+            auto content_ptr  = entry.content;
+            auto metadata_ptr = entry.metadata;
+            entry.component
                 = inline_link_button([label_ptr] { return text(*label_ptr); },
-                    on_click, PANEL_FG_DIM);
-            reasoning_labels_[index]   = label_ptr;
-            reasoning_content_[index]  = content_ptr;
-            reasoning_metadata_[index] = metadata_ptr;
-            reasoning_comps_[index]    = btn;
-            container_->Add(btn);
-            return btn;
+                    [this, content_ptr, metadata_ptr] {
+                        ViewerModal vm { " Thinking", *content_ptr, "", 1 };
+                        vm.line_numbers = false;
+                        vm.metadata     = *metadata_ptr;
+                        enqueue_user_modal(*state_, vm);
+                    },
+                    PANEL_FG_DIM);
+            container_->Add(entry.component);
+            reasoning_links_.emplace(index, std::move(entry));
+            return reasoning_links_.find(index)->second.component;
         }
 
         std::string interrupt_hint() { return "Esc interrupt"; }

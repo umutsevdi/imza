@@ -1,6 +1,9 @@
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <thread>
+#include <vector>
 
 #include <doctest/doctest.h>
 
@@ -126,6 +129,75 @@ TEST_CASE("empty sessions are not saved")
 #endif
 }
 
+TEST_CASE("session index is created and rebuilt from session files")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    ursa::Session session;
+    session.set_title("Indexed title");
+    session.begin_send("hello");
+
+    REQUIRE(ursa::save_session(session) == ursa::Status::OK);
+    const std::filesystem::path index = ursa::sessions_dir() / ".index.json";
+    REQUIRE(std::filesystem::is_regular_file(index));
+
+    std::error_code ec;
+    std::filesystem::remove(index, ec);
+    REQUIRE_FALSE(ec);
+    const auto rebuilt = ursa::saved_sessions();
+
+    REQUIRE(rebuilt.size() == 1);
+    CHECK(rebuilt.front().title == "Indexed title");
+    CHECK(std::filesystem::is_regular_file(index));
+
+    {
+        std::ofstream corrupt(index, std::ios::trunc);
+        corrupt << "not json";
+    }
+    const auto recovered = ursa::saved_sessions();
+    REQUIRE(recovered.size() == 1);
+    CHECK(recovered.front().title == "Indexed title");
+    CHECK(ursa::delete_saved_session(index)
+        == ursa::DeleteSessionResult::INVALID_PATH);
+#endif
+}
+
+TEST_CASE("concurrent session saves merge their index entries")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    constexpr int count = 8;
+    std::vector<std::thread> workers;
+    std::vector<ursa::Status> statuses(count, ursa::Status::CONFIG_ERROR);
+    workers.reserve(count);
+    for (int index = 0; index < count; ++index) {
+        workers.emplace_back([index, &statuses] {
+            ursa::Session session;
+            session.set_title("Session " + std::to_string(index));
+            session.begin_send("hello");
+            statuses[index] = ursa::save_session(session);
+        });
+    }
+    for (std::thread& worker : workers) {
+        worker.join();
+    }
+    for (const ursa::Status status : statuses) {
+        CHECK(status == ursa::Status::OK);
+    }
+
+    const auto saved = ursa::saved_sessions();
+    CHECK(saved.size() == count);
+    REQUIRE_FALSE(saved.empty());
+    REQUIRE(ursa::delete_saved_session(saved.front().path)
+        == ursa::DeleteSessionResult::OK);
+    CHECK(ursa::saved_sessions().size() == count - 1);
+#endif
+}
+
 TEST_CASE("saved sessions retain delegated-agent chat transcripts")
 {
 #ifdef _WIN32
@@ -154,6 +226,26 @@ TEST_CASE("saved sessions retain delegated-agent chat transcripts")
     CHECK(call.subagent_chats[0].title == "Agent 1 (research)");
     CHECK(
         call.subagent_chats[0].transcript.find("report") != std::string::npos);
+#endif
+}
+
+TEST_CASE("empty title is normalized in both file and index")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    ursa::Session session;
+    session.begin_send("hello");
+    REQUIRE(ursa::save_session(session) == ursa::Status::OK);
+
+    const auto saved = ursa::saved_sessions();
+    REQUIRE(saved.size() == 1);
+    CHECK(saved.front().title == "Untitled session");
+
+    ursa::Session loaded;
+    REQUIRE(ursa::load_session(saved.front().path, loaded) == ursa::Status::OK);
+    CHECK(loaded.title() == "Untitled session");
 #endif
 }
 

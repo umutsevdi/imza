@@ -24,23 +24,6 @@ namespace {
         return result;
     }
 
-    std::string quoted_path(const std::filesystem::path& path)
-    {
-#ifdef _WIN32
-        return "\"" + path.string() + "\"";
-#else
-        std::string quoted = "'";
-        for (const char character : path.string()) {
-            if (character == '\'') {
-                quoted += "'\\''";
-            } else {
-                quoted += character;
-            }
-        }
-        return quoted + "'";
-#endif
-    }
-
     int edit_config()
     {
         const std::filesystem::path path = config_path();
@@ -66,7 +49,7 @@ namespace {
 #endif
         }
         const CommandResult result
-            = run_attached_command(editor + " " + quoted_path(path));
+            = run_attached_command(editor + " " + shell_quote(path));
         if (!result.spawned) {
             std::println(stderr, "failed to start config editor");
             return 1;

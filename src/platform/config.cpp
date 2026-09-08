@@ -1,5 +1,6 @@
 #include "platform/config.h"
 
+#include "platform/file_lock.h"
 #include "platform/json_file.h"
 
 #include <json/json.h>
@@ -10,41 +11,9 @@
 
 namespace ursa {
 
-std::filesystem::path base_config_dir()
-{
-#if defined(_WIN32)
-    const char* appdata        = std::getenv("APPDATA");
-    std::filesystem::path base = appdata ? appdata : ".";
-    return base / "ursa";
-#elif defined(__APPLE__)
-    const char* home           = std::getenv("HOME");
-    std::filesystem::path base = home ? home : ".";
-    return base / "Library" / "Application Support" / "ursa";
-#else
-    const char* xdg  = std::getenv("XDG_CONFIG_HOME");
-    const char* home = std::getenv("HOME");
-    std::filesystem::path base;
-    if (xdg && *xdg) {
-        base = xdg;
-    } else if (home) {
-        base = home;
-        base /= ".config";
-    } else {
-        base = ".config";
-    }
-    return base / "ursa";
-#endif
-}
+std::filesystem::path config_path() { return data_dir() / "config.json"; }
 
-std::filesystem::path config_path()
-{
-    return base_config_dir() / "config.json";
-}
-
-std::filesystem::path presets_path()
-{
-    return base_config_dir() / "presets.json";
-}
+std::filesystem::path presets_path() { return data_dir() / "presets.json"; }
 
 std::filesystem::path data_dir()
 {
@@ -320,70 +289,116 @@ void apply_skill_policies(Config& config, const SkillPolicyChanges& changes)
     }
 }
 
+namespace {
+
+    Status save_config_unlocked(
+        const std::filesystem::path& path, const Config& cfg)
+    {
+        Json::Value root(Json::objectValue);
+        Json::Value providers(Json::arrayValue);
+        for (const Connection& conn : cfg.providers) {
+            Json::Value entry(Json::objectValue);
+            entry["id"]          = conn.id;
+            entry["provider_id"] = conn.provider_id;
+            entry["endpoint"]    = conn.endpoint;
+            entry["api_key"]     = conn.api_key;
+            entry["label"]       = conn.label;
+            Json::Value dialects(Json::objectValue);
+            for (const auto& [model, standard] : conn.dialects) {
+                dialects[model] = dialect_str(standard);
+            }
+            if (!dialects.empty()) {
+                entry["dialects"] = std::move(dialects);
+            }
+            providers.append(entry);
+        }
+        root["providers"] = providers;
+
+        Json::Value models(Json::objectValue);
+        Json::Value main(Json::objectValue);
+        if (cfg.last_used) {
+            main["provider"] = cfg.last_used->provider;
+            main["model"]    = cfg.last_used->model;
+        }
+        main["reasoning_effort"]  = cfg.reasoning_effort.value_or("off");
+        models["main"]            = std::move(main);
+        const auto write_subagent = [&](const char* key, SubagentRole role) {
+            const auto found = cfg.subagents.find(role);
+            Json::Value value(Json::objectValue);
+            if (found != cfg.subagents.end()
+                && !found->second.provider.empty()) {
+                value["provider"] = found->second.provider;
+                value["model"]    = found->second.model;
+            }
+            value["reasoning_effort"]
+                = found == cfg.subagents.end() || found->second.variant.empty()
+                ? to_config_effort(subagent_default_variant(role))
+                : to_config_effort(found->second.variant);
+            models[key] = std::move(value);
+        };
+        write_subagent("builder", SubagentRole::BUILDER);
+        write_subagent("researcher", SubagentRole::RESEARCH);
+        write_subagent("basic", SubagentRole::BASIC);
+        root["models"] = std::move(models);
+
+        Json::Value skills(Json::objectValue);
+        Json::Value global(Json::objectValue);
+        for (const auto& [name, policy] : cfg.global_skills)
+            global[name] = skill_policy_str(policy);
+        skills["global"] = global;
+        Json::Value projects(Json::objectValue);
+        for (const auto& [project_path, policies] : cfg.project_skills) {
+            Json::Value entry(Json::objectValue);
+            for (const auto& [name, policy] : policies)
+                entry[name] = skill_policy_str(policy);
+            projects[project_path] = entry;
+        }
+        skills["projects"] = projects;
+        root["skills"]     = skills;
+
+        return write_json_file(path, root, "  ");
+    }
+
+} // namespace
+
 Status save_config(const std::filesystem::path& path, const Config& cfg)
 {
-    Json::Value root(Json::objectValue);
-    Json::Value providers(Json::arrayValue);
-    for (const Connection& conn : cfg.providers) {
-        Json::Value entry(Json::objectValue);
-        entry["id"]          = conn.id;
-        entry["provider_id"] = conn.provider_id;
-        entry["endpoint"]    = conn.endpoint;
-        entry["api_key"]     = conn.api_key;
-        entry["label"]       = conn.label;
-        Json::Value dialects(Json::objectValue);
-        for (const auto& [model, standard] : conn.dialects) {
-            dialects[model] = dialect_str(standard);
-        }
-        if (!dialects.empty()) {
-            entry["dialects"] = std::move(dialects);
-        }
-        providers.append(entry);
+    auto lock = acquire_file_lock(lock_path_for(path));
+    if (!std::holds_alternative<FileLock>(lock)) {
+        return Status::CONFIG_ERROR;
     }
-    root["providers"] = providers;
+    return save_config_unlocked(path, cfg);
+}
 
-    Json::Value models(Json::objectValue);
-    Json::Value main(Json::objectValue);
-    if (cfg.last_used) {
-        main["provider"] = cfg.last_used->provider;
-        main["model"]    = cfg.last_used->model;
+ConfigUpdateResult update_config(const std::filesystem::path& path,
+    const Config& initial, const ConfigMutator& mutate, Config* result)
+{
+    auto lock = acquire_file_lock(lock_path_for(path));
+    if (!std::holds_alternative<FileLock>(lock)) {
+        return ConfigUpdateResult::ERROR;
     }
-    main["reasoning_effort"]  = cfg.reasoning_effort.value_or("off");
-    models["main"]            = std::move(main);
-    const auto write_subagent = [&](const char* key, SubagentRole role) {
-        const auto found = cfg.subagents.find(role);
-        Json::Value value(Json::objectValue);
-        if (found != cfg.subagents.end() && !found->second.provider.empty()) {
-            value["provider"] = found->second.provider;
-            value["model"]    = found->second.model;
+    std::error_code ec;
+    const bool exists = std::filesystem::exists(path, ec);
+    if (ec) {
+        return ConfigUpdateResult::ERROR;
+    }
+    Config candidate = initial;
+    if (exists && load_config(path, candidate) != Status::OK) {
+        return ConfigUpdateResult::ERROR;
+    }
+    if (!mutate(candidate)) {
+        if (result != nullptr) {
+            *result = std::move(candidate);
         }
-        value["reasoning_effort"]
-            = found == cfg.subagents.end() || found->second.variant.empty()
-            ? to_config_effort(subagent_default_variant(role))
-            : to_config_effort(found->second.variant);
-        models[key] = std::move(value);
-    };
-    write_subagent("builder", SubagentRole::BUILDER);
-    write_subagent("researcher", SubagentRole::RESEARCH);
-    write_subagent("basic", SubagentRole::BASIC);
-    root["models"] = std::move(models);
-
-    Json::Value skills(Json::objectValue);
-    Json::Value global(Json::objectValue);
-    for (const auto& [name, policy] : cfg.global_skills)
-        global[name] = skill_policy_str(policy);
-    skills["global"] = global;
-    Json::Value projects(Json::objectValue);
-    for (const auto& [project_path, policies] : cfg.project_skills) {
-        Json::Value entry(Json::objectValue);
-        for (const auto& [name, policy] : policies)
-            entry[name] = skill_policy_str(policy);
-        projects[project_path] = entry;
+        return ConfigUpdateResult::UNCHANGED;
     }
-    skills["projects"] = projects;
-    root["skills"]     = skills;
-
-    return write_json_file(path, root, "  ");
+    if (save_config_unlocked(path, candidate) != Status::OK) {
+        return ConfigUpdateResult::ERROR;
+    }
+    if (result != nullptr) {
+        *result = std::move(candidate);
+    }
+    return ConfigUpdateResult::UPDATED;
 }
 
 } // namespace ursa

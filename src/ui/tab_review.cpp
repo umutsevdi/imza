@@ -158,9 +158,7 @@ namespace {
                     | flex;
             }
             const LayoutCtx ctx     = layout_();
-            const int review_width  = ctx.kind == LayoutCtx::Kind::WIDE
-                ? ctx.width - LayoutCtx::panel_width - 4
-                : ctx.width;
+            const int review_width  = review_content_width(ctx);
             const bool side_by_side = review_width >= 100;
             render_radius_ = ctx.height > 0 ? std::max(20, ctx.height) : 120;
             if (horizontal_review_ != snapshot.review.get()
@@ -571,11 +569,7 @@ namespace {
                 text(collapsed ? "› " : "⌄ ") | color(PANEL_FG_DIM),
                 text(path) | bold | color(PANEL_FG),
                 filler(),
-                text("+" + std::to_string(file.additions))
-                    | color(Color::GreenLight),
-                text(" "),
-                text("−" + std::to_string(file.deletions))
-                    | color(Color::RedLight),
+                diffstat_chip(file.additions, file.deletions),
             };
             if (comments > 0) {
                 header_parts.push_back(text(std::format("  💬 {}", comments))
@@ -601,7 +595,7 @@ namespace {
                         std::nullopt, 0 },
                     selected_ == static_cast<int>(visible_.size()));
             } else if (!collapsed) {
-                const int side_width = std::max(20, (review_width - 3) / 2);
+                const int side_width = diff_side_width(review_width);
                 for (const ReviewHunk& hunk : file.hunks) {
                     const int hunk_begin = static_cast<int>(visible_.size());
                     const int hunk_end   = hunk_begin + 1
@@ -709,11 +703,11 @@ namespace {
             std::string marker = " ";
             std::optional<Color> background;
             if (line.kind == ReviewLine::Kind::ADDITION) {
-                marker     = "+";
-                background = DIFF_ADDITION_BG;
+                marker     = diff_marker(true);
+                background = diff_background(true);
             } else if (line.kind == ReviewLine::Kind::DELETION) {
-                marker     = "−";
-                background = DIFF_DELETION_BG;
+                marker     = diff_marker(false);
+                background = diff_background(false);
             }
             const bool selected
                 = selected_ == static_cast<int>(visible_.size());
@@ -721,7 +715,7 @@ namespace {
                 rows,
                 [this, &line, marker = std::move(marker), background, number,
                     review_width, selected] {
-                    const int content_width = std::max(1, review_width - 14);
+                    const int content_width = diff_content_width(review_width);
                     const std::string content
                         = fit(line.content, content_width, horizontal_offset_);
                     const bool old_side
@@ -762,11 +756,11 @@ namespace {
             std::string marker = " ";
             std::optional<Color> background;
             if (line->kind == ReviewLine::Kind::DELETION) {
-                marker     = "−";
-                background = DIFF_DELETION_BG;
+                marker     = diff_marker(false);
+                background = diff_background(false);
             } else if (line->kind == ReviewLine::Kind::ADDITION) {
-                marker     = "+";
-                background = DIFF_ADDITION_BG;
+                marker     = diff_marker(true);
+                background = diff_background(true);
             }
             const std::string content = fit(
                 line->content, std::max(1, side_width - 8), horizontal_offset_);
@@ -892,9 +886,9 @@ namespace {
         {
             const bool side_by_side         = review_width >= 100;
             const int side_content_width    = side_by_side
-                ? std::max(1, std::max(20, (review_width - 3) / 2) - 8)
-                : std::max(1, review_width - 14);
-            const int unified_content_width = std::max(1, review_width - 14);
+                ? std::max(1, diff_side_width(review_width) - 8)
+                : diff_content_width(review_width);
+            const int unified_content_width = diff_content_width(review_width);
             int limit                       = 0;
             for (const ReviewFile& file : review.files) {
                 const std::string& path

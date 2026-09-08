@@ -50,6 +50,11 @@ struct ToolOutput {
     std::optional<ShellStatus> shell_status { };
 };
 
+inline ToolOutput tool_error(std::string text)
+{
+    return { ToolOutput::Kind::ERROR, std::move(text) };
+}
+
 using ToolHandler = std::function<ToolOutput(const Json::Value& args)>;
 
 struct Tool {
@@ -61,6 +66,10 @@ const Tool* find_tool(std::span<const Tool> tools, std::string_view name);
 std::vector<ToolSpec> tool_specs(std::span<const Tool> tools);
 ToolOutput dispatch_tool(
     std::span<const Tool> tools, const ToolCallRequest& req);
+
+// Argument accessors: "" / nullopt unless `value[key]` holds that type.
+std::string json_string(const Json::Value& value, const char* key);
+std::optional<std::int64_t> json_int(const Json::Value& value, const char* key);
 
 std::optional<TodoList> parse_todo_args(const Json::Value& args);
 std::optional<QuestionForm> parse_ask_args(const std::string& args);

@@ -17,7 +17,6 @@ struct ModelPricing {
     std::uint64_t context_limit = 0;
 };
 
-std::optional<ModelPricing> pricing_from_model(const CachedModel& model);
 std::map<std::string, ModelPricing> pricing_table_from(const Catalog& catalog);
 double compute_cost(const Usage& usage, const ModelPricing& pricing);
 

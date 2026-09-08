@@ -917,7 +917,7 @@ TEST_CASE("filesystem session approval installs an exact reusable grant")
 
     REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
     CHECK(env.state->queue.size() == 0);
-    CHECK(env.state->permissions->size() == 1);
+    CHECK(env.state->permissions->snapshot()->size() == 1);
     for (const auto& item : env.session->items()) {
         if (const auto* call = std::get_if<ursa::ToolCall>(&item);
             call != nullptr && call->name == "write" && call->result) {

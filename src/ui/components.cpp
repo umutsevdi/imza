@@ -141,16 +141,9 @@ std::string fit(const std::string& value, int width)
     std::size_t seen = 0;
     std::size_t i    = 0;
     while (i < value.size() && seen < max) {
-        const auto lead    = static_cast<unsigned char>(value[i]);
-        std::size_t length = 1;
-        if ((lead & 0xE0) == 0xC0) {
-            length = 2;
-        } else if ((lead & 0xF0) == 0xE0) {
-            length = 3;
-        } else if ((lead & 0xF8) == 0xF0) {
-            length = 4;
-        }
-        length = std::min(length, value.size() - i);
+        const auto lead = static_cast<unsigned char>(value[i]);
+        const std::size_t length
+            = std::min(utf8_sequence_length(lead), value.size() - i);
         if (seen + 1 == max && i + length < value.size()) {
             return out + "…";
         }
@@ -168,16 +161,8 @@ std::string fit(const std::string& value, int width, int offset)
     std::size_t seen       = 0;
     std::size_t pos        = 0;
     while (pos < value.size() && seen < skip) {
-        const auto lead    = static_cast<unsigned char>(value[pos]);
-        std::size_t length = 1;
-        if ((lead & 0xE0) == 0xC0) {
-            length = 2;
-        } else if ((lead & 0xF0) == 0xE0) {
-            length = 3;
-        } else if ((lead & 0xF8) == 0xF0) {
-            length = 4;
-        }
-        pos += std::min(length, value.size() - pos);
+        const auto lead = static_cast<unsigned char>(value[pos]);
+        pos += std::min(utf8_sequence_length(lead), value.size() - pos);
         ++seen;
     }
     return fit(value.substr(pos), width);
@@ -196,16 +181,13 @@ namespace {
 
     std::string error_sentence(std::string message)
     {
-        while (!message.empty()
-            && std::isspace(static_cast<unsigned char>(message.back()))) {
-            message.pop_back();
+        std::string trimmed(trim(message));
+        if (trimmed.empty()) {
+            return trimmed;
         }
-        if (message.empty()) {
-            return message;
-        }
-        message.front() = static_cast<char>(
-            std::toupper(static_cast<unsigned char>(message.front())));
-        return ensure_sentence_end(std::move(message));
+        trimmed.front() = static_cast<char>(
+            std::toupper(static_cast<unsigned char>(trimmed.front())));
+        return ensure_sentence_end(std::move(trimmed));
     }
 
 } // namespace
@@ -236,6 +218,14 @@ Element session_error_element(const Session& session)
 
 namespace {
     std::size_t digit_width(std::size_t n) { return std::to_string(n).size(); }
+
+    Element code_block_frame(Elements body, const Color& bg, bool highlighted)
+    {
+        Element inner = vbox(std::move(body));
+        Element block = hbox({ text(" "), std::move(inner) | xflex, text(" ") })
+            | bgcolor(bg);
+        return highlighted ? std::move(block) : std::move(block) | dim;
+    }
 } // namespace
 
 Element code_block(const std::string& code, const std::string& lang)
@@ -263,11 +253,7 @@ Element code_block(const std::string& code, const std::string& lang)
             pos = nl + 1;
         }
     }
-    Element inner = vbox(std::move(body));
-    Element block = hbox({ text(" "), std::move(inner) | xflex, text(" ") })
-        | bgcolor(bg);
-    return syntax_type_supported(lang) ? std::move(block)
-                                       : std::move(block) | dim;
+    return code_block_frame(std::move(body), bg, syntax_type_supported(lang));
 }
 
 Element code_block_with_lines(
@@ -318,11 +304,18 @@ Element code_block_with_lines(
                 : text(lines[i]) | color(fg),
         }));
     }
-    Element inner = vbox(std::move(body));
-    Element block = hbox({ text(" "), std::move(inner) | xflex, text(" ") })
-        | bgcolor(bg);
-    return syntax_type_supported(lang) ? std::move(block)
-                                       : std::move(block) | dim;
+    return code_block_frame(std::move(body), bg, syntax_type_supported(lang));
+}
+
+Elements modal_header(std::string title, std::string subtitle)
+{
+    Elements rows;
+    rows.push_back(text(std::move(title)) | bold);
+    if (!subtitle.empty()) {
+        rows.push_back(text(std::move(subtitle)) | dim);
+    }
+    rows.push_back(separatorEmpty());
+    return rows;
 }
 
 Element panel(Element e)
@@ -470,6 +463,33 @@ bool diff_row_right_changed(const DiffRow& row)
     return !row.right.empty() && (row.left.empty() || row.left != row.right);
 }
 
+std::string diff_marker(bool added) { return added ? "+" : "−"; }
+
+Color diff_background(bool added)
+{
+    return added ? DIFF_ADDITION_BG : DIFF_DELETION_BG;
+}
+
+int diff_side_width(int width) { return std::max(20, (width - 3) / 2); }
+
+int diff_content_width(int width) { return std::max(1, width - 14); }
+
+int review_content_width(const LayoutCtx& ctx)
+{
+    return ctx.kind == LayoutCtx::Kind::WIDE
+        ? ctx.width - LayoutCtx::panel_width - 4
+        : ctx.width;
+}
+
+Element diffstat_chip(std::size_t additions, std::size_t deletions)
+{
+    return hbox({
+        text("+" + std::to_string(additions)) | color(Color::GreenLight),
+        text(" "),
+        text("−" + std::to_string(deletions)) | color(Color::RedLight),
+    });
+}
+
 Element diff_split(const DiffView& diff, int available_width)
 {
     const std::string syntax = syntax_type_for_path(diff.file);
@@ -518,12 +538,12 @@ Element diff_split(const DiffView& diff, int available_width)
                       rows.push_back(std::move(line));
                   };
             if (diff_row_left_changed(row)) {
-                append(
-                    row.left_no, std::nullopt, "−", row.left, DIFF_DELETION_BG);
+                append(row.left_no, std::nullopt, diff_marker(false), row.left,
+                    diff_background(false));
             }
             if (diff_row_right_changed(row)) {
-                append(std::nullopt, row.right_no, "+", row.right,
-                    DIFF_ADDITION_BG);
+                append(std::nullopt, row.right_no, diff_marker(true), row.right,
+                    diff_background(true));
             }
             if (!diff_row_left_changed(row) && !diff_row_right_changed(row)) {
                 append(row.left_no, row.right_no, " ", row.right, std::nullopt);
@@ -532,7 +552,7 @@ Element diff_split(const DiffView& diff, int available_width)
         return panel(vbox(std::move(rows))) | xflex;
     }
 
-    const int side_width = std::max(20, (available_width - 3) / 2);
+    const int side_width = diff_side_width(available_width);
     const auto side      = [&](const std::optional<std::size_t>& number,
                                std::string marker, const std::string& content,
                                std::optional<Color> background) {
@@ -554,12 +574,13 @@ Element diff_split(const DiffView& diff, int available_width)
         const bool removed = diff_row_left_changed(row);
         const bool added   = diff_row_right_changed(row);
         rows.push_back(hbox({
-            side(row.left_no, removed ? "−" : " ", row.left,
-                removed ? std::optional<Color>(DIFF_DELETION_BG)
+            side(row.left_no, removed ? diff_marker(false) : " ", row.left,
+                removed ? std::optional<Color>(diff_background(false))
                         : std::nullopt),
             text(" │ ") | color(PANEL_BORDER),
-            side(row.right_no, added ? "+" : " ", row.right,
-                added ? std::optional<Color>(DIFF_ADDITION_BG) : std::nullopt),
+            side(row.right_no, added ? diff_marker(true) : " ", row.right,
+                added ? std::optional<Color>(diff_background(true))
+                      : std::nullopt),
         }));
     }
     return panel(vbox(std::move(rows))) | xflex;

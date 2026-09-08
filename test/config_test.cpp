@@ -6,6 +6,8 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <thread>
+#include <vector>
 
 #include "platform/config.h"
 
@@ -199,13 +201,46 @@ TEST_CASE("empty config writes every editable option")
     CHECK(written["skills"]["projects"].isObject());
 }
 
-TEST_CASE("save_config leaves no temp file behind")
+TEST_CASE("save_config leaves no temp file behind and keeps the lock file")
 {
     const auto path = temp_file("notmp.json");
     ursa::Config cfg;
     CHECK(ursa::save_config(path, cfg) == ursa::Status::OK);
     CHECK_FALSE(std::filesystem::exists(path.string() + ".tmp"));
+    CHECK(std::filesystem::exists(path.string() + ".lock"));
     CHECK_FALSE(read_all(path).empty());
+}
+
+TEST_CASE("concurrent config updates preserve unrelated changes")
+{
+    const auto path = temp_file("concurrent.json");
+    REQUIRE(ursa::save_config(path, ursa::Config { }) == ursa::Status::OK);
+
+    constexpr int count = 8;
+    std::vector<ursa::ConfigUpdateResult> results(
+        count, ursa::ConfigUpdateResult::ERROR);
+    std::vector<std::thread> workers;
+    workers.reserve(count);
+    for (int index = 0; index < count; ++index) {
+        workers.emplace_back([&, index] {
+            results[index] = ursa::update_config(
+                path, ursa::Config { }, [index](ursa::Config& config) {
+                    config.global_skills["skill-" + std::to_string(index)]
+                        = ursa::SkillPolicy::ALLOW;
+                    return true;
+                });
+        });
+    }
+    for (std::thread& worker : workers) {
+        worker.join();
+    }
+    for (const ursa::ConfigUpdateResult result : results) {
+        CHECK(result == ursa::ConfigUpdateResult::UPDATED);
+    }
+
+    ursa::Config loaded;
+    REQUIRE(ursa::load_config(path, loaded) == ursa::Status::OK);
+    CHECK(loaded.global_skills.size() == count);
 }
 
 TEST_CASE("config roundtrip preserves global and project skill policies")

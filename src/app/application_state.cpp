@@ -70,6 +70,7 @@ namespace {
         StreamFn stream_fn, std::vector<Tool> tools, RuntimeFlag runtime_flags)
     {
         state->session     = std::make_shared<Session>();
+        state->sessions    = std::make_shared<SessionStore>();
         state->providers   = std::make_shared<ProviderStore>(std::move(config));
         state->subagents   = std::make_shared<SubagentManager>();
         state->environment = std::make_shared<Environment>();
@@ -94,6 +95,7 @@ namespace {
         });
 
         state->session        = std::make_shared<Session>();
+        state->sessions       = parent.sessions;
         state->providers      = parent.providers;
         state->subagents      = std::make_shared<SubagentManager>();
         state->environment    = parent.environment;

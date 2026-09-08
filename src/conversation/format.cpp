@@ -45,6 +45,18 @@ std::string denial_text(const std::string& reason)
     return "user denied: " + reason;
 }
 
+Message assistant_message(
+    std::string content, const AssistantTurn* turn, ApiStandard dialect)
+{
+    Message message { Message::Type::ASSISTANT, std::move(content) };
+    if (dialect == ApiStandard::ANTHROPIC && turn != nullptr
+        && !turn->reasoning.empty()) {
+        message.thinking.push_back(
+            { turn->reasoning, turn->reasoning_signature });
+    }
+    return message;
+}
+
 std::string tool_result_text(const ToolCall& call)
 {
     if (!call.result.has_value()) {

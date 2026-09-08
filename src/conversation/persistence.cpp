@@ -3,20 +3,29 @@
 #include "common/util.h"
 #include "conversation/session.h"
 #include "network/json_io.h"
+#include "platform/file_lock.h"
 #include "platform/json_file.h"
 
 #include <algorithm>
-#include <chrono>
 #include <cstdint>
 #include <fstream>
 #include <iomanip>
+#include <map>
 #include <random>
+#include <set>
 #include <sstream>
 #include <utility>
 
 namespace ursa {
 
 namespace {
+
+    constexpr std::string_view INDEX_FILENAME = ".index.json";
+
+    std::filesystem::path index_path()
+    {
+        return sessions_dir() / INDEX_FILENAME;
+    }
 
     std::string session_filename()
     {
@@ -291,6 +300,156 @@ namespace {
         return std::nullopt;
     }
 
+    void sort_sessions(std::vector<SavedSession>& sessions)
+    {
+        std::sort(sessions.begin(), sessions.end(),
+            [](const auto& left, const auto& right) {
+                return left.path.filename() > right.path.filename();
+            });
+    }
+
+    std::optional<std::vector<SavedSession>> read_index()
+    {
+        std::ifstream file(index_path(), std::ios::binary);
+        if (!file) {
+            return std::nullopt;
+        }
+        std::stringstream text;
+        text << file.rdbuf();
+        const Json::Value root = parse_json(text.str());
+        if (!root.isObject() || root.get("version", 0).asInt() != 1
+            || !root["sessions"].isArray()) {
+            return std::nullopt;
+        }
+        std::vector<SavedSession> sessions;
+        std::set<std::string> seen;
+        for (const Json::Value& value : root["sessions"]) {
+            if (!value.isObject() || !value["file"].isString()
+                || !value["title"].isString()
+                || !value["saved_at"].isString()) {
+                return std::nullopt;
+            }
+            const std::filesystem::path file_name = value["file"].asString();
+            if (file_name.empty() || file_name != file_name.filename()
+                || file_name.extension() != ".json"
+                || file_name == INDEX_FILENAME
+                || !seen.insert(file_name.string()).second) {
+                return std::nullopt;
+            }
+            sessions.push_back({ sessions_dir() / file_name,
+                value["title"].asString(), value["saved_at"].asString() });
+        }
+        sort_sessions(sessions);
+        return sessions;
+    }
+
+    Status write_index(const std::vector<SavedSession>& sessions)
+    {
+        Json::Value root;
+        root["version"] = 1;
+        Json::Value entries(Json::arrayValue);
+        for (const SavedSession& session : sessions) {
+            Json::Value value;
+            value["file"]     = session.path.filename().string();
+            value["title"]    = session.title;
+            value["saved_at"] = session.saved_at;
+            entries.append(std::move(value));
+        }
+        root["sessions"] = std::move(entries);
+        return write_json_file(index_path(), root, "");
+    }
+
+    std::set<std::string> session_files()
+    {
+        std::set<std::string> files;
+        std::error_code ec;
+        if (!std::filesystem::exists(sessions_dir(), ec)) {
+            return files;
+        }
+        for (const auto& entry :
+            std::filesystem::directory_iterator(sessions_dir(), ec)) {
+            if (ec || !entry.is_regular_file()
+                || entry.path().extension() != ".json"
+                || entry.path().filename() == INDEX_FILENAME) {
+                continue;
+            }
+            files.insert(entry.path().filename().string());
+        }
+        return files;
+    }
+
+    std::optional<SavedSession> read_session_metadata(
+        const std::filesystem::path& path)
+    {
+        std::ifstream file(path, std::ios::binary);
+        if (!file) {
+            return std::nullopt;
+        }
+        std::stringstream text;
+        text << file.rdbuf();
+        const Json::Value root = parse_json(text.str());
+        if (!root.isObject() || !root["items"].isArray()) {
+            return std::nullopt;
+        }
+        std::string title = root.get("title", "").asString();
+        if (title.empty()) {
+            title = "Untitled session";
+        }
+        return SavedSession { path, std::move(title),
+            root.get("saved_at", "").asString() };
+    }
+
+    std::vector<SavedSession> reconcile_index(
+        std::optional<SavedSession> added = std::nullopt)
+    {
+        std::vector<SavedSession> sessions;
+        {
+            auto lock = acquire_file_lock(lock_path_for(index_path()));
+            if (!std::holds_alternative<FileLock>(lock)) {
+                for (const std::string& file : session_files()) {
+                    if (auto metadata
+                        = read_session_metadata(sessions_dir() / file)) {
+                        sessions.push_back(std::move(*metadata));
+                    }
+                }
+                sort_sessions(sessions);
+                return sessions;
+            }
+            const std::set<std::string> files = session_files();
+            std::map<std::string, SavedSession> entries;
+            if (auto indexed = read_index()) {
+                for (SavedSession& session : *indexed) {
+                    const std::string file = session.path.filename().string();
+                    if (files.contains(file)) {
+                        entries.emplace(file, std::move(session));
+                    }
+                }
+            }
+            if (added) {
+                const std::string file = added->path.filename().string();
+                if (files.contains(file)) {
+                    entries.insert_or_assign(file, std::move(*added));
+                }
+            }
+            for (const std::string& file : files) {
+                if (entries.contains(file)) {
+                    continue;
+                }
+                if (auto metadata
+                    = read_session_metadata(sessions_dir() / file)) {
+                    entries.emplace(file, std::move(*metadata));
+                }
+            }
+            sessions.reserve(entries.size());
+            for (auto& [file, session] : entries) {
+                sessions.push_back(std::move(session));
+            }
+            sort_sessions(sessions);
+            write_index(sessions);
+        }
+        return sessions;
+    }
+
 } // namespace
 
 Status save_session(Session& session)
@@ -307,11 +466,14 @@ Status save_session(Session& session)
     if (workspace_ec) {
         return Status::CONFIG_ERROR;
     }
-    root["version"]           = 1;
-    root["title"]             = consume_string(snapshot.title);
-    root["saved_at"]          = format_local_time("%Y-%m-%d %H:%M:%S");
-    root["todo"]              = todo_json(snapshot.todo);
-    root["compacted_summary"] = consume_string(snapshot.compacted_summary);
+    root["version"] = 1;
+    const std::string title
+        = snapshot.title.empty() ? "Untitled session" : snapshot.title;
+    const std::string saved_at = format_local_time("%Y-%m-%d %H:%M:%S");
+    root["title"]              = title;
+    root["saved_at"]           = saved_at;
+    root["todo"]               = todo_json(snapshot.todo);
+    root["compacted_summary"]  = consume_string(snapshot.compacted_summary);
     root["compacted_item_count"]
         = static_cast<Json::UInt64>(snapshot.compacted_item_count);
     root["mode"]      = snapshot.plan_mode ? "plan" : "build";
@@ -336,6 +498,19 @@ Status save_session(Session& session)
         return st;
     }
     session.set_persistence(PersistedSession { path });
+    const SavedSession saved { path, title, saved_at };
+    {
+        auto lock = acquire_file_lock(lock_path_for(index_path()));
+        if (std::holds_alternative<FileLock>(lock)) {
+            if (auto indexed = read_index()) {
+                indexed->push_back(saved);
+                sort_sessions(*indexed);
+                write_index(*indexed);
+                return Status::OK;
+            }
+        }
+    }
+    reconcile_index(saved);
     return Status::OK;
 }
 
@@ -394,35 +569,10 @@ Status load_session(const std::filesystem::path& path, Session& session,
 
 std::vector<SavedSession> saved_sessions()
 {
-    std::vector<SavedSession> out;
-    std::error_code ec;
-    if (!std::filesystem::exists(sessions_dir(), ec)) {
-        return out;
+    if (auto indexed = read_index()) {
+        return *indexed;
     }
-    for (const auto& entry :
-        std::filesystem::directory_iterator(sessions_dir(), ec)) {
-        if (ec || !entry.is_regular_file()
-            || entry.path().extension() != ".json") {
-            continue;
-        }
-        std::ifstream file(entry.path());
-        std::stringstream text;
-        text << file.rdbuf();
-        const Json::Value root = parse_json(text.str());
-        if (!root.isObject()) {
-            continue;
-        }
-        std::string title = root.get("title", "").asString();
-        if (title.empty()) {
-            title = "Untitled session";
-        }
-        out.push_back({ entry.path(), std::move(title),
-            root.get("saved_at", "").asString() });
-    }
-    std::sort(out.begin(), out.end(), [](const auto& left, const auto& right) {
-        return left.path.filename() > right.path.filename();
-    });
-    return out;
+    return reconcile_index();
 }
 
 DeleteSessionResult delete_saved_session(const std::filesystem::path& path)
@@ -432,12 +582,28 @@ DeleteSessionResult delete_saved_session(const std::filesystem::path& path)
         = std::filesystem::weakly_canonical(sessions_dir(), ec);
     const std::filesystem::path target
         = std::filesystem::weakly_canonical(path, ec);
-    if (ec || target.parent_path() != root || target.extension() != ".json") {
+    if (ec || target.parent_path() != root || target.extension() != ".json"
+        || target.filename() == INDEX_FILENAME) {
         return DeleteSessionResult::INVALID_PATH;
     }
     if (!std::filesystem::remove(target, ec) || ec) {
         return DeleteSessionResult::REMOVE_FAILED;
     }
+    {
+        auto lock = acquire_file_lock(lock_path_for(index_path()));
+        if (std::holds_alternative<FileLock>(lock)) {
+            if (auto indexed = read_index()) {
+                indexed->erase(std::remove_if(indexed->begin(), indexed->end(),
+                                   [&](const SavedSession& session) {
+                                       return session.path == target;
+                                   }),
+                    indexed->end());
+                write_index(*indexed);
+                return DeleteSessionResult::OK;
+            }
+        }
+    }
+    reconcile_index();
     return DeleteSessionResult::OK;
 }
 

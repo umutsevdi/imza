@@ -127,14 +127,8 @@ namespace {
             state.session->set_error("No model selected — run /model.");
             return;
         }
-        TurnSettings settings;
-        settings.model         = selection->model;
-        settings.connection_id = selection->connection_id;
-        settings.reasoning_effort
-            = to_config_effort(selection->reasoning_effort);
-        settings.route   = selection->route;
-        settings.dialect = settings.route.dialect;
-        settings.mode    = state.session->mode();
+        const TurnSettings settings
+            = make_turn_settings(*selection, state.session->mode());
         if (!state.environment->ready()) {
             state.session->enqueue_message(
                 std::move(text), std::move(attachments));
@@ -152,25 +146,15 @@ namespace {
                 = state.providers->subagent_selection(SubagentRole::BASIC);
             const ProviderSelection& selected
                 = title_selection ? *title_selection : *selection;
-            TurnSettings title_settings;
-            title_settings.model            = selected.model;
-            title_settings.connection_id    = selected.connection_id;
-            title_settings.reasoning_effort = selected.reasoning_effort;
-            title_settings.route            = selected.route;
-            title_settings.dialect          = selected.route.dialect;
-            state.delegation->spawn_title(
-                title_input, std::move(title_settings));
+            state.delegation->spawn_title(title_input,
+                make_turn_settings(selected, state.session->mode()));
         }
     }
 
-    SessionsModal sessions_modal()
+    SessionsModal sessions_modal(const ApplicationState& state)
     {
         SessionsModal modal;
-        for (const auto& saved : saved_sessions()) {
-            modal.titles.push_back(saved.title);
-            modal.saved_at.push_back(saved.saved_at);
-            modal.paths.push_back(saved.path.string());
-        }
+        modal.sessions = state.sessions->sessions();
         return modal;
     }
 
@@ -239,7 +223,7 @@ namespace {
                 "session.");
             return;
         }
-        if (save_session(*state.session) != Status::OK) {
+        if (state.sessions->save(*state.session) != Status::OK) {
             state.session->set_error("Failed to save current session.");
             return;
         }
@@ -397,7 +381,7 @@ void resolve_modal(ApplicationState& state, ModalResult result)
                 "Finish or interrupt pending work before loading a session.");
             return;
         }
-        if (save_session(*state.session) != Status::OK) {
+        if (state.sessions->save(*state.session) != Status::OK) {
             state.session->set_error("Failed to save current session.");
             return;
         }
@@ -488,7 +472,7 @@ void run_slash(ApplicationState& state, std::string_view command)
             state, ConnectModal { ConnectModal::Entry::SUBAGENTS });
         break;
     case SlashCommand::Action::SESSIONS:
-        enqueue_user_modal(state, sessions_modal());
+        enqueue_user_modal(state, sessions_modal(state));
         break;
     case SlashCommand::Action::SKILLS:
         enqueue_user_modal(state, skills_modal(state));
@@ -511,7 +495,7 @@ void interrupt(ApplicationState& state)
 void delete_saved_session(
     ApplicationState& state, const std::filesystem::path& path)
 {
-    switch (::ursa::delete_saved_session(path)) {
+    switch (state.sessions->remove(path)) {
     case DeleteSessionResult::INVALID_PATH:
         state.session->set_error("Invalid session path.");
         return;
@@ -520,7 +504,7 @@ void delete_saved_session(
         return;
     case DeleteSessionResult::OK: break;
     }
-    state.session->set_modal(sessions_modal());
+    state.session->set_modal(sessions_modal(state));
     state.session->bump_modal_serial();
 }
 

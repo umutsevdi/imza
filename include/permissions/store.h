@@ -40,11 +40,9 @@ public:
 
     Snapshot snapshot() const;
     bool install(Grants grants);
-    bool matches_external_path(const std::filesystem::path& path) const;
     bool matches(const ShellCommandGrant& grant) const;
     bool matches(const SkillGrant& grant) const;
     void clear();
-    std::size_t size() const;
     [[nodiscard]] Signal<>::Subscription subscribe_to_grants_change(
         Signal<>::Callback callback);
 

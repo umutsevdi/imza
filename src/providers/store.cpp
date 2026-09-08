@@ -8,6 +8,33 @@
 
 namespace ursa {
 
+namespace {
+
+    const Connection* find_connection(
+        const std::vector<Connection>& providers, std::string_view id)
+    {
+        const auto it = std::find_if(providers.begin(), providers.end(),
+            [id](const Connection& connection) { return connection.id == id; });
+        return it == providers.end() ? nullptr : &*it;
+    }
+
+    std::string unique_connection_id(
+        const Config& config, std::string_view base)
+    {
+        if (find_connection(config.providers, base) == nullptr) {
+            return std::string(base);
+        }
+        for (int suffix = 2;; ++suffix) {
+            std::string candidate
+                = std::string(base) + "-" + std::to_string(suffix);
+            if (find_connection(config.providers, candidate) == nullptr) {
+                return candidate;
+            }
+        }
+    }
+
+} // namespace
+
 std::string subagent_variant_or_default(
     const SubagentModelConfig* configured, SubagentRole role)
 {
@@ -315,14 +342,12 @@ bool ProviderStore::remove_connection(std::string_view connection_id)
             if (candidate.providers.size() <= 1) {
                 return false;
             }
-            auto& providers     = candidate.providers;
-            const auto old_size = providers.size();
-            providers.erase(std::remove_if(providers.begin(), providers.end(),
-                                [connection_id](const Connection& connection) {
-                                    return connection.id == connection_id;
-                                }),
-                providers.end());
-            if (providers.size() == old_size) {
+            auto& providers           = candidate.providers;
+            const std::size_t removed = std::erase_if(
+                providers, [connection_id](const Connection& connection) {
+                    return connection.id == connection_id;
+                });
+            if (removed == 0) {
                 return false;
             }
             if (candidate.last_used
@@ -343,7 +368,8 @@ bool ProviderStore::remove_connection(std::string_view connection_id)
 bool ProviderStore::select_model(const ModelChoice& choice)
 {
     return _update_config([&](Config& candidate) {
-        if (_find_locked(choice.connection_id) == nullptr) {
+        if (find_connection(candidate.providers, choice.connection_id)
+            == nullptr) {
             return false;
         }
         candidate.last_used
@@ -366,7 +392,8 @@ bool ProviderStore::set_subagent_model(
     return _update_config([&](Config& candidate) {
         if (selection.provider.empty() != selection.model.empty()
             || (!selection.provider.empty()
-                && _find_locked(selection.provider) == nullptr)) {
+                && find_connection(candidate.providers, selection.provider)
+                    == nullptr)) {
             return false;
         }
         if (selection.variant.empty()) {
@@ -389,14 +416,12 @@ void ProviderStore::remember_dialect(
     std::string_view connection_id, std::string_view model, ApiStandard dialect)
 {
     std::ignore = _update_config([&](Config& candidate) {
-        auto it = std::find_if(candidate.providers.begin(),
-            candidate.providers.end(), [connection_id](const Connection& item) {
-                return item.id == connection_id;
-            });
-        if (it == candidate.providers.end()) {
+        auto* connection = const_cast<Connection*>(
+            find_connection(candidate.providers, connection_id));
+        if (connection == nullptr) {
             return false;
         }
-        it->dialects[std::string(model)] = dialect;
+        connection->dialects[std::string(model)] = dialect;
         return true;
     });
 }
@@ -436,10 +461,13 @@ bool ProviderStore::_update_config(
     bool committed = false;
     {
         std::lock_guard lock(mutex_);
-        Config candidate = config_;
-        if (mutate(candidate)
-            && save_config(config_path(), candidate) == Status::OK) {
-            config_   = std::move(candidate);
+        Config candidate;
+        const ConfigUpdateResult result
+            = update_config(config_path(), config_, mutate, &candidate);
+        if (result != ConfigUpdateResult::ERROR) {
+            config_ = std::move(candidate);
+        }
+        if (result == ConfigUpdateResult::UPDATED) {
             committed = true;
             if (on_commit) {
                 on_commit();
@@ -460,23 +488,7 @@ Connection* ProviderStore::_find_locked(std::string_view id)
 
 const Connection* ProviderStore::_find_locked(std::string_view id) const
 {
-    const auto it
-        = std::find_if(config_.providers.begin(), config_.providers.end(),
-            [id](const Connection& connection) { return connection.id == id; });
-    return it == config_.providers.end() ? nullptr : &*it;
-}
-
-std::string ProviderStore::_unique_id_locked(std::string base) const
-{
-    if (_find_locked(base) == nullptr) {
-        return base;
-    }
-    for (int suffix = 2;; ++suffix) {
-        std::string candidate = base + "-" + std::to_string(suffix);
-        if (_find_locked(candidate) == nullptr) {
-            return candidate;
-        }
-    }
+    return find_connection(config_.providers, id);
 }
 
 Route ProviderStore::_route_locked(
@@ -526,9 +538,6 @@ void ProviderStore::_start_fetch_locked(const std::string& connection_id)
 Status ProviderStore::_commit_connection_locked(const ConnectResult& result,
     const std::vector<ModelInfo>& models, bool& first)
 {
-    Config candidate = config_;
-    first            = !candidate.last_used.has_value();
-
     Connection probe;
     probe.provider_id = result.provider_id;
     probe.endpoint    = result.endpoint;
@@ -543,30 +552,38 @@ Status ProviderStore::_commit_connection_locked(const ConnectResult& result,
         stored.endpoint = result.endpoint;
     }
 
-    Connection* existing = nullptr;
-    for (Connection& connection : candidate.providers) {
-        const Route other
-            = resolve_route(connection, catalog_, ApiStandard::OPENAI);
-        if (!route.endpoint.empty() && other.endpoint == route.endpoint) {
-            existing = &connection;
-            break;
-        }
-    }
-
     std::string id;
-    if (existing != nullptr) {
-        existing->provider_id = stored.provider_id;
-        existing->api_key     = stored.api_key;
-        existing->label       = stored.label;
-        existing->endpoint    = stored.endpoint;
-        existing->dialects.clear();
-        id = existing->id;
-    } else {
-        stored.id = _unique_id_locked(result.provider_id);
-        id        = stored.id;
-        candidate.providers.push_back(std::move(stored));
-    }
-    if (save_config(config_path(), candidate) != Status::OK) {
+    Config candidate;
+    const ConfigUpdateResult updated = update_config(
+        config_path(), config_,
+        [&](Config& latest) {
+            first                = !latest.last_used.has_value();
+            Connection* existing = nullptr;
+            for (Connection& connection : latest.providers) {
+                const Route other
+                    = resolve_route(connection, catalog_, ApiStandard::OPENAI);
+                if (!route.endpoint.empty()
+                    && other.endpoint == route.endpoint) {
+                    existing = &connection;
+                    break;
+                }
+            }
+            if (existing != nullptr) {
+                existing->provider_id = stored.provider_id;
+                existing->api_key     = stored.api_key;
+                existing->label       = stored.label;
+                existing->endpoint    = stored.endpoint;
+                existing->dialects.clear();
+                id = existing->id;
+            } else {
+                stored.id = unique_connection_id(latest, result.provider_id);
+                id        = stored.id;
+                latest.providers.push_back(std::move(stored));
+            }
+            return true;
+        },
+        &candidate);
+    if (updated != ConfigUpdateResult::UPDATED) {
         return Status::CONFIG_ERROR;
     }
     config_ = std::move(candidate);

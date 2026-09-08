@@ -194,6 +194,7 @@ target_link_libraries(ursa_network PRIVATE
 add_library(ursa_foundation
     src/platform/command_runner.cpp
     src/platform/config.cpp
+    src/platform/file_lock.cpp
     src/platform/json_file.cpp
     src/providers/catalog.cpp
     src/providers/pricing.cpp
@@ -213,6 +214,7 @@ add_library(ursa_runtime
     src/conversation/format.cpp
     src/conversation/persistence.cpp
     src/conversation/session.cpp
+    src/conversation/session_store.cpp
     src/permissions/store.cpp
     src/providers/store.cpp
     src/workspace/review.cpp

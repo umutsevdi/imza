@@ -32,11 +32,7 @@ namespace {
         Element body
             = vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER);
         Element title = hbox({ section_title("Changed files"), filler(),
-            text("+" + std::to_string(changes.additions))
-                | color(Color::GreenLight),
-            text(" "),
-            text("−" + std::to_string(changes.deletions))
-                | color(Color::RedLight) });
+            diffstat_chip(changes.additions, changes.deletions) });
         return vbox({ std::move(title), std::move(body) });
     }
 

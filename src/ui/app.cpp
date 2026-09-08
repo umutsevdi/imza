@@ -29,12 +29,12 @@ namespace {
 
     using namespace ftxui;
 
-    void print_session_saved_box()
+    void print_session_saved_box(const SessionStore& store)
     {
         const int term_w = Terminal::Size().dimx;
         const int width  = std::max(40, std::min(term_w, 80));
 
-        std::vector<SavedSession> sessions = saved_sessions();
+        std::vector<SavedSession> sessions = store.sessions();
         if (static_cast<int>(sessions.size()) > 5) {
             sessions.resize(5);
         }
@@ -184,7 +184,7 @@ namespace {
         bool OnEvent(Event event) override
         {
             if (event == Event::CtrlC || event == Event::CtrlD) {
-                screen_.Exit();
+                state_->on_exit();
                 return true;
             }
             if (state_->session->modal().index() != 0) {
@@ -300,8 +300,10 @@ int run_repl(
     if (!state->session->has_items()) {
         return 0;
     }
-    const bool saved = save_session(*state->session) == Status::OK;
-    print_session_saved_box();
+    const bool saved = state->sessions->save(*state->session) == Status::OK;
+    if (saved) {
+        print_session_saved_box(*state->sessions);
+    }
     return saved ? 0 : 1;
 }
 

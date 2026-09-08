@@ -18,7 +18,6 @@ public:
     void post(Task task);
     void drain();
     bool wait_for_task(std::chrono::milliseconds timeout);
-    bool empty() const;
 
     [[nodiscard]] Signal<>::Subscription subscribe(Signal<>::Callback callback);
 

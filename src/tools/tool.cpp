@@ -83,11 +83,6 @@ namespace {
     constexpr std::size_t MAX_READ_LINES   = 2000;
     constexpr std::size_t MAX_LIST_ENTRIES = 2000;
 
-    ToolOutput error(std::string text)
-    {
-        return { ToolOutput::Kind::ERROR, std::move(text) };
-    }
-
     std::string format_kb(std::uintmax_t bytes)
     {
         double kb = static_cast<double>(bytes) / 1024.0;
@@ -100,42 +95,31 @@ namespace {
         return s + " KB";
     }
 
-    std::size_t utf8_width(const std::string& s)
-    {
-        std::size_t w = 0;
-        for (unsigned char c : s) {
-            if ((c & 0xC0) != 0x80) {
-                ++w;
-            }
-        }
-        return w;
-    }
-
     ToolOutput read_run(const Json::Value& args)
     {
         if (const auto validation
             = validate_filesystem_tool_arguments("read", args)) {
-            return error(*validation);
+            return tool_error(*validation);
         }
         const std::string path = args["path"].asString();
 
         std::error_code ec;
         const fs::path file(path);
         if (!fs::exists(file, ec)) {
-            return error("read: no such file: " + path);
+            return tool_error("read: no such file: " + path);
         }
         if (!fs::is_regular_file(file, ec)) {
-            return error("read: not a file: " + path);
+            return tool_error("read: not a file: " + path);
         }
 
         std::ifstream in(file, std::ios::binary);
         if (!in) {
-            return error("read: cannot open: " + path);
+            return tool_error("read: cannot open: " + path);
         }
         const std::string content((std::istreambuf_iterator<char>(in)),
             std::istreambuf_iterator<char>());
         if (content.find('\0') != std::string::npos) {
-            return error("read: binary file: " + path);
+            return tool_error("read: binary file: " + path);
         }
 
         std::size_t begin = 1;
@@ -155,12 +139,12 @@ namespace {
             return { ToolOutput::Kind::OUTPUT, "(empty file)" };
         }
         if (begin > length) {
-            return error("read: line_begin " + std::to_string(begin)
+            return tool_error("read: line_begin " + std::to_string(begin)
                 + " exceeds file length " + std::to_string(length) + ": "
                 + path);
         }
         if (end_given && end > length) {
-            return error("read: line_end " + std::to_string(end)
+            return tool_error("read: line_end " + std::to_string(end)
                 + " exceeds file length " + std::to_string(length) + ": "
                 + path);
         }
@@ -188,7 +172,7 @@ namespace {
     {
         if (const auto validation
             = validate_filesystem_tool_arguments("list", args)) {
-            return error(*validation);
+            return tool_error(*validation);
         }
         std::string dir = ".";
         if (args.isObject() && args["path"].isString()
@@ -199,10 +183,10 @@ namespace {
         std::error_code ec;
         const fs::path root(dir);
         if (!fs::exists(root, ec)) {
-            return error("list: no such directory: " + dir);
+            return tool_error("list: no such directory: " + dir);
         }
         if (!fs::is_directory(root, ec)) {
-            return error("list: not a directory: " + dir);
+            return tool_error("list: not a directory: " + dir);
         }
 
         std::vector<std::string> names;
@@ -215,7 +199,7 @@ namespace {
                 names.push_back(std::move(name));
             }
         } catch (const std::filesystem::filesystem_error& e) {
-            return error(
+            return tool_error(
                 std::string("list: cannot read directory: ") + e.what());
         }
         std::sort(names.begin(), names.end());
@@ -263,7 +247,7 @@ namespace {
     ToolOutput shell_run(const Json::Value& args)
     {
         if (const auto validation = validate_shell_tool_arguments(args)) {
-            return error(*validation);
+            return tool_error(*validation);
         }
         const std::string command = args["command"].asString();
 
@@ -275,7 +259,7 @@ namespace {
 
         CommandResult r = run_command(command, timeout);
         if (!r.spawned) {
-            return error("shell: failed to execute command");
+            return tool_error("shell: failed to execute command");
         }
 
         std::string out = std::move(r.output);
@@ -331,22 +315,6 @@ namespace {
             return false;
         }
         return true;
-    }
-
-    std::string rebuild_lines(
-        const std::vector<std::string>& lines, bool trailing_newline)
-    {
-        std::string out;
-        for (std::size_t i = 0; i < lines.size(); ++i) {
-            if (i != 0) {
-                out += '\n';
-            }
-            out += lines[i];
-        }
-        if (!lines.empty() && trailing_newline) {
-            out += '\n';
-        }
-        return out;
     }
 
     struct EditSpan {
@@ -481,7 +449,7 @@ namespace {
     {
         if (const auto validation
             = validate_filesystem_tool_arguments("edit", args)) {
-            return error(*validation);
+            return tool_error(*validation);
         }
         const std::string path  = args["file_path"].asString();
         const std::string old   = args["old_string"].asString();
@@ -492,7 +460,7 @@ namespace {
 
         std::string content, err;
         if (!load_text(path, content, err)) {
-            return error("edit: " + err);
+            return tool_error("edit: " + err);
         }
 
         std::size_t start = 0;
@@ -516,7 +484,7 @@ namespace {
             p += old.size();
         }
         if (matches.empty()) {
-            return error(offset > 0
+            return tool_error(offset > 0
                     ? "edit: old_string not found after offset line"
                     : "edit: old_string not found");
         }
@@ -542,7 +510,7 @@ namespace {
         const std::vector<std::string> new_lines = split_lines(out);
 
         if (!save_text(path, out, err)) {
-            return error("edit: " + err);
+            return tool_error("edit: " + err);
         }
         return make_diff_result("edit: replaced " + std::to_string(replaced)
                 + " occurrence(s) in " + path,
@@ -553,7 +521,7 @@ namespace {
     {
         if (const auto validation
             = validate_filesystem_tool_arguments("write", args)) {
-            return error(*validation);
+            return tool_error(*validation);
         }
         const std::string path = args["file_path"].asString();
         const std::string text = args["text"].asString();
@@ -567,11 +535,11 @@ namespace {
         std::string content, err;
         if (exists) {
             if (!load_text(path, content, err)) {
-                return error("write: " + err);
+                return tool_error("write: " + err);
             }
         } else {
             if (overwrite) {
-                return error("write: no such file: " + path);
+                return tool_error("write: no such file: " + path);
             }
             content.clear();
         }
@@ -590,9 +558,9 @@ namespace {
             new_lines.insert(
                 new_lines.begin() + static_cast<std::ptrdiff_t>(at),
                 insert.begin(), insert.end());
-            const std::string out = rebuild_lines(new_lines, trailing_newline);
+            const std::string out = join_lines(new_lines, trailing_newline);
             if (!save_text(path, out, err)) {
-                return error("write: " + err);
+                return tool_error("write: " + err);
             }
             return make_diff_result("write: inserted text below line "
                     + std::to_string(line) + " in " + path,
@@ -621,9 +589,9 @@ namespace {
         new_lines.insert(
             new_lines.begin() + static_cast<std::ptrdiff_t>(begin_idx),
             insert.begin(), insert.end());
-        const std::string out = rebuild_lines(new_lines, trailing_newline);
+        const std::string out = join_lines(new_lines, trailing_newline);
         if (!save_text(path, out, err)) {
-            return error("write: " + err);
+            return tool_error("write: " + err);
         }
         return make_diff_result("write: replaced lines " + std::to_string(lb)
                 + "-" + std::to_string(le) + " in " + path,

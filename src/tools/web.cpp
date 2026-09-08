@@ -16,11 +16,6 @@ namespace {
     constexpr int DEFAULT_RESULTS          = 5;
     constexpr int MAX_RESULTS              = 10;
 
-    ToolOutput error(std::string text)
-    {
-        return { ToolOutput::Kind::ERROR, std::move(text) };
-    }
-
     ToolOutput truncate_output(std::string text)
     {
         if (text.size() <= MAX_OUTPUT_CHARS) {
@@ -55,7 +50,7 @@ namespace {
     {
         if (const auto validation
             = validate_web_tool_arguments("webfetch", args)) {
-            return error(*validation);
+            return tool_error(*validation);
         }
         const std::string url = args["url"].asString();
 
@@ -63,19 +58,19 @@ namespace {
         std::string detail;
         const Status st = fetch_url(url, page, detail);
         if (st == Status::INVALID_URL) {
-            return error("webfetch: " + detail + ": " + url);
+            return tool_error("webfetch: " + detail + ": " + url);
         }
         if (st == Status::NETWORK_ERROR) {
-            return error("webfetch: request failed: " + url);
+            return tool_error("webfetch: request failed: " + url);
         }
         if (st != Status::OK) {
-            return error("webfetch: " + detail + ": " + url);
+            return tool_error("webfetch: " + detail + ": " + url);
         }
 
         std::string text
             = looks_like_html(page.body) ? html_to_text(page.body) : page.body;
         if (trim(text).empty()) {
-            return error("webfetch: no readable content at " + page.url);
+            return tool_error("webfetch: no readable content at " + page.url);
         }
         return truncate_output(std::move(text));
     }
@@ -84,7 +79,7 @@ namespace {
     {
         if (const auto validation
             = validate_web_tool_arguments("websearch", args)) {
-            return error(*validation);
+            return tool_error(*validation);
         }
         const std::string query = args["query"].asString();
 
@@ -97,10 +92,10 @@ namespace {
         std::string text;
         const Status st = web_search(query, num_results, text);
         if (st == Status::NETWORK_ERROR) {
-            return error("websearch: request failed for '" + query + "'");
+            return tool_error("websearch: request failed for '" + query + "'");
         }
         if (st != Status::OK) {
-            return error(
+            return tool_error(
                 "websearch: search request rejected for '" + query + "'");
         }
         if (trim(text).empty()) {

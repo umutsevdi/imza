@@ -9,6 +9,7 @@
 #include "common/types.h"
 #include "common/ursa_signal.h"
 #include "conversation/session.h"
+#include "conversation/session_store.h"
 #include "network/network.h"
 #include "platform/config.h"
 #include "providers/store.h"
@@ -31,6 +32,7 @@ using ModalRequestFn = std::function<std::future<ModalResult>(ModalPayload)>;
 
 struct ApplicationState {
     std::shared_ptr<Session> session;
+    std::shared_ptr<SessionStore> sessions;
     std::shared_ptr<ProviderStore> providers;
     std::shared_ptr<SubagentManager> subagents;
     std::shared_ptr<Environment> environment;

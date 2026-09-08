@@ -7,7 +7,7 @@ ISSUES & SUPPORT: https://github.com/umutsevdi/ursa/issues
 
 CHANGELOG
 -------------------------------------------------------------------------------
-0.1.3 - 2026-09-12
+0.1.3 - 2026-09-09
 -------------------------------------------------------------------------------
 [https://github.com/umutsevdi/ursa/releases/tag/v0.1.3]
 
@@ -17,6 +17,11 @@ Changes:
   - Reduced memory usage when preparing modal content.
   - Improved chat rendering performance.
   - Fixed review horizontal scrolling and focus.
+  - Session list now loads in the background from a session index.
+  - Added cross-process file locking for config and session files.
+  - Concurrent ursa instances no longer overwrite each other's config changes.
+  - Fixed title-generation subagent ignoring the configured reasoning effort.
+  - Various internal cleanups and code deduplication.
 
 -------------------------------------------------------------------------------
 0.1.2 - 2026-09-08
