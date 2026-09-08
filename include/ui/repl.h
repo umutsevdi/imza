@@ -1,9 +1,13 @@
 #pragma once
 
-#include "core/config.h"
+#include <memory>
 
 namespace ursa {
 
-int run_repl(const Config& cfg);
+struct ApplicationState;
+class MainThreadQueue;
+
+int run_repl(
+    std::shared_ptr<ApplicationState> state, MainThreadQueue& main_thread);
 
 } // namespace ursa

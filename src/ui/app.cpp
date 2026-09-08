@@ -1,6 +1,7 @@
-#include "agent/flows.h"
-#include "subsystems/session_store.h"
-#include "subsystems/skill_store.h"
+#include "app/flows.h"
+#include "conversation/persistence.h"
+#include "runtime/main_thread_queue.h"
+#include "tools/skills.h"
 #include "ui/ui.h"
 
 #include <ftxui/component/animation.hpp>
@@ -218,7 +219,7 @@ namespace {
         {
             const auto& environment = state_->environment;
             return environment->ready() && environment->system()->has_git
-                && environment->workspace() != nullptr;
+                && environment->workspace()->project_root.has_value();
         }
 
         void _sync_review_availability()
@@ -274,7 +275,8 @@ namespace {
 
 } // namespace
 
-int run_repl(const Config& cfg)
+int run_repl(
+    std::shared_ptr<ApplicationState> state, MainThreadQueue& main_thread)
 {
     if (!is_interactive_terminal()) {
         std::println("ursa requires an interactive terminal");
@@ -283,14 +285,11 @@ int run_repl(const Config& cfg)
 
     ScreenInteractive screen = ScreenInteractive::FullscreenAlternateScreen();
     screen.ForceHandleCtrlC(false);
-    std::vector<Tool> tools = default_tools();
-    auto state              = make_application_state(
-        [&screen](std::function<void()> f) {
-            screen.Post(std::move(f));
-            screen.PostEvent(Event::Custom);
-        },
-        cfg, StreamFn { }, std::move(tools));
-    state->on_exit = [&screen] { screen.Exit(); };
+    auto task_subscription = main_thread.subscribe([&screen, &main_thread] {
+        screen.Post([&main_thread] { main_thread.drain(); });
+        screen.PostEvent(Event::Custom);
+    });
+    state->on_exit         = [&screen] { screen.Exit(); };
     state->providers->ensure_catalog_fresh();
     if (state->providers->config().providers.empty()) {
         ursa::enqueue_user_modal(
@@ -298,7 +297,7 @@ int run_repl(const Config& cfg)
     }
     auto app = ftxui::Make<Repl>(screen, state);
     screen.Loop(app);
-    if (state->session->snapshot().items.empty()) {
+    if (!state->session->has_items()) {
         return 0;
     }
     const bool saved = save_session(*state->session) == Status::OK;

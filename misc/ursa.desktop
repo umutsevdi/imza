@@ -7,6 +7,6 @@ Categories=Development;IDE
 Exec=ursa %U
 Terminal=true
 Type=Application
-Icon=/usr/share/ursa/ursa.png
+Icon=ursa
 Actions=New;
 Keywords=development;programming;IDE;

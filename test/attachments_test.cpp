@@ -4,8 +4,8 @@
 
 #include <doctest/doctest.h>
 
-#include "subsystems/attachments.h"
-#include "subsystems/session.h"
+#include "conversation/session.h"
+#include "workspace/attachments.h"
 
 namespace fs = std::filesystem;
 

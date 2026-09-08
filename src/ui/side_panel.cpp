@@ -1,9 +1,10 @@
-#include "agent/application_state.h"
-#include "agent/flows.h"
+#include "app/application_state.h"
+#include "app/flows.h"
+#include "permissions/store.h"
 #include "ui/ui.h"
 
-#include "subsystems/review.h"
-#include "subsystems/skill_store.h"
+#include "tools/skills.h"
+#include "workspace/review.h"
 
 #include <ftxui/component/app.hpp>
 #include <ftxui/component/component.hpp>
@@ -75,6 +76,14 @@ public:
             animation::RequestAnimationFrame();
         })
                                               : Signal<>::Subscription { })
+        , permission_subscription_(
+              state_->permissions->subscribe_to_grants_change(
+                  [state = std::weak_ptr<ApplicationState>(state_)] {
+                      if (const auto current = state.lock()) {
+                          current->post(
+                              [] { animation::RequestAnimationFrame(); });
+                      }
+                  }))
     {
         links_container_ = Container::Vertical({ });
         Add(links_container_);
@@ -104,6 +113,13 @@ public:
                 = state_->skills->counts(state_->environment->skills());
             parts.push_back(render_context_box(
                 env->agent_rules_path(), attachment_names_, project, global));
+            const PermissionStore::Snapshot grants
+                = state_->permissions->snapshot();
+            PermissionView permissions
+                = make_permission_view(state_->runtime_flags, *grants);
+            if (has_custom_permissions(permissions)) {
+                parts.push_back(render_permissions_box(permissions));
+            }
         }
         Element body = vbox(std::move(parts));
         if (narrow) {
@@ -165,12 +181,12 @@ private:
         if (workflow_() != WorkflowPhase::REVIEW || !state_->review) {
             return;
         }
-        const auto snapshot = state_->review->comments_snapshot();
-        if (snapshot.comments.empty()) {
+        const std::vector<ReviewComment> comments = state_->review->comments();
+        if (comments.empty()) {
             return;
         }
         Elements rows;
-        for (const ReviewComment& comment : snapshot.comments) {
+        for (const ReviewComment& comment : comments) {
             const std::string line = comment.anchor.new_line
                 ? std::to_string(*comment.anchor.new_line)
                 : comment.anchor.old_line
@@ -224,6 +240,7 @@ private:
     std::vector<std::string> attachment_names_;
     Signal<>::Subscription attachments_subscription_;
     Signal<>::Subscription review_subscription_;
+    Signal<>::Subscription permission_subscription_;
     Component links_container_;
     std::map<std::string, Link<ChangedFile>> file_links_;
     std::map<std::size_t, Link<std::string>> comment_links_;
@@ -361,6 +378,82 @@ Element render_context_box(const std::optional<std::string>& rules,
         return vbox({ section_title("Context"), std::move(body) });
     }
     return vbox();
+}
+
+PermissionView make_permission_view(
+    RuntimeFlag flags, const PermissionStore::Grants& grants)
+{
+    PermissionView view;
+    view.web_disabled   = (flags & RuntimeFlag::WEB) == RuntimeFlag::NONE;
+    view.shell_disabled = (flags & RuntimeFlag::SHELL) == RuntimeFlag::NONE;
+    view.approvals_skipped
+        = (flags & RuntimeFlag::SKIP_PERMISSIONS) != RuntimeFlag::NONE;
+
+    for (const PermissionGrant& grant : grants) {
+        if (const auto* directory = std::get_if<ExternalGrant>(&grant)) {
+            view.folders.push_back(directory->string());
+            continue;
+        }
+        if (std::holds_alternative<SkillGrant>(grant)) {
+            continue;
+        }
+        const auto& command = std::get<ShellCommandGrant>(grant);
+        std::string label
+            = command.program + " " + command.subcommand.value_or("*");
+        view.commands.push_back(std::move(label));
+    }
+    const auto sort_unique = [](std::vector<std::string>& values) {
+        std::ranges::sort(values);
+        values.erase(std::unique(values.begin(), values.end()), values.end());
+    };
+    sort_unique(view.folders);
+    sort_unique(view.commands);
+    return view;
+}
+
+bool has_custom_permissions(const PermissionView& view)
+{
+    return view.web_disabled || view.shell_disabled || view.approvals_skipped
+        || !view.folders.empty() || !view.commands.empty();
+}
+
+Element render_permissions_box(const PermissionView& view)
+{
+    Elements rows;
+    const auto append_value = [&rows](std::string label, std::string value) {
+        rows.push_back(
+            hbox({ text(std::move(label)) | bold | color(PANEL_FG) | xflex,
+                text(std::move(value)) | color(PANEL_FG) | dim }));
+    };
+    const auto append_values = [&rows](std::string label,
+                                   const std::vector<std::string>& values) {
+        if (values.empty()) {
+            return;
+        }
+        Elements rendered;
+        for (const std::string& value : values) {
+            rendered.push_back(paragraph(value) | color(PANEL_FG) | dim);
+        }
+        rows.push_back(
+            hbox({ text(std::move(label)) | bold | color(PANEL_FG) | xflex,
+                vbox(std::move(rendered)) }));
+    };
+    if (view.web_disabled) {
+        append_value("Web", "disabled");
+    }
+    if (view.shell_disabled) {
+        append_value("Shell", "disabled");
+    }
+    if (view.approvals_skipped) {
+        append_value("Approvals", "skipped");
+    }
+    append_values("Folders", view.folders);
+    append_values("Commands", view.commands);
+    if (rows.empty()) {
+        return vbox();
+    }
+    Element body = vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER);
+    return vbox({ section_title("Permissions"), std::move(body) });
 }
 
 } // namespace ursa

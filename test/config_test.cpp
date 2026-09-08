@@ -7,7 +7,7 @@
 #include <filesystem>
 #include <fstream>
 
-#include "core/config.h"
+#include "platform/config.h"
 
 namespace {
 
@@ -113,8 +113,10 @@ TEST_CASE("config roundtrip preserves connections and last_used")
     std::string errors;
     std::istringstream stream(read_all(path));
     REQUIRE(Json::parseFromStream(reader, stream, &written, &errors));
-    CHECK_FALSE(written["providers"][0].isMember("id"));
-    CHECK_FALSE(written["providers"][0].isMember("label"));
+    CHECK(written["providers"][0]["id"] == "openrouter");
+    CHECK(written["providers"][0]["endpoint"] == "");
+    CHECK(written["providers"][0]["label"] == "");
+    CHECK_FALSE(written["providers"][0].isMember("dialects"));
     CHECK(written["providers"][1]["label"] == "my Ollama");
     CHECK(written["models"]["main"]["provider"] == "openrouter");
     CHECK(written["models"]["main"]["reasoning_effort"] == "high");
@@ -172,6 +174,29 @@ TEST_CASE("save_config creates parent directories")
     CHECK(ursa::load_config(path, loaded) == ursa::Status::OK);
     CHECK(loaded.providers.empty());
     std::filesystem::remove_all(path.parent_path().parent_path());
+}
+
+TEST_CASE("empty config writes every editable option")
+{
+    const auto path = temp_file("complete-defaults.json");
+    REQUIRE(ursa::save_config(path, ursa::Config { }) == ursa::Status::OK);
+
+    Json::Value written;
+    Json::CharReaderBuilder reader;
+    std::string errors;
+    std::istringstream stream(read_all(path));
+    REQUIRE(Json::parseFromStream(reader, stream, &written, &errors));
+    CHECK(written["providers"].isArray());
+    CHECK_FALSE(written["models"]["main"].isMember("provider"));
+    CHECK_FALSE(written["models"]["main"].isMember("model"));
+    CHECK(written["models"]["main"]["reasoning_effort"] == "off");
+    CHECK_FALSE(written["models"]["builder"].isMember("provider"));
+    CHECK_FALSE(written["models"]["builder"].isMember("model"));
+    CHECK(written["models"]["builder"]["reasoning_effort"] == "default");
+    CHECK(written["models"]["researcher"]["reasoning_effort"] == "low");
+    CHECK(written["models"]["basic"]["reasoning_effort"] == "off");
+    CHECK(written["skills"]["global"].isObject());
+    CHECK(written["skills"]["projects"].isObject());
 }
 
 TEST_CASE("save_config leaves no temp file behind")

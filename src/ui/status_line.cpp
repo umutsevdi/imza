@@ -1,8 +1,8 @@
-#include "agent/application_state.h"
+#include "app/application_state.h"
 #include "common/util.h"
-#include "core/pricing.h"
-#include "subsystems/provider_store.h"
-#include "subsystems/subagent_manager.h"
+#include "providers/pricing.h"
+#include "providers/store.h"
+#include "runtime/subagent_manager.h"
 #include "ui/ui.h"
 
 #include <cstdlib>
@@ -128,8 +128,8 @@ namespace {
                 }
                 bar.push_back(text("  "));
             }
-            bar.push_back(
-                text(" URSA ") | bold | bgcolor(PANEL_FG) | color(PANEL_COLOR));
+            bar.push_back(text(wide ? " URSA v" URSA_VERSION " " : " URSA ")
+                | bold | bgcolor(PANEL_FG) | color(PANEL_COLOR));
             return hbox(std::move(bar)) | bgcolor(PANEL_COLOR_FOCUS)
                 | color(PANEL_FG) | xflex;
         }

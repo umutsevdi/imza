@@ -2,10 +2,10 @@
 
 #include <doctest/doctest.h>
 
-#include "agent/tools.h"
+#include "conversation/session.h"
 #include "network/json_io.h"
 #include "network/network.h"
-#include "subsystems/session.h"
+#include "tools/tool.h"
 
 TEST_CASE("parse_todo_args accepts a valid list with statuses")
 {
@@ -67,12 +67,11 @@ TEST_CASE("todo_summary renders one line per item with marks")
     CHECK(out == "[ ] first\n[→] second\n[x] third\n[-] fourth");
 }
 
-TEST_CASE("todo tool is registered read-only without a direct handler")
+TEST_CASE("todo tool is registered without a direct handler")
 {
     const auto tools    = ursa::default_tools();
     const ursa::Tool* t = ursa::find_tool(tools, "todo");
     REQUIRE(t != nullptr);
-    CHECK(t->safety == ursa::ToolSafety::READ_ONLY);
     const auto out = ursa::dispatch_tool(tools, { "todo", "{}" });
     CHECK(out.kind == ursa::ToolOutput::Kind::ERROR);
 }

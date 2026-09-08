@@ -6,8 +6,8 @@
 #include <fstream>
 #include <sstream>
 
-#include "agent/tools.h"
 #include "network/json_io.h"
+#include "tools/tool.h"
 
 namespace ursa {
 
@@ -55,26 +55,11 @@ TEST_CASE("tool helpers find and list specs")
     CHECK(found->spec.name == "echo");
     CHECK(found->spec.description == "echo the message");
     CHECK(found->spec.parameters["properties"].isMember("msg"));
-    CHECK(found->safety == ToolSafety::MUTATING);
     CHECK(find_tool(tools, "missing") == nullptr);
 
     const auto specs = tool_specs(tools);
     REQUIRE(specs.size() == 1);
     CHECK(specs[0].name == "echo");
-}
-
-TEST_CASE("tool safety defaults to mutating and can be overridden")
-{
-    Tool mutating;
-    mutating.spec.name = "m";
-    CHECK(mutating.safety == ToolSafety::MUTATING);
-
-    Tool read_only { { "ro", "", Json::Value(Json::objectValue) },
-        [](const Json::Value&) {
-            return ToolOutput { ToolOutput::Kind::OUTPUT, "" };
-        },
-        ToolSafety::READ_ONLY };
-    CHECK(read_only.safety == ToolSafety::READ_ONLY);
 }
 
 TEST_CASE("dispatch parses object args for the handler")

@@ -1,7 +1,11 @@
 cmake_minimum_required(VERSION 4.0)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-project(ursa LANGUAGES C CXX)
-
+project(
+    ursa
+    VERSION 0.1.2
+    HOMEPAGE_URL "https://github.com/umutsevdi/ursa"
+    LANGUAGES C CXX
+)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -80,6 +84,17 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(ftxui)
 
+# CLI11
+set(CLI11_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(CLI11_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+set(CLI11_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(CLI11_PRECOMPILED ON CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    cli11
+    GIT_REPOSITORY https://github.com/CLIUtils/CLI11.git
+    GIT_TAG        v2.7.2
+    EXCLUDE_FROM_ALL
+)
 
 # jsoncpp
 set(JSONCPP_WITH_TESTS OFF)
@@ -111,7 +126,7 @@ FetchContent_Declare(
     GIT_TAG 0.29.0.gfm.13
     EXCLUDE_FROM_ALL
 )
-FetchContent_MakeAvailable(jsoncpp cmarkgfm)
+FetchContent_MakeAvailable(jsoncpp cmarkgfm cli11)
 if(URSA_BUILD_TESTS)
     FetchContent_MakeAvailable(doctest)
 endif()
@@ -175,67 +190,81 @@ target_link_libraries(ursa_network PRIVATE
     CURL::libcurl
 )
 
-# Shared app configuration + catalog/pricing cache (no ftxui, no cmark)
-add_library(ursa_core
-    src/core/catalog.cpp
-    src/core/command_runner.cpp
-    src/core/config.cpp
-    src/core/git.cpp
-    src/core/io.cpp
-    src/core/pricing.cpp
+# Platform services and stateless domain support (no ftxui, no cmark)
+add_library(ursa_foundation
+    src/platform/command_runner.cpp
+    src/platform/config.cpp
+    src/platform/json_file.cpp
+    src/providers/catalog.cpp
+    src/providers/pricing.cpp
+    src/workspace/git.cpp
 )
-target_include_directories(ursa_core PRIVATE
+target_include_directories(ursa_foundation PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${jsoncpp_SOURCE_DIR}/include
 )
-target_link_libraries(ursa_core PUBLIC
+target_link_libraries(ursa_foundation PUBLIC
     ursa_network
     jsoncpp_static
 )
 
-# Long-living state owned by ApplicationState (no ftxui, no cmark)
-add_library(ursa_subsystems
-    src/subsystems/attachments.cpp
-    src/subsystems/delegation_runner.cpp
-    src/subsystems/environment.cpp
-    src/subsystems/format.cpp
-    src/subsystems/provider_store.cpp
-    src/subsystems/review.cpp
-    src/subsystems/session.cpp
-    src/subsystems/session_store.cpp
-    src/subsystems/skill_store.cpp
-    src/subsystems/subagent_manager.cpp
+# Domain state and runtime infrastructure (no ftxui, no cmark)
+add_library(ursa_runtime
+    src/conversation/format.cpp
+    src/conversation/persistence.cpp
+    src/conversation/session.cpp
+    src/permissions/store.cpp
+    src/providers/store.cpp
+    src/workspace/review.cpp
+    src/runtime/main_thread_queue.cpp
+    src/runtime/modal_queue.cpp
+    src/runtime/subagent_manager.cpp
+    src/tools/skills.cpp
+    src/workspace/attachments.cpp
+    src/workspace/environment.cpp
 )
-target_include_directories(ursa_subsystems PRIVATE
+target_include_directories(ursa_runtime PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${jsoncpp_SOURCE_DIR}/include
 )
-target_link_libraries(ursa_subsystems PUBLIC
-    ursa_core
+target_link_libraries(ursa_runtime PUBLIC
+    ursa_foundation
     ursa_network
     jsoncpp_static
 )
 
-# Agent: orchestration, prompts, slash commands (ftxui-free)
-add_library(ursa_agent
-    src/agent/application_state.cpp
-    src/agent/flows.cpp
-    src/agent/modal_queue.cpp
-    src/agent/prompt.cpp
-    src/agent/slash_commands.cpp
-    src/agent/tool_args.cpp
-    src/agent/tools.cpp
-    src/agent/turn_runner.cpp
-    src/agent/web_tools.cpp
+# Application composition, turns, and tools (ftxui-free)
+add_library(ursa_execution
+    src/app/application_state.cpp
+    src/app/cli.cpp
+    src/app/flows.cpp
+    src/app/one_shot.cpp
+    src/app/slash_commands.cpp
+    src/permissions/evaluator.cpp
+    src/permissions/filesystem.cpp
+    src/tools/tool.cpp
+    src/tools/tool_args.cpp
+    src/tools/shell.cpp
+    src/tools/web.cpp
+    src/turn/delegation.cpp
+    src/turn/prompt.cpp
+    src/turn/turn_runner.cpp
 )
-target_include_directories(ursa_agent PRIVATE
+target_include_directories(ursa_execution PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${jsoncpp_SOURCE_DIR}/include
 )
-target_link_libraries(ursa_agent PUBLIC
-    ursa_core
+set_source_files_properties(src/ui/status_line.cpp PROPERTIES
+    COMPILE_DEFINITIONS URSA_VERSION="${PROJECT_VERSION}")
+set_source_files_properties(src/app/cli.cpp PROPERTIES
+    COMPILE_DEFINITIONS URSA_VERSION="${PROJECT_VERSION}")
+target_link_libraries(ursa_execution PRIVATE
+    CLI11::CLI11
+)
+target_link_libraries(ursa_execution PUBLIC
+    ursa_foundation
     ursa_network
-    ursa_subsystems
+    ursa_runtime
     jsoncpp_static
 )
 
@@ -272,7 +301,7 @@ target_compile_definitions(ursa_ui PRIVATE
     CMARK_GFM_EXTENSIONS_STATIC_DEFINE
 )
 target_link_libraries(ursa_ui PUBLIC
-    ursa_agent
+    ursa_execution
     ftxui::ftxui
     libcmark-gfm-extensions_static
     libcmark-gfm_static
@@ -290,7 +319,7 @@ target_include_directories(ursa PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 target_link_libraries(ursa PRIVATE
-    ursa_core
+    ursa_foundation
     ursa_ui
 )
 
@@ -308,82 +337,76 @@ if (URSA_BUILD_TESTS)
         CMARK_GFM_EXTENSIONS_STATIC_DEFINE
     )
     target_link_libraries(ursa_tests PRIVATE
-        ursa_agent
+        ursa_execution
         ursa_ui
         doctest::doctest
     )
 endif()
-
-
-set(PKGDIR "${CMAKE_BINARY_DIR}/package")
-function(add_bundle_file source destination)
-    get_filename_component(destination_directory "${destination}" DIRECTORY)
-    add_custom_command(
-        OUTPUT "${destination}"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${destination_directory}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${source}" "${destination}"
-        DEPENDS "${source}"
-        VERBATIM
-    )
-    set(BUNDLE_OUTPUTS ${BUNDLE_OUTPUTS} "${destination}" PARENT_SCOPE)
-endfunction()
-
-add_bundle_file("${CMAKE_SOURCE_DIR}/misc/ursa.ico"
-    "${PKGDIR}/win/ursa.ico")
-add_bundle_file("${CMAKE_SOURCE_DIR}/CHANGELOG.txt"
-    "${PKGDIR}/win/CHANGELOG.txt")
-add_bundle_file("${CMAKE_SOURCE_DIR}/LICENSE"
-    "${PKGDIR}/win/LICENSE")
-add_bundle_file("${CMAKE_SOURCE_DIR}/misc/LICENSE.thirdparty.txt"
-    "${PKGDIR}/win/LICENSE.thirdparty.txt")
-add_bundle_file("${CMAKE_SOURCE_DIR}/LICENSE"
-    "${PKGDIR}/usr/share/${PROJECT_NAME}/LICENSE")
-add_bundle_file("${CMAKE_SOURCE_DIR}/misc/LICENSE.thirdparty.txt"
-    "${PKGDIR}/usr/share/${PROJECT_NAME}/LICENSE.thirdparty.txt")
-add_bundle_file("${CMAKE_SOURCE_DIR}/misc/icon.png"
-    "${PKGDIR}/usr/share/${PROJECT_NAME}/ursa.png")
-add_bundle_file("${CMAKE_SOURCE_DIR}/misc/ursa.desktop"
-    "${PKGDIR}/usr/share/applications/ursa.desktop")
-add_bundle_file("${CMAKE_SOURCE_DIR}/CHANGELOG.txt"
-    "${PKGDIR}/usr/share/${PROJECT_NAME}/CHANGELOG.txt")
-
 add_custom_target(bundle DEPENDS ${BUNDLE_OUTPUTS})
 add_dependencies(${PROJECT_NAME} bundle)
-
 if(CMAKE_BUILD_TYPE STREQUAL "Release" AND URSA_PACKAGE)
     if(NOT WIN32)
-        set(CPACK_PACKAGE_NAME ${PROJECT_NAME})
-        set(CPACK_PACKAGE_VERSION "0.1.1")
-        set(CPACK_PACKAGE_DESCRIPTION "Open source multi-modal coding agent.")
-        set(CPACK_PACKAGE_DESCRIPTION_SUMMARY ${CPACK_PACKAGE_DESCRIPTION})
+        set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
+        set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
         set(CPACK_PACKAGE_VENDOR "Umut Sevdi")
-        set(CPACK_PACKAGE_MAINTAINER "Umut Sevdi <mail@umutsevdi.com>")
+        set(CPACK_PACKAGE_CONTACT "Umut Sevdi <mail@umutsevdi.com>")
+        set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
+            "Open source multi-modal coding agent."
+        )
+        set(CPACK_PACKAGE_DESCRIPTION
+            "Ursa is an open source multi-modal coding agent."
+        )
         set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
         set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 
-        set(CPACK_GENERATOR "DEB;RPM")
-        set(CPACK_RPM_PACKAGE_LICENSE "GPL")
-        set(CPACK_RPM_PACKAGE_GROUP "Development")
+        # RPM
         set(CPACK_RPM_PACKAGE_REQUIRES "libcurl")
-        set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Umut Sevdi <mail@umutsevdi.com>")
+        set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
+        set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-or-later")
+        set(CPACK_RPM_PACKAGE_GROUP "Development/Tools")
+        set(CPACK_RPM_PACKAGE_DESCRIPTION
+            "${CPACK_PACKAGE_DESCRIPTION}"
+        )
+        # DEB
+        set(CPACK_DEBIAN_PACKAGE_RELEASE "1")
+        set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
         set(CPACK_DEBIAN_PACKAGE_DEPENDS "libcurl4")
+        if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+            set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
+        elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+            set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "arm64")
+        else()
+            message(FATAL_ERROR
+                "Unsupported Debian architecture: ${CMAKE_SYSTEM_PROCESSOR}"
+            )
+        endif()
 
-        install(FILES "build/release/ursa"
-    DESTINATION "/usr/bin/"
-    PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
-          GROUP_EXECUTE GROUP_READ
-          WORLD_EXECUTE WORLD_READ
-  )
+        include(GNUInstallDirs)
+        install(TARGETS ursa
+            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        )
+        install(FILES
+                "${CMAKE_SOURCE_DIR}/README.md"
+                "${CMAKE_SOURCE_DIR}/CHANGELOG.txt"
+                "${CMAKE_SOURCE_DIR}/misc/LICENSE.thirdparty.txt"
+            DESTINATION "${CMAKE_INSTALL_DOCDIR}"
+        )
+        install(
+            FILES "${CMAKE_SOURCE_DIR}/LICENSE"
+            DESTINATION "${CMAKE_INSTALL_DOCDIR}"
+            RENAME copyright
+        )
+        install(
+            FILES "${CMAKE_SOURCE_DIR}/misc/ursa.desktop"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/applications"
+        )
 
-        install(DIRECTORY ${PKGDIR}/usr/share/
-    DESTINATION /usr/share/
-    USE_SOURCE_PERMISSIONS
-    PATTERN "*.*"
-  )
-
-        install(FILES "LICENSE"
-   DESTINATION "/usr/share/ursa"
-  )
+        install(
+            FILES "${CMAKE_SOURCE_DIR}/misc/icon.png"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/128x128/apps"
+            RENAME ursa.png
+        )
+        set(CPACK_GENERATOR "DEB;RPM;TGZ")
         include(CPack)
     endif()
 endif()

@@ -1,8 +1,8 @@
-#include "agent/flows.h"
+#include "app/flows.h"
 #include "common/types.h"
 #include "common/util.h"
-#include "core/catalog.h"
-#include "subsystems/session_store.h"
+#include "conversation/persistence.h"
+#include "providers/catalog.h"
 #include "ui/ui.h"
 
 #include <ftxui/component/component.hpp>

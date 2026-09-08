@@ -1,11 +1,11 @@
 #include "ui/autocomplete.h"
 
-#include "agent/application_state.h"
+#include "app/application_state.h"
 #include "common/util.h"
-#include "subsystems/environment.h"
-#include "subsystems/provider_store.h"
-#include "subsystems/skill_store.h"
+#include "providers/store.h"
+#include "tools/skills.h"
 #include "ui/ui.h"
+#include "workspace/environment.h"
 
 #include <algorithm>
 #include <filesystem>

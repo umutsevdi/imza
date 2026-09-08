@@ -4,8 +4,9 @@
 
 #include <doctest/doctest.h>
 
-#include "subsystems/session.h"
-#include "subsystems/session_store.h"
+#include "app/flows.h"
+#include "conversation/persistence.h"
+#include "conversation/session.h"
 
 namespace {
 
@@ -67,6 +68,7 @@ TEST_CASE("saved sessions are immutable and fork on a new prompt")
     source.apply(ursa::make_delta_event("world"), { });
 
     REQUIRE(ursa::save_session(source) == ursa::Status::OK);
+    CHECK_FALSE(source.snapshot_for_save());
     auto saved = ursa::saved_sessions();
     REQUIRE(saved.size() == 1);
     CHECK(saved.front().path.parent_path() == ursa::sessions_dir());
@@ -75,6 +77,7 @@ TEST_CASE("saved sessions are immutable and fork on a new prompt")
     const std::filesystem::path saved_path = saved.front().path;
 
     source.begin_send("follow-up");
+    CHECK(source.snapshot_for_save().has_value());
     REQUIRE(ursa::save_session(source) == ursa::Status::OK);
     saved = ursa::saved_sessions();
     REQUIRE(saved.size() == 2);
@@ -116,6 +119,8 @@ TEST_CASE("empty sessions are not saved")
 #else
     DataHome home;
     ursa::Session session;
+    CHECK_FALSE(session.has_items());
+    CHECK_FALSE(session.snapshot_for_save());
     CHECK(ursa::save_session(session) == ursa::Status::OK);
     CHECK(ursa::saved_sessions().empty());
 #endif
@@ -149,5 +154,50 @@ TEST_CASE("saved sessions retain delegated-agent chat transcripts")
     CHECK(call.subagent_chats[0].title == "Agent 1 (research)");
     CHECK(
         call.subagent_chats[0].transcript.find("report") != std::string::npos);
+#endif
+}
+
+TEST_CASE("CLI opens and removes saved sessions by ID")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    ursa::Session source;
+    source.begin_send("remember this");
+    REQUIRE(ursa::save_session(source) == ursa::Status::OK);
+    const auto saved = ursa::saved_sessions();
+    REQUIRE(saved.size() == 1);
+    std::string id = saved.front().path.stem().string();
+
+    char program[]    = "ursa";
+    char directory[]  = ".";
+    char session[]    = "--session";
+    char* open_argv[] = { program, directory, session, id.data() };
+    const ursa::CliResult open_result = ursa::run_cli(4, open_argv);
+
+    CHECK(open_result.continue_as_interactive);
+    CHECK(open_result.exit_code == 0);
+    REQUIRE(open_result.working_directory.has_value());
+    CHECK(*open_result.working_directory == std::filesystem::path("."));
+    REQUIRE(open_result.session_path.has_value());
+    CHECK(*open_result.session_path == saved.front().path);
+
+    char ask[]                 = "--ask";
+    char query[]               = "continue";
+    char* one_shot_argv[]      = { program, ask, query, session, id.data() };
+    const auto one_shot_result = ursa::run_cli(5, one_shot_argv);
+
+    REQUIRE(one_shot_result.one_shot.has_value());
+    CHECK(one_shot_result.one_shot->mode == ursa::OneShotRequest::Mode::ASK);
+    CHECK(one_shot_result.session_path == saved.front().path);
+
+    char remove[]       = "rm";
+    char* remove_argv[] = { program, session, remove, id.data() };
+    const ursa::CliResult remove_result = ursa::run_cli(4, remove_argv);
+
+    CHECK_FALSE(remove_result.continue_as_interactive);
+    CHECK(remove_result.exit_code == 0);
+    CHECK(ursa::saved_sessions().empty());
 #endif
 }
