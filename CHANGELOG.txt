@@ -15,6 +15,9 @@ Changes:
   - Improved Windows startup time.
   - Improved response rendering performance.
   - Reduced memory usage when preparing modal content.
+  - Improved chat rendering performance.
+  - Fixed review horizontal scrolling and focus.
+
 -------------------------------------------------------------------------------
 0.1.2 - 2026-09-08
 -------------------------------------------------------------------------------

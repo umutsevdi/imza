@@ -143,6 +143,35 @@ TEST_CASE("review highlighting parses old and new hunk sides as documents")
     CHECK(new_line.PixelAt(0, 0).foreground_color == ftxui::Color::GrayLight);
 }
 
+TEST_CASE("selected review changes use the cursor background")
+{
+    auto selected = ursa::test::to_screen(
+        ursa::review_line_background(
+            ursa::highlight_code_line("return 1;", "cpp"),
+            ursa::DIFF_ADDITION_BG, true),
+        16, 1);
+
+    CHECK(selected.PixelAt(0, 0).foreground_color == ftxui::Color::Green);
+    CHECK(selected.PixelAt(0, 0).background_color == ursa::PANEL_COLOR_FOCUS);
+}
+
+TEST_CASE("unselected review changes retain their diff backgrounds")
+{
+    auto addition = ursa::test::to_screen(
+        ursa::review_line_background(
+            ursa::highlight_code_line("return 1;", "cpp"),
+            ursa::DIFF_ADDITION_BG, false),
+        16, 1);
+    auto deletion = ursa::test::to_screen(
+        ursa::review_line_background(
+            ursa::highlight_code_line("return 0;", "cpp"),
+            ursa::DIFF_DELETION_BG, false),
+        16, 1);
+
+    CHECK(addition.PixelAt(0, 0).background_color == ursa::DIFF_ADDITION_BG);
+    CHECK(deletion.PixelAt(0, 0).background_color == ursa::DIFF_DELETION_BG);
+}
+
 TEST_CASE("untyped code keeps the panel foreground")
 {
     auto screen = ursa::test::to_screen(

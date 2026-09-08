@@ -34,6 +34,13 @@ namespace {
     constexpr std::size_t kLargeOutputLines = 10;
     constexpr std::size_t kInvalidVersion   = ~std::size_t { 0 };
     constexpr int kWheelStep                = 3;
+    constexpr int kDefaultViewportLines     = 24;
+    constexpr int kTimelineOverscan         = 20;
+
+    Element vertical_space(int height)
+    {
+        return text("") | size(HEIGHT, EQUAL, std::max(0, height));
+    }
 
     std::string assistant_metadata(const AssistantTurn& turn)
     {
@@ -178,18 +185,34 @@ namespace {
                 animation::RequestAnimationFrame();
             }
 
-            Elements items;
+            const std::uint64_t content_serial = st.content_serial();
+            const std::vector<ConversationItem>& conversation = st.items();
+            const std::size_t item_count = conversation.size();
+            const std::size_t queued_n   = st.queued().size();
+            const bool content_changed   = content_serial_ != content_serial;
+            const bool layout_changed
+                = cache_kind_ != ctx.kind || cache_width_ != ctx.width;
+            if (content_changed || layout_changed
+                || item_cache_.size() > item_count) {
+                _timeline.reset(item_count);
+            } else {
+                _timeline.resize(item_count);
+            }
+            viewport_.content_height
+                = _timeline.total_height() + static_cast<int>(queued_n);
             if (follow_) {
                 viewport_.scroll = viewport_.max_scroll();
             } else {
                 viewport_.scroll_lines(0);
             }
-            const std::uint64_t content_serial = st.content_serial();
-            const std::vector<ConversationItem>& conversation = st.items();
-            const std::size_t item_count = conversation.size();
-            const bool content_changed   = content_serial_ != content_serial;
-            const bool reset_cache       = cache_kind_ != ctx.kind
-                || cache_width_ != ctx.width || content_changed
+            const int viewport_lines = std::max({ kDefaultViewportLines,
+                viewport_.viewport_lines(), ctx.height });
+            const VirtualListWindow visible
+                = _timeline.window(viewport_.scroll, viewport_lines, 0);
+            const VirtualListWindow window = _timeline.window(
+                viewport_.scroll, viewport_lines, kTimelineOverscan);
+            _anchor_index          = visible.begin;
+            const bool reset_cache = layout_changed || content_changed
                 || item_cache_.size() > item_count;
             if (reset_cache) {
                 item_cache_.clear();
@@ -198,9 +221,9 @@ namespace {
                 cache_kind_     = ctx.kind;
                 cache_width_    = ctx.width;
                 content_serial_ = content_serial;
-                if (content_changed) {
-                    clear_interaction_cache();
-                }
+                _cached_begin   = 0;
+                _cached_end     = 0;
+                clear_interaction_cache();
             } else if (item_cache_.size() < item_count) {
                 const std::size_t previous_size = item_cache_.size();
                 item_cache_.resize(item_count);
@@ -209,17 +232,21 @@ namespace {
                     item_versions_[previous_size - 1] = kInvalidVersion;
                 }
             }
+            evict_outside(window, conversation);
             if (std::exchange(hover_dirty_, false)) {
-                item_versions_.assign(item_cache_.size(), kInvalidVersion);
+                std::fill(item_versions_.begin() + window.begin,
+                    item_versions_.begin() + window.end, kInvalidVersion);
             }
-            std::size_t item_index = 0;
-            for (const auto& it : conversation) {
-                if (item_index >= item_cache_.size()) {
-                    break;
-                }
-                const std::size_t version = item_version(it);
-                const bool is_trailing    = item_index + 1 == item_count;
-                const bool active         = is_trailing && streaming
+            Elements items;
+            if (window.before > 0) {
+                items.push_back(vertical_space(window.before));
+            }
+            for (std::size_t item_index = window.begin; item_index < window.end;
+                ++item_index) {
+                const ConversationItem& it = conversation[item_index];
+                const std::size_t version  = item_version(it);
+                const bool is_trailing     = item_index + 1 == item_count;
+                const bool active          = is_trailing && streaming
                     && std::holds_alternative<AssistantTurn>(it);
                 const bool final_segment = !(is_trailing && busy)
                     && (is_trailing
@@ -347,14 +374,25 @@ namespace {
                         });
                     }
                 }
-                items.push_back(hbox({
-                    text(" "),
-                    std::move(el) | xflex,
-                }));
-                ++item_index;
+                items.push_back(hbox({ text(" "), std::move(el) | xflex })
+                    | capture_content_height(
+                        [this, item_index](const int height) {
+                            const int delta
+                                = _timeline.set_height(item_index, height);
+                            if (delta == 0) {
+                                return;
+                            }
+                            if (!follow_ && item_index < _anchor_index) {
+                                viewport_.scroll
+                                    = std::max(0, viewport_.scroll + delta);
+                            }
+                            animation::RequestAnimationFrame();
+                        }));
             }
 
-            const size_t queued_n = st.queued().size();
+            if (window.after > 0) {
+                items.push_back(vertical_space(window.after));
+            }
             for (size_t i = 0; i < queued_n; ++i) {
                 const auto& q = st.queued()[i];
                 Elements row {
@@ -627,6 +665,10 @@ namespace {
 
         std::vector<Element> item_cache_;
         std::vector<std::size_t> item_versions_;
+        VirtualListState _timeline;
+        std::size_t _cached_begin   = 0;
+        std::size_t _cached_end     = 0;
+        std::size_t _anchor_index   = 0;
         LayoutCtx::Kind cache_kind_ = LayoutCtx::Kind::NARROW;
         int cache_width_            = 0;
 
@@ -647,6 +689,55 @@ namespace {
             reasoning_content_.clear();
             reasoning_metadata_.clear();
             reasoning_comps_.clear();
+        }
+
+        void evict_item(std::size_t index, const ConversationItem& item)
+        {
+            if (index < item_cache_.size()) {
+                item_cache_[index].reset();
+                item_versions_[index] = kInvalidVersion;
+            }
+            if (const auto* tool = std::get_if<ToolCall>(&item)) {
+                const auto read = read_buttons_.find(tool->id);
+                if (read != read_buttons_.end()) {
+                    read->second->Detach();
+                    read_buttons_.erase(read);
+                }
+                auto subagent = subagent_buttons_.lower_bound({ tool->id, 0 });
+                while (subagent != subagent_buttons_.end()
+                    && subagent->first.first == tool->id) {
+                    subagent->second->Detach();
+                    subagent = subagent_buttons_.erase(subagent);
+                }
+            }
+            const auto reasoning = reasoning_comps_.find(index);
+            if (reasoning != reasoning_comps_.end()) {
+                reasoning->second->Detach();
+                reasoning_comps_.erase(reasoning);
+                reasoning_labels_.erase(index);
+                reasoning_content_.erase(index);
+                reasoning_metadata_.erase(index);
+            }
+        }
+
+        void evict_range(std::size_t begin, std::size_t end,
+            const std::vector<ConversationItem>& conversation)
+        {
+            end = std::min(end, conversation.size());
+            for (std::size_t index = begin; index < end; ++index) {
+                evict_item(index, conversation[index]);
+            }
+        }
+
+        void evict_outside(const VirtualListWindow& window,
+            const std::vector<ConversationItem>& conversation)
+        {
+            evict_range(_cached_begin, std::min(_cached_end, window.begin),
+                conversation);
+            evict_range(
+                std::max(_cached_begin, window.end), _cached_end, conversation);
+            _cached_begin = window.begin;
+            _cached_end   = window.end;
         }
 
         Element tool_header_element(const ToolCall& tc)

@@ -9,7 +9,6 @@
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
-#include <ftxui/dom/node.hpp>
 #include <ftxui/screen/screen.hpp>
 #include <functional>
 #include <iterator>
@@ -20,55 +19,6 @@
 #include <vector>
 
 namespace ursa {
-
-ftxui::Decorator capture_content_height(int* out)
-{
-    class Impl : public ftxui::Node {
-    public:
-        Impl(ftxui::Element child, int* out)
-            : ftxui::Node(ftxui::Elements { std::move(child) })
-            , out_(out)
-        {
-        }
-
-        void ComputeRequirement() override
-        {
-            ftxui::Node::ComputeRequirement();
-            requirement_ = children_[0]->requirement();
-            *out_        = requirement_.min_y;
-        }
-
-        void SetBox(ftxui::Box box) override
-        {
-            ftxui::Node::SetBox(box);
-            children_[0]->SetBox(box);
-        }
-
-    private:
-        int* out_;
-    };
-    return [out](ftxui::Element child) {
-        return std::make_shared<Impl>(std::move(child), out);
-    };
-}
-
-int ScrollView::viewport_lines() const
-{
-    if (box.y_max < box.y_min) {
-        return 0;
-    }
-    return box.y_max - box.y_min + 1;
-}
-
-int ScrollView::max_scroll() const
-{
-    return std::max(0, content_height - viewport_lines());
-}
-
-void ScrollView::scroll_lines(int delta)
-{
-    scroll = std::clamp(scroll + delta, 0, max_scroll());
-}
 
 ModelRow make_model_row(const std::string& connection_id,
     const std::string& provider_name, const ModelInfo& info)

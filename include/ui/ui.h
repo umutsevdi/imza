@@ -90,6 +90,7 @@ bool move_list_cursor(const ftxui::Event& event, int& cursor, int count);
 // Captures the unclipped content height of a child element (yframe renders
 // report the clipped viewport instead).
 ftxui::Decorator capture_content_height(int* out);
+ftxui::Decorator capture_content_height(std::function<void(int)> out);
 
 struct ScrollView {
     int scroll         = 0;
@@ -99,6 +100,32 @@ struct ScrollView {
     int viewport_lines() const;
     int max_scroll() const;
     void scroll_lines(int delta);
+};
+
+struct VirtualListWindow {
+    std::size_t begin = 0;
+    std::size_t end   = 0;
+    int before        = 0;
+    int after         = 0;
+};
+
+class VirtualListState {
+public:
+    explicit VirtualListState(int estimated_height = 3);
+
+    void reset(std::size_t count);
+    void resize(std::size_t count);
+    int set_height(std::size_t index, int height);
+    int total_height() const;
+    VirtualListWindow window(int scroll, int viewport, int overscan) const;
+
+private:
+    void _rebuild_offsets() const;
+
+    int _estimated_height = 3;
+    std::vector<int> _heights;
+    mutable std::vector<std::int64_t> _offsets;
+    mutable bool _offsets_dirty = true;
 };
 
 struct ModelRow {
@@ -143,6 +170,8 @@ using ReviewHighlights
 void append_review_hunk_highlights(ReviewHighlights& cache,
     const ReviewHunk& hunk, std::string_view path, int review_width,
     int horizontal_offset, bool side_by_side);
+ftxui::Element review_line_background(ftxui::Element row,
+    std::optional<ftxui::Color> change_background, bool selected);
 
 ftxui::Element card(ftxui::Element body,
     std::optional<ftxui::Color> bg = std::nullopt, bool pad = true);

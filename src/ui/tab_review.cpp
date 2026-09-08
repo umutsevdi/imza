@@ -22,6 +22,19 @@
 #include <thread>
 
 namespace ursa {
+
+ftxui::Element review_line_background(ftxui::Element row,
+    std::optional<ftxui::Color> change_background, bool selected)
+{
+    if (selected) {
+        return std::move(row) | ftxui::bgcolor(PANEL_COLOR_FOCUS);
+    }
+    if (change_background) {
+        return std::move(row) | ftxui::bgcolor(*change_background);
+    }
+    return row;
+}
+
 namespace {
 
     using namespace ftxui;
@@ -125,9 +138,8 @@ namespace {
             visible_.clear();
             boxes_.clear();
             box_rows_.clear();
-            rendered_y_       = 0;
-            skipped_height_   = 0;
-            horizontal_limit_ = 0;
+            rendered_y_     = 0;
+            skipped_height_ = 0;
 
             if (snapshot.status == ReviewState::LoadStatus::IDLE
                 || snapshot.status == ReviewState::LoadStatus::LOADING) {
@@ -703,10 +715,12 @@ namespace {
                 marker     = "−";
                 background = DIFF_DELETION_BG;
             }
+            const bool selected
+                = selected_ == static_cast<int>(visible_.size());
             _push(
                 rows,
                 [this, &line, marker = std::move(marker), background, number,
-                    review_width] {
+                    review_width, selected] {
                     const int content_width = std::max(1, review_width - 14);
                     const std::string content
                         = fit(line.content, content_width, horizontal_offset_);
@@ -722,20 +736,18 @@ namespace {
                             ? text(content) | color(PANEL_FG_DIM)
                             : _highlighted_line(line, old_side, content),
                     });
-                    if (background) {
-                        row = std::move(row) | bgcolor(*background);
-                    }
-                    return row;
+                    return review_line_background(
+                        std::move(row), background, selected);
                 },
                 VisibleRow { VisibleRow::Kind::LINE, file_index, &line,
                     std::nullopt, 0 },
-                selected_ == static_cast<int>(visible_.size()));
+                selected);
             _push_comments(rows, snapshot, file_index, path, line);
             _push_editor(rows, path, line);
         }
 
-        Element _side_line(
-            const ReviewLine* line, bool old_side, int side_width) const
+        Element _side_line(const ReviewLine* line, bool old_side,
+            int side_width, bool selected) const
         {
             const std::optional<std::size_t> number = line == nullptr
                 ? std::nullopt
@@ -766,10 +778,8 @@ namespace {
                       _highlighted_line(*line, old_side, content) | xflex,
                   })
                 | size(WIDTH, EQUAL, side_width);
-            if (background) {
-                side = std::move(side) | bgcolor(*background);
-            }
-            return side;
+            return review_line_background(
+                std::move(side), background, selected);
         }
 
         void _push_side_by_side_pair(Elements& rows,
@@ -782,18 +792,20 @@ namespace {
             if (target == nullptr) {
                 return;
             }
+            const bool selected
+                = selected_ == static_cast<int>(visible_.size());
             _push(
                 rows,
-                [this, old_line, new_line, side_width] {
+                [this, old_line, new_line, side_width, selected] {
                     return hbox({
-                        _side_line(old_line, true, side_width),
+                        _side_line(old_line, true, side_width, selected),
                         text(" │ ") | color(PANEL_BORDER),
-                        _side_line(new_line, false, side_width),
+                        _side_line(new_line, false, side_width, selected),
                     });
                 },
                 VisibleRow { VisibleRow::Kind::LINE, file_index, target,
                     std::nullopt, 0 },
-                selected_ == static_cast<int>(visible_.size()));
+                selected);
             if (old_line != nullptr && old_line != target) {
                 _push_comments(rows, snapshot, file_index, path, *old_line);
                 _push_editor(rows, path, *old_line);
