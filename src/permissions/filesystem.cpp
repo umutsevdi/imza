@@ -8,7 +8,7 @@
 #include "tools/tool.h"
 #include "workspace/environment.h"
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -170,4 +170,4 @@ std::optional<ExternalGrant> filesystem_session_grant(
     return request.target.parent_path();
 }
 
-} // namespace ursa
+} // namespace imza

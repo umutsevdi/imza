@@ -1,25 +1,25 @@
-# Ursa
+# Imza
 
-Ursa is a batteries-included, model-agnostic coding agent with native
+Imza is a batteries-included, model-agnostic coding agent with native
 performance and a small runtime footprint.
 
 **\~20 MB binary · \~5-8 MB RAM at startup · \~20–40 MB during typical agentic work[^1]**
 
-Bring your own model, open Ursa in a project, and describe the
-outcome you want. Ursa reads the project instructions, gathers context, asks 
+Bring your own model, open Imza in a project, and describe the
+outcome you want. Imza reads the project instructions, gathers context, asks 
 questions when needed, and works through the task with visible reasoning,
 tool calls, diffs, and approval prompts along the way.
 
-> Ursa is not lightweight because it does less.
+> Imza is not lightweight because it does less.
 > It is lightweight because it was designed that way.
 
-Download the [latest release](https://github.com/umutsevdi/ursa/releases/latest).
+Download the [latest release](https://github.com/umutsevdi/imza/releases/latest).
 
-![ursa-layout](./screenshots/layout.png)
+![imza-layout](./screenshots/layout.png)
 
-## Why Ursa?
+## Why Imza?
 
-Ursa organizes development around three modes.
+Imza organizes development around three modes.
 
 **Plan:** inspect the project, gather context, ask questions, and design an 
 implementation without modifying files.
@@ -42,11 +42,11 @@ comments, then send the findings directly back to Plan mode.
 - Bring-your-own-model support
 - Persistent sessions, transcripts, and automatic context compaction
 
-![ursa-layout](./screenshots/review.png)
+![imza-layout](./screenshots/review.png)
 
 ## Bring Your Own Model
 
-Ursa works with OpenAI-compatible endpoints and the Anthropic Messages API,
+Imza works with OpenAI-compatible endpoints and the Anthropic Messages API,
 including locally hosted OpenAI-compatible models.
 
 Use your own API connection, a subscription-backed connection where supported, 
@@ -54,7 +54,7 @@ or a locally hosted OpenAI-compatible model.
 
 ## Headless mode
 
-Run Ursa non-interactively from scripts, CI jobs, or other development tools.
+Run Imza non-interactively from scripts, CI jobs, or other development tools.
 Use `--ask` for a one-shot read-only Plan query or `--exec` for a one-shot
 Build task.
 
@@ -62,7 +62,7 @@ Grant only the additional directory and command/subcommand pairs the task
 needs:
 
 ```sh
-./build/debug/ursa --exec "build the project and summarize the changes" \
+./build/debug/imza --exec "build the project and summarize the changes" \
   --allow-dir ../shared-assets \
   --allow-cmd "git status" "cmake --build"
 ```
@@ -112,19 +112,19 @@ session.
 
 ## Build From Source
 
-Ursa requires a C++23 compiler, CMake, Python 3, and libcurl development files.
+Imza requires a C++23 compiler, CMake, Python 3, and libcurl development files.
 ```sh
 git submodule update --init --recursive
-cmake -B build -DCMAKE_BUILD_TYPE=Debug -DURSA_BUILD_TESTS=ON \
+cmake -B build -DCMAKE_BUILD_TYPE=Debug -DIMZA_BUILD_TESTS=ON \
   -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-cmake --build build --target ursa ursa_tests
-./build/debug/ursa_tests
+cmake --build build --target imza imza_tests
+./build/debug/imza_tests
 ```
 
-Start Ursa from the repository you want it to work in:
+Start Imza from the repository you want it to work in:
 
 ```sh
-./build/debug/ursa
+./build/debug/imza
 ```
 
 On first launch, open `/connect` to add a provider, then use `/model` to choose

@@ -8,12 +8,12 @@
 #include "tools/tool.h"
 #include "turn/prompt.h"
 
-namespace ursa {
+namespace imza {
 
 TEST_CASE("base system prompt without environment")
 {
     const std::string prompt = build_system_prompt(nullptr, nullptr);
-    CHECK(prompt.find("ursa") != std::string::npos);
+    CHECK(prompt.find("imza") != std::string::npos);
     CHECK(prompt.find("PLAN") != std::string::npos);
     CHECK(prompt.find("BUILD") != std::string::npos);
     CHECK(prompt.find("<env>") == std::string::npos);
@@ -93,7 +93,7 @@ TEST_CASE("research subagent prompt is dedicated and read-only")
 {
     const std::string prompt = build_subagent_system_prompt(
         nullptr, nullptr, SubagentRole::RESEARCH);
-    CHECK(prompt.find("Ursa subagent") != std::string::npos);
+    CHECK(prompt.find("Imza subagent") != std::string::npos);
     CHECK(prompt.find("fresh context") != std::string::npos);
     CHECK(prompt.find("Work read-only") != std::string::npos);
     CHECK(prompt.find("implementation plan") != std::string::npos);
@@ -161,4 +161,4 @@ TEST_CASE("default tool set contains build mutation tools")
         [](const ToolSpec& spec) { return spec.name == "write"; }));
 }
 
-} // namespace ursa
+} // namespace imza

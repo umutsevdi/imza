@@ -9,7 +9,7 @@
 #include <fstream>
 #include <sstream>
 
-namespace ursa {
+namespace imza {
 
 std::filesystem::path config_path() { return data_dir() / "config.json"; }
 
@@ -19,19 +19,19 @@ std::filesystem::path data_dir()
 {
 #if defined(_WIN32)
     const char* appdata = std::getenv("APPDATA");
-    return std::filesystem::path(appdata && *appdata ? appdata : ".") / "ursa";
+    return std::filesystem::path(appdata && *appdata ? appdata : ".") / "imza";
 #elif defined(__APPLE__)
     const char* home = std::getenv("HOME");
     return std::filesystem::path(home && *home ? home : ".") / "Library"
-        / "Application Support" / "ursa";
+        / "Application Support" / "imza";
 #else
     const char* xdg = std::getenv("XDG_DATA_HOME");
     if (xdg && *xdg) {
-        return std::filesystem::path(xdg) / "ursa";
+        return std::filesystem::path(xdg) / "imza";
     }
     const char* home = std::getenv("HOME");
     return std::filesystem::path(home && *home ? home : ".") / ".local"
-        / "share" / "ursa";
+        / "share" / "imza";
 #endif
 }
 
@@ -401,4 +401,4 @@ ConfigUpdateResult update_config(const std::filesystem::path& path,
     return ConfigUpdateResult::UPDATED;
 }
 
-} // namespace ursa
+} // namespace imza

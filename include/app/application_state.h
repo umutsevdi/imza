@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "common/types.h"
-#include "common/ursa_signal.h"
+#include "common/imza_signal.h"
 #include "conversation/session.h"
 #include "conversation/session_store.h"
 #include "network/network.h"
@@ -17,7 +17,7 @@
 #include "runtime/subagent_manager.h"
 #include "workspace/environment.h"
 
-namespace ursa {
+namespace imza {
 
 class ReviewState;
 class SkillStore;
@@ -79,4 +79,4 @@ std::shared_ptr<ApplicationState> make_child_application_state(
     const ApplicationState& parent, PostFn post, StreamFn stream_fn = { },
     ModalRequestFn parent_routing = { }, std::string agent_label = { });
 
-} // namespace ursa
+} // namespace imza

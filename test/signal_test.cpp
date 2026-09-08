@@ -1,10 +1,10 @@
 #include <doctest/doctest.h>
 
-#include "common/ursa_signal.h"
+#include "common/imza_signal.h"
 
 TEST_CASE("signal publishes to active subscriptions")
 {
-    ursa::Signal<int> signal;
+    imza::Signal<int> signal;
     int total   = 0;
     auto first  = signal.subscribe([&](int value) { total += value; });
     auto second = signal.subscribe([&](int value) { total += value * 2; });
@@ -16,7 +16,7 @@ TEST_CASE("signal publishes to active subscriptions")
 
 TEST_CASE("signal subscription disconnects on destruction")
 {
-    ursa::Signal<> signal;
+    imza::Signal<> signal;
     int calls = 0;
     {
         auto subscription = signal.subscribe([&] { ++calls; });
@@ -30,7 +30,7 @@ TEST_CASE("signal subscription disconnects on destruction")
 
 TEST_CASE("signal subscriptions are move-only ownership tokens")
 {
-    ursa::Signal<> signal;
+    imza::Signal<> signal;
     int calls   = 0;
     auto first  = signal.subscribe([&] { ++calls; });
     auto second = std::move(first);
@@ -44,9 +44,9 @@ TEST_CASE("signal subscriptions are move-only ownership tokens")
 
 TEST_CASE("signal permits subscription changes while publishing")
 {
-    ursa::Signal<> signal;
+    imza::Signal<> signal;
     int calls = 0;
-    ursa::Signal<>::Subscription subscription;
+    imza::Signal<>::Subscription subscription;
     subscription = signal.subscribe([&] {
         ++calls;
         subscription.disconnect();
@@ -60,9 +60,9 @@ TEST_CASE("signal permits subscription changes while publishing")
 
 TEST_CASE("signal subscription may outlive its publisher")
 {
-    ursa::Signal<>::Subscription subscription;
+    imza::Signal<>::Subscription subscription;
     {
-        ursa::Signal<> signal;
+        imza::Signal<> signal;
         subscription = signal.subscribe([] { });
     }
 

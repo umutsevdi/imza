@@ -9,7 +9,7 @@
       "inheritEnvironments": [
         "msvc_x64"
       ],
-      "cmakeCommandArgs": "-DURSA_BUILD_TESTS=OFF",
+      "cmakeCommandArgs": "-DIMZA_BUILD_TESTS=OFF",
       "buildCommandArgs": "",
       "ctestCommandArgs": ""
     },
@@ -22,7 +22,7 @@
       "inheritEnvironments": [
         "msvc_x64"
       ],
-      "cmakeCommandArgs": "-DURSA_BUILD_TESTS=OFF",
+      "cmakeCommandArgs": "-DIMZA_BUILD_TESTS=OFF",
       "buildCommandArgs": "",
       "ctestCommandArgs": ""
     }

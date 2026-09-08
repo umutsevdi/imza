@@ -4,7 +4,7 @@
 
 #include <utility>
 
-namespace ursa {
+namespace imza {
 
 SessionStore::SessionStore()
     : _worker([this] {
@@ -63,4 +63,4 @@ void SessionStore::_publish_if_current(
     }
 }
 
-} // namespace ursa
+} // namespace imza

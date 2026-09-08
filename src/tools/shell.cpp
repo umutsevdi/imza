@@ -6,7 +6,7 @@
 #include <string>
 #include <utility>
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -209,4 +209,4 @@ bool shell_builtin_allowed(std::string_view program)
     return false;
 }
 
-} // namespace ursa
+} // namespace imza

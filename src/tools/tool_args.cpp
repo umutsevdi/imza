@@ -4,7 +4,7 @@
 
 #include <filesystem>
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -260,4 +260,4 @@ std::string todo_summary(const TodoList& todo)
     return out;
 }
 
-} // namespace ursa
+} // namespace imza

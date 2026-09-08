@@ -10,7 +10,7 @@
 #include <charconv>
 #include <string_view>
 
-namespace ursa {
+namespace imza {
 
 std::vector<std::string> auth_headers(AuthType auth, const std::string& key)
 {
@@ -451,4 +451,4 @@ Status parse_api_error(std::string_view body, std::string& message)
     return st;
 }
 
-} // namespace ursa
+} // namespace imza

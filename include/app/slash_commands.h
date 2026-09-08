@@ -4,7 +4,7 @@
 #include <string>
 #include <string_view>
 
-namespace ursa {
+namespace imza {
 
 struct SlashCommand {
     enum class Action {
@@ -27,4 +27,4 @@ struct SlashCommand {
 std::span<const SlashCommand> slash_commands();
 const SlashCommand* find_command(std::string_view name);
 
-} // namespace ursa
+} // namespace imza

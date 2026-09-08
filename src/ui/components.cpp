@@ -18,7 +18,7 @@
 #include <utility>
 #include <vector>
 
-namespace ursa {
+namespace imza {
 
 ModelRow make_model_row(const std::string& connection_id,
     const std::string& provider_name, const ModelInfo& info)
@@ -210,9 +210,9 @@ Element session_error_element(const Session& session)
         return text("");
     }
     return hbox({
-        text(" ") | bgcolor(Color::Red),
-        text(" " + message) | bgcolor(Color::Red),
-        filler() | bgcolor(Color::Red),
+        text(" ") | bgcolor(HL_RED),
+        text(" " + message) | bgcolor(HL_RED),
+        filler() | bgcolor(HL_RED),
     });
 }
 
@@ -484,9 +484,9 @@ int review_content_width(const LayoutCtx& ctx)
 Element diffstat_chip(std::size_t additions, std::size_t deletions)
 {
     return hbox({
-        text("+" + std::to_string(additions)) | color(Color::GreenLight),
+        text("+" + std::to_string(additions)) | color(HL_GREEN),
         text(" "),
-        text("−" + std::to_string(deletions)) | color(Color::RedLight),
+        text("−" + std::to_string(deletions)) | color(HL_RED),
     });
 }
 
@@ -585,4 +585,4 @@ Element diff_split(const DiffView& diff, int available_width)
     }
     return panel(vbox(std::move(rows))) | xflex;
 }
-} // namespace ursa
+} // namespace imza

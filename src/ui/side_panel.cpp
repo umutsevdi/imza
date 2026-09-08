@@ -1,5 +1,4 @@
 #include "app/application_state.h"
-#include "app/flows.h"
 #include "permissions/store.h"
 #include "ui/ui.h"
 
@@ -20,7 +19,7 @@
 #include <string>
 #include <vector>
 
-namespace ursa {
+namespace imza {
 using namespace ftxui;
 
 namespace {
@@ -260,13 +259,13 @@ namespace {
     ChangedFileStyle changed_file_style(ChangedFile::Kind kind)
     {
         switch (kind) {
-        case ChangedFile::Kind::MODIFIED: return { "●", Color::YellowLight };
-        case ChangedFile::Kind::ADDED: return { "+", Color::GreenLight };
-        case ChangedFile::Kind::UNTRACKED: return { "?", Color::CyanLight };
-        case ChangedFile::Kind::DELETED: return { "−", Color::RedLight };
-        case ChangedFile::Kind::RENAMED: return { "→", Color::CyanLight };
-        case ChangedFile::Kind::COPIED: return { "⧉", Color::CyanLight };
-        case ChangedFile::Kind::CONFLICTED: return { "!", Color::RedLight };
+        case ChangedFile::Kind::MODIFIED: return { "●", HL_YELLOW };
+        case ChangedFile::Kind::ADDED: return { "+", HL_GREEN };
+        case ChangedFile::Kind::UNTRACKED: return { "?", HL_CYAN };
+        case ChangedFile::Kind::DELETED: return { "−", HL_RED };
+        case ChangedFile::Kind::RENAMED: return { "→", HL_CYAN };
+        case ChangedFile::Kind::COPIED: return { "⧉", HL_CYAN };
+        case ChangedFile::Kind::CONFLICTED: return { "!", HL_RED };
         case ChangedFile::Kind::UNKNOWN: return { "•", PANEL_FG_DIM };
         }
         return { "•", PANEL_FG_DIM };
@@ -321,7 +320,7 @@ Element render_todo(const TodoList& todo, const LayoutCtx&)
     Element body = parts.empty()
         ? dim(text("none"))
         : vbox(std::move(parts)) | borderStyled(ROUNDED, PANEL_BORDER);
-    return vbox({ section_title("Todo"), std::move(body) });
+    return vbox({ section_title("Tasks"), std::move(body) });
 }
 
 Element render_changed_files(
@@ -452,5 +451,5 @@ Element render_permissions_box(const PermissionView& view)
     return vbox({ section_title("Permissions"), std::move(body) });
 }
 
-} // namespace ursa
+} // namespace imza
 //

@@ -19,7 +19,7 @@
 #include <utility>
 #include <vector>
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -716,4 +716,4 @@ void TurnRunner::_run_tool(const PermissionEvaluation& evaluation,
         { Message::Type::TOOL, std::move(history_text), { }, req.id });
 }
 
-} // namespace ursa
+} // namespace imza

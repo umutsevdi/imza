@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Generate Ursa's Tree-sitter build sources and syntax registry.
+"""Generate Imza's Tree-sitter build sources and syntax registry.
 
 To add a language:
 1. Add its grammar at vendor/tree-sitter/<package>:
@@ -197,7 +197,7 @@ def _cpp_string(value: str) -> str:
 
 def _raw_cpp_string(value: str) -> str:
     digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:8]
-    delimiter = f"ursa_{digest}"
+    delimiter = f"imza_{digest}"
     if f"){delimiter}\"" in value:
         raise ValueError("Unable to construct a safe raw C++ string delimiter")
     return f'R"{delimiter}({value}){delimiter}"'
@@ -260,7 +260,7 @@ def _render_sources(languages: tuple[ResolvedLanguage, ...]) -> str:
         for language in languages
         for source in language.sources
     )
-    return f"set(URSA_TREE_SITTER_GRAMMAR_SOURCES\n{sources}\n)\n"
+    return f"set(IMZA_TREE_SITTER_GRAMMAR_SOURCES\n{sources}\n)\n"
 
 
 def _write_if_changed(path: Path, content: str) -> None:

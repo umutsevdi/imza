@@ -10,7 +10,7 @@
 #include <algorithm>
 #include <filesystem>
 
-namespace ursa {
+namespace imza {
 
 int Autocomplete::count() const
 {
@@ -204,4 +204,4 @@ ftxui::Element Autocomplete::render(const LayoutCtx& ctx) const
         | color(PANEL_FG);
 }
 
-} // namespace ursa
+} // namespace imza

@@ -12,10 +12,10 @@
 #include <vector>
 
 #include "common/types.h"
-#include "common/ursa_signal.h"
+#include "common/imza_signal.h"
 #include "workspace/git.h"
 
-namespace ursa {
+namespace imza {
 
 struct ReviewLineAnchor {
     std::string file;
@@ -88,4 +88,4 @@ private:
     Signal<> changed_;
 };
 
-} // namespace ursa
+} // namespace imza

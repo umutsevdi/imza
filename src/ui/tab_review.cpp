@@ -21,7 +21,7 @@
 #include <set>
 #include <thread>
 
-namespace ursa {
+namespace imza {
 
 ftxui::Element review_line_background(ftxui::Element row,
     std::optional<ftxui::Color> change_background, bool selected)
@@ -393,7 +393,7 @@ namespace {
             }
             std::string prompt = format_review_plan_prompt(comments);
             navigate_(WorkflowPhase::PLAN);
-            ursa::submit(*state_, std::move(prompt));
+            imza::submit(*state_, std::move(prompt));
             state_->review->clear_comments();
             selected_comment_.reset();
             pending_jump_.reset();
@@ -478,7 +478,7 @@ namespace {
             }
             SubagentChat chat = state_->delegation->subagent_chat(
                 *review_task_id_, "AI Review");
-            ursa::enqueue_user_modal(*state_,
+            imza::enqueue_user_modal(*state_,
                 ViewerModal { std::move(chat.title), std::move(chat.transcript),
                     "markdown", 1, true, "" });
         }
@@ -1138,4 +1138,4 @@ Component make_review(std::shared_ptr<ApplicationState> state, LayoutFn layout,
         std::move(state), std::move(layout), std::move(navigate));
 }
 
-} // namespace ursa
+} // namespace imza

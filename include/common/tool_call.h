@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace ursa {
+namespace imza {
 
 struct ToolSpec {
     std::string name;
@@ -45,4 +45,4 @@ struct TodoList {
     std::vector<TodoItem> items;
 };
 
-} // namespace ursa
+} // namespace imza

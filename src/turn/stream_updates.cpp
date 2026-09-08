@@ -5,7 +5,7 @@
 #include <utility>
 #include <vector>
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -97,4 +97,4 @@ void StreamUpdateBuffer::finish()
     _publish(_state);
 }
 
-} // namespace ursa
+} // namespace imza

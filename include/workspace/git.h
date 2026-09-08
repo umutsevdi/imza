@@ -9,7 +9,7 @@
 #include <variant>
 #include <vector>
 
-namespace ursa {
+namespace imza {
 
 struct ChangedFile {
     enum class Kind {
@@ -95,4 +95,4 @@ using ReviewLoadResult = std::variant<RepositoryReview, std::string>;
 
 ReviewLoadResult parse_git_diff(std::string_view patch);
 
-} // namespace ursa
+} // namespace imza

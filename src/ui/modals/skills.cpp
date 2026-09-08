@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-namespace ursa {
+namespace imza {
 
 using namespace ftxui;
 
@@ -75,7 +75,7 @@ namespace {
         bool OnEvent(Event event) override
         {
             if (event == Event::Escape) {
-                ursa::close_modal(*state_);
+                imza::close_modal(*state_);
                 return true;
             }
             if (move_list_cursor(
@@ -97,7 +97,7 @@ namespace {
                     changes.entries.push_back(
                         { entry.name, entry.project_root, entry.policy });
                 }
-                ursa::resolve_modal(
+                imza::resolve_modal(
                     *state_, ModalResult { std::move(changes) });
                 return true;
             }
@@ -118,4 +118,4 @@ ftxui::Component make_skills(std::shared_ptr<ApplicationState> state)
     return ftxui::Make<SkillsView>(state);
 }
 
-} // namespace ursa
+} // namespace imza

@@ -2,7 +2,7 @@
 
 #include <utility>
 
-namespace ursa {
+namespace imza {
 
 void MainThreadQueue::post(Task task)
 {
@@ -50,4 +50,4 @@ Signal<>::Subscription MainThreadQueue::subscribe(Signal<>::Callback callback)
     return subscription;
 }
 
-} // namespace ursa
+} // namespace imza

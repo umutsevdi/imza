@@ -6,36 +6,36 @@
 #include "ui/ui.h"
 #include "workspace/environment.h"
 
-using ursa::test::to_screen;
-using ursa::test::to_text;
+using imza::test::to_screen;
+using imza::test::to_text;
 
 TEST_CASE("render_todo renders as panel when wide, strip when narrow")
 {
-    using Status = ursa::TodoItem::Status;
-    ursa::TodoList todo { { { "a", Status::PENDING },
+    using Status = imza::TodoItem::Status;
+    imza::TodoList todo { { { "a", Status::PENDING },
         { "b", Status::IN_PROGRESS }, { "c", Status::COMPLETED } } };
 
     const std::string wide = to_text(
-        ursa::render_todo(todo, { ursa::LayoutCtx::Kind::WIDE, 120 }));
+        imza::render_todo(todo, { imza::LayoutCtx::Kind::WIDE, 120 }));
     CHECK(wide.find("[ ]") != std::string::npos);
     CHECK(wide.find("→") != std::string::npos);
     CHECK(wide.find("[x]") != std::string::npos);
 
     const std::string narrow = to_text(
-        ursa::render_todo(todo, { ursa::LayoutCtx::Kind::NARROW, 60 }));
+        imza::render_todo(todo, { imza::LayoutCtx::Kind::NARROW, 60 }));
     CHECK(narrow.find("a") != std::string::npos);
 }
 
 TEST_CASE("render_todo wraps long items instead of clipping")
 {
-    using Status = ursa::TodoItem::Status;
-    ursa::TodoList todo {
+    using Status = imza::TodoItem::Status;
+    imza::TodoList todo {
         { { "investigate the flaky parser regression test", Status::PENDING } }
     };
     auto screen = ftxui::Screen::Create(
         ftxui::Dimension::Fixed(30), ftxui::Dimension::Fixed(10));
     ftxui::Render(screen,
-        ursa::render_todo(todo, { ursa::LayoutCtx::Kind::WIDE, 30 })
+        imza::render_todo(todo, { imza::LayoutCtx::Kind::WIDE, 30 })
             | ftxui::size(ftxui::WIDTH, ftxui::EQUAL, 30));
     const std::string out = screen.ToString();
     CHECK(out.find("investigate") != std::string::npos);
@@ -46,15 +46,15 @@ TEST_CASE("render_todo wraps long items instead of clipping")
 
 TEST_CASE("render_todo wraps to the offered width")
 {
-    using Status = ursa::TodoItem::Status;
-    ursa::TodoList todo {
+    using Status = imza::TodoItem::Status;
+    imza::TodoList todo {
         { { "rectification certification verification", Status::PENDING } }
     };
     auto render_at = [&todo](int width) {
         auto screen = ftxui::Screen::Create(
             ftxui::Dimension::Fixed(width), ftxui::Dimension::Fixed(8));
         ftxui::Render(screen,
-            ursa::render_todo(todo, { ursa::LayoutCtx::Kind::WIDE, width })
+            imza::render_todo(todo, { imza::LayoutCtx::Kind::WIDE, width })
                 | ftxui::size(ftxui::WIDTH, ftxui::EQUAL, width));
         return screen.ToString();
     };
@@ -66,8 +66,8 @@ TEST_CASE("render_todo wraps to the offered width")
 
 TEST_CASE("render_changed_files renders colored symbols and readable paths")
 {
-    using Kind = ursa::ChangedFile::Kind;
-    const ursa::RepositoryState repository {
+    using Kind = imza::ChangedFile::Kind;
+    const imza::RepositoryState repository {
         .branch = "main",
         .changed_files = {
             { "modified.cpp", Kind::MODIFIED },
@@ -81,8 +81,8 @@ TEST_CASE("render_changed_files renders colored symbols and readable paths")
         },
         .changes = { 12, 4, 1 },
     };
-    auto screen           = to_screen(ursa::render_changed_files(
-        repository, { ursa::LayoutCtx::Kind::WIDE, 30 }));
+    auto screen           = to_screen(imza::render_changed_files(
+        repository, { imza::LayoutCtx::Kind::WIDE, 30 }));
     const std::string out = screen.ToString();
 
     CHECK(out.find("●") != std::string::npos);
@@ -108,12 +108,12 @@ TEST_CASE("render_changed_files renders colored symbols and readable paths")
     CHECK(screen.PixelAt(1, 3).foreground_color == ftxui::Color::GreenLight);
     CHECK(screen.PixelAt(1, 4).foreground_color == ftxui::Color::CyanLight);
     CHECK(screen.PixelAt(1, 5).foreground_color == ftxui::Color::RedLight);
-    CHECK(screen.PixelAt(3, 2).foreground_color == ursa::PANEL_FG);
+    CHECK(screen.PixelAt(3, 2).foreground_color == imza::PANEL_FG);
 }
 
 TEST_CASE("render_context_box lists attachment basenames under files")
 {
-    const std::string out = to_text(ursa::render_context_box(
+    const std::string out = to_text(imza::render_context_box(
         "AGENTS.md", { "main.cpp", "design.md" }, { }, { }));
 
     CHECK(out.find("Files") != std::string::npos);
@@ -124,29 +124,29 @@ TEST_CASE("render_context_box lists attachment basenames under files")
 
 TEST_CASE("permissions box stays hidden for default permissions")
 {
-    const ursa::PermissionView view
-        = ursa::make_permission_view(ursa::interactive_runtime_flags(), { });
+    const imza::PermissionView view
+        = imza::make_permission_view(imza::interactive_runtime_flags(), { });
 
-    CHECK_FALSE(ursa::has_custom_permissions(view));
-    CHECK(to_text(ursa::render_permissions_box(view)).find("Permissions")
+    CHECK_FALSE(imza::has_custom_permissions(view));
+    CHECK(to_text(imza::render_permissions_box(view)).find("Permissions")
         == std::string::npos);
 }
 
 TEST_CASE("permissions box renders only custom settings and grants")
 {
-    const std::vector<ursa::PermissionGrant> grants {
-        ursa::ExternalGrant { "/outside" },
-        ursa::ExternalGrant { "/outside/generated" },
-        ursa::SkillGrant { "/skills/docs/SKILL.md" },
-        ursa::ShellCommandGrant { "cmake", "--build" },
+    const std::vector<imza::PermissionGrant> grants {
+        imza::ExternalGrant { "/outside" },
+        imza::ExternalGrant { "/outside/generated" },
+        imza::SkillGrant { "/skills/docs/SKILL.md" },
+        imza::ShellCommandGrant { "cmake", "--build" },
     };
-    const auto flags = static_cast<ursa::RuntimeFlag>(
-        ursa::SHELL | ursa::ATTENDED | ursa::SKIP_PERMISSIONS);
+    const auto flags = static_cast<imza::RuntimeFlag>(
+        imza::SHELL | imza::ATTENDED | imza::SKIP_PERMISSIONS);
 
-    const ursa::PermissionView view = ursa::make_permission_view(flags, grants);
-    const std::string out = to_text(ursa::render_permissions_box(view));
+    const imza::PermissionView view = imza::make_permission_view(flags, grants);
+    const std::string out = to_text(imza::render_permissions_box(view));
 
-    CHECK(ursa::has_custom_permissions(view));
+    CHECK(imza::has_custom_permissions(view));
     CHECK(out.find("Permissions") != std::string::npos);
     CHECK(out.find("Web") != std::string::npos);
     CHECK(out.find("disabled") != std::string::npos);
@@ -165,14 +165,14 @@ TEST_CASE("permissions box renders only custom settings and grants")
 
 TEST_CASE("permissions view reflects installed external grants")
 {
-    ursa::PermissionStore permissions;
+    imza::PermissionStore permissions;
     const std::filesystem::path folder = std::filesystem::temp_directory_path();
-    REQUIRE(permissions.install({ ursa::ExternalGrant { folder } }));
+    REQUIRE(permissions.install({ imza::ExternalGrant { folder } }));
 
     const auto grants               = permissions.snapshot();
-    const ursa::PermissionView view = ursa::make_permission_view(
-        ursa::interactive_runtime_flags(), *grants);
-    const std::string out = to_text(ursa::render_permissions_box(view));
+    const imza::PermissionView view = imza::make_permission_view(
+        imza::interactive_runtime_flags(), *grants);
+    const std::string out = to_text(imza::render_permissions_box(view));
 
     CHECK(out.find("Folders") != std::string::npos);
     CHECK(out.find(std::filesystem::weakly_canonical(folder).string())

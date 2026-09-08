@@ -6,7 +6,7 @@
 #include <array>
 #include <string_view>
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -91,4 +91,4 @@ Status fetch_models(const Route& route, std::vector<ModelInfo>& out)
     return parse_models_response(body, out);
 }
 
-} // namespace ursa
+} // namespace imza

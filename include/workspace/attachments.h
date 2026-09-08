@@ -8,7 +8,7 @@
 
 #include "common/types.h"
 
-namespace ursa {
+namespace imza {
 
 struct FileAttachment {
     std::string path;
@@ -46,4 +46,4 @@ std::string message_with_attachments(
 void retain_mentioned_attachments(
     std::string_view text, std::vector<FileAttachment>& attachments);
 
-} // namespace ursa
+} // namespace imza

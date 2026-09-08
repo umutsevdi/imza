@@ -13,7 +13,7 @@
 #include "network/network.h"
 #include "platform/config.h"
 
-namespace ursa {
+namespace imza {
 
 struct CachedModel {
     std::string name;
@@ -52,4 +52,4 @@ Route resolve_route(
     const Connection& conn, const Catalog& catalog, ApiStandard dialect);
 std::string endpoint_for_base(std::string_view base);
 
-} // namespace ursa
+} // namespace imza

@@ -20,7 +20,7 @@
 
 #include "common/util.h"
 
-namespace ursa {
+namespace imza {
 
 using namespace ftxui;
 
@@ -116,7 +116,7 @@ namespace {
         } else if (message.empty()) {
             message = "Permission required";
         }
-        return text(message) | color(Color::YellowLight);
+        return text(message) | color(HL_YELLOW);
     }
 
     Element tool_request_body(
@@ -287,7 +287,7 @@ namespace {
                     if (body_ && body_->OnEvent(event)) {
                         return true;
                     }
-                    ursa::close_modal(*state_);
+                    imza::close_modal(*state_);
                     return true;
                 }
                 if (std::holds_alternative<SessionsModal>(st.modal()) && body_
@@ -299,12 +299,12 @@ namespace {
                     _set_tool_phase(ToolPhase::DECIDE);
                     return true;
                 }
-                ursa::close_modal(*state_);
+                imza::close_modal(*state_);
                 return true;
             }
             if (std::holds_alternative<ViewerModal>(st.modal())) {
                 if (event == Event::Return) {
-                    ursa::close_modal(*state_);
+                    imza::close_modal(*state_);
                     return true;
                 }
                 return scroll_static(event);
@@ -348,7 +348,7 @@ namespace {
                 "optional reason", { }, [this] { _confirm_reject(); }));
 
             auto resolve = [this](ToolDecision d, std::string r) {
-                ursa::resolve_modal(
+                imza::resolve_modal(
                     *state_, ModalResult { ToolVerdict { d, std::move(r) } });
             };
             accept_         = action_button("Allow once",
@@ -393,7 +393,7 @@ namespace {
 
         void _confirm_reject()
         {
-            ursa::resolve_modal(*state_,
+            imza::resolve_modal(*state_,
                 ModalResult {
                     ToolVerdict { ToolDecision::REJECT, reason_buf_ } });
         }
@@ -572,7 +572,7 @@ namespace {
                 }
                 answer.cards.push_back(std::move(qa));
             }
-            ursa::resolve_modal(*state_, ModalResult { std::move(answer) });
+            imza::resolve_modal(*state_, ModalResult { std::move(answer) });
         }
 
         Element header_line(std::string_view title)
@@ -705,4 +705,4 @@ ftxui::Component make_modal(std::shared_ptr<ApplicationState> state)
     return ftxui::Make<ModalView>(std::move(state));
 }
 
-} // namespace ursa
+} // namespace imza

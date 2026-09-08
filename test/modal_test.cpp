@@ -29,7 +29,7 @@ namespace {
 
 class PostPump {
 public:
-    ursa::PostFn fn()
+    imza::PostFn fn()
     {
         return [this](std::function<void()> f) { _push(std::move(f)); };
     }
@@ -73,38 +73,38 @@ private:
     std::deque<std::function<void()>> queue_;
 };
 
-ursa::Config test_config()
+imza::Config test_config()
 {
-    ursa::Config cfg;
-    ursa::Connection conn;
+    imza::Config cfg;
+    imza::Connection conn;
     conn.id          = "test";
     conn.provider_id = "test";
     cfg.providers.push_back(conn);
-    cfg.last_used = ursa::LastUsed { "test", "m" };
+    cfg.last_used = imza::LastUsed { "test", "m" };
     return cfg;
 }
 
 struct Env {
     PostPump pump;
-    std::vector<ursa::ChatRequest> requests;
-    std::vector<ursa::ToolCallRequest> ran_tools;
-    ursa::StreamFn stream;
-    std::shared_ptr<ursa::ApplicationState> state;
-    std::shared_ptr<ursa::Session> session;
+    std::vector<imza::ChatRequest> requests;
+    std::vector<imza::ToolCallRequest> ran_tools;
+    imza::StreamFn stream;
+    std::shared_ptr<imza::ApplicationState> state;
+    std::shared_ptr<imza::Session> session;
 
-    explicit Env(ursa::RuntimeFlag flags = ursa::interactive_runtime_flags())
+    explicit Env(imza::RuntimeFlag flags = imza::interactive_runtime_flags())
     {
-        std::vector<ursa::Tool> tools;
+        std::vector<imza::Tool> tools;
         tools.push_back({ { "shell", "run a shell command",
                               Json::Value(Json::objectValue) },
             [this](const Json::Value& args) {
                 const std::string raw
                     = args.isObject() && args["command"].isString()
                     ? args["command"].asString()
-                    : ursa::write_json(args);
+                    : imza::write_json(args);
                 ran_tools.push_back(
-                    ursa::ToolCallRequest { "shell", raw, "", "" });
-                return ursa::ToolOutput { ursa::ToolOutput::Kind::OUTPUT,
+                    imza::ToolCallRequest { "shell", raw, "", "" });
+                return imza::ToolOutput { imza::ToolOutput::Kind::OUTPUT,
                     "ran: " + raw };
             } });
         tools.push_back({ { "websearch", "read-only probe",
@@ -112,43 +112,43 @@ struct Env {
             [this](const Json::Value& args) {
                 const std::string raw = args.isString()
                     ? args.asString()
-                    : ursa::write_json(args);
+                    : imza::write_json(args);
                 ran_tools.push_back(
-                    ursa::ToolCallRequest { "websearch", raw, "", "" });
-                return ursa::ToolOutput { ursa::ToolOutput::Kind::OUTPUT,
+                    imza::ToolCallRequest { "websearch", raw, "", "" });
+                return imza::ToolOutput { imza::ToolOutput::Kind::OUTPUT,
                     "searched: " + raw };
             } });
-        tools.push_back(ursa::make_subagent_tool());
-        tools.push_back(ursa::make_read_tool());
-        tools.push_back(ursa::make_edit_tool());
-        tools.push_back(ursa::make_write_tool());
-        state = ursa::make_application_state_with_tools(
+        tools.push_back(imza::make_subagent_tool());
+        tools.push_back(imza::make_read_tool());
+        tools.push_back(imza::make_edit_tool());
+        tools.push_back(imza::make_write_tool());
+        state = imza::make_application_state_with_tools(
             pump.fn(), test_config(), std::move(tools),
-            [this](const ursa::ChatRequest& req,
-                const ursa::StreamCallback& cb) { return stream(req, cb); },
+            [this](const imza::ChatRequest& req,
+                const imza::StreamCallback& cb) { return stream(req, cb); },
             flags);
         session = state->session;
         REQUIRE(pump.wait_for([&] { return state->environment->ready(); }));
     }
 
-    const ursa::ChatRequest& last_request() const { return requests.back(); }
+    const imza::ChatRequest& last_request() const { return requests.back(); }
 
     size_t user_turn_count() const
     {
         size_t n = 0;
         for (const auto& it : session->items()) {
-            if (std::holds_alternative<ursa::UserTurn>(it)) {
+            if (std::holds_alternative<imza::UserTurn>(it)) {
                 ++n;
             }
         }
         return n;
     }
 
-    const ursa::ToolCall* pending_tool() const
+    const imza::ToolCall* pending_tool() const
     {
         for (auto it = session->items().rbegin(); it != session->items().rend();
             ++it) {
-            if (const auto* tc = std::get_if<ursa::ToolCall>(&*it)) {
+            if (const auto* tc = std::get_if<imza::ToolCall>(&*it)) {
                 return tc;
             }
         }
@@ -156,21 +156,21 @@ struct Env {
     }
 };
 
-bool showing_tool_ask(const ursa::Session& st)
+bool showing_tool_ask(const imza::Session& st)
 {
-    return std::holds_alternative<ursa::ToolCallRequest>(st.modal())
-        && st.phase() == ursa::Session::Phase::AWAITING;
+    return std::holds_alternative<imza::ToolCallRequest>(st.modal())
+        && st.phase() == imza::Session::Phase::AWAITING;
 }
 
-bool showing_question(const ursa::Session& st)
+bool showing_question(const imza::Session& st)
 {
-    return std::holds_alternative<ursa::QuestionForm>(st.modal())
-        && st.phase() == ursa::Session::Phase::AWAITING;
+    return std::holds_alternative<imza::QuestionForm>(st.modal())
+        && st.phase() == imza::Session::Phase::AWAITING;
 }
 
-bool idle(const ursa::Session& st)
+bool idle(const imza::Session& st)
 {
-    return st.phase() == ursa::Session::Phase::IDLE && st.modal().index() == 0;
+    return st.phase() == imza::Session::Phase::IDLE && st.modal().index() == 0;
 }
 
 } // namespace
@@ -179,22 +179,22 @@ TEST_CASE("plan requests omit edit and write tools")
 {
     Env env;
     env.stream
-        = [&env](const ursa::ChatRequest& req, const ursa::StreamCallback& cb) {
+        = [&env](const imza::ChatRequest& req, const imza::StreamCallback& cb) {
               env.requests.push_back(req);
-              cb(ursa::make_done_event());
-              return ursa::Status::OK;
+              cb(imza::make_done_event());
+              return imza::Status::OK;
           };
 
-    ursa::submit(*env.state, "inspect");
+    imza::submit(*env.state, "inspect");
     REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
     REQUIRE_FALSE(env.requests.empty());
     const auto& tools = env.requests.front().tools;
     CHECK(std::none_of(tools.begin(), tools.end(),
-        [](const ursa::ToolSpec& tool) { return tool.name == "edit"; }));
+        [](const imza::ToolSpec& tool) { return tool.name == "edit"; }));
     CHECK(std::none_of(tools.begin(), tools.end(),
-        [](const ursa::ToolSpec& tool) { return tool.name == "write"; }));
+        [](const imza::ToolSpec& tool) { return tool.name == "write"; }));
     CHECK(std::any_of(tools.begin(), tools.end(),
-        [](const ursa::ToolSpec& tool) { return tool.name == "read"; }));
+        [](const imza::ToolSpec& tool) { return tool.name == "read"; }));
 }
 
 TEST_CASE("plan rejects fabricated write calls")
@@ -202,22 +202,22 @@ TEST_CASE("plan rejects fabricated write calls")
     Env env;
     auto round = std::make_shared<int>(0);
     env.stream
-        = [round](const ursa::ChatRequest&, const ursa::StreamCallback& cb) {
+        = [round](const imza::ChatRequest&, const imza::StreamCallback& cb) {
               if ((*round)++ == 0) {
-                  cb(ursa::make_tool_call_event({ "write",
-                      R"({"file_path":"/tmp/ursa-plan-write","text":"no"})", "",
+                  cb(imza::make_tool_call_event({ "write",
+                      R"({"file_path":"/tmp/imza-plan-write","text":"no"})", "",
                       "write-call" }));
               }
-              cb(ursa::make_done_event());
-              return ursa::Status::OK;
+              cb(imza::make_done_event());
+              return imza::Status::OK;
           };
 
-    ursa::submit(*env.state, "write");
+    imza::submit(*env.state, "write");
     REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
-    const ursa::ToolCall* call = env.pending_tool();
+    const imza::ToolCall* call = env.pending_tool();
     REQUIRE(call != nullptr);
     REQUIRE(call->result.has_value());
-    CHECK(call->result->kind == ursa::ToolCall::Result::Kind::REJECT);
+    CHECK(call->result->kind == imza::ToolCall::Result::Kind::REJECT);
     CHECK(call->result->text.find("unavailable in Plan mode")
         != std::string::npos);
 }
@@ -226,25 +226,25 @@ TEST_CASE("subagent tool waits for a research agent and retains its chat")
 {
     Env env;
     env.stream
-        = [&env](const ursa::ChatRequest& req, const ursa::StreamCallback& cb) {
+        = [&env](const imza::ChatRequest& req, const imza::StreamCallback& cb) {
               env.requests.push_back(req);
               const std::string last = req.messages.empty()
                   ? std::string { }
                   : req.messages.back().content;
               if (last.starts_with("delegate")) {
-                  cb(ursa::make_tool_call_event({ "subagent",
+                  cb(imza::make_tool_call_event({ "subagent",
                       R"({"tasks":[{"mode":"research","prompt":"inspect"}]})",
                       "delegate inspection", "delegate-1" }));
               } else if (last.starts_with("inspect")) {
-                  cb(ursa::make_delta_event("research report"));
+                  cb(imza::make_delta_event("research report"));
               } else {
-                  cb(ursa::make_delta_event("main complete"));
+                  cb(imza::make_delta_event("main complete"));
               }
-              cb(ursa::make_done_event());
-              return ursa::Status::OK;
+              cb(imza::make_done_event());
+              return imza::Status::OK;
           };
 
-    ursa::submit(*env.state, "delegate");
+    imza::submit(*env.state, "delegate");
     const bool finished = env.pump.wait_for(
         [&] { return idle(*env.session) && env.pending_tool() != nullptr; });
     CAPTURE(env.requests.size());
@@ -255,10 +255,10 @@ TEST_CASE("subagent tool waits for a research agent and retains its chat")
     CAPTURE(static_cast<int>(env.session->phase()));
     CAPTURE(env.session->error());
     REQUIRE(finished);
-    const ursa::ToolCall* call = env.pending_tool();
+    const imza::ToolCall* call = env.pending_tool();
     REQUIRE(call != nullptr);
     REQUIRE(call->result.has_value());
-    CHECK(call->result->kind == ursa::ToolCall::Result::Kind::OUTPUT);
+    CHECK(call->result->kind == imza::ToolCall::Result::Kind::OUTPUT);
     CHECK(call->result->text.find("research report") != std::string::npos);
     REQUIRE(call->subagent_chats.size() == 1);
     CHECK(call->subagent_chats[0].transcript.find("inspect")
@@ -266,14 +266,14 @@ TEST_CASE("subagent tool waits for a research agent and retains its chat")
     CHECK(call->subagent_chats[0].transcript.find("research report")
         != std::string::npos);
     const auto child_request = std::find_if(env.requests.begin(),
-        env.requests.end(), [](const ursa::ChatRequest& request) {
+        env.requests.end(), [](const imza::ChatRequest& request) {
             return !request.messages.empty()
                 && request.messages.back().content.starts_with("inspect");
         });
     REQUIRE(child_request != env.requests.end());
     REQUIRE(child_request->messages.size() >= 2);
-    CHECK(child_request->messages.front().type == ursa::Message::Type::SYSTEM);
-    CHECK(child_request->messages.front().content.find("Ursa subagent")
+    CHECK(child_request->messages.front().type == imza::Message::Type::SYSTEM);
+    CHECK(child_request->messages.front().content.find("Imza subagent")
         != std::string::npos);
     CHECK(child_request->messages.front().content.find("Work read-only")
         != std::string::npos);
@@ -281,7 +281,7 @@ TEST_CASE("subagent tool waits for a research agent and retains its chat")
         == std::string::npos);
     CHECK(child_request->messages.back().content == "inspect");
     CHECK(std::none_of(child_request->tools.begin(), child_request->tools.end(),
-        [](const ursa::ToolSpec& tool) {
+        [](const imza::ToolSpec& tool) {
             return tool.name == "subagent" || tool.name == "todo";
         }));
 }
@@ -289,31 +289,31 @@ TEST_CASE("subagent tool waits for a research agent and retains its chat")
 TEST_CASE("subagent tool captures two concurrent agents separately")
 {
     Env env;
-    env.stream = [](const ursa::ChatRequest& req,
-                     const ursa::StreamCallback& cb) {
+    env.stream = [](const imza::ChatRequest& req,
+                     const imza::StreamCallback& cb) {
         const std::string last = req.messages.empty()
             ? std::string { }
             : req.messages.back().content;
         if (last.starts_with("delegate two")) {
-            cb(ursa::make_tool_call_event({ "subagent",
+            cb(imza::make_tool_call_event({ "subagent",
                 R"({"tasks":[{"mode":"research","prompt":"alpha"},{"mode":"research","prompt":"beta"}]})",
                 "delegate two checks", "delegate-2" }));
         } else if (last.starts_with("alpha")) {
             std::this_thread::sleep_for(std::chrono::milliseconds(30));
-            cb(ursa::make_delta_event("alpha report"));
+            cb(imza::make_delta_event("alpha report"));
         } else if (last.starts_with("beta")) {
-            cb(ursa::make_delta_event("beta report"));
+            cb(imza::make_delta_event("beta report"));
         } else {
-            cb(ursa::make_delta_event("main joined reports"));
+            cb(imza::make_delta_event("main joined reports"));
         }
-        cb(ursa::make_done_event());
-        return ursa::Status::OK;
+        cb(imza::make_done_event());
+        return imza::Status::OK;
     };
 
-    ursa::submit(*env.state, "delegate two");
+    imza::submit(*env.state, "delegate two");
     REQUIRE(env.pump.wait_for(
         [&] { return idle(*env.session) && env.pending_tool() != nullptr; }));
-    const ursa::ToolCall& call = *env.pending_tool();
+    const imza::ToolCall& call = *env.pending_tool();
     REQUIRE(call.result.has_value());
     CHECK(call.result->text.find("alpha report") != std::string::npos);
     CHECK(call.result->text.find("beta report") != std::string::npos);
@@ -326,22 +326,22 @@ TEST_CASE("subagent tool captures two concurrent agents separately")
         != std::string::npos);
     CHECK(call.subagent_chats[1].transcript.find("alpha report")
         == std::string::npos);
-    const ursa::SubagentChat first
+    const imza::SubagentChat first
         = env.state->delegation->subagent_chat(call, 0);
-    const ursa::SubagentChat second
+    const imza::SubagentChat second
         = env.state->delegation->subagent_chat(call, 1);
     CHECK(first.title == "Agent 1 (research)");
     CHECK(second.title == "Agent 2 (research)");
     CHECK(first.transcript != second.transcript);
 
-    auto chat        = ursa::make_chat(env.state,
-        [] { return ursa::LayoutCtx { ursa::LayoutCtx::Kind::WIDE, 100 }; });
+    auto chat        = imza::make_chat(env.state,
+        [] { return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100 }; });
     auto click_agent = [&](std::string_view label) {
         auto screen = ftxui::Screen::Create(
             ftxui::Dimension::Fixed(120), ftxui::Dimension::Fixed(50));
         ftxui::Render(screen, chat->Render());
         const std::vector<std::string> lines
-            = ursa::split_lines(screen.ToString());
+            = imza::split_lines(screen.ToString());
         for (std::size_t y = 0; y < lines.size(); ++y) {
             const std::size_t x = lines[y].find(label);
             if (x == std::string::npos)
@@ -357,58 +357,58 @@ TEST_CASE("subagent tool captures two concurrent agents separately")
     };
 
     REQUIRE(click_agent("View Agent 1"));
-    REQUIRE(std::holds_alternative<ursa::ViewerModal>(env.session->modal()));
-    CHECK(std::get<ursa::ViewerModal>(env.session->modal()).title
+    REQUIRE(std::holds_alternative<imza::ViewerModal>(env.session->modal()));
+    CHECK(std::get<imza::ViewerModal>(env.session->modal()).title
         == "Agent 1 (research)");
-    ursa::close_modal(*env.state);
+    imza::close_modal(*env.state);
     REQUIRE(click_agent("View Agent 2"));
-    REQUIRE(std::holds_alternative<ursa::ViewerModal>(env.session->modal()));
-    CHECK(std::get<ursa::ViewerModal>(env.session->modal()).title
+    REQUIRE(std::holds_alternative<imza::ViewerModal>(env.session->modal()));
+    CHECK(std::get<imza::ViewerModal>(env.session->modal()).title
         == "Agent 2 (research)");
-    ursa::close_modal(*env.state);
+    imza::close_modal(*env.state);
 }
 
 TEST_CASE("delegated-agent approvals surface through the main modal queue")
 {
     Env env;
-    env.stream = [](const ursa::ChatRequest& req,
-                     const ursa::StreamCallback& cb) {
+    env.stream = [](const imza::ChatRequest& req,
+                     const imza::StreamCallback& cb) {
         const bool child = std::any_of(req.messages.begin(), req.messages.end(),
-            [](const ursa::Message& message) {
-                return message.type == ursa::Message::Type::USER
+            [](const imza::Message& message) {
+                return message.type == imza::Message::Type::USER
                     && message.content.starts_with("inspect");
             });
         const bool has_tool_result = std::any_of(req.messages.begin(),
-            req.messages.end(), [](const ursa::Message& message) {
-                return message.type == ursa::Message::Type::TOOL;
+            req.messages.end(), [](const imza::Message& message) {
+                return message.type == imza::Message::Type::TOOL;
             });
         if (!child && !has_tool_result) {
-            cb(ursa::make_tool_call_event({ "subagent",
+            cb(imza::make_tool_call_event({ "subagent",
                 R"({"tasks":[{"mode":"research","prompt":"inspect"}]})",
                 "delegate inspection", "delegate-1" }));
         } else if (child && !has_tool_result) {
-            cb(ursa::make_tool_call_event({ "shell",
+            cb(imza::make_tool_call_event({ "shell",
                 R"({"command":"probe child"})", "run probe", "child-shell" }));
         } else {
-            cb(ursa::make_delta_event(
+            cb(imza::make_delta_event(
                 child ? "child approved" : "main complete"));
         }
-        cb(ursa::make_done_event());
-        return ursa::Status::OK;
+        cb(imza::make_done_event());
+        return imza::Status::OK;
     };
 
-    ursa::submit(*env.state, "delegate");
+    imza::submit(*env.state, "delegate");
     REQUIRE(env.pump.wait_for([&] {
-        return std::holds_alternative<ursa::ToolCallRequest>(
+        return std::holds_alternative<imza::ToolCallRequest>(
             env.session->modal());
     }));
-    const auto request = std::get<ursa::ToolCallRequest>(env.session->modal());
+    const auto request = std::get<imza::ToolCallRequest>(env.session->modal());
     CHECK(request.description.find("Agent 1 (research)") != std::string::npos);
-    ursa::resolve_modal(
-        *env.state, ursa::ToolVerdict { ursa::ToolDecision::ACCEPT_ONCE, "" });
+    imza::resolve_modal(
+        *env.state, imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" });
     REQUIRE(env.pump.wait_for(
         [&] { return idle(*env.session) && env.pending_tool() != nullptr; }));
-    const ursa::ToolCall* call = env.pending_tool();
+    const imza::ToolCall* call = env.pending_tool();
     REQUIRE(call != nullptr);
     REQUIRE(call->result.has_value());
     CHECK(call->result->text.find("child approved") != std::string::npos);
@@ -417,45 +417,45 @@ TEST_CASE("delegated-agent approvals surface through the main modal queue")
 TEST_CASE("subagent failure reports preserve the last completed tool output")
 {
     Env env;
-    env.stream = [](const ursa::ChatRequest& req,
-                     const ursa::StreamCallback& cb) {
+    env.stream = [](const imza::ChatRequest& req,
+                     const imza::StreamCallback& cb) {
         const bool child = std::any_of(req.messages.begin(), req.messages.end(),
-            [](const ursa::Message& message) {
-                return message.type == ursa::Message::Type::USER
+            [](const imza::Message& message) {
+                return message.type == imza::Message::Type::USER
                     && message.content.starts_with("failing child");
             });
         const bool has_tool_result = std::any_of(req.messages.begin(),
-            req.messages.end(), [](const ursa::Message& message) {
-                return message.type == ursa::Message::Type::TOOL;
+            req.messages.end(), [](const imza::Message& message) {
+                return message.type == imza::Message::Type::TOOL;
             });
         if (!child && !has_tool_result) {
-            cb(ursa::make_tool_call_event({ "subagent",
+            cb(imza::make_tool_call_event({ "subagent",
                 R"({"tasks":[{"mode":"research","prompt":"failing child"}]})",
                 "delegate failing child", "delegate-failure" }));
         } else if (child && !has_tool_result) {
-            cb(ursa::make_tool_call_event(
+            cb(imza::make_tool_call_event(
                 { "shell", R"({"command":"sh -c 'printf child-output'"})",
                     "run command", "child-shell" }));
         } else if (child) {
-            cb(ursa::make_error_event(
-                ursa::Status::API_ERROR, "follow-up failed"));
+            cb(imza::make_error_event(
+                imza::Status::API_ERROR, "follow-up failed"));
         } else {
-            cb(ursa::make_delta_event("main complete"));
+            cb(imza::make_delta_event("main complete"));
         }
-        cb(ursa::make_done_event());
-        return ursa::Status::OK;
+        cb(imza::make_done_event());
+        return imza::Status::OK;
     };
 
-    ursa::submit(*env.state, "delegate failure");
+    imza::submit(*env.state, "delegate failure");
     REQUIRE(env.pump.wait_for([&] {
-        return std::holds_alternative<ursa::ToolCallRequest>(
+        return std::holds_alternative<imza::ToolCallRequest>(
             env.session->modal());
     }));
-    ursa::resolve_modal(
-        *env.state, ursa::ToolVerdict { ursa::ToolDecision::ACCEPT_ONCE, "" });
+    imza::resolve_modal(
+        *env.state, imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" });
     REQUIRE(env.pump.wait_for(
         [&] { return idle(*env.session) && env.pending_tool() != nullptr; }));
-    const ursa::ToolCall& call = *env.pending_tool();
+    const imza::ToolCall& call = *env.pending_tool();
     REQUIRE(call.result.has_value());
     CHECK(call.result->text.find("Failed: API error") != std::string::npos);
     CHECK(call.result->text.find("Last completed tool output")
@@ -470,30 +470,30 @@ TEST_CASE("subagent tool rejects build tasks while main agent is planning")
 {
     Env env;
     env.stream
-        = [](const ursa::ChatRequest& req, const ursa::StreamCallback& cb) {
+        = [](const imza::ChatRequest& req, const imza::StreamCallback& cb) {
               if (!req.messages.empty()
                   && req.messages.back().content.starts_with("delegate")) {
-                  cb(ursa::make_tool_call_event({ "subagent",
+                  cb(imza::make_tool_call_event({ "subagent",
                       R"({"tasks":[{"mode":"build","prompt":"change it"}]})",
                       "delegate change", "delegate-1" }));
               } else {
-                  cb(ursa::make_delta_event("main complete"));
+                  cb(imza::make_delta_event("main complete"));
               }
-              cb(ursa::make_done_event());
-              return ursa::Status::OK;
+              cb(imza::make_done_event());
+              return imza::Status::OK;
           };
 
-    ursa::submit(*env.state, "delegate");
+    imza::submit(*env.state, "delegate");
     const bool finished = env.pump.wait_for(
         [&] { return idle(*env.session) && env.pending_tool() != nullptr; });
     CAPTURE(env.session->items().size());
     CAPTURE(static_cast<int>(env.session->phase()));
     CAPTURE(env.session->error());
     REQUIRE(finished);
-    const ursa::ToolCall* call = env.pending_tool();
+    const imza::ToolCall* call = env.pending_tool();
     REQUIRE(call != nullptr);
     REQUIRE(call->result.has_value());
-    CHECK(call->result->kind == ursa::ToolCall::Result::Kind::REJECT);
+    CHECK(call->result->kind == imza::ToolCall::Result::Kind::REJECT);
     CHECK(call->result->text.find("require main-agent build mode")
         != std::string::npos);
     CHECK(env.state->queue.size() == 0);
@@ -504,30 +504,30 @@ TEST_CASE(
 {
     Env env;
     auto round = std::make_shared<int>(0);
-    env.stream = [&env, round](const ursa::ChatRequest& req,
-                     const ursa::StreamCallback& cb) {
+    env.stream = [&env, round](const imza::ChatRequest& req,
+                     const imza::StreamCallback& cb) {
         env.requests.push_back(req);
         if ((*round)++ == 0) {
-            cb(ursa::make_delta_event("I need input.\n"));
-            cb(ursa::make_question_event(
+            cb(imza::make_delta_event("I need input.\n"));
+            cb(imza::make_question_event(
                 { { "Which one?", { "A", "B" }, false, false } }));
         } else {
-            cb(ursa::make_delta_event("thanks"));
+            cb(imza::make_delta_event("thanks"));
         }
-        cb(ursa::make_done_event());
-        return ursa::Status::OK;
+        cb(imza::make_done_event());
+        return imza::Status::OK;
     };
 
-    ursa::submit(*env.state, "go");
+    imza::submit(*env.state, "go");
     REQUIRE(env.pump.wait_for([&] { return showing_question(*env.session); }));
     CHECK(env.state->queue.size() == 1);
 
-    const std::string ask_md = ursa::question_form_markdown(
+    const std::string ask_md = imza::question_form_markdown(
         { { "Which one?", { "A", "B" }, false, false } });
     auto assistant_corpus = [&] {
         std::string all;
         for (const auto& it : env.session->items()) {
-            if (const auto* a = std::get_if<ursa::AssistantTurn>(&it)) {
+            if (const auto* a = std::get_if<imza::AssistantTurn>(&it)) {
                 all += a->markdown + "\n";
             }
         }
@@ -536,8 +536,8 @@ TEST_CASE(
     const std::string snapshot = assistant_corpus();
     CHECK(snapshot.find(ask_md) != std::string::npos);
 
-    ursa::resolve_modal(*env.state,
-        ursa::ModalResult { ursa::ModalAnswer { { { { "B" }, "", "" } } } });
+    imza::resolve_modal(*env.state,
+        imza::ModalResult { imza::ModalAnswer { { { { "B" }, "", "" } } } });
 
     REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
     CHECK(env.state->queue.size() == 0);
@@ -548,13 +548,13 @@ TEST_CASE(
 
     size_t answers = 0;
     for (const auto& it : env.session->items()) {
-        if (std::holds_alternative<ursa::ModalAnswer>(it)) {
+        if (std::holds_alternative<imza::ModalAnswer>(it)) {
             ++answers;
         }
     }
     REQUIRE(answers == 1);
     CHECK(env.user_turn_count() == 1);
-    CHECK(env.last_request().messages.back().type == ursa::Message::Type::USER);
+    CHECK(env.last_request().messages.back().type == imza::Message::Type::USER);
     CHECK(env.last_request().messages.back().content.find("User answered:")
         != std::string::npos);
     CHECK(env.last_request().messages.back().content.find("> B")
@@ -564,49 +564,49 @@ TEST_CASE(
 TEST_CASE("tool accept: output fills result, request half byte-stable")
 {
     Env env;
-    env.session->set_mode(ursa::Session::Mode::BUILD);
+    env.session->set_mode(imza::Session::Mode::BUILD);
     auto round = std::make_shared<int>(0);
-    env.stream = [&env, round](const ursa::ChatRequest& req,
-                     const ursa::StreamCallback& cb) {
+    env.stream = [&env, round](const imza::ChatRequest& req,
+                     const imza::StreamCallback& cb) {
         env.requests.push_back(req);
         if ((*round)++ == 0) {
-            cb(ursa::make_tool_call_event(
+            cb(imza::make_tool_call_event(
                 { "shell", R"({"command":"inspect -la"})", "list files" }));
         }
-        cb(ursa::make_done_event());
-        return ursa::Status::OK;
+        cb(imza::make_done_event());
+        return imza::Status::OK;
     };
 
-    ursa::submit(*env.state, "go");
+    imza::submit(*env.state, "go");
     REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
 
-    const ursa::ToolCall* pending = env.pending_tool();
+    const imza::ToolCall* pending = env.pending_tool();
     REQUIRE(pending != nullptr);
     CHECK(pending->name == "shell");
     CHECK(pending->args == R"({"command":"inspect -la"})");
     CHECK_FALSE(pending->result.has_value());
 
-    ursa::resolve_modal(*env.state,
-        ursa::ModalResult {
-            ursa::ToolVerdict { ursa::ToolDecision::ACCEPT_ONCE, "" } });
+    imza::resolve_modal(*env.state,
+        imza::ModalResult {
+            imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" } });
 
     REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
     REQUIRE(env.ran_tools.size() == 1);
 
-    const ursa::ToolCall* done = env.pending_tool();
+    const imza::ToolCall* done = env.pending_tool();
     REQUIRE(done != nullptr);
     CHECK(done->name == "shell");
     CHECK(done->args == R"({"command":"inspect -la"})");
     REQUIRE(done->result.has_value());
-    CHECK(done->result->kind == ursa::ToolCall::Result::Kind::OUTPUT);
+    CHECK(done->result->kind == imza::ToolCall::Result::Kind::OUTPUT);
     CHECK(done->result->text == "ran: inspect -la");
 
     const auto& msgs = env.last_request().messages;
     REQUIRE(msgs.size() >= 2);
-    CHECK(msgs.back().type == ursa::Message::Type::TOOL);
+    CHECK(msgs.back().type == imza::Message::Type::TOOL);
     CHECK(msgs.back().content == "ran: inspect -la");
     const auto& prev = msgs[msgs.size() - 2];
-    CHECK(prev.type == ursa::Message::Type::ASSISTANT);
+    CHECK(prev.type == imza::Message::Type::ASSISTANT);
     REQUIRE(prev.tool_calls.size() == 1);
     CHECK(prev.tool_calls[0].name == "shell");
     CHECK(prev.tool_calls[0].args == R"({"command":"inspect -la"})");
@@ -625,34 +625,34 @@ TEST_CASE("reject with reason reaches transcript and injected result")
 {
     Env env;
     auto round = std::make_shared<int>(0);
-    env.stream = [&env, round](const ursa::ChatRequest& req,
-                     const ursa::StreamCallback& cb) {
+    env.stream = [&env, round](const imza::ChatRequest& req,
+                     const imza::StreamCallback& cb) {
         env.requests.push_back(req);
         if ((*round)++ == 0) {
-            cb(ursa::make_tool_call_event(
+            cb(imza::make_tool_call_event(
                 { "shell", R"({"command":"rm -rf /"})", "danger" }));
         }
-        cb(ursa::make_done_event());
-        return ursa::Status::OK;
+        cb(imza::make_done_event());
+        return imza::Status::OK;
     };
 
-    ursa::submit(*env.state, "go");
+    imza::submit(*env.state, "go");
     REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
 
-    ursa::resolve_modal(*env.state,
-        ursa::ModalResult { ursa::ToolVerdict {
-            ursa::ToolDecision::REJECT, "needs approval first" } });
+    imza::resolve_modal(*env.state,
+        imza::ModalResult { imza::ToolVerdict {
+            imza::ToolDecision::REJECT, "needs approval first" } });
 
     REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
     CHECK(env.ran_tools.empty());
 
-    const ursa::ToolCall* tc = env.pending_tool();
+    const imza::ToolCall* tc = env.pending_tool();
     REQUIRE(tc != nullptr);
     REQUIRE(tc->result.has_value());
-    CHECK(tc->result->kind == ursa::ToolCall::Result::Kind::REJECT);
+    CHECK(tc->result->kind == imza::ToolCall::Result::Kind::REJECT);
     CHECK(tc->result->text == "needs approval first");
 
-    CHECK(env.last_request().messages.back().type == ursa::Message::Type::TOOL);
+    CHECK(env.last_request().messages.back().type == imza::Message::Type::TOOL);
     CHECK(env.last_request().messages.back().content.find(
               "user denied: needs approval first")
         != std::string::npos);
@@ -662,29 +662,29 @@ TEST_CASE("esc on tool injects generic denial, appends nothing to transcript")
 {
     Env env;
     auto round = std::make_shared<int>(0);
-    env.stream = [&env, round](const ursa::ChatRequest& req,
-                     const ursa::StreamCallback& cb) {
+    env.stream = [&env, round](const imza::ChatRequest& req,
+                     const imza::StreamCallback& cb) {
         env.requests.push_back(req);
         if ((*round)++ == 0) {
-            cb(ursa::make_tool_call_event(
+            cb(imza::make_tool_call_event(
                 { "shell", R"({"command":"inspect"})", "" }));
         }
-        cb(ursa::make_done_event());
-        return ursa::Status::OK;
+        cb(imza::make_done_event());
+        return imza::Status::OK;
     };
 
-    ursa::submit(*env.state, "go");
+    imza::submit(*env.state, "go");
     REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
 
-    ursa::close_modal(*env.state);
+    imza::close_modal(*env.state);
 
     REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
     CHECK(env.ran_tools.empty());
 
-    const ursa::ToolCall* tc = env.pending_tool();
+    const imza::ToolCall* tc = env.pending_tool();
     REQUIRE(tc != nullptr);
     REQUIRE(tc->result.has_value());
-    CHECK(tc->result->kind == ursa::ToolCall::Result::Kind::CANCEL);
+    CHECK(tc->result->kind == imza::ToolCall::Result::Kind::CANCEL);
     CHECK(env.user_turn_count() == 1);
 
     REQUIRE(env.requests.size() == 1);
@@ -695,24 +695,24 @@ TEST_CASE("esc on question skips form, appends nothing, no exception")
 {
     Env env;
     env.stream
-        = [&env](const ursa::ChatRequest& req, const ursa::StreamCallback& cb) {
+        = [&env](const imza::ChatRequest& req, const imza::StreamCallback& cb) {
               env.requests.push_back(req);
-              cb(ursa::make_question_event(
+              cb(imza::make_question_event(
                   { { "Pick", { "x", "y" }, false, false } }));
-              cb(ursa::make_done_event());
-              return ursa::Status::OK;
+              cb(imza::make_done_event());
+              return imza::Status::OK;
           };
 
-    ursa::submit(*env.state, "go");
+    imza::submit(*env.state, "go");
     REQUIRE(env.pump.wait_for([&] { return showing_question(*env.session); }));
 
-    ursa::close_modal(*env.state);
+    imza::close_modal(*env.state);
 
     REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
     CHECK(env.user_turn_count() == 1);
     size_t answers = 0;
     for (const auto& it : env.session->items()) {
-        if (std::holds_alternative<ursa::ModalAnswer>(it)) {
+        if (std::holds_alternative<imza::ModalAnswer>(it)) {
             ++answers;
         }
     }
@@ -723,30 +723,30 @@ TEST_CASE("one drain cycle folds question answer and tool output correctly")
 {
     Env env;
     auto round = std::make_shared<int>(0);
-    env.stream = [&env, round](const ursa::ChatRequest& req,
-                     const ursa::StreamCallback& cb) {
+    env.stream = [&env, round](const imza::ChatRequest& req,
+                     const imza::StreamCallback& cb) {
         env.requests.push_back(req);
         if ((*round)++ == 0) {
-            cb(ursa::make_question_event(
+            cb(imza::make_question_event(
                 { { "Backend?", { "pg", "sqlite" }, false, false } }));
-            cb(ursa::make_tool_call_event(
+            cb(imza::make_tool_call_event(
                 { "shell", R"({"command":"whoami"})", "" }));
         }
-        cb(ursa::make_done_event());
-        return ursa::Status::OK;
+        cb(imza::make_done_event());
+        return imza::Status::OK;
     };
 
-    ursa::submit(*env.state, "go");
+    imza::submit(*env.state, "go");
 
     REQUIRE(env.pump.wait_for([&] { return showing_question(*env.session); }));
     CHECK(env.state->queue.size() == 1);
-    ursa::resolve_modal(*env.state,
-        ursa::ModalResult { ursa::ModalAnswer { { { { "pg" }, "", "" } } } });
+    imza::resolve_modal(*env.state,
+        imza::ModalResult { imza::ModalAnswer { { { { "pg" }, "", "" } } } });
 
     REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
-    ursa::resolve_modal(*env.state,
-        ursa::ModalResult {
-            ursa::ToolVerdict { ursa::ToolDecision::ACCEPT_ONCE, "" } });
+    imza::resolve_modal(*env.state,
+        imza::ModalResult {
+            imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" } });
 
     REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
 
@@ -765,9 +765,9 @@ TEST_CASE("one drain cycle folds question answer and tool output correctly")
     REQUIRE(reply_idx >= 0);
     REQUIRE(tool_idx >= 0);
     CHECK(tool_idx < reply_idx);
-    CHECK(msgs[tool_idx].type == ursa::Message::Type::TOOL);
+    CHECK(msgs[tool_idx].type == imza::Message::Type::TOOL);
     const auto& prev = msgs[tool_idx - 1];
-    CHECK(prev.type == ursa::Message::Type::ASSISTANT);
+    CHECK(prev.type == imza::Message::Type::ASSISTANT);
     REQUIRE(prev.tool_calls.size() == 1);
     CHECK(prev.tool_calls[0].name == "shell");
     CHECK(prev.tool_calls[0].args == R"({"command":"whoami"})");
@@ -777,39 +777,39 @@ TEST_CASE("FIFO order preserved and queue_size counts overlays")
 {
     Env env;
     auto round = std::make_shared<int>(0);
-    env.stream = [&env, round](const ursa::ChatRequest& req,
-                     const ursa::StreamCallback& cb) {
+    env.stream = [&env, round](const imza::ChatRequest& req,
+                     const imza::StreamCallback& cb) {
         env.requests.push_back(req);
         if ((*round)++ == 0) {
-            cb(ursa::make_question_event({ { "Q1", { "a" }, false, false } }));
-            cb(ursa::make_tool_call_event(
+            cb(imza::make_question_event({ { "Q1", { "a" }, false, false } }));
+            cb(imza::make_tool_call_event(
                 { "shell", R"({"command":"date"})", "" }));
         }
-        cb(ursa::make_done_event());
-        return ursa::Status::OK;
+        cb(imza::make_done_event());
+        return imza::Status::OK;
     };
 
-    ursa::submit(*env.state, "go");
+    imza::submit(*env.state, "go");
     REQUIRE(env.pump.wait_for([&] { return showing_question(*env.session); }));
 
-    ursa::enqueue_user_modal(
-        *env.state, ursa::ViewerModal { "Queued", "content" });
+    imza::enqueue_user_modal(
+        *env.state, imza::ViewerModal { "Queued", "content" });
     env.pump.pump();
     CHECK(env.state->queue.size() == 2);
 
-    ursa::resolve_modal(*env.state,
-        ursa::ModalResult { ursa::ModalAnswer { { { { "a" }, "", "" } } } });
+    imza::resolve_modal(*env.state,
+        imza::ModalResult { imza::ModalAnswer { { { { "a" }, "", "" } } } });
     REQUIRE(env.pump.wait_for([&] {
-        return std::holds_alternative<ursa::ViewerModal>(env.session->modal())
+        return std::holds_alternative<imza::ViewerModal>(env.session->modal())
             && env.state->queue.size() == 2;
     }));
     CHECK(env.state->queue.size() == 2);
 
-    ursa::close_modal(*env.state);
+    imza::close_modal(*env.state);
     REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
     CHECK(env.state->queue.size() == 1);
 
-    ursa::close_modal(*env.state);
+    imza::close_modal(*env.state);
     REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
     CHECK(env.state->queue.size() == 0);
 }
@@ -817,14 +817,14 @@ TEST_CASE("FIFO order preserved and queue_size counts overlays")
 TEST_CASE("markdown viewer renders markdown instead of source lines")
 {
     Env env;
-    ursa::enqueue_user_modal(*env.state,
-        ursa::ViewerModal { "Document", "# Heading\n\n```cpp\nreturn 1;\n```",
+    imza::enqueue_user_modal(*env.state,
+        imza::ViewerModal { "Document", "# Heading\n\n```cpp\nreturn 1;\n```",
             "markdown", 1, true, "" });
     REQUIRE(env.pump.wait_for([&] {
-        return std::holds_alternative<ursa::ViewerModal>(env.session->modal());
+        return std::holds_alternative<imza::ViewerModal>(env.session->modal());
     }));
 
-    ftxui::Component modal = ursa::make_modal(env.state);
+    ftxui::Component modal = imza::make_modal(env.state);
     auto screen            = ftxui::Screen::Create(
         ftxui::Dimension::Fixed(60), ftxui::Dimension::Fixed(12));
     ftxui::Render(screen, modal->Render());
@@ -837,92 +837,92 @@ TEST_CASE("one-time shell approval does not authorize later calls")
 {
     Env env;
     auto round = std::make_shared<int>(0);
-    env.stream = [&env, round](const ursa::ChatRequest& req,
-                     const ursa::StreamCallback& cb) {
+    env.stream = [&env, round](const imza::ChatRequest& req,
+                     const imza::StreamCallback& cb) {
         env.requests.push_back(req);
         switch ((*round)++) {
         case 0:
-            cb(ursa::make_tool_call_event(
+            cb(imza::make_tool_call_event(
                 { "shell", R"({"command":"custom one"})", "" }));
             break;
         case 1:
-            cb(ursa::make_tool_call_event(
+            cb(imza::make_tool_call_event(
                 { "shell", R"({"command":"custom two"})", "" }));
             break;
         default: break;
         }
-        cb(ursa::make_done_event());
-        return ursa::Status::OK;
+        cb(imza::make_done_event());
+        return imza::Status::OK;
     };
 
-    ursa::submit(*env.state, "go");
+    imza::submit(*env.state, "go");
     REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
 
-    ursa::resolve_modal(*env.state,
-        ursa::ModalResult {
-            ursa::ToolVerdict { ursa::ToolDecision::ACCEPT_ONCE, "" } });
+    imza::resolve_modal(*env.state,
+        imza::ModalResult {
+            imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" } });
 
     REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
     CHECK(env.state->queue.size() == 1);
     REQUIRE(env.ran_tools.size() == 1);
-    ursa::resolve_modal(*env.state,
-        ursa::ModalResult {
-            ursa::ToolVerdict { ursa::ToolDecision::REJECT, "" } });
+    imza::resolve_modal(*env.state,
+        imza::ModalResult {
+            imza::ToolVerdict { imza::ToolDecision::REJECT, "" } });
     REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
 
-    std::vector<ursa::ToolCall::Result::Kind> result_kinds;
+    std::vector<imza::ToolCall::Result::Kind> result_kinds;
     for (const auto& it : env.session->items()) {
-        if (const auto* tc = std::get_if<ursa::ToolCall>(&it)) {
+        if (const auto* tc = std::get_if<imza::ToolCall>(&it)) {
             REQUIRE(tc->result.has_value());
             result_kinds.push_back(tc->result->kind);
         }
     }
     REQUIRE(result_kinds.size() == 2);
-    CHECK(result_kinds[0] == ursa::ToolCall::Result::Kind::OUTPUT);
-    CHECK(result_kinds[1] == ursa::ToolCall::Result::Kind::REJECT);
+    CHECK(result_kinds[0] == imza::ToolCall::Result::Kind::OUTPUT);
+    CHECK(result_kinds[1] == imza::ToolCall::Result::Kind::REJECT);
     CHECK(env.user_turn_count() == 1);
 }
 
 TEST_CASE("filesystem session approval installs an exact reusable grant")
 {
     Env env;
-    env.session->set_mode(ursa::Session::Mode::BUILD);
+    env.session->set_mode(imza::Session::Mode::BUILD);
     const auto stamp
         = std::chrono::steady_clock::now().time_since_epoch().count();
     const std::filesystem::path directory
         = std::filesystem::temp_directory_path()
-        / ("ursa-phase4-modal-" + std::to_string(stamp));
+        / ("imza-phase4-modal-" + std::to_string(stamp));
     const std::filesystem::path path = directory / "approved.txt";
     std::filesystem::create_directories(directory);
     auto round = std::make_shared<int>(0);
     env.stream = [path, round](
-                     const ursa::ChatRequest&, const ursa::StreamCallback& cb) {
+                     const imza::ChatRequest&, const imza::StreamCallback& cb) {
         if ((*round)++ < 2) {
             Json::Value arguments(Json::objectValue);
             arguments["file_path"] = path.string();
             arguments["text"]      = "approved";
-            cb(ursa::make_tool_call_event(
-                { "write", ursa::write_json(arguments), "", "write-call" }));
+            cb(imza::make_tool_call_event(
+                { "write", imza::write_json(arguments), "", "write-call" }));
         }
-        cb(ursa::make_done_event());
-        return ursa::Status::OK;
+        cb(imza::make_done_event());
+        return imza::Status::OK;
     };
 
-    ursa::submit(*env.state, "go");
+    imza::submit(*env.state, "go");
     REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
-    const auto request = std::get<ursa::ToolCallRequest>(env.session->modal());
+    const auto request = std::get<imza::ToolCallRequest>(env.session->modal());
     CHECK(request.allow_for_session);
-    ursa::resolve_modal(*env.state,
-        ursa::ToolVerdict { ursa::ToolDecision::ACCEPT_FOR_SESSION, "" });
+    imza::resolve_modal(*env.state,
+        imza::ToolVerdict { imza::ToolDecision::ACCEPT_FOR_SESSION, "" });
 
     REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
     CHECK(env.state->queue.size() == 0);
     CHECK(env.state->permissions->snapshot()->size() == 1);
     for (const auto& item : env.session->items()) {
-        if (const auto* call = std::get_if<ursa::ToolCall>(&item);
+        if (const auto* call = std::get_if<imza::ToolCall>(&item);
             call != nullptr && call->name == "write" && call->result) {
             CAPTURE(call->result->text);
-            CHECK(call->result->kind == ursa::ToolCall::Result::Kind::OUTPUT);
+            CHECK(call->result->kind == imza::ToolCall::Result::Kind::OUTPUT);
         }
     }
     CHECK(std::filesystem::is_regular_file(path));
@@ -934,40 +934,40 @@ TEST_CASE("permission resolution follows attended and dangerous-skip flags")
 {
     SUBCASE("attended asks")
     {
-        Env env(static_cast<ursa::RuntimeFlag>(ursa::ATTENDED | ursa::SHELL));
+        Env env(static_cast<imza::RuntimeFlag>(imza::ATTENDED | imza::SHELL));
         env.stream
-            = [](const ursa::ChatRequest& req, const ursa::StreamCallback& cb) {
-                  if (req.messages.back().type == ursa::Message::Type::USER) {
-                      cb(ursa::make_tool_call_event({ "shell",
+            = [](const imza::ChatRequest& req, const imza::StreamCallback& cb) {
+                  if (req.messages.back().type == imza::Message::Type::USER) {
+                      cb(imza::make_tool_call_event({ "shell",
                           R"({"command":"custom attended"})", "", "call" }));
                   }
-                  cb(ursa::make_done_event());
-                  return ursa::Status::OK;
+                  cb(imza::make_done_event());
+                  return imza::Status::OK;
               };
-        ursa::submit(*env.state, "go");
+        imza::submit(*env.state, "go");
         REQUIRE(
             env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
         CHECK(env.ran_tools.empty());
-        ursa::resolve_modal(
-            *env.state, ursa::ToolVerdict { ursa::ToolDecision::REJECT, "" });
+        imza::resolve_modal(
+            *env.state, imza::ToolVerdict { imza::ToolDecision::REJECT, "" });
         REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
         CHECK_FALSE(env.state->runner->blocked_permission());
     }
 
     SUBCASE("attended dangerous skip accepts")
     {
-        Env env(static_cast<ursa::RuntimeFlag>(
-            ursa::ATTENDED | ursa::SHELL | ursa::SKIP_PERMISSIONS));
+        Env env(static_cast<imza::RuntimeFlag>(
+            imza::ATTENDED | imza::SHELL | imza::SKIP_PERMISSIONS));
         env.stream
-            = [](const ursa::ChatRequest& req, const ursa::StreamCallback& cb) {
-                  if (req.messages.back().type == ursa::Message::Type::USER) {
-                      cb(ursa::make_tool_call_event({ "shell",
+            = [](const imza::ChatRequest& req, const imza::StreamCallback& cb) {
+                  if (req.messages.back().type == imza::Message::Type::USER) {
+                      cb(imza::make_tool_call_event({ "shell",
                           R"({"command":"custom skipped"})", "", "call" }));
                   }
-                  cb(ursa::make_done_event());
-                  return ursa::Status::OK;
+                  cb(imza::make_done_event());
+                  return imza::Status::OK;
               };
-        ursa::submit(*env.state, "go");
+        imza::submit(*env.state, "go");
         REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
         REQUIRE(env.ran_tools.size() == 1);
         CHECK(env.state->queue.size() == 0);
@@ -975,17 +975,17 @@ TEST_CASE("permission resolution follows attended and dangerous-skip flags")
 
     SUBCASE("unattended rejects without a modal")
     {
-        Env env(ursa::SHELL);
+        Env env(imza::SHELL);
         env.stream
-            = [](const ursa::ChatRequest& req, const ursa::StreamCallback& cb) {
-                  if (req.messages.back().type == ursa::Message::Type::USER) {
-                      cb(ursa::make_tool_call_event({ "shell",
+            = [](const imza::ChatRequest& req, const imza::StreamCallback& cb) {
+                  if (req.messages.back().type == imza::Message::Type::USER) {
+                      cb(imza::make_tool_call_event({ "shell",
                           R"({"command":"custom blocked"})", "", "call" }));
                   }
-                  cb(ursa::make_done_event());
-                  return ursa::Status::OK;
+                  cb(imza::make_done_event());
+                  return imza::Status::OK;
               };
-        ursa::submit(*env.state, "go");
+        imza::submit(*env.state, "go");
         REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
         CHECK(env.ran_tools.empty());
         CHECK(env.state->queue.size() == 0);
@@ -994,18 +994,18 @@ TEST_CASE("permission resolution follows attended and dangerous-skip flags")
 
     SUBCASE("unattended dangerous skip accepts")
     {
-        Env env(static_cast<ursa::RuntimeFlag>(
-            ursa::SHELL | ursa::SKIP_PERMISSIONS));
+        Env env(static_cast<imza::RuntimeFlag>(
+            imza::SHELL | imza::SKIP_PERMISSIONS));
         env.stream
-            = [](const ursa::ChatRequest& req, const ursa::StreamCallback& cb) {
-                  if (req.messages.back().type == ursa::Message::Type::USER) {
-                      cb(ursa::make_tool_call_event({ "shell",
+            = [](const imza::ChatRequest& req, const imza::StreamCallback& cb) {
+                  if (req.messages.back().type == imza::Message::Type::USER) {
+                      cb(imza::make_tool_call_event({ "shell",
                           R"({"command":"custom skipped"})", "", "call" }));
                   }
-                  cb(ursa::make_done_event());
-                  return ursa::Status::OK;
+                  cb(imza::make_done_event());
+                  return imza::Status::OK;
               };
-        ursa::submit(*env.state, "go");
+        imza::submit(*env.state, "go");
         REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
         REQUIRE(env.ran_tools.size() == 1);
         CHECK(env.state->queue.size() == 0);
@@ -1016,55 +1016,55 @@ TEST_CASE("permission resolution follows attended and dangerous-skip flags")
 TEST_CASE("dangerous skip does not weaken hard rejection")
 {
     Env env(
-        static_cast<ursa::RuntimeFlag>(ursa::SHELL | ursa::SKIP_PERMISSIONS));
+        static_cast<imza::RuntimeFlag>(imza::SHELL | imza::SKIP_PERMISSIONS));
     env.stream
-        = [](const ursa::ChatRequest& req, const ursa::StreamCallback& cb) {
-              if (req.messages.back().type == ursa::Message::Type::USER) {
-                  cb(ursa::make_tool_call_event(
+        = [](const imza::ChatRequest& req, const imza::StreamCallback& cb) {
+              if (req.messages.back().type == imza::Message::Type::USER) {
+                  cb(imza::make_tool_call_event(
                       { "shell", R"({"command":""})", "", "call" }));
               }
-              cb(ursa::make_done_event());
-              return ursa::Status::OK;
+              cb(imza::make_done_event());
+              return imza::Status::OK;
           };
-    ursa::submit(*env.state, "go");
+    imza::submit(*env.state, "go");
     REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
     CHECK(env.ran_tools.empty());
     CHECK(env.state->queue.size() == 0);
-    const ursa::ToolCall* call = env.pending_tool();
+    const imza::ToolCall* call = env.pending_tool();
     REQUIRE(call != nullptr);
     REQUIRE(call->result.has_value());
-    CHECK(call->result->kind == ursa::ToolCall::Result::Kind::REJECT);
+    CHECK(call->result->kind == imza::ToolCall::Result::Kind::REJECT);
 }
 
 TEST_CASE("user modal enqueued mid-stream surfaces after the ask resolves")
 {
     Env env;
     auto round = std::make_shared<int>(0);
-    env.stream = [&env, round](const ursa::ChatRequest& req,
-                     const ursa::StreamCallback& cb) {
+    env.stream = [&env, round](const imza::ChatRequest& req,
+                     const imza::StreamCallback& cb) {
         env.requests.push_back(req);
         if ((*round)++ == 0) {
-            cb(ursa::make_question_event({ { "Q", { "a" }, false, false } }));
+            cb(imza::make_question_event({ { "Q", { "a" }, false, false } }));
         }
-        cb(ursa::make_done_event());
-        return ursa::Status::OK;
+        cb(imza::make_done_event());
+        return imza::Status::OK;
     };
 
-    ursa::submit(*env.state, "go");
+    imza::submit(*env.state, "go");
     REQUIRE(env.pump.wait_for([&] { return showing_question(*env.session); }));
 
-    ursa::enqueue_user_modal(
-        *env.state, ursa::VariantModal { { "off", "default" }, "default" });
+    imza::enqueue_user_modal(
+        *env.state, imza::VariantModal { { "off", "default" }, "default" });
     env.pump.pump();
-    CHECK(std::holds_alternative<ursa::QuestionForm>(env.session->modal()));
+    CHECK(std::holds_alternative<imza::QuestionForm>(env.session->modal()));
 
-    ursa::resolve_modal(*env.state,
-        ursa::ModalResult { ursa::ModalAnswer { { { { "a" }, "", "" } } } });
+    imza::resolve_modal(*env.state,
+        imza::ModalResult { imza::ModalAnswer { { { { "a" }, "", "" } } } });
     REQUIRE(env.pump.wait_for([&] {
-        return std::holds_alternative<ursa::VariantModal>(env.session->modal());
+        return std::holds_alternative<imza::VariantModal>(env.session->modal());
     }));
 
-    ursa::close_modal(*env.state);
+    imza::close_modal(*env.state);
     REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
     CHECK(env.state->queue.size() == 0);
 }
@@ -1073,62 +1073,62 @@ TEST_CASE("tools with an automatic policy run without an approval modal")
 {
     Env env;
     auto round = std::make_shared<int>(0);
-    env.stream = [&env, round](const ursa::ChatRequest& req,
-                     const ursa::StreamCallback& cb) {
+    env.stream = [&env, round](const imza::ChatRequest& req,
+                     const imza::StreamCallback& cb) {
         env.requests.push_back(req);
         if ((*round)++ == 0) {
-            cb(ursa::make_tool_call_event(
-                { "websearch", R"({"query":"ursa"})", "", "" }));
+            cb(imza::make_tool_call_event(
+                { "websearch", R"({"query":"imza"})", "", "" }));
         }
-        cb(ursa::make_done_event());
-        return ursa::Status::OK;
+        cb(imza::make_done_event());
+        return imza::Status::OK;
     };
 
-    ursa::submit(*env.state, "go");
+    imza::submit(*env.state, "go");
     REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
 
     CHECK(env.state->queue.size() == 0);
     REQUIRE(env.ran_tools.size() == 1);
     CHECK(env.ran_tools[0].name == "websearch");
 
-    const ursa::ToolCall* tc = env.pending_tool();
+    const imza::ToolCall* tc = env.pending_tool();
     REQUIRE(tc != nullptr);
     REQUIRE(tc->result.has_value());
-    CHECK(tc->result->kind == ursa::ToolCall::Result::Kind::OUTPUT);
-    CHECK(tc->result->text == R"(searched: {"query":"ursa"})");
+    CHECK(tc->result->kind == imza::ToolCall::Result::Kind::OUTPUT);
+    CHECK(tc->result->text == R"(searched: {"query":"imza"})");
 
-    CHECK(env.last_request().messages.back().type == ursa::Message::Type::TOOL);
+    CHECK(env.last_request().messages.back().type == imza::Message::Type::TOOL);
     CHECK(env.last_request().messages.back().content
-        == R"(searched: {"query":"ursa"})");
+        == R"(searched: {"query":"imza"})");
 }
 
 TEST_CASE("unknown tools error back to the model without a modal")
 {
     Env env;
     auto round = std::make_shared<int>(0);
-    env.stream = [&env, round](const ursa::ChatRequest& req,
-                     const ursa::StreamCallback& cb) {
+    env.stream = [&env, round](const imza::ChatRequest& req,
+                     const imza::StreamCallback& cb) {
         env.requests.push_back(req);
         if ((*round)++ == 0) {
-            cb(ursa::make_tool_call_event({ "nope", "{}", "", "" }));
+            cb(imza::make_tool_call_event({ "nope", "{}", "", "" }));
         }
-        cb(ursa::make_done_event());
-        return ursa::Status::OK;
+        cb(imza::make_done_event());
+        return imza::Status::OK;
     };
 
-    ursa::submit(*env.state, "go");
+    imza::submit(*env.state, "go");
     REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
 
     CHECK(env.state->queue.size() == 0);
     CHECK(env.ran_tools.empty());
 
-    const ursa::ToolCall* tc = env.pending_tool();
+    const imza::ToolCall* tc = env.pending_tool();
     REQUIRE(tc != nullptr);
     REQUIRE(tc->result.has_value());
-    CHECK(tc->result->kind == ursa::ToolCall::Result::Kind::ERROR);
+    CHECK(tc->result->kind == imza::ToolCall::Result::Kind::ERROR);
     CHECK(tc->result->text.find("unknown tool: nope") != std::string::npos);
 
-    CHECK(env.last_request().messages.back().type == ursa::Message::Type::TOOL);
+    CHECK(env.last_request().messages.back().type == imza::Message::Type::TOOL);
     CHECK(env.last_request().messages.back().content.find("unknown tool: nope")
         != std::string::npos);
 }

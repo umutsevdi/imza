@@ -9,9 +9,9 @@ using namespace std::chrono_literals;
 
 namespace {
 
-ursa::CommandResult run(const std::string& cmd, std::chrono::seconds t)
+imza::CommandResult run(const std::string& cmd, std::chrono::seconds t)
 {
-    return ursa::run_command(cmd, t);
+    return imza::run_command(cmd, t);
 }
 
 } // namespace
@@ -56,9 +56,9 @@ TEST_CASE("run_command enforces the timeout")
 TEST_CASE("run_attached_command reports completion")
 {
 #ifdef _WIN32
-    const auto result = ursa::run_attached_command("cmd.exe /c exit 7");
+    const auto result = imza::run_attached_command("cmd.exe /c exit 7");
 #else
-    const auto result = ursa::run_attached_command("exit 7");
+    const auto result = imza::run_attached_command("exit 7");
 #endif
     CHECK(result.spawned);
     CHECK(result.exit_code == 7);
@@ -67,5 +67,5 @@ TEST_CASE("run_attached_command reports completion")
 
 TEST_CASE("run_attached_command rejects an empty command")
 {
-    CHECK_FALSE(ursa::run_attached_command("").spawned);
+    CHECK_FALSE(imza::run_attached_command("").spawned);
 }

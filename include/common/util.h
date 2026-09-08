@@ -11,7 +11,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ursa {
+namespace imza {
 
 // True when `target` equals `root` or lies underneath it. Both paths are
 // expected to be canonical; an empty root contains nothing.
@@ -273,4 +273,4 @@ inline std::string home_dir()
     );
 }
 
-} // namespace ursa
+} // namespace imza

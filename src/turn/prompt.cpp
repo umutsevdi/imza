@@ -8,12 +8,12 @@
 #include <string_view>
 #include <vector>
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
     constexpr std::string_view BASE_PROMPT
-        = R"prompt(You are ursa, an interactive CLI coding agent that helps users with their tasks. Use the instructions below and the tools available to you to assist the user.
+        = R"prompt(You are imza, an interactive CLI coding agent that helps users with their tasks. Use the instructions below and the tools available to you to assist the user.
 
 # Tone and style
 - Your output is displayed in a terminal. Keep responses short and concise; answer the user's question directly without preamble or postamble.
@@ -49,7 +49,7 @@ namespace {
 
 # Skills
 - Call the `skill` tool to load a relevant skill when it was not explicitly mentioned.
-- Ursa loads `$skill-name` mentions before the request; use the enclosed skill instructions directly and do not load the same skill again.
+- Imza loads `$skill-name` mentions before the request; use the enclosed skill instructions directly and do not load the same skill again.
 - Project skills take precedence over global skills with the same name.
 
 # Modes
@@ -58,7 +58,7 @@ namespace {
 - In BUILD mode all tools are available. Implement the plan, then verify the result if possible.)prompt";
 
     constexpr std::string_view SUBAGENT_PROMPT
-        = R"prompt(You are an Ursa subagent working on the task in the user message. You have a fresh context and do not know the parent conversation, so treat the provided task and workspace instructions as your complete assignment.
+        = R"prompt(You are an Imza subagent working on the task in the user message. You have a fresh context and do not know the parent conversation, so treat the provided task and workspace instructions as your complete assignment.
 
 # Working on tasks
 - Work only on the assigned task. Use the available tools to inspect the workspace and gather the information you need.
@@ -229,4 +229,4 @@ std::string full_system_prompt(const ApplicationState& state)
     return prompt;
 }
 
-} // namespace ursa
+} // namespace imza

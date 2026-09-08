@@ -14,7 +14,7 @@
 #include <string>
 #include <utility>
 
-namespace ursa {
+namespace imza {
 
 namespace {
     bool change_directory(
@@ -508,4 +508,4 @@ void delete_saved_session(
     state.session->bump_modal_serial();
 }
 
-} // namespace ursa
+} // namespace imza

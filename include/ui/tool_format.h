@@ -5,7 +5,7 @@
 
 #include "conversation/session.h"
 
-namespace ursa {
+namespace imza {
 
 // Display formatting for tool calls in the conversation UI.
 std::string tool_display_name(const std::string& name);
@@ -15,4 +15,4 @@ std::string tool_header_args(const ToolCall& call);
 std::string tool_code_language(const ToolCall& call);
 std::size_t read_start_line(const ToolCall& call);
 
-} // namespace ursa
+} // namespace imza

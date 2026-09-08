@@ -8,7 +8,7 @@
 
 #include <doctest/doctest.h>
 
-namespace ursa {
+namespace imza {
 
 TEST_CASE("slash_commands includes built-ins")
 {
@@ -70,7 +70,7 @@ TEST_CASE("find_command matches case-insensitively")
 
 TEST_CASE("CLI continues interactively without arguments")
 {
-    char program[] = "ursa";
+    char program[] = "imza";
     char* argv[]   = { program };
 
     const CliResult result = run_cli(1, argv);
@@ -82,7 +82,7 @@ TEST_CASE("CLI continues interactively without arguments")
 
 TEST_CASE("CLI returns an interactive working directory")
 {
-    char program[]   = "ursa";
+    char program[]   = "imza";
     char directory[] = ".";
     char* argv[]     = { program, directory };
 
@@ -96,7 +96,7 @@ TEST_CASE("CLI returns an interactive working directory")
 
 TEST_CASE("CLI returns runtime session overrides")
 {
-    char program[]        = "ursa";
+    char program[]        = "imza";
     char model_option[]   = "--model";
     char model[]          = "gpt-test";
     char variant_option[] = "--variant";
@@ -119,7 +119,7 @@ TEST_CASE("CLI returns runtime session overrides")
 
 TEST_CASE("CLI exposes dangerous permission skipping in interactive mode")
 {
-    char program[]  = "ursa";
+    char program[]  = "imza";
     char skip[]     = "--skip-permissions";
     char shell[]    = "--shell";
     char disabled[] = "false";
@@ -138,7 +138,7 @@ TEST_CASE("CLI exposes dangerous permission skipping in interactive mode")
 TEST_CASE("CLI accepts multiple allowed directories")
 {
     const std::filesystem::path root
-        = std::filesystem::temp_directory_path() / "ursa-cli-allowed-dirs";
+        = std::filesystem::temp_directory_path() / "imza-cli-allowed-dirs";
     const std::filesystem::path first  = root / "first";
     const std::filesystem::path second = root / "second";
     std::error_code error;
@@ -149,7 +149,7 @@ TEST_CASE("CLI accepts multiple allowed directories")
 
     std::string first_string  = first.string();
     std::string second_string = second.string();
-    char program[]            = "ursa";
+    char program[]            = "imza";
     char option[]             = "--allow-dir";
     char* argv[]
         = { program, option, first_string.data(), second_string.data() };
@@ -172,7 +172,7 @@ TEST_CASE("CLI config creates the file and opens an editor")
     return;
 #else
     const auto root
-        = std::filesystem::temp_directory_path() / "ursa-cli-config-test";
+        = std::filesystem::temp_directory_path() / "imza-cli-config-test";
     std::error_code error;
     std::filesystem::remove_all(root, error);
     const char* previous_config = std::getenv("XDG_DATA_HOME");
@@ -184,14 +184,14 @@ TEST_CASE("CLI config creates the file and opens an editor")
     setenv("XDG_DATA_HOME", root.c_str(), 1);
     setenv("VISUAL", "true", 1);
 
-    char program[]         = "ursa";
+    char program[]         = "imza";
     char option[]          = "--config";
     char* argv[]           = { program, option };
     const CliResult result = run_cli(2, argv);
 
     CHECK_FALSE(result.continue_as_interactive);
     CHECK(result.exit_code == 0);
-    CHECK(std::filesystem::is_regular_file(root / "ursa" / "config.json"));
+    CHECK(std::filesystem::is_regular_file(root / "imza" / "config.json"));
 
     if (previous_config == nullptr) {
         unsetenv("XDG_DATA_HOME");
@@ -209,7 +209,7 @@ TEST_CASE("CLI config creates the file and opens an editor")
 
 TEST_CASE("CLI parses ask as an unattended Plan one-shot")
 {
-    char program[] = "ursa";
+    char program[] = "imza";
     char ask[]     = "--ask";
     char query[]   = "summarize this project";
     char* argv[]   = { program, ask, query };
@@ -227,7 +227,7 @@ TEST_CASE("CLI parses ask as an unattended Plan one-shot")
 
 TEST_CASE("CLI accepts command and command-subcommand startup grants")
 {
-    char program[]       = "ursa";
+    char program[]       = "imza";
     char option[]        = "--allow-cmd";
     char command[]       = "git status";
     char whole_command[] = "cmake";
@@ -244,7 +244,7 @@ TEST_CASE("CLI accepts command and command-subcommand startup grants")
 
 TEST_CASE("CLI rejects compound command startup grants")
 {
-    char program[] = "ursa";
+    char program[] = "imza";
     char option[]  = "--allow-cmd";
     char command[] = "git status && make";
     char* argv[]   = { program, option, command };
@@ -257,7 +257,7 @@ TEST_CASE("CLI rejects compound command startup grants")
 
 TEST_CASE("CLI parses exec with explicit shell access")
 {
-    char program[] = "ursa";
+    char program[] = "imza";
     char exec[]    = "--exec";
     char query[]   = "build this project";
     char shell[]   = "--shell";
@@ -293,4 +293,4 @@ TEST_CASE("run_slash emits application effects")
     CHECK(state->session->error() == "Unknown command: /missing.");
 }
 
-} // namespace ursa
+} // namespace imza

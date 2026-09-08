@@ -5,7 +5,7 @@
 
 #include "common/util.h"
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -145,4 +145,4 @@ bool PermissionStore::_covers(
     return std::get<SkillGrant>(stored) == std::get<SkillGrant>(requested);
 }
 
-} // namespace ursa
+} // namespace imza

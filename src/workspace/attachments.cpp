@@ -7,7 +7,7 @@
 #include <sstream>
 #include <unordered_set>
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -211,4 +211,4 @@ void retain_mentioned_attachments(
     });
 }
 
-} // namespace ursa
+} // namespace imza

@@ -7,7 +7,7 @@
 #include <charconv>
 #include <fstream>
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -309,4 +309,4 @@ ReviewLoadResult parse_git_diff(std::string_view patch)
     return review;
 }
 
-} // namespace ursa
+} // namespace imza

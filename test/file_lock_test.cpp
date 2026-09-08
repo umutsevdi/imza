@@ -13,7 +13,7 @@ std::filesystem::path temp_path(const std::string& name)
 {
     static int counter = 0;
     auto dir           = std::filesystem::temp_directory_path()
-        / ("ursa-file-lock-test-" + std::to_string(counter++));
+        / ("imza-file-lock-test-" + std::to_string(counter++));
     std::filesystem::create_directories(dir);
     return dir / name;
 }
@@ -26,13 +26,13 @@ TEST_CASE("acquired lock blocks a second holder until released")
     return;
 #else
     const auto path = temp_path("mutex.lock");
-    auto first      = ursa::acquire_file_lock(path);
-    REQUIRE(std::holds_alternative<ursa::FileLock>(first));
+    auto first      = imza::acquire_file_lock(path);
+    REQUIRE(std::holds_alternative<imza::FileLock>(first));
 
     std::atomic<bool> acquired { false };
     std::thread second([&] {
-        auto lock = ursa::acquire_file_lock(path);
-        acquired  = std::holds_alternative<ursa::FileLock>(lock);
+        auto lock = imza::acquire_file_lock(path);
+        acquired  = std::holds_alternative<imza::FileLock>(lock);
     });
 
     const auto deadline
@@ -45,8 +45,8 @@ TEST_CASE("acquired lock blocks a second holder until released")
     }
     CHECK_FALSE(acquired);
 
-    first = std::variant<ursa::FileLock, ursa::FileLockError> {
-        ursa::FileLockError { }
+    first = std::variant<imza::FileLock, imza::FileLockError> {
+        imza::FileLockError { }
     };
     second.join();
     CHECK(acquired);
@@ -60,11 +60,11 @@ TEST_CASE("lock file persists across release and can be reacquired")
 #else
     const auto path = temp_path("persist.lock");
     {
-        auto lock = ursa::acquire_file_lock(path);
-        REQUIRE(std::holds_alternative<ursa::FileLock>(lock));
+        auto lock = imza::acquire_file_lock(path);
+        REQUIRE(std::holds_alternative<imza::FileLock>(lock));
     }
     CHECK(std::filesystem::exists(path));
-    auto lock = ursa::acquire_file_lock(path);
-    CHECK(std::holds_alternative<ursa::FileLock>(lock));
+    auto lock = imza::acquire_file_lock(path);
+    CHECK(std::holds_alternative<imza::FileLock>(lock));
 #endif
 }

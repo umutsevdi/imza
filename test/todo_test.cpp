@@ -9,56 +9,56 @@
 
 TEST_CASE("parse_todo_args accepts a valid list with statuses")
 {
-    const auto list = ursa::parse_todo_args(ursa::parse_json(
+    const auto list = imza::parse_todo_args(imza::parse_json(
         R"json({"todos":[{"content":"a","status":"in_progress"},{"content":"b","status":"completed"},{"content":"c","status":"cancelled"}]})json"));
     REQUIRE(list.has_value());
     REQUIRE(list->items.size() == 3);
     CHECK(list->items[0].content == "a");
-    CHECK(list->items[0].status == ursa::TodoItem::Status::IN_PROGRESS);
-    CHECK(list->items[1].status == ursa::TodoItem::Status::COMPLETED);
-    CHECK(list->items[2].status == ursa::TodoItem::Status::CANCELLED);
+    CHECK(list->items[0].status == imza::TodoItem::Status::IN_PROGRESS);
+    CHECK(list->items[1].status == imza::TodoItem::Status::COMPLETED);
+    CHECK(list->items[2].status == imza::TodoItem::Status::CANCELLED);
 }
 
 TEST_CASE("parse_todo_args defaults missing status to pending")
 {
-    const auto list = ursa::parse_todo_args(
-        ursa::parse_json(R"json({"todos":[{"content":"a"}]})json"));
+    const auto list = imza::parse_todo_args(
+        imza::parse_json(R"json({"todos":[{"content":"a"}]})json"));
     REQUIRE(list.has_value());
     REQUIRE(list->items.size() == 1);
-    CHECK(list->items[0].status == ursa::TodoItem::Status::PENDING);
+    CHECK(list->items[0].status == imza::TodoItem::Status::PENDING);
 }
 
 TEST_CASE("parse_todo_args accepts an empty list")
 {
     const auto list
-        = ursa::parse_todo_args(ursa::parse_json(R"json({"todos":[]})json"));
+        = imza::parse_todo_args(imza::parse_json(R"json({"todos":[]})json"));
     REQUIRE(list.has_value());
     CHECK(list->items.empty());
 }
 
 TEST_CASE("parse_todo_args rejects malformed args")
 {
-    CHECK_FALSE(ursa::parse_todo_args(ursa::parse_json("")).has_value());
-    CHECK_FALSE(ursa::parse_todo_args(ursa::parse_json("{}")).has_value());
+    CHECK_FALSE(imza::parse_todo_args(imza::parse_json("")).has_value());
+    CHECK_FALSE(imza::parse_todo_args(imza::parse_json("{}")).has_value());
     CHECK_FALSE(
-        ursa::parse_todo_args(ursa::parse_json(R"json({"todos":"nope"})json"))
+        imza::parse_todo_args(imza::parse_json(R"json({"todos":"nope"})json"))
             .has_value());
     CHECK_FALSE(
-        ursa::parse_todo_args(ursa::parse_json(R"json({"todos":[{}]})json"))
+        imza::parse_todo_args(imza::parse_json(R"json({"todos":[{}]})json"))
             .has_value());
-    CHECK_FALSE(ursa::parse_todo_args(
-        ursa::parse_json(R"json({"todos":[{"content":""}]})json"))
+    CHECK_FALSE(imza::parse_todo_args(
+        imza::parse_json(R"json({"todos":[{"content":""}]})json"))
             .has_value());
-    CHECK_FALSE(ursa::parse_todo_args(
-        ursa::parse_json(
+    CHECK_FALSE(imza::parse_todo_args(
+        imza::parse_json(
             R"json({"todos":[{"content":"a","status":"done"}]})json"))
             .has_value());
 }
 
 TEST_CASE("todo_summary renders one line per item with marks")
 {
-    using Status          = ursa::TodoItem::Status;
-    const std::string out = ursa::todo_summary(ursa::TodoList { {
+    using Status          = imza::TodoItem::Status;
+    const std::string out = imza::todo_summary(imza::TodoList { {
         { "first", Status::PENDING },
         { "second", Status::IN_PROGRESS },
         { "third", Status::COMPLETED },
@@ -69,9 +69,9 @@ TEST_CASE("todo_summary renders one line per item with marks")
 
 TEST_CASE("todo tool is registered without a direct handler")
 {
-    const auto tools    = ursa::default_tools();
-    const ursa::Tool* t = ursa::find_tool(tools, "todo");
+    const auto tools    = imza::default_tools();
+    const imza::Tool* t = imza::find_tool(tools, "todo");
     REQUIRE(t != nullptr);
-    const auto out = ursa::dispatch_tool(tools, { "todo", "{}" });
-    CHECK(out.kind == ursa::ToolOutput::Kind::ERROR);
+    const auto out = imza::dispatch_tool(tools, { "todo", "{}" });
+    CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
 }

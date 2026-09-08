@@ -11,7 +11,7 @@
 #include "common/modal.h"
 #include "common/types.h"
 
-namespace ursa {
+namespace imza {
 
 struct Connection {
     std::string id;
@@ -60,4 +60,4 @@ std::filesystem::path presets_path(void);
 std::filesystem::path data_dir(void);
 std::filesystem::path sessions_dir(void);
 
-} // namespace ursa
+} // namespace imza

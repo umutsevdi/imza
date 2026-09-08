@@ -10,7 +10,7 @@
 #include <string>
 #include <utility>
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -252,4 +252,4 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
         std::move(request), "tool has no permission policy: " + original.name);
 }
 
-} // namespace ursa
+} // namespace imza

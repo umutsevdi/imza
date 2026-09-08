@@ -6,7 +6,7 @@
 #include "platform/config.h"
 #include "workspace/environment.h"
 
-namespace ursa {
+namespace imza {
 
 struct ApplicationState;
 
@@ -18,4 +18,4 @@ std::string build_subagent_system_prompt(const SystemEnvironment* sys,
 std::string full_system_prompt(const ApplicationState& state);
 std::string title_prompt(std::string_view request);
 
-} // namespace ursa
+} // namespace imza

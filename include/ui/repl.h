@@ -2,7 +2,7 @@
 
 #include <memory>
 
-namespace ursa {
+namespace imza {
 
 struct ApplicationState;
 class MainThreadQueue;
@@ -10,4 +10,4 @@ class MainThreadQueue;
 int run_repl(
     std::shared_ptr<ApplicationState> state, MainThreadQueue& main_thread);
 
-} // namespace ursa
+} // namespace imza

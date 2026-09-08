@@ -8,7 +8,7 @@
 #include <string>
 #include <utility>
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -135,4 +135,4 @@ Tool make_websearch_tool()
     return { std::move(spec), websearch_run };
 }
 
-} // namespace ursa
+} // namespace imza

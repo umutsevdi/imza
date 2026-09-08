@@ -11,7 +11,7 @@
 #include <fstream>
 #include <sstream>
 
-namespace ursa {
+namespace imza {
 namespace {
 
     void append_untracked(RepositoryReview& review,
@@ -518,4 +518,4 @@ Signal<>::Subscription ReviewState::subscribe(Signal<>::Callback callback)
 
 void ReviewState::_publish() { changed_.publish(); }
 
-} // namespace ursa
+} // namespace imza

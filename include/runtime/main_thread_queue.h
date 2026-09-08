@@ -7,9 +7,9 @@
 #include <mutex>
 
 #include "common/types.h"
-#include "common/ursa_signal.h"
+#include "common/imza_signal.h"
 
-namespace ursa {
+namespace imza {
 
 class MainThreadQueue final : public ApplicationComponent {
 public:
@@ -28,4 +28,4 @@ private:
     Signal<> _posted;
 };
 
-} // namespace ursa
+} // namespace imza

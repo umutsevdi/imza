@@ -5,7 +5,7 @@
 
 #include "conversation/session.h"
 
-namespace ursa {
+namespace imza {
 
 // Conversation-transcript text shared by the agent and the UI.
 std::string question_form_markdown(const QuestionForm& form);
@@ -23,4 +23,4 @@ std::string append_shell_status(
 Message assistant_message(
     std::string content, const AssistantTurn* turn, ApiStandard dialect);
 
-} // namespace ursa
+} // namespace imza

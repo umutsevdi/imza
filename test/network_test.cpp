@@ -8,13 +8,13 @@
 
 namespace {
 
-std::vector<ursa::StreamEvent> parse_all(const ursa::Provider& p,
-    ursa::ParseState& state,
+std::vector<imza::StreamEvent> parse_all(const imza::Provider& p,
+    imza::ParseState& state,
     std::initializer_list<std::pair<std::string_view, std::string_view>> blocks)
 {
-    std::vector<ursa::StreamEvent> all;
+    std::vector<imza::StreamEvent> all;
     for (const auto& [event, data] : blocks) {
-        std::vector<ursa::StreamEvent> outs;
+        std::vector<imza::StreamEvent> outs;
         p.parse(state, event, data, outs);
         all.insert(all.end(), outs.begin(), outs.end());
     }
@@ -25,12 +25,12 @@ std::vector<ursa::StreamEvent> parse_all(const ursa::Provider& p,
 
 TEST_CASE("OpenAI request shape via factory")
 {
-    const auto p = ursa::get_provider(ursa::Route { });
+    const auto p = imza::get_provider(imza::Route { });
 
-    ursa::ChatRequest req;
+    imza::ChatRequest req;
     req.model = "gpt-4o";
-    req.messages.push_back({ ursa::Message::Type::SYSTEM, "sys" });
-    req.messages.push_back({ ursa::Message::Type::USER, "hi" });
+    req.messages.push_back({ imza::Message::Type::SYSTEM, "sys" });
+    req.messages.push_back({ imza::Message::Type::USER, "hi" });
 
     const Json::Value v = p.build(req);
     CHECK(v["model"].asString() == "gpt-4o");
@@ -44,14 +44,14 @@ TEST_CASE("OpenAI request shape via factory")
 
 TEST_CASE("Anthropic request shape via factory")
 {
-    ursa::Route route;
-    route.dialect = ursa::ApiStandard::ANTHROPIC;
-    const auto p  = ursa::get_provider(route);
+    imza::Route route;
+    route.dialect = imza::ApiStandard::ANTHROPIC;
+    const auto p  = imza::get_provider(route);
 
-    ursa::ChatRequest req;
+    imza::ChatRequest req;
     req.model = "claude";
-    req.messages.push_back({ ursa::Message::Type::SYSTEM, "sys" });
-    req.messages.push_back({ ursa::Message::Type::USER, "hi" });
+    req.messages.push_back({ imza::Message::Type::SYSTEM, "sys" });
+    req.messages.push_back({ imza::Message::Type::USER, "hi" });
 
     const Json::Value v = p.build(req);
     CHECK(v["model"].asString() == "claude");
@@ -65,47 +65,47 @@ TEST_CASE("Anthropic request shape via factory")
 
 TEST_CASE("providers cap requested output tokens")
 {
-    ursa::ChatRequest openai_request;
+    imza::ChatRequest openai_request;
     openai_request.model             = "gpt-4o";
     openai_request.max_output_tokens = 2048;
     Json::Value openai
-        = ursa::get_provider(ursa::Route { }).build(openai_request);
+        = imza::get_provider(imza::Route { }).build(openai_request);
     CHECK(openai["max_tokens"].asUInt64() == 2048);
 
     openai_request.reasoning_effort = "low";
-    openai = ursa::get_provider(ursa::Route { }).build(openai_request);
+    openai = imza::get_provider(imza::Route { }).build(openai_request);
     CHECK_FALSE(openai.isMember("max_tokens"));
     CHECK(openai["max_completion_tokens"].asUInt64() == 2048);
 
-    ursa::Route route;
-    route.dialect = ursa::ApiStandard::ANTHROPIC;
-    ursa::ChatRequest anthropic_request;
+    imza::Route route;
+    route.dialect = imza::ApiStandard::ANTHROPIC;
+    imza::ChatRequest anthropic_request;
     anthropic_request.model             = "claude";
     anthropic_request.thinking_budget   = 2000;
     anthropic_request.max_output_tokens = 2048;
     const Json::Value anthropic
-        = ursa::get_provider(route).build(anthropic_request);
+        = imza::get_provider(route).build(anthropic_request);
     CHECK(anthropic["max_tokens"].asUInt64() == 4048);
 }
 
 TEST_CASE("OpenAI serializes tool specs and tool messages")
 {
-    const auto p = ursa::get_provider(ursa::Route { });
+    const auto p = imza::get_provider(imza::Route { });
 
-    ursa::ToolSpec spec;
+    imza::ToolSpec spec;
     spec.name        = "read";
     spec.description = "read a file";
-    spec.parameters  = ursa::parse_json(
+    spec.parameters  = imza::parse_json(
         R"({"type":"object","properties":{"path":{"type":"string"}}})");
 
-    ursa::ChatRequest req;
+    imza::ChatRequest req;
     req.model = "gpt-4o";
     req.tools = { spec };
-    ursa::Message assistant { ursa::Message::Type::ASSISTANT, "" };
+    imza::Message assistant { imza::Message::Type::ASSISTANT, "" };
     assistant.tool_calls.push_back({ "call_1", "read", R"({"path":"a"})" });
     req.messages.push_back(assistant);
     req.messages.push_back(
-        { ursa::Message::Type::TOOL, "file body", { }, "call_1" });
+        { imza::Message::Type::TOOL, "file body", { }, "call_1" });
 
     const Json::Value v = p.build(req);
     REQUIRE(v["tools"].size() == 1);
@@ -132,24 +132,24 @@ TEST_CASE("OpenAI serializes tool specs and tool messages")
 
 TEST_CASE("Anthropic serializes tool specs and tool_result blocks")
 {
-    ursa::Route route;
-    route.dialect = ursa::ApiStandard::ANTHROPIC;
-    const auto p  = ursa::get_provider(route);
+    imza::Route route;
+    route.dialect = imza::ApiStandard::ANTHROPIC;
+    const auto p  = imza::get_provider(route);
 
-    ursa::ToolSpec spec;
+    imza::ToolSpec spec;
     spec.name        = "grep";
     spec.description = "search files";
-    spec.parameters  = ursa::parse_json(
+    spec.parameters  = imza::parse_json(
         R"({"type":"object","properties":{"pattern":{"type":"string"}}})");
 
-    ursa::ChatRequest req;
+    imza::ChatRequest req;
     req.model = "claude";
     req.tools = { spec };
-    ursa::Message assistant { ursa::Message::Type::ASSISTANT, "looking" };
+    imza::Message assistant { imza::Message::Type::ASSISTANT, "looking" };
     assistant.tool_calls.push_back({ "tu_1", "grep", R"({"pattern":"foo"})" });
     req.messages.push_back(assistant);
     req.messages.push_back(
-        { ursa::Message::Type::TOOL, "2 matches", { }, "tu_1" });
+        { imza::Message::Type::TOOL, "2 matches", { }, "tu_1" });
 
     const Json::Value v = p.build(req);
     REQUIRE(v["tools"].size() == 1);
@@ -174,32 +174,32 @@ TEST_CASE("Anthropic serializes tool specs and tool_result blocks")
 
 TEST_CASE("OpenAI content delta")
 {
-    const auto p = ursa::get_provider(ursa::Route { });
+    const auto p = imza::get_provider(imza::Route { });
 
-    ursa::ParseState state;
+    imza::ParseState state;
     const auto outs = parse_all(
         p, state, { { "", R"({"choices":[{"delta":{"content":"Hello"}}]})" } });
     REQUIRE(outs.size() == 1);
-    CHECK(outs[0].kind == ursa::StreamEvent::Kind::CONTENT_DELTA);
+    CHECK(outs[0].kind == imza::StreamEvent::Kind::CONTENT_DELTA);
     CHECK(outs[0].text == "Hello");
 }
 
 TEST_CASE("OpenAI done")
 {
-    const auto p = ursa::get_provider(ursa::Route { });
+    const auto p = imza::get_provider(imza::Route { });
 
-    ursa::ParseState state;
+    imza::ParseState state;
     const auto outs = parse_all(p, state, { { "", "[DONE]" } });
     REQUIRE(outs.size() == 1);
-    CHECK(outs[0].kind == ursa::StreamEvent::Kind::DONE);
+    CHECK(outs[0].kind == imza::StreamEvent::Kind::DONE);
     CHECK(state.terminal);
 }
 
 TEST_CASE("OpenAI accumulates fragmented tool calls and flushes")
 {
-    const auto p = ursa::get_provider(ursa::Route { });
+    const auto p = imza::get_provider(imza::Route { });
 
-    ursa::ParseState state;
+    imza::ParseState state;
     const auto outs = parse_all(p, state,
         { { "",
               R"({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"read","arguments":"{\"pa"}}]}}]})" },
@@ -212,58 +212,58 @@ TEST_CASE("OpenAI accumulates fragmented tool calls and flushes")
 
     REQUIRE(outs.size() == 6);
     for (size_t i = 0; i < 3; ++i) {
-        CHECK(outs[i].kind == ursa::StreamEvent::Kind::CONTENT_DELTA);
+        CHECK(outs[i].kind == imza::StreamEvent::Kind::CONTENT_DELTA);
     }
-    CHECK(outs[3].kind == ursa::StreamEvent::Kind::TOOL_CALL);
+    CHECK(outs[3].kind == imza::StreamEvent::Kind::TOOL_CALL);
     CHECK(outs[3].tool_call.id == "call_a");
     CHECK(outs[3].tool_call.name == "read");
     CHECK(outs[3].tool_call.args == R"({"path":"src/main.cpp"})");
-    CHECK(outs[4].kind == ursa::StreamEvent::Kind::TOOL_CALL);
+    CHECK(outs[4].kind == imza::StreamEvent::Kind::TOOL_CALL);
     CHECK(outs[4].tool_call.id == "call_b");
     CHECK(outs[4].tool_call.name == "grep");
-    CHECK(outs[5].kind == ursa::StreamEvent::Kind::DONE);
+    CHECK(outs[5].kind == imza::StreamEvent::Kind::DONE);
 
-    ursa::ParseState drained;
+    imza::ParseState drained;
     const auto after = parse_all(p, drained, { { "", "[DONE]" } });
     REQUIRE(after.size() == 1);
-    CHECK(after[0].kind == ursa::StreamEvent::Kind::DONE);
+    CHECK(after[0].kind == imza::StreamEvent::Kind::DONE);
 }
 
 TEST_CASE("Anthropic content delta")
 {
-    ursa::Route route;
-    route.dialect = ursa::ApiStandard::ANTHROPIC;
-    const auto p  = ursa::get_provider(route);
+    imza::Route route;
+    route.dialect = imza::ApiStandard::ANTHROPIC;
+    const auto p  = imza::get_provider(route);
 
-    ursa::ParseState state;
+    imza::ParseState state;
     const auto outs = parse_all(p, state,
         { { "content_block_delta",
             R"({"type":"content_block_delta","delta":{"type":"text_delta","text":"Hi"}})" } });
     REQUIRE(outs.size() == 1);
-    CHECK(outs[0].kind == ursa::StreamEvent::Kind::CONTENT_DELTA);
+    CHECK(outs[0].kind == imza::StreamEvent::Kind::CONTENT_DELTA);
     CHECK(outs[0].text == "Hi");
 }
 
 TEST_CASE("Anthropic stop")
 {
-    ursa::Route route;
-    route.dialect = ursa::ApiStandard::ANTHROPIC;
-    const auto p  = ursa::get_provider(route);
+    imza::Route route;
+    route.dialect = imza::ApiStandard::ANTHROPIC;
+    const auto p  = imza::get_provider(route);
 
-    ursa::ParseState state;
+    imza::ParseState state;
     const auto outs = parse_all(p, state, { { "message_stop", "{}" } });
     REQUIRE(outs.size() == 1);
-    CHECK(outs[0].kind == ursa::StreamEvent::Kind::DONE);
+    CHECK(outs[0].kind == imza::StreamEvent::Kind::DONE);
     CHECK(state.terminal);
 }
 
 TEST_CASE("Anthropic assembles tool_use block across deltas")
 {
-    ursa::Route route;
-    route.dialect = ursa::ApiStandard::ANTHROPIC;
-    const auto p  = ursa::get_provider(route);
+    imza::Route route;
+    route.dialect = imza::ApiStandard::ANTHROPIC;
+    const auto p  = imza::get_provider(route);
 
-    ursa::ParseState state;
+    imza::ParseState state;
     const auto outs = parse_all(p, state,
         { { "content_block_start",
               R"({"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tu_9","name":"write"}})" },
@@ -276,76 +276,76 @@ TEST_CASE("Anthropic assembles tool_use block across deltas")
             { "message_stop", R"({"type":"message_stop"})" } });
 
     REQUIRE(outs.size() == 2);
-    CHECK(outs[0].kind == ursa::StreamEvent::Kind::TOOL_CALL);
+    CHECK(outs[0].kind == imza::StreamEvent::Kind::TOOL_CALL);
     CHECK(outs[0].tool_call.id == "tu_9");
     CHECK(outs[0].tool_call.name == "write");
     CHECK(outs[0].tool_call.args == R"({"path":"b.txt"})");
-    CHECK(outs[1].kind == ursa::StreamEvent::Kind::DONE);
+    CHECK(outs[1].kind == imza::StreamEvent::Kind::DONE);
 }
 
 TEST_CASE("get_provider selects by dialect")
 {
-    ursa::ChatRequest req;
+    imza::ChatRequest req;
     req.model = "m";
 
-    ursa::Route openai;
-    CHECK(ursa::get_provider(openai)
+    imza::Route openai;
+    CHECK(imza::get_provider(openai)
             .build(req)["stream_options"]["include_usage"]
             .asBool());
 
-    ursa::Route anthropic;
-    anthropic.dialect = ursa::ApiStandard::ANTHROPIC;
-    CHECK(ursa::get_provider(anthropic).build(req).isMember("max_tokens"));
+    imza::Route anthropic;
+    anthropic.dialect = imza::ApiStandard::ANTHROPIC;
+    CHECK(imza::get_provider(anthropic).build(req).isMember("max_tokens"));
 }
 
 TEST_CASE("OpenAI requests include_usage and emits a single usage event")
 {
-    const auto p = ursa::get_provider(ursa::Route { });
+    const auto p = imza::get_provider(imza::Route { });
 
-    const Json::Value built = p.build(ursa::ChatRequest { "gpt-4o", { }, { } });
+    const Json::Value built = p.build(imza::ChatRequest { "gpt-4o", { }, { } });
     CHECK(built["stream_options"]["include_usage"].asBool() == true);
 
-    ursa::ParseState state;
+    imza::ParseState state;
     const auto outs = parse_all(p, state,
         { { "",
               R"({"choices":[{"delta":{"content":"Hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":3,"total_tokens":13}})" },
             { "", "[DONE]" } });
     REQUIRE(outs.size() == 4);
-    CHECK(outs[0].kind == ursa::StreamEvent::Kind::CONTENT_DELTA);
+    CHECK(outs[0].kind == imza::StreamEvent::Kind::CONTENT_DELTA);
     CHECK(outs[0].text == "Hi");
-    CHECK(outs[1].kind == ursa::StreamEvent::Kind::USAGE);
+    CHECK(outs[1].kind == imza::StreamEvent::Kind::USAGE);
     CHECK(outs[1].usage.prompt == 10);
     CHECK(outs[1].usage.completion == 3);
     CHECK(outs[1].usage.total == 13);
-    CHECK(outs[2].kind == ursa::StreamEvent::Kind::DONE);
-    CHECK(outs[3].kind == ursa::StreamEvent::Kind::DONE);
+    CHECK(outs[2].kind == imza::StreamEvent::Kind::DONE);
+    CHECK(outs[3].kind == imza::StreamEvent::Kind::DONE);
 }
 
 TEST_CASE("OpenAI reads usage from choice when top-level absent (Kimi native)")
 {
-    const auto p = ursa::get_provider(ursa::Route { });
+    const auto p = imza::get_provider(imza::Route { });
 
-    ursa::ParseState state;
+    imza::ParseState state;
     const auto outs = parse_all(p, state,
         { { "",
             R"({"choices":[{"delta":{},"finish_reason":"stop","usage":{"prompt_tokens":12,"completion_tokens":5,"total_tokens":17}}]})" } });
     REQUIRE(outs.size() == 2);
-    CHECK(outs[0].kind == ursa::StreamEvent::Kind::USAGE);
+    CHECK(outs[0].kind == imza::StreamEvent::Kind::USAGE);
     CHECK(outs[0].usage.total == 17);
-    CHECK(outs[1].kind == ursa::StreamEvent::Kind::DONE);
+    CHECK(outs[1].kind == imza::StreamEvent::Kind::DONE);
 }
 
 TEST_CASE("OpenAI usage reports cached tokens from prompt_tokens_details")
 {
-    const auto p = ursa::get_provider(ursa::Route { });
+    const auto p = imza::get_provider(imza::Route { });
 
-    ursa::ParseState state;
+    imza::ParseState state;
     const auto outs = parse_all(p, state,
         { { "",
               R"({"choices":[{"delta":{}}],"usage":{"prompt_tokens":100,"completion_tokens":4,"total_tokens":104,"prompt_tokens_details":{"cached_tokens":60}}})" },
             { "", "[DONE]" } });
     REQUIRE(outs.size() == 2);
-    CHECK(outs[0].kind == ursa::StreamEvent::Kind::USAGE);
+    CHECK(outs[0].kind == imza::StreamEvent::Kind::USAGE);
     CHECK(outs[0].usage.prompt == 100);
     CHECK(outs[0].usage.cached_read == 60);
     CHECK(outs[0].usage.cached_write == 0);
@@ -354,11 +354,11 @@ TEST_CASE("OpenAI usage reports cached tokens from prompt_tokens_details")
 
 TEST_CASE("Anthropic usage folds cache tokens into prompt")
 {
-    ursa::Route route;
-    route.dialect = ursa::ApiStandard::ANTHROPIC;
-    const auto p  = ursa::get_provider(route);
+    imza::Route route;
+    route.dialect = imza::ApiStandard::ANTHROPIC;
+    const auto p  = imza::get_provider(route);
 
-    ursa::ParseState state;
+    imza::ParseState state;
     const auto outs = parse_all(p, state,
         { { "message_start",
               R"({"type":"message_start","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":60,"cache_creation_input_tokens":30}}})" },
@@ -366,22 +366,22 @@ TEST_CASE("Anthropic usage folds cache tokens into prompt")
                 R"({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}})" },
             { "message_stop", R"({"type":"message_stop"})" } });
     REQUIRE(outs.size() == 2);
-    CHECK(outs[0].kind == ursa::StreamEvent::Kind::USAGE);
+    CHECK(outs[0].kind == imza::StreamEvent::Kind::USAGE);
     CHECK(outs[0].usage.cached_read == 60);
     CHECK(outs[0].usage.cached_write == 30);
     CHECK(outs[0].usage.prompt == 100);
     CHECK(outs[0].usage.completion == 7);
     CHECK(outs[0].usage.total == 107);
-    CHECK(outs[1].kind == ursa::StreamEvent::Kind::DONE);
+    CHECK(outs[1].kind == imza::StreamEvent::Kind::DONE);
 }
 
 TEST_CASE("Anthropic emits usage from message_start and message_delta")
 {
-    ursa::Route route;
-    route.dialect = ursa::ApiStandard::ANTHROPIC;
-    const auto p  = ursa::get_provider(route);
+    imza::Route route;
+    route.dialect = imza::ApiStandard::ANTHROPIC;
+    const auto p  = imza::get_provider(route);
 
-    ursa::ParseState state;
+    imza::ParseState state;
     const auto outs = parse_all(p, state,
         { { "message_start",
               R"({"type":"message_start","message":{"usage":{"input_tokens":21,"output_tokens":0}}})" },
@@ -391,10 +391,10 @@ TEST_CASE("Anthropic emits usage from message_start and message_delta")
                 R"({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}})" },
             { "message_stop", R"({"type":"message_stop"})" } });
     REQUIRE(outs.size() == 3);
-    CHECK(outs[0].kind == ursa::StreamEvent::Kind::CONTENT_DELTA);
-    CHECK(outs[1].kind == ursa::StreamEvent::Kind::USAGE);
+    CHECK(outs[0].kind == imza::StreamEvent::Kind::CONTENT_DELTA);
+    CHECK(outs[1].kind == imza::StreamEvent::Kind::USAGE);
     CHECK(outs[1].usage.prompt == 21);
     CHECK(outs[1].usage.completion == 7);
     CHECK(outs[1].usage.total == 28);
-    CHECK(outs[2].kind == ursa::StreamEvent::Kind::DONE);
+    CHECK(outs[2].kind == imza::StreamEvent::Kind::DONE);
 }

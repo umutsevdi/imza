@@ -1,6 +1,6 @@
 THIRD-PARTY SOFTWARE NOTICES
 
-Ursa uses the third-party projects listed below. Copyright notices and
+Imza uses the third-party projects listed below. Copyright notices and
 license terms are reproduced from the versions referenced by CMake and the
 git submodules in this repository.
 

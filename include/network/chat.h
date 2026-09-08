@@ -8,7 +8,7 @@
 
 #include "common/tool_call.h"
 
-namespace ursa {
+namespace imza {
 
 struct ThinkingBlock {
     std::string text;
@@ -45,4 +45,4 @@ struct ChatRequest {
 
 const char* role_str(Message::Type type);
 
-} // namespace ursa
+} // namespace imza

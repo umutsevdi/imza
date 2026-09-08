@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-namespace ursa {
+namespace imza {
 
 template <typename... Args> class Signal {
 public:
@@ -113,4 +113,4 @@ private:
     std::shared_ptr<State> _state = std::make_shared<State>();
 };
 
-} // namespace ursa
+} // namespace imza

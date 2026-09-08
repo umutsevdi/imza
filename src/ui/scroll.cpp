@@ -6,7 +6,7 @@
 #include <limits>
 #include <utility>
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -200,4 +200,4 @@ void VirtualListState::_rebuild_offsets() const
     _offsets_dirty = false;
 }
 
-} // namespace ursa
+} // namespace imza

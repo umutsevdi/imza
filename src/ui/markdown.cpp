@@ -15,7 +15,7 @@ extern "C" {
 #include <string_view>
 #include <vector>
 
-namespace ursa {
+namespace imza {
 
 using namespace ftxui;
 
@@ -259,12 +259,12 @@ namespace {
             heading_level_                   = 0;
             in_paragraph_                    = false;
             static const Color HEAD_COLORS[] = {
-                Color::White,
-                Color::CyanLight,
-                Color::MagentaLight,
-                Color::YellowLight,
-                Color::GreenLight,
-                Color::BlueLight,
+                PANEL_FG,
+                HL_CYAN,
+                HL_MAGENTA,
+                HL_YELLOW,
+                HL_GREEN,
+                HL_BLUE,
             };
             Decorator decorate = [lvl](Element e) {
                 const int idx = (lvl < 1 || lvl > 6) ? 0 : lvl - 1;
@@ -290,8 +290,7 @@ namespace {
                     }
                     lines.push_back(
                         ftxui::text(std::string(lit.substr(start, end - start)))
-                        | color(Color::Palette256(245))
-                        | bgcolor(Color::Palette256(234)));
+                        | color(PANEL_FG_DIM) | bgcolor(PANEL_COLOR));
                     if (end == lit.size()) {
                         break;
                     }
@@ -301,8 +300,7 @@ namespace {
             if (lines.empty()) {
                 lines.push_back(ftxui::text(""));
             }
-            add(vbox(std::move(lines)) | bgcolor(Color::Palette256(234))
-                | borderLight);
+            add(vbox(std::move(lines)) | bgcolor(PANEL_COLOR) | borderLight);
         }
 
         void quote_begin() { frames_.emplace_back(); }
@@ -312,7 +310,7 @@ namespace {
             Element body = frames_.back().empty() ? ftxui::text("")
                                                   : vbox(frames_.back());
             frames_.pop_back();
-            add(std::move(body) | bgcolor(Color::Palette256(237)));
+            add(std::move(body) | bgcolor(PANEL_COLOR_FOCUS));
         }
 
         void list_begin(bool) { lists_.emplace_back(); }
@@ -473,11 +471,11 @@ namespace {
             }
             if (fl.code) {
                 e |= dim;
-                e |= bgcolor(Color::Palette256(236));
+                e |= bgcolor(PANEL_COLOR_FOCUS);
             }
             if (fl.link) {
                 e |= underlined;
-                e |= color(Color::CyanLight);
+                e |= color(HL_CYAN);
                 if (!fl.url.empty()) {
                     e |= hyperlink(fl.url);
                 }
@@ -515,4 +513,4 @@ Element render_markdown_element(std::string_view md)
     return sink.take();
 }
 
-} // namespace ursa
+} // namespace imza

@@ -5,7 +5,7 @@
 #include "common/tool_call.h"
 #include "permissions/filesystem.h"
 
-namespace ursa {
+namespace imza {
 
 class SkillStore;
 struct Config;
@@ -21,4 +21,4 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& request,
     const PermissionContext& context, const Config& config,
     const std::vector<Skill>& skills, const SkillStore& loaded_skills);
 
-} // namespace ursa
+} // namespace imza

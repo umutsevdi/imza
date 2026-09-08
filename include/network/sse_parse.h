@@ -11,7 +11,7 @@
 #include "network/chat.h"
 #include "network/network.h"
 
-namespace ursa {
+namespace imza {
 
 struct ToolAccum {
     std::string id;
@@ -46,4 +46,4 @@ struct Provider {
 
 Provider get_provider(const Route& route);
 
-} // namespace ursa
+} // namespace imza

@@ -11,7 +11,7 @@
 #include <string>
 #include <utility>
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -745,4 +745,4 @@ std::optional<Session::Mode> workflow_mode(WorkflowPhase phase)
     return std::nullopt;
 }
 
-} // namespace ursa
+} // namespace imza

@@ -4,9 +4,9 @@
 
 #include <string_view>
 
-namespace ursa {
+namespace imza {
 
 std::string write_json(const Json::Value& value);
 Json::Value parse_json(std::string_view text);
 
-} // namespace ursa
+} // namespace imza

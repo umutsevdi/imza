@@ -18,7 +18,7 @@ namespace Json {
 class Value;
 }
 
-namespace ursa {
+namespace imza {
 
 struct Config;
 
@@ -88,4 +88,4 @@ private:
     std::optional<PendingSkillTurn> pending_turn_;
 };
 
-} // namespace ursa
+} // namespace imza

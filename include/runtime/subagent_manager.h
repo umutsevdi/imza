@@ -12,9 +12,9 @@
 #include <vector>
 
 #include "common/types.h"
-#include "common/ursa_signal.h"
+#include "common/imza_signal.h"
 
-namespace ursa {
+namespace imza {
 
 class Session;
 
@@ -79,4 +79,4 @@ private:
     Signal<const SubagentEvent&> changed_;
 };
 
-} // namespace ursa
+} // namespace imza

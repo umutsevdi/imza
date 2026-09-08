@@ -10,7 +10,7 @@
 #include <algorithm>
 #include <vector>
 
-namespace ursa {
+namespace imza {
 
 using namespace ftxui;
 
@@ -52,7 +52,7 @@ namespace {
         bool OnEvent(Event event) override
         {
             if (event == Event::Escape) {
-                ursa::close_modal(*state_);
+                imza::close_modal(*state_);
                 return true;
             }
             if (event == Event::Return) {
@@ -67,7 +67,7 @@ namespace {
         void apply()
         {
             if (cursor_ >= 0 && cursor_ < static_cast<int>(options_.size())) {
-                ursa::resolve_modal(*state_,
+                imza::resolve_modal(*state_,
                     ModalResult { VariantChoice { options_[cursor_] } });
             }
         }
@@ -86,4 +86,4 @@ ftxui::Component make_variant(std::shared_ptr<ApplicationState> state)
     return ftxui::Make<VariantView>(state);
 }
 
-} // namespace ursa
+} // namespace imza

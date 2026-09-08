@@ -6,7 +6,7 @@
 
 #include "common/types.h"
 
-namespace ursa {
+namespace imza {
 
 class Session;
 struct LoadedSession;
@@ -20,4 +20,4 @@ std::vector<SavedSession> saved_sessions();
 enum class DeleteSessionResult { OK, INVALID_PATH, REMOVE_FAILED };
 DeleteSessionResult delete_saved_session(const std::filesystem::path& path);
 
-} // namespace ursa
+} // namespace imza

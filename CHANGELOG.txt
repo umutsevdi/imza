@@ -1,15 +1,23 @@
-ursa
+imza
 AUTHOR:           Umut Sevdi <mail@umutsevdi.com>
-WEBSITE:          https://github.com/umutsevdi/ursa
-SOURCE CODE:      https://github.com/umutsevdi/ursa
-RELEASES:         https://github.com/umutsevdi/ursa/releases
-ISSUES & SUPPORT: https://github.com/umutsevdi/ursa/issues
+WEBSITE:          https://github.com/umutsevdi/imza
+SOURCE CODE:      https://github.com/umutsevdi/imza
+RELEASES:         https://github.com/umutsevdi/imza/releases
+ISSUES & SUPPORT: https://github.com/umutsevdi/imza/issues
 
 CHANGELOG
 -------------------------------------------------------------------------------
+0.2.0 - 2026-09-11
+-------------------------------------------------------------------------------
+[https://github.com/umutsevdi/imza/releases/tag/v0.2.0]
+
+Changes:
+  - Rebranded as `imza`.
+
+-------------------------------------------------------------------------------
 0.1.3 - 2026-09-09
 -------------------------------------------------------------------------------
-[https://github.com/umutsevdi/ursa/releases/tag/v0.1.3]
+[https://github.com/umutsevdi/imza/releases/tag/v0.1.3]
 
 Changes:
   - Improved Windows startup time.
@@ -19,14 +27,14 @@ Changes:
   - Fixed review horizontal scrolling and focus.
   - Session list now loads in the background from a session index.
   - Added cross-process file locking for config and session files.
-  - Concurrent ursa instances no longer overwrite each other's config changes.
+  - Concurrent imza instances no longer overwrite each other's config changes.
   - Fixed title-generation subagent ignoring the configured reasoning effort.
   - Various internal cleanups and code deduplication.
 
 -------------------------------------------------------------------------------
 0.1.2 - 2026-09-08
 -------------------------------------------------------------------------------
-[https://github.com/umutsevdi/ursa/releases/tag/v0.1.2]
+[https://github.com/umutsevdi/imza/releases/tag/v0.1.2]
 
 Changes:
     - Added CLI commands.
@@ -42,7 +50,7 @@ Changes:
 -------------------------------------------------------------------------------
 0.1.1 - 2026-09-05
 -------------------------------------------------------------------------------
-[https://github.com/umutsevdi/ursa/releases/tag/v0.1.1]
+[https://github.com/umutsevdi/imza/releases/tag/v0.1.1]
 
 Changes:
     - Added syntax highlighting for 20 languages.
@@ -52,7 +60,7 @@ Changes:
 -------------------------------------------------------------------------------
 0.1.0 - 2026-09-04
 -------------------------------------------------------------------------------
-[https://github.com/umutsevdi/ursa/releases/tag/v0.1.0]
+[https://github.com/umutsevdi/imza/releases/tag/v0.1.0]
 
 Changes:
     - Initial version.

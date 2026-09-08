@@ -7,10 +7,10 @@
 #include <vector>
 
 #include "common/types.h"
-#include "common/ursa_signal.h"
+#include "common/imza_signal.h"
 #include "conversation/persistence.h"
 
-namespace ursa {
+namespace imza {
 
 class Session;
 
@@ -38,4 +38,4 @@ private:
     std::jthread _worker;
 };
 
-} // namespace ursa
+} // namespace imza

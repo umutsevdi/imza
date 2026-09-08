@@ -11,7 +11,7 @@
 #include <unistd.h>
 #endif
 
-namespace ursa {
+namespace imza {
 
 FileLock::FileLock(std::intptr_t handle)
     : _handle(handle)
@@ -94,4 +94,4 @@ std::filesystem::path lock_path_for(const std::filesystem::path& file)
     return file.string() + ".lock";
 }
 
-} // namespace ursa
+} // namespace imza

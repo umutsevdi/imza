@@ -3,12 +3,9 @@
 #include <tree_sitter/api.h>
 
 #include <algorithm>
-#include <array>
-#include <cctype>
 #include <cstdint>
 #include <filesystem>
 #include <limits>
-#include <memory>
 #include <mutex>
 #include <optional>
 #include <regex>
@@ -19,7 +16,7 @@
 
 #include "common/util.h"
 
-namespace ursa {
+namespace imza {
 
 using namespace ftxui;
 
@@ -215,12 +212,12 @@ namespace {
     Color style_color(SyntaxStyle style)
     {
         switch (style) {
-        case SyntaxStyle::KEYWORD: return Color::Green;
-        case SyntaxStyle::TYPE: return Color::Cyan;
-        case SyntaxStyle::STRING: return Color::Yellow;
-        case SyntaxStyle::NUMBER: return Color::Magenta;
-        case SyntaxStyle::COMMENT: return Color::GrayLight;
-        case SyntaxStyle::SPECIAL: return Color::Blue;
+        case SyntaxStyle::KEYWORD: return HL_GREEN;
+        case SyntaxStyle::TYPE: return HL_CYAN;
+        case SyntaxStyle::STRING: return HL_YELLOW;
+        case SyntaxStyle::NUMBER: return HL_MAGENTA;
+        case SyntaxStyle::COMMENT: return PANEL_FG_DIM;
+        case SyntaxStyle::SPECIAL: return HL_BLUE;
         case SyntaxStyle::PLAIN: return PANEL_FG;
         }
         return PANEL_FG;
@@ -534,4 +531,4 @@ Element highlight_code_line(std::string_view code, std::string_view type)
                          : std::move(lines.front());
 }
 
-} // namespace ursa
+} // namespace imza

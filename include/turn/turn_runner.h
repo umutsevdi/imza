@@ -16,7 +16,7 @@
 #include "network/network.h"
 #include "tools/tool.h"
 
-namespace ursa {
+namespace imza {
 
 class SkillStore;
 class ProviderStore;
@@ -124,4 +124,4 @@ private:
 void apply_reasoning(ChatRequest& req, ApiStandard dialect,
     std::string_view effort, const ProviderStore& providers);
 
-} // namespace ursa
+} // namespace imza

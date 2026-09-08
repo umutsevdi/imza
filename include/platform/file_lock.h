@@ -4,7 +4,7 @@
 #include <filesystem>
 #include <variant>
 
-namespace ursa {
+namespace imza {
 
 struct FileLockError { };
 
@@ -32,4 +32,4 @@ std::variant<FileLock, FileLockError> acquire_file_lock(
 
 std::filesystem::path lock_path_for(const std::filesystem::path& file);
 
-} // namespace ursa
+} // namespace imza

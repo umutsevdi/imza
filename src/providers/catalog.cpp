@@ -10,7 +10,7 @@
 
 #include "common/util.h"
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -368,4 +368,4 @@ std::string endpoint_for_base(std::string_view base)
     return normalize_base(base) + std::string(kChatSuffix);
 }
 
-} // namespace ursa
+} // namespace imza

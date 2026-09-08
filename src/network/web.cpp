@@ -12,7 +12,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -415,4 +415,4 @@ Status web_search(const std::string& query, int num_results, std::string& text)
     return Status::OK;
 }
 
-} // namespace ursa
+} // namespace imza

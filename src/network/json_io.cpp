@@ -1,6 +1,6 @@
 #include "network/json_io.h"
 
-namespace ursa {
+namespace imza {
 
 std::string write_json(const Json::Value& value)
 {
@@ -24,4 +24,4 @@ Json::Value parse_json(std::string_view text)
     return value;
 }
 
-} // namespace ursa
+} // namespace imza

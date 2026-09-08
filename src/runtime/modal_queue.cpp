@@ -2,7 +2,7 @@
 
 #include <utility>
 
-namespace ursa {
+namespace imza {
 
 void ModalQueue::enqueue(
     ModalPayload payload, std::shared_ptr<std::promise<ModalResult>> promise)
@@ -54,4 +54,4 @@ void ModalQueue::abandon()
     entries_.clear();
 }
 
-} // namespace ursa
+} // namespace imza

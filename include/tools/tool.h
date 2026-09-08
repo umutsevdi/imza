@@ -16,7 +16,7 @@
 #include "common/tool_call.h"
 #include "common/types.h"
 
-namespace ursa {
+namespace imza {
 
 struct ShellExit {
     int code;
@@ -99,4 +99,4 @@ Tool make_websearch_tool();
 std::vector<Tool> default_tools(
     RuntimeFlag flags = interactive_runtime_flags());
 
-} // namespace ursa
+} // namespace imza

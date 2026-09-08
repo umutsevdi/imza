@@ -22,7 +22,7 @@
 #include <unistd.h>
 #endif
 
-namespace ursa {
+namespace imza {
 
 namespace {
     std::filesystem::path config_dir()
@@ -282,21 +282,21 @@ std::optional<InstructionFile> load_agent_file(
     return std::nullopt;
 }
 
-std::filesystem::path prepare_ursa_temporary_directory(
+std::filesystem::path prepare_imza_temporary_directory(
     const std::filesystem::path& base)
 {
     std::error_code error;
-    const std::filesystem::path directory = base / "ursa";
+    const std::filesystem::path directory = base / "imza";
     std::filesystem::create_directories(directory, error);
     if (error || !std::filesystem::is_directory(directory, error) || error) {
         throw std::filesystem::filesystem_error(
-            "cannot create Ursa temporary directory", directory, error);
+            "cannot create Imza temporary directory", directory, error);
     }
     const std::filesystem::path canonical
         = std::filesystem::weakly_canonical(directory, error);
     if (error) {
         throw std::filesystem::filesystem_error(
-            "cannot canonicalize Ursa temporary directory", directory, error);
+            "cannot canonicalize Imza temporary directory", directory, error);
     }
     return canonical;
 }
@@ -316,7 +316,7 @@ SystemEnvironment detect_system_environment()
             "cannot resolve temporary directory", error);
     }
     environment.temporary_directory
-        = prepare_ursa_temporary_directory(temporary_directory);
+        = prepare_imza_temporary_directory(temporary_directory);
     environment.has_git = find_in_path("git");
     environment.today   = format_local_time("%Y-%m-%d");
     return environment;
@@ -557,4 +557,4 @@ std::vector<Skill> Environment::skills() const
     return out;
 }
 
-} // namespace ursa
+} // namespace imza

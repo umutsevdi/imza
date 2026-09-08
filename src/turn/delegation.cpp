@@ -12,7 +12,7 @@
 #include <thread>
 #include <utility>
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -418,4 +418,4 @@ void Delegation::spawn_title(std::string input, TurnSettings settings)
         });
 }
 
-} // namespace ursa
+} // namespace imza

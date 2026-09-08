@@ -17,7 +17,7 @@
 #include "tools/tool.h"
 #include "workspace/environment.h"
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -28,7 +28,7 @@ namespace {
             const auto stamp
                 = std::chrono::steady_clock::now().time_since_epoch().count();
             root = std::filesystem::temp_directory_path()
-                / ("ursa-permission-test-" + std::to_string(stamp));
+                / ("imza-permission-test-" + std::to_string(stamp));
             workspace = root / "workspace";
             temporary = root / "temporary";
             outside   = root / "outside";
@@ -600,7 +600,7 @@ TEST_CASE("central evaluator assigns explicit policies to built-in tools")
         == PermissionDecision::Kind::ACCEPT);
     CHECK(evaluate("webfetch", R"({"url":"https://example.com"})").decision.kind
         == PermissionDecision::Kind::ACCEPT);
-    CHECK(evaluate("websearch", R"({"query":"ursa"})").decision.kind
+    CHECK(evaluate("websearch", R"({"query":"imza"})").decision.kind
         == PermissionDecision::Kind::ACCEPT);
     CHECK(evaluate("subagent",
               R"({"tasks":[{"mode":"research","prompt":"inspect"}]})")
@@ -827,4 +827,4 @@ TEST_CASE("skill evaluation binds approval to the canonical instruction path")
 #endif
 }
 
-} // namespace ursa
+} // namespace imza

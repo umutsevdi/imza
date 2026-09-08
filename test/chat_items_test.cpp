@@ -6,57 +6,57 @@
 #include "test_helpers.h"
 #include "ui/ui.h"
 
-using ursa::test::to_text;
+using imza::test::to_text;
 
 TEST_CASE("render_item renders a user turn")
 {
-    ursa::ConversationItem it = ursa::UserTurn { "hello" };
+    imza::ConversationItem it = imza::UserTurn { "hello" };
     const std::string out
-        = to_text(ursa::render_item(it, { ursa::LayoutCtx::Kind::WIDE, 60 }));
+        = to_text(imza::render_item(it, { imza::LayoutCtx::Kind::WIDE, 60 }));
     CHECK(out.find("hello") != std::string::npos);
 }
 
 TEST_CASE("render_item renders user attachment labels")
 {
-    ursa::ConversationItem it
-        = ursa::UserTurn { "review", { { "src/main.cpp", "int main() {}" } } };
+    imza::ConversationItem it
+        = imza::UserTurn { "review", { { "src/main.cpp", "int main() {}" } } };
     const std::string out
-        = to_text(ursa::render_item(it, { ursa::LayoutCtx::Kind::WIDE, 60 }));
+        = to_text(imza::render_item(it, { imza::LayoutCtx::Kind::WIDE, 60 }));
     CHECK(out.find("@src/main.cpp") != std::string::npos);
 }
 
 TEST_CASE("render_item renders assistant markdown")
 {
-    ursa::ConversationItem it = ursa::AssistantTurn { "# Title\n" };
+    imza::ConversationItem it = imza::AssistantTurn { "# Title\n" };
     const std::string out
-        = to_text(ursa::render_item(it, { ursa::LayoutCtx::Kind::WIDE, 60 }));
+        = to_text(imza::render_item(it, { imza::LayoutCtx::Kind::WIDE, 60 }));
     CHECK(out.find("Title") != std::string::npos);
 }
 
 TEST_CASE("render_item renders a modal answer")
 {
-    ursa::ConversationItem ans = ursa::ModalAnswer { { { { "opt" }, "" } } };
+    imza::ConversationItem ans = imza::ModalAnswer { { { { "opt" }, "" } } };
     const std::string out_a
-        = to_text(ursa::render_item(ans, { ursa::LayoutCtx::Kind::WIDE, 60 }));
+        = to_text(imza::render_item(ans, { imza::LayoutCtx::Kind::WIDE, 60 }));
     CHECK(out_a.find("User answered:") != std::string::npos);
     CHECK(out_a.find("opt") != std::string::npos);
 }
 
 TEST_CASE("render_item renders completed compaction")
 {
-    ursa::ConversationItem item
-        = ursa::CompactionEvent { 1, ursa::CompactionEvent::Status::COMPLETED };
+    imza::ConversationItem item
+        = imza::CompactionEvent { 1, imza::CompactionEvent::Status::COMPLETED };
     const std::string out
-        = to_text(ursa::render_item(item, { ursa::LayoutCtx::Kind::WIDE, 60 }));
+        = to_text(imza::render_item(item, { imza::LayoutCtx::Kind::WIDE, 60 }));
     CHECK(out.find("✓ Session compacted") != std::string::npos);
 }
 
 TEST_CASE("virtual list selects only the visible rows")
 {
-    ursa::VirtualListState list(3);
+    imza::VirtualListState list(3);
     list.resize(100);
 
-    const ursa::VirtualListWindow window = list.window(150, 12, 0);
+    const imza::VirtualListWindow window = list.window(150, 12, 0);
 
     CHECK(window.begin == 50);
     CHECK(window.end == 54);
@@ -67,13 +67,13 @@ TEST_CASE("virtual list selects only the visible rows")
 
 TEST_CASE("virtual list preserves measured heights and applies overscan")
 {
-    ursa::VirtualListState list(3);
+    imza::VirtualListState list(3);
     list.resize(5);
     CHECK(list.set_height(0, 8) == 5);
     CHECK(list.set_height(1, 5) == 2);
     CHECK(list.set_height(1, 5) == 0);
 
-    const ursa::VirtualListWindow window = list.window(9, 3, 4);
+    const imza::VirtualListWindow window = list.window(9, 3, 4);
 
     CHECK(window.begin == 0);
     CHECK(window.end == 3);
@@ -84,7 +84,7 @@ TEST_CASE("virtual list preserves measured heights and applies overscan")
 
 TEST_CASE("virtual list retains measurements while growing")
 {
-    ursa::VirtualListState list(2);
+    imza::VirtualListState list(2);
     list.resize(2);
     list.set_height(0, 7);
     list.resize(4);

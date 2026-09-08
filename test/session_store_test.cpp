@@ -15,7 +15,7 @@ namespace {
 
 struct DataHome {
     std::filesystem::path path
-        = std::filesystem::temp_directory_path() / "ursa_session_store_test";
+        = std::filesystem::temp_directory_path() / "imza_session_store_test";
     std::string previous;
     bool had_previous = false;
 
@@ -64,25 +64,25 @@ TEST_CASE("saved sessions are immutable and fork on a new prompt")
     return;
 #else
     DataHome home;
-    ursa::Session source;
+    imza::Session source;
     source.set_title("Saved title");
     source.begin_send("hello");
     source.append_assistant("model", "off");
-    source.apply(ursa::make_delta_event("world"), { });
+    source.apply(imza::make_delta_event("world"), { });
 
-    REQUIRE(ursa::save_session(source) == ursa::Status::OK);
+    REQUIRE(imza::save_session(source) == imza::Status::OK);
     CHECK_FALSE(source.snapshot_for_save());
-    auto saved = ursa::saved_sessions();
+    auto saved = imza::saved_sessions();
     REQUIRE(saved.size() == 1);
-    CHECK(saved.front().path.parent_path() == ursa::sessions_dir());
-    CHECK(ursa::sessions_dir() == ursa::data_dir() / "sessions");
+    CHECK(saved.front().path.parent_path() == imza::sessions_dir());
+    CHECK(imza::sessions_dir() == imza::data_dir() / "sessions");
     CHECK(saved.front().title == "Saved title");
     const std::filesystem::path saved_path = saved.front().path;
 
     source.begin_send("follow-up");
     CHECK(source.snapshot_for_save().has_value());
-    REQUIRE(ursa::save_session(source) == ursa::Status::OK);
-    saved = ursa::saved_sessions();
+    REQUIRE(imza::save_session(source) == imza::Status::OK);
+    saved = imza::saved_sessions();
     REQUIRE(saved.size() == 2);
     CHECK(std::any_of(saved.begin(), saved.end(),
         [&](const auto& entry) { return entry.path == saved_path; }));
@@ -94,24 +94,24 @@ TEST_CASE("saved sessions are immutable and fork on a new prompt")
     std::filesystem::current_path(other, ec);
     REQUIRE_FALSE(ec);
 
-    ursa::Session loaded;
+    imza::Session loaded;
     std::filesystem::path workspace;
     REQUIRE(
-        ursa::load_session(saved_path, loaded, &workspace) == ursa::Status::OK);
+        imza::load_session(saved_path, loaded, &workspace) == imza::Status::OK);
     CHECK(workspace == directory.original);
     CHECK(std::filesystem::current_path() == other);
     CHECK(loaded.title() == "Saved title");
     REQUIRE(loaded.items().size() == 2);
-    CHECK(std::get<ursa::UserTurn>(loaded.items()[0]).text == "hello");
-    CHECK(std::get<ursa::AssistantTurn>(loaded.items()[1]).markdown == "world");
+    CHECK(std::get<imza::UserTurn>(loaded.items()[0]).text == "hello");
+    CHECK(std::get<imza::AssistantTurn>(loaded.items()[1]).markdown == "world");
 
     loaded.begin_send("parallel continuation");
-    REQUIRE(ursa::save_session(loaded) == ursa::Status::OK);
-    saved = ursa::saved_sessions();
+    REQUIRE(imza::save_session(loaded) == imza::Status::OK);
+    saved = imza::saved_sessions();
     REQUIRE(saved.size() == 3);
 
-    REQUIRE(ursa::save_session(loaded) == ursa::Status::OK);
-    CHECK(ursa::saved_sessions().size() == 3);
+    REQUIRE(imza::save_session(loaded) == imza::Status::OK);
+    CHECK(imza::saved_sessions().size() == 3);
 #endif
 }
 
@@ -121,11 +121,11 @@ TEST_CASE("empty sessions are not saved")
     return;
 #else
     DataHome home;
-    ursa::Session session;
+    imza::Session session;
     CHECK_FALSE(session.has_items());
     CHECK_FALSE(session.snapshot_for_save());
-    CHECK(ursa::save_session(session) == ursa::Status::OK);
-    CHECK(ursa::saved_sessions().empty());
+    CHECK(imza::save_session(session) == imza::Status::OK);
+    CHECK(imza::saved_sessions().empty());
 #endif
 }
 
@@ -135,18 +135,18 @@ TEST_CASE("session index is created and rebuilt from session files")
     return;
 #else
     DataHome home;
-    ursa::Session session;
+    imza::Session session;
     session.set_title("Indexed title");
     session.begin_send("hello");
 
-    REQUIRE(ursa::save_session(session) == ursa::Status::OK);
-    const std::filesystem::path index = ursa::sessions_dir() / ".index.json";
+    REQUIRE(imza::save_session(session) == imza::Status::OK);
+    const std::filesystem::path index = imza::sessions_dir() / ".index.json";
     REQUIRE(std::filesystem::is_regular_file(index));
 
     std::error_code ec;
     std::filesystem::remove(index, ec);
     REQUIRE_FALSE(ec);
-    const auto rebuilt = ursa::saved_sessions();
+    const auto rebuilt = imza::saved_sessions();
 
     REQUIRE(rebuilt.size() == 1);
     CHECK(rebuilt.front().title == "Indexed title");
@@ -156,11 +156,11 @@ TEST_CASE("session index is created and rebuilt from session files")
         std::ofstream corrupt(index, std::ios::trunc);
         corrupt << "not json";
     }
-    const auto recovered = ursa::saved_sessions();
+    const auto recovered = imza::saved_sessions();
     REQUIRE(recovered.size() == 1);
     CHECK(recovered.front().title == "Indexed title");
-    CHECK(ursa::delete_saved_session(index)
-        == ursa::DeleteSessionResult::INVALID_PATH);
+    CHECK(imza::delete_saved_session(index)
+        == imza::DeleteSessionResult::INVALID_PATH);
 #endif
 }
 
@@ -172,29 +172,29 @@ TEST_CASE("concurrent session saves merge their index entries")
     DataHome home;
     constexpr int count = 8;
     std::vector<std::thread> workers;
-    std::vector<ursa::Status> statuses(count, ursa::Status::CONFIG_ERROR);
+    std::vector<imza::Status> statuses(count, imza::Status::CONFIG_ERROR);
     workers.reserve(count);
     for (int index = 0; index < count; ++index) {
         workers.emplace_back([index, &statuses] {
-            ursa::Session session;
+            imza::Session session;
             session.set_title("Session " + std::to_string(index));
             session.begin_send("hello");
-            statuses[index] = ursa::save_session(session);
+            statuses[index] = imza::save_session(session);
         });
     }
     for (std::thread& worker : workers) {
         worker.join();
     }
-    for (const ursa::Status status : statuses) {
-        CHECK(status == ursa::Status::OK);
+    for (const imza::Status status : statuses) {
+        CHECK(status == imza::Status::OK);
     }
 
-    const auto saved = ursa::saved_sessions();
+    const auto saved = imza::saved_sessions();
     CHECK(saved.size() == count);
     REQUIRE_FALSE(saved.empty());
-    REQUIRE(ursa::delete_saved_session(saved.front().path)
-        == ursa::DeleteSessionResult::OK);
-    CHECK(ursa::saved_sessions().size() == count - 1);
+    REQUIRE(imza::delete_saved_session(saved.front().path)
+        == imza::DeleteSessionResult::OK);
+    CHECK(imza::saved_sessions().size() == count - 1);
 #endif
 }
 
@@ -204,24 +204,24 @@ TEST_CASE("saved sessions retain delegated-agent chat transcripts")
     return;
 #else
     DataHome home;
-    ursa::Session source;
+    imza::Session source;
     source.begin_send("delegate");
     source.append_assistant("model", "off");
-    const ursa::ToolCallRequest request { "subagent", "{}", "", "call-1" };
+    const imza::ToolCallRequest request { "subagent", "{}", "", "call-1" };
     source.append_tool(request);
     source.set_tool_subagent_chats(
         request, { { "Agent 1 (research)", "## Assistant\n\nreport" } });
     source.fill_tool_result(
-        request, { ursa::ToolCall::Result::Kind::OUTPUT, "report" });
+        request, { imza::ToolCall::Result::Kind::OUTPUT, "report" });
     source.finish_session("");
 
-    REQUIRE(ursa::save_session(source) == ursa::Status::OK);
-    const auto saved = ursa::saved_sessions();
+    REQUIRE(imza::save_session(source) == imza::Status::OK);
+    const auto saved = imza::saved_sessions();
     REQUIRE(saved.size() == 1);
-    ursa::Session loaded;
-    REQUIRE(ursa::load_session(saved.front().path, loaded) == ursa::Status::OK);
+    imza::Session loaded;
+    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
     REQUIRE(loaded.items().size() == 3);
-    const auto& call = std::get<ursa::ToolCall>(loaded.items()[2]);
+    const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
     REQUIRE(call.subagent_chats.size() == 1);
     CHECK(call.subagent_chats[0].title == "Agent 1 (research)");
     CHECK(
@@ -235,16 +235,16 @@ TEST_CASE("empty title is normalized in both file and index")
     return;
 #else
     DataHome home;
-    ursa::Session session;
+    imza::Session session;
     session.begin_send("hello");
-    REQUIRE(ursa::save_session(session) == ursa::Status::OK);
+    REQUIRE(imza::save_session(session) == imza::Status::OK);
 
-    const auto saved = ursa::saved_sessions();
+    const auto saved = imza::saved_sessions();
     REQUIRE(saved.size() == 1);
     CHECK(saved.front().title == "Untitled session");
 
-    ursa::Session loaded;
-    REQUIRE(ursa::load_session(saved.front().path, loaded) == ursa::Status::OK);
+    imza::Session loaded;
+    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
     CHECK(loaded.title() == "Untitled session");
 #endif
 }
@@ -255,18 +255,18 @@ TEST_CASE("CLI opens and removes saved sessions by ID")
     return;
 #else
     DataHome home;
-    ursa::Session source;
+    imza::Session source;
     source.begin_send("remember this");
-    REQUIRE(ursa::save_session(source) == ursa::Status::OK);
-    const auto saved = ursa::saved_sessions();
+    REQUIRE(imza::save_session(source) == imza::Status::OK);
+    const auto saved = imza::saved_sessions();
     REQUIRE(saved.size() == 1);
     std::string id = saved.front().path.stem().string();
 
-    char program[]    = "ursa";
+    char program[]    = "imza";
     char directory[]  = ".";
     char session[]    = "--session";
     char* open_argv[] = { program, directory, session, id.data() };
-    const ursa::CliResult open_result = ursa::run_cli(4, open_argv);
+    const imza::CliResult open_result = imza::run_cli(4, open_argv);
 
     CHECK(open_result.continue_as_interactive);
     CHECK(open_result.exit_code == 0);
@@ -278,18 +278,18 @@ TEST_CASE("CLI opens and removes saved sessions by ID")
     char ask[]                 = "--ask";
     char query[]               = "continue";
     char* one_shot_argv[]      = { program, ask, query, session, id.data() };
-    const auto one_shot_result = ursa::run_cli(5, one_shot_argv);
+    const auto one_shot_result = imza::run_cli(5, one_shot_argv);
 
     REQUIRE(one_shot_result.one_shot.has_value());
-    CHECK(one_shot_result.one_shot->mode == ursa::OneShotRequest::Mode::ASK);
+    CHECK(one_shot_result.one_shot->mode == imza::OneShotRequest::Mode::ASK);
     CHECK(one_shot_result.session_path == saved.front().path);
 
     char remove[]       = "rm";
     char* remove_argv[] = { program, session, remove, id.data() };
-    const ursa::CliResult remove_result = ursa::run_cli(4, remove_argv);
+    const imza::CliResult remove_result = imza::run_cli(4, remove_argv);
 
     CHECK_FALSE(remove_result.continue_as_interactive);
     CHECK(remove_result.exit_code == 0);
-    CHECK(ursa::saved_sessions().empty());
+    CHECK(imza::saved_sessions().empty());
 #endif
 }

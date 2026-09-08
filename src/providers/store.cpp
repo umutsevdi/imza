@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <utility>
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -594,4 +594,4 @@ Status ProviderStore::_commit_connection_locked(const ConnectResult& result,
 
 void ProviderStore::_notify_changed() { changed_.publish(); }
 
-} // namespace ursa
+} // namespace imza

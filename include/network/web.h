@@ -4,7 +4,7 @@
 
 #include <string>
 
-namespace ursa {
+namespace imza {
 
 struct FetchedPage {
     std::string url;
@@ -26,4 +26,4 @@ Status web_search(const std::string& query, int num_results, std::string& text);
 // (plain JSON or SSE "data:" lines); returns "" when none is found.
 std::string mcp_search_text(const std::string& response);
 
-} // namespace ursa
+} // namespace imza

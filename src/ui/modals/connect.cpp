@@ -19,7 +19,7 @@
 #include <string>
 #include <vector>
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -46,9 +46,9 @@ namespace {
     Element status_element(const std::string& text_value, bool ok)
     {
         if (ok) {
-            return text(text_value) | color(Color::GreenLight);
+            return text(text_value) | color(HL_GREEN);
         }
-        return text(text_value) | color(Color::RedLight);
+        return text(text_value) | color(HL_RED);
     }
 
     Element form_gutter(const std::string& label)
@@ -410,9 +410,9 @@ namespace {
                     const bool highlighted = index == row_selected_ && !in_add_;
                     Element state_el       = text("");
                     if (view.state == ConnectionView::State::READY) {
-                        state_el = text("✓") | color(Color::GreenLight);
+                        state_el = text("✓") | color(HL_GREEN);
                     } else if (view.state == ConnectionView::State::FAILED) {
-                        state_el = text("✗") | color(Color::RedLight);
+                        state_el = text("✗") | color(HL_RED);
                     } else {
                         state_el = text("⟳") | color(PANEL_FG_DIM);
                     }
@@ -495,7 +495,7 @@ namespace {
                 return;
             }
             tested_signature_ = current_signature();
-            ursa::resolve_modal(*state_, ModalResult { res });
+            imza::resolve_modal(*state_, ModalResult { res });
         }
 
         void run_save()
@@ -504,7 +504,7 @@ namespace {
             if (res.provider_id.empty()) {
                 return;
             }
-            ursa::resolve_modal(*state_, ModalResult { res });
+            imza::resolve_modal(*state_, ModalResult { res });
         }
 
         ConnectResult build_result(bool persist)
@@ -708,7 +708,7 @@ namespace {
             if (!row) {
                 return;
             }
-            ursa::resolve_modal(*state_,
+            imza::resolve_modal(*state_,
                 ModalResult {
                     ModelChoice { row->connection_id, row->model_id } });
         }
@@ -806,4 +806,4 @@ ftxui::Component make_connect(std::shared_ptr<ApplicationState> state)
     return ftxui::Make<ConnectView>(state, *state->providers);
 }
 
-} // namespace ursa
+} // namespace imza

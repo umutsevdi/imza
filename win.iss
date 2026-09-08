@@ -4,37 +4,37 @@
 ; Author: Umut Sevdi
 ; Description: Generates the Windows Installer.
 ;
-; Project: umutsevdi/ursa
+; Project: umutsevdi/imza
 ; License: 
 ; GNU GENERAL PUBLIC LICENSE
 ; ------------------------------------------------------------------------------
 
 ; Change the following variable to path to the source code.
-#define Source "C:\Users\vboxuser\source\repos\ursa"
+#define Source "C:\Users\vboxuser\source\repos\imza"
 #define Build Source + "\build\x64-Release"
 
-#define ursaName "Ursa"
-#define ursaDescription "Open source multi-modal coding agent."
-#define ursaVersion "0.1.3"
-#define ursaAuthor "Umut Sevdi"
-#define ursaURL "https://github.com/umutsevdi/ursa"
-#define ursaExe "ursa.exe"
-#define ursaAssoc ursaName + " File"
-#define ursaCopyright "Copyright (C) 2026 Umut Sevdi"
+#define imzaName "Imza"
+#define imzaDescription "Open source multi-modal coding agent."
+#define imzaVersion "0.2.0"
+#define imzaAuthor "Umut Sevdi"
+#define imzaURL "https://github.com/umutsevdi/imza"
+#define imzaExe "imza.exe"
+#define imzaAssoc imzaName + " File"
+#define imzaCopyright "Copyright (C) 2026 Umut Sevdi"
 [Setup]
 AppId={{AC922EA9-C1E0-4FA1-8529-8E9D701DF81C}
-AppName={#ursaName}
-AppVersion={#ursaVersion}
-AppVerName={#ursaName} - {#ursaVersion}
-AppPublisher={#ursaAuthor}
-AppPublisherURL={#ursaURL}
-AppSupportURL={#ursaURL}
-AppContact={#ursaAuthor}
-AppComments={#ursaDescription}
-AppCopyright={#ursaCopyright}
-AppUpdatesURL={#ursaURL}
+AppName={#imzaName}
+AppVersion={#imzaVersion}
+AppVerName={#imzaName} - {#imzaVersion}
+AppPublisher={#imzaAuthor}
+AppPublisherURL={#imzaURL}
+AppSupportURL={#imzaURL}
+AppContact={#imzaAuthor}
+AppComments={#imzaDescription}
+AppCopyright={#imzaCopyright}
+AppUpdatesURL={#imzaURL}
 
-DefaultDirName={autopf}\{#ursaName}
+DefaultDirName={autopf}\{#imzaName}
 DisableDirPage=yes
 
 ArchitecturesAllowed=x64compatible
@@ -46,10 +46,10 @@ LicenseFile={#Source}\LICENSE
 PrivilegesRequired=lowest
 
 OutputDir={#Build}
-OutputBaseFilename=Ursa Installer
-SetupIconFile={#Build}\package\win\ursa.ico
-UninstallDisplayIcon={#Build}\package\win\ursa.ico
-UninstallDisplayName={#ursaName}
+OutputBaseFilename=Imza Installer
+SetupIconFile={#Build}\package\win\imza.ico
+UninstallDisplayIcon={#Build}\package\win\imza.ico
+UninstallDisplayName={#imzaName}
 
 SolidCompression=yes
 WizardStyle=modern dynamic
@@ -59,22 +59,22 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "addtopath"; Description: "Add Ursa to the PATH environment variable"
+Name: "addtopath"; Description: "Add Imza to the PATH environment variable"
 
 [Registry]
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Flags: preservestringtype; Tasks: addtopath
 
 [Files]
-Source: "{#Build}\release\{#ursaExe}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#Build}\release\{#imzaExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Source}\misc\LICENSE.thirdparty.txt"; DestDir: "{app}"
-Source: "{#Source}\misc\ursa.ico"; DestDir: "{app}"
+Source: "{#Source}\misc\imza.ico"; DestDir: "{app}"
 Source: "{#Source}\LICENSE"; DestDir: "{app}"
 Source: "{#Source}\CHANGELOG.txt"; DestDir: "{app}"
 Source: "{#Source}\README.md"; DestDir: "{app}"
 
 [Icons]
-Name: "{autoprograms}\{#ursaName}"; Filename: "{app}\{#ursaExe}"
-Name: "{autodesktop}\{#ursaName}"; Filename: "{app}\{#ursaExe}"; Tasks: desktopicon
+Name: "{autoprograms}\{#imzaName}"; Filename: "{app}\{#imzaExe}"
+Name: "{autodesktop}\{#imzaName}"; Filename: "{app}\{#imzaExe}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#ursaExe}"; Description: "{cm:LaunchProgram,{#StringChange(ursaName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#imzaExe}"; Description: "{cm:LaunchProgram,{#StringChange(imzaName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent

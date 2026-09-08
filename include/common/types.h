@@ -5,7 +5,7 @@
 #include <string>
 #include <string_view>
 
-namespace ursa {
+namespace imza {
 
 struct ApplicationComponent { };
 
@@ -77,4 +77,4 @@ enum class ApiStandard { OPENAI, ANTHROPIC };
 
 enum class SkillPolicy { ALLOW, ASK, DENY };
 
-} // namespace ursa
+} // namespace imza

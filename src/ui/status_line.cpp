@@ -14,7 +14,7 @@
 #include <sstream>
 #include <string>
 
-namespace ursa {
+namespace imza {
 using namespace ftxui;
 
 namespace {
@@ -53,15 +53,15 @@ namespace {
             switch (phase) {
             case WorkflowPhase::PLAN:
                 mode_label = " PLAN ";
-                mode_color = Color::GreenLight;
+                mode_color = HL_GREEN;
                 break;
             case WorkflowPhase::BUILD:
                 mode_label = " BUILD ";
-                mode_color = Color::RedLight;
+                mode_color = HL_RED;
                 break;
             case WorkflowPhase::REVIEW:
                 mode_label = " REVIEW ";
-                mode_color = Color::CyanLight;
+                mode_color = HL_CYAN;
                 break;
             }
             Element mode = text(std::move(mode_label)) | bold
@@ -79,7 +79,7 @@ namespace {
                     const std::string shown
                         = to_config_effort(config.reasoning_effort);
                     const Color effort_color
-                        = shown == "high" ? Color::GreenLight : PANEL_FG;
+                        = shown == "high" ? HL_GREEN : PANEL_FG;
                     bar.push_back(
                         text(" (" + shown + ")") | color(effort_color));
                 }
@@ -109,7 +109,7 @@ namespace {
             if (!environment_ready || running_agents > 0) {
                 animation::RequestAnimationFrame();
                 bar.push_back(spinner(15, static_cast<size_t>(frame_))
-                    | color(Color::GrayLight));
+                    | color(PANEL_FG_DIM));
                 if (wide) {
                     bar.push_back(!environment_ready
                             ? text(" Caching…")
@@ -128,7 +128,7 @@ namespace {
                 }
                 bar.push_back(text("  "));
             }
-            bar.push_back(text(wide ? " URSA v" URSA_VERSION " " : " URSA ")
+            bar.push_back(text(wide ? " IMZA v" IMZA_VERSION " " : " IMZA ")
                 | bold | bgcolor(PANEL_FG) | color(PANEL_COLOR));
             return hbox(std::move(bar)) | bgcolor(PANEL_COLOR_FOCUS)
                 | color(PANEL_FG) | xflex;
@@ -202,4 +202,4 @@ ftxui::Component make_status_line(std::shared_ptr<ApplicationState> state,
     return ftxui::Make<StatusLine>(
         std::move(state), std::move(layout), std::move(workflow));
 }
-} // namespace ursa
+} // namespace imza

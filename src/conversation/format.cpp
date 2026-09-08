@@ -3,7 +3,7 @@
 #include <string>
 #include <type_traits>
 
-namespace ursa {
+namespace imza {
 
 std::string shell_status_text(const ShellStatus& status)
 {
@@ -150,4 +150,4 @@ std::string ask_answer_markdown(const ModalAnswer& answer)
     return md;
 }
 
-} // namespace ursa
+} // namespace imza

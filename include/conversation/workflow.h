@@ -5,7 +5,7 @@
 
 #include "conversation/session.h"
 
-namespace ursa {
+namespace imza {
 
 enum class WorkflowPhase { PLAN, BUILD, REVIEW };
 
@@ -17,4 +17,4 @@ std::optional<Session::Mode> workflow_mode(WorkflowPhase phase);
 using WorkflowFn         = std::function<WorkflowPhase()>;
 using WorkflowNavigateFn = std::function<void(WorkflowPhase)>;
 
-} // namespace ursa
+} // namespace imza

@@ -26,7 +26,7 @@ struct IsolatedConfig {
     {
         static int counter = 0;
         dir                = std::filesystem::temp_directory_path()
-            / ("ursa-ctrl-test-" + std::to_string(::getpid()) + "-"
+            / ("imza-ctrl-test-" + std::to_string(::getpid()) + "-"
                 + std::to_string(counter++));
         std::filesystem::create_directories(dir);
         if (const char* xdg = std::getenv("XDG_DATA_HOME")) {
@@ -35,15 +35,15 @@ struct IsolatedConfig {
         }
         setenv("XDG_DATA_HOME", dir.string().c_str(), 1);
 
-        ursa::Catalog catalog;
+        imza::Catalog catalog;
         catalog.fetched_at = static_cast<std::int64_t>(std::time(nullptr));
-        ursa::CachedProvider provider;
+        imza::CachedProvider provider;
         provider.name                 = "Test Provider";
         provider.api                  = "http://127.0.0.1:9/v1";
         provider.npm                  = "@ai-sdk/openai-compatible";
         catalog.providers["testprov"] = provider;
         std::ignore
-            = ursa::save_catalog(dir / "ursa" / "presets.json", catalog);
+            = imza::save_catalog(dir / "imza" / "presets.json", catalog);
     }
 
     ~IsolatedConfig()
@@ -62,7 +62,7 @@ struct PostPump {
     std::mutex mutex;
     std::queue<std::function<void()>> queue;
 
-    ursa::PostFn fn()
+    imza::PostFn fn()
     {
         return [this](std::function<void()> f) {
             std::lock_guard lock(mutex);
@@ -99,29 +99,29 @@ struct PostPump {
     }
 };
 
-std::shared_ptr<ursa::ApplicationState> make_state(
-    std::shared_ptr<ursa::Session> session,
-    std::shared_ptr<ursa::ProviderStore> providers, ursa::PostFn post)
+std::shared_ptr<imza::ApplicationState> make_state(
+    std::shared_ptr<imza::Session> session,
+    std::shared_ptr<imza::ProviderStore> providers, imza::PostFn post)
 {
     auto state
-        = ursa::make_application_state(std::move(post), ursa::Config { });
+        = imza::make_application_state(std::move(post), imza::Config { });
     state->session   = session;
     state->providers = providers;
     return state;
 }
 
-ursa::ModelsFn fake_models_ok()
+imza::ModelsFn fake_models_ok()
 {
-    return [](const ursa::Route&, std::vector<ursa::ModelInfo>& out) {
+    return [](const imza::Route&, std::vector<imza::ModelInfo>& out) {
         out = { { "m1" }, { "m2" } };
-        return ursa::Status::OK;
+        return imza::Status::OK;
     };
 }
 
-ursa::ModelsFn fake_models_fail()
+imza::ModelsFn fake_models_fail()
 {
-    return [](const ursa::Route&, std::vector<ursa::ModelInfo>&) {
-        return ursa::Status::API_ERROR;
+    return [](const imza::Route&, std::vector<imza::ModelInfo>&) {
+        return imza::Status::API_ERROR;
     };
 }
 
@@ -131,19 +131,19 @@ TEST_CASE("connect commits a connection and lands models in the catalog")
 {
     IsolatedConfig iso;
     PostPump pump;
-    auto providers = std::make_shared<ursa::ProviderStore>(
-        ursa::Config { }, fake_models_ok());
-    auto session = std::make_shared<ursa::Session>();
+    auto providers = std::make_shared<imza::ProviderStore>(
+        imza::Config { }, fake_models_ok());
+    auto session = std::make_shared<imza::Session>();
     auto state   = make_state(session, providers, pump.fn());
     pump.drain();
 
     resolve_modal(*state,
-        ursa::ModalResult {
-            ursa::ConnectResult { "testprov", "", "key1", "", true } });
+        imza::ModalResult {
+            imza::ConnectResult { "testprov", "", "key1", "", true } });
     REQUIRE(pump.wait_for([&] {
         const auto views = providers->connections();
         return views.size() == 1
-            && views[0].state == ursa::ConnectionView::State::READY
+            && views[0].state == imza::ConnectionView::State::READY
             && !session->connect_status().empty();
     }));
 
@@ -153,8 +153,8 @@ TEST_CASE("connect commits a connection and lands models in the catalog")
     CHECK(views[0].model_count == 2);
     CHECK(session->connect_status() == "✓ 2 models");
 
-    ursa::Config saved;
-    REQUIRE(ursa::load_config(ursa::config_path(), saved) == ursa::Status::OK);
+    imza::Config saved;
+    REQUIRE(imza::load_config(imza::config_path(), saved) == imza::Status::OK);
     REQUIRE(saved.providers.size() == 1);
     CHECK(saved.providers[0].provider_id == "testprov");
     CHECK(saved.providers[0].api_key == "key1");
@@ -164,28 +164,28 @@ TEST_CASE("connecting a labeled custom endpoint stores the label")
 {
     IsolatedConfig iso;
     PostPump pump;
-    auto providers = std::make_shared<ursa::ProviderStore>(
-        ursa::Config { }, fake_models_ok());
-    auto session = std::make_shared<ursa::Session>();
+    auto providers = std::make_shared<imza::ProviderStore>(
+        imza::Config { }, fake_models_ok());
+    auto session = std::make_shared<imza::Session>();
     auto state   = make_state(session, providers, pump.fn());
     pump.drain();
 
     resolve_modal(*state,
-        ursa::ModalResult { ursa::ConnectResult { "custom",
+        imza::ModalResult { imza::ConnectResult { "custom",
             "http://localhost:11434/v1/chat/completions", "", "my Ollama",
             true } });
     REQUIRE(pump.wait_for([&] {
         const auto views = providers->connections();
         return views.size() == 1
-            && views[0].state == ursa::ConnectionView::State::READY;
+            && views[0].state == imza::ConnectionView::State::READY;
     }));
 
     const auto views = providers->connections();
     CHECK(views[0].id == "custom");
     CHECK(views[0].name == "my Ollama");
 
-    ursa::Config saved;
-    REQUIRE(ursa::load_config(ursa::config_path(), saved) == ursa::Status::OK);
+    imza::Config saved;
+    REQUIRE(imza::load_config(imza::config_path(), saved) == imza::Status::OK);
     REQUIRE(saved.providers.size() == 1);
     CHECK(saved.providers[0].provider_id == "custom");
     CHECK(saved.providers[0].endpoint
@@ -197,21 +197,21 @@ TEST_CASE("connecting the same endpoint updates in place")
 {
     IsolatedConfig iso;
     PostPump pump;
-    auto providers = std::make_shared<ursa::ProviderStore>(
-        ursa::Config { }, fake_models_ok());
-    auto session = std::make_shared<ursa::Session>();
+    auto providers = std::make_shared<imza::ProviderStore>(
+        imza::Config { }, fake_models_ok());
+    auto session = std::make_shared<imza::Session>();
     auto state   = make_state(session, providers, pump.fn());
     pump.drain();
 
     resolve_modal(*state,
-        ursa::ModalResult {
-            ursa::ConnectResult { "testprov", "", "key1", "", true } });
+        imza::ModalResult {
+            imza::ConnectResult { "testprov", "", "key1", "", true } });
     REQUIRE(
         pump.wait_for([&] { return providers->connections().size() == 1; }));
 
     resolve_modal(*state,
-        ursa::ModalResult {
-            ursa::ConnectResult { "testprov", "", "key2", "", true } });
+        imza::ModalResult {
+            imza::ConnectResult { "testprov", "", "key2", "", true } });
     REQUIRE(pump.wait_for([&] {
         const auto views = providers->connections();
         return views.size() == 1 && views[0].api_key == "key2";
@@ -228,21 +228,21 @@ TEST_CASE("test-only connect does not persist")
 {
     IsolatedConfig iso;
     PostPump pump;
-    auto providers = std::make_shared<ursa::ProviderStore>(
-        ursa::Config { }, fake_models_ok());
-    auto session = std::make_shared<ursa::Session>();
+    auto providers = std::make_shared<imza::ProviderStore>(
+        imza::Config { }, fake_models_ok());
+    auto session = std::make_shared<imza::Session>();
     auto state   = make_state(session, providers, pump.fn());
     pump.drain();
 
     resolve_modal(*state,
-        ursa::ModalResult {
-            ursa::ConnectResult { "testprov", "", "key", "", false } });
+        imza::ModalResult {
+            imza::ConnectResult { "testprov", "", "key", "", false } });
     REQUIRE(pump.wait_for(
         [&] { return session->connect_status() == "✓ 2 models"; }));
     CHECK(providers->connections().empty());
 
-    ursa::Config saved;
-    REQUIRE(ursa::load_config(ursa::config_path(), saved) == ursa::Status::OK);
+    imza::Config saved;
+    REQUIRE(imza::load_config(imza::config_path(), saved) == imza::Status::OK);
     CHECK(saved.providers.empty());
 }
 
@@ -250,15 +250,15 @@ TEST_CASE("failing test keeps the connection absent")
 {
     IsolatedConfig iso;
     PostPump pump;
-    auto providers = std::make_shared<ursa::ProviderStore>(
-        ursa::Config { }, fake_models_fail());
-    auto session = std::make_shared<ursa::Session>();
+    auto providers = std::make_shared<imza::ProviderStore>(
+        imza::Config { }, fake_models_fail());
+    auto session = std::make_shared<imza::Session>();
     auto state   = make_state(session, providers, pump.fn());
     pump.drain();
 
     resolve_modal(*state,
-        ursa::ModalResult {
-            ursa::ConnectResult { "testprov", "", "key", "", true } });
+        imza::ModalResult {
+            imza::ConnectResult { "testprov", "", "key", "", true } });
     REQUIRE(pump.wait_for([&] { return !session->connect_status().empty(); }));
     CHECK(providers->connections().empty());
     CHECK(session->connect_status() == "API error.");
@@ -268,21 +268,21 @@ TEST_CASE("model pick sets last_used and persists")
 {
     IsolatedConfig iso;
     PostPump pump;
-    ursa::Config cfg;
-    ursa::Connection conn;
+    imza::Config cfg;
+    imza::Connection conn;
     conn.id          = "testprov";
     conn.provider_id = "testprov";
     conn.api_key     = "k";
     cfg.providers.push_back(conn);
 
     auto providers
-        = std::make_shared<ursa::ProviderStore>(cfg, fake_models_ok());
+        = std::make_shared<imza::ProviderStore>(cfg, fake_models_ok());
     auto state
-        = make_state(std::make_shared<ursa::Session>(), providers, pump.fn());
+        = make_state(std::make_shared<imza::Session>(), providers, pump.fn());
     pump.drain();
 
     resolve_modal(
-        *state, ursa::ModalResult { ursa::ModelChoice { "testprov", "m1" } });
+        *state, imza::ModalResult { imza::ModelChoice { "testprov", "m1" } });
     pump.drain();
 
     const auto snapshot = providers->config();
@@ -290,27 +290,27 @@ TEST_CASE("model pick sets last_used and persists")
     CHECK(snapshot.last_used->provider == "testprov");
     CHECK(snapshot.last_used->model == "m1");
 
-    ursa::Config saved;
-    REQUIRE(ursa::load_config(ursa::config_path(), saved) == ursa::Status::OK);
+    imza::Config saved;
+    REQUIRE(imza::load_config(imza::config_path(), saved) == imza::Status::OK);
     REQUIRE(saved.last_used.has_value());
     CHECK(saved.last_used->model == "m1");
 }
 
 TEST_CASE("provider store resolves configured subagent model")
 {
-    ursa::Config cfg;
-    ursa::Connection connection;
+    imza::Config cfg;
+    imza::Connection connection;
     connection.id          = "configured";
     connection.provider_id = "openai";
     connection.endpoint    = "https://example.test/v1/chat/completions";
-    connection.dialects["research-model"] = ursa::ApiStandard::ANTHROPIC;
+    connection.dialects["research-model"] = imza::ApiStandard::ANTHROPIC;
     cfg.providers.push_back(connection);
-    cfg.subagents[ursa::SubagentRole::RESEARCH]
+    cfg.subagents[imza::SubagentRole::RESEARCH]
         = { "configured", "research-model", "high" };
-    ursa::ProviderStore providers(cfg, fake_models_ok());
+    imza::ProviderStore providers(cfg, fake_models_ok());
 
     const auto selection
-        = providers.subagent_selection(ursa::SubagentRole::RESEARCH);
+        = providers.subagent_selection(imza::SubagentRole::RESEARCH);
     REQUIRE(selection.has_value());
     CHECK(selection->connection_id == "configured");
     CHECK(selection->model == "research-model");
@@ -319,20 +319,20 @@ TEST_CASE("provider store resolves configured subagent model")
 
 TEST_CASE("subagent defaults follow the active chat model")
 {
-    ursa::Config cfg;
-    ursa::Connection connection;
+    imza::Config cfg;
+    imza::Connection connection;
     connection.id          = "configured";
     connection.provider_id = "openai";
     connection.endpoint    = "https://example.test/v1/chat/completions";
     cfg.providers.push_back(connection);
-    cfg.last_used = ursa::LastUsed { "configured", "chat-model" };
-    ursa::ProviderStore providers(cfg, fake_models_ok());
+    cfg.last_used = imza::LastUsed { "configured", "chat-model" };
+    imza::ProviderStore providers(cfg, fake_models_ok());
 
     const auto builder
-        = providers.subagent_selection(ursa::SubagentRole::BUILDER);
+        = providers.subagent_selection(imza::SubagentRole::BUILDER);
     const auto research
-        = providers.subagent_selection(ursa::SubagentRole::RESEARCH);
-    const auto basic = providers.subagent_selection(ursa::SubagentRole::BASIC);
+        = providers.subagent_selection(imza::SubagentRole::RESEARCH);
+    const auto basic = providers.subagent_selection(imza::SubagentRole::BASIC);
     REQUIRE(builder.has_value());
     REQUIRE(research.has_value());
     REQUIRE(basic.has_value());
@@ -344,16 +344,16 @@ TEST_CASE("subagent defaults follow the active chat model")
 
 TEST_CASE("subagent configuration does not change main model reasoning")
 {
-    ursa::Config cfg;
-    ursa::Connection connection;
+    imza::Config cfg;
+    imza::Connection connection;
     connection.id          = "configured";
     connection.provider_id = "openai";
     connection.endpoint    = "https://example.test/v1/chat/completions";
     cfg.providers.push_back(connection);
-    cfg.last_used        = ursa::LastUsed { "configured", "chat-model" };
+    cfg.last_used        = imza::LastUsed { "configured", "chat-model" };
     cfg.reasoning_effort = "high";
-    cfg.subagents[ursa::SubagentRole::BASIC] = { "", "", "off" };
-    ursa::ProviderStore providers(cfg, fake_models_ok());
+    cfg.subagents[imza::SubagentRole::BASIC] = { "", "", "off" };
+    imza::ProviderStore providers(cfg, fake_models_ok());
 
     const auto main = providers.active_selection();
     REQUIRE(main.has_value());
@@ -365,20 +365,20 @@ TEST_CASE("removing the active connection re-points last_used")
 {
     IsolatedConfig iso;
     PostPump pump;
-    ursa::Config cfg;
-    ursa::Connection a;
+    imza::Config cfg;
+    imza::Connection a;
     a.id          = "a";
     a.provider_id = "testprov";
-    ursa::Connection b;
+    imza::Connection b;
     b.id          = "b";
     b.provider_id = "testprov";
     cfg.providers = { a, b };
-    cfg.last_used = ursa::LastUsed { "a", "m1" };
+    cfg.last_used = imza::LastUsed { "a", "m1" };
 
     auto providers
-        = std::make_shared<ursa::ProviderStore>(cfg, fake_models_ok());
+        = std::make_shared<imza::ProviderStore>(cfg, fake_models_ok());
     auto state
-        = make_state(std::make_shared<ursa::Session>(), providers, pump.fn());
+        = make_state(std::make_shared<imza::Session>(), providers, pump.fn());
     pump.drain();
 
     CHECK(providers->remove_connection("a"));
@@ -394,16 +394,16 @@ TEST_CASE("removing the last connection is refused")
 {
     IsolatedConfig iso;
     PostPump pump;
-    ursa::Config cfg;
-    ursa::Connection a;
+    imza::Config cfg;
+    imza::Connection a;
     a.id          = "a";
     a.provider_id = "testprov";
     cfg.providers = { a };
 
     auto providers
-        = std::make_shared<ursa::ProviderStore>(cfg, fake_models_ok());
+        = std::make_shared<imza::ProviderStore>(cfg, fake_models_ok());
     auto state
-        = make_state(std::make_shared<ursa::Session>(), providers, pump.fn());
+        = make_state(std::make_shared<imza::Session>(), providers, pump.fn());
 
     CHECK_FALSE(providers->remove_connection("a"));
     CHECK(providers->connections().size() == 1);
@@ -413,9 +413,9 @@ TEST_CASE("send guard blocks messages without an active model")
 {
     IsolatedConfig iso;
     PostPump pump;
-    auto providers = std::make_shared<ursa::ProviderStore>(
-        ursa::Config { }, fake_models_ok());
-    auto session = std::make_shared<ursa::Session>();
+    auto providers = std::make_shared<imza::ProviderStore>(
+        imza::Config { }, fake_models_ok());
+    auto session = std::make_shared<imza::Session>();
     auto state   = make_state(session, providers, pump.fn());
     pump.drain();
 

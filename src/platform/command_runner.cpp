@@ -16,7 +16,7 @@
 #include <unistd.h>
 #endif
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -265,4 +265,4 @@ CommandResult run_attached_command(const std::string& command)
 #endif
 }
 
-} // namespace ursa
+} // namespace imza

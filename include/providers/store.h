@@ -12,14 +12,14 @@
 #include <vector>
 
 #include "common/types.h"
-#include "common/ursa_signal.h"
+#include "common/imza_signal.h"
 #include "network/models.h"
 #include "network/network.h"
 #include "platform/config.h"
 #include "providers/catalog.h"
 #include "providers/pricing.h"
 
-namespace ursa {
+namespace imza {
 
 std::string subagent_variant_or_default(
     const SubagentModelConfig* configured, SubagentRole role);
@@ -139,4 +139,4 @@ private:
     std::atomic<bool> alive_ { true };
 };
 
-} // namespace ursa
+} // namespace imza

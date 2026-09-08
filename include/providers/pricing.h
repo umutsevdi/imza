@@ -7,7 +7,7 @@
 
 #include "providers/catalog.h"
 
-namespace ursa {
+namespace imza {
 
 struct ModelPricing {
     double input_per_1k         = 0.0;
@@ -20,4 +20,4 @@ struct ModelPricing {
 std::map<std::string, ModelPricing> pricing_table_from(const Catalog& catalog);
 double compute_cost(const Usage& usage, const ModelPricing& pricing);
 
-} // namespace ursa
+} // namespace imza

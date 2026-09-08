@@ -8,7 +8,7 @@
 #include "common/tool_call.h"
 #include "common/types.h"
 
-namespace ursa {
+namespace imza {
 
 struct QuestionCard {
     std::string prompt;
@@ -96,4 +96,4 @@ using ModalResult
     = std::variant<std::monostate, ToolVerdict, ModalAnswer, ConnectResult,
         ModelChoice, VariantChoice, SkillPolicyChanges, std::filesystem::path>;
 
-} // namespace ursa
+} // namespace imza

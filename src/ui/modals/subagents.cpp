@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-namespace ursa {
+namespace imza {
 
 using namespace ftxui;
 
@@ -238,4 +238,4 @@ ftxui::Component make_subagents(std::shared_ptr<ApplicationState> state)
     return ftxui::Make<SubagentsView>(*state->providers);
 }
 
-} // namespace ursa
+} // namespace imza

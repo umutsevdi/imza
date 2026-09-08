@@ -11,7 +11,7 @@
 #include "runtime/subagent_manager.h"
 #include "turn/turn_runner.h"
 
-namespace ursa {
+namespace imza {
 
 struct ProviderSelection;
 
@@ -48,4 +48,4 @@ private:
     TurnRunner& runner_;
 };
 
-} // namespace ursa
+} // namespace imza

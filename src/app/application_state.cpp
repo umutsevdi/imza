@@ -9,7 +9,7 @@
 #include <algorithm>
 #include <utility>
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -151,4 +151,4 @@ std::shared_ptr<ApplicationState> make_child_application_state(
         std::move(agent_label));
 }
 
-} // namespace ursa
+} // namespace imza

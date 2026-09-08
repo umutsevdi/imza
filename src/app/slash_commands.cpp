@@ -1,14 +1,14 @@
 #include "app/slash_commands.h"
 #include "common/util.h"
 
-namespace ursa {
+namespace imza {
 
 std::span<const SlashCommand> slash_commands()
 {
     static constexpr SlashCommand commands[] = {
         { "/new", "save this session and start a new one",
             SlashCommand::Action::NEW },
-        { "/exit", "quit ursa", SlashCommand::Action::EXIT },
+        { "/exit", "quit imza", SlashCommand::Action::EXIT },
         { "/connect", "manage provider connections",
             SlashCommand::Action::CONNECT },
         { "/model", "pick the active model", SlashCommand::Action::MODEL },
@@ -35,4 +35,4 @@ const SlashCommand* find_command(std::string_view name)
     return nullptr;
 }
 
-} // namespace ursa
+} // namespace imza

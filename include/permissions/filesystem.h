@@ -12,7 +12,7 @@
 #include "conversation/session.h"
 #include "permissions/store.h"
 
-namespace ursa {
+namespace imza {
 
 class Environment;
 struct SystemEnvironment;
@@ -52,4 +52,4 @@ FilesystemEvaluation evaluate_filesystem_request(std::string_view tool,
 std::optional<ExternalGrant> filesystem_session_grant(
     const FilesystemRequest& request);
 
-} // namespace ursa
+} // namespace imza

@@ -7,7 +7,7 @@
 #include <windows.h>
 #endif
 
-namespace ursa {
+namespace imza {
 
 Status write_json_file(const std::filesystem::path& path,
     const Json::Value& root, std::string_view indentation)
@@ -47,4 +47,4 @@ Status write_json_file(const std::filesystem::path& path,
     return ec ? Status::CONFIG_ERROR : Status::OK;
 }
 
-} // namespace ursa
+} // namespace imza

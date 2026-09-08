@@ -2,7 +2,7 @@
 #include "network/network.h"
 #include "network/sse_parse.h"
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -183,4 +183,4 @@ namespace {
 
 extern const Provider openai_provider = { build, stream_headers, parse };
 
-} // namespace ursa
+} // namespace imza

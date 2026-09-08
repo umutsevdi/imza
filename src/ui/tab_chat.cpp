@@ -23,7 +23,7 @@
 #include <utility>
 #include <vector>
 
-namespace ursa {
+namespace imza {
 
 using namespace ftxui;
 
@@ -346,7 +346,7 @@ namespace {
                     && event->status == CompactionEvent::Status::RUNNING) {
                     el = hbox({
                         spinner(15, static_cast<size_t>(frame_))
-                            | color(Color::GrayLight),
+                            | color(PANEL_FG_DIM),
                         text(" Compacting…") | dim,
                     });
                 }
@@ -362,7 +362,7 @@ namespace {
                         el = vbox({
                             hbox({
                                 spinner(15, static_cast<size_t>(frame_))
-                                    | color(Color::GrayLight),
+                                    | color(PANEL_FG_DIM),
                                 make_reasoning_button(item_index,
                                     std::move(status), at.reasoning,
                                     assistant_metadata(at))
@@ -396,7 +396,7 @@ namespace {
             for (size_t i = 0; i < queued_n; ++i) {
                 const auto& q = st.queued()[i];
                 Elements row {
-                    text("[QUEUED] ") | bold | color(Color::Green),
+                    text("[QUEUED] ") | bold | color(HL_GREEN),
                 };
                 if (i + 1 == queued_n) {
                     row.push_back(text(q.text + "   (ESC to cancel)") | dim);
@@ -500,7 +500,7 @@ namespace {
                     return true;
                 }
                 if (session_->phase() != Session::Phase::IDLE) {
-                    ursa::interrupt(*state_);
+                    imza::interrupt(*state_);
                     return true;
                 }
                 return true;
@@ -589,19 +589,19 @@ namespace {
         void open_viewer_for(const ToolCall& tc)
         {
             if (tc.name == "read") {
-                ursa::enqueue_user_modal(*state_,
+                imza::enqueue_user_modal(*state_,
                     ViewerModal { tool_call_head(tc), tc.result->text,
                         tool_code_language(tc), read_start_line(tc) });
             } else if (tc.name == "skill") {
-                ursa::enqueue_user_modal(*state_,
+                imza::enqueue_user_modal(*state_,
                     ViewerModal { tool_call_head(tc), tc.result->text,
                         "markdown", 1, true });
             } else if (tc.name == "list") {
-                ursa::enqueue_user_modal(*state_,
+                imza::enqueue_user_modal(*state_,
                     ViewerModal {
                         "Directory listing", tc.result->text, "", 1 });
             } else {
-                ursa::enqueue_user_modal(*state_,
+                imza::enqueue_user_modal(*state_,
                     ViewerModal { "Shell output", tc.result->text, "", 1 });
             }
         }
@@ -609,7 +609,7 @@ namespace {
         void open_subagent_viewer(const ToolCall& tc, std::size_t index)
         {
             SubagentChat chat = state_->delegation->subagent_chat(tc, index);
-            ursa::enqueue_user_modal(*state_,
+            imza::enqueue_user_modal(*state_,
                 ViewerModal { std::move(chat.title), std::move(chat.transcript),
                     "markdown", 1, true, "" });
         }
@@ -633,7 +633,7 @@ namespace {
             const std::string text(input_buf_);
             input_buf_.clear();
             input_cursor_ = 0;
-            ursa::submit(*state_, text, std::move(attachments_));
+            imza::submit(*state_, text, std::move(attachments_));
             attachments_.clear();
             autocomplete_.clear();
             follow_ = true;
@@ -732,7 +732,7 @@ namespace {
             Elements parts {
                 text(tc.name == "skill" ? "Load Skill"
                                         : tool_display_name(tc.name))
-                    | bold | color(Color::GreenLight),
+                    | bold | color(HL_GREEN),
                 text(" "),
                 text(tool_header_args(tc)) | color(PANEL_FG),
             };
@@ -741,7 +741,7 @@ namespace {
                     = shell_status_text(*tc.result->shell_status);
                 if (!status.empty()) {
                     parts.push_back(filler());
-                    parts.push_back(text(status) | color(Color::RedLight));
+                    parts.push_back(text(status) | color(HL_RED));
                 }
             }
             return hbox(std::move(parts));
@@ -875,7 +875,7 @@ namespace {
                     text(" …") | dim,
                 });
             } else if (tc.result->kind == ToolCall::Result::Kind::ERROR) {
-                status = text("failed") | color(Color::RedLight);
+                status = text("failed") | color(HL_RED);
             }
             return vbox({
                 hbox({
@@ -894,12 +894,12 @@ namespace {
 
         Element render_tool_error(const ToolCall& tc)
         {
-            return render_tool_status(tc, "Error: ", Color::RedLight);
+            return render_tool_status(tc, "Error: ", HL_RED);
         }
 
         Element render_tool_reject(const ToolCall& tc)
         {
-            return render_tool_status(tc, "Rejected: ", Color::YellowLight);
+            return render_tool_status(tc, "Rejected: ", HL_YELLOW);
         }
 
         Element render_tool_pending(const ToolCall& tc)
@@ -908,7 +908,7 @@ namespace {
                 Elements rows {
                     hbox({
                         spinner(15, static_cast<std::size_t>(frame_))
-                            | color(Color::GrayLight),
+                            | color(PANEL_FG_DIM),
                         text(" Delegating…" + elapsed_suffix(*session_)) | dim,
                     }),
                 };
@@ -927,7 +927,7 @@ namespace {
                 return vbox({
                     hbox({
                         spinner(15, static_cast<std::size_t>(frame_))
-                            | color(Color::GreenLight),
+                            | color(HL_GREEN),
                         text(" "),
                         tool_header_element(tc),
                     }),
@@ -1030,7 +1030,7 @@ namespace {
                     Element row   = done
                         ? btn->Render()
                         : hbox({ spinner(15, static_cast<size_t>(frame_))
-                                  | color(Color::GrayLight),
+                                  | color(PANEL_FG_DIM),
                               btn->Render(), filler(),
                               text(interrupt_hint()) | dim });
                     parts.push_back(row);
@@ -1129,4 +1129,4 @@ ftxui::Component make_chat(
     return ftxui::Make<ChatImpl>(std::move(state), std::move(layout));
 }
 
-} // namespace ursa
+} // namespace imza

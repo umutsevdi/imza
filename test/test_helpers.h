@@ -5,7 +5,7 @@
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/screen.hpp>
 
-namespace ursa::test {
+namespace imza::test {
 
 inline ftxui::Screen to_screen(
     ftxui::Element element, int width = 60, int height = 30)
@@ -22,4 +22,4 @@ inline std::string to_text(
     return to_screen(std::move(element), width, height).ToString();
 }
 
-} // namespace ursa::test
+} // namespace imza::test

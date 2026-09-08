@@ -15,14 +15,14 @@
 #include "common/modal.h"
 #include "common/tool_call.h"
 #include "common/types.h"
-#include "common/ursa_signal.h"
+#include "common/imza_signal.h"
 #include "network/chat.h"
 #include "network/network.h"
 #include "providers/pricing.h"
 #include "tools/tool.h"
 #include "workspace/attachments.h"
 
-namespace ursa {
+namespace imza {
 
 inline constexpr std::string_view PLAN_REMINDER_TAG
     = "<system-reminder id=\"plan-mode\">";
@@ -245,4 +245,4 @@ private:
     Signal<> attachments_changed_;
 };
 
-} // namespace ursa
+} // namespace imza

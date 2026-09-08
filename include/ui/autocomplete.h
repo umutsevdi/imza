@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-namespace ursa {
+namespace imza {
 
 struct ApplicationState;
 
@@ -45,4 +45,4 @@ private:
     int selected_ = 0;
 };
 
-} // namespace ursa
+} // namespace imza

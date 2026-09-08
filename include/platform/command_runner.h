@@ -4,7 +4,7 @@
 #include <filesystem>
 #include <string>
 
-namespace ursa {
+namespace imza {
 
 struct CommandResult {
     std::string output;
@@ -18,4 +18,4 @@ CommandResult run_command(
     const std::string& command, std::chrono::seconds timeout);
 CommandResult run_attached_command(const std::string& command);
 
-} // namespace ursa
+} // namespace imza

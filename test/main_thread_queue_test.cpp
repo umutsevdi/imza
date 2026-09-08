@@ -11,7 +11,7 @@ using namespace std::chrono_literals;
 
 TEST_CASE("main thread queue defers tasks until drained")
 {
-    ursa::MainThreadQueue queue;
+    imza::MainThreadQueue queue;
     int value = 0;
 
     queue.post([&value] { value = 1; });
@@ -23,7 +23,7 @@ TEST_CASE("main thread queue defers tasks until drained")
 
 TEST_CASE("main thread queue drains tasks in posting order")
 {
-    ursa::MainThreadQueue queue;
+    imza::MainThreadQueue queue;
     std::string order;
 
     queue.post([&order] { order += 'a'; });
@@ -36,7 +36,7 @@ TEST_CASE("main thread queue drains tasks in posting order")
 
 TEST_CASE("main thread queue notifies subscribers of pending work")
 {
-    ursa::MainThreadQueue queue;
+    imza::MainThreadQueue queue;
     int notifications = 0;
     queue.post([] { });
 
@@ -50,7 +50,7 @@ TEST_CASE("main thread queue notifies subscribers of pending work")
 
 TEST_CASE("main thread queue accepts work from another thread")
 {
-    ursa::MainThreadQueue queue;
+    imza::MainThreadQueue queue;
     std::atomic<bool> ran = false;
     std::jthread worker([&queue, &ran] { queue.post([&ran] { ran = true; }); });
     worker.join();

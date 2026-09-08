@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 
-namespace ursa {
+namespace imza {
 namespace {
 
     using namespace ftxui;
@@ -95,4 +95,4 @@ void append_review_hunk_highlights(ReviewHighlights& cache,
     cache_document(cache, next, syntax, HighlightSide::NEW);
 }
 
-} // namespace ursa
+} // namespace imza

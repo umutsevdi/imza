@@ -5,7 +5,7 @@
 #include <unordered_set>
 #include <utility>
 
-namespace ursa {
+namespace imza {
 
 SubagentManager::~SubagentManager() { stop(); }
 
@@ -138,4 +138,4 @@ Signal<const SubagentEvent&>::Subscription SubagentManager::subscribe(
     return changed_.subscribe(std::move(callback));
 }
 
-} // namespace ursa
+} // namespace imza

@@ -11,7 +11,7 @@
 #include "common/util.h"
 #include "platform/config.h"
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -244,4 +244,4 @@ std::optional<PendingSkillTurn> SkillStore::take_pending_turn()
     return turn;
 }
 
-} // namespace ursa
+} // namespace imza

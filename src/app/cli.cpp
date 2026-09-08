@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -108,11 +108,11 @@ namespace {
 
 CliResult run_cli(int argc, char** argv)
 {
-    CLI::App app { "ursa " URSA_VERSION "\r\n"
+    CLI::App app { "imza " IMZA_VERSION "\r\n"
                    "Umut Sevdi <mail@umutsevdi.com>\r\n"
                    "Open source multi-modal coding agent.",
-        "ursa" };
-    app.set_version_flag("-v,--version", "ursa " URSA_VERSION);
+        "imza" };
+    app.set_version_flag("-v,--version", "imza " IMZA_VERSION);
     std::vector<std::string> session_arguments;
     std::string working_directory;
     std::string model;
@@ -275,4 +275,4 @@ RuntimeFlag runtime_flags_for(const CliResult& result)
     return static_cast<RuntimeFlag>(flags);
 }
 
-} // namespace ursa
+} // namespace imza

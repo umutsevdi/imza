@@ -9,7 +9,7 @@
 #include "app/application_state.h"
 #include "permissions/store.h"
 
-namespace ursa {
+namespace imza {
 
 class MainThreadQueue;
 
@@ -67,4 +67,4 @@ void interrupt(ApplicationState& state);
 void delete_saved_session(
     ApplicationState& state, const std::filesystem::path& path);
 
-} // namespace ursa
+} // namespace imza

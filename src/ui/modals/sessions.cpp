@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-namespace ursa {
+namespace imza {
 
 using namespace ftxui;
 
@@ -78,14 +78,14 @@ namespace {
                     return true;
                 }
                 if (event == Event::Return) {
-                    ursa::delete_saved_session(
+                    imza::delete_saved_session(
                         *state_, sessions_[cursor_].path);
                     return true;
                 }
                 return true;
             }
             if (event == Event::Escape) {
-                ursa::close_modal(*state_);
+                imza::close_modal(*state_);
                 return true;
             }
             if (move_list_cursor(
@@ -102,7 +102,7 @@ namespace {
                 if (session_->has_pending_work()) {
                     return true;
                 }
-                ursa::resolve_modal(
+                imza::resolve_modal(
                     *state_, ModalResult { sessions_[cursor_].path });
                 return true;
             }
@@ -142,4 +142,4 @@ ftxui::Component make_sessions(std::shared_ptr<ApplicationState> state)
     return ftxui::Make<SessionsView>(state);
 }
 
-} // namespace ursa
+} // namespace imza

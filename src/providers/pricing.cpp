@@ -6,7 +6,7 @@
 #include <optional>
 #include <string>
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -81,4 +81,4 @@ double compute_cost(const Usage& usage, const ModelPricing& pricing)
     return plain + read + write + out;
 }
 
-} // namespace ursa
+} // namespace imza

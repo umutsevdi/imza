@@ -7,7 +7,7 @@
 #include <optional>
 #include <string>
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -80,4 +80,4 @@ int one_shot_exit_code(OneShotResult::Kind kind)
     return 1;
 }
 
-} // namespace ursa
+} // namespace imza

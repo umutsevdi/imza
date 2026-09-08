@@ -10,7 +10,7 @@
 #include "common/modal.h"
 #include "common/types.h"
 
-namespace ursa {
+namespace imza {
 
 struct PendingModal {
     ModalPayload payload;
@@ -32,4 +32,4 @@ private:
     std::deque<PendingModal> entries_;
 };
 
-} // namespace ursa
+} // namespace imza

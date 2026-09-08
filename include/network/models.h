@@ -7,7 +7,7 @@
 
 #include "network/network.h"
 
-namespace ursa {
+namespace imza {
 
 struct ModelInfo {
     std::string id;
@@ -19,4 +19,4 @@ Status parse_models_response(
     std::string_view body, std::vector<ModelInfo>& out);
 Status fetch_models(const Route& route, std::vector<ModelInfo>& out);
 
-} // namespace ursa
+} // namespace imza

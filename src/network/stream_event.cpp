@@ -2,7 +2,7 @@
 
 #include <utility>
 
-namespace ursa {
+namespace imza {
 
 StreamEvent make_delta_event(std::string text)
 {
@@ -68,4 +68,4 @@ StreamEvent make_reasoning_event(std::string text, std::string signature)
     return ev;
 }
 
-} // namespace ursa
+} // namespace imza

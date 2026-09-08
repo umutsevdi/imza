@@ -9,7 +9,7 @@
 #include "network/json_io.h"
 #include "tools/tool.h"
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -108,7 +108,7 @@ TEST_CASE("dispatch propagates handler errors")
 TEST_CASE("edit produces a diff whose right side holds the new content")
 {
     const std::filesystem::path path
-        = std::filesystem::temp_directory_path() / "ursa_edit_diff_test.txt";
+        = std::filesystem::temp_directory_path() / "imza_edit_diff_test.txt";
     {
         std::ofstream f(path, std::ios::binary | std::ios::trunc);
         f << "original line\nappended line\n";
@@ -144,7 +144,7 @@ TEST_CASE("edit produces a diff whose right side holds the new content")
 TEST_CASE("edit preserves text around partial-line replacements")
 {
     const auto path
-        = std::filesystem::temp_directory_path() / "ursa_edit_partial_test.txt";
+        = std::filesystem::temp_directory_path() / "imza_edit_partial_test.txt";
     {
         std::ofstream file(path, std::ios::binary | std::ios::trunc);
         file << "prefix old suffix\nsecond line\n";
@@ -164,7 +164,7 @@ TEST_CASE("edit preserves text around partial-line replacements")
 TEST_CASE("edit preserves gaps while replacing multiple occurrences")
 {
     const auto path = std::filesystem::temp_directory_path()
-        / "ursa_edit_multiple_test.txt";
+        / "imza_edit_multiple_test.txt";
     {
         std::ofstream file(path, std::ios::binary | std::ios::trunc);
         file << "old middle old tail\n";
@@ -185,7 +185,7 @@ TEST_CASE("edit preserves gaps while replacing multiple occurrences")
 TEST_CASE("write replaces an inclusive line range and reports final content")
 {
     const auto path
-        = std::filesystem::temp_directory_path() / "ursa_write_range_test.txt";
+        = std::filesystem::temp_directory_path() / "imza_write_range_test.txt";
     {
         std::ofstream file(path, std::ios::binary | std::ios::trunc);
         file << "one\ntwo\nthree\nfour\n";
@@ -208,7 +208,7 @@ TEST_CASE("write replaces an inclusive line range and reports final content")
 TEST_CASE("write line_end zero replaces through the end")
 {
     const auto path
-        = std::filesystem::temp_directory_path() / "ursa_write_to_end_test.txt";
+        = std::filesystem::temp_directory_path() / "imza_write_to_end_test.txt";
     {
         std::ofstream file(path, std::ios::binary | std::ios::trunc);
         file << "one\ntwo\nthree\n";
@@ -226,4 +226,4 @@ TEST_CASE("write line_end zero replaces through the end")
     std::filesystem::remove(path, ec);
 }
 
-} // namespace ursa
+} // namespace imza

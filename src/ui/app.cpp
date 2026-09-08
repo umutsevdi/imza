@@ -23,7 +23,7 @@
 #include <unistd.h>
 #endif
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -279,7 +279,7 @@ int run_repl(
     std::shared_ptr<ApplicationState> state, MainThreadQueue& main_thread)
 {
     if (!is_interactive_terminal()) {
-        std::println("ursa requires an interactive terminal");
+        std::println("imza requires an interactive terminal");
         return 1;
     }
 
@@ -292,7 +292,7 @@ int run_repl(
     state->on_exit         = [&screen] { screen.Exit(); };
     state->providers->ensure_catalog_fresh();
     if (state->providers->config().providers.empty()) {
-        ursa::enqueue_user_modal(
+        imza::enqueue_user_modal(
             *state, ConnectModal { ConnectModal::Entry::MANAGE });
     }
     auto app = ftxui::Make<Repl>(screen, state);
@@ -307,4 +307,4 @@ int run_repl(
     return saved ? 0 : 1;
 }
 
-} // namespace ursa
+} // namespace imza

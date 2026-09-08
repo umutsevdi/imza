@@ -10,11 +10,11 @@
 #include <unordered_map>
 
 #include "common/types.h"
-#include "common/ursa_signal.h"
+#include "common/imza_signal.h"
 #include "tools/skills.h"
 #include "workspace/git.h"
 
-namespace ursa {
+namespace imza {
 
 struct SystemEnvironment {
     std::string os_name;
@@ -35,7 +35,7 @@ struct WorkspaceEnvironment {
 };
 
 SystemEnvironment detect_system_environment();
-std::filesystem::path prepare_ursa_temporary_directory(
+std::filesystem::path prepare_imza_temporary_directory(
     const std::filesystem::path& base);
 WorkspaceEnvironment scan_workspace(const std::filesystem::path& directory);
 
@@ -85,4 +85,4 @@ private:
     std::jthread git_worker_;
 };
 
-} // namespace ursa
+} // namespace imza

@@ -4,7 +4,7 @@
 #include <cctype>
 #include <filesystem>
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -271,4 +271,4 @@ std::size_t read_start_line(const ToolCall& call)
     return 1;
 }
 
-} // namespace ursa
+} // namespace imza

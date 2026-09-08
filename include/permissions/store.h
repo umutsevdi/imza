@@ -9,9 +9,9 @@
 #include <vector>
 
 #include "common/types.h"
-#include "common/ursa_signal.h"
+#include "common/imza_signal.h"
 
-namespace ursa {
+namespace imza {
 
 using ExternalGrant = std::filesystem::path;
 
@@ -54,4 +54,4 @@ private:
     Signal<> _changed;
 };
 
-} // namespace ursa
+} // namespace imza

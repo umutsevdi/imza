@@ -1,12 +1,12 @@
 #!/usr/bin/env xdg-open
 [Desktop Entry]
-Name=Ursa
-GenericName=Ursa
+Name=Imza
+GenericName=Imza
 Comment=Open source multi-modal coding agent.
 Categories=Development;IDE
-Exec=ursa %U
+Exec=imza %U
 Terminal=true
 Type=Application
-Icon=ursa
+Icon=imza
 Actions=New;
 Keywords=development;programming;IDE;

@@ -16,7 +16,7 @@
 #include <sstream>
 #include <utility>
 
-namespace ursa {
+namespace imza {
 
 namespace {
 
@@ -607,4 +607,4 @@ DeleteSessionResult delete_saved_session(const std::filesystem::path& path)
     return DeleteSessionResult::OK;
 }
 
-} // namespace ursa
+} // namespace imza

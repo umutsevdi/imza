@@ -13,7 +13,7 @@
 #include "common/types.h"
 #include "network/chat.h"
 
-namespace ursa {
+namespace imza {
 
 struct StreamEvent {
     enum class Kind {
@@ -77,4 +77,4 @@ Status stream(const Route& route, const ChatRequest& req, StreamCallback cb,
 
 Status parse_api_error(std::string_view body, std::string& message);
 
-} // namespace ursa
+} // namespace imza

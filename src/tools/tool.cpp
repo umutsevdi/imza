@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-namespace ursa {
+namespace imza {
 
 const Tool* find_tool(std::span<const Tool> tools, std::string_view name)
 {
@@ -721,4 +721,4 @@ Tool make_write_tool()
     return { std::move(spec), write_run };
 }
 
-} // namespace ursa
+} // namespace imza

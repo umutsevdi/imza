@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace ursa {
+namespace imza {
 
 struct DiffRow {
     enum class Kind { SAME, REMOVE, ADD };
@@ -21,4 +21,4 @@ struct DiffView {
     std::vector<DiffRow> rows;
 };
 
-} // namespace ursa
+} // namespace imza
