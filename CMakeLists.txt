@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 4.0)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 project(
     ursa
-    VERSION 0.1.2
+    VERSION 0.1.3
     HOMEPAGE_URL "https://github.com/umutsevdi/ursa"
     LANGUAGES C CXX
 )
@@ -248,6 +248,7 @@ add_library(ursa_execution
     src/tools/web.cpp
     src/turn/delegation.cpp
     src/turn/prompt.cpp
+    src/turn/stream_updates.cpp
     src/turn/turn_runner.cpp
 )
 target_include_directories(ursa_execution PRIVATE

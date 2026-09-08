@@ -683,8 +683,8 @@ namespace {
 
         Element render_read_item(const ToolCall& tc)
         {
-            const std::string content = tc.result->text;
-            const std::string label   = "▸ open " + tool_call_head(tc)
+            const std::string& content = tc.result->text;
+            const std::string label    = "▸ open " + tool_call_head(tc)
                 + " in viewer (" + std::to_string(count_lines(content))
                 + " lines)";
             Component btn = make_viewer_button(tc.id, label);
@@ -698,11 +698,9 @@ namespace {
         Element render_list_collapsed(const ToolCall& tc)
         {
             const std::string& full = tc.result->text;
-            std::size_t entries     = 0;
-            for (const auto& line : split_lines(full)) {
-                if (!line.empty() && line.rfind("[truncated", 0) != 0) {
-                    ++entries;
-                }
+            std::size_t entries     = count_lines(full);
+            if (full.find("\n[truncated:") != std::string::npos) {
+                --entries;
             }
             const std::string label = "▸ open directory listing in viewer ("
                 + std::to_string(entries) + " entries)";

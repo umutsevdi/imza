@@ -55,7 +55,7 @@ namespace {
     bool find_in_path(const std::string& name)
     {
 #ifdef _WIN32
-        return !read_command_output("where " + name).empty();
+        return !read_command_output("where " + name + " 2>NUL").empty();
 #else
         return !read_command_output("command -v " + name).empty();
 #endif
@@ -135,9 +135,15 @@ namespace {
 
     void detect_package_managers(std::vector<std::string>& package_managers)
     {
+#ifdef _WIN32
+        static const char* const candidates[] = { "winget", "choco", "scoop" };
+#elif defined(__APPLE__)
+        static const char* const candidates[] = { "brew", "port", "nix-env" };
+#else
         static const char* const candidates[] = { "apt", "apt-get", "dnf",
             "yum", "pacman", "zypper", "apk", "brew", "port", "xbps-install",
-            "nix-env", "snap", "flatpak", "winget", "choco", "scoop" };
+            "nix-env", "snap", "flatpak" };
+#endif
         for (const char* pm : candidates) {
             if (find_in_path(pm)) {
                 package_managers.emplace_back(pm);
@@ -356,7 +362,8 @@ Environment::Environment()
                 const auto observed_workspace = workspace();
                 if (observed_workspace == nullptr
                     || !observed_workspace->project_root) {
-                    std::this_thread::sleep_for(std::chrono::seconds { 2 });
+                    std::this_thread::sleep_for(
+                        std::chrono::milliseconds { 2500 });
                     continue;
                 }
                 const CommandResult status = run_command(
@@ -389,7 +396,8 @@ Environment::Environment()
                     if (current && changed_files == current->changed_files
                         && branch_name == current->branch
                         && changes == current->changes) {
-                        std::this_thread::sleep_for(std::chrono::seconds { 2 });
+                        std::this_thread::sleep_for(
+                            std::chrono::milliseconds { 2500 });
                         continue;
                     }
                     RepositoryState next;
@@ -400,7 +408,7 @@ Environment::Environment()
                         std::make_shared<RepositoryState>(std::move(next)),
                         observed_workspace);
                 }
-                std::this_thread::sleep_for(std::chrono::seconds { 2 });
+                std::this_thread::sleep_for(std::chrono::milliseconds { 2500 });
             }
         });
     }

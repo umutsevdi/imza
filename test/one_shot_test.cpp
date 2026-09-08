@@ -4,9 +4,12 @@
 
 #include <doctest/doctest.h>
 
+#include <atomic>
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -23,10 +26,16 @@ ursa::Config one_shot_config()
 
 std::shared_ptr<ursa::ApplicationState> make_one_shot_state(
     ursa::MainThreadQueue& queue, ursa::StreamFn stream,
-    ursa::RuntimeFlag flags = ursa::WEB)
+    ursa::RuntimeFlag flags          = ursa::WEB,
+    std::atomic<std::size_t>* posted = nullptr)
 {
     return ursa::make_application_state(
-        [&queue](std::function<void()> task) { queue.post(std::move(task)); },
+        [&queue, posted](std::function<void()> task) {
+            if (posted != nullptr) {
+                posted->fetch_add(1);
+            }
+            queue.post(std::move(task));
+        },
         one_shot_config(), std::move(stream), flags);
 }
 
@@ -68,6 +77,55 @@ TEST_CASE("one-shot exec runs in Build mode")
     CHECK(state->session->mode() == ursa::Session::Mode::BUILD);
     CHECK(result.kind == ursa::OneShotResult::Kind::SUCCESS);
     CHECK(result.output == "built");
+}
+
+TEST_CASE("one-shot coalesces adjacent streaming deltas")
+{
+    ursa::MainThreadQueue queue;
+    std::atomic<std::size_t> posted = 0;
+    auto state                      = make_one_shot_state(
+        queue,
+        [](const ursa::ChatRequest&, const ursa::StreamCallback& callback) {
+            for (std::size_t index = 0; index < 1000; ++index) {
+                callback(ursa::make_delta_event("x"));
+            }
+            callback(ursa::make_done_event());
+            return ursa::Status::OK;
+        },
+        ursa::WEB, &posted);
+    while (!state->environment->ready()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds { 1 });
+    }
+    queue.drain();
+    posted.store(0);
+
+    const auto result = ursa::run_one_shot(
+        *state, queue, { ursa::OneShotRequest::Mode::ASK, "stream" });
+
+    CHECK(result.output == std::string(1000, 'x'));
+    CHECK(posted.load() < 50);
+}
+
+TEST_CASE("one-shot preserves coalesced reasoning and its signature")
+{
+    ursa::MainThreadQueue queue;
+    auto state = make_one_shot_state(queue,
+        [](const ursa::ChatRequest&, const ursa::StreamCallback& callback) {
+            callback(ursa::make_reasoning_event("first "));
+            callback(ursa::make_reasoning_event("second", "signature"));
+            callback(ursa::make_delta_event("answer"));
+            callback(ursa::make_done_event());
+            return ursa::Status::OK;
+        });
+
+    const auto result = ursa::run_one_shot(
+        *state, queue, { ursa::OneShotRequest::Mode::ASK, "reason" });
+    const auto assistant = state->session->last_assistant();
+
+    REQUIRE(assistant.has_value());
+    CHECK(result.output == "answer");
+    CHECK(assistant->reasoning == "first second");
+    CHECK(assistant->reasoning_signature == "signature");
 }
 
 TEST_CASE("one-shot reports unattended permission blocks without a modal")

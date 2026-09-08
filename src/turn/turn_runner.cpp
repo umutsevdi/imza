@@ -286,10 +286,12 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
         Status error_status                 = Status::OK;
         bool saw_stream                     = false;
         std::uint64_t request_prompt_tokens = 0;
+        StreamUpdateBuffer stream_updates(post_, state_->session);
 
         StreamCallback cb = [this, model = req.model, &text_buffer, &error_msg,
                                 &error_status, &saw_stream,
-                                &request_prompt_tokens](const StreamEvent& ev) {
+                                &request_prompt_tokens,
+                                &stream_updates](const StreamEvent& ev) {
             if (ev.kind == StreamEvent::Kind::ERROR) {
                 error_status = ev.error;
                 error_msg    = ev.text;
@@ -312,7 +314,7 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
             const ModelPricing pricing = ev.kind == StreamEvent::Kind::USAGE
                 ? state_->providers->pricing_for(model)
                 : ModelPricing { };
-            _post([this, ev, pricing] { state_->session->apply(ev, pricing); });
+            stream_updates.push(ev, pricing);
         };
 
         const StreamFn& fn = stream_fn_;
@@ -375,6 +377,7 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
                 }
             }
         }
+        stream_updates.finish();
         history = std::move(req.messages);
 
         if (state_->session->interrupt_requested()) {
