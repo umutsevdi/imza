@@ -47,8 +47,8 @@ PrivilegesRequired=lowest
 
 OutputDir={#Build}
 OutputBaseFilename=Imza Installer
-SetupIconFile={#Build}\package\win\imza.ico
-UninstallDisplayIcon={#Build}\package\win\imza.ico
+SetupIconFile={#Source}\misc\imza.ico
+UninstallDisplayIcon={#Source}\misc\imza.ico
 UninstallDisplayName={#imzaName}
 
 SolidCompression=yes
