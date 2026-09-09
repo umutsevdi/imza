@@ -73,16 +73,16 @@ TEST_CASE("config roundtrip preserves connections and last_used")
     const auto path = temp_file("roundtrip.json");
     imza::Config cfg;
     imza::Connection conn;
-    conn.id          = "openrouter";
-    conn.provider_id = "openrouter";
-    conn.api_key     = "sk-or-test";
+    conn.id            = "openrouter";
+    conn.api_key       = "sk-or-test";
+    conn.refresh_token = "refresh-test";
+    conn.expires_at    = 1756390000;
+    conn.account_id    = "account-test";
     cfg.providers.push_back(conn);
 
     imza::Connection local;
     local.id                  = "local";
-    local.provider_id         = "local";
     local.endpoint            = "http://localhost:11434/v1/chat/completions";
-    local.api_key             = "";
     local.label               = "my Ollama";
     local.dialects["glm-5.3"] = imza::ApiStandard::ANTHROPIC;
     local.dialects["gpt-responses"] = imza::ApiStandard::OPENAI_RESPONSES;
@@ -97,8 +97,10 @@ TEST_CASE("config roundtrip preserves connections and last_used")
     CHECK(imza::load_config(path, loaded) == imza::Status::OK);
     REQUIRE(loaded.providers.size() == 2);
     CHECK(loaded.providers[0].id == "openrouter");
-    CHECK(loaded.providers[0].provider_id == "openrouter");
     CHECK(loaded.providers[0].api_key == "sk-or-test");
+    CHECK(loaded.providers[0].refresh_token == "refresh-test");
+    CHECK(loaded.providers[0].expires_at == 1756390000);
+    CHECK(loaded.providers[0].account_id == "account-test");
     CHECK(loaded.providers[0].endpoint.empty());
     CHECK(loaded.providers[0].label.empty());
     CHECK(loaded.providers[1].label == "my Ollama");
@@ -119,9 +121,15 @@ TEST_CASE("config roundtrip preserves connections and last_used")
     std::istringstream stream(read_all(path));
     REQUIRE(Json::parseFromStream(reader, stream, &written, &errors));
     CHECK(written["providers"][0]["id"] == "openrouter");
-    CHECK(written["providers"][0]["endpoint"] == "");
-    CHECK(written["providers"][0]["label"] == "");
+    CHECK_FALSE(written["providers"][0].isMember("active"));
+    CHECK_FALSE(written["providers"][0].isMember("provider_id"));
+    CHECK_FALSE(written["providers"][0].isMember("endpoint"));
+    CHECK_FALSE(written["providers"][0].isMember("label"));
     CHECK_FALSE(written["providers"][0].isMember("dialects"));
+    CHECK_FALSE(written["providers"][1].isMember("api_key"));
+    CHECK_FALSE(written["providers"][1].isMember("refresh_token"));
+    CHECK_FALSE(written["providers"][1].isMember("expires_at"));
+    CHECK_FALSE(written["providers"][1].isMember("account_id"));
     CHECK(written["providers"][1]["label"] == "my Ollama");
     CHECK(written["providers"][1]["dialects"]["gpt-responses"]
         == "openai-responses");
@@ -131,15 +139,55 @@ TEST_CASE("config roundtrip preserves connections and last_used")
     CHECK_FALSE(written.isMember("reasoning_effort"));
 }
 
-TEST_CASE("load_config rejects providers without id or provider_id")
+TEST_CASE("load_config rejects providers without id")
 {
     const auto path = temp_file("invalid.json");
     {
         std::ofstream out(path);
-        out << R"({"providers": [{"id": "", "provider_id": "openai"}]})";
+        out << R"({"providers": [{"id": ""}]})";
     }
     imza::Config cfg;
     CHECK(imza::load_config(path, cfg) == imza::Status::CONFIG_ERROR);
+}
+
+TEST_CASE("load_config accepts legacy provider_id as id")
+{
+    const auto path = temp_file("legacy-provider-id.json");
+    {
+        std::ofstream out(path);
+        out << R"({"providers": [{"provider_id": "openai", "api_key": "k"}]})";
+    }
+    imza::Config cfg;
+    REQUIRE(imza::load_config(path, cfg) == imza::Status::OK);
+    REQUIRE(cfg.providers.size() == 1);
+    CHECK(cfg.providers[0].id == "openai");
+    CHECK(cfg.providers[0].api_key == "k");
+}
+
+TEST_CASE("load_config disambiguates duplicate connections with labels")
+{
+    const auto path = temp_file("duplicate-provider-id.json");
+    {
+        std::ofstream out(path);
+        out << R"({"providers": [)"
+               R"({"id": "openai"}, {"id": "openai"}, )"
+               R"({"id": "custom", "label": "one"}, )"
+               R"({"id": "custom", "label": "one"}, )"
+               R"({"id": "custom", "label": "one"}]})";
+    }
+    imza::Config cfg;
+    REQUIRE(imza::load_config(path, cfg) == imza::Status::OK);
+    REQUIRE(cfg.providers.size() == 5);
+    CHECK(cfg.providers[0].label.empty());
+    CHECK(cfg.providers[1].label == "2");
+    CHECK(cfg.providers[2].label == "one");
+    CHECK(cfg.providers[3].label == "one 2");
+    CHECK(cfg.providers[4].label == "one 3");
+    CHECK(imza::connection_key(cfg.providers[0]) == "openai");
+    CHECK(imza::connection_key(cfg.providers[1]) == "openai/2");
+    CHECK(imza::connection_key(cfg.providers[2]) == "custom/one");
+    CHECK(imza::connection_key(cfg.providers[3]) == "custom/one 2");
+    CHECK(imza::connection_key(cfg.providers[4]) == "custom/one 3");
 }
 
 TEST_CASE("load_config rejects unknown dialect")
@@ -147,8 +195,7 @@ TEST_CASE("load_config rejects unknown dialect")
     const auto path = temp_file("dialect.json");
     {
         std::ofstream out(path);
-        out << R"({"providers": [{"id": "a", "provider_id": "openai",
-            "dialects": {"m": "grpc"}}]})";
+        out << R"({"providers": [{"id": "a", "dialects": {"m": "grpc"}}]})";
     }
     imza::Config cfg;
     CHECK(imza::load_config(path, cfg) == imza::Status::CONFIG_ERROR);
@@ -268,7 +315,9 @@ TEST_CASE("config roundtrip preserves subagent models")
 {
     const auto path = temp_file("subagents.json");
     imza::Config cfg;
-    cfg.providers.push_back(imza::Connection { "openai", "openai", "", "" });
+    imza::Connection connection;
+    connection.id = "openai";
+    cfg.providers.push_back(std::move(connection));
     cfg.subagents[imza::SubagentRole::BUILDER]
         = { "openai", "gpt-builder", "" };
     cfg.subagents[imza::SubagentRole::RESEARCH]
@@ -331,7 +380,7 @@ TEST_CASE("load_config rejects invalid subagent variant")
     const auto path = temp_file("invalid-subagent-variant.json");
     {
         std::ofstream out(path);
-        out << R"({"providers": [{"id": "p", "provider_id": "openai"}],
+        out << R"({"providers": [{"id": "p"}],
             "models": {"researcher": {"provider": "p", "model": "small",
             "reasoning_effort": "maximum"}}})";
     }

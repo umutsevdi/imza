@@ -2,12 +2,14 @@
 
 #include <cerrno>
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <future>
 #include <string>
 #include <thread>
 
 #ifdef _WIN32
+#include <shellapi.h>
 #include <windows.h>
 #else
 #include <fcntl.h>
@@ -262,6 +264,39 @@ CommandResult run_attached_command(const std::string& command)
     return run_windows_attached(command, std::move(result));
 #else
     return run_posix_attached(command, std::move(result));
+#endif
+}
+
+bool open_browser(std::string_view url)
+{
+    if (url.empty()) {
+        return false;
+    }
+#ifdef _WIN32
+    const std::wstring wide = to_wide(std::string(url));
+    return reinterpret_cast<std::intptr_t>(ShellExecuteW(
+               nullptr, L"open", wide.c_str(), nullptr, nullptr, SW_SHOWNORMAL))
+        > 32;
+#else
+    const std::string target(url);
+    const pid_t pid = fork();
+    if (pid < 0) {
+        return false;
+    }
+    if (pid == 0) {
+#ifdef __APPLE__
+        execlp("open", "open", target.c_str(), static_cast<char*>(nullptr));
+#else
+        execlp("xdg-open", "xdg-open", target.c_str(),
+            static_cast<char*>(nullptr));
+#endif
+        _exit(127);
+    }
+    std::thread([pid] {
+        int status = 0;
+        while (waitpid(pid, &status, 0) < 0 && errno == EINTR) { }
+    }).detach();
+    return true;
 #endif
 }
 

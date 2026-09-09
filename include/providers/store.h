@@ -1,10 +1,12 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <functional>
 #include <map>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -30,9 +32,8 @@ using ProviderChangedFn = std::function<void()>;
 struct ConnectionView {
     enum class State { FETCHING, READY, FAILED };
     std::string id;
-    std::string provider_id;
+    std::string provider;
     std::string name;
-    bool active = false;
     std::string api_key;
     State state             = State::FETCHING;
     Status error            = Status::OK;
@@ -86,13 +87,15 @@ public:
     std::optional<ProviderSelection> subagent_selection(
         SubagentRole role) const;
     Route route_for(std::string_view connection_id, ApiStandard dialect) const;
+    Route authenticated_route_for(
+        std::string_view connection_id, ApiStandard dialect);
     bool model_reasons(std::string_view model) const;
     ModelPricing pricing_for(std::string_view model) const;
 
     void start_model_fetches();
     void refetch_models(std::string_view connection_id);
     void connect(ConnectResult result, ConnectCompleteFn complete);
-    bool remove_connection(std::string_view connection_id);
+    bool remove_connection(std::size_t index, std::string_view expected_id);
     bool select_model(const ModelChoice& choice);
     bool set_reasoning_effort(std::string effort);
     bool set_subagent_model(SubagentRole role, SubagentModelConfig selection);
@@ -133,6 +136,8 @@ private:
     std::map<std::string, int> generations_;
     bool catalog_syncing_ = false;
     mutable std::mutex mutex_;
+    std::condition_variable refresh_changed_;
+    std::set<std::string> refreshing_;
     std::vector<std::jthread> workers_;
     std::optional<std::jthread> catalog_worker_;
     Signal<> changed_;

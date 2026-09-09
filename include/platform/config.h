@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -15,12 +16,16 @@ namespace imza {
 
 struct Connection {
     std::string id;
-    std::string provider_id;
     std::string endpoint;
     std::string api_key;
+    std::string refresh_token;
+    std::int64_t expires_at = 0;
+    std::string account_id;
     std::string label;
     std::map<std::string, ApiStandard> dialects;
 };
+
+std::string connection_key(const Connection& connection);
 
 struct LastUsed {
     std::string provider;

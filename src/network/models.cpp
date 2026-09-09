@@ -10,13 +10,13 @@ namespace imza {
 
 namespace {
 
-    constexpr std::array<std::string_view, 5> kDenyList
+    constexpr std::array<std::string_view, 5> DENY_LIST
         = { "embed", "whisper", "tts", "dall-e", "moderation" };
 
     bool denied(std::string_view id)
     {
         const std::string lower = to_lower(id);
-        for (std::string_view needle : kDenyList) {
+        for (std::string_view needle : DENY_LIST) {
             if (lower.find(needle) != std::string::npos) {
                 return true;
             }
@@ -75,7 +75,7 @@ Status fetch_models(const Route& route, std::vector<ModelInfo>& out)
     }
 
     std::vector<std::string> headers = { "Accept: application/json" };
-    for (auto& h : auth_headers(route.auth, route.api_key)) {
+    for (auto& h : auth_headers(route.auth, route.api_key, route.account_id)) {
         headers.push_back(std::move(h));
     }
 

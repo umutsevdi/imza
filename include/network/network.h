@@ -44,7 +44,13 @@ StreamEvent make_usage_event(Usage usage);
 StreamEvent make_connected_event();
 StreamEvent make_reasoning_event(std::string text, std::string signature = "");
 
-enum class AuthType { BEARER, ANTHROPIC, NONE };
+enum class AuthType {
+    BEARER,
+    ANTHROPIC,
+    ANTHROPIC_SUBSCRIPTION,
+    OPENAI_SUBSCRIPTION,
+    NONE
+};
 
 struct Route {
     std::string endpoint;
@@ -52,9 +58,13 @@ struct Route {
     ApiStandard dialect = ApiStandard::OPENAI;
     AuthType auth       = AuthType::BEARER;
     std::string api_key;
+    std::string account_id;
+    Status error = Status::OK;
+    std::string error_message;
 };
 
-std::vector<std::string> auth_headers(AuthType auth, const std::string& key);
+std::vector<std::string> auth_headers(
+    AuthType auth, const std::string& key, const std::string& account_id = { });
 
 struct HttpGetOptions {
     std::size_t max_bytes = 0;

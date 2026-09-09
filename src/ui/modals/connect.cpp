@@ -25,12 +25,24 @@ namespace {
 
     using namespace ftxui;
 
-    constexpr int kColName   = 22;
-    constexpr int kColKey    = 14;
-    constexpr int kColState  = 8;
-    constexpr int kColModels = 12;
-    constexpr int kColAction = 12;
-    constexpr int kFormLabel = 9;
+    constexpr int COL_KEY      = 14;
+    constexpr int COL_STATE    = 8;
+    constexpr int COL_MODELS   = 12;
+    constexpr int COL_ACTION   = 12;
+    constexpr int FORM_LABEL   = 9;
+    constexpr int COL_NAME_MIN = 22;
+    constexpr int COL_NAME_GAP = 2;
+
+    Element name_cell(
+        const std::vector<ConnectionView>& views, const std::string& name)
+    {
+        int width = COL_NAME_MIN;
+        for (const auto& view : views) {
+            width = std::max(
+                width, static_cast<int>(utf8_width(view.name)) + COL_NAME_GAP);
+        }
+        return text(fit(name, width));
+    }
 
     std::string mask_key(const std::string& key)
     {
@@ -43,6 +55,11 @@ namespace {
         return "••••••" + key.substr(key.size() - 4);
     }
 
+    bool subscription_provider(std::string_view id)
+    {
+        return id == OPENAI_SUBSCRIPTION_ID || id == ANTHROPIC_SUBSCRIPTION_ID;
+    }
+
     Element status_element(const std::string& text_value, bool ok)
     {
         if (ok) {
@@ -53,7 +70,7 @@ namespace {
 
     Element form_gutter(const std::string& label)
     {
-        return hbox({ text("  "), text(fit(label, kFormLabel)) | bold });
+        return hbox({ text("  "), text(fit(label, FORM_LABEL)) | bold });
     }
 
     class ConnectView : public ComponentBase {
@@ -134,12 +151,12 @@ namespace {
             }
 
             bool confirming = false;
-            for (const auto& [id, active] : confirm_) {
-                confirming = confirming || active;
+            for (const auto& entry : confirm_) {
+                confirming = confirming || entry.second;
             }
             if (confirming) {
                 if (event == Event::Character('y')) {
-                    confirm_remove(row_id_at(row_selected_));
+                    confirm_remove(row_selected_);
                     return true;
                 }
                 if (event == Event::Character('n') || event == Event::Escape) {
@@ -162,9 +179,9 @@ namespace {
                     return true;
                 }
                 if (event == Event::Character('d')) {
-                    const std::string id = row_id_at(row_selected_);
-                    if (!id.empty()) {
-                        confirm_[id] = true;
+                    if (row_selected_ >= 0
+                        && row_selected_ < static_cast<int>(views().size())) {
+                        confirm_[row_selected_] = true;
                         rebuild_manage();
                     }
                     return true;
@@ -203,13 +220,14 @@ namespace {
             return provider_store_.connections();
         }
 
-        std::string row_id_at(int index)
+        bool provider_connected(std::string_view provider_id)
         {
-            const auto all = views();
-            if (index < 0 || index >= static_cast<int>(all.size())) {
-                return "";
+            for (const auto& view : views()) {
+                if (view.provider == provider_id) {
+                    return true;
+                }
             }
-            return all[static_cast<std::size_t>(index)].id;
+            return false;
         }
 
         void row_move(int delta)
@@ -278,7 +296,9 @@ namespace {
             picker_cursor_ = static_cast<int>(picker_buf_.size());
             picker_open_   = false;
             rebuild_manage();
-            if (key_input_) {
+            if (subscription_signin_) {
+                subscription_signin_->TakeFocus();
+            } else if (key_input_) {
                 key_input_->TakeFocus();
             }
         }
@@ -292,7 +312,7 @@ namespace {
 
         std::string current_endpoint()
         {
-            if (selected_provider_ != kCustomProviderId) {
+            if (selected_provider_ != CUSTOM_PROVIDER_ID) {
                 return "";
             }
             return endpoint_for_base(strip_slash(trim(base_buf_)));
@@ -314,10 +334,10 @@ namespace {
         {
             const Session& st = *session_;
             bool confirming   = false;
-            for (const auto& [id, active] : confirm_) {
-                confirming = confirming || active;
+            for (const auto& entry : confirm_) {
+                confirming = confirming || entry.second;
             }
-            const bool base_visible = selected_provider_ == kCustomProviderId;
+            const bool base_visible = selected_provider_ == CUSTOM_PROVIDER_ID;
             const std::uint64_t status_key
                 = std::hash<std::string> { }(st.connect_status()) << 32;
             const std::uint64_t key = status_key + st.modal_serial() * 16ULL
@@ -349,9 +369,12 @@ namespace {
                     }
                 }));
 
-            const bool base_visible = selected_provider_ == kCustomProviderId;
+            const bool base_visible = selected_provider_ == CUSTOM_PROVIDER_ID;
+            const bool subscription = subscription_provider(selected_provider_);
             label_input_ = Input(field_option(&label_buf_, &label_cursor_,
-                "label (optional), e.g. my Ollama",
+                provider_connected(selected_provider_)
+                    ? "label (required — already connected)"
+                    : "label (optional), e.g. my Ollama",
                 [this] { row_error_.clear(); }));
             base_input_  = Input(field_option(&base_buf_, &base_cursor_,
                 "base URL, e.g. http://localhost:1234/v1",
@@ -369,19 +392,30 @@ namespace {
             const auto all = views();
             row_buttons_.clear();
             for (int i = 0; i < static_cast<int>(all.size()); ++i) {
-                rows.push_back(
-                    make_row(all[static_cast<std::size_t>(i)].id, i));
+                rows.push_back(make_row(i));
             }
             rows_container_ = Container::Vertical(std::move(rows));
 
             Components add_parts;
             add_parts.push_back(picker_input_);
+            add_parts.push_back(label_input_);
             if (base_visible) {
-                add_parts.push_back(label_input_);
                 add_parts.push_back(base_input_);
             }
-            add_parts.push_back(key_input_);
-            add_parts.push_back(action_button_);
+            if (subscription) {
+                if (subscription_id_ != selected_provider_) {
+                    subscription_signin_
+                        = make_subscription_signin(state_, selected_provider_,
+                            [this] { return std::string(trim(label_buf_)); });
+                    subscription_id_ = selected_provider_;
+                }
+                add_parts.push_back(subscription_signin_);
+            } else {
+                subscription_signin_.reset();
+                subscription_id_.clear();
+                add_parts.push_back(key_input_);
+                add_parts.push_back(action_button_);
+            }
             add_container_ = Container::Vertical(std::move(add_parts));
 
             container_
@@ -398,15 +432,16 @@ namespace {
             }
         }
 
-        Component make_row(const std::string& id, int index)
+        Component make_row(int index)
         {
-            bool is_confirm = confirm_.count(id) != 0 && confirm_.at(id);
+            const bool is_confirm
+                = confirm_.count(index) != 0 && confirm_.at(index);
 
-            Component label = Renderer([this, id, index] {
-                for (const auto& view : views()) {
-                    if (view.id != id) {
-                        continue;
-                    }
+            Component label = Renderer([this, index] {
+                const auto all = views();
+                if (index >= 0 && index < static_cast<int>(all.size())) {
+                    const ConnectionView& view
+                        = all[static_cast<std::size_t>(index)];
                     const bool highlighted = index == row_selected_ && !in_add_;
                     Element state_el       = text("");
                     if (view.state == ConnectionView::State::READY) {
@@ -424,21 +459,25 @@ namespace {
                     } else {
                         models = "fetching…";
                     }
-                    Element models_el = text(fit(models, kColModels));
+                    Element models_el = text(fit(models, COL_MODELS));
                     if (view.state == ConnectionView::State::FAILED) {
                         models_el
-                            = status_element(fit(models, kColModels), false);
+                            = status_element(fit(models, COL_MODELS), false);
                     } else {
                         models_el = std::move(models_el) | dim;
                     }
-                    Element name_el = text(fit(view.name, kColName));
+                    Element name_el = name_cell(all, view.name);
                     if (highlighted) {
                         name_el = std::move(name_el) | bold;
                     }
                     return hbox({
                         std::move(name_el),
-                        text(fit(mask_key(view.api_key), kColKey)) | dim,
-                        state_el | size(WIDTH, EQUAL, kColState),
+                        text(fit(subscription_provider(view.provider)
+                                ? "signed in"
+                                : mask_key(view.api_key),
+                            COL_KEY))
+                            | dim,
+                        state_el | size(WIDTH, EQUAL, COL_STATE),
                         std::move(models_el),
                     });
                 }
@@ -447,17 +486,17 @@ namespace {
 
             Component right;
             if (is_confirm) {
-                Component yes
-                    = action_button("Yes", [this, id] { confirm_remove(id); });
-                Component no = action_button("No", [this, id] {
-                    confirm_.erase(id);
+                Component yes = action_button(
+                    "Yes", [this, index] { confirm_remove(index); });
+                Component no = action_button("No", [this, index] {
+                    confirm_.erase(index);
                     rebuild_manage();
                 });
                 right        = Container::Horizontal(
                     { yes, Renderer([] { return text(" "); }), no });
             } else {
-                right = action_button("Remove", [this, id] {
-                    confirm_[id] = true;
+                right = action_button("Remove", [this, index] {
+                    confirm_[index] = true;
                     rebuild_manage();
                 });
             }
@@ -474,15 +513,19 @@ namespace {
             });
         }
 
-        void confirm_remove(const std::string& id)
+        void confirm_remove(int index)
         {
-            if (!provider_store_.remove_connection(id)) {
+            const auto all = views();
+            if (index < 0 || index >= static_cast<int>(all.size())
+                || !provider_store_.remove_connection(
+                    static_cast<std::size_t>(index),
+                    all[static_cast<std::size_t>(index)].id)) {
                 row_error_ = "Cannot remove the last connection.";
-                confirm_.erase(id);
+                confirm_.erase(index);
                 rebuild_manage();
                 return;
             }
-            confirm_.erase(id);
+            confirm_.erase(index);
             row_error_.clear();
             row_selected_ = 0;
             rebuild_manage();
@@ -491,7 +534,7 @@ namespace {
         void run_test()
         {
             const ConnectResult res = build_result(false);
-            if (res.provider_id.empty()) {
+            if (res.id.empty()) {
                 return;
             }
             tested_signature_ = current_signature();
@@ -501,7 +544,7 @@ namespace {
         void run_save()
         {
             const ConnectResult res = build_result(true);
-            if (res.provider_id.empty()) {
+            if (res.id.empty()) {
                 return;
             }
             imza::resolve_modal(*state_, ModalResult { res });
@@ -510,28 +553,41 @@ namespace {
         ConnectResult build_result(bool persist)
         {
             ConnectResult res;
-            res.provider_id = selected_provider_;
-            res.persist     = persist;
-            if (res.provider_id.empty()) {
+            res.id      = selected_provider_;
+            res.persist = persist;
+            if (res.id.empty()) {
                 row_error_ = "Select a provider.";
                 return res;
             }
             res.endpoint = current_endpoint();
-            if ((res.provider_id == kCustomProviderId)
-                && res.endpoint.empty()) {
-                row_error_      = "Enter a base URL.";
-                res.provider_id = "";
+            if ((res.id == CUSTOM_PROVIDER_ID) && res.endpoint.empty()) {
+                row_error_ = "Enter a base URL.";
+                res.id     = "";
                 return res;
             }
             res.api_key = trim(key_buf_);
             res.label   = trim(label_buf_);
+            if (res.label.find('/') != std::string::npos) {
+                row_error_ = "Label cannot contain '/'.";
+                res.id     = "";
+                return res;
+            }
+            const std::string key
+                = res.label.empty() ? res.id : res.id + "/" + res.label;
+            for (const auto& view : views()) {
+                if (view.id == key) {
+                    row_error_ = "Already connected — use a different label.";
+                    res.id     = "";
+                    return res;
+                }
+            }
             row_error_.clear();
             return res;
         }
 
         Element picker_area()
         {
-            const std::string pad(kFormLabel + 2, ' ');
+            const std::string pad(FORM_LABEL + 2, ' ');
             Elements rows;
             rows.push_back(picker_input_->Render() | xflex);
             if (picker_open_) {
@@ -568,11 +624,11 @@ namespace {
                 rows.push_back(text("  (none — add one below)") | dim);
             } else {
                 rows.push_back(hbox({
-                    text(fit("Providers", kColName)) | bold,
-                    text(fit("Key", kColKey)) | dim,
-                    text(fit("Status", kColState)) | dim,
-                    text(fit("Models", kColModels)) | dim,
-                    text(fit("Action", kColAction)) | dim,
+                    name_cell(views(), "Providers") | bold,
+                    text(fit("Key", COL_KEY)) | dim,
+                    text(fit("Status", COL_STATE)) | dim,
+                    text(fit("Models", COL_MODELS)) | dim,
+                    text(fit("Action", COL_ACTION)) | dim,
                 }));
             }
             if (rows_container_ != nullptr) {
@@ -582,7 +638,9 @@ namespace {
             rows.push_back(separator() | color(PANEL_BORDER));
             rows.push_back(hbox({
                 section_title("Add Provider"),
-                text("  pick a provider, paste your key, test, then save")
+                text(subscription_provider(selected_provider_)
+                        ? "  sign in using your existing subscription"
+                        : "  pick a provider, paste your key, test, then save")
                     | dim,
             }));
             if (add_container_ != nullptr) {
@@ -590,26 +648,33 @@ namespace {
                     form_gutter("Provider"),
                     picker_area() | xflex,
                 }));
-                if (selected_provider_ == kCustomProviderId) {
-                    rows.push_back(hbox({
-                        form_gutter("Label"),
-                        label_input_->Render() | xflex,
-                    }));
+                rows.push_back(hbox({
+                    form_gutter("Label"),
+                    label_input_->Render() | xflex,
+                }));
+                if (selected_provider_ == CUSTOM_PROVIDER_ID) {
                     rows.push_back(hbox({
                         form_gutter("Base URL"),
                         base_input_->Render() | xflex,
                     }));
                 }
-                rows.push_back(hbox({
-                    form_gutter("API Key"),
-                    key_input_->Render() | xflex,
-                }));
-                rows.push_back(hbox({
-                    text(std::string(kFormLabel + 2, ' ')),
-                    action_button_->Render(),
-                    text("  "),
-                    status_line_element(),
-                }));
+                if (subscription_provider(selected_provider_)) {
+                    rows.push_back(hbox({
+                        text(std::string(FORM_LABEL + 2, ' ')),
+                        subscription_signin_->Render() | xflex,
+                    }));
+                } else {
+                    rows.push_back(hbox({
+                        form_gutter("API Key"),
+                        key_input_->Render() | xflex,
+                    }));
+                    rows.push_back(hbox({
+                        text(std::string(FORM_LABEL + 2, ' ')),
+                        action_button_->Render(),
+                        text("  "),
+                        status_line_element(),
+                    }));
+                }
             }
             rows.push_back(separatorEmpty());
             std::string hint = "↑↓ navigate · Enter/d remove · Esc close";
@@ -784,6 +849,8 @@ namespace {
         Component label_input_;
         Component key_input_;
         Component action_button_;
+        Component subscription_signin_;
+        std::string subscription_id_;
         std::string base_buf_;
         int base_cursor_ = 0;
         std::string label_buf_;
@@ -791,7 +858,7 @@ namespace {
         std::string key_buf_;
         int key_cursor_ = 0;
         std::string tested_signature_;
-        std::map<std::string, bool> confirm_;
+        std::map<int, bool> confirm_;
         std::string row_error_;
 
         std::vector<PickSnap> pick_snapshot_;

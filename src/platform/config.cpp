@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <fstream>
+#include <set>
 #include <sstream>
 
 namespace imza {
@@ -46,6 +47,14 @@ std::string_view subagent_default_variant(SubagentRole role)
         return "low";
     }
     return "off";
+}
+
+std::string connection_key(const Connection& connection)
+{
+    if (connection.label.empty()) {
+        return connection.id;
+    }
+    return connection.id + "/" + connection.label;
 }
 
 namespace {
@@ -154,16 +163,25 @@ Status load_config(
                     Status::CONFIG_ERROR, "provider entry must be an object");
             }
             Connection conn;
-            conn.id          = string_or_empty(entry, "id");
-            conn.provider_id = string_or_empty(entry, "provider_id");
-            if (!entry.isMember("id"))
-                conn.id = conn.provider_id;
-            conn.endpoint = string_or_empty(entry, "endpoint");
-            conn.api_key  = string_or_empty(entry, "api_key");
-            conn.label    = string_or_empty(entry, "label");
-            if (conn.id.empty() || conn.provider_id.empty()) {
+            conn.id = string_or_empty(entry, "id");
+            if (conn.id.empty() && !entry.isMember("id")) {
+                conn.id = string_or_empty(entry, "provider_id");
+            }
+            conn.endpoint      = string_or_empty(entry, "endpoint");
+            conn.api_key       = string_or_empty(entry, "api_key");
+            conn.refresh_token = string_or_empty(entry, "refresh_token");
+            if (!entry["expires_at"].isNull()) {
+                if (!entry["expires_at"].isInt64()) {
+                    return fail(Status::CONFIG_ERROR,
+                        "'expires_at' must be an integer");
+                }
+                conn.expires_at = entry["expires_at"].asInt64();
+            }
+            conn.account_id = string_or_empty(entry, "account_id");
+            conn.label      = string_or_empty(entry, "label");
+            if (conn.id.empty()) {
                 return fail(Status::CONFIG_ERROR,
-                    "provider entry requires non-empty 'id' and 'provider_id'");
+                    "provider entry requires a non-empty 'id'");
             }
             const Json::Value& dialects = entry["dialects"];
             if (!dialects.isNull()) {
@@ -181,6 +199,22 @@ Status load_config(
                 }
             }
             out.providers.push_back(std::move(conn));
+        }
+        std::set<std::string> seen;
+        for (Connection& connection : out.providers) {
+            if (seen.insert(connection_key(connection)).second) {
+                continue;
+            }
+            const std::string base
+                = connection.label.empty() ? "" : connection.label + " ";
+            int suffix = 2;
+            while (true) {
+                connection.label = base + std::to_string(suffix);
+                if (seen.insert(connection_key(connection)).second) {
+                    break;
+                }
+                ++suffix;
+            }
         }
     }
 
@@ -307,11 +341,25 @@ namespace {
         Json::Value providers(Json::arrayValue);
         for (const Connection& conn : cfg.providers) {
             Json::Value entry(Json::objectValue);
-            entry["id"]          = conn.id;
-            entry["provider_id"] = conn.provider_id;
-            entry["endpoint"]    = conn.endpoint;
-            entry["api_key"]     = conn.api_key;
-            entry["label"]       = conn.label;
+            entry["id"] = conn.id;
+            if (!conn.endpoint.empty()) {
+                entry["endpoint"] = conn.endpoint;
+            }
+            if (!conn.api_key.empty()) {
+                entry["api_key"] = conn.api_key;
+            }
+            if (!conn.refresh_token.empty()) {
+                entry["refresh_token"] = conn.refresh_token;
+            }
+            if (conn.expires_at != 0) {
+                entry["expires_at"] = conn.expires_at;
+            }
+            if (!conn.account_id.empty()) {
+                entry["account_id"] = conn.account_id;
+            }
+            if (!conn.label.empty()) {
+                entry["label"] = conn.label;
+            }
             Json::Value dialects(Json::objectValue);
             for (const auto& [model, standard] : conn.dialects) {
                 dialects[model] = dialect_str(standard);

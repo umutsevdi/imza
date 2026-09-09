@@ -31,11 +31,11 @@ namespace {
 
     using namespace ftxui;
 
-    constexpr std::size_t kLargeOutputLines = 10;
-    constexpr std::size_t kInvalidVersion   = ~std::size_t { 0 };
-    constexpr int kWheelStep                = 3;
-    constexpr int kDefaultViewportLines     = 24;
-    constexpr int kTimelineOverscan         = 20;
+    constexpr std::size_t LARGE_OUTPUT_LINES = 10;
+    constexpr std::size_t INVALID_VERSION    = ~std::size_t { 0 };
+    constexpr int WHEEL_STEP                 = 3;
+    constexpr int DEFAULT_VIEWPORT_LINES     = 24;
+    constexpr int TIMELINE_OVERSCAN          = 20;
 
     Element vertical_space(int height)
     {
@@ -206,19 +206,19 @@ namespace {
             } else {
                 viewport_.scroll_lines(0);
             }
-            const int viewport_lines = std::max({ kDefaultViewportLines,
+            const int viewport_lines = std::max({ DEFAULT_VIEWPORT_LINES,
                 viewport_.viewport_lines(), ctx.height });
             const VirtualListWindow visible
                 = _timeline.window(viewport_.scroll, viewport_lines, 0);
             const VirtualListWindow window = _timeline.window(
-                viewport_.scroll, viewport_lines, kTimelineOverscan);
+                viewport_.scroll, viewport_lines, TIMELINE_OVERSCAN);
             _anchor_index          = visible.begin;
             const bool reset_cache = layout_changed || content_changed
                 || item_cache_.size() > item_count;
             if (reset_cache) {
                 item_cache_.clear();
                 item_cache_.resize(item_count);
-                item_versions_.assign(item_count, kInvalidVersion);
+                item_versions_.assign(item_count, INVALID_VERSION);
                 cache_kind_     = ctx.kind;
                 cache_width_    = ctx.width;
                 content_serial_ = content_serial;
@@ -228,15 +228,15 @@ namespace {
             } else if (item_cache_.size() < item_count) {
                 const std::size_t previous_size = item_cache_.size();
                 item_cache_.resize(item_count);
-                item_versions_.resize(item_count, kInvalidVersion);
+                item_versions_.resize(item_count, INVALID_VERSION);
                 if (previous_size > 0) {
-                    item_versions_[previous_size - 1] = kInvalidVersion;
+                    item_versions_[previous_size - 1] = INVALID_VERSION;
                 }
             }
             evict_outside(window, conversation);
             if (std::exchange(hover_dirty_, false)) {
                 std::fill(item_versions_.begin() + window.begin,
-                    item_versions_.begin() + window.end, kInvalidVersion);
+                    item_versions_.begin() + window.end, INVALID_VERSION);
             }
             Elements items;
             if (window.before > 0) {
@@ -285,7 +285,7 @@ namespace {
                             switch (tc.result->kind) {
                             case ToolCall::Result::Kind::OUTPUT: {
                                 const bool big = count_lines(tc.result->text)
-                                    > kLargeOutputLines;
+                                    > LARGE_OUTPUT_LINES;
                                 if (tc.name == "subagent") {
                                     item_cache_[item_index]
                                         = render_subagent_item(tc);
@@ -523,12 +523,12 @@ namespace {
                 const Mouse& m = event.mouse();
                 if (m.button == Mouse::WheelUp) {
                     hover_dirty_ = true;
-                    scroll_lines(-kWheelStep);
+                    scroll_lines(-WHEEL_STEP);
                     return true;
                 }
                 if (m.button == Mouse::WheelDown) {
                     hover_dirty_ = true;
-                    scroll_lines(kWheelStep);
+                    scroll_lines(WHEEL_STEP);
                     return true;
                 }
                 return false;
@@ -686,7 +686,7 @@ namespace {
         {
             if (index < item_cache_.size()) {
                 item_cache_[index].reset();
-                item_versions_[index] = kInvalidVersion;
+                item_versions_[index] = INVALID_VERSION;
             }
             if (const auto* tool = std::get_if<ToolCall>(&item)) {
                 const auto read = read_buttons_.find(tool->id);
@@ -823,7 +823,7 @@ namespace {
         {
             const std::string& full   = tc.result->text;
             const std::size_t total   = count_lines(full);
-            const std::string preview = take_lines(full, kLargeOutputLines);
+            const std::string preview = take_lines(full, LARGE_OUTPUT_LINES);
             const std::string label
                 = viewer_label("full shell output", total, "lines");
             Component btn = make_viewer_button(tc.id, label);

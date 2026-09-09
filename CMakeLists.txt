@@ -71,6 +71,8 @@ endif()
 
 
 # ---- Dependencies ----
+find_package(OpenSSL REQUIRED COMPONENTS Crypto)
+
 # FTXUI
 set(FTXUI_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(FTXUI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -199,6 +201,7 @@ add_library(imza_foundation
     src/platform/json_file.cpp
     src/providers/catalog.cpp
     src/providers/pricing.cpp
+    src/providers/subscriptions.cpp
     src/workspace/git.cpp
 )
 target_include_directories(imza_foundation PRIVATE
@@ -208,6 +211,7 @@ target_include_directories(imza_foundation PRIVATE
 target_link_libraries(imza_foundation PUBLIC
     imza_network
     jsoncpp_static
+    OpenSSL::Crypto
 )
 
 # Domain state and runtime infrastructure (no ftxui, no cmark)
@@ -279,6 +283,7 @@ add_library(imza_ui
     src/ui/components.cpp
     src/ui/markdown.cpp
     src/ui/modals/connect.cpp
+    src/ui/modals/signin.cpp
     src/ui/modals/sessions.cpp
     src/ui/modals/skills.cpp
     src/ui/modals/subagents.cpp

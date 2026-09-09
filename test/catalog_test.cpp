@@ -172,6 +172,10 @@ TEST_CASE("backfill_catalog_urls patches only matching empty provider URLs")
     CHECK(catalog.providers.at("unknown").api.empty());
     CHECK(catalog.providers.at("openai-explicit").api
         == "https://example.com/v1");
+    CHECK(catalog.providers.at("openai-subscription").name
+        == "Open AI Subscription");
+    CHECK(catalog.providers.at("anthropic-subscription").name
+        == "Anthropic Subscription");
 }
 
 TEST_CASE("catalog_base uses only the catalog URL")
@@ -196,9 +200,8 @@ TEST_CASE("resolve_route derives endpoints per dialect")
     catalog.providers["openrouter"] = openrouter;
 
     imza::Connection conn;
-    conn.id          = "openrouter";
-    conn.provider_id = "openrouter";
-    conn.api_key     = "sk-or";
+    conn.id      = "openrouter";
+    conn.api_key = "sk-or";
 
     const imza::Route openai
         = imza::resolve_route(conn, catalog, imza::ApiStandard::OPENAI);
@@ -227,9 +230,8 @@ TEST_CASE("resolve_route routes anthropic providers with x-api-key")
     catalog.providers["anthropic"] = anthropic_provider;
 
     imza::Connection conn;
-    conn.id          = "anthropic";
-    conn.provider_id = "anthropic";
-    conn.api_key     = "sk-ant";
+    conn.id      = "anthropic";
+    conn.api_key = "sk-ant";
 
     const imza::Route openai
         = imza::resolve_route(conn, catalog, imza::ApiStandard::OPENAI);
@@ -246,9 +248,8 @@ TEST_CASE("resolve_route uses stored endpoint for local and custom")
 {
     imza::Catalog catalog;
     imza::Connection conn;
-    conn.id          = "custom";
-    conn.provider_id = "custom";
-    conn.endpoint    = "http://localhost:1234/v1/chat/completions";
+    conn.id       = "custom";
+    conn.endpoint = "http://localhost:1234/v1/chat/completions";
 
     const imza::Route route
         = imza::resolve_route(conn, catalog, imza::ApiStandard::OPENAI);
@@ -273,12 +274,36 @@ TEST_CASE("resolve_route misses unknown providers")
 {
     imza::Catalog catalog;
     imza::Connection conn;
-    conn.id          = "ghost";
-    conn.provider_id = "ghost";
+    conn.id = "ghost";
     const imza::Route route
         = imza::resolve_route(conn, catalog, imza::ApiStandard::OPENAI);
     CHECK(route.endpoint.empty());
     CHECK(route.api.empty());
+}
+
+TEST_CASE("subscription routes use fixed endpoints and auth")
+{
+    imza::Catalog catalog;
+    imza::Connection openai;
+    openai.id         = "openai-subscription";
+    openai.api_key    = "access";
+    openai.account_id = "account";
+    const imza::Route openai_route
+        = imza::resolve_route(openai, catalog, imza::ApiStandard::ANTHROPIC);
+    CHECK(openai_route.endpoint
+        == "https://chatgpt.com/backend-api/codex/responses");
+    CHECK(openai_route.dialect == imza::ApiStandard::OPENAI_RESPONSES);
+    CHECK(openai_route.auth == imza::AuthType::OPENAI_SUBSCRIPTION);
+    CHECK(openai_route.account_id == "account");
+
+    imza::Connection anthropic;
+    anthropic.id      = "anthropic-subscription";
+    anthropic.api_key = "access";
+    const imza::Route anthropic_route
+        = imza::resolve_route(anthropic, catalog, imza::ApiStandard::OPENAI);
+    CHECK(anthropic_route.endpoint == "https://api.anthropic.com/v1/messages");
+    CHECK(anthropic_route.dialect == imza::ApiStandard::ANTHROPIC);
+    CHECK(anthropic_route.auth == imza::AuthType::ANTHROPIC_SUBSCRIPTION);
 }
 
 TEST_CASE("auth_headers by auth type")
@@ -295,4 +320,17 @@ TEST_CASE("auth_headers by auth type")
     REQUIRE(anthropic.size() == 2);
     CHECK(anthropic[0] == "x-api-key: k");
     CHECK(anthropic[1] == "anthropic-version: 2023-06-01");
+
+    const auto anthropic_subscription
+        = imza::auth_headers(AuthType::ANTHROPIC_SUBSCRIPTION, "oauth");
+    REQUIRE(anthropic_subscription.size() == 3);
+    CHECK(anthropic_subscription[0] == "Authorization: Bearer oauth");
+    CHECK(anthropic_subscription[2] == "anthropic-beta: oauth-2025-04-20");
+
+    const auto openai_subscription
+        = imza::auth_headers(AuthType::OPENAI_SUBSCRIPTION, "oauth", "account");
+    REQUIRE(openai_subscription.size() == 3);
+    CHECK(openai_subscription[0] == "Authorization: Bearer oauth");
+    CHECK(openai_subscription[1] == "originator: codex_cli_rs");
+    CHECK(openai_subscription[2] == "ChatGPT-Account-Id: account");
 }

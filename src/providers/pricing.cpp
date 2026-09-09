@@ -10,7 +10,7 @@ namespace imza {
 
 namespace {
 
-    constexpr double kPerMillionToPerK = 1.0 / 1000.0;
+    constexpr double PER_MILLION_TO_PER_K = 1.0 / 1000.0;
 
     void insert_pricing(std::map<std::string, ModelPricing>& table,
         const std::string& key, const ModelPricing& pricing)
@@ -25,13 +25,13 @@ namespace {
         }
         ModelPricing pricing;
         pricing.input_per_1k
-            = model.cost_input.value_or(0.0) * kPerMillionToPerK;
+            = model.cost_input.value_or(0.0) * PER_MILLION_TO_PER_K;
         pricing.output_per_1k
-            = model.cost_output.value_or(0.0) * kPerMillionToPerK;
+            = model.cost_output.value_or(0.0) * PER_MILLION_TO_PER_K;
         pricing.cache_read_per_1k
-            = model.cost_cache_read.value_or(0.0) * kPerMillionToPerK;
+            = model.cost_cache_read.value_or(0.0) * PER_MILLION_TO_PER_K;
         pricing.cache_write_per_1k
-            = model.cost_cache_write.value_or(0.0) * kPerMillionToPerK;
+            = model.cost_cache_write.value_or(0.0) * PER_MILLION_TO_PER_K;
         pricing.context_limit = model.context.value_or(0);
         return pricing;
     }

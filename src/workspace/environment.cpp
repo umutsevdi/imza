@@ -224,7 +224,7 @@ namespace {
         }
     }
 
-    constexpr std::array<std::string_view, 8> kAgentSkillDirs
+    constexpr std::array<std::string_view, 8> AGENT_SKILL_DIRS
         = { ".opencode", ".claude", ".codex", ".grok", ".gemini", ".agents",
               ".cursor", ".openclaw" };
 
@@ -232,7 +232,7 @@ namespace {
         std::unordered_map<std::string, Skill>& global_skills)
     {
         std::filesystem::path home = { home_dir() };
-        for (const std::string_view skill_path : kAgentSkillDirs) {
+        for (const std::string_view skill_path : AGENT_SKILL_DIRS) {
             auto p = home / skill_path / "skills";
             add_skills(p, Skill::Scope::GLOBAL, std::nullopt, global_skills);
         }
@@ -244,7 +244,7 @@ namespace {
     void detect_project_skills(const std::filesystem::path& root,
         std::unordered_map<std::string, Skill>& project_skills)
     {
-        for (const std::string_view skill_path : kAgentSkillDirs) {
+        for (const std::string_view skill_path : AGENT_SKILL_DIRS) {
             auto p = root / skill_path / "skills";
             add_skills(p, Skill::Scope::PROJECT, root, project_skills);
         }

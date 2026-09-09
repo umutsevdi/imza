@@ -246,6 +246,9 @@ ftxui::Component make_review(std::shared_ptr<ApplicationState> state,
 ftxui::Component make_status_line(std::shared_ptr<ApplicationState> state,
     LayoutFn layout, WorkflowFn workflow);
 ftxui::Component make_connect(std::shared_ptr<ApplicationState> state);
+ftxui::Component make_subscription_signin(
+    std::shared_ptr<ApplicationState> state, std::string connection_id,
+    std::function<std::string()> label = { });
 ftxui::Component make_subagents(std::shared_ptr<ApplicationState> state);
 ftxui::Component make_variant(std::shared_ptr<ApplicationState> state);
 ftxui::Component make_sessions(std::shared_ptr<ApplicationState> state);

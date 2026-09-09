@@ -301,6 +301,8 @@ SubagentHandle Delegation::run_subagent(std::string prompt, std::string model,
     state_->subagents->prune_completed();
     const auto selection = state_->providers->active_selection();
     Route route          = selection ? selection->route : Route { };
+    const std::string connection_id
+        = selection ? selection->connection_id : std::string { };
     if (model.empty() && selection) {
         model = selection->model;
     }
@@ -319,9 +321,13 @@ SubagentHandle Delegation::run_subagent(std::string prompt, std::string model,
     return state_->subagents->start(
         std::move(prompt), model, variant, options.visible,
         [this, task_prompt, model, variant, route = std::move(route),
-            transcript, deadline,
+            connection_id, transcript, deadline,
             max_output_tokens = options.max_output_tokens](
             const std::stop_token& stop) mutable {
+            if (!connection_id.empty()) {
+                route = state_->providers->authenticated_route_for(
+                    connection_id, route.dialect);
+            }
             if (model.empty() || route.api.empty()) {
                 if (transcript) {
                     transcript->finish_session(
@@ -388,7 +394,9 @@ void Delegation::spawn_title(std::string input, TurnSettings settings)
                     title += event.text;
                 }
             };
-            Route route         = settings.route;
+            Route route = settings.route;
+            route       = state_->providers->authenticated_route_for(
+                settings.connection_id, settings.dialect);
             const Status status = stream(route, req, cb, nullptr);
             if (status != Status::OK) {
                 return SubagentResult { status, { } };

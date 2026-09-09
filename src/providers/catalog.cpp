@@ -14,11 +14,11 @@ namespace imza {
 
 namespace {
 
-    constexpr std::string_view kCatalogUrl = "https://models.dev/api.json";
-    constexpr long kFetchTimeoutSecs       = 60;
-    constexpr std::int64_t kStaleAfterSecs = 7 * 24 * 3600;
+    constexpr std::string_view CATALOG_URL  = "https://models.dev/api.json";
+    constexpr long FETCH_TIMEOUT_SECS       = 60;
+    constexpr std::int64_t STALE_AFTER_SECS = 7 * 24 * 3600;
 
-    constexpr std::array<std::string_view, 51> kWhitelist = {
+    constexpr std::array<std::string_view, 51> WHITELIST = {
         "abacus",
         "alibaba",
         "alibaba-cn",
@@ -73,7 +73,7 @@ namespace {
     };
 
     const std::map<std::pair<std::string, ApiStandard>, std::string>
-        kProviderUrls = {
+        PROVIDER_URLS = {
             { { "anthropic", ApiStandard::ANTHROPIC },
                 "https://api.anthropic.com/v1" },
             { { "cerebras", ApiStandard::OPENAI },
@@ -109,16 +109,16 @@ namespace {
 
     bool endpoint_backed(const Connection& conn)
     {
-        return conn.provider_id == kCustomProviderId || !conn.endpoint.empty();
+        return !conn.endpoint.empty();
     }
 
-    constexpr std::string_view kChatSuffix      = "/chat/completions";
-    constexpr std::string_view kResponsesSuffix = "/responses";
+    constexpr std::string_view CHAT_SUFFIX      = "/chat/completions";
+    constexpr std::string_view RESPONSES_SUFFIX = "/responses";
 
     std::string normalize_base(std::string_view base)
     {
         std::string out = strip_slash(base);
-        for (std::string_view suffix : { kChatSuffix, kResponsesSuffix }) {
+        for (std::string_view suffix : { CHAT_SUFFIX, RESPONSES_SUFFIX }) {
             if (out.size() > suffix.size()
                 && std::string_view(out).substr(out.size() - suffix.size())
                     == suffix) {
@@ -131,8 +131,8 @@ namespace {
 
     bool whitelisted_provider(std::string_view id)
     {
-        return std::find(kWhitelist.begin(), kWhitelist.end(), id)
-            != kWhitelist.end();
+        return std::find(WHITELIST.begin(), WHITELIST.end(), id)
+            != WHITELIST.end();
     }
 
     Status trim_provider(const Json::Value& src, CachedProvider& out)
@@ -196,7 +196,7 @@ bool catalog_stale(const Catalog& catalog)
         return true;
     }
     const std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
-    return now - catalog.fetched_at > kStaleAfterSecs;
+    return now - catalog.fetched_at > STALE_AFTER_SECS;
 }
 
 Status load_catalog(const std::filesystem::path& path, Catalog& out)
@@ -304,7 +304,7 @@ Status fetch_catalog(Catalog& out)
     std::string body;
     long code       = 0;
     const Status st = http_get(
-        std::string(kCatalogUrl), { }, kFetchTimeoutSecs, body, &code);
+        std::string(CATALOG_URL), { }, FETCH_TIMEOUT_SECS, body, &code);
     if (st != Status::OK) {
         return st;
     }
@@ -342,11 +342,40 @@ void backfill_catalog_urls(Catalog& catalog)
             continue;
         }
         const auto url
-            = kProviderUrls.find({ id, dialect_from_npm(provider.npm) });
-        if (url != kProviderUrls.end()) {
+            = PROVIDER_URLS.find({ id, dialect_from_npm(provider.npm) });
+        if (url != PROVIDER_URLS.end()) {
             provider.api = url->second;
         }
     }
+    inject_subscription_providers(catalog);
+}
+
+void inject_subscription_providers(Catalog& catalog)
+{
+    CachedProvider openai;
+    openai.name = "Open AI Subscription";
+    openai.api  = "https://chatgpt.com/backend-api/codex";
+    openai.npm  = "@ai-sdk/openai";
+    for (std::string_view id :
+        { "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5" }) {
+        CachedModel model;
+        model.name      = std::string(id);
+        model.tool_call = true;
+        model.reasoning = true;
+        openai.models.emplace(std::string(id), std::move(model));
+    }
+    catalog.providers[std::string(OPENAI_SUBSCRIPTION_ID)] = std::move(openai);
+
+    CachedProvider anthropic;
+    anthropic.name = "Anthropic Subscription";
+    anthropic.api  = "https://api.anthropic.com/v1";
+    anthropic.npm  = "@ai-sdk/anthropic";
+    if (const auto source = catalog.providers.find("anthropic");
+        source != catalog.providers.end()) {
+        anthropic.models = source->second.models;
+    }
+    catalog.providers[std::string(ANTHROPIC_SUBSCRIPTION_ID)]
+        = std::move(anthropic);
 }
 
 AuthType auth_from_npm(std::string_view npm)
@@ -375,13 +404,14 @@ Route resolve_route(
     const Connection& conn, const Catalog& catalog, ApiStandard dialect)
 {
     Route route;
-    route.api_key = conn.api_key;
+    route.api_key    = conn.api_key;
+    route.account_id = conn.account_id;
 
     if (endpoint_backed(conn)) {
         route.api = normalize_base(conn.endpoint);
         if (dialect == ApiStandard::OPENAI_RESPONSES
-            || std::string_view(conn.endpoint).ends_with(kResponsesSuffix)) {
-            route.endpoint = route.api + std::string(kResponsesSuffix);
+            || std::string_view(conn.endpoint).ends_with(RESPONSES_SUFFIX)) {
+            route.endpoint = route.api + std::string(RESPONSES_SUFFIX);
             route.dialect  = ApiStandard::OPENAI_RESPONSES;
         } else {
             route.endpoint = conn.endpoint;
@@ -391,7 +421,22 @@ Route resolve_route(
         return route;
     }
 
-    const auto it = catalog.providers.find(conn.provider_id);
+    if (conn.id == OPENAI_SUBSCRIPTION_ID) {
+        route.api      = "https://chatgpt.com/backend-api/codex";
+        route.endpoint = route.api + "/responses";
+        route.dialect  = ApiStandard::OPENAI_RESPONSES;
+        route.auth     = AuthType::OPENAI_SUBSCRIPTION;
+        return route;
+    }
+    if (conn.id == ANTHROPIC_SUBSCRIPTION_ID) {
+        route.api      = "https://api.anthropic.com/v1";
+        route.endpoint = route.api + "/messages";
+        route.dialect  = ApiStandard::ANTHROPIC;
+        route.auth     = AuthType::ANTHROPIC_SUBSCRIPTION;
+        return route;
+    }
+
+    const auto it = catalog.providers.find(conn.id);
     if (it == catalog.providers.end()) {
         return route;
     }
@@ -422,7 +467,7 @@ std::string endpoint_for_base(std::string_view base)
     if (base.empty()) {
         return { };
     }
-    return normalize_base(base) + std::string(kChatSuffix);
+    return normalize_base(base) + std::string(CHAT_SUFFIX);
 }
 
 } // namespace imza

@@ -12,13 +12,29 @@
 
 namespace imza {
 
-std::vector<std::string> auth_headers(AuthType auth, const std::string& key)
+std::vector<std::string> auth_headers(
+    AuthType auth, const std::string& key, const std::string& account_id)
 {
     if (auth == AuthType::NONE || key.empty()) {
         return { };
     }
     if (auth == AuthType::ANTHROPIC) {
         return { "x-api-key: " + key, "anthropic-version: 2023-06-01" };
+    }
+    if (auth == AuthType::ANTHROPIC_SUBSCRIPTION) {
+        return { "Authorization: Bearer " + key,
+            "anthropic-version: 2023-06-01",
+            "anthropic-beta: oauth-2025-04-20" };
+    }
+    if (auth == AuthType::OPENAI_SUBSCRIPTION) {
+        std::vector<std::string> headers = {
+            "Authorization: Bearer " + key,
+            "originator: codex_cli_rs",
+        };
+        if (!account_id.empty()) {
+            headers.push_back("ChatGPT-Account-Id: " + account_id);
+        }
+        return headers;
     }
     return { "Authorization: Bearer " + key };
 }
@@ -135,7 +151,7 @@ extern const Provider anthropic_provider;
 
 namespace {
 
-    constexpr std::size_t kRawCap = 16 * 1024;
+    constexpr std::size_t RAW_CAP = 16 * 1024;
 
     struct StreamCtx {
         const Provider* provider = nullptr;
@@ -234,8 +250,8 @@ namespace {
     size_t write_callback(char* ptr, size_t, size_t n, void* userdata)
     {
         auto* ctx = static_cast<StreamCtx*>(userdata);
-        if (ctx->raw.size() < kRawCap) {
-            ctx->raw.append(ptr, std::min(n, kRawCap - ctx->raw.size()));
+        if (ctx->raw.size() < RAW_CAP) {
+            ctx->raw.append(ptr, std::min(n, RAW_CAP - ctx->raw.size()));
         }
         mark_connected(*ctx);
         ctx->buf.append(ptr, n);
@@ -289,12 +305,16 @@ namespace {
 Status stream(const Route& route, const ChatRequest& req, StreamCallback cb,
     int* retry_after)
 {
+    if (route.error != Status::OK) {
+        cb(make_error_event(route.error, route.error_message));
+        return route.error;
+    }
     const Provider& provider = get_provider(route);
     const std::string body   = write_json(provider.build(req));
     const std::string& url   = route.endpoint;
 
     std::vector<std::string> header_strs = provider.headers();
-    for (auto& h : auth_headers(route.auth, route.api_key)) {
+    for (auto& h : auth_headers(route.auth, route.api_key, route.account_id)) {
         header_strs.push_back(std::move(h));
     }
     curl_slist* list = build_header_list(header_strs);

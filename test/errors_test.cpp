@@ -146,8 +146,7 @@ imza::Config test_config()
 {
     imza::Config cfg;
     imza::Connection conn;
-    conn.id          = "test";
-    conn.provider_id = "test";
+    conn.id = "test";
     cfg.providers.push_back(conn);
     cfg.last_used = imza::LastUsed { "test", "m" };
     return cfg;

@@ -149,15 +149,62 @@ TEST_CASE("connect commits a connection and lands models in the catalog")
 
     const auto views = providers->connections();
     CHECK(views[0].id == "testprov");
-    CHECK(views[0].provider_id == "testprov");
     CHECK(views[0].model_count == 2);
     CHECK(session->connect_status() == "✓ 2 models");
 
     imza::Config saved;
     REQUIRE(imza::load_config(imza::config_path(), saved) == imza::Status::OK);
     REQUIRE(saved.providers.size() == 1);
-    CHECK(saved.providers[0].provider_id == "testprov");
+    CHECK(saved.providers[0].id == "testprov");
     CHECK(saved.providers[0].api_key == "key1");
+}
+
+TEST_CASE("subscription connect stores credentials without model discovery")
+{
+    IsolatedConfig iso;
+    PostPump pump;
+    bool fetched   = false;
+    auto providers = std::make_shared<imza::ProviderStore>(imza::Config { },
+        [&](const imza::Route&, std::vector<imza::ModelInfo>&) {
+            fetched = true;
+            return imza::Status::API_ERROR;
+        });
+    auto session   = std::make_shared<imza::Session>();
+    auto state     = make_state(session, providers, pump.fn());
+    pump.drain();
+    const auto options = providers->provider_options();
+    REQUIRE(options.size() >= 2);
+    CHECK(options[0].first == "openai-subscription");
+    CHECK(options[0].second == "Open AI Subscription");
+    CHECK(options[1].first == "anthropic-subscription");
+    CHECK(options[1].second == "Anthropic Subscription");
+
+    imza::ConnectResult result;
+    result.id            = "openai-subscription";
+    result.api_key       = "access";
+    result.refresh_token = "refresh";
+    result.expires_at    = 1756390000;
+    result.account_id    = "account";
+    result.label         = "user@example.com";
+    resolve_modal(*state, imza::ModalResult { result });
+    REQUIRE(pump.wait_for([&] {
+        const auto views = providers->connections();
+        return views.size() == 1
+            && views[0].state == imza::ConnectionView::State::READY;
+    }));
+
+    CHECK_FALSE(fetched);
+    auto views = providers->connections();
+    CHECK(views[0].id == "openai-subscription/user@example.com");
+    CHECK(views[0].name == "Open AI Subscription · user@example.com");
+    imza::Config saved;
+    REQUIRE(imza::load_config(imza::config_path(), saved) == imza::Status::OK);
+    REQUIRE(saved.providers.size() == 1);
+    CHECK(saved.providers[0].id == "openai-subscription");
+    CHECK(saved.providers[0].api_key == "access");
+    CHECK(saved.providers[0].refresh_token == "refresh");
+    CHECK(saved.providers[0].expires_at == 1756390000);
+    CHECK(saved.providers[0].account_id == "account");
 }
 
 TEST_CASE("connecting a labeled custom endpoint stores the label")
@@ -181,19 +228,19 @@ TEST_CASE("connecting a labeled custom endpoint stores the label")
     }));
 
     const auto views = providers->connections();
-    CHECK(views[0].id == "custom");
-    CHECK(views[0].name == "my Ollama");
+    CHECK(views[0].id == "custom/my Ollama");
+    CHECK(views[0].name == "Custom · my Ollama");
 
     imza::Config saved;
     REQUIRE(imza::load_config(imza::config_path(), saved) == imza::Status::OK);
     REQUIRE(saved.providers.size() == 1);
-    CHECK(saved.providers[0].provider_id == "custom");
+    CHECK(saved.providers[0].id == "custom");
     CHECK(saved.providers[0].endpoint
         == "http://localhost:11434/v1/chat/completions");
     CHECK(saved.providers[0].label == "my Ollama");
 }
 
-TEST_CASE("connecting the same endpoint updates in place")
+TEST_CASE("connecting the same provider requires a distinct label")
 {
     IsolatedConfig iso;
     PostPump pump;
@@ -212,16 +259,37 @@ TEST_CASE("connecting the same endpoint updates in place")
     resolve_modal(*state,
         imza::ModalResult {
             imza::ConnectResult { "testprov", "", "key2", "", true } });
+    pump.wait_for([&] { return !session->connect_status().empty(); });
+    pump.drain();
+    REQUIRE(providers->connections().size() == 1);
+    CHECK(providers->connections()[0].api_key == "key1");
+
+    resolve_modal(*state,
+        imza::ModalResult {
+            imza::ConnectResult { "testprov", "", "key2", "second", true } });
     REQUIRE(pump.wait_for([&] {
         const auto views = providers->connections();
-        return views.size() == 1 && views[0].api_key == "key2";
+        return views.size() == 2 && views[1].api_key == "key2";
     }));
     pump.drain();
 
     const auto views = providers->connections();
-    REQUIRE(views.size() == 1);
+    REQUIRE(views.size() == 2);
     CHECK(views[0].id == "testprov");
-    CHECK(views[0].api_key == "key2");
+    CHECK(views[0].api_key == "key1");
+    CHECK(views[1].id == "testprov/second");
+    CHECK(views[1].api_key == "key2");
+    CHECK(providers->route_for("testprov", imza::ApiStandard::OPENAI).api_key
+        == "key1");
+    CHECK(providers->route_for("testprov/second", imza::ApiStandard::OPENAI)
+              .api_key
+        == "key2");
+
+    imza::Config saved;
+    REQUIRE(imza::load_config(imza::config_path(), saved) == imza::Status::OK);
+    REQUIRE(saved.providers.size() == 2);
+    CHECK(saved.providers[0].label.empty());
+    CHECK(saved.providers[1].label == "second");
 }
 
 TEST_CASE("test-only connect does not persist")
@@ -270,9 +338,8 @@ TEST_CASE("model pick sets last_used and persists")
     PostPump pump;
     imza::Config cfg;
     imza::Connection conn;
-    conn.id          = "testprov";
-    conn.provider_id = "testprov";
-    conn.api_key     = "k";
+    conn.id      = "testprov";
+    conn.api_key = "k";
     cfg.providers.push_back(conn);
 
     auto providers
@@ -300,9 +367,8 @@ TEST_CASE("provider store resolves configured subagent model")
 {
     imza::Config cfg;
     imza::Connection connection;
-    connection.id          = "configured";
-    connection.provider_id = "openai";
-    connection.endpoint    = "https://example.test/v1/chat/completions";
+    connection.id       = "configured";
+    connection.endpoint = "https://example.test/v1/chat/completions";
     connection.dialects["research-model"] = imza::ApiStandard::ANTHROPIC;
     cfg.providers.push_back(connection);
     cfg.subagents[imza::SubagentRole::RESEARCH]
@@ -321,9 +387,8 @@ TEST_CASE("subagent defaults follow the active chat model")
 {
     imza::Config cfg;
     imza::Connection connection;
-    connection.id          = "configured";
-    connection.provider_id = "openai";
-    connection.endpoint    = "https://example.test/v1/chat/completions";
+    connection.id       = "configured";
+    connection.endpoint = "https://example.test/v1/chat/completions";
     cfg.providers.push_back(connection);
     cfg.last_used = imza::LastUsed { "configured", "chat-model" };
     imza::ProviderStore providers(cfg, fake_models_ok());
@@ -346,9 +411,8 @@ TEST_CASE("subagent configuration does not change main model reasoning")
 {
     imza::Config cfg;
     imza::Connection connection;
-    connection.id          = "configured";
-    connection.provider_id = "openai";
-    connection.endpoint    = "https://example.test/v1/chat/completions";
+    connection.id       = "configured";
+    connection.endpoint = "https://example.test/v1/chat/completions";
     cfg.providers.push_back(connection);
     cfg.last_used        = imza::LastUsed { "configured", "chat-model" };
     cfg.reasoning_effort = "high";
@@ -361,17 +425,15 @@ TEST_CASE("subagent configuration does not change main model reasoning")
     CHECK(main->reasoning_effort == "high");
 }
 
-TEST_CASE("removing the active connection re-points last_used")
+TEST_CASE("removing the connected connection re-points last_used")
 {
     IsolatedConfig iso;
     PostPump pump;
     imza::Config cfg;
     imza::Connection a;
-    a.id          = "a";
-    a.provider_id = "testprov";
+    a.id = "a";
     imza::Connection b;
     b.id          = "b";
-    b.provider_id = "testprov";
     cfg.providers = { a, b };
     cfg.last_used = imza::LastUsed { "a", "m1" };
 
@@ -381,7 +443,7 @@ TEST_CASE("removing the active connection re-points last_used")
         = make_state(std::make_shared<imza::Session>(), providers, pump.fn());
     pump.drain();
 
-    CHECK(providers->remove_connection("a"));
+    CHECK(providers->remove_connection(0, "a"));
     pump.drain();
 
     const auto snapshot = providers->config();
@@ -397,7 +459,6 @@ TEST_CASE("removing the last connection is refused")
     imza::Config cfg;
     imza::Connection a;
     a.id          = "a";
-    a.provider_id = "testprov";
     cfg.providers = { a };
 
     auto providers
@@ -405,7 +466,7 @@ TEST_CASE("removing the last connection is refused")
     auto state
         = make_state(std::make_shared<imza::Session>(), providers, pump.fn());
 
-    CHECK_FALSE(providers->remove_connection("a"));
+    CHECK_FALSE(providers->remove_connection(0, "a"));
     CHECK(providers->connections().size() == 1);
 }
 

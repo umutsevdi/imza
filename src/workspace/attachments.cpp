@@ -11,9 +11,9 @@ namespace imza {
 
 namespace {
 
-    constexpr std::uintmax_t kMaxAttachmentBytes = 1024 * 1024;
-    constexpr std::size_t kMaxAttachments        = 20;
-    constexpr std::size_t kMaxTotalBytes         = 4 * 1024 * 1024;
+    constexpr std::uintmax_t MAX_ATTACHMENT_BYTES = 1024 * 1024;
+    constexpr std::size_t MAX_ATTACHMENTS         = 20;
+    constexpr std::size_t MAX_TOTAL_BYTES         = 4 * 1024 * 1024;
 
     bool ignored_directory(std::string_view name)
     {
@@ -67,7 +67,7 @@ bool can_add_attachment(const std::vector<FileAttachment>& existing,
     for (const auto& attachment : existing) {
         total += attachment.content.size();
     }
-    if (existing.size() >= kMaxAttachments || total > kMaxTotalBytes) {
+    if (existing.size() >= MAX_ATTACHMENTS || total > MAX_TOTAL_BYTES) {
         error = "Attachments exceed the 20-file or 4 MiB total limit.";
         return false;
     }
@@ -94,10 +94,10 @@ std::vector<AttachmentCandidate> attachment_candidates(
     std::vector<AttachmentCandidate> out;
     std::filesystem::directory_iterator it(search_dir,
         std::filesystem::directory_options::skip_permission_denied, ec);
-    constexpr std::size_t kMaxInspected = 2000;
+    constexpr std::size_t MAX_INSPECTED = 2000;
     std::size_t inspected               = 0;
     for (const auto& entry : it) {
-        if (ec || inspected++ >= kMaxInspected) {
+        if (ec || inspected++ >= MAX_INSPECTED) {
             break;
         }
         const std::string name = entry.path().filename().string();
@@ -147,7 +147,7 @@ AttachmentResult load_attachment(
                 + "." };
     }
     const std::uintmax_t size = std::filesystem::file_size(path, ec);
-    if (ec || size > kMaxAttachmentBytes) {
+    if (ec || size > MAX_ATTACHMENT_BYTES) {
         return { Status::CONFIG_ERROR, std::nullopt,
             "Attachment exceeds the 1 MiB limit: " + std::string(relative_path)
                 + "." };

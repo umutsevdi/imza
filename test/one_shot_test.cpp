@@ -17,8 +17,7 @@ imza::Config one_shot_config()
 {
     imza::Config config;
     imza::Connection connection;
-    connection.id          = "test";
-    connection.provider_id = "test";
+    connection.id = "test";
     config.providers.push_back(connection);
     config.last_used = imza::LastUsed { "test", "model" };
     return config;

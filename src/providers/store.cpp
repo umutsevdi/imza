@@ -2,8 +2,10 @@
 
 #include "common/util.h"
 #include "providers/pricing.h"
+#include "providers/subscriptions.h"
 
 #include <algorithm>
+#include <ctime>
 #include <utility>
 
 namespace imza {
@@ -11,38 +13,56 @@ namespace imza {
 namespace {
 
     const Connection* find_connection(
-        const std::vector<Connection>& providers, std::string_view id)
+        const std::vector<Connection>& providers, std::string_view key)
     {
-        const auto it = std::find_if(providers.begin(), providers.end(),
-            [id](const Connection& connection) { return connection.id == id; });
-        return it == providers.end() ? nullptr : &*it;
-    }
-
-    std::string unique_connection_id(
-        const Config& config, std::string_view base)
-    {
-        if (find_connection(config.providers, base) == nullptr) {
-            return std::string(base);
-        }
-        for (int suffix = 2;; ++suffix) {
-            std::string candidate
-                = std::string(base) + "-" + std::to_string(suffix);
-            if (find_connection(config.providers, candidate) == nullptr) {
-                return candidate;
+        for (const Connection& connection : providers) {
+            if (connection_key(connection) == key) {
+                return &connection;
             }
         }
+        return nullptr;
     }
 
     ApiStandard default_dialect(
         const Connection& connection, const Catalog& catalog)
     {
+        if (connection.id == OPENAI_SUBSCRIPTION_ID) {
+            return ApiStandard::OPENAI_RESPONSES;
+        }
+        if (connection.id == ANTHROPIC_SUBSCRIPTION_ID) {
+            return ApiStandard::ANTHROPIC;
+        }
         if (!connection.endpoint.empty()) {
             return ApiStandard::OPENAI;
         }
-        const auto provider = catalog.providers.find(connection.provider_id);
+        const auto provider = catalog.providers.find(connection.id);
         return provider == catalog.providers.end()
             ? ApiStandard::OPENAI
             : dialect_from_npm(provider->second.npm);
+    }
+
+    bool subscription_connection(std::string_view id)
+    {
+        return id == OPENAI_SUBSCRIPTION_ID || id == ANTHROPIC_SUBSCRIPTION_ID;
+    }
+
+    std::vector<ModelInfo> catalog_models(
+        const Catalog& catalog, std::string_view id)
+    {
+        std::vector<ModelInfo> models;
+        const auto provider = catalog.providers.find(std::string(id));
+        if (provider == catalog.providers.end()) {
+            return models;
+        }
+        models.reserve(provider->second.models.size());
+        for (const auto& [model_id, cached] : provider->second.models) {
+            ModelInfo model;
+            model.id             = model_id;
+            model.name           = cached.name;
+            model.context_length = cached.context;
+            models.push_back(std::move(model));
+        }
+        return models;
     }
 
 } // namespace
@@ -60,6 +80,7 @@ ProviderStore::ProviderStore(Config config, ModelsFn models_fn)
     , models_fn_(std::move(models_fn))
 {
     load_catalog(presets_path(), catalog_);
+    inject_subscription_providers(catalog_);
     pricing_ = pricing_table_from(catalog_);
     if (!models_fn_) {
         models_fn_ = [](const Route& route, std::vector<ModelInfo>& models) {
@@ -100,24 +121,24 @@ std::vector<ConnectionView> ProviderStore::connections() const
     views.reserve(config_.providers.size());
     for (const Connection& connection : config_.providers) {
         ConnectionView view;
-        view.id          = connection.id;
-        view.provider_id = connection.provider_id;
-        view.api_key     = connection.api_key;
-        view.active
-            = config_.last_used && config_.last_used->provider == connection.id;
-        if (!connection.label.empty()) {
-            view.name = connection.label;
-        } else if (connection.provider_id == kCustomProviderId) {
+        view.id       = connection_key(connection);
+        view.provider = connection.id;
+        view.api_key  = connection.api_key;
+        if (subscription_connection(connection.id)) {
+            view.name = catalog_.providers.at(connection.id).name;
+        } else if (!connection.endpoint.empty()) {
             view.name = "Custom";
-        } else if (const auto it
-            = catalog_.providers.find(connection.provider_id);
+        } else if (const auto it = catalog_.providers.find(connection.id);
             it != catalog_.providers.end()) {
             view.name = it->second.name;
         }
         if (view.name.empty()) {
-            view.name = connection.provider_id;
+            view.name = connection.id;
         }
-        const auto it = model_catalog_.find(connection.id);
+        if (!connection.label.empty()) {
+            view.name += " · " + connection.label;
+        }
+        const auto it = model_catalog_.find(connection_key(connection));
         if (it != model_catalog_.end()) {
             if (const auto* ready
                 = std::get_if<CatalogEntry::Ready>(&it->second.state)) {
@@ -159,7 +180,7 @@ ModelList ProviderStore::models_for(std::string_view connection_id) const
     }
     list.state          = ModelList::State::READY;
     list.models         = ready->models;
-    const auto provider = catalog_.providers.find(connection->provider_id);
+    const auto provider = catalog_.providers.find(connection->id);
     if (provider == catalog_.providers.end()) {
         return list;
     }
@@ -181,11 +202,18 @@ ProviderStore::provider_options() const
     std::lock_guard lock(mutex_);
     std::vector<std::pair<std::string, std::string>> options;
     options.reserve(catalog_.providers.size() + 2);
+    options.emplace_back(
+        std::string(OPENAI_SUBSCRIPTION_ID), "Open AI Subscription");
+    options.emplace_back(
+        std::string(ANTHROPIC_SUBSCRIPTION_ID), "Anthropic Subscription");
     for (const auto& [id, provider] : catalog_.providers) {
+        if (id == OPENAI_SUBSCRIPTION_ID || id == ANTHROPIC_SUBSCRIPTION_ID) {
+            continue;
+        }
         options.emplace_back(id, provider.name.empty() ? id : provider.name);
     }
-    std::sort(options.begin(), options.end());
-    options.emplace_back(std::string(kCustomProviderId), "Custom");
+    std::sort(options.begin() + 2, options.end());
+    options.emplace_back(std::string(CUSTOM_PROVIDER_ID), "Custom");
     return options;
 }
 
@@ -249,6 +277,75 @@ Route ProviderStore::route_for(
                                  : _route_locked(*connection, dialect);
 }
 
+Route ProviderStore::authenticated_route_for(
+    std::string_view connection_id, ApiStandard dialect)
+{
+    const std::string id(connection_id);
+    Connection snapshot;
+    {
+        std::unique_lock lock(mutex_);
+        refresh_changed_.wait(lock, [&] { return !refreshing_.contains(id); });
+        const Connection* connection = _find_locked(id);
+        if (connection == nullptr) {
+            return { };
+        }
+        const std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
+        if (!subscription_connection(connection->id)
+            || connection->expires_at == 0
+            || now <= connection->expires_at - 300) {
+            return _route_locked(*connection, dialect);
+        }
+        if (connection->refresh_token.empty()) {
+            Route route         = _route_locked(*connection, dialect);
+            route.error         = Status::API_ERROR;
+            route.error_message = "Subscription expired. Sign in again.";
+            return route;
+        }
+        snapshot = *connection;
+        refreshing_.insert(id);
+    }
+
+    const SubscriptionResult refreshed = refresh_subscription(
+        snapshot.id, snapshot.refresh_token, snapshot.account_id);
+    bool persisted = false;
+    if (refreshed.status == Status::OK) {
+        persisted = _update_config([&](Config& candidate) {
+            Connection* connection = const_cast<Connection*>(
+                find_connection(candidate.providers, id));
+            if (connection == nullptr) {
+                return false;
+            }
+            connection->api_key       = refreshed.credentials.access_token;
+            connection->refresh_token = refreshed.credentials.refresh_token;
+            connection->expires_at    = refreshed.credentials.expires_at;
+            if (!refreshed.credentials.account_id.empty()) {
+                connection->account_id = refreshed.credentials.account_id;
+            }
+            connection->label.clear();
+            return true;
+        });
+    }
+
+    Route route;
+    {
+        std::lock_guard lock(mutex_);
+        refreshing_.erase(id);
+        const Connection* connection = _find_locked(id);
+        if (connection != nullptr) {
+            route = _route_locked(*connection, dialect);
+        }
+    }
+    refresh_changed_.notify_all();
+    if (refreshed.status != Status::OK || !persisted) {
+        route.error = refreshed.status == Status::OK ? Status::CONFIG_ERROR
+                                                     : refreshed.status;
+        route.error_message = refreshed.status == Status::OK
+            ? error_text(Status::CONFIG_ERROR)
+            : refreshed.error;
+    }
+    return route;
+}
+
 bool ProviderStore::model_reasons(std::string_view model) const
 {
     if (model.empty()) {
@@ -288,7 +385,7 @@ void ProviderStore::start_model_fetches()
     {
         std::lock_guard lock(mutex_);
         for (const Connection& connection : config_.providers) {
-            _start_fetch_locked(connection.id);
+            _start_fetch_locked(connection_key(connection));
         }
     }
     _notify_changed();
@@ -306,16 +403,20 @@ void ProviderStore::refetch_models(std::string_view connection_id)
 void ProviderStore::connect(ConnectResult result, ConnectCompleteFn complete)
 {
     Route route;
+    std::vector<ModelInfo> subscription_models;
     {
         std::lock_guard lock(mutex_);
-        const bool known = result.provider_id == kCustomProviderId
-            || catalog_.providers.contains(result.provider_id);
+        const bool known = result.id == CUSTOM_PROVIDER_ID
+            || catalog_.providers.contains(result.id);
         if (known) {
             Connection probe;
-            probe.provider_id = result.provider_id;
-            probe.endpoint    = result.endpoint;
-            probe.api_key     = result.api_key;
+            probe.id       = result.id;
+            probe.endpoint = result.endpoint;
+            probe.api_key  = result.api_key;
             route = _route_locked(probe, default_dialect(probe, catalog_));
+            if (subscription_connection(result.id)) {
+                subscription_models = catalog_models(catalog_, result.id);
+            }
         }
     }
     if (route.endpoint.empty()) {
@@ -324,56 +425,62 @@ void ProviderStore::connect(ConnectResult result, ConnectCompleteFn complete)
     }
 
     std::lock_guard lock(mutex_);
-    workers_.emplace_back([this, result = std::move(result), route,
-                              complete = std::move(complete)] {
-        std::vector<ModelInfo> models;
-        const Status fetched = models_fn_(route, models);
-        if (!alive_.load()) {
-            return;
-        }
-        ConnectOutcome outcome;
-        outcome.status      = fetched;
-        outcome.model_count = models.size();
-        if (fetched == Status::OK && result.persist) {
-            std::lock_guard lock(mutex_);
-            outcome.status = _commit_connection_locked(
-                result, models, outcome.first_connection);
-            outcome.persisted = outcome.status == Status::OK;
-        }
-        if (outcome.persisted) {
-            _notify_changed();
-        }
-        complete(outcome);
-    });
+    workers_.emplace_back(
+        [this, result = std::move(result), route,
+            subscription_models = std::move(subscription_models),
+            complete            = std::move(complete)] {
+            std::vector<ModelInfo> models = subscription_models;
+            const Status fetched          = subscription_connection(result.id)
+                ? Status::OK
+                : models_fn_(route, models);
+            if (!alive_.load()) {
+                return;
+            }
+            ConnectOutcome outcome;
+            outcome.status      = fetched;
+            outcome.model_count = models.size();
+            if (fetched == Status::OK && result.persist) {
+                std::lock_guard lock(mutex_);
+                outcome.status = _commit_connection_locked(
+                    result, models, outcome.first_connection);
+                outcome.persisted = outcome.status == Status::OK;
+            }
+            if (outcome.persisted) {
+                _notify_changed();
+            }
+            complete(outcome);
+        });
 }
 
-bool ProviderStore::remove_connection(std::string_view connection_id)
+bool ProviderStore::remove_connection(
+    std::size_t index, std::string_view expected_id)
 {
     return _update_config(
         [&](Config& candidate) {
-            if (candidate.providers.size() <= 1) {
+            if (candidate.providers.size() <= 1
+                || index >= candidate.providers.size()
+                || connection_key(candidate.providers[index]) != expected_id) {
                 return false;
             }
-            auto& providers           = candidate.providers;
-            const std::size_t removed = std::erase_if(
-                providers, [connection_id](const Connection& connection) {
-                    return connection.id == connection_id;
-                });
-            if (removed == 0) {
-                return false;
-            }
+            auto& providers              = candidate.providers;
+            const std::string removed_id = connection_key(providers[index]);
+            providers.erase(
+                providers.begin() + static_cast<std::ptrdiff_t>(index));
             if (candidate.last_used
-                && candidate.last_used->provider == connection_id) {
-                candidate.last_used = LastUsed { providers.front().id, "" };
+                && candidate.last_used->provider == removed_id) {
+                candidate.last_used
+                    = LastUsed { connection_key(providers.front()), "" };
             }
             std::erase_if(candidate.subagents, [&](const auto& entry) {
-                return entry.second.provider == connection_id;
+                return entry.second.provider == removed_id;
             });
             return true;
         },
         [&] {
-            ++generations_[std::string(connection_id)];
-            model_catalog_.erase(std::string(connection_id));
+            if (_find_locked(expected_id) == nullptr) {
+                ++generations_[std::string(expected_id)];
+                model_catalog_.erase(std::string(expected_id));
+            }
         });
 }
 
@@ -524,6 +631,11 @@ void ProviderStore::_start_fetch_locked(const std::string& connection_id)
         return;
     }
     model_catalog_[connection_id] = CatalogEntry { CatalogEntry::Fetching { } };
+    if (subscription_connection(connection->id)) {
+        model_catalog_[connection_id] = CatalogEntry { CatalogEntry::Ready {
+            catalog_models(catalog_, connection->id) } };
+        return;
+    }
     workers_.emplace_back([this, connection_id, generation, route] {
         std::vector<ModelInfo> models;
         const Status status = models_fn_(route, models);
@@ -551,18 +663,13 @@ void ProviderStore::_start_fetch_locked(const std::string& connection_id)
 Status ProviderStore::_commit_connection_locked(const ConnectResult& result,
     const std::vector<ModelInfo>& models, bool& first)
 {
-    Connection probe;
-    probe.provider_id = result.provider_id;
-    probe.endpoint    = result.endpoint;
-    probe.api_key     = result.api_key;
-    const Route route
-        = resolve_route(probe, catalog_, default_dialect(probe, catalog_));
-
     Connection stored;
-    stored.provider_id = result.provider_id;
-    stored.api_key     = result.api_key;
-    stored.label       = result.label;
-    if (result.provider_id == kCustomProviderId) {
+    stored.api_key       = result.api_key;
+    stored.refresh_token = result.refresh_token;
+    stored.expires_at    = result.expires_at;
+    stored.account_id    = result.account_id;
+    stored.label         = result.label;
+    if (!result.endpoint.empty()) {
         stored.endpoint = result.endpoint;
     }
 
@@ -571,29 +678,15 @@ Status ProviderStore::_commit_connection_locked(const ConnectResult& result,
     const ConfigUpdateResult updated = update_config(
         config_path(), config_,
         [&](Config& latest) {
-            first                = !latest.last_used.has_value();
-            Connection* existing = nullptr;
-            for (Connection& connection : latest.providers) {
-                const Route other = resolve_route(connection, catalog_,
-                    default_dialect(connection, catalog_));
-                if (!route.endpoint.empty()
-                    && other.endpoint == route.endpoint) {
-                    existing = &connection;
-                    break;
+            first     = !latest.last_used.has_value();
+            stored.id = result.id;
+            id        = connection_key(stored);
+            for (const Connection& connection : latest.providers) {
+                if (connection_key(connection) == id) {
+                    return false;
                 }
             }
-            if (existing != nullptr) {
-                existing->provider_id = stored.provider_id;
-                existing->api_key     = stored.api_key;
-                existing->label       = stored.label;
-                existing->endpoint    = stored.endpoint;
-                existing->dialects.clear();
-                id = existing->id;
-            } else {
-                stored.id = unique_connection_id(latest, result.provider_id);
-                id        = stored.id;
-                latest.providers.push_back(std::move(stored));
-            }
+            latest.providers.push_back(std::move(stored));
             return true;
         },
         &candidate);

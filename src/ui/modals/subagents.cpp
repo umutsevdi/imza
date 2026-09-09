@@ -18,7 +18,7 @@ using namespace ftxui;
 
 namespace {
 
-    constexpr int kSubagentRoles = 3;
+    constexpr int SUBAGENT_ROLES = 3;
 
     SubagentRole role_at(int index)
     {
@@ -163,7 +163,7 @@ namespace {
         bool handle_role_event(const Event& event)
         {
             if (event == Event::ArrowDown || event == Event::ArrowUp) {
-                move_list_cursor(event, selected_, kSubagentRoles);
+                move_list_cursor(event, selected_, SUBAGENT_ROLES);
                 return true;
             }
             if (event == Event::ArrowLeft || event == Event::ArrowRight) {
@@ -201,7 +201,7 @@ namespace {
             Elements rows       = modal_header("Subagent Models",
                 "Tune subagent tasks. Choose <Default> to follow the main "
                 "chat model.");
-            for (int index = 0; index < kSubagentRoles; ++index) {
+            for (int index = 0; index < SUBAGENT_ROLES; ++index) {
                 const SubagentRole role = role_at(index);
                 const auto found        = config.subagents.find(role);
                 std::string model       = "<Default>";

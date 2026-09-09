@@ -274,6 +274,11 @@ bool TurnRunner::_compact_history(std::vector<Message>& history,
 
 void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
 {
+    if (!has_stream_override_) {
+        settings.route = state_->providers->authenticated_route_for(
+            settings.connection_id, settings.dialect);
+        settings.dialect = settings.route.dialect;
+    }
     int retries                 = 0;
     std::uint64_t prompt_tokens = state_->session->last().prompt;
     bool compaction_attempted   = false;
