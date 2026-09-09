@@ -411,7 +411,7 @@ namespace {
             }
             auto transcript             = std::make_shared<Session>();
             const SubagentHandle handle = state_->delegation->run_subagent(
-                std::move(prompt), selection->model, "low",
+                std::move(prompt), selection->model, selection->reasoning_effort,
                 SubagentOptions { .visible = false,
                     .timeout               = std::chrono::minutes { 5 },
                     .max_output_tokens     = 4096,

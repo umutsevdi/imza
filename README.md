@@ -42,7 +42,7 @@ comments, then send the findings directly back to Plan mode.
 - Bring-your-own-model support
 - Persistent sessions, transcripts, and automatic context compaction
 
-![imza-layout](./screenshots/review.png)
+![imza-layout](./screenshots/review.mp4)
 
 ## Bring Your Own Model
 
