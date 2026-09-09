@@ -133,15 +133,52 @@ TEST_CASE("auth_from_npm maps ai-sdk packages")
     CHECK(imza::auth_from_npm("") == imza::AuthType::BEARER);
 }
 
-TEST_CASE("catalog_base falls back for SDK-default providers")
+TEST_CASE("dialect_from_npm maps ai-sdk adapters")
 {
-    imza::CachedProvider anthropic;
-    anthropic.npm = "@ai-sdk/anthropic";
-    CHECK(imza::catalog_base(anthropic) == "https://api.anthropic.com/v1");
+    CHECK(imza::dialect_from_npm("@ai-sdk/openai")
+        == imza::ApiStandard::OPENAI_RESPONSES);
+    CHECK(imza::dialect_from_npm("@ai-sdk/openai-compatible")
+        == imza::ApiStandard::OPENAI);
+    CHECK(imza::dialect_from_npm("@ai-sdk/anthropic")
+        == imza::ApiStandard::ANTHROPIC);
+    CHECK(imza::dialect_from_npm("") == imza::ApiStandard::OPENAI);
+}
 
-    imza::CachedProvider openai;
-    openai.npm = "@ai-sdk/openai";
-    CHECK(imza::catalog_base(openai) == "https://api.openai.com/v1");
+TEST_CASE("backfill_catalog_urls patches only matching empty provider URLs")
+{
+    imza::Catalog catalog;
+    catalog.providers["anthropic"].npm       = "@ai-sdk/anthropic";
+    catalog.providers["cerebras"].npm        = "@ai-sdk/cerebras";
+    catalog.providers["groq"].npm            = "@ai-sdk/groq";
+    catalog.providers["mistral"].npm         = "@ai-sdk/mistral";
+    catalog.providers["openai"].npm          = "@ai-sdk/openai";
+    catalog.providers["togetherai"].npm      = "@ai-sdk/togetherai";
+    catalog.providers["xai"].npm             = "@ai-sdk/xai";
+    catalog.providers["unknown"].npm         = "@ai-sdk/openai-compatible";
+    catalog.providers["openai-explicit"].api = "https://example.com/v1";
+    catalog.providers["openai-explicit"].npm = "@ai-sdk/openai";
+
+    imza::backfill_catalog_urls(catalog);
+
+    CHECK(catalog.providers.at("anthropic").api
+        == "https://api.anthropic.com/v1");
+    CHECK(catalog.providers.at("cerebras").api == "https://api.cerebras.ai/v1");
+    CHECK(catalog.providers.at("groq").api == "https://api.groq.com/openai/v1");
+    CHECK(catalog.providers.at("mistral").api == "https://api.mistral.ai/v1");
+    CHECK(catalog.providers.at("openai").api == "https://api.openai.com/v1");
+    CHECK(catalog.providers.at("togetherai").api
+        == "https://api.together.xyz/v1");
+    CHECK(catalog.providers.at("xai").api == "https://api.x.ai/v1");
+    CHECK(catalog.providers.at("unknown").api.empty());
+    CHECK(catalog.providers.at("openai-explicit").api
+        == "https://example.com/v1");
+}
+
+TEST_CASE("catalog_base uses only the catalog URL")
+{
+    imza::CachedProvider empty;
+    empty.npm = "@ai-sdk/anthropic";
+    CHECK(imza::catalog_base(empty).empty());
 
     imza::CachedProvider explicit_api;
     explicit_api.api = "https://openrouter.ai/api/v1/";
@@ -173,6 +210,11 @@ TEST_CASE("resolve_route derives endpoints per dialect")
     const imza::Route anthropic
         = imza::resolve_route(conn, catalog, imza::ApiStandard::ANTHROPIC);
     CHECK(anthropic.endpoint == "https://openrouter.ai/api/v1/messages");
+
+    const imza::Route responses = imza::resolve_route(
+        conn, catalog, imza::ApiStandard::OPENAI_RESPONSES);
+    CHECK(responses.endpoint == "https://openrouter.ai/api/v1/responses");
+    CHECK(responses.dialect == imza::ApiStandard::OPENAI_RESPONSES);
 }
 
 TEST_CASE("resolve_route routes anthropic providers with x-api-key")
@@ -180,6 +222,7 @@ TEST_CASE("resolve_route routes anthropic providers with x-api-key")
     imza::Catalog catalog;
     imza::CachedProvider anthropic_provider;
     anthropic_provider.name        = "Anthropic";
+    anthropic_provider.api         = "https://api.anthropic.com/v1";
     anthropic_provider.npm         = "@ai-sdk/anthropic";
     catalog.providers["anthropic"] = anthropic_provider;
 
@@ -219,6 +262,11 @@ TEST_CASE("resolve_route uses stored endpoint for local and custom")
     CHECK(keyed.endpoint == "http://localhost:1234/v1/chat/completions");
     CHECK(keyed.dialect == imza::ApiStandard::OPENAI);
     CHECK(keyed.auth == imza::AuthType::BEARER);
+
+    const imza::Route responses = imza::resolve_route(
+        conn, catalog, imza::ApiStandard::OPENAI_RESPONSES);
+    CHECK(responses.endpoint == "http://localhost:1234/v1/responses");
+    CHECK(responses.dialect == imza::ApiStandard::OPENAI_RESPONSES);
 }
 
 TEST_CASE("resolve_route misses unknown providers")

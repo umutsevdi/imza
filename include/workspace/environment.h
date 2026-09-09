@@ -9,8 +9,8 @@
 #include <thread>
 #include <unordered_map>
 
-#include "common/types.h"
 #include "common/imza_signal.h"
+#include "common/types.h"
 #include "tools/skills.h"
 #include "workspace/git.h"
 

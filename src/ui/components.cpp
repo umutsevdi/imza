@@ -10,6 +10,7 @@
 #include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/screen.hpp>
+#include <ftxui/screen/string.hpp>
 #include <functional>
 #include <iterator>
 #include <memory>
@@ -134,6 +135,14 @@ bool move_list_cursor(const ftxui::Event& event, int& cursor, int count)
     return false;
 }
 
+namespace {
+    int glyph_width(std::string_view glyph)
+    {
+        const int width = ftxui::string_width(std::string(glyph));
+        return width < 1 ? 1 : width;
+    }
+} // namespace
+
 std::string fit(const std::string& value, int width)
 {
     const std::size_t max = static_cast<std::size_t>(std::max(width, 0));
@@ -155,17 +164,54 @@ std::string fit(const std::string& value, int width)
     return out;
 }
 
-std::string fit(const std::string& value, int width, int offset)
+std::vector<std::pair<std::size_t, std::size_t>> wrap_row_ranges(
+    std::string_view line, int width)
 {
-    const std::size_t skip = static_cast<std::size_t>(std::max(offset, 0));
-    std::size_t seen       = 0;
-    std::size_t pos        = 0;
-    while (pos < value.size() && seen < skip) {
-        const auto lead = static_cast<unsigned char>(value[pos]);
-        pos += std::min(utf8_sequence_length(lead), value.size() - pos);
-        ++seen;
+    const std::size_t max = static_cast<std::size_t>(std::max(width, 1));
+    std::vector<std::pair<std::size_t, std::size_t>> rows;
+    std::size_t row_begin = 0;
+    std::size_t row_width = 0;
+    std::size_t break_at  = std::string_view::npos;
+    std::size_t i         = 0;
+    while (i < line.size()) {
+        const std::size_t length
+            = std::min(utf8_sequence_length(line[i]), line.size() - i);
+        const std::size_t glyph
+            = static_cast<std::size_t>(glyph_width(line.substr(i, length)));
+        if (row_width + glyph > max && i > row_begin) {
+            if (break_at != std::string_view::npos && break_at > row_begin) {
+                rows.emplace_back(row_begin, break_at);
+                i = break_at;
+            } else {
+                rows.emplace_back(row_begin, i);
+            }
+            row_begin = i;
+            row_width = 0;
+            break_at  = std::string_view::npos;
+            continue;
+        }
+        row_width += glyph;
+        if (line[i] == ' ') {
+            break_at = i + 1;
+        }
+        i += length;
     }
-    return fit(value.substr(pos), width);
+    rows.emplace_back(row_begin, line.size());
+    return rows;
+}
+
+std::vector<std::string> wrap_text(std::string_view body, int width)
+{
+    std::vector<std::string> out;
+    for (const std::string& line : split_lines(body)) {
+        for (const auto& [begin, end] : wrap_row_ranges(line, width)) {
+            out.emplace_back(line.substr(begin, end - begin));
+        }
+    }
+    if (out.empty()) {
+        out.emplace_back();
+    }
+    return out;
 }
 
 LayoutCtx layout_context(int width, int height)
@@ -226,9 +272,30 @@ namespace {
             | bgcolor(bg);
         return highlighted ? std::move(block) : std::move(block) | dim;
     }
+
+    // Visual rows of `content` wrapped to `width`; highlighting runs on the
+    // full line so tokens keep their color across the wrap.
+    Elements wrapped_content_rows(
+        const std::string& content, const std::string& syntax, int width)
+    {
+        const std::vector<std::string> segments = wrap_text(content, width);
+        Elements highlighted;
+        for (std::vector<Element>& rows :
+            highlight_code_wrapped(content, syntax, width)) {
+            std::move(
+                rows.begin(), rows.end(), std::back_inserter(highlighted));
+        }
+        Elements out;
+        for (std::size_t i = 0; i < segments.size(); ++i) {
+            out.push_back(i < highlighted.size()
+                    ? std::move(highlighted[i])
+                    : text(segments[i]) | color(PANEL_FG));
+        }
+        return out;
+    }
 } // namespace
 
-Element code_block(const std::string& code, const std::string& lang)
+Element code_block(const std::string& code, const std::string& lang, int width)
 {
     const Color bg = PANEL_COLOR;
     const Color fg = PANEL_FG;
@@ -236,37 +303,27 @@ Element code_block(const std::string& code, const std::string& lang)
     if (!lang.empty()) {
         body.push_back(text(lang) | color(PANEL_FG_DIM));
     }
+    const int content_width = std::max(1, width - 4);
     if (syntax_type_supported(lang)) {
-        Elements highlighted = highlight_code(code, lang);
-        body.insert(body.end(), std::make_move_iterator(highlighted.begin()),
-            std::make_move_iterator(highlighted.end()));
+        for (std::vector<Element>& rows :
+            highlight_code_wrapped(code, lang, content_width)) {
+            std::move(rows.begin(), rows.end(), std::back_inserter(body));
+        }
     } else {
-        size_t pos = 0;
-        for (;;) {
-            const size_t nl = code.find('\n', pos);
-            const std::string line
-                = code.substr(pos, nl == std::string::npos ? nl : nl - pos);
-            body.push_back(text(line) | color(fg));
-            if (nl == std::string::npos) {
-                break;
-            }
-            pos = nl + 1;
+        for (const std::string& segment : wrap_text(code, content_width)) {
+            body.push_back(text(segment) | color(fg));
         }
     }
     return code_block_frame(std::move(body), bg, syntax_type_supported(lang));
 }
 
-Element code_block_with_lines(
-    const std::string& code, const std::string& lang, std::size_t start_line)
+Element code_block_with_lines(const std::string& code, const std::string& lang,
+    std::size_t start_line, int width)
 {
     const Color bg                       = PANEL_COLOR;
     const Color fg                       = PANEL_FG;
     const Color gutter                   = PANEL_FG_DIM;
     const std::vector<std::string> lines = split_lines(code);
-    Elements highlighted;
-    if (syntax_type_supported(lang)) {
-        highlighted = highlight_code(code, lang);
-    }
 
     std::size_t footer = lines.size();
     for (std::size_t i = 0; i < lines.size(); ++i) {
@@ -278,13 +335,20 @@ Element code_block_with_lines(
     const std::size_t content_end
         = footer > 0 && lines[footer - 1].empty() ? footer - 1 : footer;
     const std::size_t last_num = start_line + content_end;
-    const std::size_t width
+    const std::size_t number_size
         = digit_width(last_num < start_line ? start_line : last_num);
+    const int content_width
+        = std::max(1, width - static_cast<int>(number_size) - 5);
+    std::vector<std::vector<Element>> highlighted;
+    if (syntax_type_supported(lang)) {
+        highlighted = highlight_code_wrapped(code, lang, content_width);
+    }
 
     Elements body;
     if (!lang.empty()) {
         body.push_back(text(lang) | color(PANEL_FG_DIM));
     }
+    static const Elements empty_rows;
     for (std::size_t i = 0; i < lines.size(); ++i) {
         if (i == footer) {
             body.push_back(text(lines[i]) | color(PANEL_FG_DIM));
@@ -294,15 +358,21 @@ Element code_block_with_lines(
             continue;
         }
         const std::string num = std::to_string(start_line + i);
-        std::string padded(width - num.size(), ' ');
+        std::string padded(number_size - num.size(), ' ');
         padded += num;
-        body.push_back(hbox({
-            text(padded) | color(gutter),
-            text(" "),
-            syntax_type_supported(lang) && i < highlighted.size()
-                ? std::move(highlighted[i])
-                : text(lines[i]) | color(fg),
-        }));
+        const std::string blank_gutter(number_size, ' ');
+        const std::vector<std::string> segments
+            = wrap_text(lines[i], content_width);
+        const std::vector<Element>& highlighted_rows
+            = i < highlighted.size() ? highlighted[i] : empty_rows;
+        for (std::size_t j = 0; j < segments.size(); ++j) {
+            body.push_back(hbox({
+                j == 0 ? text(padded) | color(gutter) : text(blank_gutter),
+                text(" "),
+                j < highlighted_rows.size() ? highlighted_rows[j]
+                                            : text(segments[j]) | color(fg),
+            }));
+        }
     }
     return code_block_frame(std::move(body), bg, syntax_type_supported(lang));
 }
@@ -517,26 +587,41 @@ Element diff_split(const DiffView& diff, int available_width)
 
     Elements rows;
     if (available_width < 100) {
+        const int content_width = std::max(
+            1, available_width - static_cast<int>(2 * number_width + 6));
+        const std::string blank_gutter(2 * number_width + 4, ' ');
         for (const DiffRow& row : diff.rows) {
             if (is_skip(row)) {
                 rows.push_back(hbox(
                     { text("  " + row.left) | color(PANEL_FG_DIM), filler() }));
                 continue;
             }
-            const auto append
-                = [&](const std::optional<std::size_t>& old_no,
-                      const std::optional<std::size_t>& new_no,
-                      std::string marker, const std::string& content,
-                      std::optional<Color> background) {
-                      Element line = hbox(
-                          { line_number(old_no), text(" "), line_number(new_no),
-                              text(" "), text(std::move(marker) + " "),
-                              highlight_code_line(content, syntax), filler() });
-                      if (background) {
-                          line = std::move(line) | bgcolor(*background);
-                      }
-                      rows.push_back(std::move(line));
-                  };
+            const auto append = [&](const std::optional<std::size_t>& old_no,
+                                    const std::optional<std::size_t>& new_no,
+                                    std::string marker,
+                                    const std::string& content,
+                                    std::optional<Color> background) {
+                const Elements content_rows
+                    = wrapped_content_rows(content, syntax, content_width);
+                for (std::size_t i = 0; i < content_rows.size(); ++i) {
+                    Elements parts;
+                    if (i == 0) {
+                        parts.push_back(line_number(old_no));
+                        parts.push_back(text(" "));
+                        parts.push_back(line_number(new_no));
+                        parts.push_back(text(" "));
+                        parts.push_back(text(std::move(marker) + " "));
+                    } else {
+                        parts.push_back(text(blank_gutter));
+                    }
+                    parts.push_back(content_rows[i]);
+                    Element line = hbox(std::move(parts));
+                    if (background) {
+                        line = std::move(line) | bgcolor(*background);
+                    }
+                    rows.push_back(std::move(line));
+                }
+            };
             if (diff_row_left_changed(row)) {
                 append(row.left_no, std::nullopt, diff_marker(false), row.left,
                     diff_background(false));
@@ -553,13 +638,28 @@ Element diff_split(const DiffView& diff, int available_width)
     }
 
     const int side_width = diff_side_width(available_width);
-    const auto side      = [&](const std::optional<std::size_t>& number,
-                               std::string marker, const std::string& content,
-                               std::optional<Color> background) {
-        Element line = hbox({ line_number(number), text(" "),
-                           text(std::move(marker) + " "),
-                           highlight_code_line(content, syntax), filler() })
-            | size(WIDTH, EQUAL, side_width);
+    const int side_content_width
+        = std::max(1, side_width - static_cast<int>(number_width) - 5);
+    const std::string blank_gutter(number_width + 3, ' ');
+    const auto side = [&](const std::optional<std::size_t>& number,
+                          std::string marker, const std::string& content,
+                          std::optional<Color> background) {
+        const Elements content_rows
+            = wrapped_content_rows(content, syntax, side_content_width);
+        Elements visual;
+        for (std::size_t i = 0; i < content_rows.size(); ++i) {
+            Elements parts;
+            if (i == 0) {
+                parts.push_back(line_number(number));
+                parts.push_back(text(" "));
+                parts.push_back(text(std::move(marker) + " "));
+            } else {
+                parts.push_back(text(blank_gutter));
+            }
+            parts.push_back(content_rows[i]);
+            visual.push_back(hbox(std::move(parts)));
+        }
+        Element line = vbox(std::move(visual)) | size(WIDTH, EQUAL, side_width);
         if (background) {
             line = std::move(line) | bgcolor(*background);
         }

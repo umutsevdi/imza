@@ -18,8 +18,8 @@ std::string shell_status_text(const ShellStatus& status);
 std::string append_shell_status(
     std::string text, const std::optional<ShellStatus>& status);
 
-// History message for an assistant turn; Anthropic dialects carry the
-// turn's reasoning block so it can be replayed to the provider.
+// History message for an assistant turn; dialects that require reasoning
+// replay carry the provider state with the turn.
 Message assistant_message(
     std::string content, const AssistantTurn* turn, ApiStandard dialect);
 

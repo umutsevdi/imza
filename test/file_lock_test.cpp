@@ -53,7 +53,7 @@ TEST_CASE("acquired lock blocks a second holder until released")
 #endif
 }
 
-TEST_CASE("lock file persists across release and can be reacquired")
+TEST_CASE("lock file is removed on release and can be reacquired")
 {
 #ifdef _WIN32
     return;
@@ -63,8 +63,11 @@ TEST_CASE("lock file persists across release and can be reacquired")
         auto lock = imza::acquire_file_lock(path);
         REQUIRE(std::holds_alternative<imza::FileLock>(lock));
     }
-    CHECK(std::filesystem::exists(path));
-    auto lock = imza::acquire_file_lock(path);
-    CHECK(std::holds_alternative<imza::FileLock>(lock));
+    CHECK_FALSE(std::filesystem::exists(path));
+    {
+        auto lock = imza::acquire_file_lock(path);
+        REQUIRE(std::holds_alternative<imza::FileLock>(lock));
+    }
+    CHECK_FALSE(std::filesystem::exists(path));
 #endif
 }

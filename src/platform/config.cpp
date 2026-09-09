@@ -62,6 +62,10 @@ namespace {
             out = ApiStandard::OPENAI;
             return true;
         }
+        if (text == "openai-responses") {
+            out = ApiStandard::OPENAI_RESPONSES;
+            return true;
+        }
         if (text == "anthropic") {
             out = ApiStandard::ANTHROPIC;
             return true;
@@ -71,7 +75,12 @@ namespace {
 
     const char* dialect_str(ApiStandard standard)
     {
-        return standard == ApiStandard::ANTHROPIC ? "anthropic" : "openai";
+        switch (standard) {
+        case ApiStandard::OPENAI: return "openai";
+        case ApiStandard::OPENAI_RESPONSES: return "openai-responses";
+        case ApiStandard::ANTHROPIC: return "anthropic";
+        }
+        return "openai";
     }
 
     bool parse_skill_policy(const std::string& text, SkillPolicy& out)

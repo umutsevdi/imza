@@ -130,6 +130,7 @@ Status http_post(const std::string& url,
 }
 
 extern const Provider openai_provider;
+extern const Provider openai_responses_provider;
 extern const Provider anthropic_provider;
 
 namespace {
@@ -364,6 +365,9 @@ Provider get_provider(const Route& route)
 {
     if (route.dialect == ApiStandard::ANTHROPIC) {
         return anthropic_provider;
+    }
+    if (route.dialect == ApiStandard::OPENAI_RESPONSES) {
+        return openai_responses_provider;
     }
     return openai_provider;
 }

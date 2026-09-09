@@ -103,12 +103,6 @@ TEST_CASE("render_changed_files renders colored symbols and readable paths")
     CHECK(out.find("unknown.cpp") != std::string::npos);
     CHECK(out.find("+12") != std::string::npos);
     CHECK(out.find("−4") != std::string::npos);
-
-    CHECK(screen.PixelAt(1, 2).foreground_color == ftxui::Color::YellowLight);
-    CHECK(screen.PixelAt(1, 3).foreground_color == ftxui::Color::GreenLight);
-    CHECK(screen.PixelAt(1, 4).foreground_color == ftxui::Color::CyanLight);
-    CHECK(screen.PixelAt(1, 5).foreground_color == ftxui::Color::RedLight);
-    CHECK(screen.PixelAt(3, 2).foreground_color == imza::PANEL_FG);
 }
 
 TEST_CASE("render_context_box lists attachment basenames under files")

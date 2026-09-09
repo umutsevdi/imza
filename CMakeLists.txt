@@ -177,6 +177,7 @@ add_library(imza_network
     src/network/stream_event.cpp
     src/network/transport.cpp
     src/network/openai_provider.cpp
+    src/network/openai_responses_provider.cpp
     src/network/anthropic_provider.cpp
     src/network/models.cpp
     src/network/web.cpp

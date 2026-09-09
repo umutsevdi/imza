@@ -63,6 +63,55 @@ TEST_CASE("Anthropic request shape via factory")
     CHECK_FALSE(v.isMember("tools"));
 }
 
+TEST_CASE("OpenAI Responses request shape via factory")
+{
+    imza::Route route;
+    route.dialect       = imza::ApiStandard::OPENAI_RESPONSES;
+    const auto provider = imza::get_provider(route);
+
+    imza::ToolSpec spec;
+    spec.name        = "read";
+    spec.description = "read a file";
+    spec.parameters  = imza::parse_json(R"({"type":"object"})");
+
+    imza::ChatRequest req;
+    req.model             = "gpt-5";
+    req.reasoning_effort  = "high";
+    req.max_output_tokens = 2048;
+    req.tools             = { spec };
+    req.messages.push_back({ imza::Message::Type::SYSTEM, "sys" });
+    req.messages.push_back({ imza::Message::Type::USER, "hi" });
+    imza::Message assistant { imza::Message::Type::ASSISTANT, "checking" };
+    assistant.thinking.push_back({ "summary", "encrypted" });
+    assistant.tool_calls.push_back({ "call_1", "read", R"({"path":"a"})" });
+    req.messages.push_back(std::move(assistant));
+    req.messages.push_back(
+        { imza::Message::Type::TOOL, "file body", { }, "call_1" });
+
+    const Json::Value value = provider.build(req);
+    CHECK(value["model"].asString() == "gpt-5");
+    CHECK(value["stream"].asBool());
+    CHECK_FALSE(value["store"].asBool());
+    CHECK(value["include"][0].asString() == "reasoning.encrypted_content");
+    CHECK(value["reasoning"]["effort"].asString() == "high");
+    CHECK(value["reasoning"]["summary"].asString() == "auto");
+    CHECK(value["max_output_tokens"].asUInt64() == 2048);
+    REQUIRE(value["tools"].size() == 1);
+    CHECK(value["tools"][0]["name"].asString() == "read");
+    CHECK_FALSE(value["tools"][0].isMember("function"));
+
+    REQUIRE(value["input"].size() == 6);
+    CHECK(value["input"][0]["role"].asString() == "system");
+    CHECK(value["input"][1]["role"].asString() == "user");
+    CHECK(value["input"][2]["type"].asString() == "reasoning");
+    CHECK(value["input"][2]["encrypted_content"].asString() == "encrypted");
+    CHECK(value["input"][3]["role"].asString() == "assistant");
+    CHECK(value["input"][4]["type"].asString() == "function_call");
+    CHECK(value["input"][4]["call_id"].asString() == "call_1");
+    CHECK(value["input"][5]["type"].asString() == "function_call_output");
+    CHECK(value["input"][5]["output"].asString() == "file body");
+}
+
 TEST_CASE("providers cap requested output tokens")
 {
     imza::ChatRequest openai_request;
@@ -195,6 +244,51 @@ TEST_CASE("OpenAI done")
     CHECK(state.terminal);
 }
 
+TEST_CASE("OpenAI Responses streams text reasoning tools and usage")
+{
+    imza::Route route;
+    route.dialect       = imza::ApiStandard::OPENAI_RESPONSES;
+    const auto provider = imza::get_provider(route);
+
+    imza::ParseState state;
+    const auto outs = parse_all(provider, state,
+        { { "response.reasoning_summary_text.delta",
+              R"({"type":"response.reasoning_summary_text.delta","delta":"Thinking"})" },
+            { "response.output_text.delta",
+                R"({"type":"response.output_text.delta","delta":"Hello"})" },
+            { "response.output_item.added",
+                R"({"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","call_id":"call_7","name":"read","arguments":""}})" },
+            { "response.function_call_arguments.delta",
+                R"({"type":"response.function_call_arguments.delta","output_index":1,"delta":"{\"path\":"})" },
+            { "response.function_call_arguments.delta",
+                R"({"type":"response.function_call_arguments.delta","output_index":1,"delta":"\"a\"}"})" },
+            { "response.output_item.done",
+                R"({"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","call_id":"call_7","name":"read","arguments":"{\"path\":\"a\"}"}})" },
+            { "response.output_item.done",
+                R"({"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","encrypted_content":"secret"}})" },
+            { "response.completed",
+                R"({"type":"response.completed","response":{"usage":{"input_tokens":100,"output_tokens":20,"total_tokens":120,"input_tokens_details":{"cached_tokens":60,"cache_write_tokens":5}}}})" } });
+
+    REQUIRE(outs.size() == 6);
+    CHECK(outs[0].kind == imza::StreamEvent::Kind::REASONING);
+    CHECK(outs[0].text == "Thinking");
+    CHECK(outs[1].kind == imza::StreamEvent::Kind::CONTENT_DELTA);
+    CHECK(outs[1].text == "Hello");
+    CHECK(outs[2].kind == imza::StreamEvent::Kind::TOOL_CALL);
+    CHECK(outs[2].tool_call.id == "call_7");
+    CHECK(outs[2].tool_call.name == "read");
+    CHECK(outs[2].tool_call.args == R"({"path":"a"})");
+    CHECK(outs[3].kind == imza::StreamEvent::Kind::REASONING);
+    CHECK(outs[3].thinking_signature == "secret");
+    CHECK(outs[4].kind == imza::StreamEvent::Kind::USAGE);
+    CHECK(outs[4].usage.prompt == 100);
+    CHECK(outs[4].usage.completion == 20);
+    CHECK(outs[4].usage.cached_read == 60);
+    CHECK(outs[4].usage.cached_write == 5);
+    CHECK(outs[5].kind == imza::StreamEvent::Kind::DONE);
+    CHECK(state.terminal);
+}
+
 TEST_CASE("OpenAI accumulates fragmented tool calls and flushes")
 {
     const auto p = imza::get_provider(imza::Route { });
@@ -296,6 +390,10 @@ TEST_CASE("get_provider selects by dialect")
     imza::Route anthropic;
     anthropic.dialect = imza::ApiStandard::ANTHROPIC;
     CHECK(imza::get_provider(anthropic).build(req).isMember("max_tokens"));
+
+    imza::Route responses;
+    responses.dialect = imza::ApiStandard::OPENAI_RESPONSES;
+    CHECK(imza::get_provider(responses).build(req).isMember("input"));
 }
 
 TEST_CASE("OpenAI requests include_usage and emits a single usage event")

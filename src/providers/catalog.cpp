@@ -18,7 +18,8 @@ namespace {
     constexpr long kFetchTimeoutSecs       = 60;
     constexpr std::int64_t kStaleAfterSecs = 7 * 24 * 3600;
 
-    constexpr std::array<std::string_view, 44> kWhitelist = {
+    constexpr std::array<std::string_view, 51> kWhitelist = {
+        "abacus",
         "alibaba",
         "alibaba-cn",
         "alibaba-coding-plan",
@@ -26,13 +27,16 @@ namespace {
         "alibaba-token-plan",
         "alibaba-token-plan-cn",
         "amd",
+        "anthropic",
+        "cerebras",
         "databricks",
         "deepseek",
         "digitalocean",
-        "fireworks",
         "github-copilot",
+        "groq",
         "hetzner",
         "huggingface",
+        "hyper",
         "kilo",
         "kimi-for-coding",
         "llama",
@@ -41,22 +45,24 @@ namespace {
         "llmtr",
         "meta",
         "minimax",
-        "hyper",
+        "mistral",
         "moonshotai",
         "moonshotai-cn",
         "nebius",
         "nvidia",
         "ollama-cloud",
+        "openai",
         "opencode",
         "opencode-go",
         "openrouter",
         "perplexity-agent",
         "tencent-coding-plan",
-        "tencent-tokenhub",
         "tencent-token-plan",
-        "thinkingmachines"
-        "together-ai",
+        "tencent-tokenhub",
+        "thinkingmachines",
+        "togetherai",
         "vultr",
+        "xai",
         "xiaomi-token-plan-ams",
         "xiaomi-token-plan-cn",
         "xiaomi-token-plan-sgp",
@@ -65,6 +71,22 @@ namespace {
         "zhipuai",
         "zhipuai-coding-plan",
     };
+
+    const std::map<std::pair<std::string, ApiStandard>, std::string>
+        kProviderUrls = {
+            { { "anthropic", ApiStandard::ANTHROPIC },
+                "https://api.anthropic.com/v1" },
+            { { "cerebras", ApiStandard::OPENAI },
+                "https://api.cerebras.ai/v1" },
+            { { "groq", ApiStandard::OPENAI },
+                "https://api.groq.com/openai/v1" },
+            { { "mistral", ApiStandard::OPENAI }, "https://api.mistral.ai/v1" },
+            { { "openai", ApiStandard::OPENAI_RESPONSES },
+                "https://api.openai.com/v1" },
+            { { "togetherai", ApiStandard::OPENAI },
+                "https://api.together.xyz/v1" },
+            { { "xai", ApiStandard::OPENAI }, "https://api.x.ai/v1" },
+        };
 
     std::optional<double> cost_field(const Json::Value& cost, const char* key)
     {
@@ -90,15 +112,19 @@ namespace {
         return conn.provider_id == kCustomProviderId || !conn.endpoint.empty();
     }
 
-    constexpr std::string_view kChatSuffix = "/chat/completions";
+    constexpr std::string_view kChatSuffix      = "/chat/completions";
+    constexpr std::string_view kResponsesSuffix = "/responses";
 
     std::string normalize_base(std::string_view base)
     {
         std::string out = strip_slash(base);
-        if (out.size() > kChatSuffix.size()
-            && std::string_view(out).substr(out.size() - kChatSuffix.size())
-                == kChatSuffix) {
-            out.resize(out.size() - kChatSuffix.size());
+        for (std::string_view suffix : { kChatSuffix, kResponsesSuffix }) {
+            if (out.size() > suffix.size()
+                && std::string_view(out).substr(out.size() - suffix.size())
+                    == suffix) {
+                out.resize(out.size() - suffix.size());
+                break;
+            }
         }
         return out;
     }
@@ -303,9 +329,24 @@ Status fetch_catalog(Catalog& out)
         }
         catalog.providers[id] = std::move(provider);
     }
+    backfill_catalog_urls(catalog);
     catalog.fetched_at = static_cast<std::int64_t>(std::time(nullptr));
     out                = std::move(catalog);
     return Status::OK;
+}
+
+void backfill_catalog_urls(Catalog& catalog)
+{
+    for (auto& [id, provider] : catalog.providers) {
+        if (!provider.api.empty()) {
+            continue;
+        }
+        const auto url
+            = kProviderUrls.find({ id, dialect_from_npm(provider.npm) });
+        if (url != kProviderUrls.end()) {
+            provider.api = url->second;
+        }
+    }
 }
 
 AuthType auth_from_npm(std::string_view npm)
@@ -314,18 +355,20 @@ AuthType auth_from_npm(std::string_view npm)
                                                            : AuthType::BEARER;
 }
 
+ApiStandard dialect_from_npm(std::string_view npm)
+{
+    if (npm == "@ai-sdk/openai") {
+        return ApiStandard::OPENAI_RESPONSES;
+    }
+    if (npm == "@ai-sdk/anthropic") {
+        return ApiStandard::ANTHROPIC;
+    }
+    return ApiStandard::OPENAI;
+}
+
 std::string catalog_base(const CachedProvider& provider)
 {
-    if (!provider.api.empty()) {
-        return strip_slash(provider.api);
-    }
-    if (provider.npm.find("anthropic") != std::string::npos) {
-        return "https://api.anthropic.com/v1";
-    }
-    if (provider.npm.find("@ai-sdk/openai") != std::string::npos) {
-        return "https://api.openai.com/v1";
-    }
-    return { };
+    return strip_slash(provider.api);
 }
 
 Route resolve_route(
@@ -335,9 +378,15 @@ Route resolve_route(
     route.api_key = conn.api_key;
 
     if (endpoint_backed(conn)) {
-        route.endpoint = conn.endpoint;
-        route.api      = normalize_base(conn.endpoint);
-        route.dialect  = ApiStandard::OPENAI;
+        route.api = normalize_base(conn.endpoint);
+        if (dialect == ApiStandard::OPENAI_RESPONSES
+            || std::string_view(conn.endpoint).ends_with(kResponsesSuffix)) {
+            route.endpoint = route.api + std::string(kResponsesSuffix);
+            route.dialect  = ApiStandard::OPENAI_RESPONSES;
+        } else {
+            route.endpoint = conn.endpoint;
+            route.dialect  = ApiStandard::OPENAI;
+        }
         route.auth = conn.api_key.empty() ? AuthType::NONE : AuthType::BEARER;
         return route;
     }
@@ -354,9 +403,17 @@ Route resolve_route(
     route.dialect = dialect;
     route.auth
         = conn.api_key.empty() ? AuthType::NONE : auth_from_npm(provider.npm);
-    route.endpoint = route.api
-        + (dialect == ApiStandard::ANTHROPIC ? "/messages"
-                                             : "/chat/completions");
+    switch (dialect) {
+    case ApiStandard::OPENAI:
+        route.endpoint = route.api + "/chat/completions";
+        break;
+    case ApiStandard::OPENAI_RESPONSES:
+        route.endpoint = route.api + "/responses";
+        break;
+    case ApiStandard::ANTHROPIC:
+        route.endpoint = route.api + "/messages";
+        break;
+    }
     return route;
 }
 

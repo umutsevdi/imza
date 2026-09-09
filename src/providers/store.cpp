@@ -33,6 +33,18 @@ namespace {
         }
     }
 
+    ApiStandard default_dialect(
+        const Connection& connection, const Catalog& catalog)
+    {
+        if (!connection.endpoint.empty()) {
+            return ApiStandard::OPENAI;
+        }
+        const auto provider = catalog.providers.find(connection.provider_id);
+        return provider == catalog.providers.end()
+            ? ApiStandard::OPENAI
+            : dialect_from_npm(provider->second.npm);
+    }
+
 } // namespace
 
 std::string subagent_variant_or_default(
@@ -187,7 +199,7 @@ std::optional<ProviderSelection> ProviderStore::active_selection() const
     if (connection == nullptr) {
         return std::nullopt;
     }
-    ApiStandard dialect = ApiStandard::OPENAI;
+    ApiStandard dialect = default_dialect(*connection, catalog_);
     if (const auto it = connection->dialects.find(config_.last_used->model);
         it != connection->dialects.end()) {
         dialect = it->second;
@@ -216,7 +228,7 @@ std::optional<ProviderSelection> ProviderStore::subagent_selection(
     if (connection == nullptr) {
         return std::nullopt;
     }
-    ApiStandard dialect = ApiStandard::OPENAI;
+    ApiStandard dialect = default_dialect(*connection, catalog_);
     if (const auto found = connection->dialects.find(model);
         found != connection->dialects.end()) {
         dialect = found->second;
@@ -303,7 +315,7 @@ void ProviderStore::connect(ConnectResult result, ConnectCompleteFn complete)
             probe.provider_id = result.provider_id;
             probe.endpoint    = result.endpoint;
             probe.api_key     = result.api_key;
-            route             = _route_locked(probe, ApiStandard::OPENAI);
+            route = _route_locked(probe, default_dialect(probe, catalog_));
         }
     }
     if (route.endpoint.empty()) {
@@ -503,7 +515,8 @@ void ProviderStore::_start_fetch_locked(const std::string& connection_id)
     if (connection == nullptr) {
         return;
     }
-    const Route route    = _route_locked(*connection, ApiStandard::OPENAI);
+    const Route route
+        = _route_locked(*connection, default_dialect(*connection, catalog_));
     const int generation = ++generations_[connection_id];
     if (route.api.empty()) {
         model_catalog_[connection_id]
@@ -542,7 +555,8 @@ Status ProviderStore::_commit_connection_locked(const ConnectResult& result,
     probe.provider_id = result.provider_id;
     probe.endpoint    = result.endpoint;
     probe.api_key     = result.api_key;
-    const Route route = resolve_route(probe, catalog_, ApiStandard::OPENAI);
+    const Route route
+        = resolve_route(probe, catalog_, default_dialect(probe, catalog_));
 
     Connection stored;
     stored.provider_id = result.provider_id;
@@ -560,8 +574,8 @@ Status ProviderStore::_commit_connection_locked(const ConnectResult& result,
             first                = !latest.last_used.has_value();
             Connection* existing = nullptr;
             for (Connection& connection : latest.providers) {
-                const Route other
-                    = resolve_route(connection, catalog_, ApiStandard::OPENAI);
+                const Route other = resolve_route(connection, catalog_,
+                    default_dialect(connection, catalog_));
                 if (!route.endpoint.empty()
                     && other.endpoint == route.endpoint) {
                     existing = &connection;

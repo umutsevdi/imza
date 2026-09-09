@@ -13,6 +13,9 @@ CHANGELOG
 
 Changes:
   - Rebranded as `imza`.
+  - Added support for `OpenAI Responses` format.
+  - Text wrapping and session file locking fixes.
+  - Added support for more model providers.
 
 -------------------------------------------------------------------------------
 0.1.3 - 2026-09-09
@@ -27,7 +30,7 @@ Changes:
   - Fixed review horizontal scrolling and focus.
   - Session list now loads in the background from a session index.
   - Added cross-process file locking for config and session files.
-  - Concurrent imza instances no longer overwrite each other's config changes.
+  - Concurrent Ursa instances no longer overwrite each other's config changes.
   - Fixed title-generation subagent ignoring the configured reasoning effort.
   - Various internal cleanups and code deduplication.
 

@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "common/diff.h"
@@ -61,7 +62,12 @@ inline const ftxui::Color HL_CYAN    = ftxui::Color::RGB(104, 216, 232);
 inline constexpr int MODAL_MAX_WIDTH = 100;
 
 std::string fit(const std::string& text, int width);
-std::string fit(const std::string& text, int width, int offset);
+// Byte ranges [begin, end) of the visual rows of one logical line wrapped to
+// `width` display columns. Breaks after spaces when one fits, else hard-wraps.
+std::vector<std::pair<std::size_t, std::size_t>> wrap_row_ranges(
+    std::string_view line, int width);
+// Wraps every logical line of `body`; always returns at least one row.
+std::vector<std::string> wrap_text(std::string_view body, int width);
 
 ftxui::Element panel(ftxui::Element e);
 
@@ -166,24 +172,27 @@ struct ModelPickList {
     const ModelRow* chosen() const;
 };
 
-ftxui::Element render_markdown_element(std::string_view md);
+ftxui::Element render_markdown_element(std::string_view md, int width);
 
 bool syntax_type_supported(std::string_view type);
 std::string syntax_type_for_path(std::string_view path);
 ftxui::Element highlight_code_line(
     std::string_view code, std::string_view type);
 ftxui::Elements highlight_code(std::string_view code, std::string_view type);
+// One vector of visual-row elements per logical line of `code`.
+std::vector<std::vector<ftxui::Element>> highlight_code_wrapped(
+    std::string_view code, std::string_view type, int width);
 
 struct ReviewLineHighlights {
-    ftxui::Element old_side;
-    ftxui::Element new_side;
+    std::vector<ftxui::Element> old_side;
+    std::vector<ftxui::Element> new_side;
 };
 
 using ReviewHighlights
     = std::unordered_map<const ReviewLine*, ReviewLineHighlights>;
 void append_review_hunk_highlights(ReviewHighlights& cache,
     const ReviewHunk& hunk, std::string_view path, int review_width,
-    int horizontal_offset, bool side_by_side);
+    bool side_by_side);
 ftxui::Element review_line_background(ftxui::Element row,
     std::optional<ftxui::Color> change_background, bool selected);
 
@@ -192,9 +201,9 @@ ftxui::Element card(ftxui::Element body,
 ftxui::Element section_title(
     std::string_view title, ftxui::Color color = PANEL_FG_DIM);
 ftxui::Element code_block(
-    const std::string& code, const std::string& lang = "");
-ftxui::Element code_block_with_lines(
-    const std::string& code, const std::string& lang, std::size_t start_line);
+    const std::string& code, const std::string& lang, int width);
+ftxui::Element code_block_with_lines(const std::string& code,
+    const std::string& lang, std::size_t start_line, int width);
 ftxui::Element diff_split(const DiffView& diff, int available_width = 120);
 bool diff_row_left_changed(const DiffRow& row);
 bool diff_row_right_changed(const DiffRow& row);

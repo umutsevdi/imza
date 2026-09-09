@@ -86,6 +86,13 @@ namespace {
         return normalized == "md" || normalized == "markdown";
     }
 
+    int modal_content_width()
+    {
+        const int popup_w
+            = std::min(Terminal::Size().dimx - 4, MODAL_MAX_WIDTH);
+        return std::max(40, popup_w - 8);
+    }
+
     Element tool_approval_reason(const ToolCallRequest& req)
     {
         const Json::Value args = parse_json(req.args);
@@ -120,7 +127,7 @@ namespace {
     }
 
     Element tool_request_body(
-        const ToolCallRequest& req, const SystemEnvironment& system)
+        const ToolCallRequest& req, const SystemEnvironment& system, int width)
     {
         const Json::Value args = parse_json(req.args);
 
@@ -137,8 +144,9 @@ namespace {
             const std::string cwd = std::filesystem::current_path(ec).string();
             const std::string metadata = (ec ? std::string { } : cwd + " · ")
                 + "timeout " + std::to_string(timeout) + "s";
-            return vbox({ code_block(preview_text(command), shell_name(system)),
-                hint_bar(metadata) });
+            return vbox(
+                { code_block(preview_text(command), shell_name(system), width),
+                    hint_bar(metadata) });
         }
 
         if (req.name == "edit") {
@@ -146,9 +154,11 @@ namespace {
                 = syntax_type_for_path(json_string(args, "file_path"));
             Elements rows {
                 section_title("Existing text"),
-                code_block(preview_text(json_string(args, "old_string")), lang),
+                code_block(
+                    preview_text(json_string(args, "old_string")), lang, width),
                 section_title("Replacement"),
-                code_block(preview_text(json_string(args, "new_string")), lang),
+                code_block(
+                    preview_text(json_string(args, "new_string")), lang, width),
             };
             return vbox(std::move(rows));
         }
@@ -158,7 +168,8 @@ namespace {
                 = syntax_type_for_path(json_string(args, "file_path"));
             return vbox({
                 section_title("Content"),
-                code_block(preview_text(json_string(args, "text")), lang),
+                code_block(
+                    preview_text(json_string(args, "text")), lang, width),
             });
         }
 
@@ -190,46 +201,7 @@ namespace {
             }
             return vbox(std::move(rows));
         }
-        return code_block(preview_text(req.args), "json");
-    }
-
-    std::vector<std::string> wrapped_lines(
-        const std::string& body, std::size_t width)
-    {
-        std::vector<std::string> out;
-        std::string line;
-        std::string word;
-        auto flush_word = [&] {
-            if (word.empty()) {
-                return;
-            }
-            if (line.empty()) {
-                line = word;
-            } else if (line.size() + 1 + word.size() <= width) {
-                line += " ";
-                line += word;
-            } else {
-                out.push_back(std::move(line));
-                line = word;
-            }
-            word.clear();
-        };
-        for (const char c : body) {
-            if (c == '\n') {
-                flush_word();
-                out.push_back(std::move(line));
-                line.clear();
-            } else if (c == ' ') {
-                flush_word();
-            } else {
-                word += c;
-            }
-        }
-        flush_word();
-        if (!line.empty()) {
-            out.push_back(std::move(line));
-        }
-        return out;
+        return code_block(preview_text(req.args), "json", width);
     }
 
     class ModalView : public ComponentBase {
@@ -482,19 +454,16 @@ namespace {
         void build(const ViewerModal& payload)
         {
             reset_static_scroll();
+            const int content_width = modal_content_width();
             if (is_markdown_type(payload.lang)) {
-                viewer_content_ = render_markdown_element(payload.content);
+                viewer_content_
+                    = render_markdown_element(payload.content, content_width);
             } else if (payload.line_numbers) {
-                viewer_content_ = code_block_with_lines(
-                    payload.content, payload.lang, payload.start_line);
+                viewer_content_ = code_block_with_lines(payload.content,
+                    payload.lang, payload.start_line, content_width);
             } else {
-                const int popup_w
-                    = std::min(Terminal::Size().dimx - 4, MODAL_MAX_WIDTH);
-                const std::size_t content_w
-                    = static_cast<std::size_t>(std::max(40, popup_w - 8));
-                viewer_content_ = code_block(
-                    join_lines(wrapped_lines(payload.content, content_w)),
-                    payload.lang);
+                viewer_content_
+                    = code_block(payload.content, payload.lang, content_width);
             }
         }
 
@@ -593,8 +562,8 @@ namespace {
                 text(tool_action_description(req)) | color(PANEL_FG_DIM));
             rows.push_back(tool_approval_reason(req));
             rows.push_back(separatorEmpty());
-            rows.push_back(
-                tool_request_body(req, *state_->environment->system()));
+            rows.push_back(tool_request_body(
+                req, *state_->environment->system(), modal_content_width()));
             rows.push_back(separatorEmpty());
             if (tool_phase_ == ToolPhase::REASON) {
                 rows.push_back(section_title("Reason for rejecting", PANEL_FG));

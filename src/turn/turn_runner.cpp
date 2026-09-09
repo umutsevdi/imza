@@ -353,46 +353,61 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
                 current_model, current_effort);
             st = fn(req, cb);
         } else {
-            Route route = settings.route;
-            apply_reasoning(req, route.dialect, settings.reasoning_effort,
-                *state_->providers);
-            active_dialect = route.dialect;
-            current_model  = req.model;
-            current_effort = req.reasoning_effort.has_value()
-                    || req.thinking_budget.has_value()
-                ? settings.reasoning_effort
-                : "off";
-            state_->session->set_last_assistant_metadata(
-                current_model, current_effort);
-            st = stream(route, req, cb, &retry_after_secs_);
-            const Status attempt
-                = error_status != Status::OK ? error_status : st;
-            if (attempt == Status::API_ERROR && !saw_stream
-                && route.dialect == ApiStandard::OPENAI) {
-                Route alt;
-                alt = state_->providers->route_for(
-                    settings.connection_id, ApiStandard::ANTHROPIC);
-                const bool has_alt = !alt.endpoint.empty();
-                if (has_alt && alt.endpoint != route.endpoint) {
-                    retry_after_secs_ = 0;
-                    error_status      = Status::OK;
-                    error_msg.clear();
-                    apply_reasoning(req, ApiStandard::ANTHROPIC,
-                        settings.reasoning_effort, *state_->providers);
-                    st             = stream(alt, req, cb, &retry_after_secs_);
-                    active_dialect = ApiStandard::ANTHROPIC;
-                    current_effort = req.thinking_budget.has_value()
-                        ? settings.reasoning_effort
-                        : "off";
-                    state_->session->set_last_assistant_metadata(
-                        current_model, current_effort);
-                    const Status retried
-                        = error_status != Status::OK ? error_status : st;
-                    if (retried == Status::OK) {
-                        state_->providers->remember_dialect(
-                            settings.connection_id, req.model,
-                            ApiStandard::ANTHROPIC);
-                    }
+            Route route          = settings.route;
+            current_model        = req.model;
+            const auto try_route = [&](const Route& candidate) {
+                retry_after_secs_ = 0;
+                error_status      = Status::OK;
+                error_msg.clear();
+                apply_reasoning(req, candidate.dialect,
+                    settings.reasoning_effort, *state_->providers);
+                active_dialect = candidate.dialect;
+                current_effort = req.reasoning_effort.has_value()
+                        || req.thinking_budget.has_value()
+                    ? settings.reasoning_effort
+                    : "off";
+                state_->session->set_last_assistant_metadata(
+                    current_model, current_effort);
+                return stream(candidate, req, cb, &retry_after_secs_);
+            };
+
+            std::vector<std::string> attempted_endpoints { route.endpoint };
+            st = try_route(route);
+            std::vector<ApiStandard> alternatives;
+            if (route.dialect == ApiStandard::OPENAI_RESPONSES) {
+                alternatives = { ApiStandard::OPENAI, ApiStandard::ANTHROPIC };
+            } else if (route.dialect == ApiStandard::OPENAI) {
+                alternatives = route.auth == AuthType::ANTHROPIC
+                    ? std::vector { ApiStandard::ANTHROPIC,
+                          ApiStandard::OPENAI_RESPONSES }
+                    : std::vector { ApiStandard::OPENAI_RESPONSES,
+                          ApiStandard::ANTHROPIC };
+            }
+            for (const ApiStandard dialect : alternatives) {
+                const Status attempt
+                    = error_status != Status::OK ? error_status : st;
+                if (attempt != Status::API_ERROR || saw_stream) {
+                    break;
+                }
+                Route alternative = state_->providers->route_for(
+                    settings.connection_id, dialect);
+                if (alternative.endpoint.empty()
+                    || std::find(attempted_endpoints.begin(),
+                           attempted_endpoints.end(), alternative.endpoint)
+                        != attempted_endpoints.end()) {
+                    continue;
+                }
+                attempted_endpoints.push_back(alternative.endpoint);
+                st    = try_route(alternative);
+                route = std::move(alternative);
+                const Status retried
+                    = error_status != Status::OK ? error_status : st;
+                if (retried == Status::OK) {
+                    state_->providers->remember_dialect(
+                        settings.connection_id, req.model, dialect);
+                    settings.route   = route;
+                    settings.dialect = route.dialect;
+                    break;
                 }
             }
         }

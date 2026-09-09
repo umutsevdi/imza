@@ -73,7 +73,7 @@ inline std::string error_text(Status st)
     return "Unknown error.";
 }
 
-enum class ApiStandard { OPENAI, ANTHROPIC };
+enum class ApiStandard { OPENAI, OPENAI_RESPONSES, ANTHROPIC };
 
 enum class SkillPolicy { ALLOW, ASK, DENY };
 

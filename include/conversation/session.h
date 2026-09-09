@@ -12,10 +12,10 @@
 #include <variant>
 #include <vector>
 
+#include "common/imza_signal.h"
 #include "common/modal.h"
 #include "common/tool_call.h"
 #include "common/types.h"
-#include "common/imza_signal.h"
 #include "network/chat.h"
 #include "network/network.h"
 #include "providers/pricing.h"

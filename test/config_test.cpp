@@ -85,6 +85,7 @@ TEST_CASE("config roundtrip preserves connections and last_used")
     local.api_key             = "";
     local.label               = "my Ollama";
     local.dialects["glm-5.3"] = imza::ApiStandard::ANTHROPIC;
+    local.dialects["gpt-responses"] = imza::ApiStandard::OPENAI_RESPONSES;
     cfg.providers.push_back(local);
 
     cfg.last_used        = imza::LastUsed { "openrouter", "" };
@@ -106,6 +107,8 @@ TEST_CASE("config roundtrip preserves connections and last_used")
     REQUIRE(loaded.providers[1].dialects.count("glm-5.3") == 1);
     CHECK(loaded.providers[1].dialects.at("glm-5.3")
         == imza::ApiStandard::ANTHROPIC);
+    CHECK(loaded.providers[1].dialects.at("gpt-responses")
+        == imza::ApiStandard::OPENAI_RESPONSES);
     REQUIRE(loaded.last_used.has_value());
     CHECK(loaded.last_used->provider == "openrouter");
     CHECK(loaded.last_used->model.empty());
@@ -120,6 +123,8 @@ TEST_CASE("config roundtrip preserves connections and last_used")
     CHECK(written["providers"][0]["label"] == "");
     CHECK_FALSE(written["providers"][0].isMember("dialects"));
     CHECK(written["providers"][1]["label"] == "my Ollama");
+    CHECK(written["providers"][1]["dialects"]["gpt-responses"]
+        == "openai-responses");
     CHECK(written["models"]["main"]["provider"] == "openrouter");
     CHECK(written["models"]["main"]["reasoning_effort"] == "high");
     CHECK_FALSE(written.isMember("last_used"));
@@ -201,13 +206,13 @@ TEST_CASE("empty config writes every editable option")
     CHECK(written["skills"]["projects"].isObject());
 }
 
-TEST_CASE("save_config leaves no temp file behind and keeps the lock file")
+TEST_CASE("save_config leaves no temporary or lock file behind")
 {
     const auto path = temp_file("notmp.json");
     imza::Config cfg;
     CHECK(imza::save_config(path, cfg) == imza::Status::OK);
     CHECK_FALSE(std::filesystem::exists(path.string() + ".tmp"));
-    CHECK(std::filesystem::exists(path.string() + ".lock"));
+    CHECK_FALSE(std::filesystem::exists(path.string() + ".lock"));
     CHECK_FALSE(read_all(path).empty());
 }
 

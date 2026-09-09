@@ -524,6 +524,37 @@ Elements highlight_code(std::string_view code, std::string_view type)
     return lines;
 }
 
+std::vector<std::vector<Element>> highlight_code_wrapped(
+    std::string_view code, std::string_view type, int width)
+{
+    std::vector<SyntaxStyle> styles;
+    if (const LanguageDefinition* language = language_for_type(type)) {
+        styles = syntax_styles(code, *language);
+    } else {
+        styles.assign(code.size(), SyntaxStyle::PLAIN);
+    }
+
+    std::vector<std::vector<Element>> lines;
+    std::size_t begin = 0;
+    for (;;) {
+        const std::size_t newline = code.find('\n', begin);
+        const std::size_t end
+            = newline == std::string_view::npos ? code.size() : newline;
+        std::vector<Element> rows;
+        for (const auto& [row_begin, row_end] :
+            wrap_row_ranges(code.substr(begin, end - begin), width)) {
+            rows.push_back(
+                render_line(code, styles, begin + row_begin, begin + row_end));
+        }
+        lines.push_back(std::move(rows));
+        if (newline == std::string_view::npos) {
+            break;
+        }
+        begin = newline + 1;
+    }
+    return lines;
+}
+
 Element highlight_code_line(std::string_view code, std::string_view type)
 {
     Elements lines = highlight_code(code, type);

@@ -6,8 +6,8 @@
 #include <string>
 #include <vector>
 
-#include "common/types.h"
 #include "common/imza_signal.h"
+#include "common/types.h"
 #include "conversation/session.h"
 #include "conversation/session_store.h"
 #include "network/network.h"

@@ -142,6 +142,7 @@ TEST_CASE("session index is created and rebuilt from session files")
     REQUIRE(imza::save_session(session) == imza::Status::OK);
     const std::filesystem::path index = imza::sessions_dir() / ".index.json";
     REQUIRE(std::filesystem::is_regular_file(index));
+    CHECK_FALSE(std::filesystem::exists(index.string() + ".lock"));
 
     std::error_code ec;
     std::filesystem::remove(index, ec);

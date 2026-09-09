@@ -15,7 +15,7 @@ namespace {
 
     void cache_document(ReviewHighlights& cache,
         const std::vector<std::pair<const ReviewLine*, std::string>>& lines,
-        std::string_view syntax, HighlightSide side)
+        std::string_view syntax, HighlightSide side, int content_width)
     {
         if (lines.empty()) {
             return;
@@ -33,7 +33,8 @@ namespace {
             }
             code += lines[i].second;
         }
-        Elements highlighted    = highlight_code(code, syntax);
+        const std::vector<std::vector<Element>> highlighted
+            = highlight_code_wrapped(code, syntax, content_width);
         const std::size_t count = std::min(lines.size(), highlighted.size());
         for (std::size_t i = 0; i < count; ++i) {
             ReviewLineHighlights& target = cache[lines[i].first];
@@ -49,7 +50,7 @@ namespace {
 
 void append_review_hunk_highlights(ReviewHighlights& cache,
     const ReviewHunk& hunk, std::string_view path, int review_width,
-    int horizontal_offset, bool side_by_side)
+    bool side_by_side)
 {
     const bool cached
         = std::ranges::all_of(hunk.lines, [&cache](const auto& line) {
@@ -61,11 +62,11 @@ void append_review_hunk_highlights(ReviewHighlights& cache,
                   return false;
               }
               return line.kind == ReviewLine::Kind::ADDITION
-                  ? found->second.new_side != nullptr
+                  ? !found->second.new_side.empty()
                   : line.kind == ReviewLine::Kind::DELETION
-                  ? found->second.old_side != nullptr
-                  : found->second.old_side != nullptr
-                      && found->second.new_side != nullptr;
+                  ? !found->second.old_side.empty()
+                  : !found->second.old_side.empty()
+                      && !found->second.new_side.empty();
           });
     if (cached) {
         return;
@@ -82,17 +83,15 @@ void append_review_hunk_highlights(ReviewHighlights& cache,
         if (line.kind == ReviewLine::Kind::META) {
             continue;
         }
-        std::string content
-            = fit(line.content, content_width, horizontal_offset);
         if (line.kind != ReviewLine::Kind::ADDITION) {
-            old.emplace_back(&line, content);
+            old.emplace_back(&line, line.content);
         }
         if (line.kind != ReviewLine::Kind::DELETION) {
-            next.emplace_back(&line, std::move(content));
+            next.emplace_back(&line, line.content);
         }
     }
-    cache_document(cache, old, syntax, HighlightSide::OLD);
-    cache_document(cache, next, syntax, HighlightSide::NEW);
+    cache_document(cache, old, syntax, HighlightSide::OLD, content_width);
+    cache_document(cache, next, syntax, HighlightSide::NEW, content_width);
 }
 
 } // namespace imza

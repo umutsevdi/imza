@@ -107,9 +107,9 @@ namespace {
         return 0;
     }
 
-    Element user_item(const UserTurn& t)
+    Element user_item(const UserTurn& t, int width)
     {
-        Elements rows { render_markdown_element(t.text) };
+        Elements rows { render_markdown_element(t.text, width) };
         if (!t.attachments.empty()) {
             Elements chips { filler() };
             for (const auto& attachment : t.attachments) {
@@ -121,14 +121,15 @@ namespace {
         return card(vbox(std::move(rows)), PANEL_COLOR, false);
     }
 
-    Element assistant_item(const AssistantTurn& t)
+    Element assistant_item(const AssistantTurn& t, int width)
     {
-        return card(render_markdown_element(t.markdown), std::nullopt, false);
+        return card(
+            render_markdown_element(t.markdown, width), std::nullopt, false);
     }
 
-    Element modal_answer_item(const ModalAnswer& ans)
+    Element modal_answer_item(const ModalAnswer& ans, int width)
     {
-        return card(render_markdown_element(modal_answer_markdown(ans)),
+        return card(render_markdown_element(modal_answer_markdown(ans), width),
             PANEL_COLOR, false);
     }
 
@@ -813,6 +814,11 @@ namespace {
             return tool_card(tc, btn->Render());
         }
 
+        int content_width()
+        {
+            return std::max(20, review_content_width(layout_()) - 4);
+        }
+
         Element render_shell_collapsed(const ToolCall& tc)
         {
             const std::string& full   = tc.result->text;
@@ -821,15 +827,16 @@ namespace {
             const std::string label
                 = viewer_label("full shell output", total, "lines");
             Component btn = make_viewer_button(tc.id, label);
-            return tool_card(
-                tc, vbox({ code_block(preview, ""), btn->Render() }));
+            return tool_card(tc,
+                vbox({ code_block(preview, "", content_width()),
+                    btn->Render() }));
         }
-
         Element render_shell_item(const ToolCall& tc)
         {
             Elements parts { tool_header_element(tc) };
             if (!tc.result->text.empty()) {
-                parts.push_back(code_block(tc.result->text, ""));
+                parts.push_back(
+                    code_block(tc.result->text, "", content_width()));
             }
             parts.push_back(separatorEmpty());
             return vbox(std::move(parts));
@@ -852,7 +859,8 @@ namespace {
                 const LayoutCtx ctx = layout_();
                 body = diff_split(diff, review_content_width(ctx));
             } else {
-                body = code_block(tc.result->text, tool_code_language(tc));
+                body = code_block(
+                    tc.result->text, tool_code_language(tc), content_width());
             }
             return vbox({
                 std::move(header),
@@ -863,7 +871,8 @@ namespace {
 
         Element render_ask_item(const ToolCall& tc)
         {
-            return tool_card(tc, render_markdown_element(tc.result->text));
+            return tool_card(
+                tc, render_markdown_element(tc.result->text, content_width()));
         }
 
         Element render_web_item(const ToolCall& tc)
@@ -889,7 +898,8 @@ namespace {
 
         Element render_generic_tool(const ToolCall& tc)
         {
-            return tool_card(tc, code_block(tc.result->text, ""));
+            return tool_card(
+                tc, code_block(tc.result->text, "", content_width()));
         }
 
         Element render_tool_error(const ToolCall& tc)
@@ -1037,7 +1047,7 @@ namespace {
                 }
             }
             if (!t.markdown.empty()) {
-                parts.push_back(assistant_item(t));
+                parts.push_back(assistant_item(t, content_width()));
             }
             if (show_metadata) {
                 parts.push_back(hint_bar(assistant_metadata(t)));
@@ -1102,13 +1112,16 @@ ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx)
         [&](const auto& v) -> Element {
             using T = std::decay_t<decltype(v)>;
             if constexpr (std::is_same_v<T, UserTurn>) {
-                return user_item(v);
+                return user_item(
+                    v, std::max(20, review_content_width(ctx) - 4));
             } else if constexpr (std::is_same_v<T, AssistantTurn>) {
-                return assistant_item(v);
+                return assistant_item(
+                    v, std::max(20, review_content_width(ctx) - 4));
             } else if constexpr (std::is_same_v<T, TodoList>) {
                 return render_todo(v, ctx);
             } else if constexpr (std::is_same_v<T, ModalAnswer>) {
-                return modal_answer_item(v);
+                return modal_answer_item(
+                    v, std::max(20, review_content_width(ctx) - 4));
             } else if constexpr (std::is_same_v<T, CompactionEvent>) {
                 if (v.status == CompactionEvent::Status::COMPLETED) {
                     return text("✓ Session compacted") | dim;

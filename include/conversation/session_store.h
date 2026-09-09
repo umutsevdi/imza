@@ -6,8 +6,8 @@
 #include <thread>
 #include <vector>
 
-#include "common/types.h"
 #include "common/imza_signal.h"
+#include "common/types.h"
 #include "conversation/persistence.h"
 
 namespace imza {

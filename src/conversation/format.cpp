@@ -49,8 +49,12 @@ Message assistant_message(
     std::string content, const AssistantTurn* turn, ApiStandard dialect)
 {
     Message message { Message::Type::ASSISTANT, std::move(content) };
-    if (dialect == ApiStandard::ANTHROPIC && turn != nullptr
-        && !turn->reasoning.empty()) {
+    const bool preserve_anthropic_reasoning = dialect == ApiStandard::ANTHROPIC
+        && turn != nullptr && !turn->reasoning.empty();
+    const bool preserve_openai_reasoning
+        = dialect == ApiStandard::OPENAI_RESPONSES && turn != nullptr
+        && !turn->reasoning_signature.empty();
+    if (preserve_anthropic_reasoning || preserve_openai_reasoning) {
         message.thinking.push_back(
             { turn->reasoning, turn->reasoning_signature });
     }

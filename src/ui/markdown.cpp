@@ -208,6 +208,37 @@ namespace {
 
     class FtxuiSink {
     public:
+        explicit FtxuiSink(int width)
+            : width_(width)
+        {
+        }
+
+        void code_block(std::string_view lit, const char* fence_info)
+        {
+            Elements lines;
+            const std::string_view type = fence_info == nullptr
+                ? std::string_view { }
+                : std::string_view(fence_info);
+            const int content_width     = std::max(20, width_ - 6);
+            if (syntax_type_supported(type)) {
+                for (std::vector<Element>& rows :
+                    highlight_code_wrapped(lit, type, content_width)) {
+                    std::move(
+                        rows.begin(), rows.end(), std::back_inserter(lines));
+                }
+            } else {
+                for (const std::string& segment :
+                    wrap_text(lit, content_width)) {
+                    lines.push_back(ftxui::text(segment) | color(PANEL_FG_DIM)
+                        | bgcolor(PANEL_COLOR));
+                }
+            }
+            if (lines.empty()) {
+                lines.push_back(ftxui::text(""));
+            }
+            add(vbox(std::move(lines)) | bgcolor(PANEL_COLOR) | borderLight);
+        }
+
         void text(std::string_view body, const Style& fl)
         {
             if (in_cell_) {
@@ -271,36 +302,6 @@ namespace {
                 return std::move(e) | bold | color(HEAD_COLORS[idx]);
             };
             flush_words(std::move(decorate));
-        }
-
-        void code_block(std::string_view lit, const char* fence_info)
-        {
-            Elements lines;
-            const std::string_view type = fence_info == nullptr
-                ? std::string_view { }
-                : std::string_view(fence_info);
-            if (syntax_type_supported(type)) {
-                lines = highlight_code(lit, type);
-            } else {
-                size_t start = 0;
-                while (start <= lit.size()) {
-                    size_t end = lit.find('\n', start);
-                    if (end == std::string_view::npos) {
-                        end = lit.size();
-                    }
-                    lines.push_back(
-                        ftxui::text(std::string(lit.substr(start, end - start)))
-                        | color(PANEL_FG_DIM) | bgcolor(PANEL_COLOR));
-                    if (end == lit.size()) {
-                        break;
-                    }
-                    start = end + 1;
-                }
-            }
-            if (lines.empty()) {
-                lines.push_back(ftxui::text(""));
-            }
-            add(vbox(std::move(lines)) | bgcolor(PANEL_COLOR) | borderLight);
         }
 
         void quote_begin() { frames_.emplace_back(); }
@@ -487,6 +488,7 @@ namespace {
         std::vector<std::string> item_prefixes_;
         std::vector<ListFrame> lists_;
         Elements root_;
+        int width_;
 
         bool in_paragraph_ = false;
         bool in_cell_      = false;
@@ -502,9 +504,9 @@ namespace {
 
 } // namespace
 
-Element render_markdown_element(std::string_view md)
+Element render_markdown_element(std::string_view md, int width)
 {
-    FtxuiSink sink;
+    FtxuiSink sink(width);
     cmark_node* doc = parse(md);
     if (doc) {
         walk_markdown(doc, sink);

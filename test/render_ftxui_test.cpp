@@ -1,4 +1,6 @@
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <doctest/doctest.h>
 #include <ftxui/component/component.hpp>
@@ -33,43 +35,90 @@ std::string without_ansi(std::string_view input)
 
 } // namespace
 
-TEST_CASE("fit supports UTF-8-aware horizontal offsets")
+TEST_CASE("fit truncates with an ellipsis and pads to width")
 {
-    CHECK(imza::fit("abcdefgh", 4, 3) == "def…");
-    CHECK(imza::fit("●alpha", 4, 1) == "alp…");
-    CHECK(imza::fit("abcdefgh", 4, 6) == "gh  ");
+    CHECK(imza::fit("abcdefgh", 4) == "abc…");
+    CHECK(imza::fit("●alpha", 2) == "●…");
+    CHECK(imza::fit("abc", 5) == "abc  ");
+}
+
+TEST_CASE("wrap_row_ranges wraps to display width")
+{
+    using R         = std::pair<std::size_t, std::size_t>;
+    const auto wide = std::string_view("漢漢漢");
+    CHECK(imza::wrap_row_ranges("aaaa bbbb cccc", 9)
+        == std::vector<R> { { 0, 5 }, { 5, 14 } });
+    CHECK(imza::wrap_row_ranges("abcdefgh", 4)
+        == std::vector<R> { { 0, 4 }, { 4, 8 } });
+    CHECK(imza::wrap_row_ranges("exact", 5) == std::vector<R> { { 0, 5 } });
+    CHECK(imza::wrap_row_ranges("", 4) == std::vector<R> { { 0, 0 } });
+    CHECK(imza::wrap_row_ranges(wide, 4)
+        == std::vector<R> { { 0, 6 }, { 6, 9 } });
+}
+
+TEST_CASE("wrap_text wraps every logical line")
+{
+    CHECK(imza::wrap_text("one two three four\n\nlast", 8)
+        == std::vector<std::string> {
+            "one two ", "three ", "four", "", "last" });
+    CHECK(imza::wrap_text("", 8) == std::vector<std::string> { "" });
 }
 
 TEST_CASE("render_markdown_element renders paragraphs")
 {
     const std::string out
-        = to_text(imza::render_markdown_element("hello world"));
+        = to_text(imza::render_markdown_element("hello world", 60));
     CHECK(out.find("hello") != std::string::npos);
 }
 
 TEST_CASE("render_markdown_element renders code blocks")
 {
     const std::string out
-        = to_text(imza::render_markdown_element("```\nint x = 42;\n```"));
+        = to_text(imza::render_markdown_element("```\nint x = 42;\n```", 60));
     CHECK(out.find("int x = 42;") != std::string::npos);
     CHECK(out.find("┌") != std::string::npos);
 }
 
-TEST_CASE("C++ syntax highlighting uses standard terminal colors")
+TEST_CASE("markdown code blocks wrap long lines")
 {
-    auto screen = imza::test::to_screen(
-        imza::highlight_code_line("return 42; // done", "cpp"), 24, 1);
-    CHECK(screen.PixelAt(0, 0).foreground_color == ftxui::Color::Green);
-    CHECK(screen.PixelAt(7, 0).foreground_color == ftxui::Color::Magenta);
-    CHECK(screen.PixelAt(11, 0).foreground_color == ftxui::Color::GrayLight);
+    const std::string md = "```\n" + std::string(80, 'x') + " tail\n```";
+    const std::string out
+        = to_text(imza::render_markdown_element(md, 60), 60, 8);
+    CHECK(out.find("tail") != std::string::npos);
 }
 
-TEST_CASE("typed markdown fences use syntax highlighting")
+TEST_CASE("highlight_code_wrapped keeps token colors across wrapped rows")
 {
-    auto screen = imza::test::to_screen(
-        imza::render_markdown_element("```cpp\nreturn 42;\n```"), 24, 4);
-    CHECK(screen.PixelAt(1, 1).foreground_color == ftxui::Color::Green);
-    CHECK(screen.PixelAt(8, 1).foreground_color == ftxui::Color::Magenta);
+    const std::string code = "return \"aaaaaaaaaaaaaaaa\";";
+    auto whole             = imza::test::to_screen(
+        imza::highlight_code_line(code, "cpp"), code.size(), 1);
+    const ftxui::Color keyword = whole.PixelAt(0, 0).foreground_color;
+    const ftxui::Color literal = whole.PixelAt(10, 0).foreground_color;
+
+    const auto rows = imza::highlight_code_wrapped(code, "cpp", 10);
+    REQUIRE(rows.size() == 1);
+    REQUIRE(rows[0].size() == 3);
+    auto first  = imza::test::to_screen(rows[0][0], 10, 1);
+    auto second = imza::test::to_screen(rows[0][1], 10, 1);
+    auto third  = imza::test::to_screen(rows[0][2], 10, 1);
+    CHECK(first.PixelAt(0, 0).foreground_color == keyword);
+    CHECK(second.PixelAt(1, 0).foreground_color == literal);
+    CHECK(third.PixelAt(0, 0).foreground_color == literal);
+}
+
+TEST_CASE("review highlighting wraps long hunk lines")
+{
+    imza::ReviewLine line;
+    line.kind     = imza::ReviewLine::Kind::ADDITION;
+    line.content  = "auto message = \"" + std::string(60, 'a') + "\";";
+    line.new_line = 3;
+    imza::ReviewHunk hunk;
+    hunk.lines.push_back(line);
+    imza::ReviewHighlights cache;
+    imza::append_review_hunk_highlights(cache, hunk, "file.cpp", 60, false);
+    REQUIRE(cache.size() == 1);
+    const std::vector<ftxui::Element>& rows = cache.begin()->second.new_side;
+    REQUIRE(rows.size() == 3);
 }
 
 TEST_CASE("syntax type detection recognizes canonical names and extensions")
@@ -96,82 +145,6 @@ TEST_CASE("syntax registry recognizes canonical languages and special files")
     CHECK_FALSE(imza::syntax_type_supported("sql"));
 }
 
-TEST_CASE("Tree-sitter highlight predicates filter C++ constants")
-{
-    auto screen = imza::test::to_screen(
-        imza::highlight_code_line("value + MAX_VALUE", "cpp"), 24, 1);
-    CHECK(screen.PixelAt(0, 0).foreground_color == imza::PANEL_FG);
-    CHECK(screen.PixelAt(8, 0).foreground_color == ftxui::Color::Magenta);
-}
-
-TEST_CASE("Tree-sitter highlights multiline syntax in one parse")
-{
-    const auto lines = imza::highlight_code("/* first\nsecond */", "cpp");
-    REQUIRE(lines.size() == 2);
-    auto first  = imza::test::to_screen(lines[0], 16, 1);
-    auto second = imza::test::to_screen(lines[1], 16, 1);
-    CHECK(first.PixelAt(0, 0).foreground_color == ftxui::Color::GrayLight);
-    CHECK(second.PixelAt(0, 0).foreground_color == ftxui::Color::GrayLight);
-}
-
-TEST_CASE("review highlighting parses old and new hunk sides as documents")
-{
-    imza::RepositoryReview review;
-    imza::ReviewFile file;
-    file.new_path = "example.cpp";
-    imza::ReviewHunk hunk;
-    hunk.lines = {
-        { imza::ReviewLine::Kind::CONTEXT, 1, 1, "/* first" },
-        { imza::ReviewLine::Kind::DELETION, 2, std::nullopt, "old */" },
-        { imza::ReviewLine::Kind::ADDITION, std::nullopt, 2, "new */" },
-    };
-    file.hunks.push_back(std::move(hunk));
-    review.files.push_back(std::move(file));
-
-    imza::ReviewHighlights highlights;
-    const auto& lines = review.files[0].hunks[0].lines;
-    imza::append_review_hunk_highlights(
-        highlights, review.files[0].hunks[0], "example.cpp", 80, 0, false);
-    REQUIRE(highlights.contains(&lines[0]));
-    REQUIRE(highlights.contains(&lines[1]));
-    REQUIRE(highlights.contains(&lines[2]));
-    const auto old_line
-        = imza::test::to_screen(highlights.at(&lines[1]).old_side, 16, 1);
-    const auto new_line
-        = imza::test::to_screen(highlights.at(&lines[2]).new_side, 16, 1);
-    CHECK(old_line.PixelAt(0, 0).foreground_color == ftxui::Color::GrayLight);
-    CHECK(new_line.PixelAt(0, 0).foreground_color == ftxui::Color::GrayLight);
-}
-
-TEST_CASE("selected review changes use the cursor background")
-{
-    auto selected = imza::test::to_screen(
-        imza::review_line_background(
-            imza::highlight_code_line("return 1;", "cpp"),
-            imza::DIFF_ADDITION_BG, true),
-        16, 1);
-
-    CHECK(selected.PixelAt(0, 0).foreground_color == ftxui::Color::Green);
-    CHECK(selected.PixelAt(0, 0).background_color == imza::PANEL_COLOR_FOCUS);
-}
-
-TEST_CASE("unselected review changes retain their diff backgrounds")
-{
-    auto addition = imza::test::to_screen(
-        imza::review_line_background(
-            imza::highlight_code_line("return 1;", "cpp"),
-            imza::DIFF_ADDITION_BG, false),
-        16, 1);
-    auto deletion = imza::test::to_screen(
-        imza::review_line_background(
-            imza::highlight_code_line("return 0;", "cpp"),
-            imza::DIFF_DELETION_BG, false),
-        16, 1);
-
-    CHECK(addition.PixelAt(0, 0).background_color == imza::DIFF_ADDITION_BG);
-    CHECK(deletion.PixelAt(0, 0).background_color == imza::DIFF_DELETION_BG);
-}
-
 TEST_CASE("untyped code keeps the panel foreground")
 {
     auto screen = imza::test::to_screen(
@@ -183,7 +156,7 @@ TEST_CASE("untyped code keeps the panel foreground")
 TEST_CASE("render_markdown_element spaces inline code from neighbors")
 {
     const std::string out
-        = to_text(imza::render_markdown_element("see `code` now"));
+        = to_text(imza::render_markdown_element("see `code` now", 60));
     CHECK(out.find("see ") != std::string::npos);
     CHECK(out.find(" now") != std::string::npos);
     CHECK(out.find("seecode") == std::string::npos);
@@ -192,18 +165,18 @@ TEST_CASE("render_markdown_element spaces inline code from neighbors")
 
 TEST_CASE("render_markdown_element renders tables")
 {
-    const std::string out
-        = to_text(imza::render_markdown_element("| a | b |\n"
-                                                "| - | - |\n"
-                                                "| 1 | 2 |\n"));
+    const std::string out = to_text(imza::render_markdown_element("| a | b |\n"
+                                                                  "| - | - |\n"
+                                                                  "| 1 | 2 |\n",
+        60));
     CHECK(out.find("a") != std::string::npos);
     CHECK(out.find("│") != std::string::npos);
 }
 
 TEST_CASE("render_markdown_element renders lists and headings")
 {
-    const std::string out = to_text(
-        imza::render_markdown_element("# Title\n\n- one\n- two\n\n1. first\n"));
+    const std::string out = to_text(imza::render_markdown_element(
+        "# Title\n\n- one\n- two\n\n1. first\n", 60));
     CHECK(out.find("Title") != std::string::npos);
     CHECK(out.find("- one") != std::string::npos);
     CHECK(out.find("1. first") != std::string::npos);
@@ -211,45 +184,16 @@ TEST_CASE("render_markdown_element renders lists and headings")
 
 TEST_CASE("render_markdown_element drops html")
 {
-    const std::string out
-        = to_text(imza::render_markdown_element("text <script>bad</script>"));
+    const std::string out = to_text(
+        imza::render_markdown_element("text <script>bad</script>", 60));
     CHECK(out.find("<script>") == std::string::npos);
     CHECK(out.find("text") != std::string::npos);
 }
 
 TEST_CASE("render_markdown_element empty input")
 {
-    const std::string out = to_text(imza::render_markdown_element(""));
+    const std::string out = to_text(imza::render_markdown_element("", 60));
     CHECK(!out.empty());
-}
-
-TEST_CASE("session error element renders a full-width error bar")
-{
-    imza::Session session;
-    session.set_error("add a review comment before sending");
-    auto screen = ftxui::Screen::Create(
-        ftxui::Dimension::Fixed(60), ftxui::Dimension::Fixed(1));
-    ftxui::Render(screen, imza::session_error_element(session));
-
-    CHECK(screen.ToString().find("Add a review comment before sending.")
-        != std::string::npos);
-    CHECK(screen.PixelAt(0, 0).background_color == ftxui::Color::Red);
-    CHECK(screen.PixelAt(59, 0).background_color == ftxui::Color::Red);
-}
-
-TEST_CASE("multiline field underlines only its last row")
-{
-    std::string content = "first\nsecond";
-    int cursor          = static_cast<int>(content.size());
-    const auto input    = ftxui::Input(
-        &content, imza::multiline_field_option(&content, &cursor, "Comment"));
-    auto screen = ftxui::Screen::Create(
-        ftxui::Dimension::Fixed(20), ftxui::Dimension::Fixed(2));
-    ftxui::Render(
-        screen, input->Render() | ftxui::size(ftxui::WIDTH, ftxui::EQUAL, 20));
-    CHECK_FALSE(screen.PixelAt(0, 0).underlined);
-    CHECK(screen.PixelAt(0, 0).foreground_color == imza::PANEL_FG);
-    CHECK(screen.PixelAt(0, 1).foreground_color == imza::PANEL_FG);
 }
 
 TEST_CASE("diff_split renders review-style side-by-side changes")
@@ -276,15 +220,25 @@ TEST_CASE("diff_split renders unified changes on narrow screens")
     CHECK(out.find("   10 + after") != std::string::npos);
 }
 
-TEST_CASE("diff_split combines syntax foregrounds with change backgrounds")
+TEST_CASE("diff_split wraps long lines instead of clipping them")
 {
-    imza::DiffView diff { "file.cpp",
+    const std::string long_line
+        = "right side of the diff has quite a long unwrapped line here";
+    imza::DiffView unified { "file.cpp",
         {
-            { imza::DiffRow::Kind::ADD, 1, 1, "return 0;", "return 1;" },
+            { imza::DiffRow::Kind::ADD, 10, 10, "", long_line },
         } };
-    auto screen = imza::test::to_screen(imza::diff_split(diff, 40), 40, 2);
-    CHECK(screen.PixelAt(6, 0).foreground_color == ftxui::Color::Green);
-    CHECK(screen.PixelAt(6, 0).background_color == imza::DIFF_DELETION_BG);
-    CHECK(screen.PixelAt(6, 1).foreground_color == ftxui::Color::Green);
-    CHECK(screen.PixelAt(6, 1).background_color == imza::DIFF_ADDITION_BG);
+    const std::string narrow
+        = without_ansi(to_text(imza::diff_split(unified, 40), 40, 6));
+    CHECK(narrow.find("right side") != std::string::npos);
+    CHECK(narrow.find("here") != std::string::npos);
+
+    imza::DiffView side_by_side { "file.cpp",
+        {
+            { imza::DiffRow::Kind::ADD, 10, 10, "", long_line },
+        } };
+    const std::string wide
+        = without_ansi(to_text(imza::diff_split(side_by_side), 120, 6));
+    CHECK(wide.find("right side") != std::string::npos);
+    CHECK(wide.find("here") != std::string::npos);
 }

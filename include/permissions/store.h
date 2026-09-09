@@ -8,8 +8,8 @@
 #include <variant>
 #include <vector>
 
-#include "common/types.h"
 #include "common/imza_signal.h"
+#include "common/types.h"
 
 namespace imza {
 

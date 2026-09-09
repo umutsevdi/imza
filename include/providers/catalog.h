@@ -45,8 +45,10 @@ bool catalog_stale(const Catalog& catalog);
 Status load_catalog(const std::filesystem::path& path, Catalog& out);
 Status save_catalog(const std::filesystem::path& path, const Catalog& catalog);
 Status fetch_catalog(Catalog& out);
+void backfill_catalog_urls(Catalog& catalog);
 
 AuthType auth_from_npm(std::string_view npm);
+ApiStandard dialect_from_npm(std::string_view npm);
 std::string catalog_base(const CachedProvider& provider);
 Route resolve_route(
     const Connection& conn, const Catalog& catalog, ApiStandard dialect);

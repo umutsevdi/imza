@@ -18,10 +18,11 @@ public:
     FileLock& operator=(const FileLock&) = delete;
 
 private:
-    explicit FileLock(std::intptr_t handle);
+    FileLock(std::intptr_t handle, std::filesystem::path path);
     void _release();
 
     std::intptr_t _handle;
+    std::filesystem::path _path;
 
     friend std::variant<FileLock, FileLockError> acquire_file_lock(
         const std::filesystem::path& path);
