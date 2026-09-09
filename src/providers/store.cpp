@@ -29,9 +29,6 @@ namespace {
         if (connection.id == OPENAI_SUBSCRIPTION_ID) {
             return ApiStandard::OPENAI_RESPONSES;
         }
-        if (connection.id == ANTHROPIC_SUBSCRIPTION_ID) {
-            return ApiStandard::ANTHROPIC;
-        }
         if (!connection.endpoint.empty()) {
             return ApiStandard::OPENAI;
         }
@@ -43,7 +40,7 @@ namespace {
 
     bool subscription_connection(std::string_view id)
     {
-        return id == OPENAI_SUBSCRIPTION_ID || id == ANTHROPIC_SUBSCRIPTION_ID;
+        return id == OPENAI_SUBSCRIPTION_ID;
     }
 
     std::vector<ModelInfo> catalog_models(
@@ -201,18 +198,16 @@ ProviderStore::provider_options() const
 {
     std::lock_guard lock(mutex_);
     std::vector<std::pair<std::string, std::string>> options;
-    options.reserve(catalog_.providers.size() + 2);
+    options.reserve(catalog_.providers.size() + 1);
     options.emplace_back(
         std::string(OPENAI_SUBSCRIPTION_ID), "Open AI Subscription");
-    options.emplace_back(
-        std::string(ANTHROPIC_SUBSCRIPTION_ID), "Anthropic Subscription");
     for (const auto& [id, provider] : catalog_.providers) {
-        if (id == OPENAI_SUBSCRIPTION_ID || id == ANTHROPIC_SUBSCRIPTION_ID) {
+        if (id == OPENAI_SUBSCRIPTION_ID) {
             continue;
         }
         options.emplace_back(id, provider.name.empty() ? id : provider.name);
     }
-    std::sort(options.begin() + 2, options.end());
+    std::sort(options.begin() + 1, options.end());
     options.emplace_back(std::string(CUSTOM_PROVIDER_ID), "Custom");
     return options;
 }
@@ -233,7 +228,7 @@ std::optional<ProviderSelection> ProviderStore::active_selection() const
         dialect = it->second;
     }
     return ProviderSelection { config_.last_used->model,
-        config_.reasoning_effort.value_or("off"), connection->id,
+        config_.reasoning_effort.value_or("off"), connection_key(*connection),
         _route_locked(*connection, dialect) };
 }
 
@@ -264,7 +259,7 @@ std::optional<ProviderSelection> ProviderStore::subagent_selection(
     const std::string variant = subagent_variant_or_default(
         configured != config_.subagents.end() ? &configured->second : nullptr,
         role);
-    return ProviderSelection { model, variant, connection->id,
+    return ProviderSelection { model, variant, connection_key(*connection),
         _route_locked(*connection, dialect) };
 }
 

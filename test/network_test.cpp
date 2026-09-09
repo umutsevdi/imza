@@ -105,11 +105,33 @@ TEST_CASE("OpenAI Responses request shape via factory")
     CHECK(value["input"][1]["role"].asString() == "user");
     CHECK(value["input"][2]["type"].asString() == "reasoning");
     CHECK(value["input"][2]["encrypted_content"].asString() == "encrypted");
+    REQUIRE(value["input"][2]["summary"].size() == 1);
+    CHECK(value["input"][2]["summary"][0]["type"].asString() == "summary_text");
+    CHECK(value["input"][2]["summary"][0]["text"].asString() == "summary");
     CHECK(value["input"][3]["role"].asString() == "assistant");
     CHECK(value["input"][4]["type"].asString() == "function_call");
     CHECK(value["input"][4]["call_id"].asString() == "call_1");
     CHECK(value["input"][5]["type"].asString() == "function_call_output");
     CHECK(value["input"][5]["output"].asString() == "file body");
+}
+
+TEST_CASE("OpenAI Responses reasoning input includes an empty summary array")
+{
+    imza::Route route;
+    route.dialect       = imza::ApiStandard::OPENAI_RESPONSES;
+    const auto provider = imza::get_provider(route);
+
+    imza::ChatRequest req;
+    req.model = "gpt-5";
+    imza::Message assistant { imza::Message::Type::ASSISTANT, "" };
+    assistant.thinking.push_back({ "", "encrypted" });
+    req.messages.push_back(std::move(assistant));
+
+    const Json::Value value = provider.build(req);
+    REQUIRE(value["input"].size() == 2);
+    CHECK(value["input"][0]["type"].asString() == "reasoning");
+    CHECK(value["input"][0]["summary"].isArray());
+    CHECK(value["input"][0]["summary"].empty());
 }
 
 TEST_CASE("providers cap requested output tokens")

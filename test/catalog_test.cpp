@@ -174,8 +174,7 @@ TEST_CASE("backfill_catalog_urls patches only matching empty provider URLs")
         == "https://example.com/v1");
     CHECK(catalog.providers.at("openai-subscription").name
         == "Open AI Subscription");
-    CHECK(catalog.providers.at("anthropic-subscription").name
-        == "Anthropic Subscription");
+    CHECK_FALSE(catalog.providers.contains("anthropic-subscription"));
 }
 
 TEST_CASE("catalog_base uses only the catalog URL")
@@ -295,15 +294,6 @@ TEST_CASE("subscription routes use fixed endpoints and auth")
     CHECK(openai_route.dialect == imza::ApiStandard::OPENAI_RESPONSES);
     CHECK(openai_route.auth == imza::AuthType::OPENAI_SUBSCRIPTION);
     CHECK(openai_route.account_id == "account");
-
-    imza::Connection anthropic;
-    anthropic.id      = "anthropic-subscription";
-    anthropic.api_key = "access";
-    const imza::Route anthropic_route
-        = imza::resolve_route(anthropic, catalog, imza::ApiStandard::OPENAI);
-    CHECK(anthropic_route.endpoint == "https://api.anthropic.com/v1/messages");
-    CHECK(anthropic_route.dialect == imza::ApiStandard::ANTHROPIC);
-    CHECK(anthropic_route.auth == imza::AuthType::ANTHROPIC_SUBSCRIPTION);
 }
 
 TEST_CASE("auth_headers by auth type")
@@ -320,12 +310,6 @@ TEST_CASE("auth_headers by auth type")
     REQUIRE(anthropic.size() == 2);
     CHECK(anthropic[0] == "x-api-key: k");
     CHECK(anthropic[1] == "anthropic-version: 2023-06-01");
-
-    const auto anthropic_subscription
-        = imza::auth_headers(AuthType::ANTHROPIC_SUBSCRIPTION, "oauth");
-    REQUIRE(anthropic_subscription.size() == 3);
-    CHECK(anthropic_subscription[0] == "Authorization: Bearer oauth");
-    CHECK(anthropic_subscription[2] == "anthropic-beta: oauth-2025-04-20");
 
     const auto openai_subscription
         = imza::auth_headers(AuthType::OPENAI_SUBSCRIPTION, "oauth", "account");

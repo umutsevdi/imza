@@ -190,6 +190,33 @@ TEST_CASE("load_config disambiguates duplicate connections with labels")
     CHECK(imza::connection_key(cfg.providers[4]) == "custom/one 3");
 }
 
+TEST_CASE("config roundtrip resolves labeled connection keys")
+{
+    const auto path = temp_file("labeled-connections.json");
+    imza::Config cfg;
+    imza::Connection personal;
+    personal.id    = "openai-subscription";
+    personal.label = "plus";
+    cfg.providers.push_back(std::move(personal));
+    imza::Connection work;
+    work.id    = "openai-subscription";
+    work.label = "work";
+    cfg.providers.push_back(std::move(work));
+    cfg.last_used = imza::LastUsed { "openai-subscription/plus", "gpt-main" };
+    cfg.subagents[imza::SubagentRole::RESEARCH]
+        = { "openai-subscription/work", "gpt-research", "low" };
+
+    REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
+
+    imza::Config loaded;
+    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
+    REQUIRE(loaded.last_used.has_value());
+    CHECK(loaded.last_used->provider == "openai-subscription/plus");
+    REQUIRE(loaded.subagents.contains(imza::SubagentRole::RESEARCH));
+    CHECK(loaded.subagents.at(imza::SubagentRole::RESEARCH).provider
+        == "openai-subscription/work");
+}
+
 TEST_CASE("load_config rejects unknown dialect")
 {
     const auto path = temp_file("dialect.json");

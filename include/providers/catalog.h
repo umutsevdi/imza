@@ -42,8 +42,6 @@ struct Catalog {
 inline constexpr std::string_view CUSTOM_PROVIDER_ID = "custom";
 inline constexpr std::string_view OPENAI_SUBSCRIPTION_ID
     = "openai-subscription";
-inline constexpr std::string_view ANTHROPIC_SUBSCRIPTION_ID
-    = "anthropic-subscription";
 
 bool catalog_stale(const Catalog& catalog);
 Status load_catalog(const std::filesystem::path& path, Catalog& out);

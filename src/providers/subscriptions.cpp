@@ -5,8 +5,6 @@
 #include "providers/catalog.h"
 
 #include <json/json.h>
-#include <openssl/rand.h>
-#include <openssl/sha.h>
 
 #include <algorithm>
 #include <array>
@@ -24,10 +22,6 @@ namespace {
 
     constexpr std::string_view OPENAI_CLIENT_ID
         = "app_EMoamEEZ73f0CkXaXp7hrann";
-    constexpr std::string_view ANTHROPIC_CLIENT_ID
-        = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-    constexpr std::string_view ANTHROPIC_REDIRECT
-        = "https://platform.claude.com/oauth/code/callback";
 
     SubscriptionHttpPost http_post_fn(SubscriptionHttpPost post)
     {
@@ -46,29 +40,6 @@ namespace {
     {
         return { status, { },
             body.empty() ? error_text(status) : std::move(body) };
-    }
-
-    std::string base64url(const unsigned char* bytes, std::size_t size)
-    {
-        constexpr std::string_view alphabet
-            = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-"
-              "_";
-        std::string out;
-        out.reserve((size * 4 + 2) / 3);
-        std::uint32_t value = 0;
-        int bits            = -6;
-        for (std::size_t i = 0; i < size; ++i) {
-            value = (value << 8) | bytes[i];
-            bits += 8;
-            while (bits >= 0) {
-                out.push_back(alphabet[(value >> bits) & 0x3f]);
-                bits -= 6;
-            }
-        }
-        if (bits > -6) {
-            out.push_back(alphabet[(value << 8 >> (bits + 8)) & 0x3f]);
-        }
-        return out;
     }
 
     std::string decode_base64url(std::string_view input)
@@ -117,57 +88,6 @@ namespace {
         return out;
     }
 
-    std::string url_decode(std::string_view value)
-    {
-        std::string out;
-        for (std::size_t i = 0; i < value.size(); ++i) {
-            if (value[i] == '+') {
-                out.push_back(' ');
-                continue;
-            }
-            if (value[i] != '%' || i + 2 >= value.size()) {
-                out.push_back(value[i]);
-                continue;
-            }
-            unsigned decoded  = 0;
-            const auto result = std::from_chars(
-                value.data() + i + 1, value.data() + i + 3, decoded, 16);
-            if (result.ec != std::errc()) {
-                out.push_back(value[i]);
-                continue;
-            }
-            out.push_back(static_cast<char>(decoded));
-            i += 2;
-        }
-        return out;
-    }
-
-    std::string query_value(std::string_view text, std::string_view key)
-    {
-        const std::size_t query = text.find('?');
-        if (query != std::string_view::npos) {
-            text.remove_prefix(query + 1);
-        }
-        const std::size_t fragment = text.find('#');
-        if (fragment != std::string_view::npos) {
-            text = text.substr(0, fragment);
-        }
-        while (!text.empty()) {
-            const std::size_t amp       = text.find('&');
-            const std::string_view item = text.substr(0, amp);
-            const std::size_t equal     = item.find('=');
-            if (equal != std::string_view::npos
-                && item.substr(0, equal) == key) {
-                return url_decode(item.substr(equal + 1));
-            }
-            if (amp == std::string_view::npos) {
-                break;
-            }
-            text.remove_prefix(amp + 1);
-        }
-        return { };
-    }
-
     bool wait_default(std::stop_token stop, std::chrono::seconds duration)
     {
         std::mutex mutex;
@@ -191,8 +111,7 @@ namespace {
     }
 
     SubscriptionResult parse_token_response(const std::string& body,
-        bool openai, std::string_view old_refresh = { },
-        std::string_view old_account = { })
+        std::string_view old_refresh = { }, std::string_view old_account = { })
     {
         const Json::Value root = parse_json(body);
         if (!root.isObject() || !root["access_token"].isString()
@@ -204,18 +123,16 @@ namespace {
         credentials.refresh_token = root["refresh_token"].isString()
             ? root["refresh_token"].asString()
             : std::string(old_refresh);
-        credentials.expires_at = expires_from(root, credentials.access_token);
-        credentials.account_id = std::string(old_account);
-        if (openai) {
-            const std::string token = root["id_token"].isString()
-                ? root["id_token"].asString()
-                : credentials.access_token;
-            std::int64_t ignored    = 0;
-            parse_openai_token_claims(
-                token, credentials.account_id, credentials.label, ignored);
-        }
+        credentials.expires_at  = expires_from(root, credentials.access_token);
+        credentials.account_id  = std::string(old_account);
+        const std::string token = root["id_token"].isString()
+            ? root["id_token"].asString()
+            : credentials.access_token;
+        std::int64_t ignored    = 0;
+        parse_openai_token_claims(
+            token, credentials.account_id, credentials.label, ignored);
         if (credentials.refresh_token.empty()
-            || (openai && credentials.account_id.empty())) {
+            || credentials.account_id.empty()) {
             return failure(Status::JSON_ERROR, body);
         }
         return { Status::OK, std::move(credentials), { } };
@@ -245,18 +162,10 @@ namespace {
         if (code < 200 || code >= 300) {
             return failure(Status::API_ERROR, body);
         }
-        return parse_token_response(body, true);
+        return parse_token_response(body);
     }
 
 } // namespace
-
-std::string pkce_challenge(std::string_view verifier)
-{
-    std::array<unsigned char, SHA256_DIGEST_LENGTH> digest { };
-    SHA256(reinterpret_cast<const unsigned char*>(verifier.data()),
-        verifier.size(), digest.data());
-    return base64url(digest.data(), digest.size());
-}
 
 bool parse_openai_token_claims(std::string_view token, std::string& account_id,
     std::string& label, std::int64_t& expires_at)
@@ -365,65 +274,21 @@ SubscriptionResult await_openai_device_code(const OpenAIDeviceCode& code,
         stop.stop_requested() ? Status::CANCELLED : Status::TIMEOUT, { });
 }
 
-AnthropicAuthorizationResult make_anthropic_authorization()
-{
-    std::array<unsigned char, 32> verifier_bytes { };
-    std::array<unsigned char, 24> state_bytes { };
-    if (RAND_bytes(verifier_bytes.data(), verifier_bytes.size()) != 1
-        || RAND_bytes(state_bytes.data(), state_bytes.size()) != 1) {
-        return { Status::API_ERROR, { }, "Failed to generate sign-in code." };
-    }
-    AnthropicAuthorization authorization;
-    authorization.verifier
-        = base64url(verifier_bytes.data(), verifier_bytes.size());
-    authorization.state = base64url(state_bytes.data(), state_bytes.size());
-    authorization.url
-        = "https://claude.ai/oauth/authorize?code=true&response_type=code"
-          "&client_id="
-        + url_encode(ANTHROPIC_CLIENT_ID)
-        + "&redirect_uri=" + url_encode(ANTHROPIC_REDIRECT) + "&scope="
-        + url_encode("org:create_api_key user:profile user:inference")
-        + "&code_challenge="
-        + url_encode(pkce_challenge(authorization.verifier))
-        + "&code_challenge_method=S256&state="
-        + url_encode(authorization.state);
-    return { Status::OK, std::move(authorization), { } };
-}
-
-SubscriptionResult exchange_anthropic_code(
-    const AnthropicAuthorization& authorization, std::string_view pasted,
+SubscriptionResult refresh_subscription(std::string_view connection_id,
+    std::string_view refresh_token, std::string_view account_id,
     SubscriptionHttpPost post)
 {
-    std::string code;
-    std::string state;
-    if (pasted.find('?') != std::string_view::npos) {
-        code  = query_value(pasted, "code");
-        state = query_value(pasted, "state");
-    } else if (const std::size_t split = pasted.find('#');
-        split != std::string_view::npos) {
-        code  = std::string(pasted.substr(0, split));
-        state = std::string(pasted.substr(split + 1));
-    } else {
-        code = std::string(pasted);
-    }
-    if (code.empty()) {
-        return failure(Status::API_ERROR, "Authorization code is empty.");
-    }
-    if (!state.empty() && state != authorization.state) {
-        return failure(
-            Status::API_ERROR, "Authorization state does not match.");
-    }
     Json::Value request(Json::objectValue);
-    request["grant_type"]    = "authorization_code";
-    request["client_id"]     = std::string(ANTHROPIC_CLIENT_ID);
-    request["code"]          = std::move(code);
-    request["state"]         = authorization.state;
-    request["redirect_uri"]  = std::string(ANTHROPIC_REDIRECT);
-    request["code_verifier"] = authorization.verifier;
+    request["grant_type"]    = "refresh_token";
+    request["refresh_token"] = std::string(refresh_token);
+    if (connection_id != OPENAI_SUBSCRIPTION_ID) {
+        return failure(Status::API_ERROR, "Not a subscription connection.");
+    }
+    request["client_id"] = std::string(OPENAI_CLIENT_ID);
     std::string body;
     long http_code      = 0;
     post                = http_post_fn(std::move(post));
-    const Status status = post("https://platform.claude.com/v1/oauth/token",
+    const Status status = post("https://auth.openai.com/oauth/token",
         { "Content-Type: application/json" }, write_json(request), 30, body,
         &http_code);
     if (status != Status::OK) {
@@ -432,40 +297,7 @@ SubscriptionResult exchange_anthropic_code(
     if (http_code < 200 || http_code >= 300) {
         return failure(Status::API_ERROR, body);
     }
-    return parse_token_response(body, false);
-}
-
-SubscriptionResult refresh_subscription(std::string_view connection_id,
-    std::string_view refresh_token, std::string_view account_id,
-    SubscriptionHttpPost post)
-{
-    Json::Value request(Json::objectValue);
-    request["grant_type"]    = "refresh_token";
-    request["refresh_token"] = std::string(refresh_token);
-    std::string url;
-    bool openai = false;
-    if (connection_id == OPENAI_SUBSCRIPTION_ID) {
-        openai               = true;
-        url                  = "https://auth.openai.com/oauth/token";
-        request["client_id"] = std::string(OPENAI_CLIENT_ID);
-    } else if (connection_id == ANTHROPIC_SUBSCRIPTION_ID) {
-        url                  = "https://platform.claude.com/v1/oauth/token";
-        request["client_id"] = std::string(ANTHROPIC_CLIENT_ID);
-    } else {
-        return failure(Status::API_ERROR, "Not a subscription connection.");
-    }
-    std::string body;
-    long http_code      = 0;
-    post                = http_post_fn(std::move(post));
-    const Status status = post(url, { "Content-Type: application/json" },
-        write_json(request), 30, body, &http_code);
-    if (status != Status::OK) {
-        return failure(status, body);
-    }
-    if (http_code < 200 || http_code >= 300) {
-        return failure(Status::API_ERROR, body);
-    }
-    return parse_token_response(body, openai, refresh_token, account_id);
+    return parse_token_response(body, refresh_token, account_id);
 }
 
 } // namespace imza

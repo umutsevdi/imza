@@ -2,6 +2,7 @@
 
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
@@ -173,11 +174,12 @@ TEST_CASE("subscription connect stores credentials without model discovery")
     auto state     = make_state(session, providers, pump.fn());
     pump.drain();
     const auto options = providers->provider_options();
-    REQUIRE(options.size() >= 2);
+    REQUIRE_FALSE(options.empty());
     CHECK(options[0].first == "openai-subscription");
     CHECK(options[0].second == "Open AI Subscription");
-    CHECK(options[1].first == "anthropic-subscription");
-    CHECK(options[1].second == "Anthropic Subscription");
+    CHECK(std::none_of(options.begin(), options.end(), [](const auto& option) {
+        return option.first == "anthropic-subscription";
+    }));
 
     imza::ConnectResult result;
     result.id            = "openai-subscription";
@@ -381,6 +383,37 @@ TEST_CASE("provider store resolves configured subagent model")
     CHECK(selection->connection_id == "configured");
     CHECK(selection->model == "research-model");
     CHECK(selection->reasoning_effort == "high");
+}
+
+TEST_CASE("provider selections retain labeled connection identity")
+{
+    imza::Config cfg;
+    imza::Connection connection;
+    connection.id      = "openai-subscription";
+    connection.label   = "plus";
+    connection.api_key = "access";
+    cfg.providers.push_back(connection);
+    cfg.last_used = imza::LastUsed { "openai-subscription/plus", "gpt-main" };
+    cfg.subagents[imza::SubagentRole::RESEARCH]
+        = { "openai-subscription/plus", "gpt-research", "low" };
+    imza::ProviderStore providers(cfg, fake_models_ok());
+
+    const auto main = providers.active_selection();
+    REQUIRE(main.has_value());
+    CHECK(main->connection_id == "openai-subscription/plus");
+    CHECK(main->route.dialect == imza::ApiStandard::OPENAI_RESPONSES);
+    CHECK(main->route.endpoint
+        == "https://chatgpt.com/backend-api/codex/responses");
+
+    const auto research
+        = providers.subagent_selection(imza::SubagentRole::RESEARCH);
+    REQUIRE(research.has_value());
+    CHECK(research->connection_id == "openai-subscription/plus");
+
+    const imza::Route authenticated = providers.authenticated_route_for(
+        main->connection_id, main->route.dialect);
+    CHECK(authenticated.endpoint
+        == "https://chatgpt.com/backend-api/codex/responses");
 }
 
 TEST_CASE("subagent defaults follow the active chat model")

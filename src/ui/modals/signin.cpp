@@ -27,7 +27,7 @@ namespace {
     using namespace ftxui;
 
     struct SigninData {
-        enum class Phase { IDLE, STARTING, WAITING, EXCHANGING, FAILED };
+        enum class Phase { IDLE, STARTING, WAITING, FAILED };
         std::atomic<bool> active { true };
         Phase phase = Phase::IDLE;
         std::string code;
@@ -69,14 +69,7 @@ namespace {
                 return element | bgcolor(PANEL_BORDER) | color(PANEL_FG);
             };
             button_ = Button(option);
-            if (id_ == ANTHROPIC_SUBSCRIPTION_ID) {
-                input_ = Input(field_option(&pasted_, &pasted_cursor_,
-                    "paste authorization code", { },
-                    [this] { exchange_anthropic(); }));
-                Add(Container::Vertical({ button_, input_ }));
-            } else {
-                Add(Container::Vertical({ button_ }));
-            }
+            Add(Container::Vertical({ button_ }));
         }
 
         ~SubscriptionSignin() override
@@ -89,29 +82,16 @@ namespace {
         {
             _sync_button();
             Elements rows;
-            if (id_ == ANTHROPIC_SUBSCRIPTION_ID) {
-                rows.push_back(text("Claude subscription OAuth may be blocked "
-                                    "for third-party clients.")
-                    | color(HL_YELLOW));
-                rows.push_back(button_->Render());
-                rows.push_back(hbox({ text("Access Token ") | bold,
-                    input_->Render() | xflex }));
-            } else {
-                if (!data_->code.empty()) {
-                    rows.push_back(hbox({ text("Device code  ") | bold,
-                        text(data_->code) | bold }));
-                }
-                rows.push_back(button_->Render());
+            if (!data_->code.empty()) {
+                rows.push_back(hbox({ text("Device code  ") | bold,
+                    text(data_->code) | bold }));
             }
+            rows.push_back(button_->Render());
             if (data_->phase == SigninData::Phase::STARTING) {
                 rows.push_back(text("requesting sign-in code…") | dim);
             } else if (data_->phase == SigninData::Phase::WAITING) {
-                rows.push_back(text(id_ == OPENAI_SUBSCRIPTION_ID
-                                       ? "waiting for browser authorization…"
-                                       : "paste the code returned by Anthropic")
-                    | dim);
-            } else if (data_->phase == SigninData::Phase::EXCHANGING) {
-                rows.push_back(text("completing sign-in…") | dim);
+                rows.push_back(
+                    text("waiting for browser authorization…") | dim);
             } else if (data_->phase == SigninData::Phase::FAILED) {
                 rows.push_back(text(data_->error) | color(HL_RED));
             }
@@ -127,10 +107,7 @@ namespace {
                 return;
             case SigninData::Phase::FAILED: button_label_ = "Retry"; return;
             case SigninData::Phase::IDLE:
-            case SigninData::Phase::STARTING:
-            case SigninData::Phase::EXCHANGING:
-                button_label_ = "Connect";
-                return;
+            case SigninData::Phase::STARTING: button_label_ = "Connect"; return;
             }
         }
 
@@ -142,8 +119,7 @@ namespace {
                     open_browser(data_->url);
                 }
                 return;
-            case SigninData::Phase::STARTING:
-            case SigninData::Phase::EXCHANGING: return;
+            case SigninData::Phase::STARTING: return;
             case SigninData::Phase::IDLE:
             case SigninData::Phase::FAILED: _start(); return;
             }
@@ -173,19 +149,6 @@ namespace {
             data_->url.clear();
             data_->error.clear();
             worker_.reset();
-            if (id_ == ANTHROPIC_SUBSCRIPTION_ID) {
-                const auto authorization = make_anthropic_authorization();
-                if (authorization.status != Status::OK) {
-                    data_->phase = SigninData::Phase::FAILED;
-                    data_->error = authorization.error;
-                    return;
-                }
-                authorization_ = authorization.authorization;
-                data_->url     = authorization_.url;
-                data_->phase   = SigninData::Phase::WAITING;
-                open_browser(data_->url);
-                return;
-            }
             start_openai();
         }
 
@@ -253,32 +216,13 @@ namespace {
             });
         }
 
-        void exchange_anthropic()
-        {
-            if (pasted_.empty()
-                || data_->phase == SigninData::Phase::EXCHANGING) {
-                return;
-            }
-            data_->phase = SigninData::Phase::EXCHANGING;
-            worker_.reset();
-            const std::string pasted                   = pasted_;
-            const AnthropicAuthorization authorization = authorization_;
-            worker_.emplace([this, pasted, authorization](std::stop_token) {
-                post_result(exchange_anthropic_code(authorization, pasted));
-            });
-        }
-
         std::shared_ptr<ApplicationState> state_;
         std::string id_;
         std::function<std::string()> label_;
         std::shared_ptr<SigninData> data_;
-        AnthropicAuthorization authorization_;
         std::optional<std::jthread> worker_;
         std::string button_label_ = "Connect";
         Component button_;
-        Component input_;
-        std::string pasted_;
-        int pasted_cursor_ = 0;
     };
 
 } // namespace

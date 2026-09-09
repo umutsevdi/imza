@@ -44,13 +44,7 @@ StreamEvent make_usage_event(Usage usage);
 StreamEvent make_connected_event();
 StreamEvent make_reasoning_event(std::string text, std::string signature = "");
 
-enum class AuthType {
-    BEARER,
-    ANTHROPIC,
-    ANTHROPIC_SUBSCRIPTION,
-    OPENAI_SUBSCRIPTION,
-    NONE
-};
+enum class AuthType { BEARER, ANTHROPIC, OPENAI_SUBSCRIPTION, NONE };
 
 struct Route {
     std::string endpoint;

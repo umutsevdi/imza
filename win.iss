@@ -14,7 +14,7 @@
 #define Build Source + "\build\x64-Release"
 
 #define imzaName "Imza"
-#define imzaDescription "Open source multi-modal coding agent."
+#define imzaDescription "Imza is a batteries-included, model-agnostic coding agent with native performance and a small runtime footprint."
 #define imzaVersion "0.2.0"
 #define imzaAuthor "Umut Sevdi"
 #define imzaURL "https://github.com/umutsevdi/imza"

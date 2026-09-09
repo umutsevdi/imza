@@ -226,7 +226,7 @@ Status load_config(
         const auto connection_exists = [&](const std::string& id) {
             return std::any_of(out.providers.begin(), out.providers.end(),
                 [&](const Connection& connection) {
-                    return connection.id == id;
+                    return connection_key(connection) == id;
                 });
         };
         const Json::Value& main = models["main"];

@@ -21,11 +21,6 @@ std::vector<std::string> auth_headers(
     if (auth == AuthType::ANTHROPIC) {
         return { "x-api-key: " + key, "anthropic-version: 2023-06-01" };
     }
-    if (auth == AuthType::ANTHROPIC_SUBSCRIPTION) {
-        return { "Authorization: Bearer " + key,
-            "anthropic-version: 2023-06-01",
-            "anthropic-beta: oauth-2025-04-20" };
-    }
     if (auth == AuthType::OPENAI_SUBSCRIPTION) {
         std::vector<std::string> headers = {
             "Authorization: Bearer " + key,

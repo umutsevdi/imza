@@ -57,7 +57,7 @@ namespace {
 
     bool subscription_provider(std::string_view id)
     {
-        return id == OPENAI_SUBSCRIPTION_ID || id == ANTHROPIC_SUBSCRIPTION_ID;
+        return id == OPENAI_SUBSCRIPTION_ID;
     }
 
     Element status_element(const std::string& text_value, bool ok)

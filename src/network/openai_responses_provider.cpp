@@ -42,6 +42,13 @@ namespace {
             Json::Value item;
             item["type"]              = "reasoning";
             item["encrypted_content"] = thinking.signature;
+            item["summary"]           = Json::Value(Json::arrayValue);
+            if (!thinking.text.empty()) {
+                Json::Value summary;
+                summary["type"] = "summary_text";
+                summary["text"] = thinking.text;
+                item["summary"].append(std::move(summary));
+            }
             input.append(std::move(item));
         }
 

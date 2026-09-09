@@ -69,10 +69,7 @@ else()
     find_package(CURL REQUIRED)
 endif()
 
-
 # ---- Dependencies ----
-find_package(OpenSSL REQUIRED COMPONENTS Crypto)
-
 # FTXUI
 set(FTXUI_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(FTXUI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -211,7 +208,6 @@ target_include_directories(imza_foundation PRIVATE
 target_link_libraries(imza_foundation PUBLIC
     imza_network
     jsoncpp_static
-    OpenSSL::Crypto
 )
 
 # Domain state and runtime infrastructure (no ftxui, no cmark)
@@ -364,7 +360,8 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release" AND IMZA_PACKAGE)
             "Open source multi-modal coding agent."
         )
         set(CPACK_PACKAGE_DESCRIPTION
-            "Imza is an open source multi-modal coding agent."
+            "Imza is a batteries-included, model-agnostic coding agent with
+            native performance and a small runtime footprint."
         )
         set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
         set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")

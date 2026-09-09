@@ -365,17 +365,6 @@ void inject_subscription_providers(Catalog& catalog)
         openai.models.emplace(std::string(id), std::move(model));
     }
     catalog.providers[std::string(OPENAI_SUBSCRIPTION_ID)] = std::move(openai);
-
-    CachedProvider anthropic;
-    anthropic.name = "Anthropic Subscription";
-    anthropic.api  = "https://api.anthropic.com/v1";
-    anthropic.npm  = "@ai-sdk/anthropic";
-    if (const auto source = catalog.providers.find("anthropic");
-        source != catalog.providers.end()) {
-        anthropic.models = source->second.models;
-    }
-    catalog.providers[std::string(ANTHROPIC_SUBSCRIPTION_ID)]
-        = std::move(anthropic);
 }
 
 AuthType auth_from_npm(std::string_view npm)
@@ -428,14 +417,6 @@ Route resolve_route(
         route.auth     = AuthType::OPENAI_SUBSCRIPTION;
         return route;
     }
-    if (conn.id == ANTHROPIC_SUBSCRIPTION_ID) {
-        route.api      = "https://api.anthropic.com/v1";
-        route.endpoint = route.api + "/messages";
-        route.dialect  = ApiStandard::ANTHROPIC;
-        route.auth     = AuthType::ANTHROPIC_SUBSCRIPTION;
-        return route;
-    }
-
     const auto it = catalog.providers.find(conn.id);
     if (it == catalog.providers.end()) {
         return route;
