@@ -189,7 +189,8 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
     request.allow_for_session = false;
 
     if (original.name == "read" || original.name == "list"
-        || original.name == "edit" || original.name == "write") {
+        || original.name == "find" || original.name == "edit"
+        || original.name == "write") {
         const FilesystemEvaluation filesystem = evaluate_filesystem_request(
             original.name, original.args, context);
         if (!filesystem.request) {

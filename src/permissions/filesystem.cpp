@@ -21,6 +21,9 @@ namespace {
         if (tool == "list") {
             return FilesystemRequest::Operation::LIST;
         }
+        if (tool == "find") {
+            return FilesystemRequest::Operation::FIND;
+        }
         if (tool == "edit") {
             return FilesystemRequest::Operation::EDIT;
         }
@@ -85,13 +88,16 @@ FilesystemEvaluation evaluate_filesystem_request(std::string_view tool,
     std::string raw;
     if (normalized[key].isString()) {
         raw = normalized[key].asString();
-    } else if (*operation == FilesystemRequest::Operation::LIST
+    } else if ((*operation == FilesystemRequest::Operation::LIST
+                   || *operation == FilesystemRequest::Operation::FIND)
         && normalized[key].isNull()) {
         raw = ".";
     } else {
         return reject(std::string(tool) + ": invalid path argument");
     }
-    if (raw.empty() && *operation == FilesystemRequest::Operation::LIST) {
+    if (raw.empty()
+        && (*operation == FilesystemRequest::Operation::LIST
+            || *operation == FilesystemRequest::Operation::FIND)) {
         raw = ".";
     }
     const std::filesystem::path& working_directory
@@ -122,6 +128,12 @@ FilesystemEvaluation evaluate_filesystem_request(std::string_view tool,
         && (!exists || !std::filesystem::is_directory(target, error))) {
         return reject("list: target is not a directory");
     }
+    if (*operation == FilesystemRequest::Operation::FIND
+        && (!exists
+            || (!std::filesystem::is_directory(target, error)
+                && !std::filesystem::is_regular_file(target, error)))) {
+        return reject("find: target is not a file or directory");
+    }
     if (*operation == FilesystemRequest::Operation::WRITE) {
         if (exists && !std::filesystem::is_regular_file(target, error)) {
             return reject("write: target is not a file");
@@ -140,7 +152,8 @@ FilesystemEvaluation evaluate_filesystem_request(std::string_view tool,
 
     normalized[key] = target.string();
     FilesystemRequest request { *operation, target, std::move(normalized) };
-    if (*operation == FilesystemRequest::Operation::LIST) {
+    if (*operation == FilesystemRequest::Operation::LIST
+        || *operation == FilesystemRequest::Operation::FIND) {
         return { { PermissionDecision::Kind::ACCEPT, "" }, request };
     }
 
@@ -164,7 +177,8 @@ FilesystemEvaluation evaluate_filesystem_request(std::string_view tool,
 std::optional<ExternalGrant> filesystem_session_grant(
     const FilesystemRequest& request)
 {
-    if (request.operation == FilesystemRequest::Operation::LIST) {
+    if (request.operation == FilesystemRequest::Operation::LIST
+        || request.operation == FilesystemRequest::Operation::FIND) {
         return std::nullopt;
     }
     return request.target.parent_path();

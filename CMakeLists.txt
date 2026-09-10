@@ -246,6 +246,7 @@ add_library(imza_execution
     src/permissions/evaluator.cpp
     src/permissions/filesystem.cpp
     src/tools/tool.cpp
+    src/tools/find.cpp
     src/tools/tool_args.cpp
     src/tools/shell.cpp
     src/tools/web.cpp

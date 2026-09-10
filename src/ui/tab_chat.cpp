@@ -1,6 +1,7 @@
 #include "app/flows.h"
 #include "common/util.h"
 #include "conversation/format.h"
+#include "network/json_io.h"
 #include "turn/delegation.h"
 #include "ui/autocomplete.h"
 #include "ui/tool_format.h"
@@ -31,7 +32,7 @@ namespace {
 
     using namespace ftxui;
 
-    constexpr std::size_t LARGE_OUTPUT_LINES = 10;
+    constexpr std::size_t LARGE_OUTPUT_LINES = 5;
     constexpr std::size_t INVALID_VERSION    = ~std::size_t { 0 };
     constexpr int WHEEL_STEP                 = 3;
     constexpr int DEFAULT_VIEWPORT_LINES     = 24;
@@ -298,6 +299,9 @@ namespace {
                                 } else if (tc.name == "list") {
                                     item_cache_[item_index]
                                         = render_list_collapsed(tc);
+                                } else if (tc.name == "find") {
+                                    item_cache_[item_index]
+                                        = render_find_collapsed(tc);
                                 } else if (tc.name == "shell") {
                                     item_cache_[item_index] = big
                                         ? render_shell_collapsed(tc)
@@ -601,6 +605,13 @@ namespace {
                 imza::enqueue_user_modal(*state_,
                     ViewerModal {
                         "Directory listing", tc.result->text, "", 1 });
+            } else if (tc.name == "find") {
+                const Json::Value args = parse_json(tc.args);
+                imza::enqueue_user_modal(*state_,
+                    ViewerModal { "Find results",
+                        tc.result->text.empty() ? "(no matches)"
+                                                : tc.result->text,
+                        "", 1, false, json_string(args, "path") });
             } else {
                 imza::enqueue_user_modal(*state_,
                     ViewerModal { "Shell output", tc.result->text, "", 1 });
@@ -735,7 +746,7 @@ namespace {
                                         : tool_display_name(tc.name))
                     | bold | color(HL_GREEN),
                 text(" "),
-                text(tool_header_args(tc)) | color(PANEL_FG),
+                text(tool_header_args(tc)) | color(PANEL_FG_DIM),
             };
             if (tc.result.has_value() && tc.result->shell_status.has_value()) {
                 const std::string status
@@ -757,11 +768,39 @@ namespace {
             });
         }
 
-        std::string viewer_label(
-            std::string what, std::size_t count, std::string_view unit)
+        std::string viewer_header_detail(
+            const ToolCall& tc, std::size_t count, std::string_view unit)
         {
-            return "▸ open " + std::move(what) + " in viewer ("
-                + std::to_string(count) + " " + std::string(unit) + ")";
+            std::string label = tool_header_args(tc);
+            label += label.empty() ? "(" : " (";
+            label += std::to_string(count) + " ";
+            if (count == 1) {
+                label += unit;
+            } else if (unit == "entry") {
+                label += "entries";
+            } else if (unit == "match") {
+                label += "matches";
+            } else {
+                label += std::string(unit) + "s";
+            }
+            label += ")";
+            return label;
+        }
+
+        Element render_viewer_header(
+            const ToolCall& tc, std::size_t count, std::string_view unit)
+        {
+            Component button = make_viewer_header_button(
+                tc, viewer_header_detail(tc, count, unit));
+            Elements parts { button->Render() };
+            if (tc.result->shell_status.has_value()) {
+                const std::string status
+                    = shell_status_text(*tc.result->shell_status);
+                if (!status.empty()) {
+                    parts.push_back(text(status) | color(HL_RED));
+                }
+            }
+            return hbox(std::move(parts));
         }
 
         const ToolCall* find_tool_call(std::size_t id) const
@@ -787,18 +826,16 @@ namespace {
 
         Element render_skill_item(const ToolCall& tc)
         {
-            const std::string label = viewer_label(
-                "skill instructions", count_lines(tc.result->text), "lines");
-            Component btn = make_viewer_button(tc.id, label);
-            return tool_card(tc, btn->Render());
+            return vbox({ render_viewer_header(
+                              tc, count_lines(tc.result->text), "line"),
+                separatorEmpty() });
         }
 
         Element render_read_item(const ToolCall& tc)
         {
-            const std::string label = viewer_label(
-                tool_call_head(tc), count_lines(tc.result->text), "lines");
-            Component btn = make_viewer_button(tc.id, label);
-            return tool_card(tc, btn->Render());
+            return vbox({ render_viewer_header(
+                              tc, count_lines(tc.result->text), "line"),
+                separatorEmpty() });
         }
 
         Element render_list_collapsed(const ToolCall& tc)
@@ -808,10 +845,16 @@ namespace {
             if (full.find("\n[truncated:") != std::string::npos) {
                 --entries;
             }
-            const std::string label
-                = viewer_label("directory listing", entries, "entries");
-            Component btn = make_viewer_button(tc.id, label);
-            return tool_card(tc, btn->Render());
+            return vbox({ render_viewer_header(tc, entries, "entry"),
+                separatorEmpty() });
+        }
+
+        Element render_find_collapsed(const ToolCall& tc)
+        {
+            const std::size_t matches
+                = tc.result->text.empty() ? 0 : count_lines(tc.result->text);
+            return vbox({ render_viewer_header(tc, matches, "match"),
+                separatorEmpty() });
         }
 
         int content_width()
@@ -824,12 +867,8 @@ namespace {
             const std::string& full   = tc.result->text;
             const std::size_t total   = count_lines(full);
             const std::string preview = take_lines(full, LARGE_OUTPUT_LINES);
-            const std::string label
-                = viewer_label("full shell output", total, "lines");
-            Component btn = make_viewer_button(tc.id, label);
-            return tool_card(tc,
-                vbox({ code_block(preview, "", content_width()),
-                    btn->Render() }));
+            return vbox({ render_viewer_header(tc, total, "line"),
+                code_block(preview, "", content_width()), separatorEmpty() });
         }
         Element render_shell_item(const ToolCall& tc)
         {
@@ -995,14 +1034,26 @@ namespace {
                 });
         }
 
-        Component make_viewer_button(std::size_t id, std::string label)
+        Component make_viewer_header_button(
+            const ToolCall& tc, std::string detail)
         {
-            return memoized_label_button(
-                read_buttons_, id, std::move(label), [this, id] {
-                    if (const auto* tc = find_tool_call(id); tc != nullptr) {
-                        open_viewer_for(*tc);
+            if (const auto found = read_buttons_.find(tc.id);
+                found != read_buttons_.end()) {
+                return found->second;
+            }
+            std::string name     = tc.name == "skill" ? "Load Skill"
+                                                      : tool_display_name(tc.name);
+            const std::size_t id = tc.id;
+            Component button     = split_inline_link_button(
+                std::move(name), std::move(detail), [this, id] {
+                    if (const auto* call = find_tool_call(id);
+                        call != nullptr) {
+                        open_viewer_for(*call);
                     }
                 });
+            read_buttons_.emplace(id, button);
+            container_->Add(button);
+            return button;
         }
 
         bool reasoning_enabled(const AssistantTurn& turn) const

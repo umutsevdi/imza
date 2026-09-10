@@ -7,7 +7,7 @@ ISSUES & SUPPORT: https://github.com/umutsevdi/imza/issues
 
 CHANGELOG
 -------------------------------------------------------------------------------
-0.2.0 - 2026-09-11
+0.2.0 - 2026-09-10
 -------------------------------------------------------------------------------
 [https://github.com/umutsevdi/imza/releases/tag/v0.2.0]
 
@@ -16,6 +16,8 @@ Changes:
   - Added support for `OpenAI Responses` format.
   - Text wrapping and session file locking fixes.
   - Added support for more model providers.
+  - Added `find` tool.
+  - Fixed various tool bugs
 
 -------------------------------------------------------------------------------
 0.1.3 - 2026-09-09

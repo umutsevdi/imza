@@ -92,6 +92,9 @@ ftxui::Component inline_link_button(std::function<ftxui::Element()> render,
 ftxui::Component inline_link_button(std::string label,
     std::function<void()> on_click,
     const ftxui::Color& inactive_color = PANEL_FG_DIM);
+ftxui::Component split_inline_link_button(std::string primary,
+    std::string secondary, std::function<void()> on_click,
+    const ftxui::Color& primary_color = HL_GREEN);
 std::string elapsed_text(std::chrono::milliseconds elapsed);
 std::string compact_number(std::uint64_t n);
 ftxui::Element hint_bar(std::string hint);

@@ -318,6 +318,7 @@ SystemEnvironment detect_system_environment()
     environment.temporary_directory
         = prepare_imza_temporary_directory(temporary_directory);
     environment.has_git = find_in_path("git");
+    environment.has_rg  = find_in_path("rg");
     environment.today   = format_local_time("%Y-%m-%d");
     return environment;
 }

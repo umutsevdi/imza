@@ -173,6 +173,10 @@ std::string tool_call_head(const ToolCall& call)
     if (call.name == "read" || call.name == "list") {
         return read_path(call);
     }
+    if (call.name == "find") {
+        const Json::Value parsed = parse_json(call.args);
+        return json_string(parsed, "pattern");
+    }
     if (call.name == "shell") {
         return "shell";
     }
@@ -212,6 +216,12 @@ std::string tool_header_args(const ToolCall& call)
 {
     if (call.name == "read" || call.name == "list") {
         return read_path(call);
+    }
+    if (call.name == "find") {
+        const Json::Value parsed  = parse_json(call.args);
+        const std::string pattern = json_string(parsed, "pattern");
+        const std::string path    = json_string(parsed, "path");
+        return pattern + (path.empty() ? "" : " · " + path);
     }
     if (call.name == "edit" || call.name == "write") {
         const Json::Value parsed = parse_json(call.args);

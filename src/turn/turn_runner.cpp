@@ -726,6 +726,7 @@ void TurnRunner::_run_tool(const PermissionEvaluation& evaluation,
         ? ToolCall::Result::Kind::OUTPUT
         : ToolCall::Result::Kind::ERROR;
     std::string history_text = append_shell_status(out.text, out.shell_status);
+    std::optional<ViewerModal> viewer = std::move(out.viewer);
     _post([this, req, kind, out = std::move(out)]() mutable {
         ToolCall::Result result { kind, std::move(out.text) };
         result.diff         = std::move(out.diff);
@@ -734,6 +735,11 @@ void TurnRunner::_run_tool(const PermissionEvaluation& evaluation,
     });
     tool_msgs.push_back(
         { Message::Type::TOOL, std::move(history_text), { }, req.id });
+    if (viewer
+        && (state_->runtime_flags & RuntimeFlag::ATTENDED)
+            != RuntimeFlag::NONE) {
+        modal_request_(std::move(*viewer));
+    }
 }
 
 } // namespace imza

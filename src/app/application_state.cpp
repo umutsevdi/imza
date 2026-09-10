@@ -67,7 +67,8 @@ namespace {
 
     std::shared_ptr<ApplicationState> initialize_root(
         std::shared_ptr<ApplicationState> state, PostFn post, Config config,
-        StreamFn stream_fn, std::vector<Tool> tools, RuntimeFlag runtime_flags)
+        StreamFn stream_fn, std::vector<Tool> tools, RuntimeFlag runtime_flags,
+        bool use_default_tools)
     {
         state->session     = std::make_shared<Session>();
         state->sessions    = std::make_shared<SessionStore>();
@@ -80,6 +81,10 @@ namespace {
         state->post        = guarded_post(state.get(), std::move(post));
         state->on_exit     = [] { };
         state->runtime_flags = runtime_flags;
+        if (use_default_tools) {
+            tools = default_tools(
+                runtime_flags, state->environment->system()->has_rg);
+        }
         wire(state, std::move(stream_fn), std::move(tools));
         return state;
     }
@@ -89,7 +94,8 @@ namespace {
         PostFn post, StreamFn stream_fn, ModalRequestFn parent_routing,
         std::string agent_label)
     {
-        std::vector<Tool> tools = default_tools(parent.runtime_flags);
+        std::vector<Tool> tools = default_tools(
+            parent.runtime_flags, parent.environment->system()->has_rg);
         std::erase_if(tools, [](const Tool& tool) {
             return tool.spec.name == "subagent" || tool.spec.name == "todo";
         });
@@ -126,10 +132,9 @@ ApplicationState::~ApplicationState()
 std::shared_ptr<ApplicationState> make_application_state(
     PostFn post, Config config, StreamFn stream_fn, RuntimeFlag runtime_flags)
 {
-    std::vector<Tool> tools = default_tools(runtime_flags);
     std::shared_ptr<ApplicationState> state(new ApplicationState());
     return initialize_root(std::move(state), std::move(post), std::move(config),
-        std::move(stream_fn), std::move(tools), runtime_flags);
+        std::move(stream_fn), { }, runtime_flags, true);
 }
 
 std::shared_ptr<ApplicationState> make_application_state_with_tools(PostFn post,
@@ -138,7 +143,7 @@ std::shared_ptr<ApplicationState> make_application_state_with_tools(PostFn post,
 {
     std::shared_ptr<ApplicationState> state(new ApplicationState());
     return initialize_root(std::move(state), std::move(post), std::move(config),
-        std::move(stream_fn), std::move(tools), runtime_flags);
+        std::move(stream_fn), std::move(tools), runtime_flags, false);
 }
 
 std::shared_ptr<ApplicationState> make_child_application_state(

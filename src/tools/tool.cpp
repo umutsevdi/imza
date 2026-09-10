@@ -53,12 +53,13 @@ ToolOutput dispatch_tool(
     return tool->run(args);
 }
 
-std::vector<Tool> default_tools(RuntimeFlag flags)
+std::vector<Tool> default_tools(RuntimeFlag flags, bool has_rg)
 {
     std::vector<Tool> tools;
     tools.push_back(make_read_tool());
     tools.push_back(make_skill_tool());
     tools.push_back(make_list_tool());
+    tools.push_back(make_find_tool(has_rg));
     if ((flags & RuntimeFlag::ATTENDED) != RuntimeFlag::NONE) {
         tools.push_back(make_ask_tool());
     }
@@ -144,9 +145,7 @@ namespace {
                 + path);
         }
         if (end_given && end > length) {
-            return tool_error("read: line_end " + std::to_string(end)
-                + " exceeds file length " + std::to_string(length) + ": "
-                + path);
+            end = length;
         }
         bool truncated = false;
         if (!end_given) {

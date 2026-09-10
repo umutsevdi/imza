@@ -411,6 +411,15 @@ TEST_CASE("filesystem policy trusts only configured roots")
         path_args("path", fixture.outside),
         fixture.context(Session::Mode::PLAN));
     CHECK(outside_list.decision.kind == PermissionDecision::Kind::ACCEPT);
+
+    Json::Value find_args(Json::objectValue);
+    find_args["pattern"]    = "content";
+    find_args["path"]       = fixture.outside.string();
+    const auto outside_find = evaluate_filesystem_request(
+        "find", write_json(find_args), fixture.context(Session::Mode::PLAN));
+    CHECK(outside_find.decision.kind == PermissionDecision::Kind::ACCEPT);
+    REQUIRE(outside_find.request.has_value());
+    CHECK(outside_find.request->target == fixture.outside);
 }
 
 TEST_CASE("filesystem policy falls back to the working directory")
@@ -601,6 +610,8 @@ TEST_CASE("central evaluator assigns explicit policies to built-in tools")
     CHECK(evaluate("webfetch", R"({"url":"https://example.com"})").decision.kind
         == PermissionDecision::Kind::ACCEPT);
     CHECK(evaluate("websearch", R"({"query":"imza"})").decision.kind
+        == PermissionDecision::Kind::ACCEPT);
+    CHECK(evaluate("find", R"({"pattern":"content"})").decision.kind
         == PermissionDecision::Kind::ACCEPT);
     CHECK(evaluate("subagent",
               R"({"tasks":[{"mode":"research","prompt":"inspect"}]})")

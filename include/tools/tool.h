@@ -48,6 +48,7 @@ struct ToolOutput {
     std::string text;
     std::optional<DiffView> diff { };
     std::optional<ShellStatus> shell_status { };
+    std::optional<ViewerModal> viewer { };
 };
 
 inline ToolOutput tool_error(std::string text)
@@ -88,6 +89,7 @@ bool shell_builtin_allowed(std::string_view program);
 Tool make_read_tool();
 Tool make_skill_tool();
 Tool make_list_tool();
+Tool make_find_tool(bool has_rg);
 Tool make_ask_tool();
 Tool make_shell_tool();
 Tool make_todo_tool();
@@ -97,6 +99,6 @@ Tool make_write_tool();
 Tool make_webfetch_tool();
 Tool make_websearch_tool();
 std::vector<Tool> default_tools(
-    RuntimeFlag flags = interactive_runtime_flags());
+    RuntimeFlag flags = interactive_runtime_flags(), bool has_rg = false);
 
 } // namespace imza

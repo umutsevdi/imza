@@ -119,6 +119,7 @@ struct Env {
             } });
         tools.push_back(imza::make_subagent_tool());
         tools.push_back(imza::make_read_tool());
+        tools.push_back(imza::make_find_tool(false));
         tools.push_back(imza::make_edit_tool());
         tools.push_back(imza::make_write_tool());
         state = imza::make_application_state_with_tools(
@@ -610,13 +611,14 @@ TEST_CASE("tool accept: output fills result, request half byte-stable")
     CHECK(prev.tool_calls[0].name == "shell");
     CHECK(prev.tool_calls[0].args == R"({"command":"inspect -la"})");
 
-    REQUIRE(env.last_request().tools.size() == 6);
+    REQUIRE(env.last_request().tools.size() == 7);
     CHECK(env.last_request().tools[0].name == "shell");
     CHECK(env.last_request().tools[1].name == "websearch");
     CHECK(env.last_request().tools[2].name == "subagent");
     CHECK(env.last_request().tools[3].name == "read");
-    CHECK(env.last_request().tools[4].name == "edit");
-    CHECK(env.last_request().tools[5].name == "write");
+    CHECK(env.last_request().tools[4].name == "find");
+    CHECK(env.last_request().tools[5].name == "edit");
+    CHECK(env.last_request().tools[6].name == "write");
     CHECK(env.user_turn_count() == 1);
 }
 
@@ -1099,6 +1101,111 @@ TEST_CASE("tools with an automatic policy run without an approval modal")
     CHECK(env.last_request().messages.back().type == imza::Message::Type::TOOL);
     CHECK(env.last_request().messages.back().content
         == R"(searched: {"query":"imza"})");
+}
+
+TEST_CASE("find automatically opens results in a viewer modal")
+{
+    Env env;
+    auto round = std::make_shared<int>(0);
+    env.stream = [&env, round](const imza::ChatRequest& req,
+                     const imza::StreamCallback& cb) {
+        env.requests.push_back(req);
+        if ((*round)++ == 0) {
+            cb(imza::make_tool_call_event({ "find",
+                R"({"pattern":"cmake_minimum_required","path":"CMakeLists.txt"})",
+                "", "find-modal" }));
+        }
+        cb(imza::make_done_event());
+        return imza::Status::OK;
+    };
+
+    imza::submit(*env.state, "search");
+    REQUIRE(env.pump.wait_for([&] {
+        return std::holds_alternative<imza::ViewerModal>(env.session->modal());
+    }));
+    const auto viewer = std::get<imza::ViewerModal>(env.session->modal());
+    CHECK(viewer.title == "Find results");
+    CHECK(viewer.content.find("cmake_minimum_required") != std::string::npos);
+    CHECK_FALSE(viewer.line_numbers);
+
+    REQUIRE(env.pump.wait_for([&] { return env.requests.size() >= 2; }));
+    CHECK(
+        env.requests.back().messages.back().type == imza::Message::Type::TOOL);
+    CHECK(env.requests.back().messages.back().content.find(
+              "cmake_minimum_required")
+        != std::string::npos);
+
+    imza::close_modal(*env.state);
+    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+}
+
+TEST_CASE("every viewer-backed tool uses one clickable split-color header")
+{
+    Env env;
+    const auto append = [&env](std::size_t id, std::string name,
+                            std::string args, std::string output) {
+        env.session->append_item(imza::ToolCall { id, std::to_string(id),
+            std::move(name), std::move(args), { }, { },
+            imza::ToolCall::Result { imza::ToolCall::Result::Kind::OUTPUT,
+                std::move(output), std::nullopt, std::nullopt } });
+    };
+
+    append(1, "read", R"({"path":"alpha.txt"})", "one\ntwo");
+    append(2, "skill", R"({"name":"review"})", "one\ntwo");
+    append(3, "list", R"({"path":"/path"})", "one\ntwo");
+    append(4, "find", R"({"pattern":"needle","path":"/path"})", "one\ntwo");
+    append(5, "shell", R"({"command":"rg -n needle"})",
+        "one\ntwo\nthree\nfour\nfive\nsix");
+
+    auto chat   = imza::make_chat(env.state,
+        [] { return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 120 }; });
+    auto screen = ftxui::Screen::Create(
+        ftxui::Dimension::Fixed(120), ftxui::Dimension::Fixed(40));
+    ftxui::Render(screen, chat->Render());
+    const std::vector<std::string> lines = imza::split_lines(screen.ToString());
+
+    struct ExpectedHeader {
+        std::string primary;
+        std::string text;
+    };
+    const std::vector<ExpectedHeader> expected {
+        { "Read", "Read alpha.txt (2 lines)" },
+        { "Load Skill", "Load Skill review (2 lines)" },
+        { "List", "List /path (2 entries)" },
+        { "Find", "Find needle · /path (2 matches)" },
+        { "Shell", "Shell rg -n needle (6 lines)" },
+    };
+
+    for (const ExpectedHeader& header : expected) {
+        CAPTURE(header.text);
+        auto row
+            = std::find_if(lines.begin(), lines.end(), [&](const auto& line) {
+                  return line.find(header.text) != std::string::npos;
+              });
+        INFO(screen.ToString());
+        REQUIRE(row != lines.end());
+        CHECK(row->find("open") == std::string::npos);
+        const std::size_t y = static_cast<std::size_t>(row - lines.begin());
+        const std::size_t x = row->find(header.text);
+        CHECK(screen.PixelAt(static_cast<int>(x), static_cast<int>(y))
+                  .foreground_color
+            == imza::HL_GREEN);
+        CHECK(screen
+                  .PixelAt(static_cast<int>(x + header.primary.size() + 1),
+                      static_cast<int>(y))
+                  .foreground_color
+            == imza::PANEL_FG_DIM);
+
+        ftxui::Mouse mouse;
+        mouse.button = ftxui::Mouse::Left;
+        mouse.motion = ftxui::Mouse::Pressed;
+        mouse.x      = static_cast<int>(x);
+        mouse.y      = static_cast<int>(y);
+        REQUIRE(chat->OnEvent(ftxui::Event::Mouse("", mouse)));
+        REQUIRE(
+            std::holds_alternative<imza::ViewerModal>(env.session->modal()));
+        imza::close_modal(*env.state);
+    }
 }
 
 TEST_CASE("unknown tools error back to the model without a modal")

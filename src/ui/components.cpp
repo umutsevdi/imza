@@ -498,6 +498,29 @@ Component inline_link_button(std::string label, std::function<void()> on_click,
         std::move(on_click), inactive_color);
 }
 
+Component split_inline_link_button(std::string primary, std::string secondary,
+    std::function<void()> on_click, const Color& primary_color)
+{
+    ButtonOption option;
+    option.on_click = on_click;
+    option.transform
+        = [primary = std::move(primary), secondary = std::move(secondary),
+              primary_color](const EntryState& state) {
+              Elements parts { text(primary) | bold | color(primary_color) };
+              if (!secondary.empty()) {
+                  parts.push_back(text(" "));
+                  parts.push_back(text(secondary)
+                      | color(state.focused ? PANEL_FG : PANEL_FG_DIM));
+              }
+              Element element = hbox(std::move(parts));
+              if (state.focused) {
+                  element = std::move(element) | underlined;
+              }
+              return hbox({ std::move(element), filler() });
+          };
+    return space_activates(Button(std::move(option)), std::move(on_click));
+}
+
 std::string elapsed_text(std::chrono::milliseconds elapsed)
 {
     const auto total = std::max<std::int64_t>(0, elapsed.count()) / 1000;

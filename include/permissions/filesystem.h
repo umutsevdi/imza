@@ -33,7 +33,7 @@ struct PermissionDecision {
 };
 
 struct FilesystemRequest {
-    enum class Operation { READ, LIST, EDIT, WRITE };
+    enum class Operation { READ, LIST, FIND, EDIT, WRITE };
 
     Operation operation = Operation::READ;
     std::filesystem::path target;

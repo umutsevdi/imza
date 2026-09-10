@@ -100,10 +100,10 @@ std::optional<std::string> validate_filesystem_tool_arguments(
     }
     const bool write = tool == "edit" || tool == "write";
     const char* key  = write ? "file_path" : "path";
-    if (tool == "list") {
+    if (tool == "list" || tool == "find") {
         if (arguments.isMember(key) && !arguments[key].isNull()
             && !arguments[key].isString()) {
-            return "list: path must be a string";
+            return std::string(tool) + ": path must be a string";
         }
     } else if (!arguments[key].isString()
         || arguments[key].asString().empty()) {
@@ -126,6 +126,13 @@ std::optional<std::string> validate_filesystem_tool_arguments(
         return std::nullopt;
     }
     if (tool == "list") {
+        return std::nullopt;
+    }
+    if (tool == "find") {
+        if (!arguments["pattern"].isString()
+            || arguments["pattern"].asString().empty()) {
+            return "find: pattern must be a non-empty string";
+        }
         return std::nullopt;
     }
     if (tool == "edit") {

@@ -1,7 +1,9 @@
 #include <doctest/doctest.h>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
+#include <utility>
 
 #include "network/json_io.h"
 #include "tools/tool.h"
@@ -56,6 +58,17 @@ imza::ToolOutput run_window(
     return tool.run(imza::parse_json(args));
 }
 
+imza::ToolOutput run_find(const imza::Tool& tool, std::string pattern,
+    const std::optional<fs::path>& path = std::nullopt)
+{
+    Json::Value args(Json::objectValue);
+    args["pattern"] = std::move(pattern);
+    if (path) {
+        args["path"] = path->string();
+    }
+    return tool.run(args);
+}
+
 } // namespace
 
 TEST_CASE("read returns the full file")
@@ -98,6 +111,17 @@ TEST_CASE("read reports range and path errors")
     const auto dir = run(tool, tmp.path.string());
     CHECK(dir.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(dir.text.find("not a file") != std::string::npos);
+}
+
+TEST_CASE("read clamps line_end to the file length")
+{
+    TmpDir tmp;
+    write_file(tmp.file("small.txt"), "a\nb\nc\n");
+    const auto tool = imza::make_read_tool();
+
+    const auto out = run_window(tool, tmp.file("small.txt").string(), 2, 1000);
+    CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(out.text == "b\nc");
 }
 
 TEST_CASE("read rejects binary files and reports empty files")
@@ -191,10 +215,72 @@ TEST_CASE("list rejects non-directories and reports empty output")
     CHECK(empty.text.empty());
 }
 
+TEST_CASE("find fallback searches recursively and prepares a viewer")
+{
+    TmpDir tmp;
+    fs::create_directory(tmp.file("nested"));
+    write_file(tmp.file("nested/match.txt"), "alpha\nneedle 42\nomega\n");
+    write_file(tmp.file("other.txt"), "nothing here\n");
+    const auto tool = imza::make_find_tool(false);
+
+    const auto out = run_find(tool, R"(needle [0-9]+)", tmp.path);
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(out.text.find("match.txt:2:needle 42") != std::string::npos);
+    REQUIRE(out.viewer.has_value());
+    CHECK(out.viewer->title == "Find results");
+    CHECK(out.viewer->content == out.text);
+    CHECK_FALSE(out.viewer->line_numbers);
+}
+
+TEST_CASE("find handles no matches and validates arguments")
+{
+    TmpDir tmp;
+    write_file(tmp.file("file.txt"), "content\n");
+    const auto tool = imza::make_find_tool(false);
+
+    const auto none = run_find(tool, "absent", tmp.path);
+    REQUIRE(none.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(none.text.empty());
+    REQUIRE(none.viewer.has_value());
+    CHECK(none.viewer->content == "(no matches)");
+
+    CHECK(
+        tool.run(imza::parse_json("{}")).kind == imza::ToolOutput::Kind::ERROR);
+    CHECK(tool.run(imza::parse_json(R"({"pattern":""})")).kind
+        == imza::ToolOutput::Kind::ERROR);
+    CHECK(tool.run(imza::parse_json(R"({"pattern":"x","path":3})")).kind
+        == imza::ToolOutput::Kind::ERROR);
+}
+
+TEST_CASE("find defaults to the current directory")
+{
+    TmpDir tmp;
+    write_file(tmp.file("default.txt"), "default-find-marker\n");
+    const auto tool      = imza::make_find_tool(false);
+    const fs::path saved = fs::current_path();
+    fs::current_path(tmp.path);
+    const auto out = run_find(tool, "default-find-marker");
+    fs::current_path(saved);
+
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(out.text.find("default-find-marker") != std::string::npos);
+}
+
+TEST_CASE("find passes shell metacharacters as regex text")
+{
+    TmpDir tmp;
+    write_file(tmp.file("file.txt"), "literal;echo value\n");
+    const auto tool = imza::make_find_tool(false);
+
+    const auto out = run_find(tool, R"(literal;echo)", tmp.path);
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(out.text.find("literal;echo value") != std::string::npos);
+}
+
 TEST_CASE("builtin tools expose the current tool set")
 {
     const auto tools = imza::default_tools();
-    REQUIRE(tools.size() == 11);
+    REQUIRE(tools.size() == 12);
 
     const auto* read = find_tool(tools, "read");
     REQUIRE(read != nullptr);
@@ -203,6 +289,11 @@ TEST_CASE("builtin tools expose the current tool set")
     const auto* list = find_tool(tools, "list");
     REQUIRE(list != nullptr);
     CHECK(list->spec.parameters["properties"].isMember("path"));
+
+    const auto* find = find_tool(tools, "find");
+    REQUIRE(find != nullptr);
+    CHECK(find->spec.parameters["properties"].isMember("pattern"));
+    CHECK(find->spec.parameters["properties"].isMember("path"));
 
     const auto* ask = find_tool(tools, "ask");
     REQUIRE(ask != nullptr);
@@ -221,7 +312,7 @@ TEST_CASE("builtin tools expose the current tool set")
     REQUIRE(find_tool(tools, "write") != nullptr);
     REQUIRE(find_tool(tools, "webfetch") != nullptr);
     REQUIRE(find_tool(tools, "websearch") != nullptr);
-    CHECK(tool_specs(tools).size() == 11);
+    CHECK(tool_specs(tools).size() == 12);
 }
 
 TEST_CASE("runtime flags independently filter the tool roster")
@@ -252,6 +343,7 @@ TEST_CASE("runtime flags independently filter the tool roster")
     CHECK(imza::find_tool(tools, "webfetch") == nullptr);
     CHECK(imza::find_tool(tools, "websearch") == nullptr);
     CHECK(imza::find_tool(tools, "read") != nullptr);
+    CHECK(imza::find_tool(tools, "find") != nullptr);
     CHECK(imza::find_tool(tools, "write") != nullptr);
 
     const auto disabled = imza::dispatch_tool(
