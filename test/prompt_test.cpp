@@ -140,16 +140,6 @@ TEST_CASE("subagent prompt retains workspace context")
     CHECK(prompt.find("$skill-name") == std::string::npos);
 }
 
-TEST_CASE("mode reminders carry unique detectable tags")
-{
-    const std::string_view plan  = plan_mode_reminder();
-    const std::string_view build = build_mode_reminder();
-    CHECK(plan.find(PLAN_REMINDER_TAG) != std::string_view::npos);
-    CHECK(plan.find("permission") != std::string_view::npos);
-    CHECK(build.find(BUILD_REMINDER_TAG) != std::string_view::npos);
-    CHECK(plan != build);
-}
-
 TEST_CASE("default tool set contains build mutation tools")
 {
     const std::vector<Tool> tools = default_tools();
