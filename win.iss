@@ -46,7 +46,7 @@ LicenseFile={#Source}\LICENSE
 PrivilegesRequired=lowest
 
 OutputDir={#Build}
-OutputBaseFilename=Imza Installer
+OutputBaseFilename=imza-{#imzaVersion}-windows-installer.exe
 SetupIconFile={#Source}\misc\imza.ico
 UninstallDisplayIcon={#Source}\misc\imza.ico
 UninstallDisplayName={#imzaName}
