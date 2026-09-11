@@ -49,7 +49,7 @@ struct Config {
     std::map<std::string, std::map<std::string, SkillPolicy>> project_skills;
 };
 
-enum class ConfigUpdateResult { UPDATED, UNCHANGED, ERROR };
+enum class ConfigUpdateResult { UPDATED, UNCHANGED, FAILURE };
 using ConfigMutator = std::function<bool(Config&)>;
 
 std::string_view subagent_default_variant(SubagentRole role);

@@ -9,8 +9,9 @@
 #include <thread>
 
 #ifdef _WIN32
-#include <shellapi.h>
 #include <windows.h>
+/* Do not change the order. Windows API is cursed */
+#include <shellapi.h>
 #else
 #include <fcntl.h>
 #include <signal.h>

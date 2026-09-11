@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 4.0)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 project(
     imza
-    VERSION 0.2.0
+    VERSION 0.2.1
     HOMEPAGE_URL "https://github.com/umutsevdi/imza"
     LANGUAGES C CXX
 )

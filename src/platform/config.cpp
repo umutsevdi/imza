@@ -481,16 +481,16 @@ ConfigUpdateResult update_config(const std::filesystem::path& path,
 {
     auto lock = acquire_file_lock(lock_path_for(path));
     if (!std::holds_alternative<FileLock>(lock)) {
-        return ConfigUpdateResult::ERROR;
+        return ConfigUpdateResult::FAILURE;
     }
     std::error_code ec;
     const bool exists = std::filesystem::exists(path, ec);
     if (ec) {
-        return ConfigUpdateResult::ERROR;
+        return ConfigUpdateResult::FAILURE;
     }
     Config candidate = initial;
     if (exists && load_config(path, candidate) != Status::OK) {
-        return ConfigUpdateResult::ERROR;
+        return ConfigUpdateResult::FAILURE;
     }
     if (!mutate(candidate)) {
         if (result != nullptr) {
@@ -499,7 +499,7 @@ ConfigUpdateResult update_config(const std::filesystem::path& path,
         return ConfigUpdateResult::UNCHANGED;
     }
     if (save_config_unlocked(path, candidate) != Status::OK) {
-        return ConfigUpdateResult::ERROR;
+        return ConfigUpdateResult::FAILURE;
     }
     if (result != nullptr) {
         *result = std::move(candidate);

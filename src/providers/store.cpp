@@ -578,7 +578,7 @@ bool ProviderStore::_update_config(
         Config candidate;
         const ConfigUpdateResult result
             = update_config(config_path(), config_, mutate, &candidate);
-        if (result != ConfigUpdateResult::ERROR) {
+        if (result != ConfigUpdateResult::FAILURE) {
             config_ = std::move(candidate);
         }
         if (result == ConfigUpdateResult::UPDATED) {

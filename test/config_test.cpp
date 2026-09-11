@@ -297,7 +297,7 @@ TEST_CASE("concurrent config updates preserve unrelated changes")
 
     constexpr int count = 8;
     std::vector<imza::ConfigUpdateResult> results(
-        count, imza::ConfigUpdateResult::ERROR);
+        count, imza::ConfigUpdateResult::FAILURE);
     std::vector<std::thread> workers;
     workers.reserve(count);
     for (int index = 0; index < count; ++index) {
