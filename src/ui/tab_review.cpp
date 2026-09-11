@@ -409,36 +409,37 @@ namespace {
                     "or review it in smaller commits.");
                 return;
             }
-            auto transcript             = std::make_shared<Session>();
-            const SubagentHandle handle = state_->delegation->run_subagent(
-                std::move(prompt), selection->model, selection->reasoning_effort,
-                SubagentOptions { .visible = false,
-                    .timeout               = std::chrono::minutes { 5 },
-                    .max_output_tokens     = 4096,
-                    .transcript            = std::move(transcript) },
-                [state = state_, running = review_running_](
-                    const SubagentResult& result) {
-                    running->store(false);
-                    animation::RequestAnimationFrame();
-                    if (result.status == Status::CANCELLED) {
-                        return;
-                    }
-                    if (result.status != Status::OK) {
-                        state->session->set_error(
-                            "AI review failed: " + error_text(result.status));
-                        return;
-                    }
-                    const ReviewState::Snapshot current
-                        = state->review->snapshot();
-                    AiReviewParseResult parsed = parse_ai_review_response(
-                        result.output, *current.review);
-                    if (auto* error = std::get_if<std::string>(&parsed)) {
-                        state->session->set_error(std::move(*error));
-                        return;
-                    }
-                    state->review->add_comments(std::move(
-                        std::get<std::vector<ReviewCommentDraft>>(parsed)));
-                });
+            auto transcript = std::make_shared<Session>();
+            const SubagentHandle handle
+                = state_->delegation->run_subagent(std::move(prompt),
+                    selection->model, selection->reasoning_effort,
+                    SubagentOptions { .visible = false,
+                        .timeout               = std::chrono::minutes { 5 },
+                        .max_output_tokens     = 4096,
+                        .transcript            = std::move(transcript) },
+                    [state = state_, running = review_running_](
+                        const SubagentResult& result) {
+                        running->store(false);
+                        animation::RequestAnimationFrame();
+                        if (result.status == Status::CANCELLED) {
+                            return;
+                        }
+                        if (result.status != Status::OK) {
+                            state->session->set_error("AI review failed: "
+                                + error_text(result.status));
+                            return;
+                        }
+                        const ReviewState::Snapshot current
+                            = state->review->snapshot();
+                        AiReviewParseResult parsed = parse_ai_review_response(
+                            result.output, *current.review);
+                        if (auto* error = std::get_if<std::string>(&parsed)) {
+                            state->session->set_error(std::move(*error));
+                            return;
+                        }
+                        state->review->add_comments(std::move(
+                            std::get<std::vector<ReviewCommentDraft>>(parsed)));
+                    });
             review_task_id_ = handle.id;
         }
 

@@ -39,6 +39,7 @@ TEST_CASE("slash_commands includes built-ins")
         const bool known = c.action == SlashCommand::Action::EXIT
             || c.action == SlashCommand::Action::NEW
             || c.action == SlashCommand::Action::SYSTEM_PROMPT
+            || c.action == SlashCommand::Action::CHANGELOG
             || c.action == SlashCommand::Action::CONNECT
             || c.action == SlashCommand::Action::MODEL
             || c.action == SlashCommand::Action::VARIANT
@@ -65,6 +66,8 @@ TEST_CASE("find_command matches case-insensitively")
     CHECK(find_command("/new")->action == SlashCommand::Action::NEW);
     CHECK(find_command("/connect")->action == SlashCommand::Action::CONNECT);
     CHECK(find_command("/model")->action == SlashCommand::Action::MODEL);
+    CHECK(
+        find_command("/changelog")->action == SlashCommand::Action::CHANGELOG);
     CHECK(find_command("/foo") == nullptr);
 }
 

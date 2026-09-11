@@ -64,5 +64,6 @@ std::filesystem::path config_path(void);
 std::filesystem::path presets_path(void);
 std::filesystem::path data_dir(void);
 std::filesystem::path sessions_dir(void);
+std::optional<std::string> read_changelog(void);
 
 } // namespace imza

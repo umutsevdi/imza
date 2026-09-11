@@ -6,6 +6,7 @@ project(
     HOMEPAGE_URL "https://github.com/umutsevdi/imza"
     LANGUAGES C CXX
 )
+include(GNUInstallDirs)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -209,6 +210,13 @@ target_link_libraries(imza_foundation PUBLIC
     imza_network
     jsoncpp_static
 )
+if(NOT WIN32)
+    target_compile_definitions(imza_foundation PRIVATE
+        "IMZA_INSTALL_PREFIX=\"${CMAKE_INSTALL_PREFIX}\""
+        "IMZA_INSTALL_BINDIR=\"${CMAKE_INSTALL_BINDIR}\""
+        "IMZA_INSTALL_DOCDIR=\"${CMAKE_INSTALL_DOCDIR}\""
+    )
+endif()
 
 # Domain state and runtime infrastructure (no ftxui, no cmark)
 add_library(imza_runtime
@@ -364,10 +372,10 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release" AND IMZA_PACKAGE)
             "Imza is a batteries-included, model-agnostic coding agent with
             native performance and a small runtime footprint."
         )
+        set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
         set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
         set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 
-        include(GNUInstallDirs)
         install(TARGETS imza
             RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
         )

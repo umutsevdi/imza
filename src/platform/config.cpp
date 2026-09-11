@@ -10,6 +10,10 @@
 #include <set>
 #include <sstream>
 
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
 namespace imza {
 
 std::filesystem::path config_path() { return data_dir() / "config.json"; }
@@ -37,6 +41,51 @@ std::filesystem::path data_dir()
 }
 
 std::filesystem::path sessions_dir() { return data_dir() / "sessions"; }
+
+namespace {
+#if defined(_WIN32)
+    std::filesystem::path current_executable_path()
+    {
+        wchar_t buffer[MAX_PATH];
+        const DWORD size = GetModuleFileNameW(nullptr, buffer, MAX_PATH);
+        if (size == 0 || size >= MAX_PATH) {
+            return { };
+        }
+        return std::filesystem::path(buffer);
+    }
+#endif
+
+    std::filesystem::path changelog_path()
+    {
+#if defined(_WIN32)
+        const std::filesystem::path executable = current_executable_path();
+        if (executable.empty()) {
+            return { };
+        }
+        return executable.parent_path() / "CHANGELOG.txt";
+#else
+        return std::filesystem::path { IMZA_INSTALL_PREFIX }
+        / IMZA_INSTALL_DOCDIR / "CHANGELOG.txt";
+#endif
+    }
+} // namespace
+
+std::optional<std::string> read_changelog()
+{
+    const std::filesystem::path path = changelog_path();
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(path, error) || error) {
+        return std::nullopt;
+    }
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        return std::nullopt;
+    }
+    std::string content { std::istreambuf_iterator<char>(in),
+        std::istreambuf_iterator<char>() };
+    return content.empty() ? std::nullopt
+                           : std::optional<std::string> { std::move(content) };
+}
 
 std::string_view subagent_default_variant(SubagentRole role)
 {

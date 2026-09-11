@@ -18,6 +18,8 @@ std::span<const SlashCommand> slash_commands()
         { "/sessions", "load or delete saved sessions",
             SlashCommand::Action::SESSIONS },
         { "/skills", "manage discovered skills", SlashCommand::Action::SKILLS },
+        { "/changelog", "show the version history",
+            SlashCommand::Action::CHANGELOG },
         { "/prompt", "show the generated system prompt",
             SlashCommand::Action::SYSTEM_PROMPT },
     };

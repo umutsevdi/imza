@@ -5,6 +5,7 @@
 #include "network/json_io.h"
 #include "permissions/evaluator.h"
 #include "permissions/store.h"
+#include "platform/config.h"
 #include "tools/skills.h"
 #include "turn/delegation.h"
 #include "turn/prompt.h"
@@ -477,6 +478,16 @@ void run_slash(ApplicationState& state, std::string_view command)
     case SlashCommand::Action::SKILLS:
         enqueue_user_modal(state, skills_modal(state));
         break;
+    case SlashCommand::Action::CHANGELOG: {
+        const std::optional<std::string> changelog = read_changelog();
+        if (!changelog) {
+            state.session->set_error("Changelog file not found.");
+            break;
+        }
+        enqueue_user_modal(
+            state, ViewerModal { "Changelog", *changelog, "md", 1, false, "" });
+        break;
+    }
     case SlashCommand::Action::SYSTEM_PROMPT:
         enqueue_user_modal(state,
             ViewerModal { "System prompt", full_system_prompt(state), "md", 1,

@@ -215,7 +215,7 @@ TEST_CASE("list rejects non-directories and reports empty output")
     CHECK(empty.text.empty());
 }
 
-TEST_CASE("find fallback searches recursively and prepares a viewer")
+TEST_CASE("find fallback searches recursively without opening a viewer")
 {
     TmpDir tmp;
     fs::create_directory(tmp.file("nested"));
@@ -226,10 +226,7 @@ TEST_CASE("find fallback searches recursively and prepares a viewer")
     const auto out = run_find(tool, R"(needle [0-9]+)", tmp.path);
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(out.text.find("match.txt:2:needle 42") != std::string::npos);
-    REQUIRE(out.viewer.has_value());
-    CHECK(out.viewer->title == "Find results");
-    CHECK(out.viewer->content == out.text);
-    CHECK_FALSE(out.viewer->line_numbers);
+    CHECK_FALSE(out.viewer.has_value());
 }
 
 TEST_CASE("find handles no matches and validates arguments")
@@ -241,8 +238,7 @@ TEST_CASE("find handles no matches and validates arguments")
     const auto none = run_find(tool, "absent", tmp.path);
     REQUIRE(none.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(none.text.empty());
-    REQUIRE(none.viewer.has_value());
-    CHECK(none.viewer->content == "(no matches)");
+    CHECK_FALSE(none.viewer.has_value());
 
     CHECK(
         tool.run(imza::parse_json("{}")).kind == imza::ToolOutput::Kind::ERROR);

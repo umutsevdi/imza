@@ -11,6 +11,7 @@ struct SlashCommand {
         EXIT,
         NEW,
         SYSTEM_PROMPT,
+        CHANGELOG,
         CONNECT,
         MODEL,
         VARIANT,

@@ -1,15 +1,16 @@
-imza
+```
 AUTHOR:           Umut Sevdi <mail@umutsevdi.com>
-WEBSITE:          https://github.com/umutsevdi/imza
-SOURCE CODE:      https://github.com/umutsevdi/imza
-RELEASES:         https://github.com/umutsevdi/imza/releases
-ISSUES & SUPPORT: https://github.com/umutsevdi/imza/issues
+WEBSITE:          <https://github.com/umutsevdi/imza>
+SOURCE CODE:      <https://github.com/umutsevdi/imza>
+RELEASES:         <https://github.com/umutsevdi/imza/releases>
+ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
+```
 
 CHANGELOG
 -------------------------------------------------------------------------------
 0.2.0 - 2026-09-10
 -------------------------------------------------------------------------------
-[https://github.com/umutsevdi/imza/releases/tag/v0.2.0]
+<https://github.com/umutsevdi/imza/releases/tag/v0.2.0>
 
 Changes:
   - Rebranded as `imza`.
@@ -22,7 +23,7 @@ Changes:
 -------------------------------------------------------------------------------
 0.1.3 - 2026-09-09
 -------------------------------------------------------------------------------
-[https://github.com/umutsevdi/imza/releases/tag/v0.1.3]
+<https://github.com/umutsevdi/imza/releases/tag/v0.1.3>
 
 Changes:
   - Improved Windows startup time.
@@ -39,33 +40,33 @@ Changes:
 -------------------------------------------------------------------------------
 0.1.2 - 2026-09-08
 -------------------------------------------------------------------------------
-[https://github.com/umutsevdi/imza/releases/tag/v0.1.2]
+<https://github.com/umutsevdi/imza/releases/tag/v0.1.2>
 
 Changes:
-    - Added CLI commands.
-    - Rewritten permission system.
-       - Permissions can be set using CLI options or using user responses.
-       - Added shell command evaluation based permissions.
-       - Added directory access management.
-    - Performance improvements on large conversations.
-    - Performance improvements on large diff reviews.
-    - Added headless mode.
-    - Various other small bug fixes.
+  - Added CLI commands.
+  - Rewritten permission system.
+     - Permissions can be set using CLI options or using user responses.
+     - Added shell command evaluation based permissions.
+     - Added directory access management.
+  - Performance improvements on large conversations.
+  - Performance improvements on large diff reviews.
+  - Added headless mode.
+  - Various other small bug fixes.
 
 -------------------------------------------------------------------------------
 0.1.1 - 2026-09-05
 -------------------------------------------------------------------------------
-[https://github.com/umutsevdi/imza/releases/tag/v0.1.1]
+<https://github.com/umutsevdi/imza/releases/tag/v0.1.1>
 
 Changes:
-    - Added syntax highlighting for 20 languages.
-    - Markdown rendering for `ViewerModal`'s.
-    - Added labels for custom providers.
+  - Added syntax highlighting for 20 languages.
+  - Markdown rendering for `ViewerModal`'s.
+  - Added labels for custom providers.
 
 -------------------------------------------------------------------------------
 0.1.0 - 2026-09-04
 -------------------------------------------------------------------------------
-[https://github.com/umutsevdi/imza/releases/tag/v0.1.0]
+<https://github.com/umutsevdi/imza/releases/tag/v0.1.0>
 
 Changes:
-    - Initial version.
+  - Initial version.

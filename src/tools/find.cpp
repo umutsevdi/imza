@@ -99,12 +99,7 @@ namespace {
             && (result.output.back() == '\n' || result.output.back() == '\r')) {
             result.output.pop_back();
         }
-        ToolOutput output { ToolOutput::Kind::OUTPUT,
-            std::move(result.output) };
-        output.viewer = ViewerModal { "Find results",
-            output.text.empty() ? "(no matches)" : output.text, "", 1, false,
-            path };
-        return output;
+        return { ToolOutput::Kind::OUTPUT, std::move(result.output) };
     }
 
 } // namespace

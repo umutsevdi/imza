@@ -9,8 +9,8 @@
 #include <thread>
 
 #ifdef _WIN32
-#include <windows.h>
 #include <shellapi.h>
+#include <windows.h>
 #else
 #include <fcntl.h>
 #include <signal.h>
