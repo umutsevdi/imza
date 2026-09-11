@@ -78,7 +78,7 @@ std::vector<AttachmentCandidate> attachment_candidates(
     const std::filesystem::path& root, std::string_view query,
     std::size_t limit)
 {
-    std::filesystem::path typed(query);
+    std::filesystem::path typed = path_from_utf8(query);
     std::filesystem::path directory = typed.parent_path();
     const std::string needle        = to_lower(typed.filename().string());
     std::error_code ec;
@@ -112,7 +112,7 @@ std::vector<AttachmentCandidate> attachment_candidates(
         if (!is_dir && !entry.is_regular_file(ec)) {
             continue;
         }
-        std::string path = (directory / name).generic_string();
+        std::string path = utf8_from_path(directory / name);
         if (is_dir) {
             path += '/';
         }
@@ -136,7 +136,7 @@ AttachmentResult load_attachment(
     std::error_code ec;
     const auto canonical_root = std::filesystem::weakly_canonical(root, ec);
     const auto path           = std::filesystem::weakly_canonical(
-        canonical_root / std::filesystem::path(relative_path), ec);
+        canonical_root / path_from_utf8(relative_path), ec);
     if (ec || !path_within(canonical_root, path)) {
         return { Status::CONFIG_ERROR, std::nullopt,
             "Attachment must be inside the workspace." };
@@ -166,7 +166,7 @@ AttachmentResult load_attachment(
                 + "." };
     }
     const std::string display
-        = std::filesystem::relative(path, canonical_root, ec).generic_string();
+        = utf8_from_path(std::filesystem::relative(path, canonical_root, ec));
     return { Status::OK, FileAttachment { display, std::move(content) }, "" };
 }
 

@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <thread>
 #include <vector>
 
@@ -247,6 +248,115 @@ TEST_CASE("empty title is normalized in both file and index")
     imza::Session loaded;
     REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
     CHECK(loaded.title() == "Untitled session");
+#endif
+}
+
+TEST_CASE("non-ASCII workspace paths round-trip as valid UTF-8")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    CurrentDirectory directory;
+    const auto workspace = home.path / "Eylül çalışma";
+    std::filesystem::create_directories(workspace);
+    std::error_code ec;
+    std::filesystem::current_path(workspace, ec);
+    REQUIRE_FALSE(ec);
+
+    imza::Session source;
+    source.set_title("Unicode workspace");
+    source.begin_send("hello");
+    REQUIRE(imza::save_session(source) == imza::Status::OK);
+
+    const auto saved = imza::saved_sessions();
+    REQUIRE(saved.size() == 1);
+    std::ifstream raw(saved.front().path, std::ios::binary);
+    std::stringstream text;
+    text << raw.rdbuf();
+    const std::string bytes = text.str();
+    REQUIRE_FALSE(bytes.empty());
+    const bool escaped  = bytes.find("Eyl\\u00fcl") != std::string::npos;
+    const bool utf8     = bytes.find("Eyl\xc3\xbcl") != std::string::npos;
+    const bool encoded  = escaped || utf8;
+    CHECK(encoded);
+    CHECK(bytes.find("\xef\xbf\xbd") == std::string::npos);
+
+    const auto other = home.path / "other-workspace";
+    std::filesystem::create_directories(other);
+    std::filesystem::current_path(other, ec);
+    REQUIRE_FALSE(ec);
+
+    imza::Session loaded;
+    std::filesystem::path loaded_workspace;
+    REQUIRE(imza::load_session(saved.front().path, loaded, &loaded_workspace)
+        == imza::Status::OK);
+    CHECK(loaded_workspace == workspace);
+    CHECK(loaded.title() == "Unicode workspace");
+#endif
+}
+
+TEST_CASE("missing or stale workspace falls back to the current directory")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    CurrentDirectory directory;
+    std::filesystem::create_directories(home.path);
+    const std::filesystem::path stale = home.path / "stale.json";
+    {
+        std::ofstream file(stale, std::ios::binary);
+        file << "{\n"
+             << "  \"version\": 1,\n"
+             << "  \"title\": \"Stale workspace\",\n"
+             << "  \"saved_at\": \"2026-09-10 19:17:27\",\n"
+             << "  \"mode\": \"build\",\n"
+             << "  \"workspace\": \"" << directory.original.string() << "/gone-away\",\n"
+             << "  \"items\": [{\"type\": \"user\", \"text\": \"hello\"}]\n"
+             << "}\n";
+    }
+
+    imza::LoadedSession loaded;
+    REQUIRE(imza::read_session(stale, loaded) == imza::Status::OK);
+    CHECK(loaded.workspace == directory.original);
+    REQUIRE(loaded.snapshot.items.size() == 1);
+    CHECK(std::get<imza::UserTurn>(loaded.snapshot.items.front()).text
+        == "hello");
+
+    const std::filesystem::path legacy = home.path / "legacy.json";
+    {
+        std::ofstream file(legacy, std::ios::binary);
+        file << "{\n"
+             << "  \"title\": \"Legacy format\",\n"
+             << "  \"items\": [{\"type\": \"user\", \"text\": \"hi\"}]\n"
+             << "}\n";
+    }
+    REQUIRE(imza::read_session(legacy, loaded) == imza::Status::OK);
+    CHECK(loaded.workspace == directory.original);
+#endif
+}
+
+TEST_CASE("malformed field types fail the load instead of crashing")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    CurrentDirectory directory;
+    std::filesystem::create_directories(home.path);
+    const std::filesystem::path malformed = home.path / "malformed.json";
+    {
+        std::ofstream file(malformed, std::ios::binary);
+        file << "{\n"
+             << "  \"version\": 1,\n"
+             << "  \"workspace\": \"" << directory.original.string() << "\",\n"
+             << "  \"items\": [{\"type\": \"tool\", \"id\": \"abc\"}]\n"
+             << "}\n";
+    }
+
+    imza::LoadedSession loaded;
+    CHECK(imza::read_session(malformed, loaded) == imza::Status::JSON_ERROR);
 #endif
 }
 

@@ -8,6 +8,15 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
+0.2.1 - 2026-09-11
+-------------------------------------------------------------------------------
+<https://github.com/umutsevdi/imza/releases/tag/v0.2.1>
+
+Changes:
+  - Fixed `find` tool opening up on each call.
+  - Fixed session corruption bugs.
+
+-------------------------------------------------------------------------------
 0.2.0 - 2026-09-10
 -------------------------------------------------------------------------------
 <https://github.com/umutsevdi/imza/releases/tag/v0.2.0>

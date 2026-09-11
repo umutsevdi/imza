@@ -42,6 +42,8 @@ WorkspaceEnvironment scan_workspace(const std::filesystem::path& directory);
 
 class Environment final : public ApplicationComponent {
 public:
+    enum class ChdirResult { CHANGED, UNCHANGED, FAILED };
+
     explicit Environment();
     std::shared_ptr<const SystemEnvironment> system() const { return system_; }
     std::shared_ptr<const WorkspaceEnvironment> workspace() const
@@ -61,7 +63,7 @@ public:
 
     std::optional<std::string> agent_rules_path() const;
     std::vector<Skill> skills() const;
-    bool chdir(const std::filesystem::path& dir);
+    ChdirResult chdir(const std::filesystem::path& dir);
     [[nodiscard]] Signal<>::Subscription subscribe_to_workspace_change(
         Signal<>::Callback callback);
     [[nodiscard]] Signal<>::Subscription subscribe_to_repository_change(

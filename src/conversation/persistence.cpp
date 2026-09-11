@@ -477,7 +477,7 @@ Status save_session(Session& session)
     root["compacted_item_count"]
         = static_cast<Json::UInt64>(snapshot.compacted_item_count);
     root["mode"]      = snapshot.plan_mode ? "plan" : "build";
-    root["workspace"] = workspace.string();
+    root["workspace"] = utf8_from_path(workspace);
     Json::Value items(Json::arrayValue);
     for (auto& item : snapshot.items) {
         items.append(item_json(item));
@@ -526,29 +526,38 @@ Status read_session(const std::filesystem::path& path, LoadedSession& loaded)
     if (!root.isObject() || !root["items"].isArray()) {
         return Status::JSON_ERROR;
     }
-    if (!root["workspace"].isString() || root["workspace"].asString().empty()) {
-        return Status::CONFIG_ERROR;
-    }
-    const std::filesystem::path workspace_path = root["workspace"].asString();
     std::error_code workspace_ec;
-    if (!std::filesystem::is_directory(workspace_path, workspace_ec)
-        || workspace_ec) {
+    std::filesystem::path workspace
+        = std::filesystem::current_path(workspace_ec);
+    if (workspace_ec) {
         return Status::CONFIG_ERROR;
     }
-    SessionSnapshot snapshot;
-    snapshot.persistence       = PersistedSession { path };
-    snapshot.title             = root.get("title", "").asString();
-    snapshot.todo              = parse_todo(root["todo"]);
-    snapshot.compacted_summary = root.get("compacted_summary", "").asString();
-    snapshot.compacted_item_count
-        = root.get("compacted_item_count", 0).asUInt64();
-    snapshot.plan_mode = root.get("mode", "plan").asString() != "build";
-    for (const auto& value : root["items"]) {
-        if (auto item = parse_item(value)) {
-            snapshot.items.push_back(std::move(*item));
+    if (root["workspace"].isString()) {
+        const std::filesystem::path saved
+            = path_from_utf8(root["workspace"].asString());
+        if (std::filesystem::is_directory(saved, workspace_ec)
+            && !workspace_ec) {
+            workspace = saved;
         }
     }
-    loaded = LoadedSession { std::move(snapshot), workspace_path };
+    SessionSnapshot snapshot;
+    try {
+        snapshot.persistence       = PersistedSession { path };
+        snapshot.title             = root.get("title", "").asString();
+        snapshot.todo              = parse_todo(root["todo"]);
+        snapshot.compacted_summary = root.get("compacted_summary", "").asString();
+        snapshot.compacted_item_count
+            = root.get("compacted_item_count", 0).asUInt64();
+        snapshot.plan_mode = root.get("mode", "plan").asString() != "build";
+        for (const auto& value : root["items"]) {
+            if (auto item = parse_item(value)) {
+                snapshot.items.push_back(std::move(*item));
+            }
+        }
+    } catch (const Json::Exception&) {
+        return Status::JSON_ERROR;
+    }
+    loaded = LoadedSession { std::move(snapshot), std::move(workspace) };
     return Status::OK;
 }
 

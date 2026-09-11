@@ -299,7 +299,8 @@ TEST_CASE("failed directory changes and child creation retain grants")
     const auto grant     = ExternalGrant { fixture.outside };
     REQUIRE(parent->permissions->install({ grant }));
 
-    CHECK_FALSE(parent->environment->chdir(fixture.root / "missing"));
+    CHECK(parent->environment->chdir(fixture.root / "missing")
+        == imza::Environment::ChdirResult::FAILED);
     CHECK(parent->permissions->snapshot()->size() == 1);
     auto child = make_child_application_state(*parent, immediate);
     CHECK(child->permissions == parent->permissions);

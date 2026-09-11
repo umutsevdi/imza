@@ -470,30 +470,30 @@ void Environment::_publish_repository(
     repository_changed_.publish();
 }
 
-bool Environment::chdir(const std::filesystem::path& dir)
+Environment::ChdirResult Environment::chdir(const std::filesystem::path& dir)
 {
     std::error_code ec;
     const std::filesystem::path canonical
         = std::filesystem::weakly_canonical(dir, ec);
     if (ec) {
-        return false;
+        return ChdirResult::FAILED;
     }
     std::filesystem::current_path(canonical, ec);
     if (ec) {
-        return false;
+        return ChdirResult::FAILED;
     }
     std::uint64_t generation;
     {
         std::unique_lock lock(workspace_mutex_);
         if (workspace_ && workspace_->working_directory == canonical) {
-            return false;
+            return ChdirResult::UNCHANGED;
         }
         generation = ++workspace_generation_;
     }
     auto workspace
         = std::make_shared<WorkspaceEnvironment>(scan_workspace(canonical));
     _publish_workspace(std::move(workspace), generation);
-    return true;
+    return ChdirResult::CHANGED;
 }
 
 Signal<>::Subscription Environment::subscribe_to_workspace_change(

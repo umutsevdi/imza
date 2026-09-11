@@ -62,7 +62,8 @@ int main(int argc, char** argv)
         if (imza::load_session(*cli.session_path, *state->session, &workspace)
                 != imza::Status::OK
             || (!cli.working_directory
-                && !state->environment->chdir(workspace))) {
+                && imza::Environment::ChdirResult::FAILED
+                    == state->environment->chdir(workspace))) {
             std::println(stderr, "failed to load session '{}'",
                 cli.session_path->stem().string());
             return 2;

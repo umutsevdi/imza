@@ -27,17 +27,16 @@ namespace {
         if (error) {
             return false;
         }
-        const auto current = state.environment->workspace();
-        if (current && current->working_directory == canonical) {
+        switch (state.environment->chdir(canonical)) {
+        case Environment::ChdirResult::FAILED:
+            return false;
+        case Environment::ChdirResult::UNCHANGED:
             return true;
+        case Environment::ChdirResult::CHANGED:
+            break;
         }
-        const bool changed = state.environment->chdir(canonical);
-        if (changed) {
-            state.permissions->clear();
-            return true;
-        }
-        const auto refreshed = state.environment->workspace();
-        return refreshed && refreshed->working_directory == canonical;
+        state.permissions->clear();
+        return true;
     }
 
     void start_turn(ApplicationState& state, std::string text,

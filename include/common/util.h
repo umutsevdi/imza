@@ -25,6 +25,20 @@ inline bool path_within(
     return target == root || (!relative.empty() && *relative.begin() != "..");
 }
 
+// Paths and JSON strings meet as UTF-8 text; `std::filesystem::path`
+// conversions via `string()` use the system code page on Windows and would
+// corrupt non-ASCII names.
+inline std::string utf8_from_path(const std::filesystem::path& path)
+{
+    const std::u8string text = path.u8string();
+    return std::string(text.begin(), text.end());
+}
+
+inline std::filesystem::path path_from_utf8(std::string_view text)
+{
+    return std::filesystem::path(std::u8string(text.begin(), text.end()));
+}
+
 inline std::string env_or_empty(const char* key)
 {
 #ifdef _WIN32

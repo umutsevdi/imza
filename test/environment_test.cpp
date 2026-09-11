@@ -155,7 +155,7 @@ TEST_CASE("workspace retains its directory outside a project")
 
     imza::Environment env;
     REQUIRE(wait_until_ready(env));
-    REQUIRE(env.chdir(dir));
+    REQUIRE(env.chdir(dir) == imza::Environment::ChdirResult::CHANGED);
     CHECK(env.ready());
     REQUIRE(env.workspace() != nullptr);
     CHECK(env.workspace()->working_directory == dir);
@@ -163,6 +163,8 @@ TEST_CASE("workspace retains its directory outside a project")
     REQUIRE(env.repository() != nullptr);
     CHECK(env.repository()->branch.empty());
     CHECK(env.repository()->changed_files.empty());
+
+    CHECK(env.chdir(dir) == imza::Environment::ChdirResult::UNCHANGED);
 
     std::filesystem::current_path(original);
 }
@@ -191,7 +193,7 @@ TEST_CASE("workspace carries an instruction and project skills when rooted")
 
     imza::Environment env;
     REQUIRE(wait_until_ready(env));
-    REQUIRE(env.chdir(root));
+    REQUIRE(env.chdir(root) == imza::Environment::ChdirResult::CHANGED);
     const auto ws = env.workspace();
     REQUIRE(ws != nullptr);
     REQUIRE(ws->project_root.has_value());
