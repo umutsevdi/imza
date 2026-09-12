@@ -29,8 +29,12 @@ inline constexpr std::string_view PLAN_REMINDER_TAG
 inline constexpr std::string_view BUILD_REMINDER_TAG
     = "<system-reminder id=\"build-mode\">";
 
-std::string_view plan_mode_reminder();
-std::string_view build_mode_reminder();
+// Finished reminder texts handed to build_history; empty members suppress
+// injection of that reminder.
+struct ModeReminderTexts {
+    std::string plan;
+    std::string build;
+};
 
 struct UserTurn {
     std::string text;
@@ -183,7 +187,8 @@ public:
     void apply(const StreamEvent& ev, const ModelPricing& pricing);
     bool finish_session(std::string error);
     std::vector<Message> build_history(std::string_view system_prompt,
-        ApiStandard dialect = ApiStandard::OPENAI) const;
+        ApiStandard dialect                = ApiStandard::OPENAI,
+        const ModeReminderTexts& reminders = { }) const;
 
     std::optional<AssistantTurn> last_assistant() const;
     void reset_reasoning();

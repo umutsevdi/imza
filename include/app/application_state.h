@@ -24,6 +24,7 @@ class SkillStore;
 class TurnRunner;
 class Delegation;
 class PermissionStore;
+class PromptStore;
 
 using PostFn = std::function<void(std::function<void()>)>;
 using StreamFn
@@ -39,6 +40,7 @@ struct ApplicationState {
     std::shared_ptr<ReviewState> review;
     std::shared_ptr<SkillStore> skills;
     std::shared_ptr<PermissionStore> permissions;
+    std::shared_ptr<PromptStore> prompts;
 
     std::unique_ptr<TurnRunner> runner;
     std::unique_ptr<Delegation> delegation;

@@ -72,6 +72,17 @@ value such as `"git status"` grants only that command/subcommand pair; a value
 containing only the program name grants all of its subcommands for the current
 session.
 
+## Custom prompts
+
+Copy any file from [`misc/prompts`](misc/prompts) to Imza's `prompts`
+data directory and edit it there. Non-empty files override their embedded
+default independently; files not present continue to use the defaults built
+into the executable.
+
+- Linux: `$XDG_DATA_HOME/imza/prompts`, or `~/.local/share/imza/prompts`
+- macOS: `~/Library/Application Support/imza/prompts`
+- Windows: `%APPDATA%\imza\prompts`
+
 ## Capabilities
 
 - [X] Streaming Markdown and reasoning

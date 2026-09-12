@@ -2,6 +2,7 @@
 #include "common/types.h"
 #include "common/util.h"
 #include "turn/delegation.h"
+#include "turn/prompts.h"
 #include "ui/ui.h"
 #include "workspace/review.h"
 
@@ -372,7 +373,8 @@ namespace {
                 state_->session->set_error("No model selected — run /model.");
                 return;
             }
-            std::string prompt = format_review_plan_prompt(comments);
+            std::string prompt = format_review_plan_prompt(
+                state_->prompts->review_plan(), comments);
             navigate_(WorkflowPhase::PLAN);
             imza::submit(*state_, std::move(prompt));
             state_->review->clear_comments();
@@ -399,8 +401,8 @@ namespace {
                 state_->session->set_error("There are no changes to review.");
                 return;
             }
-            std::string prompt
-                = format_ai_review_prompt(*snapshot.review, snapshot.comments);
+            std::string prompt = format_ai_review_prompt(
+                state_->prompts->review(), *snapshot.review, snapshot.comments);
             constexpr std::size_t MAX_REVIEW_PROMPT_BYTES = 200 * 1024;
             if (prompt.size() > MAX_REVIEW_PROMPT_BYTES) {
                 review_running_->store(false);

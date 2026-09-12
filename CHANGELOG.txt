@@ -8,6 +8,17 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
+0.2.2 - 2026-09-13
+-------------------------------------------------------------------------------
+<https://github.com/umutsevdi/imza/releases/tag/v0.2.2>
+
+Changes:
+  - Fixed a bug that caused curl request to abruptly end on MacOS.
+  - Performance improvements in `read` tool calls and session changes
+  - Added per-prompt overrides from Markdown files in the user data directory.
+  - Increased the allowed commands list.
+
+-------------------------------------------------------------------------------
 0.2.1 - 2026-09-11
 -------------------------------------------------------------------------------
 <https://github.com/umutsevdi/imza/releases/tag/v0.2.1>

@@ -1,0 +1,1 @@
+Summarize this coding-agent session for continuation. Preserve the user's requirements, decisions, files changed, commands and test results, unresolved problems, and the exact current task. Be concise and do not continue the task.

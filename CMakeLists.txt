@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 4.0)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 project(
     imza
-    VERSION 0.2.1
+    VERSION 0.2.2
     HOMEPAGE_URL "https://github.com/umutsevdi/imza"
     LANGUAGES C CXX
 )
@@ -151,6 +151,20 @@ execute_process(
 )
 include("${TREE_SITTER_GENERATED_DIR}/tree_sitter_sources.cmake")
 
+set(PROMPTS_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+file(GLOB IMZA_PROMPT_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/misc/prompts/*.md")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_prompts.py"
+    ${IMZA_PROMPT_SOURCES})
+execute_process(
+    COMMAND
+        "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_prompts.py"
+        --source "${CMAKE_CURRENT_SOURCE_DIR}/misc/prompts"
+        --output "${PROMPTS_GENERATED_DIR}"
+    COMMAND_ERROR_IS_FATAL ANY
+)
+
 add_subdirectory("${TREE_SITTER_VENDOR_DIR}/core"
     "${CMAKE_CURRENT_BINARY_DIR}/tree-sitter-core" EXCLUDE_FROM_ALL)
 add_library(imza_tree_sitter_grammars STATIC
@@ -260,12 +274,14 @@ add_library(imza_execution
     src/tools/web.cpp
     src/turn/delegation.cpp
     src/turn/prompt.cpp
+    src/turn/prompts.cpp
     src/turn/stream_updates.cpp
     src/turn/turn_runner.cpp
 )
 target_include_directories(imza_execution PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${jsoncpp_SOURCE_DIR}/include
+    ${PROMPTS_GENERATED_DIR}
 )
 set_source_files_properties(src/ui/status_line.cpp PROPERTIES
     COMPILE_DEFINITIONS IMZA_VERSION="${PROJECT_VERSION}")
@@ -350,6 +366,7 @@ if (IMZA_BUILD_TESTS)
     target_compile_definitions(imza_tests PRIVATE
         CMARK_GFM_STATIC_DEFINE
         CMARK_GFM_EXTENSIONS_STATIC_DEFINE
+        "IMZA_PROMPT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/misc/prompts\""
     )
     target_link_libraries(imza_tests PRIVATE
         imza_execution

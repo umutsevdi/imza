@@ -3,6 +3,7 @@
 #include "permissions/store.h"
 #include "tools/skills.h"
 #include "turn/delegation.h"
+#include "turn/prompts.h"
 #include "turn/turn_runner.h"
 #include "workspace/review.h"
 
@@ -70,6 +71,7 @@ namespace {
         StreamFn stream_fn, std::vector<Tool> tools, RuntimeFlag runtime_flags,
         bool use_default_tools)
     {
+        state->prompts     = std::make_shared<PromptStore>(prompts_dir());
         state->session     = std::make_shared<Session>();
         state->sessions    = std::make_shared<SessionStore>();
         state->providers   = std::make_shared<ProviderStore>(std::move(config));
@@ -108,6 +110,7 @@ namespace {
         state->review         = std::make_shared<ReviewState>();
         state->skills         = std::make_shared<SkillStore>();
         state->permissions    = parent.permissions;
+        state->prompts        = parent.prompts;
         state->post           = guarded_post(state.get(), std::move(post));
         state->on_exit        = [] { };
         state->parent_routing = std::move(parent_routing);

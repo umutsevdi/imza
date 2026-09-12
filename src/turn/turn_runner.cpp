@@ -7,6 +7,7 @@
 #include "providers/pricing.h"
 #include "providers/store.h"
 #include "tools/skills.h"
+#include "turn/prompts.h"
 
 #include <algorithm>
 #include <chrono>
@@ -237,11 +238,7 @@ bool TurnRunner::_compact_history(std::vector<Message>& history,
         return session->interrupt_requested();
     };
     request.messages = {
-        { Message::Type::SYSTEM,
-            "Summarize this coding-agent session for continuation. Preserve "
-            "the user's requirements, decisions, files changed, commands and "
-            "test results, unresolved problems, and the exact current task. "
-            "Be concise and do not continue the task." },
+        { Message::Type::SYSTEM, state_->prompts->compaction() },
         { Message::Type::USER, compaction_transcript(history, tail) },
     };
 

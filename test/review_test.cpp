@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include "turn/prompts.h"
 #include "workspace/review.h"
 
 TEST_CASE("git diff parser builds files hunks and line numbers")
@@ -84,7 +85,8 @@ TEST_CASE("review comments format as a plan prompt and clear together")
             "change the return type\nand update callers", true },
     };
 
-    CHECK(imza::format_review_plan_prompt(comments)
+    const imza::PromptStore prompts;
+    CHECK(imza::format_review_plan_prompt(prompts.review_plan(), comments)
         == "Plan the changes needed to address the following review comments:"
            "\n\n- `src/app.cpp:12`\n  handle the error"
            "\n\n- `include/app.h:7` (stale)\n  change the return type"
@@ -94,7 +96,7 @@ TEST_CASE("review comments format as a plan prompt and clear together")
     state.add_comment(comments[0].anchor, comments[0].body);
     state.clear_comments();
     CHECK(state.snapshot().comments.empty());
-    CHECK(imza::format_review_plan_prompt({ }).empty());
+    CHECK(imza::format_review_plan_prompt(prompts.review_plan(), { }).empty());
 }
 
 TEST_CASE("review state marks comments stale when their line disappears")
@@ -123,7 +125,9 @@ TEST_CASE("AI review prompt includes diff and existing comments")
         { "src/app.cpp", std::nullopt, 4, "updated" }, "existing issue",
         false } };
 
-    const std::string prompt = imza::format_ai_review_prompt(review, comments);
+    const imza::PromptStore prompts;
+    const std::string prompt
+        = imza::format_ai_review_prompt(prompts.review(), review, comments);
     CHECK(prompt.find("diff --git a/src/app.cpp b/src/app.cpp")
         != std::string::npos);
     CHECK(prompt.find("-old\\n+updated") != std::string::npos);

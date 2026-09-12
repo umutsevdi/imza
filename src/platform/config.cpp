@@ -42,6 +42,8 @@ std::filesystem::path data_dir()
 
 std::filesystem::path sessions_dir() { return data_dir() / "sessions"; }
 
+std::filesystem::path prompts_dir() { return data_dir() / "prompts"; }
+
 namespace {
 #if defined(_WIN32)
     std::filesystem::path current_executable_path()

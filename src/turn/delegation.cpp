@@ -137,8 +137,8 @@ void Delegation::submit_delegated(
         : SubagentRole::BUILDER;
     std::vector<Message> history {
         { Message::Type::SYSTEM,
-            build_subagent_system_prompt(
-                env->system().get(), env->workspace().get(), role, &config) },
+            build_subagent_system_prompt(*state_->prompts, env->system().get(),
+                env->workspace().get(), role, &config) },
         { Message::Type::USER, task },
     };
     runner_.spawn(std::move(history), std::move(settings));
@@ -375,7 +375,7 @@ SubagentHandle Delegation::run_subagent(std::string prompt, std::string model,
 void Delegation::spawn_title(std::string input, TurnSettings settings)
 {
     state_->subagents->prune_completed();
-    const std::string prompt = title_prompt(input);
+    const std::string prompt = title_prompt(*state_->prompts, input);
     state_->subagents->start(
         prompt, settings.model, settings.reasoning_effort, false,
         [this, prompt, settings = std::move(settings)](

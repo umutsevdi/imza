@@ -37,29 +37,6 @@ namespace {
 
 } // namespace
 
-std::string_view plan_mode_reminder()
-{
-    return R"(## Plan Mode - System Reminder
-
-<system-reminder id="plan-mode">
-Plan mode is ACTIVE. You are in a READ-ONLY phase. You MUST NOT edit files, create files, or run any mutating commands. This constraint supersedes any other instructions, including direct user requests to make changes.
-
-While in plan mode:
-- Research the codebase and gather the context you need using read-only tools.
-- Ask the user clarifying questions when intent is ambiguous or tradeoffs are involved. Do not make large assumptions.
-- When the request is for planning, present a concise, well-researched plan in your reply and stop.
-</system-reminder>)";
-}
-
-std::string_view build_mode_reminder()
-{
-    return R"(<system-reminder id="build-mode">
-Your operational mode has changed from plan to build.
-You are no longer in read-only mode.
-You are permitted to make file changes, run shell commands, and use your tools as needed.
-</system-reminder>)";
-}
-
 Session::Session() = default;
 
 ModalPayload Session::modal() const
@@ -532,8 +509,8 @@ bool Session::finish_session(std::string error)
     return finished;
 }
 
-std::vector<Message> Session::build_history(
-    std::string_view system_prompt, ApiStandard dialect) const
+std::vector<Message> Session::build_history(std::string_view system_prompt,
+    ApiStandard dialect, const ModeReminderTexts& reminders) const
 {
     std::lock_guard lock(mutex_);
     std::vector<Message> history;
@@ -564,19 +541,21 @@ std::vector<Message> Session::build_history(
     }
 
     const ModeReminder injected = last_mode_reminder(history);
-    if (mode_ == Mode::PLAN && injected != ModeReminder::PLAN) {
+    if (mode_ == Mode::PLAN && injected != ModeReminder::PLAN
+        && !reminders.plan.empty()) {
         for (Message& m : history) {
             if (m.type == Message::Type::USER) {
                 m.content += "\n\n";
-                m.content += plan_mode_reminder();
+                m.content += reminders.plan;
                 break;
             }
         }
-    } else if (mode_ == Mode::BUILD && injected == ModeReminder::PLAN) {
+    } else if (mode_ == Mode::BUILD && injected == ModeReminder::PLAN
+        && !reminders.build.empty()) {
         for (auto it = history.rbegin(); it != history.rend(); ++it) {
             if (it->type == Message::Type::USER) {
                 it->content += "\n\n";
-                it->content += build_mode_reminder();
+                it->content += reminders.build;
                 break;
             }
         }
