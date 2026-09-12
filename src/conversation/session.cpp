@@ -255,8 +255,8 @@ std::vector<std::string> Session::attachment_names() const
             continue;
         }
         for (const FileAttachment& attachment : user->attachments) {
-            std::string name = utf8_from_path(
-                path_from_utf8(attachment.path).filename());
+            std::string name
+                = utf8_from_path(path_from_utf8(attachment.path).filename());
             if (!name.empty()
                 && std::find(names.begin(), names.end(), name) == names.end()) {
                 names.push_back(std::move(name));

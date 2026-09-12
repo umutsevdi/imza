@@ -196,12 +196,23 @@ TEST_CASE("runtime shell grants match subcommands and whole programs")
 TEST_CASE("shell analysis extracts compound command and subcommand pairs")
 {
     const ShellAnalysis analysis
-        = analyze_shell("git status --short && cmake --build build | tee log");
+        = analyze_shell("git push origin && cmake --build build | tee log");
     REQUIRE(analysis.reuse == ShellAnalysis::Reuse::SESSION);
     REQUIRE(analysis.invocations.size() == 3);
-    CHECK(analysis.invocations[0] == (ShellInvocation { "git", "status" }));
-    CHECK(analysis.invocations[1] == (ShellInvocation { "cmake", "--build" }));
+    CHECK(analysis.invocations[0] == (ShellInvocation { "git", "push" }));
+    CHECK(analysis.invocations[1] == (ShellInvocation { "cmake", "build" }));
     CHECK(analysis.invocations[2] == (ShellInvocation { "tee", "log" }));
+
+    const ShellAnalysis flagged = analyze_shell("git -C build status");
+    REQUIRE(flagged.invocations.size() == 1);
+    CHECK(flagged.invocations[0] == (ShellInvocation { "git", "status" }));
+
+    CHECK(analyze_shell("grep --color pattern src").invocations[0]
+        == (ShellInvocation { "grep", "pattern" }));
+    CHECK(analyze_shell("git status").invocations[0]
+        == (ShellInvocation { "git", "status" }));
+    CHECK(analyze_shell("git").invocations[0]
+        == (ShellInvocation { "git", std::nullopt }));
 
     CHECK(
         analyze_shell("ls > listing.txt").reuse == ShellAnalysis::Reuse::ONCE);
@@ -218,13 +229,57 @@ TEST_CASE("shell built-in catalog is platform specific")
     CHECK(shell_builtin_allowed("dir"));
     CHECK(shell_builtin_allowed("findstr"));
     CHECK(shell_builtin_allowed("tasklist"));
+    CHECK(shell_builtin_allowed("pushd"));
     CHECK_FALSE(shell_builtin_allowed("ls"));
 #else
     CHECK(shell_builtin_allowed("cat"));
     CHECK(shell_builtin_allowed("grep"));
     CHECK(shell_builtin_allowed("stat"));
+    CHECK(shell_builtin_allowed("cd"));
+    CHECK(shell_builtin_allowed("pushd"));
     CHECK_FALSE(shell_builtin_allowed("dir"));
-    CHECK_FALSE(shell_builtin_allowed("find"));
+    CHECK_FALSE(shell_builtin_allowed("git"));
+#endif
+}
+
+TEST_CASE("read-only command pair catalog is platform specific")
+{
+    const auto invocation = [](std::string_view command) {
+        return analyze_shell(command).invocations.front();
+    };
+
+    CHECK(shell_readonly_allowed(invocation("git status")));
+    CHECK(shell_readonly_allowed(invocation("git status -sb")));
+    CHECK(shell_readonly_allowed(invocation("git log --oneline -n 20")));
+    CHECK_FALSE(shell_readonly_allowed(invocation("git push")));
+    CHECK_FALSE(shell_readonly_allowed(invocation("git")));
+    CHECK_FALSE(shell_readonly_allowed(invocation("git status --force")));
+    CHECK_FALSE(shell_readonly_allowed(invocation("git branch -D main")));
+    CHECK_FALSE(shell_readonly_allowed(invocation("git branch -m a b")));
+    CHECK(shell_readonly_allowed(invocation("git branch -a")));
+    CHECK_FALSE(shell_readonly_allowed(invocation("git tag -d v1")));
+    CHECK_FALSE(shell_readonly_allowed(invocation("git tag -f v1")));
+    CHECK_FALSE(shell_readonly_allowed(invocation("git tag -F msg v1")));
+    CHECK(shell_readonly_allowed(invocation("git tag -l")));
+    CHECK_FALSE(
+        shell_readonly_allowed(invocation("git remote add origin url")));
+    CHECK(shell_readonly_allowed(invocation("git remote -v")));
+    CHECK_FALSE(shell_readonly_allowed(invocation("curl status")));
+    CHECK_FALSE(shell_readonly_allowed(invocation("git diff --output=x.txt")));
+    CHECK(shell_readonly_allowed(invocation("git diff --stat")));
+    CHECK(shell_readonly_allowed(invocation("make -n")));
+    CHECK(shell_readonly_allowed(invocation("make --dry-run")));
+    CHECK(shell_readonly_allowed(invocation("which -a ls")));
+#ifdef _WIN32
+    CHECK(shell_readonly_allowed(invocation("tasklist /v")));
+    CHECK(shell_readonly_allowed(invocation("driverquery /v")));
+    CHECK(shell_readonly_allowed(invocation("where /r . git")));
+    CHECK_FALSE(shell_readonly_allowed(invocation("tasklist /kill")));
+    CHECK_FALSE(shell_readonly_allowed(invocation("systemctl status")));
+#else
+    CHECK(shell_readonly_allowed(invocation("systemctl status")));
+    CHECK_FALSE(shell_readonly_allowed(invocation("systemctl start foo")));
+    CHECK_FALSE(shell_readonly_allowed(invocation("tasklist /v")));
 #endif
 }
 
@@ -628,16 +683,14 @@ TEST_CASE("central evaluator assigns explicit policies to built-in tools")
     CHECK(evaluate("write", write_args(fixture.workspace / "new.txt"))
               .decision.kind
         == PermissionDecision::Kind::REJECT);
-    const auto shell = evaluate("shell", R"({"command":"git status"})");
+    CHECK(evaluate("custom", "{}").decision.kind
+        == PermissionDecision::Kind::REJECT);
+    const auto shell = evaluate("shell", R"({"command":"git push"})");
     CHECK(shell.decision.kind == PermissionDecision::Kind::ASK);
     REQUIRE(shell.session_grants.size() == 1);
     CHECK(shell.request.allow_for_session);
     CHECK(std::get<ShellCommandGrant>(shell.session_grants.front())
-        == (ShellCommandGrant { "git", "status" }));
-    CHECK(evaluate("shell", R"({"command":""})").decision.kind
-        == PermissionDecision::Kind::REJECT);
-    CHECK(evaluate("custom", "{}").decision.kind
-        == PermissionDecision::Kind::REJECT);
+        == (ShellCommandGrant { "git", "push" }));
 }
 
 TEST_CASE("shell policy reuses, combines, and broadens session grants")
@@ -664,12 +717,13 @@ TEST_CASE("shell policy reuses, combines, and broadens session grants")
     CHECK_FALSE(shell_builtin_allowed("dir"));
 #endif
 
-    const PermissionEvaluation first = evaluate("git status --short");
+    const PermissionEvaluation first = evaluate("git push origin");
     REQUIRE(first.decision.kind == PermissionDecision::Kind::ASK);
     REQUIRE(first.session_grants.size() == 1);
     CHECK(std::get<ShellCommandGrant>(first.session_grants.front())
-        == (ShellCommandGrant { "git", "status" }));
-    CHECK(evaluate("git status --porcelain", first.session_grants).decision.kind
+        == (ShellCommandGrant { "git", "push" }));
+    CHECK(evaluate("git push --force-with-lease", first.session_grants)
+              .decision.kind
         == PermissionDecision::Kind::ACCEPT);
 
     const PermissionEvaluation broader
@@ -684,6 +738,20 @@ TEST_CASE("shell policy reuses, combines, and broadens session grants")
         = evaluate("cargo test && ninja -C build");
     REQUIRE(compound.decision.kind == PermissionDecision::Kind::ASK);
     CHECK(compound.session_grants.size() == 2);
+
+    CHECK(evaluate("git status && git log").decision.kind
+        == PermissionDecision::Kind::ACCEPT);
+    CHECK(evaluate("git status && git push").decision.kind
+        == PermissionDecision::Kind::ASK);
+    const ShellAnalysis mixed = analyze_shell("git status && git push");
+    CHECK_FALSE(shell_readonly_allowed(mixed.invocations[1]));
+
+    CHECK(evaluate("make -n && which -a ls").decision.kind
+        == PermissionDecision::Kind::ACCEPT);
+    CHECK(evaluate("git branch -D main").decision.kind
+        == PermissionDecision::Kind::ASK);
+    CHECK(evaluate("git diff --output=patch.txt").decision.kind
+        == PermissionDecision::Kind::ASK);
 
     const PermissionEvaluation redirected = evaluate("ls > files.txt");
     CHECK(redirected.decision.kind == PermissionDecision::Kind::ASK);

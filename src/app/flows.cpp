@@ -28,12 +28,9 @@ namespace {
             return false;
         }
         switch (state.environment->chdir(canonical)) {
-        case Environment::ChdirResult::FAILED:
-            return false;
-        case Environment::ChdirResult::UNCHANGED:
-            return true;
-        case Environment::ChdirResult::CHANGED:
-            break;
+        case Environment::ChdirResult::FAILED: return false;
+        case Environment::ChdirResult::UNCHANGED: return true;
+        case Environment::ChdirResult::CHANGED: break;
         }
         state.permissions->clear();
         return true;

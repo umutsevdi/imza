@@ -276,9 +276,9 @@ TEST_CASE("non-ASCII workspace paths round-trip as valid UTF-8")
     text << raw.rdbuf();
     const std::string bytes = text.str();
     REQUIRE_FALSE(bytes.empty());
-    const bool escaped  = bytes.find("Eyl\\u00fcl") != std::string::npos;
-    const bool utf8     = bytes.find("Eyl\xc3\xbcl") != std::string::npos;
-    const bool encoded  = escaped || utf8;
+    const bool escaped = bytes.find("Eyl\\u00fcl") != std::string::npos;
+    const bool utf8    = bytes.find("Eyl\xc3\xbcl") != std::string::npos;
+    const bool encoded = escaped || utf8;
     CHECK(encoded);
     CHECK(bytes.find("\xef\xbf\xbd") == std::string::npos);
 
@@ -312,7 +312,8 @@ TEST_CASE("missing or stale workspace falls back to the current directory")
              << "  \"title\": \"Stale workspace\",\n"
              << "  \"saved_at\": \"2026-09-10 19:17:27\",\n"
              << "  \"mode\": \"build\",\n"
-             << "  \"workspace\": \"" << directory.original.string() << "/gone-away\",\n"
+             << "  \"workspace\": \"" << directory.original.string()
+             << "/gone-away\",\n"
              << "  \"items\": [{\"type\": \"user\", \"text\": \"hello\"}]\n"
              << "}\n";
     }

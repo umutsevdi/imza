@@ -99,7 +99,8 @@ namespace {
 
         PermissionStore::Grants candidates;
         for (const ShellInvocation& invocation : analysis.invocations) {
-            if (shell_builtin_allowed(invocation.program)) {
+            if (shell_builtin_allowed(invocation.program)
+                || shell_readonly_allowed(invocation)) {
                 continue;
             }
             const ShellCommandGrant requested { invocation.program,
