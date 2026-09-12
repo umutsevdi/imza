@@ -168,9 +168,10 @@ namespace {
         std::string data;
         std::string raw;
         std::vector<StreamEvent> outs;
-        int retry_after = 0;
-        int http_status = 0;
-        bool connected  = false;
+        const ChatRequest* req = nullptr;
+        int retry_after        = 0;
+        int http_status        = 0;
+        bool connected         = false;
     };
 
     void mark_connected(StreamCtx& ctx)
@@ -256,6 +257,9 @@ namespace {
     size_t write_callback(char* ptr, size_t, size_t n, void* userdata)
     {
         auto* ctx = static_cast<StreamCtx*>(userdata);
+        if (ctx->parse_state.terminal) {
+            return n;
+        }
         if (ctx->raw.size() < RAW_CAP) {
             ctx->raw.append(ptr, std::min(n, RAW_CAP - ctx->raw.size()));
         }
@@ -279,14 +283,17 @@ namespace {
             }
         }
         ctx->buf.erase(0, pos);
-        return ctx->parse_state.terminal ? 0 : n;
+        return n;
     }
 
     int progress_callback(
         void* userdata, curl_off_t, curl_off_t, curl_off_t, curl_off_t)
     {
-        const auto* req = static_cast<const ChatRequest*>(userdata);
-        return req->interrupted && req->interrupted() ? 1 : 0;
+        const auto* ctx = static_cast<const StreamCtx*>(userdata);
+        return (ctx->req && ctx->req->interrupted && ctx->req->interrupted())
+                || ctx->parse_state.terminal
+            ? 1
+            : 0;
     }
 
     Status classify_failure(
@@ -328,6 +335,7 @@ Status stream(const Route& route, const ChatRequest& req, StreamCallback cb,
     StreamCtx ctx;
     ctx.provider = &provider;
     ctx.cb       = std::move(cb);
+    ctx.req      = &req;
     CURL* curl   = reuse_handle();
     if (!curl) {
         curl_slist_free_all(list);
@@ -344,6 +352,8 @@ Status stream(const Route& route, const ChatRequest& req, StreamCallback cb,
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, list);
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
+    curl_easy_setopt(
+        curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(body.size()));
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &ctx);
     curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header_callback);
@@ -351,7 +361,7 @@ Status stream(const Route& route, const ChatRequest& req, StreamCallback cb,
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, progress_callback);
-    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &req);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &ctx);
 
     const CURLcode res = curl_easy_perform(curl);
 
@@ -359,14 +369,14 @@ Status stream(const Route& route, const ChatRequest& req, StreamCallback cb,
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code);
     curl_slist_free_all(list);
 
-    if (res == CURLE_WRITE_ERROR && ctx.parse_state.terminal) {
+    if (res == CURLE_ABORTED_BY_CALLBACK && req.interrupted
+        && req.interrupted()) {
+        return Status::OK;
+    }
+    if (ctx.parse_state.terminal) {
         return Status::OK;
     }
     if (res != CURLE_OK) {
-        if (res == CURLE_ABORTED_BY_CALLBACK && req.interrupted
-            && req.interrupted()) {
-            return Status::OK;
-        }
         std::string detail(
             errbuf[0] != '\0' ? errbuf : curl_easy_strerror(res));
         ctx.cb(make_error_event(Status::NETWORK_ERROR, std::move(detail)));
