@@ -2,7 +2,7 @@
 #include "common/types.h"
 #include "common/util.h"
 #include "turn/delegation.h"
-#include "turn/prompts.h"
+#include "turn/prompt.h"
 #include "ui/ui.h"
 #include "workspace/review.h"
 

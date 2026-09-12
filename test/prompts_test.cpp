@@ -7,7 +7,6 @@
 
 #include "conversation/session.h"
 #include "turn/prompt.h"
-#include "turn/prompts.h"
 
 namespace imza {
 

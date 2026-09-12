@@ -3,7 +3,7 @@
 #include "permissions/store.h"
 #include "tools/skills.h"
 #include "turn/delegation.h"
-#include "turn/prompts.h"
+#include "turn/prompt.h"
 #include "turn/turn_runner.h"
 #include "workspace/review.h"
 

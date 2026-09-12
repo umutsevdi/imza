@@ -486,11 +486,6 @@ void run_slash(ApplicationState& state, std::string_view command)
             state, ViewerModal { "Changelog", *changelog, "md", 1, false, "" });
         break;
     }
-    case SlashCommand::Action::SYSTEM_PROMPT:
-        enqueue_user_modal(state,
-            ViewerModal { "System prompt", full_system_prompt(state), "md", 1,
-                false, "" });
-        break;
     }
 }
 

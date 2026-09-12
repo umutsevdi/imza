@@ -7,7 +7,7 @@
 #include "providers/pricing.h"
 #include "providers/store.h"
 #include "tools/skills.h"
-#include "turn/prompts.h"
+#include "turn/prompt.h"
 
 #include <algorithm>
 #include <chrono>

@@ -10,7 +10,6 @@ struct SlashCommand {
     enum class Action {
         EXIT,
         NEW,
-        SYSTEM_PROMPT,
         CHANGELOG,
         CONNECT,
         MODEL,

@@ -37,8 +37,6 @@ namespace {
 
 } // namespace
 
-Session::Session() = default;
-
 ModalPayload Session::modal() const
 {
     std::lock_guard lock(mutex_);

@@ -16,10 +16,6 @@
 
 namespace imza {
 
-std::filesystem::path config_path() { return data_dir() / "config.json"; }
-
-std::filesystem::path presets_path() { return data_dir() / "presets.json"; }
-
 std::filesystem::path data_dir()
 {
 #if defined(_WIN32)
@@ -39,10 +35,6 @@ std::filesystem::path data_dir()
         / "share" / "imza";
 #endif
 }
-
-std::filesystem::path sessions_dir() { return data_dir() / "sessions"; }
-
-std::filesystem::path prompts_dir() { return data_dir() / "prompts"; }
 
 namespace {
 #if defined(_WIN32)
@@ -87,17 +79,6 @@ std::optional<std::string> read_changelog()
         std::istreambuf_iterator<char>() };
     return content.empty() ? std::nullopt
                            : std::optional<std::string> { std::move(content) };
-}
-
-std::string_view subagent_default_variant(SubagentRole role)
-{
-    if (role == SubagentRole::BUILDER) {
-        return "medium";
-    }
-    if (role == SubagentRole::RESEARCH) {
-        return "low";
-    }
-    return "off";
 }
 
 std::string connection_key(const Connection& connection)

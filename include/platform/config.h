@@ -52,7 +52,16 @@ struct Config {
 enum class ConfigUpdateResult { UPDATED, UNCHANGED, FAILURE };
 using ConfigMutator = std::function<bool(Config&)>;
 
-std::string_view subagent_default_variant(SubagentRole role);
+constexpr std::string_view subagent_default_variant(SubagentRole role)
+{
+    if (role == SubagentRole::BUILDER) {
+        return "medium";
+    }
+    if (role == SubagentRole::RESEARCH) {
+        return "low";
+    }
+    return "off";
+}
 Status load_config(const std::filesystem::path& path, Config& out,
     std::string* error = nullptr);
 Status save_config(const std::filesystem::path& path, const Config& cfg);
@@ -60,11 +69,17 @@ ConfigUpdateResult update_config(const std::filesystem::path& path,
     const Config& initial, const ConfigMutator& mutate,
     Config* result = nullptr);
 void apply_skill_policies(Config& config, const SkillPolicyChanges& changes);
-std::filesystem::path config_path(void);
-std::filesystem::path presets_path(void);
 std::filesystem::path data_dir(void);
-std::filesystem::path sessions_dir(void);
-std::filesystem::path prompts_dir(void);
+inline std::filesystem::path config_path()
+{
+    return data_dir() / "config.json";
+}
+inline std::filesystem::path presets_path()
+{
+    return data_dir() / "presets.json";
+}
+inline std::filesystem::path sessions_dir() { return data_dir() / "sessions"; }
+inline std::filesystem::path prompts_dir() { return data_dir() / "prompts"; }
 std::optional<std::string> read_changelog(void);
 
 } // namespace imza

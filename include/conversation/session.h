@@ -124,7 +124,7 @@ public:
         double total_cost;
     };
 
-    Session();
+    Session() = default;
 
     const std::vector<ConversationItem>& items() const { return items_; }
     ModalPayload modal() const;

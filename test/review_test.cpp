@@ -1,6 +1,6 @@
 #include <doctest/doctest.h>
 
-#include "turn/prompts.h"
+#include "turn/prompt.h"
 #include "workspace/review.h"
 
 TEST_CASE("git diff parser builds files hunks and line numbers")

@@ -274,7 +274,6 @@ add_library(imza_execution
     src/tools/web.cpp
     src/turn/delegation.cpp
     src/turn/prompt.cpp
-    src/turn/prompts.cpp
     src/turn/stream_updates.cpp
     src/turn/turn_runner.cpp
 )

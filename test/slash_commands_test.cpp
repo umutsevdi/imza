@@ -38,7 +38,6 @@ TEST_CASE("slash_commands includes built-ins")
     for (const auto& c : cmds) {
         const bool known = c.action == SlashCommand::Action::EXIT
             || c.action == SlashCommand::Action::NEW
-            || c.action == SlashCommand::Action::SYSTEM_PROMPT
             || c.action == SlashCommand::Action::CHANGELOG
             || c.action == SlashCommand::Action::CONNECT
             || c.action == SlashCommand::Action::MODEL

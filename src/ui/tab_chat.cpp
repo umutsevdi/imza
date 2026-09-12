@@ -37,6 +37,7 @@ namespace {
     constexpr int WHEEL_STEP                 = 3;
     constexpr int DEFAULT_VIEWPORT_LINES     = 24;
     constexpr int TIMELINE_OVERSCAN          = 20;
+    constexpr const char* INTERRUPT_HINT     = "Esc interrupt";
 
     Element vertical_space(int height)
     {
@@ -378,7 +379,7 @@ namespace {
                                     assistant_metadata(at))
                                     ->Render(),
                                 filler(),
-                                text(interrupt_hint()) | dim,
+                                text(INTERRUPT_HINT) | dim,
                             }),
                             el,
                         });
@@ -1098,7 +1099,7 @@ namespace {
                         : hbox({ spinner(15, static_cast<size_t>(frame_))
                                   | color(PANEL_FG_DIM),
                               btn->Render(), filler(),
-                              text(interrupt_hint()) | dim });
+                              text(INTERRUPT_HINT) | dim });
                     parts.push_back(row);
                 }
             }
@@ -1141,8 +1142,6 @@ namespace {
             reasoning_links_.emplace(index, std::move(entry));
             return reasoning_links_.find(index)->second.component;
         }
-
-        std::string interrupt_hint() { return "Esc interrupt"; }
 
         std::string input_buf_;
         InputOption input_options_;
