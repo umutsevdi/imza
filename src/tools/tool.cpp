@@ -117,12 +117,6 @@ namespace {
         if (!in) {
             return tool_error("read: cannot open: " + path);
         }
-        const std::string content((std::istreambuf_iterator<char>(in)),
-            std::istreambuf_iterator<char>());
-        if (content.find('\0') != std::string::npos) {
-            return tool_error("read: binary file: " + path);
-        }
-
         std::size_t begin = 1;
         if (args.isMember("line_begin")) {
             begin = static_cast<std::size_t>(args["line_begin"].asInt64());
@@ -134,8 +128,23 @@ namespace {
             end_given = true;
         }
 
-        const std::vector<std::string> lines = split_lines(content);
-        const std::size_t length             = lines.size();
+        const std::size_t requested_end
+            = end_given ? end : begin + MAX_READ_LINES - 1;
+        std::vector<std::string> lines;
+        std::size_t length = 0;
+        std::string line;
+        while (std::getline(in, line)) {
+            ++length;
+            if (line.find('\0') != std::string::npos) {
+                return tool_error("read: binary file: " + path);
+            }
+            if (length >= begin && length <= requested_end) {
+                lines.push_back(std::move(line));
+            }
+        }
+        if (!in.eof()) {
+            return tool_error("read: cannot read: " + path);
+        }
         if (length == 0) {
             return { ToolOutput::Kind::OUTPUT, "(empty file)" };
         }
@@ -144,21 +153,10 @@ namespace {
                 + " exceeds file length " + std::to_string(length) + ": "
                 + path);
         }
-        if (end_given && end > length) {
-            end = length;
-        }
-        bool truncated = false;
-        if (!end_given) {
-            const std::size_t capped = begin + MAX_READ_LINES - 1;
-            if (capped < length) {
-                end       = capped;
-                truncated = true;
-            } else {
-                end = length;
-            }
-        }
+        end                  = std::min(requested_end, length);
+        const bool truncated = !end_given && requested_end < length;
 
-        std::string out = join_lines(lines, begin - 1, end - 1);
+        std::string out = join_lines(lines, 0, lines.size() - 1);
         if (truncated) {
             out += "\n\n[truncated: showing lines " + std::to_string(begin)
                 + "-" + std::to_string(end) + " of " + std::to_string(length)

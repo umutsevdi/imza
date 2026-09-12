@@ -181,7 +181,7 @@ void Session::restore(SessionSnapshot snapshot)
         persistence_          = std::move(snapshot.persistence);
         mode_                 = snapshot.plan_mode ? Mode::PLAN : Mode::BUILD;
         modal_                = std::monostate { };
-        queued_.clear();
+        std::vector<QueuedMessage>().swap(queued_);
         error_.clear();
         retry_countdown_.reset();
         reasoning_start_.reset();

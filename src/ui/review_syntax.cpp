@@ -14,7 +14,8 @@ namespace {
     enum class HighlightSide { OLD, NEW };
 
     void cache_document(ReviewHighlights& cache,
-        const std::vector<std::pair<const ReviewLine*, std::string>>& lines,
+        const std::vector<std::pair<const ReviewLine*, std::string_view>>&
+            lines,
         std::string_view syntax, HighlightSide side, int content_width)
     {
         if (lines.empty()) {
@@ -75,8 +76,8 @@ void append_review_hunk_highlights(ReviewHighlights& cache,
         ? std::max(1, diff_side_width(review_width) - 8)
         : diff_content_width(review_width);
     const std::string syntax = syntax_type_for_path(path);
-    std::vector<std::pair<const ReviewLine*, std::string>> old;
-    std::vector<std::pair<const ReviewLine*, std::string>> next;
+    std::vector<std::pair<const ReviewLine*, std::string_view>> old;
+    std::vector<std::pair<const ReviewLine*, std::string_view>> next;
     old.reserve(hunk.lines.size());
     next.reserve(hunk.lines.size());
     for (const ReviewLine& line : hunk.lines) {

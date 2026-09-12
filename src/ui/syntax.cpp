@@ -22,7 +22,7 @@ using namespace ftxui;
 
 namespace {
 
-    enum class SyntaxStyle {
+    enum class SyntaxStyle : std::uint8_t {
         PLAIN,
         KEYWORD,
         TYPE,

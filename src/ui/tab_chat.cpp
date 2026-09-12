@@ -217,9 +217,14 @@ namespace {
             const bool reset_cache = layout_changed || content_changed
                 || item_cache_.size() > item_count;
             if (reset_cache) {
-                item_cache_.clear();
-                item_cache_.resize(item_count);
-                item_versions_.assign(item_count, INVALID_VERSION);
+                if (item_count == 0) {
+                    std::vector<Element>().swap(item_cache_);
+                    std::vector<std::size_t>().swap(item_versions_);
+                } else {
+                    item_cache_.clear();
+                    item_cache_.resize(item_count);
+                    item_versions_.assign(item_count, INVALID_VERSION);
+                }
                 cache_kind_     = ctx.kind;
                 cache_width_    = ctx.width;
                 content_serial_ = content_serial;

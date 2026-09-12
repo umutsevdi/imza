@@ -140,6 +140,17 @@ TEST_CASE("read rejects binary files and reports empty files")
     CHECK(empty.text == "(empty file)");
 }
 
+TEST_CASE("read detects binary data outside the requested window")
+{
+    TmpDir tmp;
+    write_file(tmp.file("bin.dat"), std::string("visible\nhidden\0data\n", 20));
+    const auto tool = imza::make_read_tool();
+
+    const auto out = run_window(tool, tmp.file("bin.dat").string(), 1, 1);
+    CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
+    CHECK(out.text.find("binary") != std::string::npos);
+}
+
 TEST_CASE("read truncates unbounded reads of long files")
 {
     TmpDir tmp;

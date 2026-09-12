@@ -53,10 +53,21 @@ namespace {
         return n;
     }
 
+    struct CurlHandle {
+        CURL* value = curl_easy_init();
+
+        ~CurlHandle()
+        {
+            if (value != nullptr) {
+                curl_easy_cleanup(value);
+            }
+        }
+    };
+
     CURL* reuse_handle()
     {
-        static thread_local CURL* handle = curl_easy_init();
-        return handle;
+        static thread_local CurlHandle handle;
+        return handle.value;
     }
 
     curl_slist* build_header_list(const std::vector<std::string>& headers)
