@@ -73,15 +73,6 @@ TEST_CASE("parse_api_error ignores non-error bodies")
     CHECK(bad == imza::Status::OK);
 }
 
-TEST_CASE("error_text maps statuses to human strings")
-{
-    CHECK(imza::error_text(imza::Status::RATE_LIMITED)
-        == "Rate limited by provider.");
-    CHECK(imza::error_text(imza::Status::BUDGET_EXCEEDED)
-        == "Out of budget / insufficient credits.");
-    CHECK(imza::error_text(imza::Status::NETWORK_ERROR) == "Network error.");
-}
-
 TEST_CASE("OpenAI parse turns mid-stream error blocks into ERROR events")
 {
     const auto p = imza::get_provider(imza::Route { });

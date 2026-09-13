@@ -1,6 +1,5 @@
 #include "app/flows.h"
 #include "common/types.h"
-#include "common/util.h"
 #include "turn/delegation.h"
 #include "turn/prompt.h"
 #include "ui/ui.h"
@@ -56,6 +55,19 @@ namespace {
             ? "∅"
             : line_range(hunk.new_start, hunk.new_count);
         return old_range + " → " + new_range;
+    }
+
+    Element review_comment_row(Element body, int height)
+    {
+        Elements rail;
+        rail.reserve(static_cast<std::size_t>(height));
+        for (int row = 0; row < height; ++row) {
+            rail.push_back(text(" ") | bgcolor(HL_CYAN));
+        }
+        Element comment = hbox({ vbox(std::move(rail)), text(" "),
+                              std::move(body) | xflex, filler() })
+            | color(PANEL_FG) | bgcolor(PANEL_COLOR_FOCUS);
+        return hbox({ text("             "), std::move(comment) | xflex });
     }
 
     class Review : public ComponentBase {
@@ -644,19 +656,19 @@ namespace {
                 if (!_matches(comment.anchor, path, line)) {
                     continue;
                 }
+                const int content_width = std::max(1, review_width - 15);
                 const std::vector<std::string> segments
-                    = wrap_text(comment.body, std::max(20, review_width - 15));
+                    = wrap_text(comment.body, content_width);
                 _push(
                     rows,
                     [segments] {
                         Elements body;
                         body.reserve(segments.size());
                         for (const std::string& text_line : segments) {
-                            body.push_back(text(text_line) | color(PANEL_FG));
+                            body.push_back(text(text_line));
                         }
-                        return hbox({ text("             "),
-                                   vbox(std::move(body)) | xflex, filler() })
-                            | bgcolor(PANEL_BORDER);
+                        return review_comment_row(vbox(std::move(body)),
+                            static_cast<int>(segments.size()));
                     },
                     VisibleRow { VisibleRow::Kind::COMMENT, file_index, nullptr,
                         comment.id, 0 },
@@ -665,17 +677,22 @@ namespace {
             }
         }
 
-        void _push_editor(
-            Elements& rows, const std::string& path, const ReviewLine& line)
+        void _push_editor(Elements& rows, const std::string& path,
+            const ReviewLine& line, int review_width)
         {
             if (!editor_anchor_ || !_matches(*editor_anchor_, path, line)) {
                 return;
             }
+            const int content_width = std::max(1, review_width - 15);
+            const int height
+                = static_cast<int>(wrap_text(draft_, content_width).size());
             _flush_spacer(rows);
-            rows.push_back(hbox({ text("               "),
-                comment_input_->Render() | xflex, text(" ") }));
-            rendered_y_
-                += static_cast<int>(std::ranges::count(draft_, '\n') + 1);
+            rows.push_back(
+                review_comment_row(wrapped_input_element(draft_,
+                                       static_cast<std::size_t>(draft_cursor_),
+                                       content_width, "Leave a comment"),
+                    height));
+            rendered_y_ += height;
         }
 
         void _push_unified_line(Elements& rows,
@@ -744,7 +761,7 @@ namespace {
                 selected, static_cast<int>(segments.size()));
             _push_comments(
                 rows, snapshot, file_index, path, line, review_width);
-            _push_editor(rows, path, line);
+            _push_editor(rows, path, line, review_width);
         }
 
         Element _side_line(const ReviewLine* line, bool old_side,
@@ -837,11 +854,11 @@ namespace {
             if (old_line != nullptr && old_line != target) {
                 _push_comments(rows, snapshot, file_index, path, *old_line,
                     side_width * 2 + 3);
-                _push_editor(rows, path, *old_line);
+                _push_editor(rows, path, *old_line, side_width * 2 + 3);
             }
             _push_comments(
                 rows, snapshot, file_index, path, *target, side_width * 2 + 3);
-            _push_editor(rows, path, *target);
+            _push_editor(rows, path, *target, side_width * 2 + 3);
         }
 
         void _push_side_by_side_hunk(Elements& rows,

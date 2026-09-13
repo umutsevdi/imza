@@ -199,19 +199,80 @@ std::vector<std::pair<std::size_t, std::size_t>> wrap_row_ranges(
     rows.emplace_back(row_begin, line.size());
     return rows;
 }
-
 std::vector<std::string> wrap_text(std::string_view body, int width)
 {
     std::vector<std::string> out;
-    for (const std::string& line : split_lines(body)) {
+    std::size_t line_begin = 0;
+    while (line_begin <= body.size()) {
+        const std::size_t newline = body.find('\n', line_begin);
+        const std::size_t line_end
+            = newline == std::string_view::npos ? body.size() : newline;
+        const std::string_view line
+            = body.substr(line_begin, line_end - line_begin);
         for (const auto& [begin, end] : wrap_row_ranges(line, width)) {
             out.emplace_back(line.substr(begin, end - begin));
         }
-    }
-    if (out.empty()) {
-        out.emplace_back();
+        if (newline == std::string_view::npos) {
+            break;
+        }
+        line_begin = newline + 1;
     }
     return out;
+}
+
+ftxui::Element wrapped_input_element(std::string_view content,
+    std::size_t cursor, int width, std::string_view placeholder, bool focused)
+{
+    using namespace ftxui;
+
+    if (content.empty()) {
+        return text(placeholder) | dim;
+    }
+
+    cursor = std::min(cursor, content.size());
+    Elements rows;
+    std::size_t line_begin = 0;
+    while (line_begin <= content.size()) {
+        const std::size_t newline = content.find('\n', line_begin);
+        const std::size_t line_end
+            = newline == std::string_view::npos ? content.size() : newline;
+        const std::string_view line
+            = content.substr(line_begin, line_end - line_begin);
+        for (const auto& [begin, end] : wrap_row_ranges(line, width)) {
+            const std::size_t row_begin = line_begin + begin;
+            const std::size_t row_end   = line_begin + end;
+            const bool cursor_here      = cursor >= row_begin
+                && (cursor < row_end
+                    || (cursor == row_end && end == line.size()));
+            if (!cursor_here) {
+                rows.push_back(text(line.substr(begin, end - begin)));
+                continue;
+            }
+
+            const std::size_t local_cursor = cursor - line_begin;
+            const std::string_view before
+                = line.substr(begin, local_cursor - begin);
+            const std::size_t glyph_end = local_cursor < line.size()
+                ? std::min(line.size(),
+                      local_cursor
+                          + utf8_sequence_length(
+                              static_cast<unsigned char>(line[local_cursor])))
+                : local_cursor;
+            Element cursor_cell         = text(local_cursor < line.size()
+                    ? line.substr(local_cursor, glyph_end - local_cursor)
+                    : std::string_view(" "));
+            if (focused) {
+                cursor_cell = std::move(cursor_cell) | focusCursorBarBlinking;
+            }
+            rows.push_back(hbox({ text(before), std::move(cursor_cell),
+                text(line.substr(glyph_end, end - glyph_end)) }));
+        }
+        if (newline == std::string_view::npos) {
+            break;
+        }
+        line_begin = newline + 1;
+    }
+    return vbox(std::move(rows));
 }
 
 LayoutCtx layout_context(int width, int height)

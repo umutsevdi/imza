@@ -1137,7 +1137,10 @@ namespace {
             const bool done          = t.reasoning_ms.has_value();
             const bool placeholder
                 = active && !has_reasoning && !done && expected;
-            if (has_reasoning || placeholder || (done && expected)) {
+            // A completed turn with no reasoning text and no measurable
+            // duration has nothing to display or inspect.
+            if (has_reasoning || placeholder
+                || (done && expected && t.reasoning_ms->count() >= 50)) {
                 std::string label;
                 if (done) {
                     const double secs
@@ -1148,20 +1151,16 @@ namespace {
                 } else {
                     label = " Thinking…" + elapsed_suffix(*session_);
                 }
-                if (done && !has_reasoning) {
-                    parts.push_back(text(label) | dim);
-                } else {
-                    Component btn = make_reasoning_button(index, label,
-                        placeholder ? std::string() : t.reasoning,
-                        assistant_metadata(t));
-                    Element row   = done
-                        ? btn->Render()
-                        : hbox({ spinner(15, static_cast<size_t>(frame_))
-                                  | color(PANEL_FG_DIM),
-                              btn->Render(), filler(),
-                              text(INTERRUPT_HINT) | dim });
-                    parts.push_back(row);
-                }
+                Component btn = make_reasoning_button(index, label,
+                    placeholder ? std::string() : t.reasoning,
+                    assistant_metadata(t));
+                Element row   = done
+                    ? btn->Render()
+                    : hbox({ spinner(15, static_cast<size_t>(frame_))
+                              | color(PANEL_FG_DIM),
+                          btn->Render(), filler(),
+                          text(INTERRUPT_HINT) | dim });
+                parts.push_back(row);
             }
             if (!t.markdown.empty()) {
                 parts.push_back(assistant_item(t, content_width()));

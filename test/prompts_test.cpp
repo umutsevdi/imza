@@ -59,8 +59,6 @@ TEST_CASE("embedded prompts match the repository sources")
     CHECK(prompts.subagent_research() == read_prompt("subagent_research.md"));
     CHECK(prompts.subagent_build() == read_prompt("subagent_build.md"));
     CHECK(prompts.title() == read_prompt("title.md"));
-    CHECK(prompts.reminder_plan() == read_prompt("reminder_plan.md"));
-    CHECK(prompts.reminder_build() == read_prompt("reminder_build.md"));
     CHECK(prompts.compaction() == read_prompt("compaction.md"));
     CHECK(prompts.review() == read_prompt("review.md"));
     CHECK(prompts.review_plan() == read_prompt("review_plan.md"));
@@ -96,28 +94,20 @@ TEST_CASE("prompt sources contain prose instead of runtime markup")
 {
     for (const std::string_view name : { "system.md", "subagent.md",
              "subagent_research.md", "subagent_build.md", "title.md",
-             "reminder_plan.md", "reminder_build.md", "compaction.md",
-             "review.md", "review_plan.md" }) {
+             "compaction.md", "review.md", "review_plan.md" }) {
         const std::string prompt = read_prompt(name);
         CHECK(prompt.find("<system-reminder") == std::string::npos);
         CHECK(prompt.find("{{") == std::string::npos);
     }
 }
 
-TEST_CASE("mode reminder composition owns system markup")
+TEST_CASE("current mode prompts declare one authoritative state")
 {
-    const PromptStore prompts;
-    const std::string plan = plan_mode_reminder(prompts);
-    CHECK(plan.starts_with(PLAN_REMINDER_TAG));
-    CHECK(plan.find(prompts.reminder_plan()) != std::string::npos);
-    CHECK(plan.find("<system-reminder", PLAN_REMINDER_TAG.size())
-        == std::string::npos);
-    CHECK(plan.ends_with("</system-reminder>"));
+    const std::string plan = current_mode_prompt(Session::Mode::PLAN);
+    CHECK(plan == "<runtime-mode name=\"plan\"/>");
 
-    const std::string build = build_mode_reminder(prompts);
-    CHECK(build.starts_with(BUILD_REMINDER_TAG));
-    CHECK(build.find(prompts.reminder_build()) != std::string::npos);
-    CHECK(build.ends_with("</system-reminder>"));
+    const std::string build = current_mode_prompt(Session::Mode::BUILD);
+    CHECK(build == "<runtime-mode name=\"build\"/>");
 }
 
 TEST_CASE("title prompt appends the user request")

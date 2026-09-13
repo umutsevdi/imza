@@ -59,6 +59,18 @@ struct CurrentDirectory {
 
 } // namespace
 
+TEST_CASE("CLI session list aligns columns without terminal tabs")
+{
+    const std::vector<imza::SavedSession> sessions {
+        { "1789291986542-c06df75e.json", "Long title", "2026-09-13 12:33:06" },
+        { "short.json", "Other title", "2026-09-13 12:25:53" },
+    };
+
+    CHECK(imza::format_session_list(sessions)
+        == "SESSION ID              SAVED                TITLE\n"
+           "1789291986542-c06df75e  2026-09-13 12:33:06  Long title\n"
+           "short                   2026-09-13 12:25:53  Other title\n");
+}
 TEST_CASE("saved sessions are immutable and fork on a new prompt")
 {
 #ifdef _WIN32

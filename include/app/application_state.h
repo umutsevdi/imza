@@ -27,6 +27,8 @@ class Delegation;
 class PermissionStore;
 class PromptStore;
 
+enum class AgentNotification { TURN_FINISHED, INPUT_REQUIRED };
+
 using PostFn = std::function<void(std::function<void()>)>;
 using StreamFn
     = std::function<Status(const ChatRequest&, const StreamCallback&)>;
@@ -50,6 +52,7 @@ struct ApplicationState {
 
     PostFn post;
     std::function<void()> on_exit;
+    std::function<void(AgentNotification)> notify_user;
     ModalRequestFn parent_routing;
     std::string agent_label;
     RuntimeFlag runtime_flags = interactive_runtime_flags();

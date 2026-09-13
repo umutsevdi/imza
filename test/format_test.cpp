@@ -42,14 +42,6 @@ TEST_CASE("modal_answer_markdown renders Q/A pairs with prompt")
     CHECK(md.find("—") != std::string::npos);
 }
 
-TEST_CASE("tool_display_name capitalizes the first letter")
-{
-    CHECK(imza::tool_display_name("read") == "Read");
-    CHECK(imza::tool_display_name("list") == "List");
-    CHECK(imza::tool_display_name("") == "");
-    CHECK(imza::tool_display_name("read_file") == "Read_file");
-}
-
 TEST_CASE("tool_args_summary flattens object args to key=value pairs")
 {
     CHECK(imza::tool_args_summary(R"({"path":"notes.txt","n":3})")

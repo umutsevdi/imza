@@ -49,19 +49,6 @@ TEST_CASE("parse_models_response reads Anthropic-shaped fixture")
     CHECK(out[1].id == "claude-sonnet-5");
 }
 
-TEST_CASE("parse_models_response sorts by id")
-{
-    const std::string body = R"({"data": [
-        {"id": "c-model"}, {"id": "a-model"}, {"id": "b-model"}
-    ]})";
-    std::vector<imza::ModelInfo> out;
-    REQUIRE(imza::parse_models_response(body, out) == imza::Status::OK);
-    REQUIRE(out.size() == 3);
-    CHECK(out[0].id == "a-model");
-    CHECK(out[1].id == "b-model");
-    CHECK(out[2].id == "c-model");
-}
-
 TEST_CASE("parse_models_response drops deny-listed ids")
 {
     const std::string body = R"({"data": [

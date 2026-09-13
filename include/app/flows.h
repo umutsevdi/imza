@@ -48,6 +48,7 @@ struct CliResult {
 };
 
 CliResult run_cli(int argc, char** argv);
+std::string format_session_list(const std::vector<SavedSession>& sessions);
 RuntimeFlag runtime_flags_for(const CliResult& result);
 OneShotResult run_one_shot(ApplicationState& state,
     MainThreadQueue& main_thread, const OneShotRequest& request);

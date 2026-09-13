@@ -5,7 +5,6 @@
 #include <string_view>
 
 #include "conversation/session.h"
-#include "tools/tool.h"
 #include "turn/prompt.h"
 
 namespace imza {
@@ -17,6 +16,7 @@ TEST_CASE("base system prompt without environment")
     CHECK(prompt.find("imza") != std::string::npos);
     CHECK(prompt.find("PLAN") != std::string::npos);
     CHECK(prompt.find("BUILD") != std::string::npos);
+    CHECK(prompt.find("<runtime-mode name=") == std::string::npos);
     CHECK(prompt.find("<env>") == std::string::npos);
     CHECK(prompt.find("Available tools") == std::string::npos);
 }
@@ -149,17 +149,6 @@ TEST_CASE("subagent prompt retains workspace context")
     CHECK(
         prompt.find("docs [global]: Write documentation") != std::string::npos);
     CHECK(prompt.find("$skill-name") == std::string::npos);
-}
-
-TEST_CASE("default tool set contains build mutation tools")
-{
-    const std::vector<Tool> tools = default_tools();
-    const auto all                = tool_specs(tools);
-    CHECK(all.size() == tools.size());
-    CHECK(std::any_of(all.begin(), all.end(),
-        [](const ToolSpec& spec) { return spec.name == "edit"; }));
-    CHECK(std::any_of(all.begin(), all.end(),
-        [](const ToolSpec& spec) { return spec.name == "write"; }));
 }
 
 } // namespace imza

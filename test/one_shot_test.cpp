@@ -43,8 +43,13 @@ std::shared_ptr<imza::ApplicationState> make_one_shot_state(
 TEST_CASE("one-shot ask runs in Plan mode and returns assistant output")
 {
     imza::MainThreadQueue queue;
-    auto state = make_one_shot_state(queue,
-        [](const imza::ChatRequest&, const imza::StreamCallback& callback) {
+    std::atomic_bool received_plan_mode = false;
+    auto state                          = make_one_shot_state(queue,
+        [&received_plan_mode](const imza::ChatRequest& request,
+            const imza::StreamCallback& callback) {
+            received_plan_mode.store(request.messages.front().content.find(
+                                         "<runtime-mode name=\"plan\"/>")
+                != std::string::npos);
             callback(imza::make_connected_event());
             callback(imza::make_delta_event("summary"));
             callback(imza::make_done_event());
@@ -55,6 +60,7 @@ TEST_CASE("one-shot ask runs in Plan mode and returns assistant output")
         *state, queue, { imza::OneShotRequest::Mode::ASK, "summarize" });
 
     CHECK(state->session->mode() == imza::Session::Mode::PLAN);
+    CHECK(received_plan_mode.load());
     CHECK(result.kind == imza::OneShotResult::Kind::SUCCESS);
     CHECK(result.output == "summary");
     CHECK(imza::one_shot_exit_code(result.kind) == 0);
@@ -63,8 +69,13 @@ TEST_CASE("one-shot ask runs in Plan mode and returns assistant output")
 TEST_CASE("one-shot exec runs in Build mode")
 {
     imza::MainThreadQueue queue;
-    auto state = make_one_shot_state(queue,
-        [](const imza::ChatRequest&, const imza::StreamCallback& callback) {
+    std::atomic_bool received_build_mode = false;
+    auto state                           = make_one_shot_state(queue,
+        [&received_build_mode](const imza::ChatRequest& request,
+            const imza::StreamCallback& callback) {
+            received_build_mode.store(request.messages.front().content.find(
+                                          "<runtime-mode name=\"build\"/>")
+                != std::string::npos);
             callback(imza::make_delta_event("built"));
             callback(imza::make_done_event());
             return imza::Status::OK;
@@ -74,6 +85,7 @@ TEST_CASE("one-shot exec runs in Build mode")
         *state, queue, { imza::OneShotRequest::Mode::EXEC, "build" });
 
     CHECK(state->session->mode() == imza::Session::Mode::BUILD);
+    CHECK(received_build_mode.load());
     CHECK(result.kind == imza::OneShotResult::Kind::SUCCESS);
     CHECK(result.output == "built");
 }

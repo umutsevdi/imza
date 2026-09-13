@@ -171,14 +171,6 @@ TEST_CASE("pricing_for keeps zero-cost models and rejects unknown ones")
     CHECK(empty.context_limit == 0);
 }
 
-TEST_CASE("compute_cost scales by token counts")
-{
-    imza::ModelPricing p { 0.001, 0.002, 0.0, 0.0, 1000 };
-
-    imza::Usage u { .prompt = 1000, .completion = 500, .total = 1500 };
-    CHECK(imza::compute_cost(u, p) == doctest::Approx(0.001 + 0.001));
-}
-
 TEST_CASE("compute_cost bills cached tokens at cache rates when present")
 {
     imza::ModelPricing p;

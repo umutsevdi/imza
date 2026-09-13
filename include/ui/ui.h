@@ -68,6 +68,9 @@ std::vector<std::pair<std::size_t, std::size_t>> wrap_row_ranges(
     std::string_view line, int width);
 // Wraps every logical line of `body`; always returns at least one row.
 std::vector<std::string> wrap_text(std::string_view body, int width);
+ftxui::Element wrapped_input_element(std::string_view content,
+    std::size_t cursor, int width, std::string_view placeholder,
+    bool focused = true);
 
 ftxui::Element panel(ftxui::Element e);
 

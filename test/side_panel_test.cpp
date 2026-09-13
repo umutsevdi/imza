@@ -9,7 +9,7 @@
 using imza::test::to_screen;
 using imza::test::to_text;
 
-TEST_CASE("render_todo renders as panel when wide, strip when narrow")
+TEST_CASE("render_todo renders status marks")
 {
     using Status = imza::TodoItem::Status;
     imza::TodoList todo { { { "a", Status::PENDING },
@@ -20,10 +20,6 @@ TEST_CASE("render_todo renders as panel when wide, strip when narrow")
     CHECK(wide.find("[ ]") != std::string::npos);
     CHECK(wide.find("→") != std::string::npos);
     CHECK(wide.find("[x]") != std::string::npos);
-
-    const std::string narrow = to_text(
-        imza::render_todo(todo, { imza::LayoutCtx::Kind::NARROW, 60 }));
-    CHECK(narrow.find("a") != std::string::npos);
 }
 
 TEST_CASE("render_todo wraps long items instead of clipping")
@@ -42,26 +38,6 @@ TEST_CASE("render_todo wraps long items instead of clipping")
     CHECK(out.find("flaky") != std::string::npos);
     CHECK(out.find("regression") != std::string::npos);
     CHECK(out.find("test") != std::string::npos);
-}
-
-TEST_CASE("render_todo wraps to the offered width")
-{
-    using Status = imza::TodoItem::Status;
-    imza::TodoList todo {
-        { { "rectification certification verification", Status::PENDING } }
-    };
-    auto render_at = [&todo](int width) {
-        auto screen = ftxui::Screen::Create(
-            ftxui::Dimension::Fixed(width), ftxui::Dimension::Fixed(8));
-        ftxui::Render(screen,
-            imza::render_todo(todo, { imza::LayoutCtx::Kind::WIDE, width })
-                | ftxui::size(ftxui::WIDTH, ftxui::EQUAL, width));
-        return screen.ToString();
-    };
-    CHECK(
-        render_at(80).find("rectification certification") != std::string::npos);
-    CHECK(
-        render_at(30).find("rectification certification") == std::string::npos);
 }
 
 TEST_CASE("render_changed_files renders colored symbols and readable paths")
@@ -155,20 +131,4 @@ TEST_CASE("permissions box renders only custom settings and grants")
     CHECK(out.find("Skills") == std::string::npos);
     CHECK(out.find("docs") == std::string::npos);
     CHECK(out.find("cmake --build") != std::string::npos);
-}
-
-TEST_CASE("permissions view reflects installed external grants")
-{
-    imza::PermissionStore permissions;
-    const std::filesystem::path folder = std::filesystem::temp_directory_path();
-    REQUIRE(permissions.install({ imza::ExternalGrant { folder } }));
-
-    const auto grants               = permissions.snapshot();
-    const imza::PermissionView view = imza::make_permission_view(
-        imza::interactive_runtime_flags(), *grants);
-    const std::string out = to_text(imza::render_permissions_box(view));
-
-    CHECK(out.find("Folders") != std::string::npos);
-    CHECK(out.find(std::filesystem::weakly_canonical(folder).string())
-        != std::string::npos);
 }

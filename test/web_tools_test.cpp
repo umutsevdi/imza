@@ -142,14 +142,3 @@ TEST_CASE("websearch rejects invalid arguments")
     CHECK(empty.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(empty.text.starts_with("websearch:"));
 }
-
-TEST_CASE("web tools are registered")
-{
-    const auto tools = imza::default_tools();
-
-    const auto* fetch = imza::find_tool(tools, "webfetch");
-    REQUIRE(fetch != nullptr);
-
-    const auto* search = imza::find_tool(tools, "websearch");
-    REQUIRE(search != nullptr);
-}

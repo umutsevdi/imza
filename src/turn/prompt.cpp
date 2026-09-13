@@ -160,16 +160,6 @@ namespace {
         }
     }
 
-    std::string mode_reminder(
-        std::string_view tag, std::string_view instructions)
-    {
-        std::string out(tag);
-        out += '\n';
-        out += instructions;
-        out += "\n</system-reminder>";
-        return out;
-    }
-
 } // namespace
 
 PromptStore::PromptStore(const std::filesystem::path& overrides)
@@ -180,10 +170,6 @@ PromptStore::PromptStore(const std::filesystem::path& overrides)
     , _subagent_build(load_prompt(
           overrides, "subagent_build.md", prompts_detail::SUBAGENT_BUILD))
     , _title(load_prompt(overrides, "title.md", prompts_detail::TITLE))
-    , _reminder_plan(load_prompt(
-          overrides, "reminder_plan.md", prompts_detail::REMINDER_PLAN))
-    , _reminder_build(load_prompt(
-          overrides, "reminder_build.md", prompts_detail::REMINDER_BUILD))
     , _compaction(
           load_prompt(overrides, "compaction.md", prompts_detail::COMPACTION))
     , _review(load_prompt(overrides, "review.md", prompts_detail::REVIEW))
@@ -224,23 +210,24 @@ std::string title_prompt(const PromptStore& prompts, std::string_view request)
     return out;
 }
 
-std::string plan_mode_reminder(const PromptStore& prompts)
+std::string current_mode_prompt(Session::Mode mode)
 {
-    return mode_reminder(PLAN_REMINDER_TAG, prompts.reminder_plan());
+    return mode == Session::Mode::PLAN ? "<runtime-mode name=\"plan\"/>"
+                                       : "<runtime-mode name=\"build\"/>";
 }
 
-std::string build_mode_reminder(const PromptStore& prompts)
-{
-    return mode_reminder(BUILD_REMINDER_TAG, prompts.reminder_build());
-}
-
-std::string full_system_prompt(const ApplicationState& state)
+std::string full_system_prompt(
+    const ApplicationState& state, std::optional<Session::Mode> mode)
 {
     const std::shared_ptr<Environment> env = state.environment;
     const Config config                    = state.providers->config();
     std::string prompt                     = build_system_prompt(
         *state.prompts, env->system().get(), env->workspace().get(), &config);
     prompt += state.skills->prompt_suffix();
+    if (mode) {
+        prompt += "\n\n";
+        prompt += current_mode_prompt(*mode);
+    }
     return prompt;
 }
 

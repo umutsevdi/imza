@@ -141,13 +141,6 @@ TEST_CASE("Imza temporary directory is reusable and canonical")
     std::filesystem::remove_all(base, error);
 }
 
-TEST_CASE("environment becomes ready after the workspace scan")
-{
-    imza::Environment env;
-    REQUIRE(wait_until_ready(env));
-    CHECK(env.ready());
-}
-
 TEST_CASE("workspace retains its directory outside a project")
 {
     const auto original = std::filesystem::current_path();

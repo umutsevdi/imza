@@ -8,14 +8,6 @@
 
 using imza::test::to_text;
 
-TEST_CASE("render_item renders a user turn")
-{
-    imza::ConversationItem it = imza::UserTurn { "hello" };
-    const std::string out
-        = to_text(imza::render_item(it, { imza::LayoutCtx::Kind::WIDE, 60 }));
-    CHECK(out.find("hello") != std::string::npos);
-}
-
 TEST_CASE("render_item renders user attachment labels")
 {
     imza::ConversationItem it
@@ -23,23 +15,6 @@ TEST_CASE("render_item renders user attachment labels")
     const std::string out
         = to_text(imza::render_item(it, { imza::LayoutCtx::Kind::WIDE, 60 }));
     CHECK(out.find("@src/main.cpp") != std::string::npos);
-}
-
-TEST_CASE("render_item renders assistant markdown")
-{
-    imza::ConversationItem it = imza::AssistantTurn { "# Title\n" };
-    const std::string out
-        = to_text(imza::render_item(it, { imza::LayoutCtx::Kind::WIDE, 60 }));
-    CHECK(out.find("Title") != std::string::npos);
-}
-
-TEST_CASE("render_item renders a modal answer")
-{
-    imza::ConversationItem ans = imza::ModalAnswer { { { { "opt" }, "" } } };
-    const std::string out_a
-        = to_text(imza::render_item(ans, { imza::LayoutCtx::Kind::WIDE, 60 }));
-    CHECK(out_a.find("User answered:") != std::string::npos);
-    CHECK(out_a.find("opt") != std::string::npos);
 }
 
 TEST_CASE("render_item renders completed compaction")

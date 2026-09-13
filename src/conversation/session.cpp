@@ -14,29 +14,6 @@
 
 namespace imza {
 
-namespace {
-
-    enum class ModeReminder { NONE, PLAN, BUILD };
-
-    ModeReminder last_mode_reminder(const std::vector<Message>& history)
-    {
-        ModeReminder last = ModeReminder::NONE;
-        for (const Message& m : history) {
-            if (m.type != Message::Type::USER) {
-                continue;
-            }
-            if (m.content.find(PLAN_REMINDER_TAG) != std::string::npos) {
-                last = ModeReminder::PLAN;
-            } else if (m.content.find(BUILD_REMINDER_TAG)
-                != std::string::npos) {
-                last = ModeReminder::BUILD;
-            }
-        }
-        return last;
-    }
-
-} // namespace
-
 ModalPayload Session::modal() const
 {
     std::lock_guard lock(mutex_);
@@ -507,8 +484,8 @@ bool Session::finish_session(std::string error)
     return finished;
 }
 
-std::vector<Message> Session::build_history(std::string_view system_prompt,
-    ApiStandard dialect, const ModeReminderTexts& reminders) const
+std::vector<Message> Session::build_history(
+    std::string_view system_prompt, ApiStandard dialect) const
 {
     std::lock_guard lock(mutex_);
     std::vector<Message> history;
@@ -538,26 +515,6 @@ std::vector<Message> Session::build_history(std::string_view system_prompt,
         }
     }
 
-    const ModeReminder injected = last_mode_reminder(history);
-    if (mode_ == Mode::PLAN && injected != ModeReminder::PLAN
-        && !reminders.plan.empty()) {
-        for (Message& m : history) {
-            if (m.type == Message::Type::USER) {
-                m.content += "\n\n";
-                m.content += reminders.plan;
-                break;
-            }
-        }
-    } else if (mode_ == Mode::BUILD && injected == ModeReminder::PLAN
-        && !reminders.build.empty()) {
-        for (auto it = history.rbegin(); it != history.rend(); ++it) {
-            if (it->type == Message::Type::USER) {
-                it->content += "\n\n";
-                it->content += reminders.build;
-                break;
-            }
-        }
-    }
     return history;
 }
 
