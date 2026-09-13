@@ -4,11 +4,12 @@
 
 namespace imza {
 
-void ModalQueue::enqueue(
-    ModalPayload payload, std::shared_ptr<std::promise<ModalResult>> promise)
+void ModalQueue::enqueue(ModalPayload payload, ModalOrigin origin,
+    std::shared_ptr<std::promise<ModalResult>> promise)
 {
     std::lock_guard lock(mutex_);
-    entries_.push_back(PendingModal { std::move(payload), std::move(promise) });
+    entries_.push_back(
+        PendingModal { std::move(payload), std::move(promise), origin });
 }
 
 std::optional<PendingModal> ModalQueue::try_pop()
@@ -22,13 +23,13 @@ std::optional<PendingModal> ModalQueue::try_pop()
     return entry;
 }
 
-std::optional<ModalPayload> ModalQueue::peek_front() const
+std::optional<PendingModal> ModalQueue::peek_front() const
 {
     std::lock_guard lock(mutex_);
     if (entries_.empty()) {
         return std::nullopt;
     }
-    return entries_.front().payload;
+    return entries_.front();
 }
 
 std::size_t ModalQueue::size() const

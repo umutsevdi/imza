@@ -336,9 +336,13 @@ int run_repl(
 
     ScreenInteractive screen = ScreenInteractive::FullscreenAlternateScreen();
     screen.ForceHandleCtrlC(false);
-    state->notify_turn_finished = [] {
+    state->notify_user = [](AgentNotification notification) {
+        const std::string_view message
+            = notification == AgentNotification::TURN_FINISHED
+            ? "Imza finished"
+            : "Imza needs your attention";
         std::cout << terminal_notification_sequence(
-            terminal_supports_osc9(), "Imza finished")
+            terminal_supports_osc9(), message)
                   << std::flush;
     };
     auto task_subscription = main_thread.subscribe([&screen, &main_thread] {

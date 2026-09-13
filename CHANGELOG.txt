@@ -19,7 +19,7 @@ Changes:
   - Improved permission system.
   - Added persistent chat input history and fixed multiline paste submission.
   - Made Plan and Build mode instructions consistent across every model turn.
-  - Added automatic terminal notifications when an agent turn finishes.
+  - Added terminal notifications when an agent turn finishes or needs user input.
 
 -------------------------------------------------------------------------------
 0.2.1 - 2026-09-11

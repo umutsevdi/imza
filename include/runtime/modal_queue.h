@@ -12,17 +12,20 @@
 
 namespace imza {
 
+enum class ModalOrigin { USER, AGENT };
+
 struct PendingModal {
     ModalPayload payload;
     std::shared_ptr<std::promise<ModalResult>> promise;
+    ModalOrigin origin = ModalOrigin::USER;
 };
 
 class ModalQueue final : public ApplicationComponent {
 public:
-    void enqueue(ModalPayload payload,
+    void enqueue(ModalPayload payload, ModalOrigin origin,
         std::shared_ptr<std::promise<ModalResult>> promise = { });
     std::optional<PendingModal> try_pop();
-    std::optional<ModalPayload> peek_front() const;
+    std::optional<PendingModal> peek_front() const;
     std::size_t size() const;
     void clear();
     void abandon();

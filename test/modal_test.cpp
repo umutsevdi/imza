@@ -200,8 +200,10 @@ TEST_CASE("plan requests omit edit and write tools")
 TEST_CASE("attended root turn notifies once after completion")
 {
     Env env;
-    int notifications               = 0;
-    env.state->notify_turn_finished = [&notifications] { ++notifications; };
+    std::vector<imza::AgentNotification> notifications;
+    env.state->notify_user = [&notifications](imza::AgentNotification event) {
+        notifications.push_back(event);
+    };
     env.stream
         = [](const imza::ChatRequest&, const imza::StreamCallback& callback) {
               callback(imza::make_done_event());
@@ -210,10 +212,113 @@ TEST_CASE("attended root turn notifies once after completion")
 
     imza::submit(*env.state, "inspect");
     REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
-    CHECK(notifications == 1);
+    REQUIRE(notifications.size() == 1);
+    CHECK(notifications.front() == imza::AgentNotification::TURN_FINISHED);
 
     imza::on_turn_finished(*env.state, "");
-    CHECK(notifications == 1);
+    CHECK(notifications.size() == 1);
+}
+
+TEST_CASE("agent question notifies when input is required")
+{
+    Env env;
+    std::vector<imza::AgentNotification> notifications;
+    env.state->notify_user = [&notifications](imza::AgentNotification event) {
+        notifications.push_back(event);
+    };
+    auto round = std::make_shared<int>(0);
+    env.stream = [round](const imza::ChatRequest&,
+                     const imza::StreamCallback& callback) {
+        if ((*round)++ == 0) {
+            callback(imza::make_question_event(
+                { { "Continue?", { "yes" }, false, false } }));
+        }
+        callback(imza::make_done_event());
+        return imza::Status::OK;
+    };
+
+    imza::submit(*env.state, "inspect");
+    REQUIRE(env.pump.wait_for([&] { return showing_question(*env.session); }));
+    REQUIRE(notifications.size() == 1);
+    CHECK(notifications.front() == imza::AgentNotification::INPUT_REQUIRED);
+
+    imza::resolve_modal(*env.state,
+        imza::ModalResult { imza::ModalAnswer { { { { "yes" }, "", "" } } } });
+    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE(notifications.size() == 2);
+    CHECK(notifications.back() == imza::AgentNotification::TURN_FINISHED);
+}
+
+TEST_CASE("agent shell approval notifies when input is required")
+{
+    Env env;
+    std::vector<imza::AgentNotification> notifications;
+    env.state->notify_user = [&notifications](imza::AgentNotification event) {
+        notifications.push_back(event);
+    };
+    env.stream = [](const imza::ChatRequest& request,
+                     const imza::StreamCallback& callback) {
+        if (request.messages.back().type == imza::Message::Type::USER) {
+            callback(imza::make_tool_call_event(
+                { "shell", R"({"command":"custom notify"})", "", "call" }));
+        }
+        callback(imza::make_done_event());
+        return imza::Status::OK;
+    };
+
+    imza::submit(*env.state, "run it");
+    REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
+    REQUIRE(notifications.size() == 1);
+    CHECK(notifications.front() == imza::AgentNotification::INPUT_REQUIRED);
+
+    imza::resolve_modal(
+        *env.state, imza::ToolVerdict { imza::ToolDecision::REJECT, "" });
+    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE(notifications.size() == 2);
+    CHECK(notifications.back() == imza::AgentNotification::TURN_FINISHED);
+}
+
+TEST_CASE("user modal does not send an agent notification")
+{
+    Env env;
+    std::vector<imza::AgentNotification> notifications;
+    env.state->notify_user = [&notifications](imza::AgentNotification event) {
+        notifications.push_back(event);
+    };
+
+    imza::enqueue_user_modal(
+        *env.state, imza::ViewerModal { "Document", "content" });
+
+    CHECK(std::holds_alternative<imza::ViewerModal>(env.session->modal()));
+    CHECK(notifications.empty());
+    imza::close_modal(*env.state);
+}
+
+TEST_CASE("queued agent modal notifies only when presented")
+{
+    Env env;
+    std::vector<imza::AgentNotification> notifications;
+    env.state->notify_user = [&notifications](imza::AgentNotification event) {
+        notifications.push_back(event);
+    };
+    imza::enqueue_user_modal(
+        *env.state, imza::ViewerModal { "First", "content" });
+    auto result = imza::request_modal(
+        *env.state, imza::ViewerModal { "Agent", "content" });
+    env.pump.pump();
+
+    CHECK(notifications.empty());
+    REQUIRE(std::holds_alternative<imza::ViewerModal>(env.session->modal()));
+    CHECK(std::get<imza::ViewerModal>(env.session->modal()).title == "First");
+
+    imza::close_modal(*env.state);
+    REQUIRE(std::holds_alternative<imza::ViewerModal>(env.session->modal()));
+    CHECK(std::get<imza::ViewerModal>(env.session->modal()).title == "Agent");
+    REQUIRE(notifications.size() == 1);
+    CHECK(notifications.front() == imza::AgentNotification::INPUT_REQUIRED);
+
+    imza::close_modal(*env.state);
+    CHECK(result.get().index() == 0);
 }
 
 TEST_CASE("plan rejects fabricated write calls")

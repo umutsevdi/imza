@@ -18,6 +18,16 @@
 namespace imza {
 
 namespace {
+    void notify_user(ApplicationState& state, AgentNotification notification)
+    {
+        if (state.agent_label.empty()
+            && (state.runtime_flags & RuntimeFlag::ATTENDED)
+                != RuntimeFlag::NONE
+            && state.notify_user) {
+            state.notify_user(notification);
+        }
+    }
+
     bool change_directory(
         ApplicationState& state, const std::filesystem::path& directory)
     {
@@ -283,7 +293,7 @@ void close_modal(ApplicationState& state)
 
 void enqueue_user_modal(ApplicationState& state, ModalPayload payload)
 {
-    state.queue.enqueue(std::move(payload));
+    state.queue.enqueue(std::move(payload), ModalOrigin::USER);
     if (state.session->modal().index() == 0
         && (state.session->phase() == Session::Phase::IDLE
             || state.session->phase() == Session::Phase::CONNECTING
@@ -302,7 +312,8 @@ std::future<ModalResult> request_modal(
 
     auto promise = std::make_shared<std::promise<ModalResult>>();
     auto future  = promise->get_future();
-    state.queue.enqueue(std::move(payload), promise);
+    state.queue.enqueue(
+        std::move(payload), ModalOrigin::AGENT, std::move(promise));
     state.post([&state] { present_front(state); });
     return future;
 }
@@ -312,11 +323,14 @@ void present_front(ApplicationState& state)
     if (state.session->modal().index() != 0) {
         return;
     }
-    auto payload = state.queue.peek_front();
-    if (!payload) {
+    auto pending = state.queue.peek_front();
+    if (!pending) {
         return;
     }
-    state.session->present_modal(std::move(*payload));
+    state.session->present_modal(std::move(pending->payload));
+    if (pending->origin == ModalOrigin::AGENT) {
+        notify_user(state, AgentNotification::INPUT_REQUIRED);
+    }
 }
 
 void drain_queued(ApplicationState& state)
@@ -334,11 +348,7 @@ void on_turn_finished(ApplicationState& state, std::string error)
     if (!ended) {
         return;
     }
-    if (state.agent_label.empty()
-        && (state.runtime_flags & RuntimeFlag::ATTENDED) != RuntimeFlag::NONE
-        && state.notify_turn_finished) {
-        state.notify_turn_finished();
-    }
+    notify_user(state, AgentNotification::TURN_FINISHED);
     present_front(state);
     drain_queued(state);
 }
