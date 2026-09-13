@@ -79,6 +79,10 @@ inline std::filesystem::path presets_path()
     return data_dir() / "presets.json";
 }
 inline std::filesystem::path sessions_dir() { return data_dir() / "sessions"; }
+inline std::filesystem::path input_history_path()
+{
+    return data_dir() / "input-history.json";
+}
 inline std::filesystem::path prompts_dir() { return data_dir() / "prompts"; }
 std::optional<std::string> read_changelog(void);
 

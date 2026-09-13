@@ -235,6 +235,7 @@ endif()
 # Domain state and runtime infrastructure (no ftxui, no cmark)
 add_library(imza_runtime
     src/conversation/format.cpp
+    src/conversation/input_history.cpp
     src/conversation/persistence.cpp
     src/conversation/session.cpp
     src/conversation/session_store.cpp

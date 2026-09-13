@@ -17,6 +17,7 @@ Changes:
   - Performance improvements in `read` tool calls and session changes
   - Added per-prompt overrides from Markdown files in the user data directory.
   - Improved permission system.
+  - Added persistent chat input history and fixed multiline paste submission.
 
 -------------------------------------------------------------------------------
 0.2.1 - 2026-09-11

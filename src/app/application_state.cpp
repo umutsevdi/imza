@@ -71,9 +71,11 @@ namespace {
         StreamFn stream_fn, std::vector<Tool> tools, RuntimeFlag runtime_flags,
         bool use_default_tools)
     {
-        state->prompts     = std::make_shared<PromptStore>(prompts_dir());
-        state->session     = std::make_shared<Session>();
-        state->sessions    = std::make_shared<SessionStore>();
+        state->prompts  = std::make_shared<PromptStore>(prompts_dir());
+        state->session  = std::make_shared<Session>();
+        state->sessions = std::make_shared<SessionStore>();
+        state->input_history
+            = std::make_shared<InputHistoryStore>(input_history_path());
         state->providers   = std::make_shared<ProviderStore>(std::move(config));
         state->subagents   = std::make_shared<SubagentManager>();
         state->environment = std::make_shared<Environment>();
@@ -104,6 +106,7 @@ namespace {
 
         state->session        = std::make_shared<Session>();
         state->sessions       = parent.sessions;
+        state->input_history  = parent.input_history;
         state->providers      = parent.providers;
         state->subagents      = std::make_shared<SubagentManager>();
         state->environment    = parent.environment;
