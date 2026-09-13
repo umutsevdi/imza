@@ -59,6 +59,7 @@ namespace {
         return value;
     }
 
+#if !defined(_WIN32) && !defined(__APPLE__)
     bool contains(const std::vector<std::string>& values, std::string_view name)
     {
         return std::any_of(
@@ -66,6 +67,7 @@ namespace {
                 return std::string_view(value) == name;
             });
     }
+#endif
 
     bool update_cache_stale(
         const UpdateCache& cache, std::int64_t now_unix_secs)
