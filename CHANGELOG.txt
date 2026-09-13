@@ -16,7 +16,7 @@ Changes:
   - Fixed a bug that caused curl request to abruptly end on MacOS.
   - Performance improvements in `read` tool calls and session changes
   - Added per-prompt overrides from Markdown files in the user data directory.
-  - Increased the allowed commands list.
+  - Improved permission system.
 
 -------------------------------------------------------------------------------
 0.2.1 - 2026-09-11

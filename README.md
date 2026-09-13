@@ -62,7 +62,7 @@ Grant only the additional directory and command/subcommand pairs the task
 needs:
 
 ```sh
-./build/debug/imza --exec "build the project and summarize the changes" \
+imza --exec "build the project and summarize the changes" \
   --allow-dir ../shared-assets \
   --allow-cmd "git status" "cmake --build"
 ```
@@ -115,28 +115,35 @@ into the executable.
 
 ### Roadmap
 - [ ] MCP
+- [ ] Undo
+- [ ] Fork sessions
 - [ ] Image or other multimodal prompt attachments
-- [ ] Mid session directory changes
 - [ ] Monthly usage analytics (local)
 - [ ] Python based extensions
 - [ ] Notifications
 
-## Build From Source
+## Installation
 
-Imza requires a C++23 compiler, CMake, Python 3, and libcurl development files.
+Install build dependencies (C++23 compiler, CMake, Python 3, libcurl), then:
+
 ```sh
+git clone https://github.com/umutsevdi/imza
+cd imza
 git submodule update --init --recursive
-cmake -B build -DCMAKE_BUILD_TYPE=Debug -DIMZA_BUILD_TESTS=ON \
-  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-cmake --build build --target imza imza_tests
-./build/debug/imza_tests
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target package
+sudo apt install build/*.deb     # Debian/Ubuntu
 ```
 
-Start Imza from the repository you want it to work in:
-
-```sh
-./build/debug/imza
-```
+RPM users: `sudo dnf install build/*.rpm`. macOS: `sudo installer -pkg
+build/*.pkg` or extract `build/*.tar.gz` anywhere and add its `bin` to `PATH`.
+>  Packages install under the configured prefix (default `/usr/local`). Pass
+>  `-DCMAKE_INSTALL_PREFIX=/your/prefix` to the CMake step to relocate them. The
+>  macOS `.tar.gz` should be extracted with the prefix as its root to keep
+>  `/changelog` and other resources resolvable. Downloaded macOS packages are
+>  unsigned; right-click → Open on first launch to bypass Gatekeeper.
+Prefer to skip the installer? The binary is at `./build/release/imza` after the
+build step.
 
 On first launch, open `/connect` to add a provider, then use `/model` to choose
 a model. Type `/` in the chat input to browse the available commands.
