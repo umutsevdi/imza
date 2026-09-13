@@ -15,7 +15,7 @@ tool calls, diffs, and approval prompts along the way.
 
 Download the [latest release](https://github.com/umutsevdi/imza/releases/latest).
 
-![imza-layout](./screenshots/layout.png)
+https://github.com/user-attachments/assets/a0096f0d-8337-4e6b-aabe-f9debe273594
 
 ## Why Imza?
 
@@ -41,8 +41,6 @@ comments, then send the findings directly back to Plan mode.
 - Shell-aware, scoped permission controls
 - Bring-your-own-model support
 - Persistent sessions, transcripts, and automatic context compaction
-
-https://github.com/user-attachments/assets/7e624309-132b-41e0-a59b-68a7b68d0bf9
 
 ## Bring Your Own Model
 
@@ -72,16 +70,7 @@ value such as `"git status"` grants only that command/subcommand pair; a value
 containing only the program name grants all of its subcommands for the current
 session.
 
-## Custom prompts
-
-Copy any file from [`misc/prompts`](misc/prompts) to Imza's `prompts`
-data directory and edit it there. Non-empty files override their embedded
-default independently; files not present continue to use the defaults built
-into the executable.
-
-- Linux: `$XDG_DATA_HOME/imza/prompts`, or `~/.local/share/imza/prompts`
-- macOS: `~/Library/Application Support/imza/prompts`
-- Windows: `%APPDATA%\imza\prompts`
+![imza-layout](./screenshots/layout.png)
 
 ## Capabilities
 
