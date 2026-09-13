@@ -355,6 +355,7 @@ int run_repl(
         screen.Exit();
     };
     state->providers->ensure_catalog_fresh();
+    state->environment->check_for_updates(IMZA_VERSION);
     if (state->providers->config().providers.empty()) {
         imza::enqueue_user_modal(
             *state, ConnectModal { ConnectModal::Entry::MANAGE });

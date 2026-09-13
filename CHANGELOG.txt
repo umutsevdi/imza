@@ -8,6 +8,15 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
+0.2.3 - 2026-09-14
+-------------------------------------------------------------------------------
+<https://github.com/umutsevdi/imza/releases/tag/v0.2.3>
+
+Changes:
+  - Added automated update checks with an in-app notice and an explicit `imza --update` installer.
+  - Standardized release artifact naming to `imza-<version>-<os>-<arch>.<ext>`.
+
+-------------------------------------------------------------------------------
 0.2.2 - 2026-09-13
 -------------------------------------------------------------------------------
 <https://github.com/umutsevdi/imza/releases/tag/v0.2.2>

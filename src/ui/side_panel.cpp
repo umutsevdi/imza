@@ -79,6 +79,12 @@ public:
                               [] { animation::RequestAnimationFrame(); });
                       }
                   }))
+        , update_subscription_(state_->environment->subscribe_to_update_change(
+              [state = std::weak_ptr<ApplicationState>(state_)] {
+                  if (const auto current = state.lock()) {
+                      current->post([] { animation::RequestAnimationFrame(); });
+                  }
+              }))
     {
         links_container_ = Container::Vertical({ });
         Add(links_container_);
@@ -115,6 +121,11 @@ public:
             if (has_custom_permissions(permissions)) {
                 parts.push_back(render_permissions_box(permissions));
             }
+        }
+        if (const std::optional<std::string> update
+            = state_->environment->update_available()) {
+            parts.push_back(text("<Update available v" + *update + ">") | bold
+                | color(PANEL_FG));
         }
         Element body = vbox(std::move(parts));
         if (narrow) {
@@ -236,6 +247,7 @@ private:
     Signal<>::Subscription attachments_subscription_;
     Signal<>::Subscription review_subscription_;
     Signal<>::Subscription permission_subscription_;
+    Signal<>::Subscription update_subscription_;
     Component links_container_;
     std::map<std::string, Link<ChangedFile>> file_links_;
     std::map<std::size_t, Link<std::string>> comment_links_;

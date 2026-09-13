@@ -10,12 +10,19 @@
 ; ------------------------------------------------------------------------------
 
 ; Change the following variable to path to the source code.
+#ifndef Source
 #define Source "C:\Users\vboxuser\source\repos\imza"
+#endif
+
+#ifndef Build
 #define Build Source + "\build\x64-Release"
+#endif
 
 #define imzaName "Imza"
 #define imzaDescription "Imza is a batteries-included, model-agnostic coding agent with native performance and a small runtime footprint."
+#ifndef imzaVersion
 #define imzaVersion "0.2.2"
+#endif
 #define imzaAuthor "Umut Sevdi"
 #define imzaURL "https://github.com/umutsevdi/imza"
 #define imzaExe "imza.exe"
@@ -46,7 +53,7 @@ LicenseFile={#Source}\LICENSE
 PrivilegesRequired=lowest
 
 OutputDir={#Build}
-OutputBaseFilename=imza-{#imzaVersion}-windows-installer.exe
+OutputBaseFilename=imza-{#imzaVersion}-windows-x64.exe
 SetupIconFile={#Source}\misc\imza.ico
 UninstallDisplayIcon={#Source}\misc\imza.ico
 UninstallDisplayName={#imzaName}

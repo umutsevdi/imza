@@ -3,11 +3,13 @@
 #include "common/util.h"
 #include "platform/command_runner.h"
 #include "platform/config.h"
+#include "platform/update.h"
 
 #include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -159,24 +161,6 @@ namespace {
 #endif
     }
 
-    void detect_package_managers(std::vector<std::string>& package_managers)
-    {
-#ifdef _WIN32
-        static const char* const candidates[] = { "winget", "choco", "scoop" };
-#elif defined(__APPLE__)
-        static const char* const candidates[] = { "brew", "port", "nix-env" };
-#else
-        static const char* const candidates[] = { "apt", "apt-get", "dnf",
-            "yum", "pacman", "zypper", "apk", "brew", "port", "xbps-install",
-            "nix-env", "snap", "flatpak" };
-#endif
-        for (const char* pm : candidates) {
-            if (find_in_path(pm)) {
-                package_managers.emplace_back(pm);
-            }
-        }
-    }
-
     std::string skill_description(const std::filesystem::path& path)
     {
         std::ifstream in(path);
@@ -251,6 +235,24 @@ namespace {
     }
 
 } // namespace
+
+void detect_package_managers(std::vector<std::string>& package_managers)
+{
+#ifdef _WIN32
+    static const char* const candidates[] = { "winget", "choco", "scoop" };
+#elif defined(__APPLE__)
+    static const char* const candidates[] = { "brew", "port", "nix-env" };
+#else
+    static const char* const candidates[]
+        = { "apt", "apt-get", "dnf", "yum", "pacman", "zypper", "apk", "brew",
+              "port", "xbps-install", "nix-env", "snap", "flatpak" };
+#endif
+    for (const char* pm : candidates) {
+        if (find_in_path(pm)) {
+            package_managers.emplace_back(pm);
+        }
+    }
+}
 
 std::optional<InstructionFile> load_agent_file(
     const std::filesystem::path& root)
@@ -526,6 +528,35 @@ Signal<>::Subscription Environment::subscribe_to_repository_change(
         callback();
     }
     return subscription;
+}
+
+Signal<>::Subscription Environment::subscribe_to_update_change(
+    Signal<>::Callback callback)
+{
+    return update_changed_.subscribe(std::move(callback));
+}
+
+std::optional<std::string> Environment::update_available() const
+{
+    std::lock_guard lock(update_mutex_);
+    return update_version_;
+}
+
+void Environment::check_for_updates(std::string binary_version)
+{
+    if (update_checked_.exchange(true)) {
+        return;
+    }
+    update_worker_ = std::jthread(
+        [this, version = std::move(binary_version)](std::stop_token) {
+            std::optional<std::string> available
+                = check_for_update(system_->package_managers, version);
+            {
+                std::lock_guard lock(update_mutex_);
+                update_version_ = std::move(available);
+            }
+            update_changed_.publish();
+        });
 }
 
 std::optional<std::string> Environment::agent_rules_path() const

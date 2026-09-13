@@ -3,7 +3,9 @@
 #include "conversation/persistence.h"
 #include "platform/command_runner.h"
 #include "platform/config.h"
+#include "platform/update.h"
 #include "tools/tool.h"
+#include "workspace/environment.h"
 
 #include <CLI/CLI.hpp>
 
@@ -25,8 +27,45 @@ namespace {
         return result;
     }
 
+    void print_update_banner()
+    {
+        if (const std::optional<std::string> version
+            = cached_update(IMZA_VERSION)) {
+            std::println("<Update available v{}>", *version);
+        }
+    }
+
+    int run_update_command()
+    {
+        std::vector<std::string> package_managers;
+        detect_package_managers(package_managers);
+        std::println("Checking for the latest imza release...");
+        const std::optional<UpdateInfo> update
+            = fetch_update(package_managers, IMZA_VERSION);
+        if (!update) {
+            std::println("No update available.");
+            return 0;
+        }
+        std::println("Downloading imza {}...", update->version);
+        std::error_code error;
+        const std::filesystem::path temp = prepare_imza_temporary_directory(
+            std::filesystem::temp_directory_path(error));
+        if (error) {
+            std::println(stderr, "cannot resolve temporary directory");
+            return 1;
+        }
+        if (install_update(*update, temp) != 0) {
+            std::println(
+                stderr, "installation of imza {} failed", update->version);
+            return 1;
+        }
+        std::println("Installed imza {}.", update->version);
+        return 0;
+    }
+
     int edit_config()
     {
+        print_update_banner();
         const std::filesystem::path path = config_path();
         std::error_code error;
         const bool exists = std::filesystem::exists(path, error);
@@ -64,6 +103,7 @@ namespace {
 
     int list_sessions()
     {
+        print_update_banner();
         const std::vector<SavedSession> sessions = saved_sessions();
         if (sessions.empty()) {
             std::println("No saved sessions.");
@@ -87,6 +127,7 @@ namespace {
 
     int remove_session(const std::filesystem::path& path, const std::string& id)
     {
+        print_update_banner();
         switch (delete_saved_session(path)) {
         case DeleteSessionResult::OK:
             std::println("Deleted session {}.", id);
@@ -151,9 +192,12 @@ CliResult run_cli(int argc, char** argv)
     std::vector<std::string> allowed_commands;
     bool config_requested = false;
     bool skip_permissions = false;
+    bool update_requested = false;
     app.add_flag("-c,--config", config_requested, "Open the config file");
     app.add_flag("--skip-permissions", skip_permissions,
         "Automatically allow permission prompts for this process");
+    app.add_flag("--update", update_requested,
+        "Download and install the latest release");
     auto* ask_option = app.add_option("-a,--ask", ask,
                               "Run a one-shot read-only agent query")
                            ->type_name("<query>");
@@ -243,6 +287,9 @@ CliResult run_cli(int argc, char** argv)
             ask_option->count() > 0 ? std::move(ask) : std::move(exec) };
     };
 
+    if (update_requested) {
+        return finished(run_update_command());
+    }
     if (config_requested) {
         return finished(edit_config());
     }

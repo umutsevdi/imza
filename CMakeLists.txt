@@ -211,6 +211,7 @@ add_library(imza_foundation
     src/platform/config.cpp
     src/platform/file_lock.cpp
     src/platform/json_file.cpp
+    src/platform/update.cpp
     src/providers/catalog.cpp
     src/providers/pricing.cpp
     src/providers/subscriptions.cpp
@@ -286,6 +287,8 @@ target_include_directories(imza_execution PRIVATE
 set_source_files_properties(src/ui/status_line.cpp PROPERTIES
     COMPILE_DEFINITIONS IMZA_VERSION="${PROJECT_VERSION}")
 set_source_files_properties(src/app/cli.cpp PROPERTIES
+    COMPILE_DEFINITIONS IMZA_VERSION="${PROJECT_VERSION}")
+set_source_files_properties(src/ui/app.cpp PROPERTIES
     COMPILE_DEFINITIONS IMZA_VERSION="${PROJECT_VERSION}")
 target_link_libraries(imza_execution PRIVATE
     CLI11::CLI11
@@ -407,28 +410,33 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release" AND IMZA_PACKAGE)
             DESTINATION "${CMAKE_INSTALL_DOCDIR}"
             RENAME copyright
         )
-        if(APPLE)
-            set(CPACK_PRODUCTBUILD_IDENTIFIER "com.umutsevdi.imza")
-            set(CPACK_GENERATOR "productbuild;TGZ")
+        if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+            set(IMZA_ARCH "x64")
+        elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+            set(IMZA_ARCH "arm64")
         else()
+            message(FATAL_ERROR
+                "Unsupported package architecture: ${CMAKE_SYSTEM_PROCESSOR}"
+            )
+        endif()
+        if(APPLE)
+            set(IMZA_OS "macos")
+            set(CPACK_PRODUCTBUILD_IDENTIFIER "com.umutsevdi.imza")
+            set(CPACK_GENERATOR "productbuild")
+        else()
+            set(IMZA_OS "linux")
             set(CPACK_RPM_PACKAGE_REQUIRES "libcurl")
-            set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
             set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-or-later")
             set(CPACK_RPM_PACKAGE_GROUP "Development/Tools")
             set(CPACK_RPM_PACKAGE_DESCRIPTION
                 "${CPACK_PACKAGE_DESCRIPTION}"
             )
             set(CPACK_DEBIAN_PACKAGE_RELEASE "1")
-            set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
             set(CPACK_DEBIAN_PACKAGE_DEPENDS "libcurl4")
-            if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+            if(IMZA_ARCH STREQUAL "x64")
                 set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
-            elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
-                set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "arm64")
             else()
-                message(FATAL_ERROR
-                    "Unsupported Debian architecture: ${CMAKE_SYSTEM_PROCESSOR}"
-                )
+                set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "arm64")
             endif()
             install(
                 FILES "${CMAKE_SOURCE_DIR}/misc/imza.desktop"
@@ -439,8 +447,10 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release" AND IMZA_PACKAGE)
                 DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/128x128/apps"
                 RENAME imza.png
             )
-            set(CPACK_GENERATOR "DEB;RPM;TGZ")
+            set(CPACK_GENERATOR "DEB;RPM")
         endif()
+        set(CPACK_PACKAGE_FILE_NAME
+            "imza-${PROJECT_VERSION}-${IMZA_OS}-${IMZA_ARCH}")
         include(CPack)
     endif()
 endif()

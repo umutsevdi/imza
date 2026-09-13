@@ -4,10 +4,12 @@
 #include <condition_variable>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <shared_mutex>
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 #include "common/imza_signal.h"
 #include "common/types.h"
@@ -36,6 +38,7 @@ struct WorkspaceEnvironment {
 };
 
 SystemEnvironment detect_system_environment();
+void detect_package_managers(std::vector<std::string>& package_managers);
 std::filesystem::path prepare_imza_temporary_directory(
     const std::filesystem::path& base);
 WorkspaceEnvironment scan_workspace(const std::filesystem::path& directory);
@@ -68,6 +71,15 @@ public:
         Signal<>::Callback callback);
     [[nodiscard]] Signal<>::Subscription subscribe_to_repository_change(
         Signal<>::Callback callback);
+    [[nodiscard]] Signal<>::Subscription subscribe_to_update_change(
+        Signal<>::Callback callback);
+
+    // Version of an installable newer release, or nullopt.
+    std::optional<std::string> update_available() const;
+
+    // Publishes the cached result and refreshes it in the background when
+    // `update.json` is older than a day. No-op after the first call.
+    void check_for_updates(std::string binary_version);
 
 private:
     void _publish_workspace(std::shared_ptr<const WorkspaceEnvironment> ws,
@@ -80,10 +92,15 @@ private:
     std::shared_ptr<const RepositoryState> repository_;
     Signal<> workspace_changed_;
     Signal<> repository_changed_;
+    Signal<> update_changed_;
+    mutable std::mutex update_mutex_;
+    std::optional<std::string> update_version_;
+    std::atomic<bool> update_checked_ { false };
     std::uint64_t workspace_generation_ { 0 };
     std::atomic<bool> ready_ { false };
     std::condition_variable_any workspace_ready_cv_;
     std::jthread worker_;
+    std::jthread update_worker_;
 
     std::jthread git_worker_;
 };

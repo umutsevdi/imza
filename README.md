@@ -113,6 +113,8 @@ session.
 
 ## Installation
 
+> Pre-built binaries for the [latest release](https://github.com/umutsevdi/imza/releases/latest).
+
 Install build dependencies (C++23 compiler, CMake, Python 3, libcurl), then:
 
 ```sh
@@ -124,15 +126,15 @@ cmake --build build --target package
 sudo apt install build/*.deb     # Debian/Ubuntu
 ```
 
-RPM users: `sudo dnf install build/*.rpm`. macOS: `sudo installer -pkg
-build/*.pkg` or extract `build/*.tar.gz` anywhere and add its `bin` to `PATH`.
 >  Packages install under the configured prefix (default `/usr/local`). Pass
->  `-DCMAKE_INSTALL_PREFIX=/your/prefix` to the CMake step to relocate them. The
->  macOS `.tar.gz` should be extracted with the prefix as its root to keep
->  `/changelog` and other resources resolvable. Downloaded macOS packages are
->  unsigned; right-click → Open on first launch to bypass Gatekeeper.
-Prefer to skip the installer? The binary is at `./build/release/imza` after the
-build step.
+>  `-DCMAKE_INSTALL_PREFIX=/your/prefix` to the CMake step to relocate them.
+>  Downloaded macOS packages are unsigned; right-click → Open on first launch
+>  to bypass Gatekeeper. 
+
+> Installed builds keep themselves up to date. Use `imza --update`. 
+
+> Prefer to skip the installer? The binary is at `./build/release/imza` after the
+> build step.
 
 On first launch, open `/connect` to add a provider, then use `/model` to choose
 a model. Type `/` in the chat input to browse the available commands.
