@@ -7,6 +7,7 @@
 
 #include <CLI/CLI.hpp>
 
+#include <algorithm>
 #include <optional>
 #include <print>
 #include <string>
@@ -69,11 +70,7 @@ namespace {
             return 0;
         }
 
-        std::println("SESSION ID\tSAVED\tTITLE");
-        for (const auto& session : sessions) {
-            std::println("{}\t{}\t{}", session.path.stem().string(),
-                session.saved_at, session.title);
-        }
+        std::print("{}", format_session_list(sessions));
         return 0;
     }
 
@@ -105,6 +102,35 @@ namespace {
     }
 
 } // namespace
+
+std::string format_session_list(const std::vector<SavedSession>& sessions)
+{
+    constexpr std::string_view id_header    = "SESSION ID";
+    constexpr std::string_view saved_header = "SAVED";
+    std::size_t id_width                    = id_header.size();
+    std::size_t saved_width                 = saved_header.size();
+    for (const SavedSession& session : sessions) {
+        id_width    = std::max(id_width, session.path.stem().string().size());
+        saved_width = std::max(saved_width, session.saved_at.size());
+    }
+
+    std::string output;
+    const auto append_row
+        = [&](std::string id, std::string saved, std::string_view title) {
+              output += id;
+              output.append(id_width - id.size() + 2, ' ');
+              output += saved;
+              output.append(saved_width - saved.size() + 2, ' ');
+              output += title;
+              output += '\n';
+          };
+    append_row(std::string(id_header), std::string(saved_header), "TITLE");
+    for (const SavedSession& session : sessions) {
+        append_row(
+            session.path.stem().string(), session.saved_at, session.title);
+    }
+    return output;
+}
 
 CliResult run_cli(int argc, char** argv)
 {

@@ -61,7 +61,34 @@ TEST_CASE("wrap_text wraps every logical line")
     CHECK(imza::wrap_text("one two three four\n\nlast", 8)
         == std::vector<std::string> {
             "one two ", "three ", "four", "", "last" });
+    CHECK(imza::wrap_text("last\n", 8)
+        == std::vector<std::string> { "last", "" });
     CHECK(imza::wrap_text("", 8) == std::vector<std::string> { "" });
+}
+
+TEST_CASE("wrapped input keeps long draft text visible")
+{
+    const std::string draft = "one two three four";
+    const std::string out
+        = without_ansi(to_text(imza::wrapped_input_element(draft, draft.size(),
+                                   8, "Leave a comment", false),
+            8, 4));
+
+    CHECK(out.find("one two") != std::string::npos);
+    CHECK(out.find("three") != std::string::npos);
+    CHECK(out.find("four") != std::string::npos);
+}
+
+TEST_CASE("wrapped input preserves UTF-8 text around the cursor")
+{
+    const std::string draft = "prefix 漢漢 suffix";
+    const std::string out   = without_ansi(to_text(
+        imza::wrapped_input_element(draft, draft.find(" suffix"), 9, "", false),
+        9, 3));
+
+    CHECK(out.find("prefix") != std::string::npos);
+    CHECK(out.find("漢漢") != std::string::npos);
+    CHECK(out.find("suffix") != std::string::npos);
 }
 
 TEST_CASE("render_markdown_element renders paragraphs")
