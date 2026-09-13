@@ -33,6 +33,13 @@ std::string read_all(const std::filesystem::path& path)
 
 } // namespace
 
+static_assert(
+    imza::subagent_default_variant(imza::SubagentRole::BUILDER) == "medium");
+static_assert(
+    imza::subagent_default_variant(imza::SubagentRole::RESEARCH) == "low");
+static_assert(
+    imza::subagent_default_variant(imza::SubagentRole::BASIC) == "off");
+
 TEST_CASE("load_config missing file yields empty config")
 {
     const auto path = temp_file("missing.json");

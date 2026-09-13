@@ -20,8 +20,6 @@ std::span<const SlashCommand> slash_commands()
         { "/skills", "manage discovered skills", SlashCommand::Action::SKILLS },
         { "/changelog", "show the version history",
             SlashCommand::Action::CHANGELOG },
-        { "/prompt", "show the generated system prompt",
-            SlashCommand::Action::SYSTEM_PROMPT },
     };
     return commands;
 }

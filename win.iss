@@ -15,7 +15,7 @@
 
 #define imzaName "Imza"
 #define imzaDescription "Imza is a batteries-included, model-agnostic coding agent with native performance and a small runtime footprint."
-#define imzaVersion "0.2.1"
+#define imzaVersion "0.2.2"
 #define imzaAuthor "Umut Sevdi"
 #define imzaURL "https://github.com/umutsevdi/imza"
 #define imzaExe "imza.exe"

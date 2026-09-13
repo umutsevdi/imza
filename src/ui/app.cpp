@@ -90,6 +90,33 @@ namespace {
             || event == Event::Special("\x1B[27;2;9~");
     }
 
+    void set_bracketed_paste(bool enabled)
+    {
+        std::cout << (enabled ? "\x1B[?2004h" : "\x1B[?2004l") << std::flush;
+    }
+
+    class BracketedPasteMode {
+    public:
+        explicit BracketedPasteMode(ScreenInteractive& screen)
+        {
+            screen.Post([] { set_bracketed_paste(true); });
+        }
+
+        ~BracketedPasteMode() { disable(); }
+
+        void disable()
+        {
+            if (!_enabled) {
+                return;
+            }
+            _enabled = false;
+            set_bracketed_paste(false);
+        }
+
+    private:
+        bool _enabled = true;
+    };
+
     class Repl : public ComponentBase {
     public:
         Repl(ScreenInteractive& screen, std::shared_ptr<ApplicationState> state)
@@ -289,7 +316,11 @@ int run_repl(
         screen.Post([&main_thread] { main_thread.drain(); });
         screen.PostEvent(Event::Custom);
     });
-    state->on_exit         = [&screen] { screen.Exit(); };
+    BracketedPasteMode bracketed_paste(screen);
+    state->on_exit = [&screen, &bracketed_paste] {
+        bracketed_paste.disable();
+        screen.Exit();
+    };
     state->providers->ensure_catalog_fresh();
     if (state->providers->config().providers.empty()) {
         imza::enqueue_user_modal(
@@ -297,6 +328,7 @@ int run_repl(
     }
     auto app = ftxui::Make<Repl>(screen, state);
     screen.Loop(app);
+    bracketed_paste.disable();
     if (!state->session->has_items()) {
         return 0;
     }

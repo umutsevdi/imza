@@ -8,6 +8,7 @@
 
 #include "common/imza_signal.h"
 #include "common/types.h"
+#include "conversation/input_history.h"
 #include "conversation/session.h"
 #include "conversation/session_store.h"
 #include "network/network.h"
@@ -24,6 +25,7 @@ class SkillStore;
 class TurnRunner;
 class Delegation;
 class PermissionStore;
+class PromptStore;
 
 using PostFn = std::function<void(std::function<void()>)>;
 using StreamFn
@@ -33,12 +35,14 @@ using ModalRequestFn = std::function<std::future<ModalResult>(ModalPayload)>;
 struct ApplicationState {
     std::shared_ptr<Session> session;
     std::shared_ptr<SessionStore> sessions;
+    std::shared_ptr<InputHistoryStore> input_history;
     std::shared_ptr<ProviderStore> providers;
     std::shared_ptr<SubagentManager> subagents;
     std::shared_ptr<Environment> environment;
     std::shared_ptr<ReviewState> review;
     std::shared_ptr<SkillStore> skills;
     std::shared_ptr<PermissionStore> permissions;
+    std::shared_ptr<PromptStore> prompts;
 
     std::unique_ptr<TurnRunner> runner;
     std::unique_ptr<Delegation> delegation;

@@ -28,12 +28,9 @@ namespace {
             return false;
         }
         switch (state.environment->chdir(canonical)) {
-        case Environment::ChdirResult::FAILED:
-            return false;
-        case Environment::ChdirResult::UNCHANGED:
-            return true;
-        case Environment::ChdirResult::CHANGED:
-            break;
+        case Environment::ChdirResult::FAILED: return false;
+        case Environment::ChdirResult::UNCHANGED: return true;
+        case Environment::ChdirResult::CHANGED: break;
         }
         state.permissions->clear();
         return true;
@@ -139,7 +136,9 @@ namespace {
         state.session->clear_interrupt();
         state.session->begin_send(std::move(text), std::move(attachments));
         state.runner->spawn(state.session->build_history(
-                                full_system_prompt(state), settings.dialect),
+                                full_system_prompt(state), settings.dialect,
+                                { plan_mode_reminder(*state.prompts),
+                                    build_mode_reminder(*state.prompts) }),
             std::move(settings));
         if (generate_title && !state.runner->has_stream_override()) {
             const auto title_selection
@@ -487,11 +486,6 @@ void run_slash(ApplicationState& state, std::string_view command)
             state, ViewerModal { "Changelog", *changelog, "md", 1, false, "" });
         break;
     }
-    case SlashCommand::Action::SYSTEM_PROMPT:
-        enqueue_user_modal(state,
-            ViewerModal { "System prompt", full_system_prompt(state), "md", 1,
-                false, "" });
-        break;
     }
 }
 

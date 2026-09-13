@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -37,6 +38,7 @@ namespace {
     constexpr int WHEEL_STEP                 = 3;
     constexpr int DEFAULT_VIEWPORT_LINES     = 24;
     constexpr int TIMELINE_OVERSCAN          = 20;
+    constexpr const char* INTERRUPT_HINT     = "Esc interrupt";
 
     Element vertical_space(int height)
     {
@@ -217,9 +219,14 @@ namespace {
             const bool reset_cache = layout_changed || content_changed
                 || item_cache_.size() > item_count;
             if (reset_cache) {
-                item_cache_.clear();
-                item_cache_.resize(item_count);
-                item_versions_.assign(item_count, INVALID_VERSION);
+                if (item_count == 0) {
+                    std::vector<Element>().swap(item_cache_);
+                    std::vector<std::size_t>().swap(item_versions_);
+                } else {
+                    item_cache_.clear();
+                    item_cache_.resize(item_count);
+                    item_versions_.assign(item_count, INVALID_VERSION);
+                }
                 cache_kind_     = ctx.kind;
                 cache_width_    = ctx.width;
                 content_serial_ = content_serial;
@@ -373,7 +380,7 @@ namespace {
                                     assistant_metadata(at))
                                     ->Render(),
                                 filler(),
-                                text(interrupt_hint()) | dim,
+                                text(INTERRUPT_HINT) | dim,
                             }),
                             el,
                         });
@@ -437,7 +444,7 @@ namespace {
             Elements bottom;
             bottom.push_back(
                 vbox({
-                    hint_bar("↑/↓ scroll · click a card to open in viewer"),
+                    hint_bar("Ctrl+↑↓ input history · ↑↓ scroll"),
                     hint_bar("Tab next phase · Shift+Tab previous phase"),
                 })
                 | xflex);
@@ -539,15 +546,21 @@ namespace {
             }
             const bool multiline_input
                 = input_buf_.find('\n') != std::string::npos;
-            if (!multiline_input) {
-                if (event == Event::ArrowUp) {
-                    scroll_lines(-1);
-                    return true;
-                }
-                if (event == Event::ArrowDown) {
-                    scroll_lines(1);
-                    return true;
-                }
+            if (event == Event::ArrowUpCtrl) {
+                recall_previous_input();
+                return true;
+            }
+            if (event == Event::ArrowDownCtrl) {
+                recall_next_input();
+                return true;
+            }
+            if (!multiline_input && event == Event::ArrowUp) {
+                scroll_lines(-1);
+                return true;
+            }
+            if (!multiline_input && event == Event::ArrowDown) {
+                scroll_lines(1);
+                return true;
             }
             if (event == Event::PageUp) {
                 scroll_lines(-std::max(1, viewport_lines() - 1));
@@ -628,9 +641,57 @@ namespace {
 
         void on_input_changed()
         {
+            if (!changing_history_) {
+                history_index_.reset();
+                history_draft_.clear();
+            }
             session_->clear_error();
             retain_mentioned_attachments(input_buf_, attachments_);
             autocomplete_.refresh(*state_, input_buf_, input_cursor_);
+        }
+
+        void set_input_from_history(std::string text)
+        {
+            changing_history_ = true;
+            input_buf_        = std::move(text);
+            input_cursor_     = static_cast<int>(input_buf_.size());
+            on_input_changed();
+            changing_history_ = false;
+        }
+
+        void recall_previous_input()
+        {
+            const std::vector<std::string> entries
+                = state_->input_history->entries();
+            if (entries.empty()) {
+                return;
+            }
+            if (!history_index_) {
+                history_draft_ = input_buf_;
+                history_index_ = entries.size();
+            }
+            if (*history_index_ == 0) {
+                return;
+            }
+            --*history_index_;
+            set_input_from_history(entries[*history_index_]);
+        }
+
+        void recall_next_input()
+        {
+            if (!history_index_) {
+                return;
+            }
+            const std::vector<std::string> entries
+                = state_->input_history->entries();
+            if (*history_index_ + 1 < entries.size()) {
+                ++*history_index_;
+                set_input_from_history(entries[*history_index_]);
+                return;
+            }
+            history_index_.reset();
+            set_input_from_history(std::move(history_draft_));
+            history_draft_.clear();
         }
 
         void insert_newline()
@@ -645,6 +706,11 @@ namespace {
             const std::string text(input_buf_);
             input_buf_.clear();
             input_cursor_ = 0;
+            history_index_.reset();
+            history_draft_.clear();
+            if (!trim(text).empty()) {
+                state_->input_history->record(text);
+            }
             imza::submit(*state_, text, std::move(attachments_));
             attachments_.clear();
             autocomplete_.clear();
@@ -1093,7 +1159,7 @@ namespace {
                         : hbox({ spinner(15, static_cast<size_t>(frame_))
                                   | color(PANEL_FG_DIM),
                               btn->Render(), filler(),
-                              text(interrupt_hint()) | dim });
+                              text(INTERRUPT_HINT) | dim });
                     parts.push_back(row);
                 }
             }
@@ -1137,16 +1203,17 @@ namespace {
             return reasoning_links_.find(index)->second.component;
         }
 
-        std::string interrupt_hint() { return "Esc interrupt"; }
-
         std::string input_buf_;
         InputOption input_options_;
         Component input_;
 
         Autocomplete autocomplete_;
         std::vector<FileAttachment> attachments_;
-        int input_cursor_ = 0;
-        bool paste_mode_  = false;
+        std::optional<std::size_t> history_index_;
+        std::string history_draft_;
+        int input_cursor_      = 0;
+        bool changing_history_ = false;
+        bool paste_mode_       = false;
 
         bool follow_                  = true;
         bool hover_dirty_             = false;

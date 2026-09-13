@@ -188,13 +188,12 @@ ReviewLoadResult load_repository_review(const std::filesystem::path& root)
 }
 
 std::string format_review_plan_prompt(
-    const std::vector<ReviewComment>& comments)
+    std::string_view instructions, const std::vector<ReviewComment>& comments)
 {
     if (comments.empty()) {
         return { };
     }
-    std::string prompt
-        = "Plan the changes needed to address the following review comments:";
+    std::string prompt(instructions);
     for (const ReviewComment& comment : comments) {
         const std::string line = comment.anchor.new_line
             ? std::to_string(*comment.anchor.new_line)
@@ -215,27 +214,9 @@ std::string format_review_plan_prompt(
     return prompt;
 }
 
-std::string format_ai_review_prompt(
+std::string format_ai_review_prompt(std::string_view instructions,
     const RepositoryReview& review, const std::vector<ReviewComment>& comments)
 {
-    constexpr std::string_view instructions
-        = R"prompt(Review the supplied git diff.
-
-Report only concrete, actionable defects introduced or materially affected by
-the diff. Prioritize correctness, security, reliability, performance, contract
-violations, and applicable repository-guideline violations. Do not report
-pre-existing issues or speculative problems without a realistic failure mode.
-
-Anchor every finding to an added line using side "new", or a deleted line using
-side "old". Existing comments are supplied for context; do not repeat them.
-Prefer precision over recall. If there are no meaningful findings, return an
-empty findings array.
-
-Return JSON only, with exactly this shape:
-{"findings":[{"file":"path/to/file","side":"new","line":12,"severity":"P2","body":"One-line explanation of the defect, trigger, and impact."}]}
-
-Severity is one of P0, P1, P2, or P3.)prompt";
-
     Json::Value input(Json::objectValue);
     input["diff"] = format_review_patch(review);
     Json::Value existing(Json::arrayValue);

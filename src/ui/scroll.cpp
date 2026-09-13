@@ -130,6 +130,12 @@ VirtualListState::VirtualListState(int estimated_height)
 
 void VirtualListState::reset(std::size_t count)
 {
+    if (count == 0) {
+        std::vector<int>().swap(_heights);
+        std::vector<std::int64_t>().swap(_offsets);
+        _offsets_dirty = true;
+        return;
+    }
     _heights.assign(count, _estimated_height);
     _offsets_dirty = true;
 }

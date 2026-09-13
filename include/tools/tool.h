@@ -31,6 +31,7 @@ using ShellStatus = std::variant<ShellExit, ShellTimeout>;
 struct ShellInvocation {
     std::string program;
     std::optional<std::string> subcommand;
+    std::vector<std::string> arguments;
 
     bool operator==(const ShellInvocation&) const = default;
 };
@@ -85,6 +86,7 @@ std::optional<std::string> validate_subagent_tool_arguments(
 std::string todo_summary(const TodoList& todo);
 ShellAnalysis analyze_shell(std::string_view command);
 bool shell_builtin_allowed(std::string_view program);
+bool shell_readonly_allowed(const ShellInvocation& invocation);
 
 Tool make_read_tool();
 Tool make_skill_tool();

@@ -78,7 +78,7 @@ std::vector<AttachmentCandidate> attachment_candidates(
     const std::filesystem::path& root, std::string_view query,
     std::size_t limit)
 {
-    std::filesystem::path typed = path_from_utf8(query);
+    std::filesystem::path typed     = path_from_utf8(query);
     std::filesystem::path directory = typed.parent_path();
     const std::string needle        = to_lower(typed.filename().string());
     std::error_code ec;

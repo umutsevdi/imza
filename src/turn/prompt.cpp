@@ -1,85 +1,59 @@
 #include "turn/prompt.h"
 #include "app/application_state.h"
 #include "common/util.h"
+#include "conversation/session.h"
 #include "tools/skills.h"
 
 #include <algorithm>
-#include <filesystem>
+#include <cctype>
+#include <fstream>
+#include <sstream>
 #include <string_view>
+#include <utility>
 #include <vector>
+
+#include "prompt_defaults.inc"
 
 namespace imza {
 
 namespace {
 
-    constexpr std::string_view BASE_PROMPT
-        = R"prompt(You are imza, an interactive CLI coding agent that helps users with their tasks. Use the instructions below and the tools available to you to assist the user.
+    bool has_content(std::string_view text)
+    {
+        for (const char c : text) {
+            if (!std::isspace(static_cast<unsigned char>(c))) {
+                return true;
+            }
+        }
+        return false;
+    }
 
-# Tone and style
-- Your output is displayed in a terminal. Keep responses short and concise; answer the user's question directly without preamble or postamble.
-- Use GitHub-flavored markdown for formatting; it is rendered in a monospace font using the CommonMark specification.
-- Only use emojis if the user explicitly requests them. Avoid using emojis in all communication unless asked.
-- When referencing specific functions or pieces of code include the pattern `file_path:line_number` to allow the user to easily navigate to the source code location.
-- Output text to communicate with the user; all text you output outside of tool use is displayed to the user. Only use tools to complete tasks. Never use tools or code comments as a means of communicating with the user.
+    std::string strip_trailing_space(std::string text)
+    {
+        while (!text.empty()
+            && (text.back() == '\n' || text.back() == '\r' || text.back() == ' '
+                || text.back() == '\t')) {
+            text.pop_back();
+        }
+        return text;
+    }
 
-# Doing tasks
-- First understand the file's code conventions. Mimic code style, use existing libraries and utilities, and follow existing patterns.
-- NEVER assume that a given library is available, even if it is well known. Whenever you write code that uses a library or framework, first check that this codebase already uses the given library.
-- Prefer the smallest change consistent with the repository's architecture. Modify existing files when appropriate, but create new files when the requested feature, tests, or established project structure naturally requires them. Do not create unnecessary helper files, documentation, or scripts.
-- Add comments only when they explain non-obvious intent, invariants, workarounds, or design constraints, or when the repository's conventions require documentation comments.
-- Never generate or guess URLs for the user unless you are confident that the URLs are for helping the user with programming.
-- Verify your solution if possible with tests. NEVER assume a specific test framework or test script; check the README or search the codebase to determine the testing approach.
-- NEVER commit changes unless the user explicitly asks you to.
-
-# Tool usage policy
-- Prefer purpose-built tools over the shell whenever an available tool can perform the operation directly and reliably.
-- Use dedicated tools for tasks such as reading and editing files, searching the codebase, managing todos, and other supported operations instead of reproducing those operations with shell commands.
-- Do not use shell commands merely as a workaround for an available specialized tool.
-- When doing file search, prefer to explore broadly before narrowing down; gather context in parallel when the searches are independent.
-- You can call multiple tools in a single response. When multiple independent pieces of information are requested, batch your tool calls together for optimal performance. When making multiple independent tool calls, send them in a single message.
-- If the commands depend on each other and must run sequentially, wait for previous results first to determine the dependent values.
-
-# Todo list
-- Use the todo tool to create and maintain a structured task list for the current session; it surfaces progress to the user in a side panel.
-- Use it proactively when the task requires 3+ distinct steps, is non-trivial, or arrives as multiple tasks; skip it for single, straightforward, or purely informational requests. When in doubt, use it.
-- Each call replaces the entire list, so send the complete updated list every time.
-- Statuses: pending (not started), in_progress (exactly ONE at a time), completed (only after the work is actually done, including verification), cancelled (no longer needed).
-- Update statuses in real time; do not batch completions. If blocked or partial, keep the item in_progress and add a follow-up item describing the blocker.
-- Keep items specific and actionable; break large work into smaller steps. Preserve user-provided commands verbatim (flags, args, order).
-
-# Skills
-- Call the `skill` tool to load a relevant skill when it was not explicitly mentioned.
-- Imza loads `$skill-name` mentions before the request; use the enclosed skill instructions directly and do not load the same skill again.
-- Project skills take precedence over global skills with the same name.
-
-# Modes
-- You operate in one of two modes: PLAN or BUILD. The current mode is announced via <system-reminder> messages.
-- In PLAN mode read-only operations run normally. Edit and write tools are unavailable. Research first and ask clarifying questions when intent is ambiguous.
-- In BUILD mode all tools are available. Implement the plan, then verify the result if possible.)prompt";
-
-    constexpr std::string_view SUBAGENT_PROMPT
-        = R"prompt(You are an Imza subagent working on the task in the user message. You have a fresh context and do not know the parent conversation, so treat the provided task and workspace instructions as your complete assignment.
-
-# Working on tasks
-- Work only on the assigned task. Use the available tools to inspect the workspace and gather the information you need.
-- Follow workspace instructions and existing code conventions. Check the codebase before assuming that files, libraries, commands, or patterns exist.
-- Preserve unrelated user changes and avoid work outside the task's scope. Never commit changes unless the task explicitly requests it.
-- You may ask the user questions when required information is missing, the request is ambiguous, or a consequential choice needs confirmation. Otherwise, make reasonable assumptions and continue.
-- Complete the task as far as the available tools and information allow. Verify findings or changes when practical. Never claim that a command or test succeeded unless you ran it successfully.
-- Do not delegate to other agents or claim that the parent request is complete.
-
-# Skills
-Call the `skill` tool when a skill is relevant to the assigned task. Project skills take precedence over global skills with the same name.
-
-# Response
-Your final response is returned to the calling agent and may also be viewed by the user. State the result directly and concisely. Include relevant file locations, changes made, validation performed, and unresolved blockers when applicable.)prompt";
-
-    constexpr std::string_view RESEARCH_SUBAGENT_PROMPT
-        = R"prompt(# Research mode
-Work read-only. Do not create, modify, rename, or delete files, and do not run commands that mutate the workspace or external state. The task may request investigation, explanation, review, comparison, planning, or another read-only result. Return the result requested by the task; do not automatically turn every task into an implementation plan.)prompt";
-
-    constexpr std::string_view BUILD_SUBAGENT_PROMPT = R"prompt(# Build mode
-You may modify files and run commands needed to complete the assigned task. Inspect existing code before editing, keep changes focused, and run relevant validation when practical. The task may not require edits; do not make changes merely because build access is available.)prompt";
+    std::string load_prompt(const std::filesystem::path& overrides,
+        std::string_view file_name, std::string_view fallback)
+    {
+        if (!overrides.empty()) {
+            std::ifstream file(overrides / file_name, std::ios::binary);
+            if (file) {
+                std::ostringstream buffer;
+                buffer << file.rdbuf();
+                std::string text = buffer.str();
+                if (has_content(text)) {
+                    return strip_trailing_space(std::move(text));
+                }
+            }
+        }
+        return std::string(fallback);
+    }
 
     std::string environment_block(
         const SystemEnvironment& sys, const WorkspaceEnvironment* ws)
@@ -186,37 +160,78 @@ You may modify files and run commands needed to complete the assigned task. Insp
         }
     }
 
+    std::string mode_reminder(
+        std::string_view tag, std::string_view instructions)
+    {
+        std::string out(tag);
+        out += '\n';
+        out += instructions;
+        out += "\n</system-reminder>";
+        return out;
+    }
+
 } // namespace
 
-std::string build_system_prompt(const SystemEnvironment* sys,
-    const WorkspaceEnvironment* ws, const Config* config)
+PromptStore::PromptStore(const std::filesystem::path& overrides)
+    : _system(load_prompt(overrides, "system.md", prompts_detail::SYSTEM))
+    , _subagent(load_prompt(overrides, "subagent.md", prompts_detail::SUBAGENT))
+    , _subagent_research(load_prompt(
+          overrides, "subagent_research.md", prompts_detail::SUBAGENT_RESEARCH))
+    , _subagent_build(load_prompt(
+          overrides, "subagent_build.md", prompts_detail::SUBAGENT_BUILD))
+    , _title(load_prompt(overrides, "title.md", prompts_detail::TITLE))
+    , _reminder_plan(load_prompt(
+          overrides, "reminder_plan.md", prompts_detail::REMINDER_PLAN))
+    , _reminder_build(load_prompt(
+          overrides, "reminder_build.md", prompts_detail::REMINDER_BUILD))
+    , _compaction(
+          load_prompt(overrides, "compaction.md", prompts_detail::COMPACTION))
+    , _review(load_prompt(overrides, "review.md", prompts_detail::REVIEW))
+    , _review_plan(
+          load_prompt(overrides, "review_plan.md", prompts_detail::REVIEW_PLAN))
 {
-    std::string out(BASE_PROMPT);
+}
+
+std::string build_system_prompt(const PromptStore& prompts,
+    const SystemEnvironment* sys, const WorkspaceEnvironment* ws,
+    const Config* config)
+{
+    std::string out = prompts.system();
     append_context(out, sys, ws, config);
     return out;
 }
 
-std::string build_subagent_system_prompt(const SystemEnvironment* sys,
-    const WorkspaceEnvironment* ws, SubagentRole role, const Config* config)
+std::string build_subagent_system_prompt(const PromptStore& prompts,
+    const SystemEnvironment* sys, const WorkspaceEnvironment* ws,
+    SubagentRole role, const Config* config)
 {
     if (role == SubagentRole::BASIC) {
         return { };
     }
-    std::string out(SUBAGENT_PROMPT);
+    std::string out = prompts.subagent();
     out += "\n\n";
-    out += role == SubagentRole::RESEARCH ? RESEARCH_SUBAGENT_PROMPT
-                                          : BUILD_SUBAGENT_PROMPT;
+    out += role == SubagentRole::RESEARCH ? prompts.subagent_research()
+                                          : prompts.subagent_build();
     append_context(out, sys, ws, config);
     return out;
 }
 
-std::string title_prompt(std::string_view request)
+std::string title_prompt(const PromptStore& prompts, std::string_view request)
 {
-    std::string out
-        = "Create a concise 3-7 word title for the user's request. Return only "
-          "the title, without quotes or punctuation.\n\nUser request:\n";
+    std::string out = prompts.title();
+    out += "\n\nUser request:\n";
     out += request;
     return out;
+}
+
+std::string plan_mode_reminder(const PromptStore& prompts)
+{
+    return mode_reminder(PLAN_REMINDER_TAG, prompts.reminder_plan());
+}
+
+std::string build_mode_reminder(const PromptStore& prompts)
+{
+    return mode_reminder(BUILD_REMINDER_TAG, prompts.reminder_build());
 }
 
 std::string full_system_prompt(const ApplicationState& state)
@@ -224,7 +239,7 @@ std::string full_system_prompt(const ApplicationState& state)
     const std::shared_ptr<Environment> env = state.environment;
     const Config config                    = state.providers->config();
     std::string prompt                     = build_system_prompt(
-        env->system().get(), env->workspace().get(), &config);
+        *state.prompts, env->system().get(), env->workspace().get(), &config);
     prompt += state.skills->prompt_suffix();
     return prompt;
 }

@@ -12,7 +12,8 @@ namespace imza {
 
 TEST_CASE("base system prompt without environment")
 {
-    const std::string prompt = build_system_prompt(nullptr, nullptr);
+    const PromptStore prompts;
+    const std::string prompt = build_system_prompt(prompts, nullptr, nullptr);
     CHECK(prompt.find("imza") != std::string::npos);
     CHECK(prompt.find("PLAN") != std::string::npos);
     CHECK(prompt.find("BUILD") != std::string::npos);
@@ -29,7 +30,8 @@ TEST_CASE("system prompt embeds the environment block")
     sys.package_managers = { "apt", "snap" };
     sys.today            = "Fri Aug 28 2026";
 
-    const std::string prompt = build_system_prompt(&sys, nullptr);
+    const PromptStore prompts;
+    const std::string prompt = build_system_prompt(prompts, &sys, nullptr);
     CHECK(prompt.find("<env>") != std::string::npos);
     CHECK(prompt.find("Current Directory") != std::string::npos);
     CHECK(prompt.find("Operating System: Linux 6.8") != std::string::npos);
@@ -49,7 +51,8 @@ TEST_CASE("system prompt embeds workspace instructions when present")
     ws.working_directory = std::filesystem::temp_directory_path();
     ws.instruction = InstructionFile { "AGENTS.md", "# Rules\nBe terse." };
 
-    const std::string prompt = build_system_prompt(&sys, &ws);
+    const PromptStore prompts;
+    const std::string prompt = build_system_prompt(prompts, &sys, &ws);
     CHECK(prompt.find("<instructions source=\"AGENTS.md\">")
         != std::string::npos);
     CHECK(prompt.find("Be terse.") != std::string::npos);
@@ -65,7 +68,8 @@ TEST_CASE("system prompt omits the instructions block when absent")
     WorkspaceEnvironment ws;
     ws.working_directory = std::filesystem::temp_directory_path();
 
-    const std::string prompt = build_system_prompt(&sys, &ws);
+    const PromptStore prompts;
+    const std::string prompt = build_system_prompt(prompts, &sys, &ws);
     CHECK(prompt.find("<instructions") == std::string::npos);
 }
 
@@ -82,7 +86,9 @@ TEST_CASE("system prompt advertises active skills and hides denied skills")
     Config config;
     config.global_skills["docs"]   = SkillPolicy::ALLOW;
     config.global_skills["secret"] = SkillPolicy::DENY;
-    const std::string prompt = build_system_prompt(&sys, nullptr, &config);
+    const PromptStore prompts;
+    const std::string prompt
+        = build_system_prompt(prompts, &sys, nullptr, &config);
     CHECK(
         prompt.find("docs [global]: Write documentation") != std::string::npos);
     CHECK(prompt.find("secret [global]") == std::string::npos);
@@ -91,8 +97,9 @@ TEST_CASE("system prompt advertises active skills and hides denied skills")
 
 TEST_CASE("research subagent prompt is dedicated and read-only")
 {
+    const PromptStore prompts;
     const std::string prompt = build_subagent_system_prompt(
-        nullptr, nullptr, SubagentRole::RESEARCH);
+        prompts, nullptr, nullptr, SubagentRole::RESEARCH);
     CHECK(prompt.find("Imza subagent") != std::string::npos);
     CHECK(prompt.find("fresh context") != std::string::npos);
     CHECK(prompt.find("Work read-only") != std::string::npos);
@@ -103,8 +110,9 @@ TEST_CASE("research subagent prompt is dedicated and read-only")
 
 TEST_CASE("build subagent prompt permits focused changes")
 {
-    const std::string prompt
-        = build_subagent_system_prompt(nullptr, nullptr, SubagentRole::BUILDER);
+    const PromptStore prompts;
+    const std::string prompt = build_subagent_system_prompt(
+        prompts, nullptr, nullptr, SubagentRole::BUILDER);
     CHECK(prompt.find("may modify files") != std::string::npos);
     CHECK(prompt.find("keep changes focused") != std::string::npos);
     CHECK(prompt.find("Work read-only") == std::string::npos);
@@ -112,7 +120,9 @@ TEST_CASE("build subagent prompt permits focused changes")
 
 TEST_CASE("basic subagent has no system prompt")
 {
-    CHECK(build_subagent_system_prompt(nullptr, nullptr, SubagentRole::BASIC)
+    const PromptStore prompts;
+    CHECK(build_subagent_system_prompt(
+        prompts, nullptr, nullptr, SubagentRole::BASIC)
             .empty());
 }
 
@@ -129,8 +139,9 @@ TEST_CASE("subagent prompt retains workspace context")
     ws.working_directory = std::filesystem::temp_directory_path();
     ws.instruction = InstructionFile { "AGENTS.md", "Use project rules." };
 
-    const std::string prompt
-        = build_subagent_system_prompt(&sys, &ws, SubagentRole::BUILDER);
+    const PromptStore prompts;
+    const std::string prompt = build_subagent_system_prompt(
+        prompts, &sys, &ws, SubagentRole::BUILDER);
     CHECK(prompt.find("Operating System: Linux") != std::string::npos);
     CHECK(prompt.find("<instructions source=\"AGENTS.md\">")
         != std::string::npos);

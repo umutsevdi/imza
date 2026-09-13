@@ -42,8 +42,8 @@ using AiReviewParseResult
     = std::variant<std::vector<ReviewCommentDraft>, std::string>;
 
 std::string format_review_plan_prompt(
-    const std::vector<ReviewComment>& comments);
-std::string format_ai_review_prompt(
+    std::string_view instructions, const std::vector<ReviewComment>& comments);
+std::string format_ai_review_prompt(std::string_view instructions,
     const RepositoryReview& review, const std::vector<ReviewComment>& comments);
 AiReviewParseResult parse_ai_review_response(
     std::string_view response, const RepositoryReview& review);

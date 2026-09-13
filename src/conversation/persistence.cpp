@@ -542,10 +542,11 @@ Status read_session(const std::filesystem::path& path, LoadedSession& loaded)
     }
     SessionSnapshot snapshot;
     try {
-        snapshot.persistence       = PersistedSession { path };
-        snapshot.title             = root.get("title", "").asString();
-        snapshot.todo              = parse_todo(root["todo"]);
-        snapshot.compacted_summary = root.get("compacted_summary", "").asString();
+        snapshot.persistence = PersistedSession { path };
+        snapshot.title       = root.get("title", "").asString();
+        snapshot.todo        = parse_todo(root["todo"]);
+        snapshot.compacted_summary
+            = root.get("compacted_summary", "").asString();
         snapshot.compacted_item_count
             = root.get("compacted_item_count", 0).asUInt64();
         snapshot.plan_mode = root.get("mode", "plan").asString() != "build";
