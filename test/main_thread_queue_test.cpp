@@ -9,19 +9,7 @@
 
 using namespace std::chrono_literals;
 
-TEST_CASE("main thread queue defers tasks until drained")
-{
-    imza::MainThreadQueue queue;
-    int value = 0;
-
-    queue.post([&value] { value = 1; });
-
-    CHECK(value == 0);
-    queue.drain();
-    CHECK(value == 1);
-}
-
-TEST_CASE("main thread queue drains tasks in posting order")
+TEST_CASE("main thread queue defers tasks until drained in posting order")
 {
     imza::MainThreadQueue queue;
     std::string order;
@@ -29,8 +17,9 @@ TEST_CASE("main thread queue drains tasks in posting order")
     queue.post([&order] { order += 'a'; });
     queue.post([&order] { order += 'b'; });
     queue.post([&order] { order += 'c'; });
-    queue.drain();
 
+    CHECK(order.empty());
+    queue.drain();
     CHECK(order == "abc");
 }
 

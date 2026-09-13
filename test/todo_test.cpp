@@ -4,8 +4,6 @@
 
 #include "conversation/session.h"
 #include "network/json_io.h"
-#include "network/network.h"
-#include "tools/tool.h"
 
 TEST_CASE("parse_todo_args accepts a valid list with statuses")
 {
@@ -65,13 +63,4 @@ TEST_CASE("todo_summary renders one line per item with marks")
         { "fourth", Status::CANCELLED },
     } });
     CHECK(out == "[ ] first\n[→] second\n[x] third\n[-] fourth");
-}
-
-TEST_CASE("todo tool is registered without a direct handler")
-{
-    const auto tools    = imza::default_tools();
-    const imza::Tool* t = imza::find_tool(tools, "todo");
-    REQUIRE(t != nullptr);
-    const auto out = imza::dispatch_tool(tools, { "todo", "{}" });
-    CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
 }

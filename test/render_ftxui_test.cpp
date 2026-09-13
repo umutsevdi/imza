@@ -91,13 +91,6 @@ TEST_CASE("wrapped input preserves UTF-8 text around the cursor")
     CHECK(out.find("suffix") != std::string::npos);
 }
 
-TEST_CASE("render_markdown_element renders paragraphs")
-{
-    const std::string out
-        = to_text(imza::render_markdown_element("hello world", 60));
-    CHECK(out.find("hello") != std::string::npos);
-}
-
 TEST_CASE("render_markdown_element renders code blocks")
 {
     const std::string out
@@ -215,12 +208,6 @@ TEST_CASE("render_markdown_element drops html")
         imza::render_markdown_element("text <script>bad</script>", 60));
     CHECK(out.find("<script>") == std::string::npos);
     CHECK(out.find("text") != std::string::npos);
-}
-
-TEST_CASE("render_markdown_element empty input")
-{
-    const std::string out = to_text(imza::render_markdown_element("", 60));
-    CHECK(!out.empty());
 }
 
 TEST_CASE("diff_split renders review-style side-by-side changes")

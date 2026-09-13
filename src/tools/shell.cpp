@@ -59,24 +59,35 @@ namespace {
             });
 #endif
         // Subcommand identity: first word after the program that is not an
-        // option. A short option such as -C also consumes its separate value.
+        // option. Options before the subcommand carry no grant identity; a
+        // short option and its separate value (git -C build) are skipped
+        // whole. Past the subcommand only flags are retained as arguments:
+        // operands cannot widen a grant, and their values are consumed with
+        // their option.
+        const auto is_flag = [](const std::string& word) {
+            return !word.empty() && word.front() == '-';
+        };
         std::size_t index = program + 1;
-        while (index < words.size() && !words[index].empty()
-            && words[index].front() == '-') {
-            const bool short_option
-                = words[index].size() == 2 && words[index][1] != '-';
-            if (short_option && index + 1 < words.size()
-                && !words[index + 1].empty()
-                && words[index + 1].front() != '-') {
-                std::swap(words[index], words[index + 1]);
+        while (index < words.size() && is_flag(words[index])) {
+            if (words[index].size() == 2 && words[index][1] != '-'
+                && index + 1 < words.size() && !is_flag(words[index + 1])) {
+                ++index;
             }
             ++index;
         }
         if (index < words.size()) {
             invocation.subcommand = std::move(words[index]);
+            ++index;
         }
-        for (std::size_t rest = program + 1; rest < words.size(); ++rest) {
-            invocation.arguments.push_back(std::move(words[rest]));
+        for (; index < words.size(); ++index) {
+            if (!is_flag(words[index])) {
+                continue;
+            }
+            if (words[index].size() == 2 && words[index][1] != '-'
+                && index + 1 < words.size() && !is_flag(words[index + 1])) {
+                ++index;
+            }
+            invocation.arguments.push_back(std::move(words[index]));
         }
         analysis.invocations.push_back(std::move(invocation));
         words.clear();
@@ -99,28 +110,6 @@ namespace {
                 return true;
             }
             begin = last + 1;
-        }
-        return false;
-    }
-
-    bool matches_readonly(std::span<const ReadOnlyCommand> commands,
-        const ShellInvocation& invocation)
-    {
-        for (const ReadOnlyCommand& entry : commands) {
-            if (entry.program != invocation.program
-                || entry.subcommand != invocation.subcommand) {
-                continue;
-            }
-            bool covered = true;
-            for (const std::string& argument : invocation.arguments) {
-                if (!flag_allowed(entry.flags, argument)) {
-                    covered = false;
-                    break;
-                }
-            }
-            if (covered) {
-                return true;
-            }
         }
         return false;
     }
@@ -277,9 +266,33 @@ bool shell_builtin_allowed(std::string_view program)
 
 bool shell_readonly_allowed(const ShellInvocation& invocation)
 {
-    if (!invocation.subcommand || invocation.subcommand->empty()) {
+    if (invocation.program.empty()) {
         return false;
     }
+    // Combined short flags (git status -sb) match when every character is an
+    // allowed flag; uncombined args must match the catalog verbatim.
+    const auto argument_allowed = [](const ReadOnlyCommand& entry,
+                                      const std::string& argument) {
+        if (argument.size() > 2 && argument.front() == '-'
+            && argument[1] != '-') {
+            return std::all_of(
+                argument.begin() + 1, argument.end(), [&entry](char flag) {
+                    return flag_allowed(entry.flags, std::string("-") + flag);
+                });
+        }
+        return flag_allowed(entry.flags, argument);
+    };
+    const auto matches = [&argument_allowed](const ShellInvocation& call,
+                             const ReadOnlyCommand& entry) {
+        if (call.program != entry.program
+            || call.subcommand != entry.subcommand) {
+            return false;
+        }
+        return std::all_of(call.arguments.begin(), call.arguments.end(),
+            [&entry, &argument_allowed](const std::string& argument) {
+                return argument_allowed(entry, argument);
+            });
+    };
 #ifdef _WIN32
     static constexpr std::array<ReadOnlyCommand, 12> platform_only {
         { { "tasklist", std::nullopt, "/v /fo /fi /nh" },
@@ -359,8 +372,14 @@ bool shell_readonly_allowed(const ShellInvocation& invocation)
             { "pip", "list", "-o --outdated --format" },
             { "pip", "show", "-f --files" }, { "go", "version", "-m" } }
     };
-    return matches_readonly(platform_only, invocation)
-        || matches_readonly(shared, invocation);
+    return std::any_of(platform_only.begin(), platform_only.end(),
+               [&](const ReadOnlyCommand& entry) {
+                   return matches(invocation, entry);
+               })
+        || std::any_of(
+            shared.begin(), shared.end(), [&](const ReadOnlyCommand& entry) {
+                return matches(invocation, entry);
+            });
 }
 
 } // namespace imza

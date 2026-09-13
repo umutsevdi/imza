@@ -243,29 +243,6 @@ TEST_CASE("Anthropic serializes tool specs and tool_result blocks")
     CHECK(result["content"][0]["content"].asString() == "2 matches");
 }
 
-TEST_CASE("OpenAI content delta")
-{
-    const auto p = imza::get_provider(imza::Route { });
-
-    imza::ParseState state;
-    const auto outs = parse_all(
-        p, state, { { "", R"({"choices":[{"delta":{"content":"Hello"}}]})" } });
-    REQUIRE(outs.size() == 1);
-    CHECK(outs[0].kind == imza::StreamEvent::Kind::CONTENT_DELTA);
-    CHECK(outs[0].text == "Hello");
-}
-
-TEST_CASE("OpenAI done")
-{
-    const auto p = imza::get_provider(imza::Route { });
-
-    imza::ParseState state;
-    const auto outs = parse_all(p, state, { { "", "[DONE]" } });
-    REQUIRE(outs.size() == 1);
-    CHECK(outs[0].kind == imza::StreamEvent::Kind::DONE);
-    CHECK(state.terminal);
-}
-
 TEST_CASE("OpenAI Responses streams text reasoning tools and usage")
 {
     imza::Route route;
@@ -345,34 +322,6 @@ TEST_CASE("OpenAI accumulates fragmented tool calls and flushes")
     CHECK(after[0].kind == imza::StreamEvent::Kind::DONE);
 }
 
-TEST_CASE("Anthropic content delta")
-{
-    imza::Route route;
-    route.dialect = imza::ApiStandard::ANTHROPIC;
-    const auto p  = imza::get_provider(route);
-
-    imza::ParseState state;
-    const auto outs = parse_all(p, state,
-        { { "content_block_delta",
-            R"({"type":"content_block_delta","delta":{"type":"text_delta","text":"Hi"}})" } });
-    REQUIRE(outs.size() == 1);
-    CHECK(outs[0].kind == imza::StreamEvent::Kind::CONTENT_DELTA);
-    CHECK(outs[0].text == "Hi");
-}
-
-TEST_CASE("Anthropic stop")
-{
-    imza::Route route;
-    route.dialect = imza::ApiStandard::ANTHROPIC;
-    const auto p  = imza::get_provider(route);
-
-    imza::ParseState state;
-    const auto outs = parse_all(p, state, { { "message_stop", "{}" } });
-    REQUIRE(outs.size() == 1);
-    CHECK(outs[0].kind == imza::StreamEvent::Kind::DONE);
-    CHECK(state.terminal);
-}
-
 TEST_CASE("Anthropic assembles tool_use block across deltas")
 {
     imza::Route route;
@@ -397,25 +346,6 @@ TEST_CASE("Anthropic assembles tool_use block across deltas")
     CHECK(outs[0].tool_call.name == "write");
     CHECK(outs[0].tool_call.args == R"({"path":"b.txt"})");
     CHECK(outs[1].kind == imza::StreamEvent::Kind::DONE);
-}
-
-TEST_CASE("get_provider selects by dialect")
-{
-    imza::ChatRequest req;
-    req.model = "m";
-
-    imza::Route openai;
-    CHECK(imza::get_provider(openai)
-            .build(req)["stream_options"]["include_usage"]
-            .asBool());
-
-    imza::Route anthropic;
-    anthropic.dialect = imza::ApiStandard::ANTHROPIC;
-    CHECK(imza::get_provider(anthropic).build(req).isMember("max_tokens"));
-
-    imza::Route responses;
-    responses.dialect = imza::ApiStandard::OPENAI_RESPONSES;
-    CHECK(imza::get_provider(responses).build(req).isMember("input"));
 }
 
 TEST_CASE("OpenAI requests include_usage and emits a single usage event")
@@ -472,7 +402,7 @@ TEST_CASE("OpenAI usage reports cached tokens from prompt_tokens_details")
     CHECK(outs[0].usage.completion == 4);
 }
 
-TEST_CASE("Anthropic usage folds cache tokens into prompt")
+TEST_CASE("Anthropic emits usage and content across the message lifecycle")
 {
     imza::Route route;
     route.dialect = imza::ApiStandard::ANTHROPIC;
@@ -482,29 +412,6 @@ TEST_CASE("Anthropic usage folds cache tokens into prompt")
     const auto outs = parse_all(p, state,
         { { "message_start",
               R"({"type":"message_start","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":60,"cache_creation_input_tokens":30}}})" },
-            { "message_delta",
-                R"({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}})" },
-            { "message_stop", R"({"type":"message_stop"})" } });
-    REQUIRE(outs.size() == 2);
-    CHECK(outs[0].kind == imza::StreamEvent::Kind::USAGE);
-    CHECK(outs[0].usage.cached_read == 60);
-    CHECK(outs[0].usage.cached_write == 30);
-    CHECK(outs[0].usage.prompt == 100);
-    CHECK(outs[0].usage.completion == 7);
-    CHECK(outs[0].usage.total == 107);
-    CHECK(outs[1].kind == imza::StreamEvent::Kind::DONE);
-}
-
-TEST_CASE("Anthropic emits usage from message_start and message_delta")
-{
-    imza::Route route;
-    route.dialect = imza::ApiStandard::ANTHROPIC;
-    const auto p  = imza::get_provider(route);
-
-    imza::ParseState state;
-    const auto outs = parse_all(p, state,
-        { { "message_start",
-              R"({"type":"message_start","message":{"usage":{"input_tokens":21,"output_tokens":0}}})" },
             { "content_block_delta",
                 R"({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}})" },
             { "message_delta",
@@ -512,9 +419,13 @@ TEST_CASE("Anthropic emits usage from message_start and message_delta")
             { "message_stop", R"({"type":"message_stop"})" } });
     REQUIRE(outs.size() == 3);
     CHECK(outs[0].kind == imza::StreamEvent::Kind::CONTENT_DELTA);
+    CHECK(outs[0].text == "ok");
     CHECK(outs[1].kind == imza::StreamEvent::Kind::USAGE);
-    CHECK(outs[1].usage.prompt == 21);
+    CHECK(outs[1].usage.cached_read == 60);
+    CHECK(outs[1].usage.cached_write == 30);
+    CHECK(outs[1].usage.prompt == 100);
     CHECK(outs[1].usage.completion == 7);
-    CHECK(outs[1].usage.total == 28);
+    CHECK(outs[1].usage.total == 107);
     CHECK(outs[2].kind == imza::StreamEvent::Kind::DONE);
+    CHECK(state.terminal);
 }

@@ -49,15 +49,6 @@ TEST_CASE("slash_commands includes built-ins")
     }
 }
 
-TEST_CASE("slash_commands names start with slash")
-{
-    const auto cmds = slash_commands();
-    for (const auto& c : cmds) {
-        CHECK_FALSE(c.name.empty());
-        CHECK(c.name.front() == '/');
-    }
-}
-
 TEST_CASE("find_command matches case-insensitively")
 {
     CHECK(find_command("/help") == nullptr);

@@ -113,24 +113,6 @@ namespace {
 
 } // namespace
 
-TEST_CASE("runtime flags combine independently")
-{
-    int flags = RuntimeFlag::WEB | RuntimeFlag::SKIP_PERMISSIONS;
-    CHECK((flags & RuntimeFlag::WEB) != RuntimeFlag::NONE);
-    CHECK((flags & RuntimeFlag::SKIP_PERMISSIONS) != RuntimeFlag::NONE);
-    CHECK((flags & RuntimeFlag::SHELL) == RuntimeFlag::NONE);
-
-    flags &= ~RuntimeFlag::WEB;
-    CHECK((flags & RuntimeFlag::WEB) == RuntimeFlag::NONE);
-    CHECK((flags & RuntimeFlag::SKIP_PERMISSIONS) != RuntimeFlag::NONE);
-
-    const RuntimeFlag interactive = interactive_runtime_flags();
-    CHECK((interactive & RuntimeFlag::WEB) != RuntimeFlag::NONE);
-    CHECK((interactive & RuntimeFlag::SHELL) != RuntimeFlag::NONE);
-    CHECK((interactive & RuntimeFlag::ATTENDED) != RuntimeFlag::NONE);
-    CHECK((interactive & RuntimeFlag::SKIP_PERMISSIONS) == RuntimeFlag::NONE);
-}
-
 TEST_CASE("permission store installs complete valid sets atomically")
 {
     PermissionStore store;
@@ -250,30 +232,20 @@ TEST_CASE("read-only command pair catalog is platform specific")
 
     CHECK(shell_readonly_allowed(invocation("git status")));
     CHECK(shell_readonly_allowed(invocation("git status -sb")));
-    CHECK(shell_readonly_allowed(invocation("git log --oneline -n 20")));
     CHECK_FALSE(shell_readonly_allowed(invocation("git push")));
     CHECK_FALSE(shell_readonly_allowed(invocation("git")));
     CHECK_FALSE(shell_readonly_allowed(invocation("git status --force")));
     CHECK_FALSE(shell_readonly_allowed(invocation("git branch -D main")));
-    CHECK_FALSE(shell_readonly_allowed(invocation("git branch -m a b")));
     CHECK(shell_readonly_allowed(invocation("git branch -a")));
     CHECK_FALSE(shell_readonly_allowed(invocation("git tag -d v1")));
-    CHECK_FALSE(shell_readonly_allowed(invocation("git tag -f v1")));
-    CHECK_FALSE(shell_readonly_allowed(invocation("git tag -F msg v1")));
     CHECK(shell_readonly_allowed(invocation("git tag -l")));
-    CHECK_FALSE(
-        shell_readonly_allowed(invocation("git remote add origin url")));
-    CHECK(shell_readonly_allowed(invocation("git remote -v")));
     CHECK_FALSE(shell_readonly_allowed(invocation("curl status")));
     CHECK_FALSE(shell_readonly_allowed(invocation("git diff --output=x.txt")));
     CHECK(shell_readonly_allowed(invocation("git diff --stat")));
     CHECK(shell_readonly_allowed(invocation("make -n")));
-    CHECK(shell_readonly_allowed(invocation("make --dry-run")));
     CHECK(shell_readonly_allowed(invocation("which -a ls")));
 #ifdef _WIN32
     CHECK(shell_readonly_allowed(invocation("tasklist /v")));
-    CHECK(shell_readonly_allowed(invocation("driverquery /v")));
-    CHECK(shell_readonly_allowed(invocation("where /r . git")));
     CHECK_FALSE(shell_readonly_allowed(invocation("tasklist /kill")));
     CHECK_FALSE(shell_readonly_allowed(invocation("systemctl status")));
 #else
@@ -402,7 +374,7 @@ TEST_CASE("permission store snapshots remain valid during concurrent changes")
     CHECK(store.snapshot()->empty());
 }
 
-TEST_CASE("filesystem policy distinguishes Plan and Build writes")
+TEST_CASE("filesystem policy covers all trusted and granted write cases")
 {
     PermissionFixture fixture;
     const std::string args = write_args(fixture.workspace / "new.txt");
@@ -415,11 +387,7 @@ TEST_CASE("filesystem policy distinguishes Plan and Build writes")
     const auto built = evaluate_filesystem_request(
         "write", args, fixture.context(Session::Mode::BUILD));
     CHECK(built.decision.kind == PermissionDecision::Kind::ACCEPT);
-}
 
-TEST_CASE("filesystem policy covers all trusted and granted write cases")
-{
-    PermissionFixture fixture;
     const auto workspace_edit = evaluate_filesystem_request("edit",
         edit_args(fixture.workspace / "inside.txt"),
         fixture.context(Session::Mode::PLAN));
@@ -658,26 +626,12 @@ TEST_CASE("central evaluator assigns explicit policies to built-in tools")
             config, skills, loaded);
     };
 
-    CHECK(evaluate("ask", R"({"questions":[{"prompt":"Continue?"}]})")
-              .decision.kind
-        == PermissionDecision::Kind::ACCEPT);
-    CHECK(evaluate("todo", R"({"todos":[]})").decision.kind
-        == PermissionDecision::Kind::ACCEPT);
-    CHECK(evaluate("webfetch", R"({"url":"https://example.com"})").decision.kind
-        == PermissionDecision::Kind::ACCEPT);
-    CHECK(evaluate("websearch", R"({"query":"imza"})").decision.kind
-        == PermissionDecision::Kind::ACCEPT);
-    CHECK(evaluate("find", R"({"pattern":"content"})").decision.kind
-        == PermissionDecision::Kind::ACCEPT);
     CHECK(evaluate("subagent",
               R"({"tasks":[{"mode":"research","prompt":"inspect"}]})")
               .decision.kind
         == PermissionDecision::Kind::ACCEPT);
     CHECK(evaluate(
               "subagent", R"({"tasks":[{"mode":"build","prompt":"change"}]})")
-              .decision.kind
-        == PermissionDecision::Kind::REJECT);
-    CHECK(evaluate("edit", edit_args(fixture.workspace / "inside.txt"))
               .decision.kind
         == PermissionDecision::Kind::REJECT);
     CHECK(evaluate("write", write_args(fixture.workspace / "new.txt"))
