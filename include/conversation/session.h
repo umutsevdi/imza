@@ -24,18 +24,6 @@
 
 namespace imza {
 
-inline constexpr std::string_view PLAN_REMINDER_TAG
-    = "<system-reminder id=\"plan-mode\">";
-inline constexpr std::string_view BUILD_REMINDER_TAG
-    = "<system-reminder id=\"build-mode\">";
-
-// Finished reminder texts handed to build_history; empty members suppress
-// injection of that reminder.
-struct ModeReminderTexts {
-    std::string plan;
-    std::string build;
-};
-
 struct UserTurn {
     std::string text;
     std::vector<FileAttachment> attachments;
@@ -187,8 +175,7 @@ public:
     void apply(const StreamEvent& ev, const ModelPricing& pricing);
     bool finish_session(std::string error);
     std::vector<Message> build_history(std::string_view system_prompt,
-        ApiStandard dialect                = ApiStandard::OPENAI,
-        const ModeReminderTexts& reminders = { }) const;
+        ApiStandard dialect = ApiStandard::OPENAI) const;
 
     std::optional<AssistantTurn> last_assistant() const;
     void reset_reasoning();

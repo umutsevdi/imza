@@ -135,10 +135,9 @@ namespace {
         const std::string title_input = text;
         state.session->clear_interrupt();
         state.session->begin_send(std::move(text), std::move(attachments));
-        state.runner->spawn(state.session->build_history(
-                                full_system_prompt(state), settings.dialect,
-                                { plan_mode_reminder(*state.prompts),
-                                    build_mode_reminder(*state.prompts) }),
+        state.runner->spawn(
+            state.session->build_history(
+                full_system_prompt(state, settings.mode), settings.dialect),
             std::move(settings));
         if (generate_title && !state.runner->has_stream_override()) {
             const auto title_selection

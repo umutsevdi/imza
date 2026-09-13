@@ -17,6 +17,7 @@ TEST_CASE("base system prompt without environment")
     CHECK(prompt.find("imza") != std::string::npos);
     CHECK(prompt.find("PLAN") != std::string::npos);
     CHECK(prompt.find("BUILD") != std::string::npos);
+    CHECK(prompt.find("<runtime-mode name=") == std::string::npos);
     CHECK(prompt.find("<env>") == std::string::npos);
     CHECK(prompt.find("Available tools") == std::string::npos);
 }

@@ -12,8 +12,6 @@ PROMPT_NAMES: tuple[str, ...] = (
     "subagent_research",
     "subagent_build",
     "title",
-    "reminder_plan",
-    "reminder_build",
     "compaction",
     "review",
     "review_plan",
