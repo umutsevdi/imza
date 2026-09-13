@@ -334,6 +334,11 @@ void on_turn_finished(ApplicationState& state, std::string error)
     if (!ended) {
         return;
     }
+    if (state.agent_label.empty()
+        && (state.runtime_flags & RuntimeFlag::ATTENDED) != RuntimeFlag::NONE
+        && state.notify_turn_finished) {
+        state.notify_turn_finished();
+    }
     present_front(state);
     drain_queued(state);
 }

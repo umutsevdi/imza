@@ -13,6 +13,7 @@
 #include <ftxui/screen/terminal.hpp>
 
 #include <algorithm>
+#include <cstdlib>
 #include <functional>
 #include <iostream>
 #include <print>
@@ -28,6 +29,15 @@ namespace imza {
 namespace {
 
     using namespace ftxui;
+
+    std::string terminal_notification_sequence(
+        bool osc9_supported, std::string_view message)
+    {
+        if (!osc9_supported) {
+            return "\a";
+        }
+        return "\x1B]9;" + std::string(message) + "\a";
+    }
 
     void print_session_saved_box(const SessionStore& store)
     {
@@ -81,6 +91,20 @@ namespace {
 #else
         return isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
 #endif
+    }
+
+    bool terminal_supports_osc9()
+    {
+        const char* term_program = std::getenv("TERM_PROGRAM");
+        if (term_program != nullptr) {
+            const std::string_view program(term_program);
+            if (program == "iTerm.app" || program == "WezTerm"
+                || program == "ghostty") {
+                return true;
+            }
+        }
+        const char* windows_terminal = std::getenv("WT_SESSION");
+        return windows_terminal != nullptr && *windows_terminal != '\0';
     }
 
     bool is_reverse_tab(const Event& event)
@@ -312,6 +336,11 @@ int run_repl(
 
     ScreenInteractive screen = ScreenInteractive::FullscreenAlternateScreen();
     screen.ForceHandleCtrlC(false);
+    state->notify_turn_finished = [] {
+        std::cout << terminal_notification_sequence(
+            terminal_supports_osc9(), "Imza finished")
+                  << std::flush;
+    };
     auto task_subscription = main_thread.subscribe([&screen, &main_thread] {
         screen.Post([&main_thread] { main_thread.drain(); });
         screen.PostEvent(Event::Custom);

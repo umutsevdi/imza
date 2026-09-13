@@ -41,6 +41,7 @@ comments, then send the findings directly back to Plan mode.
 - Shell-aware, scoped permission controls
 - Bring-your-own-model support
 - Persistent sessions, transcripts, and automatic context compaction
+- Terminal notifications when an attended agent turn finishes
 
 ## Bring Your Own Model
 
@@ -101,6 +102,7 @@ session.
 - [X] Syntax highlighting
 - [X] Headless mode
 - [X] Shell-aware permissions with program and subcommand grants
+- [X] Notifications
 
 ### Roadmap
 - [ ] MCP
@@ -109,7 +111,6 @@ session.
 - [ ] Image or other multimodal prompt attachments
 - [ ] Monthly usage analytics (local)
 - [ ] Python based extensions
-- [ ] Notifications
 
 ## Installation
 

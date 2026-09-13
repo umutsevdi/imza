@@ -197,6 +197,25 @@ TEST_CASE("plan requests omit edit and write tools")
         [](const imza::ToolSpec& tool) { return tool.name == "read"; }));
 }
 
+TEST_CASE("attended root turn notifies once after completion")
+{
+    Env env;
+    int notifications               = 0;
+    env.state->notify_turn_finished = [&notifications] { ++notifications; };
+    env.stream
+        = [](const imza::ChatRequest&, const imza::StreamCallback& callback) {
+              callback(imza::make_done_event());
+              return imza::Status::OK;
+          };
+
+    imza::submit(*env.state, "inspect");
+    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    CHECK(notifications == 1);
+
+    imza::on_turn_finished(*env.state, "");
+    CHECK(notifications == 1);
+}
+
 TEST_CASE("plan rejects fabricated write calls")
 {
     Env env;
