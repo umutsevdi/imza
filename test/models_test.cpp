@@ -4,94 +4,96 @@
 
 namespace {
 
-TEST_CASE("parse_models_response reads plain OpenAI fixture")
+TEST_CASE("parse_models_response reads and filters successful response shapes")
 {
-    const std::string body = R"({"data": [
-        {"id": "gpt-4o"},
-        {"id": "gpt-4o-mini"}
-    ]})";
-    std::vector<imza::ModelInfo> out;
-    REQUIRE(imza::parse_models_response(body, out) == imza::Status::OK);
-    REQUIRE(out.size() == 2);
-    CHECK(out[0].id == "gpt-4o");
-    CHECK(out[0].name.empty());
-    CHECK_FALSE(out[0].context_length.has_value());
-}
+    struct ExpectedModel {
+        const char* id;
+        const char* name;
+        std::optional<std::uint64_t> context_length;
+    };
+    struct Scenario {
+        const char* name;
+        const char* body;
+        std::vector<ExpectedModel> expected;
+        bool check_metadata;
+    };
+    const std::vector<Scenario> scenarios {
+        { "plain OpenAI data",
+            R"({"data": [
+                {"id": "gpt-4o"},
+                {"id": "gpt-4o-mini"}
+            ]})",
+            { { "gpt-4o", "", std::nullopt },
+                { "gpt-4o-mini", "", std::nullopt } },
+            true },
+        { "rich OpenRouter data sorted by id",
+            R"({"data": [
+                {"id": "z-ai/glm-5.3", "name": "GLM 5.3", "context_length": 204800},
+                {"id": "openai/gpt-5.5", "name": "GPT 5.5"}
+            ]})",
+            { { "openai/gpt-5.5", "GPT 5.5", std::nullopt },
+                { "z-ai/glm-5.3", "GLM 5.3", 204800 } },
+            true },
+        { "Anthropic-shaped data",
+            R"({"data": [
+                {"id": "claude-sonnet-5", "display_name": "Claude Sonnet 5"},
+                {"id": "claude-haiku-4.5"}
+            ]})",
+            { { "claude-haiku-4.5", "", std::nullopt },
+                { "claude-sonnet-5", "", std::nullopt } },
+            false },
+        { "deny-listed ids removed",
+            R"({"data": [
+                {"id": "gpt-4o"},
+                {"id": "openai/dall-e-3"},
+                {"id": "text-embedding-3-large"},
+                {"id": "whisper-large-v3"},
+                {"id": "tts-1"},
+                {"id": "text-moderation-latest"},
+                {"id": "moderation-model-x"},
+                {"id": "claude-sonnet-5"}
+            ]})",
+            { { "claude-sonnet-5", "", std::nullopt },
+                { "gpt-4o", "", std::nullopt } },
+            false },
+        { "entries without ids skipped",
+            R"({"data": [
+                {"name": "no id here"},
+                "a string entry",
+                {"id": "real"}
+            ]})",
+            { { "real", "", std::nullopt } }, false },
+    };
 
-TEST_CASE("parse_models_response reads rich OpenRouter fixture")
-{
-    const std::string body = R"({"data": [
-        {"id": "z-ai/glm-5.3", "name": "GLM 5.3", "context_length": 204800},
-        {"id": "openai/gpt-5.5", "name": "GPT 5.5"}
-    ]})";
-    std::vector<imza::ModelInfo> out;
-    REQUIRE(imza::parse_models_response(body, out) == imza::Status::OK);
-    REQUIRE(out.size() == 2);
-    CHECK(out[0].id == "openai/gpt-5.5");
-    CHECK(out[0].name == "GPT 5.5");
-    CHECK_FALSE(out[0].context_length.has_value());
-    CHECK(out[1].id == "z-ai/glm-5.3");
-    CHECK(out[1].name == "GLM 5.3");
-    REQUIRE(out[1].context_length.has_value());
-    CHECK(*out[1].context_length == 204800);
-}
-
-TEST_CASE("parse_models_response reads Anthropic-shaped fixture")
-{
-    const std::string body = R"({"data": [
-        {"id": "claude-sonnet-5", "display_name": "Claude Sonnet 5"},
-        {"id": "claude-haiku-4.5"}
-    ]})";
-    std::vector<imza::ModelInfo> out;
-    REQUIRE(imza::parse_models_response(body, out) == imza::Status::OK);
-    REQUIRE(out.size() == 2);
-    CHECK(out[0].id == "claude-haiku-4.5");
-    CHECK(out[1].id == "claude-sonnet-5");
-}
-
-TEST_CASE("parse_models_response drops deny-listed ids")
-{
-    const std::string body = R"({"data": [
-        {"id": "gpt-4o"},
-        {"id": "openai/dall-e-3"},
-        {"id": "text-embedding-3-large"},
-        {"id": "whisper-large-v3"},
-        {"id": "tts-1"},
-        {"id": "text-moderation-latest"},
-        {"id": "moderation-model-x"},
-        {"id": "claude-sonnet-5"}
-    ]})";
-    std::vector<imza::ModelInfo> out;
-    REQUIRE(imza::parse_models_response(body, out) == imza::Status::OK);
-    REQUIRE(out.size() == 2);
-    CHECK(out[0].id == "claude-sonnet-5");
-    CHECK(out[1].id == "gpt-4o");
+    for (const auto& scenario : scenarios) {
+        CAPTURE(scenario.name);
+        std::vector<imza::ModelInfo> out;
+        REQUIRE(imza::parse_models_response(scenario.body, out)
+            == imza::Status::OK);
+        REQUIRE(out.size() == scenario.expected.size());
+        for (std::size_t i = 0; i < out.size(); ++i) {
+            CAPTURE(i);
+            CHECK(out[i].id == scenario.expected[i].id);
+            if (scenario.check_metadata) {
+                CHECK(out[i].name == scenario.expected[i].name);
+                CHECK(out[i].context_length
+                    == scenario.expected[i].context_length);
+            }
+        }
+    }
 }
 
 TEST_CASE("parse_models_response rejects malformed bodies")
 {
-    std::vector<imza::ModelInfo> out;
-    CHECK(imza::parse_models_response("not json", out)
-        == imza::Status::JSON_ERROR);
-    CHECK(imza::parse_models_response("[1,2,3]", out)
-        == imza::Status::JSON_ERROR);
-    CHECK(imza::parse_models_response(R"({"models": []})", out)
-        == imza::Status::JSON_ERROR);
-    CHECK(imza::parse_models_response(R"({"data": {}})", out)
-        == imza::Status::JSON_ERROR);
-}
+    const std::vector<const char*> bodies { "not json", "[1,2,3]",
+        R"({"models": []})", R"({"data": {}})" };
 
-TEST_CASE("parse_models_response skips entries without id")
-{
-    const std::string body = R"({"data": [
-        {"name": "no id here"},
-        "a string entry",
-        {"id": "real"}
-    ]})";
-    std::vector<imza::ModelInfo> out;
-    REQUIRE(imza::parse_models_response(body, out) == imza::Status::OK);
-    REQUIRE(out.size() == 1);
-    CHECK(out[0].id == "real");
+    for (const char* body : bodies) {
+        CAPTURE(body);
+        std::vector<imza::ModelInfo> out;
+        CHECK(
+            imza::parse_models_response(body, out) == imza::Status::JSON_ERROR);
+    }
 }
 
 } // namespace

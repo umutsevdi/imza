@@ -3,6 +3,7 @@
 
 #include <unistd.h>
 
+#include <array>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -397,38 +398,35 @@ TEST_CASE("config preserves default model with a variant override")
     CHECK(research.variant == "high");
 }
 
-TEST_CASE("load_config rejects subagent with unknown connection")
+TEST_CASE("load_config rejects invalid nested configuration values")
 {
-    const auto path = temp_file("invalid-subagents.json");
-    {
-        std::ofstream out(path);
-        out << R"({"providers": [], "models": {"basic": {
-            "provider": "missing", "model": "small", "reasoning_effort": "low"}}})";
-    }
-    imza::Config cfg;
-    CHECK(imza::load_config(path, cfg) == imza::Status::CONFIG_ERROR);
-}
-
-TEST_CASE("load_config rejects invalid subagent variant")
-{
-    const auto path = temp_file("invalid-subagent-variant.json");
-    {
-        std::ofstream out(path);
-        out << R"({"providers": [{"id": "p"}],
+    struct InvalidConfigCase {
+        const char* name;
+        const char* filename;
+        const char* json;
+    };
+    const std::array cases {
+        InvalidConfigCase { "subagent with unknown connection",
+            "invalid-subagents.json",
+            R"({"providers": [], "models": {"basic": {
+            "provider": "missing", "model": "small", "reasoning_effort": "low"}}})" },
+        InvalidConfigCase { "invalid subagent variant",
+            "invalid-subagent-variant.json",
+            R"({"providers": [{"id": "p"}],
             "models": {"researcher": {"provider": "p", "model": "small",
-            "reasoning_effort": "maximum"}}})";
-    }
-    imza::Config cfg;
-    CHECK(imza::load_config(path, cfg) == imza::Status::CONFIG_ERROR);
-}
+            "reasoning_effort": "maximum"}}})" },
+        InvalidConfigCase { "invalid skill policy", "bad-skills.json",
+            R"({"skills":{"global":{"x":"maybe"}}})" },
+    };
 
-TEST_CASE("config rejects invalid skill policies")
-{
-    const auto path = temp_file("bad-skills.json");
-    {
-        std::ofstream out(path);
-        out << R"({"skills":{"global":{"x":"maybe"}}})";
+    for (const auto& invalid : cases) {
+        CAPTURE(invalid.name);
+        const auto path = temp_file(invalid.filename);
+        {
+            std::ofstream out(path);
+            out << invalid.json;
+        }
+        imza::Config cfg;
+        CHECK(imza::load_config(path, cfg) == imza::Status::CONFIG_ERROR);
     }
-    imza::Config cfg;
-    CHECK(imza::load_config(path, cfg) == imza::Status::CONFIG_ERROR);
 }

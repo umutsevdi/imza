@@ -42,16 +42,12 @@ TEST_CASE("modal_answer_markdown renders Q/A pairs with prompt")
     CHECK(md.find("—") != std::string::npos);
 }
 
-TEST_CASE("tool_args_summary flattens object args to key=value pairs")
+TEST_CASE("tool_args_summary formats object and non-object args")
 {
     CHECK(imza::tool_args_summary(R"({"path":"notes.txt","n":3})")
         == "n=3 path=notes.txt");
     CHECK(imza::tool_args_summary(R"({"flag":true})") == "flag=true");
     CHECK(imza::tool_args_summary(R"({"path":null})") == "path=null");
-}
-
-TEST_CASE("tool_args_summary passes non-object args through verbatim")
-{
     CHECK(imza::tool_args_summary("ls -la") == "ls -la");
     CHECK(imza::tool_args_summary("{}") == "{}");
 }

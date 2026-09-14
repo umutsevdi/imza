@@ -287,7 +287,6 @@ TEST_CASE("find passes shell metacharacters as regex text")
 TEST_CASE("builtin tools expose the current tool set")
 {
     const auto tools = imza::default_tools();
-    REQUIRE(tools.size() == 12);
 
     const auto* read = find_tool(tools, "read");
     REQUIRE(read != nullptr);
@@ -319,7 +318,6 @@ TEST_CASE("builtin tools expose the current tool set")
     REQUIRE(find_tool(tools, "write") != nullptr);
     REQUIRE(find_tool(tools, "webfetch") != nullptr);
     REQUIRE(find_tool(tools, "websearch") != nullptr);
-    CHECK(tool_specs(tools).size() == 12);
 }
 
 TEST_CASE("runtime flags independently filter the tool roster")

@@ -2,6 +2,7 @@
 
 #include <unistd.h>
 
+#include <array>
 #include <ctime>
 #include <fstream>
 
@@ -189,7 +190,7 @@ TEST_CASE("catalog_base uses only the catalog URL")
     CHECK(imza::catalog_base(explicit_api) == "https://openrouter.ai/api/v1");
 }
 
-TEST_CASE("resolve_route derives endpoints per dialect")
+TEST_CASE("resolve_route covers connection and dialect scenarios")
 {
     imza::Catalog catalog;
     imza::CachedProvider openrouter;
@@ -198,102 +199,95 @@ TEST_CASE("resolve_route derives endpoints per dialect")
     openrouter.npm                  = "@ai-sdk/openai-compatible";
     catalog.providers["openrouter"] = openrouter;
 
-    imza::Connection conn;
-    conn.id      = "openrouter";
-    conn.api_key = "sk-or";
+    imza::CachedProvider anthropic;
+    anthropic.name                 = "Anthropic";
+    anthropic.api                  = "https://api.anthropic.com/v1";
+    anthropic.npm                  = "@ai-sdk/anthropic";
+    catalog.providers["anthropic"] = anthropic;
 
-    const imza::Route openai
-        = imza::resolve_route(conn, catalog, imza::ApiStandard::OPENAI);
-    CHECK(openai.endpoint == "https://openrouter.ai/api/v1/chat/completions");
-    CHECK(openai.api == "https://openrouter.ai/api/v1");
-    CHECK(openai.auth == imza::AuthType::BEARER);
-    CHECK(openai.api_key == "sk-or");
+    struct RouteCase {
+        const char* name;
+        const char* connection_id;
+        const char* connection_endpoint;
+        const char* api_key;
+        const char* account_id;
+        imza::ApiStandard requested_dialect;
+        const char* endpoint;
+        const char* api;
+        imza::ApiStandard dialect;
+        imza::AuthType auth;
+    };
+    const std::array cases {
+        RouteCase { "catalog OpenAI", "openrouter", "", "sk-or", "",
+            imza::ApiStandard::OPENAI,
+            "https://openrouter.ai/api/v1/chat/completions",
+            "https://openrouter.ai/api/v1", imza::ApiStandard::OPENAI,
+            imza::AuthType::BEARER },
+        RouteCase { "catalog Anthropic dialect", "openrouter", "", "sk-or", "",
+            imza::ApiStandard::ANTHROPIC,
+            "https://openrouter.ai/api/v1/messages",
+            "https://openrouter.ai/api/v1", imza::ApiStandard::ANTHROPIC,
+            imza::AuthType::BEARER },
+        RouteCase { "catalog responses dialect", "openrouter", "", "sk-or", "",
+            imza::ApiStandard::OPENAI_RESPONSES,
+            "https://openrouter.ai/api/v1/responses",
+            "https://openrouter.ai/api/v1", imza::ApiStandard::OPENAI_RESPONSES,
+            imza::AuthType::BEARER },
+        RouteCase { "Anthropic provider OpenAI dialect", "anthropic", "",
+            "sk-ant", "", imza::ApiStandard::OPENAI,
+            "https://api.anthropic.com/v1/chat/completions",
+            "https://api.anthropic.com/v1", imza::ApiStandard::OPENAI,
+            imza::AuthType::ANTHROPIC },
+        RouteCase { "Anthropic provider native dialect", "anthropic", "",
+            "sk-ant", "", imza::ApiStandard::ANTHROPIC,
+            "https://api.anthropic.com/v1/messages",
+            "https://api.anthropic.com/v1", imza::ApiStandard::ANTHROPIC,
+            imza::AuthType::ANTHROPIC },
+        RouteCase { "custom endpoint without key", "custom",
+            "http://localhost:1234/v1/chat/completions", "", "",
+            imza::ApiStandard::OPENAI,
+            "http://localhost:1234/v1/chat/completions",
+            "http://localhost:1234/v1", imza::ApiStandard::OPENAI,
+            imza::AuthType::NONE },
+        RouteCase { "custom endpoint with key", "custom",
+            "http://localhost:1234/v1/chat/completions", "secret", "",
+            imza::ApiStandard::ANTHROPIC,
+            "http://localhost:1234/v1/chat/completions",
+            "http://localhost:1234/v1", imza::ApiStandard::OPENAI,
+            imza::AuthType::BEARER },
+        RouteCase { "custom responses endpoint", "custom",
+            "http://localhost:1234/v1/chat/completions", "secret", "",
+            imza::ApiStandard::OPENAI_RESPONSES,
+            "http://localhost:1234/v1/responses", "http://localhost:1234/v1",
+            imza::ApiStandard::OPENAI_RESPONSES, imza::AuthType::BEARER },
+        RouteCase { "unknown provider", "ghost", "", "", "",
+            imza::ApiStandard::OPENAI, "", "", imza::ApiStandard::OPENAI,
+            imza::AuthType::BEARER },
+        RouteCase { "OpenAI subscription", "openai-subscription", "", "access",
+            "account", imza::ApiStandard::ANTHROPIC,
+            "https://chatgpt.com/backend-api/codex/responses",
+            "https://chatgpt.com/backend-api/codex",
+            imza::ApiStandard::OPENAI_RESPONSES,
+            imza::AuthType::OPENAI_SUBSCRIPTION },
+    };
 
-    const imza::Route anthropic
-        = imza::resolve_route(conn, catalog, imza::ApiStandard::ANTHROPIC);
-    CHECK(anthropic.endpoint == "https://openrouter.ai/api/v1/messages");
+    for (const auto& route_case : cases) {
+        CAPTURE(route_case.name);
+        imza::Connection connection;
+        connection.id         = route_case.connection_id;
+        connection.endpoint   = route_case.connection_endpoint;
+        connection.api_key    = route_case.api_key;
+        connection.account_id = route_case.account_id;
 
-    const imza::Route responses = imza::resolve_route(
-        conn, catalog, imza::ApiStandard::OPENAI_RESPONSES);
-    CHECK(responses.endpoint == "https://openrouter.ai/api/v1/responses");
-    CHECK(responses.dialect == imza::ApiStandard::OPENAI_RESPONSES);
-}
-
-TEST_CASE("resolve_route routes anthropic providers with x-api-key")
-{
-    imza::Catalog catalog;
-    imza::CachedProvider anthropic_provider;
-    anthropic_provider.name        = "Anthropic";
-    anthropic_provider.api         = "https://api.anthropic.com/v1";
-    anthropic_provider.npm         = "@ai-sdk/anthropic";
-    catalog.providers["anthropic"] = anthropic_provider;
-
-    imza::Connection conn;
-    conn.id      = "anthropic";
-    conn.api_key = "sk-ant";
-
-    const imza::Route openai
-        = imza::resolve_route(conn, catalog, imza::ApiStandard::OPENAI);
-    CHECK(openai.endpoint == "https://api.anthropic.com/v1/chat/completions");
-    CHECK(openai.api == "https://api.anthropic.com/v1");
-    CHECK(openai.auth == imza::AuthType::ANTHROPIC);
-
-    const imza::Route anthropic
-        = imza::resolve_route(conn, catalog, imza::ApiStandard::ANTHROPIC);
-    CHECK(anthropic.endpoint == "https://api.anthropic.com/v1/messages");
-}
-
-TEST_CASE("resolve_route uses stored endpoint for local and custom")
-{
-    imza::Catalog catalog;
-    imza::Connection conn;
-    conn.id       = "custom";
-    conn.endpoint = "http://localhost:1234/v1/chat/completions";
-
-    const imza::Route route
-        = imza::resolve_route(conn, catalog, imza::ApiStandard::OPENAI);
-    CHECK(route.endpoint == "http://localhost:1234/v1/chat/completions");
-    CHECK(route.api == "http://localhost:1234/v1");
-    CHECK(route.auth == imza::AuthType::NONE);
-
-    conn.api_key = "secret";
-    const imza::Route keyed
-        = imza::resolve_route(conn, catalog, imza::ApiStandard::ANTHROPIC);
-    CHECK(keyed.endpoint == "http://localhost:1234/v1/chat/completions");
-    CHECK(keyed.dialect == imza::ApiStandard::OPENAI);
-    CHECK(keyed.auth == imza::AuthType::BEARER);
-
-    const imza::Route responses = imza::resolve_route(
-        conn, catalog, imza::ApiStandard::OPENAI_RESPONSES);
-    CHECK(responses.endpoint == "http://localhost:1234/v1/responses");
-    CHECK(responses.dialect == imza::ApiStandard::OPENAI_RESPONSES);
-}
-
-TEST_CASE("resolve_route misses unknown providers")
-{
-    imza::Catalog catalog;
-    imza::Connection conn;
-    conn.id = "ghost";
-    const imza::Route route
-        = imza::resolve_route(conn, catalog, imza::ApiStandard::OPENAI);
-    CHECK(route.endpoint.empty());
-    CHECK(route.api.empty());
-}
-
-TEST_CASE("subscription routes use fixed endpoints and auth")
-{
-    imza::Catalog catalog;
-    imza::Connection openai;
-    openai.id         = "openai-subscription";
-    openai.api_key    = "access";
-    openai.account_id = "account";
-    const imza::Route openai_route
-        = imza::resolve_route(openai, catalog, imza::ApiStandard::ANTHROPIC);
-    CHECK(openai_route.endpoint
-        == "https://chatgpt.com/backend-api/codex/responses");
-    CHECK(openai_route.dialect == imza::ApiStandard::OPENAI_RESPONSES);
-    CHECK(openai_route.auth == imza::AuthType::OPENAI_SUBSCRIPTION);
-    CHECK(openai_route.account_id == "account");
+        const imza::Route route = imza::resolve_route(
+            connection, catalog, route_case.requested_dialect);
+        CHECK(route.endpoint == route_case.endpoint);
+        CHECK(route.api == route_case.api);
+        CHECK(route.dialect == route_case.dialect);
+        CHECK(route.auth == route_case.auth);
+        CHECK(route.api_key == route_case.api_key);
+        CHECK(route.account_id == route_case.account_id);
+    }
 }
 
 TEST_CASE("auth_headers by auth type")

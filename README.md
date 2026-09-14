@@ -131,7 +131,8 @@ sudo apt install build/*.deb     # Debian/Ubuntu
 >  Downloaded macOS packages are unsigned; right-click → Open on first launch
 >  to bypass Gatekeeper. 
 
-> Installed builds keep themselves up to date. Use `imza --update`. 
+> Installed builds check for new releases and show a notice when one is
+> available. Use `imza --update` to install it.
 
 > Prefer to skip the installer? The binary is at `./build/release/imza` after the
 > build step.

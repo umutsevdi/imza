@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
+#include <vector>
 
 #include "providers/catalog.h"
 #include "providers/pricing.h"
@@ -89,35 +90,40 @@ struct IsolatedCatalog {
 
 } // namespace
 
-TEST_CASE("pricing_table_from builds bare and provider-qualified keys")
+TEST_CASE("pricing_table_from builds expected entries")
 {
+    struct Scenario {
+        const char* name;
+        const char* key;
+        imza::ModelPricing expected;
+    };
+    const std::vector<Scenario> scenarios {
+        { "bare OpenAI id", "gpt-4o-mini",
+            { 0.00015, 0.00060, 0.000075, 0.0, 128000 } },
+        { "provider-qualified OpenAI id", "openai/gpt-4o-mini",
+            { 0.00015, 0.00060, 0.000075, 0.0, 128000 } },
+        { "bare Anthropic id", "claude-sonnet-4",
+            { 0.003, 0.015, 0.00030, 0.00375, 200000 } },
+        { "provider-qualified Anthropic id", "anthropic/claude-sonnet-4",
+            { 0.003, 0.015, 0.00030, 0.00375, 200000 } },
+        { "zero-cost model", "glm-5-flash", { 0.0, 0.0, 0.0, 0.0, 128000 } },
+    };
     const auto table = imza::pricing_table_from(test_catalog());
 
-    REQUIRE(table.count("gpt-4o-mini") == 1);
-    REQUIRE(table.count("openai/gpt-4o-mini") == 1);
-    const auto& mini = table.at("openai/gpt-4o-mini");
-    CHECK(mini.input_per_1k == doctest::Approx(0.00015));
-    CHECK(mini.output_per_1k == doctest::Approx(0.00060));
-    CHECK(mini.cache_read_per_1k == doctest::Approx(0.000075));
-    CHECK(mini.cache_write_per_1k == doctest::Approx(0.0));
-    CHECK(mini.context_limit == 128000);
-
-    REQUIRE(table.count("claude-sonnet-4") == 1);
-    REQUIRE(table.count("anthropic/claude-sonnet-4") == 1);
-    CHECK(table.at("anthropic/claude-sonnet-4").input_per_1k
-        == doctest::Approx(0.003));
-    CHECK(table.at("anthropic/claude-sonnet-4").cache_write_per_1k
-        == doctest::Approx(0.00375));
-}
-
-TEST_CASE("pricing_table_from keeps zero-cost models and drops costless ones")
-{
-    const auto table = imza::pricing_table_from(test_catalog());
-
-    REQUIRE(table.count("glm-5-flash") == 1);
-    CHECK(table.at("glm-5-flash").input_per_1k == 0.0);
-    CHECK(table.at("glm-5-flash").context_limit == 128000);
-
+    for (const auto& scenario : scenarios) {
+        CAPTURE(scenario.name);
+        REQUIRE(table.count(scenario.key) == 1);
+        const auto& actual = table.at(scenario.key);
+        CHECK(actual.input_per_1k
+            == doctest::Approx(scenario.expected.input_per_1k));
+        CHECK(actual.output_per_1k
+            == doctest::Approx(scenario.expected.output_per_1k));
+        CHECK(actual.cache_read_per_1k
+            == doctest::Approx(scenario.expected.cache_read_per_1k));
+        CHECK(actual.cache_write_per_1k
+            == doctest::Approx(scenario.expected.cache_write_per_1k));
+        CHECK(actual.context_limit == scenario.expected.context_limit);
+    }
     CHECK(table.count("costless-model") == 0);
 }
 
@@ -171,55 +177,28 @@ TEST_CASE("pricing_for keeps zero-cost models and rejects unknown ones")
     CHECK(empty.context_limit == 0);
 }
 
-TEST_CASE("compute_cost bills cached tokens at cache rates when present")
+TEST_CASE("compute_cost handles cache-rate scenarios")
 {
-    imza::ModelPricing p;
-    p.input_per_1k       = 0.003;
-    p.output_per_1k      = 0.015;
-    p.cache_read_per_1k  = 0.0003;
-    p.cache_write_per_1k = 0.00375;
+    struct Scenario {
+        const char* name;
+        imza::ModelPricing pricing;
+        imza::Usage usage;
+        double expected;
+    };
+    const std::vector<Scenario> scenarios {
+        { "explicit cache read and write rates",
+            { 0.003, 0.015, 0.0003, 0.00375, 0 },
+            { 100000, 1000, 60000, 10000, 101000 },
+            30.0 * 0.003 + 60.0 * 0.0003 + 10.0 * 0.00375 + 1.0 * 0.015 },
+        { "absent cache rates fall back to input rate",
+            { 0.001, 0.002, 0.0, 0.0, 0 }, { 2000, 0, 1000, 0, 2000 }, 0.002 },
+        { "cached tokens exceed prompt", { 0.001, 0.002, 0.0001, 0.0, 0 },
+            { 1000, 0, 800, 900, 1000 }, 0.8 * 0.0001 + 0.2 * 0.001 },
+    };
 
-    imza::Usage u;
-    u.prompt       = 100000;
-    u.completion   = 1000;
-    u.cached_read  = 60000;
-    u.cached_write = 10000;
-    u.total        = 101000;
-
-    const double expected
-        = 30.0 * 0.003 + 60.0 * 0.0003 + 10.0 * 0.00375 + 1.0 * 0.015;
-    CHECK(imza::compute_cost(u, p) == doctest::Approx(expected));
-}
-
-TEST_CASE("compute_cost falls back to input rate when cache rates are absent")
-{
-    imza::ModelPricing p;
-    p.input_per_1k  = 0.001;
-    p.output_per_1k = 0.002;
-
-    imza::Usage u;
-    u.prompt      = 2000;
-    u.completion  = 0;
-    u.cached_read = 1000;
-    u.total       = 2000;
-
-    CHECK(imza::compute_cost(u, p) == doctest::Approx(0.002));
-}
-
-TEST_CASE("compute_cost is safe when cached tokens exceed prompt")
-{
-    imza::ModelPricing p;
-    p.input_per_1k      = 0.001;
-    p.output_per_1k     = 0.002;
-    p.cache_read_per_1k = 0.0001;
-
-    imza::Usage u;
-    u.prompt       = 1000;
-    u.completion   = 0;
-    u.cached_read  = 800;
-    u.cached_write = 900;
-    u.total        = 1000;
-
-    const double expected = 0.8 * 0.0001 + 0.2 * 0.001;
-    CHECK(imza::compute_cost(u, p) == doctest::Approx(expected));
+    for (const auto& scenario : scenarios) {
+        CAPTURE(scenario.name);
+        CHECK(imza::compute_cost(scenario.usage, scenario.pricing)
+            == doctest::Approx(scenario.expected));
+    }
 }

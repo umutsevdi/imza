@@ -95,32 +95,25 @@ TEST_CASE("system prompt advertises active skills and hides denied skills")
     CHECK(prompt.find("`skill` tool") != std::string::npos);
 }
 
-TEST_CASE("research subagent prompt is dedicated and read-only")
+TEST_CASE("subagent prompts enforce role policies")
 {
     const PromptStore prompts;
-    const std::string prompt = build_subagent_system_prompt(
+
+    const std::string research = build_subagent_system_prompt(
         prompts, nullptr, nullptr, SubagentRole::RESEARCH);
-    CHECK(prompt.find("Imza subagent") != std::string::npos);
-    CHECK(prompt.find("fresh context") != std::string::npos);
-    CHECK(prompt.find("Work read-only") != std::string::npos);
-    CHECK(prompt.find("implementation plan") != std::string::npos);
-    CHECK(prompt.find("# Todo list") == std::string::npos);
-    CHECK(prompt.find("interactive CLI coding agent") == std::string::npos);
-}
+    CHECK(research.find("Imza subagent") != std::string::npos);
+    CHECK(research.find("fresh context") != std::string::npos);
+    CHECK(research.find("Work read-only") != std::string::npos);
+    CHECK(research.find("implementation plan") != std::string::npos);
+    CHECK(research.find("# Todo list") == std::string::npos);
+    CHECK(research.find("interactive CLI coding agent") == std::string::npos);
 
-TEST_CASE("build subagent prompt permits focused changes")
-{
-    const PromptStore prompts;
-    const std::string prompt = build_subagent_system_prompt(
+    const std::string builder = build_subagent_system_prompt(
         prompts, nullptr, nullptr, SubagentRole::BUILDER);
-    CHECK(prompt.find("may modify files") != std::string::npos);
-    CHECK(prompt.find("keep changes focused") != std::string::npos);
-    CHECK(prompt.find("Work read-only") == std::string::npos);
-}
+    CHECK(builder.find("may modify files") != std::string::npos);
+    CHECK(builder.find("keep changes focused") != std::string::npos);
+    CHECK(builder.find("Work read-only") == std::string::npos);
 
-TEST_CASE("basic subagent has no system prompt")
-{
-    const PromptStore prompts;
     CHECK(build_subagent_system_prompt(
         prompts, nullptr, nullptr, SubagentRole::BASIC)
             .empty());

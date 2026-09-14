@@ -438,7 +438,6 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release" AND IMZA_PACKAGE)
         else()
             set(IMZA_OS "linux")
             set(CPACK_RPM_PACKAGE_REQUIRES "libcurl")
-            set(CPACK_RPM_PACKAGE_AUTOREQPROV "no")
             set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-or-later")
             set(CPACK_RPM_PACKAGE_GROUP "Development/Tools")
             set(CPACK_RPM_PACKAGE_DESCRIPTION

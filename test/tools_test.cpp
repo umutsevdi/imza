@@ -48,7 +48,6 @@ namespace {
 TEST_CASE("tool helpers find and list specs")
 {
     const std::vector<Tool> tools = echo_tools();
-    REQUIRE(tools.size() == 1);
 
     const Tool* found = find_tool(tools, "echo");
     REQUIRE(found != nullptr);

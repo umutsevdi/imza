@@ -25,52 +25,38 @@
 
 namespace {
 
-TEST_CASE("parse_api_error reads OpenAI-style error objects")
+TEST_CASE("parse_api_error classifies provider error response shapes")
 {
-    std::string msg;
-    const imza::Status st = imza::parse_api_error(
-        R"({"error":{"message":"Rate limit reached","type":"requests"}})", msg);
-    CHECK(st == imza::Status::RATE_LIMITED);
-    CHECK(msg == "Rate limit reached");
-}
+    struct Scenario {
+        const char* name;
+        const char* body;
+        imza::Status expected_status;
+        const char* expected_message;
+    };
+    const std::vector<Scenario> scenarios {
+        { "OpenAI error object",
+            R"({"error":{"message":"Rate limit reached","type":"requests"}})",
+            imza::Status::RATE_LIMITED, "Rate limit reached" },
+        { "Anthropic error object",
+            R"({"type":"error","error":{"type":"rate_limit_error","message":"Number of requests too high"}})",
+            imza::Status::RATE_LIMITED, "Number of requests too high" },
+        { "string error with budget keyword",
+            R"({"error":"insufficient credits"})",
+            imza::Status::BUDGET_EXCEEDED, "insufficient credits" },
+        { "top-level message fallback",
+            R"({"message":"billing problem detected"})",
+            imza::Status::BUDGET_EXCEEDED, "billing problem detected" },
+        { "non-error JSON body", R"({"choices":[]})", imza::Status::OK, "" },
+        { "non-JSON body", "<html>oops</html>", imza::Status::OK, "" },
+    };
 
-TEST_CASE("parse_api_error reads Anthropic-style error objects")
-{
-    std::string msg;
-    const imza::Status st = imza::parse_api_error(
-        R"({"type":"error","error":{"type":"rate_limit_error","message":"Number of requests too high"}})",
-        msg);
-    CHECK(st == imza::Status::RATE_LIMITED);
-    CHECK(msg == "Number of requests too high");
-}
-
-TEST_CASE("parse_api_error reads string errors and budget keywords")
-{
-    std::string msg;
-    const imza::Status st
-        = imza::parse_api_error(R"({"error":"insufficient credits"})", msg);
-    CHECK(st == imza::Status::BUDGET_EXCEEDED);
-    CHECK(msg == "insufficient credits");
-}
-
-TEST_CASE("parse_api_error falls back to top-level message")
-{
-    std::string msg;
-    const imza::Status st = imza::parse_api_error(
-        R"({"message":"billing problem detected"})", msg);
-    CHECK(st == imza::Status::BUDGET_EXCEEDED);
-    CHECK(msg == "billing problem detected");
-}
-
-TEST_CASE("parse_api_error ignores non-error bodies")
-{
-    std::string msg;
-    const imza::Status st = imza::parse_api_error(R"({"choices":[]})", msg);
-    CHECK(st == imza::Status::OK);
-    CHECK(msg.empty());
-
-    const imza::Status bad = imza::parse_api_error("<html>oops</html>", msg);
-    CHECK(bad == imza::Status::OK);
+    for (const auto& scenario : scenarios) {
+        CAPTURE(scenario.name);
+        std::string message;
+        CHECK(imza::parse_api_error(scenario.body, message)
+            == scenario.expected_status);
+        CHECK(message == scenario.expected_message);
+    }
 }
 
 TEST_CASE("OpenAI parse turns mid-stream error blocks into ERROR events")

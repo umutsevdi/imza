@@ -5,33 +5,27 @@
 #include "conversation/session.h"
 #include "network/json_io.h"
 
-TEST_CASE("parse_todo_args accepts a valid list with statuses")
+TEST_CASE("parse_todo_args accepts supported list forms")
 {
-    const auto list = imza::parse_todo_args(imza::parse_json(
+    const auto statuses = imza::parse_todo_args(imza::parse_json(
         R"json({"todos":[{"content":"a","status":"in_progress"},{"content":"b","status":"completed"},{"content":"c","status":"cancelled"}]})json"));
-    REQUIRE(list.has_value());
-    REQUIRE(list->items.size() == 3);
-    CHECK(list->items[0].content == "a");
-    CHECK(list->items[0].status == imza::TodoItem::Status::IN_PROGRESS);
-    CHECK(list->items[1].status == imza::TodoItem::Status::COMPLETED);
-    CHECK(list->items[2].status == imza::TodoItem::Status::CANCELLED);
-}
+    REQUIRE(statuses.has_value());
+    REQUIRE(statuses->items.size() == 3);
+    CHECK(statuses->items[0].content == "a");
+    CHECK(statuses->items[0].status == imza::TodoItem::Status::IN_PROGRESS);
+    CHECK(statuses->items[1].status == imza::TodoItem::Status::COMPLETED);
+    CHECK(statuses->items[2].status == imza::TodoItem::Status::CANCELLED);
 
-TEST_CASE("parse_todo_args defaults missing status to pending")
-{
-    const auto list = imza::parse_todo_args(
+    const auto default_status = imza::parse_todo_args(
         imza::parse_json(R"json({"todos":[{"content":"a"}]})json"));
-    REQUIRE(list.has_value());
-    REQUIRE(list->items.size() == 1);
-    CHECK(list->items[0].status == imza::TodoItem::Status::PENDING);
-}
+    REQUIRE(default_status.has_value());
+    REQUIRE(default_status->items.size() == 1);
+    CHECK(default_status->items[0].status == imza::TodoItem::Status::PENDING);
 
-TEST_CASE("parse_todo_args accepts an empty list")
-{
-    const auto list
+    const auto empty
         = imza::parse_todo_args(imza::parse_json(R"json({"todos":[]})json"));
-    REQUIRE(list.has_value());
-    CHECK(list->items.empty());
+    REQUIRE(empty.has_value());
+    CHECK(empty->items.empty());
 }
 
 TEST_CASE("parse_todo_args rejects malformed args")

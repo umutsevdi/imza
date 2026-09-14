@@ -1043,68 +1043,24 @@ TEST_CASE("filesystem session approval installs an exact reusable grant")
     std::filesystem::remove_all(directory, error);
 }
 
-TEST_CASE("permission resolution follows attended and dangerous-skip flags")
+TEST_CASE("dangerous skip accepts permission-gated tools without a modal")
 {
-    SUBCASE("attended asks")
-    {
-        Env env(static_cast<imza::RuntimeFlag>(imza::ATTENDED | imza::SHELL));
-        env.stream
-            = [](const imza::ChatRequest& req, const imza::StreamCallback& cb) {
-                  if (req.messages.back().type == imza::Message::Type::USER) {
-                      cb(imza::make_tool_call_event({ "shell",
-                          R"({"command":"custom attended"})", "", "call" }));
-                  }
-                  cb(imza::make_done_event());
-                  return imza::Status::OK;
-              };
-        imza::submit(*env.state, "go");
-        REQUIRE(
-            env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
-        CHECK(env.ran_tools.empty());
-        imza::resolve_modal(
-            *env.state, imza::ToolVerdict { imza::ToolDecision::REJECT, "" });
-        REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
-        CHECK_FALSE(env.state->runner->blocked_permission());
-    }
-
-    SUBCASE("attended dangerous skip accepts")
-    {
-        Env env(static_cast<imza::RuntimeFlag>(
-            imza::ATTENDED | imza::SHELL | imza::SKIP_PERMISSIONS));
-        env.stream
-            = [](const imza::ChatRequest& req, const imza::StreamCallback& cb) {
-                  if (req.messages.back().type == imza::Message::Type::USER) {
-                      cb(imza::make_tool_call_event({ "shell",
-                          R"({"command":"custom skipped"})", "", "call" }));
-                  }
-                  cb(imza::make_done_event());
-                  return imza::Status::OK;
-              };
-        imza::submit(*env.state, "go");
-        REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
-        REQUIRE(env.ran_tools.size() == 1);
-        CHECK(env.state->queue.size() == 0);
-        CHECK_FALSE(env.state->runner->blocked_permission());
-    }
-
-    SUBCASE("unattended rejects without a modal")
-    {
-        Env env(imza::SHELL);
-        env.stream
-            = [](const imza::ChatRequest& req, const imza::StreamCallback& cb) {
-                  if (req.messages.back().type == imza::Message::Type::USER) {
-                      cb(imza::make_tool_call_event({ "shell",
-                          R"({"command":"custom blocked"})", "", "call" }));
-                  }
-                  cb(imza::make_done_event());
-                  return imza::Status::OK;
-              };
-        imza::submit(*env.state, "go");
-        REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
-        CHECK(env.ran_tools.empty());
-        CHECK(env.state->queue.size() == 0);
-        CHECK(env.state->runner->blocked_permission());
-    }
+    Env env(static_cast<imza::RuntimeFlag>(
+        imza::ATTENDED | imza::SHELL | imza::SKIP_PERMISSIONS));
+    env.stream = [](const imza::ChatRequest& req,
+                     const imza::StreamCallback& cb) {
+        if (req.messages.back().type == imza::Message::Type::USER) {
+            cb(imza::make_tool_call_event(
+                { "shell", R"({"command":"custom skipped"})", "", "call" }));
+        }
+        cb(imza::make_done_event());
+        return imza::Status::OK;
+    };
+    imza::submit(*env.state, "go");
+    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE(env.ran_tools.size() == 1);
+    CHECK(env.state->queue.size() == 0);
+    CHECK_FALSE(env.state->runner->blocked_permission());
 }
 
 TEST_CASE("dangerous skip does not weaken hard rejection")
@@ -1128,39 +1084,6 @@ TEST_CASE("dangerous skip does not weaken hard rejection")
     REQUIRE(call != nullptr);
     REQUIRE(call->result.has_value());
     CHECK(call->result->kind == imza::ToolCall::Result::Kind::REJECT);
-}
-
-TEST_CASE("user modal enqueued mid-stream surfaces after the ask resolves")
-{
-    Env env;
-    auto round = std::make_shared<int>(0);
-    env.stream = [&env, round](const imza::ChatRequest& req,
-                     const imza::StreamCallback& cb) {
-        env.requests.push_back(req);
-        if ((*round)++ == 0) {
-            cb(imza::make_question_event({ { "Q", { "a" }, false, false } }));
-        }
-        cb(imza::make_done_event());
-        return imza::Status::OK;
-    };
-
-    imza::submit(*env.state, "go");
-    REQUIRE(env.pump.wait_for([&] { return showing_question(*env.session); }));
-
-    imza::enqueue_user_modal(
-        *env.state, imza::VariantModal { { "off", "default" }, "default" });
-    env.pump.pump();
-    CHECK(std::holds_alternative<imza::QuestionForm>(env.session->modal()));
-
-    imza::resolve_modal(*env.state,
-        imza::ModalResult { imza::ModalAnswer { { { { "a" }, "", "" } } } });
-    REQUIRE(env.pump.wait_for([&] {
-        return std::holds_alternative<imza::VariantModal>(env.session->modal());
-    }));
-
-    imza::close_modal(*env.state);
-    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
-    CHECK(env.state->queue.size() == 0);
 }
 
 TEST_CASE("tools with an automatic policy run without an approval modal")

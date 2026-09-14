@@ -3,9 +3,12 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #include "workspace/environment.h"
 
@@ -215,49 +218,42 @@ TEST_CASE("workspace scan retains nested cwd and discovers repository root")
     std::filesystem::remove_all(root, error);
 }
 
-TEST_CASE("load_agent_file prefers AGENTS.md over other candidates")
+TEST_CASE("load_agent_file selects the first available candidate")
 {
-    const auto dir
-        = std::filesystem::temp_directory_path() / "imza_test_agents_pre";
-    std::filesystem::remove_all(dir);
-    REQUIRE(std::filesystem::create_directories(dir));
-    write_file(dir / "AGENTS.md", "agents rules");
-    write_file(dir / "CLAUDE.md", "claude rules");
+    struct AgentFileCase {
+        std::string_view name;
+        std::vector<std::pair<std::string_view, std::string_view>> files;
+        std::optional<imza::InstructionFile> expected;
+    };
+    const std::vector<AgentFileCase> cases {
+        { "prefers AGENTS.md",
+            { { "AGENTS.md", "agents rules" },
+                { "CLAUDE.md", "claude rules" } },
+            imza::InstructionFile { "AGENTS.md", "agents rules" } },
+        { "falls back to GEMINI.md", { { "GEMINI.md", "gemini rules" } },
+            imza::InstructionFile { "GEMINI.md", "gemini rules" } },
+        { "returns nullopt without candidates", { }, std::nullopt },
+    };
 
-    const auto found = imza::load_agent_file(dir);
-    REQUIRE(found.has_value());
-    CHECK(found->path == "AGENTS.md");
-    CHECK(found->content == "agents rules");
+    for (const auto& test : cases) {
+        CAPTURE(test.name);
+        const auto dir = std::filesystem::temp_directory_path()
+            / ("imza_test_agents_" + std::string(test.name));
+        std::filesystem::remove_all(dir);
+        REQUIRE(std::filesystem::create_directories(dir));
+        for (const auto& [name, content] : test.files) {
+            write_file(dir / name, content);
+        }
 
-    std::filesystem::remove_all(dir);
-}
+        const auto found = imza::load_agent_file(dir);
+        REQUIRE(found.has_value() == test.expected.has_value());
+        if (test.expected) {
+            CHECK(found->path == test.expected->path);
+            CHECK(found->content == test.expected->content);
+        }
 
-TEST_CASE("load_agent_file falls back to the next candidate")
-{
-    const auto dir
-        = std::filesystem::temp_directory_path() / "imza_test_agents_fb";
-    std::filesystem::remove_all(dir);
-    REQUIRE(std::filesystem::create_directories(dir));
-    write_file(dir / "GEMINI.md", "gemini rules");
-
-    const auto found = imza::load_agent_file(dir);
-    REQUIRE(found.has_value());
-    CHECK(found->path == "GEMINI.md");
-    CHECK(found->content == "gemini rules");
-
-    std::filesystem::remove_all(dir);
-}
-
-TEST_CASE("load_agent_file returns nullopt when no candidate exists")
-{
-    const auto dir
-        = std::filesystem::temp_directory_path() / "imza_test_agents_empty";
-    std::filesystem::remove_all(dir);
-    REQUIRE(std::filesystem::create_directories(dir));
-
-    CHECK_FALSE(imza::load_agent_file(dir).has_value());
-
-    std::filesystem::remove_all(dir);
+        std::filesystem::remove_all(dir);
+    }
 }
 
 TEST_CASE("load_agent_file truncates oversized content")

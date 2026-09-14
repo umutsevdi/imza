@@ -61,7 +61,7 @@ TEST_CASE("truncate_utf8 keeps complete sequences")
     CHECK(imza::truncate_utf8("", 5) == "");
 }
 
-TEST_CASE("html_to_text strips markup and decodes entities")
+TEST_CASE("html_to_text handles markup, entities, and text")
 {
     const std::string html
         = "<html><head><title>T</title><style>.x{color:red}</style></head>\n"
@@ -73,20 +73,12 @@ TEST_CASE("html_to_text strips markup and decodes entities")
 
     CHECK(imza::html_to_text(html)
         == "Hello\nWorld & more 'quoted' text\none\ntwo\nlink text");
-}
-
-TEST_CASE("html_to_text leaves unknown entities and text intact")
-{
     CHECK(imza::html_to_text("a &foo; b") == "a &foo; b");
     CHECK(imza::html_to_text("<span>just</span> text") == "just text");
     CHECK(imza::html_to_text("<p>line<br>break</p>") == "line\nbreak");
     CHECK(imza::html_to_text("&#65;&#x42;") == "AB");
     CHECK(imza::html_to_text("") == "");
     CHECK(imza::html_to_text("plain words") == "plain words");
-}
-
-TEST_CASE("html_to_text rejects surrogate code points")
-{
     CHECK(imza::html_to_text("&#xD800;") == "&#xD800;");
     CHECK(imza::html_to_text("&#xdc00;") == "&#xdc00;");
     CHECK(imza::html_to_text("&#xDFFF;") == "&#xDFFF;");

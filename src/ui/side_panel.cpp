@@ -124,8 +124,7 @@ public:
         }
         if (const std::optional<std::string> update
             = state_->environment->update_available()) {
-            parts.push_back(text("<Update available v" + *update + ">") | bold
-                | color(PANEL_FG));
+            parts.push_back(render_update_available(*update));
         }
         Element body = vbox(std::move(parts));
         if (narrow) {
@@ -461,6 +460,16 @@ Element render_permissions_box(const PermissionView& view)
     }
     Element body = vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER);
     return vbox({ section_title("Permissions"), std::move(body) });
+}
+
+Element render_update_available(std::string version)
+{
+    return hbox({
+        text(" Update Available ") | bold | color(PANEL_FG),
+        filler(),
+        text("  v" + std::move(version) + " ") | bold | color(PANEL_COLOR_FOCUS)
+            | bgcolor(HL_GREEN),
+    });
 }
 
 } // namespace imza

@@ -242,6 +242,7 @@ PermissionView make_permission_view(
     RuntimeFlag flags, const PermissionStore::Grants& grants);
 bool has_custom_permissions(const PermissionView& view);
 ftxui::Element render_permissions_box(const PermissionView& view);
+ftxui::Element render_update_available(std::string version);
 
 ftxui::Component make_chat(
     std::shared_ptr<ApplicationState> state, LayoutFn layout);

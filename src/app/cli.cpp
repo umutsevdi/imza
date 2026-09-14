@@ -19,6 +19,22 @@ namespace imza {
 
 namespace {
 
+    bool requests_one_shot(int argc, char** argv)
+    {
+        for (int index = 1; index < argc; ++index) {
+            const std::string_view argument = argv[index];
+            if (argument == "--") {
+                return false;
+            }
+            if (argument == "-a" || argument == "--ask"
+                || argument.starts_with("--ask=") || argument == "-e"
+                || argument == "--exec" || argument.starts_with("--exec=")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     CliResult finished(int exit_code)
     {
         CliResult result;
@@ -31,7 +47,7 @@ namespace {
     {
         if (const std::optional<std::string> version
             = cached_update(IMZA_VERSION)) {
-            std::println("<Update available v{}>", *version);
+            std::println(stderr, "<Update available v{}>", *version);
         }
     }
 
@@ -65,7 +81,6 @@ namespace {
 
     int edit_config()
     {
-        print_update_banner();
         const std::filesystem::path path = config_path();
         std::error_code error;
         const bool exists = std::filesystem::exists(path, error);
@@ -103,7 +118,6 @@ namespace {
 
     int list_sessions()
     {
-        print_update_banner();
         const std::vector<SavedSession> sessions = saved_sessions();
         if (sessions.empty()) {
             std::println("No saved sessions.");
@@ -127,7 +141,6 @@ namespace {
 
     int remove_session(const std::filesystem::path& path, const std::string& id)
     {
-        print_update_banner();
         switch (delete_saved_session(path)) {
         case DeleteSessionResult::OK:
             std::println("Deleted session {}.", id);
@@ -238,7 +251,20 @@ CliResult run_cli(int argc, char** argv)
     try {
         app.parse(argc, argv);
     } catch (const CLI::ParseError& error) {
+        if (error.get_exit_code() == 0 && !requests_one_shot(argc, argv)) {
+            print_update_banner();
+        }
         return finished(app.exit(error));
+    }
+
+    const bool one_shot_requested
+        = ask_option->count() != 0 || exec_option->count() != 0;
+    const bool session_command = !session_arguments.empty()
+        && (session_arguments.front() == "ls"
+            || session_arguments.front() == "rm");
+    if (!one_shot_requested
+        && (update_requested || config_requested || session_command)) {
+        print_update_banner();
     }
 
     std::vector<ShellCommandGrant> command_grants;

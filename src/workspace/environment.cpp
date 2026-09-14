@@ -378,6 +378,13 @@ Environment::Environment()
 
     if (system_->has_git) {
         git_worker_ = std::jthread([this](const std::stop_token& stop) {
+            std::mutex poll_mutex;
+            std::condition_variable_any poll_cv;
+            const auto wait_for_next_poll = [&] {
+                std::unique_lock lock(poll_mutex);
+                poll_cv.wait_for(lock, stop, std::chrono::milliseconds { 2500 },
+                    [] { return false; });
+            };
             {
                 std::unique_lock lock(workspace_mutex_);
                 if (!workspace_ready_cv_.wait(
@@ -389,8 +396,7 @@ Environment::Environment()
                 const auto observed_workspace = workspace();
                 if (observed_workspace == nullptr
                     || !observed_workspace->project_root) {
-                    std::this_thread::sleep_for(
-                        std::chrono::milliseconds { 2500 });
+                    wait_for_next_poll();
                     continue;
                 }
                 const CommandResult status = run_command(
@@ -423,8 +429,7 @@ Environment::Environment()
                     if (current && changed_files == current->changed_files
                         && branch_name == current->branch
                         && changes == current->changes) {
-                        std::this_thread::sleep_for(
-                            std::chrono::milliseconds { 2500 });
+                        wait_for_next_poll();
                         continue;
                     }
                     RepositoryState next;
@@ -435,7 +440,7 @@ Environment::Environment()
                         std::make_shared<RepositoryState>(std::move(next)),
                         observed_workspace);
                 }
-                std::this_thread::sleep_for(std::chrono::milliseconds { 2500 });
+                wait_for_next_poll();
             }
         });
     }
