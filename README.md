@@ -15,6 +15,8 @@ tool calls, diffs, and approval prompts along the way.
 
 Download the [latest release](https://github.com/umutsevdi/imza/releases/latest).
 
+Check out the [user guide](https://github.com/umutsevdi/imza/wiki).
+
 https://github.com/user-attachments/assets/a0096f0d-8337-4e6b-aabe-f9debe273594
 
 ## Why Imza?
