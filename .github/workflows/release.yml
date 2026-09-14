@@ -38,9 +38,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Build and package
+      - name: Install dependencies
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          sudo apt-get update
+          sudo apt-get install -y libcurl4-openssl-dev gcc-14 g++-14
+      - name: Build and package
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DIMZA_BUILD_TESTS=OFF
           cmake --build build
           cmake --build build --target package
       - uses: actions/upload-artifact@v4
@@ -58,9 +65,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Build and package
+      - name: Install dependencies
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          sudo apt-get update
+          sudo apt-get install -y libcurl4-openssl-dev gcc-14 g++-14
+      - name: Build and package
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DIMZA_BUILD_TESTS=OFF
           cmake --build build
           cmake --build build --target package
       - uses: actions/upload-artifact@v4
@@ -85,7 +99,7 @@ jobs:
           xcodebuild -version
       - name: Build and package
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DIMZA_BUILD_TESTS=OFF \
               -DCURL_ROOT="$(brew --prefix curl)"
           cmake --build build
           cmake --build build --target package
@@ -105,7 +119,7 @@ jobs:
       - run: choco install innosetup -y --no-progress
       - name: Build
         run: |
-          cmake -S . -B build
+          cmake -S . -B build -DIMZA_BUILD_TESTS=OFF
           cmake --build build --config Release
       - name: Stage installer input
         shell: bash

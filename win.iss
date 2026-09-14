@@ -21,7 +21,7 @@
 #define imzaName "Imza"
 #define imzaDescription "Imza is a batteries-included, model-agnostic coding agent with native performance and a small runtime footprint."
 #ifndef imzaVersion
-#define imzaVersion "0.2.2"
+#define imzaVersion "0.2.3"
 #endif
 #define imzaAuthor "Umut Sevdi"
 #define imzaURL "https://github.com/umutsevdi/imza"
@@ -75,9 +75,9 @@ Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; Value
 Source: "{#Build}\release\{#imzaExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Source}\misc\LICENSE.thirdparty.txt"; DestDir: "{app}"
 Source: "{#Source}\misc\imza.ico"; DestDir: "{app}"
-Source: "{#Source}\LICENSE"; DestDir: "{app}"
+Source: "{#Source}\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"
 Source: "{#Source}\CHANGELOG.txt"; DestDir: "{app}"
-Source: "{#Source}\README.md"; DestDir: "{app}"
+Source: "{#Source}\README.md"; DestDir: "{app}"; DestName: "README.txt"
 
 [Icons]
 Name: "{autoprograms}\{#imzaName}"; Filename: "{app}\{#imzaExe}"

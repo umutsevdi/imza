@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.31)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 project(
     imza
-    VERSION 0.2.2
+    VERSION 0.2.3
     HOMEPAGE_URL "https://github.com/umutsevdi/imza"
     LANGUAGES C CXX
 )
@@ -400,15 +400,14 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release" AND IMZA_PACKAGE)
             RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
         )
         install(FILES
-                "${CMAKE_SOURCE_DIR}/README.md"
                 "${CMAKE_SOURCE_DIR}/CHANGELOG.txt"
                 "${CMAKE_SOURCE_DIR}/misc/LICENSE.thirdparty.txt"
             DESTINATION "${CMAKE_INSTALL_DOCDIR}"
         )
         install(
-            FILES "${CMAKE_SOURCE_DIR}/LICENSE"
+            FILES "${CMAKE_SOURCE_DIR}/README.md"
             DESTINATION "${CMAKE_INSTALL_DOCDIR}"
-            RENAME copyright
+            RENAME README.txt
         )
         if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
             set(IMZA_ARCH "x64")
@@ -422,6 +421,19 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release" AND IMZA_PACKAGE)
         if(APPLE)
             set(IMZA_OS "macos")
             set(CPACK_PRODUCTBUILD_IDENTIFIER "com.umutsevdi.imza")
+            install(
+                FILES "${CMAKE_SOURCE_DIR}/LICENSE"
+                DESTINATION "${CMAKE_INSTALL_DOCDIR}"
+                RENAME LICENSE.txt
+            )
+            configure_file("${CMAKE_SOURCE_DIR}/LICENSE"
+                "${CMAKE_CURRENT_BINARY_DIR}/LICENSE.txt" COPYONLY)
+            configure_file("${CMAKE_SOURCE_DIR}/README.md"
+                "${CMAKE_CURRENT_BINARY_DIR}/README.txt" COPYONLY)
+            set(CPACK_RESOURCE_FILE_LICENSE
+                "${CMAKE_CURRENT_BINARY_DIR}/LICENSE.txt")
+            set(CPACK_RESOURCE_FILE_README
+                "${CMAKE_CURRENT_BINARY_DIR}/README.txt")
             set(CPACK_GENERATOR "productbuild")
         else()
             set(IMZA_OS "linux")
@@ -433,6 +445,11 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release" AND IMZA_PACKAGE)
             )
             set(CPACK_DEBIAN_PACKAGE_RELEASE "1")
             set(CPACK_DEBIAN_PACKAGE_DEPENDS "libcurl4")
+            install(
+                FILES "${CMAKE_SOURCE_DIR}/LICENSE"
+                DESTINATION "${CMAKE_INSTALL_DOCDIR}"
+                RENAME copyright
+            )
             if(IMZA_ARCH STREQUAL "x64")
                 set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
             else()
