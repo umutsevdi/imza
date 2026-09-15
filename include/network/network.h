@@ -81,4 +81,7 @@ Status stream(const Route& route, const ChatRequest& req, StreamCallback cb,
 
 Status parse_api_error(std::string_view body, std::string& message);
 
+Status classify_failure(long code, const std::string& raw,
+    std::string& message);
+
 } // namespace imza

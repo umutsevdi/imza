@@ -200,6 +200,58 @@ TEST_CASE("controller does not retry budget errors")
         == "Out of budget / insufficient credits: insufficient credits.");
 }
 
+TEST_CASE("controller retries stalled connections before any data arrives")
+{
+    AgentEnv env;
+    auto round   = std::make_shared<int>(0);
+    AgentEnv* ep = &env;
+    env.stream   = [ep, round](const imza::ChatRequest& req,
+                       const imza::StreamCallback& cb) -> imza::Status {
+        ep->requests.push_back(req);
+        if ((*round)++ == 0) {
+            cb(imza::make_connected_event());
+            cb(imza::make_error_event(
+                imza::Status::TIMEOUT, "Operation too slow"));
+            return imza::Status::TIMEOUT;
+        }
+        cb(imza::make_connected_event());
+        cb(imza::make_delta_event("recovered"));
+        cb(imza::make_done_event());
+        return imza::Status::OK;
+    };
+    imza::submit(*env.state, "hello");
+    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    CHECK(env.requests.size() == 2);
+    CHECK(env.session->error().empty());
+    const auto& items = env.session->items();
+    bool found        = false;
+    for (const auto& it : items) {
+        if (const auto* a = std::get_if<imza::AssistantTurn>(&it)) {
+            found = found || a->markdown == "recovered";
+        }
+    }
+    CHECK(found);
+}
+
+TEST_CASE("controller does not retry a stall after content arrived")
+{
+    AgentEnv env;
+    AgentEnv* ep = &env;
+    env.stream   = [ep](const imza::ChatRequest& req,
+                       const imza::StreamCallback& cb) -> imza::Status {
+        ep->requests.push_back(req);
+        cb(imza::make_connected_event());
+        cb(imza::make_delta_event("partial"));
+        cb(imza::make_error_event(
+            imza::Status::TIMEOUT, "Operation too slow"));
+        return imza::Status::TIMEOUT;
+    };
+    imza::submit(*env.state, "hello");
+    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    CHECK(env.requests.size() == 1);
+    CHECK(env.session->error() == "Timed out: Operation too slow.");
+}
+
 struct FakeApi {
     std::string response;
     std::string request;

@@ -310,8 +310,10 @@ Element session_error_element(const Session& session)
         if (remaining < 0) {
             remaining = 0;
         }
-        message
-            = "Rate limited — retrying in " + std::to_string(remaining) + "s…";
+        message = session.retry_countdown()->stalled
+            ? "Connection stalled — retrying in "
+                + std::to_string(remaining) + "s…"
+            : "Rate limited — retrying in " + std::to_string(remaining) + "s…";
     }
     if (message.empty()) {
         return text("");

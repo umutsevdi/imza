@@ -306,11 +306,12 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
         std::string error_msg;
         Status error_status                 = Status::OK;
         bool saw_stream                     = false;
+        bool received_data                  = false;
         std::uint64_t request_prompt_tokens = 0;
         StreamUpdateBuffer stream_updates(post_, state_->session);
 
         StreamCallback cb = [this, model = req.model, &text_buffer, &error_msg,
-                                &error_status, &saw_stream,
+                                &error_status, &saw_stream, &received_data,
                                 &request_prompt_tokens,
                                 &stream_updates](const StreamEvent& ev) {
             if (ev.kind == StreamEvent::Kind::ERROR) {
@@ -325,6 +326,12 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
             if (ev.kind == StreamEvent::Kind::CONTENT_DELTA
                 || ev.kind == StreamEvent::Kind::CONNECTED) {
                 saw_stream = true;
+            }
+            if (ev.kind == StreamEvent::Kind::CONTENT_DELTA
+                || ev.kind == StreamEvent::Kind::REASONING
+                || ev.kind == StreamEvent::Kind::TOOL_CALL
+                || ev.kind == StreamEvent::Kind::USAGE) {
+                received_data = true;
             }
             if (ev.kind == StreamEvent::Kind::CONTENT_DELTA) {
                 text_buffer += ev.text;
@@ -422,14 +429,25 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
         }
 
         const Status fail = error_status != Status::OK ? error_status : st;
-        if (fail == Status::RATE_LIMITED && retries < 2) {
+        // A stalled connection or a transient server failure before any
+        // data can be retried safely; once content has arrived a retry
+        // would duplicate visible output.
+        const bool retryable_stall = !received_data
+            && (fail == Status::TIMEOUT || fail == Status::NETWORK_ERROR);
+        const bool retryable_server
+            = !received_data && fail == Status::SERVER_ERROR;
+        if ((fail == Status::RATE_LIMITED || retryable_stall
+                || retryable_server)
+            && retries < 2) {
             ++retries;
             int wait = retry_after_secs_;
             if (wait <= 0) {
                 wait = retries == 1 ? 2 : 5;
             }
             wait = std::clamp(wait, 1, 30);
-            _post([this, wait] { state_->session->mark_retry(wait); });
+            _post([this, wait, stalled = retryable_stall] {
+                state_->session->mark_retry(wait, stalled);
+            });
             using namespace std::chrono_literals;
             const auto deadline
                 = std::chrono::steady_clock::now() + std::chrono::seconds(wait);

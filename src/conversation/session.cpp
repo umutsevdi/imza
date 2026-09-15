@@ -444,12 +444,13 @@ void Session::set_phase(Phase phase)
     phase_ = phase;
 }
 
-void Session::mark_retry(int wait_seconds)
+void Session::mark_retry(int wait_seconds, bool stalled)
 {
     std::lock_guard lock(mutex_);
     phase_           = Phase::CONNECTING;
     retry_countdown_ = Countdown { std::chrono::steady_clock::now()
-        + std::chrono::seconds(wait_seconds) };
+            + std::chrono::seconds(wait_seconds),
+        stalled };
 }
 
 void Session::reset_reasoning()

@@ -104,6 +104,7 @@ public:
     enum class Mode { PLAN, BUILD };
     struct Countdown {
         std::chrono::steady_clock::time_point deadline;
+        bool stalled = false;
     };
     struct StatusView {
         Mode mode;
@@ -170,7 +171,7 @@ public:
     void bump_modal_serial();
     void present_modal(ModalPayload payload);
     void set_phase(Phase phase);
-    void mark_retry(int wait_seconds);
+    void mark_retry(int wait_seconds, bool stalled = false);
 
     void apply(const StreamEvent& ev, const ModelPricing& pricing);
     bool finish_session(std::string error);
