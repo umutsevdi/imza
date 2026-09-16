@@ -298,8 +298,7 @@ namespace {
 
 } // namespace
 
-Status classify_failure(
-    long code, const std::string& raw, std::string& message)
+Status classify_failure(long code, const std::string& raw, std::string& message)
 {
     Status st = parse_api_error(raw, message);
     if (code == 429) {
@@ -324,9 +323,9 @@ namespace {
     // A stream that moves less than this for the window is stalled. Slow
     // providers legitimately think for minutes before the first token, so
     // the window is deliberately generous; retries cover the rest.
-    constexpr long CONNECT_TIMEOUT_SECS     = 10;
-    constexpr long STALL_LIMIT_BYTES_PER_S  = 1;
-    constexpr long STALL_WINDOW_SECS        = 300;
+    constexpr long CONNECT_TIMEOUT_SECS    = 10;
+    constexpr long STALL_LIMIT_BYTES_PER_S = 1;
+    constexpr long STALL_WINDOW_SECS       = 300;
 
 } // namespace
 
@@ -345,6 +344,12 @@ Status stream(const Route& route, const ChatRequest& req, StreamCallback cb,
     for (auto& h : auth_headers(route.auth, route.api_key, route.account_id)) {
         header_strs.push_back(std::move(h));
     }
+    if (!route.user_agent.empty()) {
+        header_strs.push_back(route.user_agent);
+    }
+    if (!route.opencode_session.empty()) {
+        header_strs.push_back("x-opencode-session: " + route.opencode_session);
+    }
     curl_slist* list = build_header_list(header_strs);
 
     StreamCtx ctx;
@@ -361,8 +366,7 @@ Status stream(const Route& route, const ChatRequest& req, StreamCallback cb,
     curl_easy_reset(curl);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, CONNECT_TIMEOUT_SECS);
-    curl_easy_setopt(
-        curl, CURLOPT_LOW_SPEED_LIMIT, STALL_LIMIT_BYTES_PER_S);
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, STALL_LIMIT_BYTES_PER_S);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, STALL_WINDOW_SECS);
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, list);

@@ -189,7 +189,8 @@ TEST_CASE("one-shot retries transient server errors before stream data")
     imza::MainThreadQueue queue;
     std::atomic<int> calls = 0;
     auto state             = make_one_shot_state(queue,
-        [&calls](const imza::ChatRequest&, const imza::StreamCallback& callback) {
+        [&calls](
+            const imza::ChatRequest&, const imza::StreamCallback& callback) {
             if (calls.fetch_add(1) == 0) {
                 callback(imza::make_error_event(
                     imza::Status::SERVER_ERROR, "upstream unavailable"));
@@ -213,11 +214,12 @@ TEST_CASE("one-shot does not retry server errors after stream data arrived")
     imza::MainThreadQueue queue;
     std::atomic<int> calls = 0;
     auto state             = make_one_shot_state(queue,
-        [&calls](const imza::ChatRequest&, const imza::StreamCallback& callback) {
+        [&calls](
+            const imza::ChatRequest&, const imza::StreamCallback& callback) {
             calls.fetch_add(1);
             callback(imza::make_delta_event("partial "));
-            callback(imza::make_error_event(
-                imza::Status::SERVER_ERROR, "boom"));
+            callback(
+                imza::make_error_event(imza::Status::SERVER_ERROR, "boom"));
             return imza::Status::SERVER_ERROR;
         });
 

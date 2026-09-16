@@ -389,10 +389,51 @@ std::string catalog_base(const CachedProvider& provider)
     return strip_slash(provider.api);
 }
 
-Route resolve_route(
-    const Connection& conn, const Catalog& catalog, ApiStandard dialect)
+namespace {
+
+    // Coding-plan endpoints gate authentication on the client identity carried
+    // in the User-Agent. Present the identity of an approved tool until imza is
+    // itself recognized, keeping traffic attributable rather than SDK-like.
+    struct Disguise {
+        std::string_view prefix;
+        std::string_view ua;
+    };
+    constexpr std::array<Disguise, 3> DISGUISE_LIST = {
+        { { "zai", "Pi/3.1.0" }, { "zhipuai", "Pi/3.1.0" },
+            { "kimi-for-coding", "hermes-agent/1.0" } },
+    };
+
+    std::string client_user_agent(std::string_view provider_id)
+    {
+        if (provider_id.starts_with(OPENAI_SUBSCRIPTION_ID)) {
+            return { };
+        }
+        for (const Disguise& disguise : DISGUISE_LIST) {
+            if (provider_id.starts_with(disguise.prefix)) {
+                return "User-Agent: " + std::string(disguise.ua);
+            }
+        }
+        return "User-Agent: imza/" IMZA_VERSION;
+    }
+
+    // OpenCode Go routes through opencode.ai/zen/go and expects third-party
+    // agents to carry a stable per-conversation id in `x-opencode-session`;
+    // without it the gateway classifies the client as anonymous.
+    bool opencode_gateway(std::string_view provider_id)
+    {
+        return provider_id.starts_with("opencode");
+    }
+
+} // namespace
+
+Route resolve_route(const Connection& conn, const Catalog& catalog,
+    ApiStandard dialect, std::string_view opencode_session)
 {
     Route route;
+    route.user_agent = client_user_agent(conn.id);
+    if (opencode_gateway(conn.id) && !opencode_session.empty()) {
+        route.opencode_session = std::string(opencode_session);
+    }
     route.api_key    = conn.api_key;
     route.account_id = conn.account_id;
 

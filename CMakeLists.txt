@@ -225,6 +225,9 @@ target_link_libraries(imza_foundation PUBLIC
     imza_network
     jsoncpp_static
 )
+
+set_source_files_properties(src/providers/catalog.cpp PROPERTIES
+    COMPILE_DEFINITIONS IMZA_VERSION="${PROJECT_VERSION}")
 if(NOT WIN32)
     target_compile_definitions(imza_foundation PRIVATE
         "IMZA_INSTALL_PREFIX=\"${CMAKE_INSTALL_PREFIX}\""

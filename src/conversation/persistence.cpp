@@ -9,9 +9,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <fstream>
-#include <iomanip>
 #include <map>
-#include <random>
 #include <set>
 #include <sstream>
 #include <utility>
@@ -25,20 +23,6 @@ namespace {
     std::filesystem::path index_path()
     {
         return sessions_dir() / INDEX_FILENAME;
-    }
-
-    std::string session_filename()
-    {
-        const auto now = std::chrono::system_clock::now().time_since_epoch();
-        const auto milliseconds
-            = std::chrono::duration_cast<std::chrono::milliseconds>(now)
-                  .count();
-        std::random_device random;
-        const std::uint32_t suffix = static_cast<std::uint32_t>(random());
-        std::ostringstream out;
-        out << milliseconds << '-' << std::hex << std::setw(8)
-            << std::setfill('0') << suffix << ".json";
-        return out.str();
     }
 
     Json::Value consume_string(std::string& source)
@@ -484,14 +468,8 @@ Status save_session(Session& session)
     }
     root["items"] = std::move(items);
 
-    std::error_code ec;
-    std::filesystem::path path;
-    do {
-        path = sessions_dir() / session_filename();
-    } while (std::filesystem::exists(path, ec) && !ec);
-    if (ec) {
-        return Status::CONFIG_ERROR;
-    }
+    const std::filesystem::path path
+        = sessions_dir() / (session.session_id() + ".json");
 
     const Status st = write_json_file(path, root, "");
     if (st != Status::OK) {
@@ -503,6 +481,12 @@ Status save_session(Session& session)
         auto lock = acquire_file_lock(lock_path_for(index_path()));
         if (std::holds_alternative<FileLock>(lock)) {
             if (auto indexed = read_index()) {
+                // A re-save of the same run rewrites the same file, so
+                // replace its index entry instead of duplicating it.
+                const std::string file = saved.path.filename().string();
+                std::erase_if(*indexed, [&](const SavedSession& entry) {
+                    return entry.path.filename().string() == file;
+                });
                 indexed->push_back(saved);
                 sort_sessions(*indexed);
                 write_index(*indexed);

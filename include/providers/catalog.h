@@ -53,8 +53,8 @@ void inject_subscription_providers(Catalog& catalog);
 AuthType auth_from_npm(std::string_view npm);
 ApiStandard dialect_from_npm(std::string_view npm);
 std::string catalog_base(const CachedProvider& provider);
-Route resolve_route(
-    const Connection& conn, const Catalog& catalog, ApiStandard dialect);
+Route resolve_route(const Connection& conn, const Catalog& catalog,
+    ApiStandard dialect, std::string_view opencode_session = { });
 std::string endpoint_for_base(std::string_view base);
 
 } // namespace imza

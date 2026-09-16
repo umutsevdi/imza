@@ -311,8 +311,8 @@ Element session_error_element(const Session& session)
             remaining = 0;
         }
         message = session.retry_countdown()->stalled
-            ? "Connection stalled — retrying in "
-                + std::to_string(remaining) + "s…"
+            ? "Connection stalled — retrying in " + std::to_string(remaining)
+                + "s…"
             : "Rate limited — retrying in " + std::to_string(remaining) + "s…";
     }
     if (message.empty()) {

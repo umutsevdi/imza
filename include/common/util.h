@@ -3,9 +3,11 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstdint>
 #include <ctime>
 #include <filesystem>
 #include <iomanip>
+#include <random>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -285,6 +287,24 @@ inline std::string home_dir()
         "HOME"
 #endif
     );
+}
+
+// Globally unique, sortable identifier generated once per Session object and
+// stable for its lifetime: wall-clock milliseconds plus a random 32-bit
+// suffix. Doubles as the saved-session file name stem; resuming a saved file
+// starts a new object with a fresh id, so saving after a resume forks a new
+// file and leaves the original untouched.
+inline std::string unique_session_id()
+{
+    const auto now = std::chrono::system_clock::now().time_since_epoch();
+    const auto milliseconds
+        = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+    std::random_device random;
+    const std::uint32_t suffix = static_cast<std::uint32_t>(random());
+    std::ostringstream out;
+    out << milliseconds << '-' << std::hex << std::setw(8) << std::setfill('0')
+        << suffix;
+    return out.str();
 }
 
 } // namespace imza

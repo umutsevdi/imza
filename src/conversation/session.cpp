@@ -32,6 +32,12 @@ std::uint64_t Session::content_serial() const
     return content_serial_;
 }
 
+std::string Session::session_id() const
+{
+    std::lock_guard lock(mutex_);
+    return session_id_;
+}
+
 Session::Phase Session::phase() const
 {
     std::lock_guard lock(mutex_);
@@ -131,8 +137,11 @@ void Session::restore(SessionSnapshot snapshot)
         compacted_summary_    = std::move(snapshot.compacted_summary);
         compacted_item_count_ = snapshot.compacted_item_count;
         persistence_          = std::move(snapshot.persistence);
-        mode_                 = snapshot.plan_mode ? Mode::PLAN : Mode::BUILD;
-        modal_                = std::monostate { };
+        // Every restore starts a new run: /new and session loads reuse this
+        // object, so rotate the id to keep each run's saves in their own file.
+        session_id_ = unique_session_id();
+        mode_       = snapshot.plan_mode ? Mode::PLAN : Mode::BUILD;
+        modal_      = std::monostate { };
         std::vector<QueuedMessage>().swap(queued_);
         error_.clear();
         retry_countdown_.reset();

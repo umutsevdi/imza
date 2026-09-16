@@ -16,6 +16,7 @@
 #include "common/modal.h"
 #include "common/tool_call.h"
 #include "common/types.h"
+#include "common/util.h"
 #include "network/chat.h"
 #include "network/network.h"
 #include "providers/pricing.h"
@@ -119,6 +120,7 @@ public:
     ModalPayload modal() const;
     std::uint64_t modal_serial() const;
     std::uint64_t content_serial() const;
+    std::string session_id() const;
     Phase phase() const;
     Mode mode() const;
     std::string error() const;
@@ -233,6 +235,7 @@ private:
     std::string compacted_summary_;
     std::size_t compacted_item_count_ = 0;
     SessionPersistence persistence_   = UnsavedSession { };
+    std::string session_id_           = unique_session_id();
 
     Signal<> title_changed_;
     Signal<> attachments_changed_;

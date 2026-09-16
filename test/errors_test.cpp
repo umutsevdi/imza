@@ -242,8 +242,7 @@ TEST_CASE("controller does not retry a stall after content arrived")
         ep->requests.push_back(req);
         cb(imza::make_connected_event());
         cb(imza::make_delta_event("partial"));
-        cb(imza::make_error_event(
-            imza::Status::TIMEOUT, "Operation too slow"));
+        cb(imza::make_error_event(imza::Status::TIMEOUT, "Operation too slow"));
         return imza::Status::TIMEOUT;
     };
     imza::submit(*env.state, "hello");

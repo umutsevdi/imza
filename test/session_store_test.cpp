@@ -71,14 +71,14 @@ TEST_CASE("CLI session list aligns columns without terminal tabs")
            "1789291986542-c06df75e  2026-09-13 12:33:06  Long title\n"
            "short                   2026-09-13 12:25:53  Other title\n");
 }
-TEST_CASE("saved sessions are immutable and fork on a new prompt")
+TEST_CASE("saved sessions are immutable and resume forks a new file")
 {
 #ifdef _WIN32
     return;
 #else
     DataHome home;
     imza::Session source;
-    source.set_title("Saved title");
+    source.set_title("Fork on resume");
     source.begin_send("hello");
     source.append_assistant("model", "off");
     source.apply(imza::make_delta_event("world"), { });
@@ -89,16 +89,17 @@ TEST_CASE("saved sessions are immutable and fork on a new prompt")
     REQUIRE(saved.size() == 1);
     CHECK(saved.front().path.parent_path() == imza::sessions_dir());
     CHECK(imza::sessions_dir() == imza::data_dir() / "sessions");
-    CHECK(saved.front().title == "Saved title");
+    CHECK(saved.front().title == "Fork on resume");
     const std::filesystem::path saved_path = saved.front().path;
+    CHECK(saved_path.stem().string() == source.session_id());
 
+    // A re-save of the same run rewrites its own file.
     source.begin_send("follow-up");
     CHECK(source.snapshot_for_save().has_value());
     REQUIRE(imza::save_session(source) == imza::Status::OK);
     saved = imza::saved_sessions();
-    REQUIRE(saved.size() == 2);
-    CHECK(std::any_of(saved.begin(), saved.end(),
-        [&](const auto& entry) { return entry.path == saved_path; }));
+    REQUIRE(saved.size() == 1);
+    CHECK(saved.front().path == saved_path);
 
     CurrentDirectory directory;
     const auto other = home.path / "other-workspace";
@@ -112,19 +113,25 @@ TEST_CASE("saved sessions are immutable and fork on a new prompt")
     REQUIRE(
         imza::load_session(saved_path, loaded, &workspace) == imza::Status::OK);
     CHECK(workspace == directory.original);
-    CHECK(std::filesystem::current_path() == other);
-    CHECK(loaded.title() == "Saved title");
-    REQUIRE(loaded.items().size() == 2);
+    // Resuming keeps the file untouched and starts a fresh object identity.
+    CHECK(loaded.session_id() != source.session_id());
+    CHECK_FALSE(loaded.session_id().empty());
     CHECK(std::get<imza::UserTurn>(loaded.items()[0]).text == "hello");
     CHECK(std::get<imza::AssistantTurn>(loaded.items()[1]).markdown == "world");
 
     loaded.begin_send("parallel continuation");
     REQUIRE(imza::save_session(loaded) == imza::Status::OK);
     saved = imza::saved_sessions();
-    REQUIRE(saved.size() == 3);
+    REQUIRE(saved.size() == 2);
+    CHECK(std::any_of(saved.begin(), saved.end(),
+        [&](const auto& entry) { return entry.path == saved_path; }));
+    const auto forked = std::find_if(saved.begin(), saved.end(),
+        [&](const auto& entry) { return entry.path != saved_path; });
+    REQUIRE(forked != saved.end());
+    CHECK(forked->path.stem().string() == loaded.session_id());
 
     REQUIRE(imza::save_session(loaded) == imza::Status::OK);
-    CHECK(imza::saved_sessions().size() == 3);
+    CHECK(imza::saved_sessions().size() == 2);
 #endif
 }
 
@@ -415,5 +422,52 @@ TEST_CASE("CLI opens and removes saved sessions by ID")
     CHECK_FALSE(remove_result.continue_as_interactive);
     CHECK(remove_result.exit_code == 0);
     CHECK(imza::saved_sessions().empty());
+#endif
+}
+
+TEST_CASE("session id is generated ahead of use and rotates on restore")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    imza::Session session;
+    const std::string initial_id = session.session_id();
+    CHECK_FALSE(initial_id.empty());
+    // The id predates any traffic, so it can be attached as the gateway
+    // session header from the very first request of a run.
+    session.set_title("Lifecycle test");
+    session.begin_send("hello");
+    CHECK(session.session_id() == initial_id);
+    REQUIRE(imza::save_session(session) == imza::Status::OK);
+    const auto saved = imza::saved_sessions();
+    REQUIRE(saved.size() == 1);
+    CHECK(saved.front().path.stem().string() == initial_id);
+    CHECK(session.snapshot_for_save() == std::nullopt);
+
+    imza::Session restored;
+    std::filesystem::path workspace;
+    REQUIRE(imza::load_session(saved.front().path, restored, &workspace)
+        == imza::Status::OK);
+    // A resumed session is a new run with its own id, so its saves fork a
+    // fresh file and never rewrite the file it was loaded from.
+    CHECK_FALSE(restored.session_id().empty());
+    CHECK(restored.session_id() != initial_id);
+    restored.begin_send("continued");
+    CHECK(restored.session_id() != initial_id);
+    REQUIRE(imza::save_session(restored) == imza::Status::OK);
+    const auto after_fork = imza::saved_sessions();
+    REQUIRE(after_fork.size() == 2);
+    CHECK(std::any_of(after_fork.begin(), after_fork.end(),
+        [&](const imza::SavedSession& entry) {
+            return entry.path.stem().string() == initial_id;
+        }));
+
+    // Starting a new session in place (the /new flow) rotates the id too, so
+    // the fresh conversation cannot overwrite the archive it left behind.
+    const std::string pre_new_id = session.session_id();
+    session.restore(imza::SessionSnapshot { });
+    CHECK(session.session_id() != pre_new_id);
+    CHECK_FALSE(session.has_items());
 #endif
 }

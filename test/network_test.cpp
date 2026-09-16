@@ -411,16 +411,15 @@ TEST_CASE("classify_failure maps statuses onto retry categories")
     CHECK(message == "slow down");
     CHECK(imza::classify_failure(402, "", message)
         == imza::Status::BUDGET_EXCEEDED);
-    CHECK(imza::classify_failure(408, "", message)
-        == imza::Status::SERVER_ERROR);
-    CHECK(imza::classify_failure(409, "", message)
-        == imza::Status::SERVER_ERROR);
-    CHECK(imza::classify_failure(500, "", message)
-        == imza::Status::SERVER_ERROR);
-    CHECK(imza::classify_failure(503, "", message)
-        == imza::Status::SERVER_ERROR);
-    CHECK(imza::classify_failure(400, "", message)
-        == imza::Status::API_ERROR);
+    CHECK(
+        imza::classify_failure(408, "", message) == imza::Status::SERVER_ERROR);
+    CHECK(
+        imza::classify_failure(409, "", message) == imza::Status::SERVER_ERROR);
+    CHECK(
+        imza::classify_failure(500, "", message) == imza::Status::SERVER_ERROR);
+    CHECK(
+        imza::classify_failure(503, "", message) == imza::Status::SERVER_ERROR);
+    CHECK(imza::classify_failure(400, "", message) == imza::Status::API_ERROR);
     CHECK(message == "HTTP 400");
 }
 

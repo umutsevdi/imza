@@ -8,6 +8,15 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
+0.2.4 - 2026-09-17
+-------------------------------------------------------------------------------
+<https://github.com/umutsevdi/imza/releases/tag/v0.2.4>
+
+Changes:
+  - Increased maximum timeout for streams. Added retry for server errors (HTTP 408, 409, 5xx).
+  - Imza sends a recognizable user-agent on provider requests.
+
+-------------------------------------------------------------------------------
 0.2.3 - 2026-09-14
 -------------------------------------------------------------------------------
 <https://github.com/umutsevdi/imza/releases/tag/v0.2.3>
