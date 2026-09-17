@@ -1191,7 +1191,7 @@ namespace {
             entry.component
                 = inline_link_button([label_ptr] { return text(*label_ptr); },
                     [this, content_ptr, metadata_ptr] {
-                        ViewerModal vm { " Thinking", *content_ptr, "", 1 };
+                        ViewerModal vm { " Thinking", *content_ptr, "md", 1 };
                         vm.line_numbers = false;
                         vm.metadata     = *metadata_ptr;
                         enqueue_user_modal(*state_, vm);
