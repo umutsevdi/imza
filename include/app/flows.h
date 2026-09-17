@@ -67,5 +67,9 @@ void run_slash(ApplicationState& state, std::string_view command);
 void interrupt(ApplicationState& state);
 void delete_saved_session(
     ApplicationState& state, const std::filesystem::path& path);
+// Load `path` as the active conversation: pending-work guard, save the
+// current session, lock and validate the target, restore, clear runtime
+// state. On failure the active conversation stays and a session error is set.
+void switch_session(ApplicationState& state, const std::filesystem::path& path);
 
 } // namespace imza

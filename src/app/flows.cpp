@@ -131,7 +131,7 @@ namespace {
         const std::optional<ProviderSelection> selection
             = state.providers->active_selection();
         if (!selection.has_value()) {
-            state.session->set_error("No model selected — run /model.");
+            state.session->set_error("No model selected - run /model.");
             return;
         }
         const TurnSettings settings
@@ -235,6 +235,8 @@ namespace {
             state.session->set_error("Failed to save current session.");
             return;
         }
+        // The archived file is no longer chat-active in this process.
+        state.sessions->deactivate();
         state.queue.clear();
         state.skills->clear();
         state.permissions->clear();
@@ -389,27 +391,7 @@ void resolve_modal(ApplicationState& state, ModalResult result)
         }
     }
     if (auto* path = std::get_if<std::filesystem::path>(&result)) {
-        if (state.session->has_pending_work()) {
-            state.session->set_error(
-                "Finish or interrupt pending work before loading a session.");
-            return;
-        }
-        if (state.sessions->save(*state.session) != Status::OK) {
-            state.session->set_error("Failed to save current session.");
-            return;
-        }
-        LoadedSession loaded;
-        const Status status = read_session(*path, loaded);
-        if (status != Status::OK
-            || !change_directory(state, loaded.workspace)) {
-            state.session->set_error("Failed to load session.");
-        } else {
-            state.session->restore(std::move(loaded.snapshot));
-            state.skills->clear();
-            state.permissions->clear();
-            state.runner->clear();
-            state.subagents->prune_completed();
-        }
+        switch_session(state, *path);
     }
     if (auto* connect = std::get_if<ConnectResult>(&result)) {
         begin_connect(state, *connect);
@@ -466,7 +448,7 @@ void run_slash(ApplicationState& state, std::string_view command)
         break;
     case SlashCommand::Action::MODEL:
         if (state.providers->connections().empty()) {
-            state.session->set_error("No connections — run /connect first.");
+            state.session->set_error("No connections - run /connect first.");
             break;
         }
         enqueue_user_modal(
@@ -508,6 +490,45 @@ void interrupt(ApplicationState& state)
     if (state.session->phase() != Session::Phase::IDLE) {
         state.session->request_interrupt();
     }
+}
+
+void switch_session(ApplicationState& state, const std::filesystem::path& path)
+{
+    if (state.session->has_pending_work()) {
+        state.session->set_error(
+            "Finish or interrupt pending work before loading a session.");
+        return;
+    }
+    if (state.sessions->is_locked(path)) {
+        state.session->set_error("Session is open in another imza process.");
+        return;
+    }
+    if (state.sessions->save(*state.session) != Status::OK) {
+        state.session->set_error("Failed to save current session.");
+        return;
+    }
+    // Validate-then-commit: the target is read and locked before the active
+    // conversation is replaced, so a failure leaves the current session
+    // running; the previous lock is released only after the new one is held.
+    LoadedSession loaded;
+    if (read_session(path, loaded) != Status::OK) {
+        state.session->set_error("Failed to load session.");
+        return;
+    }
+    if (!state.sessions->activate(path)) {
+        state.session->set_error("Session is open in another imza process.");
+        return;
+    }
+    if (!change_directory(state, loaded.workspace)) {
+        state.sessions->deactivate();
+        state.session->set_error("Failed to load session.");
+        return;
+    }
+    state.session->restore(std::move(loaded.snapshot));
+    state.skills->clear();
+    state.permissions->clear();
+    state.runner->clear();
+    state.subagents->prune_completed();
 }
 
 void delete_saved_session(

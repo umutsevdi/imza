@@ -382,7 +382,7 @@ namespace {
                 return;
             }
             if (!state_->providers->active_selection()) {
-                state_->session->set_error("No model selected — run /model.");
+                state_->session->set_error("No model selected - run /model.");
                 return;
             }
             std::string prompt = format_review_plan_prompt(
@@ -403,7 +403,7 @@ namespace {
             const auto selection = state_->providers->active_selection();
             if (!selection) {
                 review_running_->store(false);
-                state_->session->set_error("No model selected — run /model.");
+                state_->session->set_error("No model selected - run /model.");
                 return;
             }
             const ReviewState::Snapshot snapshot = state_->review->snapshot();

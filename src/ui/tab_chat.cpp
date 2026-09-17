@@ -144,7 +144,7 @@ namespace {
             , layout_(std::move(layout))
         {
             input_options_.content     = &input_buf_;
-            input_options_.placeholder = "Ask anything — type / for commands";
+            input_options_.placeholder = "Ask anything - type / for commands";
             input_options_.multiline   = true;
             input_options_.on_change   = [this] { on_input_changed(); };
             input_options_.on_enter    = [this] { submit(); };

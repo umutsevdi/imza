@@ -111,7 +111,7 @@ std::string modal_answer_markdown(const ModalAnswer& answer)
                     body += card.selected[i];
                 }
             }
-            md += "  " + (body.empty() ? "—" : body);
+            md += "  " + (body.empty() ? "-" : body);
         } else {
             for (const auto& sel : card.selected) {
                 md += "\n> " + sel;
@@ -147,7 +147,7 @@ std::string ask_answer_markdown(const ModalAnswer& answer)
             body += card.free_text;
         }
         if (body.empty()) {
-            body = "—";
+            body = "-";
         }
         md += "> " + body;
     }

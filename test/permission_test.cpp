@@ -813,7 +813,7 @@ TEST_CASE("unknown dollar tokens remain ordinary chat text")
         { "It costs $5", "Use $HOME", "Try $not-a-skill" }) {
         state->session->clear_error();
         submit(*state, text);
-        CHECK(state->session->error() == "No model selected — run /model.");
+        CHECK(state->session->error() == "No model selected - run /model.");
     }
 }
 

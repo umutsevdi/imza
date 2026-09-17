@@ -289,11 +289,10 @@ inline std::string home_dir()
     );
 }
 
-// Globally unique, sortable identifier generated once per Session object and
-// stable for its lifetime: wall-clock milliseconds plus a random 32-bit
-// suffix. Doubles as the saved-session file name stem; resuming a saved file
-// starts a new object with a fresh id, so saving after a resume forks a new
-// file and leaves the original untouched.
+// Globally unique, sortable identifier: wall-clock milliseconds plus a random
+// 32-bit suffix. Generated once per fresh Session object; a loaded session
+// instead adopts its source file's stem as the id so saves continue that file
+// in place.
 inline std::string unique_session_id()
 {
     const auto now = std::chrono::system_clock::now().time_since_epoch();

@@ -140,7 +140,7 @@ namespace {
         {
             if (!_label_free()) {
                 data_->phase = SigninData::Phase::FAILED;
-                data_->error = "Set a label above first — this provider is "
+                data_->error = "Set a label above first - this provider is "
                                "already connected.";
                 return;
             }
@@ -178,7 +178,7 @@ namespace {
                 if (exists) {
                     data->phase = SigninData::Phase::FAILED;
                     data->error
-                        = "Already connected — set a different label above.";
+                        = "Already connected - set a different label above.";
                     return;
                 }
                 imza::resolve_modal(*state,

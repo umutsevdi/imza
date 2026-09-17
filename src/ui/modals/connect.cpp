@@ -373,7 +373,7 @@ namespace {
             const bool subscription = subscription_provider(selected_provider_);
             label_input_ = Input(field_option(&label_buf_, &label_cursor_,
                 provider_connected(selected_provider_)
-                    ? "label (required — already connected)"
+                    ? "label (required - already connected)"
                     : "label (optional), e.g. my Ollama",
                 [this] { row_error_.clear(); }));
             base_input_  = Input(field_option(&base_buf_, &base_cursor_,
@@ -576,7 +576,7 @@ namespace {
                 = res.label.empty() ? res.id : res.id + "/" + res.label;
             for (const auto& view : views()) {
                 if (view.id == key) {
-                    row_error_ = "Already connected — use a different label.";
+                    row_error_ = "Already connected - use a different label.";
                     res.id     = "";
                     return res;
                 }
@@ -621,7 +621,7 @@ namespace {
 
             const auto all = views();
             if (all.empty()) {
-                rows.push_back(text("  (none — add one below)") | dim);
+                rows.push_back(text("  (none - add one below)") | dim);
             } else {
                 rows.push_back(hbox({
                     name_cell(views(), "Providers") | bold,
@@ -800,7 +800,7 @@ namespace {
             if (pick_.visible.empty()) {
                 if (!any_fetching) {
                     rows.push_back(any_failed
-                            ? status_element("✗ Some providers failed — press "
+                            ? status_element("✗ Some providers failed - press "
                                              "F5 to retry.",
                                   false)
                             : text("no models") | dim);

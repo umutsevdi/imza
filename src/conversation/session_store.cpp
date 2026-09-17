@@ -34,10 +34,44 @@ Status SessionStore::save(Session& session)
 
 DeleteSessionResult SessionStore::remove(const std::filesystem::path& path)
 {
+    // Deleting the chat-active file would deadlock on our own guard, so it
+    // is dropped first.
+    {
+        std::lock_guard<std::mutex> lock_guard(_mutex);
+        if (_active_lock && _active_lock->path() == lock_path_for(path)) {
+            _active_lock.reset();
+        }
+    }
     _generation.fetch_add(1);
     const DeleteSessionResult result = delete_saved_session(path);
     _publish(saved_sessions());
     return result;
+}
+
+bool SessionStore::is_locked(const std::filesystem::path& path) const
+{
+    return session_file_locked(path);
+}
+
+bool SessionStore::activate(const std::filesystem::path& path)
+{
+    const std::filesystem::path lock = lock_path_for(path);
+    // The previous file's lock is released only after the new file has been
+    // locked, so a failed switch keeps the current conversation guarded.
+    auto acquired = acquire_file_lock(
+        lock, FileLockRequest { FileLockMode::EXCLUSIVE, false });
+    if (!std::holds_alternative<FileLock>(acquired)) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock_guard(_mutex);
+    _active_lock = std::move(std::get<FileLock>(acquired));
+    return true;
+}
+
+void SessionStore::deactivate()
+{
+    std::lock_guard<std::mutex> lock_guard(_mutex);
+    _active_lock.reset();
 }
 
 Signal<>::Subscription SessionStore::subscribe(Signal<>::Callback callback)

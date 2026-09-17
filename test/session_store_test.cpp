@@ -2,15 +2,21 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <sstream>
 #include <thread>
+#include <variant>
 #include <vector>
 
 #include <doctest/doctest.h>
 
+#include "app/application_state.h"
 #include "app/flows.h"
 #include "conversation/persistence.h"
 #include "conversation/session.h"
+#include "conversation/session_store.h"
+#include "platform/config.h"
+#include "platform/file_lock.h"
 
 namespace {
 
@@ -71,14 +77,14 @@ TEST_CASE("CLI session list aligns columns without terminal tabs")
            "1789291986542-c06df75e  2026-09-13 12:33:06  Long title\n"
            "short                   2026-09-13 12:25:53  Other title\n");
 }
-TEST_CASE("saved sessions are immutable and resume forks a new file")
+TEST_CASE("saved sessions continue in place and rewrite the same file")
 {
 #ifdef _WIN32
     return;
 #else
     DataHome home;
     imza::Session source;
-    source.set_title("Fork on resume");
+    source.set_title("Continued session");
     source.begin_send("hello");
     source.append_assistant("model", "off");
     source.apply(imza::make_delta_event("world"), { });
@@ -89,7 +95,7 @@ TEST_CASE("saved sessions are immutable and resume forks a new file")
     REQUIRE(saved.size() == 1);
     CHECK(saved.front().path.parent_path() == imza::sessions_dir());
     CHECK(imza::sessions_dir() == imza::data_dir() / "sessions");
-    CHECK(saved.front().title == "Fork on resume");
+    CHECK(saved.front().title == "Continued session");
     const std::filesystem::path saved_path = saved.front().path;
     CHECK(saved_path.stem().string() == source.session_id());
 
@@ -113,25 +119,20 @@ TEST_CASE("saved sessions are immutable and resume forks a new file")
     REQUIRE(
         imza::load_session(saved_path, loaded, &workspace) == imza::Status::OK);
     CHECK(workspace == directory.original);
-    // Resuming keeps the file untouched and starts a fresh object identity.
-    CHECK(loaded.session_id() != source.session_id());
-    CHECK_FALSE(loaded.session_id().empty());
+    // A resumed session adopts the source file stem and saves back into the
+    // same file once dirtied.
+    CHECK(loaded.session_id() == saved_path.stem().string());
     CHECK(std::get<imza::UserTurn>(loaded.items()[0]).text == "hello");
     CHECK(std::get<imza::AssistantTurn>(loaded.items()[1]).markdown == "world");
 
+    CHECK(loaded.snapshot_for_save() == std::nullopt);
     loaded.begin_send("parallel continuation");
     REQUIRE(imza::save_session(loaded) == imza::Status::OK);
     saved = imza::saved_sessions();
-    REQUIRE(saved.size() == 2);
-    CHECK(std::any_of(saved.begin(), saved.end(),
-        [&](const auto& entry) { return entry.path == saved_path; }));
-    const auto forked = std::find_if(saved.begin(), saved.end(),
-        [&](const auto& entry) { return entry.path != saved_path; });
-    REQUIRE(forked != saved.end());
-    CHECK(forked->path.stem().string() == loaded.session_id());
-
+    REQUIRE(saved.size() == 1);
+    CHECK(saved.front().path == saved_path);
     REQUIRE(imza::save_session(loaded) == imza::Status::OK);
-    CHECK(imza::saved_sessions().size() == 2);
+    CHECK(imza::saved_sessions().size() == 1);
 #endif
 }
 
@@ -425,7 +426,7 @@ TEST_CASE("CLI opens and removes saved sessions by ID")
 #endif
 }
 
-TEST_CASE("session id is generated ahead of use and rotates on restore")
+TEST_CASE("session id is generated ahead of use and adopts the stem on load")
 {
 #ifdef _WIN32
     return;
@@ -449,25 +450,128 @@ TEST_CASE("session id is generated ahead of use and rotates on restore")
     std::filesystem::path workspace;
     REQUIRE(imza::load_session(saved.front().path, restored, &workspace)
         == imza::Status::OK);
-    // A resumed session is a new run with its own id, so its saves fork a
-    // fresh file and never rewrite the file it was loaded from.
-    CHECK_FALSE(restored.session_id().empty());
-    CHECK(restored.session_id() != initial_id);
+    // A resumed session continues its source file in place: it adopts the
+    // file stem as the id and saves rewrite that same file.
+    CHECK(restored.session_id() == initial_id);
+    CHECK(restored.snapshot_for_save() == std::nullopt);
     restored.begin_send("continued");
-    CHECK(restored.session_id() != initial_id);
     REQUIRE(imza::save_session(restored) == imza::Status::OK);
-    const auto after_fork = imza::saved_sessions();
-    REQUIRE(after_fork.size() == 2);
-    CHECK(std::any_of(after_fork.begin(), after_fork.end(),
-        [&](const imza::SavedSession& entry) {
-            return entry.path.stem().string() == initial_id;
-        }));
+    const auto after_continue = imza::saved_sessions();
+    REQUIRE(after_continue.size() == 1);
+    CHECK(after_continue.front().path.stem().string() == initial_id);
 
-    // Starting a new session in place (the /new flow) rotates the id too, so
+    // Starting a new session in place (the /new flow) rotates the id, so
     // the fresh conversation cannot overwrite the archive it left behind.
     const std::string pre_new_id = session.session_id();
     session.restore(imza::SessionSnapshot { });
     CHECK(session.session_id() != pre_new_id);
     CHECK_FALSE(session.has_items());
+#endif
+}
+
+TEST_CASE("locked sessions block loads and deletion, then recover")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    CurrentDirectory directory;
+    imza::Session source;
+    source.set_title("Locked session");
+    source.begin_send("hello");
+    REQUIRE(imza::save_session(source) == imza::Status::OK);
+    const auto saved = imza::saved_sessions();
+    REQUIRE(saved.size() == 1);
+    const auto path = saved.front().path;
+
+    imza::SessionStore store;
+    // A lock held by another process (simulated with a raw handle) makes
+    // activation fail and the session stay locked.
+    auto foreign = imza::acquire_file_lock(imza::lock_path_for(path),
+        imza::FileLockRequest { imza::FileLockMode::EXCLUSIVE, false });
+    REQUIRE(std::holds_alternative<imza::FileLock>(foreign));
+
+    CHECK(store.is_locked(path));
+    CHECK_FALSE(store.activate(path));
+    CHECK(imza::session_file_locked(path));
+    // Reads refuse a foreign-locked file instead of blocking, and the
+    // exclusive lock also makes deletion fail.
+    imza::LoadedSession loaded;
+    CHECK(imza::read_session(path, loaded) == imza::Status::CONFIG_ERROR);
+    CHECK(imza::delete_saved_session(path)
+        == imza::DeleteSessionResult::REMOVE_FAILED);
+    CHECK(imza::saved_sessions().size() == 1);
+
+    // After the foreign lock is dropped the same probe succeeds and the
+    // session can be activated; activating another path releases the first.
+    foreign = std::variant<imza::FileLock, imza::FileLockError> {
+        imza::FileLockError { }
+    };
+    CHECK_FALSE(store.is_locked(path));
+    REQUIRE(store.activate(path));
+    CHECK(store.is_locked(path));
+    const auto other = imza::sessions_dir() / "other-session.json";
+    REQUIRE(store.activate(other));
+    // The previous guard was released, so the session is free again.
+    CHECK_FALSE(store.is_locked(path));
+    REQUIRE(store.activate(path));
+    // Deleting the active session through the store drops the guard first,
+    // so the removal succeeds; a foreign lock would still make it fail.
+    CHECK(store.remove(path) == imza::DeleteSessionResult::OK);
+    CHECK(imza::saved_sessions().empty());
+    store.deactivate();
+#endif
+}
+
+TEST_CASE("switch_session locks the target and reports foreign locks")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    CurrentDirectory directory;
+    const auto immediate = [](std::function<void()> task) { task(); };
+    auto state = imza::make_application_state(immediate, imza::Config { });
+    state->session->set_title("Current");
+    state->session->begin_send("hello");
+    state->session->append_assistant("model", "off");
+    state->session->apply(imza::make_delta_event("world"), { });
+    state->session->finish_session("");
+    REQUIRE(imza::save_session(*state->session) == imza::Status::OK);
+    const std::string current_stem = state->session->session_id();
+
+    imza::Session target;
+    target.set_title("Target");
+    target.begin_send("hola");
+    REQUIRE(imza::save_session(target) == imza::Status::OK);
+    const auto sessions = imza::saved_sessions();
+    REQUIRE(sessions.size() == 2);
+    const auto target_path = std::find_if(
+        sessions.begin(), sessions.end(), [&](const auto& entry) {
+            return entry.title == "Target";
+        })->path;
+
+    auto foreign = imza::acquire_file_lock(imza::lock_path_for(target_path),
+        imza::FileLockRequest { imza::FileLockMode::EXCLUSIVE, false });
+    REQUIRE(std::holds_alternative<imza::FileLock>(foreign));
+
+    imza::switch_session(*state, target_path);
+    CHECK(state->session->title() == "Current");
+    CHECK(
+        state->session->error() == "Session is open in another imza process.");
+    CHECK(state->session->session_id() == current_stem);
+    CHECK(imza::saved_sessions().size() == 2);
+
+    foreign = std::variant<imza::FileLock, imza::FileLockError> {
+        imza::FileLockError { }
+    };
+    imza::switch_session(*state, target_path);
+    CHECK(state->session->title() == "Target");
+    CHECK(state->session->error().empty());
+    CHECK(state->session->session_id() == target_path.stem().string());
+
+    state->session->begin_send("grew the target in place");
+    REQUIRE(imza::save_session(*state->session) == imza::Status::OK);
+    CHECK(imza::saved_sessions().size() == 2);
 #endif
 }

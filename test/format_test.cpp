@@ -39,7 +39,7 @@ TEST_CASE("modal_answer_markdown renders Q/A pairs with prompt")
     CHECK(md.find("Auth, Billing") != std::string::npos);
     CHECK(md.find("my own region") != std::string::npos);
     CHECK(md.find("anything else?**") != std::string::npos);
-    CHECK(md.find("—") != std::string::npos);
+    CHECK(md.find("-") != std::string::npos);
 }
 
 TEST_CASE("tool_args_summary formats object and non-object args")
@@ -112,7 +112,7 @@ TEST_CASE("ask_answer_markdown numbers questions and blockquotes answers")
 
     imza::ModalAnswer empty;
     empty.cards.push_back(imza::QuestionAnswer { { }, "", "Anything else?" });
-    CHECK(imza::ask_answer_markdown(empty) == "1. **Anything else?**\n> —");
+    CHECK(imza::ask_answer_markdown(empty) == "1. **Anything else?**\n> -");
 }
 
 TEST_CASE("tool_code_language derives the extension for read only")

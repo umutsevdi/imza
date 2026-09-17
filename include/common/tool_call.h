@@ -39,10 +39,14 @@ struct TodoItem {
     enum class Status { PENDING, IN_PROGRESS, COMPLETED, CANCELLED };
     std::string content;
     Status status = Status::PENDING;
+
+    bool operator==(const TodoItem&) const = default;
 };
 
 struct TodoList {
     std::vector<TodoItem> items;
+
+    bool operator==(const TodoList&) const = default;
 };
 
 } // namespace imza

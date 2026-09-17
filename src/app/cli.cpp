@@ -180,8 +180,9 @@ std::string format_session_list(const std::vector<SavedSession>& sessions)
           };
     append_row(std::string(id_header), std::string(saved_header), "TITLE");
     for (const SavedSession& session : sessions) {
-        append_row(
-            session.path.stem().string(), session.saved_at, session.title);
+        const std::string saved
+            = session_file_locked(session.path) ? "locked" : session.saved_at;
+        append_row(session.path.stem().string(), saved, session.title);
     }
     return output;
 }

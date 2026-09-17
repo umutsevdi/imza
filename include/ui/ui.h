@@ -178,6 +178,12 @@ struct ModelPickList {
     const ModelRow* chosen() const;
 };
 
+// Indices of `rows` whose `match` text contains the lowercased, trimmed
+// `filter`. Empty filter selects every row.
+std::vector<std::size_t> filter_visible(const std::string& filter,
+    std::size_t row_count,
+    const std::function<std::string(std::size_t)>& match);
+
 ftxui::Element render_markdown_element(std::string_view md, int width);
 
 bool syntax_type_supported(std::string_view type);

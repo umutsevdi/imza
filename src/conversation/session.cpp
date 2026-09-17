@@ -119,8 +119,7 @@ SessionSnapshot Session::snapshot() const
 std::optional<SessionSnapshot> Session::snapshot_for_save() const
 {
     std::lock_guard lock(mutex_);
-    if (items_.empty()
-        || std::holds_alternative<PersistedSession>(persistence_)) {
+    if (items_.empty() || !dirty_) {
         return std::nullopt;
     }
     return SessionSnapshot { title_, items_, todo_, compacted_summary_,
@@ -137,11 +136,18 @@ void Session::restore(SessionSnapshot snapshot)
         compacted_summary_    = std::move(snapshot.compacted_summary);
         compacted_item_count_ = snapshot.compacted_item_count;
         persistence_          = std::move(snapshot.persistence);
-        // Every restore starts a new run: /new and session loads reuse this
-        // object, so rotate the id to keep each run's saves in their own file.
-        session_id_ = unique_session_id();
-        mode_       = snapshot.plan_mode ? Mode::PLAN : Mode::BUILD;
-        modal_      = std::monostate { };
+        // A loaded session continues its source file in place and adopts the
+        // file stem as its id. Only fresh conversations (/new, brand-new
+        // objects) rotate to a generated id so their first save gains a new
+        // file instead of overwriting an archive.
+        if (auto* persisted = std::get_if<PersistedSession>(&persistence_)) {
+            session_id_ = persisted->path.stem().string();
+        } else {
+            session_id_ = unique_session_id();
+        }
+        dirty_ = false;
+        mode_  = snapshot.plan_mode ? Mode::PLAN : Mode::BUILD;
+        modal_ = std::monostate { };
         std::vector<QueuedMessage>().swap(queued_);
         error_.clear();
         retry_countdown_.reset();
@@ -174,6 +180,8 @@ void Session::set_persistence(SessionPersistence persistence)
 {
     std::lock_guard lock(mutex_);
     persistence_ = std::move(persistence);
+    // The file now mirrors the conversation until the next mutation.
+    dirty_ = false;
 }
 
 void Session::set_mode(Mode next_mode)
@@ -243,6 +251,7 @@ void Session::set_title(std::string title)
         std::lock_guard lock(mutex_);
         if (title_.empty()) {
             title_ = std::move(title);
+            dirty_ = true;
         }
     }
     _notify_title_change();
@@ -285,6 +294,7 @@ void Session::begin_send(
     {
         std::lock_guard lock(mutex_);
         persistence_ = UnsavedSession { };
+        dirty_       = true;
         items_.emplace_back(
             UserTurn { std::move(text), std::move(attachments) });
         error_.clear();
@@ -299,6 +309,7 @@ void Session::begin_send(
 void Session::append_assistant(std::string model, std::string reasoning_effort)
 {
     std::lock_guard lock(mutex_);
+    dirty_ = true;
     items_.emplace_back(AssistantTurn { .model = std::move(model),
         .reasoning_effort                      = std::move(reasoning_effort) });
 }
@@ -316,6 +327,7 @@ void Session::set_last_assistant_metadata(
 void Session::append_item(ConversationItem item)
 {
     std::lock_guard lock(mutex_);
+    dirty_ = true;
     items_.push_back(std::move(item));
 }
 
@@ -346,6 +358,7 @@ void Session::finish_compaction(std::size_t id, std::string summary,
         }
         event->status = success ? CompactionEvent::Status::COMPLETED
                                 : CompactionEvent::Status::FAILED;
+        dirty_        = true;
         if (success) {
             compacted_summary_    = std::move(summary);
             compacted_item_count_ = compacted_item_count;
@@ -360,6 +373,7 @@ void Session::append_tool(const ToolCallRequest& req)
     if (auto* a = last_assistant_locked()) {
         finalize_reasoning(*a);
     }
+    dirty_               = true;
     const std::size_t id = next_tool_id_++;
     items_.emplace_back(
         ToolCall { id, req.id, req.name, req.args, { }, { }, std::nullopt });
@@ -409,12 +423,16 @@ void Session::fill_tool_result(
     std::lock_guard lock(mutex_);
     if (auto* call = _find_tool_locked(req, true)) {
         call->result = std::move(result);
+        dirty_       = true;
     }
 }
 
 void Session::set_todo(TodoList todo)
 {
     std::lock_guard lock(mutex_);
+    if (todo != todo_) {
+        dirty_ = true;
+    }
     todo_ = std::move(todo);
 }
 
@@ -538,6 +556,7 @@ void Session::apply(const StreamEvent& ev, const ModelPricing& pricing)
             if (auto* a = std::get_if<AssistantTurn>(&items_.back())) {
                 if (!ev.text.empty()) {
                     finalize_reasoning(*a);
+                    dirty_ = true;
                 }
                 a->markdown += ev.text;
             }
@@ -549,7 +568,10 @@ void Session::apply(const StreamEvent& ev, const ModelPricing& pricing)
                 if (a->reasoning.empty() && !reasoning_start_.has_value()) {
                     reasoning_start_ = std::chrono::steady_clock::now();
                 }
-                a->reasoning += ev.text;
+                if (!ev.text.empty()) {
+                    a->reasoning += ev.text;
+                    dirty_ = true;
+                }
                 if (!ev.thinking_signature.empty()) {
                     a->reasoning_signature = ev.thinking_signature;
                 }
@@ -560,6 +582,7 @@ void Session::apply(const StreamEvent& ev, const ModelPricing& pricing)
         if (auto* a = last_assistant_locked()) {
             finalize_reasoning(*a);
         }
+        dirty_ = true;
         items_.emplace_back(ToolCall { next_tool_id_++, ev.tool_call.id,
             ev.tool_call.name, ev.tool_call.args, { }, { }, std::nullopt });
         break;
@@ -570,6 +593,7 @@ void Session::apply(const StreamEvent& ev, const ModelPricing& pricing)
                     a->markdown += "\n\n";
                 }
                 a->markdown += question_form_markdown(ev.question);
+                dirty_ = true;
             }
         }
         break;

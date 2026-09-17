@@ -48,18 +48,26 @@ ftxui::Element model_picker_row(const ModelRow& row, bool selected)
     return e;
 }
 
-void ModelPickList::refill_visible()
+std::vector<std::size_t> filter_visible(const std::string& filter,
+    std::size_t row_count, const std::function<std::string(std::size_t)>& match)
 {
     const std::string needle = to_lower(trim(filter));
-    visible.clear();
-    for (std::size_t i = 0; i < rows.size(); ++i) {
+    std::vector<std::size_t> visible;
+    for (std::size_t i = 0; i < row_count; ++i) {
         if (!needle.empty()
-            && to_lower(rows[i].model_id).find(needle) == std::string::npos
-            && to_lower(rows[i].name).find(needle) == std::string::npos) {
+            && to_lower(match(i)).find(needle) == std::string::npos) {
             continue;
         }
         visible.push_back(i);
     }
+    return visible;
+}
+
+void ModelPickList::refill_visible()
+{
+    visible = filter_visible(filter, rows.size(), [this](std::size_t i) {
+        return rows[i].model_id + ' ' + rows[i].name;
+    });
 }
 
 void ModelPickList::move(int delta)
@@ -311,9 +319,9 @@ Element session_error_element(const Session& session)
             remaining = 0;
         }
         message = session.retry_countdown()->stalled
-            ? "Connection stalled — retrying in " + std::to_string(remaining)
+            ? "Connection stalled - retrying in " + std::to_string(remaining)
                 + "s…"
-            : "Rate limited — retrying in " + std::to_string(remaining) + "s…";
+            : "Rate limited - retrying in " + std::to_string(remaining) + "s…";
     }
     if (message.empty()) {
         return text("");
