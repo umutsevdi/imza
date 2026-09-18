@@ -138,16 +138,18 @@ namespace {
 
     class ChatImpl : public ComponentBase {
     public:
-        ChatImpl(std::shared_ptr<ApplicationState> state, LayoutFn layout)
+        ChatImpl(std::shared_ptr<ApplicationState> state, LayoutFn layout,
+            ChatHints hints = { })
             : state_(std::move(state))
             , session_(state_->session)
             , layout_(std::move(layout))
+            , hints_(std::move(hints))
         {
-            input_options_.content     = &input_buf_;
-            input_options_.placeholder = "Ask anything — type / for commands";
-            input_options_.multiline   = true;
-            input_options_.on_change   = [this] { on_input_changed(); };
-            input_options_.on_enter    = [this] { submit(); };
+            input_options_.content         = &input_buf_;
+            input_options_.placeholder     = hints_.placeholder.c_str();
+            input_options_.multiline       = true;
+            input_options_.on_change       = [this] { on_input_changed(); };
+            input_options_.on_enter        = [this] { submit(); };
             input_options_.cursor_position = Ref<int>(&input_cursor_);
             input_options_.insert          = true;
             input_options_.transform       = [](InputState state) {
@@ -442,18 +444,22 @@ namespace {
                 | flex | reflect(viewport_.box);
 
             Elements bottom;
-            bottom.push_back(
-                vbox({
-                    hint_bar("Ctrl+↑↓ input history · ↑↓ scroll"),
-                    hint_bar("Tab next phase · Shift+Tab previous phase"),
-                })
-                | xflex);
+            Elements hints;
+            if (!hints_.scroll_line.empty()) {
+                hints.push_back(hint_bar(hints_.scroll_line));
+            }
+            if (!hints_.phase_line.empty()) {
+                hints.push_back(hint_bar(hints_.phase_line));
+            }
+            if (!hints.empty()) {
+                bottom.push_back(vbox(std::move(hints)) | xflex);
+            }
             if (autocomplete_.active()) {
                 bottom.push_back(autocomplete_.render(ctx));
             }
             bottom.push_back(vbox({ std::move(input_box) | yflex,
-                text("  Alt+Enter add line · @ attach file · $ use skill ")
-                    | color(PANEL_FG_DIM) | bgcolor(PANEL_COLOR) }));
+                text(hints_.input_hint) | color(PANEL_FG_DIM)
+                    | bgcolor(PANEL_COLOR) }));
             if (!st.error().empty() || st.retry_countdown()) {
                 bottom.push_back(session_error_element(st));
             }
@@ -721,6 +727,7 @@ namespace {
         std::shared_ptr<ApplicationState> state_;
         std::shared_ptr<Session> session_;
         LayoutFn layout_;
+        ChatHints hints_;
 
         Component container_;
         std::map<std::size_t, Component> read_buttons_;
@@ -1191,7 +1198,7 @@ namespace {
             entry.component
                 = inline_link_button([label_ptr] { return text(*label_ptr); },
                     [this, content_ptr, metadata_ptr] {
-                        ViewerModal vm { " Thinking", *content_ptr, "", 1 };
+                        ViewerModal vm { " Thinking", *content_ptr, "md", 1 };
                         vm.line_numbers = false;
                         vm.metadata     = *metadata_ptr;
                         enqueue_user_modal(*state_, vm);
@@ -1254,9 +1261,10 @@ ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx)
 }
 
 ftxui::Component make_chat(
-    std::shared_ptr<ApplicationState> state, LayoutFn layout)
+    std::shared_ptr<ApplicationState> state, LayoutFn layout, ChatHints hints)
 {
-    return ftxui::Make<ChatImpl>(std::move(state), std::move(layout));
+    return ftxui::Make<ChatImpl>(
+        std::move(state), std::move(layout), std::move(hints));
 }
 
 } // namespace imza

@@ -39,10 +39,11 @@ comments, then send the findings directly back to Plan mode.
 - Native terminal UI with a small runtime footprint
 - Plan → Build → Review workflow
 - Interactive diffs and AI-assisted code review
-- Up to five concurrent research or build subagents
+- Sidechat, a place to ask questions without disrupting the main agent's work.
 - Shell-aware, scoped permission controls
 - Bring-your-own-model support
 - Persistent sessions, transcripts, and automatic context compaction
+- Up to five concurrent research or build subagents
 - Terminal notifications when an attended agent finishes or needs input
 
 ## Bring Your Own Model
@@ -105,13 +106,12 @@ session.
 - [X] Headless mode
 - [X] Shell-aware permissions with program and subcommand grants
 - [X] Notifications
+- [X] Sidechat
 
 ### Roadmap
-- [ ] Fork sessions
 - [ ] MCP
 - [ ] Image or other multimodal prompt attachments
 - [ ] Monthly usage analytics (local)
-- [ ] Python based extensions
 
 ## Installation
 

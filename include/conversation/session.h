@@ -16,6 +16,7 @@
 #include "common/modal.h"
 #include "common/tool_call.h"
 #include "common/types.h"
+#include "common/util.h"
 #include "network/chat.h"
 #include "network/network.h"
 #include "providers/pricing.h"
@@ -104,6 +105,7 @@ public:
     enum class Mode { PLAN, BUILD };
     struct Countdown {
         std::chrono::steady_clock::time_point deadline;
+        bool stalled = false;
     };
     struct StatusView {
         Mode mode;
@@ -118,6 +120,7 @@ public:
     ModalPayload modal() const;
     std::uint64_t modal_serial() const;
     std::uint64_t content_serial() const;
+    std::string session_id() const;
     Phase phase() const;
     Mode mode() const;
     std::string error() const;
@@ -170,7 +173,7 @@ public:
     void bump_modal_serial();
     void present_modal(ModalPayload payload);
     void set_phase(Phase phase);
-    void mark_retry(int wait_seconds);
+    void mark_retry(int wait_seconds, bool stalled = false);
 
     void apply(const StreamEvent& ev, const ModelPricing& pricing);
     bool finish_session(std::string error);
@@ -232,6 +235,8 @@ private:
     std::string compacted_summary_;
     std::size_t compacted_item_count_ = 0;
     SessionPersistence persistence_   = UnsavedSession { };
+    bool dirty_                       = false;
+    std::string session_id_           = unique_session_id();
 
     Signal<> title_changed_;
     Signal<> attachments_changed_;

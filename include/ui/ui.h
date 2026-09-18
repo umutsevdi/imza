@@ -178,6 +178,12 @@ struct ModelPickList {
     const ModelRow* chosen() const;
 };
 
+// Indices of `rows` whose `match` text contains the lowercased, trimmed
+// `filter`. Empty filter selects every row.
+std::vector<std::size_t> filter_visible(const std::string& filter,
+    std::size_t row_count,
+    const std::function<std::string(std::size_t)>& match);
+
 ftxui::Element render_markdown_element(std::string_view md, int width);
 
 bool syntax_type_supported(std::string_view type);
@@ -244,8 +250,19 @@ bool has_custom_permissions(const PermissionView& view);
 ftxui::Element render_permissions_box(const PermissionView& view);
 ftxui::Element render_update_available(std::string version);
 
-ftxui::Component make_chat(
-    std::shared_ptr<ApplicationState> state, LayoutFn layout);
+// Per-chat footer text; the sidechat clears hints and sets its own input
+// hint.
+struct ChatHints {
+    std::string scroll_line = "Ctrl+↑↓ input history · ↑↓ scroll";
+    std::string phase_line
+        = "Tab next phase · Shift+Tab previous phase · Ctrl+S Sidechat";
+    std::string placeholder = "Ask anything - type / for commands";
+    std::string input_hint
+        = "  Alt+Enter add line · @ attach file · $ use skill ";
+};
+
+ftxui::Component make_chat(std::shared_ptr<ApplicationState> state,
+    LayoutFn layout, struct ChatHints hints = { });
 ftxui::Component make_side_panel(std::shared_ptr<ApplicationState> state,
     LayoutFn layout, WorkflowFn workflow, WorkflowNavigateFn navigate);
 ftxui::Component make_review(std::shared_ptr<ApplicationState> state,
@@ -261,5 +278,18 @@ ftxui::Component make_variant(std::shared_ptr<ApplicationState> state);
 ftxui::Component make_sessions(std::shared_ptr<ApplicationState> state);
 ftxui::Component make_skills(std::shared_ptr<ApplicationState> state);
 ftxui::Component make_modal(std::shared_ptr<ApplicationState> state);
+// Sidechat column: owns its chat pane, modal host, focus state, and mouse
+// box. `on_focus` fires when the pane gains or loses attention.
+struct SidechatHandle {
+    virtual ~SidechatHandle()                  = default;
+    virtual ftxui::Component component() const = 0;
+    virtual bool focused() const               = 0;
+    virtual bool has_modal() const             = 0;
+    virtual ftxui::Component modal() const     = 0;
+    virtual bool rendered() const              = 0;
+};
+
+std::shared_ptr<SidechatHandle> make_sidechat_component(
+    std::shared_ptr<ApplicationState> state, std::function<void()> on_focus);
 
 } // namespace imza

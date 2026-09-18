@@ -50,6 +50,7 @@ enum class Status {
     API_ERROR,
     RATE_LIMITED,
     BUDGET_EXCEEDED,
+    SERVER_ERROR,
     CANCELLED,
     TIMEOUT,
     CONFIG_ERROR
@@ -66,6 +67,7 @@ inline std::string error_text(Status st)
     case Status::RATE_LIMITED: return "Rate limited by provider.";
     case Status::BUDGET_EXCEEDED:
         return "Out of budget / insufficient credits.";
+    case Status::SERVER_ERROR: return "Provider server error.";
     case Status::CANCELLED: return "Cancelled.";
     case Status::TIMEOUT: return "Timed out.";
     case Status::CONFIG_ERROR: return "Configuration error.";

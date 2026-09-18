@@ -187,7 +187,7 @@ TEST_CASE("list returns sorted entries with directory markers")
     const auto out = run(tool, tmp.path.string());
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(out.text
-        == ".hidden    0 KB\nalpha.txt  0 KB\nbeta.txt   0 KB\nzed/       —");
+        == ".hidden    0 KB\nalpha.txt  0 KB\nbeta.txt   0 KB\nzed/       -");
 }
 
 TEST_CASE("list defaults to the current directory")

@@ -402,6 +402,27 @@ TEST_CASE("OpenAI usage reports cached tokens from prompt_tokens_details")
     CHECK(outs[0].usage.completion == 4);
 }
 
+TEST_CASE("classify_failure maps statuses onto retry categories")
+{
+    std::string message;
+    CHECK(imza::classify_failure(
+              429, R"({"error":{"message":"slow down"}})", message)
+        == imza::Status::RATE_LIMITED);
+    CHECK(message == "slow down");
+    CHECK(imza::classify_failure(402, "", message)
+        == imza::Status::BUDGET_EXCEEDED);
+    CHECK(
+        imza::classify_failure(408, "", message) == imza::Status::SERVER_ERROR);
+    CHECK(
+        imza::classify_failure(409, "", message) == imza::Status::SERVER_ERROR);
+    CHECK(
+        imza::classify_failure(500, "", message) == imza::Status::SERVER_ERROR);
+    CHECK(
+        imza::classify_failure(503, "", message) == imza::Status::SERVER_ERROR);
+    CHECK(imza::classify_failure(400, "", message) == imza::Status::API_ERROR);
+    CHECK(message == "HTTP 400");
+}
+
 TEST_CASE("Anthropic emits usage and content across the message lifecycle")
 {
     imza::Route route;

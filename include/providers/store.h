@@ -87,8 +87,8 @@ public:
     std::optional<ProviderSelection> subagent_selection(
         SubagentRole role) const;
     Route route_for(std::string_view connection_id, ApiStandard dialect) const;
-    Route authenticated_route_for(
-        std::string_view connection_id, ApiStandard dialect);
+    Route authenticated_route_for(std::string_view connection_id,
+        ApiStandard dialect, std::string_view opencode_session = { });
     bool model_reasons(std::string_view model) const;
     ModelPricing pricing_for(std::string_view model) const;
 
@@ -118,8 +118,8 @@ private:
 
     Connection* _find_locked(std::string_view id);
     const Connection* _find_locked(std::string_view id) const;
-    Route _route_locked(
-        const Connection& connection, ApiStandard dialect) const;
+    Route _route_locked(const Connection& connection, ApiStandard dialect,
+        std::string_view opencode_session = { }) const;
     void _start_fetch_locked(const std::string& connection_id);
     Status _commit_connection_locked(const ConnectResult& result,
         const std::vector<ModelInfo>& models, bool& first);

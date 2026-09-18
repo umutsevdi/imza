@@ -156,6 +156,9 @@ namespace {
             review_      = make_review(state_, layout,
                 [this](WorkflowPhase phase) { _set_phase(phase); });
             modal_       = make_modal(state_);
+            sidechat_
+                = make_sidechat_component(state_, [this] { _focus_main(); });
+            sidechat_component_ = sidechat_->component();
 
             workspace_subscription_
                 = state_->environment->subscribe_to_workspace_change(
@@ -169,7 +172,7 @@ namespace {
             review_available_ = _review_available();
             tab_names_        = { "Plan", "Build" };
             if (review_available_) {
-                tab_names_.push_back("Review");
+                tab_names_.emplace_back("Review");
             }
             tabs_ = CatchEvent(
                 Menu(&tab_names_, &selected_, MenuOption::HorizontalAnimated()),
@@ -183,6 +186,7 @@ namespace {
                 status_line_,
                 modal_,
             }));
+            Add(sidechat_component_);
             chat_->TakeFocus();
         }
 
@@ -200,30 +204,50 @@ namespace {
             const std::string title = state_->session->title();
             Element title_p = paragraph(title.empty() ? "New Session" : title)
                 | bold | color(PANEL_FG);
-            right_col = std::move(right_col) | xflex | yflex;
+            const bool narrow       = layout_.kind == LayoutCtx::Kind::NARROW;
+            const bool side_by_side = state_->sidechat_open && !narrow;
 
             Element root;
-            if (layout_.kind == LayoutCtx::Kind::WIDE) {
-                root = vbox({ hbox({ text(" "), side | yflex, text(" "),
-                                  vbox({ hbox({ text(" "), title_p | xflex,
-                                             tab }),
-                                      right_col })
-                                      | xflex })
+            if (narrow && sidechat_->focused()) {
+                root = vbox({ sidechat_component_->Render() | flex,
+                           separatorEmpty(), status })
+                    | flex;
+            } else if (layout_.kind == LayoutCtx::Kind::WIDE) {
+                Element main_panel
+                    = vbox({
+                          hbox({ text(" "), title_p | xflex, tab }),
+                          std::move(right_col) | reflect(main_pane_box_)
+                              | yflex,
+                      })
+                    | xflex | yflex;
+                if (side_by_side) {
+                    main_panel = hbox({ std::move(main_panel), separatorEmpty(),
+                        sidechat_component_->Render() });
+                }
+                root = vbox({ hbox({ side | yflex, text(" "),
+                                  std::move(main_panel) | xflex | yflex })
                                | flex,
                            separatorEmpty(), status })
                     | flex;
             } else {
-                root = vbox({ hbox({ title_p | xflex, tab }), side,
-                           separatorEmpty(), right_col, separatorEmpty(),
-                           status })
+                Element content = std::move(right_col) | xflex | yflex;
+                root            = vbox({ hbox({ title_p | xflex, tab }), side,
+                                      separatorEmpty(), std::move(content),
+                                      separatorEmpty(), status })
                     | flex;
             }
 
+            Component popup_source = nullptr;
             if (state_->session->modal().index() != 0) {
+                popup_source = modal_;
+            } else if (sidechat_->has_modal()) {
+                popup_source = sidechat_->modal();
+            }
+            if (popup_source) {
                 const int h   = terminal_size.dimy;
                 const int mw  = std::min(w - 4, MODAL_MAX_WIDTH);
                 const int mh  = std::max(10, h - 4);
-                Element popup = modal_->Render()
+                Element popup = popup_source->Render()
                     | borderStyled(ROUNDED, PANEL_BORDER) | bgcolor(PANEL_COLOR)
                     | color(PANEL_FG) | clear_under | size(WIDTH, EQUAL, mw)
                     | size(HEIGHT, LESS_THAN, mh);
@@ -241,6 +265,12 @@ namespace {
             if (state_->session->modal().index() != 0) {
                 return modal_->OnEvent(event);
             }
+            if (sidechat_->has_modal()) {
+                return sidechat_component_->OnEvent(event);
+            }
+            if (sidechat_component_->OnEvent(event)) {
+                return true;
+            }
             if (event == Event::Tab) {
                 _set_phase(next_workflow_phase(phase_, review_available_));
                 return true;
@@ -250,6 +280,12 @@ namespace {
                 return true;
             }
             if (event.is_mouse()) {
+                const Mouse& m = event.mouse();
+                if (m.button == Mouse::Left && m.motion == Mouse::Pressed
+                    && state_->sidechat_open && sidechat_->focused()
+                    && main_pane_box_.Contain(m.x, m.y)) {
+                    _focus_main();
+                }
                 const int previous = selected_;
                 if (tabs_->OnEvent(event)) {
                     if (selected_ != previous) {
@@ -263,6 +299,14 @@ namespace {
             }
             return selected_pane_ == 0 ? chat_->OnEvent(event)
                                        : review_->OnEvent(event);
+        }
+
+        Component ActiveChild() override
+        {
+            if (state_->sidechat_open && sidechat_->focused()) {
+                return sidechat_component_;
+            }
+            return ComponentBase::ActiveChild();
         }
 
     private:
@@ -298,6 +342,18 @@ namespace {
             if (const auto mode = workflow_mode(phase)) {
                 state_->session->set_mode(*mode);
             }
+            if (sidechat_->focused()) {
+                return;
+            }
+            if (selected_pane_ == 0) {
+                chat_->TakeFocus();
+            } else {
+                review_->TakeFocus();
+            }
+        }
+
+        void _focus_main()
+        {
             if (selected_pane_ == 0) {
                 chat_->TakeFocus();
             } else {
@@ -307,6 +363,8 @@ namespace {
 
         ScreenInteractive& screen_;
         std::shared_ptr<ApplicationState> state_;
+        std::shared_ptr<SidechatHandle> sidechat_;
+        ftxui::Component sidechat_component_;
         Component side_;
         Component modal_;
         Component status_line_;
@@ -322,6 +380,7 @@ namespace {
         bool review_available_ { false };
         int selected_ { 0 };
         int selected_pane_ { 0 };
+        ftxui::Box main_pane_box_ { };
     };
 
 } // namespace

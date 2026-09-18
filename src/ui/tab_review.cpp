@@ -225,7 +225,11 @@ namespace {
                 ? "Enter save · Alt+Enter new line · Esc cancel"
                 : selected_comment_
                 ? "↑↓ navigate · e edit · d delete"
-                : "↑↓ navigate · [] files · Enter collapse · c comment";
+                : "↑↓ navigate · [] files · Enter collapse · c comment  ";
+            // Advertise the Sidechat toggle while no pane is on screen.
+            const std::string hint_sidechat
+                = state_->sidechat_open ? "" : " · Ctrl+S Sidechat";
+            const std::string hint_line = hint + hint_sidechat;
             Elements bottom { };
 
             if (!state_->session->error().empty()
@@ -248,7 +252,7 @@ namespace {
                 actions.push_back(review_cancel_button_->Render());
             }
             actions.push_back(filler());
-            actions.push_back(text(hint) | dim);
+            actions.push_back(text(hint_line) | dim);
             bottom.push_back(hbox(std::move(actions)));
             return vbox({ std::move(content), vbox(std::move(bottom)) }) | flex;
         }
@@ -382,7 +386,7 @@ namespace {
                 return;
             }
             if (!state_->providers->active_selection()) {
-                state_->session->set_error("No model selected — run /model.");
+                state_->session->set_error("No model selected - run /model.");
                 return;
             }
             std::string prompt = format_review_plan_prompt(
@@ -403,7 +407,7 @@ namespace {
             const auto selection = state_->providers->active_selection();
             if (!selection) {
                 review_running_->store(false);
-                state_->session->set_error("No model selected — run /model.");
+                state_->session->set_error("No model selected - run /model.");
                 return;
             }
             const ReviewState::Snapshot snapshot = state_->review->snapshot();

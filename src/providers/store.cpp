@@ -272,8 +272,8 @@ Route ProviderStore::route_for(
                                  : _route_locked(*connection, dialect);
 }
 
-Route ProviderStore::authenticated_route_for(
-    std::string_view connection_id, ApiStandard dialect)
+Route ProviderStore::authenticated_route_for(std::string_view connection_id,
+    ApiStandard dialect, std::string_view opencode_session)
 {
     const std::string id(connection_id);
     Connection snapshot;
@@ -288,11 +288,11 @@ Route ProviderStore::authenticated_route_for(
         if (!subscription_connection(connection->id)
             || connection->expires_at == 0
             || now <= connection->expires_at - 300) {
-            return _route_locked(*connection, dialect);
+            return _route_locked(*connection, dialect, opencode_session);
         }
         if (connection->refresh_token.empty()) {
-            Route route         = _route_locked(*connection, dialect);
-            route.error         = Status::API_ERROR;
+            Route route = _route_locked(*connection, dialect, opencode_session);
+            route.error = Status::API_ERROR;
             route.error_message = "Subscription expired. Sign in again.";
             return route;
         }
@@ -327,7 +327,7 @@ Route ProviderStore::authenticated_route_for(
         refreshing_.erase(id);
         const Connection* connection = _find_locked(id);
         if (connection != nullptr) {
-            route = _route_locked(*connection, dialect);
+            route = _route_locked(*connection, dialect, opencode_session);
         }
     }
     refresh_changed_.notify_all();
@@ -605,10 +605,10 @@ const Connection* ProviderStore::_find_locked(std::string_view id) const
     return find_connection(config_.providers, id);
 }
 
-Route ProviderStore::_route_locked(
-    const Connection& connection, ApiStandard dialect) const
+Route ProviderStore::_route_locked(const Connection& connection,
+    ApiStandard dialect, std::string_view opencode_session) const
 {
-    return resolve_route(connection, catalog_, dialect);
+    return resolve_route(connection, catalog_, dialect, opencode_session);
 }
 
 void ProviderStore::_start_fetch_locked(const std::string& connection_id)

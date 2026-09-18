@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -27,7 +28,13 @@ namespace {
         {
             store_subscription_ = state_->sessions->subscribe(
                 [] { animation::RequestAnimationFrame(); });
+            filter_input_ = Input(field_option(
+                &filter_text_, &filter_cursor_, "filter sessions", [this] {
+                    selected_ = 0;
+                    _refill();
+                }));
             _refresh();
+            filter_input_->TakeFocus();
         }
 
         Element OnRender() override
@@ -40,19 +47,29 @@ namespace {
             } else if (sessions_.empty()) {
                 rows.push_back(text("No saved sessions") | dim);
             } else if (confirming_) {
-                rows.push_back(
-                    text("Delete “" + sessions_[cursor_].title + "”?") | bold);
+                rows.push_back(text("Delete “" + _row().title + "”?") | bold);
                 rows.push_back(separatorEmpty());
                 rows.push_back(hint_bar("Enter delete · Esc cancel"));
             } else {
-                for (int index = 0; index < static_cast<int>(sessions_.size());
-                    ++index) {
-                    Element row = hbox({ text(sessions_[index].title), filler(),
-                        text(sessions_[index].saved_at)
-                            | color(PANEL_FG_DIM) });
-                    if (index == cursor_) {
-                        row = std::move(row) | bgcolor(PANEL_COLOR_FOCUS)
-                            | bold;
+                rows.push_back(filter_input_->Render() | xflex);
+                if (visible_.empty()) {
+                    rows.push_back(text("no matching sessions") | dim);
+                }
+                for (int i = 0; i < static_cast<int>(visible_.size()); ++i) {
+                    const SavedSession& entry = sessions_[visible_[i]];
+                    const bool locked         = locked_.contains(entry.path);
+                    Element row               = hbox({
+                        text(i == selected_ ? "› " : "  "),
+                        text(entry.title),
+                        filler(),
+                        text(locked ? "locked" : entry.saved_at)
+                            | color(PANEL_FG_DIM),
+                    });
+                    if (locked) {
+                        row = std::move(row) | dim;
+                    }
+                    if (i == selected_) {
+                        row = std::move(row) | bold;
                     }
                     rows.push_back(std::move(row));
                 }
@@ -63,8 +80,9 @@ namespace {
                         | color(PANEL_FG));
                 }
                 rows.push_back(hint_bar(loading_blocked
-                        ? "↑↓ rows · d delete · Esc close"
-                        : "↑↓ rows · Enter load · d delete · Esc close"));
+                        ? "type filter · ↑↓ rows · DEL delete · Esc close"
+                        : "type filter · ↑↓ rows · Enter load · DEL delete · "
+                          "Esc close"));
             }
             return vbox({ vbox(std::move(rows)), separatorEmpty() }) | xflex;
         }
@@ -78,8 +96,7 @@ namespace {
                     return true;
                 }
                 if (event == Event::Return) {
-                    imza::delete_saved_session(
-                        *state_, sessions_[cursor_].path);
+                    imza::delete_saved_session(*state_, _row().path);
                     return true;
                 }
                 return true;
@@ -88,28 +105,39 @@ namespace {
                 imza::close_modal(*state_);
                 return true;
             }
-            if (move_list_cursor(
-                    event, cursor_, static_cast<int>(sessions_.size()))) {
+            if (event == Event::ArrowDown || event == Event::ArrowUp) {
+                move_list_cursor(
+                    event, selected_, static_cast<int>(visible_.size()));
                 return true;
             }
-            if ((event == Event::Character('d')
-                    || event == Event::Character('D'))
-                && !sessions_.empty()) {
+            if (event == Event::Delete && !visible_.empty()) {
                 confirming_ = true;
                 return true;
             }
-            if (event == Event::Return && !sessions_.empty()) {
-                if (session_->has_pending_work()) {
+            if (event == Event::Return && !visible_.empty()) {
+                if (session_->has_pending_work() || _row_locked()) {
                     return true;
                 }
-                imza::resolve_modal(
-                    *state_, ModalResult { sessions_[cursor_].path });
+                imza::resolve_modal(*state_, ModalResult { _row().path });
                 return true;
             }
-            return false;
+            return filter_input_->OnEvent(event);
         }
 
     private:
+        const SavedSession& _row() const
+        {
+            return sessions_[visible_[static_cast<std::size_t>(selected_)]];
+        }
+
+        bool _row_locked() const { return locked_.contains(_row().path); }
+
+        void _refill()
+        {
+            visible_ = filter_visible(filter_text_, sessions_.size(),
+                [this](std::size_t index) { return sessions_[index].title; });
+        }
+
         void _refresh()
         {
             const auto sessions = state_->sessions->sessions();
@@ -117,21 +145,28 @@ namespace {
                 return;
             }
             last_sessions_ = sessions;
-            sessions_      = sessions;
-            if (sessions_.empty()) {
-                cursor_ = 0;
-            } else {
-                cursor_ = std::clamp(
-                    cursor_, 0, static_cast<int>(sessions_.size()) - 1);
+            sessions_      = std::move(sessions);
+            locked_.clear();
+            for (const SavedSession& entry : sessions_) {
+                if (state_->sessions->is_locked(entry.path)) {
+                    locked_.insert(entry.path);
+                }
             }
+            selected_ = 0;
+            _refill();
         }
 
         std::shared_ptr<ApplicationState> state_;
         std::shared_ptr<Session> session_;
         Signal<>::Subscription store_subscription_;
-        std::vector<SavedSession> last_sessions_;
         std::vector<SavedSession> sessions_;
-        int cursor_      = 0;
+        std::vector<SavedSession> last_sessions_;
+        std::vector<std::size_t> visible_;
+        std::set<std::filesystem::path> locked_;
+        std::string filter_text_;
+        int filter_cursor_ = 0;
+        int selected_      = 0;
+        Component filter_input_;
         bool confirming_ = false;
     };
 

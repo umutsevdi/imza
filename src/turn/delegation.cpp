@@ -325,8 +325,9 @@ SubagentHandle Delegation::run_subagent(std::string prompt, std::string model,
             max_output_tokens = options.max_output_tokens](
             const std::stop_token& stop) mutable {
             if (!connection_id.empty()) {
-                route = state_->providers->authenticated_route_for(
-                    connection_id, route.dialect);
+                route
+                    = state_->providers->authenticated_route_for(connection_id,
+                        route.dialect, state_->session->session_id());
             }
             if (model.empty() || route.api.empty()) {
                 if (transcript) {
@@ -396,7 +397,8 @@ void Delegation::spawn_title(std::string input, TurnSettings settings)
             };
             Route route = settings.route;
             route       = state_->providers->authenticated_route_for(
-                settings.connection_id, settings.dialect);
+                settings.connection_id, settings.dialect,
+                state_->session->session_id());
             const Status status = stream(route, req, cb, nullptr);
             if (status != Status::OK) {
                 return SubagentResult { status, { } };

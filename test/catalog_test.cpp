@@ -312,3 +312,64 @@ TEST_CASE("auth_headers by auth type")
     CHECK(openai_subscription[1] == "originator: codex_cli_rs");
     CHECK(openai_subscription[2] == "ChatGPT-Account-Id: account");
 }
+
+TEST_CASE("resolve_route stamps the client User-Agent")
+{
+    imza::Catalog catalog;
+    const auto user_agent_for = [&](std::string_view id) {
+        imza::Connection connection;
+        connection.id      = std::string(id);
+        connection.api_key = "key";
+        return imza::resolve_route(
+            connection, catalog, imza::ApiStandard::OPENAI)
+            .user_agent;
+    };
+
+    CHECK(user_agent_for("zai") == "User-Agent: Pi/3.1.0");
+    CHECK(user_agent_for("zai-coding-plan") == "User-Agent: Pi/3.1.0");
+    CHECK(user_agent_for("zhipuai") == "User-Agent: Pi/3.1.0");
+    CHECK(user_agent_for("zhipuai-coding-plan") == "User-Agent: Pi/3.1.0");
+    CHECK(user_agent_for("kimi-for-coding") == "User-Agent: hermes-agent/1.0");
+
+    CHECK(user_agent_for("moonshotai").starts_with("User-Agent: imza/"));
+    CHECK(user_agent_for("openrouter").starts_with("User-Agent: imza/"));
+    CHECK(user_agent_for("ghost").starts_with("User-Agent: imza/"));
+
+    CHECK(user_agent_for("openai-subscription").empty());
+    CHECK(user_agent_for("openai-subscription/plus").empty());
+
+    imza::Connection custom;
+    custom.id       = "custom";
+    custom.endpoint = "http://localhost:1234/v1";
+    custom.api_key  = "key";
+    CHECK(imza::resolve_route(custom, catalog, imza::ApiStandard::OPENAI)
+            .user_agent.starts_with("User-Agent: imza/"));
+}
+
+TEST_CASE("resolve_route stamps the OpenCode session id")
+{
+    imza::Catalog catalog;
+    const auto session_for = [&](std::string_view id) {
+        imza::Connection connection;
+        connection.id      = std::string(id);
+        connection.api_key = "key";
+        return imza::resolve_route(
+            connection, catalog, imza::ApiStandard::OPENAI, "abc-123")
+            .opencode_session;
+    };
+
+    CHECK(session_for("opencode") == "abc-123");
+    CHECK(session_for("opencode-go") == "abc-123");
+
+    CHECK(session_for("zai").empty());
+    CHECK(session_for("moonshotai").empty());
+    CHECK(session_for("openai-subscription").empty());
+
+    imza::Connection custom;
+    custom.id       = "custom";
+    custom.endpoint = "http://localhost:1234/v1";
+    custom.api_key  = "key";
+    CHECK(imza::resolve_route(
+        custom, catalog, imza::ApiStandard::OPENAI, "abc-123")
+            .opencode_session.empty());
+}

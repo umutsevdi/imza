@@ -1149,3 +1149,66 @@ TEST_CASE("unknown tools error back to the model without a modal")
     CHECK(env.last_request().messages.back().content.find("unknown tool: nope")
         != std::string::npos);
 }
+
+// Display text of a rendered row: ANSI-styled cells decode to their visible
+// characters, so byte offsets become click columns.
+std::string plain_row(const std::string& row)
+{
+    std::string out;
+    for (std::size_t i = 0; i < row.size();) {
+        if (row[i] == '\x1b') {
+            ++i;
+            if (i < row.size() && row[i] == '[') {
+                ++i;
+                while (i < row.size()
+                    && !std::isalpha(static_cast<unsigned char>(row[i]))) {
+                    ++i;
+                }
+                ++i;
+            }
+            continue;
+        }
+        out += row[i++];
+    }
+    return out;
+}
+
+TEST_CASE("modal action buttons respond to mouse clicks")
+{
+    Env env;
+    env.session->set_mode(imza::Session::Mode::BUILD);
+    env.stream = [&env](const imza::ChatRequest& req,
+                     const imza::StreamCallback& cb) {
+        env.requests.push_back(req);
+        if (req.messages.back().type == imza::Message::Type::USER) {
+            cb(imza::make_tool_call_event(
+                { "shell", R"({"command":"custom one"})", "", "call-1" }));
+        }
+        cb(imza::make_done_event());
+        return imza::Status::OK;
+    };
+    imza::submit(*env.state, "go");
+    REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
+
+    ftxui::Component modal = imza::make_modal(env.state);
+    modal->Render();
+    auto screen = ftxui::Screen::Create(
+        ftxui::Dimension::Fixed(100), ftxui::Dimension::Fixed(40));
+    ftxui::Render(screen, modal->Render());
+    const std::vector<std::string> lines = imza::split_lines(screen.ToString());
+    bool clicked                         = false;
+    for (std::size_t y = 0; y < lines.size() && !clicked; ++y) {
+        const std::size_t x = plain_row(lines[y]).find("Allow once");
+        if (x == std::string::npos) {
+            continue;
+        }
+        ftxui::Mouse mouse;
+        mouse.button = ftxui::Mouse::Left;
+        mouse.motion = ftxui::Mouse::Pressed;
+        mouse.x      = static_cast<int>(x);
+        mouse.y      = static_cast<int>(y);
+        clicked      = modal->OnEvent(ftxui::Event::Mouse("", mouse));
+    }
+    CHECK(clicked);
+    REQUIRE(env.pump.wait_for([&] { return env.ran_tools.size() == 1; }));
+}

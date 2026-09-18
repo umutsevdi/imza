@@ -226,12 +226,12 @@ namespace {
                 : 2;
             out += std::string(pad, ' ');
             if (name.empty() || name.back() == '/') {
-                out += "—";
+                out += "-";
                 continue;
             }
             std::error_code sec;
             const auto sz = fs::file_size(root / name, sec);
-            out += sec ? "—" : format_kb(sz);
+            out += sec ? "-" : format_kb(sz);
         }
         if (truncated) {
             out += "\n[truncated: showing first "

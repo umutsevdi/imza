@@ -131,7 +131,7 @@ namespace {
         const std::optional<ProviderSelection> selection
             = state.providers->active_selection();
         if (!selection.has_value()) {
-            state.session->set_error("No model selected — run /model.");
+            state.session->set_error("No model selected - run /model.");
             return;
         }
         const TurnSettings settings
@@ -235,6 +235,8 @@ namespace {
             state.session->set_error("Failed to save current session.");
             return;
         }
+        // The archived file is no longer chat-active in this process.
+        state.sessions->deactivate();
         state.queue.clear();
         state.skills->clear();
         state.permissions->clear();
@@ -275,6 +277,10 @@ void submit(ApplicationState& state, std::string text,
     if (t[0] == '/') {
         run_slash(state, t);
         return;
+    }
+    if (state.parent_state != nullptr
+        && state.session->phase() == Session::Phase::IDLE) {
+        ensure_sidechat_seeded(state);
     }
     if (state.session->phase() == Session::Phase::IDLE) {
         submit_with_skills(state, std::string(t), std::move(attachments));
@@ -389,27 +395,7 @@ void resolve_modal(ApplicationState& state, ModalResult result)
         }
     }
     if (auto* path = std::get_if<std::filesystem::path>(&result)) {
-        if (state.session->has_pending_work()) {
-            state.session->set_error(
-                "Finish or interrupt pending work before loading a session.");
-            return;
-        }
-        if (state.sessions->save(*state.session) != Status::OK) {
-            state.session->set_error("Failed to save current session.");
-            return;
-        }
-        LoadedSession loaded;
-        const Status status = read_session(*path, loaded);
-        if (status != Status::OK
-            || !change_directory(state, loaded.workspace)) {
-            state.session->set_error("Failed to load session.");
-        } else {
-            state.session->restore(std::move(loaded.snapshot));
-            state.skills->clear();
-            state.permissions->clear();
-            state.runner->clear();
-            state.subagents->prune_completed();
-        }
+        switch_session(state, *path);
     }
     if (auto* connect = std::get_if<ConnectResult>(&result)) {
         begin_connect(state, *connect);
@@ -452,6 +438,10 @@ void resolve_modal(ApplicationState& state, ModalResult result)
 
 void run_slash(ApplicationState& state, std::string_view command)
 {
+    if (state.parent_state != nullptr) {
+        run_slash(*state.parent_state, command);
+        return;
+    }
     const SlashCommand* found = find_command(command);
     if (found == nullptr) {
         state.session->set_error(
@@ -466,7 +456,7 @@ void run_slash(ApplicationState& state, std::string_view command)
         break;
     case SlashCommand::Action::MODEL:
         if (state.providers->connections().empty()) {
-            state.session->set_error("No connections — run /connect first.");
+            state.session->set_error("No connections - run /connect first.");
             break;
         }
         enqueue_user_modal(
@@ -510,6 +500,45 @@ void interrupt(ApplicationState& state)
     }
 }
 
+void switch_session(ApplicationState& state, const std::filesystem::path& path)
+{
+    if (state.session->has_pending_work()) {
+        state.session->set_error(
+            "Finish or interrupt pending work before loading a session.");
+        return;
+    }
+    if (state.sessions->is_locked(path)) {
+        state.session->set_error("Session is open in another imza process.");
+        return;
+    }
+    if (state.sessions->save(*state.session) != Status::OK) {
+        state.session->set_error("Failed to save current session.");
+        return;
+    }
+    // Validate-then-commit: the target is read and locked before the active
+    // conversation is replaced, so a failure leaves the current session
+    // running; the previous lock is released only after the new one is held.
+    LoadedSession loaded;
+    if (read_session(path, loaded) != Status::OK) {
+        state.session->set_error("Failed to load session.");
+        return;
+    }
+    if (!state.sessions->activate(path)) {
+        state.session->set_error("Session is open in another imza process.");
+        return;
+    }
+    if (!change_directory(state, loaded.workspace)) {
+        state.sessions->deactivate();
+        state.session->set_error("Failed to load session.");
+        return;
+    }
+    state.session->restore(std::move(loaded.snapshot));
+    state.skills->clear();
+    state.permissions->clear();
+    state.runner->clear();
+    state.subagents->prune_completed();
+}
+
 void delete_saved_session(
     ApplicationState& state, const std::filesystem::path& path)
 {
@@ -524,6 +553,77 @@ void delete_saved_session(
     }
     state.session->set_modal(sessions_modal(state));
     state.session->bump_modal_serial();
+}
+
+bool sidechat_open(const ApplicationState& state)
+{
+    return state.sidechat != nullptr && state.sidechat_open;
+}
+
+namespace {
+
+    SessionSnapshot sidechat_seed(const ApplicationState& state)
+    {
+        const std::string parent_title = state.session->title();
+        SessionSnapshot seed           = state.session->snapshot();
+        const std::string seed_transcript
+            = conversation_transcript(seed.compacted_summary, seed);
+        if (!seed_transcript.empty()) {
+            seed.compacted_summary = seed_transcript;
+            seed.items.clear();
+        }
+        seed.title = "Sidechat · "
+            + (parent_title.empty() ? "New Session" : parent_title);
+        seed.persistence = UnsavedSession { };
+        return seed;
+    }
+
+} // namespace
+
+void ensure_sidechat_seeded(ApplicationState& state)
+{
+    if (state.parent_state == nullptr || state.sidechat_context_seeded) {
+        return;
+    }
+    state.session->restore(sidechat_seed(*state.parent_state));
+    state.sidechat_context_seeded = true;
+}
+
+void open_sidechat(ApplicationState& state)
+{
+    if (state.sidechat == nullptr) {
+        state.sidechat = make_sidechat_application_state(state);
+    }
+    state.sidechat_open = true;
+}
+
+void close_sidechat(ApplicationState& state)
+{
+    if (state.sidechat == nullptr) {
+        return;
+    }
+    interrupt(*state.sidechat);
+    state.sidechat->session->clear_error();
+    state.sidechat_open = false;
+}
+
+void refresh_sidechat(ApplicationState& state)
+{
+    if (state.sidechat == nullptr) {
+        state.session->set_error(
+            "No Sidechat is open - open one with Ctrl+S first.");
+        return;
+    }
+    interrupt(*state.sidechat);
+    SessionSnapshot shell = state.sidechat->session->snapshot();
+    shell.items.clear();
+    shell.compacted_summary.clear();
+    shell.compacted_item_count = 0;
+    shell.todo                 = TodoList { };
+    shell.persistence          = UnsavedSession { };
+    state.sidechat->session->restore(std::move(shell));
+    state.sidechat->session->clear_error();
+    state.sidechat->sidechat_context_seeded = false;
 }
 
 } // namespace imza

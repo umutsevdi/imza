@@ -75,6 +75,9 @@ Status fetch_models(const Route& route, std::vector<ModelInfo>& out)
     }
 
     std::vector<std::string> headers = { "Accept: application/json" };
+    if (!route.user_agent.empty()) {
+        headers.push_back(route.user_agent);
+    }
     for (auto& h : auth_headers(route.auth, route.api_key, route.account_id)) {
         headers.push_back(std::move(h));
     }

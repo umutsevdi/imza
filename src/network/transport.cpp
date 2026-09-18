@@ -296,22 +296,36 @@ namespace {
             : 0;
     }
 
-    Status classify_failure(
-        long code, const std::string& raw, std::string& message)
-    {
-        Status st = parse_api_error(raw, message);
-        if (code == 429) {
-            st = Status::RATE_LIMITED;
-        } else if (code == 402) {
-            st = Status::BUDGET_EXCEEDED;
-        } else if (st == Status::OK) {
-            st = Status::API_ERROR;
-        }
-        if (message.empty()) {
-            message = "HTTP " + std::to_string(code);
-        }
-        return st;
+} // namespace
+
+Status classify_failure(long code, const std::string& raw, std::string& message)
+{
+    Status st = parse_api_error(raw, message);
+    if (code == 429) {
+        st = Status::RATE_LIMITED;
+    } else if (code == 402) {
+        st = Status::BUDGET_EXCEEDED;
+    } else if (code == 408 || code == 409 || code >= 500) {
+        // Transient server-side failures; the turn runner may retry them
+        // before any stream data arrives.
+        st = Status::SERVER_ERROR;
+    } else if (st == Status::OK) {
+        st = Status::API_ERROR;
     }
+    if (message.empty()) {
+        message = "HTTP " + std::to_string(code);
+    }
+    return st;
+}
+
+namespace {
+
+    // A stream that moves less than this for the window is stalled. Slow
+    // providers legitimately think for minutes before the first token, so
+    // the window is deliberately generous; retries cover the rest.
+    constexpr long CONNECT_TIMEOUT_SECS    = 10;
+    constexpr long STALL_LIMIT_BYTES_PER_S = 1;
+    constexpr long STALL_WINDOW_SECS       = 300;
 
 } // namespace
 
@@ -330,6 +344,12 @@ Status stream(const Route& route, const ChatRequest& req, StreamCallback cb,
     for (auto& h : auth_headers(route.auth, route.api_key, route.account_id)) {
         header_strs.push_back(std::move(h));
     }
+    if (!route.user_agent.empty()) {
+        header_strs.push_back(route.user_agent);
+    }
+    if (!route.opencode_session.empty()) {
+        header_strs.push_back("x-opencode-session: " + route.opencode_session);
+    }
     curl_slist* list = build_header_list(header_strs);
 
     StreamCtx ctx;
@@ -345,9 +365,9 @@ Status stream(const Route& route, const ChatRequest& req, StreamCallback cb,
     char errbuf[CURL_ERROR_SIZE] = { };
     curl_easy_reset(curl);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
-    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
-    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 30L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, CONNECT_TIMEOUT_SECS);
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, STALL_LIMIT_BYTES_PER_S);
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, STALL_WINDOW_SECS);
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, list);
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
@@ -379,8 +399,12 @@ Status stream(const Route& route, const ChatRequest& req, StreamCallback cb,
     if (res != CURLE_OK) {
         std::string detail(
             errbuf[0] != '\0' ? errbuf : curl_easy_strerror(res));
-        ctx.cb(make_error_event(Status::NETWORK_ERROR, std::move(detail)));
-        return Status::NETWORK_ERROR;
+        // LOW_SPEED aborts surface as CURLE_OPERATION_TIMEDOUT; retryable.
+        const Status st = res == CURLE_OPERATION_TIMEDOUT
+            ? Status::TIMEOUT
+            : Status::NETWORK_ERROR;
+        ctx.cb(make_error_event(st, std::move(detail)));
+        return st;
     }
     if (code >= 400) {
         std::string message;

@@ -8,6 +8,7 @@
 #include "providers/store.h"
 #include "tools/skills.h"
 #include "turn/prompt.h"
+#include "workspace/attachments.h"
 
 #include <algorithm>
 #include <chrono>
@@ -41,6 +42,41 @@ namespace {
                 return tool_available_in_mode(spec.name, mode);
             });
         return available;
+    }
+
+    constexpr std::size_t TURN_LINE_CAP    = 40;
+    constexpr std::size_t TOOL_LINE_CAP    = 8;
+    constexpr std::string_view TOOL_PREFIX = "TOOL: ";
+
+    std::string capped(std::string_view text, std::size_t max_lines)
+    {
+        const std::string body = take_lines(text, max_lines);
+        return count_lines(text) > max_lines ? body + "\n…" : body;
+    }
+
+    std::string item_transcript(const ConversationItem& item)
+    {
+        std::string out;
+        if (const auto* user = std::get_if<UserTurn>(&item)) {
+            out += "\nUSER:\n";
+            out += capped(
+                message_with_attachments(user->text, user->attachments),
+                TURN_LINE_CAP);
+        } else if (const auto* assistant = std::get_if<AssistantTurn>(&item)) {
+            out += "\nASSISTANT:\n";
+            out += capped(assistant->markdown, TURN_LINE_CAP);
+        } else if (const auto* call = std::get_if<ToolCall>(&item)) {
+            out += "\n";
+            out += TOOL_PREFIX;
+            out += call->name;
+            out += "\n";
+            out += capped(call->args, TOOL_LINE_CAP);
+            if (call->result) {
+                out += "\nRESULT:\n";
+                out += capped(tool_result_text(*call), TOOL_LINE_CAP);
+            }
+        }
+        return out;
     }
 
     std::string compaction_transcript(
@@ -81,6 +117,21 @@ TurnSettings make_turn_settings(
     settings.dialect          = selection.route.dialect;
     settings.mode             = mode;
     return settings;
+}
+
+std::string conversation_transcript(
+    const std::string& compacted_summary, const SessionSnapshot& snapshot)
+{
+    std::string out;
+    if (!compacted_summary.empty()) {
+        out += "\nUSER:\n<session-summary>\n";
+        out += compacted_summary;
+        out += "\n";
+    }
+    for (const ConversationItem& item : snapshot.items) {
+        out += item_transcript(item);
+    }
+    return out;
 }
 
 void apply_reasoning(ChatRequest& req, ApiStandard dialect,
@@ -272,8 +323,9 @@ bool TurnRunner::_compact_history(std::vector<Message>& history,
 void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
 {
     if (!has_stream_override_) {
-        settings.route = state_->providers->authenticated_route_for(
-            settings.connection_id, settings.dialect);
+        settings.route
+            = state_->providers->authenticated_route_for(settings.connection_id,
+                settings.dialect, state_->session->session_id());
         settings.dialect = settings.route.dialect;
     }
     int retries                 = 0;
@@ -306,11 +358,12 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
         std::string error_msg;
         Status error_status                 = Status::OK;
         bool saw_stream                     = false;
+        bool received_data                  = false;
         std::uint64_t request_prompt_tokens = 0;
         StreamUpdateBuffer stream_updates(post_, state_->session);
 
         StreamCallback cb = [this, model = req.model, &text_buffer, &error_msg,
-                                &error_status, &saw_stream,
+                                &error_status, &saw_stream, &received_data,
                                 &request_prompt_tokens,
                                 &stream_updates](const StreamEvent& ev) {
             if (ev.kind == StreamEvent::Kind::ERROR) {
@@ -325,6 +378,12 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
             if (ev.kind == StreamEvent::Kind::CONTENT_DELTA
                 || ev.kind == StreamEvent::Kind::CONNECTED) {
                 saw_stream = true;
+            }
+            if (ev.kind == StreamEvent::Kind::CONTENT_DELTA
+                || ev.kind == StreamEvent::Kind::REASONING
+                || ev.kind == StreamEvent::Kind::TOOL_CALL
+                || ev.kind == StreamEvent::Kind::USAGE) {
+                received_data = true;
             }
             if (ev.kind == StreamEvent::Kind::CONTENT_DELTA) {
                 text_buffer += ev.text;
@@ -422,14 +481,25 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
         }
 
         const Status fail = error_status != Status::OK ? error_status : st;
-        if (fail == Status::RATE_LIMITED && retries < 2) {
+        // A stalled connection or a transient server failure before any
+        // data can be retried safely; once content has arrived a retry
+        // would duplicate visible output.
+        const bool retryable_stall = !received_data
+            && (fail == Status::TIMEOUT || fail == Status::NETWORK_ERROR);
+        const bool retryable_server
+            = !received_data && fail == Status::SERVER_ERROR;
+        if ((fail == Status::RATE_LIMITED || retryable_stall
+                || retryable_server)
+            && retries < 2) {
             ++retries;
             int wait = retry_after_secs_;
             if (wait <= 0) {
                 wait = retries == 1 ? 2 : 5;
             }
             wait = std::clamp(wait, 1, 30);
-            _post([this, wait] { state_->session->mark_retry(wait); });
+            _post([this, wait, stalled = retryable_stall] {
+                state_->session->mark_retry(wait, stalled);
+            });
             using namespace std::chrono_literals;
             const auto deadline
                 = std::chrono::steady_clock::now() + std::chrono::seconds(wait);

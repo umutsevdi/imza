@@ -53,6 +53,8 @@ struct Route {
     AuthType auth       = AuthType::BEARER;
     std::string api_key;
     std::string account_id;
+    std::string user_agent;
+    std::string opencode_session;
     Status error = Status::OK;
     std::string error_message;
 };
@@ -80,5 +82,8 @@ Status stream(const Route& route, const ChatRequest& req, StreamCallback cb,
     int* retry_after = nullptr);
 
 Status parse_api_error(std::string_view body, std::string& message);
+
+Status classify_failure(
+    long code, const std::string& raw, std::string& message);
 
 } // namespace imza

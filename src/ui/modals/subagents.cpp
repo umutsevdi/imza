@@ -58,6 +58,12 @@ namespace {
         explicit SubagentsView(ProviderStore& providers)
             : provider_store_(providers)
         {
+            pick_filter_ = Input(field_option(
+                &pick_.filter, &pick_.filter_cursor, "filter models", [this] {
+                    pick_.selected = 0;
+                    pick_.refill_visible();
+                }));
+            container_   = Container::Vertical({ pick_filter_ });
         }
 
         Element OnRender() override
@@ -99,8 +105,28 @@ namespace {
                 }
             }
             pick_.filter.clear();
-            pick_.selected = 0;
+            pick_.filter_cursor = 0;
             pick_.refill_visible();
+            pick_.selected          = 0;
+            const SubagentRole role = role_at(selected_);
+            const Config config     = provider_store_.config();
+            const auto found        = config.subagents.find(role);
+            if (found != config.subagents.end()) {
+                for (int i = 0; i < static_cast<int>(pick_.visible.size());
+                    ++i) {
+                    const ModelRow& row
+                        = pick_
+                              .rows[pick_.visible[static_cast<std::size_t>(i)]];
+                    if (row.connection_id == found->second.provider
+                        && row.model_id == found->second.model) {
+                        pick_.selected = i;
+                        break;
+                    }
+                }
+            }
+            if (pick_filter_) {
+                pick_filter_->TakeFocus();
+            }
             picking_ = true;
         }
 
@@ -157,7 +183,7 @@ namespace {
                 save_model();
                 return true;
             }
-            return false;
+            return container_ ? container_->OnEvent(event) : false;
         }
 
         bool handle_role_event(const Event& event)
@@ -181,8 +207,9 @@ namespace {
         {
             Elements rows { modal_header(
                 role_name(role_at(selected_)) + " Subagent Model") };
+            rows.push_back(pick_filter_->Render() | xflex);
             if (pick_.visible.empty()) {
-                rows.push_back(text("no models available") | dim);
+                rows.push_back(text("no matching models") | dim);
             }
             for (int i = 0; i < static_cast<int>(pick_.visible.size()); ++i) {
                 const ModelRow& row
@@ -227,6 +254,8 @@ namespace {
 
         ProviderStore& provider_store_;
         ModelPickList pick_;
+        Component pick_filter_;
+        Component container_;
         int selected_ = 0;
         bool picking_ = false;
     };

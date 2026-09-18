@@ -58,16 +58,24 @@ int main(int argc, char** argv)
         return 2;
     }
     if (cli.session_path) {
-        std::filesystem::path workspace;
-        if (imza::load_session(*cli.session_path, *state->session, &workspace)
-                != imza::Status::OK
-            || (!cli.working_directory
-                && imza::Environment::ChdirResult::FAILED
-                    == state->environment->chdir(workspace))) {
-            std::println(stderr, "failed to load session '{}'",
-                cli.session_path->stem().string());
-            return 2;
+        const bool locked = state->sessions->is_locked(*cli.session_path);
+        imza::LoadedSession loaded;
+        if (!locked
+            && imza::read_session(*cli.session_path, loaded) == imza::Status::OK
+            && state->sessions->activate(*cli.session_path)) {
+            state->session->restore(std::move(loaded.snapshot));
+            if (cli.working_directory
+                || state->environment->chdir(loaded.workspace)
+                    != imza::Environment::ChdirResult::FAILED) {
+                return imza::run_repl(std::move(state), main_thread);
+            }
+            state->sessions->deactivate();
         }
+        std::println(stderr, "failed to load session '{}': {}",
+            cli.session_path->stem().string(),
+            locked ? "session is open in another imza process"
+                   : "unreadable or invalid session file");
+        return 2;
     }
     if (cli.model) {
         const imza::Config config = state->providers->config();

@@ -50,6 +50,12 @@ struct ApplicationState {
     std::unique_ptr<Delegation> delegation;
     ModalQueue queue;
 
+    // Sidechat pane, declared last so it dies before the components it shares.
+    std::shared_ptr<ApplicationState> sidechat;
+    bool sidechat_open             = false;
+    bool sidechat_context_seeded   = false;
+    ApplicationState* parent_state = nullptr;
+
     PostFn post;
     std::function<void()> on_exit;
     std::function<void(AgentNotification)> notify_user;
@@ -73,6 +79,8 @@ private:
         PostFn, Config, std::vector<Tool>, StreamFn, RuntimeFlag);
     friend std::shared_ptr<ApplicationState> make_child_application_state(
         const ApplicationState&, PostFn, StreamFn, ModalRequestFn, std::string);
+    friend std::shared_ptr<ApplicationState> make_sidechat_application_state(
+        ApplicationState&);
 };
 
 std::shared_ptr<ApplicationState> make_application_state(PostFn post,
@@ -85,5 +93,9 @@ std::shared_ptr<ApplicationState> make_application_state_with_tools(PostFn post,
 std::shared_ptr<ApplicationState> make_child_application_state(
     const ApplicationState& parent, PostFn post, StreamFn stream_fn = { },
     ModalRequestFn parent_routing = { }, std::string agent_label = { });
+
+// Sidechat child state (see SPEC_SIDECHAT.md).
+std::shared_ptr<ApplicationState> make_sidechat_application_state(
+    ApplicationState& parent);
 
 } // namespace imza
