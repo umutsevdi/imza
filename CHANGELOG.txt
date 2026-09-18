@@ -10,7 +10,7 @@ CHANGELOG
 -------------------------------------------------------------------------------
 0.3.0 - 2026-09-18
 -------------------------------------------------------------------------------
-<https://github.com/umutsevdi/imza/releases/tag/v0.2.4>
+<https://github.com/umutsevdi/imza/releases/tag/v0.3.0>
 
 Changes:
   - Improved system, subagent, compaction, and review prompts based on research 
