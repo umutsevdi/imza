@@ -178,7 +178,7 @@ namespace {
                     row_move(-1);
                     return true;
                 }
-                if (event == Event::Character('d')) {
+                if (event == Event::Delete) {
                     if (row_selected_ >= 0
                         && row_selected_ < static_cast<int>(views().size())) {
                         confirm_[row_selected_] = true;
@@ -677,7 +677,7 @@ namespace {
                 }
             }
             rows.push_back(separatorEmpty());
-            std::string hint = "↑↓ navigate · Enter/d remove · Esc close";
+            std::string hint = "↑↓ navigate · Enter/DEL remove · Esc close";
             if (!confirm_.empty()) {
                 hint = "y confirm · n cancel";
             }

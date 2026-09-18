@@ -80,8 +80,8 @@ namespace {
                         | color(PANEL_FG));
                 }
                 rows.push_back(hint_bar(loading_blocked
-                        ? "type filter · ↑↓ rows · d delete · Esc close"
-                        : "type filter · ↑↓ rows · Enter load · d delete · "
+                        ? "type filter · ↑↓ rows · DEL delete · Esc close"
+                        : "type filter · ↑↓ rows · Enter load · DEL delete · "
                           "Esc close"));
             }
             return vbox({ vbox(std::move(rows)), separatorEmpty() }) | xflex;
@@ -110,9 +110,7 @@ namespace {
                     event, selected_, static_cast<int>(visible_.size()));
                 return true;
             }
-            if ((event == Event::Character('d')
-                    || event == Event::Character('D'))
-                && !visible_.empty()) {
+            if (event == Event::Delete && !visible_.empty()) {
                 confirming_ = true;
                 return true;
             }

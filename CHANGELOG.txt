@@ -13,6 +13,8 @@ CHANGELOG
 <https://github.com/umutsevdi/imza/releases/tag/v0.2.4>
 
 Changes:
+  - Improved system, subagent, compaction, and review prompts based on research 
+into other coding agents.
   - Increased maximum timeout for streams. Added retry for server errors (HTTP 
 408, 409, 5xx).
   - Imza sends a recognizable user-agent on provider requests.
@@ -21,6 +23,9 @@ imza processes.
   - Added `Sidechat`, a place to ask questions without disrupting the main 
 agent. The Sidechat is toggled with Ctrl+S, its context reloads from the main
 chat on the next prompt. 
+  - Session explorer and Connect now deletes with the Del key, so filtering no
+longer triggers deletions.
+  - Updated Subagent model picker.
 
 -------------------------------------------------------------------------------
 0.2.3 - 2026-09-14
