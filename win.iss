@@ -53,7 +53,7 @@ LicenseFile={#Source}\LICENSE
 PrivilegesRequired=lowest
 
 OutputDir={#Build}
-OutputBaseFilename=imza-{#imzaVersion}-windows-x64.exe
+OutputBaseFilename=imza-{#imzaVersion}-windows-x64
 SetupIconFile={#Source}\misc\imza.ico
 UninstallDisplayIcon={#Source}\misc\imza.ico
 UninstallDisplayName={#imzaName}
