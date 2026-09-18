@@ -353,7 +353,7 @@ WorkspaceEnvironment scan_workspace(const std::filesystem::path& directory)
 }
 
 Environment::Environment()
-    : system_(std::make_shared<const SystemEnvironment>(
+    : _system(std::make_shared<const SystemEnvironment>(
           detect_system_environment()))
 {
     std::error_code initial_error;
@@ -376,8 +376,8 @@ Environment::Environment()
         _publish_workspace(std::move(workspace), 0);
     });
 
-    if (system_->has_git) {
-        git_worker_ = std::jthread([this](const std::stop_token& stop) {
+    if (_system->has_git) {
+        _git_worker = std::jthread([this](const std::stop_token& stop) {
             std::mutex poll_mutex;
             std::condition_variable_any poll_cv;
             const auto wait_for_next_poll = [&] {
@@ -386,9 +386,9 @@ Environment::Environment()
                     [] { return false; });
             };
             {
-                std::unique_lock lock(workspace_mutex_);
-                if (!workspace_ready_cv_.wait(
-                        lock, stop, [this] { return ready_.load(); })) {
+                std::unique_lock lock(_workspace_mutex);
+                if (!_workspace_ready_cv.wait(
+                        lock, stop, [this] { return _ready.load(); })) {
                     return;
                 }
             }
@@ -450,17 +450,17 @@ void Environment::_publish_workspace(
     std::shared_ptr<const WorkspaceEnvironment> ws, std::uint64_t generation)
 {
     {
-        std::unique_lock lock(workspace_mutex_);
-        if (generation != workspace_generation_) {
+        std::unique_lock lock(_workspace_mutex);
+        if (generation != _workspace_generation) {
             return;
         }
-        workspace_  = std::move(ws);
-        repository_ = std::make_shared<const RepositoryState>();
-        ready_.store(true);
+        _workspace  = std::move(ws);
+        _repository = std::make_shared<const RepositoryState>();
+        _ready.store(true);
     }
-    workspace_ready_cv_.notify_all();
-    workspace_changed_.publish();
-    repository_changed_.publish();
+    _workspace_ready_cv.notify_all();
+    _workspace_changed.publish();
+    _repository_changed.publish();
 }
 
 void Environment::_publish_repository(
@@ -468,13 +468,13 @@ void Environment::_publish_repository(
     const std::shared_ptr<const WorkspaceEnvironment>& workspace)
 {
     {
-        std::unique_lock lock(workspace_mutex_);
-        if (workspace_ != workspace) {
+        std::unique_lock lock(_workspace_mutex);
+        if (_workspace != workspace) {
             return;
         }
-        repository_ = std::move(repository);
+        _repository = std::move(repository);
     }
-    repository_changed_.publish();
+    _repository_changed.publish();
 }
 
 Environment::ChdirResult Environment::chdir(const std::filesystem::path& dir)
@@ -491,11 +491,11 @@ Environment::ChdirResult Environment::chdir(const std::filesystem::path& dir)
     }
     std::uint64_t generation;
     {
-        std::unique_lock lock(workspace_mutex_);
-        if (workspace_ && workspace_->working_directory == canonical) {
+        std::unique_lock lock(_workspace_mutex);
+        if (_workspace && _workspace->working_directory == canonical) {
             return ChdirResult::UNCHANGED;
         }
-        generation = ++workspace_generation_;
+        generation = ++_workspace_generation;
     }
     auto workspace
         = std::make_shared<WorkspaceEnvironment>(scan_workspace(canonical));
@@ -509,9 +509,9 @@ Signal<>::Subscription Environment::subscribe_to_workspace_change(
     Signal<>::Subscription subscription;
     bool notify_now;
     {
-        std::unique_lock lock(workspace_mutex_);
-        subscription = workspace_changed_.subscribe(callback);
-        notify_now   = ready_.load();
+        std::unique_lock lock(_workspace_mutex);
+        subscription = _workspace_changed.subscribe(callback);
+        notify_now   = _ready.load();
     }
     if (notify_now) {
         callback();
@@ -525,9 +525,9 @@ Signal<>::Subscription Environment::subscribe_to_repository_change(
     Signal<>::Subscription subscription;
     bool notify_now;
     {
-        std::unique_lock lock(workspace_mutex_);
-        subscription = repository_changed_.subscribe(callback);
-        notify_now   = repository_ != nullptr;
+        std::unique_lock lock(_workspace_mutex);
+        subscription = _repository_changed.subscribe(callback);
+        notify_now   = _repository != nullptr;
     }
     if (notify_now) {
         callback();
@@ -538,29 +538,29 @@ Signal<>::Subscription Environment::subscribe_to_repository_change(
 Signal<>::Subscription Environment::subscribe_to_update_change(
     Signal<>::Callback callback)
 {
-    return update_changed_.subscribe(std::move(callback));
+    return _update_changed.subscribe(std::move(callback));
 }
 
 std::optional<std::string> Environment::update_available() const
 {
-    std::lock_guard lock(update_mutex_);
-    return update_version_;
+    std::lock_guard lock(_update_mutex);
+    return _update_version;
 }
 
 void Environment::check_for_updates(std::string binary_version)
 {
-    if (update_checked_.exchange(true)) {
+    if (_update_checked.exchange(true)) {
         return;
     }
-    update_worker_ = std::jthread(
+    _update_worker = std::jthread(
         [this, version = std::move(binary_version)](std::stop_token) {
             std::optional<std::string> available
-                = check_for_update(system_->package_managers, version);
+                = check_for_update(_system->package_managers, version);
             {
-                std::lock_guard lock(update_mutex_);
-                update_version_ = std::move(available);
+                std::lock_guard lock(_update_mutex);
+                _update_version = std::move(available);
             }
-            update_changed_.publish();
+            _update_changed.publish();
         });
 }
 
@@ -576,7 +576,7 @@ std::optional<std::string> Environment::agent_rules_path() const
 std::vector<Skill> Environment::skills() const
 {
     std::vector<Skill> out;
-    for (const auto& [name, skill] : system_->global_skills) {
+    for (const auto& [name, skill] : _system->global_skills) {
         out.push_back(skill);
     }
     const auto ws = workspace();

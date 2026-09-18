@@ -37,11 +37,11 @@ public:
 private:
     int count() const;
 
-    std::vector<const SlashCommand*> commands_;
-    std::vector<Skill> skills_;
-    std::vector<AttachmentCandidate> files_;
-    std::optional<AttachmentToken> token_;
-    std::optional<std::size_t> skill_begin_;
+    std::vector<const SlashCommand*> _commands;
+    std::vector<Skill> _skills;
+    std::vector<AttachmentCandidate> _files;
+    std::optional<AttachmentToken> _token;
+    std::optional<std::size_t> _skill_begin;
     int selected_ = 0;
 };
 

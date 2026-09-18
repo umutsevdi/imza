@@ -34,8 +34,8 @@ struct RepositoryState;
 
 struct LayoutCtx {
     enum class Kind { WIDE, NARROW };
-    static constexpr int wide_threshold = 100;
-    static constexpr int panel_width    = 40;
+    static constexpr int WIDE_THRESHOLD = 100;
+    static constexpr int PANEL_WIDTH    = 40;
     Kind kind                           = Kind::NARROW;
     int width                           = 0;
     int height                          = 0;
@@ -279,17 +279,17 @@ ftxui::Component make_sessions(std::shared_ptr<ApplicationState> state);
 ftxui::Component make_skills(std::shared_ptr<ApplicationState> state);
 ftxui::Component make_modal(std::shared_ptr<ApplicationState> state);
 // Sidechat column: owns its chat pane, modal host, focus state, and mouse
-// box. `on_focus` fires when the pane gains or loses attention.
-struct SidechatHandle {
-    virtual ~SidechatHandle()                  = default;
-    virtual ftxui::Component component() const = 0;
-    virtual bool focused() const               = 0;
-    virtual bool has_modal() const             = 0;
-    virtual ftxui::Component modal() const     = 0;
-    virtual bool rendered() const              = 0;
+// box. `on_focus` fires when the pane gains or loses attention; `status`
+// mirrors pane-private UI state for the app screen (UI thread only).
+struct SidechatStatus {
+    bool focused = false;
+    ftxui::Component modal;
+    // Live query: pane is open and a modal payload is pending on its session.
+    std::function<bool()> has_modal;
 };
 
-std::shared_ptr<SidechatHandle> make_sidechat_component(
-    std::shared_ptr<ApplicationState> state, std::function<void()> on_focus);
+ftxui::Component make_sidechat_component(
+    std::shared_ptr<ApplicationState> state, std::function<void()> on_focus,
+    SidechatStatus& status);
 
 } // namespace imza

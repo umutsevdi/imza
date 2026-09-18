@@ -42,9 +42,9 @@ public:
     SubagentChat subagent_chat(const ToolCall& call, std::size_t index) const;
 
 private:
-    ApplicationState* state_;
-    PostFn post_;
-    ModalRequestFn modal_request_;
+    ApplicationState* _state;
+    PostFn _post;
+    ModalRequestFn _modal_request;
     TurnRunner& runner_;
 };
 

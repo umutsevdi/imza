@@ -82,8 +82,8 @@ public:
 
 private:
     void _publish();
-    mutable std::mutex mutex_;
-    Snapshot state_;
+    mutable std::mutex _mutex;
+    Snapshot _state;
     std::size_t next_comment_id_ = 1;
     Signal<> changed_;
 };

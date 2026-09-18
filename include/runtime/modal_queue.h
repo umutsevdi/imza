@@ -31,8 +31,8 @@ public:
     void abandon();
 
 private:
-    mutable std::mutex mutex_;
-    std::deque<PendingModal> entries_;
+    mutable std::mutex _mutex;
+    std::deque<PendingModal> _entries;
 };
 
 } // namespace imza

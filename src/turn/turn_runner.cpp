@@ -157,23 +157,23 @@ TurnRunner::TurnRunner(ApplicationState& state, PostFn post,
     std::vector<Tool> tools, StreamFn stream_fn, ModalRequestFn modal_request,
     std::shared_ptr<SkillStore> skills, SubagentToolFn subagent_tool,
     std::function<void(std::string)> on_finish)
-    : state_(&state)
-    , post_(std::move(post))
-    , modal_request_(std::move(modal_request))
-    , skills_(std::move(skills))
-    , subagent_tool_(std::move(subagent_tool))
-    , on_finish_(std::move(on_finish))
-    , stream_fn_(std::move(stream_fn))
-    , has_stream_override_(static_cast<bool>(stream_fn_))
-    , tools_(std::move(tools))
+    : _state(&state)
+    , _post_fn(std::move(post))
+    , _modal_request(std::move(modal_request))
+    , _skills(std::move(skills))
+    , _subagent_tool(std::move(subagent_tool))
+    , _on_finish(std::move(on_finish))
+    , _stream_fn(std::move(stream_fn))
+    , _has_stream_override(static_cast<bool>(_stream_fn))
+    , _tools(std::move(tools))
 {
-    for (Tool& tool : tools_) {
+    for (Tool& tool : _tools) {
         if (tool.spec.name != "skill") {
             continue;
         }
         tool.run = [this](const Json::Value& args) {
             const auto skill
-                = resolve_skill(state_->environment->skills(), args);
+                = resolve_skill(_state->environment->skills(), args);
             if (!skill) {
                 return ToolOutput { ToolOutput::Kind::ERROR,
                     "skill: unknown or unavailable skill" };
@@ -185,7 +185,7 @@ TurnRunner::TurnRunner(ApplicationState& state, PostFn post,
                 return ToolOutput { ToolOutput::Kind::ERROR,
                     "skill: permission target changed before execution" };
             }
-            if (skill_policy(state_->providers->config(), *skill)
+            if (skill_policy(_state->providers->config(), *skill)
                 == SkillPolicy::DENY) {
                 return ToolOutput { ToolOutput::Kind::ERROR,
                     "skill: access denied by configuration" };
@@ -203,30 +203,30 @@ TurnRunner::TurnRunner(ApplicationState& state, PostFn post,
         };
         break;
     }
-    specs_all_ = tool_specs(tools_);
+    _specs_all = tool_specs(_tools);
 
-    if (!stream_fn_) {
-        stream_fn_ = [this](const ChatRequest& req, const StreamCallback& cb) {
-            const auto selection = state_->providers->active_selection();
+    if (!_stream_fn) {
+        _stream_fn = [this](const ChatRequest& req, const StreamCallback& cb) {
+            const auto selection = _state->providers->active_selection();
             const Route route
                 = selection.has_value() ? selection->route : Route { };
-            return stream(route, req, cb, &retry_after_secs_);
+            return stream(route, req, cb, &_retry_after_secs);
         };
     }
 }
 
 TurnRunner::~TurnRunner()
 {
-    alive_.store(false);
-    worker_.reset();
+    _alive.store(false);
+    _worker.reset();
 }
 
 void TurnRunner::spawn(std::vector<Message> history, TurnSettings settings)
 {
-    blocked_permission_.store(false);
-    state_->session->append_assistant(
+    _blocked_permission.store(false);
+    _state->session->append_assistant(
         settings.model, settings.reasoning_effort);
-    worker_.emplace([this, history = std::move(history),
+    _worker.emplace([this, history = std::move(history),
                         settings = std::move(settings)]() mutable {
         _drive(std::move(history), std::move(settings));
     });
@@ -234,40 +234,40 @@ void TurnRunner::spawn(std::vector<Message> history, TurnSettings settings)
 
 void TurnRunner::clear()
 {
-    blocked_permission_.store(false);
-    stream_events_.clear();
+    _blocked_permission.store(false);
+    _stream_events.clear();
 }
 
-void TurnRunner::stop() { alive_.store(false); }
+void TurnRunner::stop() { _alive.store(false); }
 
 void TurnRunner::set_on_finish(std::function<void(std::string)> on_finish)
 {
-    on_finish_ = std::move(on_finish);
+    _on_finish = std::move(on_finish);
 }
 
 void TurnRunner::set_subagent_tool(SubagentToolFn subagent_tool)
 {
-    subagent_tool_ = std::move(subagent_tool);
+    _subagent_tool = std::move(subagent_tool);
 }
 
 void TurnRunner::_post(std::function<void()> f)
 {
-    if (alive_.load()) {
-        post_(std::move(f));
+    if (_alive.load()) {
+        _post_fn(std::move(f));
     }
 }
 
 Status TurnRunner::run_stream(
     const ChatRequest& req, const Route& route, const StreamCallback& cb) const
 {
-    return has_stream_override_ ? stream_fn_(req, cb)
+    return _has_stream_override ? _stream_fn(req, cb)
                                 : stream(route, req, cb, nullptr);
 }
 
 bool TurnRunner::_compact_history(std::vector<Message>& history,
     const TurnSettings& settings, std::uint64_t prompt_tokens)
 {
-    const ModelPricing pricing = state_->providers->pricing_for(settings.model);
+    const ModelPricing pricing = _state->providers->pricing_for(settings.model);
     if (!compaction_due(pricing, prompt_tokens, history.size())) {
         return true;
     }
@@ -281,15 +281,15 @@ bool TurnRunner::_compact_history(std::vector<Message>& history,
     }
     --tail;
 
-    const auto [event_id, prefix_size] = state_->session->begin_compaction();
+    const auto [event_id, prefix_size] = _state->session->begin_compaction();
     ChatRequest request;
     request.model       = settings.model;
     request.temperature = 0.2;
-    request.interrupted = [session = state_->session] {
+    request.interrupted = [session = _state->session] {
         return session->interrupt_requested();
     };
     request.messages = {
-        { Message::Type::SYSTEM, state_->prompts->compaction() },
+        { Message::Type::SYSTEM, _state->prompts->compaction() },
         { Message::Type::USER, compaction_transcript(history, tail) },
     };
 
@@ -305,10 +305,10 @@ bool TurnRunner::_compact_history(std::vector<Message>& history,
 
     const Status status = run_stream(request, settings.route, callback);
     const bool success  = status == Status::OK && error.empty()
-        && !summary.empty() && !state_->session->interrupt_requested();
-    state_->session->finish_compaction(event_id, summary, prefix_size, success);
+        && !summary.empty() && !_state->session->interrupt_requested();
+    _state->session->finish_compaction(event_id, summary, prefix_size, success);
     if (!success) {
-        return !state_->session->interrupt_requested();
+        return !_state->session->interrupt_requested();
     }
 
     std::vector<Message> recent(history.begin() + tail, history.end());
@@ -322,18 +322,18 @@ bool TurnRunner::_compact_history(std::vector<Message>& history,
 
 void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
 {
-    if (!has_stream_override_) {
+    if (!_has_stream_override) {
         settings.route
-            = state_->providers->authenticated_route_for(settings.connection_id,
-                settings.dialect, state_->session->session_id());
+            = _state->providers->authenticated_route_for(settings.connection_id,
+                settings.dialect, _state->session->session_id());
         settings.dialect = settings.route.dialect;
     }
     int retries                 = 0;
-    std::uint64_t prompt_tokens = state_->session->last().prompt;
+    std::uint64_t prompt_tokens = _state->session->last().prompt;
     bool compaction_attempted   = false;
     for (;;) {
         const ModelPricing pricing
-            = state_->providers->pricing_for(settings.model);
+            = _state->providers->pricing_for(settings.model);
         const bool should_compact = !compaction_attempted
             && compaction_due(pricing, prompt_tokens, history.size());
         if (should_compact) {
@@ -341,26 +341,28 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
         }
         if (should_compact
             && !_compact_history(history, settings, prompt_tokens)) {
-            _post([this] { on_finish_(""); });
+            _post([this] { _on_finish(""); });
             return;
         }
         prompt_tokens = 0;
         ChatRequest req;
         req.model       = settings.model;
         req.messages    = std::move(history);
-        req.tools       = tool_specs_for_mode(specs_all_, settings.mode);
-        req.interrupted = [session = state_->session] {
+        req.tools       = tool_specs_for_mode(_specs_all, settings.mode);
+        req.interrupted = [session = _state->session] {
             return session->interrupt_requested();
         };
-        state_->session->reset_reasoning();
-        stream_events_.clear();
+        _state->session->reset_reasoning();
+        _stream_events.clear();
         std::string text_buffer;
         std::string error_msg;
         Status error_status                 = Status::OK;
         bool saw_stream                     = false;
         bool received_data                  = false;
         std::uint64_t request_prompt_tokens = 0;
-        StreamUpdateBuffer stream_updates(post_, state_->session);
+        StreamUpdateBuffer stream_updates(
+            [this](std::function<void()> f) { _post(std::move(f)); },
+            _state->session);
 
         StreamCallback cb = [this, model = req.model, &text_buffer, &error_msg,
                                 &error_status, &saw_stream, &received_data,
@@ -373,7 +375,7 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
             }
             if (ev.kind == StreamEvent::Kind::TOOL_CALL
                 || ev.kind == StreamEvent::Kind::QUESTION) {
-                stream_events_.push_back(ev);
+                _stream_events.push_back(ev);
             }
             if (ev.kind == StreamEvent::Kind::CONTENT_DELTA
                 || ev.kind == StreamEvent::Kind::CONNECTED) {
@@ -392,44 +394,44 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
                 request_prompt_tokens = ev.usage.prompt;
             }
             const ModelPricing pricing = ev.kind == StreamEvent::Kind::USAGE
-                ? state_->providers->pricing_for(model)
+                ? _state->providers->pricing_for(model)
                 : ModelPricing { };
             stream_updates.push(ev, pricing);
         };
 
-        const StreamFn& fn = stream_fn_;
-        retry_after_secs_  = 0;
+        const StreamFn& fn = _stream_fn;
+        _retry_after_secs  = 0;
         Status st;
         ApiStandard active_dialect = ApiStandard::OPENAI;
         std::string current_model;
         std::string current_effort;
-        if (has_stream_override_) {
+        if (_has_stream_override) {
             req.reasoning_effort = settings.reasoning_effort == "off"
                 ? std::nullopt
                 : std::optional<std::string>(
                       to_wire_effort(settings.reasoning_effort));
             current_model        = req.model;
             current_effort       = settings.reasoning_effort;
-            state_->session->set_last_assistant_metadata(
+            _state->session->set_last_assistant_metadata(
                 current_model, current_effort);
             st = fn(req, cb);
         } else {
             Route route          = settings.route;
             current_model        = req.model;
             const auto try_route = [&](const Route& candidate) {
-                retry_after_secs_ = 0;
+                _retry_after_secs = 0;
                 error_status      = Status::OK;
                 error_msg.clear();
                 apply_reasoning(req, candidate.dialect,
-                    settings.reasoning_effort, *state_->providers);
+                    settings.reasoning_effort, *_state->providers);
                 active_dialect = candidate.dialect;
                 current_effort = req.reasoning_effort.has_value()
                         || req.thinking_budget.has_value()
                     ? settings.reasoning_effort
                     : "off";
-                state_->session->set_last_assistant_metadata(
+                _state->session->set_last_assistant_metadata(
                     current_model, current_effort);
-                return stream(candidate, req, cb, &retry_after_secs_);
+                return stream(candidate, req, cb, &_retry_after_secs);
             };
 
             std::vector<std::string> attempted_endpoints { route.endpoint };
@@ -450,7 +452,7 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
                 if (attempt != Status::API_ERROR || saw_stream) {
                     break;
                 }
-                Route alternative = state_->providers->route_for(
+                Route alternative = _state->providers->route_for(
                     settings.connection_id, dialect);
                 if (alternative.endpoint.empty()
                     || std::find(attempted_endpoints.begin(),
@@ -464,7 +466,7 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
                 const Status retried
                     = error_status != Status::OK ? error_status : st;
                 if (retried == Status::OK) {
-                    state_->providers->remember_dialect(
+                    _state->providers->remember_dialect(
                         settings.connection_id, req.model, dialect);
                     settings.route   = route;
                     settings.dialect = route.dialect;
@@ -475,8 +477,8 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
         stream_updates.finish();
         history = std::move(req.messages);
 
-        if (state_->session->interrupt_requested()) {
-            _post([this] { on_finish_(""); });
+        if (_state->session->interrupt_requested()) {
+            _post([this] { _on_finish(""); });
             return;
         }
 
@@ -492,20 +494,20 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
                 || retryable_server)
             && retries < 2) {
             ++retries;
-            int wait = retry_after_secs_;
+            int wait = _retry_after_secs;
             if (wait <= 0) {
                 wait = retries == 1 ? 2 : 5;
             }
             wait = std::clamp(wait, 1, 30);
             _post([this, wait, stalled = retryable_stall] {
-                state_->session->mark_retry(wait, stalled);
+                _state->session->mark_retry(wait, stalled);
             });
             using namespace std::chrono_literals;
             const auto deadline
                 = std::chrono::steady_clock::now() + std::chrono::seconds(wait);
             while (std::chrono::steady_clock::now() < deadline) {
-                if (!alive_.load() || state_->session->interrupt_requested()) {
-                    _post([this] { on_finish_(""); });
+                if (!_alive.load() || _state->session->interrupt_requested()) {
+                    _post([this] { _on_finish(""); });
                     return;
                 }
                 std::this_thread::sleep_for(50ms);
@@ -514,7 +516,7 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
         }
         if (fail != Status::OK) {
             _post([this, fail, msg = error_msg] {
-                state_->session->clear_error();
+                _state->session->clear_error();
                 std::string error = error_text(fail);
                 if (!msg.empty()) {
                     if (error.ends_with('.')) {
@@ -523,14 +525,14 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
                     error += ": " + msg;
                     error = ensure_sentence_end(std::move(error));
                 }
-                on_finish_(std::move(error));
+                _on_finish(std::move(error));
             });
             return;
         }
         retries       = 0;
         prompt_tokens = request_prompt_tokens;
 
-        if (!alive_.load()) {
+        if (!_alive.load()) {
             return;
         }
 
@@ -538,20 +540,20 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
         const size_t history_before = history.size();
         _drain_pending_asks(
             history, reply_buffer, text_buffer, active_dialect, settings.mode);
-        if (!alive_.load()) {
+        if (!_alive.load()) {
             return;
         }
-        if (state_->session->interrupt_requested()) {
-            _post([this] { on_finish_(""); });
+        if (_state->session->interrupt_requested()) {
+            _post([this] { _on_finish(""); });
             return;
         }
 
         if (history.size() == history_before) {
-            _post([this] { on_finish_(""); });
+            _post([this] { _on_finish(""); });
             return;
         }
         _post([this, settings] {
-            state_->session->append_assistant(
+            _state->session->append_assistant(
                 settings.model, settings.reasoning_effort);
         });
     }
@@ -564,19 +566,19 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
     std::vector<Message> tool_msgs;
     bool had_tool_calls = false;
 
-    for (const auto& ev : stream_events_) {
-        if (!alive_.load()) {
+    for (const auto& ev : _stream_events) {
+        if (!_alive.load()) {
             return;
         }
         if (ev.kind == StreamEvent::Kind::QUESTION) {
-            if ((state_->runtime_flags & RuntimeFlag::ATTENDED)
+            if ((_state->runtime_flags & RuntimeFlag::ATTENDED)
                 == RuntimeFlag::NONE) {
-                blocked_permission_.store(true);
+                _blocked_permission.store(true);
                 continue;
             }
-            const ModalResult res = modal_request_(ev.question).get();
+            const ModalResult res = _modal_request(ev.question).get();
             _apply_question_result(res, reply_buffer);
-            if (state_->session->interrupt_requested()) {
+            if (_state->session->interrupt_requested()) {
                 return;
             }
             continue;
@@ -592,7 +594,7 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
                 original.name + " is unavailable in Plan mode", tool_msgs);
             continue;
         }
-        if (find_tool(tools_, original.name) == nullptr) {
+        if (find_tool(_tools, original.name) == nullptr) {
             const std::string error = "unknown tool: " + original.name;
             _finish_tool(
                 original, ToolCall::Result::Kind::ERROR, error, tool_msgs);
@@ -601,18 +603,18 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
 
         const PermissionEvaluation evaluation = evaluate_tool_request(original,
             permission_context(
-                *state_->environment, *state_->permissions, mode),
-            state_->providers->config(), state_->environment->skills(),
-            *skills_);
+                *_state->environment, *_state->permissions, mode),
+            _state->providers->config(), _state->environment->skills(),
+            *_skills);
         if (evaluation.decision.kind == PermissionDecision::Kind::REJECT) {
             _reject_tool(original, evaluation.decision.reason, tool_msgs);
             continue;
         }
         if (original.name == "ask") {
             const auto form       = parse_ask_args(evaluation.request.args);
-            const ModalResult res = modal_request_(*form).get();
+            const ModalResult res = _modal_request(*form).get();
             _apply_ask_result(original, res, tool_msgs);
-            if (state_->session->interrupt_requested()) {
+            if (_state->session->interrupt_requested()) {
                 return;
             }
             continue;
@@ -622,8 +624,8 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
                 = *parse_todo_args(parse_json(evaluation.request.args));
             const std::string text = todo_summary(todo);
             _post([this, req = original, todo, text] {
-                state_->session->set_todo(todo);
-                state_->session->fill_tool_result(req,
+                _state->session->set_todo(todo);
+                _state->session->fill_tool_result(req,
                     ToolCall::Result { ToolCall::Result::Kind::OUTPUT, text });
             });
             tool_msgs.push_back(
@@ -631,18 +633,18 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
             continue;
         }
         if (original.name == "subagent") {
-            subagent_tool_(evaluation.request, tool_msgs);
+            _subagent_tool(evaluation.request, tool_msgs);
             continue;
         }
         if (evaluation.decision.kind == PermissionDecision::Kind::ACCEPT
-            || (state_->runtime_flags & RuntimeFlag::SKIP_PERMISSIONS)
+            || (_state->runtime_flags & RuntimeFlag::SKIP_PERMISSIONS)
                 != RuntimeFlag::NONE) {
             _run_tool(evaluation, mode, tool_msgs);
             continue;
         }
-        if ((state_->runtime_flags & RuntimeFlag::ATTENDED)
+        if ((_state->runtime_flags & RuntimeFlag::ATTENDED)
             == RuntimeFlag::NONE) {
-            blocked_permission_.store(true);
+            _blocked_permission.store(true);
             _reject_tool(original,
                 "permission is unavailable in unattended mode: "
                     + evaluation.decision.reason,
@@ -650,9 +652,9 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
             continue;
         }
 
-        const ModalResult res = modal_request_(evaluation.request).get();
+        const ModalResult res = _modal_request(evaluation.request).get();
         _apply_tool_result(evaluation, res, mode, tool_msgs);
-        if (state_->session->interrupt_requested()) {
+        if (_state->session->interrupt_requested()) {
             return;
         }
     }
@@ -662,10 +664,10 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
     }
 
     const std::optional<AssistantTurn> reasoning_source
-        = state_->session->last_assistant();
+        = _state->session->last_assistant();
     Message assistant = assistant_message(assistant_text,
         reasoning_source.has_value() ? &*reasoning_source : nullptr, dialect);
-    for (const auto& ev : stream_events_) {
+    for (const auto& ev : _stream_events) {
         if (ev.kind == StreamEvent::Kind::TOOL_CALL) {
             assistant.tool_calls.push_back(ToolCallEntry {
                 ev.tool_call.id, ev.tool_call.name, ev.tool_call.args });
@@ -700,7 +702,7 @@ void TurnRunner::_apply_tool_result(const PermissionEvaluation& evaluation,
     }
     if (verdict->decision == ToolDecision::ACCEPT_FOR_SESSION) {
         if (evaluation.session_grants.empty()
-            || !state_->permissions->install(evaluation.session_grants)) {
+            || !_state->permissions->install(evaluation.session_grants)) {
             _reject_tool(req, "session approval is unavailable", tool_msgs);
             return;
         }
@@ -718,7 +720,7 @@ void TurnRunner::_apply_question_result(
     ModalAnswer copy = *answer;
     reply_buffer += modal_answer_markdown(copy);
     _post([this, copy = std::move(copy)] {
-        state_->session->append_item(std::move(copy));
+        _state->session->append_item(std::move(copy));
     });
 }
 
@@ -755,7 +757,7 @@ void TurnRunner::_finish_tool(const ToolCallRequest& req,
     std::string history_text, std::vector<Message>& tool_msgs)
 {
     _post([this, req, kind, result_text = std::move(result_text)]() mutable {
-        state_->session->fill_tool_result(
+        _state->session->fill_tool_result(
             req, ToolCall::Result { kind, std::move(result_text) });
     });
     tool_msgs.push_back(
@@ -767,8 +769,8 @@ void TurnRunner::_run_tool(const PermissionEvaluation& evaluation,
 {
     const PermissionEvaluation current = evaluate_tool_request(
         evaluation.request,
-        permission_context(*state_->environment, *state_->permissions, mode),
-        state_->providers->config(), state_->environment->skills(), *skills_);
+        permission_context(*_state->environment, *_state->permissions, mode),
+        _state->providers->config(), _state->environment->skills(), *_skills);
     if (current.decision.kind == PermissionDecision::Kind::REJECT
         || current.request.args != evaluation.request.args) {
         const std::string reason
@@ -780,13 +782,13 @@ void TurnRunner::_run_tool(const PermissionEvaluation& evaluation,
     }
 
     const ToolCallRequest& req = current.request;
-    ToolOutput out             = dispatch_tool(tools_, req);
+    ToolOutput out             = dispatch_tool(_tools, req);
     if (req.name == "skill" && out.kind == ToolOutput::Kind::OUTPUT) {
         if (const auto skill = resolve_skill(
-                state_->environment->skills(), parse_json(req.args))) {
+                _state->environment->skills(), parse_json(req.args))) {
             const std::optional<std::filesystem::path> path
                 = canonical_skill_path(*skill);
-            skills_->record_tool_load(path.value_or(skill->path), out.text);
+            _skills->record_tool_load(path.value_or(skill->path), out.text);
         }
     }
     const auto kind          = out.kind == ToolOutput::Kind::OUTPUT
@@ -798,14 +800,14 @@ void TurnRunner::_run_tool(const PermissionEvaluation& evaluation,
         ToolCall::Result result { kind, std::move(out.text) };
         result.diff         = std::move(out.diff);
         result.shell_status = std::move(out.shell_status);
-        state_->session->fill_tool_result(req, std::move(result));
+        _state->session->fill_tool_result(req, std::move(result));
     });
     tool_msgs.push_back(
         { Message::Type::TOOL, std::move(history_text), { }, req.id });
     if (viewer
-        && (state_->runtime_flags & RuntimeFlag::ATTENDED)
+        && (_state->runtime_flags & RuntimeFlag::ATTENDED)
             != RuntimeFlag::NONE) {
-        modal_request_(std::move(*viewer));
+        _modal_request(std::move(*viewer));
     }
 }
 

@@ -16,94 +16,94 @@ namespace imza {
 
 ModalPayload Session::modal() const
 {
-    std::lock_guard lock(mutex_);
-    return modal_;
+    std::lock_guard lock(_mutex);
+    return _modal;
 }
 
 std::uint64_t Session::modal_serial() const
 {
-    std::lock_guard lock(mutex_);
-    return modal_serial_;
+    std::lock_guard lock(_mutex);
+    return _modal_serial;
 }
 
 std::uint64_t Session::content_serial() const
 {
-    std::lock_guard lock(mutex_);
-    return content_serial_;
+    std::lock_guard lock(_mutex);
+    return _content_serial;
 }
 
 std::string Session::session_id() const
 {
-    std::lock_guard lock(mutex_);
-    return session_id_;
+    std::lock_guard lock(_mutex);
+    return _session_id;
 }
 
 Session::Phase Session::phase() const
 {
-    std::lock_guard lock(mutex_);
-    return phase_;
+    std::lock_guard lock(_mutex);
+    return _phase;
 }
 
 Session::Mode Session::mode() const
 {
-    std::lock_guard lock(mutex_);
-    return mode_;
+    std::lock_guard lock(_mutex);
+    return _mode;
 }
 
 std::string Session::error() const
 {
-    std::lock_guard lock(mutex_);
-    return error_;
+    std::lock_guard lock(_mutex);
+    return _error;
 }
 
 std::string Session::connect_status() const
 {
-    std::lock_guard lock(mutex_);
-    return connect_status_;
+    std::lock_guard lock(_mutex);
+    return _connect_status;
 }
 
 std::optional<Session::Countdown> Session::retry_countdown() const
 {
-    std::lock_guard lock(mutex_);
-    return retry_countdown_;
+    std::lock_guard lock(_mutex);
+    return _retry_countdown;
 }
 
 Usage Session::last() const
 {
-    std::lock_guard lock(mutex_);
-    return last_;
+    std::lock_guard lock(_mutex);
+    return _last;
 }
 
 std::optional<std::chrono::milliseconds> Session::turn_elapsed() const
 {
-    std::lock_guard lock(mutex_);
-    if (!turn_started_) {
+    std::lock_guard lock(_mutex);
+    if (!_turn_started) {
         return std::nullopt;
     }
     return std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - *turn_started_);
+        std::chrono::steady_clock::now() - *_turn_started);
 }
 
 Session::StatusView Session::status_view() const
 {
-    std::lock_guard lock(mutex_);
-    return { mode_, totals_, last_, total_cost_ };
+    std::lock_guard lock(_mutex);
+    return { _mode, _totals, _last, _total_cost };
 }
 
 bool Session::has_items() const
 {
-    std::lock_guard lock(mutex_);
-    return !items_.empty();
+    std::lock_guard lock(_mutex);
+    return !_items.empty();
 }
 
 bool Session::has_pending_work() const
 {
-    std::lock_guard lock(mutex_);
-    if (phase_ != Phase::IDLE || !queued_.empty()) {
+    std::lock_guard lock(_mutex);
+    if (_phase != Phase::IDLE || !_queued.empty()) {
         return true;
     }
     return std::any_of(
-        items_.begin(), items_.end(), [](const ConversationItem& item) {
+        _items.begin(), _items.end(), [](const ConversationItem& item) {
             const auto* tool = std::get_if<ToolCall>(&item);
             return tool != nullptr && !tool->result.has_value();
         });
@@ -111,114 +111,114 @@ bool Session::has_pending_work() const
 
 SessionSnapshot Session::snapshot() const
 {
-    std::lock_guard lock(mutex_);
-    return { title_, items_, todo_, compacted_summary_, compacted_item_count_,
-        mode_ == Mode::PLAN, persistence_ };
+    std::lock_guard lock(_mutex);
+    return { _title, _items, _todo, _compacted_summary, _compacted_item_count,
+        _mode == Mode::PLAN, _persistence };
 }
 
 std::optional<SessionSnapshot> Session::snapshot_for_save() const
 {
-    std::lock_guard lock(mutex_);
-    if (items_.empty() || !dirty_) {
+    std::lock_guard lock(_mutex);
+    if (_items.empty() || !_dirty) {
         return std::nullopt;
     }
-    return SessionSnapshot { title_, items_, todo_, compacted_summary_,
-        compacted_item_count_, mode_ == Mode::PLAN, persistence_ };
+    return SessionSnapshot { _title, _items, _todo, _compacted_summary,
+        _compacted_item_count, _mode == Mode::PLAN, _persistence };
 }
 
 void Session::restore(SessionSnapshot snapshot)
 {
     {
-        std::lock_guard lock(mutex_);
-        title_                = std::move(snapshot.title);
-        items_                = std::move(snapshot.items);
-        todo_                 = std::move(snapshot.todo);
-        compacted_summary_    = std::move(snapshot.compacted_summary);
-        compacted_item_count_ = snapshot.compacted_item_count;
-        persistence_          = std::move(snapshot.persistence);
+        std::lock_guard lock(_mutex);
+        _title                = std::move(snapshot.title);
+        _items                = std::move(snapshot.items);
+        _todo                 = std::move(snapshot.todo);
+        _compacted_summary    = std::move(snapshot.compacted_summary);
+        _compacted_item_count = snapshot.compacted_item_count;
+        _persistence          = std::move(snapshot.persistence);
         // A loaded session continues its source file in place and adopts the
         // file stem as its id. Only fresh conversations (/new, brand-new
         // objects) rotate to a generated id so their first save gains a new
         // file instead of overwriting an archive.
-        if (auto* persisted = std::get_if<PersistedSession>(&persistence_)) {
-            session_id_ = persisted->path.stem().string();
+        if (auto* persisted = std::get_if<PersistedSession>(&_persistence)) {
+            _session_id = persisted->path.stem().string();
         } else {
-            session_id_ = unique_session_id();
+            _session_id = unique_session_id();
         }
-        dirty_ = false;
-        mode_  = snapshot.plan_mode ? Mode::PLAN : Mode::BUILD;
-        modal_ = std::monostate { };
-        std::vector<QueuedMessage>().swap(queued_);
-        error_.clear();
-        retry_countdown_.reset();
-        reasoning_start_.reset();
-        turn_started_.reset();
-        phase_                    = Phase::IDLE;
-        totals_                   = { };
-        last_                     = { };
-        total_cost_               = 0.0;
-        title_generation_claimed_ = !title_.empty();
-        interrupt_requested_.store(false);
-        next_tool_id_       = 1;
-        next_compaction_id_ = 1;
-        for (const auto& item : items_) {
+        _dirty = false;
+        _mode  = snapshot.plan_mode ? Mode::PLAN : Mode::BUILD;
+        _modal = std::monostate { };
+        std::vector<QueuedMessage>().swap(_queued);
+        _error.clear();
+        _retry_countdown.reset();
+        _reasoning_start.reset();
+        _turn_started.reset();
+        _phase                    = Phase::IDLE;
+        _totals                   = { };
+        _last                     = { };
+        _total_cost               = 0.0;
+        _title_generation_claimed = !_title.empty();
+        _interrupt_requested.store(false);
+        _next_tool_id       = 1;
+        _next_compaction_id = 1;
+        for (const auto& item : _items) {
             if (const auto* tool = std::get_if<ToolCall>(&item)) {
-                next_tool_id_ = std::max(next_tool_id_, tool->id + 1);
+                _next_tool_id = std::max(_next_tool_id, tool->id + 1);
             } else if (const auto* event
                 = std::get_if<CompactionEvent>(&item)) {
-                next_compaction_id_
-                    = std::max(next_compaction_id_, event->id + 1);
+                _next_compaction_id
+                    = std::max(_next_compaction_id, event->id + 1);
             }
         }
-        ++modal_serial_;
-        ++content_serial_;
+        ++_modal_serial;
+        ++_content_serial;
     }
     attachments_changed_.publish();
 }
 
 void Session::set_persistence(SessionPersistence persistence)
 {
-    std::lock_guard lock(mutex_);
-    persistence_ = std::move(persistence);
+    std::lock_guard lock(_mutex);
+    _persistence = std::move(persistence);
     // The file now mirrors the conversation until the next mutation.
-    dirty_ = false;
+    _dirty = false;
 }
 
 void Session::set_mode(Mode next_mode)
 {
-    std::lock_guard lock(mutex_);
-    mode_ = next_mode;
+    std::lock_guard lock(_mutex);
+    _mode = next_mode;
 }
 
 void Session::set_error(std::string msg)
 {
-    std::lock_guard lock(mutex_);
-    error_ = std::move(msg);
+    std::lock_guard lock(_mutex);
+    _error = std::move(msg);
 }
 
 void Session::clear_error()
 {
-    std::lock_guard lock(mutex_);
-    error_.clear();
+    std::lock_guard lock(_mutex);
+    _error.clear();
 }
 
 void Session::set_connect_status(std::string status)
 {
-    std::lock_guard lock(mutex_);
-    connect_status_ = std::move(status);
+    std::lock_guard lock(_mutex);
+    _connect_status = std::move(status);
 }
 
 std::string Session::title() const
 {
-    std::lock_guard lock(mutex_);
-    return title_;
+    std::lock_guard lock(_mutex);
+    return _title;
 }
 
 std::vector<std::string> Session::attachment_names() const
 {
-    std::lock_guard lock(mutex_);
+    std::lock_guard lock(_mutex);
     std::vector<std::string> names;
-    for (const ConversationItem& item : items_) {
+    for (const ConversationItem& item : _items) {
         const auto* user = std::get_if<UserTurn>(&item);
         if (user == nullptr) {
             continue;
@@ -237,21 +237,21 @@ std::vector<std::string> Session::attachment_names() const
 
 bool Session::claim_title_generation()
 {
-    std::lock_guard lock(mutex_);
-    if (title_generation_claimed_ || !items_.empty()) {
+    std::lock_guard lock(_mutex);
+    if (_title_generation_claimed || !_items.empty()) {
         return false;
     }
-    title_generation_claimed_ = true;
+    _title_generation_claimed = true;
     return true;
 }
 
 void Session::set_title(std::string title)
 {
     {
-        std::lock_guard lock(mutex_);
-        if (title_.empty()) {
-            title_ = std::move(title);
-            dirty_ = true;
+        std::lock_guard lock(_mutex);
+        if (_title.empty()) {
+            _title = std::move(title);
+            _dirty = true;
         }
     }
     _notify_title_change();
@@ -259,10 +259,10 @@ void Session::set_title(std::string title)
 
 void Session::cancel_queued(std::size_t id)
 {
-    std::lock_guard lock(mutex_);
-    for (auto it = queued_.begin(); it != queued_.end(); ++it) {
+    std::lock_guard lock(_mutex);
+    for (auto it = _queued.begin(); it != _queued.end(); ++it) {
         if (it->id == id) {
-            queued_.erase(it);
+            _queued.erase(it);
             return;
         }
     }
@@ -271,19 +271,19 @@ void Session::cancel_queued(std::size_t id)
 void Session::enqueue_message(
     std::string text, std::vector<FileAttachment> attachments)
 {
-    std::lock_guard lock(mutex_);
-    queued_.push_back(QueuedMessage {
-        next_queued_id_++, std::move(text), std::move(attachments) });
+    std::lock_guard lock(_mutex);
+    _queued.push_back(QueuedMessage {
+        _next_queued_id++, std::move(text), std::move(attachments) });
 }
 
 std::optional<QueuedMessage> Session::pop_queued()
 {
-    std::lock_guard lock(mutex_);
-    if (queued_.empty()) {
+    std::lock_guard lock(_mutex);
+    if (_queued.empty()) {
         return std::nullopt;
     }
-    QueuedMessage next = std::move(queued_.front());
-    queued_.erase(queued_.begin());
+    QueuedMessage next = std::move(_queued.front());
+    _queued.erase(_queued.begin());
     return next;
 }
 
@@ -292,14 +292,14 @@ void Session::begin_send(
 {
     const bool has_attachments = !attachments.empty();
     {
-        std::lock_guard lock(mutex_);
-        persistence_ = UnsavedSession { };
-        dirty_       = true;
-        items_.emplace_back(
+        std::lock_guard lock(_mutex);
+        _persistence = UnsavedSession { };
+        _dirty       = true;
+        _items.emplace_back(
             UserTurn { std::move(text), std::move(attachments) });
-        error_.clear();
-        phase_        = Phase::CONNECTING;
-        turn_started_ = std::chrono::steady_clock::now();
+        _error.clear();
+        _phase        = Phase::CONNECTING;
+        _turn_started = std::chrono::steady_clock::now();
     }
     if (has_attachments) {
         attachments_changed_.publish();
@@ -308,16 +308,16 @@ void Session::begin_send(
 
 void Session::append_assistant(std::string model, std::string reasoning_effort)
 {
-    std::lock_guard lock(mutex_);
-    dirty_ = true;
-    items_.emplace_back(AssistantTurn { .model = std::move(model),
+    std::lock_guard lock(_mutex);
+    _dirty = true;
+    _items.emplace_back(AssistantTurn { .model = std::move(model),
         .reasoning_effort                      = std::move(reasoning_effort) });
 }
 
 void Session::set_last_assistant_metadata(
     std::string model, std::string reasoning_effort)
 {
-    std::lock_guard lock(mutex_);
+    std::lock_guard lock(_mutex);
     if (AssistantTurn* assistant = last_assistant_locked()) {
         assistant->model            = std::move(model);
         assistant->reasoning_effort = std::move(reasoning_effort);
@@ -326,23 +326,23 @@ void Session::set_last_assistant_metadata(
 
 void Session::append_item(ConversationItem item)
 {
-    std::lock_guard lock(mutex_);
-    dirty_ = true;
-    items_.push_back(std::move(item));
+    std::lock_guard lock(_mutex);
+    _dirty = true;
+    _items.push_back(std::move(item));
 }
 
 std::pair<std::size_t, std::size_t> Session::begin_compaction()
 {
-    std::lock_guard lock(mutex_);
-    const std::size_t id = next_compaction_id_++;
+    std::lock_guard lock(_mutex);
+    const std::size_t id = _next_compaction_id++;
     std::size_t prefix   = 0;
-    for (std::size_t index = items_.size(); index > 0; --index) {
-        if (std::holds_alternative<UserTurn>(items_[index - 1])) {
+    for (std::size_t index = _items.size(); index > 0; --index) {
+        if (std::holds_alternative<UserTurn>(_items[index - 1])) {
             prefix = index - 1;
             break;
         }
     }
-    items_.emplace_back(
+    _items.emplace_back(
         CompactionEvent { id, CompactionEvent::Status::RUNNING });
     return { id, prefix };
 }
@@ -350,18 +350,18 @@ std::pair<std::size_t, std::size_t> Session::begin_compaction()
 void Session::finish_compaction(std::size_t id, std::string summary,
     std::size_t compacted_item_count, bool success)
 {
-    std::lock_guard lock(mutex_);
-    for (auto& item : items_) {
+    std::lock_guard lock(_mutex);
+    for (auto& item : _items) {
         auto* event = std::get_if<CompactionEvent>(&item);
         if (event == nullptr || event->id != id) {
             continue;
         }
         event->status = success ? CompactionEvent::Status::COMPLETED
                                 : CompactionEvent::Status::FAILED;
-        dirty_        = true;
+        _dirty        = true;
         if (success) {
-            compacted_summary_    = std::move(summary);
-            compacted_item_count_ = compacted_item_count;
+            _compacted_summary    = std::move(summary);
+            _compacted_item_count = compacted_item_count;
         }
         return;
     }
@@ -369,20 +369,20 @@ void Session::finish_compaction(std::size_t id, std::string summary,
 
 void Session::append_tool(const ToolCallRequest& req)
 {
-    std::lock_guard lock(mutex_);
+    std::lock_guard lock(_mutex);
     if (auto* a = last_assistant_locked()) {
         finalize_reasoning(*a);
     }
-    dirty_               = true;
-    const std::size_t id = next_tool_id_++;
-    items_.emplace_back(
+    _dirty               = true;
+    const std::size_t id = _next_tool_id++;
+    _items.emplace_back(
         ToolCall { id, req.id, req.name, req.args, { }, { }, std::nullopt });
 }
 
 ToolCall* Session::_find_tool_locked(
     const ToolCallRequest& req, const bool unfinished_only)
 {
-    for (auto it = items_.rbegin(); it != items_.rend(); ++it) {
+    for (auto it = _items.rbegin(); it != _items.rend(); ++it) {
         auto* call = std::get_if<ToolCall>(&*it);
         if (call == nullptr || (unfinished_only && call->result.has_value())) {
             continue;
@@ -400,104 +400,104 @@ ToolCall* Session::_find_tool_locked(
 void Session::set_tool_subagent_chats(
     const ToolCallRequest& req, std::vector<SubagentChat> chats)
 {
-    std::lock_guard lock(mutex_);
+    std::lock_guard lock(_mutex);
     if (auto* call = _find_tool_locked(req, false)) {
         call->subagent_chats = std::move(chats);
-        ++content_serial_;
+        ++_content_serial;
     }
 }
 
 void Session::set_tool_subagents(
     const ToolCallRequest& req, std::vector<std::size_t> ids)
 {
-    std::lock_guard lock(mutex_);
+    std::lock_guard lock(_mutex);
     if (auto* call = _find_tool_locked(req, true)) {
         call->subagent_ids = std::move(ids);
-        ++content_serial_;
+        ++_content_serial;
     }
 }
 
 void Session::fill_tool_result(
     const ToolCallRequest& req, ToolCall::Result result)
 {
-    std::lock_guard lock(mutex_);
+    std::lock_guard lock(_mutex);
     if (auto* call = _find_tool_locked(req, true)) {
         call->result = std::move(result);
-        dirty_       = true;
+        _dirty       = true;
     }
 }
 
 void Session::set_todo(TodoList todo)
 {
-    std::lock_guard lock(mutex_);
-    if (todo != todo_) {
-        dirty_ = true;
+    std::lock_guard lock(_mutex);
+    if (todo != _todo) {
+        _dirty = true;
     }
-    todo_ = std::move(todo);
+    _todo = std::move(todo);
 }
 
 void Session::set_modal(ModalPayload payload)
 {
-    std::lock_guard lock(mutex_);
-    modal_ = std::move(payload);
+    std::lock_guard lock(_mutex);
+    _modal = std::move(payload);
 }
 
 void Session::clear_modal()
 {
-    std::lock_guard lock(mutex_);
-    modal_ = std::monostate { };
+    std::lock_guard lock(_mutex);
+    _modal = std::monostate { };
 }
 
 void Session::bump_modal_serial()
 {
-    std::lock_guard lock(mutex_);
-    ++modal_serial_;
+    std::lock_guard lock(_mutex);
+    ++_modal_serial;
 }
 
 void Session::present_modal(ModalPayload payload)
 {
-    std::lock_guard lock(mutex_);
-    modal_ = std::move(payload);
-    if (std::holds_alternative<ToolCallRequest>(modal_)
-        || std::holds_alternative<QuestionForm>(modal_)) {
-        phase_ = Phase::AWAITING;
+    std::lock_guard lock(_mutex);
+    _modal = std::move(payload);
+    if (std::holds_alternative<ToolCallRequest>(_modal)
+        || std::holds_alternative<QuestionForm>(_modal)) {
+        _phase = Phase::AWAITING;
     }
-    ++modal_serial_;
+    ++_modal_serial;
 }
 
 void Session::set_phase(Phase phase)
 {
-    std::lock_guard lock(mutex_);
-    phase_ = phase;
+    std::lock_guard lock(_mutex);
+    _phase = phase;
 }
 
 void Session::mark_retry(int wait_seconds, bool stalled)
 {
-    std::lock_guard lock(mutex_);
-    phase_           = Phase::CONNECTING;
-    retry_countdown_ = Countdown { std::chrono::steady_clock::now()
+    std::lock_guard lock(_mutex);
+    _phase           = Phase::CONNECTING;
+    _retry_countdown = Countdown { std::chrono::steady_clock::now()
             + std::chrono::seconds(wait_seconds),
         stalled };
 }
 
 void Session::reset_reasoning()
 {
-    std::lock_guard lock(mutex_);
-    reasoning_start_ = std::chrono::steady_clock::now();
+    std::lock_guard lock(_mutex);
+    _reasoning_start = std::chrono::steady_clock::now();
 }
 
-void Session::request_interrupt() { interrupt_requested_.store(true); }
+void Session::request_interrupt() { _interrupt_requested.store(true); }
 
-void Session::clear_interrupt() { interrupt_requested_.store(false); }
+void Session::clear_interrupt() { _interrupt_requested.store(false); }
 
 bool Session::interrupt_requested() const
 {
-    return interrupt_requested_.load();
+    return _interrupt_requested.load();
 }
 
 std::optional<AssistantTurn> Session::last_assistant() const
 {
-    std::lock_guard lock(mutex_);
+    std::lock_guard lock(_mutex);
     if (const auto* assistant = last_assistant_locked()) {
         return *assistant;
     }
@@ -506,8 +506,8 @@ std::optional<AssistantTurn> Session::last_assistant() const
 
 bool Session::finish_session(std::string error)
 {
-    std::lock_guard lock(mutex_);
-    const bool finished = phase_ != Phase::IDLE;
+    std::lock_guard lock(_mutex);
+    const bool finished = _phase != Phase::IDLE;
     finish_session_locked(error);
     return finished;
 }
@@ -515,17 +515,17 @@ bool Session::finish_session(std::string error)
 std::vector<Message> Session::build_history(
     std::string_view system_prompt, ApiStandard dialect) const
 {
-    std::lock_guard lock(mutex_);
+    std::lock_guard lock(_mutex);
     std::vector<Message> history;
     history.push_back({ Message::Type::SYSTEM, std::string(system_prompt) });
-    if (!compacted_summary_.empty()) {
+    if (!_compacted_summary.empty()) {
         history.push_back({ Message::Type::USER,
-            "<session-summary>\n" + compacted_summary_
+            "<session-summary>\n" + _compacted_summary
                 + "\n</session-summary>" });
     }
-    const std::size_t begin = std::min(compacted_item_count_, items_.size());
-    for (std::size_t index = begin; index < items_.size(); ++index) {
-        const auto& item = items_[index];
+    const std::size_t begin = std::min(_compacted_item_count, _items.size());
+    for (std::size_t index = begin; index < _items.size(); ++index) {
+        const auto& item = _items[index];
         if (const auto* u = std::get_if<UserTurn>(&item)) {
             history.push_back({ Message::Type::USER,
                 message_with_attachments(u->text, u->attachments) });
@@ -548,29 +548,29 @@ std::vector<Message> Session::build_history(
 
 void Session::apply(const StreamEvent& ev, const ModelPricing& pricing)
 {
-    std::lock_guard lock(mutex_);
+    std::lock_guard lock(_mutex);
     switch (ev.kind) {
     case StreamEvent::Kind::CONTENT_DELTA:
-        assert(phase_ != Phase::AWAITING);
-        if (!items_.empty()) {
-            if (auto* a = std::get_if<AssistantTurn>(&items_.back())) {
+        assert(_phase != Phase::AWAITING);
+        if (!_items.empty()) {
+            if (auto* a = std::get_if<AssistantTurn>(&_items.back())) {
                 if (!ev.text.empty()) {
                     finalize_reasoning(*a);
-                    dirty_ = true;
+                    _dirty = true;
                 }
                 a->markdown += ev.text;
             }
         }
         break;
     case StreamEvent::Kind::REASONING:
-        if (!items_.empty()) {
-            if (auto* a = std::get_if<AssistantTurn>(&items_.back())) {
-                if (a->reasoning.empty() && !reasoning_start_.has_value()) {
-                    reasoning_start_ = std::chrono::steady_clock::now();
+        if (!_items.empty()) {
+            if (auto* a = std::get_if<AssistantTurn>(&_items.back())) {
+                if (a->reasoning.empty() && !_reasoning_start.has_value()) {
+                    _reasoning_start = std::chrono::steady_clock::now();
                 }
                 if (!ev.text.empty()) {
                     a->reasoning += ev.text;
-                    dirty_ = true;
+                    _dirty = true;
                 }
                 if (!ev.thinking_signature.empty()) {
                     a->reasoning_signature = ev.thinking_signature;
@@ -582,18 +582,18 @@ void Session::apply(const StreamEvent& ev, const ModelPricing& pricing)
         if (auto* a = last_assistant_locked()) {
             finalize_reasoning(*a);
         }
-        dirty_ = true;
-        items_.emplace_back(ToolCall { next_tool_id_++, ev.tool_call.id,
+        _dirty = true;
+        _items.emplace_back(ToolCall { _next_tool_id++, ev.tool_call.id,
             ev.tool_call.name, ev.tool_call.args, { }, { }, std::nullopt });
         break;
     case StreamEvent::Kind::QUESTION:
-        if (!items_.empty()) {
-            if (auto* a = std::get_if<AssistantTurn>(&items_.back())) {
+        if (!_items.empty()) {
+            if (auto* a = std::get_if<AssistantTurn>(&_items.back())) {
                 if (!a->markdown.empty()) {
                     a->markdown += "\n\n";
                 }
                 a->markdown += question_form_markdown(ev.question);
-                dirty_ = true;
+                _dirty = true;
             }
         }
         break;
@@ -606,10 +606,10 @@ void Session::apply(const StreamEvent& ev, const ModelPricing& pricing)
         finish_session_locked(error_text(ev.error));
         break;
     case StreamEvent::Kind::CONNECTED:
-        if (phase_ == Phase::CONNECTING) {
-            error_.clear();
-            retry_countdown_.reset();
-            phase_ = Phase::STREAMING;
+        if (_phase == Phase::CONNECTING) {
+            _error.clear();
+            _retry_countdown.reset();
+            _phase = Phase::STREAMING;
         }
         break;
     case StreamEvent::Kind::USAGE: update_usage(ev, pricing); break;
@@ -624,7 +624,7 @@ AssistantTurn* Session::last_assistant_locked()
 
 const AssistantTurn* Session::last_assistant_locked() const
 {
-    for (auto it = items_.rbegin(); it != items_.rend(); ++it) {
+    for (auto it = _items.rbegin(); it != _items.rend(); ++it) {
         if (const auto* a = std::get_if<AssistantTurn>(&*it)) {
             return a;
         }
@@ -634,37 +634,37 @@ const AssistantTurn* Session::last_assistant_locked() const
 
 void Session::finalize_reasoning(AssistantTurn& a)
 {
-    if (!reasoning_start_.has_value() || a.reasoning_ms.has_value()) {
+    if (!_reasoning_start.has_value() || a.reasoning_ms.has_value()) {
         return;
     }
     const auto now = std::chrono::steady_clock::now();
     a.reasoning_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        now - *reasoning_start_);
+        now - *_reasoning_start);
 }
 
 void Session::finish_session_locked(const std::string& error)
 {
-    if (phase_ == Phase::IDLE) {
+    if (_phase == Phase::IDLE) {
         return;
     }
     if (auto* a = last_assistant_locked()) {
         finalize_reasoning(*a);
     }
-    retry_countdown_.reset();
-    if (!error.empty() && error_.empty()) {
-        error_ = error;
+    _retry_countdown.reset();
+    if (!error.empty() && _error.empty()) {
+        _error = error;
     }
-    phase_ = Phase::IDLE;
+    _phase = Phase::IDLE;
 }
 
 void Session::update_usage(
     const StreamEvent& usage_event, const ModelPricing& pricing)
 {
-    last_ = usage_event.usage;
-    totals_.prompt += usage_event.usage.prompt;
-    totals_.completion += usage_event.usage.completion;
-    totals_.total += usage_event.usage.total;
-    total_cost_ += compute_cost(usage_event.usage, pricing);
+    _last = usage_event.usage;
+    _totals.prompt += usage_event.usage.prompt;
+    _totals.completion += usage_event.usage.completion;
+    _totals.total += usage_event.usage.total;
+    _total_cost += compute_cost(usage_event.usage, pricing);
 }
 
 Signal<>::Subscription Session::subscribe_to_title_change(

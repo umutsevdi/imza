@@ -72,11 +72,11 @@ public:
         Signal<const SubagentEvent&>::Callback callback);
 
 private:
-    mutable std::mutex mutex_;
-    std::vector<SubagentTask> tasks_;
-    std::vector<std::pair<std::size_t, std::jthread>> workers_;
-    std::size_t next_id_ = 1;
-    Signal<const SubagentEvent&> changed_;
+    mutable std::mutex _mutex;
+    std::vector<SubagentTask> _tasks;
+    std::vector<std::pair<std::size_t, std::jthread>> _workers;
+    std::size_t _next_id = 1;
+    Signal<const SubagentEvent&> _changed;
 };
 
 } // namespace imza
