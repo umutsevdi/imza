@@ -27,12 +27,13 @@ namespace {
 
 } // namespace
 
-class SidechatComponent : public ComponentBase, public SidechatHandle {
+class SidechatComponent : public ComponentBase {
 public:
-    SidechatComponent(
-        std::shared_ptr<ApplicationState> state, std::function<void()> on_focus)
+    SidechatComponent(std::shared_ptr<ApplicationState> state,
+        std::function<void()> on_focus, SidechatStatus& status)
         : state_(std::move(state))
         , on_focus_(std::move(on_focus))
+        , status_(status)
         , host_(Container::Vertical({ }))
     {
         Add(host_);
@@ -76,7 +77,7 @@ public:
                 _unfocus();
             } else {
                 imza::open_sidechat(*state_);
-                focused_ = true;
+                _set_focused(true);
             }
             return true;
         }
@@ -100,7 +101,7 @@ public:
         if (pane_box_.Contain(m.x, m.y)) {
             if (m.button == Mouse::Left && m.motion == Mouse::Pressed
                 && !focused_) {
-                focused_ = true;
+                _set_focused(true);
             }
             return pane_->OnEvent(event);
         }
@@ -110,24 +111,10 @@ public:
         return false;
     }
 
-    bool focused() const override { return focused_; }
-
-    bool has_modal() const override { return pane_ != nullptr && _has_modal(); }
-
-    Component modal() const override { return modal_; }
-
-    bool rendered() const override
-    {
-        // Hidden panes keep a stale box.
-        return pane_ != nullptr
-            && (layout_.kind != LayoutCtx::Kind::NARROW || focused_);
-    }
-
-    Component component() const override { return self_; }
-
 private:
-    friend std::shared_ptr<SidechatHandle> make_sidechat_component(
-        std::shared_ptr<ApplicationState>, std::function<void()>);
+    friend ftxui::Component make_sidechat_component(
+        std::shared_ptr<ApplicationState>, std::function<void()>,
+        SidechatStatus&);
 
     bool _has_modal() const
     {
@@ -145,12 +132,14 @@ private:
             modal_ = make_modal(state_->sidechat);
             pane_  = make_chat(
                 state_->sidechat, [this] { return layout_; }, sidechat_hints());
+            status_.modal = modal_;
             host_->Add(modal_);
             host_->Add(pane_);
             return;
         }
         pane_.reset();
         modal_.reset();
+        status_.modal.reset();
         host_->DetachAllChildren();
         _unfocus();
     }
@@ -160,13 +149,19 @@ private:
         if (!focused_) {
             return;
         }
-        focused_ = false;
+        _set_focused(false);
         on_focus_();
+    }
+
+    void _set_focused(bool focused)
+    {
+        focused_        = focused;
+        status_.focused = focused;
     }
 
     std::shared_ptr<ApplicationState> state_;
     std::function<void()> on_focus_;
-    Component self_;
+    SidechatStatus& status_;
     Component host_;
     Component pane_;
     Component modal_;
@@ -176,12 +171,19 @@ private:
     ftxui::Box pane_box_ { };
 };
 
-std::shared_ptr<SidechatHandle> make_sidechat_component(
-    std::shared_ptr<ApplicationState> state, std::function<void()> on_focus)
+ftxui::Component make_sidechat_component(
+    std::shared_ptr<ApplicationState> state, std::function<void()> on_focus,
+    SidechatStatus& status)
 {
-    auto component = ftxui::Make<SidechatComponent>(state, std::move(on_focus));
-    component->self_  = component;
-    component->state_ = std::move(state);
+    auto component = ftxui::Make<SidechatComponent>(
+        std::move(state), std::move(on_focus), status);
+    std::weak_ptr<ComponentBase> weak = component;
+    status.has_modal                  = [weak, &status] {
+        const auto locked = weak.lock();
+        return locked != nullptr
+            && std::static_pointer_cast<SidechatComponent>(locked)->_has_modal()
+            && status.modal != nullptr;
+    };
     return component;
 }
 

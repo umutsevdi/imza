@@ -156,9 +156,8 @@ namespace {
             review_      = make_review(state_, layout,
                 [this](WorkflowPhase phase) { _set_phase(phase); });
             modal_       = make_modal(state_);
-            sidechat_
-                = make_sidechat_component(state_, [this] { _focus_main(); });
-            sidechat_component_ = sidechat_->component();
+            sidechat_    = make_sidechat_component(
+                state_, [this] { _focus_main(); }, sidechat_status_);
 
             workspace_subscription_
                 = state_->environment->subscribe_to_workspace_change(
@@ -186,7 +185,7 @@ namespace {
                 status_line_,
                 modal_,
             }));
-            Add(sidechat_component_);
+            Add(sidechat_);
             chat_->TakeFocus();
         }
 
@@ -208,9 +207,9 @@ namespace {
             const bool side_by_side = state_->sidechat_open && !narrow;
 
             Element root;
-            if (narrow && sidechat_->focused()) {
-                root = vbox({ sidechat_component_->Render() | flex,
-                           separatorEmpty(), status })
+            if (narrow && sidechat_status_.focused) {
+                root = vbox({ sidechat_->Render() | flex, separatorEmpty(),
+                           status })
                     | flex;
             } else if (layout_.kind == LayoutCtx::Kind::WIDE) {
                 Element main_panel
@@ -222,7 +221,7 @@ namespace {
                     | xflex | yflex;
                 if (side_by_side) {
                     main_panel = hbox({ std::move(main_panel), separatorEmpty(),
-                        sidechat_component_->Render() });
+                        sidechat_->Render() });
                 }
                 root = vbox({ hbox({ side | yflex, text(" "),
                                   std::move(main_panel) | xflex | yflex })
@@ -240,8 +239,9 @@ namespace {
             Component popup_source = nullptr;
             if (state_->session->modal().index() != 0) {
                 popup_source = modal_;
-            } else if (sidechat_->has_modal()) {
-                popup_source = sidechat_->modal();
+            } else if (sidechat_status_.has_modal
+                && sidechat_status_.has_modal()) {
+                popup_source = sidechat_status_.modal;
             }
             if (popup_source) {
                 const int h   = terminal_size.dimy;
@@ -265,10 +265,10 @@ namespace {
             if (state_->session->modal().index() != 0) {
                 return modal_->OnEvent(event);
             }
-            if (sidechat_->has_modal()) {
-                return sidechat_component_->OnEvent(event);
+            if (sidechat_status_.has_modal && sidechat_status_.has_modal()) {
+                return sidechat_->OnEvent(event);
             }
-            if (sidechat_component_->OnEvent(event)) {
+            if (sidechat_->OnEvent(event)) {
                 return true;
             }
             if (event == Event::Tab) {
@@ -282,7 +282,7 @@ namespace {
             if (event.is_mouse()) {
                 const Mouse& m = event.mouse();
                 if (m.button == Mouse::Left && m.motion == Mouse::Pressed
-                    && state_->sidechat_open && sidechat_->focused()
+                    && state_->sidechat_open && sidechat_status_.focused
                     && main_pane_box_.Contain(m.x, m.y)) {
                     _focus_main();
                 }
@@ -303,8 +303,8 @@ namespace {
 
         Component ActiveChild() override
         {
-            if (state_->sidechat_open && sidechat_->focused()) {
-                return sidechat_component_;
+            if (state_->sidechat_open && sidechat_status_.focused) {
+                return sidechat_;
             }
             return ComponentBase::ActiveChild();
         }
@@ -342,7 +342,7 @@ namespace {
             if (const auto mode = workflow_mode(phase)) {
                 state_->session->set_mode(*mode);
             }
-            if (sidechat_->focused()) {
+            if (sidechat_status_.focused) {
                 return;
             }
             if (selected_pane_ == 0) {
@@ -363,8 +363,8 @@ namespace {
 
         ScreenInteractive& screen_;
         std::shared_ptr<ApplicationState> state_;
-        std::shared_ptr<SidechatHandle> sidechat_;
-        ftxui::Component sidechat_component_;
+        ftxui::Component sidechat_;
+        SidechatStatus sidechat_status_;
         Component side_;
         Component modal_;
         Component status_line_;

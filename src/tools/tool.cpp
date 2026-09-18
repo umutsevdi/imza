@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iomanip>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -329,7 +330,9 @@ namespace {
         if (v.isString()) {
             try {
                 return std::stol(v.asString());
-            } catch (...) {
+            } catch (const std::invalid_argument&) {
+                return def;
+            } catch (const std::out_of_range&) {
                 return def;
             }
         }

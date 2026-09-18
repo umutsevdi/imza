@@ -285,7 +285,7 @@ ftxui::Element wrapped_input_element(std::string_view content,
 
 LayoutCtx layout_context(int width, int height)
 {
-    return { width >= LayoutCtx::wide_threshold ? LayoutCtx::Kind::WIDE
+    return { width >= LayoutCtx::WIDE_THRESHOLD ? LayoutCtx::Kind::WIDE
                                                 : LayoutCtx::Kind::NARROW,
         width, height };
 }
@@ -641,7 +641,7 @@ int diff_content_width(int width) { return std::max(1, width - 14); }
 int review_content_width(const LayoutCtx& ctx)
 {
     return ctx.kind == LayoutCtx::Kind::WIDE
-        ? ctx.width - LayoutCtx::panel_width - 4
+        ? ctx.width - LayoutCtx::PANEL_WIDTH - 4
         : ctx.width;
 }
 

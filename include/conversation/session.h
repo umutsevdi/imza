@@ -116,7 +116,7 @@ public:
 
     Session() = default;
 
-    const std::vector<ConversationItem>& items() const { return items_; }
+    const std::vector<ConversationItem>& items() const { return _items; }
     ModalPayload modal() const;
     std::uint64_t modal_serial() const;
     std::uint64_t content_serial() const;
@@ -127,8 +127,8 @@ public:
     std::string connect_status() const;
     std::string title() const;
     std::vector<std::string> attachment_names() const;
-    const TodoList& todo() const { return todo_; }
-    const std::vector<QueuedMessage>& queued() const { return queued_; }
+    const TodoList& todo() const { return _todo; }
+    const std::vector<QueuedMessage>& queued() const { return _queued; }
     std::optional<Countdown> retry_countdown() const;
     Usage last() const;
     std::optional<std::chrono::milliseconds> turn_elapsed() const;
@@ -203,40 +203,40 @@ private:
         const StreamEvent& usage_event, const ModelPricing& pricing);
     void _notify_title_change();
 
-    mutable std::mutex mutex_;
+    mutable std::mutex _mutex;
 
-    std::vector<ConversationItem> items_;
-    ModalPayload modal_           = std::monostate { };
-    std::uint64_t modal_serial_   = 0;
-    std::uint64_t content_serial_ = 0;
-    Phase phase_                  = Phase::IDLE;
-    Mode mode_                    = Mode::PLAN;
-    std::string error_;
-    std::string connect_status_;
-    std::string title_;
-    bool title_generation_claimed_ = false;
+    std::vector<ConversationItem> _items;
+    ModalPayload _modal           = std::monostate { };
+    std::uint64_t _modal_serial   = 0;
+    std::uint64_t _content_serial = 0;
+    Phase _phase                  = Phase::IDLE;
+    Mode _mode                    = Mode::PLAN;
+    std::string _error;
+    std::string _connect_status;
+    std::string _title;
+    bool _title_generation_claimed = false;
 
-    TodoList todo_;
-    std::vector<QueuedMessage> queued_;
+    TodoList _todo;
+    std::vector<QueuedMessage> _queued;
 
-    std::optional<Countdown> retry_countdown_;
+    std::optional<Countdown> _retry_countdown;
 
-    Usage totals_;
-    Usage last_;
-    double total_cost_ = 0.0;
+    Usage _totals;
+    Usage _last;
+    double _total_cost = 0.0;
 
-    std::size_t next_tool_id_       = 1;
-    std::size_t next_compaction_id_ = 1;
-    std::size_t next_queued_id_     = 0;
-    std::optional<std::chrono::steady_clock::time_point> reasoning_start_;
-    std::optional<std::chrono::steady_clock::time_point> turn_started_;
-    std::atomic<bool> interrupt_requested_ { false };
+    std::size_t _next_tool_id       = 1;
+    std::size_t _next_compaction_id = 1;
+    std::size_t _next_queued_id     = 0;
+    std::optional<std::chrono::steady_clock::time_point> _reasoning_start;
+    std::optional<std::chrono::steady_clock::time_point> _turn_started;
+    std::atomic<bool> _interrupt_requested { false };
 
-    std::string compacted_summary_;
-    std::size_t compacted_item_count_ = 0;
-    SessionPersistence persistence_   = UnsavedSession { };
-    bool dirty_                       = false;
-    std::string session_id_           = unique_session_id();
+    std::string _compacted_summary;
+    std::size_t _compacted_item_count = 0;
+    SessionPersistence _persistence   = UnsavedSession { };
+    bool _dirty                       = false;
+    std::string _session_id           = unique_session_id();
 
     Signal<> title_changed_;
     Signal<> attachments_changed_;

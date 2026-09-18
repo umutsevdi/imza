@@ -115,9 +115,9 @@ namespace {
 
 Delegation::Delegation(ApplicationState& state, PostFn post,
     ModalRequestFn modal_request, TurnRunner& runner)
-    : state_(&state)
-    , post_(std::move(post))
-    , modal_request_(std::move(modal_request))
+    : _state(&state)
+    , _post(std::move(post))
+    , _modal_request(std::move(modal_request))
     , runner_(runner)
 {
 }
@@ -126,18 +126,18 @@ void Delegation::submit_delegated(
     std::string text, const ProviderSelection& selection, Session::Mode mode)
 {
     TurnSettings settings = make_turn_settings(selection, mode);
-    state_->session->set_mode(mode);
-    state_->session->clear_interrupt();
+    _state->session->set_mode(mode);
+    _state->session->clear_interrupt();
     const std::string task = text;
-    state_->session->begin_send(std::move(text));
-    const std::shared_ptr<Environment> env = state_->environment;
-    const Config config                    = state_->providers->config();
+    _state->session->begin_send(std::move(text));
+    const std::shared_ptr<Environment> env = _state->environment;
+    const Config config                    = _state->providers->config();
     const SubagentRole role                = mode == Session::Mode::PLAN
         ? SubagentRole::RESEARCH
         : SubagentRole::BUILDER;
     std::vector<Message> history {
         { Message::Type::SYSTEM,
-            build_subagent_system_prompt(*state_->prompts, env->system().get(),
+            build_subagent_system_prompt(*_state->prompts, env->system().get(),
                 env->workspace().get(), role, &config) },
         { Message::Type::USER, task },
     };
@@ -147,14 +147,14 @@ void Delegation::submit_delegated(
 void Delegation::run_subagents(
     const ToolCallRequest& req, std::vector<Message>& tool_msgs)
 {
-    state_->subagents->prune_completed();
+    _state->subagents->prune_completed();
     std::string validation_error;
     const auto parsed = parse_tasks(
-        parse_json(req.args), state_->session->mode(), validation_error);
+        parse_json(req.args), _state->session->mode(), validation_error);
     if (!parsed) {
         const ToolOutput out { ToolOutput::Kind::ERROR, validation_error };
-        post_([this, req, out] {
-            state_->session->fill_tool_result(req,
+        _post([this, req, out] {
+            _state->session->fill_tool_result(req,
                 ToolCall::Result { ToolCall::Result::Kind::ERROR, out.text });
         });
         tool_msgs.push_back(
@@ -169,7 +169,7 @@ void Delegation::run_subagents(
 
     for (std::size_t index = 0; index < parsed->size(); ++index) {
         const DelegatedTask& task = (*parsed)[index];
-        const auto selection = state_->providers->subagent_selection(task.role);
+        const auto selection = _state->providers->subagent_selection(task.role);
         if (!selection) {
             validation_error = "subagent: no model is available for agent "
                 + std::to_string(index + 1);
@@ -181,15 +181,15 @@ void Delegation::run_subagents(
         const std::string prompt          = task.prompt;
         const Session::Mode mode          = task.mode;
         auto child_state                  = make_child_application_state(
-            *state_, [](const std::function<void()>& action) { action(); },
+            *_state, [](const std::function<void()>& action) { action(); },
             runner_.has_stream_override() ? runner_.stream_fn() : StreamFn { },
-            [modal_request = modal_request_](ModalPayload payload) {
+            [modal_request = _modal_request](ModalPayload payload) {
                 return modal_request(std::move(payload));
             },
             label);
         std::shared_ptr<Session> child_session = child_state->session;
         sessions.push_back(child_session);
-        handles.push_back(state_->subagents->start(
+        handles.push_back(_state->subagents->start(
             prompt, selected.model, selected.reasoning_effort, true,
             [this, child_state, selected, prompt, mode](
                 const std::stop_token& stop) mutable {
@@ -198,7 +198,7 @@ void Delegation::run_subagents(
                 using namespace std::chrono_literals;
                 while (child_state->session->phase() != Session::Phase::IDLE) {
                     if (stop.stop_requested()
-                        || state_->session->interrupt_requested()) {
+                        || _state->session->interrupt_requested()) {
                         interrupt(*child_state);
                     }
                     std::this_thread::sleep_for(20ms);
@@ -221,7 +221,7 @@ void Delegation::run_subagents(
     for (const SubagentHandle& handle : handles) {
         ids.push_back(handle.id);
     }
-    post_([this, req, ids] { state_->session->set_tool_subagents(req, ids); });
+    _post([this, req, ids] { _state->session->set_tool_subagents(req, ids); });
 
     std::string output;
     std::vector<SubagentChat> chats;
@@ -244,11 +244,11 @@ void Delegation::run_subagents(
     const ToolCall::Result::Kind kind = validation_error.empty()
         ? ToolCall::Result::Kind::OUTPUT
         : ToolCall::Result::Kind::ERROR;
-    post_([this, req, kind, output, chats = std::move(chats)]() mutable {
-        state_->session->set_tool_subagent_chats(req, std::move(chats));
-        state_->session->fill_tool_result(
+    _post([this, req, kind, output, chats = std::move(chats)]() mutable {
+        _state->session->set_tool_subagent_chats(req, std::move(chats));
+        _state->session->fill_tool_result(
             req, ToolCall::Result { kind, output });
-        state_->subagents->prune_completed();
+        _state->subagents->prune_completed();
     });
     tool_msgs.push_back({ Message::Type::TOOL, output, { }, req.id });
 }
@@ -277,7 +277,7 @@ SubagentChat Delegation::subagent_chat(
 
 SubagentChat Delegation::subagent_chat(std::size_t id, std::string title) const
 {
-    const std::vector<SubagentTask> tasks = state_->subagents->tasks();
+    const std::vector<SubagentTask> tasks = _state->subagents->tasks();
     const auto found = std::find_if(tasks.begin(), tasks.end(),
         [id](const SubagentTask& task) { return task.id == id; });
     if (found == tasks.end()) {
@@ -298,8 +298,8 @@ SubagentChat Delegation::subagent_chat(std::size_t id, std::string title) const
 SubagentHandle Delegation::run_subagent(std::string prompt, std::string model,
     std::string variant, SubagentOptions options, SubagentCompleteFn complete)
 {
-    state_->subagents->prune_completed();
-    const auto selection = state_->providers->active_selection();
+    _state->subagents->prune_completed();
+    const auto selection = _state->providers->active_selection();
     Route route          = selection ? selection->route : Route { };
     const std::string connection_id
         = selection ? selection->connection_id : std::string { };
@@ -318,7 +318,7 @@ SubagentHandle Delegation::run_subagent(std::string prompt, std::string model,
         ? std::optional { std::chrono::steady_clock::now() + options.timeout }
         : std::nullopt;
     auto transcript     = options.transcript;
-    return state_->subagents->start(
+    return _state->subagents->start(
         std::move(prompt), model, variant, options.visible,
         [this, task_prompt, model, variant, route = std::move(route),
             connection_id, transcript, deadline,
@@ -326,8 +326,8 @@ SubagentHandle Delegation::run_subagent(std::string prompt, std::string model,
             const std::stop_token& stop) mutable {
             if (!connection_id.empty()) {
                 route
-                    = state_->providers->authenticated_route_for(connection_id,
-                        route.dialect, state_->session->session_id());
+                    = _state->providers->authenticated_route_for(connection_id,
+                        route.dialect, _state->session->session_id());
             }
             if (model.empty() || route.api.empty()) {
                 if (transcript) {
@@ -345,9 +345,9 @@ SubagentHandle Delegation::run_subagent(std::string prompt, std::string model,
                         && std::chrono::steady_clock::now() >= *deadline);
             };
             req.messages
-                = { { Message::Type::SYSTEM, full_system_prompt(*state_) },
+                = { { Message::Type::SYSTEM, full_system_prompt(*_state) },
                       { Message::Type::USER, task_prompt } };
-            apply_reasoning(req, route.dialect, variant, *state_->providers);
+            apply_reasoning(req, route.dialect, variant, *_state->providers);
             std::string output;
             const StreamCallback callback = [&](const StreamEvent& event) {
                 if (transcript) {
@@ -375,9 +375,9 @@ SubagentHandle Delegation::run_subagent(std::string prompt, std::string model,
 
 void Delegation::spawn_title(std::string input, TurnSettings settings)
 {
-    state_->subagents->prune_completed();
-    const std::string prompt = title_prompt(*state_->prompts, input);
-    state_->subagents->start(
+    _state->subagents->prune_completed();
+    const std::string prompt = title_prompt(*_state->prompts, input);
+    _state->subagents->start(
         prompt, settings.model, settings.reasoning_effort, false,
         [this, prompt, settings = std::move(settings)](
             const std::stop_token& stop) {
@@ -387,7 +387,7 @@ void Delegation::spawn_title(std::string input, TurnSettings settings)
             req.interrupted = [stop] { return stop.stop_requested(); };
             req.messages    = { { Message::Type::USER, prompt } };
             apply_reasoning(req, settings.dialect, settings.reasoning_effort,
-                *state_->providers);
+                *_state->providers);
             std::string title;
             const StreamCallback cb = [&](const StreamEvent& event) {
                 if (event.kind == StreamEvent::Kind::CONTENT_DELTA
@@ -396,9 +396,9 @@ void Delegation::spawn_title(std::string input, TurnSettings settings)
                 }
             };
             Route route = settings.route;
-            route       = state_->providers->authenticated_route_for(
+            route       = _state->providers->authenticated_route_for(
                 settings.connection_id, settings.dialect,
-                state_->session->session_id());
+                _state->session->session_id());
             const Status status = stream(route, req, cb, nullptr);
             if (status != Status::OK) {
                 return SubagentResult { status, { } };
@@ -422,8 +422,8 @@ void Delegation::spawn_title(std::string input, TurnSettings settings)
             if (title.empty()) {
                 return;
             }
-            post_([this, title = std::move(title)]() mutable {
-                state_->session->set_title(std::move(title));
+            _post([this, title = std::move(title)]() mutable {
+                _state->session->set_title(std::move(title));
             });
         });
 }

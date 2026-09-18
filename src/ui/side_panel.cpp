@@ -130,7 +130,7 @@ public:
         if (narrow) {
             return panel(body) | xflex;
         }
-        return panel(body) | size(WIDTH, EQUAL, LayoutCtx::panel_width);
+        return panel(body) | size(WIDTH, EQUAL, LayoutCtx::PANEL_WIDTH);
     }
 
     bool OnEvent(Event event) override
@@ -202,7 +202,7 @@ private:
                 + (comment.stale ? "  stale" : "");
             rows.push_back(
                 hbox({ _comment_link(comment.id, label)->Render(), filler(),
-                    text(fit(comment.body, LayoutCtx::panel_width / 2 - 6))
+                    text(fit(comment.body, LayoutCtx::PANEL_WIDTH / 2 - 6))
                         | color(PANEL_FG_DIM) })
                 | xflex);
         }
@@ -473,4 +473,3 @@ Element render_update_available(std::string version)
 }
 
 } // namespace imza
-//

@@ -14,13 +14,13 @@ namespace imza {
 
 int Autocomplete::count() const
 {
-    if (!files_.empty()) {
-        return static_cast<int>(files_.size());
+    if (!_files.empty()) {
+        return static_cast<int>(_files.size());
     }
-    if (!skills_.empty()) {
-        return static_cast<int>(skills_.size());
+    if (!_skills.empty()) {
+        return static_cast<int>(_skills.size());
     }
-    return static_cast<int>(commands_.size());
+    return static_cast<int>(_commands.size());
 }
 
 bool Autocomplete::active() const { return count() > 0; }
@@ -47,15 +47,15 @@ void Autocomplete::refresh(
 {
     clear();
     const std::size_t at = static_cast<std::size_t>(cursor);
-    token_               = attachment_token_at(text, at);
-    if (token_) {
-        files_ = attachment_candidates(
-            std::filesystem::current_path(), token_->query);
+    _token               = attachment_token_at(text, at);
+    if (_token) {
+        _files = attachment_candidates(
+            std::filesystem::current_path(), _token->query);
         return;
     }
     const std::size_t begin = word_begin(text, at);
     if (begin < at && text[begin] == '$' && mention_end(text, begin) >= at) {
-        skill_begin_ = begin;
+        _skill_begin = begin;
         const std::string key
             = to_lower(text.substr(begin + 1, at - begin - 1));
         const std::vector<Skill> allowed = allowed_skills(
@@ -63,12 +63,12 @@ void Autocomplete::refresh(
         for (const Skill& skill : allowed) {
             const std::string name = to_lower(skill.name);
             if (name.starts_with(key)) {
-                skills_.push_back(skill);
+                _skills.push_back(skill);
             }
         }
         return;
     }
-    skill_begin_.reset();
+    _skill_begin.reset();
     if (text.empty() || text[0] != '/' || text.find(' ') != std::string::npos) {
         return;
     }
@@ -77,23 +77,23 @@ void Autocomplete::refresh(
         const std::string name = to_lower(c.name);
         if (name.size() >= key.size()
             && name.compare(0, key.size(), key) == 0) {
-            commands_.push_back(&c);
+            _commands.push_back(&c);
         }
     }
-    if (commands_.size() == 1 && commands_[0]->name == text) {
-        commands_.clear();
+    if (_commands.size() == 1 && _commands[0]->name == text) {
+        _commands.clear();
     }
 }
 
 bool Autocomplete::accept(const ApplicationState& state, std::string& text,
     int& cursor, std::vector<FileAttachment>& attachments)
 {
-    if (!files_.empty() && token_) {
+    if (!_files.empty() && _token) {
         const AttachmentCandidate& candidate
-            = files_[static_cast<std::size_t>(selected_)];
+            = _files[static_cast<std::size_t>(selected_)];
         const std::string replacement = "@" + candidate.path;
-        text.replace(token_->begin, token_->end - token_->begin, replacement);
-        cursor = static_cast<int>(token_->begin + replacement.size());
+        text.replace(_token->begin, _token->end - _token->begin, replacement);
+        cursor = static_cast<int>(_token->begin + replacement.size());
         if (candidate.directory) {
             refresh(state, text, cursor);
             return false;
@@ -123,18 +123,18 @@ bool Autocomplete::accept(const ApplicationState& state, std::string& text,
         clear();
         return false;
     }
-    if (!skills_.empty() && skill_begin_) {
+    if (!_skills.empty() && _skill_begin) {
         const std::string replacement
-            = "$" + skills_[static_cast<std::size_t>(selected_)].name;
-        text.replace(*skill_begin_,
-            static_cast<std::size_t>(cursor) - *skill_begin_, replacement);
-        cursor = static_cast<int>(*skill_begin_ + replacement.size());
+            = "$" + _skills[static_cast<std::size_t>(selected_)].name;
+        text.replace(*_skill_begin,
+            static_cast<std::size_t>(cursor) - *_skill_begin, replacement);
+        cursor = static_cast<int>(*_skill_begin + replacement.size());
         text.insert(static_cast<std::size_t>(cursor), " ");
         ++cursor;
         refresh(state, text, cursor);
         return false;
     }
-    const SlashCommand* cmd = commands_[static_cast<std::size_t>(selected_)];
+    const SlashCommand* cmd = _commands[static_cast<std::size_t>(selected_)];
     text                    = cmd->name;
     cursor                  = static_cast<int>(text.size());
     refresh(state, text, cursor);
@@ -143,11 +143,11 @@ bool Autocomplete::accept(const ApplicationState& state, std::string& text,
 
 void Autocomplete::clear()
 {
-    commands_.clear();
-    skills_.clear();
-    files_.clear();
-    token_.reset();
-    skill_begin_.reset();
+    _commands.clear();
+    _skills.clear();
+    _files.clear();
+    _token.reset();
+    _skill_begin.reset();
     selected_ = 0;
 }
 
@@ -156,12 +156,12 @@ ftxui::Element Autocomplete::render(const LayoutCtx& ctx) const
     using namespace ftxui;
     const size_t max_rows       = 8;
     const int available_width   = ctx.kind == LayoutCtx::Kind::WIDE
-        ? ctx.width - LayoutCtx::panel_width
+        ? ctx.width - LayoutCtx::PANEL_WIDTH
         : ctx.width;
     const int description_width = std::clamp(available_width - 28, 8, 56);
-    const size_t total          = !files_.empty() ? files_.size()
-        : !skills_.empty()                        ? skills_.size()
-                                                  : commands_.size();
+    const size_t total          = !_files.empty() ? _files.size()
+        : !_skills.empty()                        ? _skills.size()
+                                                  : _commands.size();
     const size_t shown          = std::min(total, max_rows);
     const size_t selected       = static_cast<size_t>(std::max(0, selected_));
     const size_t first
@@ -174,17 +174,17 @@ ftxui::Element Autocomplete::render(const LayoutCtx& ctx) const
     for (size_t row_index = 0; row_index < shown; ++row_index) {
         const size_t i              = first + row_index;
         const bool sel              = static_cast<int>(i) == selected_;
-        const std::string name_text = !files_.empty() ? "@" + files_[i].path
-            : !skills_.empty() ? "$" + skills_[i].name
-                               : std::string(commands_[i]->name);
+        const std::string name_text = !_files.empty() ? "@" + _files[i].path
+            : !_skills.empty() ? "$" + _skills[i].name
+                               : std::string(_commands[i]->name);
         Element name                = text(name_text);
         if (sel) {
             name = name | bold;
         }
-        const std::string description = !files_.empty()
-            ? (files_[i].directory ? "directory" : "file")
-            : !skills_.empty() ? skills_[i].description
-                               : std::string(commands_[i]->desc);
+        const std::string description = !_files.empty()
+            ? (_files[i].directory ? "directory" : "file")
+            : !_skills.empty() ? _skills[i].description
+                               : std::string(_commands[i]->desc);
         Element row                   = hbox({
             std::move(name) | xflex,
             text("  "),

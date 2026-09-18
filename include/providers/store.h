@@ -127,19 +127,19 @@ private:
         std::function<void()> on_commit = { });
     void _notify_changed();
 
-    Config config_;
-    Catalog catalog_;
-    std::map<std::string, ModelPricing> pricing_;
-    ModelsFn models_fn_;
+    Config _config;
+    Catalog _catalog;
+    std::map<std::string, ModelPricing> _pricing;
+    ModelsFn _models_fn;
 
-    std::map<std::string, CatalogEntry> model_catalog_;
-    std::map<std::string, int> generations_;
-    bool catalog_syncing_ = false;
-    mutable std::mutex mutex_;
-    std::condition_variable refresh_changed_;
-    std::set<std::string> refreshing_;
-    std::vector<std::jthread> workers_;
-    std::optional<std::jthread> catalog_worker_;
+    std::map<std::string, CatalogEntry> _model_catalog;
+    std::map<std::string, int> _generations;
+    bool _catalog_syncing = false;
+    mutable std::mutex _mutex;
+    std::condition_variable _refresh_changed;
+    std::set<std::string> _refreshing;
+    std::vector<std::jthread> _workers;
+    std::optional<std::jthread> _catalog_worker;
     Signal<> changed_;
     std::atomic<bool> alive_ { true };
 };

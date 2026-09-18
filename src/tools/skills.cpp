@@ -147,8 +147,8 @@ std::vector<Skill> allowed_skills(
 
 bool SkillStore::is_loaded(const std::filesystem::path& path) const
 {
-    std::lock_guard lock(mutex_);
-    return loaded_.contains(path.string());
+    std::lock_guard lock(_mutex);
+    return _loaded.contains(path.string());
 }
 
 bool SkillStore::load(const Skill& skill, std::string& error)
@@ -165,25 +165,25 @@ bool SkillStore::load(const Skill& skill, std::string& error)
         error = "Skill instructions exceed 128 KiB: " + skill.name + ".";
         return false;
     }
-    std::lock_guard lock(mutex_);
-    loaded_.insert(skill.path.string());
-    contents_[skill.path.string()] = read.body;
+    std::lock_guard lock(_mutex);
+    _loaded.insert(skill.path.string());
+    _contents[skill.path.string()] = read.body;
     return true;
 }
 
 void SkillStore::record_tool_load(
     const std::filesystem::path& path, std::string body)
 {
-    std::lock_guard lock(mutex_);
-    loaded_.insert(path.string());
-    contents_[path.string()] = std::move(body);
+    std::lock_guard lock(_mutex);
+    _loaded.insert(path.string());
+    _contents[path.string()] = std::move(body);
 }
 
 std::string SkillStore::prompt_suffix() const
 {
-    std::lock_guard lock(mutex_);
+    std::lock_guard lock(_mutex);
     std::string out;
-    for (const auto& [path, content] : contents_) {
+    for (const auto& [path, content] : _contents) {
         out += "\n\n" + content;
     }
     return out;
@@ -194,12 +194,12 @@ std::pair<SkillCounts, SkillCounts> SkillStore::counts(
 {
     SkillCounts project;
     SkillCounts global;
-    std::lock_guard lock(mutex_);
+    std::lock_guard lock(_mutex);
     for (const Skill& skill : catalog) {
         SkillCounts& scope
             = skill.scope == Skill::Scope::PROJECT ? project : global;
         ++scope.total;
-        if (loaded_.contains(skill.path.string())) {
+        if (_loaded.contains(skill.path.string())) {
             ++scope.active;
         }
     }
@@ -208,39 +208,39 @@ std::pair<SkillCounts, SkillCounts> SkillStore::counts(
 
 void SkillStore::clear()
 {
-    std::lock_guard lock(mutex_);
-    loaded_.clear();
-    contents_.clear();
-    pending_turn_.reset();
+    std::lock_guard lock(_mutex);
+    _loaded.clear();
+    _contents.clear();
+    _pending_turn.reset();
 }
 
 std::optional<PendingSkillTurn> SkillStore::pending_turn() const
 {
-    std::lock_guard lock(mutex_);
-    return pending_turn_;
+    std::lock_guard lock(_mutex);
+    return _pending_turn;
 }
 
 void SkillStore::set_pending_turn(PendingSkillTurn turn)
 {
-    std::lock_guard lock(mutex_);
-    pending_turn_ = std::move(turn);
+    std::lock_guard lock(_mutex);
+    _pending_turn = std::move(turn);
 }
 
 std::optional<PendingSkillTurn> SkillStore::advance_pending_turn()
 {
-    std::lock_guard lock(mutex_);
-    if (!pending_turn_) {
+    std::lock_guard lock(_mutex);
+    if (!_pending_turn) {
         return std::nullopt;
     }
-    ++pending_turn_->next;
-    return pending_turn_;
+    ++_pending_turn->next;
+    return _pending_turn;
 }
 
 std::optional<PendingSkillTurn> SkillStore::take_pending_turn()
 {
-    std::lock_guard lock(mutex_);
-    std::optional<PendingSkillTurn> turn = std::move(pending_turn_);
-    pending_turn_.reset();
+    std::lock_guard lock(_mutex);
+    std::optional<PendingSkillTurn> turn = std::move(_pending_turn);
+    _pending_turn.reset();
     return turn;
 }
 

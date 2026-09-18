@@ -82,10 +82,10 @@ public:
     std::optional<PendingSkillTurn> take_pending_turn();
 
 private:
-    mutable std::mutex mutex_;
-    std::set<std::string> loaded_;
-    std::map<std::string, std::string> contents_;
-    std::optional<PendingSkillTurn> pending_turn_;
+    mutable std::mutex _mutex;
+    std::set<std::string> _loaded;
+    std::map<std::string, std::string> _contents;
+    std::optional<PendingSkillTurn> _pending_turn;
 };
 
 } // namespace imza

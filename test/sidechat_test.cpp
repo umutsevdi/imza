@@ -2,6 +2,7 @@
 #include "app/flows.h"
 #include "common/modal.h"
 #include "platform/config.h"
+#include "ui/ui.h"
 
 #include <doctest/doctest.h>
 
@@ -16,6 +17,29 @@ namespace {
     }
 
 } // namespace
+
+TEST_CASE("sidechat status reports no modal when the pane is open without one")
+{
+    auto state = make_root();
+    SidechatStatus status;
+    auto component = make_sidechat_component(state, [] { }, status);
+
+    REQUIRE_FALSE(state->sidechat_open);
+    CHECK_FALSE(status.has_modal());
+
+    open_sidechat(*state);
+    component->Render();
+    REQUIRE(state->sidechat_open);
+    CHECK_FALSE(status.has_modal());
+
+    enqueue_user_modal(
+        *state->sidechat, ConnectModal { ConnectModal::Entry::MANAGE });
+    CHECK(status.has_modal());
+
+    close_sidechat(*state);
+    component->Render();
+    CHECK_FALSE(status.has_modal());
+}
 
 TEST_CASE("sidechat toggle hides and reopens without discarding the session")
 {

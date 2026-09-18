@@ -1,147 +1,120 @@
 #include <doctest/doctest.h>
 
 #include <filesystem>
+#include <fstream>
 #include <string>
-#include <string_view>
+#include <type_traits>
 
 #include "conversation/session.h"
 #include "turn/prompt.h"
 
 namespace imza {
 
-TEST_CASE("base system prompt without environment")
+namespace {
+
+    void write_prompt(const std::filesystem::path& directory,
+        const std::string& name, const std::string& content)
+    {
+        std::filesystem::create_directories(directory);
+        std::ofstream file(
+            directory / name, std::ios::binary | std::ios::trunc);
+        file << content;
+    }
+
+    std::string read_prompt(std::string_view name)
+    {
+        std::ifstream file(
+            std::filesystem::path(IMZA_PROMPT_SOURCE_DIR) / std::string(name),
+            std::ios::binary);
+        std::string text { std::istreambuf_iterator<char>(file),
+            std::istreambuf_iterator<char>() };
+        while (!text.empty()
+            && (text.back() == '\n' || text.back() == '\r' || text.back() == ' '
+                || text.back() == '\t')) {
+            text.pop_back();
+        }
+        return text;
+    }
+
+    std::filesystem::path temporary_prompt_directory(std::string_view name)
+    {
+        static std::size_t sequence = 0;
+        const std::filesystem::path directory
+            = std::filesystem::temp_directory_path()
+            / ("imza-prompts-" + std::string(name) + "-"
+                + std::to_string(sequence++));
+        std::filesystem::remove_all(directory);
+        return directory;
+    }
+
+} // namespace
+
+static_assert(std::is_base_of_v<ApplicationComponent, PromptStore>);
+
+TEST_CASE("embedded prompts match the repository sources")
 {
     const PromptStore prompts;
-    const std::string prompt = build_system_prompt(prompts, nullptr, nullptr);
-    CHECK(prompt.find("imza") != std::string::npos);
-    CHECK(prompt.find("PLAN") != std::string::npos);
-    CHECK(prompt.find("BUILD") != std::string::npos);
-    CHECK(prompt.find("<runtime-mode name=") == std::string::npos);
-    CHECK(prompt.find("<env>") == std::string::npos);
-    CHECK(prompt.find("Available tools") == std::string::npos);
+    CHECK(prompts.system() == read_prompt("system.md"));
+    CHECK(prompts.subagent() == read_prompt("subagent.md"));
+    CHECK(prompts.subagent_research() == read_prompt("subagent_research.md"));
+    CHECK(prompts.subagent_build() == read_prompt("subagent_build.md"));
+    CHECK(prompts.title() == read_prompt("title.md"));
+    CHECK(prompts.compaction() == read_prompt("compaction.md"));
+    CHECK(prompts.review() == read_prompt("review.md"));
+    CHECK(prompts.review_plan() == read_prompt("review_plan.md"));
 }
 
-TEST_CASE("system prompt embeds the environment block")
+TEST_CASE("user directory overrides prompts independently")
 {
-    SystemEnvironment sys;
-    sys.os_name          = "Linux";
-    sys.os_version       = "6.8";
-    sys.default_shell    = "/bin/bash";
-    sys.package_managers = { "apt", "snap" };
-    sys.today            = "Fri Aug 28 2026";
+    const std::filesystem::path directory
+        = temporary_prompt_directory("overrides");
+    write_prompt(directory, "system.md", "Custom system prompt.\n");
+    write_prompt(directory, "title.md", "Custom title prompt.");
 
-    const PromptStore prompts;
-    const std::string prompt = build_system_prompt(prompts, &sys, nullptr);
-    CHECK(prompt.find("<env>") != std::string::npos);
-    CHECK(prompt.find("Current Directory") != std::string::npos);
-    CHECK(prompt.find("Operating System: Linux 6.8") != std::string::npos);
-    CHECK(prompt.find("/bin/bash") != std::string::npos);
-    CHECK(prompt.find("apt, snap") != std::string::npos);
-    CHECK(prompt.find("Fri Aug 28 2026") != std::string::npos);
-    CHECK(prompt.find("</env>") != std::string::npos);
+    const PromptStore prompts(directory);
+    CHECK(prompts.system() == "Custom system prompt.");
+    CHECK(prompts.title() == "Custom title prompt.");
+    CHECK(prompts.compaction() == PromptStore().compaction());
+
+    std::filesystem::remove_all(directory);
 }
 
-TEST_CASE("system prompt embeds workspace instructions when present")
+TEST_CASE("blank user files use embedded prompts")
 {
-    SystemEnvironment sys;
-    sys.os_name       = "Linux";
-    sys.default_shell = "/bin/bash";
-    sys.today         = "Fri Aug 28 2026";
-    WorkspaceEnvironment ws;
-    ws.working_directory = std::filesystem::temp_directory_path();
-    ws.instruction = InstructionFile { "AGENTS.md", "# Rules\nBe terse." };
+    const std::filesystem::path directory = temporary_prompt_directory("blank");
+    write_prompt(directory, "system.md", "   \n\t\n");
 
-    const PromptStore prompts;
-    const std::string prompt = build_system_prompt(prompts, &sys, &ws);
-    CHECK(prompt.find("<instructions source=\"AGENTS.md\">")
-        != std::string::npos);
-    CHECK(prompt.find("Be terse.") != std::string::npos);
-    CHECK(prompt.find("</instructions>") != std::string::npos);
+    const PromptStore prompts(directory);
+    CHECK(prompts.system() == PromptStore().system());
+
+    std::filesystem::remove_all(directory);
 }
 
-TEST_CASE("system prompt omits the instructions block when absent")
+TEST_CASE("prompt sources contain prose instead of runtime markup")
 {
-    SystemEnvironment sys;
-    sys.os_name       = "Linux";
-    sys.default_shell = "/bin/bash";
-    sys.today         = "Fri Aug 28 2026";
-    WorkspaceEnvironment ws;
-    ws.working_directory = std::filesystem::temp_directory_path();
-
-    const PromptStore prompts;
-    const std::string prompt = build_system_prompt(prompts, &sys, &ws);
-    CHECK(prompt.find("<instructions") == std::string::npos);
+    for (const std::string_view name : { "system.md", "subagent.md",
+             "subagent_research.md", "subagent_build.md", "title.md",
+             "compaction.md", "review.md", "review_plan.md" }) {
+        const std::string prompt = read_prompt(name);
+        CHECK(prompt.find("<system-reminder") == std::string::npos);
+        CHECK(prompt.find("{{") == std::string::npos);
+    }
 }
 
-TEST_CASE("system prompt advertises active skills and hides denied skills")
+TEST_CASE("current mode prompts declare one authoritative state")
 {
-    SystemEnvironment sys;
-    sys.global_skills.clear();
-    sys.global_skills.emplace("docs",
-        Skill { "docs", "Write documentation", "/tmp/docs/SKILL.md",
-            Skill::Scope::GLOBAL, std::nullopt });
-    sys.global_skills.emplace("secret",
-        Skill { "secret", "Hidden", "/tmp/secret/SKILL.md",
-            Skill::Scope::GLOBAL, std::nullopt });
-    Config config;
-    config.global_skills["docs"]   = SkillPolicy::ALLOW;
-    config.global_skills["secret"] = SkillPolicy::DENY;
-    const PromptStore prompts;
-    const std::string prompt
-        = build_system_prompt(prompts, &sys, nullptr, &config);
-    CHECK(
-        prompt.find("docs [global]: Write documentation") != std::string::npos);
-    CHECK(prompt.find("secret [global]") == std::string::npos);
-    CHECK(prompt.find("`skill` tool") != std::string::npos);
+    const std::string plan = current_mode_prompt(Session::Mode::PLAN);
+    CHECK(plan == "<runtime-mode name=\"plan\"/>");
+
+    const std::string build = current_mode_prompt(Session::Mode::BUILD);
+    CHECK(build == "<runtime-mode name=\"build\"/>");
 }
 
-TEST_CASE("subagent prompts enforce role policies")
+TEST_CASE("title prompt appends the user request")
 {
     const PromptStore prompts;
-
-    const std::string research = build_subagent_system_prompt(
-        prompts, nullptr, nullptr, SubagentRole::RESEARCH);
-    CHECK(research.find("Imza subagent") != std::string::npos);
-    CHECK(research.find("fresh context") != std::string::npos);
-    CHECK(research.find("Work read-only") != std::string::npos);
-    CHECK(research.find("implementation plan") != std::string::npos);
-    CHECK(research.find("# Todo list") == std::string::npos);
-    CHECK(research.find("interactive CLI coding agent") == std::string::npos);
-
-    const std::string builder = build_subagent_system_prompt(
-        prompts, nullptr, nullptr, SubagentRole::BUILDER);
-    CHECK(builder.find("may modify files") != std::string::npos);
-    CHECK(builder.find("keep changes focused") != std::string::npos);
-    CHECK(builder.find("Work read-only") == std::string::npos);
-
-    CHECK(build_subagent_system_prompt(
-        prompts, nullptr, nullptr, SubagentRole::BASIC)
-            .empty());
-}
-
-TEST_CASE("subagent prompt retains workspace context")
-{
-    SystemEnvironment sys;
-    sys.os_name       = "Linux";
-    sys.default_shell = "/bin/bash";
-    sys.today         = "Tue Sep 1 2026";
-    sys.global_skills.emplace("docs",
-        Skill { "docs", "Write documentation", "/tmp/docs/SKILL.md",
-            Skill::Scope::GLOBAL, std::nullopt });
-    WorkspaceEnvironment ws;
-    ws.working_directory = std::filesystem::temp_directory_path();
-    ws.instruction = InstructionFile { "AGENTS.md", "Use project rules." };
-
-    const PromptStore prompts;
-    const std::string prompt = build_subagent_system_prompt(
-        prompts, &sys, &ws, SubagentRole::BUILDER);
-    CHECK(prompt.find("Operating System: Linux") != std::string::npos);
-    CHECK(prompt.find("<instructions source=\"AGENTS.md\">")
-        != std::string::npos);
-    CHECK(prompt.find("Use project rules.") != std::string::npos);
-    CHECK(
-        prompt.find("docs [global]: Write documentation") != std::string::npos);
-    CHECK(prompt.find("$skill-name") == std::string::npos);
+    CHECK(title_prompt(prompts, "fix the bug")
+        == prompts.title() + "\n\nUser request:\nfix the bug");
 }
 
 } // namespace imza

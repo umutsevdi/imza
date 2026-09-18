@@ -48,21 +48,21 @@ public:
     enum class ChdirResult { CHANGED, UNCHANGED, FAILED };
 
     explicit Environment();
-    std::shared_ptr<const SystemEnvironment> system() const { return system_; }
+    std::shared_ptr<const SystemEnvironment> system() const { return _system; }
     std::shared_ptr<const WorkspaceEnvironment> workspace() const
     {
-        std::shared_lock lock(workspace_mutex_);
-        return workspace_;
+        std::shared_lock lock(_workspace_mutex);
+        return _workspace;
     }
     std::shared_ptr<const RepositoryState> repository() const
     {
-        std::shared_lock lock(workspace_mutex_);
-        return repository_;
+        std::shared_lock lock(_workspace_mutex);
+        return _repository;
     }
 
     // True once the workspace scan has finished, whether or not a project
     // root was found.
-    bool ready() const { return ready_.load(); }
+    bool ready() const { return _ready.load(); }
 
     std::optional<std::string> agent_rules_path() const;
     std::vector<Skill> skills() const;
@@ -86,23 +86,23 @@ private:
         std::uint64_t generation);
     void _publish_repository(std::shared_ptr<const RepositoryState> repository,
         const std::shared_ptr<const WorkspaceEnvironment>& workspace);
-    std::shared_ptr<const SystemEnvironment> system_;
-    mutable std::shared_mutex workspace_mutex_;
-    std::shared_ptr<const WorkspaceEnvironment> workspace_;
-    std::shared_ptr<const RepositoryState> repository_;
-    Signal<> workspace_changed_;
-    Signal<> repository_changed_;
-    Signal<> update_changed_;
-    mutable std::mutex update_mutex_;
-    std::optional<std::string> update_version_;
-    std::atomic<bool> update_checked_ { false };
-    std::uint64_t workspace_generation_ { 0 };
-    std::atomic<bool> ready_ { false };
-    std::condition_variable_any workspace_ready_cv_;
+    std::shared_ptr<const SystemEnvironment> _system;
+    mutable std::shared_mutex _workspace_mutex;
+    std::shared_ptr<const WorkspaceEnvironment> _workspace;
+    std::shared_ptr<const RepositoryState> _repository;
+    Signal<> _workspace_changed;
+    Signal<> _repository_changed;
+    Signal<> _update_changed;
+    mutable std::mutex _update_mutex;
+    std::optional<std::string> _update_version;
+    std::atomic<bool> _update_checked { false };
+    std::uint64_t _workspace_generation { 0 };
+    std::atomic<bool> _ready { false };
+    std::condition_variable_any _workspace_ready_cv;
     std::jthread worker_;
-    std::jthread update_worker_;
+    std::jthread _update_worker;
 
-    std::jthread git_worker_;
+    std::jthread _git_worker;
 };
 
 } // namespace imza

@@ -310,23 +310,23 @@ ReviewState::Snapshot::Snapshot()
 
 ReviewState::Snapshot ReviewState::snapshot() const
 {
-    std::lock_guard lock(mutex_);
-    return state_;
+    std::lock_guard lock(_mutex);
+    return _state;
 }
 
 std::vector<ReviewComment> ReviewState::comments() const
 {
-    std::lock_guard lock(mutex_);
-    return state_.comments;
+    std::lock_guard lock(_mutex);
+    return _state.comments;
 }
 
 void ReviewState::set_loading()
 {
     {
-        std::lock_guard lock(mutex_);
-        state_.status = LoadStatus::LOADING;
-        state_.error.clear();
-        ++state_.generation;
+        std::lock_guard lock(_mutex);
+        _state.status = LoadStatus::LOADING;
+        _state.error.clear();
+        ++_state.generation;
     }
     _publish();
 }
@@ -334,11 +334,11 @@ void ReviewState::set_loading()
 void ReviewState::set_result(ReviewLoadResult result)
 {
     {
-        std::lock_guard lock(mutex_);
+        std::lock_guard lock(_mutex);
         if (auto* review = std::get_if<RepositoryReview>(&result)) {
             auto next
                 = std::make_shared<const RepositoryReview>(std::move(*review));
-            for (ReviewComment& comment : state_.comments) {
+            for (ReviewComment& comment : _state.comments) {
                 comment.stale = true;
                 for (const ReviewFile& file : next->files) {
                     const std::string& path
@@ -365,14 +365,14 @@ void ReviewState::set_result(ReviewLoadResult result)
                     }
                 }
             }
-            state_.review = std::move(next);
-            state_.status = LoadStatus::LOADED;
-            state_.error.clear();
+            _state.review = std::move(next);
+            _state.status = LoadStatus::LOADED;
+            _state.error.clear();
         } else {
-            state_.status = LoadStatus::ERROR;
-            state_.error  = std::move(std::get<std::string>(result));
+            _state.status = LoadStatus::ERROR;
+            _state.error  = std::move(std::get<std::string>(result));
         }
-        ++state_.generation;
+        ++_state.generation;
     }
     _publish();
 }
@@ -381,11 +381,11 @@ std::size_t ReviewState::add_comment(ReviewLineAnchor anchor, std::string body)
 {
     std::size_t id;
     {
-        std::lock_guard lock(mutex_);
+        std::lock_guard lock(_mutex);
         id = next_comment_id_++;
-        state_.comments.push_back(
+        _state.comments.push_back(
             ReviewComment { id, std::move(anchor), std::move(body), false });
-        ++state_.generation;
+        ++_state.generation;
     }
     _publish();
     return id;
@@ -395,10 +395,10 @@ std::size_t ReviewState::add_comments(std::vector<ReviewCommentDraft> comments)
 {
     std::size_t added = 0;
     {
-        std::lock_guard lock(mutex_);
+        std::lock_guard lock(_mutex);
         for (ReviewCommentDraft& comment : comments) {
             const bool duplicate = std::ranges::any_of(
-                state_.comments, [&comment](const ReviewComment& candidate) {
+                _state.comments, [&comment](const ReviewComment& candidate) {
                     return candidate.anchor == comment.anchor
                         && normalized_comment_body(candidate.body)
                         == normalized_comment_body(comment.body);
@@ -406,12 +406,12 @@ std::size_t ReviewState::add_comments(std::vector<ReviewCommentDraft> comments)
             if (duplicate) {
                 continue;
             }
-            state_.comments.push_back(ReviewComment { next_comment_id_++,
+            _state.comments.push_back(ReviewComment { next_comment_id_++,
                 std::move(comment.anchor), std::move(comment.body), false });
             ++added;
         }
         if (added > 0) {
-            ++state_.generation;
+            ++_state.generation;
         }
     }
     if (added > 0) {
@@ -423,14 +423,14 @@ std::size_t ReviewState::add_comments(std::vector<ReviewCommentDraft> comments)
 void ReviewState::update_comment(std::size_t id, std::string body)
 {
     {
-        std::lock_guard lock(mutex_);
+        std::lock_guard lock(_mutex);
         const auto it
-            = std::ranges::find(state_.comments, id, &ReviewComment::id);
-        if (it == state_.comments.end()) {
+            = std::ranges::find(_state.comments, id, &ReviewComment::id);
+        if (it == _state.comments.end()) {
             return;
         }
         it->body = std::move(body);
-        ++state_.generation;
+        ++_state.generation;
     }
     _publish();
 }
@@ -438,10 +438,10 @@ void ReviewState::update_comment(std::size_t id, std::string body)
 void ReviewState::delete_comment(std::size_t id)
 {
     {
-        std::lock_guard lock(mutex_);
-        std::erase_if(state_.comments,
+        std::lock_guard lock(_mutex);
+        std::erase_if(_state.comments,
             [id](const ReviewComment& comment) { return comment.id == id; });
-        ++state_.generation;
+        ++_state.generation;
     }
     _publish();
 }
@@ -449,45 +449,45 @@ void ReviewState::delete_comment(std::size_t id)
 void ReviewState::request_jump(std::size_t id)
 {
     {
-        std::lock_guard lock(mutex_);
-        state_.jump_comment = id;
-        ++state_.generation;
+        std::lock_guard lock(_mutex);
+        _state.jump_comment = id;
+        ++_state.generation;
     }
     _publish();
 }
 
 void ReviewState::clear_jump()
 {
-    std::lock_guard lock(mutex_);
-    state_.jump_comment.reset();
+    std::lock_guard lock(_mutex);
+    _state.jump_comment.reset();
 }
 
 void ReviewState::request_file_jump(std::string path)
 {
     {
-        std::lock_guard lock(mutex_);
-        state_.jump_file = std::move(path);
-        ++state_.generation;
+        std::lock_guard lock(_mutex);
+        _state.jump_file = std::move(path);
+        ++_state.generation;
     }
     _publish();
 }
 
 void ReviewState::clear_file_jump()
 {
-    std::lock_guard lock(mutex_);
-    state_.jump_file.reset();
+    std::lock_guard lock(_mutex);
+    _state.jump_file.reset();
 }
 
 void ReviewState::clear_comments()
 {
     {
-        std::lock_guard lock(mutex_);
-        if (state_.comments.empty()) {
+        std::lock_guard lock(_mutex);
+        if (_state.comments.empty()) {
             return;
         }
-        state_.comments.clear();
-        state_.jump_comment.reset();
-        ++state_.generation;
+        _state.comments.clear();
+        _state.jump_comment.reset();
+        ++_state.generation;
     }
     _publish();
 }

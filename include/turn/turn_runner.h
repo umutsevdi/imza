@@ -77,12 +77,12 @@ public:
     void stop();
     void set_on_finish(std::function<void(std::string)> on_finish);
     void set_subagent_tool(SubagentToolFn subagent_tool);
-    bool has_stream_override() const { return has_stream_override_; }
-    const StreamFn& stream_fn() const { return stream_fn_; }
-    const std::vector<ToolSpec>& specs() const { return specs_all_; }
+    bool has_stream_override() const { return _has_stream_override; }
+    const StreamFn& stream_fn() const { return _stream_fn; }
+    const std::vector<ToolSpec>& specs() const { return _specs_all; }
     Status run_stream(const ChatRequest& req, const Route& route,
         const StreamCallback& cb) const;
-    bool blocked_permission() const { return blocked_permission_.load(); }
+    bool blocked_permission() const { return _blocked_permission.load(); }
 
 private:
     void _drive(std::vector<Message> history, TurnSettings settings);
@@ -109,21 +109,21 @@ private:
         std::vector<Message>& tool_msgs);
     void _post(std::function<void()> f);
 
-    ApplicationState* state_;
-    PostFn post_;
-    ModalRequestFn modal_request_;
-    std::shared_ptr<SkillStore> skills_;
-    SubagentToolFn subagent_tool_;
-    std::function<void(std::string)> on_finish_;
-    StreamFn stream_fn_;
-    bool has_stream_override_ { false };
-    std::vector<Tool> tools_;
-    std::vector<ToolSpec> specs_all_;
-    std::vector<StreamEvent> stream_events_;
-    std::atomic<bool> alive_ { true };
-    std::atomic<bool> blocked_permission_ { false };
-    std::optional<std::jthread> worker_;
-    int retry_after_secs_ = 0;
+    ApplicationState* _state;
+    PostFn _post_fn;
+    ModalRequestFn _modal_request;
+    std::shared_ptr<SkillStore> _skills;
+    SubagentToolFn _subagent_tool;
+    std::function<void(std::string)> _on_finish;
+    StreamFn _stream_fn;
+    bool _has_stream_override { false };
+    std::vector<Tool> _tools;
+    std::vector<ToolSpec> _specs_all;
+    std::vector<StreamEvent> _stream_events;
+    std::atomic<bool> _alive { true };
+    std::atomic<bool> _blocked_permission { false };
+    std::optional<std::jthread> _worker;
+    int _retry_after_secs = 0;
 };
 
 void apply_reasoning(ChatRequest& req, ApiStandard dialect,

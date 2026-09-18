@@ -73,14 +73,14 @@ std::string subagent_variant_or_default(
 }
 
 ProviderStore::ProviderStore(Config config, ModelsFn models_fn)
-    : config_(std::move(config))
-    , models_fn_(std::move(models_fn))
+    : _config(std::move(config))
+    , _models_fn(std::move(models_fn))
 {
-    load_catalog(presets_path(), catalog_);
-    inject_subscription_providers(catalog_);
-    pricing_ = pricing_table_from(catalog_);
-    if (!models_fn_) {
-        models_fn_ = [](const Route& route, std::vector<ModelInfo>& models) {
+    load_catalog(presets_path(), _catalog);
+    inject_subscription_providers(_catalog);
+    _pricing = pricing_table_from(_catalog);
+    if (!_models_fn) {
+        _models_fn = [](const Route& route, std::vector<ModelInfo>& models) {
             return fetch_models(route, models);
         };
     }
@@ -89,8 +89,8 @@ ProviderStore::ProviderStore(Config config, ModelsFn models_fn)
 ProviderStore::~ProviderStore()
 {
     alive_.store(false);
-    catalog_worker_.reset();
-    workers_.clear();
+    _catalog_worker.reset();
+    _workers.clear();
 }
 
 Signal<>::Subscription ProviderStore::subscribe(ProviderChangedFn callback)
@@ -100,33 +100,33 @@ Signal<>::Subscription ProviderStore::subscribe(ProviderChangedFn callback)
 
 Config ProviderStore::config() const
 {
-    std::lock_guard lock(mutex_);
-    return config_;
+    std::lock_guard lock(_mutex);
+    return _config;
 }
 
 StatusConfigView ProviderStore::status() const
 {
-    std::lock_guard lock(mutex_);
-    return { config_.last_used ? config_.last_used->model : "",
-        config_.reasoning_effort.value_or("off") };
+    std::lock_guard lock(_mutex);
+    return { _config.last_used ? _config.last_used->model : "",
+        _config.reasoning_effort.value_or("off") };
 }
 
 std::vector<ConnectionView> ProviderStore::connections() const
 {
-    std::lock_guard lock(mutex_);
+    std::lock_guard lock(_mutex);
     std::vector<ConnectionView> views;
-    views.reserve(config_.providers.size());
-    for (const Connection& connection : config_.providers) {
+    views.reserve(_config.providers.size());
+    for (const Connection& connection : _config.providers) {
         ConnectionView view;
         view.id       = connection_key(connection);
         view.provider = connection.id;
         view.api_key  = connection.api_key;
         if (subscription_connection(connection.id)) {
-            view.name = catalog_.providers.at(connection.id).name;
+            view.name = _catalog.providers.at(connection.id).name;
         } else if (!connection.endpoint.empty()) {
             view.name = "Custom";
-        } else if (const auto it = catalog_.providers.find(connection.id);
-            it != catalog_.providers.end()) {
+        } else if (const auto it = _catalog.providers.find(connection.id);
+            it != _catalog.providers.end()) {
             view.name = it->second.name;
         }
         if (view.name.empty()) {
@@ -135,8 +135,8 @@ std::vector<ConnectionView> ProviderStore::connections() const
         if (!connection.label.empty()) {
             view.name += " · " + connection.label;
         }
-        const auto it = model_catalog_.find(connection_key(connection));
-        if (it != model_catalog_.end()) {
+        const auto it = _model_catalog.find(connection_key(connection));
+        if (it != _model_catalog.end()) {
             if (const auto* ready
                 = std::get_if<CatalogEntry::Ready>(&it->second.state)) {
                 view.state       = ConnectionView::State::READY;
@@ -154,7 +154,7 @@ std::vector<ConnectionView> ProviderStore::connections() const
 
 ModelList ProviderStore::models_for(std::string_view connection_id) const
 {
-    std::lock_guard lock(mutex_);
+    std::lock_guard lock(_mutex);
     ModelList list;
     const Connection* connection = _find_locked(connection_id);
     if (connection == nullptr) {
@@ -162,8 +162,8 @@ ModelList ProviderStore::models_for(std::string_view connection_id) const
         list.error = Status::CONFIG_ERROR;
         return list;
     }
-    const auto it = model_catalog_.find(std::string(connection_id));
-    if (it == model_catalog_.end()) {
+    const auto it = _model_catalog.find(std::string(connection_id));
+    if (it == _model_catalog.end()) {
         return list;
     }
     const auto* ready = std::get_if<CatalogEntry::Ready>(&it->second.state);
@@ -177,8 +177,8 @@ ModelList ProviderStore::models_for(std::string_view connection_id) const
     }
     list.state          = ModelList::State::READY;
     list.models         = ready->models;
-    const auto provider = catalog_.providers.find(connection->id);
-    if (provider == catalog_.providers.end()) {
+    const auto provider = _catalog.providers.find(connection->id);
+    if (provider == _catalog.providers.end()) {
         return list;
     }
     for (ModelInfo& info : list.models) {
@@ -196,12 +196,12 @@ ModelList ProviderStore::models_for(std::string_view connection_id) const
 std::vector<std::pair<std::string, std::string>>
 ProviderStore::provider_options() const
 {
-    std::lock_guard lock(mutex_);
+    std::lock_guard lock(_mutex);
     std::vector<std::pair<std::string, std::string>> options;
-    options.reserve(catalog_.providers.size() + 1);
+    options.reserve(_catalog.providers.size() + 1);
     options.emplace_back(
         std::string(OPENAI_SUBSCRIPTION_ID), "Open AI Subscription");
-    for (const auto& [id, provider] : catalog_.providers) {
+    for (const auto& [id, provider] : _catalog.providers) {
         if (id == OPENAI_SUBSCRIPTION_ID) {
             continue;
         }
@@ -214,50 +214,50 @@ ProviderStore::provider_options() const
 
 std::optional<ProviderSelection> ProviderStore::active_selection() const
 {
-    std::lock_guard lock(mutex_);
-    if (!config_.last_used || config_.last_used->model.empty()) {
+    std::lock_guard lock(_mutex);
+    if (!_config.last_used || _config.last_used->model.empty()) {
         return std::nullopt;
     }
-    const Connection* connection = _find_locked(config_.last_used->provider);
+    const Connection* connection = _find_locked(_config.last_used->provider);
     if (connection == nullptr) {
         return std::nullopt;
     }
-    ApiStandard dialect = default_dialect(*connection, catalog_);
-    if (const auto it = connection->dialects.find(config_.last_used->model);
+    ApiStandard dialect = default_dialect(*connection, _catalog);
+    if (const auto it = connection->dialects.find(_config.last_used->model);
         it != connection->dialects.end()) {
         dialect = it->second;
     }
-    return ProviderSelection { config_.last_used->model,
-        config_.reasoning_effort.value_or("off"), connection_key(*connection),
+    return ProviderSelection { _config.last_used->model,
+        _config.reasoning_effort.value_or("off"), connection_key(*connection),
         _route_locked(*connection, dialect) };
 }
 
 std::optional<ProviderSelection> ProviderStore::subagent_selection(
     SubagentRole role) const
 {
-    std::lock_guard lock(mutex_);
-    const auto configured  = config_.subagents.find(role);
-    const bool use_default = configured == config_.subagents.end()
+    std::lock_guard lock(_mutex);
+    const auto configured  = _config.subagents.find(role);
+    const bool use_default = configured == _config.subagents.end()
         || configured->second.provider.empty();
     if (use_default
-        && (!config_.last_used || config_.last_used->model.empty())) {
+        && (!_config.last_used || _config.last_used->model.empty())) {
         return std::nullopt;
     }
-    const std::string& provider = use_default ? config_.last_used->provider
+    const std::string& provider = use_default ? _config.last_used->provider
                                               : configured->second.provider;
     const std::string& model
-        = use_default ? config_.last_used->model : configured->second.model;
+        = use_default ? _config.last_used->model : configured->second.model;
     const Connection* connection = _find_locked(provider);
     if (connection == nullptr) {
         return std::nullopt;
     }
-    ApiStandard dialect = default_dialect(*connection, catalog_);
+    ApiStandard dialect = default_dialect(*connection, _catalog);
     if (const auto found = connection->dialects.find(model);
         found != connection->dialects.end()) {
         dialect = found->second;
     }
     const std::string variant = subagent_variant_or_default(
-        configured != config_.subagents.end() ? &configured->second : nullptr,
+        configured != _config.subagents.end() ? &configured->second : nullptr,
         role);
     return ProviderSelection { model, variant, connection_key(*connection),
         _route_locked(*connection, dialect) };
@@ -266,7 +266,7 @@ std::optional<ProviderSelection> ProviderStore::subagent_selection(
 Route ProviderStore::route_for(
     std::string_view connection_id, ApiStandard dialect) const
 {
-    std::lock_guard lock(mutex_);
+    std::lock_guard lock(_mutex);
     const Connection* connection = _find_locked(connection_id);
     return connection == nullptr ? Route { }
                                  : _route_locked(*connection, dialect);
@@ -278,8 +278,8 @@ Route ProviderStore::authenticated_route_for(std::string_view connection_id,
     const std::string id(connection_id);
     Connection snapshot;
     {
-        std::unique_lock lock(mutex_);
-        refresh_changed_.wait(lock, [&] { return !refreshing_.contains(id); });
+        std::unique_lock lock(_mutex);
+        _refresh_changed.wait(lock, [&] { return !_refreshing.contains(id); });
         const Connection* connection = _find_locked(id);
         if (connection == nullptr) {
             return { };
@@ -297,7 +297,7 @@ Route ProviderStore::authenticated_route_for(std::string_view connection_id,
             return route;
         }
         snapshot = *connection;
-        refreshing_.insert(id);
+        _refreshing.insert(id);
     }
 
     const SubscriptionResult refreshed = refresh_subscription(
@@ -323,14 +323,14 @@ Route ProviderStore::authenticated_route_for(std::string_view connection_id,
 
     Route route;
     {
-        std::lock_guard lock(mutex_);
-        refreshing_.erase(id);
+        std::lock_guard lock(_mutex);
+        _refreshing.erase(id);
         const Connection* connection = _find_locked(id);
         if (connection != nullptr) {
             route = _route_locked(*connection, dialect, opencode_session);
         }
     }
-    refresh_changed_.notify_all();
+    _refresh_changed.notify_all();
     if (refreshed.status != Status::OK || !persisted) {
         route.error = refreshed.status == Status::OK ? Status::CONFIG_ERROR
                                                      : refreshed.status;
@@ -346,8 +346,8 @@ bool ProviderStore::model_reasons(std::string_view model) const
     if (model.empty()) {
         return false;
     }
-    std::lock_guard lock(mutex_);
-    for (const auto& [provider_id, provider] : catalog_.providers) {
+    std::lock_guard lock(_mutex);
+    for (const auto& [provider_id, provider] : _catalog.providers) {
         const auto it = provider.models.find(std::string(model));
         if (it != provider.models.end() && it->second.reasoning == true) {
             return true;
@@ -362,12 +362,12 @@ ModelPricing ProviderStore::pricing_for(std::string_view model) const
     if (key.empty()) {
         return { };
     }
-    std::lock_guard lock(mutex_);
-    const auto exact = pricing_.find(key);
-    if (exact != pricing_.end()) {
+    std::lock_guard lock(_mutex);
+    const auto exact = _pricing.find(key);
+    if (exact != _pricing.end()) {
         return exact->second;
     }
-    for (const auto& [name, row] : pricing_) {
+    for (const auto& [name, row] : _pricing) {
         if (key.find(name) != std::string::npos) {
             return row;
         }
@@ -378,8 +378,8 @@ ModelPricing ProviderStore::pricing_for(std::string_view model) const
 void ProviderStore::start_model_fetches()
 {
     {
-        std::lock_guard lock(mutex_);
-        for (const Connection& connection : config_.providers) {
+        std::lock_guard lock(_mutex);
+        for (const Connection& connection : _config.providers) {
             _start_fetch_locked(connection_key(connection));
         }
     }
@@ -389,7 +389,7 @@ void ProviderStore::start_model_fetches()
 void ProviderStore::refetch_models(std::string_view connection_id)
 {
     {
-        std::lock_guard lock(mutex_);
+        std::lock_guard lock(_mutex);
         _start_fetch_locked(std::string(connection_id));
     }
     _notify_changed();
@@ -400,17 +400,17 @@ void ProviderStore::connect(ConnectResult result, ConnectCompleteFn complete)
     Route route;
     std::vector<ModelInfo> subscription_models;
     {
-        std::lock_guard lock(mutex_);
+        std::lock_guard lock(_mutex);
         const bool known = result.id == CUSTOM_PROVIDER_ID
-            || catalog_.providers.contains(result.id);
+            || _catalog.providers.contains(result.id);
         if (known) {
             Connection probe;
             probe.id       = result.id;
             probe.endpoint = result.endpoint;
             probe.api_key  = result.api_key;
-            route = _route_locked(probe, default_dialect(probe, catalog_));
+            route = _route_locked(probe, default_dialect(probe, _catalog));
             if (subscription_connection(result.id)) {
-                subscription_models = catalog_models(catalog_, result.id);
+                subscription_models = catalog_models(_catalog, result.id);
             }
         }
     }
@@ -419,15 +419,15 @@ void ProviderStore::connect(ConnectResult result, ConnectCompleteFn complete)
         return;
     }
 
-    std::lock_guard lock(mutex_);
-    workers_.emplace_back(
+    std::lock_guard lock(_mutex);
+    _workers.emplace_back(
         [this, result = std::move(result), route,
             subscription_models = std::move(subscription_models),
             complete            = std::move(complete)] {
             std::vector<ModelInfo> models = subscription_models;
             const Status fetched          = subscription_connection(result.id)
                 ? Status::OK
-                : models_fn_(route, models);
+                : _models_fn(route, models);
             if (!alive_.load()) {
                 return;
             }
@@ -435,7 +435,7 @@ void ProviderStore::connect(ConnectResult result, ConnectCompleteFn complete)
             outcome.status      = fetched;
             outcome.model_count = models.size();
             if (fetched == Status::OK && result.persist) {
-                std::lock_guard lock(mutex_);
+                std::lock_guard lock(_mutex);
                 outcome.status = _commit_connection_locked(
                     result, models, outcome.first_connection);
                 outcome.persisted = outcome.status == Status::OK;
@@ -473,8 +473,8 @@ bool ProviderStore::remove_connection(
         },
         [&] {
             if (_find_locked(expected_id) == nullptr) {
-                ++generations_[std::string(expected_id)];
-                model_catalog_.erase(std::string(expected_id));
+                ++_generations[std::string(expected_id)];
+                _model_catalog.erase(std::string(expected_id));
             }
         });
 }
@@ -543,27 +543,27 @@ void ProviderStore::remember_dialect(
 void ProviderStore::ensure_catalog_fresh()
 {
     {
-        std::lock_guard lock(mutex_);
-        if (catalog_syncing_ || !catalog_stale(catalog_)) {
+        std::lock_guard lock(_mutex);
+        if (_catalog_syncing || !catalog_stale(_catalog)) {
             return;
         }
-        catalog_syncing_ = true;
+        _catalog_syncing = true;
     }
-    catalog_worker_.emplace([this] {
+    _catalog_worker.emplace([this] {
         Catalog catalog;
         const Status status = fetch_catalog(catalog);
         if (!alive_.load()) {
             return;
         }
         {
-            std::lock_guard lock(mutex_);
-            catalog_syncing_ = false;
+            std::lock_guard lock(_mutex);
+            _catalog_syncing = false;
             if (status != Status::OK) {
                 return;
             }
-            catalog_ = catalog;
-            save_catalog(presets_path(), catalog_);
-            pricing_ = pricing_table_from(catalog_);
+            _catalog = catalog;
+            save_catalog(presets_path(), _catalog);
+            _pricing = pricing_table_from(_catalog);
         }
         _notify_changed();
     });
@@ -574,12 +574,12 @@ bool ProviderStore::_update_config(
 {
     bool committed = false;
     {
-        std::lock_guard lock(mutex_);
+        std::lock_guard lock(_mutex);
         Config candidate;
         const ConfigUpdateResult result
-            = update_config(config_path(), config_, mutate, &candidate);
+            = update_config(config_path(), _config, mutate, &candidate);
         if (result != ConfigUpdateResult::FAILURE) {
-            config_ = std::move(candidate);
+            _config = std::move(candidate);
         }
         if (result == ConfigUpdateResult::UPDATED) {
             committed = true;
@@ -602,13 +602,13 @@ Connection* ProviderStore::_find_locked(std::string_view id)
 
 const Connection* ProviderStore::_find_locked(std::string_view id) const
 {
-    return find_connection(config_.providers, id);
+    return find_connection(_config.providers, id);
 }
 
 Route ProviderStore::_route_locked(const Connection& connection,
     ApiStandard dialect, std::string_view opencode_session) const
 {
-    return resolve_route(connection, catalog_, dialect, opencode_session);
+    return resolve_route(connection, _catalog, dialect, opencode_session);
 }
 
 void ProviderStore::_start_fetch_locked(const std::string& connection_id)
@@ -618,36 +618,36 @@ void ProviderStore::_start_fetch_locked(const std::string& connection_id)
         return;
     }
     const Route route
-        = _route_locked(*connection, default_dialect(*connection, catalog_));
-    const int generation = ++generations_[connection_id];
+        = _route_locked(*connection, default_dialect(*connection, _catalog));
+    const int generation = ++_generations[connection_id];
     if (route.api.empty()) {
-        model_catalog_[connection_id]
+        _model_catalog[connection_id]
             = CatalogEntry { CatalogEntry::Failed { Status::INVALID_URL } };
         return;
     }
-    model_catalog_[connection_id] = CatalogEntry { CatalogEntry::Fetching { } };
+    _model_catalog[connection_id] = CatalogEntry { CatalogEntry::Fetching { } };
     if (subscription_connection(connection->id)) {
-        model_catalog_[connection_id] = CatalogEntry { CatalogEntry::Ready {
-            catalog_models(catalog_, connection->id) } };
+        _model_catalog[connection_id] = CatalogEntry { CatalogEntry::Ready {
+            catalog_models(_catalog, connection->id) } };
         return;
     }
-    workers_.emplace_back([this, connection_id, generation, route] {
+    _workers.emplace_back([this, connection_id, generation, route] {
         std::vector<ModelInfo> models;
-        const Status status = models_fn_(route, models);
+        const Status status = _models_fn(route, models);
         if (!alive_.load()) {
             return;
         }
         {
-            std::lock_guard lock(mutex_);
-            if (generations_[connection_id] != generation) {
+            std::lock_guard lock(_mutex);
+            if (_generations[connection_id] != generation) {
                 return;
             }
             if (status == Status::OK) {
-                model_catalog_[connection_id] = CatalogEntry {
+                _model_catalog[connection_id] = CatalogEntry {
                     CatalogEntry::Ready { std::move(models) }
                 };
             } else {
-                model_catalog_[connection_id]
+                _model_catalog[connection_id]
                     = CatalogEntry { CatalogEntry::Failed { status } };
             }
         }
@@ -671,7 +671,7 @@ Status ProviderStore::_commit_connection_locked(const ConnectResult& result,
     std::string id;
     Config candidate;
     const ConfigUpdateResult updated = update_config(
-        config_path(), config_,
+        config_path(), _config,
         [&](Config& latest) {
             first     = !latest.last_used.has_value();
             stored.id = result.id;
@@ -688,9 +688,9 @@ Status ProviderStore::_commit_connection_locked(const ConnectResult& result,
     if (updated != ConfigUpdateResult::UPDATED) {
         return Status::CONFIG_ERROR;
     }
-    config_ = std::move(candidate);
-    ++generations_[id];
-    model_catalog_[id] = CatalogEntry { CatalogEntry::Ready { models } };
+    _config = std::move(candidate);
+    ++_generations[id];
+    _model_catalog[id] = CatalogEntry { CatalogEntry::Ready { models } };
     return Status::OK;
 }
 
