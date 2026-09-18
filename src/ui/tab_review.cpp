@@ -225,7 +225,7 @@ namespace {
                 ? "Enter save · Alt+Enter new line · Esc cancel"
                 : selected_comment_
                 ? "↑↓ navigate · e edit · d delete"
-                : "↑↓ navigate · [] files · Enter collapse · c comment";
+                : "↑↓ navigate · [] files · Enter collapse · c comment  ";
             // Advertise the Sidechat toggle while no pane is on screen.
             const std::string hint_sidechat
                 = state_->sidechat_open ? "" : " · Ctrl+S Sidechat";

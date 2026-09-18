@@ -172,7 +172,7 @@ namespace {
             review_available_ = _review_available();
             tab_names_        = { "Plan", "Build" };
             if (review_available_) {
-                tab_names_.push_back("Review");
+                tab_names_.emplace_back("Review");
             }
             tabs_ = CatchEvent(
                 Menu(&tab_names_, &selected_, MenuOption::HorizontalAnimated()),
@@ -224,7 +224,7 @@ namespace {
                     main_panel = hbox({ std::move(main_panel), separatorEmpty(),
                         sidechat_component_->Render() });
                 }
-                root = vbox({ hbox({ text(" "), side | yflex, text(" "),
+                root = vbox({ hbox({ side | yflex, text(" "),
                                   std::move(main_panel) | xflex | yflex })
                                | flex,
                            separatorEmpty(), status })

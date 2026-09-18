@@ -14,7 +14,7 @@ using namespace ftxui;
 
 namespace {
 
-    constexpr int SIDECHAT_COLUMN_WIDTH = 40;
+    constexpr int SIDECHAT_COLUMN_WIDTH = 45;
 
     ChatHints sidechat_hints()
     {
@@ -55,15 +55,15 @@ public:
         }
         const Session::StatusView usage
             = state_->sidechat->session->status_view();
-        Element header = text("  Sidechat · "
-                             + compact_number(usage.totals.total) + " tok ")
-            | bold | color(PANEL_FG);
-        Element column = vbox({
-                             std::move(header),
-                             separatorEmpty(),
-                             separatorEmpty(),
-                             host_->Render() | yflex,
-                         })
+        Element column
+            = vbox({
+                  hbox({ text("Sidechat") | bold | color(PANEL_FG), filler(),
+                      text(compact_number(usage.totals.total) + " tok")
+                          | dim }),
+                  separatorLight(),
+                  separatorEmpty(),
+                  host_->Render() | yflex,
+              })
             | size(WIDTH, EQUAL, column_width_) | reflect(pane_box_);
         return focused_ ? column : std::move(column) | dim;
     }
