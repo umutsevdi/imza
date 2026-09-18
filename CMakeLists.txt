@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.31)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 project(
     imza
-    VERSION 0.2.3
+    VERSION 0.3.0
     HOMEPAGE_URL "https://github.com/umutsevdi/imza"
     LANGUAGES C CXX
 )
@@ -319,6 +319,7 @@ add_library(imza_ui
     src/ui/review_syntax.cpp
     src/ui/scroll.cpp
     src/ui/side_panel.cpp
+    src/ui/sidechat.cpp
     src/ui/status_line.cpp
     src/ui/syntax.cpp
     src/ui/tab_chat.cpp

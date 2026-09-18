@@ -278,6 +278,10 @@ void submit(ApplicationState& state, std::string text,
         run_slash(state, t);
         return;
     }
+    if (state.parent_state != nullptr
+        && state.session->phase() == Session::Phase::IDLE) {
+        ensure_sidechat_seeded(state);
+    }
     if (state.session->phase() == Session::Phase::IDLE) {
         submit_with_skills(state, std::string(t), std::move(attachments));
     } else {
@@ -434,6 +438,10 @@ void resolve_modal(ApplicationState& state, ModalResult result)
 
 void run_slash(ApplicationState& state, std::string_view command)
 {
+    if (state.parent_state != nullptr) {
+        run_slash(*state.parent_state, command);
+        return;
+    }
     const SlashCommand* found = find_command(command);
     if (found == nullptr) {
         state.session->set_error(
@@ -545,6 +553,77 @@ void delete_saved_session(
     }
     state.session->set_modal(sessions_modal(state));
     state.session->bump_modal_serial();
+}
+
+bool sidechat_open(const ApplicationState& state)
+{
+    return state.sidechat != nullptr && state.sidechat_open;
+}
+
+namespace {
+
+    SessionSnapshot sidechat_seed(const ApplicationState& state)
+    {
+        const std::string parent_title = state.session->title();
+        SessionSnapshot seed           = state.session->snapshot();
+        const std::string seed_transcript
+            = conversation_transcript(seed.compacted_summary, seed);
+        if (!seed_transcript.empty()) {
+            seed.compacted_summary = seed_transcript;
+            seed.items.clear();
+        }
+        seed.title = "Sidechat · "
+            + (parent_title.empty() ? "New Session" : parent_title);
+        seed.persistence = UnsavedSession { };
+        return seed;
+    }
+
+} // namespace
+
+void ensure_sidechat_seeded(ApplicationState& state)
+{
+    if (state.parent_state == nullptr || state.sidechat_context_seeded) {
+        return;
+    }
+    state.session->restore(sidechat_seed(*state.parent_state));
+    state.sidechat_context_seeded = true;
+}
+
+void open_sidechat(ApplicationState& state)
+{
+    if (state.sidechat == nullptr) {
+        state.sidechat = make_sidechat_application_state(state);
+    }
+    state.sidechat_open = true;
+}
+
+void close_sidechat(ApplicationState& state)
+{
+    if (state.sidechat == nullptr) {
+        return;
+    }
+    interrupt(*state.sidechat);
+    state.sidechat->session->clear_error();
+    state.sidechat_open = false;
+}
+
+void refresh_sidechat(ApplicationState& state)
+{
+    if (state.sidechat == nullptr) {
+        state.session->set_error(
+            "No Sidechat is open - open one with Ctrl+S first.");
+        return;
+    }
+    interrupt(*state.sidechat);
+    SessionSnapshot shell = state.sidechat->session->snapshot();
+    shell.items.clear();
+    shell.compacted_summary.clear();
+    shell.compacted_item_count = 0;
+    shell.todo                 = TodoList { };
+    shell.persistence          = UnsavedSession { };
+    state.sidechat->session->restore(std::move(shell));
+    state.sidechat->session->clear_error();
+    state.sidechat->sidechat_context_seeded = false;
 }
 
 } // namespace imza

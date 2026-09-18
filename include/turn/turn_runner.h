@@ -39,6 +39,10 @@ struct ProviderSelection;
 TurnSettings make_turn_settings(
     const ProviderSelection& selection, Session::Mode mode);
 
+// Bounded transcript shared by automatic compaction and sidechat seeding.
+std::string conversation_transcript(
+    const std::string& compacted_summary, const SessionSnapshot& snapshot);
+
 class StreamUpdateBuffer {
 public:
     StreamUpdateBuffer(PostFn post, std::shared_ptr<Session> session);
@@ -75,6 +79,7 @@ public:
     void set_subagent_tool(SubagentToolFn subagent_tool);
     bool has_stream_override() const { return has_stream_override_; }
     const StreamFn& stream_fn() const { return stream_fn_; }
+    const std::vector<ToolSpec>& specs() const { return specs_all_; }
     Status run_stream(const ChatRequest& req, const Route& route,
         const StreamCallback& cb) const;
     bool blocked_permission() const { return blocked_permission_.load(); }

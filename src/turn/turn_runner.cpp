@@ -8,6 +8,7 @@
 #include "providers/store.h"
 #include "tools/skills.h"
 #include "turn/prompt.h"
+#include "workspace/attachments.h"
 
 #include <algorithm>
 #include <chrono>
@@ -41,6 +42,41 @@ namespace {
                 return tool_available_in_mode(spec.name, mode);
             });
         return available;
+    }
+
+    constexpr std::size_t TURN_LINE_CAP    = 40;
+    constexpr std::size_t TOOL_LINE_CAP    = 8;
+    constexpr std::string_view TOOL_PREFIX = "TOOL: ";
+
+    std::string capped(std::string_view text, std::size_t max_lines)
+    {
+        const std::string body = take_lines(text, max_lines);
+        return count_lines(text) > max_lines ? body + "\n…" : body;
+    }
+
+    std::string item_transcript(const ConversationItem& item)
+    {
+        std::string out;
+        if (const auto* user = std::get_if<UserTurn>(&item)) {
+            out += "\nUSER:\n";
+            out += capped(
+                message_with_attachments(user->text, user->attachments),
+                TURN_LINE_CAP);
+        } else if (const auto* assistant = std::get_if<AssistantTurn>(&item)) {
+            out += "\nASSISTANT:\n";
+            out += capped(assistant->markdown, TURN_LINE_CAP);
+        } else if (const auto* call = std::get_if<ToolCall>(&item)) {
+            out += "\n";
+            out += TOOL_PREFIX;
+            out += call->name;
+            out += "\n";
+            out += capped(call->args, TOOL_LINE_CAP);
+            if (call->result) {
+                out += "\nRESULT:\n";
+                out += capped(tool_result_text(*call), TOOL_LINE_CAP);
+            }
+        }
+        return out;
     }
 
     std::string compaction_transcript(
@@ -81,6 +117,21 @@ TurnSettings make_turn_settings(
     settings.dialect          = selection.route.dialect;
     settings.mode             = mode;
     return settings;
+}
+
+std::string conversation_transcript(
+    const std::string& compacted_summary, const SessionSnapshot& snapshot)
+{
+    std::string out;
+    if (!compacted_summary.empty()) {
+        out += "\nUSER:\n<session-summary>\n";
+        out += compacted_summary;
+        out += "\n";
+    }
+    for (const ConversationItem& item : snapshot.items) {
+        out += item_transcript(item);
+    }
+    return out;
 }
 
 void apply_reasoning(ChatRequest& req, ApiStandard dialect,

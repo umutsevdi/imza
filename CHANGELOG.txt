@@ -8,14 +8,19 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
-0.2.4 - 2026-09-17
+0.3.0 - 2026-09-18
 -------------------------------------------------------------------------------
 <https://github.com/umutsevdi/imza/releases/tag/v0.2.4>
 
 Changes:
-  - Increased maximum timeout for streams. Added retry for server errors (HTTP 408, 409, 5xx).
+  - Increased maximum timeout for streams. Added retry for server errors (HTTP 
+408, 409, 5xx).
   - Imza sends a recognizable user-agent on provider requests.
-  - Loaded sessions continue in place, active chats are locked against other imza processes.
+  - Loaded sessions continue in place, active chats are locked against other 
+imza processes.
+  - Added `Sidechat`, a place to ask questions without disrupting the main 
+agent. The Sidechat is toggled with Ctrl+S, its context reloads from the main
+chat on the next prompt. 
 
 -------------------------------------------------------------------------------
 0.2.3 - 2026-09-14

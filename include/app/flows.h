@@ -71,5 +71,16 @@ void delete_saved_session(
 // current session, lock and validate the target, restore, clear runtime
 // state. On failure the active conversation stays and a session error is set.
 void switch_session(ApplicationState& state, const std::filesystem::path& path);
+// Show the Sidechat pane; its context loads lazily on the first prompt.
+void open_sidechat(ApplicationState& state);
+// Hide the Sidechat pane. An in-flight turn is interrupted; the session
+// persists.
+void close_sidechat(ApplicationState& state);
+// Load the sidechat's leading snapshot of the active conversation, once.
+void ensure_sidechat_seeded(ApplicationState& state);
+// Clear the sidechat's context; the next prompt reloads it. Errors when no
+// sidechat exists.
+void refresh_sidechat(ApplicationState& state);
+bool sidechat_open(const ApplicationState& state);
 
 } // namespace imza

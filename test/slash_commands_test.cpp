@@ -58,6 +58,8 @@ TEST_CASE("find_command matches case-insensitively")
     CHECK(find_command("/model")->action == SlashCommand::Action::MODEL);
     CHECK(
         find_command("/changelog")->action == SlashCommand::Action::CHANGELOG);
+    CHECK(find_command("/split") == nullptr);
+    CHECK(find_command("/refresh") == nullptr);
     CHECK(find_command("/foo") == nullptr);
 }
 

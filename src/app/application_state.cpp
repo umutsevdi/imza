@@ -8,6 +8,8 @@
 #include "workspace/review.h"
 
 #include <algorithm>
+#include <iterator>
+#include <memory>
 #include <utility>
 
 namespace imza {
@@ -96,14 +98,8 @@ namespace {
     std::shared_ptr<ApplicationState> initialize_child(
         std::shared_ptr<ApplicationState> state, const ApplicationState& parent,
         PostFn post, StreamFn stream_fn, ModalRequestFn parent_routing,
-        std::string agent_label)
+        std::string agent_label, std::vector<Tool> tools)
     {
-        std::vector<Tool> tools = default_tools(
-            parent.runtime_flags, parent.environment->system()->has_rg);
-        std::erase_if(tools, [](const Tool& tool) {
-            return tool.spec.name == "subagent" || tool.spec.name == "todo";
-        });
-
         state->session        = std::make_shared<Session>();
         state->sessions       = parent.sessions;
         state->input_history  = parent.input_history;
@@ -121,6 +117,22 @@ namespace {
         state->runtime_flags  = parent.runtime_flags;
         wire(state, std::move(stream_fn), std::move(tools));
         return state;
+    }
+
+    std::vector<Tool> sidechat_roster(const ApplicationState& parent)
+    {
+        std::vector<Tool> tools = default_tools(
+            parent.runtime_flags, parent.environment->system()->has_rg);
+        // The sidechat is a regular chat; drop only file mutation and
+        // delegation.
+        std::erase_if(tools, [](const Tool& tool) {
+            constexpr std::string_view removed[]
+                = { "edit", "write", "subagent", "todo" };
+            return std::find(
+                       std::begin(removed), std::end(removed), tool.spec.name)
+                != std::end(removed);
+        });
+        return tools;
     }
 
 } // namespace
@@ -157,9 +169,34 @@ std::shared_ptr<ApplicationState> make_child_application_state(
     ModalRequestFn parent_routing, std::string agent_label)
 {
     std::shared_ptr<ApplicationState> state(new ApplicationState());
+    std::vector<Tool> tools = default_tools(
+        parent.runtime_flags, parent.environment->system()->has_rg);
+    std::erase_if(tools, [](const Tool& tool) {
+        return tool.spec.name == "subagent" || tool.spec.name == "todo";
+    });
     return initialize_child(std::move(state), parent, std::move(post),
-        std::move(stream_fn), std::move(parent_routing),
-        std::move(agent_label));
+        std::move(stream_fn), std::move(parent_routing), std::move(agent_label),
+        std::move(tools));
+}
+
+std::shared_ptr<ApplicationState> make_sidechat_application_state(
+    ApplicationState& parent)
+{
+    std::shared_ptr<ApplicationState> state(new ApplicationState());
+    state->parent_state = &parent;
+    state               = initialize_child(
+        std::move(state), parent, parent.post, { },
+        [&parent](ModalPayload payload) -> std::future<ModalResult> {
+            if (!parent.alive.load()) {
+                std::promise<ModalResult> abandoned;
+                abandoned.set_value(std::monostate { });
+                return abandoned.get_future();
+            }
+            return request_modal(
+                const_cast<ApplicationState&>(parent), std::move(payload));
+        },
+        "Sidechat", sidechat_roster(parent));
+    return state;
 }
 
 } // namespace imza
