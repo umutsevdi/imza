@@ -26,8 +26,7 @@ namespace {
         }
         return L"Local\\imza-file-lock-" + std::to_wstring(hash);
     }
-#endif
-
+#else
     int flock_operation(const FileLockRequest& request)
     {
         int operation
@@ -37,6 +36,7 @@ namespace {
         }
         return operation;
     }
+#endif
 
 } // namespace
 
