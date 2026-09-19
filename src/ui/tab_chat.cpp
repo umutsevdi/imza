@@ -177,7 +177,8 @@ namespace {
                     [](const ConversationItem& item) {
                         const auto* tc = std::get_if<ToolCall>(&item);
                         return tc != nullptr
-                            && (tc->name == "shell" || tc->name == "subagent")
+                            && (tc->name == "shell" || tc->name == "subagent"
+                                || tc->name == "lua")
                             && !tc->result.has_value();
                     });
             const bool compaction_running = std::any_of(st.items().begin(),
@@ -264,7 +265,8 @@ namespace {
                             conversation[item_index + 1]));
                 std::size_t eff_version = version;
                 if (const auto* tc = std::get_if<ToolCall>(&it); tc != nullptr
-                    && (tc->name == "shell" || tc->name == "subagent")
+                    && (tc->name == "shell" || tc->name == "subagent"
+                        || tc->name == "lua")
                     && !tc->result.has_value()) {
                     eff_version = static_cast<std::size_t>(frame_);
                 }
@@ -325,6 +327,9 @@ namespace {
                                 } else if (tc.name == "ask") {
                                     item_cache_[item_index]
                                         = render_ask_item(tc);
+                                } else if (tc.name == "lua") {
+                                    item_cache_[item_index]
+                                        = render_lua_item(tc);
                                 } else {
                                     item_cache_[item_index]
                                         = render_generic_tool(tc);
@@ -629,6 +634,10 @@ namespace {
                         tc.result->text.empty() ? "(no matches)"
                                                 : tc.result->text,
                         "", 1, false, json_string(args, "path") });
+            } else if (tc.name == "lua") {
+                imza::enqueue_user_modal(*state_,
+                    ViewerModal { "Lua execution", lua_viewer_content(tc),
+                        "markdown", 1, false });
             } else {
                 imza::enqueue_user_modal(*state_,
                     ViewerModal { "Shell output", tc.result->text, "", 1 });
@@ -1012,6 +1021,19 @@ namespace {
                 tc, code_block(tc.result->text, "", content_width()));
         }
 
+        Element render_lua_item(const ToolCall& tc)
+        {
+            const std::size_t count = tc.result->dispatch_log.size();
+            Component button        = make_lua_viewer_button(tc, count);
+            Elements rows { button->Render() };
+            const std::string summary = lua_dispatch_summary(tc);
+            if (!summary.empty()) {
+                rows.push_back(text(summary) | color(PANEL_FG_DIM));
+            }
+            rows.push_back(separatorEmpty());
+            return vbox(std::move(rows));
+        }
+
         Element render_tool_error(const ToolCall& tc)
         {
             return render_tool_status(tc, "Error: ", HL_RED);
@@ -1042,6 +1064,16 @@ namespace {
                 }
                 rows.push_back(separatorEmpty());
                 return vbox(std::move(rows));
+            }
+            if (tc.name == "lua") {
+                return vbox({
+                    hbox({
+                        spinner(15, static_cast<std::size_t>(frame_))
+                            | color(HL_GREEN),
+                        text(" Executing…") | color(PANEL_FG_DIM),
+                    }),
+                    separatorEmpty(),
+                });
             }
             if (tc.name == "shell") {
                 return vbox({
@@ -1103,6 +1135,31 @@ namespace {
                         open_subagent_viewer(*call, index);
                     }
                 });
+        }
+
+        Component make_lua_viewer_button(const ToolCall& tc, std::size_t count)
+        {
+            if (const auto found = read_buttons_.find(tc.id);
+                found != read_buttons_.end()) {
+                return found->second;
+            }
+            std::string label = "Executed " + std::to_string(count) + " tool "
+                + (count == 1 ? "call" : "calls");
+            auto shared_label
+                = std::make_shared<const std::string>(std::move(label));
+            const std::size_t id = tc.id;
+            Component button     = inline_link_button(
+                [shared_label] { return text(*shared_label) | bold; },
+                [this, id] {
+                    if (const auto* call = find_tool_call(id);
+                        call != nullptr) {
+                        open_viewer_for(*call);
+                    }
+                },
+                HL_GREEN);
+            read_buttons_.emplace(id, button);
+            container_->Add(button);
+            return button;
         }
 
         Component make_viewer_header_button(

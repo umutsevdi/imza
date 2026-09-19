@@ -145,6 +145,18 @@ namespace {
                         },
                         *tool->result->shell_status);
                 }
+                if (!tool->result->dispatch_log.empty()) {
+                    Json::Value log(Json::arrayValue);
+                    for (const LuaBindingCall& call :
+                        tool->result->dispatch_log) {
+                        Json::Value entry;
+                        entry["binding"] = call.binding;
+                        entry["target"]  = call.target;
+                        entry["ok"]      = call.ok;
+                        log.append(std::move(entry));
+                    }
+                    out["dispatch_log"] = std::move(log);
+                }
             }
         } else if (auto* todo = std::get_if<TodoList>(&item)) {
             out["type"]  = "todo";
@@ -249,6 +261,14 @@ namespace {
                         tool.result->shell_status
                             = ShellTimeout { std::chrono::seconds(
                                 value["shell_timeout"].asInt64()) };
+                    }
+                    if (value["dispatch_log"].isArray()) {
+                        for (const auto& entry : value["dispatch_log"]) {
+                            tool.result->dispatch_log.push_back(
+                                { entry.get("binding", "").asString(),
+                                    entry.get("target", "").asString(),
+                                    entry.get("ok", true).asBool() });
+                        }
                     }
                 }
             }

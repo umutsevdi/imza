@@ -1,7 +1,9 @@
 #include "ui/tool_format.h"
+#include "common/util.h"
 #include "network/json_io.h"
 #include "tools/tool.h"
 
+#include <algorithm>
 #include <cctype>
 #include <filesystem>
 
@@ -280,6 +282,71 @@ std::size_t read_start_line(const ToolCall& call)
         return static_cast<std::size_t>(*raw);
     }
     return 1;
+}
+
+std::string lua_dispatch_summary(const ToolCall& call)
+{
+    if (!call.result.has_value() || call.result->dispatch_log.empty()) {
+        return "";
+    }
+    struct BindingCount {
+        std::string name;
+        std::size_t count  = 0;
+        std::size_t failed = 0;
+    };
+    std::vector<BindingCount> counts;
+    for (const LuaBindingCall& entry : call.result->dispatch_log) {
+        auto found = std::find_if(
+            counts.begin(), counts.end(), [&](const BindingCount& count) {
+                return count.name == entry.binding;
+            });
+        if (found == counts.end()) {
+            counts.push_back({ entry.binding, 0, 0 });
+            found = std::prev(counts.end());
+        }
+        ++found->count;
+        found->failed += entry.ok ? 0 : 1;
+    }
+    std::string summary;
+    for (const BindingCount& count : counts) {
+        if (!summary.empty()) {
+            summary += " · ";
+        }
+        summary += std::to_string(count.count) + " " + count.name;
+        if (count.failed > 0) {
+            summary += " (" + std::to_string(count.failed) + " failed)";
+        }
+    }
+    return summary;
+}
+
+std::string lua_viewer_content(const ToolCall& call)
+{
+    // Fences must outgrow any backtick run in the content, or the markdown
+    // renderer closes the block early.
+    std::size_t fence = 3;
+    const auto needed = [&fence](const std::string& text) {
+        std::size_t run  = 0;
+        std::size_t best = 0;
+        for (const char c : text) {
+            run  = c == '`' ? run + 1 : 0;
+            best = std::max(best, run);
+        }
+        fence = std::max(fence, best + 1);
+    };
+    const std::string script = json_string(parse_json(call.args), "script");
+    needed(script);
+    if (call.result.has_value()) {
+        needed(call.result->text);
+    }
+    const std::string open = std::string(fence, '`');
+    std::string out        = open + "lua\n" + script + "\n" + open + "\n";
+    if (call.result.has_value()) {
+        out += open + "txt\n"
+            + (call.result->text.empty() ? "(no output)" : call.result->text)
+            + "\n" + open + "\n";
+    }
+    return out;
 }
 
 } // namespace imza

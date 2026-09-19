@@ -23,6 +23,33 @@ TEST_CASE("modal_answer_markdown renders selected then free text")
     CHECK(md.find("> Option 3\n> extra note") != std::string::npos);
 }
 
+TEST_CASE("lua dispatch summary groups binding calls")
+{
+    imza::ToolCall call;
+    call.name   = "lua";
+    call.result = imza::ToolCall::Result { imza::ToolCall::Result::Kind::OUTPUT,
+        "done\n" };
+    call.result->dispatch_log = {
+        { "read", "a.cpp", true },
+        { "list", "src", true },
+        { "read", "b.cpp", true },
+        { "list", "test", false },
+        { "list", "include", true },
+    };
+    CHECK(imza::lua_dispatch_summary(call) == "2 read · 3 list (1 failed)");
+}
+
+TEST_CASE("lua viewer report fences script and output safely")
+{
+    imza::ToolCall call;
+    call.name   = "lua";
+    call.args   = R"json({"script":"print('```')"})json";
+    call.result = imza::ToolCall::Result { imza::ToolCall::Result::Kind::OUTPUT,
+        "ok\n" };
+    const std::string report = imza::lua_viewer_content(call);
+    CHECK(report.find("````lua\nprint('```')\n````") != std::string::npos);
+    CHECK(report.find("````txt\nok\n\n````") != std::string::npos);
+}
 TEST_CASE("modal_answer_markdown renders Q/A pairs with prompt")
 {
     imza::ModalAnswer ans;

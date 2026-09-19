@@ -22,6 +22,16 @@ struct ShellTimeout {
 
 using ShellStatus = std::variant<ShellExit, ShellTimeout>;
 
+// One sandbox-binding call a lua script made: what it touched and whether
+// the gate allowed it. UI-only; the model transcript never includes it.
+struct LuaBindingCall {
+    std::string binding;
+    std::string target;
+    bool ok = true;
+
+    bool operator==(const LuaBindingCall&) const = default;
+};
+
 struct ToolSpec {
     std::string name;
     std::string description;

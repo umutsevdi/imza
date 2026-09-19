@@ -7,7 +7,9 @@
 #include <utility>
 
 #include "network/json_io.h"
+#include "permissions/store.h"
 #include "tools/tool.h"
+#include "workspace/environment.h"
 
 namespace fs = std::filesystem;
 
@@ -54,6 +56,58 @@ imza::ToolOutput run_script(const std::string& script, imza::LuaHost host = { })
     req.args       = imza::write_json(args);
     return imza::dispatch_tool({ &tool, 1 }, req);
 }
+
+// A host wired like the application: a real permission context built from
+// the live permission store, an attended ask route, and grant installation
+// back into the store. Tests pin behavior without spinning up a full state.
+struct ShellFixture {
+    std::shared_ptr<imza::SystemEnvironment> system
+        = std::make_shared<imza::SystemEnvironment>();
+    std::shared_ptr<imza::WorkspaceEnvironment> workspace
+        = std::make_shared<imza::WorkspaceEnvironment>();
+    imza::PermissionStore store;
+    imza::PermissionStore::Grants installed;
+    std::optional<imza::ToolVerdict> verdict;
+    std::optional<imza::ToolCallRequest> last_request;
+    int ask_calls         = 0;
+    bool attendable       = true;
+    bool shell_enabled    = true;
+    bool skip_permissions = false;
+
+    bool install(const imza::PermissionStore::Grants& grants)
+    {
+        return store.install(grants);
+    }
+
+    imza::LuaHost host()
+    {
+        imza::LuaHost host;
+        host.shell_enabled    = shell_enabled;
+        host.skip_permissions = skip_permissions;
+        host.context          = [this] {
+            return imza::PermissionContext { system, workspace,
+                store.snapshot(), imza::Session::Mode::BUILD };
+        };
+        host.install_grants = [this](imza::PermissionStore::Grants grants) {
+            installed.insert(installed.end(), grants.begin(), grants.end());
+            return store.install(std::move(grants));
+        };
+        if (attendable) {
+            host.ask = [this](imza::ModalPayload payload) {
+                ++ask_calls;
+                last_request
+                    = std::get<imza::ToolCallRequest>(std::move(payload));
+                std::promise<imza::ModalResult> promise;
+                promise.set_value(verdict.has_value()
+                        ? imza::ModalResult { *verdict }
+                        : imza::ModalResult { imza::ToolVerdict {
+                              imza::ToolDecision::REJECT, "test denial" } });
+                return promise.get_future();
+            };
+        }
+        return host;
+    }
+};
 
 } // namespace
 
@@ -208,7 +262,7 @@ TEST_CASE("todo bindings read and write the shared task board")
     host.set_todo = [&board](imza::TodoList todo) { board = std::move(todo); };
 
     const imza::ToolOutput set
-        = run_script("local ok, err = tool.set_todo({"
+        = run_script("local ok, err = tool.todo.set({"
                      "{content = 'first', status = 'in_progress'},"
                      "{content = 'second'}})\n"
                      "if err then error(err) end\nprint(ok)",
@@ -223,17 +277,45 @@ TEST_CASE("todo bindings read and write the shared task board")
     host2.todo     = [&board] { return board; };
     host2.set_todo = [&board](imza::TodoList todo) { board = std::move(todo); };
     const imza::ToolOutput get
-        = run_script("local rows = tool.todo()\n"
+        = run_script("local rows = tool.todo.get()\n"
                      "print(#rows, rows[1].content, rows[1].status, "
                      "rows[2].status)",
             std::move(host2));
     CHECK(get.text == "2\tfirst\tin_progress\tpending\n");
 
     const imza::ToolOutput bad
-        = run_script("local ok, err = tool.set_todo({"
+        = run_script("local ok, err = tool.todo.set({"
                      "{content = 'x', status = 'nope'}})\nprint(err)",
             imza::LuaHost { });
     CHECK(bad.text.find("unknown status") != std::string::npos);
+}
+
+TEST_CASE("todo bindings round-trip the cancelled status")
+{
+    imza::LuaHost host { };
+    imza::TodoList board;
+    host.todo     = [&board] { return board; };
+    host.set_todo = [&board](imza::TodoList todo) { board = std::move(todo); };
+
+    const imza::ToolOutput set
+        = run_script("local ok, err = tool.todo.set({"
+                     "{content = 'done', status = 'completed'},"
+                     "{content = 'dropped', status = 'cancelled'}})\n"
+                     "if err then error(err) end",
+            std::move(host));
+    CHECK(set.kind == imza::ToolOutput::Kind::OUTPUT);
+    REQUIRE(board.items.size() == 2);
+    CHECK(board.items[0].status == imza::TodoItem::Status::COMPLETED);
+    CHECK(board.items[1].status == imza::TodoItem::Status::CANCELLED);
+
+    imza::LuaHost host2 { };
+    host2.todo     = [&board] { return board; };
+    host2.set_todo = [&board](imza::TodoList todo) { board = std::move(todo); };
+    const imza::ToolOutput get
+        = run_script("local rows = tool.todo.get()\n"
+                     "print(rows[1].status, rows[2].status)",
+            std::move(host2));
+    CHECK(get.text == "completed\tcancelled\n");
 }
 
 TEST_CASE("tool.ask surfaces answers and unattended runs reject")
@@ -328,8 +410,238 @@ TEST_CASE("web bindings validate arguments before checking access")
         == imza::ToolOutput::Kind::ERROR);
 }
 
+TEST_CASE("tool.sh runs a single command and returns exit code")
+{
+    ShellFixture fx;
+    const imza::ToolOutput out
+        = run_script("local out, code = tool.sh('echo hello-sh')\n"
+                     "print(out, code)",
+            fx.host());
+    CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(out.text == "hello-sh\n\t0\n");
+    CHECK(fx.ask_calls == 0);
+
+    const imza::ToolOutput failing = run_script(
+        "local out, code = tool.sh('false')\nprint(out, code)", fx.host());
+    CHECK(failing.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(failing.text == "\t1\n");
+
+    const imza::ToolOutput disabled
+        = run_script("local out, err = tool.sh('echo x')\nprint(err)");
+    CHECK(disabled.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(disabled.text.find("shell access is disabled") != std::string::npos);
+
+    const imza::ToolOutput empty
+        = run_script("local out, err = tool.sh('')\nprint(err)", fx.host());
+    CHECK(empty.text.find("empty command") != std::string::npos);
+}
+
+TEST_CASE("tool.sh workspace argument selects the run directory")
+{
+    TmpDir dir;
+    ShellFixture fx;
+    fx.workspace->working_directory = dir.path;
+
+    const imza::ToolOutput absolute = run_script(
+        "local out, code = tool.sh('pwd', 10, [[" + dir.path.string()
+            + "]])\n"
+              "print(out, code)",
+        fx.host());
+    CHECK(absolute.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(absolute.text.find(dir.path.string()) != std::string::npos);
+    CHECK(absolute.text.find("\t0\n") != std::string::npos);
+
+    fs::create_directories(dir.file("sub"));
+    const imza::ToolOutput relative
+        = run_script("local out, code = tool.sh('pwd', 10, 'sub')\n"
+                     "print(out, code)",
+            fx.host());
+    CHECK(relative.text.find((dir.file("sub")).string()) != std::string::npos);
+
+    const imza::ToolOutput missing = run_script(
+        "local out, err = tool.sh('pwd', 10, 'no-such-dir')\nprint(err)",
+        fx.host());
+    CHECK(missing.text.find("not a directory") != std::string::npos);
+
+    const imza::ToolOutput empty = run_script(
+        "local out, err = tool.sh('pwd', 10, '')\nprint(err)", fx.host());
+    CHECK(empty.text.find("must not be empty") != std::string::npos);
+}
+
+TEST_CASE("tool.sh rejects only multiple command expressions")
+{
+    ShellFixture fx;
+    const imza::ToolOutput chained = run_script(
+        "local out, err = tool.sh('echo a && echo b')\nprint(err)", fx.host());
+    CHECK(chained.text.find("one command per call") != std::string::npos);
+    CHECK(fx.ask_calls == 0);
+
+    const imza::ToolOutput piped = run_script(
+        "local out, err = tool.sh('echo a | grep a')\nprint(err)", fx.host());
+    CHECK(piped.text.find("one command per call") != std::string::npos);
+
+    const imza::ToolOutput multiline = run_script(
+        "local out, err = tool.sh('echo a\\necho b')\nprint(err)", fx.host());
+    CHECK(multiline.text.find("one command per call") != std::string::npos);
+}
+
+TEST_CASE("tool.sh routes redirects and non-catalog commands to the gate")
+{
+    const fs::path marker
+        = fs::temp_directory_path() / "imza_sh_redirect_out.txt";
+    ShellFixture unattended;
+    unattended.attendable = false;
+    const imza::ToolOutput redirected
+        = run_script("local out, err = tool.sh('echo hi > " + marker.string()
+                + "')\n"
+                  "print(err)",
+            unattended.host());
+    CHECK(redirected.text.find("approval") != std::string::npos);
+
+    const imza::ToolOutput expanded
+        = run_script("local out, err = tool.sh('echo $HOME')\nprint(err)",
+            unattended.host());
+    CHECK(expanded.text.find("approval") != std::string::npos);
+
+    const imza::ToolOutput mutating = run_script(
+        "local out, err = tool.sh('touch /tmp/imza_sh_unattended')\n"
+        "print(err)",
+        unattended.host());
+    CHECK(mutating.text.find("approval") != std::string::npos);
+}
+
+TEST_CASE("tool.sh applies the native approval and session grant flow")
+{
+    const fs::path dir = fs::temp_directory_path() / "imza_sh_grants";
+    fs::create_directories(dir);
+
+    ShellFixture once;
+    once.verdict = imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" };
+    const imza::ToolOutput accepted = run_script(
+        "local out, code = tool.sh('echo $HOME')\nprint(code)", once.host());
+    CHECK(accepted.text == "0\n");
+    REQUIRE(once.ask_calls == 1);
+    REQUIRE(once.last_request.has_value());
+    CHECK(once.last_request->name == "shell");
+    CHECK_FALSE(once.last_request->allow_for_session);
+    CHECK(once.installed.empty());
+
+    ShellFixture session;
+    session.verdict
+        = imza::ToolVerdict { imza::ToolDecision::ACCEPT_FOR_SESSION, "" };
+    const imza::ToolOutput granted
+        = run_script("local out, code = tool.sh('touch " + (dir / "a").string()
+                + "')\n"
+                  "print(code)",
+            session.host());
+    CHECK(granted.text == "0\n");
+    REQUIRE(session.ask_calls == 1);
+    REQUIRE(session.last_request.has_value());
+    CHECK(session.last_request->allow_for_session);
+    CHECK(session.last_request->permission_reason.find("touch")
+        != std::string::npos);
+    REQUIRE(session.installed.size() == 1);
+    CHECK(std::get<imza::ShellCommandGrant>(session.installed.front()).program
+        == "touch");
+
+    ShellFixture rejected;
+    rejected.verdict
+        = imza::ToolVerdict { imza::ToolDecision::REJECT, "no thanks" };
+    const imza::ToolOutput denied
+        = run_script("local out, err = tool.sh('touch " + (dir / "b").string()
+                + "')\n"
+                  "print(err)",
+            rejected.host());
+    REQUIRE(rejected.ask_calls == 1);
+    CHECK(denied.text.find("no thanks") != std::string::npos);
+    CHECK(rejected.installed.empty());
+
+    std::error_code error_cleanup;
+    fs::remove_all(dir, error_cleanup);
+}
+
+TEST_CASE("tool.sh accepts pre-installed grants and skip-permissions silently")
+{
+    ShellFixture pre;
+    CHECK(pre.install({ imza::ShellCommandGrant { "touch",
+        fs::temp_directory_path().string() + "/imza_sh_pre_granted" } }));
+    pre.verdict = imza::ToolVerdict { imza::ToolDecision::REJECT, "unused" };
+    const imza::ToolOutput auto_run = run_script(
+        "local out, code = tool.sh('touch " + fs::temp_directory_path().string()
+            + "/imza_sh_pre_granted')\n"
+              "print(code)",
+        pre.host());
+    CHECK(auto_run.text == "0\n");
+    CHECK(pre.ask_calls == 0);
+
+    ShellFixture skipped;
+    skipped.skip_permissions = true;
+    skipped.verdict
+        = imza::ToolVerdict { imza::ToolDecision::REJECT, "unused" };
+    const imza::ToolOutput bypassed = run_script(
+        "local out, code = tool.sh('touch " + fs::temp_directory_path().string()
+            + "/imza_sh_skip')\n"
+              "print(code)",
+        skipped.host());
+    CHECK(bypassed.text == "0\n");
+    CHECK(skipped.ask_calls == 0);
+}
+
 TEST_CASE("default_tools includes lua in every mode")
 {
     const auto tools = imza::default_tools(imza::RuntimeFlag::NONE);
     CHECK(imza::find_tool(tools, "lua") != nullptr);
+}
+
+TEST_CASE("filesystem bindings record a dispatch log with targets")
+{
+    TmpDir dir;
+    write_file(dir.file("a.txt"), "one\ntwo\n");
+    const imza::ToolOutput out
+        = run_script("tool.read([[" + dir.file("a.txt").string()
+            + "]])\n"
+              "tool.list([["
+            + dir.path.string()
+            + "]])\n"
+              "tool.grep([["
+            + dir.file("a.txt").string() + "]], 'one')");
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    REQUIRE(out.dispatch_log.size() == 3);
+    CHECK(out.dispatch_log[0].binding == "read");
+    CHECK(out.dispatch_log[0].ok);
+    CHECK(out.dispatch_log[0].target == dir.file("a.txt").string());
+    CHECK(out.dispatch_log[1].binding == "list");
+    CHECK(out.dispatch_log[1].ok);
+    CHECK(out.dispatch_log[2].binding == "grep");
+    CHECK(out.dispatch_log[2].ok);
+}
+
+TEST_CASE("sh binding logs commands with exit status")
+{
+    TmpDir dir;
+    ShellFixture fx;
+    const imza::ToolOutput out
+        = run_script("tool.sh('echo hi')\ntool.sh('false')\nlocal _, err = "
+                     "tool.sh('echo a && echo b')\nprint(err ~= nil)",
+            fx.host());
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    REQUIRE(out.dispatch_log.size() == 2);
+    CHECK(out.dispatch_log[0].binding == "sh");
+    CHECK(out.dispatch_log[0].target == "echo hi");
+    CHECK(out.dispatch_log[0].ok);
+    CHECK_FALSE(out.dispatch_log[1].ok);
+}
+
+TEST_CASE("a script killed at the deadline keeps its partial log")
+{
+    TmpDir dir;
+    write_file(dir.file("a.txt"), "x\n");
+    const imza::ToolOutput out
+        = run_script("tool.read([[" + dir.file("a.txt").string()
+            + "]])\n"
+              "while true do end");
+    CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
+    REQUIRE(out.dispatch_log.size() == 1);
+    CHECK(out.dispatch_log[0].binding == "read");
+    CHECK(out.dispatch_log[0].ok);
 }

@@ -45,6 +45,7 @@ struct ToolOutput {
     std::optional<DiffView> diff { };
     std::optional<ShellStatus> shell_status { };
     std::optional<ViewerModal> viewer { };
+    std::vector<LuaBindingCall> dispatch_log { };
 };
 
 inline ToolOutput tool_error(std::string text)
@@ -109,7 +110,10 @@ struct LuaHost {
     // By value: ProviderStore::config() returns a temporary.
     std::function<Config()> config;
     std::function<SkillStore&()> skill_store;
-    bool web_enabled = false;
+    std::function<bool(PermissionStore::Grants)> install_grants;
+    bool web_enabled      = false;
+    bool shell_enabled    = false;
+    bool skip_permissions = false;
 };
 
 Tool make_lua_tool(LuaHost host = { }, bool has_rg = false);

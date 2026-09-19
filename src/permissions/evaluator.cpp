@@ -262,4 +262,14 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
         std::move(request), "tool has no permission policy: " + original.name);
 }
 
+PermissionEvaluation evaluate_shell_request(
+    const ToolCallRequest& request, const PermissionContext& context)
+{
+    const Json::Value arguments = parse_json(request.args);
+    if (const auto error = validate_shell_tool_arguments(arguments)) {
+        return reject(std::move(request), *error);
+    }
+    return evaluate_shell(request, arguments, context);
+}
+
 } // namespace imza

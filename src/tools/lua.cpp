@@ -1,8 +1,10 @@
 #include "tools/tool.h"
 
 #include "network/json_io.h"
+#include "permissions/evaluator.h"
 #include "permissions/filesystem.h"
 #include "platform/command_runner.h"
+#include "workspace/environment.h"
 
 #include <algorithm>
 #include <cctype>
@@ -41,6 +43,7 @@ namespace {
         std::size_t memory_used = 0;
         std::chrono::steady_clock::time_point deadline;
         bool truncated = false;
+        std::vector<LuaBindingCall> log;
         // Borrowed; lives as long as the Tool that owns this VM run.
         const LuaHost* host = nullptr;
         bool has_rg         = false;
@@ -178,6 +181,13 @@ namespace {
         return *static_cast<ScriptRun**>(lua_getextraspace(L));
     }
 
+    void record_call(
+        lua_State* L, std::string_view binding, std::string target, bool ok)
+    {
+        run_of(L)->log.push_back(
+            { std::string(binding), std::move(target), ok });
+    }
+
     int binding_error(lua_State* L, std::string message)
     {
         lua_pushnil(L);
@@ -189,20 +199,31 @@ namespace {
     // stack. This shim is the only place the two meet. ASK verdicts resolve
     // through the modal queue when an ask callback is wired, and collapse
     // to a rejection without one (unattended runs); the script sees the
-    // outcome as nil,err either way.
-    std::optional<FilesystemRequest> evaluate(
-        lua_State* L, std::string_view tool, const Json::Value& args)
+    // outcome as nil,err either way. Calls that pass the gate land in the
+    // dispatch log with their canonicalized target.
+    std::optional<FilesystemRequest> evaluate(lua_State* L,
+        std::string_view tool, const Json::Value& args,
+        std::string_view binding = "")
     {
         ScriptRun* run = run_of(L);
+        const std::string label
+            = binding.empty() ? std::string(tool) : std::string(binding);
+        const auto record = [&](bool ok, std::string target) {
+            run->log.push_back({ label, std::move(target), ok });
+        };
         if (run->host == nullptr || !run->host->context) {
             // No provider: trusted mode (tests, SKIP_PERMISSIONS paths).
+            const std::string path = json_string(args, "path");
+            record(true, fs::path(path).string());
             return FilesystemRequest { FilesystemRequest::Operation::READ,
-                fs::path(json_string(args, "path")), args };
+                fs::path(path), args };
         }
         const FilesystemEvaluation evaluation = evaluate_filesystem_request(
             tool, write_json(args), run->host->context());
         switch (evaluation.decision.kind) {
-        case PermissionDecision::Kind::ACCEPT: return evaluation.request;
+        case PermissionDecision::Kind::ACCEPT:
+            record(true, evaluation.request->target.string());
+            return evaluation.request;
         case PermissionDecision::Kind::REJECT: return std::nullopt;
         case PermissionDecision::Kind::ASK: break;
         }
@@ -224,6 +245,7 @@ namespace {
         const auto* verdict = std::get_if<ToolVerdict>(&result);
         if (verdict != nullptr
             && verdict->decision == ToolDecision::ACCEPT_ONCE) {
+            record(true, evaluation.request->target.string());
             return evaluation.request;
         }
         return std::nullopt;
@@ -531,7 +553,7 @@ namespace {
         Json::Value args = string_arg("path", path);
         args["pattern"]  = pattern;
         const std::optional<FilesystemRequest> allowed
-            = evaluate(L, "find", args);
+            = evaluate(L, "find", args, "grep");
         if (!allowed) {
             return binding_error(L, "grep: permission denied: " + path);
         }
@@ -541,14 +563,15 @@ namespace {
         return grep_run(L, pattern, target, run->has_rg);
     }
 
-    // tool.todo() => [{content, status}]
+    // tool.todo.get() => [{content, status}]
     int tool_todo(lua_State* L)
     {
         ScriptRun* run = run_of(L);
         if (run->host == nullptr || !run->host->todo) {
-            return binding_error(L, "todo: unavailable in this context");
+            return binding_error(L, "todo.get: unavailable in this context");
         }
         const TodoList list = run->host->todo();
+        record_call(L, "todo.get", "", true);
         lua_newtable(L);
         for (std::size_t i = 0; i < list.items.size(); ++i) {
             const TodoItem& item = list.items[i];
@@ -558,7 +581,8 @@ namespace {
             const char* status = item.status == TodoItem::Status::PENDING
                 ? "pending"
                 : item.status == TodoItem::Status::IN_PROGRESS ? "in_progress"
-                                                               : "completed";
+                : item.status == TodoItem::Status::COMPLETED   ? "completed"
+                                                               : "cancelled";
             lua_pushstring(L, status);
             lua_setfield(L, -2, "status");
             lua_rawseti(L, -2, static_cast<lua_Integer>(i + 1));
@@ -566,8 +590,9 @@ namespace {
         return 1;
     }
 
-    // tool.set_todo(items) => true|nil, err
-    // items: [{content = string, status = "pending"|"in_progress"|"completed"}]
+    // tool.todo.set(items) => true|nil, err
+    // items: [{content = string, status = "pending"|"in_progress"|
+    //                  "completed"|"cancelled"}]
     int tool_set_todo(lua_State* L)
     {
         luaL_checktype(L, 1, LUA_TTABLE);
@@ -578,13 +603,13 @@ namespace {
             if (!lua_istable(L, -1)) {
                 lua_pop(L, 1);
                 return binding_error(L,
-                    "set_todo: item " + std::to_string(i) + " must be a table");
+                    "todo.set: item " + std::to_string(i) + " must be a table");
             }
             lua_getfield(L, -1, "content");
             if (!lua_isstring(L, -1)) {
                 lua_pop(L, 2);
                 return binding_error(L,
-                    "set_todo: item " + std::to_string(i)
+                    "todo.set: item " + std::to_string(i)
                         + " needs a 'content' string");
             }
             const std::string content = lua_tostring(L, -1);
@@ -598,10 +623,12 @@ namespace {
                 item.status = TodoItem::Status::IN_PROGRESS;
             } else if (std::string_view(status) == "completed") {
                 item.status = TodoItem::Status::COMPLETED;
+            } else if (std::string_view(status) == "cancelled") {
+                item.status = TodoItem::Status::CANCELLED;
             } else if (std::string_view(status) != "pending") {
                 lua_pop(L, 2);
                 return binding_error(L,
-                    "set_todo: item " + std::to_string(i)
+                    "todo.set: item " + std::to_string(i)
                         + " has unknown status '" + status + "'");
             }
             lua_pop(L, 1);
@@ -610,9 +637,10 @@ namespace {
         }
         ScriptRun* run = run_of(L);
         if (run->host == nullptr || !run->host->set_todo) {
-            return binding_error(L, "set_todo: unavailable in this context");
+            return binding_error(L, "todo.set: unavailable in this context");
         }
         run->host->set_todo(std::move(list));
+        record_call(L, "todo.set", "", true);
         lua_pushboolean(L, 1);
         return 1;
     }
@@ -676,8 +704,13 @@ namespace {
         run->deadline += std::chrono::steady_clock::now() - paused_at;
         const auto* answer = std::get_if<ModalAnswer>(&result);
         if (answer == nullptr) {
+            record_call(L, "ask", "", false);
             return binding_error(L, "ask: dismissed by the user");
         }
+        record_call(L, "ask",
+            std::to_string(answer->cards.size())
+                + (answer->cards.size() == 1 ? " question" : " questions"),
+            true);
         lua_newtable(L);
         for (std::size_t i = 0; i < answer->cards.size(); ++i) {
             const QuestionAnswer& qa = answer->cards[i];
@@ -712,11 +745,14 @@ namespace {
         args["name"]                     = name;
         const std::optional<Skill> skill = resolve_skill(catalog, args);
         if (!skill) {
+            record_call(L, "skill", name, false);
             return binding_error(L, "skill: unknown or unavailable skill");
         }
         if (skill_policy(run->host->config(), *skill) == SkillPolicy::DENY) {
+            record_call(L, "skill", name, false);
             return binding_error(L, "skill: access denied by configuration");
         }
+        record_call(L, "skill", name, true);
         SkillStore& store = run->host->skill_store();
         if (store.is_loaded(skill->path)) {
             const SkillRead already = read_skill(*skill);
@@ -739,6 +775,146 @@ namespace {
         }
         lua_pushlstring(L, read.body.data(), read.body.size());
         return 1;
+    }
+
+    // tool.sh(command, timeout=10, workspace=nil) => output, exit_code
+    // (nil, err on failure)
+    // Exactly the native shell permission flow, with one binding-local rule:
+    // a single command expression per call. Chains (; || & and newlines)
+    // must be composed in Lua. Everything else — redirects, expansions,
+    // catalog lookups, session grants — is decided by evaluate_shell_request,
+    // the same gate the native shell tool runs. `workspace` selects the
+    // directory the command runs in; relative paths resolve against the
+    // session working directory. The process cwd only moves through
+    // Environment::chdir, so inheriting it as the default matches the
+    // native shell tool without a syscall.
+    int tool_sh(lua_State* L)
+    {
+        const std::string command = luaL_checkstring(L, 1);
+        long timeout              = 10;
+        if (lua_gettop(L) >= 2 && !lua_isnil(L, 2)) {
+            timeout = std::clamp<long>(luaL_checkinteger(L, 2), 1, 120);
+        }
+
+        ScriptRun* run = run_of(L);
+        if (run->host == nullptr || !run->host->shell_enabled) {
+            return binding_error(
+                L, "sh: shell access is disabled for this run");
+        }
+
+        std::string workspace;
+        if (lua_gettop(L) >= 3 && !lua_isnil(L, 3)) {
+            const std::string raw = luaL_checkstring(L, 3);
+            if (raw.empty()) {
+                return binding_error(L, "sh: workspace must not be empty");
+            }
+            fs::path dir(raw);
+            if (dir.is_relative()) {
+                // The session working directory lives in the workspace
+                // snapshot; the process cwd already tracks it (Environment
+                // chdirs the process), so this is plain path joining.
+                const PermissionContext context = run->host->context
+                    ? run->host->context()
+                    : PermissionContext { };
+                dir = (context.workspace ? context.workspace->working_directory
+                                         : fs::current_path())
+                    / dir;
+            }
+            std::error_code ec;
+            if (!fs::is_directory(dir, ec)) {
+                return binding_error(
+                    L, "sh: workspace is not a directory: " + raw);
+            }
+            workspace = dir.string();
+        }
+
+        const ShellAnalysis analysis = analyze_shell(command);
+        if (analysis.invocations.size() > 1) {
+            return binding_error(L,
+                "sh: one command per call; compose results in Lua instead of "
+                "chaining with && || ; |");
+        }
+        if (analysis.invocations.empty()) {
+            return binding_error(L, "sh: empty command");
+        }
+
+        const auto run_sh = [&]() -> int {
+            CommandResult r = run_command(
+                command, std::chrono::seconds(timeout), fs::path(workspace));
+            if (!r.spawned) {
+                record_call(L, "sh", command, false);
+                return binding_error(L, "sh: failed to execute command");
+            }
+            if (r.timed_out) {
+                record_call(L, "sh", command, false);
+                return binding_error(
+                    L, "sh: timed out after " + std::to_string(timeout) + "s");
+            }
+            record_call(L, "sh", command, r.exit_code == 0);
+            std::string output = std::move(r.output);
+            if (output.size() > MAX_OUTPUT_BYTES) {
+                output.resize(MAX_OUTPUT_BYTES);
+                output += "\n[truncated]";
+            }
+            lua_pushlstring(L, output.data(), output.size());
+            lua_pushinteger(L, r.exit_code);
+            return 2;
+        };
+
+        if (run->host == nullptr || !run->host->context) {
+            // No provider: trusted mode (tests, SKIP_PERMISSIONS paths).
+            return run_sh();
+        }
+
+        Json::Value args;
+        args["command"] = command;
+        args["timeout"] = static_cast<Json::Int64>(timeout);
+        ToolCallRequest request { "shell", write_json(args), { } };
+        const PermissionEvaluation evaluation
+            = evaluate_shell_request(request, run->host->context());
+        if (evaluation.decision.kind == PermissionDecision::Kind::REJECT) {
+            return binding_error(L, "sh: " + evaluation.decision.reason);
+        }
+        if (evaluation.decision.kind == PermissionDecision::Kind::ACCEPT
+            || run->host->skip_permissions) {
+            return run_sh();
+        }
+        if (!run->host->ask) {
+            // Unattended: fail closed.
+            return binding_error(
+                L, "sh: permission requires approval in attended runs");
+        }
+
+        // ASK: block on the modal queue like the native flow; think-time is
+        // free, so shift the wall-clock deadline by the paused duration.
+        const auto paused_at     = std::chrono::steady_clock::now();
+        const ModalResult result = run->host->ask(evaluation.request).get();
+        run->deadline += std::chrono::steady_clock::now() - paused_at;
+        const auto* verdict = std::get_if<ToolVerdict>(&result);
+        if (verdict == nullptr) {
+            return binding_error(L, "sh: permission dismissed");
+        }
+        if (verdict->decision == ToolDecision::REJECT) {
+            return binding_error(L,
+                "sh: "
+                    + (verdict->reason.empty() ? "rejected" : verdict->reason));
+        }
+        if (verdict->decision == ToolDecision::ACCEPT_FOR_SESSION) {
+            if (evaluation.session_grants.empty() || !run->host->install_grants
+                || !run->host->install_grants(evaluation.session_grants)) {
+                return binding_error(L, "sh: session approval is unavailable");
+            }
+        }
+
+        // Re-evaluate before execution, mirroring the native run flow: the
+        // grants above may have turned the request into an auto-accept.
+        const PermissionEvaluation current
+            = evaluate_shell_request(evaluation.request, run->host->context());
+        if (current.decision.kind == PermissionDecision::Kind::REJECT
+            || current.request.args != evaluation.request.args) {
+            return binding_error(L, "sh: " + current.decision.reason);
+        }
+        return run_sh();
     }
 
     constexpr std::size_t MAX_WEB_CHARS = 40000;
@@ -774,14 +950,18 @@ namespace {
         std::string detail;
         const Status st = fetch_url(url, page, detail);
         if (st == Status::INVALID_URL) {
+            record_call(L, "webfetch", url, false);
             return binding_error(L, "webfetch: " + detail + ": " + url);
         }
         if (st == Status::NETWORK_ERROR) {
+            record_call(L, "webfetch", url, false);
             return binding_error(L, "webfetch: request failed: " + url);
         }
         if (st != Status::OK) {
+            record_call(L, "webfetch", url, false);
             return binding_error(L, "webfetch: " + detail + ": " + url);
         }
+        record_call(L, "webfetch", url, true);
 
         std::string body  = page.body;
         std::size_t begin = 0;
@@ -824,13 +1004,16 @@ namespace {
         std::string text;
         const Status st = web_search(query, num_results, text);
         if (st == Status::NETWORK_ERROR) {
+            record_call(L, "websearch", query, false);
             return binding_error(
                 L, "websearch: request failed for '" + query + "'");
         }
         if (st != Status::OK) {
+            record_call(L, "websearch", query, false);
             return binding_error(
                 L, "websearch: search request rejected for '" + query + "'");
         }
+        record_call(L, "websearch", query, true);
         if (trim(text).empty()) {
             lua_pushliteral(
                 L, "No search results found. Try a different query.");
@@ -850,10 +1033,12 @@ namespace {
         lua_setfield(L, -2, "list");
         lua_pushcfunction(L, tool_grep);
         lua_setfield(L, -2, "grep");
+        lua_newtable(L);
         lua_pushcfunction(L, tool_todo);
-        lua_setfield(L, -2, "todo");
+        lua_setfield(L, -2, "get");
         lua_pushcfunction(L, tool_set_todo);
-        lua_setfield(L, -2, "set_todo");
+        lua_setfield(L, -2, "set");
+        lua_setfield(L, -2, "todo");
         lua_pushcfunction(L, tool_ask);
         lua_setfield(L, -2, "ask");
         lua_pushcfunction(L, tool_skill);
@@ -862,6 +1047,8 @@ namespace {
         lua_setfield(L, -2, "webfetch");
         lua_pushcfunction(L, tool_websearch);
         lua_setfield(L, -2, "websearch");
+        lua_pushcfunction(L, tool_sh);
+        lua_setfield(L, -2, "sh");
         lua_setglobal(L, "tool");
     }
 
@@ -893,27 +1080,29 @@ namespace {
         open_bindings(L);
         lua_sethook(L, deadline_hook, LUA_MASKCOUNT, HOOK_INTERVAL);
 
+        // The log records what ran even when the script dies mid-flight, so
+        // every exit path below carries it out.
+        const auto finish = [&](ToolOutput out) {
+            out.dispatch_log = std::move(run.log);
+            lua_close(L);
+            return out;
+        };
+
         const int loaded
             = luaL_loadbufferx(L, script.data(), script.size(), "script", "t");
         if (loaded != LUA_OK) {
-            const std::string error
-                = "lua: " + std::string(lua_tostring(L, -1));
-            lua_close(L);
-            return tool_error(error);
+            return finish(
+                tool_error("lua: " + std::string(lua_tostring(L, -1))));
         }
         if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-            const std::string error
-                = "lua: " + std::string(lua_tostring(L, -1));
-            lua_close(L);
-            return tool_error(error);
+            return finish(
+                tool_error("lua: " + std::string(lua_tostring(L, -1))));
         }
-        lua_close(L);
-
         std::string output = std::move(run.output);
         if (run.truncated) {
             output += "\n[truncated]";
         }
-        return { ToolOutput::Kind::OUTPUT, std::move(output) };
+        return finish({ ToolOutput::Kind::OUTPUT, std::move(output) });
     }
 
 } // namespace
@@ -936,9 +1125,9 @@ Tool make_lua_tool(LuaHost host, bool has_rg)
           "tool.grep(path: string, pattern: string) -> [{file: string, line: "
           "integer, text: string}]  -- regex = POSIX ERE (rg: Rust regex), "
           "not Lua patterns\n"
-          "tool.todo() -> [{content: string, status: 'pending'|"
-          "'in_progress'|'completed'}]\n"
-          "tool.set_todo(items: [{content: string, status?: string}]) -> "
+          "tool.todo.get() -> [{content: string, status: 'pending'|"
+          "'in_progress'|'completed'|'cancelled'}]\n"
+          "tool.todo.set(items: [{content: string, status?: string}]) -> "
           "boolean\n"
           "tool.ask(cards: [{prompt: string, options?: string[], multi?: "
           "boolean=false, free_text?: boolean=false}]) -> [{question: "
@@ -947,6 +1136,12 @@ Tool make_lua_tool(LuaHost host, bool has_rg)
           "tool.webfetch(url: string) -> string  -- requires web access\n"
           "tool.websearch(query: string, num_results?: integer=5, max 10) -> "
           "string  -- requires web access\n"
+          "tool.sh(command: string, timeout?: integer=10, max 120, "
+          "workspace?: string) -> output, exit_code  -- one command per "
+          "call; chains are rejected, compose them in Lua; approval "
+          "matches the shell tool; workspace selects the directory to run "
+          "in (relative paths resolve against the session working "
+          "directory)\n"
           "print(args...) writes to the returned output.";
     spec.parameters = parse_json(
         R"json({"type":"object","properties":{"script":{"type":"string","description":"Lua source code to execute"},"timeout":{"type":"integer","description":"maximum script execution time in seconds, excluding pauses for permission prompts (default 10, max 120)"}},"required":["script"]})json");

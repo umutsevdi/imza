@@ -39,7 +39,8 @@ namespace {
     }
 
     CommandResult run_windows(const std::string& command,
-        std::chrono::seconds timeout, CommandResult result)
+        std::chrono::seconds timeout, CommandResult result,
+        const std::filesystem::path& working_directory)
     {
         std::wstring cmdline = L"cmd.exe /c " + to_wide(command);
 
@@ -61,8 +62,13 @@ namespace {
         si.hStdInput  = GetStdHandle(STD_INPUT_HANDLE);
 
         PROCESS_INFORMATION pi { };
+        const std::wstring wide_directory = working_directory.empty()
+            ? std::wstring { }
+            : working_directory.wstring();
         if (!CreateProcessW(nullptr, cmdline.data(), nullptr, nullptr, TRUE, 0,
-                nullptr, nullptr, &si, &pi)) {
+                nullptr,
+                wide_directory.empty() ? nullptr : wide_directory.c_str(), &si,
+                &pi)) {
             CloseHandle(out_read);
             CloseHandle(out_write);
             return result;
@@ -125,7 +131,8 @@ namespace {
 #else
 
     CommandResult run_posix(const std::string& command,
-        std::chrono::seconds timeout, CommandResult result)
+        std::chrono::seconds timeout, CommandResult result,
+        const std::filesystem::path& working_directory)
     {
         int pipefd[2];
         if (pipe(pipefd) != 0) {
@@ -138,6 +145,13 @@ namespace {
             return result;
         }
         if (pid == 0) {
+            // 126 marks "cannot run" (here: the directory vanished between
+            // validation and exec); the binding pre-validates, so this only
+            // covers a TOCTOU race.
+            if (!working_directory.empty()
+                && chdir(working_directory.c_str()) != 0) {
+                _exit(126);
+            }
             setpgid(0, 0);
             dup2(pipefd[1], STDOUT_FILENO);
             dup2(pipefd[1], STDERR_FILENO);
@@ -241,17 +255,18 @@ std::string shell_quote(const std::filesystem::path& path)
 #endif
 }
 
-CommandResult run_command(
-    const std::string& command, std::chrono::seconds timeout)
+CommandResult run_command(const std::string& command,
+    std::chrono::seconds timeout,
+    const std::filesystem::path& working_directory)
 {
     CommandResult result;
     if (command.empty() || timeout < std::chrono::seconds(0)) {
         return result;
     }
 #ifdef _WIN32
-    return run_windows(command, timeout, std::move(result));
+    return run_windows(command, timeout, std::move(result), working_directory);
 #else
-    return run_posix(command, timeout, std::move(result));
+    return run_posix(command, timeout, std::move(result), working_directory);
 #endif
 }
 

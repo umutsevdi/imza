@@ -58,8 +58,17 @@ namespace {
             .skills = [state] { return state->environment->skills(); },
             .config = [state] { return state->providers->config(); },
             .skill_store = [state]() -> SkillStore& { return *state->skills; },
+            .install_grants =
+                [state](PermissionStore::Grants grants) {
+                    return state->permissions->install(std::move(grants));
+                },
             .web_enabled
             = (state->runtime_flags & RuntimeFlag::WEB) != RuntimeFlag::NONE,
+            .shell_enabled
+            = (state->runtime_flags & RuntimeFlag::SHELL) != RuntimeFlag::NONE,
+            .skip_permissions
+            = (state->runtime_flags & RuntimeFlag::SKIP_PERMISSIONS)
+                != RuntimeFlag::NONE,
         };
     }
 
