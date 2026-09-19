@@ -76,9 +76,8 @@ namespace {
             void ComputeRequirement() override
             {
                 Node::ComputeRequirement();
-                requirement_ = children_[0]->requirement();
-                requirement_.focused.cursor_shape
-                    = Screen::Cursor::BlockBlinking;
+                requirement_                      = children_[0]->requirement();
+                requirement_.focused.cursor_shape = Screen::Cursor::Block;
             }
 
             void SetBox(Box box) override
@@ -400,7 +399,6 @@ namespace {
                                 viewport_.scroll
                                     = std::max(0, viewport_.scroll + delta);
                             }
-                            animation::RequestAnimationFrame();
                         }));
             }
 
