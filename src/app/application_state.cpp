@@ -56,9 +56,10 @@ namespace {
             = [state](
                   TodoList todo) { state->session->set_todo(std::move(todo)); },
             .skills = [state] { return state->environment->skills(); },
-            .config
-            = [state]() -> const Config& { return state->providers->config(); },
+            .config = [state] { return state->providers->config(); },
             .skill_store = [state]() -> SkillStore& { return *state->skills; },
+            .web_enabled
+            = (state->runtime_flags & RuntimeFlag::WEB) != RuntimeFlag::NONE,
         };
     }
 

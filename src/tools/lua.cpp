@@ -5,6 +5,7 @@
 #include "platform/command_runner.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -740,6 +741,106 @@ namespace {
         return 1;
     }
 
+    constexpr std::size_t MAX_WEB_CHARS = 40000;
+
+    // Mirrors web.cpp's truncate_output: cap at a UTF-8 boundary, then mark.
+    std::string truncate_web(std::string text)
+    {
+        if (text.size() <= MAX_WEB_CHARS) {
+            return text;
+        }
+        std::string out(truncate_utf8(text, MAX_WEB_CHARS));
+        out += "\n[truncated: showing first " + std::to_string(out.size())
+            + " of the content]";
+        return out;
+    }
+
+    bool web_enabled(lua_State* L)
+    {
+        ScriptRun* run = run_of(L);
+        return run->host != nullptr && run->host->web_enabled;
+    }
+
+    // tool.webfetch(url) => string|nil, err
+    int tool_webfetch(lua_State* L)
+    {
+        const std::string url = luaL_checkstring(L, 1);
+        if (!web_enabled(L)) {
+            return binding_error(
+                L, "webfetch: web access is disabled for this run");
+        }
+
+        FetchedPage page;
+        std::string detail;
+        const Status st = fetch_url(url, page, detail);
+        if (st == Status::INVALID_URL) {
+            return binding_error(L, "webfetch: " + detail + ": " + url);
+        }
+        if (st == Status::NETWORK_ERROR) {
+            return binding_error(L, "webfetch: request failed: " + url);
+        }
+        if (st != Status::OK) {
+            return binding_error(L, "webfetch: " + detail + ": " + url);
+        }
+
+        std::string body  = page.body;
+        std::size_t begin = 0;
+        while (begin < body.size()
+            && std::isspace(static_cast<unsigned char>(body[begin]))) {
+            ++begin;
+        }
+        const std::string head = to_lower(body.substr(
+            begin, std::min(body.size() - begin, std::size_t(200))));
+        const bool is_html     = !body.empty() && body[begin] == '<'
+            && (head.starts_with("<!doctype html") || head.starts_with("<html")
+                || head.starts_with("<head") || head.starts_with("<body")
+                || head.starts_with("<div") || head.starts_with("<p")
+                || head.starts_with("<h1") || head.starts_with("<h2")
+                || head.starts_with("<!doctype html public"));
+        std::string text = is_html ? html_to_text(page.body) : page.body;
+        if (trim(text).empty()) {
+            return binding_error(
+                L, "webfetch: no readable content at " + page.url);
+        }
+        const std::string out = truncate_web(std::move(text));
+        lua_pushlstring(L, out.data(), out.size());
+        return 1;
+    }
+
+    // tool.websearch(query, num_results=5) => string|nil, err
+    int tool_websearch(lua_State* L)
+    {
+        const std::string query = luaL_checkstring(L, 1);
+        int num_results         = 5;
+        if (lua_gettop(L) >= 2 && !lua_isnil(L, 2)) {
+            num_results = static_cast<int>(luaL_checkinteger(L, 2));
+        }
+        num_results = std::clamp(num_results, 1, 10);
+        if (!web_enabled(L)) {
+            return binding_error(
+                L, "websearch: web access is disabled for this run");
+        }
+
+        std::string text;
+        const Status st = web_search(query, num_results, text);
+        if (st == Status::NETWORK_ERROR) {
+            return binding_error(
+                L, "websearch: request failed for '" + query + "'");
+        }
+        if (st != Status::OK) {
+            return binding_error(
+                L, "websearch: search request rejected for '" + query + "'");
+        }
+        if (trim(text).empty()) {
+            lua_pushliteral(
+                L, "No search results found. Try a different query.");
+            return 1;
+        }
+        const std::string out = truncate_web(std::move(text));
+        lua_pushlstring(L, out.data(), out.size());
+        return 1;
+    }
+
     void open_bindings(lua_State* L)
     {
         lua_newtable(L);
@@ -757,6 +858,10 @@ namespace {
         lua_setfield(L, -2, "ask");
         lua_pushcfunction(L, tool_skill);
         lua_setfield(L, -2, "skill");
+        lua_pushcfunction(L, tool_webfetch);
+        lua_setfield(L, -2, "webfetch");
+        lua_pushcfunction(L, tool_websearch);
+        lua_setfield(L, -2, "websearch");
         lua_setglobal(L, "tool");
     }
 
@@ -839,6 +944,9 @@ Tool make_lua_tool(LuaHost host, bool has_rg)
           "boolean=false, free_text?: boolean=false}]) -> [{question: "
           "string, answer: string}]  -- pauses for user input\n"
           "tool.skill(name: string) -> string\n"
+          "tool.webfetch(url: string) -> string  -- requires web access\n"
+          "tool.websearch(query: string, num_results?: integer=5, max 10) -> "
+          "string  -- requires web access\n"
           "print(args...) writes to the returned output.";
     spec.parameters = parse_json(
         R"json({"type":"object","properties":{"script":{"type":"string","description":"Lua source code to execute"},"timeout":{"type":"integer","description":"maximum script execution time in seconds, excluding pauses for permission prompts (default 10, max 120)"}},"required":["script"]})json");

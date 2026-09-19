@@ -288,7 +288,7 @@ TEST_CASE("tool.skill loads instructions once and rejects unknown names")
         skill.scope = imza::Skill::Scope::GLOBAL;
         return { skill };
     };
-    host.config = []() -> const imza::Config& {
+    host.config = [] {
         static imza::Config config;
         return config;
     };
@@ -306,6 +306,26 @@ TEST_CASE("tool.skill loads instructions once and rejects unknown names")
     const imza::ToolOutput unknown = run_script(
         "local body, err = tool.skill('nope')\nprint(err)", std::move(host));
     CHECK(unknown.text.find("unknown") != std::string::npos);
+}
+
+TEST_CASE("web bindings fail closed without web access")
+{
+    const imza::ToolOutput fetch = run_script(
+        "local body, err = tool.webfetch('https://example.com')\nprint(err)");
+    CHECK(fetch.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(fetch.text.find("web access is disabled") != std::string::npos);
+
+    const imza::ToolOutput search
+        = run_script("local body, err = tool.websearch('imza')\nprint(err)");
+    CHECK(search.text.find("web access is disabled") != std::string::npos);
+}
+
+TEST_CASE("web bindings validate arguments before checking access")
+{
+    CHECK(run_script("print(tool.webfetch())").kind
+        == imza::ToolOutput::Kind::ERROR);
+    CHECK(run_script("print(tool.websearch())").kind
+        == imza::ToolOutput::Kind::ERROR);
 }
 
 TEST_CASE("default_tools includes lua in every mode")

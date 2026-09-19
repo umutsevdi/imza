@@ -16,6 +16,7 @@
 #include "common/modal.h"
 #include "common/tool_call.h"
 #include "common/types.h"
+#include "network/web.h"
 #include "permissions/filesystem.h"
 #include "platform/config.h"
 #include "tools/skills.h"
@@ -105,8 +106,10 @@ struct LuaHost {
     std::function<TodoList()> todo;
     std::function<void(TodoList)> set_todo;
     std::function<std::vector<Skill>()> skills;
-    std::function<const Config&()> config;
+    // By value: ProviderStore::config() returns a temporary.
+    std::function<Config()> config;
     std::function<SkillStore&()> skill_store;
+    bool web_enabled = false;
 };
 
 Tool make_lua_tool(LuaHost host = { }, bool has_rg = false);
