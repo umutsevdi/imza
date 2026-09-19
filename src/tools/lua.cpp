@@ -1,9 +1,11 @@
 #include "tools/tool.h"
 
+#include "common/util.h"
 #include "network/json_io.h"
 #include "permissions/evaluator.h"
 #include "permissions/filesystem.h"
 #include "platform/command_runner.h"
+#include "tools/file_ops.h"
 #include "workspace/environment.h"
 
 #include <algorithm>
@@ -38,12 +40,21 @@ namespace {
     constexpr std::size_t MAX_GREP_ROWS    = 500;
     constexpr int MAX_LIST_DEPTH           = 5;
 
+    struct FileMutation {
+        std::string path;
+        std::string original;
+        std::string latest;
+    };
+
     struct ScriptRun {
         std::string output;
         std::size_t memory_used = 0;
         std::chrono::steady_clock::time_point deadline;
         bool truncated = false;
         std::vector<LuaBindingCall> log;
+        // Per-file net mutation state: original content at first touch,
+        // latest content after each accepted tool.file.* call.
+        std::vector<FileMutation> mutations;
         // Borrowed; lives as long as the Tool that owns this VM run.
         const LuaHost* host = nullptr;
         bool has_rg         = false;
@@ -213,7 +224,10 @@ namespace {
         };
         if (run->host == nullptr || !run->host->context) {
             // No provider: trusted mode (tests, SKIP_PERMISSIONS paths).
-            const std::string path = json_string(args, "path");
+            std::string path = json_string(args, "path");
+            if (path.empty()) {
+                path = json_string(args, "file_path");
+            }
             record(true, fs::path(path).string());
             return FilesystemRequest { FilesystemRequest::Operation::READ,
                 fs::path(path), args };
@@ -731,53 +745,7 @@ namespace {
         return 1;
     }
 
-    // tool.skill(name) => string|nil, err
-    int tool_skill(lua_State* L)
-    {
-        const std::string name = luaL_checkstring(L, 1);
-        ScriptRun* run         = run_of(L);
-        if (run->host == nullptr || !run->host->skills || !run->host->config
-            || !run->host->skill_store) {
-            return binding_error(L, "skill: unavailable in this context");
-        }
-        const std::vector<Skill> catalog = run->host->skills();
-        Json::Value args;
-        args["name"]                     = name;
-        const std::optional<Skill> skill = resolve_skill(catalog, args);
-        if (!skill) {
-            record_call(L, "skill", name, false);
-            return binding_error(L, "skill: unknown or unavailable skill");
-        }
-        if (skill_policy(run->host->config(), *skill) == SkillPolicy::DENY) {
-            record_call(L, "skill", name, false);
-            return binding_error(L, "skill: access denied by configuration");
-        }
-        record_call(L, "skill", name, true);
-        SkillStore& store = run->host->skill_store();
-        if (store.is_loaded(skill->path)) {
-            const SkillRead already = read_skill(*skill);
-            if (already.kind == SkillRead::Kind::OK) {
-                lua_pushlstring(L, already.body.data(), already.body.size());
-                return 1;
-            }
-        }
-        const SkillRead read = read_skill(*skill);
-        if (read.kind == SkillRead::Kind::READ_FAILED) {
-            return binding_error(L, "skill: cannot read instructions");
-        }
-        if (read.kind == SkillRead::Kind::TOO_LARGE) {
-            return binding_error(L, "skill: instructions exceed 128 KiB");
-        }
-        std::string error;
-        if (!store.load(*skill, error)) {
-            return binding_error(
-                L, "skill: " + (error.empty() ? "cannot load" : error));
-        }
-        lua_pushlstring(L, read.body.data(), read.body.size());
-        return 1;
-    }
-
-    // tool.sh(command, timeout=10, workspace=nil) => output, exit_code
+    // tool.shell(command, timeout=10, workspace=nil) => output, exit_code
     // (nil, err on failure)
     // Exactly the native shell permission flow, with one binding-local rule:
     // a single command expression per call. Chains (; || & and newlines)
@@ -799,14 +767,14 @@ namespace {
         ScriptRun* run = run_of(L);
         if (run->host == nullptr || !run->host->shell_enabled) {
             return binding_error(
-                L, "sh: shell access is disabled for this run");
+                L, "shell: shell access is disabled for this run");
         }
 
         std::string workspace;
         if (lua_gettop(L) >= 3 && !lua_isnil(L, 3)) {
             const std::string raw = luaL_checkstring(L, 3);
             if (raw.empty()) {
-                return binding_error(L, "sh: workspace must not be empty");
+                return binding_error(L, "shell: workspace must not be empty");
             }
             fs::path dir(raw);
             if (dir.is_relative()) {
@@ -823,7 +791,7 @@ namespace {
             std::error_code ec;
             if (!fs::is_directory(dir, ec)) {
                 return binding_error(
-                    L, "sh: workspace is not a directory: " + raw);
+                    L, "shell: workspace is not a directory: " + raw);
             }
             workspace = dir.string();
         }
@@ -831,26 +799,27 @@ namespace {
         const ShellAnalysis analysis = analyze_shell(command);
         if (analysis.invocations.size() > 1) {
             return binding_error(L,
-                "sh: one command per call; compose results in Lua instead of "
+                "shell: one command per call; compose results in Lua instead "
+                "of "
                 "chaining with && || ; |");
         }
         if (analysis.invocations.empty()) {
-            return binding_error(L, "sh: empty command");
+            return binding_error(L, "shell: empty command");
         }
 
         const auto run_sh = [&]() -> int {
             CommandResult r = run_command(
                 command, std::chrono::seconds(timeout), fs::path(workspace));
             if (!r.spawned) {
-                record_call(L, "sh", command, false);
-                return binding_error(L, "sh: failed to execute command");
+                record_call(L, "shell", command, false);
+                return binding_error(L, "shell: failed to execute command");
             }
             if (r.timed_out) {
-                record_call(L, "sh", command, false);
-                return binding_error(
-                    L, "sh: timed out after " + std::to_string(timeout) + "s");
+                record_call(L, "shell", command, false);
+                return binding_error(L,
+                    "shell: timed out after " + std::to_string(timeout) + "s");
             }
-            record_call(L, "sh", command, r.exit_code == 0);
+            record_call(L, "shell", command, r.exit_code == 0);
             std::string output = std::move(r.output);
             if (output.size() > MAX_OUTPUT_BYTES) {
                 output.resize(MAX_OUTPUT_BYTES);
@@ -873,7 +842,7 @@ namespace {
         const PermissionEvaluation evaluation
             = evaluate_shell_request(request, run->host->context());
         if (evaluation.decision.kind == PermissionDecision::Kind::REJECT) {
-            return binding_error(L, "sh: " + evaluation.decision.reason);
+            return binding_error(L, "shell: " + evaluation.decision.reason);
         }
         if (evaluation.decision.kind == PermissionDecision::Kind::ACCEPT
             || run->host->skip_permissions) {
@@ -882,7 +851,7 @@ namespace {
         if (!run->host->ask) {
             // Unattended: fail closed.
             return binding_error(
-                L, "sh: permission requires approval in attended runs");
+                L, "shell: permission requires approval in attended runs");
         }
 
         // ASK: block on the modal queue like the native flow; think-time is
@@ -892,17 +861,18 @@ namespace {
         run->deadline += std::chrono::steady_clock::now() - paused_at;
         const auto* verdict = std::get_if<ToolVerdict>(&result);
         if (verdict == nullptr) {
-            return binding_error(L, "sh: permission dismissed");
+            return binding_error(L, "shell: permission dismissed");
         }
         if (verdict->decision == ToolDecision::REJECT) {
             return binding_error(L,
-                "sh: "
+                "shell: "
                     + (verdict->reason.empty() ? "rejected" : verdict->reason));
         }
         if (verdict->decision == ToolDecision::ACCEPT_FOR_SESSION) {
             if (evaluation.session_grants.empty() || !run->host->install_grants
                 || !run->host->install_grants(evaluation.session_grants)) {
-                return binding_error(L, "sh: session approval is unavailable");
+                return binding_error(
+                    L, "shell: session approval is unavailable");
             }
         }
 
@@ -912,7 +882,7 @@ namespace {
             = evaluate_shell_request(evaluation.request, run->host->context());
         if (current.decision.kind == PermissionDecision::Kind::REJECT
             || current.request.args != evaluation.request.args) {
-            return binding_error(L, "sh: " + current.decision.reason);
+            return binding_error(L, "shell: " + current.decision.reason);
         }
         return run_sh();
     }
@@ -937,31 +907,31 @@ namespace {
         return run->host != nullptr && run->host->web_enabled;
     }
 
-    // tool.webfetch(url) => string|nil, err
+    // tool.web.fetch(url) => string|nil, err
     int tool_webfetch(lua_State* L)
     {
         const std::string url = luaL_checkstring(L, 1);
         if (!web_enabled(L)) {
             return binding_error(
-                L, "webfetch: web access is disabled for this run");
+                L, "web.fetch: web access is disabled for this run");
         }
 
         FetchedPage page;
         std::string detail;
         const Status st = fetch_url(url, page, detail);
         if (st == Status::INVALID_URL) {
-            record_call(L, "webfetch", url, false);
-            return binding_error(L, "webfetch: " + detail + ": " + url);
+            record_call(L, "web.fetch", url, false);
+            return binding_error(L, "web.fetch: " + detail + ": " + url);
         }
         if (st == Status::NETWORK_ERROR) {
-            record_call(L, "webfetch", url, false);
-            return binding_error(L, "webfetch: request failed: " + url);
+            record_call(L, "web.fetch", url, false);
+            return binding_error(L, "web.fetch: request failed: " + url);
         }
         if (st != Status::OK) {
-            record_call(L, "webfetch", url, false);
-            return binding_error(L, "webfetch: " + detail + ": " + url);
+            record_call(L, "web.fetch", url, false);
+            return binding_error(L, "web.fetch: " + detail + ": " + url);
         }
-        record_call(L, "webfetch", url, true);
+        record_call(L, "web.fetch", url, true);
 
         std::string body  = page.body;
         std::size_t begin = 0;
@@ -980,14 +950,14 @@ namespace {
         std::string text = is_html ? html_to_text(page.body) : page.body;
         if (trim(text).empty()) {
             return binding_error(
-                L, "webfetch: no readable content at " + page.url);
+                L, "web.fetch: no readable content at " + page.url);
         }
         const std::string out = truncate_web(std::move(text));
         lua_pushlstring(L, out.data(), out.size());
         return 1;
     }
 
-    // tool.websearch(query, num_results=5) => string|nil, err
+    // tool.web.search(query, num_results=5) => string|nil, err
     int tool_websearch(lua_State* L)
     {
         const std::string query = luaL_checkstring(L, 1);
@@ -998,22 +968,22 @@ namespace {
         num_results = std::clamp(num_results, 1, 10);
         if (!web_enabled(L)) {
             return binding_error(
-                L, "websearch: web access is disabled for this run");
+                L, "web.search: web access is disabled for this run");
         }
 
         std::string text;
         const Status st = web_search(query, num_results, text);
         if (st == Status::NETWORK_ERROR) {
-            record_call(L, "websearch", query, false);
+            record_call(L, "web.search", query, false);
             return binding_error(
-                L, "websearch: request failed for '" + query + "'");
+                L, "web.search: request failed for '" + query + "'");
         }
         if (st != Status::OK) {
-            record_call(L, "websearch", query, false);
+            record_call(L, "web.search", query, false);
             return binding_error(
-                L, "websearch: search request rejected for '" + query + "'");
+                L, "web.search: search request rejected for '" + query + "'");
         }
-        record_call(L, "websearch", query, true);
+        record_call(L, "web.search", query, true);
         if (trim(text).empty()) {
             lua_pushliteral(
                 L, "No search results found. Try a different query.");
@@ -1021,6 +991,181 @@ namespace {
         }
         const std::string out = truncate_web(std::move(text));
         lua_pushlstring(L, out.data(), out.size());
+        return 1;
+    }
+
+    // ---- tool.file.* ------------------------------------------------------
+    // Mutating bindings. Each marshals Lua args into the native tool's Json
+    // shape, runs the shared permission gate (evaluate() handles ACCEPT /
+    // ASK-modal / REJECT), and applies the change through the file_ops core
+    // against the canonicalized target. The run tracks per-file original
+    // and latest content so the tool result can carry one net diff per
+    // touched file.
+
+    // Applies `transform` to the file at `target`, persists the result, and
+    // records the net mutation. Returns true on success.
+    bool apply_file_mutation(lua_State* L, const std::string& target,
+        const std::function<std::optional<std::string>(
+            const std::string&, std::string&)>& transform,
+        std::string& err)
+    {
+        ScriptRun* run         = run_of(L);
+        FileMutation* mutation = nullptr;
+        for (FileMutation& m : run->mutations) {
+            if (m.path == target) {
+                mutation = &m;
+                break;
+            }
+        }
+        std::string content;
+        if (mutation != nullptr) {
+            content = mutation->latest;
+        } else if (!load_text(target, content, err)) {
+            return false;
+        }
+        std::optional<std::string> next = transform(content, err);
+        if (!next) {
+            return false;
+        }
+        if (!save_text(target, *next, err)) {
+            return false;
+        }
+        if (mutation == nullptr) {
+            run->mutations.push_back({ target, content, *next });
+        } else {
+            mutation->latest = *next;
+        }
+        return true;
+    }
+
+    // tool.file.insert(path, text, line=nil) => true|nil, err
+    int tool_file_insert(lua_State* L)
+    {
+        const std::string path = luaL_checkstring(L, 1);
+        const std::string text = luaL_checkstring(L, 2);
+        lua_Integer line       = 0;
+        if (lua_gettop(L) >= 3 && !lua_isnil(L, 3)) {
+            line = luaL_checkinteger(L, 3);
+            if (line < 1) {
+                return binding_error(L, "file.insert: line must be 1-based");
+            }
+        }
+
+        Json::Value args;
+        args["file_path"] = path;
+        args["text"]      = text;
+        if (line > 0) {
+            args["line"] = static_cast<Json::Int64>(line);
+        }
+        const std::optional<FilesystemRequest> allowed
+            = evaluate(L, "insert", args, "file.insert");
+        if (!allowed) {
+            return binding_error(L, "file.insert: permission denied: " + path);
+        }
+        const std::string target = allowed->target.string();
+
+        std::string err;
+        const std::size_t at = static_cast<std::size_t>(line);
+        if (!apply_file_mutation(
+                L, target,
+                [&](const std::string& content, std::string& error) {
+                    return insert_text(content, text, at, error);
+                },
+                err)) {
+            return binding_error(L, "file.insert: " + err);
+        }
+        lua_pushboolean(L, 1);
+        return 1;
+    }
+
+    // tool.file.edit(path, old, new, count=1) => true|nil, err
+    int tool_file_edit(lua_State* L)
+    {
+        const std::string path  = luaL_checkstring(L, 1);
+        const std::string old   = luaL_checkstring(L, 2);
+        const std::string fresh = luaL_checkstring(L, 3);
+        lua_Integer count       = 1;
+        if (lua_gettop(L) >= 4 && !lua_isnil(L, 4)) {
+            count = luaL_checkinteger(L, 4);
+            if (count < 0) {
+                return binding_error(L, "file.edit: count must be 0 or more");
+            }
+        }
+        if (old.empty()) {
+            return binding_error(L, "file.edit: old must be non-empty");
+        }
+
+        Json::Value args;
+        args["file_path"]     = path;
+        args["old_string"]    = old;
+        args["new_string"]    = fresh;
+        args["replace_count"] = static_cast<Json::Int64>(count);
+        const std::optional<FilesystemRequest> allowed
+            = evaluate(L, "edit", args, "file.edit");
+        if (!allowed) {
+            return binding_error(L, "file.edit: permission denied: " + path);
+        }
+        const std::string target = allowed->target.string();
+
+        std::string err;
+        if (!apply_file_mutation(
+                L, target,
+                [&](const std::string& content, std::string& error) {
+                    return replace_text(content, old, fresh,
+                        static_cast<std::size_t>(count), error);
+                },
+                err)) {
+            return binding_error(L, "file.edit: " + err);
+        }
+        lua_pushboolean(L, 1);
+        return 1;
+    }
+
+    // tool.file.write(path, text) => true|nil, err
+    int tool_file_write(lua_State* L)
+    {
+        const std::string path = luaL_checkstring(L, 1);
+        const std::string text = luaL_checkstring(L, 2);
+
+        Json::Value args;
+        args["file_path"] = path;
+        args["text"]      = text;
+        const std::optional<FilesystemRequest> allowed
+            = evaluate(L, "write", args, "file.write");
+        if (!allowed) {
+            return binding_error(L, "file.write: permission denied: " + path);
+        }
+        const std::string target = allowed->target.string();
+
+        ScriptRun* run = run_of(L);
+        std::string err;
+        FileMutation* mutation = nullptr;
+        for (FileMutation& m : run->mutations) {
+            if (m.path == target) {
+                mutation = &m;
+                break;
+            }
+        }
+        std::string original;
+        if (mutation != nullptr) {
+            original = mutation->original;
+        } else {
+            std::error_code ec;
+            if (fs::exists(fs::path(target), ec)
+                && !load_text(target, original, err)) {
+                record_call(L, "file.write", target, false);
+                return binding_error(L, "file.write: " + err);
+            }
+        }
+        if (!save_text(target, text, err)) {
+            return binding_error(L, "file.write: " + err);
+        }
+        if (mutation == nullptr) {
+            run->mutations.push_back({ target, original, text });
+        } else {
+            mutation->latest = text;
+        }
+        lua_pushboolean(L, 1);
         return 1;
     }
 
@@ -1041,14 +1186,22 @@ namespace {
         lua_setfield(L, -2, "todo");
         lua_pushcfunction(L, tool_ask);
         lua_setfield(L, -2, "ask");
-        lua_pushcfunction(L, tool_skill);
-        lua_setfield(L, -2, "skill");
+        lua_newtable(L);
         lua_pushcfunction(L, tool_webfetch);
-        lua_setfield(L, -2, "webfetch");
+        lua_setfield(L, -2, "fetch");
         lua_pushcfunction(L, tool_websearch);
-        lua_setfield(L, -2, "websearch");
+        lua_setfield(L, -2, "search");
+        lua_setfield(L, -2, "web");
         lua_pushcfunction(L, tool_sh);
-        lua_setfield(L, -2, "sh");
+        lua_setfield(L, -2, "shell");
+        lua_newtable(L);
+        lua_pushcfunction(L, tool_file_insert);
+        lua_setfield(L, -2, "insert");
+        lua_pushcfunction(L, tool_file_edit);
+        lua_setfield(L, -2, "edit");
+        lua_pushcfunction(L, tool_file_write);
+        lua_setfield(L, -2, "write");
+        lua_setfield(L, -2, "file");
         lua_setglobal(L, "tool");
     }
 
@@ -1080,10 +1233,17 @@ namespace {
         open_bindings(L);
         lua_sethook(L, deadline_hook, LUA_MASKCOUNT, HOOK_INTERVAL);
 
-        // The log records what ran even when the script dies mid-flight, so
-        // every exit path below carries it out.
+        // The log and the net per-file diffs record what ran even when the
+        // script dies mid-flight, so every exit path below carries them out.
         const auto finish = [&](ToolOutput out) {
             out.dispatch_log = std::move(run.log);
+            for (const FileMutation& m : run.mutations) {
+                if (m.original == m.latest) {
+                    continue;
+                }
+                out.diffs.push_back(make_diff_view(
+                    m.path, split_lines(m.original), split_lines(m.latest)));
+            }
             lua_close(L);
             return out;
         };
@@ -1132,16 +1292,27 @@ Tool make_lua_tool(LuaHost host, bool has_rg)
           "tool.ask(cards: [{prompt: string, options?: string[], multi?: "
           "boolean=false, free_text?: boolean=false}]) -> [{question: "
           "string, answer: string}]  -- pauses for user input\n"
-          "tool.skill(name: string) -> string\n"
-          "tool.webfetch(url: string) -> string  -- requires web access\n"
-          "tool.websearch(query: string, num_results?: integer=5, max 10) -> "
-          "string  -- requires web access\n"
-          "tool.sh(command: string, timeout?: integer=10, max 120, "
+          "tool.web.fetch(url: string) -> string  -- requires web access\n"
+          "tool.web.search(query: string, num_results?: integer=5, max 10) "
+          "-> string  -- requires web access\n"
+          "tool.shell(command: string, timeout?: integer=10, max 120, "
           "workspace?: string) -> output, exit_code  -- one command per "
           "call; chains are rejected, compose them in Lua; approval "
           "matches the shell tool; workspace selects the directory to run "
           "in (relative paths resolve against the session working "
           "directory)\n"
+          "tool.file.insert(path: string, text: string, line?: integer=nil) "
+          "-> true  -- inserts text before the 1-based line, pushing it "
+          "down; nil appends at end of file; file must exist\n"
+          "tool.file.edit(path: string, old: string, new: string, count?: "
+          "integer=1) -> true  -- replaces the first count occurrences of "
+          "old (count=0 replaces all)\n"
+          "tool.file.write(path: string, text: string) -> true  -- creates "
+          "a new file or entirely rewrites an existing one\n"
+          "file.* bindings return nil, err on failure; each mutating call "
+          "goes through the same permission gate as the native edit/write "
+          "tools, and every touched file produces a net diff in the "
+          "result.\n"
           "print(args...) writes to the returned output.";
     spec.parameters = parse_json(
         R"json({"type":"object","properties":{"script":{"type":"string","description":"Lua source code to execute"},"timeout":{"type":"integer","description":"maximum script execution time in seconds, excluding pauses for permission prompts (default 10, max 120)"}},"required":["script"]})json");

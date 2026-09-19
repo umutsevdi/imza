@@ -52,6 +52,9 @@ namespace {
         if (req.name == "write") {
             return "Write text to a file";
         }
+        if (req.name == "insert") {
+            return "Insert text into a file";
+        }
         if (req.name == "read") {
             return "Read text from a file";
         }
@@ -98,10 +101,12 @@ namespace {
         const Json::Value args = parse_json(req.args);
         std::string message    = req.permission_reason;
         const char* path_key
-            = req.name == "edit" || req.name == "write" ? "file_path" : "path";
+            = req.name == "edit" || req.name == "write" || req.name == "insert"
+            ? "file_path"
+            : "path";
         if (!message.empty()
             && (req.name == "read" || req.name == "list" || req.name == "edit"
-                || req.name == "write")) {
+                || req.name == "write" || req.name == "insert")) {
             const std::string path = json_string(args, path_key);
             if (!path.empty()) {
                 message += " · " + path;
@@ -109,7 +114,8 @@ namespace {
         } else if (message.empty() && req.name == "shell") {
             message = "May modify files or run external processes";
         } else if (message.empty()
-            && (req.name == "edit" || req.name == "write")) {
+            && (req.name == "edit" || req.name == "write"
+                || req.name == "insert")) {
             const std::string path = json_string(args, "file_path");
             message
                 = path.empty() ? "Will modify a file" : "Will modify " + path;
@@ -168,6 +174,20 @@ namespace {
                 = syntax_type_for_path(json_string(args, "file_path"));
             return vbox({
                 section_title("Content"),
+                code_block(
+                    preview_text(json_string(args, "text")), lang, width),
+            });
+        }
+
+        if (req.name == "insert") {
+            const std::string lang
+                = syntax_type_for_path(json_string(args, "file_path"));
+            std::string where = "at end of file";
+            if (const auto line = json_int(args, "line")) {
+                where = "before line " + std::to_string(*line);
+            }
+            return vbox({
+                section_title("Insert " + where),
                 code_block(
                     preview_text(json_string(args, "text")), lang, width),
             });

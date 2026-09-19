@@ -98,7 +98,7 @@ std::optional<std::string> validate_filesystem_tool_arguments(
     if (!arguments.isObject()) {
         return std::string(tool) + ": arguments must be an object";
     }
-    const bool write = tool == "edit" || tool == "write";
+    const bool write = tool == "edit" || tool == "write" || tool == "insert";
     const char* key  = write ? "file_path" : "path";
     if (tool == "list" || tool == "find") {
         if (arguments.isMember(key) && !arguments[key].isNull()
@@ -148,6 +148,12 @@ std::optional<std::string> validate_filesystem_tool_arguments(
             return error;
         }
         return validate_positive(tool, arguments, "offset", true);
+    }
+    if (tool == "insert") {
+        if (!arguments["text"].isString()) {
+            return "insert: text must be a string";
+        }
+        return validate_positive(tool, arguments, "line", true);
     }
     if (tool != "write") {
         return std::string(tool) + ": unsupported filesystem tool";

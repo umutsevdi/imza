@@ -64,6 +64,51 @@ namespace {
         return out;
     }
 
+    Json::Value diff_json(DiffView& diff)
+    {
+        Json::Value out;
+        out["file"] = consume_string(diff.file);
+        Json::Value rows(Json::arrayValue);
+        for (auto& row : diff.rows) {
+            Json::Value value;
+            value["kind"]  = static_cast<int>(row.kind);
+            value["left"]  = consume_string(row.left);
+            value["right"] = consume_string(row.right);
+            if (row.left_no) {
+                value["left_no"] = static_cast<Json::UInt64>(*row.left_no);
+            }
+            if (row.right_no) {
+                value["right_no"] = static_cast<Json::UInt64>(*row.right_no);
+            }
+            rows.append(std::move(value));
+        }
+        out["rows"] = std::move(rows);
+        return out;
+    }
+
+    DiffView parse_diff(const Json::Value& value)
+    {
+        DiffView diff;
+        diff.file = value.get("file", "").asString();
+        for (const auto& row_value : value["rows"]) {
+            DiffRow row;
+            const int row_kind = row_value.get("kind", 0).asInt();
+            if (row_kind >= 0 && row_kind <= 2) {
+                row.kind = static_cast<DiffRow::Kind>(row_kind);
+            }
+            row.left  = row_value.get("left", "").asString();
+            row.right = row_value.get("right", "").asString();
+            if (row_value.isMember("left_no")) {
+                row.left_no = row_value["left_no"].asUInt64();
+            }
+            if (row_value.isMember("right_no")) {
+                row.right_no = row_value["right_no"].asUInt64();
+            }
+            diff.rows.push_back(std::move(row));
+        }
+        return diff;
+    }
+
     Json::Value item_json(ConversationItem& item)
     {
         Json::Value out;
@@ -111,26 +156,14 @@ namespace {
                 out["result_kind"] = static_cast<int>(tool->result->kind);
                 out["result"]      = consume_string(tool->result->text);
                 if (tool->result->diff) {
-                    Json::Value diff;
-                    diff["file"] = consume_string(tool->result->diff->file);
-                    Json::Value rows(Json::arrayValue);
-                    for (auto& row : tool->result->diff->rows) {
-                        Json::Value value;
-                        value["kind"]  = static_cast<int>(row.kind);
-                        value["left"]  = consume_string(row.left);
-                        value["right"] = consume_string(row.right);
-                        if (row.left_no) {
-                            value["left_no"]
-                                = static_cast<Json::UInt64>(*row.left_no);
-                        }
-                        if (row.right_no) {
-                            value["right_no"]
-                                = static_cast<Json::UInt64>(*row.right_no);
-                        }
-                        rows.append(std::move(value));
+                    out["diff"] = diff_json(*tool->result->diff);
+                }
+                if (!tool->result->diffs.empty()) {
+                    Json::Value diffs(Json::arrayValue);
+                    for (auto& diff : tool->result->diffs) {
+                        diffs.append(diff_json(diff));
                     }
-                    diff["rows"] = std::move(rows);
-                    out["diff"]  = std::move(diff);
+                    out["diffs"] = std::move(diffs);
                 }
                 if (tool->result->shell_status) {
                     std::visit(
@@ -233,26 +266,12 @@ namespace {
                         value.get("result", "").asString()
                     };
                     if (value["diff"].isObject()) {
-                        DiffView diff;
-                        diff.file = value["diff"].get("file", "").asString();
-                        for (const auto& row_value : value["diff"]["rows"]) {
-                            DiffRow row;
-                            const int row_kind
-                                = row_value.get("kind", 0).asInt();
-                            if (row_kind >= 0 && row_kind <= 2) {
-                                row.kind = static_cast<DiffRow::Kind>(row_kind);
-                            }
-                            row.left  = row_value.get("left", "").asString();
-                            row.right = row_value.get("right", "").asString();
-                            if (row_value.isMember("left_no")) {
-                                row.left_no = row_value["left_no"].asUInt64();
-                            }
-                            if (row_value.isMember("right_no")) {
-                                row.right_no = row_value["right_no"].asUInt64();
-                            }
-                            diff.rows.push_back(std::move(row));
+                        tool.result->diff = parse_diff(value["diff"]);
+                    }
+                    if (value["diffs"].isArray()) {
+                        for (const Json::Value& entry : value["diffs"]) {
+                            tool.result->diffs.push_back(parse_diff(entry));
                         }
-                        tool.result->diff = std::move(diff);
                     }
                     if (value.isMember("shell_exit")) {
                         tool.result->shell_status

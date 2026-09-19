@@ -24,7 +24,7 @@ namespace {
         if (tool == "find") {
             return FilesystemRequest::Operation::FIND;
         }
-        if (tool == "edit") {
+        if (tool == "edit" || tool == "insert") {
             return FilesystemRequest::Operation::EDIT;
         }
         if (tool == "write") {

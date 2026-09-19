@@ -18,8 +18,6 @@
 #include "common/types.h"
 #include "network/web.h"
 #include "permissions/filesystem.h"
-#include "platform/config.h"
-#include "tools/skills.h"
 
 namespace imza {
 
@@ -43,6 +41,9 @@ struct ToolOutput {
     Kind kind;
     std::string text;
     std::optional<DiffView> diff { };
+    // Net per-file diffs a lua script produced through tool.file.*;
+    // multiple mutations of one file collapse into a single before/after.
+    std::vector<DiffView> diffs { };
     std::optional<ShellStatus> shell_status { };
     std::optional<ViewerModal> viewer { };
     std::vector<LuaBindingCall> dispatch_log { };
@@ -100,16 +101,12 @@ Tool make_websearch_tool();
 // Callbacks the lua bindings use to reach the world outside the VM.
 // Empty members mean the corresponding binding is unavailable (tests,
 // headless without an environment): context empty = trusted mode, ask
-// empty = ASK auto-rejects, todo/skill empty = binding returns an error.
+// empty = ASK auto-rejects, todo empty = binding returns an error.
 struct LuaHost {
     std::function<PermissionContext()> context;
     std::function<std::future<ModalResult>(ModalPayload)> ask;
     std::function<TodoList()> todo;
     std::function<void(TodoList)> set_todo;
-    std::function<std::vector<Skill>()> skills;
-    // By value: ProviderStore::config() returns a temporary.
-    std::function<Config()> config;
-    std::function<SkillStore&()> skill_store;
     std::function<bool(PermissionStore::Grants)> install_grants;
     bool web_enabled      = false;
     bool shell_enabled    = false;

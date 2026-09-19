@@ -1030,6 +1030,18 @@ namespace {
             if (!summary.empty()) {
                 rows.push_back(text(summary) | color(PANEL_FG_DIM));
             }
+            const LayoutCtx ctx = layout_();
+            for (const DiffView& diff : tc.result->diffs) {
+                std::size_t additions = 0;
+                std::size_t deletions = 0;
+                for (const DiffRow& row : diff.rows) {
+                    deletions += diff_row_left_changed(row) ? 1 : 0;
+                    additions += diff_row_right_changed(row) ? 1 : 0;
+                }
+                rows.push_back(hbox({ text(diff.file) | bold | color(PANEL_FG),
+                    filler(), diffstat_chip(additions, deletions) }));
+                rows.push_back(diff_split(diff, review_content_width(ctx)));
+            }
             rows.push_back(separatorEmpty());
             return vbox(std::move(rows));
         }

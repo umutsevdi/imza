@@ -28,9 +28,8 @@ namespace {
         };
     }
 
-    // Lua tool bindings reach session state, the modal queue, and the
-    // skill catalog through this host; the ask routes into the modal queue
-    // only in attended mode.
+    // Lua tool bindings reach session state and the modal queue through
+    // this host; the ask routes into the modal queue only in attended mode.
     LuaHost lua_host(ApplicationState* state)
     {
         return LuaHost {
@@ -55,9 +54,6 @@ namespace {
             .set_todo
             = [state](
                   TodoList todo) { state->session->set_todo(std::move(todo)); },
-            .skills = [state] { return state->environment->skills(); },
-            .config = [state] { return state->providers->config(); },
-            .skill_store = [state]() -> SkillStore& { return *state->skills; },
             .install_grants =
                 [state](PermissionStore::Grants grants) {
                     return state->permissions->install(std::move(grants));

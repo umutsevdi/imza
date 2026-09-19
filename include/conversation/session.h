@@ -49,6 +49,7 @@ struct ToolCall {
         Kind kind;
         std::string text;
         std::optional<DiffView> diff;
+        std::vector<DiffView> diffs;
         std::optional<ShellStatus> shell_status;
         std::vector<LuaBindingCall> dispatch_log;
     };

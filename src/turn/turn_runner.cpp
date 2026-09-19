@@ -799,6 +799,7 @@ void TurnRunner::_run_tool(const PermissionEvaluation& evaluation,
     _post([this, req, kind, out = std::move(out)]() mutable {
         ToolCall::Result result { kind, std::move(out.text) };
         result.diff         = std::move(out.diff);
+        result.diffs        = std::move(out.diffs);
         result.shell_status = std::move(out.shell_status);
         result.dispatch_log = std::move(out.dispatch_log);
         _state->session->fill_tool_result(req, std::move(result));
