@@ -1,5 +1,8 @@
 #include "app/application_state.h"
+
 #include "app/flows.h"
+#include "permissions/evaluator.h"
+#include "permissions/filesystem.h"
 #include "permissions/store.h"
 #include "tools/skills.h"
 #include "turn/delegation.h"
@@ -22,6 +25,40 @@ namespace {
             if (state->alive.load()) {
                 post(std::move(f));
             }
+        };
+    }
+
+    // Lua tool bindings reach session state, the modal queue, and the
+    // skill catalog through this host; the ask routes into the modal queue
+    // only in attended mode.
+    LuaHost lua_host(ApplicationState* state)
+    {
+        return LuaHost {
+            .context =
+                [state] {
+                    return state->environment && state->permissions
+                        ? permission_context(*state->environment,
+                              *state->permissions, state->session->mode())
+                        : PermissionContext { };
+                },
+            .ask = [state](ModalPayload payload) -> std::future<ModalResult> {
+                if ((state->runtime_flags & RuntimeFlag::ATTENDED)
+                    == RuntimeFlag::NONE) {
+                    std::promise<ModalResult> denied;
+                    denied.set_value(
+                        ToolVerdict { ToolDecision::REJECT, "unattended run" });
+                    return denied.get_future();
+                }
+                return request_modal(*state, std::move(payload));
+            },
+            .todo = [state] { return state->session->todo(); },
+            .set_todo
+            = [state](
+                  TodoList todo) { state->session->set_todo(std::move(todo)); },
+            .skills = [state] { return state->environment->skills(); },
+            .config
+            = [state]() -> const Config& { return state->providers->config(); },
+            .skill_store = [state]() -> SkillStore& { return *state->skills; },
         };
     }
 
@@ -88,8 +125,9 @@ namespace {
         state->on_exit     = [] { };
         state->runtime_flags = runtime_flags;
         if (use_default_tools) {
-            tools = default_tools(
-                runtime_flags, state->environment->system()->has_rg);
+            ApplicationState* captured = state.get();
+            tools                      = default_tools(runtime_flags,
+                state->environment->system()->has_rg, lua_host(captured));
         }
         wire(state, std::move(stream_fn), std::move(tools));
         return state;
@@ -119,10 +157,10 @@ namespace {
         return state;
     }
 
-    std::vector<Tool> sidechat_roster(const ApplicationState& parent)
+    std::vector<Tool> sidechat_roster(ApplicationState& parent)
     {
-        std::vector<Tool> tools = default_tools(
-            parent.runtime_flags, parent.environment->system()->has_rg);
+        std::vector<Tool> tools = default_tools(parent.runtime_flags,
+            parent.environment->system()->has_rg, lua_host(&parent));
         // The sidechat is a regular chat; drop only file mutation and
         // delegation.
         std::erase_if(tools, [](const Tool& tool) {
@@ -169,8 +207,8 @@ std::shared_ptr<ApplicationState> make_child_application_state(
     ModalRequestFn parent_routing, std::string agent_label)
 {
     std::shared_ptr<ApplicationState> state(new ApplicationState());
-    std::vector<Tool> tools = default_tools(
-        parent.runtime_flags, parent.environment->system()->has_rg);
+    std::vector<Tool> tools = default_tools(parent.runtime_flags,
+        parent.environment->system()->has_rg, lua_host(state.get()));
     std::erase_if(tools, [](const Tool& tool) {
         return tool.spec.name == "subagent" || tool.spec.name == "todo";
     });

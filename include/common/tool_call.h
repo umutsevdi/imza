@@ -2,10 +2,25 @@
 
 #include <json/json.h>
 
+#include <chrono>
+#include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
+#include "common/diff.h"
+
 namespace imza {
+
+struct ShellExit {
+    int code;
+};
+
+struct ShellTimeout {
+    std::chrono::seconds duration;
+};
+
+using ShellStatus = std::variant<ShellExit, ShellTimeout>;
 
 struct ToolSpec {
     std::string name;

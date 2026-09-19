@@ -16,6 +16,7 @@
 #include "providers/store.h"
 #include "runtime/modal_queue.h"
 #include "runtime/subagent_manager.h"
+#include "tools/tool.h"
 #include "workspace/environment.h"
 
 namespace imza {

@@ -4,6 +4,7 @@
 
 #include "conversation/session.h"
 #include "network/json_io.h"
+#include "tools/tool.h"
 
 TEST_CASE("parse_todo_args accepts supported list forms")
 {

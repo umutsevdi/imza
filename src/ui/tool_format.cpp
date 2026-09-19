@@ -1,5 +1,6 @@
 #include "ui/tool_format.h"
 #include "network/json_io.h"
+#include "tools/tool.h"
 
 #include <cctype>
 #include <filesystem>

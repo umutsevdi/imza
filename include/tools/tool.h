@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <functional>
+#include <future>
 #include <optional>
 #include <span>
 #include <string>
@@ -15,18 +16,11 @@
 #include "common/modal.h"
 #include "common/tool_call.h"
 #include "common/types.h"
+#include "permissions/filesystem.h"
+#include "platform/config.h"
+#include "tools/skills.h"
 
 namespace imza {
-
-struct ShellExit {
-    int code;
-};
-
-struct ShellTimeout {
-    std::chrono::seconds duration;
-};
-
-using ShellStatus = std::variant<ShellExit, ShellTimeout>;
 
 struct ShellInvocation {
     std::string program;
@@ -100,8 +94,23 @@ Tool make_edit_tool();
 Tool make_write_tool();
 Tool make_webfetch_tool();
 Tool make_websearch_tool();
-Tool make_lua_tool();
-std::vector<Tool> default_tools(
-    RuntimeFlag flags = interactive_runtime_flags(), bool has_rg = false);
+
+// Callbacks the lua bindings use to reach the world outside the VM.
+// Empty members mean the corresponding binding is unavailable (tests,
+// headless without an environment): context empty = trusted mode, ask
+// empty = ASK auto-rejects, todo/skill empty = binding returns an error.
+struct LuaHost {
+    std::function<PermissionContext()> context;
+    std::function<std::future<ModalResult>(ModalPayload)> ask;
+    std::function<TodoList()> todo;
+    std::function<void(TodoList)> set_todo;
+    std::function<std::vector<Skill>()> skills;
+    std::function<const Config&()> config;
+    std::function<SkillStore&()> skill_store;
+};
+
+Tool make_lua_tool(LuaHost host = { }, bool has_rg = false);
+std::vector<Tool> default_tools(RuntimeFlag flags = interactive_runtime_flags(),
+    bool has_rg = false, LuaHost lua_host = { });
 
 } // namespace imza

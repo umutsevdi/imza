@@ -20,7 +20,6 @@
 #include "network/chat.h"
 #include "network/network.h"
 #include "providers/pricing.h"
-#include "tools/tool.h"
 #include "workspace/attachments.h"
 
 namespace imza {
