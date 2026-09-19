@@ -13,7 +13,8 @@ CHANGELOG
 <https://github.com/umutsevdi/imza/releases/tag/v0.3.0>
 
 Changes:
-  - Improved system, subagent, compaction, and review prompts based on research 
+  - Fixed high idle CPU usage caused by constant chat timeline redraws.
+  - Improved system, subagent, compaction, and review prompts based on research
 into other coding agents.
   - Increased maximum timeout for streams. Added retry for server errors (HTTP 
 408, 409, 5xx).
