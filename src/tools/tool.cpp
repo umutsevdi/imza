@@ -71,6 +71,7 @@ std::vector<Tool> default_tools(RuntimeFlag flags, bool has_rg)
     tools.push_back(make_subagent_tool());
     tools.push_back(make_edit_tool());
     tools.push_back(make_write_tool());
+    tools.push_back(make_lua_tool());
     if ((flags & RuntimeFlag::WEB) != RuntimeFlag::NONE) {
         tools.push_back(make_webfetch_tool());
         tools.push_back(make_websearch_tool());

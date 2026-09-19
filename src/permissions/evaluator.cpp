@@ -237,6 +237,14 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
         }
         return accept(std::move(request));
     }
+    if (original.name == "lua") {
+        if (!arguments["script"].isString()
+            || arguments["script"].asString().empty()) {
+            return reject(std::move(request),
+                "lua: expected a non-empty 'script' string");
+        }
+        return accept(std::move(request));
+    }
     if (original.name == "webfetch" || original.name == "websearch") {
         if (const auto error
             = validate_web_tool_arguments(original.name, arguments)) {

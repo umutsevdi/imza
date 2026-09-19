@@ -100,6 +100,7 @@ Tool make_edit_tool();
 Tool make_write_tool();
 Tool make_webfetch_tool();
 Tool make_websearch_tool();
+Tool make_lua_tool();
 std::vector<Tool> default_tools(
     RuntimeFlag flags = interactive_runtime_flags(), bool has_rg = false);
 

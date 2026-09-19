@@ -108,6 +108,14 @@ FetchContent_Declare(
     EXCLUDE_FROM_ALL
 )
 
+# lua (single-file amalgamation, built as a library for the sandbox worker)
+FetchContent_Declare(
+    lua
+    GIT_REPOSITORY https://github.com/lua/lua.git
+    GIT_TAG        v5.4.9
+    EXCLUDE_FROM_ALL
+)
+
 # doctest
 FetchContent_Declare(
     doctest
@@ -127,8 +135,18 @@ FetchContent_Declare(
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(jsoncpp cmarkgfm cli11)
+FetchContent_MakeAvailable(lua)
 if(IMZA_BUILD_TESTS)
     FetchContent_MakeAvailable(doctest)
+endif()
+
+add_library(imza_lua STATIC ${lua_SOURCE_DIR}/onelua.c)
+target_compile_definitions(imza_lua PRIVATE MAKE_LIB)
+target_include_directories(imza_lua PUBLIC ${lua_SOURCE_DIR})
+if(MSVC)
+    target_compile_options(imza_lua PRIVATE /w)
+else()
+    target_compile_options(imza_lua PRIVATE -w -O2)
 endif()
 
 find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
@@ -274,6 +292,7 @@ add_library(imza_execution
     src/permissions/filesystem.cpp
     src/tools/tool.cpp
     src/tools/find.cpp
+    src/tools/lua.cpp
     src/tools/tool_args.cpp
     src/tools/shell.cpp
     src/tools/web.cpp
@@ -300,6 +319,7 @@ target_link_libraries(imza_execution PUBLIC
     imza_foundation
     imza_network
     imza_runtime
+    imza_lua
     jsoncpp_static
 )
 
