@@ -2,6 +2,8 @@
 #include "common/util.h"
 #include "network/json_io.h"
 
+#include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -53,6 +55,44 @@ std::vector<Tool> default_tools(bool has_rg, LuaHost lua_host)
     tools.push_back(make_subagent_tool());
     tools.push_back(make_lua_tool(std::move(lua_host), has_rg));
     return tools;
+}
+
+std::optional<std::string> validate_subagent_tool_arguments(
+    const Json::Value& arguments, bool allow_build)
+{
+    if (!arguments.isObject() || !arguments["tasks"].isArray()
+        || arguments["tasks"].empty() || arguments["tasks"].size() > 5) {
+        return "subagent: expected one to five tasks";
+    }
+    for (const Json::Value& value : arguments["tasks"]) {
+        if (!value.isObject() || !value["mode"].isString()
+            || !value["prompt"].isString()
+            || trim(value["prompt"].asString()).empty()) {
+            return "subagent: every task requires a mode and prompt";
+        }
+        const std::string mode = to_lower(value["mode"].asString());
+        if (mode != "research" && mode != "build") {
+            return "subagent: mode must be research or build";
+        }
+        if (mode == "build" && !allow_build) {
+            return "subagent: build agents require main-agent build mode";
+        }
+    }
+    return std::nullopt;
+}
+
+std::string json_string(const Json::Value& value, const char* key)
+{
+    return value.isObject() && value[key].isString() ? value[key].asString()
+                                                     : std::string { };
+}
+
+std::optional<std::int64_t> json_int(const Json::Value& value, const char* key)
+{
+    if (!value.isObject() || !value[key].isIntegral()) {
+        return std::nullopt;
+    }
+    return value[key].asInt64();
 }
 
 Tool make_skill_tool()

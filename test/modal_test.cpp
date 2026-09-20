@@ -165,7 +165,8 @@ struct Env {
 
 bool showing_tool_ask(const imza::Session& st)
 {
-    return std::holds_alternative<imza::ToolCallRequest>(st.modal())
+    return (std::holds_alternative<imza::ToolCallRequest>(st.modal())
+               || std::holds_alternative<imza::PermissionPrompt>(st.modal()))
         && st.phase() == imza::Session::Phase::AWAITING;
 }
 
@@ -540,11 +541,10 @@ TEST_CASE("delegated-agent approvals surface through the main modal queue")
     };
 
     imza::submit(*env.state, "delegate");
-    REQUIRE(env.pump.wait_for([&] {
-        return std::holds_alternative<imza::ToolCallRequest>(
-            env.session->modal());
-    }));
-    const auto request = std::get<imza::ToolCallRequest>(env.session->modal());
+    REQUIRE(env.pump.wait_for(
+        [&] { return showing_tool_ask(*env.session); }));
+    const auto request
+        = std::get<imza::PermissionPrompt>(env.session->modal());
     CHECK(request.description.find("Agent 1 (research)") != std::string::npos);
     imza::resolve_modal(
         *env.state, imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" });
@@ -589,10 +589,8 @@ TEST_CASE("subagent failure reports preserve the last completed tool output")
     };
 
     imza::submit(*env.state, "delegate failure");
-    REQUIRE(env.pump.wait_for([&] {
-        return std::holds_alternative<imza::ToolCallRequest>(
-            env.session->modal());
-    }));
+    REQUIRE(env.pump.wait_for(
+        [&] { return showing_tool_ask(*env.session); }));
     imza::resolve_modal(
         *env.state, imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" });
     REQUIRE(env.pump.wait_for(
@@ -1049,9 +1047,11 @@ TEST_CASE("filesystem session approval installs an exact reusable grant")
 
     imza::submit(*env.state, "go");
     REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
-    const auto request = std::get<imza::ToolCallRequest>(env.session->modal());
-    CHECK(request.name == "write");
-    CHECK(request.allow_for_session);
+    const auto prompt
+        = std::get<imza::PermissionPrompt>(env.session->modal());
+    CHECK(prompt.name == "write");
+    CHECK(prompt.allow_for_session);
+    CHECK(prompt.target == path.string());
     imza::resolve_modal(*env.state,
         imza::ToolVerdict { imza::ToolDecision::ACCEPT_FOR_SESSION, "" });
 

@@ -1,6 +1,7 @@
 #include "app/flows.h"
 #include "common/util.h"
 #include "conversation/persistence.h"
+#include "permissions/shell_analysis.h"
 #include "platform/command_runner.h"
 #include "platform/config.h"
 #include "platform/update.h"

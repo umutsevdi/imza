@@ -68,7 +68,7 @@ struct ShellFixture {
     imza::PermissionStore store;
     imza::PermissionStore::Grants installed;
     std::optional<imza::ToolVerdict> verdict;
-    std::optional<imza::ToolCallRequest> last_request;
+    std::optional<imza::PermissionPrompt> last_prompt;
     int ask_calls         = 0;
     bool attendable       = true;
     bool shell_enabled    = true;
@@ -95,8 +95,8 @@ struct ShellFixture {
         if (attendable) {
             host.ask = [this](imza::ModalPayload payload) {
                 ++ask_calls;
-                last_request
-                    = std::get<imza::ToolCallRequest>(std::move(payload));
+                last_prompt
+                    = std::get<imza::PermissionPrompt>(std::move(payload));
                 std::promise<imza::ModalResult> promise;
                 promise.set_value(verdict.has_value()
                         ? imza::ModalResult { *verdict }
@@ -485,9 +485,11 @@ TEST_CASE("tool.sh applies the native approval and session grant flow")
         "local out, code = tool.shell('echo $HOME')\nprint(code)", once.host());
     CHECK(accepted.text == "0\n");
     REQUIRE(once.ask_calls == 1);
-    REQUIRE(once.last_request.has_value());
-    CHECK(once.last_request->name == "shell");
-    CHECK_FALSE(once.last_request->allow_for_session);
+    REQUIRE(once.last_prompt.has_value());
+    CHECK(once.last_prompt->name == "shell");
+    CHECK(once.last_prompt->command == "echo $HOME");
+    CHECK(once.last_prompt->timeout == std::chrono::seconds(10));
+    CHECK_FALSE(once.last_prompt->allow_for_session);
     CHECK(once.installed.empty());
 
     ShellFixture session;
@@ -500,10 +502,11 @@ TEST_CASE("tool.sh applies the native approval and session grant flow")
         session.host());
     CHECK(granted.text == "0\n");
     REQUIRE(session.ask_calls == 1);
-    REQUIRE(session.last_request.has_value());
-    CHECK(session.last_request->allow_for_session);
-    CHECK(session.last_request->permission_reason.find("touch")
-        != std::string::npos);
+    REQUIRE(session.last_prompt.has_value());
+    CHECK(session.last_prompt->name == "shell");
+    CHECK(session.last_prompt->command == "touch " + (dir / "a").string());
+    CHECK(session.last_prompt->reason.find("touch") != std::string::npos);
+    CHECK(session.last_prompt->allow_for_session);
     REQUIRE(session.installed.size() == 1);
     CHECK(std::get<imza::ShellCommandGrant>(session.installed.front()).program
         == "touch");
@@ -859,9 +862,13 @@ TEST_CASE("tool.file mutations proceed after attended approval")
         return imza::PermissionContext { system, workspace, store.snapshot(),
             imza::Session::Mode::BUILD };
     };
-    host.ask = [](imza::ModalPayload payload) {
-        const auto& req = std::get<imza::ToolCallRequest>(payload);
-        CHECK(req.name == "edit");
+    host.ask = [&](imza::ModalPayload payload) {
+        const auto& prompt = std::get<imza::PermissionPrompt>(payload);
+        CHECK(prompt.name == "edit");
+        CHECK(prompt.target == outside.file("a.txt").string());
+        CHECK(prompt.old_text == "one");
+        CHECK(prompt.new_text == "ONE");
+        CHECK_FALSE(prompt.reason.empty());
         std::promise<imza::ModalResult> promise;
         promise.set_value(imza::ModalResult {
             imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" } });

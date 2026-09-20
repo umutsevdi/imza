@@ -11,6 +11,7 @@
 #include "network/json_io.h"
 #include "permissions/evaluator.h"
 #include "permissions/filesystem.h"
+#include "permissions/shell_analysis.h"
 #include "permissions/store.h"
 #include "platform/config.h"
 #include "tools/skills.h"
@@ -75,31 +76,6 @@ namespace {
         }
     };
 
-    std::string path_args(
-        std::string_view key, const std::filesystem::path& path)
-    {
-        Json::Value value(Json::objectValue);
-        value[std::string(key)] = path.string();
-        return write_json(value);
-    }
-
-    std::string edit_args(const std::filesystem::path& path)
-    {
-        Json::Value value(Json::objectValue);
-        value["file_path"]  = path.string();
-        value["old_string"] = "content";
-        value["new_string"] = "updated";
-        return write_json(value);
-    }
-
-    std::string write_args(const std::filesystem::path& path)
-    {
-        Json::Value value(Json::objectValue);
-        value["file_path"] = path.string();
-        value["text"]      = "updated";
-        return write_json(value);
-    }
-
     void write_session_file(const std::filesystem::path& path,
         const std::filesystem::path& workspace, std::string_view title)
     {
@@ -109,6 +85,40 @@ namespace {
         root["items"]     = Json::Value(Json::arrayValue);
         std::ofstream file(path);
         file << write_json(root);
+    }
+
+    FilesystemRequest read_request(const std::filesystem::path& path)
+    {
+        return ReadFileRequest { path };
+    }
+
+    FilesystemRequest list_request(const std::filesystem::path& path)
+    {
+        return ListDirectoryRequest { path };
+    }
+
+    FilesystemRequest find_request(
+        const std::filesystem::path& path, std::string pattern = "content")
+    {
+        return FindFilesRequest { path, std::move(pattern) };
+    }
+
+    FilesystemRequest edit_request(const std::filesystem::path& path)
+    {
+        return EditFileRequest { path, "content", "updated", 1 };
+    }
+
+    FilesystemRequest write_request(const std::filesystem::path& path)
+    {
+        return WriteFileRequest { path, "updated" };
+    }
+
+    ShellEvaluation shell_policy(std::string command,
+        const PermissionContext& context,
+        std::chrono::seconds timeout = std::chrono::seconds(10))
+    {
+        return evaluate_shell_request(
+            { std::move(command), timeout, { } }, context);
     }
 
 } // namespace
@@ -377,35 +387,36 @@ TEST_CASE("permission store snapshots remain valid during concurrent changes")
 TEST_CASE("filesystem policy covers all trusted and granted write cases")
 {
     PermissionFixture fixture;
-    const std::string args = write_args(fixture.workspace / "new.txt");
 
     const auto planned = evaluate_filesystem_request(
-        "write", args, fixture.context(Session::Mode::PLAN));
+        write_request(fixture.workspace / "new.txt"),
+        fixture.context(Session::Mode::PLAN));
     CHECK(planned.decision.kind == PermissionDecision::Kind::REJECT);
     CHECK_FALSE(planned.request.has_value());
 
     const auto built = evaluate_filesystem_request(
-        "write", args, fixture.context(Session::Mode::BUILD));
+        write_request(fixture.workspace / "new.txt"),
+        fixture.context(Session::Mode::BUILD));
     CHECK(built.decision.kind == PermissionDecision::Kind::ACCEPT);
 
-    const auto workspace_edit = evaluate_filesystem_request("edit",
-        edit_args(fixture.workspace / "inside.txt"),
+    const auto workspace_edit = evaluate_filesystem_request(
+        edit_request(fixture.workspace / "inside.txt"),
         fixture.context(Session::Mode::PLAN));
     CHECK(workspace_edit.decision.kind == PermissionDecision::Kind::REJECT);
 
-    const auto temporary_write = evaluate_filesystem_request("write",
-        write_args(fixture.temporary / "new.txt"),
+    const auto temporary_write = evaluate_filesystem_request(
+        write_request(fixture.temporary / "new.txt"),
         fixture.context(Session::Mode::BUILD));
     CHECK(temporary_write.decision.kind == PermissionDecision::Kind::ACCEPT);
 
-    const auto outside_write = evaluate_filesystem_request("write",
-        write_args(fixture.outside / "new.txt"),
+    const auto outside_write = evaluate_filesystem_request(
+        write_request(fixture.outside / "new.txt"),
         fixture.context(Session::Mode::BUILD));
     CHECK(outside_write.decision.kind == PermissionDecision::Kind::ASK);
 
     const PermissionGrant grant = ExternalGrant { fixture.outside };
-    const auto granted          = evaluate_filesystem_request("write",
-        write_args(fixture.outside / "new.txt"),
+    const auto granted          = evaluate_filesystem_request(
+        write_request(fixture.outside / "new.txt"),
         fixture.context(Session::Mode::BUILD, { grant }));
     CHECK(granted.decision.kind == PermissionDecision::Kind::ACCEPT);
 }
@@ -416,34 +427,30 @@ TEST_CASE("filesystem policy trusts only configured roots")
     REQUIRE(fixture.environment->working_directory == fixture.workspace);
     REQUIRE(fixture.environment->project_root == fixture.workspace);
     REQUIRE(fixture.system->temporary_directory == fixture.temporary);
-    const auto workspace_read = evaluate_filesystem_request("read",
-        path_args("path", fixture.workspace / "inside.txt"),
+    const auto workspace_read = evaluate_filesystem_request(
+        read_request(fixture.workspace / "inside.txt"),
         fixture.context(Session::Mode::PLAN));
     CHECK(workspace_read.decision.kind == PermissionDecision::Kind::ACCEPT);
 
-    const auto temporary_read = evaluate_filesystem_request("read",
-        path_args("path", fixture.temporary / "temporary.txt"),
+    const auto temporary_read = evaluate_filesystem_request(
+        read_request(fixture.temporary / "temporary.txt"),
         fixture.context(Session::Mode::PLAN));
     CHECK(temporary_read.decision.kind == PermissionDecision::Kind::ACCEPT);
 
-    const auto outside_read = evaluate_filesystem_request("read",
-        path_args("path", fixture.outside / "outside.txt"),
+    const auto outside_read = evaluate_filesystem_request(
+        read_request(fixture.outside / "outside.txt"),
         fixture.context(Session::Mode::PLAN));
     CHECK(outside_read.decision.kind == PermissionDecision::Kind::ASK);
 
-    const auto outside_list = evaluate_filesystem_request("list",
-        path_args("path", fixture.outside),
-        fixture.context(Session::Mode::PLAN));
+    const auto outside_list = evaluate_filesystem_request(
+        list_request(fixture.outside), fixture.context(Session::Mode::PLAN));
     CHECK(outside_list.decision.kind == PermissionDecision::Kind::ACCEPT);
 
-    Json::Value find_args(Json::objectValue);
-    find_args["pattern"]    = "content";
-    find_args["path"]       = fixture.outside.string();
     const auto outside_find = evaluate_filesystem_request(
-        "find", write_json(find_args), fixture.context(Session::Mode::PLAN));
+        find_request(fixture.outside), fixture.context(Session::Mode::PLAN));
     CHECK(outside_find.decision.kind == PermissionDecision::Kind::ACCEPT);
     REQUIRE(outside_find.request.has_value());
-    CHECK(outside_find.request->target == fixture.outside);
+    CHECK(filesystem_target(*outside_find.request) == fixture.outside);
 }
 
 TEST_CASE("filesystem policy falls back to the working directory")
@@ -451,11 +458,11 @@ TEST_CASE("filesystem policy falls back to the working directory")
     PermissionFixture fixture;
     fixture.environment->project_root.reset();
 
-    const auto inside  = evaluate_filesystem_request("read",
-        path_args("path", fixture.workspace / "inside.txt"),
+    const auto inside = evaluate_filesystem_request(
+        read_request(fixture.workspace / "inside.txt"),
         fixture.context(Session::Mode::PLAN));
-    const auto outside = evaluate_filesystem_request("read",
-        path_args("path", fixture.outside / "outside.txt"),
+    const auto outside = evaluate_filesystem_request(
+        read_request(fixture.outside / "outside.txt"),
         fixture.context(Session::Mode::PLAN));
 
     CHECK(inside.decision.kind == PermissionDecision::Kind::ACCEPT);
@@ -469,11 +476,12 @@ TEST_CASE("filesystem policy trusts the repository above a nested cwd")
     std::filesystem::create_directories(nested);
     fixture.environment->working_directory = nested;
 
-    const auto result = evaluate_filesystem_request("read",
-        R"({"path":"../inside.txt"})", fixture.context(Session::Mode::PLAN));
+    const auto result = evaluate_filesystem_request(
+        read_request("../inside.txt"), fixture.context(Session::Mode::PLAN));
     CHECK(result.decision.kind == PermissionDecision::Kind::ACCEPT);
     REQUIRE(result.request.has_value());
-    CHECK(result.request->target == fixture.workspace / "inside.txt");
+    CHECK(
+        filesystem_target(*result.request) == fixture.workspace / "inside.txt");
 }
 
 TEST_CASE("external directory grants cover descendants but not siblings")
@@ -481,17 +489,16 @@ TEST_CASE("external directory grants cover descendants but not siblings")
     PermissionFixture fixture;
     const auto target               = fixture.outside / "outside.txt";
     const PermissionGrant directory = ExternalGrant { fixture.outside };
-    const auto recursive
-        = evaluate_filesystem_request("read", path_args("path", target),
-            fixture.context(Session::Mode::PLAN, { directory }));
+    const auto recursive = evaluate_filesystem_request(read_request(target),
+        fixture.context(Session::Mode::PLAN, { directory }));
     CHECK(recursive.decision.kind == PermissionDecision::Kind::ACCEPT);
 
     const auto sibling = fixture.root / "outside-sibling";
     std::filesystem::create_directories(sibling);
     std::ofstream(sibling / "file.txt") << "content\n";
-    const auto sibling_result = evaluate_filesystem_request("read",
-        path_args("path", sibling / "file.txt"),
-        fixture.context(Session::Mode::PLAN, { directory }));
+    const auto sibling_result
+        = evaluate_filesystem_request(read_request(sibling / "file.txt"),
+            fixture.context(Session::Mode::PLAN, { directory }));
     CHECK(sibling_result.decision.kind == PermissionDecision::Kind::ASK);
 }
 
@@ -499,35 +506,36 @@ TEST_CASE("one external grant authorizes mode-available operations")
 {
     PermissionFixture fixture;
     const auto target = fixture.outside / "outside.txt";
-    const auto read   = evaluate_filesystem_request("read",
-        path_args("path", target), fixture.context(Session::Mode::PLAN));
+    const auto read   = evaluate_filesystem_request(
+        read_request(target), fixture.context(Session::Mode::PLAN));
     REQUIRE(read.decision.kind == PermissionDecision::Kind::ASK);
     REQUIRE(read.request.has_value());
     const auto grant = filesystem_session_grant(*read.request);
     REQUIRE(grant.has_value());
 
-    const auto edit = evaluate_filesystem_request("edit", edit_args(target),
-        fixture.context(Session::Mode::BUILD, { *grant }));
+    const auto edit = evaluate_filesystem_request(edit_request(target),
+        fixture.context(Session::Mode::BUILD, { PermissionGrant { *grant } }));
     CHECK(edit.decision.kind == PermissionDecision::Kind::ACCEPT);
 }
 
 TEST_CASE("filesystem normalization rejects malformed and wrong-type targets")
 {
     PermissionFixture fixture;
-    const auto malformed = evaluate_filesystem_request(
-        "read", "{}", fixture.context(Session::Mode::PLAN));
-    CHECK(malformed.decision.kind == PermissionDecision::Kind::REJECT);
+    const auto empty_path
+        = evaluate_filesystem_request(read_request(std::filesystem::path { }),
+            fixture.context(Session::Mode::PLAN));
+    CHECK(empty_path.decision.kind == PermissionDecision::Kind::REJECT);
 
-    const auto wrong_type = evaluate_filesystem_request("read",
-        path_args("path", fixture.workspace),
-        fixture.context(Session::Mode::PLAN));
+    const auto wrong_type = evaluate_filesystem_request(
+        read_request(fixture.workspace), fixture.context(Session::Mode::PLAN));
     CHECK(wrong_type.decision.kind == PermissionDecision::Kind::REJECT);
 
-    const auto relative = evaluate_filesystem_request("read",
-        R"({"path":"inside.txt"})", fixture.context(Session::Mode::PLAN));
+    const auto relative = evaluate_filesystem_request(
+        read_request("inside.txt"), fixture.context(Session::Mode::PLAN));
     CHECK(relative.decision.kind == PermissionDecision::Kind::ACCEPT);
     REQUIRE(relative.request.has_value());
-    CHECK(relative.request->target == fixture.workspace / "inside.txt");
+    CHECK(filesystem_target(*relative.request)
+        == fixture.workspace / "inside.txt");
 }
 
 TEST_CASE("filesystem normalization resolves traversal and missing writes")
@@ -535,22 +543,24 @@ TEST_CASE("filesystem normalization resolves traversal and missing writes")
     PermissionFixture fixture;
     std::filesystem::create_directories(fixture.workspace / "nested");
 
-    const auto traversal = evaluate_filesystem_request("read",
-        R"({"path":"nested/../inside.txt"})",
-        fixture.context(Session::Mode::PLAN));
+    const auto traversal
+        = evaluate_filesystem_request(read_request("nested/../inside.txt"),
+            fixture.context(Session::Mode::PLAN));
     CHECK(traversal.decision.kind == PermissionDecision::Kind::ACCEPT);
     REQUIRE(traversal.request.has_value());
-    CHECK(traversal.request->target == fixture.workspace / "inside.txt");
+    CHECK(filesystem_target(*traversal.request)
+        == fixture.workspace / "inside.txt");
 
-    const auto missing = evaluate_filesystem_request("write",
-        write_args(fixture.workspace / "nested" / "new.txt"),
+    const auto missing = evaluate_filesystem_request(
+        write_request(fixture.workspace / "nested" / "new.txt"),
         fixture.context(Session::Mode::BUILD));
     CHECK(missing.decision.kind == PermissionDecision::Kind::ACCEPT);
     REQUIRE(missing.request.has_value());
-    CHECK(missing.request->target == fixture.workspace / "nested" / "new.txt");
+    CHECK(filesystem_target(*missing.request)
+        == fixture.workspace / "nested" / "new.txt");
 
-    const auto missing_parent = evaluate_filesystem_request("write",
-        write_args(fixture.workspace / "absent" / "new.txt"),
+    const auto missing_parent = evaluate_filesystem_request(
+        write_request(fixture.workspace / "absent" / "new.txt"),
         fixture.context(Session::Mode::BUILD));
     CHECK(missing_parent.decision.kind == PermissionDecision::Kind::REJECT);
 }
@@ -563,63 +573,22 @@ TEST_CASE("filesystem normalization follows symlinked targets and parents")
     PermissionFixture fixture;
     std::filesystem::create_directory_symlink(
         fixture.outside, fixture.workspace / "outside-link");
-    const auto linked_read = evaluate_filesystem_request("read",
-        path_args("path", fixture.workspace / "outside-link" / "outside.txt"),
+    const auto linked_read = evaluate_filesystem_request(
+        read_request(fixture.workspace / "outside-link" / "outside.txt"),
         fixture.context(Session::Mode::PLAN));
     CHECK(linked_read.decision.kind == PermissionDecision::Kind::ASK);
     REQUIRE(linked_read.request.has_value());
-    CHECK(linked_read.request->target == fixture.outside / "outside.txt");
+    CHECK(filesystem_target(*linked_read.request)
+        == fixture.outside / "outside.txt");
 
-    const auto linked_write = evaluate_filesystem_request("write",
-        write_args(fixture.workspace / "outside-link" / "new.txt"),
+    const auto linked_write = evaluate_filesystem_request(
+        write_request(fixture.workspace / "outside-link" / "new.txt"),
         fixture.context(Session::Mode::BUILD));
     CHECK(linked_write.decision.kind == PermissionDecision::Kind::ASK);
     REQUIRE(linked_write.request.has_value());
-    CHECK(linked_write.request->target == fixture.outside / "new.txt");
+    CHECK(filesystem_target(*linked_write.request)
+        == fixture.outside / "new.txt");
 #endif
-}
-
-TEST_CASE("filesystem policy rejects malformed operation arguments")
-{
-    PermissionFixture fixture;
-    const PermissionContext context = fixture.context(Session::Mode::BUILD);
-    const std::string file = (fixture.workspace / "inside.txt").string();
-
-    CHECK(evaluate_filesystem_request(
-              "read", R"({"path":")" + file + R"(","line_begin":0})", context)
-              .decision.kind
-        == PermissionDecision::Kind::REJECT);
-    CHECK(evaluate_filesystem_request("read",
-              R"({"path":")" + file + R"(","line_begin":4,"line_end":2})",
-              context)
-              .decision.kind
-        == PermissionDecision::Kind::REJECT);
-    CHECK(evaluate_filesystem_request("edit",
-              R"({"file_path":")" + file
-                  + R"(","old_string":"","new_string":"x"})",
-              context)
-              .decision.kind
-        == PermissionDecision::Kind::REJECT);
-    CHECK(evaluate_filesystem_request(
-              "write", R"({"file_path":")" + file + R"("})", context)
-              .decision.kind
-        == PermissionDecision::Kind::REJECT);
-    CHECK(evaluate_filesystem_request(
-              "write", R"({"file_path":")" + file + R"(","text":7})", context)
-              .decision.kind
-        == PermissionDecision::Kind::REJECT);
-    CHECK(evaluate_filesystem_request("insert",
-              R"({"file_path":")" + file + R"(","text":"x","line":"one"})",
-              context)
-              .decision.kind
-        == PermissionDecision::Kind::REJECT);
-    CHECK(
-        evaluate_filesystem_request("edit",
-            R"({"file_path":")" + file
-                + R"(","old_string":"x","new_string":"y","replace_count":-1})",
-            context)
-            .decision.kind
-        == PermissionDecision::Kind::REJECT);
 }
 
 TEST_CASE("central evaluator assigns explicit policies to built-in tools")
@@ -644,17 +613,14 @@ TEST_CASE("central evaluator assigns explicit policies to built-in tools")
               "subagent", R"({"tasks":[{"mode":"build","prompt":"change"}]})")
               .decision.kind
         == PermissionDecision::Kind::REJECT);
-    CHECK(evaluate("write", write_args(fixture.workspace / "new.txt"))
-              .decision.kind
+    CHECK(evaluate("write", R"({"file_path":"new.txt"})").decision.kind
         == PermissionDecision::Kind::REJECT);
     CHECK(evaluate("custom", "{}").decision.kind
         == PermissionDecision::Kind::REJECT);
-    const auto shell = evaluate("shell", R"({"command":"git push"})");
-    CHECK(shell.decision.kind == PermissionDecision::Kind::ASK);
-    REQUIRE(shell.session_grants.size() == 1);
-    CHECK(shell.request.allow_for_session);
-    CHECK(std::get<ShellCommandGrant>(shell.session_grants.front())
-        == (ShellCommandGrant { "git", "push" }));
+    CHECK(evaluate("lua", R"js({"script":"print(1)"})js").decision.kind
+        == PermissionDecision::Kind::ACCEPT);
+    CHECK(evaluate("lua", R"js({"script":""})js").decision.kind
+        == PermissionDecision::Kind::REJECT);
 }
 
 TEST_CASE("shell policy reuses, combines, and broadens session grants")
@@ -665,12 +631,8 @@ TEST_CASE("shell policy reuses, combines, and broadens session grants")
     SkillStore loaded;
     const auto evaluate
         = [&](std::string command, PermissionStore::Grants grants = { }) {
-              Json::Value arguments(Json::objectValue);
-              arguments["command"] = std::move(command);
-              return evaluate_tool_request(
-                  { "shell", write_json(arguments), "", "", "", false },
-                  fixture.context(Session::Mode::BUILD, std::move(grants)),
-                  config, skills, loaded);
+              return shell_policy(std::move(command),
+                  fixture.context(Session::Mode::BUILD, std::move(grants)));
           };
 
 #ifdef _WIN32
@@ -681,7 +643,7 @@ TEST_CASE("shell policy reuses, combines, and broadens session grants")
     CHECK_FALSE(shell_builtin_allowed("dir"));
 #endif
 
-    const PermissionEvaluation first = evaluate("git push origin");
+    const ShellEvaluation first = evaluate("git push origin");
     REQUIRE(first.decision.kind == PermissionDecision::Kind::ASK);
     REQUIRE(first.session_grants.size() == 1);
     CHECK(std::get<ShellCommandGrant>(first.session_grants.front())
@@ -690,7 +652,7 @@ TEST_CASE("shell policy reuses, combines, and broadens session grants")
               .decision.kind
         == PermissionDecision::Kind::ACCEPT);
 
-    const PermissionEvaluation broader
+    const ShellEvaluation broader
         = evaluate("git add file.cpp", first.session_grants);
     REQUIRE(broader.decision.kind == PermissionDecision::Kind::ASK);
     REQUIRE(broader.session_grants.size() == 1);
@@ -698,8 +660,7 @@ TEST_CASE("shell policy reuses, combines, and broadens session grants")
         == (ShellCommandGrant { "git", std::nullopt }));
     CHECK(broader.decision.reason.find("git *") != std::string::npos);
 
-    const PermissionEvaluation compound
-        = evaluate("cargo test && ninja -C build");
+    const ShellEvaluation compound = evaluate("cargo test && ninja -C build");
     REQUIRE(compound.decision.kind == PermissionDecision::Kind::ASK);
     CHECK(compound.session_grants.size() == 2);
 
@@ -717,31 +678,33 @@ TEST_CASE("shell policy reuses, combines, and broadens session grants")
     CHECK(evaluate("git diff --output=patch.txt").decision.kind
         == PermissionDecision::Kind::ASK);
 
-    const PermissionEvaluation redirected = evaluate("ls > files.txt");
+    const ShellEvaluation redirected = evaluate("ls > files.txt");
     CHECK(redirected.decision.kind == PermissionDecision::Kind::ASK);
     CHECK(redirected.session_grants.empty());
-    CHECK_FALSE(redirected.request.allow_for_session);
+    CHECK(redirected.request.command == "ls > files.txt");
 }
 
-TEST_CASE("central evaluator normalizes filesystem calls and derives grants")
+TEST_CASE("shell policy rejects an empty command")
 {
     PermissionFixture fixture;
-    const Config config;
-    const std::vector<Skill> skills;
-    SkillStore loaded;
-    const auto evaluation = evaluate_tool_request(
-        { "write", write_args(fixture.outside / "new.txt"), "", "", "", false },
-        fixture.context(Session::Mode::BUILD), config, skills, loaded);
+    const auto empty = shell_policy("", fixture.context(Session::Mode::BUILD));
+    CHECK(empty.decision.kind == PermissionDecision::Kind::REJECT);
+}
+
+TEST_CASE("filesystem evaluation canonicalizes targets and derives grants")
+{
+    PermissionFixture fixture;
+    const auto evaluation = evaluate_filesystem_request(
+        write_request(fixture.outside / "new.txt"),
+        fixture.context(Session::Mode::BUILD));
 
     CHECK(evaluation.decision.kind == PermissionDecision::Kind::ASK);
-    CHECK(evaluation.request.allow_for_session);
-    REQUIRE(evaluation.session_grants.size() == 1);
-    const auto* grant
-        = std::get_if<ExternalGrant>(&evaluation.session_grants.front());
-    REQUIRE(grant != nullptr);
+    REQUIRE(evaluation.request.has_value());
+    CHECK(
+        filesystem_target(*evaluation.request) == fixture.outside / "new.txt");
+    const auto grant = filesystem_session_grant(*evaluation.request);
+    REQUIRE(grant.has_value());
     CHECK(*grant == fixture.outside);
-    CHECK(parse_json(evaluation.request.args)["file_path"].asString()
-        == (fixture.outside / "new.txt").string());
 }
 
 TEST_CASE("skill policy and runtime grants use the same central evaluator")

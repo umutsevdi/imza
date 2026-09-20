@@ -1,22 +1,17 @@
+#include "tools/bindings.h"
+
+#include "tools/lua.h"
 #include "tools/tool.h"
 
 #include "common/util.h"
 #include "network/json_io.h"
-#include "permissions/evaluator.h"
-#include "permissions/filesystem.h"
-#include "platform/command_runner.h"
 #include "tools/file_ops.h"
-#include "workspace/environment.h"
 
 #include <algorithm>
-#include <cctype>
 #include <chrono>
 #include <cstdlib>
-#include <filesystem>
-#include <fstream>
-#include <functional>
-#include <sstream>
 #include <string>
+#include <vector>
 
 extern "C" {
 #include <lauxlib.h>
@@ -28,42 +23,14 @@ namespace imza {
 
 namespace {
 
-    namespace fs = std::filesystem;
-
-    constexpr std::size_t MAX_OUTPUT_BYTES = 64 * 1024;
     constexpr std::size_t MAX_MEMORY_BYTES = 256UL * 1024 * 1024;
     // Hook fires every N VM instructions to check the wall-clock deadline;
     // short scripts pay one clock read per interval.
     constexpr int HOOK_INTERVAL = 1000 * 1000;
 
-    constexpr std::size_t MAX_LIST_ENTRIES = 2000;
-    constexpr std::size_t MAX_GREP_ROWS    = 500;
-    constexpr int MAX_LIST_DEPTH           = 5;
-
-    struct FileMutation {
-        std::string path;
-        std::string original;
-        std::string latest;
-    };
-
-    struct ScriptRun {
-        std::string output;
-        std::size_t memory_used = 0;
-        std::chrono::steady_clock::time_point deadline;
-        bool truncated = false;
-        std::vector<LuaBindingCall> log;
-        // Per-file net mutation state: original content at first touch,
-        // latest content after each accepted tool.file.* call.
-        std::vector<FileMutation> mutations;
-        // Borrowed; lives as long as the Tool that owns this VM run.
-        const LuaHost* host     = nullptr;
-        bool has_rg             = false;
-        bool blocked_permission = false;
-    };
-
     void* lua_alloc(void* ud, void* ptr, std::size_t osize, std::size_t nsize)
     {
-        auto* run = static_cast<ScriptRun*>(ud);
+        auto* run = static_cast<LuaRunContext*>(ud);
         if (nsize == 0) {
             std::free(ptr);
             run->memory_used -= osize;
@@ -82,8 +49,8 @@ namespace {
 
     int lua_print(lua_State* L)
     {
-        auto* run
-            = static_cast<ScriptRun*>(lua_touserdata(L, lua_upvalueindex(1)));
+        auto* run = static_cast<LuaRunContext*>(
+            lua_touserdata(L, lua_upvalueindex(1)));
         if (run->truncated) {
             return 0;
         }
@@ -108,7 +75,7 @@ namespace {
 
     void deadline_hook(lua_State* L, lua_Debug*)
     {
-        auto* run = *static_cast<ScriptRun**>(lua_getextraspace(L));
+        auto* run = *static_cast<LuaRunContext**>(lua_getextraspace(L));
         if (std::chrono::steady_clock::now() > run->deadline) {
             luaL_error(L, "execution time limit exceeded");
         }
@@ -142,7 +109,7 @@ namespace {
     // Only sandbox-safe base libraries; tool access is via the bindings on
     // the `tool` table, each of which re-runs the filesystem permission
     // evaluation before touching the disk.
-    void open_sandbox(lua_State* L, ScriptRun& run)
+    void open_sandbox(lua_State* L, LuaRunContext& run)
     {
         static const luaL_Reg loadedlibs[] = {
             { LUA_GNAME, luaopen_base },
@@ -169,8 +136,6 @@ namespace {
         lua_setfield(L, -2, "dump");
         lua_pop(L, 1);
 
-        // load stays available but is forced to text-only mode; see
-        // text_only_load above.
         lua_getglobal(L, "load");
         auto* slot = static_cast<lua_CFunction*>(
             lua_newuserdatauv(L, sizeof(lua_CFunction), 0));
@@ -180,1064 +145,114 @@ namespace {
         lua_pushcfunction(L, text_only_load);
         lua_setglobal(L, "load");
 
-        *static_cast<ScriptRun**>(lua_getextraspace(L)) = &run;
+        *static_cast<LuaRunContext**>(lua_getextraspace(L)) = &run;
         lua_pushlightuserdata(L, &run);
         lua_pushcclosure(L, lua_print, 1);
         lua_setglobal(L, "print");
     }
-
-    // ---- bindings ---------------------------------------------------------
-
-    ScriptRun* run_of(lua_State* L)
+    // Roster order: the order here is the order of METHODS entries in the
+    // model-facing description.
+    std::span<const LuaBinding> all_bindings()
     {
-        return *static_cast<ScriptRun**>(lua_getextraspace(L));
+        static const std::vector<LuaBinding> bindings = [] {
+            std::vector<LuaBinding> all;
+            const auto add = [&](std::span<const LuaBinding> family) {
+                all.insert(all.end(), family.begin(), family.end());
+            };
+            add(filesystem_lua_bindings());
+            add(session_lua_bindings());
+            add(shell_lua_bindings());
+            add(web_lua_bindings());
+            add(mutation_lua_bindings());
+            return all;
+        }();
+        return bindings;
     }
 
-    void record_call(
-        lua_State* L, std::string_view binding, std::string target, bool ok)
-    {
-        run_of(L)->log.push_back(
-            { std::string(binding), std::move(target), ok });
-    }
-
-    int binding_error(lua_State* L, std::string message)
-    {
-        lua_pushnil(L);
-        lua_pushlstring(L, message.data(), message.size());
-        return 2;
-    }
-
-    // The permission gate speaks Json args; the binding speaks the Lua
-    // stack. This shim is the only place the two meet. ASK verdicts resolve
-    // through the modal queue when an ask callback is wired, and collapse
-    // to a rejection without one (unattended runs); the script sees the
-    // outcome as nil,err either way. Calls that pass the gate land in the
-    // dispatch log with their canonicalized target.
-    std::optional<FilesystemRequest> evaluate(lua_State* L,
-        std::string_view tool, const Json::Value& args,
-        std::string_view binding = "")
-    {
-        ScriptRun* run = run_of(L);
-        const std::string label
-            = binding.empty() ? std::string(tool) : std::string(binding);
-        const auto record = [&](bool ok, std::string target) {
-            run->log.push_back({ label, std::move(target), ok });
-        };
-        if (run->host == nullptr || !run->host->context) {
-            // No provider: trusted mode (tests, SKIP_PERMISSIONS paths).
-            std::string path = json_string(args, "path");
-            if (path.empty()) {
-                path = json_string(args, "file_path");
-            }
-            record(true, fs::path(path).string());
-            return FilesystemRequest { FilesystemRequest::Operation::READ,
-                fs::path(path), args };
-        }
-        const FilesystemEvaluation evaluation = evaluate_filesystem_request(
-            tool, write_json(args), run->host->context());
-        switch (evaluation.decision.kind) {
-        case PermissionDecision::Kind::ACCEPT:
-            record(true, evaluation.request->target.string());
-            return evaluation.request;
-        case PermissionDecision::Kind::REJECT: return std::nullopt;
-        case PermissionDecision::Kind::ASK: break;
-        }
-        if (run->host->skip_permissions) {
-            record(true, evaluation.request->target.string());
-            return evaluation.request;
-        }
-        if (run->host->unattended) {
-            run->blocked_permission = true;
-            return std::nullopt;
-        }
-        if (!run->host->ask) {
-            return std::nullopt;
-        }
-        ToolCallRequest request
-            = evaluation.request->normalized_arguments.isObject()
-            ? ToolCallRequest { std::string(tool),
-                  write_json(evaluation.request->normalized_arguments), "" }
-            : ToolCallRequest { std::string(tool), write_json(args), "" };
-        request.permission_reason = evaluation.decision.reason;
-        PermissionStore::Grants grants;
-        if (const auto grant = filesystem_session_grant(*evaluation.request)) {
-            grants.push_back(PermissionGrant { *grant });
-        }
-        request.allow_for_session = !grants.empty();
-        // Human think-time is free: shift the wall-clock deadline by the
-        // paused duration so a slow approval does not consume the script's
-        // execution budget.
-        const auto paused_at     = std::chrono::steady_clock::now();
-        const ModalResult result = run->host->ask(std::move(request)).get();
-        run->deadline += std::chrono::steady_clock::now() - paused_at;
-        const auto* verdict = std::get_if<ToolVerdict>(&result);
-        if (verdict == nullptr || verdict->decision == ToolDecision::REJECT) {
-            return std::nullopt;
-        }
-        if (verdict->decision == ToolDecision::ACCEPT_FOR_SESSION) {
-            if (grants.empty() || !run->host->install_grants
-                || !run->host->install_grants(std::move(grants))) {
-                return std::nullopt;
-            }
-            const FilesystemEvaluation current = evaluate_filesystem_request(
-                tool, write_json(args), run->host->context());
-            if (current.decision.kind != PermissionDecision::Kind::ACCEPT
-                || !current.request
-                || current.request->normalized_arguments
-                    != evaluation.request->normalized_arguments) {
-                return std::nullopt;
-            }
-            record(true, current.request->target.string());
-            return current.request;
-        }
-        record(true, evaluation.request->target.string());
-        return evaluation.request;
-    }
-
-    Json::Value string_arg(const char* key, const std::string& value)
-    {
-        Json::Value args;
-        args[key] = value;
-        return args;
-    }
-
-    // tool.read(path, first_line=1, last_line=nil) => string|nil, err
-    int tool_read(lua_State* L)
-    {
-        const std::string path  = luaL_checkstring(L, 1);
-        const lua_Integer first = lua_gettop(L) >= 2 && !lua_isnil(L, 2)
-            ? luaL_checkinteger(L, 2)
-            : 1;
-        const bool last_given   = lua_gettop(L) >= 3 && !lua_isnil(L, 3);
-        const lua_Integer last  = last_given ? luaL_checkinteger(L, 3) : 0;
-        if (first < 1 || (last_given && last < first)) {
-            return binding_error(L,
-                "read: line range must be 1-based and last_line >= first_line");
-        }
-
-        Json::Value args   = string_arg("path", path);
-        args["line_begin"] = static_cast<Json::Int64>(first);
-        if (last_given) {
-            args["line_end"] = static_cast<Json::Int64>(last);
-        }
-        const std::optional<FilesystemRequest> allowed
-            = evaluate(L, "read", args);
-        if (!allowed) {
-            return binding_error(L, "read: permission denied: " + path);
-        }
-        const std::string target = allowed->target.string();
-
-        std::error_code ec;
-        if (!fs::is_regular_file(fs::path(target), ec)) {
-            return binding_error(L, "read: no such file: " + path);
-        }
-        std::ifstream in(target, std::ios::binary);
-        if (!in) {
-            return binding_error(L, "read: cannot open: " + path);
-        }
-
-        lua_Integer number = 0;
-        std::size_t total  = 0;
-        std::string content;
-        std::string line;
-        while (std::getline(in, line)) {
-            ++number;
-            if (number >= first && (!last_given || number <= last)) {
-                if (line.find('\0') != std::string::npos) {
-                    return binding_error(L, "read: binary file: " + path);
-                }
-                content += line;
-                content.push_back('\n');
-            }
-        }
-        if (!in.eof()) {
-            return binding_error(L, "read: cannot read: " + path);
-        }
-        if (number == 0) {
-            lua_pushlstring(L, "", 0);
-            return 1;
-        }
-        if (number < first) {
-            return binding_error(L,
-                "read: first_line " + std::to_string(first)
-                    + " exceeds file length " + std::to_string(number) + ": "
-                    + path);
-        }
-        total = static_cast<std::size_t>(number);
-        if (content.size() > MAX_OUTPUT_BYTES) {
-            content.resize(MAX_OUTPUT_BYTES);
-            content += "\n[truncated]";
-        }
-        lua_pushlstring(L, content.data(), content.size());
-        return 1;
-    }
-
-    std::string format_kb(std::uintmax_t bytes)
-    {
-        std::ostringstream os;
-        os << std::fixed << std::setprecision(1)
-           << static_cast<double>(bytes) / 1024.0;
-        std::string s = os.str();
-        if (s.size() >= 2 && s.compare(s.size() - 2, 2, ".0") == 0) {
-            s = s.substr(0, s.size() - 2);
-        }
-        return s + " KB";
-    }
-
-    void push_list_entry(
-        lua_State* L, const fs::directory_entry& entry, std::error_code& ec)
+    // Installs every descriptor on the global `tool` table, creating the
+    // intermediate table for one-level dotted paths ("todo.get", "file.edit").
+    // A duplicate path is a programming error surfaced as a VM-level failure
+    // rather than a silent shadow.
+    void register_bindings(lua_State* L)
     {
         lua_newtable(L);
-        const std::string name = entry.path().filename().string();
-        lua_pushlstring(L, name.data(), name.size());
-        lua_setfield(L, -2, "path");
-        const bool directory = entry.is_directory(ec);
-        if (directory) {
-            lua_pushliteral(L, "dir");
-        } else {
-            lua_pushliteral(L, "file");
-        }
-        lua_setfield(L, -2, "type");
-        if (!directory) {
-            const auto size      = entry.file_size(ec);
-            const std::string kb = ec ? "-" : format_kb(size);
-            lua_pushlstring(L, kb.data(), kb.size());
-            lua_setfield(L, -2, "size");
-        }
-    }
-
-    int list_directory(lua_State* L, const std::string& target, int depth,
-        bool show_hidden, int* count)
-    {
-        std::error_code ec;
-        fs::directory_iterator it(
-            target, fs::directory_options::skip_permission_denied, ec);
-        fs::directory_iterator end;
-        if (ec) {
-            return binding_error(L, "list: cannot read directory: " + target);
-        }
-        std::vector<fs::directory_entry> entries;
-        for (; it != end; it.increment(ec)) {
-            if (ec) {
-                break;
-            }
-            entries.push_back(*it);
-        }
-        std::sort(entries.begin(), entries.end(),
-            [](const fs::directory_entry& a, const fs::directory_entry& b) {
-                return a.path().filename() < b.path().filename();
-            });
-        for (const auto& entry : entries) {
-            std::error_code sec;
-            const std::string name = entry.path().filename().string();
-            if (!show_hidden && !name.empty() && name.front() == '.') {
-                continue;
-            }
-            if (*count >= MAX_LIST_ENTRIES) {
-                return 0;
-            }
-            ++*count;
-            push_list_entry(L, entry, sec);
-            lua_rawseti(L, -2, static_cast<lua_Integer>(*count));
-            if (depth > 1 && entry.is_directory(sec)) {
-                if (const int failed = list_directory(L, entry.path().string(),
-                        depth - 1, show_hidden, count)) {
-                    return failed;
-                }
-            }
-        }
-        return 0;
-    }
-
-    // tool.list(path, depth=1, show_hidden=false) => [{path,type,size}]|nil,
-    // err
-    int tool_list(lua_State* L)
-    {
-        const std::string path = lua_gettop(L) >= 1 && !lua_isnil(L, 1)
-            ? luaL_checkstring(L, 1)
-            : ".";
-        int depth              = 1;
-        if (lua_gettop(L) >= 2 && !lua_isnil(L, 2)) {
-            depth = static_cast<int>(luaL_checkinteger(L, 2));
-        }
-        const bool show_hidden
-            = lua_gettop(L) >= 3 && !lua_isnil(L, 3) && lua_toboolean(L, 3);
-        if (depth < 1 || depth > MAX_LIST_DEPTH) {
-            return binding_error(L,
-                "list: depth must be between 1 and "
-                    + std::to_string(MAX_LIST_DEPTH));
-        }
-
-        Json::Value args = string_arg("path", path);
-        const std::optional<FilesystemRequest> allowed
-            = evaluate(L, "list", args);
-        if (!allowed) {
-            return binding_error(L, "list: permission denied: " + path);
-        }
-        const std::string target = allowed->target.string();
-
-        std::error_code ec;
-        if (!fs::is_directory(fs::path(target), ec)) {
-            return binding_error(L, "list: no such directory: " + path);
-        }
-
-        lua_newtable(L);
-        int count = 0;
-        if (const int failed
-            = list_directory(L, target, depth, show_hidden, &count)) {
-            return failed;
-        }
-        return 1;
-    }
-
-    int grep_run(lua_State* L, const std::string& pattern,
-        const std::string& path, bool has_rg)
-    {
-        const std::string command = has_rg
-            ? "rg -n -- " + shell_quote(fs::path(pattern)) + " "
-                + shell_quote(fs::path(path))
-            : "grep -rsnE -- " + shell_quote(fs::path(pattern)) + " "
-                + shell_quote(fs::path(path));
-        constexpr auto timeout    = std::chrono::seconds { 10 };
-        CommandResult result      = run_command(command, timeout);
-        if (!result.spawned) {
-            return binding_error(L, "grep: failed to start search command");
-        }
-        if (result.timed_out) {
-            return binding_error(L, "grep: search timed out after 10 seconds");
-        }
-        if (result.exit_code > 1) {
-            return binding_error(L,
-                result.output.empty() ? "grep: search failed with exit code "
-                        + std::to_string(result.exit_code)
-                                      : "grep: " + result.output);
-        }
-
-        lua_newtable(L);
-        int row           = 0;
-        std::size_t start = 0;
-        bool truncated    = false;
-        // With a file target rg/grep print "line:text" (no filename);
-        // with a directory they print "file:line:text".
-        const bool directory   = fs::is_directory(fs::path(path));
-        const char* fixed_file = directory ? "" : path.c_str();
-        while (start < result.output.size()) {
-            const std::size_t stop = result.output.find('\n', start);
-            const std::string line = result.output.substr(start,
-                stop == std::string::npos ? std::string::npos : stop - start);
-            start = stop == std::string::npos ? result.output.size() : stop + 1;
-            if (line.empty()) {
-                continue;
-            }
-            std::string file;
-            std::size_t number_begin = 0;
-            const auto first         = line.find(':');
-            const auto second        = first == std::string::npos
-                ? std::string::npos
-                : line.find(':', first + 1);
-            if (directory && first != std::string::npos
-                && second != std::string::npos) {
-                number_begin = first + 1;
-            }
-            const std::size_t number_len
-                = (directory ? second : first) - number_begin;
-            if ((directory && second == std::string::npos)
-                || number_len == std::string::npos
-                || line.substr(number_begin, number_len)
-                        .find_first_not_of("0123456789")
-                    != std::string::npos) {
-                continue;
-            }
-            if (++row > MAX_GREP_ROWS) {
-                truncated = true;
-                break;
-            }
-            lua_newtable(L);
-            if (directory) {
-                file = line.substr(0, first);
-            } else {
-                file = fixed_file;
-            }
-            lua_pushlstring(L, file.data(), file.size());
-            lua_setfield(L, -2, "file");
-            lua_pushinteger(
-                L, std::stol(line.substr(number_begin, number_len)));
-            lua_setfield(L, -2, "line");
-            const std::string text
-                = line.substr((directory ? second : first) + 1);
-            lua_pushlstring(L, text.data(), text.size());
-            lua_setfield(L, -2, "text");
-            lua_rawseti(L, -2, static_cast<lua_Integer>(row));
-        }
-        if (truncated) {
-            lua_newtable(L);
-            lua_pushboolean(L, 0);
-            lua_setfield(L, -2, "file");
-            lua_pushinteger(L, 0);
-            lua_setfield(L, -2, "line");
-            lua_pushliteral(L, "[truncated]");
-            lua_setfield(L, -2, "text");
-            lua_rawseti(L, -2, static_cast<lua_Integer>(row));
-        }
-        return 1;
-    }
-
-    // tool.grep(path, pattern) => [{file, line, text}]|nil, err
-    int tool_grep(lua_State* L)
-    {
-        const std::string path    = lua_gettop(L) >= 1 && !lua_isnil(L, 1)
-            ? luaL_checkstring(L, 1)
-            : ".";
-        const std::string pattern = luaL_checkstring(L, 2);
-        if (pattern.empty()) {
-            return binding_error(L, "grep: pattern must be a non-empty string");
-        }
-
-        Json::Value args = string_arg("path", path);
-        args["pattern"]  = pattern;
-        const std::optional<FilesystemRequest> allowed
-            = evaluate(L, "find", args, "grep");
-        if (!allowed) {
-            return binding_error(L, "grep: permission denied: " + path);
-        }
-        const std::string target = allowed->target.string();
-
-        ScriptRun* run = run_of(L);
-        return grep_run(L, pattern, target, run->has_rg);
-    }
-
-    // tool.todo.get() => [{content, status}]
-    int tool_todo(lua_State* L)
-    {
-        ScriptRun* run = run_of(L);
-        if (run->host == nullptr || !run->host->todo) {
-            return binding_error(L, "todo.get: unavailable in this context");
-        }
-        const TodoList list = run->host->todo();
-        record_call(L, "todo.get", "", true);
-        lua_newtable(L);
-        for (std::size_t i = 0; i < list.items.size(); ++i) {
-            const TodoItem& item = list.items[i];
-            lua_newtable(L);
-            lua_pushlstring(L, item.content.data(), item.content.size());
-            lua_setfield(L, -2, "content");
-            const char* status = item.status == TodoItem::Status::PENDING
-                ? "pending"
-                : item.status == TodoItem::Status::IN_PROGRESS ? "in_progress"
-                : item.status == TodoItem::Status::COMPLETED   ? "completed"
-                                                               : "cancelled";
-            lua_pushstring(L, status);
-            lua_setfield(L, -2, "status");
-            lua_rawseti(L, -2, static_cast<lua_Integer>(i + 1));
-        }
-        return 1;
-    }
-
-    // tool.todo.set(items) => true|nil, err
-    // items: [{content = string, status = "pending"|"in_progress"|
-    //                  "completed"|"cancelled"}]
-    int tool_set_todo(lua_State* L)
-    {
-        luaL_checktype(L, 1, LUA_TTABLE);
-        TodoList list;
-        const std::size_t n = lua_rawlen(L, 1);
-        for (std::size_t i = 1; i <= n; ++i) {
-            lua_rawgeti(L, 1, static_cast<lua_Integer>(i));
-            if (!lua_istable(L, -1)) {
-                lua_pop(L, 1);
-                return binding_error(L,
-                    "todo.set: item " + std::to_string(i) + " must be a table");
-            }
-            lua_getfield(L, -1, "content");
-            if (!lua_isstring(L, -1)) {
-                lua_pop(L, 2);
-                return binding_error(L,
-                    "todo.set: item " + std::to_string(i)
-                        + " needs a 'content' string");
-            }
-            const std::string content = lua_tostring(L, -1);
-            lua_pop(L, 1);
-            lua_getfield(L, -1, "status");
-            const char* status
-                = lua_isstring(L, -1) ? lua_tostring(L, -1) : "pending";
-            TodoItem item;
-            item.content = content;
-            if (std::string_view(status) == "in_progress") {
-                item.status = TodoItem::Status::IN_PROGRESS;
-            } else if (std::string_view(status) == "completed") {
-                item.status = TodoItem::Status::COMPLETED;
-            } else if (std::string_view(status) == "cancelled") {
-                item.status = TodoItem::Status::CANCELLED;
-            } else if (std::string_view(status) != "pending") {
-                lua_pop(L, 2);
-                return binding_error(L,
-                    "todo.set: item " + std::to_string(i)
-                        + " has unknown status '" + status + "'");
-            }
-            lua_pop(L, 1);
-            lua_pop(L, 1);
-            list.items.push_back(std::move(item));
-        }
-        ScriptRun* run = run_of(L);
-        if (run->host == nullptr || !run->host->set_todo) {
-            return binding_error(L, "todo.set: unavailable in this context");
-        }
-        run->host->set_todo(std::move(list));
-        record_call(L, "todo.set", "", true);
-        lua_pushboolean(L, 1);
-        return 1;
-    }
-
-    // tool.ask(questions) => [{question, answer}]|nil, err
-    // questions: [{prompt = string, options = {string...}?,
-    //              multi = bool?, free_text = bool?}]
-    int tool_ask(lua_State* L)
-    {
-        luaL_checktype(L, 1, LUA_TTABLE);
-        QuestionForm form;
-        const std::size_t n = lua_rawlen(L, 1);
-        for (std::size_t i = 1; i <= n; ++i) {
-            lua_rawgeti(L, 1, static_cast<lua_Integer>(i));
-            if (!lua_istable(L, -1)) {
-                lua_pop(L, 1);
-                return binding_error(
-                    L, "ask: card " + std::to_string(i) + " must be a table");
-            }
-            lua_getfield(L, -1, "prompt");
-            if (!lua_isstring(L, -1)) {
-                lua_pop(L, 2);
-                return binding_error(L,
-                    "ask: card " + std::to_string(i)
-                        + " needs a 'prompt' string");
-            }
-            QuestionCard card;
-            card.prompt = lua_tostring(L, -1);
-            lua_pop(L, 1);
-            lua_getfield(L, -1, "options");
-            if (lua_istable(L, -1)) {
-                const std::size_t options = lua_rawlen(L, -1);
-                for (std::size_t o = 1; o <= options; ++o) {
-                    lua_rawgeti(L, -1, static_cast<lua_Integer>(o));
-                    if (lua_isstring(L, -1)) {
-                        card.options.emplace_back(lua_tostring(L, -1));
-                    }
+        const int tool = lua_gettop(L);
+        for (const LuaBinding& binding : all_bindings()) {
+            const std::string_view path = binding.path;
+            const auto dot              = path.rfind('.');
+            int parent                  = tool;
+            const std::string prefix(path.substr(0, dot));
+            const std::string leaf(
+                dot == std::string_view::npos ? path : path.substr(dot + 1));
+            if (dot != std::string_view::npos) {
+                lua_getfield(L, tool, prefix.c_str());
+                if (lua_isnil(L, -1)) {
                     lua_pop(L, 1);
+                    lua_newtable(L);
+                    lua_pushvalue(L, -1);
+                    lua_setfield(L, tool, prefix.c_str());
                 }
+                parent = lua_gettop(L);
             }
+            lua_getfield(L, parent, leaf.c_str());
+            const bool duplicate = !lua_isnil(L, -1);
             lua_pop(L, 1);
-            lua_getfield(L, -1, "multi");
-            card.multi = lua_toboolean(L, -1) != 0;
-            lua_pop(L, 1);
-            lua_getfield(L, -1, "free_text");
-            card.free_text = lua_toboolean(L, -1) != 0;
-            lua_pop(L, 2);
-            form.push_back(std::move(card));
-        }
-        if (form.empty()) {
-            return binding_error(L, "ask: at least one card is required");
-        }
-
-        ScriptRun* run = run_of(L);
-        if (run->host == nullptr || !run->host->ask) {
-            return binding_error(
-                L, "ask: questions are unavailable in unattended runs");
-        }
-        const auto paused_at     = std::chrono::steady_clock::now();
-        const ModalResult result = run->host->ask(std::move(form)).get();
-        run->deadline += std::chrono::steady_clock::now() - paused_at;
-        const auto* answer = std::get_if<ModalAnswer>(&result);
-        if (answer == nullptr) {
-            record_call(L, "ask", "", false);
-            return binding_error(L, "ask: dismissed by the user");
-        }
-        record_call(L, "ask",
-            std::to_string(answer->cards.size())
-                + (answer->cards.size() == 1 ? " question" : " questions"),
-            true);
-        lua_newtable(L);
-        for (std::size_t i = 0; i < answer->cards.size(); ++i) {
-            const QuestionAnswer& qa = answer->cards[i];
-            lua_newtable(L);
-            lua_pushlstring(L, qa.prompt.data(), qa.prompt.size());
-            lua_setfield(L, -2, "question");
-            std::string joined = qa.free_text;
-            for (std::size_t c = 0; c < qa.selected.size(); ++c) {
-                if (c > 0) {
-                    joined += ", ";
-                }
-                joined += qa.selected[c];
+            if (duplicate) {
+                luaL_error(L, "binding catalog: duplicate path '%s'",
+                    std::string(path).c_str());
+                return;
             }
-            lua_pushlstring(L, joined.data(), joined.size());
-            lua_setfield(L, -2, "answer");
-            lua_rawseti(L, -2, static_cast<lua_Integer>(i + 1));
+            lua_pushcfunction(L, binding.function);
+            lua_setfield(L, parent, leaf.c_str());
+            if (dot != std::string_view::npos) {
+                lua_pop(L, 1); // the intermediate table
+            }
         }
-        return 1;
+        lua_pushvalue(L, tool);
+        lua_setglobal(L, "tool");
+        lua_pop(L, 1);
     }
 
-    // tool.shell(command, timeout=10, workspace=nil) => output, exit_code
-    // (nil, err on failure)
-    // Exactly the native shell permission flow, with one binding-local rule:
-    // a single command expression per call. Chains (; || & and newlines)
-    // must be composed in Lua. Everything else — redirects, expansions,
-    // catalog lookups, session grants — is decided by evaluate_shell_request,
-    // the same gate the native shell tool runs. `workspace` selects the
-    // directory the command runs in; relative paths resolve against the
-    // session working directory. The process cwd only moves through
-    // Environment::chdir, so inheriting it as the default matches the
-    // native shell tool without a syscall.
-    int tool_sh(lua_State* L)
+    std::string render_description()
     {
-        const std::string command = luaL_checkstring(L, 1);
-        long timeout              = 10;
-        if (lua_gettop(L) >= 2 && !lua_isnil(L, 2)) {
-            timeout = std::clamp<long>(luaL_checkinteger(L, 2), 1, 120);
-        }
+        std::string out
+            = R"desc(Executes a sandboxed Lua script and returns printed content
+and modified files.
+Base libraries: string, table, math, coroutine (io/os/package are absent).
 
-        ScriptRun* run = run_of(L);
-        if (run->host == nullptr || !run->host->shell_enabled) {
-            return binding_error(
-                L, "shell: shell access is disabled for this run");
-        }
+TYPES
+  FileEntry  = { path: string, type: "file" | "dir", size?: string }  -- "4.2 KB"
+  TodoStatus = "pending" | "in_progress" | "completed" | "cancelled"
+  TodoItem   = { content: string, status: TodoStatus }
+  AskCard    = { prompt: string, options?: string[], multi?: bool, free_text?: bool }
+  AskAnswer  = { question: string, answer: string }
+  GrepHit    = { file: string, line: integer, text: string }
 
-        std::string workspace;
-        if (lua_gettop(L) >= 3 && !lua_isnil(L, 3)) {
-            const std::string raw = luaL_checkstring(L, 3);
-            if (raw.empty()) {
-                return binding_error(L, "shell: workspace must not be empty");
-            }
-            fs::path dir(raw);
-            if (dir.is_relative()) {
-                // The session working directory lives in the workspace
-                // snapshot; the process cwd already tracks it (Environment
-                // chdirs the process), so this is plain path joining.
-                const PermissionContext context = run->host->context
-                    ? run->host->context()
-                    : PermissionContext { };
-                dir = (context.workspace ? context.workspace->working_directory
-                                         : fs::current_path())
-                    / dir;
-            }
-            std::error_code ec;
-            if (!fs::is_directory(dir, ec)) {
-                return binding_error(
-                    L, "shell: workspace is not a directory: " + raw);
-            }
-            workspace = dir.string();
-        }
+LEGEND
+  tool.<name>(args...) => Value | (nil, Err)
+  - Err is a string
+  - `?` optional with its default after `=`.
+  - An ungranted path returns nil, Err. Check the second return value
 
-        const ShellAnalysis analysis = analyze_shell(command);
-        if (analysis.invocations.size() > 1) {
-            return binding_error(L,
-                "shell: one command per call; compose results in Lua instead "
-                "of "
-                "chaining with && || ; |");
-        }
-        if (analysis.invocations.empty()) {
-            return binding_error(L, "shell: empty command");
-        }
-
-        const auto run_sh = [&]() -> int {
-            CommandResult r = run_command(
-                command, std::chrono::seconds(timeout), fs::path(workspace));
-            if (!r.spawned) {
-                record_call(L, "shell", command, false);
-                return binding_error(L, "shell: failed to execute command");
-            }
-            if (r.timed_out) {
-                record_call(L, "shell", command, false);
-                return binding_error(L,
-                    "shell: timed out after " + std::to_string(timeout) + "s");
-            }
-            record_call(L, "shell", command, r.exit_code == 0);
-            std::string output = std::move(r.output);
-            if (output.size() > MAX_OUTPUT_BYTES) {
-                output.resize(MAX_OUTPUT_BYTES);
-                output += "\n[truncated]";
-            }
-            lua_pushlstring(L, output.data(), output.size());
-            lua_pushinteger(L, r.exit_code);
-            return 2;
-        };
-
-        if (run->host == nullptr || !run->host->context) {
-            // No provider: trusted mode (tests, SKIP_PERMISSIONS paths).
-            return run_sh();
-        }
-
-        Json::Value args;
-        args["command"] = command;
-        args["timeout"] = static_cast<Json::Int64>(timeout);
-        ToolCallRequest request { "shell", write_json(args), { } };
-        const PermissionEvaluation evaluation
-            = evaluate_shell_request(request, run->host->context());
-        if (evaluation.decision.kind == PermissionDecision::Kind::REJECT) {
-            return binding_error(L, "shell: " + evaluation.decision.reason);
-        }
-        if (evaluation.decision.kind == PermissionDecision::Kind::ACCEPT
-            || run->host->skip_permissions) {
-            return run_sh();
-        }
-        if (run->host->unattended) {
-            run->blocked_permission = true;
-            return binding_error(
-                L, "shell: permission requires approval in attended runs");
-        }
-        if (!run->host->ask) {
-            return binding_error(L, "shell: permission approval unavailable");
-        }
-
-        // ASK: block on the modal queue like the native flow; think-time is
-        // free, so shift the wall-clock deadline by the paused duration.
-        const auto paused_at     = std::chrono::steady_clock::now();
-        const ModalResult result = run->host->ask(evaluation.request).get();
-        run->deadline += std::chrono::steady_clock::now() - paused_at;
-        const auto* verdict = std::get_if<ToolVerdict>(&result);
-        if (verdict == nullptr) {
-            return binding_error(L, "shell: permission dismissed");
-        }
-        if (verdict->decision == ToolDecision::REJECT) {
-            return binding_error(L,
-                "shell: "
-                    + (verdict->reason.empty() ? "rejected" : verdict->reason));
-        }
-        if (verdict->decision == ToolDecision::ACCEPT_FOR_SESSION) {
-            if (evaluation.session_grants.empty() || !run->host->install_grants
-                || !run->host->install_grants(evaluation.session_grants)) {
-                return binding_error(
-                    L, "shell: session approval is unavailable");
+METHODS)desc";
+        for (const LuaBinding& binding : all_bindings()) {
+            out += "\n";
+            out += binding.signature;
+            out += "\n";
+            for (const std::string& line :
+                split_lines(std::string(binding.description))) {
+                out += "    ";
+                out += line;
+                out += "\n";
             }
         }
-
-        // Re-evaluate before execution, mirroring the native run flow: the
-        // grants above may have turned the request into an auto-accept.
-        const PermissionEvaluation current
-            = evaluate_shell_request(evaluation.request, run->host->context());
-        if (current.decision.kind == PermissionDecision::Kind::REJECT
-            || current.request.args != evaluation.request.args) {
-            return binding_error(L, "shell: " + current.decision.reason);
+        // Match the historical literal: no trailing newline after the last
+        // description line.
+        while (!out.empty() && out.back() == '\n') {
+            out.pop_back();
         }
-        return run_sh();
-    }
-
-    constexpr std::size_t MAX_WEB_CHARS = 40000;
-
-    // Mirrors web.cpp's truncate_output: cap at a UTF-8 boundary, then mark.
-    std::string truncate_web(std::string text)
-    {
-        if (text.size() <= MAX_WEB_CHARS) {
-            return text;
-        }
-        std::string out(truncate_utf8(text, MAX_WEB_CHARS));
-        out += "\n[truncated: showing first " + std::to_string(out.size())
-            + " of the content]";
         return out;
     }
-
-    bool web_enabled(lua_State* L)
-    {
-        ScriptRun* run = run_of(L);
-        return run->host != nullptr && run->host->web_enabled;
-    }
-
-    // tool.web.fetch(url) => string|nil, err
-    int tool_webfetch(lua_State* L)
-    {
-        const std::string url = luaL_checkstring(L, 1);
-        if (!web_enabled(L)) {
-            return binding_error(
-                L, "web.fetch: web access is disabled for this run");
-        }
-
-        FetchedPage page;
-        std::string detail;
-        const Status st = fetch_url(url, page, detail);
-        if (st == Status::INVALID_URL) {
-            record_call(L, "web.fetch", url, false);
-            return binding_error(L, "web.fetch: " + detail + ": " + url);
-        }
-        if (st == Status::NETWORK_ERROR) {
-            record_call(L, "web.fetch", url, false);
-            return binding_error(L, "web.fetch: request failed: " + url);
-        }
-        if (st != Status::OK) {
-            record_call(L, "web.fetch", url, false);
-            return binding_error(L, "web.fetch: " + detail + ": " + url);
-        }
-        record_call(L, "web.fetch", url, true);
-
-        std::string body  = page.body;
-        std::size_t begin = 0;
-        while (begin < body.size()
-            && std::isspace(static_cast<unsigned char>(body[begin]))) {
-            ++begin;
-        }
-        const std::string head = to_lower(body.substr(
-            begin, std::min(body.size() - begin, std::size_t(200))));
-        const bool is_html     = !body.empty() && body[begin] == '<'
-            && (head.starts_with("<!doctype html") || head.starts_with("<html")
-                || head.starts_with("<head") || head.starts_with("<body")
-                || head.starts_with("<div") || head.starts_with("<p")
-                || head.starts_with("<h1") || head.starts_with("<h2")
-                || head.starts_with("<!doctype html public"));
-        std::string text = is_html ? html_to_text(page.body) : page.body;
-        if (trim(text).empty()) {
-            return binding_error(
-                L, "web.fetch: no readable content at " + page.url);
-        }
-        const std::string out = truncate_web(std::move(text));
-        lua_pushlstring(L, out.data(), out.size());
-        return 1;
-    }
-
-    // tool.web.search(query, num_results=5) => string|nil, err
-    int tool_websearch(lua_State* L)
-    {
-        const std::string query = luaL_checkstring(L, 1);
-        int num_results         = 5;
-        if (lua_gettop(L) >= 2 && !lua_isnil(L, 2)) {
-            num_results = static_cast<int>(luaL_checkinteger(L, 2));
-        }
-        num_results = std::clamp(num_results, 1, 10);
-        if (!web_enabled(L)) {
-            return binding_error(
-                L, "web.search: web access is disabled for this run");
-        }
-
-        std::string text;
-        const Status st = web_search(query, num_results, text);
-        if (st == Status::NETWORK_ERROR) {
-            record_call(L, "web.search", query, false);
-            return binding_error(
-                L, "web.search: request failed for '" + query + "'");
-        }
-        if (st != Status::OK) {
-            record_call(L, "web.search", query, false);
-            return binding_error(
-                L, "web.search: search request rejected for '" + query + "'");
-        }
-        record_call(L, "web.search", query, true);
-        if (trim(text).empty()) {
-            lua_pushliteral(
-                L, "No search results found. Try a different query.");
-            return 1;
-        }
-        const std::string out = truncate_web(std::move(text));
-        lua_pushlstring(L, out.data(), out.size());
-        return 1;
-    }
-
-    // ---- tool.file.* ------------------------------------------------------
-    // Mutating bindings. Each marshals Lua args into the native tool's Json
-    // shape, runs the shared permission gate (evaluate() handles ACCEPT /
-    // ASK-modal / REJECT), and applies the change through the file_ops core
-    // against the canonicalized target. The run tracks per-file original
-    // and latest content so the tool result can carry one net diff per
-    // touched file.
-
-    // Applies `transform` to the file at `target`, persists the result, and
-    // records the net mutation. Returns true on success.
-    bool apply_file_mutation(lua_State* L, const std::string& target,
-        const std::function<std::optional<std::string>(
-            const std::string&, std::string&)>& transform,
-        std::string& err)
-    {
-        ScriptRun* run         = run_of(L);
-        FileMutation* mutation = nullptr;
-        for (FileMutation& m : run->mutations) {
-            if (m.path == target) {
-                mutation = &m;
-                break;
-            }
-        }
-        std::string content;
-        if (mutation != nullptr) {
-            content = mutation->latest;
-        } else if (!load_text(target, content, err)) {
-            return false;
-        }
-        std::optional<std::string> next = transform(content, err);
-        if (!next) {
-            return false;
-        }
-        if (!save_text(target, *next, err)) {
-            return false;
-        }
-        if (mutation == nullptr) {
-            run->mutations.push_back({ target, content, *next });
-        } else {
-            mutation->latest = *next;
-        }
-        return true;
-    }
-
-    // tool.file.insert(path, text, line=nil) => true|nil, err
-    int tool_file_insert(lua_State* L)
-    {
-        const std::string path = luaL_checkstring(L, 1);
-        const std::string text = luaL_checkstring(L, 2);
-        lua_Integer line       = 0;
-        if (lua_gettop(L) >= 3 && !lua_isnil(L, 3)) {
-            line = luaL_checkinteger(L, 3);
-            if (line < 1) {
-                return binding_error(L, "file.insert: line must be 1-based");
-            }
-        }
-
-        Json::Value args;
-        args["file_path"] = path;
-        args["text"]      = text;
-        if (line > 0) {
-            args["line"] = static_cast<Json::Int64>(line);
-        }
-        const std::optional<FilesystemRequest> allowed
-            = evaluate(L, "insert", args, "file.insert");
-        if (!allowed) {
-            return binding_error(L, "file.insert: permission denied: " + path);
-        }
-        const std::string target = allowed->target.string();
-
-        std::string err;
-        const std::size_t at = static_cast<std::size_t>(line);
-        if (!apply_file_mutation(
-                L, target,
-                [&](const std::string& content, std::string& error) {
-                    return insert_text(content, text, at, error);
-                },
-                err)) {
-            return binding_error(L, "file.insert: " + err);
-        }
-        lua_pushboolean(L, 1);
-        return 1;
-    }
-
-    // tool.file.edit(path, old, new, count=1) => true|nil, err
-    int tool_file_edit(lua_State* L)
-    {
-        const std::string path  = luaL_checkstring(L, 1);
-        const std::string old   = luaL_checkstring(L, 2);
-        const std::string fresh = luaL_checkstring(L, 3);
-        lua_Integer count       = 1;
-        if (lua_gettop(L) >= 4 && !lua_isnil(L, 4)) {
-            count = luaL_checkinteger(L, 4);
-            if (count < 0) {
-                return binding_error(L, "file.edit: count must be 0 or more");
-            }
-        }
-        if (old.empty()) {
-            return binding_error(L, "file.edit: old must be non-empty");
-        }
-
-        Json::Value args;
-        args["file_path"]     = path;
-        args["old_string"]    = old;
-        args["new_string"]    = fresh;
-        args["replace_count"] = static_cast<Json::Int64>(count);
-        const std::optional<FilesystemRequest> allowed
-            = evaluate(L, "edit", args, "file.edit");
-        if (!allowed) {
-            return binding_error(L, "file.edit: permission denied: " + path);
-        }
-        const std::string target = allowed->target.string();
-
-        std::string err;
-        if (!apply_file_mutation(
-                L, target,
-                [&](const std::string& content, std::string& error) {
-                    return replace_text(content, old, fresh,
-                        static_cast<std::size_t>(count), error);
-                },
-                err)) {
-            return binding_error(L, "file.edit: " + err);
-        }
-        lua_pushboolean(L, 1);
-        return 1;
-    }
-
-    // tool.file.write(path, text) => true|nil, err
-    int tool_file_write(lua_State* L)
-    {
-        const std::string path = luaL_checkstring(L, 1);
-        const std::string text = luaL_checkstring(L, 2);
-
-        Json::Value args;
-        args["file_path"] = path;
-        args["text"]      = text;
-        const std::optional<FilesystemRequest> allowed
-            = evaluate(L, "write", args, "file.write");
-        if (!allowed) {
-            return binding_error(L, "file.write: permission denied: " + path);
-        }
-        const std::string target = allowed->target.string();
-
-        ScriptRun* run = run_of(L);
-        std::string err;
-        FileMutation* mutation = nullptr;
-        for (FileMutation& m : run->mutations) {
-            if (m.path == target) {
-                mutation = &m;
-                break;
-            }
-        }
-        std::string original;
-        if (mutation != nullptr) {
-            original = mutation->original;
-        } else {
-            std::error_code ec;
-            if (fs::exists(fs::path(target), ec)
-                && !load_text(target, original, err)) {
-                record_call(L, "file.write", target, false);
-                return binding_error(L, "file.write: " + err);
-            }
-        }
-        if (!save_text(target, text, err)) {
-            return binding_error(L, "file.write: " + err);
-        }
-        if (mutation == nullptr) {
-            run->mutations.push_back({ target, original, text });
-        } else {
-            mutation->latest = text;
-        }
-        lua_pushboolean(L, 1);
-        return 1;
-    }
-
-    void open_bindings(lua_State* L)
-    {
-        lua_newtable(L);
-        lua_pushcfunction(L, tool_read);
-        lua_setfield(L, -2, "read");
-        lua_pushcfunction(L, tool_list);
-        lua_setfield(L, -2, "list");
-        lua_pushcfunction(L, tool_grep);
-        lua_setfield(L, -2, "grep");
-        lua_newtable(L);
-        lua_pushcfunction(L, tool_todo);
-        lua_setfield(L, -2, "get");
-        lua_pushcfunction(L, tool_set_todo);
-        lua_setfield(L, -2, "set");
-        lua_setfield(L, -2, "todo");
-        lua_pushcfunction(L, tool_ask);
-        lua_setfield(L, -2, "ask");
-        lua_newtable(L);
-        lua_pushcfunction(L, tool_webfetch);
-        lua_setfield(L, -2, "fetch");
-        lua_pushcfunction(L, tool_websearch);
-        lua_setfield(L, -2, "search");
-        lua_setfield(L, -2, "web");
-        lua_pushcfunction(L, tool_sh);
-        lua_setfield(L, -2, "shell");
-        lua_newtable(L);
-        lua_pushcfunction(L, tool_file_insert);
-        lua_setfield(L, -2, "insert");
-        lua_pushcfunction(L, tool_file_edit);
-        lua_setfield(L, -2, "edit");
-        lua_pushcfunction(L, tool_file_write);
-        lua_setfield(L, -2, "write");
-        lua_setfield(L, -2, "file");
-        lua_setglobal(L, "tool");
-    }
-
-    // ---- driver -----------------------------------------------------------
 
     ToolOutput lua_run(
         const Json::Value& args, const LuaHost& host, bool has_rg)
@@ -1251,7 +266,7 @@ namespace {
             timeout = std::clamp(*value, 1L, 120L);
         }
 
-        ScriptRun run;
+        LuaRunContext run;
         run.deadline
             = std::chrono::steady_clock::now() + std::chrono::seconds(timeout);
         run.host   = &host;
@@ -1262,7 +277,7 @@ namespace {
             return tool_error("lua: cannot create VM");
         }
         open_sandbox(L, run);
-        open_bindings(L);
+        register_bindings(L);
         lua_sethook(L, deadline_hook, LUA_MASKCOUNT, HOOK_INTERVAL);
 
         // The log and the net per-file diffs record what ran even when the
@@ -1303,95 +318,9 @@ namespace {
 Tool make_lua_tool(LuaHost host, bool has_rg)
 {
     ToolSpec spec;
-    spec.name = "lua";
-    spec.description
-        = R"desc(Executes a sandboxed Lua script and returns printed content
-and modified files.
-Base libraries: string, table, math, coroutine (io/os/package are absent).
-
-TYPES
-  FileEntry  = { path: string, type: "file" | "dir", size?: string }  -- "4.2 KB"
-  TodoStatus = "pending" | "in_progress" | "completed" | "cancelled"
-  TodoItem   = { content: string, status: TodoStatus }
-  AskCard    = { prompt: string, options?: string[], multi?: bool, free_text?: bool }
-  AskAnswer  = { question: string, answer: string }
-  GrepHit    = { file: string, line: integer, text: string }
-
-LEGEND
-  tool.<name>(args...) => Value | (nil, Err)
-  - Err is a string
-  - `?` optional with its default after `=`.
-  - An ungranted path returns nil, Err. Check the second return value
-
-METHODS
-tool.read(path: string, first_line?: integer=1, last_line?: integer=nil)
-    => string
-    Read the file at `path` returning its content.
-    first_line..last_line inclusive omit last_line to read to the end.
-    Fails on no such file, first_line past the end, last_line < first_line, or a
-    binary file. Over 64 KB is cut and marked "[truncated]".
-
-tool.list(path?: string=".", depth?: integer=1, show_hidden?: bool=false)
-    => FileEntry[]
-    List files and directories in `path`.
-    Filename-sorted listing; depth (1..5) descends into subdirectories and
-    their entries come back flat, so join child names to their parent
-    yourself. `size` is absent for directories and "-" when unreadable.
-    Capped at 2000 entries.
-
-tool.grep(path: string, pattern: string) => GrepHit[]
-    Run a POSIX extended regex (not a Lua pattern) over a file or
-    directory tree, one hit per matching line.
-    Capped at 500 hits, followed by a hit whose text is "[truncated]".
-
-tool.todo.get() => TodoItem[]
-    The session task list in display order; empty array when unset.
-
-tool.todo.set(items: TodoItem[]) => true
-    Set todo items.
-    Replaces the entire list: get, modify, set the full array back.
-    `status` defaults to "pending"; any other value is rejected.
-
-tool.ask(cards: AskCard[]) => AskAnswer[]
-    Puts a question to the end user and returns their answer.
-    `options` offers a choice list, `multi` allows several picks, `free_text` allows
-    typed input; a card may combine them, and `answer` is the typed text
-    plus the selected labels joined with ", ". nil, Err when dismissed.
-    Unavailable in unattended runs.
-
-tool.shell(command: string, timeout?: integer=10, workspace?: string)
-    => output: string, exit_code: integer
-    Runs a single external command, returning its captured output (capped at
-    64 KB) and exit status.
-    A non-zero exit_code is a successful call, so test exit_code rather than nil.
-    nil, Err means it could not start, timed out (1..120 s) or was denied.
-    Chains and pipelines are rejected. Compose results in Lua instead.
-    `workspace` is the directory the command runs in.
-
-tool.web.fetch(url: string) => string
-    Fetches an http(s) URL as readable text: HTML is converted to plain
-    text, other bodies (JSON, markdown, raw) return as-is.
-    Fails on non-http(s) URLs, network errors, non-2xx responses, bodies over 5 MB,
-    and pages with no readable content. Capped at 40000 characters.
-
-tool.web.search(query: string, num_results?: integer=5) => string
-    Search results as a formatted text block.
-    num_results is clamped to 1..10. No hits returns "No search results found.
-    Try a different query."
-
-tool.file.insert(path: string, text: string, line?: integer=nil) => true
-    Inserts text before the 1-based line, pushing it down; omit line to
-    append at the end. A line past the end of the file is an error.
-
-tool.file.edit(path: string, old: string, new: string, count?: integer=1) => true
-    Replaces the first count occurrences of old with new; count=0 replaces
-    all. old is an exact literal match, so include enough surrounding text
-    to be unique. Errors if old is empty or not found.
-
-tool.file.write(path: string, text: string) => true
-    Replaces the file's entire content, creating it if absent. Prefer
-    insert/edit for targeted changes; this discards everything else.)desc";
-    spec.parameters = parse_json(
+    spec.name        = "lua";
+    spec.description = render_description();
+    spec.parameters  = parse_json(
         R"json({"type":"object","properties":{"script":{"type":"string","description":"Lua source code to execute"},"timeout":{"type":"integer","description":"maximum script execution time in seconds, excluding pauses for permission prompts (default 10, max 120)"}},"required":["script"]})json");
     return { std::move(spec),
         [host = std::move(host), has_rg](

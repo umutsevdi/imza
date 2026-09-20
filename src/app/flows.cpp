@@ -191,6 +191,10 @@ namespace {
             request->description = agent_label + " · "
                 + (request->description.empty() ? request->name
                                                 : request->description);
+        } else if (auto* prompt = std::get_if<PermissionPrompt>(&payload)) {
+            prompt->description = agent_label + " · "
+                + (prompt->description.empty() ? prompt->name
+                                               : prompt->description);
         } else if (auto* form = std::get_if<QuestionForm>(&payload)) {
             if (!form->empty()) {
                 form->front().prompt
@@ -291,7 +295,8 @@ void submit(ApplicationState& state, std::string text,
 
 void close_modal(ApplicationState& state)
 {
-    if (std::holds_alternative<ToolCallRequest>(state.session->modal())) {
+    if (std::holds_alternative<ToolCallRequest>(state.session->modal())
+        || std::holds_alternative<PermissionPrompt>(state.session->modal())) {
         interrupt(state);
     }
     resolve_modal(state, std::monostate { });

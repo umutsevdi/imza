@@ -51,6 +51,22 @@ struct ToolVerdict {
     std::string reason;
 };
 
+struct PermissionPrompt {
+    std::string name;
+    std::string description;
+    std::string reason;
+    std::string target;
+    std::string command;
+    std::string old_text;
+    std::string new_text;
+    std::string text;
+    std::optional<std::size_t> first_line;
+    std::optional<std::size_t> last_line;
+    std::optional<std::size_t> line;
+    std::chrono::seconds timeout { 10 };
+    bool allow_for_session = false;
+};
+
 struct ToolCallRequest {
     std::string name;
     std::string args;

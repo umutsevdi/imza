@@ -1081,8 +1081,8 @@ namespace {
                 return vbox({
                     hbox({
                         spinner(15, static_cast<std::size_t>(frame_))
-                            | color(HL_GREEN),
-                        text(" Executing…") | color(PANEL_FG_DIM),
+                            | color(PANEL_FG_DIM),
+                        text(" Executing…") | dim,
                     }),
                     separatorEmpty(),
                 });

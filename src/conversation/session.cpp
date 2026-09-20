@@ -459,6 +459,7 @@ void Session::present_modal(ModalPayload payload)
     std::lock_guard lock(_mutex);
     _modal = std::move(payload);
     if (std::holds_alternative<ToolCallRequest>(_modal)
+        || std::holds_alternative<PermissionPrompt>(_modal)
         || std::holds_alternative<QuestionForm>(_modal)) {
         _phase = Phase::AWAITING;
     }

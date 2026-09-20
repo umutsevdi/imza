@@ -1,6 +1,7 @@
 #include "permissions/evaluator.h"
 
 #include "network/json_io.h"
+#include "permissions/shell_analysis.h"
 #include "platform/config.h"
 #include "tools/skills.h"
 #include "tools/tool.h"
@@ -84,17 +85,24 @@ namespace {
         return reason;
     }
 
-    PermissionEvaluation evaluate_shell(const ToolCallRequest& original,
-        const Json::Value& arguments, const PermissionContext& context)
+    ShellEvaluation evaluate_shell(
+        ShellRequest request, const PermissionContext& context)
     {
-        if (!context.grants) {
-            return reject(original, "permission grants are unavailable");
+        if (request.command.empty()) {
+            return { { PermissionDecision::Kind::REJECT,
+                         "shell: 'command' must be a non-empty string" },
+                std::move(request), { } };
         }
-        const ShellAnalysis analysis
-            = analyze_shell(arguments["command"].asString());
+        if (!context.grants) {
+            return { { PermissionDecision::Kind::REJECT,
+                         "permission grants are unavailable" },
+                std::move(request), { } };
+        }
+        const ShellAnalysis analysis = analyze_shell(request.command);
         if (analysis.reuse == ShellAnalysis::Reuse::ONCE) {
-            return ask(
-                original, "shell syntax requires approval for each execution");
+            return { { PermissionDecision::Kind::ASK,
+                         "shell syntax requires approval for each execution" },
+                std::move(request), { } };
         }
 
         PermissionStore::Grants candidates;
@@ -128,10 +136,12 @@ namespace {
             }
         }
         if (candidates.empty()) {
-            return accept(original);
+            return { { PermissionDecision::Kind::ACCEPT, "" },
+                std::move(request), { } };
         }
         const std::string reason = shell_grant_reason(candidates);
-        return ask(original, reason, std::move(candidates));
+        return { { PermissionDecision::Kind::ASK, reason }, std::move(request),
+            std::move(candidates) };
     }
 
     PermissionEvaluation evaluate_skill(const ToolCallRequest& original,
@@ -189,28 +199,6 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
     request.permission_reason.clear();
     request.allow_for_session = false;
 
-    if (original.name == "read" || original.name == "list"
-        || original.name == "find" || original.name == "edit"
-        || original.name == "write") {
-        const FilesystemEvaluation filesystem = evaluate_filesystem_request(
-            original.name, original.args, context);
-        if (!filesystem.request) {
-            return reject(std::move(request), filesystem.decision.reason);
-        }
-        request.args = write_json(filesystem.request->normalized_arguments);
-        if (filesystem.decision.kind == PermissionDecision::Kind::ACCEPT) {
-            return accept(std::move(request));
-        }
-        if (filesystem.decision.kind == PermissionDecision::Kind::REJECT) {
-            return reject(std::move(request), filesystem.decision.reason);
-        }
-        PermissionStore::Grants grants;
-        if (const auto grant = filesystem_session_grant(*filesystem.request)) {
-            grants.push_back(PermissionGrant { *grant });
-        }
-        return ask(
-            std::move(request), filesystem.decision.reason, std::move(grants));
-    }
     if (original.name == "skill") {
         return evaluate_skill(original, context, config, skills, loaded_skills);
     }
@@ -231,24 +219,14 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
         }
         return accept(std::move(request));
     }
-    if (original.name == "shell") {
-        if (const auto error = validate_shell_tool_arguments(arguments)) {
-            return reject(std::move(request), *error);
-        }
-        return evaluate_shell(request, arguments, context);
-    }
     return reject(
         std::move(request), "tool has no permission policy: " + original.name);
 }
 
-PermissionEvaluation evaluate_shell_request(
-    const ToolCallRequest& request, const PermissionContext& context)
+ShellEvaluation evaluate_shell_request(
+    ShellRequest request, const PermissionContext& context)
 {
-    const Json::Value arguments = parse_json(request.args);
-    if (const auto error = validate_shell_tool_arguments(arguments)) {
-        return reject(std::move(request), *error);
-    }
-    return evaluate_shell(request, arguments, context);
+    return evaluate_shell(std::move(request), context);
 }
 
 } // namespace imza

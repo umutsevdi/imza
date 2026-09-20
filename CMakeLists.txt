@@ -108,7 +108,7 @@ FetchContent_Declare(
     EXCLUDE_FROM_ALL
 )
 
-# lua (single-file amalgamation, built as a library for the sandbox worker)
+# lua
 FetchContent_Declare(
     lua
     GIT_REPOSITORY https://github.com/lua/lua.git
@@ -290,11 +290,16 @@ add_library(imza_execution
     src/app/slash_commands.cpp
     src/permissions/evaluator.cpp
     src/permissions/filesystem.cpp
+    src/permissions/shell_analysis.cpp
     src/tools/tool.cpp
     src/tools/file_ops.cpp
     src/tools/lua.cpp
-    src/tools/tool_args.cpp
-    src/tools/shell.cpp
+    src/tools/bindings/binding.cpp
+    src/tools/bindings/filesystem.cpp
+    src/tools/bindings/mutation.cpp
+    src/tools/bindings/session.cpp
+    src/tools/bindings/shell.cpp
+    src/tools/bindings/web.cpp
     src/turn/delegation.cpp
     src/turn/prompt.cpp
     src/turn/stream_updates.cpp
