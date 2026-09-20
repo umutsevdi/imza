@@ -145,9 +145,8 @@ namespace {
             return binding_error(
                 L, "ask: questions are unavailable in unattended runs");
         }
-        const auto paused_at     = std::chrono::steady_clock::now();
-        const ModalResult result = run->host->ask(std::move(form)).get();
-        run->deadline += std::chrono::steady_clock::now() - paused_at;
+        const ModalResult result
+            = ask_with_deadline_credit(*run, std::move(form));
         const auto* answer = std::get_if<ModalAnswer>(&result);
         if (answer == nullptr) {
             record_call(L, "ask", "", false);

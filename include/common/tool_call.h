@@ -9,6 +9,8 @@
 #include <vector>
 
 #include "common/diff.h"
+#include "permissions/filesystem.h"
+#include "permissions/shell.h"
 
 namespace imza {
 
@@ -51,20 +53,16 @@ struct ToolVerdict {
     std::string reason;
 };
 
+// Approval modal payload for a sandbox binding's gated call: the display
+// label, the canonical target for the header line, and the typed request
+// the modal renders details from.
 struct PermissionPrompt {
     std::string name;
     std::string description;
     std::string reason;
     std::string target;
-    std::string command;
-    std::string old_text;
-    std::string new_text;
-    std::string text;
-    std::optional<std::size_t> first_line;
-    std::optional<std::size_t> last_line;
-    std::optional<std::size_t> line;
-    std::chrono::seconds timeout { 10 };
     bool allow_for_session = false;
+    std::variant<std::monostate, FilesystemRequest, ShellRequest> request;
 };
 
 struct ToolCallRequest {

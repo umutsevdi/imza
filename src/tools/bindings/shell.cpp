@@ -9,6 +9,7 @@
 #include <chrono>
 #include <filesystem>
 #include <string>
+#include <utility>
 
 extern "C" {
 #include <lauxlib.h>
@@ -28,7 +29,6 @@ namespace {
             timeout = std::clamp<long>(luaL_checkinteger(L, 2), 1, 120);
         }
 
-        LuaRunContext* run = run_of(L);
         std::string workspace;
         if (lua_gettop(L) >= 3 && !lua_isnil(L, 3)) {
             const std::string raw = luaL_checkstring(L, 3);
@@ -40,6 +40,7 @@ namespace {
                 // The session working directory lives in the workspace
                 // snapshot; the process cwd already tracks it (Environment
                 // chdirs the process), so this is plain path joining.
+                LuaRunContext* run              = run_of(L);
                 const PermissionContext context = run->host->permission_context
                     ? run->host->permission_context()
                     : PermissionContext { };
@@ -66,93 +67,35 @@ namespace {
             return binding_error(L, "shell: empty command");
         }
 
-        const auto run_sh = [&]() -> int {
-            CommandResult r = run_command(
-                command, std::chrono::seconds(timeout), fs::path(workspace));
-            if (!r.spawned) {
-                record_call(L, "shell", command, false);
-                return binding_error(L, "shell: failed to execute command");
-            }
-            if (r.timed_out) {
-                record_call(L, "shell", command, false);
-                return binding_error(L,
-                    "shell: timed out after " + std::to_string(timeout) + "s");
-            }
-            record_call(L, "shell", command, r.exit_code == 0);
-            std::string output = std::move(r.output);
-            if (output.size() > MAX_OUTPUT_BYTES) {
-                output.resize(MAX_OUTPUT_BYTES);
-                output += "\n[truncated]";
-            }
-            lua_pushlstring(L, output.data(), output.size());
-            lua_pushinteger(L, r.exit_code);
-            return 2;
-        };
+        const GateOutcome gate = authorize_shell(L,
+            ShellRequest {
+                command, std::chrono::seconds(timeout), fs::path(workspace) });
+        if (!gate) {
+            return binding_error(L, gate.denial);
+        }
+        const std::string run_dir
+            = gate.shell ? gate.shell->workspace.string() : workspace;
 
-        if (!run->host->permission_context) {
-            // No provider: trusted mode (tests, SKIP_PERMISSIONS paths).
-            return run_sh();
+        CommandResult r = run_command(
+            command, std::chrono::seconds(timeout), fs::path(run_dir));
+        if (!r.spawned) {
+            record_call(L, "shell", command, false);
+            return binding_error(L, "shell: failed to execute command");
         }
-
-        const ShellRequest request { command, std::chrono::seconds(timeout),
-            fs::path(workspace) };
-        const ShellEvaluation evaluation
-            = evaluate_shell_request(request, run->host->permission_context());
-        if (evaluation.decision.kind == PermissionDecision::Kind::REJECT) {
-            return binding_error(L, "shell: " + evaluation.decision.reason);
-        }
-        if (evaluation.decision.kind == PermissionDecision::Kind::ACCEPT
-            || run->host->skip_permissions) {
-            return run_sh();
-        }
-        if (run->host->unattended) {
-            run->blocked_permission = true;
+        if (r.timed_out) {
+            record_call(L, "shell", command, false);
             return binding_error(
-                L, "shell: permission requires approval in attended runs");
+                L, "shell: timed out after " + std::to_string(timeout) + "s");
         }
-        if (!run->host->ask) {
-            return binding_error(L, "shell: permission approval unavailable");
+        record_call(L, "shell", command, r.exit_code == 0);
+        std::string output = std::move(r.output);
+        if (output.size() > MAX_OUTPUT_BYTES) {
+            output.resize(MAX_OUTPUT_BYTES);
+            output += "\n[truncated]";
         }
-
-        // ASK: block on the modal queue; think-time is free, so shift the
-        // wall-clock deadline by the paused duration.
-        PermissionPrompt prompt;
-        prompt.name              = "shell";
-        prompt.description       = "shell";
-        prompt.reason            = evaluation.decision.reason;
-        prompt.command           = evaluation.request.command;
-        prompt.target            = evaluation.request.workspace.string();
-        prompt.timeout           = evaluation.request.timeout;
-        prompt.allow_for_session = !evaluation.session_grants.empty();
-        const auto paused_at     = std::chrono::steady_clock::now();
-        const ModalResult result = run->host->ask(std::move(prompt)).get();
-        run->deadline += std::chrono::steady_clock::now() - paused_at;
-        const auto* verdict = std::get_if<ToolVerdict>(&result);
-        if (verdict == nullptr) {
-            return binding_error(L, "shell: permission dismissed");
-        }
-        if (verdict->decision == ToolDecision::REJECT) {
-            return binding_error(L,
-                "shell: "
-                    + (verdict->reason.empty() ? "rejected" : verdict->reason));
-        }
-        if (verdict->decision == ToolDecision::ACCEPT_FOR_SESSION) {
-            if (evaluation.session_grants.empty() || !run->host->install_grants
-                || !run->host->install_grants(evaluation.session_grants)) {
-                return binding_error(
-                    L, "shell: session approval is unavailable");
-            }
-        }
-
-        // Re-evaluate before execution: the grant above may have turned the
-        // request into an auto-accept.
-        const ShellEvaluation current
-            = evaluate_shell_request(request, run->host->permission_context());
-        if (current.decision.kind == PermissionDecision::Kind::REJECT
-            || current.request != evaluation.request) {
-            return binding_error(L, "shell: " + current.decision.reason);
-        }
-        return run_sh();
+        lua_pushlstring(L, output.data(), output.size());
+        lua_pushinteger(L, r.exit_code);
+        return 2;
     }
 
     constexpr LuaBinding BINDINGS[] = {

@@ -62,7 +62,11 @@ struct LuaRunContext {
     std::vector<FileMutation> mutations;
     // Borrowed; set by the driver before any binding can run, so
     // binding code never null-checks it.
-    const LuaHost* host     = nullptr;
+    const LuaHost* host = nullptr;
+    // Dotted catalog path of the binding executing right now, set by the
+    // registration trampoline. The gate logs under it, so the dispatch-log
+    // vocabulary is the model-facing one by construction.
+    std::string_view current_binding;
     bool blocked_permission = false;
 };
 
@@ -79,14 +83,46 @@ int binding_error(lua_State* L, std::string message);
 void record_call(
     lua_State* L, std::string_view binding, std::string target, bool ok);
 
-// The permission chokepoint: takes a typed request, runs it through the
-// shared filesystem gate, resolves ASK verdicts through the modal queue
-// (grant install + re-evaluation on accept-for-session), and collapses
-// unattended or unwired ASKs to rejection. Returns the canonicalized
-// request on success; the binding must execute against that target, never
-// the raw script-supplied path. Accepted calls land in the dispatch log.
-std::optional<FilesystemRequest> authorize_filesystem(
-    lua_State* L, FilesystemRequest request, std::string_view label = "");
+// Verdict of the shared gate pipeline for one binding call: exactly one
+// request arm is set when allowed; denial carries the binding-error
+// text (label + gate/verdict reason) when denied.
+struct GateOutcome {
+    std::optional<FilesystemRequest> filesystem;
+    std::optional<ShellRequest> shell;
+    std::string denial;
+
+    explicit operator bool() const { return denial.empty(); }
+};
+
+// Blocks on the host's modal route and returns the verdict, crediting the
+// human think-time back to the run's wall-clock deadline.
+ModalResult ask_with_deadline_credit(LuaRunContext& run, ModalPayload payload);
+
+// The shared ASK -> grant -> re-evaluate pipeline both gates run after
+// their gate returned ASK: skip_permissions accepts, unattended fails
+// closed (marking the run's blocked_permission), attended routes through
+// ask_with_deadline_credit, and ACCEPT_FOR_SESSION installs the session
+// grants and re-runs recheck (re-evaluate the gate, confirm the same
+// canonical request). Denied outcomes land in the dispatch log with
+// ok=false and fill denial.
+bool resolve_ask(LuaRunContext& run, const std::string& label,
+    const std::string& target, PermissionStore::Grants session_grants,
+    PermissionPrompt prompt, const std::function<bool()>& recheck,
+    std::string& denial);
+
+// The permission chokepoints: run the typed request through the shared
+// gate and resolve_ask. The binding must execute against the returned
+// canonicalized request, never the raw script-supplied path. Both log the
+// call under LuaRunContext::current_binding, the executing binding's
+// catalog path, so the dispatch-log vocabulary cannot diverge from the
+// model-facing one.
+GateOutcome authorize_filesystem(lua_State* L, FilesystemRequest request);
+GateOutcome authorize_shell(lua_State* L, const ShellRequest& request);
+
+// Binding error for a denied gate call: the historical permission-denied
+// text plus the gate/verdict reason when one exists.
+std::string gate_denied(
+    lua_State* L, const std::string& denial, const std::string& path);
 
 // Family catalogs, defined one file per family under src/tools/bindings/.
 std::span<const LuaBinding> filesystem_lua_bindings();

@@ -30,21 +30,33 @@ namespace {
         return nullptr;
     }
 
-    // Reads the file at `target` (or the run's cached latest), applies
-    // `transform`, persists, and records the net mutation for the run's
-    // final diff.
+    // Reads the file at `target` (the run's cached latest once touched),
+    // applies `transform`, persists, and records the net mutation for the
+    // run's final diff. `whole_file` (tool.file.write) tolerates a missing
+    // target: the original is then empty, so a fresh file diffs from blank.
     bool apply_file_mutation(lua_State* L, const std::string& target,
         const std::function<std::optional<std::string>(
             const std::string&, std::string&)>& transform,
-        std::string& err)
+        std::string& err, bool whole_file = false)
     {
         LuaRunContext* run     = run_of(L);
         FileMutation* mutation = find_mutation(run, target);
+        std::string original;
         std::string content;
         if (mutation != nullptr) {
-            content = mutation->latest;
-        } else if (!load_text(target, content, err)) {
-            return false;
+            original = mutation->original;
+            content  = mutation->latest;
+        } else {
+            // load_text distinguishes a missing file (whole_file: a fresh
+            // write from empty) from unreadable content (always an error).
+            if (!load_text(target, content, err)) {
+                if (!whole_file || !err.starts_with("no such file")) {
+                    return false;
+                }
+                err.clear();
+                content.clear();
+            }
+            original = content;
         }
         std::optional<std::string> next = transform(content, err);
         if (!next) {
@@ -54,7 +66,7 @@ namespace {
             return false;
         }
         if (mutation == nullptr) {
-            run->mutations.push_back({ target, content, *next });
+            run->mutations.push_back({ target, original, *next });
         } else {
             mutation->latest = *next;
         }
@@ -77,12 +89,11 @@ namespace {
             line > 0
                 ? std::optional<std::size_t>(static_cast<std::size_t>(line))
                 : std::nullopt };
-        const std::optional<FilesystemRequest> allowed
-            = authorize_filesystem(L, request, "file.insert");
-        if (!allowed) {
-            return binding_error(L, "file.insert: permission denied: " + path);
+        const GateOutcome gate = authorize_filesystem(L, request);
+        if (!gate) {
+            return binding_error(L, gate_denied(L, gate.denial, path));
         }
-        const std::string target = filesystem_target(*allowed).string();
+        const std::string target = filesystem_target(*gate.filesystem).string();
 
         std::string err;
         const std::size_t at = static_cast<std::size_t>(line);
@@ -116,12 +127,11 @@ namespace {
 
         const EditFileRequest request { path, old, fresh,
             static_cast<std::size_t>(count) };
-        const std::optional<FilesystemRequest> allowed
-            = authorize_filesystem(L, request, "file.edit");
-        if (!allowed) {
-            return binding_error(L, "file.edit: permission denied: " + path);
+        const GateOutcome gate = authorize_filesystem(L, request);
+        if (!gate) {
+            return binding_error(L, gate_denied(L, gate.denial, path));
         }
-        const std::string target = filesystem_target(*allowed).string();
+        const std::string target = filesystem_target(*gate.filesystem).string();
 
         std::string err;
         if (!apply_file_mutation(
@@ -143,34 +153,20 @@ namespace {
         const std::string text = luaL_checkstring(L, 2);
 
         const WriteFileRequest request { path, text };
-        const std::optional<FilesystemRequest> allowed
-            = authorize_filesystem(L, request, "file.write");
-        if (!allowed) {
-            return binding_error(L, "file.write: permission denied: " + path);
+        const GateOutcome gate = authorize_filesystem(L, request);
+        if (!gate) {
+            return binding_error(L, gate_denied(L, gate.denial, path));
         }
-        const std::string target = filesystem_target(*allowed).string();
+        const std::string target = filesystem_target(*gate.filesystem).string();
 
-        LuaRunContext* run = run_of(L);
         std::string err;
-        FileMutation* mutation = find_mutation(run, target);
-        std::string original;
-        if (mutation != nullptr) {
-            original = mutation->original;
-        } else {
-            std::error_code ec;
-            if (fs::exists(fs::path(target), ec)
-                && !load_text(target, original, err)) {
-                record_call(L, "file.write", target, false);
-                return binding_error(L, "file.write: " + err);
-            }
-        }
-        if (!save_text(target, text, err)) {
+        if (!apply_file_mutation(
+                L, target,
+                [&](const std::string&, std::string&) {
+                    return std::optional<std::string>(text);
+                },
+                err, true)) {
             return binding_error(L, "file.write: " + err);
-        }
-        if (mutation == nullptr) {
-            run->mutations.push_back({ target, original, text });
-        } else {
-            mutation->latest = text;
         }
         lua_pushboolean(L, 1);
         return 1;

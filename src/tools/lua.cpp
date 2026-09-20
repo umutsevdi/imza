@@ -169,16 +169,6 @@ namespace {
         return bindings;
     }
 
-    // Installed in place of a binding whose capability the run lacks: fails
-    // closed as `nil, err` with the descriptor's denial text, so the binding
-    // is still documented and callable but cannot execute.
-    int binding_denied(lua_State* L)
-    {
-        const auto* binding = static_cast<const LuaBinding*>(
-            lua_touserdata(L, lua_upvalueindex(1)));
-        return binding_error(L, std::string(binding->capability_denied));
-    }
-
     // True when the run's host grants `capability`.
     bool capability_allowed(const LuaHost& host, LuaCapability capability)
     {
@@ -190,11 +180,29 @@ namespace {
         return true;
     }
 
+    // Every catalog entry is installed as this closure with the descriptor
+    // as upvalue: it records the executing binding's dotted path on the run
+    // context (the gate logs under it, so the dispatch-log vocabulary is the
+    // model-facing one by construction), then calls the real function. When
+    // the run lacks the capability it fails closed as `nil, err` with the
+    // descriptor's denial text; the binding stays documented and callable.
+    int binding_trampoline(lua_State* L)
+    {
+        const auto* binding = static_cast<const LuaBinding*>(
+            lua_touserdata(L, lua_upvalueindex(1)));
+        LuaRunContext* run   = run_of(L);
+        run->current_binding = binding->path;
+        if (!capability_allowed(*run->host, binding->capability)) {
+            return binding_error(L, std::string(binding->capability_denied));
+        }
+        return binding->function(L);
+    }
+
     // Installs every descriptor on the global `tool` table, creating the
     // intermediate table for one-level dotted paths ("todo.get", "file.edit").
     // A duplicate path is a programming error surfaced as a VM-level failure
     // rather than a silent shadow.
-    void register_bindings(lua_State* L, const LuaRunContext& run)
+    void register_bindings(lua_State* L)
     {
         lua_newtable(L);
         const int tool = lua_gettop(L);
@@ -223,12 +231,8 @@ namespace {
                     std::string(path).c_str());
                 return;
             }
-            if (capability_allowed(*run.host, binding.capability)) {
-                lua_pushcfunction(L, binding.function);
-            } else {
-                lua_pushlightuserdata(L, const_cast<LuaBinding*>(&binding));
-                lua_pushcclosure(L, binding_denied, 1);
-            }
+            lua_pushlightuserdata(L, const_cast<LuaBinding*>(&binding));
+            lua_pushcclosure(L, binding_trampoline, 1);
             lua_setfield(L, parent, leaf.c_str());
             if (dot != std::string_view::npos) {
                 lua_pop(L, 1); // the intermediate table
@@ -259,6 +263,7 @@ LEGEND
   - Err is a string
   - `?` optional with its default after `=`.
   - An ungranted path returns nil, Err. Check the second return value
+  - Paths can be relative to current working directory.
   - Operational failures (missing file, denied permission, timeout) are
     values: nil, Err. Wrong argument types raise and abort the script;
     wrap in pcall only if you intend to survive them
@@ -275,8 +280,8 @@ METHODS)desc";
                 out += "\n";
             }
         }
-        // Match the historical literal: no trailing newline after the last
-        // description line.
+        // The generated description ends at the last binding's prose: no
+        // trailing newline, so the tool spec reads as a single block.
         while (!out.empty() && out.back() == '\n') {
             out.pop_back();
         }
@@ -304,7 +309,7 @@ METHODS)desc";
             return tool_error("lua: cannot create VM");
         }
         open_sandbox(L, run);
-        register_bindings(L, run);
+        register_bindings(L);
         lua_sethook(L, deadline_hook, LUA_MASKCOUNT, HOOK_INTERVAL);
 
         // The log and the net per-file diffs record what ran even when the

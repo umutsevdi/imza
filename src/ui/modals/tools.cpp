@@ -155,10 +155,52 @@ namespace {
         return text(message) | color(HL_YELLOW);
     }
 
+    Element filesystem_body(const PermissionPrompt& req,
+        const FilesystemRequest& request, int width)
+    {
+        const std::string lang = syntax_type_for_path(req.target);
+        return std::visit(
+            [&](const auto& operation) -> Element {
+                using T = std::decay_t<decltype(operation)>;
+                if constexpr (std::is_same_v<T, EditFileRequest>) {
+                    return vbox({ section_title("Existing text"),
+                        code_block(
+                            preview_text(operation.old_text), lang, width),
+                        section_title("Replacement"),
+                        code_block(
+                            preview_text(operation.new_text), lang, width) });
+                } else if constexpr (std::is_same_v<T, WriteFileRequest>) {
+                    return vbox({ section_title("Content"),
+                        code_block(
+                            preview_text(operation.text), lang, width) });
+                } else if constexpr (std::is_same_v<T, InsertFileRequest>) {
+                    const std::string where = operation.line
+                        ? "before line " + std::to_string(*operation.line)
+                        : "at end of file";
+                    return vbox({ section_title("Insert " + where),
+                        code_block(
+                            preview_text(operation.text), lang, width) });
+                } else if constexpr (std::is_same_v<T, ReadFileRequest>) {
+                    if (!operation.first_line) {
+                        return text("");
+                    }
+                    std::string range
+                        = "lines " + std::to_string(operation.first_line);
+                    range += operation.last_line
+                        ? "–" + std::to_string(*operation.last_line)
+                        : " onward";
+                    return text(range) | color(PANEL_FG_DIM);
+                } else {
+                    return text("");
+                }
+            },
+            request);
+    }
+
     Element tool_request_body(
         const PermissionPrompt& req, const SystemEnvironment& system, int width)
     {
-        if (req.name == "shell") {
+        if (const auto* shell = std::get_if<ShellRequest>(&req.request)) {
             std::string cwd = req.target;
             if (cwd.empty()) {
                 std::error_code ec;
@@ -169,34 +211,13 @@ namespace {
             }
             const std::string metadata
                 = (cwd.empty() ? std::string { } : cwd + " · ") + "timeout "
-                + std::to_string(req.timeout.count()) + "s";
-            return vbox({ code_block(preview_text(req.command),
+                + std::to_string(shell->timeout.count()) + "s";
+            return vbox({ code_block(preview_text(shell->command),
                               shell_name(system), width),
                 hint_bar(metadata) });
         }
-        const std::string lang = syntax_type_for_path(req.target);
-        if (req.name == "edit") {
-            return vbox({ section_title("Existing text"),
-                code_block(preview_text(req.old_text), lang, width),
-                section_title("Replacement"),
-                code_block(preview_text(req.new_text), lang, width) });
-        }
-        if (req.name == "write") {
-            return vbox({ section_title("Content"),
-                code_block(preview_text(req.text), lang, width) });
-        }
-        if (req.name == "insert") {
-            const std::string where = req.line
-                ? "before line " + std::to_string(*req.line)
-                : "at end of file";
-            return vbox({ section_title("Insert " + where),
-                code_block(preview_text(req.text), lang, width) });
-        }
-        if (req.name == "read" && req.first_line) {
-            std::string range = "lines " + std::to_string(*req.first_line);
-            range += req.last_line ? "–" + std::to_string(*req.last_line)
-                                   : " onward";
-            return text(range) | color(PANEL_FG_DIM);
+        if (const auto* file = std::get_if<FilesystemRequest>(&req.request)) {
+            return filesystem_body(req, *file, width);
         }
         return text("");
     }

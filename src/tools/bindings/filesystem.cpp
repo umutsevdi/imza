@@ -43,12 +43,11 @@ namespace {
             last_given
                 ? std::optional<std::size_t>(static_cast<std::size_t>(last))
                 : std::nullopt };
-        const std::optional<FilesystemRequest> allowed
-            = authorize_filesystem(L, request);
-        if (!allowed) {
-            return binding_error(L, "read: permission denied: " + path);
+        const GateOutcome gate = authorize_filesystem(L, request);
+        if (!gate) {
+            return binding_error(L, gate_denied(L, gate.denial, path));
         }
-        const std::string target = filesystem_target(*allowed).string();
+        const std::string target = filesystem_target(*gate.filesystem).string();
 
         std::error_code ec;
         if (!fs::is_regular_file(fs::path(target), ec)) {
@@ -188,12 +187,11 @@ namespace {
         }
 
         const ListDirectoryRequest request { path, depth, show_hidden };
-        const std::optional<FilesystemRequest> allowed
-            = authorize_filesystem(L, request);
-        if (!allowed) {
-            return binding_error(L, "list: permission denied: " + path);
+        const GateOutcome gate = authorize_filesystem(L, request);
+        if (!gate) {
+            return binding_error(L, gate_denied(L, gate.denial, path));
         }
-        const std::string target = filesystem_target(*allowed).string();
+        const std::string target = filesystem_target(*gate.filesystem).string();
 
         std::error_code ec;
         if (!fs::is_directory(fs::path(target), ec)) {
@@ -312,12 +310,11 @@ namespace {
         }
 
         const FindFilesRequest request { path, pattern };
-        const std::optional<FilesystemRequest> allowed
-            = authorize_filesystem(L, request, "grep");
-        if (!allowed) {
-            return binding_error(L, "grep: permission denied: " + path);
+        const GateOutcome gate = authorize_filesystem(L, request);
+        if (!gate) {
+            return binding_error(L, gate_denied(L, gate.denial, path));
         }
-        const std::string target = filesystem_target(*allowed).string();
+        const std::string target = filesystem_target(*gate.filesystem).string();
 
         return grep_run(L, pattern, target, run_of(L)->host->has_rg);
     }

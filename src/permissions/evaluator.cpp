@@ -181,19 +181,23 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
     request.permission_reason.clear();
     request.allow_for_session = false;
 
-    if (original.name == "skill") {
-        return evaluate_skill(original, context, config, skills, loaded_skills);
+    const std::optional<RosterTool> tool = classify_roster_tool(original.name);
+    if (!tool) {
+        return reject(std::move(request),
+            "tool has no permission policy: " + original.name);
     }
 
     const Json::Value arguments = parse_json(original.args);
-    if (original.name == "subagent") {
+    switch (*tool) {
+    case RosterTool::SKILL:
+        return evaluate_skill(original, context, config, skills, loaded_skills);
+    case RosterTool::SUBAGENT:
         if (const auto error = validate_subagent_tool_arguments(
                 arguments, context.mode == SessionMode::BUILD)) {
             return reject(std::move(request), *error);
         }
         return accept(std::move(request));
-    }
-    if (original.name == "lua") {
+    case RosterTool::LUA:
         if (!arguments["script"].isString()
             || arguments["script"].asString().empty()) {
             return reject(std::move(request),
@@ -203,6 +207,20 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
     }
     return reject(
         std::move(request), "tool has no permission policy: " + original.name);
+}
+
+std::optional<RosterTool> classify_roster_tool(std::string_view name)
+{
+    if (name == "skill") {
+        return RosterTool::SKILL;
+    }
+    if (name == "subagent") {
+        return RosterTool::SUBAGENT;
+    }
+    if (name == "lua") {
+        return RosterTool::LUA;
+    }
+    return std::nullopt;
 }
 
 } // namespace imza

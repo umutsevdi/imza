@@ -80,38 +80,8 @@ TEST_CASE("tool_args_summary formats object and non-object args")
     CHECK(imza::tool_args_summary("{}") == "{}");
 }
 
-TEST_CASE("tool_call_head shows the file path for read, args otherwise")
+TEST_CASE("tool_call_head special-cases roster tools, args otherwise")
 {
-    imza::ToolCall read { 1, "", "read",
-        R"({"path":"src/a.cpp","line_begin":1})", { } };
-    CHECK(imza::tool_call_head(read) == "src/a.cpp");
-
-    imza::ToolCall other { 1, "", "bash", "git status", { } };
-    CHECK(imza::tool_call_head(other) == "Bash git status");
-
-    imza::ToolCall ask { 1, "", "ask",
-        R"({"questions":[{"prompt":"Continue?"}]})", { } };
-    CHECK(imza::tool_call_head(ask) == "Ask (1 question)");
-
-    imza::ToolCall ask_multi { 1, "", "ask",
-        R"({"questions":[{"prompt":"A"},{"prompt":"B"}]})", { } };
-    CHECK(imza::tool_call_head(ask_multi) == "Ask (2 questions)");
-
-    imza::ToolCall todo { 1, "", "todo",
-        R"({"todos":[{"content":"a","status":"pending"},{"content":"b","status":"in_progress"},{"content":"c","status":"completed"}]})",
-        { } };
-    CHECK(imza::tool_call_head(todo) == "Todo (3 tasks)");
-
-    imza::ToolCall todo_one { 1, "", "todo", R"({"todos":[{"content":"a"}]})",
-        { } };
-    CHECK(imza::tool_call_head(todo_one) == "Todo (1 task)");
-
-    imza::ToolCall todo_clear { 1, "", "todo", R"({"todos":[]})", { } };
-    CHECK(imza::tool_call_head(todo_clear) == "Todo");
-
-    imza::ToolCall todo_bad { 1, "", "todo", "not json", { } };
-    CHECK(imza::tool_call_head(todo_bad) == "Todo");
-
     imza::ToolCall skill { 1, "", "skill",
         R"({"name":"code-review","scope":"project"})", { } };
     CHECK(imza::tool_call_head(skill) == "Load Skill code-review");
@@ -122,6 +92,15 @@ TEST_CASE("tool_call_head shows the file path for read, args otherwise")
         { } };
     CHECK(imza::tool_call_head(subagent) == "Subagent");
     CHECK(imza::tool_header_args(subagent) == "1 research, 1 builder");
+
+    // Names the roster no longer offers (pre-0.4 sessions) fall through to
+    // the generic display-name + argument summary.
+    imza::ToolCall read { 1, "", "read",
+        R"({"path":"src/a.cpp","line_begin":1})", { } };
+    CHECK(imza::tool_call_head(read) == "Read line_begin=1 path=src/a.cpp");
+
+    imza::ToolCall other { 1, "", "bash", "git status", { } };
+    CHECK(imza::tool_call_head(other) == "Bash git status");
 }
 
 TEST_CASE("lua headers summarize bindings and never echo the script")
@@ -163,18 +142,6 @@ TEST_CASE("ask_answer_markdown numbers questions and blockquotes answers")
     imza::ModalAnswer empty;
     empty.cards.push_back(imza::QuestionAnswer { { }, "", "Anything else?" });
     CHECK(imza::ask_answer_markdown(empty) == "1. **Anything else?**\n> -");
-}
-
-TEST_CASE("tool_code_language derives the extension for read only")
-{
-    imza::ToolCall read { 1, "", "read", R"({"path":"src/a.cpp"})", { } };
-    CHECK(imza::tool_code_language(read) == "cpp");
-
-    imza::ToolCall no_ext { 1, "", "read", R"({"path":"Makefile"})", { } };
-    CHECK(imza::tool_code_language(no_ext).empty());
-
-    imza::ToolCall other { 1, "", "bash", "git status", { } };
-    CHECK(imza::tool_code_language(other).empty());
 }
 
 TEST_CASE("shell status text hides success and preserves arbitrary timeout")

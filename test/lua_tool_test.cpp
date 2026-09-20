@@ -395,13 +395,13 @@ TEST_CASE("web bindings fail closed before argument validation")
     // The capability gate is enforced at registration (R3a), so a denied
     // binding returns `nil, err` even when called with missing arguments:
     // access is checked before the handler could raise a type error.
-    const imza::ToolOutput fetch = run_script(
-        "local body, err = tool.web.fetch()\nprint(err)");
+    const imza::ToolOutput fetch
+        = run_script("local body, err = tool.web.fetch()\nprint(err)");
     CHECK(fetch.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(fetch.text.find("web access is disabled") != std::string::npos);
 
-    const imza::ToolOutput search = run_script(
-        "local body, err = tool.web.search()\nprint(err)");
+    const imza::ToolOutput search
+        = run_script("local body, err = tool.web.search()\nprint(err)");
     CHECK(search.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(search.text.find("web access is disabled") != std::string::npos);
 }
@@ -522,8 +522,10 @@ TEST_CASE("tool.sh applies the native approval and session grant flow")
     REQUIRE(once.ask_calls == 1);
     REQUIRE(once.last_prompt.has_value());
     CHECK(once.last_prompt->name == "shell");
-    CHECK(once.last_prompt->command == "echo $HOME");
-    CHECK(once.last_prompt->timeout == std::chrono::seconds(10));
+    const auto& shell_request
+        = std::get<imza::ShellRequest>(once.last_prompt->request);
+    CHECK(shell_request.command == "echo $HOME");
+    CHECK(shell_request.timeout == std::chrono::seconds(10));
     CHECK_FALSE(once.last_prompt->allow_for_session);
     CHECK(once.installed.empty());
 
@@ -539,7 +541,8 @@ TEST_CASE("tool.sh applies the native approval and session grant flow")
     REQUIRE(session.ask_calls == 1);
     REQUIRE(session.last_prompt.has_value());
     CHECK(session.last_prompt->name == "shell");
-    CHECK(session.last_prompt->command == "touch " + (dir / "a").string());
+    CHECK(std::get<imza::ShellRequest>(session.last_prompt->request).command
+        == "touch " + (dir / "a").string());
     CHECK(session.last_prompt->reason.find("touch") != std::string::npos);
     CHECK(session.last_prompt->allow_for_session);
     REQUIRE(session.installed.size() == 1);
@@ -901,8 +904,10 @@ TEST_CASE("tool.file mutations proceed after attended approval")
         const auto& prompt = std::get<imza::PermissionPrompt>(payload);
         CHECK(prompt.name == "edit");
         CHECK(prompt.target == outside.file("a.txt").string());
-        CHECK(prompt.old_text == "one");
-        CHECK(prompt.new_text == "ONE");
+        const auto& edit = std::get<imza::EditFileRequest>(
+            std::get<imza::FilesystemRequest>(prompt.request));
+        CHECK(edit.old_text == "one");
+        CHECK(edit.new_text == "ONE");
         CHECK_FALSE(prompt.reason.empty());
         std::promise<imza::ModalResult> promise;
         promise.set_value(imza::ModalResult {
