@@ -14,10 +14,10 @@ extern "C" {
 namespace imza {
 namespace {
 
-    int tool_todo(lua_State* L)
+    int binding_todo_get(lua_State* L)
     {
         LuaRunContext* run = run_of(L);
-        if (run->host == nullptr || !run->host->todo) {
+        if (!run->host->todo) {
             return binding_error(L, "todo.get: unavailable in this context");
         }
         const TodoList list = run->host->todo();
@@ -40,7 +40,7 @@ namespace {
         return 1;
     }
 
-    int tool_set_todo(lua_State* L)
+    int binding_todo_set(lua_State* L)
     {
         luaL_checktype(L, 1, LUA_TTABLE);
         TodoList list;
@@ -62,28 +62,30 @@ namespace {
             const std::string content = lua_tostring(L, -1);
             lua_pop(L, 1);
             lua_getfield(L, -1, "status");
-            const char* status
+            const std::string_view status
                 = lua_isstring(L, -1) ? lua_tostring(L, -1) : "pending";
+            lua_pop(L, 1);
             TodoItem item;
             item.content = content;
-            if (std::string_view(status) == "in_progress") {
+            if (status == "in_progress") {
                 item.status = TodoItem::Status::IN_PROGRESS;
-            } else if (std::string_view(status) == "completed") {
+            } else if (status == "completed") {
                 item.status = TodoItem::Status::COMPLETED;
-            } else if (std::string_view(status) == "cancelled") {
+            } else if (status == "cancelled") {
                 item.status = TodoItem::Status::CANCELLED;
-            } else if (std::string_view(status) != "pending") {
-                lua_pop(L, 2);
+            } else if (status == "pending") {
+                item.status = TodoItem::Status::PENDING;
+            } else {
+                lua_pop(L, 1);
                 return binding_error(L,
                     "todo.set: item " + std::to_string(i)
-                        + " has unknown status '" + status + "'");
+                        + " has unknown status '" + std::string(status) + "'");
             }
-            lua_pop(L, 1);
             lua_pop(L, 1);
             list.items.push_back(std::move(item));
         }
         LuaRunContext* run = run_of(L);
-        if (run->host == nullptr || !run->host->set_todo) {
+        if (!run->host->set_todo) {
             return binding_error(L, "todo.set: unavailable in this context");
         }
         run->host->set_todo(std::move(list));
@@ -92,7 +94,7 @@ namespace {
         return 1;
     }
 
-    int tool_ask(lua_State* L)
+    int binding_ask(lua_State* L)
     {
         luaL_checktype(L, 1, LUA_TTABLE);
         QuestionForm form;
@@ -139,7 +141,7 @@ namespace {
         }
 
         LuaRunContext* run = run_of(L);
-        if (run->host == nullptr || !run->host->ask) {
+        if (!run->host->ask) {
             return binding_error(
                 L, "ask: questions are unavailable in unattended runs");
         }
@@ -178,13 +180,13 @@ namespace {
     constexpr LuaBinding BINDINGS[] = {
         {
             "todo.get",
-            tool_todo,
+            binding_todo_get,
             "tool.todo.get() => TodoItem[]",
             "The session task list in display order; empty array when unset.",
         },
         {
             "todo.set",
-            tool_set_todo,
+            binding_todo_set,
             "tool.todo.set(items: TodoItem[]) => true",
             "Set todo items.\n"
             "Replaces the entire list: get, modify, set the full array back.\n"
@@ -192,7 +194,7 @@ namespace {
         },
         {
             "ask",
-            tool_ask,
+            binding_ask,
             "tool.ask(cards: AskCard[]) => AskAnswer[]",
             "Puts a question to the end user and returns their answer.\n"
             "`options` offers a choice list, `multi` allows several picks, "

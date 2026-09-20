@@ -169,11 +169,32 @@ namespace {
         return bindings;
     }
 
+    // Installed in place of a binding whose capability the run lacks: fails
+    // closed as `nil, err` with the descriptor's denial text, so the binding
+    // is still documented and callable but cannot execute.
+    int binding_denied(lua_State* L)
+    {
+        const auto* binding = static_cast<const LuaBinding*>(
+            lua_touserdata(L, lua_upvalueindex(1)));
+        return binding_error(L, std::string(binding->capability_denied));
+    }
+
+    // True when the run's host grants `capability`.
+    bool capability_allowed(const LuaHost& host, LuaCapability capability)
+    {
+        switch (capability) {
+        case LuaCapability::SHELL: return host.shell_enabled;
+        case LuaCapability::WEB: return host.web_enabled;
+        case LuaCapability::NONE: return true;
+        }
+        return true;
+    }
+
     // Installs every descriptor on the global `tool` table, creating the
     // intermediate table for one-level dotted paths ("todo.get", "file.edit").
     // A duplicate path is a programming error surfaced as a VM-level failure
     // rather than a silent shadow.
-    void register_bindings(lua_State* L)
+    void register_bindings(lua_State* L, const LuaRunContext& run)
     {
         lua_newtable(L);
         const int tool = lua_gettop(L);
@@ -202,7 +223,12 @@ namespace {
                     std::string(path).c_str());
                 return;
             }
-            lua_pushcfunction(L, binding.function);
+            if (capability_allowed(*run.host, binding.capability)) {
+                lua_pushcfunction(L, binding.function);
+            } else {
+                lua_pushlightuserdata(L, const_cast<LuaBinding*>(&binding));
+                lua_pushcclosure(L, binding_denied, 1);
+            }
             lua_setfield(L, parent, leaf.c_str());
             if (dot != std::string_view::npos) {
                 lua_pop(L, 1); // the intermediate table
@@ -257,8 +283,7 @@ METHODS)desc";
         return out;
     }
 
-    ToolOutput lua_run(
-        const Json::Value& args, const LuaHost& host, bool has_rg)
+    ToolOutput lua_run(const Json::Value& args, const LuaHost& host)
     {
         const std::string script = json_string(args, "script");
         if (script.empty()) {
@@ -272,15 +297,14 @@ METHODS)desc";
         LuaRunContext run;
         run.deadline
             = std::chrono::steady_clock::now() + std::chrono::seconds(timeout);
-        run.host   = &host;
-        run.has_rg = has_rg;
+        run.host = &host;
 
         lua_State* L = lua_newstate(lua_alloc, &run);
         if (L == nullptr) {
             return tool_error("lua: cannot create VM");
         }
         open_sandbox(L, run);
-        register_bindings(L);
+        register_bindings(L, run);
         lua_sethook(L, deadline_hook, LUA_MASKCOUNT, HOOK_INTERVAL);
 
         // The log and the net per-file diffs record what ran even when the
@@ -313,12 +337,12 @@ METHODS)desc";
         if (run.truncated) {
             output += "\n[truncated]";
         }
-        return finish({ ToolOutput::Kind::OUTPUT, std::move(output) });
+        return finish(tool_output(std::move(output)));
     }
 
 } // namespace
 
-Tool make_lua_tool(LuaHost host, bool has_rg)
+Tool make_lua_tool(LuaHost host)
 {
     ToolSpec spec;
     spec.name        = "lua";
@@ -326,8 +350,8 @@ Tool make_lua_tool(LuaHost host, bool has_rg)
     spec.parameters  = parse_json(
         R"json({"type":"object","properties":{"script":{"type":"string","description":"Lua source code to execute"},"timeout":{"type":"integer","description":"maximum script execution time in seconds, excluding pauses for permission prompts (default 10, max 120)"}},"required":["script"]})json");
     return { std::move(spec),
-        [host = std::move(host), has_rg](
-            const Json::Value& args) { return lua_run(args, host, has_rg); } };
+        [host = std::move(host)](
+            const Json::Value& args) { return lua_run(args, host); } };
 }
 
 } // namespace imza

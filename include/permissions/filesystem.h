@@ -9,7 +9,7 @@
 #include <variant>
 #include <vector>
 
-#include "conversation/session.h"
+#include "common/types.h"
 #include "permissions/store.h"
 
 namespace imza {
@@ -22,7 +22,7 @@ struct PermissionContext {
     std::shared_ptr<const SystemEnvironment> system;
     std::shared_ptr<const WorkspaceEnvironment> workspace;
     PermissionStore::Snapshot grants;
-    Session::Mode mode = Session::Mode::PLAN;
+    SessionMode mode = SessionMode::PLAN;
 };
 
 struct PermissionDecision {
@@ -87,8 +87,8 @@ struct FilesystemEvaluation {
     std::optional<FilesystemRequest> request;
 };
 
-PermissionContext permission_context(const Environment& environment,
-    const PermissionStore& permissions, Session::Mode mode);
+PermissionContext make_permission_context(const Environment& environment,
+    const PermissionStore& permissions, SessionMode mode);
 FilesystemEvaluation evaluate_filesystem_request(
     FilesystemRequest request, const PermissionContext& context);
 std::optional<ExternalGrant> filesystem_session_grant(

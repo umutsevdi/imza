@@ -28,13 +28,15 @@ namespace {
 
     // Lua tool bindings reach session state and the modal queue through
     // this host; the ask routes into the modal queue only in attended mode.
-    LuaHost lua_host(ApplicationState* state)
+    // A child state is assembled before its environment pointer is wired,
+    // so has_rg arrives as a parameter rather than being read from state.
+    LuaHost lua_host(ApplicationState* state, bool has_rg)
     {
         return LuaHost {
-            .context =
+            .permission_context =
                 [state] {
                     return state->environment && state->permissions
-                        ? permission_context(*state->environment,
+                        ? make_permission_context(*state->environment,
                               *state->permissions, state->session->mode())
                         : PermissionContext { };
                 },
@@ -65,6 +67,7 @@ namespace {
                 != RuntimeFlag::NONE,
             .unattended = (state->runtime_flags & RuntimeFlag::ATTENDED)
                 == RuntimeFlag::NONE,
+            .has_rg = has_rg,
         };
     }
 
@@ -133,7 +136,7 @@ namespace {
         if (use_default_tools) {
             ApplicationState* captured = state.get();
             tools                      = default_tools(
-                state->environment->system()->has_rg, lua_host(captured));
+                lua_host(captured, state->environment->system()->has_rg));
         }
         wire(state, std::move(stream_fn), std::move(tools));
         return state;
@@ -166,7 +169,7 @@ namespace {
     std::vector<Tool> sidechat_roster(ApplicationState& parent)
     {
         std::vector<Tool> tools = default_tools(
-            parent.environment->system()->has_rg, lua_host(&parent));
+            lua_host(&parent, parent.environment->system()->has_rg));
         // The sidechat is a regular chat: it keeps the lua sandbox (and its
         // file bindings) but must not spawn its own subagents.
         std::erase_if(tools,
@@ -209,7 +212,7 @@ std::shared_ptr<ApplicationState> make_child_application_state(
 {
     std::shared_ptr<ApplicationState> state(new ApplicationState());
     std::vector<Tool> tools = default_tools(
-        parent.environment->system()->has_rg, lua_host(state.get()));
+        lua_host(state.get(), parent.environment->system()->has_rg));
     std::erase_if(
         tools, [](const Tool& tool) { return tool.spec.name == "subagent"; });
     return initialize_child(std::move(state), parent, std::move(post),

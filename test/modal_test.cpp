@@ -105,8 +105,8 @@ struct Env {
             = (flags & imza::SKIP_PERMISSIONS) != imza::RuntimeFlag::NONE;
         lua_host.unattended
             = (flags & imza::RuntimeFlag::ATTENDED) == imza::RuntimeFlag::NONE;
-        lua_host.context = [this] {
-            return imza::permission_context(
+        lua_host.permission_context = [this] {
+            return imza::make_permission_context(
                 *state->environment, *state->permissions, session->mode());
         };
         lua_host.ask =

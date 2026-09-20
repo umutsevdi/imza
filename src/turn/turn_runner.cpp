@@ -580,7 +580,7 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
         }
 
         const PermissionEvaluation evaluation = evaluate_tool_request(original,
-            permission_context(
+            make_permission_context(
                 *_state->environment, *_state->permissions, mode),
             _state->providers->config(), _state->environment->skills(),
             *_skills);
@@ -711,7 +711,8 @@ void TurnRunner::_run_tool(const PermissionEvaluation& evaluation,
 {
     const PermissionEvaluation current = evaluate_tool_request(
         evaluation.request,
-        permission_context(*_state->environment, *_state->permissions, mode),
+        make_permission_context(
+            *_state->environment, *_state->permissions, mode),
         _state->providers->config(), _state->environment->skills(), *_skills);
     if (current.decision.kind == PermissionDecision::Kind::REJECT
         || current.request.args != evaluation.request.args) {

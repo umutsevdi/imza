@@ -2,14 +2,11 @@
 
 #include <json/json.h>
 
-#include <chrono>
 #include <functional>
-#include <future>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
-#include <variant>
 #include <vector>
 
 #include "common/diff.h"
@@ -33,6 +30,11 @@ struct ToolOutput {
 inline ToolOutput tool_error(std::string text)
 {
     return { ToolOutput::Kind::ERROR, std::move(text) };
+}
+
+inline ToolOutput tool_output(std::string text)
+{
+    return { ToolOutput::Kind::OUTPUT, std::move(text) };
 }
 
 using ToolHandler = std::function<ToolOutput(const Json::Value& args)>;
@@ -59,6 +61,6 @@ Tool make_subagent_tool();
 
 // Builds the model-facing roster: skill, subagent, and the lua sandbox
 // (see tools/lua.h for the LuaHost the lua tool is wired with).
-std::vector<Tool> default_tools(bool has_rg = false, LuaHost lua_host = { });
+std::vector<Tool> default_tools(LuaHost lua_host = { });
 
 } // namespace imza

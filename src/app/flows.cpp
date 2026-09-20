@@ -83,7 +83,8 @@ namespace {
         const ToolCallRequest& request, Session::Mode mode)
     {
         return evaluate_tool_request(request,
-            permission_context(*state.environment, *state.permissions, mode),
+            make_permission_context(
+                *state.environment, *state.permissions, mode),
             state.providers->config(), state.environment->skills(),
             *state.skills);
     }

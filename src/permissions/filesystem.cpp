@@ -77,8 +77,8 @@ namespace {
 
 } // namespace
 
-PermissionContext permission_context(const Environment& environment,
-    const PermissionStore& permissions, Session::Mode mode)
+PermissionContext make_permission_context(const Environment& environment,
+    const PermissionStore& permissions, SessionMode mode)
 {
     return { environment.system(), environment.workspace(),
         permissions.snapshot(), mode };
@@ -122,7 +122,7 @@ FilesystemEvaluation evaluate_filesystem_request(
         return reject("filesystem environment is not ready");
     }
     const std::string name(filesystem_request_name(request));
-    if (context.mode == Session::Mode::PLAN
+    if (context.mode == SessionMode::PLAN
         && (is_edit(request) || is_write(request))) {
         return reject(name + ": unavailable in Plan mode");
     }
@@ -185,7 +185,7 @@ FilesystemEvaluation evaluate_filesystem_request(
     const bool trusted = path_within(project_root, target)
         || path_within(context.system->temporary_directory, target);
     if (granted
-        || (trusted && (!write || context.mode == Session::Mode::BUILD))) {
+        || (trusted && (!write || context.mode == SessionMode::BUILD))) {
         return { { PermissionDecision::Kind::ACCEPT, "" }, request };
     }
     return { { PermissionDecision::Kind::ASK,

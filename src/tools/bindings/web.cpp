@@ -29,20 +29,9 @@ namespace {
         return out;
     }
 
-    bool web_enabled(lua_State* L)
-    {
-        LuaRunContext* run = run_of(L);
-        return run->host != nullptr && run->host->web_enabled;
-    }
-
-    int tool_webfetch(lua_State* L)
+    int binding_web_fetch(lua_State* L)
     {
         const std::string url = luaL_checkstring(L, 1);
-        if (!web_enabled(L)) {
-            return binding_error(
-                L, "web.fetch: web access is disabled for this run");
-        }
-
         FetchedPage page;
         std::string detail;
         const Status st = fetch_url(url, page, detail);
@@ -84,7 +73,7 @@ namespace {
         return 1;
     }
 
-    int tool_websearch(lua_State* L)
+    int binding_web_search(lua_State* L)
     {
         const std::string query = luaL_checkstring(L, 1);
         int num_results         = 5;
@@ -92,11 +81,6 @@ namespace {
             num_results = static_cast<int>(luaL_checkinteger(L, 2));
         }
         num_results = std::clamp(num_results, 1, 10);
-        if (!web_enabled(L)) {
-            return binding_error(
-                L, "web.search: web access is disabled for this run");
-        }
-
         std::string text;
         const Status st = web_search(query, num_results, text);
         if (st == Status::NETWORK_ERROR) {
@@ -123,7 +107,7 @@ namespace {
     constexpr LuaBinding BINDINGS[] = {
         {
             "web.fetch",
-            tool_webfetch,
+            binding_web_fetch,
             "tool.web.fetch(url: string) => string",
             "Fetches an http(s) URL as readable text: HTML is converted to "
             "plain\n"
@@ -132,16 +116,18 @@ namespace {
             "bodies over 5 MB,\n"
             "and pages with no readable content. Capped at 40000 characters.",
             LuaCapability::WEB,
+            "web.fetch: web access is disabled for this run",
         },
         {
             "web.search",
-            tool_websearch,
+            binding_web_search,
             "tool.web.search(query: string, num_results?: integer=5) => string",
             "Search results as a formatted text block.\n"
             "num_results is clamped to 1..10. No hits returns \"No search "
             "results found.\n"
             "Try a different query.\"",
             LuaCapability::WEB,
+            "web.search: web access is disabled for this run",
         },
     };
 

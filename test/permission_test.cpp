@@ -11,6 +11,7 @@
 #include "network/json_io.h"
 #include "permissions/evaluator.h"
 #include "permissions/filesystem.h"
+#include "permissions/shell.h"
 #include "permissions/shell_analysis.h"
 #include "permissions/store.h"
 #include "platform/config.h"
@@ -137,7 +138,8 @@ TEST_CASE("permission store installs complete valid sets atomically")
     CHECK(empty_snapshot->empty());
     const auto installed_snapshot = store.snapshot();
     CHECK(installed_snapshot->size() == 2);
-    CHECK(store.matches(ShellCommandGrant { "git", "status" }));
+    CHECK(
+        grants_cover(store.snapshot(), ShellCommandGrant { "git", "status" }));
     CHECK(store.install({ ExternalGrant { root } }));
     CHECK(store.snapshot()->size() == 2);
     CHECK(installed_snapshot->size() == 2);
@@ -178,10 +180,12 @@ TEST_CASE("runtime shell grants match subcommands and whole programs")
     const std::vector<PermissionGrant> grants { PermissionGrant {
         ShellCommandGrant { "git", "status" } } };
     REQUIRE(store.install(grants));
-    CHECK(store.matches(ShellCommandGrant { "git", "status" }));
-    CHECK_FALSE(store.matches(ShellCommandGrant { "git", "diff" }));
+    CHECK(
+        grants_cover(store.snapshot(), ShellCommandGrant { "git", "status" }));
+    CHECK_FALSE(
+        grants_cover(store.snapshot(), ShellCommandGrant { "git", "diff" }));
     REQUIRE(store.install({ ShellCommandGrant { "git", std::nullopt } }));
-    CHECK(store.matches(ShellCommandGrant { "git", "diff" }));
+    CHECK(grants_cover(store.snapshot(), ShellCommandGrant { "git", "diff" }));
     CHECK(store.snapshot()->size() == 1);
 }
 

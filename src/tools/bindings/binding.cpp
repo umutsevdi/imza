@@ -63,23 +63,23 @@ namespace {
 
 } // namespace
 
-std::optional<FilesystemRequest> evaluate(
-    lua_State* L, FilesystemRequest request, std::string_view binding)
+std::optional<FilesystemRequest> authorize_filesystem(
+    lua_State* L, FilesystemRequest request, std::string_view label_override)
 {
     LuaRunContext* run      = run_of(L);
-    const std::string label = binding.empty()
+    const std::string label = label_override.empty()
         ? std::string(filesystem_request_name(request))
-        : std::string(binding);
+        : std::string(label_override);
     const auto record       = [&](bool ok, const FilesystemRequest& allowed) {
         run->log.push_back({ label, filesystem_target(allowed).string(), ok });
     };
-    if (run->host == nullptr || !run->host->context) {
+    if (!run->host->permission_context) {
         // No provider: trusted mode (tests, SKIP_PERMISSIONS paths).
         record(true, request);
         return request;
     }
     const FilesystemEvaluation evaluation
-        = evaluate_filesystem_request(request, run->host->context());
+        = evaluate_filesystem_request(request, run->host->permission_context());
     switch (evaluation.decision.kind) {
     case PermissionDecision::Kind::ACCEPT:
         record(true, *evaluation.request);
@@ -118,8 +118,8 @@ std::optional<FilesystemRequest> evaluate(
             || !run->host->install_grants(std::move(grants))) {
             return std::nullopt;
         }
-        const FilesystemEvaluation current
-            = evaluate_filesystem_request(request, run->host->context());
+        const FilesystemEvaluation current = evaluate_filesystem_request(
+            request, run->host->permission_context());
         if (current.decision.kind != PermissionDecision::Kind::ACCEPT
             || !current.request || *current.request != *evaluation.request) {
             return std::nullopt;

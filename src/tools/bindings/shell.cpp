@@ -1,6 +1,6 @@
 #include "tools/bindings.h"
 
-#include "permissions/evaluator.h"
+#include "permissions/shell.h"
 #include "permissions/shell_analysis.h"
 #include "platform/command_runner.h"
 #include "workspace/environment.h"
@@ -20,7 +20,7 @@ namespace {
 
     namespace fs = std::filesystem;
 
-    int tool_sh(lua_State* L)
+    int binding_shell(lua_State* L)
     {
         const std::string command = luaL_checkstring(L, 1);
         long timeout              = 10;
@@ -29,11 +29,6 @@ namespace {
         }
 
         LuaRunContext* run = run_of(L);
-        if (run->host == nullptr || !run->host->shell_enabled) {
-            return binding_error(
-                L, "shell: shell access is disabled for this run");
-        }
-
         std::string workspace;
         if (lua_gettop(L) >= 3 && !lua_isnil(L, 3)) {
             const std::string raw = luaL_checkstring(L, 3);
@@ -45,8 +40,8 @@ namespace {
                 // The session working directory lives in the workspace
                 // snapshot; the process cwd already tracks it (Environment
                 // chdirs the process), so this is plain path joining.
-                const PermissionContext context = run->host->context
-                    ? run->host->context()
+                const PermissionContext context = run->host->permission_context
+                    ? run->host->permission_context()
                     : PermissionContext { };
                 dir = (context.workspace ? context.workspace->working_directory
                                          : fs::current_path())
@@ -94,7 +89,7 @@ namespace {
             return 2;
         };
 
-        if (run->host == nullptr || !run->host->context) {
+        if (!run->host->permission_context) {
             // No provider: trusted mode (tests, SKIP_PERMISSIONS paths).
             return run_sh();
         }
@@ -102,7 +97,7 @@ namespace {
         const ShellRequest request { command, std::chrono::seconds(timeout),
             fs::path(workspace) };
         const ShellEvaluation evaluation
-            = evaluate_shell_request(request, run->host->context());
+            = evaluate_shell_request(request, run->host->permission_context());
         if (evaluation.decision.kind == PermissionDecision::Kind::REJECT) {
             return binding_error(L, "shell: " + evaluation.decision.reason);
         }
@@ -152,7 +147,7 @@ namespace {
         // Re-evaluate before execution: the grant above may have turned the
         // request into an auto-accept.
         const ShellEvaluation current
-            = evaluate_shell_request(request, run->host->context());
+            = evaluate_shell_request(request, run->host->permission_context());
         if (current.decision.kind == PermissionDecision::Kind::REJECT
             || current.request != evaluation.request) {
             return binding_error(L, "shell: " + current.decision.reason);
@@ -163,7 +158,7 @@ namespace {
     constexpr LuaBinding BINDINGS[] = {
         {
             "shell",
-            tool_sh,
+            binding_shell,
             "tool.shell(command: string, timeout?: integer=10, "
             "workspace?: string)\n    => output: string, exit_code: integer",
             "Runs a single external command, returning its captured output "
@@ -177,6 +172,7 @@ namespace {
             "instead.\n"
             "`workspace` is the directory the command runs in.",
             LuaCapability::SHELL,
+            "shell: shell access is disabled for this run",
         },
     };
 

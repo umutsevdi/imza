@@ -261,7 +261,6 @@ add_library(imza_runtime
     src/conversation/persistence.cpp
     src/conversation/session.cpp
     src/conversation/session_store.cpp
-    src/permissions/store.cpp
     src/providers/store.cpp
     src/workspace/review.cpp
     src/runtime/main_thread_queue.cpp
@@ -289,6 +288,7 @@ add_library(imza_execution
     src/app/one_shot.cpp
     src/app/slash_commands.cpp
     src/permissions/evaluator.cpp
+    src/permissions/store.cpp
     src/permissions/filesystem.cpp
     src/permissions/shell_analysis.cpp
     src/tools/tool.cpp

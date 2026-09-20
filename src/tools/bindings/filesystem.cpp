@@ -2,13 +2,13 @@
 
 #include "permissions/filesystem.h"
 #include "platform/command_runner.h"
-#include "workspace/environment.h"
 
 #include <algorithm>
 #include <cctype>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <sstream>
 #include <string>
 
@@ -22,11 +22,11 @@ namespace {
 
     namespace fs = std::filesystem;
 
-    constexpr std::size_t MAX_LIST_ENTRIES = 2000;
-    constexpr std::size_t MAX_GREP_ROWS    = 500;
-    constexpr int MAX_LIST_DEPTH           = 5;
+    constexpr int MAX_LIST_ENTRIES = 2000;
+    constexpr int MAX_GREP_ROWS    = 500;
+    constexpr int MAX_LIST_DEPTH   = 5;
 
-    int tool_read(lua_State* L)
+    int binding_read(lua_State* L)
     {
         const std::string path  = luaL_checkstring(L, 1);
         const lua_Integer first = lua_gettop(L) >= 2 && !lua_isnil(L, 2)
@@ -43,7 +43,8 @@ namespace {
             last_given
                 ? std::optional<std::size_t>(static_cast<std::size_t>(last))
                 : std::nullopt };
-        const std::optional<FilesystemRequest> allowed = evaluate(L, request);
+        const std::optional<FilesystemRequest> allowed
+            = authorize_filesystem(L, request);
         if (!allowed) {
             return binding_error(L, "read: permission denied: " + path);
         }
@@ -59,7 +60,6 @@ namespace {
         }
 
         lua_Integer number = 0;
-        std::size_t total  = 0;
         std::string content;
         std::string line;
         while (std::getline(in, line)) {
@@ -85,7 +85,6 @@ namespace {
                     + " exceeds file length " + std::to_string(number) + ": "
                     + path);
         }
-        total = static_cast<std::size_t>(number);
         if (content.size() > MAX_OUTPUT_BYTES) {
             content.resize(MAX_OUTPUT_BYTES);
             content += "\n[truncated]";
@@ -171,7 +170,7 @@ namespace {
         return 0;
     }
 
-    int tool_list(lua_State* L)
+    int binding_list(lua_State* L)
     {
         const std::string path = lua_gettop(L) >= 1 && !lua_isnil(L, 1)
             ? luaL_checkstring(L, 1)
@@ -189,7 +188,8 @@ namespace {
         }
 
         const ListDirectoryRequest request { path, depth, show_hidden };
-        const std::optional<FilesystemRequest> allowed = evaluate(L, request);
+        const std::optional<FilesystemRequest> allowed
+            = authorize_filesystem(L, request);
         if (!allowed) {
             return binding_error(L, "list: permission denied: " + path);
         }
@@ -301,7 +301,7 @@ namespace {
         return 1;
     }
 
-    int tool_grep(lua_State* L)
+    int binding_grep(lua_State* L)
     {
         const std::string path    = lua_gettop(L) >= 1 && !lua_isnil(L, 1)
             ? luaL_checkstring(L, 1)
@@ -313,20 +313,19 @@ namespace {
 
         const FindFilesRequest request { path, pattern };
         const std::optional<FilesystemRequest> allowed
-            = evaluate(L, request, "grep");
+            = authorize_filesystem(L, request, "grep");
         if (!allowed) {
             return binding_error(L, "grep: permission denied: " + path);
         }
         const std::string target = filesystem_target(*allowed).string();
 
-        LuaRunContext* run = run_of(L);
-        return grep_run(L, pattern, target, run->has_rg);
+        return grep_run(L, pattern, target, run_of(L)->host->has_rg);
     }
 
     constexpr LuaBinding BINDINGS[] = {
         {
             "read",
-            tool_read,
+            binding_read,
             "tool.read(path: string, first_line?: integer=1, "
             "last_line?: integer=nil)\n    => string",
             "Read the file at `path` returning its content.\n"
@@ -338,7 +337,7 @@ namespace {
         },
         {
             "list",
-            tool_list,
+            binding_list,
             "tool.list(path?: string=\".\", depth?: integer=1, "
             "show_hidden?: bool=false)\n    => FileEntry[]",
             "List files and directories in `path`.\n"
@@ -352,7 +351,7 @@ namespace {
         },
         {
             "grep",
-            tool_grep,
+            binding_grep,
             "tool.grep(path: string, pattern: string) => GrepHit[]",
             "Run a POSIX extended regex (not a Lua pattern) over a file or\n"
             "directory tree, one hit per matching line.\n"

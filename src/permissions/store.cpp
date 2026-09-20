@@ -51,6 +51,24 @@ PermissionStore::Snapshot PermissionStore::snapshot() const
     return _grants;
 }
 
+bool grant_covers(
+    const PermissionGrant& stored, const PermissionGrant& requested)
+{
+    if (stored.index() != requested.index()) {
+        return false;
+    }
+    if (const auto* directory = std::get_if<ExternalGrant>(&stored)) {
+        return path_within(*directory, std::get<ExternalGrant>(requested));
+    }
+    if (const auto* command = std::get_if<ShellCommandGrant>(&stored)) {
+        const auto& other = std::get<ShellCommandGrant>(requested);
+        return command->program == other.program
+            && (!command->subcommand
+                || command->subcommand == other.subcommand);
+    }
+    return std::get<SkillGrant>(stored) == std::get<SkillGrant>(requested);
+}
+
 bool PermissionStore::install(Grants grants)
 {
     if (!std::all_of(grants.begin(), grants.end(), normalize_grant)) {
@@ -65,7 +83,7 @@ bool PermissionStore::install(Grants grants)
                 grants.begin(), grants.end(), [&](const auto& requested) {
                     return std::any_of(_grants->begin(), _grants->end(),
                         [&](const auto& stored) {
-                            return _covers(stored, requested);
+                            return grant_covers(stored, requested);
                         });
                 })) {
             return true;
@@ -73,37 +91,19 @@ bool PermissionStore::install(Grants grants)
         Grants next = *_grants;
         for (PermissionGrant& grant : grants) {
             if (std::any_of(next.begin(), next.end(), [&](const auto& stored) {
-                    return _covers(stored, grant);
+                    return grant_covers(stored, grant);
                 })) {
                 continue;
             }
-            std::erase_if(next,
-                [&](const auto& stored) { return _covers(grant, stored); });
+            std::erase_if(next, [&](const auto& stored) {
+                return grant_covers(grant, stored);
+            });
             next.push_back(std::move(grant));
         }
         _grants = std::make_shared<const Grants>(std::move(next));
     }
     _changed.publish();
     return true;
-}
-
-bool PermissionStore::matches(const ShellCommandGrant& grant) const
-{
-    const Snapshot grants = snapshot();
-    return std::any_of(grants->begin(), grants->end(), [&](const auto& entry) {
-        const auto* stored = std::get_if<ShellCommandGrant>(&entry);
-        return stored != nullptr && stored->program == grant.program
-            && (!stored->subcommand || stored->subcommand == grant.subcommand);
-    });
-}
-
-bool PermissionStore::matches(const SkillGrant& grant) const
-{
-    const Snapshot grants = snapshot();
-    return std::any_of(grants->begin(), grants->end(), [&](const auto& entry) {
-        const auto* stored = std::get_if<SkillGrant>(&entry);
-        return stored != nullptr && *stored == grant;
-    });
 }
 
 void PermissionStore::clear()
@@ -127,22 +127,11 @@ Signal<>::Subscription PermissionStore::subscribe_to_grants_change(
     return _changed.subscribe(std::move(callback));
 }
 
-bool PermissionStore::_covers(
-    const PermissionGrant& stored, const PermissionGrant& requested)
+bool grants_cover(
+    const PermissionStore::Grants& grants, const PermissionGrant& requested)
 {
-    if (stored.index() != requested.index()) {
-        return false;
-    }
-    if (const auto* directory = std::get_if<ExternalGrant>(&stored)) {
-        return path_within(*directory, std::get<ExternalGrant>(requested));
-    }
-    if (const auto* command = std::get_if<ShellCommandGrant>(&stored)) {
-        const auto& other = std::get<ShellCommandGrant>(requested);
-        return command->program == other.program
-            && (!command->subcommand
-                || command->subcommand == other.subcommand);
-    }
-    return std::get<SkillGrant>(stored) == std::get<SkillGrant>(requested);
+    return std::any_of(grants.begin(), grants.end(),
+        [&](const auto& stored) { return grant_covers(stored, requested); });
 }
 
 } // namespace imza

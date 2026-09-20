@@ -34,6 +34,9 @@ struct LuaBinding {
     std::string_view signature;
     std::string_view description;
     LuaCapability capability = LuaCapability::NONE;
+    // Error text the registration-time gate returns when `capability` is
+    // off for the run; only meaningful for SHELL/WEB descriptors.
+    std::string_view capability_denied = "";
 };
 
 // Per-file net mutation state for tool.file.*: original content at first
@@ -46,7 +49,10 @@ struct FileMutation {
 };
 
 // Everything a binding needs from the run, reached via run_of(). Lives on
-// the driver's stack for the duration of one tool call.
+// the driver's stack for the duration of one tool call. The output/budget
+// members belong to the driver (src/tools/lua.cpp); log/mutations/
+// blocked_permission are the effect record bindings accumulate and the
+// driver carries out into ToolOutput.
 struct LuaRunContext {
     std::string output;
     std::size_t memory_used = 0;
@@ -54,9 +60,9 @@ struct LuaRunContext {
     bool truncated = false;
     std::vector<LuaBindingCall> log;
     std::vector<FileMutation> mutations;
-    // Borrowed; lives as long as the Tool that owns this VM run.
+    // Borrowed; set by the driver before any binding can run, so
+    // binding code never null-checks it.
     const LuaHost* host     = nullptr;
-    bool has_rg             = false;
     bool blocked_permission = false;
 };
 
@@ -79,8 +85,8 @@ void record_call(
 // unattended or unwired ASKs to rejection. Returns the canonicalized
 // request on success; the binding must execute against that target, never
 // the raw script-supplied path. Accepted calls land in the dispatch log.
-std::optional<FilesystemRequest> evaluate(
-    lua_State* L, FilesystemRequest request, std::string_view binding = "");
+std::optional<FilesystemRequest> authorize_filesystem(
+    lua_State* L, FilesystemRequest request, std::string_view label = "");
 
 // Family catalogs, defined one file per family under src/tools/bindings/.
 std::span<const LuaBinding> filesystem_lua_bindings();

@@ -82,11 +82,11 @@ struct ShellFixture {
     imza::LuaHost host()
     {
         imza::LuaHost host;
-        host.shell_enabled    = shell_enabled;
-        host.skip_permissions = skip_permissions;
-        host.context          = [this] {
+        host.shell_enabled      = shell_enabled;
+        host.skip_permissions   = skip_permissions;
+        host.permission_context = [this] {
             return imza::PermissionContext { system, workspace,
-                store.snapshot(), imza::Session::Mode::BUILD };
+                store.snapshot(), imza::SessionMode::BUILD };
         };
         host.install_grants = [this](imza::PermissionStore::Grants grants) {
             installed.insert(installed.end(), grants.begin(), grants.end());
@@ -273,7 +273,7 @@ TEST_CASE("bindings outside the workspace return an error value")
     // Without a provider the binding runs in trusted mode; with a provider
     // whose context lacks workspace/system it must reject, not crash.
     imza::LuaHost empty { };
-    empty.context              = [] { return imza::PermissionContext { }; };
+    empty.permission_context   = [] { return imza::PermissionContext { }; };
     const imza::ToolOutput out = run_script("local s, e = tool.read([["
             + dir.file("lines.txt").string() + "]])\nprint(s, e)",
         std::move(empty));
@@ -390,12 +390,20 @@ TEST_CASE("web bindings fail closed without web access")
     CHECK(search.text.find("web access is disabled") != std::string::npos);
 }
 
-TEST_CASE("web bindings validate arguments before checking access")
+TEST_CASE("web bindings fail closed before argument validation")
 {
-    CHECK(run_script("print(tool.web.fetch())").kind
-        == imza::ToolOutput::Kind::ERROR);
-    CHECK(run_script("print(tool.web.search())").kind
-        == imza::ToolOutput::Kind::ERROR);
+    // The capability gate is enforced at registration (R3a), so a denied
+    // binding returns `nil, err` even when called with missing arguments:
+    // access is checked before the handler could raise a type error.
+    const imza::ToolOutput fetch = run_script(
+        "local body, err = tool.web.fetch()\nprint(err)");
+    CHECK(fetch.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(fetch.text.find("web access is disabled") != std::string::npos);
+
+    const imza::ToolOutput search = run_script(
+        "local body, err = tool.web.search()\nprint(err)");
+    CHECK(search.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(search.text.find("web access is disabled") != std::string::npos);
 }
 
 TEST_CASE("tool.sh runs a single command and returns exit code")
@@ -814,9 +822,9 @@ TEST_CASE("tool.file mutations reject in Plan mode")
     workspace->working_directory = dir.path;
     workspace->project_root      = dir.path;
     imza::PermissionStore store;
-    host.context = [&] {
+    host.permission_context = [&] {
         return imza::PermissionContext { system, workspace, store.snapshot(),
-            imza::Session::Mode::PLAN };
+            imza::SessionMode::PLAN };
     };
     const std::string a        = dir.file("a.txt").string();
     const imza::ToolOutput out = run_script("local ok, err = tool.file.edit([["
@@ -837,9 +845,9 @@ TEST_CASE("tool.file mutations auto-accept in trusted Build mode")
     workspace->working_directory = dir.path;
     workspace->project_root      = dir.path;
     imza::PermissionStore store;
-    host.context = [&] {
+    host.permission_context = [&] {
         return imza::PermissionContext { system, workspace, store.snapshot(),
-            imza::Session::Mode::BUILD };
+            imza::SessionMode::BUILD };
     };
     const std::string a        = dir.file("a.txt").string();
     const imza::ToolOutput out = run_script(
@@ -860,9 +868,9 @@ TEST_CASE("tool.file mutations outside the workspace ask and fail closed "
     workspace->working_directory = dir.path;
     workspace->project_root      = dir.path;
     imza::PermissionStore store;
-    host.context = [&] {
+    host.permission_context = [&] {
         return imza::PermissionContext { system, workspace, store.snapshot(),
-            imza::Session::Mode::BUILD };
+            imza::SessionMode::BUILD };
     };
     // No ask callback: ASK verdicts must fail closed.
     const std::string a        = outside.file("a.txt").string();
@@ -885,9 +893,9 @@ TEST_CASE("tool.file mutations proceed after attended approval")
     workspace->working_directory = dir.path;
     workspace->project_root      = dir.path;
     imza::PermissionStore store;
-    host.context = [&] {
+    host.permission_context = [&] {
         return imza::PermissionContext { system, workspace, store.snapshot(),
-            imza::Session::Mode::BUILD };
+            imza::SessionMode::BUILD };
     };
     host.ask = [&](imza::ModalPayload payload) {
         const auto& prompt = std::get<imza::PermissionPrompt>(payload);

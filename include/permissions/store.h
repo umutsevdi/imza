@@ -40,18 +40,27 @@ public:
 
     Snapshot snapshot() const;
     bool install(Grants grants);
-    bool matches(const ShellCommandGrant& grant) const;
-    bool matches(const SkillGrant& grant) const;
     void clear();
     [[nodiscard]] Signal<>::Subscription subscribe_to_grants_change(
         Signal<>::Callback callback);
 
 private:
-    static bool _covers(
-        const PermissionGrant& stored, const PermissionGrant& requested);
     mutable std::mutex _mutex;
     Snapshot _grants;
     Signal<> _changed;
 };
+
+// True when `stored` already authorizes everything `requested` covers:
+// a directory grant contains the requested directory, a program-level
+// shell grant covers any of its subcommands, skill grants match exactly.
+bool grant_covers(
+    const PermissionGrant& stored, const PermissionGrant& requested);
+bool grants_cover(
+    const PermissionStore::Grants& grants, const PermissionGrant& requested);
+inline bool grants_cover(
+    const PermissionStore::Snapshot& grants, const PermissionGrant& requested)
+{
+    return grants && grants_cover(*grants, requested);
+}
 
 } // namespace imza

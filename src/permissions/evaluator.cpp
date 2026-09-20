@@ -1,6 +1,7 @@
 #include "permissions/evaluator.h"
 
 #include "network/json_io.h"
+#include "permissions/shell.h"
 #include "permissions/shell_analysis.h"
 #include "platform/config.h"
 #include "tools/skills.h"
@@ -39,28 +40,6 @@ namespace {
             std::move(request), std::move(grants) };
     }
 
-    bool matches_skill(
-        const PermissionStore::Grants& grants, const SkillGrant& requested)
-    {
-        return std::any_of(
-            grants.begin(), grants.end(), [&](const auto& grant) {
-                const auto* skill = std::get_if<SkillGrant>(&grant);
-                return skill != nullptr && *skill == requested;
-            });
-    }
-
-    bool matches_shell(const PermissionStore::Grants& grants,
-        const ShellCommandGrant& requested)
-    {
-        return std::any_of(
-            grants.begin(), grants.end(), [&](const auto& grant) {
-                const auto* shell = std::get_if<ShellCommandGrant>(&grant);
-                return shell != nullptr && shell->program == requested.program
-                    && (!shell->subcommand
-                        || shell->subcommand == requested.subcommand);
-            });
-    }
-
     bool has_shell_program(
         const PermissionStore::Grants& grants, std::string_view program)
     {
@@ -76,72 +55,16 @@ namespace {
         std::string reason
             = "shell commands require approval · session scope: ";
         for (const PermissionGrant& grant : grants) {
-            const auto& shell = std::get<ShellCommandGrant>(grant);
+            const auto* shell = std::get_if<ShellCommandGrant>(&grant);
+            if (shell == nullptr) {
+                continue;
+            }
             if (!reason.ends_with(": ")) {
                 reason += ", ";
             }
-            reason += shell.program + " " + shell.subcommand.value_or("*");
+            reason += shell->program + " " + shell->subcommand.value_or("*");
         }
         return reason;
-    }
-
-    ShellEvaluation evaluate_shell(
-        ShellRequest request, const PermissionContext& context)
-    {
-        if (request.command.empty()) {
-            return { { PermissionDecision::Kind::REJECT,
-                         "shell: 'command' must be a non-empty string" },
-                std::move(request), { } };
-        }
-        if (!context.grants) {
-            return { { PermissionDecision::Kind::REJECT,
-                         "permission grants are unavailable" },
-                std::move(request), { } };
-        }
-        const ShellAnalysis analysis = analyze_shell(request.command);
-        if (analysis.reuse == ShellAnalysis::Reuse::ONCE) {
-            return { { PermissionDecision::Kind::ASK,
-                         "shell syntax requires approval for each execution" },
-                std::move(request), { } };
-        }
-
-        PermissionStore::Grants candidates;
-        for (const ShellInvocation& invocation : analysis.invocations) {
-            if (shell_builtin_allowed(invocation.program)
-                || shell_readonly_allowed(invocation)) {
-                continue;
-            }
-            const ShellCommandGrant requested { invocation.program,
-                invocation.subcommand };
-            if (matches_shell(*context.grants, requested)) {
-                continue;
-            }
-            ShellCommandGrant candidate = requested;
-            if (has_shell_program(*context.grants, requested.program)) {
-                candidate.subcommand.reset();
-            }
-            for (PermissionGrant& pending : candidates) {
-                auto* shell = std::get_if<ShellCommandGrant>(&pending);
-                if (shell == nullptr || shell->program != candidate.program) {
-                    continue;
-                }
-                if (shell->subcommand != candidate.subcommand) {
-                    shell->subcommand.reset();
-                }
-                candidate.program.clear();
-                break;
-            }
-            if (!candidate.program.empty()) {
-                candidates.push_back(PermissionGrant { std::move(candidate) });
-            }
-        }
-        if (candidates.empty()) {
-            return { { PermissionDecision::Kind::ACCEPT, "" },
-                std::move(request), { } };
-        }
-        const std::string reason = shell_grant_reason(candidates);
-        return { { PermissionDecision::Kind::ASK, reason }, std::move(request),
-            std::move(candidates) };
     }
 
     PermissionEvaluation evaluate_skill(const ToolCallRequest& original,
@@ -172,7 +95,7 @@ namespace {
         const SkillGrant grant { *path };
         if (loaded_skills.is_loaded(skill->path)
             || loaded_skills.is_loaded(*path)
-            || (context.grants && matches_skill(*context.grants, grant))) {
+            || grants_cover(context.grants, grant)) {
             return accept(std::move(request));
         }
         const SkillRead read = read_skill(*skill);
@@ -191,6 +114,65 @@ namespace {
 
 } // namespace
 
+ShellEvaluation evaluate_shell_request(
+    ShellRequest request, const PermissionContext& context)
+{
+    if (request.command.empty()) {
+        return { { PermissionDecision::Kind::REJECT,
+                     "shell: 'command' must be a non-empty string" },
+            std::move(request), { } };
+    }
+    if (!context.grants) {
+        return { { PermissionDecision::Kind::REJECT,
+                     "permission grants are unavailable" },
+            std::move(request), { } };
+    }
+    const ShellAnalysis analysis = analyze_shell(request.command);
+    if (analysis.reuse == ShellAnalysis::Reuse::ONCE) {
+        return { { PermissionDecision::Kind::ASK,
+                     "shell syntax requires approval for each execution" },
+            std::move(request), { } };
+    }
+
+    PermissionStore::Grants candidates;
+    for (const ShellInvocation& invocation : analysis.invocations) {
+        if (shell_builtin_allowed(invocation.program)
+            || shell_readonly_allowed(invocation)) {
+            continue;
+        }
+        const ShellCommandGrant requested { invocation.program,
+            invocation.subcommand };
+        if (grants_cover(context.grants, requested)) {
+            continue;
+        }
+        ShellCommandGrant candidate = requested;
+        if (has_shell_program(*context.grants, requested.program)) {
+            candidate.subcommand.reset();
+        }
+        for (PermissionGrant& pending : candidates) {
+            auto* shell = std::get_if<ShellCommandGrant>(&pending);
+            if (shell == nullptr || shell->program != candidate.program) {
+                continue;
+            }
+            if (shell->subcommand != candidate.subcommand) {
+                shell->subcommand.reset();
+            }
+            candidate.program.clear();
+            break;
+        }
+        if (!candidate.program.empty()) {
+            candidates.push_back(PermissionGrant { std::move(candidate) });
+        }
+    }
+    if (candidates.empty()) {
+        return { { PermissionDecision::Kind::ACCEPT, "" }, std::move(request),
+            { } };
+    }
+    const std::string reason = shell_grant_reason(candidates);
+    return { { PermissionDecision::Kind::ASK, reason }, std::move(request),
+        std::move(candidates) };
+}
+
 PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
     const PermissionContext& context, const Config& config,
     const std::vector<Skill>& skills, const SkillStore& loaded_skills)
@@ -206,7 +188,7 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
     const Json::Value arguments = parse_json(original.args);
     if (original.name == "subagent") {
         if (const auto error = validate_subagent_tool_arguments(
-                arguments, context.mode == Session::Mode::BUILD)) {
+                arguments, context.mode == SessionMode::BUILD)) {
             return reject(std::move(request), *error);
         }
         return accept(std::move(request));
@@ -221,12 +203,6 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
     }
     return reject(
         std::move(request), "tool has no permission policy: " + original.name);
-}
-
-ShellEvaluation evaluate_shell_request(
-    ShellRequest request, const PermissionContext& context)
-{
-    return evaluate_shell(std::move(request), context);
 }
 
 } // namespace imza

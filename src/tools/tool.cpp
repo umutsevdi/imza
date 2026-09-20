@@ -48,12 +48,12 @@ ToolOutput dispatch_tool(
     return tool->run(args);
 }
 
-std::vector<Tool> default_tools(bool has_rg, LuaHost lua_host)
+std::vector<Tool> default_tools(LuaHost lua_host)
 {
     std::vector<Tool> tools;
     tools.push_back(make_skill_tool());
     tools.push_back(make_subagent_tool());
-    tools.push_back(make_lua_tool(std::move(lua_host), has_rg));
+    tools.push_back(make_lua_tool(std::move(lua_host)));
     return tools;
 }
 

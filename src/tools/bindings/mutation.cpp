@@ -18,6 +18,18 @@ namespace {
 
     namespace fs = std::filesystem;
 
+    // The run's record for `target`, or nullptr when the file has not been
+    // mutated yet this run.
+    FileMutation* find_mutation(LuaRunContext* run, const std::string& target)
+    {
+        for (FileMutation& m : run->mutations) {
+            if (m.path == target) {
+                return &m;
+            }
+        }
+        return nullptr;
+    }
+
     // Reads the file at `target` (or the run's cached latest), applies
     // `transform`, persists, and records the net mutation for the run's
     // final diff.
@@ -27,13 +39,7 @@ namespace {
         std::string& err)
     {
         LuaRunContext* run     = run_of(L);
-        FileMutation* mutation = nullptr;
-        for (FileMutation& m : run->mutations) {
-            if (m.path == target) {
-                mutation = &m;
-                break;
-            }
-        }
+        FileMutation* mutation = find_mutation(run, target);
         std::string content;
         if (mutation != nullptr) {
             content = mutation->latest;
@@ -55,7 +61,7 @@ namespace {
         return true;
     }
 
-    int tool_file_insert(lua_State* L)
+    int binding_file_insert(lua_State* L)
     {
         const std::string path = luaL_checkstring(L, 1);
         const std::string text = luaL_checkstring(L, 2);
@@ -72,7 +78,7 @@ namespace {
                 ? std::optional<std::size_t>(static_cast<std::size_t>(line))
                 : std::nullopt };
         const std::optional<FilesystemRequest> allowed
-            = evaluate(L, request, "file.insert");
+            = authorize_filesystem(L, request, "file.insert");
         if (!allowed) {
             return binding_error(L, "file.insert: permission denied: " + path);
         }
@@ -92,7 +98,7 @@ namespace {
         return 1;
     }
 
-    int tool_file_edit(lua_State* L)
+    int binding_file_edit(lua_State* L)
     {
         const std::string path  = luaL_checkstring(L, 1);
         const std::string old   = luaL_checkstring(L, 2);
@@ -111,7 +117,7 @@ namespace {
         const EditFileRequest request { path, old, fresh,
             static_cast<std::size_t>(count) };
         const std::optional<FilesystemRequest> allowed
-            = evaluate(L, request, "file.edit");
+            = authorize_filesystem(L, request, "file.edit");
         if (!allowed) {
             return binding_error(L, "file.edit: permission denied: " + path);
         }
@@ -131,14 +137,14 @@ namespace {
         return 1;
     }
 
-    int tool_file_write(lua_State* L)
+    int binding_file_write(lua_State* L)
     {
         const std::string path = luaL_checkstring(L, 1);
         const std::string text = luaL_checkstring(L, 2);
 
         const WriteFileRequest request { path, text };
         const std::optional<FilesystemRequest> allowed
-            = evaluate(L, request, "file.write");
+            = authorize_filesystem(L, request, "file.write");
         if (!allowed) {
             return binding_error(L, "file.write: permission denied: " + path);
         }
@@ -146,13 +152,7 @@ namespace {
 
         LuaRunContext* run = run_of(L);
         std::string err;
-        FileMutation* mutation = nullptr;
-        for (FileMutation& m : run->mutations) {
-            if (m.path == target) {
-                mutation = &m;
-                break;
-            }
-        }
+        FileMutation* mutation = find_mutation(run, target);
         std::string original;
         if (mutation != nullptr) {
             original = mutation->original;
@@ -179,7 +179,7 @@ namespace {
     constexpr LuaBinding BINDINGS[] = {
         {
             "file.insert",
-            tool_file_insert,
+            binding_file_insert,
             "tool.file.insert(path: string, text: string, "
             "line?: integer=nil) => true",
             "Inserts text before the 1-based line, pushing it down; omit "
@@ -188,7 +188,7 @@ namespace {
         },
         {
             "file.edit",
-            tool_file_edit,
+            binding_file_edit,
             "tool.file.edit(path: string, old: string, new: string, "
             "count?: integer=1) => true",
             "Replaces the first count occurrences of old with new; count=0 "
@@ -199,7 +199,7 @@ namespace {
         },
         {
             "file.write",
-            tool_file_write,
+            binding_file_write,
             "tool.file.write(path: string, text: string) => true",
             "Replaces the file's entire content, creating it if absent. "
             "Prefer\n"

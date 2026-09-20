@@ -103,7 +103,7 @@ struct QueuedMessage {
 class Session final : public ApplicationComponent {
 public:
     enum class Phase { IDLE, CONNECTING, STREAMING, AWAITING };
-    enum class Mode { PLAN, BUILD };
+    using Mode = SessionMode;
     struct Countdown {
         std::chrono::steady_clock::time_point deadline;
         bool stalled = false;
