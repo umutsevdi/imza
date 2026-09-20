@@ -1023,12 +1023,14 @@ namespace {
 
         Element render_lua_item(const ToolCall& tc)
         {
-            const std::size_t count = tc.result->dispatch_log.size();
-            Component button        = make_lua_viewer_button(tc, count);
+            const bool failed = tc.result->kind == ToolCall::Result::Kind::ERROR
+                || tc.result->kind == ToolCall::Result::Kind::REJECT;
+            Component button = make_lua_viewer_button(tc, failed);
             Elements rows { button->Render() };
-            const std::string summary = lua_dispatch_summary(tc);
-            if (!summary.empty()) {
-                rows.push_back(text(summary) | color(PANEL_FG_DIM));
+            if (failed && !tc.result->text.empty()) {
+                // Show the reason the run died; the script stays in the viewer.
+                rows.push_back(
+                    text(take_lines(tc.result->text, 2)) | color(HL_RED));
             }
             const LayoutCtx ctx = layout_();
             for (const DiffView& diff : tc.result->diffs) {
@@ -1048,11 +1050,19 @@ namespace {
 
         Element render_tool_error(const ToolCall& tc)
         {
+            // Keep the lua card shape: the status header would echo
+            // the whole script into the chat.
+            if (tc.name == "lua") {
+                return render_lua_item(tc);
+            }
             return render_tool_status(tc, "Error: ", HL_RED);
         }
 
         Element render_tool_reject(const ToolCall& tc)
         {
+            if (tc.name == "lua") {
+                return render_lua_item(tc);
+            }
             return render_tool_status(tc, "Rejected: ", HL_YELLOW);
         }
 
@@ -1082,7 +1092,7 @@ namespace {
                     hbox({
                         spinner(15, static_cast<std::size_t>(frame_))
                             | color(PANEL_FG_DIM),
-                        text(" Executing…") | dim,
+                        text(" Executing script…") | dim,
                     }),
                     separatorEmpty(),
                 });
@@ -1149,14 +1159,17 @@ namespace {
                 });
         }
 
-        Component make_lua_viewer_button(const ToolCall& tc, std::size_t count)
+        Component make_lua_viewer_button(const ToolCall& tc, bool failed)
         {
             if (const auto found = read_buttons_.find(tc.id);
                 found != read_buttons_.end()) {
                 return found->second;
             }
-            std::string label = "Executed " + std::to_string(count) + " tool "
-                + (count == 1 ? "call" : "calls");
+            const std::string counts = lua_dispatch_counts(tc);
+            std::string label        = failed ? "Execution Failed" : "Executed";
+            if (!counts.empty()) {
+                label += " · " + counts;
+            }
             auto shared_label
                 = std::make_shared<const std::string>(std::move(label));
             const std::size_t id = tc.id;
@@ -1168,7 +1181,7 @@ namespace {
                         open_viewer_for(*call);
                     }
                 },
-                HL_GREEN);
+                failed ? HL_RED : HL_GREEN);
             read_buttons_.emplace(id, button);
             container_->Add(button);
             return button;

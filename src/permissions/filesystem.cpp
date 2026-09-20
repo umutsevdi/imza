@@ -69,8 +69,7 @@ namespace {
         return std::holds_alternative<WriteFileRequest>(request);
     }
 
-    void set_target(
-        FilesystemRequest& request, std::filesystem::path target)
+    void set_target(FilesystemRequest& request, std::filesystem::path target)
     {
         std::visit(
             [&](auto& value) { value.target = std::move(target); }, request);
@@ -85,8 +84,7 @@ PermissionContext permission_context(const Environment& environment,
         permissions.snapshot(), mode };
 }
 
-const std::filesystem::path& filesystem_target(
-    const FilesystemRequest& request)
+const std::filesystem::path& filesystem_target(const FilesystemRequest& request)
 {
     return std::visit(
         [](const auto& value) -> const std::filesystem::path& {
@@ -179,7 +177,7 @@ FilesystemEvaluation evaluate_filesystem_request(
         return { { PermissionDecision::Kind::ACCEPT, "" }, request };
     }
 
-    const bool write = is_edit(request) || is_write(request);
+    const bool write   = is_edit(request) || is_write(request);
     const bool granted = matches_path(*context.grants, target);
     const std::filesystem::path& project_root = context.workspace->project_root
         ? *context.workspace->project_root

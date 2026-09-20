@@ -541,10 +541,8 @@ TEST_CASE("delegated-agent approvals surface through the main modal queue")
     };
 
     imza::submit(*env.state, "delegate");
-    REQUIRE(env.pump.wait_for(
-        [&] { return showing_tool_ask(*env.session); }));
-    const auto request
-        = std::get<imza::PermissionPrompt>(env.session->modal());
+    REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
+    const auto request = std::get<imza::PermissionPrompt>(env.session->modal());
     CHECK(request.description.find("Agent 1 (research)") != std::string::npos);
     imza::resolve_modal(
         *env.state, imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" });
@@ -589,8 +587,7 @@ TEST_CASE("subagent failure reports preserve the last completed tool output")
     };
 
     imza::submit(*env.state, "delegate failure");
-    REQUIRE(env.pump.wait_for(
-        [&] { return showing_tool_ask(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
     imza::resolve_modal(
         *env.state, imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" });
     REQUIRE(env.pump.wait_for(
@@ -1047,8 +1044,7 @@ TEST_CASE("filesystem session approval installs an exact reusable grant")
 
     imza::submit(*env.state, "go");
     REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
-    const auto prompt
-        = std::get<imza::PermissionPrompt>(env.session->modal());
+    const auto prompt = std::get<imza::PermissionPrompt>(env.session->modal());
     CHECK(prompt.name == "write");
     CHECK(prompt.allow_for_session);
     CHECK(prompt.target == path.string());

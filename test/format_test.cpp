@@ -23,7 +23,7 @@ TEST_CASE("modal_answer_markdown renders selected then free text")
     CHECK(md.find("> Option 3\n> extra note") != std::string::npos);
 }
 
-TEST_CASE("lua dispatch summary groups binding calls")
+TEST_CASE("lua dispatch log formats as counts and grouped summary")
 {
     imza::ToolCall call;
     call.name   = "lua";
@@ -36,6 +36,7 @@ TEST_CASE("lua dispatch summary groups binding calls")
         { "list", "test", false },
         { "list", "include", true },
     };
+    CHECK(imza::lua_dispatch_counts(call) == "5 tools (1 failed)");
     CHECK(imza::lua_dispatch_summary(call) == "2 read · 3 list (1 failed)");
 }
 
@@ -121,6 +122,28 @@ TEST_CASE("tool_call_head shows the file path for read, args otherwise")
         { } };
     CHECK(imza::tool_call_head(subagent) == "Subagent");
     CHECK(imza::tool_header_args(subagent) == "1 research, 1 builder");
+}
+
+TEST_CASE("lua headers summarize bindings and never echo the script")
+{
+    const std::string script = R"json({"script":"local x = 1\nprint(x)"})json";
+
+    imza::ToolCall pending { 1, "", "lua", script, { } };
+    CHECK(imza::tool_call_head(pending) == "Lua execution");
+    CHECK(imza::tool_header_args(pending).empty());
+
+    imza::ToolCall done { 1, "", "lua", script, { } };
+    done.result = imza::ToolCall::Result { imza::ToolCall::Result::Kind::OUTPUT,
+        "1\n" };
+    done.result->dispatch_log
+        = { { "read", "a.cpp", true }, { "shell", "ls", false } };
+    CHECK(imza::tool_call_head(done) == "Lua · 2 tools (1 failed)");
+    CHECK(imza::tool_header_args(done) == "2 tools (1 failed)");
+    CHECK(imza::tool_header_args(done).find("print") == std::string::npos);
+
+    CHECK(imza::lua_viewer_content(done).find(
+              "Bindings: 1 read · 1 shell (1 failed)")
+        != std::string::npos);
 }
 
 TEST_CASE("ask_answer_markdown numbers questions and blockquotes answers")

@@ -233,6 +233,9 @@ LEGEND
   - Err is a string
   - `?` optional with its default after `=`.
   - An ungranted path returns nil, Err. Check the second return value
+  - Operational failures (missing file, denied permission, timeout) are
+    values: nil, Err. Wrong argument types raise and abort the script;
+    wrap in pcall only if you intend to survive them
 
 METHODS)desc";
         for (const LuaBinding& binding : all_bindings()) {

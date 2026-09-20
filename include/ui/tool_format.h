@@ -15,8 +15,11 @@ std::string tool_header_args(const ToolCall& call);
 std::string tool_code_language(const ToolCall& call);
 std::size_t read_start_line(const ToolCall& call);
 
-// Collapsed-card detail for a lua tool call: the binding dispatch log as a
-// one-line summary, falling back to an output-line count without a log.
+// Card detail for a lua tool call: the binding dispatch log collapsed
+// to "N tools (M failed)"; empty when there are no logged calls.
+std::string lua_dispatch_counts(const ToolCall& call);
+// Viewer detail for a lua tool call: the dispatch log grouped by binding as
+// "2 read · 3 list (1 failed)".
 std::string lua_dispatch_summary(const ToolCall& call);
 // Viewer body for a lua tool call: a markdown report with the script and
 // its output in fenced sections.

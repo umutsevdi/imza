@@ -207,6 +207,10 @@ std::string tool_call_head(const ToolCall& call)
     if (call.name == "subagent") {
         return tool_display_name(call.name);
     }
+    if (call.name == "lua") {
+        const std::string counts = lua_dispatch_counts(call);
+        return counts.empty() ? "Lua execution" : "Lua · " + counts;
+    }
     std::string head       = tool_display_name(call.name);
     const std::string args = tool_args_summary(call.args);
     if (!args.empty()) {
@@ -258,6 +262,11 @@ std::string tool_header_args(const ToolCall& call)
     if (call.name == "subagent") {
         return subagent_args(call);
     }
+    if (call.name == "lua") {
+        // The binding counts identify the run; echoing the script would
+        // spill it into the chat on failure.
+        return lua_dispatch_counts(call);
+    }
     return tool_args_summary(call.args);
 }
 
@@ -282,6 +291,24 @@ std::size_t read_start_line(const ToolCall& call)
         return static_cast<std::size_t>(*raw);
     }
     return 1;
+}
+
+std::string lua_dispatch_counts(const ToolCall& call)
+{
+    if (!call.result.has_value() || call.result->dispatch_log.empty()) {
+        return "";
+    }
+    std::size_t total  = 0;
+    std::size_t failed = 0;
+    for (const LuaBindingCall& entry : call.result->dispatch_log) {
+        ++total;
+        failed += entry.ok ? 0 : 1;
+    }
+    std::string out = std::to_string(total) + " tools";
+    if (failed > 0) {
+        out += " (" + std::to_string(failed) + " failed)";
+    }
+    return out;
 }
 
 std::string lua_dispatch_summary(const ToolCall& call)
@@ -340,7 +367,12 @@ std::string lua_viewer_content(const ToolCall& call)
         needed(call.result->text);
     }
     const std::string open = std::string(fence, '`');
-    std::string out        = open + "lua\n" + script + "\n" + open + "\n";
+    std::string out;
+    if (const std::string summary = lua_dispatch_summary(call);
+        !summary.empty()) {
+        out += "Bindings: " + summary + "\n\n";
+    }
+    out += open + "lua\n" + script + "\n" + open + "\n";
     if (call.result.has_value()) {
         out += open + "txt\n"
             + (call.result->text.empty() ? "(no output)" : call.result->text)

@@ -121,6 +121,33 @@ TEST_CASE("lua tool prints values to its output")
     CHECK(out.text == "hello\t42\ttrue\n1,2,3\n");
 }
 
+TEST_CASE("binding errors split: operational failures are values, type "
+          "mistakes raise")
+{
+    // An operational failure (missing file) is the documented nil, err
+    // value; the script survives and keeps running.
+    const imza::ToolOutput value_error
+        = run_script("local data, err = tool.read('no-such-file.txt')\n"
+                     "print(data == nil, err ~= nil)");
+    CHECK(value_error.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(value_error.text == "true\ttrue\n");
+
+    // A wrong argument type is a script bug: it raises with a Lua error
+    // position and aborts the run. (Numbers coerce to strings per the Lua
+    // C API; nil, booleans, and tables are the rejected shapes.)
+    const imza::ToolOutput raised = run_script("tool.read({})\nprint('dead')");
+    CHECK(raised.kind == imza::ToolOutput::Kind::ERROR);
+    CHECK(raised.text.find("bad argument #1 to 'read'") != std::string::npos);
+    CHECK(raised.text.find("string expected, got table") != std::string::npos);
+    CHECK(raised.text.find("dead") == std::string::npos);
+
+    // pcall is the sanctioned way to survive a type mistake.
+    const imza::ToolOutput caught
+        = run_script("print(pcall(tool.read, {}) == false)");
+    CHECK(caught.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(caught.text == "true\n");
+}
+
 TEST_CASE("lua tool rejects empty scripts and reports errors with positions")
 {
     CHECK(run_script("").kind == imza::ToolOutput::Kind::ERROR);

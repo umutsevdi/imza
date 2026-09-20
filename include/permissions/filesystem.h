@@ -42,8 +42,8 @@ struct ReadFileRequest {
 
 struct ListDirectoryRequest {
     std::filesystem::path target = ".";
-    int depth = 1;
-    bool show_hidden = false;
+    int depth                    = 1;
+    bool show_hidden             = false;
 
     bool operator==(const ListDirectoryRequest&) const = default;
 };
