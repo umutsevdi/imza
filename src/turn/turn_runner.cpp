@@ -27,23 +27,6 @@ namespace {
 
     constexpr std::uint64_t COMPACTION_PERCENT = 80;
 
-    bool tool_available_in_mode(std::string_view name, Session::Mode mode)
-    {
-        return mode == Session::Mode::BUILD
-            || (name != "edit" && name != "write");
-    }
-
-    std::vector<ToolSpec> tool_specs_for_mode(
-        const std::vector<ToolSpec>& specs, Session::Mode mode)
-    {
-        std::vector<ToolSpec> available;
-        std::ranges::copy_if(
-            specs, std::back_inserter(available), [mode](const ToolSpec& spec) {
-                return tool_available_in_mode(spec.name, mode);
-            });
-        return available;
-    }
-
     constexpr std::size_t TURN_LINE_CAP    = 40;
     constexpr std::size_t TOOL_LINE_CAP    = 8;
     constexpr std::string_view TOOL_PREFIX = "TOOL: ";
@@ -348,7 +331,7 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
         ChatRequest req;
         req.model       = settings.model;
         req.messages    = std::move(history);
-        req.tools       = tool_specs_for_mode(_specs_all, settings.mode);
+        req.tools       = _specs_all;
         req.interrupted = [session = _state->session] {
             return session->interrupt_requested();
         };
@@ -589,11 +572,6 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
 
         had_tool_calls                  = true;
         const ToolCallRequest& original = ev.tool_call;
-        if (!tool_available_in_mode(original.name, mode)) {
-            _reject_tool(original,
-                original.name + " is unavailable in Plan mode", tool_msgs);
-            continue;
-        }
         if (find_tool(_tools, original.name) == nullptr) {
             const std::string error = "unknown tool: " + original.name;
             _finish_tool(
@@ -608,28 +586,6 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
             *_skills);
         if (evaluation.decision.kind == PermissionDecision::Kind::REJECT) {
             _reject_tool(original, evaluation.decision.reason, tool_msgs);
-            continue;
-        }
-        if (original.name == "ask") {
-            const auto form       = parse_ask_args(evaluation.request.args);
-            const ModalResult res = _modal_request(*form).get();
-            _apply_ask_result(original, res, tool_msgs);
-            if (_state->session->interrupt_requested()) {
-                return;
-            }
-            continue;
-        }
-        if (original.name == "todo") {
-            const TodoList todo
-                = *parse_todo_args(parse_json(evaluation.request.args));
-            const std::string text = todo_summary(todo);
-            _post([this, req = original, todo, text] {
-                _state->session->set_todo(todo);
-                _state->session->fill_tool_result(req,
-                    ToolCall::Result { ToolCall::Result::Kind::OUTPUT, text });
-            });
-            tool_msgs.push_back(
-                { Message::Type::TOOL, text, { }, original.id });
             continue;
         }
         if (original.name == "subagent") {
@@ -724,20 +680,6 @@ void TurnRunner::_apply_question_result(
     });
 }
 
-void TurnRunner::_apply_ask_result(const ToolCallRequest& req,
-    const ModalResult& res, std::vector<Message>& tool_msgs)
-{
-    const auto* answer = std::get_if<ModalAnswer>(&res);
-    if (answer == nullptr) {
-        _finish_tool(req, ToolCall::Result::Kind::CANCEL, "", denial_text(""),
-            tool_msgs);
-        return;
-    }
-    ModalAnswer copy       = *answer;
-    const std::string text = ask_answer_markdown(copy);
-    _finish_tool(req, ToolCall::Result::Kind::OUTPUT, text, tool_msgs);
-}
-
 void TurnRunner::_reject_tool(const ToolCallRequest& req, std::string reason,
     std::vector<Message>& tool_msgs)
 {
@@ -783,6 +725,9 @@ void TurnRunner::_run_tool(const PermissionEvaluation& evaluation,
 
     const ToolCallRequest& req = current.request;
     ToolOutput out             = dispatch_tool(_tools, req);
+    if (out.blocked_permission) {
+        _blocked_permission.store(true);
+    }
     if (req.name == "skill" && out.kind == ToolOutput::Kind::OUTPUT) {
         if (const auto skill = resolve_skill(
                 _state->environment->skills(), parse_json(req.args))) {

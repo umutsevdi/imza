@@ -216,20 +216,6 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
     }
 
     const Json::Value arguments = parse_json(original.args);
-    if (original.name == "ask") {
-        if (!parse_ask_args(original.args)) {
-            return reject(std::move(request),
-                "ask: expected a non-empty 'questions' array");
-        }
-        return accept(std::move(request));
-    }
-    if (original.name == "todo") {
-        if (!parse_todo_args(arguments)) {
-            return reject(std::move(request),
-                "todo: expected a 'todos' array of {content, status} objects");
-        }
-        return accept(std::move(request));
-    }
     if (original.name == "subagent") {
         if (const auto error = validate_subagent_tool_arguments(
                 arguments, context.mode == Session::Mode::BUILD)) {
@@ -242,13 +228,6 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
             || arguments["script"].asString().empty()) {
             return reject(std::move(request),
                 "lua: expected a non-empty 'script' string");
-        }
-        return accept(std::move(request));
-    }
-    if (original.name == "webfetch" || original.name == "websearch") {
-        if (const auto error
-            = validate_web_tool_arguments(original.name, arguments)) {
-            return reject(std::move(request), *error);
         }
         return accept(std::move(request));
     }

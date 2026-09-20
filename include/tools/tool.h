@@ -47,6 +47,7 @@ struct ToolOutput {
     std::optional<ShellStatus> shell_status { };
     std::optional<ViewerModal> viewer { };
     std::vector<LuaBindingCall> dispatch_log { };
+    bool blocked_permission = false;
 };
 
 inline ToolOutput tool_error(std::string text)
@@ -85,18 +86,8 @@ ShellAnalysis analyze_shell(std::string_view command);
 bool shell_builtin_allowed(std::string_view program);
 bool shell_readonly_allowed(const ShellInvocation& invocation);
 
-Tool make_read_tool();
 Tool make_skill_tool();
-Tool make_list_tool();
-Tool make_find_tool(bool has_rg);
-Tool make_ask_tool();
-Tool make_shell_tool();
-Tool make_todo_tool();
 Tool make_subagent_tool();
-Tool make_edit_tool();
-Tool make_write_tool();
-Tool make_webfetch_tool();
-Tool make_websearch_tool();
 
 // Callbacks the lua bindings use to reach the world outside the VM.
 // Empty members mean the corresponding binding is unavailable (tests,
@@ -111,6 +102,7 @@ struct LuaHost {
     bool web_enabled      = false;
     bool shell_enabled    = false;
     bool skip_permissions = false;
+    bool unattended       = false;
 };
 
 Tool make_lua_tool(LuaHost host = { }, bool has_rg = false);

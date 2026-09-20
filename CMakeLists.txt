@@ -292,11 +292,9 @@ add_library(imza_execution
     src/permissions/filesystem.cpp
     src/tools/tool.cpp
     src/tools/file_ops.cpp
-    src/tools/find.cpp
     src/tools/lua.cpp
     src/tools/tool_args.cpp
     src/tools/shell.cpp
-    src/tools/web.cpp
     src/turn/delegation.cpp
     src/turn/prompt.cpp
     src/turn/stream_updates.cpp

@@ -65,6 +65,8 @@ namespace {
             .skip_permissions
             = (state->runtime_flags & RuntimeFlag::SKIP_PERMISSIONS)
                 != RuntimeFlag::NONE,
+            .unattended = (state->runtime_flags & RuntimeFlag::ATTENDED)
+                == RuntimeFlag::NONE,
         };
     }
 

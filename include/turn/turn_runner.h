@@ -94,8 +94,6 @@ private:
     void _apply_tool_result(const PermissionEvaluation& evaluation,
         const ModalResult& res, Session::Mode mode,
         std::vector<Message>& tool_msgs);
-    void _apply_ask_result(const ToolCallRequest& req, const ModalResult& res,
-        std::vector<Message>& tool_msgs);
     void _apply_question_result(
         const ModalResult& res, std::string& reply_buffer);
     void _reject_tool(const ToolCallRequest& req, std::string reason,

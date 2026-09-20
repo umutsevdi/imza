@@ -1,11 +1,13 @@
 #include "app/application_state.h"
 #include "app/flows.h"
+#include "network/json_io.h"
 #include "runtime/main_thread_queue.h"
 
 #include <doctest/doctest.h>
 
 #include <atomic>
 #include <chrono>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <string>
@@ -142,13 +144,22 @@ TEST_CASE("one-shot preserves coalesced reasoning and its signature")
 TEST_CASE("one-shot reports unattended permission blocks without a modal")
 {
     imza::MainThreadQueue queue;
+    // Outside the workspace and the trusted temporary root, so the write
+    // gate raises ASK; without ATTENDED the run must fail closed.
+    const std::filesystem::path path = std::filesystem::path(getenv("HOME"))
+        / ("imza-one-shot-blocked-"
+            + std::to_string(
+                std::chrono::steady_clock::now().time_since_epoch().count()));
     auto state = make_one_shot_state(
         queue,
-        [](const imza::ChatRequest& request,
+        [path](const imza::ChatRequest& request,
             const imza::StreamCallback& callback) {
             if (request.messages.back().type == imza::Message::Type::USER) {
-                callback(imza::make_tool_call_event({ "shell",
-                    R"({"command":"custom blocked"})", "", "call" }));
+                Json::Value arguments(Json::objectValue);
+                arguments["script"] = "assert(tool.file.write([["
+                    + path.string() + "]], 'no'))";
+                callback(imza::make_tool_call_event(
+                    { "lua", imza::write_json(arguments), "", "call" }));
             } else {
                 callback(imza::make_delta_event("permission required"));
             }
@@ -164,6 +175,7 @@ TEST_CASE("one-shot reports unattended permission blocks without a modal")
     CHECK(imza::one_shot_exit_code(result.kind) == 3);
     CHECK(state->queue.size() == 0);
     CHECK(state->session->modal().index() == 0);
+    CHECK_FALSE(std::filesystem::exists(path));
 }
 
 TEST_CASE("one-shot reports provider failures")

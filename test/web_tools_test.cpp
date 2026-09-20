@@ -106,31 +106,3 @@ TEST_CASE("mcp_search_text reads JSON and SSE responses")
         imza::mcp_search_text(R"({"result":{"content":[{"text":""}]}})") == "");
     CHECK(imza::mcp_search_text("totally not json") == "");
 }
-
-TEST_CASE("webfetch rejects invalid arguments")
-{
-    const auto tool = imza::make_webfetch_tool();
-
-    const auto missing = tool.run(imza::parse_json("{}"));
-    CHECK(missing.kind == imza::ToolOutput::Kind::ERROR);
-
-    const auto empty = tool.run(imza::parse_json(R"({"url":""})"));
-    CHECK(empty.kind == imza::ToolOutput::Kind::ERROR);
-
-    const auto scheme
-        = tool.run(imza::parse_json(R"({"url":"ftp://example.com"})"));
-    CHECK(scheme.kind == imza::ToolOutput::Kind::ERROR);
-    CHECK(scheme.text.starts_with("webfetch:"));
-}
-
-TEST_CASE("websearch rejects invalid arguments")
-{
-    const auto tool = imza::make_websearch_tool();
-
-    const auto missing = tool.run(imza::parse_json("{}"));
-    CHECK(missing.kind == imza::ToolOutput::Kind::ERROR);
-
-    const auto empty = tool.run(imza::parse_json(R"({"query":""})"));
-    CHECK(empty.kind == imza::ToolOutput::Kind::ERROR);
-    CHECK(empty.text.starts_with("websearch:"));
-}

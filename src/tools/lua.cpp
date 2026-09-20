@@ -56,8 +56,9 @@ namespace {
         // latest content after each accepted tool.file.* call.
         std::vector<FileMutation> mutations;
         // Borrowed; lives as long as the Tool that owns this VM run.
-        const LuaHost* host = nullptr;
-        bool has_rg         = false;
+        const LuaHost* host     = nullptr;
+        bool has_rg             = false;
+        bool blocked_permission = false;
     };
 
     void* lua_alloc(void* ud, void* ptr, std::size_t osize, std::size_t nsize)
@@ -241,6 +242,14 @@ namespace {
         case PermissionDecision::Kind::REJECT: return std::nullopt;
         case PermissionDecision::Kind::ASK: break;
         }
+        if (run->host->skip_permissions) {
+            record(true, evaluation.request->target.string());
+            return evaluation.request;
+        }
+        if (run->host->unattended) {
+            run->blocked_permission = true;
+            return std::nullopt;
+        }
         if (!run->host->ask) {
             return std::nullopt;
         }
@@ -250,6 +259,11 @@ namespace {
                   write_json(evaluation.request->normalized_arguments), "" }
             : ToolCallRequest { std::string(tool), write_json(args), "" };
         request.permission_reason = evaluation.decision.reason;
+        PermissionStore::Grants grants;
+        if (const auto grant = filesystem_session_grant(*evaluation.request)) {
+            grants.push_back(PermissionGrant { *grant });
+        }
+        request.allow_for_session = !grants.empty();
         // Human think-time is free: shift the wall-clock deadline by the
         // paused duration so a slow approval does not consume the script's
         // execution budget.
@@ -257,12 +271,27 @@ namespace {
         const ModalResult result = run->host->ask(std::move(request)).get();
         run->deadline += std::chrono::steady_clock::now() - paused_at;
         const auto* verdict = std::get_if<ToolVerdict>(&result);
-        if (verdict != nullptr
-            && verdict->decision == ToolDecision::ACCEPT_ONCE) {
-            record(true, evaluation.request->target.string());
-            return evaluation.request;
+        if (verdict == nullptr || verdict->decision == ToolDecision::REJECT) {
+            return std::nullopt;
         }
-        return std::nullopt;
+        if (verdict->decision == ToolDecision::ACCEPT_FOR_SESSION) {
+            if (grants.empty() || !run->host->install_grants
+                || !run->host->install_grants(std::move(grants))) {
+                return std::nullopt;
+            }
+            const FilesystemEvaluation current = evaluate_filesystem_request(
+                tool, write_json(args), run->host->context());
+            if (current.decision.kind != PermissionDecision::Kind::ACCEPT
+                || !current.request
+                || current.request->normalized_arguments
+                    != evaluation.request->normalized_arguments) {
+                return std::nullopt;
+            }
+            record(true, current.request->target.string());
+            return current.request;
+        }
+        record(true, evaluation.request->target.string());
+        return evaluation.request;
     }
 
     Json::Value string_arg(const char* key, const std::string& value)
@@ -848,10 +877,13 @@ namespace {
             || run->host->skip_permissions) {
             return run_sh();
         }
-        if (!run->host->ask) {
-            // Unattended: fail closed.
+        if (run->host->unattended) {
+            run->blocked_permission = true;
             return binding_error(
                 L, "shell: permission requires approval in attended runs");
+        }
+        if (!run->host->ask) {
+            return binding_error(L, "shell: permission approval unavailable");
         }
 
         // ASK: block on the modal queue like the native flow; think-time is
@@ -1236,7 +1268,8 @@ namespace {
         // The log and the net per-file diffs record what ran even when the
         // script dies mid-flight, so every exit path below carries them out.
         const auto finish = [&](ToolOutput out) {
-            out.dispatch_log = std::move(run.log);
+            out.dispatch_log       = std::move(run.log);
+            out.blocked_permission = run.blocked_permission;
             for (const FileMutation& m : run.mutations) {
                 if (m.original == m.latest) {
                     continue;

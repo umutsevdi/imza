@@ -433,16 +433,19 @@ TEST_CASE("tool.sh rejects only multiple command expressions")
 {
     ShellFixture fx;
     const imza::ToolOutput chained = run_script(
-        "local out, err = tool.shell('echo a && echo b')\nprint(err)", fx.host());
+        "local out, err = tool.shell('echo a && echo b')\nprint(err)",
+        fx.host());
     CHECK(chained.text.find("one command per call") != std::string::npos);
     CHECK(fx.ask_calls == 0);
 
     const imza::ToolOutput piped = run_script(
-        "local out, err = tool.shell('echo a | grep a')\nprint(err)", fx.host());
+        "local out, err = tool.shell('echo a | grep a')\nprint(err)",
+        fx.host());
     CHECK(piped.text.find("one command per call") != std::string::npos);
 
     const imza::ToolOutput multiline = run_script(
-        "local out, err = tool.shell('echo a\\necho b')\nprint(err)", fx.host());
+        "local out, err = tool.shell('echo a\\necho b')\nprint(err)",
+        fx.host());
     CHECK(multiline.text.find("one command per call") != std::string::npos);
 }
 
@@ -490,11 +493,11 @@ TEST_CASE("tool.sh applies the native approval and session grant flow")
     ShellFixture session;
     session.verdict
         = imza::ToolVerdict { imza::ToolDecision::ACCEPT_FOR_SESSION, "" };
-    const imza::ToolOutput granted
-        = run_script("local out, code = tool.shell('touch " + (dir / "a").string()
-                + "')\n"
-                  "print(code)",
-            session.host());
+    const imza::ToolOutput granted = run_script(
+        "local out, code = tool.shell('touch " + (dir / "a").string()
+            + "')\n"
+              "print(code)",
+        session.host());
     CHECK(granted.text == "0\n");
     REQUIRE(session.ask_calls == 1);
     REQUIRE(session.last_request.has_value());
@@ -508,11 +511,11 @@ TEST_CASE("tool.sh applies the native approval and session grant flow")
     ShellFixture rejected;
     rejected.verdict
         = imza::ToolVerdict { imza::ToolDecision::REJECT, "no thanks" };
-    const imza::ToolOutput denied
-        = run_script("local out, err = tool.shell('touch " + (dir / "b").string()
-                + "')\n"
-                  "print(err)",
-            rejected.host());
+    const imza::ToolOutput denied = run_script(
+        "local out, err = tool.shell('touch " + (dir / "b").string()
+            + "')\n"
+              "print(err)",
+        rejected.host());
     REQUIRE(rejected.ask_calls == 1);
     CHECK(denied.text.find("no thanks") != std::string::npos);
     CHECK(rejected.installed.empty());
@@ -527,11 +530,12 @@ TEST_CASE("tool.sh accepts pre-installed grants and skip-permissions silently")
     CHECK(pre.install({ imza::ShellCommandGrant { "touch",
         fs::temp_directory_path().string() + "/imza_sh_pre_granted" } }));
     pre.verdict = imza::ToolVerdict { imza::ToolDecision::REJECT, "unused" };
-    const imza::ToolOutput auto_run = run_script(
-        "local out, code = tool.shell('touch " + fs::temp_directory_path().string()
-            + "/imza_sh_pre_granted')\n"
-              "print(code)",
-        pre.host());
+    const imza::ToolOutput auto_run
+        = run_script("local out, code = tool.shell('touch "
+                + fs::temp_directory_path().string()
+                + "/imza_sh_pre_granted')\n"
+                  "print(code)",
+            pre.host());
     CHECK(auto_run.text == "0\n");
     CHECK(pre.ask_calls == 0);
 
@@ -539,11 +543,12 @@ TEST_CASE("tool.sh accepts pre-installed grants and skip-permissions silently")
     skipped.skip_permissions = true;
     skipped.verdict
         = imza::ToolVerdict { imza::ToolDecision::REJECT, "unused" };
-    const imza::ToolOutput bypassed = run_script(
-        "local out, code = tool.shell('touch " + fs::temp_directory_path().string()
-            + "/imza_sh_skip')\n"
-              "print(code)",
-        skipped.host());
+    const imza::ToolOutput bypassed
+        = run_script("local out, code = tool.shell('touch "
+                + fs::temp_directory_path().string()
+                + "/imza_sh_skip')\n"
+                  "print(code)",
+            skipped.host());
     CHECK(bypassed.text == "0\n");
     CHECK(skipped.ask_calls == 0);
 }
@@ -581,10 +586,10 @@ TEST_CASE("sh binding logs commands with exit status")
 {
     TmpDir dir;
     ShellFixture fx;
-    const imza::ToolOutput out
-        = run_script("tool.shell('echo hi')\ntool.shell('false')\nlocal _, err = "
-                     "tool.shell('echo a && echo b')\nprint(err ~= nil)",
-            fx.host());
+    const imza::ToolOutput out = run_script(
+        "tool.shell('echo hi')\ntool.shell('false')\nlocal _, err = "
+        "tool.shell('echo a && echo b')\nprint(err ~= nil)",
+        fx.host());
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     REQUIRE(out.dispatch_log.size() == 2);
     CHECK(out.dispatch_log[0].binding == "shell");
