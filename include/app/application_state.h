@@ -95,7 +95,6 @@ std::shared_ptr<ApplicationState> make_child_application_state(
     const ApplicationState& parent, PostFn post, StreamFn stream_fn = { },
     ModalRequestFn parent_routing = { }, std::string agent_label = { });
 
-// Sidechat child state (see SPEC_SIDECHAT.md).
 std::shared_ptr<ApplicationState> make_sidechat_application_state(
     ApplicationState& parent);
 

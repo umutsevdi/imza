@@ -27,24 +27,17 @@ TEST_CASE("builtin tools expose the current tool set")
     CHECK(find_tool(tools, "websearch") == nullptr);
 }
 
-TEST_CASE("the roster is identical in every mode and flag combination")
+TEST_CASE("a removed native tool name is unknown to the roster")
 {
-    const auto none  = imza::default_tools(imza::RuntimeFlag::NONE);
-    const auto all   = imza::default_tools(imza::interactive_runtime_flags());
-    const auto web   = imza::default_tools(imza::RuntimeFlag::WEB);
-    const auto shell = imza::default_tools(imza::RuntimeFlag::SHELL);
-
-    for (const auto* roster : { &none, &all, &web, &shell }) {
-        REQUIRE(imza::find_tool(*roster, "lua") != nullptr);
-        REQUIRE(imza::find_tool(*roster, "skill") != nullptr);
-        REQUIRE(imza::find_tool(*roster, "subagent") != nullptr);
-        CHECK(imza::find_tool(*roster, "shell") == nullptr);
-        CHECK(imza::find_tool(*roster, "webfetch") == nullptr);
-        CHECK(imza::find_tool(*roster, "ask") == nullptr);
-    }
+    // The roster no longer varies with runtime flags: WEB/SHELL gate the
+    // lua bindings, not tool membership. A native name fails dispatch.
+    const auto tools = imza::default_tools();
+    REQUIRE(imza::find_tool(tools, "lua") != nullptr);
+    REQUIRE(imza::find_tool(tools, "skill") != nullptr);
+    REQUIRE(imza::find_tool(tools, "subagent") != nullptr);
 
     const auto disabled = imza::dispatch_tool(
-        none, { "shell", R"({"command":"echo unavailable"})", "", "" });
+        tools, { "shell", R"({"command":"echo unavailable"})", "", "" });
     CHECK(disabled.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(disabled.text == "unknown tool: shell");
 }

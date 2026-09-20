@@ -600,15 +600,25 @@ TEST_CASE("filesystem policy rejects malformed operation arguments")
               context)
               .decision.kind
         == PermissionDecision::Kind::REJECT);
-    CHECK(evaluate_filesystem_request("write",
-              R"({"file_path":")" + file + R"(","text":"x","overwrite":true})",
-              context)
+    CHECK(evaluate_filesystem_request(
+              "write", R"({"file_path":")" + file + R"("})", context)
               .decision.kind
         == PermissionDecision::Kind::REJECT);
-    CHECK(evaluate_filesystem_request("write",
+    CHECK(evaluate_filesystem_request(
+              "write", R"({"file_path":")" + file + R"(","text":7})", context)
+              .decision.kind
+        == PermissionDecision::Kind::REJECT);
+    CHECK(evaluate_filesystem_request("insert",
               R"({"file_path":")" + file + R"(","text":"x","line":"one"})",
               context)
               .decision.kind
+        == PermissionDecision::Kind::REJECT);
+    CHECK(
+        evaluate_filesystem_request("edit",
+            R"({"file_path":")" + file
+                + R"(","old_string":"x","new_string":"y","replace_count":-1})",
+            context)
+            .decision.kind
         == PermissionDecision::Kind::REJECT);
 }
 

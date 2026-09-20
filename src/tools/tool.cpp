@@ -46,8 +46,7 @@ ToolOutput dispatch_tool(
     return tool->run(args);
 }
 
-std::vector<Tool> default_tools(
-    RuntimeFlag flags, bool has_rg, LuaHost lua_host)
+std::vector<Tool> default_tools(bool has_rg, LuaHost lua_host)
 {
     std::vector<Tool> tools;
     tools.push_back(make_skill_tool());

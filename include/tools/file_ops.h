@@ -9,9 +9,8 @@
 
 namespace imza {
 
-// Text file I/O used by the native edit/write tools and the lua
-// tool.file.* bindings. load_text rejects missing paths, directories,
-// and binary content; save_text truncates.
+// Text file I/O behind the lua tool.file.* bindings. load_text rejects
+// missing paths, directories, and binary content; save_text truncates.
 bool load_text(const std::string& path, std::string& out, std::string& err);
 bool save_text(
     const std::string& path, const std::string& content, std::string& err);
@@ -30,8 +29,8 @@ std::optional<std::string> replace_text(const std::string& content,
     std::string& err);
 
 // Single-span diff of two file versions, with 3 lines of context and
-// "… N unchanged line(s) …" elision rows. Used for both native tool
-// results and the lua aggregate diffs.
+// "… N unchanged line(s) …" elision rows. Used for the lua aggregate
+// per-file diffs.
 DiffView make_diff_view(const std::string& path,
     const std::vector<std::string>& old_lines,
     const std::vector<std::string>& new_lines);

@@ -10,8 +10,6 @@
 #include "turn/turn_runner.h"
 #include "workspace/review.h"
 
-#include <algorithm>
-#include <iterator>
 #include <memory>
 #include <utility>
 
@@ -134,7 +132,7 @@ namespace {
         state->runtime_flags = runtime_flags;
         if (use_default_tools) {
             ApplicationState* captured = state.get();
-            tools                      = default_tools(runtime_flags,
+            tools                      = default_tools(
                 state->environment->system()->has_rg, lua_host(captured));
         }
         wire(state, std::move(stream_fn), std::move(tools));
@@ -167,17 +165,12 @@ namespace {
 
     std::vector<Tool> sidechat_roster(ApplicationState& parent)
     {
-        std::vector<Tool> tools = default_tools(parent.runtime_flags,
+        std::vector<Tool> tools = default_tools(
             parent.environment->system()->has_rg, lua_host(&parent));
-        // The sidechat is a regular chat; drop only file mutation and
-        // delegation.
-        std::erase_if(tools, [](const Tool& tool) {
-            constexpr std::string_view removed[]
-                = { "edit", "write", "subagent", "todo" };
-            return std::find(
-                       std::begin(removed), std::end(removed), tool.spec.name)
-                != std::end(removed);
-        });
+        // The sidechat is a regular chat: it keeps the lua sandbox (and its
+        // file bindings) but must not spawn its own subagents.
+        std::erase_if(tools,
+            [](const Tool& tool) { return tool.spec.name == "subagent"; });
         return tools;
     }
 
@@ -215,11 +208,10 @@ std::shared_ptr<ApplicationState> make_child_application_state(
     ModalRequestFn parent_routing, std::string agent_label)
 {
     std::shared_ptr<ApplicationState> state(new ApplicationState());
-    std::vector<Tool> tools = default_tools(parent.runtime_flags,
+    std::vector<Tool> tools = default_tools(
         parent.environment->system()->has_rg, lua_host(state.get()));
-    std::erase_if(tools, [](const Tool& tool) {
-        return tool.spec.name == "subagent" || tool.spec.name == "todo";
-    });
+    std::erase_if(
+        tools, [](const Tool& tool) { return tool.spec.name == "subagent"; });
     return initialize_child(std::move(state), parent, std::move(post),
         std::move(stream_fn), std::move(parent_routing), std::move(agent_label),
         std::move(tools));

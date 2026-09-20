@@ -553,9 +553,9 @@ TEST_CASE("tool.sh accepts pre-installed grants and skip-permissions silently")
     CHECK(skipped.ask_calls == 0);
 }
 
-TEST_CASE("default_tools includes lua in every mode")
+TEST_CASE("default_tools includes lua")
 {
-    const auto tools = imza::default_tools(imza::RuntimeFlag::NONE);
+    const auto tools = imza::default_tools();
     CHECK(imza::find_tool(tools, "lua") != nullptr);
 }
 
