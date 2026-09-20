@@ -33,6 +33,10 @@ namespace {
 
     using namespace ftxui;
 
+    // Inline cap for a lua run's per-file diffs; beyond this the rest
+    // collapses behind a viewer button.
+    constexpr std::size_t INLINE_DIFF_ROWS = 25;
+
     constexpr std::size_t INVALID_VERSION = ~std::size_t { 0 };
     constexpr int WHEEL_STEP              = 3;
     constexpr int DEFAULT_VIEWPORT_LINES  = 24;
@@ -475,6 +479,16 @@ namespace {
                         return true;
                     }
                 }
+                for (auto& [key, button] : diff_buttons_) {
+                    if (button->OnEvent(event)) {
+                        return true;
+                    }
+                }
+                for (auto& [id, button] : pending_lua_buttons_) {
+                    if (button->OnEvent(event)) {
+                        return true;
+                    }
+                }
                 for (auto& [id, link] : reasoning_links_) {
                     if (link.component->OnEvent(event)) {
                         return true;
@@ -693,8 +707,10 @@ namespace {
 
         Component container_;
         std::map<std::size_t, Component> read_buttons_;
+        std::map<std::size_t, Component> pending_lua_buttons_;
         std::map<std::pair<std::size_t, std::size_t>, Component>
             subagent_buttons_;
+        std::map<std::pair<std::size_t, std::size_t>, Component> diff_buttons_;
         struct ReasoningLink {
             std::shared_ptr<std::string> label;
             std::shared_ptr<std::string> content;
@@ -720,11 +736,19 @@ namespace {
             for (auto& [key, component] : subagent_buttons_) {
                 component->Detach();
             }
+            for (auto& [key, component] : diff_buttons_) {
+                component->Detach();
+            }
+            for (auto& [id, component] : pending_lua_buttons_) {
+                component->Detach();
+            }
             for (auto& [index, link] : reasoning_links_) {
                 link.component->Detach();
             }
             read_buttons_.clear();
             subagent_buttons_.clear();
+            diff_buttons_.clear();
+            pending_lua_buttons_.clear();
             reasoning_links_.clear();
         }
 
@@ -745,6 +769,17 @@ namespace {
                     && subagent->first.first == tool->id) {
                     subagent->second->Detach();
                     subagent = subagent_buttons_.erase(subagent);
+                }
+                auto diff = diff_buttons_.lower_bound({ tool->id, 0 });
+                while (diff != diff_buttons_.end()
+                    && diff->first.first == tool->id) {
+                    diff->second->Detach();
+                    diff = diff_buttons_.erase(diff);
+                }
+                const auto pending = pending_lua_buttons_.find(tool->id);
+                if (pending != pending_lua_buttons_.end()) {
+                    pending->second->Detach();
+                    pending_lua_buttons_.erase(pending);
                 }
             }
             const auto reasoning = reasoning_links_.find(index);
@@ -885,7 +920,9 @@ namespace {
                     text(take_lines(tc.result->text, 2)) | color(HL_RED));
             }
             const LayoutCtx ctx = layout_();
-            for (const DiffView& diff : tc.result->diffs) {
+            for (std::size_t index = 0; index < tc.result->diffs.size();
+                ++index) {
+                const DiffView& diff  = tc.result->diffs[index];
                 std::size_t additions = 0;
                 std::size_t deletions = 0;
                 for (const DiffRow& row : diff.rows) {
@@ -894,7 +931,20 @@ namespace {
                 }
                 rows.push_back(hbox({ text(diff.file) | bold | color(PANEL_FG),
                     filler(), diffstat_chip(additions, deletions) }));
-                rows.push_back(diff_split(diff, review_content_width(ctx)));
+                if (diff.rows.size() <= INLINE_DIFF_ROWS) {
+                    rows.push_back(diff_split(diff, review_content_width(ctx)));
+                    continue;
+                }
+                DiffView head;
+                head.file = diff.file;
+                head.rows.assign(diff.rows.begin(),
+                    std::next(diff.rows.begin(),
+                        static_cast<std::ptrdiff_t>(INLINE_DIFF_ROWS)));
+                rows.push_back(diff_split(head, review_content_width(ctx)));
+                const std::string label = "‹ View full diff ("
+                    + std::to_string(diff.rows.size()) + " lines) ›";
+                rows.push_back(
+                    make_diff_viewer_button(tc.id, index, label)->Render());
             }
             rows.push_back(separatorEmpty());
             return vbox(std::move(rows));
@@ -944,7 +994,8 @@ namespace {
                     hbox({
                         spinner(15, static_cast<std::size_t>(frame_))
                             | color(PANEL_FG_DIM),
-                        text(" Executing…") | dim,
+                        text(" "),
+                        make_lua_pending_button(tc)->Render(),
                     }),
                     separatorEmpty(),
                 });
@@ -997,6 +1048,42 @@ namespace {
                         call != nullptr) {
                         open_subagent_viewer(*call, index);
                     }
+                });
+        }
+
+        Component make_diff_viewer_button(
+            std::size_t id, std::size_t index, std::string label)
+        {
+            return memoized_label_button(diff_buttons_, std::pair { id, index },
+                std::move(label), [this, id, index] {
+                    const auto* call = find_tool_call(id);
+                    if (call == nullptr || !call->result.has_value()
+                        || index >= call->result->diffs.size()) {
+                        return;
+                    }
+                    const DiffView& diff = call->result->diffs[index];
+                    imza::enqueue_user_modal(*state_,
+                        ViewerModal {
+                            diff.file, "", "diff", 1, false, "", diff });
+                });
+        }
+
+        Component make_lua_pending_button(const ToolCall& tc)
+        {
+            return memoized_label_button(
+                pending_lua_buttons_, tc.id, "Executing…", [this, id = tc.id] {
+                    const auto* call = find_tool_call(id);
+                    if (call == nullptr) {
+                        return;
+                    }
+                    if (call->result.has_value()) {
+                        open_viewer_for(*call);
+                        return;
+                    }
+                    const std::string script
+                        = json_string(parse_json(call->args), "script");
+                    imza::enqueue_user_modal(*state_,
+                        ViewerModal { "Lua script", script, "lua", 1 });
                 });
         }
 

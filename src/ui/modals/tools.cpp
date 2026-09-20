@@ -98,10 +98,10 @@ namespace {
         return normalized == "md" || normalized == "markdown";
     }
 
-    int modal_content_width()
+    int modal_content_width(const ModalPayload& modal)
     {
         const int popup_w
-            = std::min(Terminal::Size().dimx - 4, MODAL_MAX_WIDTH);
+            = std::min(Terminal::Size().dimx - 4, modal_max_width(modal));
         return std::max(40, popup_w - 8);
     }
 
@@ -484,8 +484,10 @@ namespace {
         void build(const ViewerModal& payload)
         {
             reset_static_scroll();
-            const int content_width = modal_content_width();
-            if (is_markdown_type(payload.lang)) {
+            const int content_width = modal_content_width(session_->modal());
+            if (payload.diff.has_value()) {
+                viewer_content_ = diff_split(*payload.diff, content_width);
+            } else if (is_markdown_type(payload.lang)) {
                 viewer_content_
                     = render_markdown_element(payload.content, content_width);
             } else if (payload.line_numbers) {
@@ -592,8 +594,9 @@ namespace {
                 text(tool_action_description(req)) | color(PANEL_FG_DIM));
             rows.push_back(tool_approval_reason(req));
             rows.push_back(separatorEmpty());
-            rows.push_back(tool_request_body(
-                req, *state_->environment->system(), modal_content_width()));
+            rows.push_back(
+                tool_request_body(req, *state_->environment->system(),
+                    modal_content_width(session_->modal())));
             rows.push_back(separatorEmpty());
             if (tool_phase_ == ToolPhase::REASON) {
                 rows.push_back(section_title("Reason for rejecting", PANEL_FG));
@@ -698,6 +701,14 @@ namespace {
     };
 
 } // namespace
+
+int modal_max_width(const ModalPayload& modal)
+{
+    return std::holds_alternative<ViewerModal>(modal)
+            && std::get<ViewerModal>(modal).diff.has_value()
+        ? DIFF_VIEWER_MODAL_MAX_WIDTH
+        : MODAL_MAX_WIDTH;
+}
 
 ftxui::Component make_modal(std::shared_ptr<ApplicationState> state)
 {

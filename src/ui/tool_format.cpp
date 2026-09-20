@@ -129,7 +129,7 @@ std::string lua_dispatch_counts(const ToolCall& call)
         ++total;
         failed += entry.ok ? 0 : 1;
     }
-    std::string out = std::to_string(total) + " tools";
+    std::string out = std::to_string(total) + (total == 1 ? " tool" : " tools");
     if (failed > 0) {
         out += " (" + std::to_string(failed) + " failed)";
     }

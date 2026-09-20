@@ -38,6 +38,9 @@ TEST_CASE("lua dispatch log formats as counts and grouped summary")
     };
     CHECK(imza::lua_dispatch_counts(call) == "5 tools (1 failed)");
     CHECK(imza::lua_dispatch_summary(call) == "2 read · 3 list (1 failed)");
+
+    call.result->dispatch_log = { { "read", "a.cpp", true } };
+    CHECK(imza::lua_dispatch_counts(call) == "1 tool");
 }
 
 TEST_CASE("lua viewer report fences script and output safely")

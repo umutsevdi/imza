@@ -237,15 +237,20 @@ namespace {
             }
 
             Component popup_source = nullptr;
+            std::shared_ptr<Session> modal_session;
             if (state_->session->modal().index() != 0) {
-                popup_source = modal_;
+                popup_source  = modal_;
+                modal_session = state_->session;
             } else if (sidechat_status_.has_modal
                 && sidechat_status_.has_modal()) {
-                popup_source = sidechat_status_.modal;
+                popup_source  = sidechat_status_.modal;
+                modal_session = state_->sidechat ? state_->sidechat->session
+                                                 : state_->session;
             }
             if (popup_source) {
-                const int h   = terminal_size.dimy;
-                const int mw  = std::min(w - 4, MODAL_MAX_WIDTH);
+                const int h = terminal_size.dimy;
+                const int mw
+                    = std::min(w - 4, modal_max_width(modal_session->modal()));
                 const int mh  = std::max(10, h - 4);
                 Element popup = popup_source->Render()
                     | borderStyled(ROUNDED, PANEL_BORDER) | bgcolor(PANEL_COLOR)
