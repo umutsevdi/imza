@@ -605,8 +605,8 @@ TEST_CASE("central evaluator assigns explicit policies to built-in tools")
 
     const auto evaluate = [&](std::string name, std::string arguments) {
         return evaluate_tool_request(
-            { std::move(name), std::move(arguments), "", "", "", false }, plan,
-            config, skills, loaded);
+            { std::move(name), std::move(arguments), "", "" }, plan, config,
+            skills, loaded);
     };
 
     CHECK(evaluate("subagent",
@@ -724,13 +724,16 @@ TEST_CASE("skill policy and runtime grants use the same central evaluator")
     const std::vector<Skill> skills { skill };
     SkillStore loaded;
     Config config;
-    const ToolCallRequest request { "skill", R"({"name":"docs"})", "", "", "",
-        false };
+    const ToolCallRequest request { "skill", R"({"name":"docs"})", "", "" };
 
     auto evaluation = evaluate_tool_request(
         request, fixture.context(Session::Mode::PLAN), config, skills, loaded);
     CHECK(evaluation.decision.kind == PermissionDecision::Kind::ASK);
-    CHECK(evaluation.request.allow_for_session);
+    REQUIRE(evaluation.prompt.has_value());
+    CHECK(evaluation.prompt->allow_for_session);
+    CHECK(evaluation.prompt->reason == "skill instructions require approval");
+    CHECK(std::get<imza::SkillRequest>(evaluation.prompt->request).name
+        == "docs");
     REQUIRE(evaluation.session_grants.size() == 1);
 
     evaluation = evaluate_tool_request(request,
@@ -759,8 +762,7 @@ TEST_CASE("skill policy and runtime grants use the same central evaluator")
 
     const Skill missing { "missing", "Missing instructions",
         fixture.outside / "missing.md", Skill::Scope::GLOBAL, std::nullopt };
-    CHECK(evaluate_tool_request(
-              { "skill", R"({"name":"missing"})", "", "", "", false },
+    CHECK(evaluate_tool_request({ "skill", R"({"name":"missing"})", "", "" },
               fixture.context(Session::Mode::PLAN), config,
               std::vector<Skill> { missing }, loaded)
               .decision.kind
@@ -773,12 +775,43 @@ TEST_CASE("skill policy and runtime grants use the same central evaluator")
     }
     const Skill large { "large", "Large instructions", large_path,
         Skill::Scope::GLOBAL, std::nullopt };
-    CHECK(evaluate_tool_request(
-              { "skill", R"({"name":"large"})", "", "", "", false },
+    CHECK(evaluate_tool_request({ "skill", R"({"name":"large"})", "", "" },
               fixture.context(Session::Mode::PLAN), config,
               std::vector<Skill> { large }, loaded)
               .decision.kind
         == PermissionDecision::Kind::REJECT);
+}
+
+TEST_CASE("authorized_skill_path accepts only the canonical target")
+{
+    PermissionFixture fixture;
+    const auto path = fixture.outside / "SKILL.md";
+    {
+        std::ofstream file(path);
+        file << "workflow";
+    }
+    const Skill skill { "docs", "Documentation workflow", path,
+        Skill::Scope::GLOBAL, std::nullopt };
+    const std::string canonical = canonical_skill_path(skill)->string();
+
+    Json::Value bound(Json::objectValue);
+    bound["name"]  = "docs";
+    bound["scope"] = "global";
+    bound["path"]  = canonical;
+    CHECK(authorized_skill_path(skill, { "skill", write_json(bound), "", "" })
+        == canonical_skill_path(skill));
+
+    // A request aimed at a different file must not authorize this skill.
+    Json::Value other(Json::objectValue);
+    other["name"]  = "docs";
+    other["scope"] = "global";
+    other["path"]  = (fixture.outside / "elsewhere.md").string();
+    CHECK_FALSE(
+        authorized_skill_path(skill, { "skill", write_json(other), "", "" }));
+
+    // Nor one that omits the path, as an unnormalized model call does.
+    CHECK_FALSE(authorized_skill_path(
+        skill, { "skill", R"({"name":"docs"})", "", "" }));
 }
 
 TEST_CASE("unknown dollar tokens remain ordinary chat text")
@@ -818,8 +851,7 @@ TEST_CASE("skill evaluation binds approval to the canonical instruction path")
     const std::vector<Skill> skills { skill };
     const Config config;
     SkillStore loaded;
-    const ToolCallRequest request { "skill", R"({"name":"changing"})", "", "",
-        "", false };
+    const ToolCallRequest request { "skill", R"({"name":"changing"})", "", "" };
     const PermissionEvaluation approved = evaluate_tool_request(
         request, fixture.context(Session::Mode::PLAN), config, skills, loaded);
     REQUIRE(approved.decision.kind == PermissionDecision::Kind::ASK);

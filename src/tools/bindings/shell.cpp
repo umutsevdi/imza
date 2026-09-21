@@ -102,18 +102,15 @@ namespace {
         {
             "shell",
             binding_shell,
-            "tool.shell(command: string, timeout?: integer=10, "
-            "workspace?: string)\n    => output: string, exit_code: integer",
-            "Runs a single external command, returning its captured output "
-            "(capped at\n"
-            "64 KB) and exit status.\n"
-            "A non-zero exit_code is a successful call, so test exit_code "
-            "rather than nil.\n"
-            "nil, Err means it could not start, timed out (1..120 s) or was "
-            "denied.\n"
-            "Chains and pipelines are rejected. Compose results in Lua "
-            "instead.\n"
-            "`workspace` is the directory the command runs in.",
+            R"desc(
+tool.shell(command: string, timeout?: integer=10, workspace?: string) => output: string, exit_code: integer
+Runs a single external command, returning its captured output (capped at 64 KB)
+and exit status.
+A non-zero exit_code is a successful call, so test exit_code rather than nil.
+nil, Err means it could not start, timed out (1..120 s) or was denied.
+Chains and pipelines are rejected. Compose results in Lua instead.
+`workspace` is the directory the command runs in.
+            )desc",
             LuaCapability::SHELL,
             "shell: shell access is disabled for this run",
         },

@@ -1,8 +1,10 @@
 #include "tools/tool.h"
 #include "common/util.h"
 #include "network/json_io.h"
+#include "tools/skills.h"
 
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <utility>
@@ -41,18 +43,15 @@ ToolOutput dispatch_tool(
     if (args.isNull()) {
         args = Json::Value(req.args);
     }
-    if (!tool->run) {
-        return { ToolOutput::Kind::ERROR,
-            "tool has no implementation: " + req.name };
-    }
-    return tool->run(args);
+    return tool->run(req, args);
 }
 
-std::vector<Tool> default_tools(LuaHost lua_host)
+std::vector<Tool> default_tools(
+    LuaHost lua_host, SkillToolDeps skill_deps, SubagentToolSlot subagent)
 {
     std::vector<Tool> tools;
-    tools.push_back(make_skill_tool());
-    tools.push_back(make_subagent_tool());
+    tools.push_back(make_skill_tool(std::move(skill_deps)));
+    tools.push_back(make_subagent_tool(std::move(subagent)));
     tools.push_back(make_lua_tool(std::move(lua_host)));
     return tools;
 }
@@ -95,7 +94,7 @@ std::optional<std::int64_t> json_int(const Json::Value& value, const char* key)
     return value[key].asInt64();
 }
 
-Tool make_skill_tool()
+Tool make_skill_tool(SkillToolDeps deps)
 {
     ToolSpec spec;
     spec.name        = "skill";
@@ -103,10 +102,35 @@ Tool make_skill_tool()
                        "Optionally specify scope as project or global.";
     spec.parameters  = parse_json(
         R"json({"type":"object","properties":{"name":{"type":"string"},"scope":{"type":"string","enum":["project","global"]}},"required":["name"]})json");
-    return { std::move(spec), { } };
+    // Policy, path, and size are the gate's job; _run_tool re-evaluates
+    // before dispatch, so the handler only resolves, reads, and records.
+    return { std::move(spec),
+        [deps = std::move(deps)](
+            const ToolCallRequest&, const Json::Value& args) -> ToolOutput {
+            const std::vector<Skill> catalog
+                = deps.catalog ? deps.catalog() : std::vector<Skill> { };
+            const std::optional<Skill> skill = resolve_skill(catalog, args);
+            if (!skill) {
+                return tool_error("skill: unknown or unavailable skill");
+            }
+            const SkillRead read = read_skill(*skill);
+            if (read.kind == SkillRead::Kind::READ_FAILED) {
+                return tool_error("skill: cannot read instructions");
+            }
+            if (read.kind == SkillRead::Kind::TOO_LARGE) {
+                return tool_error("skill: instructions exceed 128 KiB");
+            }
+            if (deps.store) {
+                const std::optional<std::filesystem::path> path
+                    = canonical_skill_path(*skill);
+                deps.store().record_tool_load(
+                    path.value_or(skill->path), read.body);
+            }
+            return tool_output(read.body);
+        } };
 }
 
-Tool make_subagent_tool()
+Tool make_subagent_tool(SubagentToolSlot delegate)
 {
     ToolSpec spec;
     spec.name = "subagent";
@@ -116,7 +140,20 @@ Tool make_subagent_tool()
           "available while the main agent is in build mode.";
     spec.parameters = parse_json(
         R"json({"type":"object","properties":{"tasks":{"type":"array","minItems":1,"maxItems":5,"items":{"type":"object","properties":{"mode":{"type":"string","enum":["research","build"]},"prompt":{"type":"string","minLength":1}},"required":["mode","prompt"],"additionalProperties":false}}},"required":["tasks"],"additionalProperties":false})json");
-    return Tool { std::move(spec), { } };
+    if (!delegate) {
+        delegate = std::make_shared<SubagentToolFn>();
+    }
+    return { std::move(spec),
+        [delegate = std::move(delegate)](
+            const ToolCallRequest& req, const Json::Value& args) -> ToolOutput {
+            if (!*delegate) {
+                return tool_error("subagent: delegation is unavailable");
+            }
+            return (*delegate)(req, args);
+        } };
 }
 
 } // namespace imza
+
+
+

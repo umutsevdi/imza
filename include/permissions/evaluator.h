@@ -21,10 +21,13 @@ enum class RosterTool { SKILL, SUBAGENT, LUA };
 
 std::optional<RosterTool> classify_roster_tool(std::string_view name);
 
+// `prompt` is set only for ASK verdicts: the modal's single carrier of
+// the reason and the session-scope flag.
 struct PermissionEvaluation {
     PermissionDecision decision;
     ToolCallRequest request;
     PermissionStore::Grants session_grants;
+    std::optional<PermissionPrompt> prompt;
 };
 
 PermissionEvaluation evaluate_tool_request(const ToolCallRequest& request,
@@ -32,3 +35,4 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& request,
     const std::vector<Skill>& skills, const SkillStore& loaded_skills);
 
 } // namespace imza
+

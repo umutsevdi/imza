@@ -10,7 +10,7 @@
 #include "permissions/store.h"
 #include "platform/config.h"
 #include "runtime/main_thread_queue.h"
-#include "ui/repl.h"
+#include "ui/ui.h"
 
 int main(int argc, char** argv)
 {

@@ -18,16 +18,17 @@
 #include <utility>
 #include <vector>
 
-#include "common/diff.h"
 #include "common/modal.h"
-#include "conversation/workflow.h"
-#include "network/models.h"
+#include "common/tool_call.h"
+#include "conversation/session.h"
+#include "network/network.h"
 #include "permissions/store.h"
 #include "tools/skills.h"
 
 namespace imza {
 
 class Session;
+class MainThreadQueue;
 struct ApplicationState;
 struct ReviewHunk;
 struct ReviewLine;
@@ -298,5 +299,8 @@ struct SidechatStatus {
 ftxui::Component make_sidechat_component(
     std::shared_ptr<ApplicationState> state, std::function<void()> on_focus,
     SidechatStatus& status);
+
+int run_repl(
+    std::shared_ptr<ApplicationState> state, MainThreadQueue& main_thread);
 
 } // namespace imza

@@ -71,6 +71,15 @@ namespace {
         };
     }
 
+    // Lazy so the roster can be built before state->skills exists.
+    SkillToolDeps skill_deps(ApplicationState* state)
+    {
+        return SkillToolDeps {
+            [state] { return state->environment->skills(); },
+            [state] -> SkillStore& { return *state->skills; },
+        };
+    }
+
     void wire(std::shared_ptr<ApplicationState> state, StreamFn stream_fn,
         std::vector<Tool> tools)
     {
@@ -80,18 +89,17 @@ namespace {
             [raw](ModalPayload payload) {
                 return request_modal(*raw, std::move(payload));
             },
-            state->skills, SubagentToolFn { },
-            std::function<void(std::string)> { });
+            state->skills, std::function<void(std::string)> { });
         state->delegation = std::make_unique<Delegation>(
             *raw, state->post,
             [raw](ModalPayload payload) {
                 return request_modal(*raw, std::move(payload));
             },
             *state->runner);
-        state->runner->set_subagent_tool(
-            [raw](const ToolCallRequest& req, std::vector<Message>& msgs) {
-                raw->delegation->run_subagents(req, msgs);
-            });
+        *state->subagent_slot
+            = [raw](const ToolCallRequest& req, const Json::Value& args) {
+                  return raw->delegation->run_subagents(req, args);
+              };
         state->runner->set_on_finish([raw](std::string error) {
             on_turn_finished(*raw, std::move(error));
         });
@@ -133,10 +141,15 @@ namespace {
         state->post        = guarded_post(state.get(), std::move(post));
         state->on_exit     = [] { };
         state->runtime_flags = runtime_flags;
+        // Created before the roster so the subagent tool can capture it.
+        if (!state->subagent_slot) {
+            state->subagent_slot = std::make_shared<SubagentToolFn>();
+        }
         if (use_default_tools) {
             ApplicationState* captured = state.get();
             tools                      = default_tools(
-                lua_host(captured, state->environment->system()->has_rg));
+                lua_host(captured, state->environment->system()->has_rg),
+                skill_deps(captured), state->subagent_slot);
         }
         wire(state, std::move(stream_fn), std::move(tools));
         return state;
@@ -147,13 +160,13 @@ namespace {
         PostFn post, StreamFn stream_fn, ModalRequestFn parent_routing,
         std::string agent_label, std::vector<Tool> tools)
     {
-        state->session        = std::make_shared<Session>();
-        state->sessions       = parent.sessions;
-        state->input_history  = parent.input_history;
-        state->providers      = parent.providers;
-        state->subagents      = std::make_shared<SubagentManager>();
-        state->environment    = parent.environment;
-        state->review         = std::make_shared<ReviewState>();
+        state->session       = std::make_shared<Session>();
+        state->sessions      = parent.sessions;
+        state->input_history = parent.input_history;
+        state->providers     = parent.providers;
+        state->subagents     = std::make_shared<SubagentManager>();
+        state->environment   = parent.environment;
+        state->review        = std::make_shared<ReviewState>();
         state->skills         = std::make_shared<SkillStore>();
         state->permissions    = parent.permissions;
         state->prompts        = parent.prompts;
@@ -162,14 +175,19 @@ namespace {
         state->parent_routing = std::move(parent_routing);
         state->agent_label    = std::move(agent_label);
         state->runtime_flags  = parent.runtime_flags;
+        if (!state->subagent_slot) {
+            state->subagent_slot = std::make_shared<SubagentToolFn>();
+        }
         wire(state, std::move(stream_fn), std::move(tools));
         return state;
     }
 
-    std::vector<Tool> sidechat_roster(ApplicationState& parent)
+    std::vector<Tool> sidechat_roster(
+        ApplicationState& parent, ApplicationState& child)
     {
         std::vector<Tool> tools = default_tools(
-            lua_host(&parent, parent.environment->system()->has_rg));
+            lua_host(&parent, parent.environment->system()->has_rg),
+            skill_deps(&child));
         // The sidechat is a regular chat: it keeps the lua sandbox (and its
         // file bindings) but must not spawn its own subagents.
         std::erase_if(tools,
@@ -199,9 +217,10 @@ std::shared_ptr<ApplicationState> make_application_state(
 
 std::shared_ptr<ApplicationState> make_application_state_with_tools(PostFn post,
     Config config, std::vector<Tool> tools, StreamFn stream_fn,
-    RuntimeFlag runtime_flags)
+    RuntimeFlag runtime_flags, SubagentToolSlot subagent_slot)
 {
     std::shared_ptr<ApplicationState> state(new ApplicationState());
+    state->subagent_slot = std::move(subagent_slot);
     return initialize_root(std::move(state), std::move(post), std::move(config),
         std::move(stream_fn), std::move(tools), runtime_flags, false);
 }
@@ -212,7 +231,8 @@ std::shared_ptr<ApplicationState> make_child_application_state(
 {
     std::shared_ptr<ApplicationState> state(new ApplicationState());
     std::vector<Tool> tools = default_tools(
-        lua_host(state.get(), parent.environment->system()->has_rg));
+        lua_host(state.get(), parent.environment->system()->has_rg),
+        skill_deps(state.get()));
     std::erase_if(
         tools, [](const Tool& tool) { return tool.spec.name == "subagent"; });
     return initialize_child(std::move(state), parent, std::move(post),
@@ -225,7 +245,9 @@ std::shared_ptr<ApplicationState> make_sidechat_application_state(
 {
     std::shared_ptr<ApplicationState> state(new ApplicationState());
     state->parent_state = &parent;
-    state               = initialize_child(
+    // Built first: the roster captures the child that is moved below.
+    std::vector<Tool> roster = sidechat_roster(parent, *state);
+    state                    = initialize_child(
         std::move(state), parent, parent.post, { },
         [&parent](ModalPayload payload) -> std::future<ModalResult> {
             if (!parent.alive.load()) {
@@ -236,8 +258,13 @@ std::shared_ptr<ApplicationState> make_sidechat_application_state(
             return request_modal(
                 const_cast<ApplicationState&>(parent), std::move(payload));
         },
-        "Sidechat", sidechat_roster(parent));
+        "Sidechat", std::move(roster));
     return state;
 }
 
 } // namespace imza
+
+
+
+
+

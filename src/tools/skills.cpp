@@ -9,6 +9,7 @@
 #include <json/json.h>
 
 #include "common/util.h"
+#include "network/json_io.h"
 #include "platform/config.h"
 
 namespace imza {
@@ -65,6 +66,18 @@ std::optional<std::filesystem::path> canonical_skill_path(const Skill& skill)
     std::filesystem::path path
         = std::filesystem::weakly_canonical(skill.path, error);
     if (error || !path.is_absolute()) {
+        return std::nullopt;
+    }
+    return path;
+}
+std::optional<std::filesystem::path> authorized_skill_path(
+    const Skill& skill, const ToolCallRequest& request)
+{
+    const std::optional<std::filesystem::path> path
+        = canonical_skill_path(skill);
+    const Json::Value arguments = parse_json(request.args);
+    if (!path || !arguments.isObject() || !arguments["path"].isString()
+        || arguments["path"].asString() != path->string()) {
         return std::nullopt;
     }
     return path;

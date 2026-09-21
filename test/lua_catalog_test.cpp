@@ -15,7 +15,7 @@ namespace {
         const Tool tool = make_lua_tool();
         Json::Value args(Json::objectValue);
         args["script"] = script;
-        return tool.run(args).text;
+        return tool.run({ "lua", "", "", "" }, args).text;
     }
 
 } // namespace

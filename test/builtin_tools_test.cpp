@@ -1,5 +1,11 @@
 #include <doctest/doctest.h>
 
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+
+#include "network/json_io.h"
+#include "tools/skills.h"
 #include "tools/tool.h"
 
 TEST_CASE("builtin tools expose the current tool set")
@@ -40,4 +46,64 @@ TEST_CASE("a removed native tool name is unknown to the roster")
         tools, { "shell", R"({"command":"echo unavailable"})", "", "" });
     CHECK(disabled.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(disabled.text == "unknown tool: shell");
+}
+
+TEST_CASE("the skill tool handler reads instructions and records the load")
+{
+    const auto stamp
+        = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root = std::filesystem::temp_directory_path()
+        / ("imza-skill-tool-" + std::to_string(stamp));
+    std::filesystem::create_directories(root);
+    const auto path = root / "SKILL.md";
+    {
+        std::ofstream file(path);
+        file << "documented workflow";
+    }
+    const imza::Skill skill { "docs", "Documentation workflow", path,
+        imza::Skill::Scope::GLOBAL, std::nullopt };
+    auto store = std::make_shared<imza::SkillStore>();
+    imza::SkillToolDeps deps;
+    deps.catalog = [skill] { return std::vector<imza::Skill> { skill }; };
+    deps.store   = [store] -> imza::SkillStore& { return *store; };
+
+    const auto tool = imza::make_skill_tool(std::move(deps));
+    const auto out  = tool.run({ "skill", "", "", "" },
+        imza::parse_json(R"json({"name":"docs"})json"));
+    CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(out.text.find("documented workflow") != std::string::npos);
+    // Loading through the tool records the skill so the gate stops asking.
+    CHECK(store->is_loaded(path));
+
+    const auto missing = tool.run({ "skill", "", "", "" },
+        imza::parse_json(R"json({"name":"absent"})json"));
+    CHECK(missing.kind == imza::ToolOutput::Kind::ERROR);
+    CHECK(missing.text == "skill: unknown or unavailable skill");
+
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+}
+
+TEST_CASE("the skill tool records nothing without a store but still reads")
+{
+    const auto stamp
+        = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root = std::filesystem::temp_directory_path()
+        / ("imza-skill-nostore-" + std::to_string(stamp));
+    std::filesystem::create_directories(root);
+    const auto path = root / "SKILL.md";
+    {
+        std::ofstream file(path);
+        file << "instructions";
+    }
+    const imza::Skill skill { "docs", "d", path, imza::Skill::Scope::GLOBAL,
+        std::nullopt };
+    imza::SkillToolDeps deps;
+    deps.catalog    = [skill] { return std::vector<imza::Skill> { skill }; };
+    const auto tool = imza::make_skill_tool(std::move(deps));
+    const auto out  = tool.run({ "skill", "", "", "" },
+        imza::parse_json(R"json({"name":"docs"})json"));
+    CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
 }

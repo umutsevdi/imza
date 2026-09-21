@@ -22,9 +22,6 @@ class SkillStore;
 class ProviderStore;
 struct PermissionEvaluation;
 
-using SubagentToolFn
-    = std::function<void(const ToolCallRequest&, std::vector<Message>&)>;
-
 struct TurnSettings {
     std::string model;
     std::string reasoning_effort;
@@ -65,7 +62,7 @@ class TurnRunner final : public ApplicationComponent {
 public:
     TurnRunner(ApplicationState& state, PostFn post, std::vector<Tool> tools,
         StreamFn stream_fn, ModalRequestFn modal_request,
-        std::shared_ptr<SkillStore> skills, SubagentToolFn subagent_tool,
+        std::shared_ptr<SkillStore> skills,
         std::function<void(std::string)> on_finish);
     ~TurnRunner();
 
@@ -76,7 +73,6 @@ public:
     void clear();
     void stop();
     void set_on_finish(std::function<void(std::string)> on_finish);
-    void set_subagent_tool(SubagentToolFn subagent_tool);
     bool has_stream_override() const { return _has_stream_override; }
     const StreamFn& stream_fn() const { return _stream_fn; }
     const std::vector<ToolSpec>& specs() const { return _specs_all; }
@@ -111,7 +107,6 @@ private:
     PostFn _post_fn;
     ModalRequestFn _modal_request;
     std::shared_ptr<SkillStore> _skills;
-    SubagentToolFn _subagent_tool;
     std::function<void(std::string)> _on_finish;
     StreamFn _stream_fn;
     bool _has_stream_override { false };

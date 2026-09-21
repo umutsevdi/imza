@@ -96,9 +96,8 @@ struct SkillsModal {
     std::vector<Entry> entries;
 };
 
-using ModalPayload = std::variant<std::monostate, ViewerModal, ToolCallRequest,
-    PermissionPrompt, QuestionForm, ConnectModal, VariantModal, SessionsModal,
-    SkillsModal>;
+using ModalPayload = std::variant<std::monostate, ViewerModal, PermissionPrompt,
+    QuestionForm, ConnectModal, VariantModal, SessionsModal, SkillsModal>;
 
 using ModalResult
     = std::variant<std::monostate, ToolVerdict, ModalAnswer, ConnectResult,

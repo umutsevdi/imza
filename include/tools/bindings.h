@@ -31,7 +31,6 @@ enum class LuaCapability { NONE, SHELL, WEB };
 struct LuaBinding {
     std::string_view path;
     lua_CFunction function;
-    std::string_view signature;
     std::string_view description;
     LuaCapability capability = LuaCapability::NONE;
     // Error text the registration-time gate returns when `capability` is

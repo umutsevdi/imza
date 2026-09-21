@@ -14,7 +14,7 @@ namespace {
             { { "echo", "echo the message",
                   parse_json(
                       R"({"type":"object","properties":{"msg":{"type":"string"}}})") },
-                [](const Json::Value& args) {
+                [](const ToolCallRequest&, const Json::Value& args) {
                     return ToolOutput { ToolOutput::Kind::OUTPUT,
                         args.get("msg", "").asString() };
                 } }
@@ -52,7 +52,7 @@ TEST_CASE("dispatch passes non-JSON args through as a string value")
 {
     std::vector<Tool> tools {
         { { "raw", "takes raw text", Json::Value(Json::objectValue) },
-            [](const Json::Value& args) {
+            [](const ToolCallRequest&, const Json::Value& args) {
                 return ToolOutput { ToolOutput::Kind::OUTPUT, args.asString() };
             } }
     };
@@ -73,7 +73,7 @@ TEST_CASE("dispatch propagates handler errors")
 {
     std::vector<Tool> tools {
         { { "boom", "always fails", Json::Value(Json::objectValue) },
-            [](const Json::Value&) {
+            [](const ToolCallRequest&, const Json::Value&) {
                 return ToolOutput { ToolOutput::Kind::ERROR, "it broke" };
             } }
     };

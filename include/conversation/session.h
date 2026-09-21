@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -242,5 +243,15 @@ private:
     Signal<> title_changed_;
     Signal<> attachments_changed_;
 };
+
+enum class WorkflowPhase { PLAN, BUILD, REVIEW };
+
+WorkflowPhase next_workflow_phase(WorkflowPhase phase, bool review_available);
+WorkflowPhase previous_workflow_phase(
+    WorkflowPhase phase, bool review_available);
+std::optional<Session::Mode> workflow_mode(WorkflowPhase phase);
+
+using WorkflowFn         = std::function<WorkflowPhase()>;
+using WorkflowNavigateFn = std::function<void(WorkflowPhase)>;
 
 } // namespace imza

@@ -176,31 +176,29 @@ namespace {
         {
             "file.insert",
             binding_file_insert,
-            "tool.file.insert(path: string, text: string, "
-            "line?: integer=nil) => true",
-            "Inserts text before the 1-based line, pushing it down; omit "
-            "line to\n"
-            "append at the end. A line past the end of the file is an error.",
+            R"desc(
+tool.file.insert(path: string, text: string, line?: integer=nil) => true
+Inserts text before the 1-based line, pushing it down; omit line to
+append at the end. A line past the end of the file is an error.
+            )desc",
         },
         {
             "file.edit",
             binding_file_edit,
-            "tool.file.edit(path: string, old: string, new: string, "
-            "count?: integer=1) => true",
-            "Replaces the first count occurrences of old with new; count=0 "
-            "replaces\n"
-            "all. old is an exact literal match, so include enough "
-            "surrounding text\n"
-            "to be unique. Errors if old is empty or not found.",
+            R"desc(
+tool.file.edit(path: string, old: string, new: string, count?: integer=1) => true
+Replaces the first count occurrences of old with new; count=0 replaces all.
+Old is an exact literal match, so include enough surrounding text to be unique.
+Errors if old is empty or not found.)desc",
         },
         {
             "file.write",
             binding_file_write,
-            "tool.file.write(path: string, text: string) => true",
-            "Replaces the file's entire content, creating it if absent. "
-            "Prefer\n"
-            "insert/edit for targeted changes; this discards everything "
-            "else.",
+            R"desc(
+tool.file.write(path: string, text: string) => true
+Replaces the file's entire content, creating it if absent.
+Prefer insert/edit for targeted changes; this discards everything else.
+            )desc",
         },
     };
 

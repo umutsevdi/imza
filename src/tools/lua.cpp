@@ -271,14 +271,7 @@ LEGEND
 METHODS)desc";
         for (const LuaBinding& binding : all_bindings()) {
             out += "\n";
-            out += binding.signature;
-            out += "\n";
-            for (const std::string& line :
-                split_lines(std::string(binding.description))) {
-                out += "    ";
-                out += line;
-                out += "\n";
-            }
+            out += binding.description;
         }
         // The generated description ends at the last binding's prose: no
         // trailing newline, so the tool spec reads as a single block.
@@ -355,7 +348,7 @@ Tool make_lua_tool(LuaHost host)
     spec.parameters  = parse_json(
         R"json({"type":"object","properties":{"script":{"type":"string","description":"Lua source code to execute"},"timeout":{"type":"integer","description":"maximum script execution time in seconds, excluding pauses for permission prompts (default 10, max 120)"}},"required":["script"]})json");
     return { std::move(spec),
-        [host = std::move(host)](
+        [host = std::move(host)](const ToolCallRequest&,
             const Json::Value& args) { return lua_run(args, host); } };
 }
 

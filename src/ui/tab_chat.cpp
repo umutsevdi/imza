@@ -1109,9 +1109,9 @@ namespace {
                         open_viewer_for(*call);
                     }
                 },
-                failed ? HL_RED : HL_GREEN);
+                failed ? PANEL_FG_DIM : HL_GREEN);
             read_buttons_.emplace(id, button);
-            container_->Add(button);
+            container_->Add(failed ? button | strikethrough : button);
             return button;
         }
 

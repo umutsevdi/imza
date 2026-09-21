@@ -18,26 +18,30 @@ namespace {
 
     PermissionEvaluation reject(ToolCallRequest request, std::string reason)
     {
-        request.permission_reason = reason;
         return { { PermissionDecision::Kind::REJECT, std::move(reason) },
-            std::move(request), { } };
+            std::move(request), { }, std::nullopt };
     }
 
     PermissionEvaluation accept(ToolCallRequest request)
     {
-        request.permission_reason.clear();
-        request.allow_for_session = false;
         return { { PermissionDecision::Kind::ACCEPT, "" }, std::move(request),
-            { } };
+            { }, std::nullopt };
     }
 
+    // The ASK verdict's own carrier: reason, session scope, typed details.
     PermissionEvaluation ask(ToolCallRequest request, std::string reason,
-        PermissionStore::Grants grants = { })
+        PermissionStore::Grants grants, SkillRequest details)
     {
-        request.permission_reason = reason;
-        request.allow_for_session = !grants.empty();
+        PermissionPrompt prompt;
+        prompt.name        = "skill";
+        prompt.description = request.description;
+        prompt.reason      = reason;
+        // No target: it would also append to the reason line.
+        prompt.allow_for_session = !grants.empty();
+        prompt.id                = request.id;
+        prompt.request           = std::move(details);
         return { { PermissionDecision::Kind::ASK, std::move(reason) },
-            std::move(request), std::move(grants) };
+            std::move(request), std::move(grants), std::move(prompt) };
     }
 
     bool has_shell_program(
@@ -108,8 +112,13 @@ namespace {
         if (skill_policy(config, *skill) == SkillPolicy::ALLOW) {
             return accept(std::move(request));
         }
+        SkillRequest details;
+        details.name = skill->name;
+        details.scope
+            = skill->scope == Skill::Scope::PROJECT ? "project" : "global";
+        details.path = path->string();
         return ask(std::move(request), "skill instructions require approval",
-            { PermissionGrant { grant } });
+            { PermissionGrant { grant } }, std::move(details));
     }
 
 } // namespace
@@ -178,8 +187,6 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
     const std::vector<Skill>& skills, const SkillStore& loaded_skills)
 {
     ToolCallRequest request = original;
-    request.permission_reason.clear();
-    request.allow_for_session = false;
 
     const std::optional<RosterTool> tool = classify_roster_tool(original.name);
     if (!tool) {
@@ -224,3 +231,6 @@ std::optional<RosterTool> classify_roster_tool(std::string_view name)
 }
 
 } // namespace imza
+
+
+

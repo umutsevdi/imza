@@ -180,29 +180,29 @@ namespace {
         {
             "todo.get",
             binding_todo_get,
-            "tool.todo.get() => TodoItem[]",
-            "The session task list in display order; empty array when unset.",
+            R"desc(
+tool.todo.get() => TodoItem[]
+The session task list in display order; empty array when unset.
+            )desc",
         },
-        {
-            "todo.set",
-            binding_todo_set,
-            "tool.todo.set(items: TodoItem[]) => true",
-            "Set todo items.\n"
-            "Replaces the entire list: get, modify, set the full array back.\n"
-            "`status` defaults to \"pending\"; any other value is rejected.",
-        },
+        { "todo.set", binding_todo_set,
+            R"desc(
+tool.todo.set(items: TodoItem[]) => true
+Set todo items.
+Replaces the entire list: get, modify, set the full array back.
+`status` defaults to "pending"; any other value is rejected.
+            )desc" },
         {
             "ask",
             binding_ask,
-            "tool.ask(cards: AskCard[]) => AskAnswer[]",
-            "Puts a question to the end user and returns their answer.\n"
-            "`options` offers a choice list, `multi` allows several picks, "
-            "`free_text` allows\n"
-            "typed input; a card may combine them, and `answer` is the typed "
-            "text\n"
-            "plus the selected labels joined with \", \". nil, Err when "
-            "dismissed.\n"
-            "Unavailable in unattended runs.",
+            R"desc(
+tool.ask(cards: AskCard[]) => AskAnswer[]
+Puts a question to the end user and returns their answer.
+`options` offers a choice list, `multi` allows several picks, `free_text` allows
+typed input; a card may combine them, and `answer` is the typed text
+plus the selected labels joined with ", ".
+nil, Err when dismissed. Unavailable in unattended runs.
+            )desc",
         },
     };
 

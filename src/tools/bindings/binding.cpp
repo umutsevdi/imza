@@ -57,7 +57,7 @@ namespace {
 
     PermissionPrompt gate_prompt(std::string name, std::string reason,
         std::string target, bool allow_for_session,
-        std::variant<std::monostate, FilesystemRequest, ShellRequest> request)
+        PermissionPromptRequest request)
     {
         PermissionPrompt prompt;
         prompt.name              = std::move(name);

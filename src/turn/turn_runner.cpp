@@ -2,7 +2,6 @@
 #include "common/types.h"
 #include "common/util.h"
 #include "conversation/format.h"
-#include "network/json_io.h"
 #include "permissions/evaluator.h"
 #include "providers/pricing.h"
 #include "providers/store.h"
@@ -12,7 +11,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <filesystem>
 #include <iterator>
 #include <memory>
 #include <optional>
@@ -138,54 +136,17 @@ void apply_reasoning(ChatRequest& req, ApiStandard dialect,
 
 TurnRunner::TurnRunner(ApplicationState& state, PostFn post,
     std::vector<Tool> tools, StreamFn stream_fn, ModalRequestFn modal_request,
-    std::shared_ptr<SkillStore> skills, SubagentToolFn subagent_tool,
+    std::shared_ptr<SkillStore> skills,
     std::function<void(std::string)> on_finish)
     : _state(&state)
     , _post_fn(std::move(post))
     , _modal_request(std::move(modal_request))
     , _skills(std::move(skills))
-    , _subagent_tool(std::move(subagent_tool))
     , _on_finish(std::move(on_finish))
     , _stream_fn(std::move(stream_fn))
     , _has_stream_override(static_cast<bool>(_stream_fn))
     , _tools(std::move(tools))
 {
-    for (Tool& tool : _tools) {
-        if (tool.spec.name != "skill") {
-            continue;
-        }
-        tool.run = [this](const Json::Value& args) {
-            const auto skill
-                = resolve_skill(_state->environment->skills(), args);
-            if (!skill) {
-                return ToolOutput { ToolOutput::Kind::ERROR,
-                    "skill: unknown or unavailable skill" };
-            }
-            const std::optional<std::filesystem::path> path
-                = canonical_skill_path(*skill);
-            if (!path || !args["path"].isString()
-                || args["path"].asString() != path->string()) {
-                return ToolOutput { ToolOutput::Kind::ERROR,
-                    "skill: permission target changed before execution" };
-            }
-            if (skill_policy(_state->providers->config(), *skill)
-                == SkillPolicy::DENY) {
-                return ToolOutput { ToolOutput::Kind::ERROR,
-                    "skill: access denied by configuration" };
-            }
-            const SkillRead read = read_skill(*skill);
-            if (read.kind == SkillRead::Kind::READ_FAILED) {
-                return ToolOutput { ToolOutput::Kind::ERROR,
-                    "skill: cannot read instructions" };
-            }
-            if (read.kind == SkillRead::Kind::TOO_LARGE) {
-                return ToolOutput { ToolOutput::Kind::ERROR,
-                    "skill: instructions exceed 128 KiB" };
-            }
-            return ToolOutput { ToolOutput::Kind::OUTPUT, read.body };
-        };
-        break;
-    }
     _specs_all = tool_specs(_tools);
 
     if (!_stream_fn) {
@@ -226,11 +187,6 @@ void TurnRunner::stop() { _alive.store(false); }
 void TurnRunner::set_on_finish(std::function<void(std::string)> on_finish)
 {
     _on_finish = std::move(on_finish);
-}
-
-void TurnRunner::set_subagent_tool(SubagentToolFn subagent_tool)
-{
-    _subagent_tool = std::move(subagent_tool);
 }
 
 void TurnRunner::_post(std::function<void()> f)
@@ -588,10 +544,6 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
             _reject_tool(original, evaluation.decision.reason, tool_msgs);
             continue;
         }
-        if (original.name == "subagent") {
-            _subagent_tool(evaluation.request, tool_msgs);
-            continue;
-        }
         if (evaluation.decision.kind == PermissionDecision::Kind::ACCEPT
             || (_state->runtime_flags & RuntimeFlag::SKIP_PERMISSIONS)
                 != RuntimeFlag::NONE) {
@@ -608,7 +560,8 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
             continue;
         }
 
-        const ModalResult res = _modal_request(evaluation.request).get();
+        // The roster gate only asks for skills, which carry a prompt.
+        const ModalResult res = _modal_request(*evaluation.prompt).get();
         _apply_tool_result(evaluation, res, mode, tool_msgs);
         if (_state->session->interrupt_requested()) {
             return;
@@ -729,14 +682,6 @@ void TurnRunner::_run_tool(const PermissionEvaluation& evaluation,
     if (out.blocked_permission) {
         _blocked_permission.store(true);
     }
-    if (req.name == "skill" && out.kind == ToolOutput::Kind::OUTPUT) {
-        if (const auto skill = resolve_skill(
-                _state->environment->skills(), parse_json(req.args))) {
-            const std::optional<std::filesystem::path> path
-                = canonical_skill_path(*skill);
-            _skills->record_tool_load(path.value_or(skill->path), out.text);
-        }
-    }
     const auto kind          = out.kind == ToolOutput::Kind::OUTPUT
         ? ToolCall::Result::Kind::OUTPUT
         : ToolCall::Result::Kind::ERROR;
@@ -752,3 +697,4 @@ void TurnRunner::_run_tool(const PermissionEvaluation& evaluation,
 }
 
 } // namespace imza
+

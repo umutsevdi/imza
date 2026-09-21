@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include "common/diff.h"
+#include "common/tool_call.h"
 
 namespace imza {
 

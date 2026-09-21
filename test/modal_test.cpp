@@ -88,6 +88,7 @@ struct Env {
     PostPump pump;
     std::vector<imza::ChatRequest> requests;
     imza::StreamFn stream;
+    std::shared_ptr<imza::SubagentToolFn> subagent_slot;
     std::shared_ptr<imza::ApplicationState> state;
     std::shared_ptr<imza::Session> session;
 
@@ -125,15 +126,18 @@ struct Env {
             return state->permissions->install(std::move(grants));
         };
 
+        // The state's wire() fills this slot with its delegation; the
+        // subagent tool reads it per call, mirroring application wiring.
+        subagent_slot = std::make_shared<imza::SubagentToolFn>();
         std::vector<imza::Tool> tools;
         tools.push_back(imza::make_skill_tool());
-        tools.push_back(imza::make_subagent_tool());
+        tools.push_back(imza::make_subagent_tool(subagent_slot));
         tools.push_back(imza::make_lua_tool(std::move(lua_host)));
         state = imza::make_application_state_with_tools(
             pump.fn(), test_config(), std::move(tools),
             [this](const imza::ChatRequest& req,
                 const imza::StreamCallback& cb) { return stream(req, cb); },
-            flags);
+            flags, subagent_slot);
         session = state->session;
         REQUIRE(pump.wait_for([&] { return state->environment->ready(); }));
     }
@@ -165,8 +169,7 @@ struct Env {
 
 bool showing_tool_ask(const imza::Session& st)
 {
-    return (std::holds_alternative<imza::ToolCallRequest>(st.modal())
-               || std::holds_alternative<imza::PermissionPrompt>(st.modal()))
+    return std::holds_alternative<imza::PermissionPrompt>(st.modal())
         && st.phase() == imza::Session::Phase::AWAITING;
 }
 
@@ -1242,4 +1245,68 @@ TEST_CASE("modal action buttons respond to mouse clicks")
     REQUIRE(call != nullptr);
     REQUIRE(call->result.has_value());
     CHECK(call->result->kind == imza::ToolCall::Result::Kind::OUTPUT);
+}
+
+TEST_CASE("skill approval modal renders its canonical baseline")
+{
+    Env env;
+    imza::PermissionPrompt prompt;
+    prompt.name              = "skill";
+    prompt.description       = "Load skill docs";
+    prompt.reason            = "skill instructions require approval";
+    prompt.allow_for_session = true;
+    prompt.id                = "manual-skill";
+    prompt.request           = imza::SkillRequest { "docs", "project",
+        "/tmp/imza-skill-baseline/SKILL.md" };
+
+    imza::enqueue_user_modal(*env.state, prompt);
+    REQUIRE(env.pump.wait_for([&] {
+        return std::holds_alternative<imza::PermissionPrompt>(
+            env.session->modal());
+    }));
+
+    ftxui::Component modal = imza::make_modal(env.state);
+    auto screen            = ftxui::Screen::Create(
+        ftxui::Dimension::Fixed(60), ftxui::Dimension::Fixed(14));
+    ftxui::Render(screen, modal->Render());
+    std::string rendered;
+    for (const std::string& line : imza::split_lines(screen.ToString())) {
+        const std::string trimmed = std::string(imza::trim(plain_row(line)));
+        if (!trimmed.empty()) {
+            rendered += trimmed + "\n";
+        }
+    }
+    imza::close_modal(*env.state);
+    // Whitespace runs collapse so the pin covers content, order, and labels
+    // rather than the header padding: the R2/R4 refactor must keep this
+    // dialog equivalent, not byte-identical to a terminal width.
+    std::string flat;
+    for (const std::string& line : imza::split_lines(rendered)) {
+        std::string collapsed;
+        bool space = false;
+        for (const char c : line) {
+            if (std::isspace(static_cast<unsigned char>(c))) {
+                space = true;
+                continue;
+            }
+            if (space && !collapsed.empty()) {
+                collapsed += ' ';
+            }
+            space = false;
+            collapsed += c;
+        }
+        if (!collapsed.empty()) {
+            flat += collapsed + "\n";
+        }
+    }
+    CHECK(flat == R"(Skill 1 remaining
+Load skill docs
+skill instructions require approval
+name docs
+path /tmp/imza-skill-baseline/SKILL.md
+scope project
+Allow once Allow for this session Reject
+allow lasts until directory or session changes
+Esc reject
+)");
 }

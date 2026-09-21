@@ -144,22 +144,15 @@ void Delegation::submit_delegated(
     runner_.spawn(std::move(history), std::move(settings));
 }
 
-void Delegation::run_subagents(
-    const ToolCallRequest& req, std::vector<Message>& tool_msgs)
+ToolOutput Delegation::run_subagents(
+    const ToolCallRequest& req, const Json::Value& args)
 {
     _state->subagents->prune_completed();
     std::string validation_error;
-    const auto parsed = parse_tasks(
-        parse_json(req.args), _state->session->mode(), validation_error);
+    const auto parsed
+        = parse_tasks(args, _state->session->mode(), validation_error);
     if (!parsed) {
-        const ToolOutput out { ToolOutput::Kind::ERROR, validation_error };
-        _post([this, req, out] {
-            _state->session->fill_tool_result(req,
-                ToolCall::Result { ToolCall::Result::Kind::ERROR, out.text });
-        });
-        tool_msgs.push_back(
-            { Message::Type::TOOL, validation_error, { }, req.id });
-        return;
+        return tool_error(validation_error);
     }
 
     std::vector<SubagentHandle> handles;
@@ -241,16 +234,12 @@ void Delegation::run_subagents(
         }
         output += validation_error;
     }
-    const ToolCall::Result::Kind kind = validation_error.empty()
-        ? ToolCall::Result::Kind::OUTPUT
-        : ToolCall::Result::Kind::ERROR;
-    _post([this, req, kind, output, chats = std::move(chats)]() mutable {
+    _post([this, req, chats = std::move(chats)]() mutable {
         _state->session->set_tool_subagent_chats(req, std::move(chats));
-        _state->session->fill_tool_result(
-            req, ToolCall::Result { kind, output });
         _state->subagents->prune_completed();
     });
-    tool_msgs.push_back({ Message::Type::TOOL, output, { }, req.id });
+    return validation_error.empty() ? tool_output(std::move(output))
+                                    : tool_error(std::move(output));
 }
 
 SubagentChat Delegation::subagent_chat(

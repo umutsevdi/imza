@@ -38,19 +38,13 @@ namespace {
         return std::filesystem::path(sys.default_shell).filename().string();
     }
 
-    // The only model-facing ToolCallRequest that still reaches an approval
-    // modal is `skill`; filesystem and shell approvals arrive as a typed
-    // PermissionPrompt. The skill request carries its own description.
-    std::string tool_action_description(const ToolCallRequest& req)
-    {
-        return req.description.empty() ? "Allow this tool to run"
-                                       : req.description;
-    }
-
     std::string tool_action_description(const PermissionPrompt& req)
     {
         if (!req.description.empty() && req.description != req.name) {
             return req.description;
+        }
+        if (req.name == "skill") {
+            return "Allow this tool to run";
         }
         if (req.name == "shell") {
             return "Run a shell command";
@@ -105,30 +99,10 @@ namespace {
         return std::max(40, popup_w - 8);
     }
 
-    Element tool_approval_reason(const ToolCallRequest& req)
+    Element detail_row(const std::string& label, const std::string& value)
     {
-        const std::string message = req.permission_reason.empty()
-            ? "Permission required"
-            : req.permission_reason;
-        return text(message) | color(HL_YELLOW);
-    }
-
-    Element tool_request_body(
-        const ToolCallRequest& req, const SystemEnvironment&, int width)
-    {
-        const Json::Value args = parse_json(req.args);
-        if (args.isObject() && !args.empty()) {
-            Elements rows;
-            for (const std::string& key : args.getMemberNames()) {
-                const Json::Value& value = args[key];
-                const std::string rendered
-                    = value.isString() ? value.asString() : write_json(value);
-                rows.push_back(hbox({ text(key) | bold | color(PANEL_FG),
-                    text("  "), paragraph(preview_text(rendered)) | xflex }));
-            }
-            return vbox(std::move(rows));
-        }
-        return code_block(preview_text(req.args), "json", width);
+        return hbox({ text(label) | bold | color(PANEL_FG), text("  "),
+            paragraph(preview_text(value)) | xflex });
     }
 
     Element tool_approval_reason(const PermissionPrompt& req)
@@ -219,6 +193,11 @@ namespace {
         if (const auto* file = std::get_if<FilesystemRequest>(&req.request)) {
             return filesystem_body(req, *file, width);
         }
+        if (const auto* skill = std::get_if<SkillRequest>(&req.request)) {
+            return vbox({ detail_row("name", skill->name),
+                detail_row("path", skill->path),
+                detail_row("scope", skill->scope) });
+        }
         return text("");
     }
 
@@ -245,8 +224,7 @@ namespace {
             return std::visit(
                 [&](const auto& payload) -> Element {
                     using T = std::decay_t<decltype(payload)>;
-                    if constexpr (std::is_same_v<T, ToolCallRequest>
-                        || std::is_same_v<T, PermissionPrompt>) {
+                    if constexpr (std::is_same_v<T, PermissionPrompt>) {
                         return tool_body(payload);
                     } else if constexpr (std::is_same_v<T, QuestionForm>) {
                         return question_body();
@@ -285,8 +263,7 @@ namespace {
                     && body_->OnEvent(event)) {
                     return true;
                 }
-                if ((std::holds_alternative<ToolCallRequest>(st.modal())
-                        || std::holds_alternative<PermissionPrompt>(st.modal()))
+                if (std::holds_alternative<PermissionPrompt>(st.modal())
                     && tool_phase_ == ToolPhase::REASON) {
                     _set_tool_phase(ToolPhase::DECIDE);
                     return true;
@@ -328,11 +305,6 @@ namespace {
             serial_ = st.modal_serial();
             std::visit(
                 [this](const auto& payload) { build(payload); }, st.modal());
-        }
-
-        void build(const ToolCallRequest& request)
-        {
-            build_tool_approval(request.allow_for_session);
         }
 
         void build(const PermissionPrompt& request)
@@ -716,3 +688,5 @@ ftxui::Component make_modal(std::shared_ptr<ApplicationState> state)
 }
 
 } // namespace imza
+
+
