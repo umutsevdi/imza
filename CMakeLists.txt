@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.31)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 project(
     imza
-    VERSION 0.3.0
+    VERSION 0.3.1
     HOMEPAGE_URL "https://github.com/umutsevdi/imza"
     LANGUAGES C CXX
 )
@@ -396,6 +396,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release" AND IMZA_PACKAGE)
             "Imza is a batteries-included, model-agnostic coding agent with
             native performance and a small runtime footprint."
         )
+        set(CPACK_COMPONENTS_ALL Unspecified)
         set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
         set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
         set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
