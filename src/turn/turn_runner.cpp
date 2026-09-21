@@ -685,9 +685,10 @@ void TurnRunner::_run_tool(const PermissionEvaluation& evaluation,
     const auto kind          = out.kind == ToolOutput::Kind::OUTPUT
         ? ToolCall::Result::Kind::OUTPUT
         : ToolCall::Result::Kind::ERROR;
-    std::string history_text = out.text;
+    std::string history_text = format_lua_result(out.text, out.return_value);
     _post([this, req, kind, out = std::move(out)]() mutable {
         ToolCall::Result result { kind, std::move(out.text) };
+        result.return_value = std::move(out.return_value);
         result.diffs        = std::move(out.diffs);
         result.dispatch_log = std::move(out.dispatch_log);
         _state->session->fill_tool_result(req, std::move(result));
@@ -697,4 +698,3 @@ void TurnRunner::_run_tool(const PermissionEvaluation& evaluation,
 }
 
 } // namespace imza
-

@@ -49,6 +49,7 @@ struct ToolCall {
         enum class Kind { OUTPUT, ERROR, REJECT, CANCEL };
         Kind kind;
         std::string text;
+        std::optional<Json::Value> return_value;
         std::optional<DiffView> diff;
         std::vector<DiffView> diffs;
         std::optional<ShellStatus> shell_status;

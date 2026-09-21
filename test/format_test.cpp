@@ -1,8 +1,10 @@
 #include <string>
 
 #include <doctest/doctest.h>
+#include <json/json.h>
 
 #include "conversation/format.h"
+#include "network/json_io.h"
 #include "ui/tool_format.h"
 
 TEST_CASE("question_form_markdown renders prompt and options")
@@ -54,6 +56,55 @@ TEST_CASE("lua viewer report fences script and output safely")
     CHECK(report.find("````lua\nprint('```')\n````") != std::string::npos);
     CHECK(report.find("````txt\nok\n\n````") != std::string::npos);
 }
+TEST_CASE("lua viewer appends a returned-value JSON block")
+{
+    imza::ToolCall call;
+    call.name   = "lua";
+    call.args   = R"json({"script":"return {a = 1}"})json";
+    call.result = imza::ToolCall::Result { imza::ToolCall::Result::Kind::OUTPUT,
+        "log\n" };
+    call.result->return_value = imza::parse_json(R"json({"a":1})json");
+    const std::string report  = imza::lua_viewer_content(call);
+    CHECK(report.find("```lua\nreturn {a = 1}\n```") != std::string::npos);
+    CHECK(report.find("```txt\nlog\n\n```") != std::string::npos);
+    CHECK(report.find("```json\n{\n  \"a\" : 1\n}\n```") != std::string::npos);
+
+    // The JSON block is the last section.
+    const std::size_t json_at = report.find("```json");
+    const std::size_t txt_at  = report.find("```txt");
+    CHECK(json_at > txt_at);
+}
+
+TEST_CASE("lua viewer omits the JSON block when there is no return value")
+{
+    imza::ToolCall call;
+    call.name   = "lua";
+    call.args   = R"json({"script":"print('x')"})json";
+    call.result = imza::ToolCall::Result { imza::ToolCall::Result::Kind::OUTPUT,
+        "x\n" };
+    const std::string report = imza::lua_viewer_content(call);
+    CHECK(report.find("```json") == std::string::npos);
+}
+
+TEST_CASE("format_lua_result appends returned JSON to the transcript")
+{
+    CHECK(imza::format_lua_result("done\n", std::nullopt) == "done\n");
+
+    const Json::Value value = imza::parse_json(R"json({"a":1})json");
+    const std::string with  = imza::format_lua_result("done\n", value);
+    CHECK(with.find("done\n") == 0);
+    CHECK(with.find("```json\n{\n  \"a\" : 1\n}\n```") != std::string::npos);
+
+    // No printed output: the JSON block starts the result.
+    const std::string only = imza::format_lua_result("", value);
+    CHECK(only.find("```json") == 0);
+
+    // A returned value containing backticks gets a larger fence.
+    const Json::Value tricky = imza::parse_json(R"json("```")json");
+    const std::string fenced = imza::format_lua_result("", tricky);
+    CHECK(fenced.find("````json") != std::string::npos);
+}
+
 TEST_CASE("modal_answer_markdown renders Q/A pairs with prompt")
 {
     imza::ModalAnswer ans;

@@ -155,6 +155,10 @@ namespace {
             if (tool->result) {
                 out["result_kind"] = static_cast<int>(tool->result->kind);
                 out["result"]      = consume_string(tool->result->text);
+                if (tool->result->return_value) {
+                    out["return_value"]
+                        = std::move(*tool->result->return_value);
+                }
                 if (tool->result->diff) {
                     out["diff"] = diff_json(*tool->result->diff);
                 }
@@ -265,6 +269,9 @@ namespace {
                         static_cast<ToolCall::Result::Kind>(kind),
                         value.get("result", "").asString()
                     };
+                    if (value.isMember("return_value")) {
+                        tool.result->return_value = value["return_value"];
+                    }
                     if (value["diff"].isObject()) {
                         tool.result->diff = parse_diff(value["diff"]);
                     }

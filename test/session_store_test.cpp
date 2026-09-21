@@ -15,6 +15,7 @@
 #include "conversation/persistence.h"
 #include "conversation/session.h"
 #include "conversation/session_store.h"
+#include "network/json_io.h"
 #include "platform/config.h"
 #include "platform/file_lock.h"
 
@@ -283,6 +284,68 @@ TEST_CASE("lua dispatch log survives session persistence")
     const imza::LuaBindingCall shell { "sh", "false", false };
     CHECK(call.result->dispatch_log[0] == read);
     CHECK(call.result->dispatch_log[1] == shell);
+#endif
+}
+
+TEST_CASE("lua return value survives session persistence")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    imza::Session source;
+    source.begin_send("run lua");
+    source.append_assistant("model", "off");
+    const imza::ToolCallRequest request { "lua",
+        R"json({"script":"return {a = 1}"})json", "", "call-1" };
+    source.append_tool(request);
+    imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT, "" };
+    result.return_value
+        = imza::parse_json(R"json({"a":1,"b":[true,null]})json");
+    source.fill_tool_result(request, std::move(result));
+    source.finish_session("");
+
+    REQUIRE(imza::save_session(source) == imza::Status::OK);
+    const auto saved = imza::saved_sessions();
+    REQUIRE(saved.size() == 1);
+    imza::Session loaded;
+    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
+    REQUIRE(call.result.has_value());
+    REQUIRE(call.result->return_value.has_value());
+    CHECK((*call.result->return_value)["a"].asInt() == 1);
+    REQUIRE((*call.result->return_value)["b"].isArray());
+    CHECK((*call.result->return_value)["b"][0].asBool());
+    CHECK((*call.result->return_value)["b"][1].isNull());
+#endif
+}
+
+TEST_CASE("legacy lua result without a return value still loads")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    imza::Session source;
+    source.begin_send("run lua");
+    source.append_assistant("model", "off");
+    const imza::ToolCallRequest request { "lua",
+        R"json({"script":"print(1)"})json", "", "call-1" };
+    source.append_tool(request);
+    imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT,
+        "1\n" };
+    source.fill_tool_result(request, std::move(result));
+    source.finish_session("");
+
+    REQUIRE(imza::save_session(source) == imza::Status::OK);
+    const auto saved = imza::saved_sessions();
+    REQUIRE(saved.size() == 1);
+    imza::Session loaded;
+    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
+    REQUIRE(call.result.has_value());
+    CHECK_FALSE(call.result->return_value.has_value());
+    CHECK(call.result->text == "1\n");
 #endif
 }
 

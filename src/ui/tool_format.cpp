@@ -172,38 +172,62 @@ std::string lua_dispatch_summary(const ToolCall& call)
     return summary;
 }
 
-std::string lua_viewer_content(const ToolCall& call)
+ToolReport make_tool_report(const ToolCall& call)
 {
-    // Fences must outgrow any backtick run in the content, or the markdown
-    // renderer closes the block early.
+    ToolReport report;
+    report.summary = lua_dispatch_summary(call);
+    report.detail  = lua_dispatch_counts(call);
+    report.sections.push_back(
+        ToolReportCode { "lua", json_string(parse_json(call.args), "script") });
+    if (!call.result.has_value()) {
+        return report;
+    }
+    report.sections.push_back(ToolReportCode {
+        "txt", call.result->text.empty() ? "(no output)" : call.result->text });
+    if (call.result->return_value) {
+        report.sections.push_back(ToolReportCode {
+            "json", write_pretty_json(*call.result->return_value) });
+    }
+    for (std::size_t index = 0; index < call.result->diffs.size(); ++index) {
+        report.sections.push_back(
+            ToolReportDiff { index, &call.result->diffs[index] });
+    }
+    return report;
+}
+
+std::string tool_report_markdown(const ToolReport& report)
+{
     std::size_t fence = 3;
-    const auto needed = [&fence](const std::string& text) {
-        std::size_t run  = 0;
-        std::size_t best = 0;
-        for (const char c : text) {
-            run  = c == '`' ? run + 1 : 0;
-            best = std::max(best, run);
+    for (const ToolReportSection& section : report.sections) {
+        const auto* code = std::get_if<ToolReportCode>(&section);
+        if (code == nullptr) {
+            continue;
         }
-        fence = std::max(fence, best + 1);
-    };
-    const std::string script = json_string(parse_json(call.args), "script");
-    needed(script);
-    if (call.result.has_value()) {
-        needed(call.result->text);
+        std::size_t run = 0;
+        for (const char c : code->content) {
+            run   = c == '`' ? run + 1 : 0;
+            fence = std::max(fence, run + 1);
+        }
     }
-    const std::string open = std::string(fence, '`');
+
+    const std::string open(fence, '`');
     std::string out;
-    if (const std::string summary = lua_dispatch_summary(call);
-        !summary.empty()) {
-        out += "Bindings: " + summary + "\n\n";
+    if (!report.summary.empty()) {
+        out += "Bindings: " + report.summary + "\n\n";
     }
-    out += open + "lua\n" + script + "\n" + open + "\n";
-    if (call.result.has_value()) {
-        out += open + "txt\n"
-            + (call.result->text.empty() ? "(no output)" : call.result->text)
-            + "\n" + open + "\n";
+    for (const ToolReportSection& section : report.sections) {
+        const auto* code = std::get_if<ToolReportCode>(&section);
+        if (code != nullptr) {
+            out += open + code->language + "\n" + code->content + "\n" + open
+                + "\n";
+        }
     }
     return out;
+}
+
+std::string lua_viewer_content(const ToolCall& call)
+{
+    return tool_report_markdown(make_tool_report(call));
 }
 
 } // namespace imza

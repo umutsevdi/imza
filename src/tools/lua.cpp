@@ -9,8 +9,11 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <string>
+#include <string_view>
+#include <unordered_set>
 #include <vector>
 
 extern "C" {
@@ -23,7 +26,11 @@ namespace imza {
 
 namespace {
 
-    constexpr std::size_t MAX_MEMORY_BYTES = 256UL * 1024 * 1024;
+    constexpr std::size_t MAX_MEMORY_BYTES         = 256UL * 1024 * 1024;
+    constexpr std::size_t MAX_RETURN_DEPTH         = 16;
+    constexpr std::size_t MAX_RETURN_NODES         = 10'000;
+    constexpr std::size_t MAX_RETURN_TABLE_ENTRIES = 5'000;
+    constexpr std::string_view TRUNCATION_MARKER   = "\n[truncated]";
     // Hook fires every N VM instructions to check the wall-clock deadline;
     // short scripts pay one clock read per interval.
     constexpr int HOOK_INTERVAL = 1000 * 1000;
@@ -54,22 +61,28 @@ namespace {
         if (run->truncated) {
             return 0;
         }
+        constexpr std::size_t payload_limit
+            = MAX_OUTPUT_BYTES - TRUNCATION_MARKER.size();
+        const auto append = [&](std::string_view text) {
+            const std::size_t available = payload_limit - run->output.size();
+            run->output.append(text.substr(0, available));
+            if (text.size() > available) {
+                run->truncated = true;
+            }
+        };
         const int n = lua_gettop(L);
         for (int i = 1; i <= n && !run->truncated; ++i) {
+            if (i > 1) {
+                append("\t");
+            }
             std::size_t len = 0;
             const char* s   = luaL_tolstring(L, i, &len);
-            if (run->output.size() + len > MAX_OUTPUT_BYTES) {
-                run->truncated = true;
-                lua_pop(L, 1);
-                break;
-            }
-            run->output.append(s, len);
-            if (i < n) {
-                run->output.push_back('\t');
-            }
+            append(std::string_view(s, len));
             lua_pop(L, 1);
         }
-        run->output.push_back('\n');
+        if (!run->truncated) {
+            append("\n");
+        }
         return 0;
     }
 
@@ -246,8 +259,9 @@ namespace {
     std::string render_description()
     {
         std::string out
-            = R"desc(Executes a sandboxed Lua script and returns printed content
-and modified files.
+            = R"desc(Executes a sandboxed Lua script and returns printed content,
+top-level return values as JSON, and modified files. Use print for logs and
+return for structured results.
 Base libraries: string, table, math, coroutine (io/os/package are absent).
 
 TYPES
@@ -279,6 +293,156 @@ METHODS)desc";
             out.pop_back();
         }
         return out;
+    }
+
+    bool lua_value_json(lua_State* L, int index, Json::Value& out,
+        std::size_t depth, std::size_t& nodes,
+        std::unordered_set<const void*>& tables, std::string& error)
+    {
+        if (depth > MAX_RETURN_DEPTH) {
+            error = "nesting exceeds " + std::to_string(MAX_RETURN_DEPTH);
+            return false;
+        }
+        if (++nodes > MAX_RETURN_NODES) {
+            error = "value exceeds " + std::to_string(MAX_RETURN_NODES)
+                + " nodes";
+            return false;
+        }
+
+        index = lua_absindex(L, index);
+        switch (lua_type(L, index)) {
+        case LUA_TNIL: out = Json::Value::null; return true;
+        case LUA_TBOOLEAN: out = lua_toboolean(L, index) != 0; return true;
+        case LUA_TNUMBER:
+            if (lua_isinteger(L, index)) {
+                out = static_cast<Json::Int64>(lua_tointeger(L, index));
+                return true;
+            }
+            if (const lua_Number value = lua_tonumber(L, index);
+                std::isfinite(value)) {
+                out = static_cast<double>(value);
+                return true;
+            }
+            error = "numbers must be finite";
+            return false;
+        case LUA_TSTRING: {
+            std::size_t size  = 0;
+            const char* value = lua_tolstring(L, index, &size);
+            out               = std::string(value, size);
+            return true;
+        }
+        case LUA_TTABLE: break;
+        default:
+            error = std::string("unsupported ") + luaL_typename(L, index)
+                + " value";
+            return false;
+        }
+
+        const void* identity = lua_topointer(L, index);
+        if (!tables.insert(identity).second) {
+            error = "cyclic or repeated table reference";
+            return false;
+        }
+
+        enum class TableKind { EMPTY, ARRAY, OBJECT };
+        TableKind kind          = TableKind::EMPTY;
+        std::size_t entries     = 0;
+        lua_Integer largest_key = 0;
+        Json::Value value(Json::objectValue);
+        lua_pushnil(L);
+        while (lua_next(L, index) != 0) {
+            if (++entries > MAX_RETURN_TABLE_ENTRIES) {
+                lua_pop(L, 2);
+                error = "table exceeds "
+                    + std::to_string(MAX_RETURN_TABLE_ENTRIES) + " entries";
+                return false;
+            }
+
+            Json::Value child;
+            if (!lua_value_json(
+                    L, -1, child, depth + 1, nodes, tables, error)) {
+                lua_pop(L, 2);
+                return false;
+            }
+            if (lua_isinteger(L, -2)) {
+                if (kind == TableKind::OBJECT) {
+                    lua_pop(L, 2);
+                    error = "tables cannot mix array and object keys";
+                    return false;
+                }
+                const lua_Integer key = lua_tointeger(L, -2);
+                if (key < 1
+                    || key
+                        > static_cast<lua_Integer>(MAX_RETURN_TABLE_ENTRIES)) {
+                    lua_pop(L, 2);
+                    error = "array keys must be between 1 and "
+                        + std::to_string(MAX_RETURN_TABLE_ENTRIES);
+                    return false;
+                }
+                kind = TableKind::ARRAY;
+                if (!value.isArray()) {
+                    value = Json::Value(Json::arrayValue);
+                }
+                value[static_cast<Json::ArrayIndex>(key - 1)]
+                    = std::move(child);
+                largest_key = std::max(largest_key, key);
+            } else if (lua_type(L, -2) == LUA_TSTRING) {
+                if (kind == TableKind::ARRAY) {
+                    lua_pop(L, 2);
+                    error = "tables cannot mix array and object keys";
+                    return false;
+                }
+                std::size_t size              = 0;
+                const char* key               = lua_tolstring(L, -2, &size);
+                kind                          = TableKind::OBJECT;
+                value[std::string(key, size)] = std::move(child);
+            } else {
+                lua_pop(L, 2);
+                error = "table keys must be strings or positive integers";
+                return false;
+            }
+            lua_pop(L, 1);
+        }
+        if (kind == TableKind::ARRAY
+            && largest_key != static_cast<lua_Integer>(entries)) {
+            error = "array keys must be contiguous from 1";
+            return false;
+        }
+        out = std::move(value);
+        return true;
+    }
+
+    std::optional<Json::Value> lua_return_value(
+        lua_State* L, int first, std::string& error)
+    {
+        const int count = lua_gettop(L) - first + 1;
+        if (count <= 0) {
+            return std::nullopt;
+        }
+
+        std::size_t nodes = 0;
+        std::unordered_set<const void*> tables;
+        Json::Value value;
+        if (count == 1) {
+            if (!lua_value_json(L, first, value, 0, nodes, tables, error)) {
+                return std::nullopt;
+            }
+        } else {
+            value = Json::Value(Json::arrayValue);
+            for (int i = 0; i < count; ++i) {
+                Json::Value entry;
+                if (!lua_value_json(
+                        L, first + i, entry, 0, nodes, tables, error)) {
+                    return std::nullopt;
+                }
+                value.append(std::move(entry));
+            }
+        }
+        if (write_json(value).size() > MAX_OUTPUT_BYTES) {
+            error = "encoded value exceeds 64 KiB";
+            return std::nullopt;
+        }
+        return value;
     }
 
     ToolOutput lua_run(const Json::Value& args, const LuaHost& host)
@@ -321,21 +485,32 @@ METHODS)desc";
             return out;
         };
 
+        const int first_result = lua_gettop(L) + 1;
         const int loaded
             = luaL_loadbufferx(L, script.data(), script.size(), "script", "t");
         if (loaded != LUA_OK) {
             return finish(
                 tool_error("lua: " + std::string(lua_tostring(L, -1))));
         }
-        if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
+        if (lua_pcall(L, 0, LUA_MULTRET, 0) != LUA_OK) {
             return finish(
                 tool_error("lua: " + std::string(lua_tostring(L, -1))));
         }
+
+        std::string return_error;
+        std::optional<Json::Value> return_value
+            = lua_return_value(L, first_result, return_error);
+        if (!return_error.empty()) {
+            return finish(tool_error("lua: return value: " + return_error));
+        }
+
         std::string output = std::move(run.output);
         if (run.truncated) {
-            output += "\n[truncated]";
+            output += TRUNCATION_MARKER;
         }
-        return finish(tool_output(std::move(output)));
+        ToolOutput result   = tool_output(std::move(output));
+        result.return_value = std::move(return_value);
+        return finish(std::move(result));
     }
 
 } // namespace

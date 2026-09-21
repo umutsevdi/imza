@@ -912,7 +912,9 @@ namespace {
         {
             const bool failed = tc.result->kind == ToolCall::Result::Kind::ERROR
                 || tc.result->kind == ToolCall::Result::Kind::REJECT;
-            Component button = make_lua_viewer_button(tc, failed);
+            const ToolReport report = make_tool_report(tc);
+            Component button
+                = make_lua_viewer_button(tc, failed, report.detail);
             Elements rows { button->Render() };
             if (failed && !tc.result->text.empty()) {
                 // Show the reason the run died; the script stays in the viewer.
@@ -920,9 +922,12 @@ namespace {
                     text(take_lines(tc.result->text, 2)) | color(HL_RED));
             }
             const LayoutCtx ctx = layout_();
-            for (std::size_t index = 0; index < tc.result->diffs.size();
-                ++index) {
-                const DiffView& diff  = tc.result->diffs[index];
+            for (const ToolReportSection& section : report.sections) {
+                const auto* report_diff = std::get_if<ToolReportDiff>(&section);
+                if (report_diff == nullptr || report_diff->view == nullptr) {
+                    continue;
+                }
+                const DiffView& diff  = *report_diff->view;
                 std::size_t additions = 0;
                 std::size_t deletions = 0;
                 for (const DiffRow& row : diff.rows) {
@@ -944,7 +949,8 @@ namespace {
                 const std::string label = "‹ View full diff ("
                     + std::to_string(diff.rows.size()) + " lines) ›";
                 rows.push_back(
-                    make_diff_viewer_button(tc.id, index, label)->Render());
+                    make_diff_viewer_button(tc.id, report_diff->index, label)
+                        ->Render());
             }
             rows.push_back(separatorEmpty());
             return vbox(std::move(rows));
@@ -1087,14 +1093,14 @@ namespace {
                 });
         }
 
-        Component make_lua_viewer_button(const ToolCall& tc, bool failed)
+        Component make_lua_viewer_button(
+            const ToolCall& tc, bool failed, const std::string& counts)
         {
             if (const auto found = read_buttons_.find(tc.id);
                 found != read_buttons_.end()) {
                 return found->second;
             }
-            const std::string counts = lua_dispatch_counts(tc);
-            std::string label        = failed ? "Execution Failed" : "Executed";
+            std::string label = failed ? "Execution Failed" : "Executed";
             if (!counts.empty()) {
                 label += " · " + counts;
             }

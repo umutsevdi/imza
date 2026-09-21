@@ -23,6 +23,7 @@ struct ToolOutput {
     enum class Kind { OUTPUT, ERROR };
     Kind kind;
     std::string text;
+    std::optional<Json::Value> return_value = std::nullopt;
     // Net per-file diffs a lua script produced through tool.file.*;
     // multiple mutations of one file collapse into a single before/after.
     std::vector<DiffView> diffs { };

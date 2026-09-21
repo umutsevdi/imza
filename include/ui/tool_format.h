@@ -2,10 +2,33 @@
 
 #include <cstddef>
 #include <string>
+#include <variant>
+#include <vector>
 
 #include "conversation/session.h"
 
 namespace imza {
+
+struct ToolReportCode {
+    std::string language;
+    std::string content;
+};
+
+struct ToolReportDiff {
+    std::size_t index;
+    const DiffView* view;
+};
+
+using ToolReportSection = std::variant<ToolReportCode, ToolReportDiff>;
+
+struct ToolReport {
+    std::string summary;
+    std::string detail;
+    std::vector<ToolReportSection> sections;
+};
+
+ToolReport make_tool_report(const ToolCall& call);
+std::string tool_report_markdown(const ToolReport& report);
 
 // Display formatting for tool calls in the conversation UI.
 std::string tool_display_name(const std::string& name);

@@ -192,6 +192,108 @@ TEST_CASE("lua tool truncates oversized output")
     CHECK(out.text.find("[truncated]") != std::string::npos);
 }
 
+TEST_CASE("lua tool captures top-level return values as JSON")
+{
+    const imza::ToolOutput none = run_script("print('x')");
+    CHECK(none.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(none.text == "x\n");
+    CHECK_FALSE(none.return_value.has_value());
+
+    const imza::ToolOutput object = run_script(
+        "print('log')\n"
+        "return { file = 'a.cpp', changed = true, lines = { 10, 11 } }");
+    CHECK(object.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(object.text == "log\n");
+    REQUIRE(object.return_value.has_value());
+    CHECK((*object.return_value)["file"].asString() == "a.cpp");
+    CHECK((*object.return_value)["changed"].asBool());
+    CHECK((*object.return_value)["lines"].size() == 2);
+    CHECK((*object.return_value)["lines"][1].asInt() == 11);
+
+    const imza::ToolOutput scalars = run_script("return 42");
+    CHECK(scalars.return_value.has_value());
+    CHECK(scalars.return_value->asInt() == 42);
+
+    const imza::ToolOutput null = run_script("return nil");
+    CHECK(null.return_value.has_value());
+    CHECK(null.return_value->isNull());
+
+    const imza::ToolOutput multi = run_script("return 'a', 2, false");
+    REQUIRE(multi.return_value.has_value());
+    REQUIRE(multi.return_value->isArray());
+    CHECK(multi.return_value->size() == 3);
+    CHECK((*multi.return_value)[0].asString() == "a");
+    CHECK((*multi.return_value)[1].asInt() == 2);
+    CHECK_FALSE((*multi.return_value)[2].asBool());
+
+    const imza::ToolOutput empty = run_script("return {}");
+    REQUIRE(empty.return_value.has_value());
+    CHECK(empty.return_value->isObject());
+    CHECK(empty.return_value->empty());
+}
+
+TEST_CASE("lua tool rejects unconvertible return values")
+{
+    const auto rejected
+        = [](const std::string& script, const std::string& reason) {
+              const imza::ToolOutput out = run_script(script);
+              CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
+              CHECK(out.text.find(reason) != std::string::npos);
+              CHECK_FALSE(out.return_value.has_value());
+          };
+
+    rejected("return function() end", "unsupported function value");
+    rejected("local t = {} t.self = t return t",
+        "cyclic or repeated table reference");
+    rejected(
+        "local t = {} return { t, t }", "cyclic or repeated table reference");
+    rejected(
+        "return { 1, 2, [5] = 3 }", "array keys must be contiguous from 1");
+    rejected("return { a = 1, [2] = 'b' }",
+        "tables cannot mix array and object keys");
+    rejected("return 0/0", "numbers must be finite");
+
+    std::string deep = "return ";
+    for (int i = 0; i < 17; ++i) {
+        deep += "{ x = ";
+    }
+    deep += "1";
+    for (int i = 0; i < 17; ++i) {
+        deep += " }";
+    }
+    rejected(deep, "nesting exceeds 16");
+
+    rejected("local t = {} for i = 1, 5001 do t[i] = i end return t",
+        "table exceeds 5000 entries");
+
+    rejected("return string.rep('x', 70000)", "encoded value exceeds 64 KiB");
+}
+
+TEST_CASE("return-value conversion failure preserves log and diffs")
+{
+    TmpDir dir;
+    write_file(dir.file("a.txt"), "one\n");
+    const std::string script = "tool.file.write('" + dir.file("a.txt").string()
+        + "', 'two\\n')\n"
+          "return function() end";
+    const imza::ToolOutput out = run_script(script);
+    CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
+    CHECK_FALSE(out.return_value.has_value());
+    REQUIRE(out.dispatch_log.size() == 1);
+    CHECK(out.dispatch_log[0].binding == "file.write");
+    REQUIRE(out.diffs.size() == 1);
+    CHECK(out.diffs[0].file == dir.file("a.txt").string());
+}
+
+TEST_CASE("lua print truncation respects the hard output cap")
+{
+    const imza::ToolOutput out
+        = run_script("for i = 1, 100000 do print(i, 'x', true) end");
+    CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(out.text.size() <= 64 * 1024);
+    CHECK(out.text.find("[truncated]") != std::string::npos);
+}
+
 TEST_CASE("tool.read returns 1-based windows and empty for empty files")
 {
     TmpDir dir;
