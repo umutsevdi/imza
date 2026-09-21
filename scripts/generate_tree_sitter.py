@@ -213,6 +213,49 @@ def _render_string_array(name: str, values: tuple[str, ...]) -> str:
     return f"constexpr std::array {identifier} {{ {entries} }};"
 
 
+def _render_language_registry(languages: tuple[ResolvedLanguage, ...]) -> str:
+    """Render the highlight-free registry: language identity and grammar
+    entry points only, self-contained for TUs that never highlight."""
+    declarations = "\n".join(
+        f'extern "C" const TSLanguage* {language.symbol}();'
+        for language in languages
+    )
+    definitions: list[str] = []
+    entries: list[str] = []
+    for language in languages:
+        identifier = language.name.upper()
+        definitions.extend(
+            (
+                _render_string_array(
+                    f"{identifier}_EXTENSIONS", language.definition.extensions
+                ),
+                _render_string_array(
+                    f"{identifier}_FILENAMES", language.definition.filenames
+                ),
+            )
+        )
+        entries.append(
+            "    LanguageEntry { "
+            f'{_cpp_string(language.name)}, {identifier}_EXTENSIONS, '
+            f"{identifier}_FILENAMES, {language.symbol} }},"
+        )
+
+    return (
+        "struct LanguageEntry {\n"
+        "    std::string_view name;\n"
+        "    std::span<const std::string_view> extensions;\n"
+        "    std::span<const std::string_view> filenames;\n"
+        "    const TSLanguage* (*load_language)();\n"
+        "};\n\n"
+        + declarations
+        + "\n\n"
+        + "\n\n".join(definitions)
+        + f"\n\nconstexpr std::array<LanguageEntry, {len(languages)}> LANGUAGE_ENTRIES {{ {{\n"
+        + "\n".join(entries)
+        + "\n} };\n"
+    )
+
+
 def _render_registry(languages: tuple[ResolvedLanguage, ...]) -> str:
     declarations = "\n".join(
         f'extern "C" const TSLanguage* {language.symbol}();'
@@ -289,6 +332,10 @@ def main() -> int:
         parser.error(str(error))
     _write_if_changed(
         args.output / "tree_sitter_sources.cmake", _render_sources(languages)
+    )
+    _write_if_changed(
+        args.output / "language_registry.inc",
+        _render_language_registry(languages),
     )
     _write_if_changed(
         args.output / "syntax_registry.inc", _render_registry(languages)

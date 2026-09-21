@@ -36,6 +36,7 @@ struct LuaBinding {
     // Error text the registration-time gate returns when `capability` is
     // off for the run; only meaningful for SHELL/WEB descriptors.
     std::string_view capability_denied = "";
+    bool is_private;
 };
 
 // Per-file net mutation state for tool.file.*: original content at first
@@ -129,5 +130,6 @@ std::span<const LuaBinding> session_lua_bindings();
 std::span<const LuaBinding> shell_lua_bindings();
 std::span<const LuaBinding> web_lua_bindings();
 std::span<const LuaBinding> mutation_lua_bindings();
+std::span<const LuaBinding> tree_lua_bindings();
 
 } // namespace imza

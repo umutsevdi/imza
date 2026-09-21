@@ -300,6 +300,7 @@ add_library(imza_execution
     src/tools/bindings/mutation.cpp
     src/tools/bindings/session.cpp
     src/tools/bindings/shell.cpp
+    src/tools/bindings/tree.cpp
     src/tools/bindings/web.cpp
     src/turn/delegation.cpp
     src/turn/prompt.cpp
@@ -310,6 +311,7 @@ target_include_directories(imza_execution PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${jsoncpp_SOURCE_DIR}/include
     ${PROMPTS_GENERATED_DIR}
+    ${TREE_SITTER_GENERATED_DIR}
 )
 set_source_files_properties(src/ui/status_line.cpp PROPERTIES
     COMPILE_DEFINITIONS IMZA_VERSION="${PROJECT_VERSION}")
@@ -325,6 +327,7 @@ target_link_libraries(imza_execution PUBLIC
     imza_network
     imza_runtime
     imza_lua
+    imza_tree_sitter_grammars
     jsoncpp_static
 )
 

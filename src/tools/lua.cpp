@@ -177,6 +177,7 @@ namespace {
             add(shell_lua_bindings());
             add(web_lua_bindings());
             add(mutation_lua_bindings());
+            add(tree_lua_bindings());
             return all;
         }();
         return bindings;
@@ -260,7 +261,7 @@ namespace {
     {
         std::string out
             = R"desc(Executes a sandboxed Lua script and returns printed content,
-top-level return values as JSON, and modified files. Use print for logs and
+returned object, and modified files. Use print for logs and
 return for structured results.
 Base libraries: string, table, math, coroutine (io/os/package are absent).
 
@@ -271,6 +272,7 @@ TYPES
   AskCard    = { prompt: string, options?: string[], multi?: bool, free_text?: bool }
   AskAnswer  = { question: string, answer: string }
   GrepHit    = { file: string, line: integer, text: string }
+  TsSymbol   = { kind: string, name: string, start_line: integer, end_line: integer, text: string }
 
 LEGEND
   tool.<name>(args...) => Value | (nil, Err)
@@ -284,8 +286,10 @@ LEGEND
 
 METHODS)desc";
         for (const LuaBinding& binding : all_bindings()) {
-            out += "\n";
-            out += binding.description;
+            if (!binding.is_private) {
+                out += "\n";
+                out += binding.description;
+            }
         }
         // The generated description ends at the last binding's prose: no
         // trailing newline, so the tool spec reads as a single block.

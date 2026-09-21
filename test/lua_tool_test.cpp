@@ -696,6 +696,196 @@ TEST_CASE("tool.sh accepts pre-installed grants and skip-permissions silently")
     CHECK(skipped.ask_calls == 0);
 }
 
+TEST_CASE("tool.ts.index lists declarations parsed by the grammar")
+{
+    TmpDir dir;
+    write_file(dir.file("sym.cpp"),
+        "// not a symbol\n"
+        "struct Alpha { int x; };\n"
+        "int beta(int v) { return v; }\n"
+        "class Gamma { };\n");
+
+    const imza::ToolOutput out = run_script("local rows, err = tool.ts.index([["
+        + dir.file("sym.cpp").string()
+        + "]])\n"
+          "if err then error(err) end\n"
+          "for _, r in ipairs(rows) do print(r.kind, r.name, "
+          "r.start_line, r.end_line) end");
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(
+        out.text.find("struct_specifier\tAlpha\t2\t2\n") != std::string::npos);
+    CHECK(out.text.find("function_definition\tbeta\t3\t3\n")
+        != std::string::npos);
+    CHECK(out.text.find("class_specifier\tGamma\t4\t4\n") != std::string::npos);
+    // The comment is not a declaration and appears nowhere.
+    CHECK(out.text.find("not a symbol") == std::string::npos);
+}
+
+TEST_CASE("tool.ts.index caps results and reports node text")
+{
+    TmpDir dir;
+    std::string body;
+    for (int i = 1; i <= 60; ++i) {
+        body += "int fn" + std::to_string(i) + "() { return "
+            + std::to_string(i) + "; }\n";
+    }
+    write_file(dir.file("many.cpp"), body);
+
+    const imza::ToolOutput out = run_script("local rows, err = tool.ts.index([["
+        + dir.file("many.cpp").string()
+        + "]])\n"
+          "if err then error(err) end\nprint(#rows, rows[1].text)");
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(out.text.find("50\tint fn1() { return 1; }\n") != std::string::npos);
+}
+
+TEST_CASE("tool.ts.nodes matches exact types and globs")
+{
+    TmpDir dir;
+    write_file(dir.file("nodes.c"), "int main() { return 0; }\n");
+
+    const imza::ToolOutput exact = run_script(
+        "local rows, err = tool.ts.nodes([[" + dir.file("nodes.c").string()
+        + "]], 'call_expression')\n"
+          "if err then error(err) end\nprint(#rows)");
+    CHECK(exact.text == "0\n");
+
+    const imza::ToolOutput glob = run_script(
+        "local rows, err = tool.ts.nodes([[" + dir.file("nodes.c").string()
+        + "]], '*call*')\n"
+          "if err then error(err) end\nprint(#rows)");
+    CHECK(glob.text == "0\n");
+
+    const imza::ToolOutput declared = run_script(
+        "local rows, err = tool.ts.nodes([[" + dir.file("nodes.c").string()
+        + "]], 'function_definition')\n"
+          "if err then error(err) end\n"
+          "print(#rows, rows[1].kind, rows[1].name)");
+    CHECK(declared.text.find("1\tfunction_definition\tmain\n")
+        != std::string::npos);
+}
+
+TEST_CASE("tool.ts.nodes rejects unknown exact types")
+{
+    TmpDir dir;
+    write_file(dir.file("a.c"), "int main() { return 0; }\n");
+    const imza::ToolOutput out = run_script("local rows, err = tool.ts.nodes([["
+        + dir.file("a.c").string()
+        + "]], 'not_a_real_node')\nprint(rows, err)");
+    CHECK(out.text.find("not_a_real_node") != std::string::npos);
+}
+
+TEST_CASE("tool.ts.symbols lists identifier occurrences with lines")
+{
+    TmpDir dir;
+    write_file(dir.file("use.c"),
+        "int cat;\n"
+        "int dog;\n"
+        "int use_cat() { return cat; }\n");
+
+    const imza::ToolOutput out = run_script(
+        "local rows, err = tool.ts.symbols([[" + dir.file("use.c").string()
+        + "]], 'cat')\n"
+          "if err then error(err) end\n"
+          "for _, r in ipairs(rows) do print(r.file, r.line, r.text) end");
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    // Grammar-typed: the 'cat' inside 'use_cat' never matches.
+    CHECK(out.text.find("\t1\tint cat;\n") != std::string::npos);
+    CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    // Grammar-typed: no row's line is exactly 'use_cat'; but its line 3
+    // row exists because it contains the standalone `cat` identifier.
+    CHECK(out.text.find("\t3\tint use_cat() { return cat; }\n")
+        != std::string::npos);
+}
+
+TEST_CASE("tool.ts.references lists call sites of a symbol")
+{
+    TmpDir dir;
+    write_file(dir.file("use.c"),
+        "int cat;\n"
+        "int dog;\n"
+        "int use_cat() { return cat; }\n"
+        "int call_cat() { return cat(); }\n"
+        "// cat() in a comment\n");
+
+    const imza::ToolOutput out = run_script(
+        "local rows, err = tool.ts.references([[" + dir.file("use.c").string()
+        + "]], 'cat')\n"
+          "if err then error(err) end\n"
+          "for _, r in ipairs(rows) do print(r.line, r.kind, r.text) end");
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    // Only the call site on line 4 matches; the variable uses and the
+    // comment are not identifier-in-call-node matches.
+    CHECK(out.text == "4\tcall_expression\tint call_cat() { return cat(); }\n");
+}
+TEST_CASE("ts bindings fail with values on bad paths and unknown grammars")
+{
+    TmpDir dir;
+    write_file(dir.file("a.c"), "int main() { return 0; }\n");
+    write_file(dir.file("note.unknownext"), "hello\n");
+
+    const imza::ToolOutput missing
+        = run_script("local rows, err = "
+                     "tool.ts.index('no-such-file.c')\nprint(rows, err)");
+    CHECK(missing.text.find("no such file") != std::string::npos);
+
+    const imza::ToolOutput nogramever
+        = run_script("local rows, err = tool.ts.index([["
+            + dir.file("note.unknownext").string() + "]])\nprint(rows, err)");
+    CHECK(nogramever.text.find("no grammar") != std::string::npos);
+}
+
+TEST_CASE("ts bindings record dispatch log entries")
+{
+    TmpDir dir;
+    write_file(dir.file("a.c"), "int main() { return 0; }\n");
+    const std::string path     = dir.file("a.c").string();
+    const imza::ToolOutput out = run_script("tool.ts.index([[" + path
+        + "]])\n"
+          "tool.ts.nodes([["
+        + path
+        + "]], 'function_definition')\n"
+          "tool.ts.symbols([["
+        + path
+        + "]], 'main')\n"
+          "tool.ts.references([["
+        + path
+        + "]], 'main')\n"
+          "tool._lib.ts_query([["
+        + path + "]], '(function_definition) @f')");
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    REQUIRE(out.dispatch_log.size() == 5);
+    CHECK(out.dispatch_log[0].binding == "ts.index");
+    CHECK(out.dispatch_log[1].binding == "ts.nodes");
+    CHECK(out.dispatch_log[2].binding == "ts.symbols");
+    CHECK(out.dispatch_log[3].binding == "ts.references");
+    CHECK(out.dispatch_log[4].binding == "_lib.ts_query");
+    for (const auto& entry : out.dispatch_log) {
+        CHECK(entry.ok);
+        CHECK(entry.target == path);
+    }
+}
+
+TEST_CASE("tool._lib.ts_query runs captures and rejects invalid queries")
+{
+    TmpDir dir;
+    write_file(dir.file("q.c"), "int main() { return 0; }\n");
+    const std::string path = dir.file("q.c").string();
+
+    const imza::ToolOutput out
+        = run_script("local rows, err = tool._lib.ts_query([[" + path
+            + "]], '(function_definition declarator: (function_declarator "
+              "declarator: (identifier) @name))')\n"
+              "if err then error(err) end\n"
+              "print(#rows, rows[1].capture, rows[1].line, rows[1].text)");
+    CHECK(out.text.find("1\tname\t1\tmain\n") != std::string::npos);
+
+    const imza::ToolOutput bad
+        = run_script("local rows, err = tool._lib.ts_query([[" + path
+            + "]], '(function_definition')\nprint(rows, err)");
+    CHECK(bad.text.find("invalid query") != std::string::npos);
+}
+
 TEST_CASE("default_tools includes lua")
 {
     const auto tools = imza::default_tools();
