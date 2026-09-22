@@ -12,6 +12,8 @@ std::string question_form_markdown(const QuestionForm& form);
 std::string modal_answer_markdown(const ModalAnswer& answer);
 std::string ask_answer_markdown(const ModalAnswer& answer);
 
+std::string format_lua_result(
+    std::string text, const std::optional<Json::Value>& return_value);
 std::string tool_result_text(const ToolCall& call);
 std::string denial_text(const std::string& reason);
 std::string shell_status_text(const ShellStatus& status);

@@ -2,54 +2,33 @@
 
 #include <json/json.h>
 
-#include <chrono>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
-#include <variant>
 #include <vector>
 
-#include "common/diff.h"
-#include "common/modal.h"
 #include "common/tool_call.h"
 #include "common/types.h"
+#include "tools/lua.h"
 
 namespace imza {
 
-struct ShellExit {
-    int code;
-};
-
-struct ShellTimeout {
-    std::chrono::seconds duration;
-};
-
-using ShellStatus = std::variant<ShellExit, ShellTimeout>;
-
-struct ShellInvocation {
-    std::string program;
-    std::optional<std::string> subcommand;
-    std::vector<std::string> arguments;
-
-    bool operator==(const ShellInvocation&) const = default;
-};
-
-struct ShellAnalysis {
-    enum class Reuse { SESSION, ONCE };
-
-    std::vector<ShellInvocation> invocations;
-    Reuse reuse = Reuse::ONCE;
-};
+struct Skill;
+class SkillStore;
 
 struct ToolOutput {
     enum class Kind { OUTPUT, ERROR };
     Kind kind;
     std::string text;
-    std::optional<DiffView> diff { };
-    std::optional<ShellStatus> shell_status { };
-    std::optional<ViewerModal> viewer { };
+    std::optional<Json::Value> return_value = std::nullopt;
+    // Net per-file diffs a lua script produced through tool.file.*;
+    // multiple mutations of one file collapse into a single before/after.
+    std::vector<DiffView> diffs { };
+    std::vector<LuaBindingCall> dispatch_log { };
+    bool blocked_permission = false;
 };
 
 inline ToolOutput tool_error(std::string text)
@@ -57,7 +36,15 @@ inline ToolOutput tool_error(std::string text)
     return { ToolOutput::Kind::ERROR, std::move(text) };
 }
 
-using ToolHandler = std::function<ToolOutput(const Json::Value& args)>;
+inline ToolOutput tool_output(std::string text)
+{
+    return { ToolOutput::Kind::OUTPUT, std::move(text) };
+}
+
+// Handlers get the request alongside its parsed args: side-channel
+// results (subagent chats, skill loads) must be matched to its call id.
+using ToolHandler = std::function<ToolOutput(
+    const ToolCallRequest&, const Json::Value& args)>;
 
 struct Tool {
     ToolSpec spec;
@@ -73,34 +60,29 @@ ToolOutput dispatch_tool(
 std::string json_string(const Json::Value& value, const char* key);
 std::optional<std::int64_t> json_int(const Json::Value& value, const char* key);
 
-std::optional<TodoList> parse_todo_args(const Json::Value& args);
-std::optional<QuestionForm> parse_ask_args(const std::string& args);
-std::optional<std::string> validate_filesystem_tool_arguments(
-    std::string_view tool, const Json::Value& arguments);
-std::optional<std::string> validate_shell_tool_arguments(
-    const Json::Value& arguments);
-std::optional<std::string> validate_web_tool_arguments(
-    std::string_view tool, const Json::Value& arguments);
 std::optional<std::string> validate_subagent_tool_arguments(
     const Json::Value& arguments, bool allow_build);
-std::string todo_summary(const TodoList& todo);
-ShellAnalysis analyze_shell(std::string_view command);
-bool shell_builtin_allowed(std::string_view program);
-bool shell_readonly_allowed(const ShellInvocation& invocation);
 
-Tool make_read_tool();
-Tool make_skill_tool();
-Tool make_list_tool();
-Tool make_find_tool(bool has_rg);
-Tool make_ask_tool();
-Tool make_shell_tool();
-Tool make_todo_tool();
-Tool make_subagent_tool();
-Tool make_edit_tool();
-Tool make_write_tool();
-Tool make_webfetch_tool();
-Tool make_websearch_tool();
-std::vector<Tool> default_tools(
-    RuntimeFlag flags = interactive_runtime_flags(), bool has_rg = false);
+// Lazy accessors, like LuaHost: the roster is built before the
+// environment and store are wired. Skill policy is gated once upstream.
+struct SkillToolDeps {
+    std::function<std::vector<Skill>()> catalog;
+    std::function<SkillStore&()> store;
+};
+
+Tool make_skill_tool(SkillToolDeps deps = { });
+
+// Slot indirection breaks the TurnRunner/Delegation cycle: the tool
+// captures it empty, wire() fills it once both exist.
+using SubagentToolFn
+    = std::function<ToolOutput(const ToolCallRequest&, const Json::Value&)>;
+using SubagentToolSlot = std::shared_ptr<SubagentToolFn>;
+
+Tool make_subagent_tool(SubagentToolSlot delegate = { });
+
+// Builds the model-facing roster: skill, subagent, and the lua sandbox
+// (see tools/lua.h for the LuaHost the lua tool is wired with).
+std::vector<Tool> default_tools(LuaHost lua_host = { },
+    SkillToolDeps skill_deps = { }, SubagentToolSlot subagent = { });
 
 } // namespace imza

@@ -33,12 +33,15 @@ namespace {
 
     using namespace ftxui;
 
-    constexpr std::size_t LARGE_OUTPUT_LINES = 5;
-    constexpr std::size_t INVALID_VERSION    = ~std::size_t { 0 };
-    constexpr int WHEEL_STEP                 = 3;
-    constexpr int DEFAULT_VIEWPORT_LINES     = 24;
-    constexpr int TIMELINE_OVERSCAN          = 20;
-    constexpr const char* INTERRUPT_HINT     = "Esc interrupt";
+    // Inline cap for a lua run's per-file diffs; beyond this the rest
+    // collapses behind a viewer button.
+    constexpr std::size_t INLINE_DIFF_ROWS = 25;
+
+    constexpr std::size_t INVALID_VERSION = ~std::size_t { 0 };
+    constexpr int WHEEL_STEP              = 3;
+    constexpr int DEFAULT_VIEWPORT_LINES  = 24;
+    constexpr int TIMELINE_OVERSCAN       = 20;
+    constexpr const char* INTERRUPT_HINT  = "Esc interrupt";
 
     Element vertical_space(int height)
     {
@@ -177,7 +180,8 @@ namespace {
                     [](const ConversationItem& item) {
                         const auto* tc = std::get_if<ToolCall>(&item);
                         return tc != nullptr
-                            && (tc->name == "shell" || tc->name == "subagent")
+                            && (tc->name == "shell" || tc->name == "subagent"
+                                || tc->name == "lua")
                             && !tc->result.has_value();
                     });
             const bool compaction_running = std::any_of(st.items().begin(),
@@ -264,7 +268,8 @@ namespace {
                             conversation[item_index + 1]));
                 std::size_t eff_version = version;
                 if (const auto* tc = std::get_if<ToolCall>(&it); tc != nullptr
-                    && (tc->name == "shell" || tc->name == "subagent")
+                    && (tc->name == "shell" || tc->name == "subagent"
+                        || tc->name == "lua")
                     && !tc->result.has_value()) {
                     eff_version = static_cast<std::size_t>(frame_);
                 }
@@ -293,38 +298,12 @@ namespace {
                         } else {
                             switch (tc.result->kind) {
                             case ToolCall::Result::Kind::OUTPUT: {
-                                const bool big = count_lines(tc.result->text)
-                                    > LARGE_OUTPUT_LINES;
                                 if (tc.name == "subagent") {
                                     item_cache_[item_index]
                                         = render_subagent_item(tc);
-                                } else if (tc.name == "read") {
+                                } else if (tc.name == "lua") {
                                     item_cache_[item_index]
-                                        = render_read_item(tc);
-                                } else if (tc.name == "skill") {
-                                    item_cache_[item_index]
-                                        = render_skill_item(tc);
-                                } else if (tc.name == "list") {
-                                    item_cache_[item_index]
-                                        = render_list_collapsed(tc);
-                                } else if (tc.name == "find") {
-                                    item_cache_[item_index]
-                                        = render_find_collapsed(tc);
-                                } else if (tc.name == "shell") {
-                                    item_cache_[item_index] = big
-                                        ? render_shell_collapsed(tc)
-                                        : render_shell_item(tc);
-                                } else if (tc.name == "edit"
-                                    || tc.name == "write") {
-                                    item_cache_[item_index]
-                                        = render_write_item(tc);
-                                } else if (tc.name == "webfetch"
-                                    || tc.name == "websearch") {
-                                    item_cache_[item_index]
-                                        = render_web_item(tc);
-                                } else if (tc.name == "ask") {
-                                    item_cache_[item_index]
-                                        = render_ask_item(tc);
+                                        = render_lua_item(tc);
                                 } else {
                                     item_cache_[item_index]
                                         = render_generic_tool(tc);
@@ -500,6 +479,16 @@ namespace {
                         return true;
                     }
                 }
+                for (auto& [key, button] : diff_buttons_) {
+                    if (button->OnEvent(event)) {
+                        return true;
+                    }
+                }
+                for (auto& [id, button] : pending_lua_buttons_) {
+                    if (button->OnEvent(event)) {
+                        return true;
+                    }
+                }
                 for (auto& [id, link] : reasoning_links_) {
                     if (link.component->OnEvent(event)) {
                         return true;
@@ -610,28 +599,17 @@ namespace {
 
         void open_viewer_for(const ToolCall& tc)
         {
-            if (tc.name == "read") {
-                imza::enqueue_user_modal(*state_,
-                    ViewerModal { tool_call_head(tc), tc.result->text,
-                        tool_code_language(tc), read_start_line(tc) });
-            } else if (tc.name == "skill") {
+            if (tc.name == "skill") {
                 imza::enqueue_user_modal(*state_,
                     ViewerModal { tool_call_head(tc), tc.result->text,
                         "markdown", 1, true });
-            } else if (tc.name == "list") {
+            } else if (tc.name == "lua") {
                 imza::enqueue_user_modal(*state_,
-                    ViewerModal {
-                        "Directory listing", tc.result->text, "", 1 });
-            } else if (tc.name == "find") {
-                const Json::Value args = parse_json(tc.args);
-                imza::enqueue_user_modal(*state_,
-                    ViewerModal { "Find results",
-                        tc.result->text.empty() ? "(no matches)"
-                                                : tc.result->text,
-                        "", 1, false, json_string(args, "path") });
+                    ViewerModal { "Lua execution", lua_viewer_content(tc),
+                        "markdown", 1, false });
             } else {
                 imza::enqueue_user_modal(*state_,
-                    ViewerModal { "Shell output", tc.result->text, "", 1 });
+                    ViewerModal { tool_call_head(tc), tc.result->text, "", 1 });
             }
         }
 
@@ -729,8 +707,10 @@ namespace {
 
         Component container_;
         std::map<std::size_t, Component> read_buttons_;
+        std::map<std::size_t, Component> pending_lua_buttons_;
         std::map<std::pair<std::size_t, std::size_t>, Component>
             subagent_buttons_;
+        std::map<std::pair<std::size_t, std::size_t>, Component> diff_buttons_;
         struct ReasoningLink {
             std::shared_ptr<std::string> label;
             std::shared_ptr<std::string> content;
@@ -756,11 +736,19 @@ namespace {
             for (auto& [key, component] : subagent_buttons_) {
                 component->Detach();
             }
+            for (auto& [key, component] : diff_buttons_) {
+                component->Detach();
+            }
+            for (auto& [id, component] : pending_lua_buttons_) {
+                component->Detach();
+            }
             for (auto& [index, link] : reasoning_links_) {
                 link.component->Detach();
             }
             read_buttons_.clear();
             subagent_buttons_.clear();
+            diff_buttons_.clear();
+            pending_lua_buttons_.clear();
             reasoning_links_.clear();
         }
 
@@ -781,6 +769,17 @@ namespace {
                     && subagent->first.first == tool->id) {
                     subagent->second->Detach();
                     subagent = subagent_buttons_.erase(subagent);
+                }
+                auto diff = diff_buttons_.lower_bound({ tool->id, 0 });
+                while (diff != diff_buttons_.end()
+                    && diff->first.first == tool->id) {
+                    diff->second->Detach();
+                    diff = diff_buttons_.erase(diff);
+                }
+                const auto pending = pending_lua_buttons_.find(tool->id);
+                if (pending != pending_lua_buttons_.end()) {
+                    pending->second->Detach();
+                    pending_lua_buttons_.erase(pending);
                 }
             }
             const auto reasoning = reasoning_links_.find(index);
@@ -895,130 +894,83 @@ namespace {
                 }));
         }
 
-        Element render_skill_item(const ToolCall& tc)
-        {
-            return vbox({ render_viewer_header(
-                              tc, count_lines(tc.result->text), "line"),
-                separatorEmpty() });
-        }
-
-        Element render_read_item(const ToolCall& tc)
-        {
-            return vbox({ render_viewer_header(
-                              tc, count_lines(tc.result->text), "line"),
-                separatorEmpty() });
-        }
-
-        Element render_list_collapsed(const ToolCall& tc)
-        {
-            const std::string& full = tc.result->text;
-            std::size_t entries     = count_lines(full);
-            if (full.find("\n[truncated:") != std::string::npos) {
-                --entries;
-            }
-            return vbox({ render_viewer_header(tc, entries, "entry"),
-                separatorEmpty() });
-        }
-
-        Element render_find_collapsed(const ToolCall& tc)
-        {
-            const std::size_t matches
-                = tc.result->text.empty() ? 0 : count_lines(tc.result->text);
-            return vbox({ render_viewer_header(tc, matches, "match"),
-                separatorEmpty() });
-        }
-
         int content_width()
         {
             return std::max(20, review_content_width(layout_()) - 4);
         }
 
-        Element render_shell_collapsed(const ToolCall& tc)
+        // The default: a collapsed link row that opens the result in the
+        // viewer instead of spilling its text into the timeline.
+        Element render_generic_tool(const ToolCall& tc)
         {
-            const std::string& full   = tc.result->text;
-            const std::size_t total   = count_lines(full);
-            const std::string preview = take_lines(full, LARGE_OUTPUT_LINES);
-            return vbox({ render_viewer_header(tc, total, "line"),
-                code_block(preview, "", content_width()), separatorEmpty() });
-        }
-        Element render_shell_item(const ToolCall& tc)
-        {
-            Elements parts { tool_header_element(tc) };
-            if (!tc.result->text.empty()) {
-                parts.push_back(
-                    code_block(tc.result->text, "", content_width()));
-            }
-            parts.push_back(separatorEmpty());
-            return vbox(std::move(parts));
+            return vbox({ render_viewer_header(
+                              tc, count_lines(tc.result->text), "line"),
+                separatorEmpty() });
         }
 
-        Element render_write_item(const ToolCall& tc)
+        Element render_lua_item(const ToolCall& tc)
         {
-            Element body;
-            Element header = tool_header_element(tc);
-            if (tc.result->diff.has_value()) {
-                const DiffView& diff  = *tc.result->diff;
+            const bool failed = tc.result->kind == ToolCall::Result::Kind::ERROR
+                || tc.result->kind == ToolCall::Result::Kind::REJECT;
+            const ToolReport report = make_tool_report(tc);
+            Component button
+                = make_lua_viewer_button(tc, failed, report.detail);
+            Elements rows { button->Render() };
+            if (failed && !tc.result->text.empty()) {
+                // Show the reason the run died; the script stays in the viewer.
+                rows.push_back(
+                    text(take_lines(tc.result->text, 2)) | color(HL_RED));
+            }
+            const LayoutCtx ctx = layout_();
+            for (const ToolReportSection& section : report.sections) {
+                const auto* report_diff = std::get_if<ToolReportDiff>(&section);
+                if (report_diff == nullptr || report_diff->view == nullptr) {
+                    continue;
+                }
+                const DiffView& diff  = *report_diff->view;
                 std::size_t additions = 0;
                 std::size_t deletions = 0;
                 for (const DiffRow& row : diff.rows) {
                     deletions += diff_row_left_changed(row) ? 1 : 0;
                     additions += diff_row_right_changed(row) ? 1 : 0;
                 }
-                header              = hbox({ std::move(header), filler(),
-                    diffstat_chip(additions, deletions) });
-                const LayoutCtx ctx = layout_();
-                body = diff_split(diff, review_content_width(ctx));
-            } else {
-                body = code_block(
-                    tc.result->text, tool_code_language(tc), content_width());
+                rows.push_back(hbox({ text(diff.file) | bold | color(PANEL_FG),
+                    filler(), diffstat_chip(additions, deletions) }));
+                if (diff.rows.size() <= INLINE_DIFF_ROWS) {
+                    rows.push_back(diff_split(diff, review_content_width(ctx)));
+                    continue;
+                }
+                DiffView head;
+                head.file = diff.file;
+                head.rows.assign(diff.rows.begin(),
+                    std::next(diff.rows.begin(),
+                        static_cast<std::ptrdiff_t>(INLINE_DIFF_ROWS)));
+                rows.push_back(diff_split(head, review_content_width(ctx)));
+                const std::string label = "‹ View full diff ("
+                    + std::to_string(diff.rows.size()) + " lines) ›";
+                rows.push_back(
+                    make_diff_viewer_button(tc.id, report_diff->index, label)
+                        ->Render());
             }
-            return vbox({
-                std::move(header),
-                body,
-                separatorEmpty(),
-            });
-        }
-
-        Element render_ask_item(const ToolCall& tc)
-        {
-            return tool_card(
-                tc, render_markdown_element(tc.result->text, content_width()));
-        }
-
-        Element render_web_item(const ToolCall& tc)
-        {
-            Element status = text("done") | dim;
-            if (!tc.result.has_value()) {
-                status = hbox({
-                    spinner(15, static_cast<std::size_t>(frame_)) | dim,
-                    text(" …") | dim,
-                });
-            } else if (tc.result->kind == ToolCall::Result::Kind::ERROR) {
-                status = text("failed") | color(HL_RED);
-            }
-            return vbox({
-                hbox({
-                    tool_header_element(tc),
-                    filler(),
-                    std::move(status),
-                }),
-                separatorEmpty(),
-            });
-        }
-
-        Element render_generic_tool(const ToolCall& tc)
-        {
-            return tool_card(
-                tc, code_block(tc.result->text, "", content_width()));
+            rows.push_back(separatorEmpty());
+            return vbox(std::move(rows));
         }
 
         Element render_tool_error(const ToolCall& tc)
         {
+            // Keep the lua card shape: the status header would echo
+            // the whole script into the chat.
+            if (tc.name == "lua") {
+                return render_lua_item(tc);
+            }
             return render_tool_status(tc, "Error: ", HL_RED);
         }
 
         Element render_tool_reject(const ToolCall& tc)
         {
+            if (tc.name == "lua") {
+                return render_lua_item(tc);
+            }
             return render_tool_status(tc, "Rejected: ", HL_YELLOW);
         }
 
@@ -1043,13 +995,13 @@ namespace {
                 rows.push_back(separatorEmpty());
                 return vbox(std::move(rows));
             }
-            if (tc.name == "shell") {
+            if (tc.name == "lua") {
                 return vbox({
                     hbox({
                         spinner(15, static_cast<std::size_t>(frame_))
-                            | color(HL_GREEN),
+                            | color(PANEL_FG_DIM),
                         text(" "),
-                        tool_header_element(tc),
+                        make_lua_pending_button(tc)->Render(),
                     }),
                     separatorEmpty(),
                 });
@@ -1105,6 +1057,70 @@ namespace {
                 });
         }
 
+        Component make_diff_viewer_button(
+            std::size_t id, std::size_t index, std::string label)
+        {
+            return memoized_label_button(diff_buttons_, std::pair { id, index },
+                std::move(label), [this, id, index] {
+                    const auto* call = find_tool_call(id);
+                    if (call == nullptr || !call->result.has_value()
+                        || index >= call->result->diffs.size()) {
+                        return;
+                    }
+                    const DiffView& diff = call->result->diffs[index];
+                    imza::enqueue_user_modal(*state_,
+                        ViewerModal {
+                            diff.file, "", "diff", 1, false, "", diff });
+                });
+        }
+
+        Component make_lua_pending_button(const ToolCall& tc)
+        {
+            return memoized_label_button(
+                pending_lua_buttons_, tc.id, "Executing…", [this, id = tc.id] {
+                    const auto* call = find_tool_call(id);
+                    if (call == nullptr) {
+                        return;
+                    }
+                    if (call->result.has_value()) {
+                        open_viewer_for(*call);
+                        return;
+                    }
+                    const std::string script
+                        = json_string(parse_json(call->args), "script");
+                    imza::enqueue_user_modal(*state_,
+                        ViewerModal { "Lua script", script, "lua", 1 });
+                });
+        }
+
+        Component make_lua_viewer_button(
+            const ToolCall& tc, bool failed, const std::string& counts)
+        {
+            if (const auto found = read_buttons_.find(tc.id);
+                found != read_buttons_.end()) {
+                return found->second;
+            }
+            std::string label = failed ? "Execution Failed" : "Executed";
+            if (!counts.empty()) {
+                label += " · " + counts;
+            }
+            auto shared_label
+                = std::make_shared<const std::string>(std::move(label));
+            const std::size_t id = tc.id;
+            Component button     = inline_link_button(
+                [shared_label] { return text(*shared_label) | bold; },
+                [this, id] {
+                    if (const auto* call = find_tool_call(id);
+                        call != nullptr) {
+                        open_viewer_for(*call);
+                    }
+                },
+                failed ? PANEL_FG_DIM : HL_GREEN);
+            read_buttons_.emplace(id, button);
+            container_->Add(failed ? button | strikethrough : button);
+            return button;
+        }
+
         Component make_viewer_header_button(
             const ToolCall& tc, std::string detail)
         {
@@ -1142,8 +1158,6 @@ namespace {
             const bool done          = t.reasoning_ms.has_value();
             const bool placeholder
                 = active && !has_reasoning && !done && expected;
-            // A completed turn with no reasoning text and no measurable
-            // duration has nothing to display or inspect.
             if (has_reasoning || placeholder
                 || (done && expected && t.reasoning_ms->count() >= 50)) {
                 std::string label;

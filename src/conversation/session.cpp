@@ -2,7 +2,6 @@
 #include "common/types.h"
 #include "common/util.h"
 #include "conversation/format.h"
-#include "conversation/workflow.h"
 #include "providers/pricing.h"
 
 #include <algorithm>
@@ -458,7 +457,7 @@ void Session::present_modal(ModalPayload payload)
 {
     std::lock_guard lock(_mutex);
     _modal = std::move(payload);
-    if (std::holds_alternative<ToolCallRequest>(_modal)
+    if (std::holds_alternative<PermissionPrompt>(_modal)
         || std::holds_alternative<QuestionForm>(_modal)) {
         _phase = Phase::AWAITING;
     }

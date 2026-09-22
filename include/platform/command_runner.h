@@ -15,8 +15,9 @@ struct CommandResult {
 };
 
 std::string shell_quote(const std::filesystem::path& path);
-CommandResult run_command(
-    const std::string& command, std::chrono::seconds timeout);
+CommandResult run_command(const std::string& command,
+    std::chrono::seconds timeout,
+    const std::filesystem::path& working_directory = { });
 CommandResult run_attached_command(const std::string& command);
 bool open_browser(std::string_view url);
 

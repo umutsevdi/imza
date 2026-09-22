@@ -77,6 +77,9 @@ inline std::string error_text(Status st)
 
 enum class ApiStandard { OPENAI, OPENAI_RESPONSES, ANTHROPIC };
 
+// Session interaction mode: PLAN reads and analyzes, BUILD may mutate.
+enum class SessionMode { PLAN, BUILD };
+
 enum class SkillPolicy { ALLOW, ASK, DENY };
 
 } // namespace imza

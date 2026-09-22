@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
@@ -72,6 +73,8 @@ struct ViewerModal {
     std::size_t start_line = 1;
     bool line_numbers      = true;
     std::string metadata;
+    // When set, renders the side-by-side diff view instead of the text.
+    std::optional<DiffView> diff;
 };
 
 struct VariantModal {
@@ -93,7 +96,7 @@ struct SkillsModal {
     std::vector<Entry> entries;
 };
 
-using ModalPayload = std::variant<std::monostate, ViewerModal, ToolCallRequest,
+using ModalPayload = std::variant<std::monostate, ViewerModal, PermissionPrompt,
     QuestionForm, ConnectModal, VariantModal, SessionsModal, SkillsModal>;
 
 using ModalResult

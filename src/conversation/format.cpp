@@ -1,5 +1,8 @@
 #include "conversation/format.h"
 
+#include "network/json_io.h"
+
+#include <algorithm>
 #include <string>
 #include <type_traits>
 
@@ -61,6 +64,30 @@ Message assistant_message(
     return message;
 }
 
+std::string format_lua_result(
+    std::string text, const std::optional<Json::Value>& return_value)
+{
+    if (!return_value.has_value()) {
+        return text;
+    }
+    const std::string json = write_pretty_json(*return_value);
+    std::size_t fence      = 3;
+    std::size_t run        = 0;
+    for (const char c : json) {
+        run   = c == '`' ? run + 1 : 0;
+        fence = std::max(fence, run + 1);
+    }
+    if (!text.empty() && text.back() != '\n') {
+        text += '\n';
+    }
+    if (!text.empty()) {
+        text += '\n';
+    }
+    const std::string open(fence, '`');
+    text += open + "json\n" + json + "\n" + open;
+    return text;
+}
+
 std::string tool_result_text(const ToolCall& call)
 {
     if (!call.result.has_value()) {
@@ -72,7 +99,8 @@ std::string tool_result_text(const ToolCall& call)
     case ToolCall::Result::Kind::OUTPUT:
     case ToolCall::Result::Kind::ERROR:
         return append_shell_status(
-            call.result->text, call.result->shell_status);
+            format_lua_result(call.result->text, call.result->return_value),
+            call.result->shell_status);
     }
     return "";
 }

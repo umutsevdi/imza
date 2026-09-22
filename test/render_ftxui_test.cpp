@@ -256,3 +256,16 @@ TEST_CASE("diff_split wraps long lines instead of clipping them")
     CHECK(wide.find("right side") != std::string::npos);
     CHECK(wide.find("here") != std::string::npos);
 }
+TEST_CASE("diff_split renders skip rows as elision markers")
+{
+    imza::DiffView diff { "file.cpp",
+        {
+            { imza::DiffRow::Kind::SAME, 1, 1, "keep", "keep" },
+            { imza::DiffRow::Kind::SKIP, 5, 5, "… 8 unchanged line(s) …",
+                "… 8 unchanged line(s) …" },
+            { imza::DiffRow::Kind::ADD, { }, 14, "", "new" },
+        } };
+    const std::string out = without_ansi(to_text(imza::diff_split(diff)));
+    CHECK(out.find("8 unchanged line(s)") != std::string::npos);
+    CHECK(out.find("14 + new") != std::string::npos);
+}

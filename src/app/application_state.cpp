@@ -1,5 +1,8 @@
 #include "app/application_state.h"
+
 #include "app/flows.h"
+#include "permissions/evaluator.h"
+#include "permissions/filesystem.h"
 #include "permissions/store.h"
 #include "tools/skills.h"
 #include "turn/delegation.h"
@@ -7,8 +10,6 @@
 #include "turn/turn_runner.h"
 #include "workspace/review.h"
 
-#include <algorithm>
-#include <iterator>
 #include <memory>
 #include <utility>
 
@@ -25,6 +26,60 @@ namespace {
         };
     }
 
+    // Lua tool bindings reach session state and the modal queue through
+    // this host; the ask routes into the modal queue only in attended mode.
+    // A child state is assembled before its environment pointer is wired,
+    // so has_rg arrives as a parameter rather than being read from state.
+    LuaHost lua_host(ApplicationState* state, bool has_rg)
+    {
+        return LuaHost {
+            .permission_context =
+                [state] {
+                    return state->environment && state->permissions
+                        ? make_permission_context(*state->environment,
+                              *state->permissions, state->session->mode())
+                        : PermissionContext { };
+                },
+            .ask = [state](ModalPayload payload) -> std::future<ModalResult> {
+                if ((state->runtime_flags & RuntimeFlag::ATTENDED)
+                    == RuntimeFlag::NONE) {
+                    std::promise<ModalResult> denied;
+                    denied.set_value(
+                        ToolVerdict { ToolDecision::REJECT, "unattended run" });
+                    return denied.get_future();
+                }
+                return request_modal(*state, std::move(payload));
+            },
+            .todo = [state] { return state->session->todo(); },
+            .set_todo
+            = [state](
+                  TodoList todo) { state->session->set_todo(std::move(todo)); },
+            .install_grants =
+                [state](PermissionStore::Grants grants) {
+                    return state->permissions->install(std::move(grants));
+                },
+            .web_enabled
+            = (state->runtime_flags & RuntimeFlag::WEB) != RuntimeFlag::NONE,
+            .shell_enabled
+            = (state->runtime_flags & RuntimeFlag::SHELL) != RuntimeFlag::NONE,
+            .skip_permissions
+            = (state->runtime_flags & RuntimeFlag::SKIP_PERMISSIONS)
+                != RuntimeFlag::NONE,
+            .unattended = (state->runtime_flags & RuntimeFlag::ATTENDED)
+                == RuntimeFlag::NONE,
+            .has_rg = has_rg,
+        };
+    }
+
+    // Lazy so the roster can be built before state->skills exists.
+    SkillToolDeps skill_deps(ApplicationState* state)
+    {
+        return SkillToolDeps {
+            [state] { return state->environment->skills(); },
+            [state] -> SkillStore& { return *state->skills; },
+        };
+    }
+
     void wire(std::shared_ptr<ApplicationState> state, StreamFn stream_fn,
         std::vector<Tool> tools)
     {
@@ -34,18 +89,17 @@ namespace {
             [raw](ModalPayload payload) {
                 return request_modal(*raw, std::move(payload));
             },
-            state->skills, SubagentToolFn { },
-            std::function<void(std::string)> { });
+            state->skills, std::function<void(std::string)> { });
         state->delegation = std::make_unique<Delegation>(
             *raw, state->post,
             [raw](ModalPayload payload) {
                 return request_modal(*raw, std::move(payload));
             },
             *state->runner);
-        state->runner->set_subagent_tool(
-            [raw](const ToolCallRequest& req, std::vector<Message>& msgs) {
-                raw->delegation->run_subagents(req, msgs);
-            });
+        *state->subagent_slot
+            = [raw](const ToolCallRequest& req, const Json::Value& args) {
+                  return raw->delegation->run_subagents(req, args);
+              };
         state->runner->set_on_finish([raw](std::string error) {
             on_turn_finished(*raw, std::move(error));
         });
@@ -87,9 +141,14 @@ namespace {
         state->post        = guarded_post(state.get(), std::move(post));
         state->on_exit     = [] { };
         state->runtime_flags = runtime_flags;
+        if (!state->subagent_slot) {
+            state->subagent_slot = std::make_shared<SubagentToolFn>();
+        }
         if (use_default_tools) {
-            tools = default_tools(
-                runtime_flags, state->environment->system()->has_rg);
+            ApplicationState* captured = state.get();
+            tools                      = default_tools(
+                lua_host(captured, state->environment->system()->has_rg),
+                skill_deps(captured), state->subagent_slot);
         }
         wire(state, std::move(stream_fn), std::move(tools));
         return state;
@@ -115,23 +174,23 @@ namespace {
         state->parent_routing = std::move(parent_routing);
         state->agent_label    = std::move(agent_label);
         state->runtime_flags  = parent.runtime_flags;
+        if (!state->subagent_slot) {
+            state->subagent_slot = std::make_shared<SubagentToolFn>();
+        }
         wire(state, std::move(stream_fn), std::move(tools));
         return state;
     }
 
-    std::vector<Tool> sidechat_roster(const ApplicationState& parent)
+    std::vector<Tool> sidechat_roster(
+        ApplicationState& parent, ApplicationState& child)
     {
         std::vector<Tool> tools = default_tools(
-            parent.runtime_flags, parent.environment->system()->has_rg);
-        // The sidechat is a regular chat; drop only file mutation and
-        // delegation.
-        std::erase_if(tools, [](const Tool& tool) {
-            constexpr std::string_view removed[]
-                = { "edit", "write", "subagent", "todo" };
-            return std::find(
-                       std::begin(removed), std::end(removed), tool.spec.name)
-                != std::end(removed);
-        });
+            lua_host(&parent, parent.environment->system()->has_rg),
+            skill_deps(&child));
+        // The sidechat is a regular chat: it keeps the lua sandbox (and its
+        // file bindings) but must not spawn its own subagents.
+        std::erase_if(tools,
+            [](const Tool& tool) { return tool.spec.name == "subagent"; });
         return tools;
     }
 
@@ -157,9 +216,10 @@ std::shared_ptr<ApplicationState> make_application_state(
 
 std::shared_ptr<ApplicationState> make_application_state_with_tools(PostFn post,
     Config config, std::vector<Tool> tools, StreamFn stream_fn,
-    RuntimeFlag runtime_flags)
+    RuntimeFlag runtime_flags, SubagentToolSlot subagent_slot)
 {
     std::shared_ptr<ApplicationState> state(new ApplicationState());
+    state->subagent_slot = std::move(subagent_slot);
     return initialize_root(std::move(state), std::move(post), std::move(config),
         std::move(stream_fn), std::move(tools), runtime_flags, false);
 }
@@ -170,10 +230,10 @@ std::shared_ptr<ApplicationState> make_child_application_state(
 {
     std::shared_ptr<ApplicationState> state(new ApplicationState());
     std::vector<Tool> tools = default_tools(
-        parent.runtime_flags, parent.environment->system()->has_rg);
-    std::erase_if(tools, [](const Tool& tool) {
-        return tool.spec.name == "subagent" || tool.spec.name == "todo";
-    });
+        lua_host(state.get(), parent.environment->system()->has_rg),
+        skill_deps(state.get()));
+    std::erase_if(
+        tools, [](const Tool& tool) { return tool.spec.name == "subagent"; });
     return initialize_child(std::move(state), parent, std::move(post),
         std::move(stream_fn), std::move(parent_routing), std::move(agent_label),
         std::move(tools));
@@ -184,7 +244,9 @@ std::shared_ptr<ApplicationState> make_sidechat_application_state(
 {
     std::shared_ptr<ApplicationState> state(new ApplicationState());
     state->parent_state = &parent;
-    state               = initialize_child(
+    // Built first: the roster captures the child that is moved below.
+    std::vector<Tool> roster = sidechat_roster(parent, *state);
+    state                    = initialize_child(
         std::move(state), parent, parent.post, { },
         [&parent](ModalPayload payload) -> std::future<ModalResult> {
             if (!parent.alive.load()) {
@@ -195,7 +257,7 @@ std::shared_ptr<ApplicationState> make_sidechat_application_state(
             return request_modal(
                 const_cast<ApplicationState&>(parent), std::move(payload));
         },
-        "Sidechat", sidechat_roster(parent));
+        "Sidechat", std::move(roster));
     return state;
 }
 

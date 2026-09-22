@@ -1,15 +1,15 @@
 #pragma once
 
+#include <cstddef>
 #include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
-#include <json/json.h>
-
-#include "conversation/session.h"
+#include "common/types.h"
 #include "permissions/store.h"
 
 namespace imza {
@@ -22,7 +22,7 @@ struct PermissionContext {
     std::shared_ptr<const SystemEnvironment> system;
     std::shared_ptr<const WorkspaceEnvironment> workspace;
     PermissionStore::Snapshot grants;
-    Session::Mode mode = Session::Mode::PLAN;
+    SessionMode mode = SessionMode::PLAN;
 };
 
 struct PermissionDecision {
@@ -32,24 +32,69 @@ struct PermissionDecision {
     std::string reason;
 };
 
-struct FilesystemRequest {
-    enum class Operation { READ, LIST, FIND, EDIT, WRITE };
-
-    Operation operation = Operation::READ;
+struct ReadFileRequest {
     std::filesystem::path target;
-    Json::Value normalized_arguments;
+    std::size_t first_line = 1;
+    std::optional<std::size_t> last_line;
+
+    bool operator==(const ReadFileRequest&) const = default;
 };
+
+struct ListDirectoryRequest {
+    std::filesystem::path target = ".";
+    int depth                    = 1;
+    bool show_hidden             = false;
+
+    bool operator==(const ListDirectoryRequest&) const = default;
+};
+
+struct FindFilesRequest {
+    std::filesystem::path target = ".";
+    std::string pattern;
+
+    bool operator==(const FindFilesRequest&) const = default;
+};
+
+struct InsertFileRequest {
+    std::filesystem::path target;
+    std::string text;
+    std::optional<std::size_t> line;
+
+    bool operator==(const InsertFileRequest&) const = default;
+};
+
+struct EditFileRequest {
+    std::filesystem::path target;
+    std::string old_text;
+    std::string new_text;
+    std::size_t count = 1;
+
+    bool operator==(const EditFileRequest&) const = default;
+};
+
+struct WriteFileRequest {
+    std::filesystem::path target;
+    std::string text;
+
+    bool operator==(const WriteFileRequest&) const = default;
+};
+
+using FilesystemRequest = std::variant<ReadFileRequest, ListDirectoryRequest,
+    FindFilesRequest, InsertFileRequest, EditFileRequest, WriteFileRequest>;
 
 struct FilesystemEvaluation {
     PermissionDecision decision;
     std::optional<FilesystemRequest> request;
 };
 
-PermissionContext permission_context(const Environment& environment,
-    const PermissionStore& permissions, Session::Mode mode);
-FilesystemEvaluation evaluate_filesystem_request(std::string_view tool,
-    const std::string& arguments, const PermissionContext& context);
+PermissionContext make_permission_context(const Environment& environment,
+    const PermissionStore& permissions, SessionMode mode);
+FilesystemEvaluation evaluate_filesystem_request(
+    FilesystemRequest request, const PermissionContext& context);
 std::optional<ExternalGrant> filesystem_session_grant(
     const FilesystemRequest& request);
+const std::filesystem::path& filesystem_target(
+    const FilesystemRequest& request);
+std::string_view filesystem_request_name(const FilesystemRequest& request);
 
 } // namespace imza

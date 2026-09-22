@@ -16,6 +16,7 @@
 #include "providers/store.h"
 #include "runtime/modal_queue.h"
 #include "runtime/subagent_manager.h"
+#include "tools/tool.h"
 #include "workspace/environment.h"
 
 namespace imza {
@@ -48,6 +49,8 @@ struct ApplicationState {
 
     std::unique_ptr<TurnRunner> runner;
     std::unique_ptr<Delegation> delegation;
+    // Shared with the subagent tool; wire() fills it once both exist.
+    SubagentToolSlot subagent_slot;
     ModalQueue queue;
 
     // Sidechat pane, declared last so it dies before the components it shares.
@@ -76,7 +79,8 @@ private:
     friend std::shared_ptr<ApplicationState> make_application_state(
         PostFn, Config, StreamFn, RuntimeFlag);
     friend std::shared_ptr<ApplicationState> make_application_state_with_tools(
-        PostFn, Config, std::vector<Tool>, StreamFn, RuntimeFlag);
+        PostFn, Config, std::vector<Tool>, StreamFn, RuntimeFlag,
+        SubagentToolSlot);
     friend std::shared_ptr<ApplicationState> make_child_application_state(
         const ApplicationState&, PostFn, StreamFn, ModalRequestFn, std::string);
     friend std::shared_ptr<ApplicationState> make_sidechat_application_state(
@@ -88,14 +92,17 @@ std::shared_ptr<ApplicationState> make_application_state(PostFn post,
     RuntimeFlag runtime_flags = interactive_runtime_flags());
 std::shared_ptr<ApplicationState> make_application_state_with_tools(PostFn post,
     Config config, std::vector<Tool> tools, StreamFn stream_fn = { },
-    RuntimeFlag runtime_flags = interactive_runtime_flags());
+    RuntimeFlag runtime_flags      = interactive_runtime_flags(),
+    SubagentToolSlot subagent_slot = nullptr);
 
 std::shared_ptr<ApplicationState> make_child_application_state(
     const ApplicationState& parent, PostFn post, StreamFn stream_fn = { },
     ModalRequestFn parent_routing = { }, std::string agent_label = { });
 
-// Sidechat child state (see SPEC_SIDECHAT.md).
 std::shared_ptr<ApplicationState> make_sidechat_application_state(
     ApplicationState& parent);
 
 } // namespace imza
+
+
+

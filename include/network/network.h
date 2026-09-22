@@ -3,7 +3,9 @@
 #include <json/json.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -85,5 +87,15 @@ Status parse_api_error(std::string_view body, std::string& message);
 
 Status classify_failure(
     long code, const std::string& raw, std::string& message);
+
+struct ModelInfo {
+    std::string id;
+    std::string name;
+    std::optional<std::uint64_t> context_length;
+};
+
+Status parse_models_response(
+    std::string_view body, std::vector<ModelInfo>& out);
+Status fetch_models(const Route& route, std::vector<ModelInfo>& out);
 
 } // namespace imza

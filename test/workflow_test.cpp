@@ -1,6 +1,6 @@
 #include <doctest/doctest.h>
 
-#include "conversation/workflow.h"
+#include "conversation/session.h"
 
 TEST_CASE("workflow phase navigation")
 {

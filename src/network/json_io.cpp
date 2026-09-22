@@ -9,6 +9,13 @@ std::string write_json(const Json::Value& value)
     return Json::writeString(builder, value);
 }
 
+std::string write_pretty_json(const Json::Value& value)
+{
+    Json::StreamWriterBuilder builder;
+    builder["indentation"] = "  ";
+    return Json::writeString(builder, value);
+}
+
 Json::Value parse_json(std::string_view text)
 {
     static thread_local Json::CharReaderBuilder builder;

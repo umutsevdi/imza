@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.31)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 project(
     imza
     VERSION 0.3.1
@@ -108,6 +109,14 @@ FetchContent_Declare(
     EXCLUDE_FROM_ALL
 )
 
+# lua
+FetchContent_Declare(
+    lua
+    GIT_REPOSITORY https://github.com/lua/lua.git
+    GIT_TAG        v5.4.9
+    EXCLUDE_FROM_ALL
+)
+
 # doctest
 FetchContent_Declare(
     doctest
@@ -127,8 +136,18 @@ FetchContent_Declare(
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(jsoncpp cmarkgfm cli11)
+FetchContent_MakeAvailable(lua)
 if(IMZA_BUILD_TESTS)
     FetchContent_MakeAvailable(doctest)
+endif()
+
+add_library(imza_lua STATIC ${lua_SOURCE_DIR}/onelua.c)
+target_compile_definitions(imza_lua PRIVATE MAKE_LIB)
+target_include_directories(imza_lua PUBLIC ${lua_SOURCE_DIR})
+if(MSVC)
+    target_compile_options(imza_lua PRIVATE /w)
+else()
+    target_compile_options(imza_lua PRIVATE -w -O2)
 endif()
 
 find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
@@ -243,7 +262,6 @@ add_library(imza_runtime
     src/conversation/persistence.cpp
     src/conversation/session.cpp
     src/conversation/session_store.cpp
-    src/permissions/store.cpp
     src/providers/store.cpp
     src/workspace/review.cpp
     src/runtime/main_thread_queue.cpp
@@ -271,12 +289,19 @@ add_library(imza_execution
     src/app/one_shot.cpp
     src/app/slash_commands.cpp
     src/permissions/evaluator.cpp
+    src/permissions/store.cpp
     src/permissions/filesystem.cpp
+    src/permissions/shell_analysis.cpp
     src/tools/tool.cpp
-    src/tools/find.cpp
-    src/tools/tool_args.cpp
-    src/tools/shell.cpp
-    src/tools/web.cpp
+    src/tools/file_ops.cpp
+    src/tools/lua.cpp
+    src/tools/bindings/binding.cpp
+    src/tools/bindings/filesystem.cpp
+    src/tools/bindings/mutation.cpp
+    src/tools/bindings/session.cpp
+    src/tools/bindings/shell.cpp
+    src/tools/bindings/tree.cpp
+    src/tools/bindings/web.cpp
     src/turn/delegation.cpp
     src/turn/prompt.cpp
     src/turn/stream_updates.cpp
@@ -286,6 +311,7 @@ target_include_directories(imza_execution PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${jsoncpp_SOURCE_DIR}/include
     ${PROMPTS_GENERATED_DIR}
+    ${TREE_SITTER_GENERATED_DIR}
 )
 set_source_files_properties(src/ui/status_line.cpp PROPERTIES
     COMPILE_DEFINITIONS IMZA_VERSION="${PROJECT_VERSION}")
@@ -300,6 +326,8 @@ target_link_libraries(imza_execution PUBLIC
     imza_foundation
     imza_network
     imza_runtime
+    imza_lua
+    imza_tree_sitter_grammars
     jsoncpp_static
 )
 
@@ -476,3 +504,4 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release" AND IMZA_PACKAGE)
         include(CPack)
     endif()
 endif()
+

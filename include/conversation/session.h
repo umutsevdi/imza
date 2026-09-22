@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -20,7 +21,6 @@
 #include "network/chat.h"
 #include "network/network.h"
 #include "providers/pricing.h"
-#include "tools/tool.h"
 #include "workspace/attachments.h"
 
 namespace imza {
@@ -49,8 +49,11 @@ struct ToolCall {
         enum class Kind { OUTPUT, ERROR, REJECT, CANCEL };
         Kind kind;
         std::string text;
+        std::optional<Json::Value> return_value;
         std::optional<DiffView> diff;
+        std::vector<DiffView> diffs;
         std::optional<ShellStatus> shell_status;
+        std::vector<LuaBindingCall> dispatch_log;
     };
     std::size_t id = 0;
     std::string call_id;
@@ -102,7 +105,7 @@ struct QueuedMessage {
 class Session final : public ApplicationComponent {
 public:
     enum class Phase { IDLE, CONNECTING, STREAMING, AWAITING };
-    enum class Mode { PLAN, BUILD };
+    using Mode = SessionMode;
     struct Countdown {
         std::chrono::steady_clock::time_point deadline;
         bool stalled = false;
@@ -241,5 +244,15 @@ private:
     Signal<> title_changed_;
     Signal<> attachments_changed_;
 };
+
+enum class WorkflowPhase { PLAN, BUILD, REVIEW };
+
+WorkflowPhase next_workflow_phase(WorkflowPhase phase, bool review_available);
+WorkflowPhase previous_workflow_phase(
+    WorkflowPhase phase, bool review_available);
+std::optional<Session::Mode> workflow_mode(WorkflowPhase phase);
+
+using WorkflowFn         = std::function<WorkflowPhase()>;
+using WorkflowNavigateFn = std::function<void(WorkflowPhase)>;
 
 } // namespace imza

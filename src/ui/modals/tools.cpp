@@ -38,10 +38,13 @@ namespace {
         return std::filesystem::path(sys.default_shell).filename().string();
     }
 
-    std::string tool_action_description(const ToolCallRequest& req)
+    std::string tool_action_description(const PermissionPrompt& req)
     {
-        if (!req.description.empty()) {
+        if (!req.description.empty() && req.description != req.name) {
             return req.description;
+        }
+        if (req.name == "skill") {
+            return "Allow this tool to run";
         }
         if (req.name == "shell") {
             return "Run a shell command";
@@ -52,13 +55,16 @@ namespace {
         if (req.name == "write") {
             return "Write text to a file";
         }
+        if (req.name == "insert") {
+            return "Insert text into a file";
+        }
         if (req.name == "read") {
             return "Read text from a file";
         }
         if (req.name == "list") {
             return "List a directory";
         }
-        return "Allow this tool to run";
+        return "Allow this operation to run";
     }
 
     std::string preview_text(const std::string& content)
@@ -86,122 +92,113 @@ namespace {
         return normalized == "md" || normalized == "markdown";
     }
 
-    int modal_content_width()
+    int modal_content_width(const ModalPayload& modal)
     {
         const int popup_w
-            = std::min(Terminal::Size().dimx - 4, MODAL_MAX_WIDTH);
+            = std::min(Terminal::Size().dimx - 4, modal_max_width(modal));
         return std::max(40, popup_w - 8);
     }
 
-    Element tool_approval_reason(const ToolCallRequest& req)
+    Element detail_row(const std::string& label, const std::string& value)
     {
-        const Json::Value args = parse_json(req.args);
-        std::string message    = req.permission_reason;
-        const char* path_key
-            = req.name == "edit" || req.name == "write" ? "file_path" : "path";
-        if (!message.empty()
-            && (req.name == "read" || req.name == "list" || req.name == "edit"
-                || req.name == "write")) {
-            const std::string path = json_string(args, path_key);
-            if (!path.empty()) {
-                message += " · " + path;
-            }
+        return hbox({ text(label) | bold | color(PANEL_FG), text("  "),
+            paragraph(preview_text(value)) | xflex });
+    }
+
+    Element tool_approval_reason(const PermissionPrompt& req)
+    {
+        std::string message = req.reason;
+        if (!message.empty() && !req.target.empty()) {
+            message += " · " + req.target;
         } else if (message.empty() && req.name == "shell") {
             message = "May modify files or run external processes";
         } else if (message.empty()
-            && (req.name == "edit" || req.name == "write")) {
-            const std::string path = json_string(args, "file_path");
-            message
-                = path.empty() ? "Will modify a file" : "Will modify " + path;
+            && (req.name == "edit" || req.name == "write"
+                || req.name == "insert")) {
+            message = req.target.empty() ? "Will modify a file"
+                                         : "Will modify " + req.target;
         } else if (message.empty() && req.name == "read") {
-            const std::string path = json_string(args, "path");
-            message = path.empty() ? "Will read a file" : "Will read " + path;
+            message = req.target.empty() ? "Will read a file"
+                                         : "Will read " + req.target;
         } else if (message.empty() && req.name == "list") {
-            const std::string path = json_string(args, "path");
-            message
-                = path.empty() ? "Will list a directory" : "Will list " + path;
+            message = req.target.empty() ? "Will list a directory"
+                                         : "Will list " + req.target;
         } else if (message.empty()) {
             message = "Permission required";
         }
         return text(message) | color(HL_YELLOW);
     }
 
-    Element tool_request_body(
-        const ToolCallRequest& req, const SystemEnvironment& system, int width)
+    Element filesystem_body(const PermissionPrompt& req,
+        const FilesystemRequest& request, int width)
     {
-        const Json::Value args = parse_json(req.args);
-
-        if (req.name == "shell") {
-            const std::string command = json_string(args, "command").empty()
-                ? req.args
-                : json_string(args, "command");
-            long timeout              = 10;
-            if (const auto value = json_int(args, "timeout");
-                value.has_value()) {
-                timeout = static_cast<long>(*value);
-            }
-            std::error_code ec;
-            const std::string cwd = std::filesystem::current_path(ec).string();
-            const std::string metadata = (ec ? std::string { } : cwd + " · ")
-                + "timeout " + std::to_string(timeout) + "s";
-            return vbox(
-                { code_block(preview_text(command), shell_name(system), width),
-                    hint_bar(metadata) });
-        }
-
-        if (req.name == "edit") {
-            const std::string lang
-                = syntax_type_for_path(json_string(args, "file_path"));
-            Elements rows {
-                section_title("Existing text"),
-                code_block(
-                    preview_text(json_string(args, "old_string")), lang, width),
-                section_title("Replacement"),
-                code_block(
-                    preview_text(json_string(args, "new_string")), lang, width),
-            };
-            return vbox(std::move(rows));
-        }
-
-        if (req.name == "write") {
-            const std::string lang
-                = syntax_type_for_path(json_string(args, "file_path"));
-            return vbox({
-                section_title("Content"),
-                code_block(
-                    preview_text(json_string(args, "text")), lang, width),
-            });
-        }
-
-        if (req.name == "read") {
-            std::string range;
-            if (const auto begin = json_int(args, "line_begin")) {
-                range = "lines " + std::to_string(*begin);
-                if (const auto end = json_int(args, "line_end")) {
-                    range += "–" + std::to_string(*end);
+        const std::string lang = syntax_type_for_path(req.target);
+        return std::visit(
+            [&](const auto& operation) -> Element {
+                using T = std::decay_t<decltype(operation)>;
+                if constexpr (std::is_same_v<T, EditFileRequest>) {
+                    return vbox({ section_title("Existing text"),
+                        code_block(
+                            preview_text(operation.old_text), lang, width),
+                        section_title("Replacement"),
+                        code_block(
+                            preview_text(operation.new_text), lang, width) });
+                } else if constexpr (std::is_same_v<T, WriteFileRequest>) {
+                    return vbox({ section_title("Content"),
+                        code_block(
+                            preview_text(operation.text), lang, width) });
+                } else if constexpr (std::is_same_v<T, InsertFileRequest>) {
+                    const std::string where = operation.line
+                        ? "before line " + std::to_string(*operation.line)
+                        : "at end of file";
+                    return vbox({ section_title("Insert " + where),
+                        code_block(
+                            preview_text(operation.text), lang, width) });
+                } else if constexpr (std::is_same_v<T, ReadFileRequest>) {
+                    if (!operation.first_line) {
+                        return text("");
+                    }
+                    std::string range
+                        = "lines " + std::to_string(operation.first_line);
+                    range += operation.last_line
+                        ? "–" + std::to_string(*operation.last_line)
+                        : " onward";
+                    return text(range) | color(PANEL_FG_DIM);
                 } else {
-                    range += " onward";
+                    return text("");
+                }
+            },
+            request);
+    }
+
+    Element tool_request_body(
+        const PermissionPrompt& req, const SystemEnvironment& system, int width)
+    {
+        if (const auto* shell = std::get_if<ShellRequest>(&req.request)) {
+            std::string cwd = req.target;
+            if (cwd.empty()) {
+                std::error_code ec;
+                cwd = std::filesystem::current_path(ec).string();
+                if (ec) {
+                    cwd.clear();
                 }
             }
-            return range.empty() ? text("") : text(range) | color(PANEL_FG_DIM);
+            const std::string metadata
+                = (cwd.empty() ? std::string { } : cwd + " · ") + "timeout "
+                + std::to_string(shell->timeout.count()) + "s";
+            return vbox({ code_block(preview_text(shell->command),
+                              shell_name(system), width),
+                hint_bar(metadata) });
         }
-
-        if (req.name == "list") {
-            return text("");
+        if (const auto* file = std::get_if<FilesystemRequest>(&req.request)) {
+            return filesystem_body(req, *file, width);
         }
-
-        if (args.isObject() && !args.empty()) {
-            Elements rows;
-            for (const std::string& key : args.getMemberNames()) {
-                const Json::Value& value = args[key];
-                const std::string rendered
-                    = value.isString() ? value.asString() : write_json(value);
-                rows.push_back(hbox({ text(key) | bold | color(PANEL_FG),
-                    text("  "), paragraph(preview_text(rendered)) | xflex }));
-            }
-            return vbox(std::move(rows));
+        if (const auto* skill = std::get_if<SkillRequest>(&req.request)) {
+            return vbox({ detail_row("name", skill->name),
+                detail_row("path", skill->path),
+                detail_row("scope", skill->scope) });
         }
-        return code_block(preview_text(req.args), "json", width);
+        return text("");
     }
 
     class ModalView : public ComponentBase {
@@ -227,7 +224,7 @@ namespace {
             return std::visit(
                 [&](const auto& payload) -> Element {
                     using T = std::decay_t<decltype(payload)>;
-                    if constexpr (std::is_same_v<T, ToolCallRequest>) {
+                    if constexpr (std::is_same_v<T, PermissionPrompt>) {
                         return tool_body(payload);
                     } else if constexpr (std::is_same_v<T, QuestionForm>) {
                         return question_body();
@@ -266,7 +263,7 @@ namespace {
                     && body_->OnEvent(event)) {
                     return true;
                 }
-                if (std::holds_alternative<ToolCallRequest>(st.modal())
+                if (std::holds_alternative<PermissionPrompt>(st.modal())
                     && tool_phase_ == ToolPhase::REASON) {
                     _set_tool_phase(ToolPhase::DECIDE);
                     return true;
@@ -310,7 +307,12 @@ namespace {
                 [this](const auto& payload) { build(payload); }, st.modal());
         }
 
-        void build(const ToolCallRequest& request)
+        void build(const PermissionPrompt& request)
+        {
+            build_tool_approval(request.allow_for_session);
+        }
+
+        void build_tool_approval(bool allow_for_session)
         {
             tool_phase_ = ToolPhase::DECIDE;
             reason_buf_.clear();
@@ -325,7 +327,7 @@ namespace {
             };
             accept_         = action_button("Allow once",
                 [resolve] { resolve(ToolDecision::ACCEPT_ONCE, ""); });
-            accept_session_ = request.allow_for_session
+            accept_session_ = allow_for_session
                 ? action_button("Allow for this session",
                       [resolve] {
                           resolve(ToolDecision::ACCEPT_FOR_SESSION, "");
@@ -454,8 +456,10 @@ namespace {
         void build(const ViewerModal& payload)
         {
             reset_static_scroll();
-            const int content_width = modal_content_width();
-            if (is_markdown_type(payload.lang)) {
+            const int content_width = modal_content_width(session_->modal());
+            if (payload.diff.has_value()) {
+                viewer_content_ = diff_split(*payload.diff, content_width);
+            } else if (is_markdown_type(payload.lang)) {
                 viewer_content_
                     = render_markdown_element(payload.content, content_width);
             } else if (payload.line_numbers) {
@@ -555,15 +559,16 @@ namespace {
             });
         }
 
-        Element tool_body(const ToolCallRequest& req)
+        template <typename Request> Element tool_body(const Request& req)
         {
             Elements rows { header_line(tool_display_name(req.name)) };
             rows.push_back(
                 text(tool_action_description(req)) | color(PANEL_FG_DIM));
             rows.push_back(tool_approval_reason(req));
             rows.push_back(separatorEmpty());
-            rows.push_back(tool_request_body(
-                req, *state_->environment->system(), modal_content_width()));
+            rows.push_back(
+                tool_request_body(req, *state_->environment->system(),
+                    modal_content_width(session_->modal())));
             rows.push_back(separatorEmpty());
             if (tool_phase_ == ToolPhase::REASON) {
                 rows.push_back(section_title("Reason for rejecting", PANEL_FG));
@@ -669,9 +674,19 @@ namespace {
 
 } // namespace
 
+int modal_max_width(const ModalPayload& modal)
+{
+    return std::holds_alternative<ViewerModal>(modal)
+            && std::get<ViewerModal>(modal).diff.has_value()
+        ? DIFF_VIEWER_MODAL_MAX_WIDTH
+        : MODAL_MAX_WIDTH;
+}
+
 ftxui::Component make_modal(std::shared_ptr<ApplicationState> state)
 {
     return ftxui::Make<ModalView>(std::move(state));
 }
 
 } // namespace imza
+
+

@@ -15,6 +15,7 @@
 #include "conversation/persistence.h"
 #include "conversation/session.h"
 #include "conversation/session_store.h"
+#include "network/json_io.h"
 #include "platform/config.h"
 #include "platform/file_lock.h"
 
@@ -251,6 +252,201 @@ TEST_CASE("saved sessions retain delegated-agent chat transcripts")
 #endif
 }
 
+TEST_CASE("lua dispatch log survives session persistence")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    imza::Session source;
+    source.begin_send("run lua");
+    source.append_assistant("model", "off");
+    const imza::ToolCallRequest request { "lua",
+        R"json({"script":"print(1)"})json", "", "call-1" };
+    source.append_tool(request);
+    imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT,
+        "1\n" };
+    result.dispatch_log
+        = { { "read", "/tmp/a", true }, { "sh", "false", false } };
+    source.fill_tool_result(request, std::move(result));
+    source.finish_session("");
+
+    REQUIRE(imza::save_session(source) == imza::Status::OK);
+    const auto saved = imza::saved_sessions();
+    REQUIRE(saved.size() == 1);
+    imza::Session loaded;
+    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    REQUIRE(loaded.items().size() == 3);
+    const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
+    REQUIRE(call.result.has_value());
+    REQUIRE(call.result->dispatch_log.size() == 2);
+    const imza::LuaBindingCall read { "read", "/tmp/a", true };
+    const imza::LuaBindingCall shell { "sh", "false", false };
+    CHECK(call.result->dispatch_log[0] == read);
+    CHECK(call.result->dispatch_log[1] == shell);
+#endif
+}
+
+TEST_CASE("lua return value survives session persistence")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    imza::Session source;
+    source.begin_send("run lua");
+    source.append_assistant("model", "off");
+    const imza::ToolCallRequest request { "lua",
+        R"json({"script":"return {a = 1}"})json", "", "call-1" };
+    source.append_tool(request);
+    imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT, "" };
+    result.return_value
+        = imza::parse_json(R"json({"a":1,"b":[true,null]})json");
+    source.fill_tool_result(request, std::move(result));
+    source.finish_session("");
+
+    REQUIRE(imza::save_session(source) == imza::Status::OK);
+    const auto saved = imza::saved_sessions();
+    REQUIRE(saved.size() == 1);
+    imza::Session loaded;
+    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
+    REQUIRE(call.result.has_value());
+    REQUIRE(call.result->return_value.has_value());
+    CHECK((*call.result->return_value)["a"].asInt() == 1);
+    REQUIRE((*call.result->return_value)["b"].isArray());
+    CHECK((*call.result->return_value)["b"][0].asBool());
+    CHECK((*call.result->return_value)["b"][1].isNull());
+#endif
+}
+
+TEST_CASE("legacy lua result without a return value still loads")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    imza::Session source;
+    source.begin_send("run lua");
+    source.append_assistant("model", "off");
+    const imza::ToolCallRequest request { "lua",
+        R"json({"script":"print(1)"})json", "", "call-1" };
+    source.append_tool(request);
+    imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT,
+        "1\n" };
+    source.fill_tool_result(request, std::move(result));
+    source.finish_session("");
+
+    REQUIRE(imza::save_session(source) == imza::Status::OK);
+    const auto saved = imza::saved_sessions();
+    REQUIRE(saved.size() == 1);
+    imza::Session loaded;
+    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
+    REQUIRE(call.result.has_value());
+    CHECK_FALSE(call.result->return_value.has_value());
+    CHECK(call.result->text == "1\n");
+#endif
+}
+
+TEST_CASE("lua aggregate diffs survive session persistence")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    imza::Session source;
+    source.begin_send("run lua");
+    source.append_assistant("model", "off");
+    const imza::ToolCallRequest request { "lua",
+        R"json({"script":"tool.file.edit(...)"} )json", "", "call-1" };
+    source.append_tool(request);
+    imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT, "" };
+    imza::DiffView diff;
+    diff.file = "/tmp/a.txt";
+    diff.rows.push_back({ imza::DiffRow::Kind::SAME, 1, 1, "x", "x" });
+    diff.rows.push_back({ imza::DiffRow::Kind::REMOVE, 2, { }, "old", "" });
+    diff.rows.push_back({ imza::DiffRow::Kind::ADD, { }, 2, "", "new" });
+    result.diffs.push_back(diff);
+    source.fill_tool_result(request, std::move(result));
+    source.finish_session("");
+
+    REQUIRE(imza::save_session(source) == imza::Status::OK);
+    const auto saved = imza::saved_sessions();
+    REQUIRE(saved.size() == 1);
+    imza::Session loaded;
+    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
+    REQUIRE(call.result.has_value());
+    REQUIRE(call.result->diffs.size() == 1);
+    CHECK(call.result->diffs[0].file == "/tmp/a.txt");
+    REQUIRE(call.result->diffs[0].rows.size() == 3);
+    CHECK(call.result->diffs[0].rows[1].kind == imza::DiffRow::Kind::REMOVE);
+    CHECK(call.result->diffs[0].rows[1].left == "old");
+    CHECK(call.result->diffs[0].rows[2].kind == imza::DiffRow::Kind::ADD);
+    CHECK(call.result->diffs[0].rows[2].right == "new");
+#endif
+}
+
+TEST_CASE("lua aggregate diffs round-trip SKIP and clamp unknown kinds")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    imza::Session source;
+    source.begin_send("run lua");
+    source.append_assistant("model", "off");
+    const imza::ToolCallRequest request { "lua", "{}", "", "call-1" };
+    source.append_tool(request);
+    imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT, "" };
+    imza::DiffView diff;
+    diff.file = "/tmp/a.txt";
+    diff.rows.push_back({ imza::DiffRow::Kind::SAME, 1, 1, "x", "x" });
+    diff.rows.push_back({ imza::DiffRow::Kind::SKIP, 2, 2,
+        "… 5 unchanged line(s) …", "… 5 unchanged line(s) …" });
+    diff.rows.push_back({ imza::DiffRow::Kind::REMOVE, 8, { }, "old", "" });
+    diff.rows.push_back({ imza::DiffRow::Kind::ADD, { }, 8, "", "new" });
+    result.diffs.push_back(diff);
+    source.fill_tool_result(request, std::move(result));
+    source.finish_session("");
+
+    REQUIRE(imza::save_session(source) == imza::Status::OK);
+    const auto saved = imza::saved_sessions();
+    REQUIRE(saved.size() == 1);
+    imza::Session loaded;
+    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
+    REQUIRE(call.result.has_value());
+    REQUIRE(call.result->diffs.size() == 1);
+    REQUIRE(call.result->diffs[0].rows.size() == 4);
+    CHECK(call.result->diffs[0].rows[1].kind == imza::DiffRow::Kind::SKIP);
+    CHECK(call.result->diffs[0].rows[1].left == "… 5 unchanged line(s) …");
+    CHECK(call.result->diffs[0].rows[2].kind == imza::DiffRow::Kind::REMOVE);
+    CHECK(call.result->diffs[0].rows[3].kind == imza::DiffRow::Kind::ADD);
+
+    // Kinds newer than this build clamps to SAME so old sessions load.
+    std::ifstream in(saved.front().path);
+    std::stringstream buffer;
+    buffer << in.rdbuf();
+    std::string json     = buffer.str();
+    const std::size_t at = json.find("\"kind\":3");
+    REQUIRE(at != std::string::npos);
+    json.replace(at, 8, "\"kind\":9");
+    {
+        std::ofstream out(saved.front().path);
+        out << json;
+    }
+    imza::Session clamped;
+    REQUIRE(
+        imza::load_session(saved.front().path, clamped) == imza::Status::OK);
+    const auto& clamped_call = std::get<imza::ToolCall>(clamped.items()[2]);
+    REQUIRE(clamped_call.result.has_value());
+    REQUIRE(clamped_call.result->diffs[0].rows.size() == 4);
+    CHECK(clamped_call.result->diffs[0].rows[1].kind
+        == imza::DiffRow::Kind::SAME);
+#endif
+}
 TEST_CASE("empty title is normalized in both file and index")
 {
 #ifdef _WIN32

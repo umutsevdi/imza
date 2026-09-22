@@ -18,15 +18,17 @@
 #include <utility>
 #include <vector>
 
-#include "common/diff.h"
-#include "conversation/workflow.h"
-#include "network/models.h"
+#include "common/modal.h"
+#include "common/tool_call.h"
+#include "conversation/session.h"
+#include "network/network.h"
 #include "permissions/store.h"
 #include "tools/skills.h"
 
 namespace imza {
 
 class Session;
+class MainThreadQueue;
 struct ApplicationState;
 struct ReviewHunk;
 struct ReviewLine;
@@ -60,6 +62,12 @@ inline const ftxui::Color HL_BLUE    = ftxui::Color::RGB(121, 192, 255);
 inline const ftxui::Color HL_MAGENTA = ftxui::Color::RGB(210, 168, 255);
 inline const ftxui::Color HL_CYAN    = ftxui::Color::RGB(104, 216, 232);
 inline constexpr int MODAL_MAX_WIDTH = 100;
+// Wider frame for the side-by-side diff viewer, which needs two panes of
+// readable code; every other modal keeps MODAL_MAX_WIDTH.
+inline constexpr int DIFF_VIEWER_MODAL_MAX_WIDTH = 160;
+
+// Width cap for the active modal payload.
+int modal_max_width(const ModalPayload& modal);
 
 std::string fit(const std::string& text, int width);
 // Byte ranges [begin, end) of the visual rows of one logical line wrapped to
@@ -291,5 +299,8 @@ struct SidechatStatus {
 ftxui::Component make_sidechat_component(
     std::shared_ptr<ApplicationState> state, std::function<void()> on_focus,
     SidechatStatus& status);
+
+int run_repl(
+    std::shared_ptr<ApplicationState> state, MainThreadQueue& main_thread);
 
 } // namespace imza

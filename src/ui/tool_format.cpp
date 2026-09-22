@@ -1,8 +1,10 @@
 #include "ui/tool_format.h"
+#include "common/util.h"
 #include "network/json_io.h"
+#include "tools/tool.h"
 
+#include <algorithm>
 #include <cctype>
-#include <filesystem>
 
 namespace imza {
 
@@ -39,93 +41,6 @@ namespace {
                 + (build_count == 1 ? " builder" : " builders");
         }
         return summary;
-    }
-
-    int json_array_count(const std::string& args, std::string_view key)
-    {
-        const Json::Value parsed = parse_json(args);
-        if (parsed.isObject() && parsed[std::string(key)].isArray()) {
-            return static_cast<int>(parsed[std::string(key)].size());
-        }
-        return 0;
-    }
-
-    std::string plural_count(int n, std::string_view word)
-    {
-        std::string out = std::to_string(n) + ' ';
-        out += word;
-        if (n != 1) {
-            out += 's';
-        }
-        return out;
-    }
-
-    std::string read_path(const ToolCall& call)
-    {
-        const Json::Value parsed = parse_json(call.args);
-        const std::string path   = json_string(parsed, "path");
-        return path.empty() ? call.args : path;
-    }
-
-    std::string web_search_arg(const ToolCall& call)
-    {
-        const Json::Value parsed = parse_json(call.args);
-        const auto* key          = call.name == "webfetch" ? "url" : "query";
-        const std::string value  = json_string(parsed, key);
-        return value.empty() ? call.args : value;
-    }
-
-    std::string tool_request_summary(
-        const std::string& name, const std::string& args)
-    {
-        const Json::Value parsed = parse_json(args);
-        if (name == "edit") {
-            std::string out = tool_display_name(name) + ": "
-                + json_string(parsed, "file_path");
-            if (const auto offset = json_int(parsed, "offset");
-                offset.has_value() && *offset > 0) {
-                out += " · line " + std::to_string(*offset);
-            }
-            return out;
-        }
-        if (name == "write") {
-            const std::string path = json_string(parsed, "file_path");
-            const bool overwrite   = parsed.isObject()
-                && parsed["overwrite"].isBool() && parsed["overwrite"].asBool();
-            std::string out = tool_display_name(name) + ": " + path;
-            if (!overwrite) {
-                const auto line = json_int(parsed, "line");
-                if (line.has_value() && *line > 0) {
-                    out += " · below line " + std::to_string(*line);
-                }
-            } else {
-                const auto lb = json_int(parsed, "line_begin");
-                const auto le = json_int(parsed, "line_end");
-                if ((lb && *lb > 0) || (le && *le > 0)) {
-                    out += " · lines " + std::to_string(lb.value_or(0)) + "-"
-                        + std::to_string(le.value_or(0));
-                }
-            }
-            return out;
-        }
-        if (name == "skill") {
-            return "Load Skill " + json_string(parsed, "name");
-        }
-        std::string head          = tool_display_name(name);
-        const std::string summary = tool_args_summary(args);
-        if (name == "todo") {
-            return tool_display_name(name) + " ("
-                + plural_count(json_array_count(args, "todos"), "task") + ")";
-        }
-        if (name == "ask") {
-            return tool_display_name(name) + " ("
-                + plural_count(json_array_count(args, "questions"), "question")
-                + ")";
-        }
-        if (!summary.empty()) {
-            head += " " + summary;
-        }
-        return head;
     }
 
 } // namespace
@@ -167,42 +82,17 @@ std::string tool_args_summary(const std::string& args)
 
 std::string tool_call_head(const ToolCall& call)
 {
-    if (call.name == "edit" || call.name == "write") {
-        return tool_request_summary(call.name, call.args);
-    }
-    if (call.name == "read" || call.name == "list") {
-        return read_path(call);
-    }
-    if (call.name == "find") {
-        const Json::Value parsed = parse_json(call.args);
-        return json_string(parsed, "pattern");
-    }
-    if (call.name == "shell") {
-        return "shell";
-    }
     if (call.name == "skill") {
         const Json::Value parsed = parse_json(call.args);
         const std::string name   = json_string(parsed, "name");
         return name.empty() ? "Load Skill" : "Load Skill " + name;
     }
-    if (call.name == "ask") {
-        return tool_display_name(call.name) + " ("
-            + plural_count(json_array_count(call.args, "questions"), "question")
-            + ")";
-    }
-    if (call.name == "todo") {
-        const int n = json_array_count(call.args, "todos");
-        if (n == 0) {
-            return tool_display_name(call.name);
-        }
-        return tool_display_name(call.name) + " (" + plural_count(n, "task")
-            + ")";
-    }
-    if (call.name == "webfetch" || call.name == "websearch") {
-        return web_search_arg(call);
-    }
     if (call.name == "subagent") {
         return tool_display_name(call.name);
+    }
+    if (call.name == "lua") {
+        const std::string counts = lua_dispatch_counts(call);
+        return counts.empty() ? "Lua execution" : "Lua · " + counts;
     }
     std::string head       = tool_display_name(call.name);
     const std::string args = tool_args_summary(call.args);
@@ -214,71 +104,130 @@ std::string tool_call_head(const ToolCall& call)
 
 std::string tool_header_args(const ToolCall& call)
 {
-    if (call.name == "read" || call.name == "list") {
-        return read_path(call);
-    }
-    if (call.name == "find") {
-        const Json::Value parsed  = parse_json(call.args);
-        const std::string pattern = json_string(parsed, "pattern");
-        const std::string path    = json_string(parsed, "path");
-        return pattern + (path.empty() ? "" : " · " + path);
-    }
-    if (call.name == "edit" || call.name == "write") {
-        const Json::Value parsed = parse_json(call.args);
-        std::string path         = json_string(parsed, "file_path");
-        if (path.empty()) {
-            path = json_string(parsed, "path");
-        }
-        if (path.empty()) {
-            path = call.args;
-        }
-        return path;
-    }
-    if (call.name == "shell") {
-        const Json::Value parsed = parse_json(call.args);
-        const std::string cmd    = json_string(parsed, "command");
-        return cmd.empty() ? call.args : cmd;
-    }
-    if (call.name == "ask") {
-        return plural_count(
-            json_array_count(call.args, "questions"), "question");
-    }
-    if (call.name == "todo") {
-        return plural_count(json_array_count(call.args, "todos"), "task");
-    }
     if (call.name == "skill") {
         return json_string(parse_json(call.args), "name");
-    }
-    if (call.name == "webfetch" || call.name == "websearch") {
-        return web_search_arg(call);
     }
     if (call.name == "subagent") {
         return subagent_args(call);
     }
+    if (call.name == "lua") {
+        // The binding counts identify the run; echoing the script would
+        // spill it into the chat on failure.
+        return lua_dispatch_counts(call);
+    }
     return tool_args_summary(call.args);
 }
 
-std::string tool_code_language(const ToolCall& call)
+std::string lua_dispatch_counts(const ToolCall& call)
 {
-    if (call.name != "read") {
+    if (!call.result.has_value() || call.result->dispatch_log.empty()) {
         return "";
     }
-    std::string ext
-        = std::filesystem::path(read_path(call)).extension().string();
-    if (!ext.empty() && ext.front() == '.') {
-        ext.erase(0, 1);
+    std::size_t total  = 0;
+    std::size_t failed = 0;
+    for (const LuaBindingCall& entry : call.result->dispatch_log) {
+        ++total;
+        failed += entry.ok ? 0 : 1;
     }
-    return ext;
+    std::string out = std::to_string(total) + (total == 1 ? " tool" : " tools");
+    if (failed > 0) {
+        out += " (" + std::to_string(failed) + " failed)";
+    }
+    return out;
 }
 
-std::size_t read_start_line(const ToolCall& call)
+std::string lua_dispatch_summary(const ToolCall& call)
 {
-    const Json::Value parsed = parse_json(call.args);
-    if (const auto raw = json_int(parsed, "line_begin");
-        raw.has_value() && *raw >= 1) {
-        return static_cast<std::size_t>(*raw);
+    if (!call.result.has_value() || call.result->dispatch_log.empty()) {
+        return "";
     }
-    return 1;
+    struct BindingCount {
+        std::string name;
+        std::size_t count  = 0;
+        std::size_t failed = 0;
+    };
+    std::vector<BindingCount> counts;
+    for (const LuaBindingCall& entry : call.result->dispatch_log) {
+        auto found = std::find_if(
+            counts.begin(), counts.end(), [&](const BindingCount& count) {
+                return count.name == entry.binding;
+            });
+        if (found == counts.end()) {
+            counts.push_back({ entry.binding, 0, 0 });
+            found = std::prev(counts.end());
+        }
+        ++found->count;
+        found->failed += entry.ok ? 0 : 1;
+    }
+    std::string summary;
+    for (const BindingCount& count : counts) {
+        if (!summary.empty()) {
+            summary += " · ";
+        }
+        summary += std::to_string(count.count) + " " + count.name;
+        if (count.failed > 0) {
+            summary += " (" + std::to_string(count.failed) + " failed)";
+        }
+    }
+    return summary;
+}
+
+ToolReport make_tool_report(const ToolCall& call)
+{
+    ToolReport report;
+    report.summary = lua_dispatch_summary(call);
+    report.detail  = lua_dispatch_counts(call);
+    report.sections.push_back(
+        ToolReportCode { "lua", json_string(parse_json(call.args), "script") });
+    if (!call.result.has_value()) {
+        return report;
+    }
+    report.sections.push_back(ToolReportCode {
+        "txt", call.result->text.empty() ? "(no output)" : call.result->text });
+    if (call.result->return_value) {
+        report.sections.push_back(ToolReportCode {
+            "json", write_pretty_json(*call.result->return_value) });
+    }
+    for (std::size_t index = 0; index < call.result->diffs.size(); ++index) {
+        report.sections.push_back(
+            ToolReportDiff { index, &call.result->diffs[index] });
+    }
+    return report;
+}
+
+std::string tool_report_markdown(const ToolReport& report)
+{
+    std::size_t fence = 3;
+    for (const ToolReportSection& section : report.sections) {
+        const auto* code = std::get_if<ToolReportCode>(&section);
+        if (code == nullptr) {
+            continue;
+        }
+        std::size_t run = 0;
+        for (const char c : code->content) {
+            run   = c == '`' ? run + 1 : 0;
+            fence = std::max(fence, run + 1);
+        }
+    }
+
+    const std::string open(fence, '`');
+    std::string out;
+    if (!report.summary.empty()) {
+        out += "Bindings: " + report.summary + "\n\n";
+    }
+    for (const ToolReportSection& section : report.sections) {
+        const auto* code = std::get_if<ToolReportCode>(&section);
+        if (code != nullptr) {
+            out += open + code->language + "\n" + code->content + "\n" + open
+                + "\n";
+        }
+    }
+    return out;
+}
+
+std::string lua_viewer_content(const ToolCall& call)
+{
+    return tool_report_markdown(make_tool_report(call));
 }
 
 } // namespace imza

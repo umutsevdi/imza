@@ -52,11 +52,7 @@ namespace {
     bool load_skill(ApplicationState& state, const Skill& skill,
         const ToolCallRequest& authorized)
     {
-        const std::optional<std::filesystem::path> path
-            = canonical_skill_path(skill);
-        const Json::Value arguments = parse_json(authorized.args);
-        if (!path || !arguments["path"].isString()
-            || arguments["path"].asString() != path->string()) {
+        if (!authorized_skill_path(skill, authorized)) {
             state.session->set_error(
                 "Skill permission target changed before activation.");
             return false;
@@ -76,14 +72,26 @@ namespace {
         args["scope"]
             = skill.scope == Skill::Scope::PROJECT ? "project" : "global";
         return { "skill", write_json(args), "Load skill " + skill.name,
-            "manual-skill", "", false };
+            "manual-skill" };
+    }
+
+    // Rebuilds the normalized call a prompt approved, for re-evaluation.
+    ToolCallRequest authorized_request(const PermissionPrompt& prompt)
+    {
+        const auto& details = std::get<SkillRequest>(prompt.request);
+        Json::Value args(Json::objectValue);
+        args["name"]  = details.name;
+        args["scope"] = details.scope;
+        args["path"]  = details.path;
+        return { "skill", write_json(args), prompt.description, prompt.id };
     }
 
     PermissionEvaluation evaluate_permission(ApplicationState& state,
         const ToolCallRequest& request, Session::Mode mode)
     {
         return evaluate_tool_request(request,
-            permission_context(*state.environment, *state.permissions, mode),
+            make_permission_context(
+                *state.environment, *state.permissions, mode),
             state.providers->config(), state.environment->skills(),
             *state.skills);
     }
@@ -120,9 +128,9 @@ namespace {
         state.skills->set_pending_turn(PendingSkillTurn {
             std::move(text), std::move(attachments), std::move(awaiting), 0 });
         enqueue_user_modal(state,
-            evaluate_permission(
+            *evaluate_permission(
                 state, skill_request(first), state.session->mode())
-                .request);
+                .prompt);
     }
 
     void start_turn(ApplicationState& state, std::string text,
@@ -187,10 +195,10 @@ namespace {
         if (agent_label.empty()) {
             return;
         }
-        if (auto* request = std::get_if<ToolCallRequest>(&payload)) {
-            request->description = agent_label + " · "
-                + (request->description.empty() ? request->name
-                                                : request->description);
+        if (auto* prompt = std::get_if<PermissionPrompt>(&payload)) {
+            prompt->description = agent_label + " · "
+                + (prompt->description.empty() ? prompt->name
+                                               : prompt->description);
         } else if (auto* form = std::get_if<QuestionForm>(&payload)) {
             if (!form->empty()) {
                 form->front().prompt
@@ -254,10 +262,15 @@ namespace {
         }
         if (pending->next < pending->awaiting.size()) {
             const Skill& skill = pending->awaiting[pending->next];
-            enqueue_user_modal(state,
-                evaluate_permission(
-                    state, skill_request(skill), state.session->mode())
-                    .request);
+            const PermissionEvaluation evaluation = evaluate_permission(
+                state, skill_request(skill), state.session->mode());
+            // An earlier approval can grant a later queued skill too;
+            // with no prompt left, advance to the next one.
+            if (evaluation.prompt) {
+                enqueue_user_modal(state, *evaluation.prompt);
+                return;
+            }
+            advance_pending_skill(state);
             return;
         }
         std::optional<PendingSkillTurn> turn
@@ -291,7 +304,7 @@ void submit(ApplicationState& state, std::string text,
 
 void close_modal(ApplicationState& state)
 {
-    if (std::holds_alternative<ToolCallRequest>(state.session->modal())) {
+    if (std::holds_alternative<PermissionPrompt>(state.session->modal())) {
         interrupt(state);
     }
     resolve_modal(state, std::monostate { });
@@ -361,24 +374,25 @@ void on_turn_finished(ApplicationState& state, std::string error)
 
 void resolve_modal(ApplicationState& state, ModalResult result)
 {
-    bool manual_skill    = false;
-    bool manual_accepted = false;
-    std::optional<ToolCallRequest> manual_authorization;
+    bool manual_skill                = false;
+    bool manual_accepted             = false;
     const ModalPayload current_modal = state.session->modal();
-    if (const auto* request = std::get_if<ToolCallRequest>(&current_modal);
-        request != nullptr && request->id == "manual-skill") {
+    if (const auto* prompt = std::get_if<PermissionPrompt>(&current_modal);
+        prompt != nullptr && prompt->id == "manual-skill") {
         manual_skill        = true;
         const auto* verdict = std::get_if<ToolVerdict>(&result);
         manual_accepted
             = verdict != nullptr && verdict->decision != ToolDecision::REJECT;
         const std::optional<PendingSkillTurn> pending
             = state.skills->pending_turn();
+        std::optional<ToolCallRequest> manual_authorization;
         if (manual_accepted) {
+            const ToolCallRequest request = authorized_request(*prompt);
             const PermissionEvaluation evaluation
-                = evaluate_permission(state, *request, state.session->mode());
+                = evaluate_permission(state, request, state.session->mode());
             manual_accepted
                 = evaluation.decision.kind != PermissionDecision::Kind::REJECT
-                && evaluation.request.args == request->args;
+                && evaluation.request.args == request.args;
             if (manual_accepted) {
                 manual_authorization = evaluation.request;
             }
@@ -627,3 +641,6 @@ void refresh_sidechat(ApplicationState& state)
 }
 
 } // namespace imza
+
+
+
