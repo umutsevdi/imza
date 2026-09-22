@@ -326,6 +326,7 @@ TEST_CASE("tool.list returns entries with type and size fields")
     TmpDir dir;
     write_file(dir.file("visible.txt"), "content");
     fs::create_directories(dir.file("sub"));
+    write_file(dir.file("sub/nested.txt"), "content");
 
     const imza::ToolOutput out
         = run_script("local rows, err = tool.list([[" + dir.path.string()
@@ -335,6 +336,7 @@ TEST_CASE("tool.list returns entries with type and size fields")
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(out.text.find("visible.txt\tfile") != std::string::npos);
     CHECK(out.text.find("sub\tdir") != std::string::npos);
+    CHECK(out.text.find("sub/nested.txt\tfile") != std::string::npos);
 }
 
 TEST_CASE("tool.grep returns file, line, and text per match")

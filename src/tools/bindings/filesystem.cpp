@@ -104,11 +104,13 @@ namespace {
         return s + " KB";
     }
 
-    void push_list_entry(
-        lua_State* L, const fs::directory_entry& entry, std::error_code& ec)
+    void push_list_entry(lua_State* L, const fs::directory_entry& entry,
+        const fs::path& root, std::error_code& ec)
     {
         lua_newtable(L);
-        const std::string name = entry.path().filename().string();
+        std::error_code rec;
+        const std::string name
+            = fs::relative(entry.path(), root, rec).string();
         lua_pushlstring(L, name.data(), name.size());
         lua_setfield(L, -2, "path");
         const bool directory = entry.is_directory(ec);
@@ -126,8 +128,8 @@ namespace {
         }
     }
 
-    int list_directory(lua_State* L, const std::string& target, int depth,
-        bool show_hidden, int* count)
+    int list_directory(lua_State* L, const fs::path& root,
+        const std::string& target, int depth, bool show_hidden, int* count)
     {
         std::error_code ec;
         fs::directory_iterator it(
@@ -157,11 +159,11 @@ namespace {
                 return 0;
             }
             ++*count;
-            push_list_entry(L, entry, sec);
+            push_list_entry(L, entry, root, sec);
             lua_rawseti(L, -2, static_cast<lua_Integer>(*count));
             if (depth > 1 && entry.is_directory(sec)) {
-                if (const int failed = list_directory(L, entry.path().string(),
-                        depth - 1, show_hidden, count)) {
+                if (const int failed = list_directory(L, root,
+                        entry.path().string(), depth - 1, show_hidden, count)) {
                     return failed;
                 }
             }
@@ -200,8 +202,8 @@ namespace {
 
         lua_newtable(L);
         int count = 0;
-        if (const int failed
-            = list_directory(L, target, depth, show_hidden, &count)) {
+        if (const int failed = list_directory(L, fs::path(target), target,
+                depth, show_hidden, &count)) {
             return failed;
         }
         return 1;
@@ -336,10 +338,10 @@ binary file. Over 64 KB is cut and marked "[truncated]".
             binding_list,
             R"desc(
 tool.list(path?: string=".", depth?: integer=1, show_hidden?: bool=false) => FileEntry[]
-List files and directories in `path`, returning their names and sizes.
-Filename-sorted listing; depth (1..5) descends into subdirectories and
-their entries come back flat, so join child names to their  parent yourself.
-`size` is absent for directories and "-" when " unreadable.
+List files and directories in `path`, returning their paths and sizes.
+Paths are relative to the requested directory. Filename-sorted listing;
+depth (1..5) descends into subdirectories and their entries come back flat.
+`size` is absent for directories and "-" when unreadable.
 Capped at 2000 entries.
             )desc",
         },
