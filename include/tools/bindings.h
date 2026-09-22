@@ -70,8 +70,6 @@ struct LuaRunContext {
     bool blocked_permission = false;
 };
 
-constexpr std::size_t MAX_OUTPUT_BYTES = 64 * 1024;
-
 // The run context stored in the VM's extra space by the driver.
 LuaRunContext* run_of(lua_State* L);
 

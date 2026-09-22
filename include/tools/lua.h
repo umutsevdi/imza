@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <functional>
 #include <future>
 #include <vector>
@@ -8,6 +9,8 @@
 #include "permissions/filesystem.h"
 
 namespace imza {
+
+constexpr std::size_t MAX_OUTPUT_BYTES = 64 * 1024;
 
 struct Tool; // defined in tools/tool.h; returned by value from make_lua_tool
 

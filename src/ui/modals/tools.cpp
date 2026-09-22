@@ -221,27 +221,31 @@ namespace {
                 return text("");
             }
             ensure_built(st);
-            return std::visit(
-                [&](const auto& payload) -> Element {
-                    using T = std::decay_t<decltype(payload)>;
-                    if constexpr (std::is_same_v<T, PermissionPrompt>) {
-                        return tool_body(payload);
-                    } else if constexpr (std::is_same_v<T, QuestionForm>) {
-                        return question_body();
-                    } else if constexpr (std::is_same_v<T, ViewerModal>) {
-                        return viewer_body(payload);
-                    } else if constexpr (std::is_same_v<T, ConnectModal>) {
-                        return connect_->Render();
-                    } else if constexpr (std::is_same_v<T, VariantModal>) {
-                        return variant_->Render();
-                    } else if constexpr (std::is_same_v<T, SessionsModal>) {
-                        return sessions_->Render();
-                    } else if constexpr (std::is_same_v<T, SkillsModal>) {
-                        return skills_->Render();
-                    }
-                    return text("");
-                },
-                st.modal());
+            // AppleClang fails to emit member-template instantiations
+            // referenced only from a visit lambda; dispatch with
+            // holds_alternative instead.
+            if (std::holds_alternative<PermissionPrompt>(st.modal())) {
+                return tool_body(std::get<PermissionPrompt>(st.modal()));
+            }
+            if (std::holds_alternative<QuestionForm>(st.modal())) {
+                return question_body();
+            }
+            if (std::holds_alternative<ViewerModal>(st.modal())) {
+                return viewer_body(std::get<ViewerModal>(st.modal()));
+            }
+            if (std::holds_alternative<ConnectModal>(st.modal())) {
+                return connect_->Render();
+            }
+            if (std::holds_alternative<VariantModal>(st.modal())) {
+                return variant_->Render();
+            }
+            if (std::holds_alternative<SessionsModal>(st.modal())) {
+                return sessions_->Render();
+            }
+            if (std::holds_alternative<SkillsModal>(st.modal())) {
+                return skills_->Render();
+            }
+            return text("");
         }
 
         bool OnEvent(Event event) override
