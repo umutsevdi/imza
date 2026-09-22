@@ -1108,7 +1108,10 @@ namespace {
                 = std::make_shared<const std::string>(std::move(label));
             const std::size_t id = tc.id;
             Component button     = inline_link_button(
-                [shared_label] { return text(*shared_label) | bold; },
+                [failed, shared_label] {
+                    return failed ? text(*shared_label) | strikethrough
+                                  : text(*shared_label) | bold;
+                },
                 [this, id] {
                     if (const auto* call = find_tool_call(id);
                         call != nullptr) {
@@ -1117,7 +1120,7 @@ namespace {
                 },
                 failed ? PANEL_FG_DIM : HL_GREEN);
             read_buttons_.emplace(id, button);
-            container_->Add(failed ? button | strikethrough : button);
+            container_->Add(button);
             return button;
         }
 

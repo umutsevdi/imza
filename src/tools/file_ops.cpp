@@ -393,7 +393,8 @@ std::optional<std::string> insert_text(const std::string& content,
     std::vector<std::string> lines = split_lines(content);
     if (line > lines.size() + 1) {
         err = "line " + std::to_string(line) + " exceeds file length "
-            + std::to_string(lines.size());
+            + std::to_string(lines.size())
+            + " (line is 1-based; omit it to append at the end)";
         return std::nullopt;
     }
     const std::vector<std::string> insert = split_lines(text);
@@ -418,7 +419,23 @@ std::optional<std::string> replace_text(const std::string& content,
         p += old.size();
     }
     if (matches.empty()) {
-        err = "old string not found";
+        std::string_view shown(old);
+        if (shown.size() > 40) {
+            shown = shown.substr(0, 40);
+        }
+        std::string quoted;
+        for (const char c : shown) {
+            if (c == '\n') {
+                quoted += "\\n";
+            } else if (c == '\t') {
+                quoted += "\\t";
+            } else {
+                quoted += c;
+            }
+        }
+        err = "old text not found in file: \"" + quoted
+            + (old.size() > 40 ? "..." : "")
+            + "\"; it must match exactly, including whitespace";
         return std::nullopt;
     }
     const std::size_t n

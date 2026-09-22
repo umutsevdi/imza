@@ -8,12 +8,15 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
-0.4.0-exp-lua - 2026-09-22
+0.4.0 - 2026-09-22
 -------------------------------------------------------------------------------
 <https://github.com/umutsevdi/imza/releases/tag/v0.4.0>
 
 Changes:
   - NEW: Rewritten the agent tool call system. 
+  - Clearer tool error messages: failed file lookups show the resolved path,
+edits report the searched text, and the Lua tool description documents the
+ask call shape and the return-over-print preference.
 See: <https://github.com/umutsevdi/imza/discussions/1>
 
 -------------------------------------------------------------------------------

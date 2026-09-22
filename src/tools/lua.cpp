@@ -73,7 +73,7 @@ namespace {
         const int n = lua_gettop(L);
         for (int i = 1; i <= n && !run->truncated; ++i) {
             if (i > 1) {
-                append("\t");
+                append("    ");
             }
             std::size_t len = 0;
             const char* s   = luaL_tolstring(L, i, &len);
@@ -261,8 +261,10 @@ namespace {
     {
         std::string out
             = R"desc(Executes a sandboxed Lua script and returns printed content,
-returned object, and modified files. Use print for logs and
-return for structured results.
+returned object, and modified files. End the script with `return expr`
+whenever you have a result: any Lua expression is converted to JSON and
+shown back to you. Prefer return over print -- printing a table only
+shows its address; print is for progress logs.
 Base libraries: string, table, math, coroutine (io/os/package are absent).
 
 TYPES
@@ -457,7 +459,7 @@ METHODS)desc";
         }
         long timeout = 10;
         if (const auto value = json_int(args, "timeout")) {
-            timeout = std::clamp(*value, 1L, 120L);
+            timeout = std::clamp(static_cast<long>(*value), 1L, 120L);
         }
 
         LuaRunContext run;

@@ -197,10 +197,10 @@ Replaces the entire list: get, modify, set the full array back.
             binding_ask,
             R"desc(
 tool.ask(cards: AskCard[]) => AskAnswer[]
-Puts a question to the end user and returns their answer.
-`options` offers a choice list, `multi` allows several picks, `free_text` allows
-typed input; a card may combine them, and `answer` is the typed text
-plus the selected labels joined with ", ".
+Asks the user one or more questions and returns their answers.
+`options` offers a choice list, `multi` allows several picks,
+`free_text` allows typed input; a card may combine them, and `answer` is the
+typed text plus the selected labels joined with ", ".
 nil, Err when dismissed. Unavailable in unattended runs.
             )desc",
         },

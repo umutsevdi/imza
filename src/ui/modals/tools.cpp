@@ -688,5 +688,3 @@ ftxui::Component make_modal(std::shared_ptr<ApplicationState> state)
 }
 
 } // namespace imza
-
-

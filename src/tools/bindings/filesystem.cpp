@@ -51,7 +51,8 @@ namespace {
 
         std::error_code ec;
         if (!fs::is_regular_file(fs::path(target), ec)) {
-            return binding_error(L, "read: no such file: " + path);
+            return binding_error(L,
+                "read: no such file: " + path + " (looked for " + target + ")");
         }
         std::ifstream in(target, std::ios::binary);
         if (!in) {
@@ -109,8 +110,7 @@ namespace {
     {
         lua_newtable(L);
         std::error_code rec;
-        const std::string name
-            = fs::relative(entry.path(), root, rec).string();
+        const std::string name = fs::relative(entry.path(), root, rec).string();
         lua_pushlstring(L, name.data(), name.size());
         lua_setfield(L, -2, "path");
         const bool directory = entry.is_directory(ec);
@@ -197,13 +197,15 @@ namespace {
 
         std::error_code ec;
         if (!fs::is_directory(fs::path(target), ec)) {
-            return binding_error(L, "list: no such directory: " + path);
+            return binding_error(L,
+                "list: no such directory: " + path + " (looked for " + target
+                    + ")");
         }
 
         lua_newtable(L);
         int count = 0;
-        if (const int failed = list_directory(L, fs::path(target), target,
-                depth, show_hidden, &count)) {
+        if (const int failed = list_directory(
+                L, fs::path(target), target, depth, show_hidden, &count)) {
             return failed;
         }
         return 1;

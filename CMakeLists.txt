@@ -3,7 +3,7 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 project(
     imza
-    VERSION 0.3.1
+    VERSION 0.4.0
     HOMEPAGE_URL "https://github.com/umutsevdi/imza"
     LANGUAGES C CXX
 )

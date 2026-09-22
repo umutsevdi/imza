@@ -103,6 +103,3 @@ std::shared_ptr<ApplicationState> make_sidechat_application_state(
     ApplicationState& parent);
 
 } // namespace imza
-
-
-

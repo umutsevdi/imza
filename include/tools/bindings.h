@@ -36,7 +36,7 @@ struct LuaBinding {
     // Error text the registration-time gate returns when `capability` is
     // off for the run; only meaningful for SHELL/WEB descriptors.
     std::string_view capability_denied = "";
-    bool is_private;
+    bool is_private                    = false;
 };
 
 // Per-file net mutation state for tool.file.*: original content at first

@@ -248,7 +248,7 @@ namespace {
         std::string err;
         std::string code;
         if (!load_text(target, code, err)) {
-            binding_error(L, "ts: " + err);
+            binding_error(L, "ts: " + err + " (looked for " + target + ")");
             return std::nullopt;
         }
         if (code.size() > std::numeric_limits<std::uint32_t>::max()) {

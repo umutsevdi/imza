@@ -35,4 +35,3 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& request,
     const std::vector<Skill>& skills, const SkillStore& loaded_skills);
 
 } // namespace imza
-

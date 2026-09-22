@@ -830,6 +830,7 @@ TEST_CASE("ts bindings fail with values on bad paths and unknown grammars")
         = run_script("local rows, err = "
                      "tool.ts.index('no-such-file.c')\nprint(rows, err)");
     CHECK(missing.text.find("no such file") != std::string::npos);
+    CHECK(missing.text.find("looked for ") != std::string::npos);
 
     const imza::ToolOutput nogramever
         = run_script("local rows, err = tool.ts.index([["
@@ -984,7 +985,9 @@ TEST_CASE("tool.file.insert rejects out-of-range lines and missing files")
               "print(ok2, err2)");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(out.text.find("exceeds file length") != std::string::npos);
+    CHECK(out.text.find("line is 1-based") != std::string::npos);
     CHECK(out.text.find("no such file") != std::string::npos);
+    CHECK(out.text.find("use file.write to create it") != std::string::npos);
     CHECK(out.diffs.empty());
 }
 
@@ -1024,7 +1027,10 @@ TEST_CASE("tool.file.edit errors on missing match and empty old")
             + "]], '', 'x')\n"
               "print(ok2, err2)");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(out.text.find("not found") != std::string::npos);
+    CHECK(out.text.find("old text not found in file: \"absent\"; it must match")
+        != std::string::npos);
+    CHECK(out.text.find("must match exactly") != std::string::npos);
+    CHECK(out.text.find(path + ":") != std::string::npos);
     CHECK(out.text.find("non-empty") != std::string::npos);
     CHECK(read_all(dir.file("a.txt")) == "hello\n");
 }

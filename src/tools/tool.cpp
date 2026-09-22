@@ -154,6 +154,3 @@ Tool make_subagent_tool(SubagentToolSlot delegate)
 }
 
 } // namespace imza
-
-
-

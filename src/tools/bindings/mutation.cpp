@@ -103,7 +103,11 @@ namespace {
                     return insert_text(content, text, at, error);
                 },
                 err)) {
-            return binding_error(L, "file.insert: " + err);
+            return binding_error(L,
+                "file.insert: " + target + ": " + err
+                    + (err.starts_with("no such file")
+                            ? " (use file.write to create it)"
+                            : ""));
         }
         lua_pushboolean(L, 1);
         return 1;
@@ -141,7 +145,7 @@ namespace {
                         static_cast<std::size_t>(count), error);
                 },
                 err)) {
-            return binding_error(L, "file.edit: " + err);
+            return binding_error(L, "file.edit: " + target + ": " + err);
         }
         lua_pushboolean(L, 1);
         return 1;
@@ -166,7 +170,7 @@ namespace {
                     return std::optional<std::string>(text);
                 },
                 err, true)) {
-            return binding_error(L, "file.write: " + err);
+            return binding_error(L, "file.write: " + target + ": " + err);
         }
         lua_pushboolean(L, 1);
         return 1;

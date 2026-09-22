@@ -641,6 +641,3 @@ void refresh_sidechat(ApplicationState& state)
 }
 
 } // namespace imza
-
-
-
