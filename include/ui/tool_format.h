@@ -14,12 +14,19 @@ struct ToolReportCode {
     std::string content;
 };
 
+// Markdown-native content appended without a code fence so tables and
+// plain lines render as markdown.
+struct ToolReportMarkdown {
+    std::string content;
+};
+
 struct ToolReportDiff {
     std::size_t index;
     const DiffView* view;
 };
 
-using ToolReportSection = std::variant<ToolReportCode, ToolReportDiff>;
+using ToolReportSection
+    = std::variant<ToolReportCode, ToolReportMarkdown, ToolReportDiff>;
 
 struct ToolReport {
     std::string summary;

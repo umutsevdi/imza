@@ -1,5 +1,6 @@
 #include "ui/tool_format.h"
 #include "common/util.h"
+#include "conversation/format.h"
 #include "network/json_io.h"
 #include "tools/tool.h"
 
@@ -182,11 +183,25 @@ ToolReport make_tool_report(const ToolCall& call)
     if (!call.result.has_value()) {
         return report;
     }
-    report.sections.push_back(ToolReportCode {
-        "txt", call.result->text.empty() ? "(no output)" : call.result->text });
+    // A return value can speak for itself; no need for an empty-output
+    // placeholder when there is nothing printed.
+    if (!call.result->text.empty()) {
+        report.sections.push_back(ToolReportCode { "txt", call.result->text });
+    }
     if (call.result->return_value) {
-        report.sections.push_back(ToolReportCode {
-            "json", write_pretty_json(*call.result->return_value) });
+        const LuaReturnKind kind = lua_return_kind(*call.result->return_value);
+        // Strings are free-form output: keep them out of the markdown
+        // renderer, numbers/bools are safe as bare text.
+        if (kind == LuaReturnKind::JSON
+            || (kind == LuaReturnKind::SCALAR
+                && call.result->return_value->isString())) {
+            report.sections.push_back(
+                ToolReportCode { kind == LuaReturnKind::JSON ? "json" : "txt",
+                    format_lua_return(*call.result->return_value) });
+        } else {
+            report.sections.push_back(ToolReportMarkdown {
+                format_lua_return(*call.result->return_value) });
+        }
     }
     for (std::size_t index = 0; index < call.result->diffs.size(); ++index) {
         report.sections.push_back(
@@ -216,10 +231,11 @@ std::string tool_report_markdown(const ToolReport& report)
         out += "Bindings: " + report.summary + "\n\n";
     }
     for (const ToolReportSection& section : report.sections) {
-        const auto* code = std::get_if<ToolReportCode>(&section);
-        if (code != nullptr) {
+        if (const auto* code = std::get_if<ToolReportCode>(&section)) {
             out += open + code->language + "\n" + code->content + "\n" + open
                 + "\n";
+        } else if (const auto* md = std::get_if<ToolReportMarkdown>(&section)) {
+            out += md->content + "\n";
         }
     }
     return out;

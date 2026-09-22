@@ -262,9 +262,12 @@ namespace {
         std::string out
             = R"desc(Executes a sandboxed Lua script and returns printed content,
 returned object, and modified files. End the script with `return expr`
-whenever you have a result: any Lua expression is converted to JSON and
-shown back to you. Prefer return over print -- printing a table only
-shows its address; print is for progress logs.
+whenever you have a result. The returned value is shown back to you:
+scalars and lists of scalars print directly, lists of records render as
+a markdown table, and other shapes fall back to JSON. When you need the
+exact JSON text, print or build it explicitly instead of relying on the
+rendering. Prefer return over print -- printing a table only shows its
+address; print is for progress logs.
 Base libraries: string, table, math, coroutine (io/os/package are absent).
 
 TYPES

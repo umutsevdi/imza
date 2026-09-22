@@ -1,6 +1,7 @@
 #include "conversation/format.h"
 
 #include "network/json_io.h"
+#include "tools/bindings.h"
 
 #include <algorithm>
 #include <string>
@@ -64,27 +65,178 @@ Message assistant_message(
     return message;
 }
 
+namespace {
+
+    LuaReturnKind classify_return(const Json::Value& value)
+    {
+        if (!value.isArray()) {
+            return value.isObject() ? LuaReturnKind::JSON
+                                    : LuaReturnKind::SCALAR;
+        }
+        if (value.empty()) {
+            return LuaReturnKind::JSON;
+        }
+        const bool all_scalars = std::all_of(
+            value.begin(), value.end(), [](const Json::Value& entry) {
+                return !entry.isObject() && !entry.isArray();
+            });
+        return all_scalars ? LuaReturnKind::SCALAR_LIST : LuaReturnKind::TABLE;
+    }
+
+} // namespace
+
+LuaReturnKind lua_return_kind(const Json::Value& value)
+{
+    return classify_return(value);
+}
+
+// Renders the JSON-encoded return value for display: scalars and scalar
+// lists print directly, uniform record lists render as markdown tables,
+// and everything else falls back to pretty JSON. `render` reports the
+// chosen form so callers can pick fence handling.
+std::string render_lua_return(const Json::Value& value, LuaReturnKind& render)
+{
+    render = classify_return(value);
+    switch (render) {
+    case LuaReturnKind::SCALAR: return value.asString();
+    case LuaReturnKind::JSON: return write_pretty_json(value);
+    default: break;
+    }
+    if (render == LuaReturnKind::SCALAR_LIST) {
+        std::string out;
+        for (const Json::Value& entry : value) {
+            out += entry.asString();
+            out += '\n';
+        }
+        return out;
+    }
+    // A formal table: list of objects. Columns are the union of keys in
+    // first-seen order; missing fields render as empty cells. A nested
+    // value anywhere demotes the whole list back to JSON.
+    for (const Json::Value& entry : value) {
+        for (const auto& key : entry.getMemberNames()) {
+            if (entry[key].isObject() || entry[key].isArray()) {
+                render = LuaReturnKind::JSON;
+                return write_pretty_json(value);
+            }
+        }
+    }
+    Json::Value columns(Json::arrayValue);
+    Json::Value seen(Json::objectValue);
+    for (const Json::Value& entry : value) {
+        for (const auto& key : entry.getMemberNames()) {
+            if (!seen.isMember(key)) {
+                seen[key] = true;
+                columns.append(key);
+            }
+        }
+    }
+    // Markdown tables do not support multi-line or pipe-bearing cells;
+    // soften the break and escape the separator. Very wide cells are
+    // capped so one long field cannot flatten the table.
+    const auto cell = [](const Json::Value& value) {
+        const std::string text = value.isNull() ? "" : value.asString();
+        std::size_t width      = 0;
+        std::string out;
+        for (const char c : text) {
+            if (c == '\n') {
+                out += "<br>";
+                width += 3;
+            } else if (c == '|') {
+                out += "\\|";
+                width += 1;
+            } else {
+                out += c;
+                width += 1;
+            }
+            if (width >= 80) {
+                out += "\u2026";
+                break;
+            }
+        }
+        return out;
+    };
+    std::string out;
+    out += '|';
+    for (const Json::Value& key : columns) {
+        out += cell(key);
+        out += '|';
+    }
+    out += "\n|";
+    for (std::size_t i = 0; i < columns.size(); ++i) {
+        out += "---|";
+    }
+    out += '\n';
+    for (const Json::Value& entry : value) {
+        out += '|';
+        for (const Json::Value& key : columns) {
+            out += cell(entry[key.asString()]);
+            out += '|';
+        }
+        out += '\n';
+        if (out.size() > MAX_OUTPUT_BYTES) {
+            render = LuaReturnKind::JSON;
+            return write_pretty_json(value);
+        }
+    }
+    return out;
+}
+
+std::string format_lua_return(const Json::Value& value)
+{
+    LuaReturnKind render = LuaReturnKind::JSON;
+    return render_lua_return(value, render);
+}
+
 std::string format_lua_result(
     std::string text, const std::optional<Json::Value>& return_value)
 {
     if (!return_value.has_value()) {
         return text;
     }
-    const std::string json = write_pretty_json(*return_value);
-    std::size_t fence      = 3;
-    std::size_t run        = 0;
-    for (const char c : json) {
-        run   = c == '`' ? run + 1 : 0;
-        fence = std::max(fence, run + 1);
-    }
-    if (!text.empty() && text.back() != '\n') {
-        text += '\n';
-    }
+    LuaReturnKind render   = LuaReturnKind::JSON;
+    const std::string body = render_lua_return(*return_value, render);
     if (!text.empty()) {
+        if (text.back() != '\n') {
+            text += '\n';
+        }
         text += '\n';
     }
-    const std::string open(fence, '`');
-    text += open + "json\n" + json + "\n" + open;
+    if (render == LuaReturnKind::JSON) {
+        std::size_t fence = 3;
+        std::size_t run   = 0;
+        for (const char c : body) {
+            run   = c == '`' ? run + 1 : 0;
+            fence = std::max(fence, run + 1);
+        }
+        const std::string open(fence, '`');
+        text += open + "json\n" + body + "\n" + open;
+        return text;
+    }
+    if (render == LuaReturnKind::SCALAR) {
+        if (return_value->isString()) {
+            // Free-form output must not be interpreted as markdown.
+            std::size_t fence = 3;
+            std::size_t run   = 0;
+            for (const char c : body) {
+                run   = c == '`' ? run + 1 : 0;
+                fence = std::max(fence, run + 1);
+            }
+            const std::string open(fence, '`');
+            text += open + "\n" + body + "\n" + open;
+            return text;
+        }
+        text += body;
+        return text;
+    }
+    // SCALAR_LIST ends with a newline; TABLE does too. Keep the list
+    // without its trailing newline to match scalar handling, keep the
+    // table intact.
+    if (render == LuaReturnKind::SCALAR_LIST) {
+        text += std::string_view(body).substr(0, body.size() - 1);
+    } else {
+        text += body;
+    }
     return text;
 }
 

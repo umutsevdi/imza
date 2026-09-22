@@ -56,7 +56,7 @@ TEST_CASE("lua viewer report fences script and output safely")
     CHECK(report.find("````lua\nprint('```')\n````") != std::string::npos);
     CHECK(report.find("````txt\nok\n\n````") != std::string::npos);
 }
-TEST_CASE("lua viewer appends a returned-value JSON block")
+TEST_CASE("lua viewer appends a rendered return-value block")
 {
     imza::ToolCall call;
     call.name   = "lua";
@@ -67,15 +67,16 @@ TEST_CASE("lua viewer appends a returned-value JSON block")
     const std::string report  = imza::lua_viewer_content(call);
     CHECK(report.find("```lua\nreturn {a = 1}\n```") != std::string::npos);
     CHECK(report.find("```txt\nlog\n\n```") != std::string::npos);
+    // JSON returns are fenced with the json language for highlighting.
     CHECK(report.find("```json\n{\n  \"a\" : 1\n}\n```") != std::string::npos);
 
-    // The JSON block is the last section.
+    // The return-value block is the last section.
     const std::size_t json_at = report.find("```json");
     const std::size_t txt_at  = report.find("```txt");
     CHECK(json_at > txt_at);
 }
 
-TEST_CASE("lua viewer omits the JSON block when there is no return value")
+TEST_CASE("lua viewer omits the return-value block when there is none")
 {
     imza::ToolCall call;
     call.name   = "lua";
@@ -84,12 +85,56 @@ TEST_CASE("lua viewer omits the JSON block when there is no return value")
         "x\n" };
     const std::string report = imza::lua_viewer_content(call);
     CHECK(report.find("```json") == std::string::npos);
+    CHECK(report.find("|path|") == std::string::npos);
 }
 
-TEST_CASE("format_lua_result appends returned JSON to the transcript")
+TEST_CASE("lua viewer skips the output block when nothing was printed")
+{
+    imza::ToolCall call;
+    call.name = "lua";
+    call.args = R"json({"script":"return 42"})json";
+    call.result
+        = imza::ToolCall::Result { imza::ToolCall::Result::Kind::OUTPUT, "" };
+    call.result->return_value = imza::parse_json("42");
+    const std::string report  = imza::lua_viewer_content(call);
+    CHECK(report.find("```txt") == std::string::npos);
+    CHECK(report.find("(no output)") == std::string::npos);
+    CHECK(report.find("\n42") != std::string::npos);
+}
+
+TEST_CASE("lua viewer puts string returns in a code block")
+{
+    imza::ToolCall call;
+    call.name = "lua";
+    call.args = R"json({"script":"return '## not a heading'"})json";
+    call.result
+        = imza::ToolCall::Result { imza::ToolCall::Result::Kind::OUTPUT, "" };
+    call.result->return_value
+        = imza::parse_json(R"json("## not a heading")json");
+    const std::string report = imza::lua_viewer_content(call);
+    CHECK(report.find("```txt\n## not a heading\n```") != std::string::npos);
+}
+
+TEST_CASE("lua viewer renders table returns as markdown, not JSON")
+{
+    imza::ToolCall call;
+    call.name = "lua";
+    call.args = R"json({"script":"return tool.list()"})json";
+    call.result
+        = imza::ToolCall::Result { imza::ToolCall::Result::Kind::OUTPUT, "" };
+    call.result->return_value = imza::parse_json(
+        R"json([{"path":"src/a.cpp","type":"file","size":"1.2 KB"}])json");
+    const std::string report = imza::lua_viewer_content(call);
+    // The table must appear bare so the markdown renderer renders it.
+    CHECK(report.find("\n|path|size|type|\n") != std::string::npos);
+    CHECK(report.find("```json") == std::string::npos);
+}
+
+TEST_CASE("format_lua_result appends returned values to the transcript")
 {
     CHECK(imza::format_lua_result("done\n", std::nullopt) == "done\n");
 
+    // Non-array objects fall back to fenced JSON.
     const Json::Value value = imza::parse_json(R"json({"a":1})json");
     const std::string with  = imza::format_lua_result("done\n", value);
     CHECK(with.find("done\n") == 0);
@@ -99,10 +144,56 @@ TEST_CASE("format_lua_result appends returned JSON to the transcript")
     const std::string only = imza::format_lua_result("", value);
     CHECK(only.find("```json") == 0);
 
-    // A returned value containing backticks gets a larger fence.
-    const Json::Value tricky = imza::parse_json(R"json("```")json");
+    // A returned JSON fallback containing backticks gets a larger fence.
+    const Json::Value tricky = imza::parse_json(R"json({"a":"```"})json");
     const std::string fenced = imza::format_lua_result("", tricky);
     CHECK(fenced.find("````json") != std::string::npos);
+}
+
+TEST_CASE("format_lua_result prints scalars and scalar lists directly")
+{
+    const Json::Value number = imza::parse_json("42");
+    CHECK(imza::format_lua_result("", number) == "42");
+
+    // Strings are free-form: fenced so markdown does not eat them.
+    const Json::Value text = imza::parse_json(R"json("hello world")json");
+    CHECK(imza::format_lua_result("log\n", text)
+        == "log\n\n```\nhello world\n```");
+
+    const Json::Value flag = imza::parse_json("true");
+    CHECK(imza::format_lua_result("", flag) == "true");
+
+    const Json::Value list = imza::parse_json(R"json([1,2,3])json");
+    CHECK(imza::format_lua_result("", list) == "1\n2\n3");
+
+    // A scalar string that merely starts with "[" must not be JSON-fenced.
+    const Json::Value bracketed = imza::parse_json(R"json("[a]")json");
+    CHECK(imza::format_lua_result("", bracketed) == "```\n[a]\n```");
+}
+
+TEST_CASE("format_lua_return renders record lists as markdown tables")
+{
+    const Json::Value records = imza::parse_json(
+        R"json([
+            {"path":"src/a.cpp","type":"file","size":"1.2 KB"},
+            {"path":"src","type":"dir"},
+            {"path":"note|a\nb","type":"file","size":"3 KB"}
+        ])json");
+    const std::string table = imza::format_lua_return(records);
+    // jsoncpp stores object keys sorted, so columns follow that order.
+    const std::vector<std::string> lines
+        = { "|path|size|type|", "|---|---|---|", "|src/a.cpp|1.2 KB|file|",
+              "|src||dir|", "|note\\|a<br>b|3 KB|file|" };
+    std::size_t at = 0;
+    for (const std::string& line : lines) {
+        const std::size_t found = table.find(line, at);
+        REQUIRE(found != std::string::npos);
+        at = found + line.size();
+    }
+
+    // Nested values demote the list to JSON.
+    const Json::Value nested = imza::parse_json(R"json([{"a":[1]}])json");
+    CHECK(imza::format_lua_return(nested).find("|") == std::string::npos);
 }
 
 TEST_CASE("modal_answer_markdown renders Q/A pairs with prompt")
