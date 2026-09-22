@@ -93,7 +93,10 @@ namespace {
         for (const auto& row_value : value["rows"]) {
             DiffRow row;
             const int row_kind = row_value.get("kind", 0).asInt();
-            if (row_kind >= 0 && row_kind <= 2) {
+            // SKIP (3) is new; older or foreign values clamp to SAME so
+            // old sessions still load.
+            if (row_kind >= 0
+                && row_kind <= static_cast<int>(DiffRow::Kind::SKIP)) {
                 row.kind = static_cast<DiffRow::Kind>(row_kind);
             }
             row.left  = row_value.get("left", "").asString();

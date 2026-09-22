@@ -388,6 +388,65 @@ TEST_CASE("lua aggregate diffs survive session persistence")
 #endif
 }
 
+TEST_CASE("lua aggregate diffs round-trip SKIP and clamp unknown kinds")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    imza::Session source;
+    source.begin_send("run lua");
+    source.append_assistant("model", "off");
+    const imza::ToolCallRequest request { "lua", "{}", "", "call-1" };
+    source.append_tool(request);
+    imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT, "" };
+    imza::DiffView diff;
+    diff.file = "/tmp/a.txt";
+    diff.rows.push_back({ imza::DiffRow::Kind::SAME, 1, 1, "x", "x" });
+    diff.rows.push_back({ imza::DiffRow::Kind::SKIP, 2, 2,
+        "… 5 unchanged line(s) …", "… 5 unchanged line(s) …" });
+    diff.rows.push_back({ imza::DiffRow::Kind::REMOVE, 8, { }, "old", "" });
+    diff.rows.push_back({ imza::DiffRow::Kind::ADD, { }, 8, "", "new" });
+    result.diffs.push_back(diff);
+    source.fill_tool_result(request, std::move(result));
+    source.finish_session("");
+
+    REQUIRE(imza::save_session(source) == imza::Status::OK);
+    const auto saved = imza::saved_sessions();
+    REQUIRE(saved.size() == 1);
+    imza::Session loaded;
+    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
+    REQUIRE(call.result.has_value());
+    REQUIRE(call.result->diffs.size() == 1);
+    REQUIRE(call.result->diffs[0].rows.size() == 4);
+    CHECK(call.result->diffs[0].rows[1].kind == imza::DiffRow::Kind::SKIP);
+    CHECK(call.result->diffs[0].rows[1].left == "… 5 unchanged line(s) …");
+    CHECK(call.result->diffs[0].rows[2].kind == imza::DiffRow::Kind::REMOVE);
+    CHECK(call.result->diffs[0].rows[3].kind == imza::DiffRow::Kind::ADD);
+
+    // Kinds newer than this build clamps to SAME so old sessions load.
+    std::ifstream in(saved.front().path);
+    std::stringstream buffer;
+    buffer << in.rdbuf();
+    std::string json     = buffer.str();
+    const std::size_t at = json.find("\"kind\":3");
+    REQUIRE(at != std::string::npos);
+    json.replace(at, 8, "\"kind\":9");
+    {
+        std::ofstream out(saved.front().path);
+        out << json;
+    }
+    imza::Session clamped;
+    REQUIRE(
+        imza::load_session(saved.front().path, clamped) == imza::Status::OK);
+    const auto& clamped_call = std::get<imza::ToolCall>(clamped.items()[2]);
+    REQUIRE(clamped_call.result.has_value());
+    REQUIRE(clamped_call.result->diffs[0].rows.size() == 4);
+    CHECK(clamped_call.result->diffs[0].rows[1].kind
+        == imza::DiffRow::Kind::SAME);
+#endif
+}
 TEST_CASE("empty title is normalized in both file and index")
 {
 #ifdef _WIN32

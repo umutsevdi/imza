@@ -33,10 +33,9 @@ namespace {
         PermissionStore::Grants grants, SkillRequest details)
     {
         PermissionPrompt prompt;
-        prompt.name        = "skill";
-        prompt.description = request.description;
-        prompt.reason      = reason;
-        // No target: it would also append to the reason line.
+        prompt.name              = "skill";
+        prompt.description       = request.description;
+        prompt.reason            = reason;
         prompt.allow_for_session = !grants.empty();
         prompt.id                = request.id;
         prompt.request           = std::move(details);
@@ -231,6 +230,3 @@ std::optional<RosterTool> classify_roster_tool(std::string_view name)
 }
 
 } // namespace imza
-
-
-

@@ -473,8 +473,6 @@ METHODS)desc";
         register_bindings(L);
         lua_sethook(L, deadline_hook, LUA_MASKCOUNT, HOOK_INTERVAL);
 
-        // The log and the net per-file diffs record what ran even when the
-        // script dies mid-flight, so every exit path below carries them out.
         const auto finish = [&](ToolOutput out) {
             out.dispatch_log       = std::move(run.log);
             out.blocked_permission = run.blocked_permission;

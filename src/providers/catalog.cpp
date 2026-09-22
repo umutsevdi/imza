@@ -391,9 +391,9 @@ std::string catalog_base(const CachedProvider& provider)
 
 namespace {
 
-    // Coding-plan endpoints gate authentication on the client identity carried
-    // in the User-Agent. Present the identity of an approved tool until imza is
-    // itself recognized, keeping traffic attributable rather than SDK-like.
+    // Coding-plan endpoints authenticate on the client identity in the
+    // User-Agent; present an approved tool's identity until imza is
+    // recognized, keeping traffic attributable rather than SDK-like.
     struct Disguise {
         std::string_view prefix;
         std::string_view ua;

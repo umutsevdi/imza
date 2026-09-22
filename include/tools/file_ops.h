@@ -28,9 +28,11 @@ std::optional<std::string> replace_text(const std::string& content,
     const std::string& old, const std::string& fresh, std::size_t count,
     std::string& err);
 
-// Single-span diff of two file versions, with 3 lines of context and
-// "… N unchanged line(s) …" elision rows. Used for the lua aggregate
-// per-file diffs.
+// Diff of two file versions as localized hunks: patience diff with a
+// Myers fallback computes the edit script, hunks separated by fewer than
+// 2*context unchanged lines are merged, and large gaps collapse into
+// DiffRow::Kind::SKIP elision rows. Used for the lua aggregate per-file
+// diffs.
 DiffView make_diff_view(const std::string& path,
     const std::vector<std::string>& old_lines,
     const std::vector<std::string>& new_lines);

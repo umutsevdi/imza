@@ -8,6 +8,15 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
+0.4.0-exp-lua - 2026-09-22
+-------------------------------------------------------------------------------
+<https://github.com/umutsevdi/imza/releases/tag/v0.4.0>
+
+Changes:
+  - NEW: Rewritten the agent tool call system. 
+See: <https://github.com/umutsevdi/imza/discussions/1>
+
+-------------------------------------------------------------------------------
 0.3.0 - 2026-09-18
 -------------------------------------------------------------------------------
 <https://github.com/umutsevdi/imza/releases/tag/v0.3.0>

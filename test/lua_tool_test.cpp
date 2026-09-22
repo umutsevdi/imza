@@ -330,7 +330,7 @@ TEST_CASE("tool.list returns entries with type and size fields")
 
     const imza::ToolOutput out
         = run_script("local rows, err = tool.list([[" + dir.path.string()
-            + "]])\n"
+            + "]], 2)\n"
               "if err then error(err) end\n"
               "for _, r in ipairs(rows) do print(r.path, r.type) end");
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
@@ -1062,15 +1062,21 @@ TEST_CASE("lua file mutations collapse into one net diff per file")
     REQUIRE(out.diffs.size() == 2);
     CHECK(out.diffs[0].file == a);
     CHECK(out.diffs[1].file == b);
-    // Net diff for a.txt shows original (one,two,three) against the final
-    // content (zero,one,TWO,three) in a single span.
-    std::size_t adds = 0;
+    // Net diff localizes both edits: the "two"->"TWO" replacement and
+    // the prepended "zero" become two small hunks.
+    std::size_t adds    = 0;
+    std::size_t removes = 0;
     for (const imza::DiffRow& row : out.diffs[0].rows) {
         if (row.kind == imza::DiffRow::Kind::ADD) {
             ++adds;
         }
+        if (row.kind == imza::DiffRow::Kind::REMOVE) {
+            ++removes;
+        }
+        CHECK(row.kind != imza::DiffRow::Kind::SKIP);
     }
-    CHECK(adds == 3);
+    CHECK(adds == 2);
+    CHECK(removes == 1);
 }
 
 TEST_CASE("lua file diffs survive a mid-script error")

@@ -1158,8 +1158,6 @@ namespace {
             const bool done          = t.reasoning_ms.has_value();
             const bool placeholder
                 = active && !has_reasoning && !done && expected;
-            // A completed turn with no reasoning text and no measurable
-            // duration has nothing to display or inspect.
             if (has_reasoning || placeholder
                 || (done && expected && t.reasoning_ms->count() >= 50)) {
                 std::string label;

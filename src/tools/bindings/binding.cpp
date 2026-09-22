@@ -126,7 +126,7 @@ GateOutcome authorize_filesystem(lua_State* L, FilesystemRequest request)
         return outcome;
     };
     if (!run->host->permission_context) {
-        // No provider: trusted mode (tests, SKIP_PERMISSIONS paths).
+        // Trusted mode: no provider (tests, SKIP_PERMISSIONS paths).
         return allow(request);
     }
     const FilesystemEvaluation evaluation
@@ -175,7 +175,7 @@ GateOutcome authorize_shell(lua_State* L, const ShellRequest& request)
         return outcome;
     };
     if (!run->host->permission_context) {
-        // No provider: trusted mode (tests, SKIP_PERMISSIONS paths).
+        // Trusted mode: no provider (tests, SKIP_PERMISSIONS paths).
         return allow();
     }
     const ShellEvaluation evaluation

@@ -15,7 +15,7 @@
 namespace imza {
 
 struct DiffRow {
-    enum class Kind { SAME, REMOVE, ADD };
+    enum class Kind { SAME, REMOVE, ADD, SKIP };
     Kind kind = Kind::SAME;
     std::optional<std::size_t> left_no;
     std::optional<std::size_t> right_no;

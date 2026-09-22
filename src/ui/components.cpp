@@ -674,10 +674,8 @@ Element diff_split(const DiffView& diff, int available_width)
         return text(std::string(number_width - number.size(), ' ') + number)
             | color(PANEL_FG_DIM);
     };
-    const auto is_skip = [](const DiffRow& row) {
-        return !row.left.empty() && row.left == row.right
-            && row.left.find("unchanged line") != std::string::npos;
-    };
+    const auto is_skip
+        = [](const DiffRow& row) { return row.kind == DiffRow::Kind::SKIP; };
 
     Elements rows;
     if (available_width < 100) {

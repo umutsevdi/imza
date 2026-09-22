@@ -141,7 +141,6 @@ namespace {
         state->post        = guarded_post(state.get(), std::move(post));
         state->on_exit     = [] { };
         state->runtime_flags = runtime_flags;
-        // Created before the roster so the subagent tool can capture it.
         if (!state->subagent_slot) {
             state->subagent_slot = std::make_shared<SubagentToolFn>();
         }
@@ -160,13 +159,13 @@ namespace {
         PostFn post, StreamFn stream_fn, ModalRequestFn parent_routing,
         std::string agent_label, std::vector<Tool> tools)
     {
-        state->session       = std::make_shared<Session>();
-        state->sessions      = parent.sessions;
-        state->input_history = parent.input_history;
-        state->providers     = parent.providers;
-        state->subagents     = std::make_shared<SubagentManager>();
-        state->environment   = parent.environment;
-        state->review        = std::make_shared<ReviewState>();
+        state->session        = std::make_shared<Session>();
+        state->sessions       = parent.sessions;
+        state->input_history  = parent.input_history;
+        state->providers      = parent.providers;
+        state->subagents      = std::make_shared<SubagentManager>();
+        state->environment    = parent.environment;
+        state->review         = std::make_shared<ReviewState>();
         state->skills         = std::make_shared<SkillStore>();
         state->permissions    = parent.permissions;
         state->prompts        = parent.prompts;
@@ -263,8 +262,3 @@ std::shared_ptr<ApplicationState> make_sidechat_application_state(
 }
 
 } // namespace imza
-
-
-
-
-

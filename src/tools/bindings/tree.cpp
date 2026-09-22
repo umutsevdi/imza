@@ -92,10 +92,9 @@ namespace {
         return parser;
     }
 
-    // First meaningful identifier of a declaration node: the `name` field
-    // when the grammar defines one, else the first child whose grammar
-    // type is `identifier`. Empty when the node has neither.
-    // Shallowest identifier in `node`'s subtree, or a null node.
+    // Shallowest identifier in `node`'s subtree: the `name` field when
+    // the grammar defines one, else the first child of grammar type
+    // `identifier`. Null node when it has neither.
     TSNode node_name_inner(const TSNode& node, std::string_view)
     {
         std::vector<TSNode> stack { node };
