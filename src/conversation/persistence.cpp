@@ -7,7 +7,6 @@
 #include "platform/json_file.h"
 
 #include <algorithm>
-#include <cstdint>
 #include <fstream>
 #include <map>
 #include <set>
@@ -162,9 +161,6 @@ namespace {
                     out["return_value"]
                         = std::move(*tool->result->return_value);
                 }
-                if (tool->result->diff) {
-                    out["diff"] = diff_json(*tool->result->diff);
-                }
                 if (!tool->result->diffs.empty()) {
                     Json::Value diffs(Json::arrayValue);
                     for (auto& diff : tool->result->diffs) {
@@ -274,9 +270,6 @@ namespace {
                     };
                     if (value.isMember("return_value")) {
                         tool.result->return_value = value["return_value"];
-                    }
-                    if (value["diff"].isObject()) {
-                        tool.result->diff = parse_diff(value["diff"]);
                     }
                     if (value["diffs"].isArray()) {
                         for (const Json::Value& entry : value["diffs"]) {

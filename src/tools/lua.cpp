@@ -260,35 +260,34 @@ namespace {
     std::string render_description()
     {
         std::string out
-            = R"desc(Executes a sandboxed Lua script and returns printed content,
-returned object, and modified files. End the script with `return expr`
-whenever you have a result. The returned value is shown back to you:
-scalars and lists of scalars print directly, lists of records render as
-a markdown table, and other shapes fall back to JSON. When you need the
-exact JSON text, print or build it explicitly instead of relying on the
-rendering. Prefer return over print -- printing a table only shows its
-address; print is for progress logs.
-Base libraries: string, table, math, coroutine (io/os/package are absent).
+            = R"desc(Executes a sandboxed Lua script and captures printed output,
+the return value, and modified files. Prefer one script for multiple related
+operations when this reduces tool calls or intermediate steps.
+OUTPUT
+- return is the primary structured result.
+- print is for useful human-readable output, diagnostics, progress, or intermediate findings.
+- Use both when appropriate; neither substitutes for the other.
+- Avoid duplicating the same information through both channels.
+- Side-effect-only scripts may omit return.
+Returned values are rendered as follows: scalars and scalar lists directly, record lists as Markdown tables, and other structures as JSON.
 
 TYPES
-  FileEntry  = { path: string, type: "file" | "dir", size?: string }  -- "4.2 KB"
-  TodoStatus = "pending" | "in_progress" | "completed" | "cancelled"
-  TodoItem   = { content: string, status: TodoStatus }
-  AskCard    = { prompt: string, options?: string[], multi?: bool, free_text?: bool }
-  AskAnswer  = { question: string, answer: string }
-  GrepHit    = { file: string, line: integer, text: string }
-  TsSymbol   = { kind: string, name: string, start_line: integer, end_line: integer, text: string }
+FileEntry = { path: string, type: "file" | "dir", size?: string }
+TodoStatus = "pending" | "in_progress" | "completed" | "cancelled"
+TodoItem = { content: string, status: TodoStatus }
+AskCard = { prompt: string, options?: string[], multi?: bool, free_text?: bool }
+AskAnswer = { question: string, answer: string }
+GrepHit = { file: string, line: integer, text: string }
+TsSymbol = { kind: string, name: string, start_line: integer, end_line: integer, text: string }
 
 LEGEND
-  tool.<name>(args...) => Value | (nil, Err)
-  - Err is a string
-  - `?` optional with its default after `=`.
-  - An ungranted path returns nil, Err. Check the second return value
-  - Paths can be relative to current working directory.
-  - Operational failures (missing file, denied permission, timeout) are
-    values: nil, Err. Wrong argument types raise and abort the script;
-    wrap in pcall only if you intend to survive them
-
+tool.<name>(args...) => Value | (nil, Err)
+- Err is a string.
+- ? marks an optional argument; defaults are shown when applicable.
+- Ungranted paths return nil, Err.
+- Paths may be relative to the current working directory.
+- Operational failures return nil, Err.
+- Invalid arguments raise and abort the script; use pcall only when recovery is intended.
 METHODS)desc";
         for (const LuaBinding& binding : all_bindings()) {
             if (!binding.is_private) {

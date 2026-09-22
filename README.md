@@ -39,7 +39,8 @@ comments, then send the findings directly back to Plan mode.
 - Native terminal UI with a small runtime footprint
 - Plan → Build → Review workflow
 - Interactive diffs and AI-assisted code review
-- Sidechat, a place to ask questions without disrupting the main agent's work.
+- Sophisticated tool orchestration system for reduced token costs and faster task completion
+- Sidechat, a place to ask questions without disrupting the main agent's work
 - Shell-aware, scoped permission controls
 - Bring-your-own-model support
 - Persistent sessions, transcripts, and automatic context compaction
@@ -76,6 +77,11 @@ session.
 
 ![imza-layout](./screenshots/layout.png)
 
+## Bulk Execution
+Imza provides models with a language runtime for executing sophisticated 
+scripts at once, enabling bulk edits and compact read calls that save tokens 
+and speed up development. [Read more](https://github.com/umutsevdi/imza/discussions/1)
+
 ## Capabilities
 
 - [X] Streaming Markdown and reasoning
@@ -107,6 +113,7 @@ session.
 - [X] Shell-aware permissions with program and subcommand grants
 - [X] Notifications
 - [X] Sidechat
+- [X] Block execution
 
 ### Roadmap
 - [ ] MCP

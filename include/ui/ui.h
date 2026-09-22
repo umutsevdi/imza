@@ -45,23 +45,20 @@ struct LayoutCtx {
 
 using LayoutFn = std::function<LayoutCtx()>;
 
-// Panels
 inline const ftxui::Color PANEL_COLOR       = ftxui::Color::RGB(33, 36, 40);
 inline const ftxui::Color PANEL_FG          = ftxui::Color::RGB(228, 231, 235);
 inline const ftxui::Color PANEL_FG_DIM      = ftxui::Color::RGB(146, 152, 160);
 inline const ftxui::Color PANEL_BORDER      = ftxui::Color::RGB(72, 79, 88);
 inline const ftxui::Color PANEL_COLOR_FOCUS = ftxui::Color::RGB(45, 50, 56);
-// Diffs
-inline const ftxui::Color DIFF_ADDITION_BG = ftxui::Color::RGB(25, 57, 45);
-inline const ftxui::Color DIFF_DELETION_BG = ftxui::Color::RGB(63, 37, 42);
-// Treesitter
-inline const ftxui::Color HL_RED     = ftxui::Color::RGB(247, 114, 114);
-inline const ftxui::Color HL_GREEN   = ftxui::Color::RGB(126, 231, 135);
-inline const ftxui::Color HL_YELLOW  = ftxui::Color::RGB(242, 204, 96);
-inline const ftxui::Color HL_BLUE    = ftxui::Color::RGB(121, 192, 255);
-inline const ftxui::Color HL_MAGENTA = ftxui::Color::RGB(210, 168, 255);
-inline const ftxui::Color HL_CYAN    = ftxui::Color::RGB(104, 216, 232);
-inline constexpr int MODAL_MAX_WIDTH = 100;
+inline const ftxui::Color DIFF_ADDITION_BG  = ftxui::Color::RGB(25, 57, 45);
+inline const ftxui::Color DIFF_DELETION_BG  = ftxui::Color::RGB(63, 37, 42);
+inline const ftxui::Color HL_RED            = ftxui::Color::RGB(247, 114, 114);
+inline const ftxui::Color HL_GREEN          = ftxui::Color::RGB(126, 231, 135);
+inline const ftxui::Color HL_YELLOW         = ftxui::Color::RGB(242, 204, 96);
+inline const ftxui::Color HL_BLUE           = ftxui::Color::RGB(121, 192, 255);
+inline const ftxui::Color HL_MAGENTA        = ftxui::Color::RGB(210, 168, 255);
+inline const ftxui::Color HL_CYAN           = ftxui::Color::RGB(104, 216, 232);
+inline constexpr int MODAL_MAX_WIDTH        = 100;
 // Wider frame for the side-by-side diff viewer, which needs two panes of
 // readable code; every other modal keeps MODAL_MAX_WIDTH.
 inline constexpr int DIFF_VIEWER_MODAL_MAX_WIDTH = 160;

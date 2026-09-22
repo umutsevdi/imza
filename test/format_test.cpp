@@ -76,6 +76,27 @@ TEST_CASE("lua viewer appends a rendered return-value block")
     CHECK(json_at > txt_at);
 }
 
+TEST_CASE("lua viewer appends a quoted error block after the return value")
+{
+    imza::ToolCall call;
+    call.name   = "lua";
+    call.args   = R"json({"script":"return 1"})json";
+    call.result = imza::ToolCall::Result { imza::ToolCall::Result::Kind::ERROR,
+        "script:1: boom\n" };
+    call.result->return_value = imza::parse_json(R"json({"a":1})json");
+    const std::string report  = imza::lua_viewer_content(call);
+    CHECK(report.find("**Error**") != std::string::npos);
+    CHECK(report.find("> [!ERROR]") != std::string::npos);
+    CHECK(report.find("> script:1: boom") != std::string::npos);
+    // The error text is carried only by the quoted block, not echoed as
+    // a plain output section.
+    CHECK(report.find("```txt\nscript:1: boom") == std::string::npos);
+    // The error follows the return-value block, ahead of any diffs.
+    const std::size_t err_at  = report.find("**Error**");
+    const std::size_t json_at = report.find("```json");
+    CHECK(err_at > json_at);
+}
+
 TEST_CASE("lua viewer omits the return-value block when there is none")
 {
     imza::ToolCall call;

@@ -6,7 +6,6 @@
 #include <filesystem>
 #include <functional>
 #include <string>
-#include <utility>
 
 extern "C" {
 #include <lauxlib.h>
@@ -180,17 +179,14 @@ namespace {
         {
             "file.insert",
             binding_file_insert,
-            R"desc(
-tool.file.insert(path: string, text: string, line?: integer=nil) => true
+            R"desc(tool.file.insert(path: string, text: string, line?: integer=nil) => true
 Inserts text before the 1-based line, pushing it down; omit line to
-append at the end. A line past the end of the file is an error.
-            )desc",
+append at the end. A line past the end of the file is an error.)desc",
         },
         {
             "file.edit",
             binding_file_edit,
-            R"desc(
-tool.file.edit(path: string, old: string, new: string, count?: integer=1) => true
+            R"desc(tool.file.edit(path: string, old: string, new: string, count?: integer=1) => true
 Replaces the first count occurrences of old with new; count=0 replaces all.
 Old is an exact literal match, so include enough surrounding text to be unique.
 Errors if old is empty or not found.)desc",
@@ -198,11 +194,9 @@ Errors if old is empty or not found.)desc",
         {
             "file.write",
             binding_file_write,
-            R"desc(
-tool.file.write(path: string, text: string) => true
+            R"desc(tool.file.write(path: string, text: string) => true
 Replaces the file's entire content, creating it if absent.
-Prefer insert/edit for targeted changes; this discards everything else.
-            )desc",
+Prefer insert/edit for targeted changes; this discards everything else.)desc",
         },
     };
 

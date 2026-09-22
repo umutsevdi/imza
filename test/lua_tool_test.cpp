@@ -118,7 +118,7 @@ TEST_CASE("lua tool prints values to its output")
                                             "table.sort(t)\n"
                                             "print(table.concat(t, ','))");
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(out.text == "hello\t42\ttrue\n1,2,3\n");
+    CHECK(out.text == "hello    42    true\n1,2,3\n");
 }
 
 TEST_CASE("binding errors split: operational failures are values, type "
@@ -130,7 +130,7 @@ TEST_CASE("binding errors split: operational failures are values, type "
         = run_script("local data, err = tool.read('no-such-file.txt')\n"
                      "print(data == nil, err ~= nil)");
     CHECK(value_error.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(value_error.text == "true\ttrue\n");
+    CHECK(value_error.text == "true    true\n");
 
     // A wrong argument type is a script bug: it raises with a Lua error
     // position and aborts the run. (Numbers coerce to strings per the Lua
@@ -334,9 +334,9 @@ TEST_CASE("tool.list returns entries with type and size fields")
               "if err then error(err) end\n"
               "for _, r in ipairs(rows) do print(r.path, r.type) end");
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(out.text.find("visible.txt\tfile") != std::string::npos);
-    CHECK(out.text.find("sub\tdir") != std::string::npos);
-    CHECK(out.text.find("sub/nested.txt\tfile") != std::string::npos);
+    CHECK(out.text.find("visible.txt    file") != std::string::npos);
+    CHECK(out.text.find("sub    dir") != std::string::npos);
+    CHECK(out.text.find("sub/nested.txt    file") != std::string::npos);
 }
 
 TEST_CASE("tool.grep returns file, line, and text per match")
@@ -351,8 +351,8 @@ TEST_CASE("tool.grep returns file, line, and text per match")
               "print(#rows, rows[1].file, rows[1].line, rows[1].text)\n"
               "for _, r in ipairs(rows) do print(r.file, r.line, r.text) end");
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(out.text.find("hay.cpp\t1\tint cat = 1;") != std::string::npos);
-    CHECK(out.text.find("hay.cpp\t3\tcat();") != std::string::npos);
+    CHECK(out.text.find("hay.cpp    1    int cat = 1;") != std::string::npos);
+    CHECK(out.text.find("hay.cpp    3    cat();") != std::string::npos);
 }
 
 TEST_CASE("tool.grep accepts a single file target and fills the file field")
@@ -367,8 +367,8 @@ TEST_CASE("tool.grep accepts a single file target and fills the file field")
           "if #rows ~= 1 then error('expected 1 row') end\n"
           "print(rows[1].file, rows[1].line, rows[1].text)");
     CHECK(file_out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(
-        file_out.text.find("one.cpp\t1\tonly match here") != std::string::npos);
+    CHECK(file_out.text.find("one.cpp    1    only match here")
+        != std::string::npos);
 }
 
 TEST_CASE("bindings outside the workspace return an error value")
@@ -382,7 +382,7 @@ TEST_CASE("bindings outside the workspace return an error value")
             + dir.file("lines.txt").string() + "]])\nprint(s, e)",
         std::move(empty));
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(out.text.find("permission denied") != std::string::npos);
+    CHECK(out.text.find("denied") != std::string::npos);
 }
 
 TEST_CASE("todo bindings read and write the shared task board")
@@ -412,7 +412,7 @@ TEST_CASE("todo bindings read and write the shared task board")
                      "print(#rows, rows[1].content, rows[1].status, "
                      "rows[2].status)",
             std::move(host2));
-    CHECK(get.text == "2\tfirst\tin_progress\tpending\n");
+    CHECK(get.text == "2    first    in_progress    pending\n");
 
     const imza::ToolOutput bad
         = run_script("local ok, err = tool.todo.set({"
@@ -446,7 +446,7 @@ TEST_CASE("todo bindings round-trip the cancelled status")
         = run_script("local rows = tool.todo.get()\n"
                      "print(rows[1].status, rows[2].status)",
             std::move(host2));
-    CHECK(get.text == "completed\tcancelled\n");
+    CHECK(get.text == "completed    cancelled\n");
 }
 
 TEST_CASE("tool.ask surfaces answers and unattended runs reject")
@@ -475,7 +475,7 @@ TEST_CASE("tool.ask surfaces answers and unattended runs reject")
                      "print(rows[1].question, rows[1].answer)",
             std::move(host));
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(out.text == "deploy?\tyes\n");
+    CHECK(out.text == "deploy?    yes\n");
 
     const imza::ToolOutput unattended = run_script(
         "local rows, err = tool.ask({{prompt = 'hello?'}})\nprint(err)");
@@ -518,13 +518,13 @@ TEST_CASE("tool.sh runs a single command and returns exit code")
                      "print(out, code)",
             fx.host());
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(out.text == "hello-sh\n\t0\n");
+    CHECK(out.text == "hello-sh\n    0\n");
     CHECK(fx.ask_calls == 0);
 
     const imza::ToolOutput failing = run_script(
         "local out, code = tool.shell('false')\nprint(out, code)", fx.host());
     CHECK(failing.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(failing.text == "\t1\n");
+    CHECK(failing.text == "    1\n");
 
     const imza::ToolOutput disabled
         = run_script("local out, err = tool.shell('echo x')\nprint(err)");
@@ -549,7 +549,7 @@ TEST_CASE("tool.sh workspace argument selects the run directory")
         fx.host());
     CHECK(absolute.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(absolute.text.find(dir.path.string()) != std::string::npos);
-    CHECK(absolute.text.find("\t0\n") != std::string::npos);
+    CHECK(absolute.text.find("    0\n") != std::string::npos);
 
     fs::create_directories(dir.file("sub"));
     const imza::ToolOutput relative
@@ -714,11 +714,12 @@ TEST_CASE("tool.ts.index lists declarations parsed by the grammar")
           "for _, r in ipairs(rows) do print(r.kind, r.name, "
           "r.start_line, r.end_line) end");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(
-        out.text.find("struct_specifier\tAlpha\t2\t2\n") != std::string::npos);
-    CHECK(out.text.find("function_definition\tbeta\t3\t3\n")
+    CHECK(out.text.find("struct_specifier    Alpha    2    2\n")
         != std::string::npos);
-    CHECK(out.text.find("class_specifier\tGamma\t4\t4\n") != std::string::npos);
+    CHECK(out.text.find("function_definition    beta    3    3\n")
+        != std::string::npos);
+    CHECK(out.text.find("class_specifier    Gamma    4    4\n")
+        != std::string::npos);
     // The comment is not a declaration and appears nowhere.
     CHECK(out.text.find("not a symbol") == std::string::npos);
 }
@@ -738,7 +739,8 @@ TEST_CASE("tool.ts.index caps results and reports node text")
         + "]])\n"
           "if err then error(err) end\nprint(#rows, rows[1].text)");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(out.text.find("50\tint fn1() { return 1; }\n") != std::string::npos);
+    CHECK(
+        out.text.find("50    int fn1() { return 1; }\n") != std::string::npos);
 }
 
 TEST_CASE("tool.ts.nodes matches exact types and globs")
@@ -763,7 +765,7 @@ TEST_CASE("tool.ts.nodes matches exact types and globs")
         + "]], 'function_definition')\n"
           "if err then error(err) end\n"
           "print(#rows, rows[1].kind, rows[1].name)");
-    CHECK(declared.text.find("1\tfunction_definition\tmain\n")
+    CHECK(declared.text.find("1    function_definition    main\n")
         != std::string::npos);
 }
 
@@ -792,11 +794,11 @@ TEST_CASE("tool.ts.symbols lists identifier occurrences with lines")
           "for _, r in ipairs(rows) do print(r.file, r.line, r.text) end");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     // Grammar-typed: the 'cat' inside 'use_cat' never matches.
-    CHECK(out.text.find("\t1\tint cat;\n") != std::string::npos);
+    CHECK(out.text.find("    1    int cat;\n") != std::string::npos);
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
     // Grammar-typed: no row's line is exactly 'use_cat'; but its line 3
     // row exists because it contains the standalone `cat` identifier.
-    CHECK(out.text.find("\t3\tint use_cat() { return cat; }\n")
+    CHECK(out.text.find("    3    int use_cat() { return cat; }\n")
         != std::string::npos);
 }
 
@@ -818,7 +820,8 @@ TEST_CASE("tool.ts.references lists call sites of a symbol")
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     // Only the call site on line 4 matches; the variable uses and the
     // comment are not identifier-in-call-node matches.
-    CHECK(out.text == "4\tcall_expression\tint call_cat() { return cat(); }\n");
+    CHECK(out.text
+        == "4    call_expression    int call_cat() { return cat(); }\n");
 }
 TEST_CASE("ts bindings fail with values on bad paths and unknown grammars")
 {
@@ -881,7 +884,7 @@ TEST_CASE("tool._lib.ts_query runs captures and rejects invalid queries")
               "declarator: (identifier) @name))')\n"
               "if err then error(err) end\n"
               "print(#rows, rows[1].capture, rows[1].line, rows[1].text)");
-    CHECK(out.text.find("1\tname\t1\tmain\n") != std::string::npos);
+    CHECK(out.text.find("1    name    1    main\n") != std::string::npos);
 
     const imza::ToolOutput bad
         = run_script("local rows, err = tool._lib.ts_query([[" + path
@@ -1140,7 +1143,7 @@ TEST_CASE("tool.file mutations reject in Plan mode")
             + a + "]], 'one', 'ONE')\nprint(ok, err)",
         std::move(host));
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(out.text.find("permission denied") != std::string::npos);
+    CHECK(out.text.find("denied") != std::string::npos);
     CHECK(read_all(dir.file("a.txt")) == "one\n");
 }
 
@@ -1187,7 +1190,7 @@ TEST_CASE("tool.file mutations outside the workspace ask and fail closed "
             + a + "]], 'one', 'ONE')\nprint(ok, err)",
         std::move(host));
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(out.text.find("permission denied") != std::string::npos);
+    CHECK(out.text.find("denied") != std::string::npos);
     CHECK(read_all(outside.file("a.txt")) == "one\n");
 }
 

@@ -13,11 +13,14 @@ CHANGELOG
 <https://github.com/umutsevdi/imza/releases/tag/v0.4.0>
 
 Changes:
-  - NEW: Rewritten the agent tool call system. 
+  - NEW: Rewritten the agent tool call system. See: <https://github.com/umutsevdi/imza/discussions/1>
+  - Tool call results use custom renderers depending on return types.
   - Clearer tool error messages: failed file lookups show the resolved path,
 edits report the searched text, and the Lua tool description documents the
 ask call shape and the return-over-print preference.
-See: <https://github.com/umutsevdi/imza/discussions/1>
+  - UI polish.
+  - Internal cleanup: removed an unused legacy field from stored tool
+results.
 
 -------------------------------------------------------------------------------
 0.3.0 - 2026-09-18

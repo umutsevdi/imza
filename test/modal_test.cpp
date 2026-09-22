@@ -365,8 +365,7 @@ TEST_CASE("plan mode rejects mutating file operations at the gate")
     // The roster-level gate accepts a lua call, so the Plan-mode refusal
     // surfaces as a binding error inside the tool result.
     CHECK(call->result->kind == imza::ToolCall::Result::Kind::OUTPUT);
-    CHECK(call->result->text.find("file.write: permission denied")
-        != std::string::npos);
+    CHECK(call->result->text.find("file.write: denied") != std::string::npos);
     CHECK_FALSE(std::filesystem::is_regular_file(directory / "out.txt"));
     std::error_code error;
     std::filesystem::remove_all(directory, error);

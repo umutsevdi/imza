@@ -5,7 +5,6 @@
 #include "platform/command_runner.h"
 #include "platform/config.h"
 #include "platform/update.h"
-#include "tools/tool.h"
 #include "workspace/environment.h"
 
 #include <CLI/CLI.hpp>
@@ -171,7 +170,7 @@ std::string format_session_list(const std::vector<SavedSession>& sessions)
 
     std::string output;
     const auto append_row
-        = [&](std::string id, std::string saved, std::string_view title) {
+        = [&](const std::string& id, const std::string& saved, std::string_view title) {
               output += id;
               output.append(id_width - id.size() + 2, ' ');
               output += saved;

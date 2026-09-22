@@ -121,17 +121,16 @@ FilesystemEvaluation evaluate_filesystem_request(
     if (!context.system || !context.workspace || !context.grants) {
         return reject("filesystem environment is not ready");
     }
-    const std::string name(filesystem_request_name(request));
     if (context.mode == SessionMode::PLAN
         && (is_edit(request) || is_write(request))) {
-        return reject(name + ": unavailable in Plan mode");
+        return reject("unavailable in Plan mode");
     }
 
     std::filesystem::path target = filesystem_target(request);
     const std::filesystem::path& working_directory
         = context.workspace->working_directory;
     if (target.empty() || working_directory.empty()) {
-        return reject(name + ": invalid path argument");
+        return reject("invalid path argument");
     }
     if (target.is_relative()) {
         target = working_directory / target;
@@ -139,37 +138,37 @@ FilesystemEvaluation evaluate_filesystem_request(
     std::error_code error;
     target = std::filesystem::weakly_canonical(target, error);
     if (error || !target.is_absolute()) {
-        return reject(name + ": cannot normalize target");
+        return reject("cannot normalize target");
     }
     const bool exists = std::filesystem::exists(target, error);
     if (error) {
-        return reject(name + ": cannot inspect target");
+        return reject("cannot inspect target");
     }
     if ((is_read(request) || is_edit(request))
         && (!exists || !std::filesystem::is_regular_file(target, error))) {
-        return reject(name + ": target is not a file");
+        return reject("target is not a file");
     }
     if (is_list(request)
         && (!exists || !std::filesystem::is_directory(target, error))) {
-        return reject("list: target is not a directory");
+        return reject("target is not a directory");
     }
     if (is_find(request)
         && (!exists
             || (!std::filesystem::is_directory(target, error)
                 && !std::filesystem::is_regular_file(target, error)))) {
-        return reject("find: target is not a file or directory");
+        return reject("target is not a file or directory");
     }
     if (is_write(request)) {
         if (exists && !std::filesystem::is_regular_file(target, error)) {
-            return reject("write: target is not a file");
+            return reject("target is not a file");
         }
         if (!exists
             && !std::filesystem::is_directory(target.parent_path(), error)) {
-            return reject("write: target parent is not a directory");
+            return reject("target parent is not a directory");
         }
     }
     if (error) {
-        return reject(name + ": cannot inspect target");
+        return reject("cannot inspect target");
     }
 
     set_target(request, target);

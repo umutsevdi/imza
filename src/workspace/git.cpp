@@ -76,10 +76,12 @@ namespace {
             return { };
         }
         std::string path(body.substr(split + 1));
-        if (!path.empty() && path.front() == '"')
+        if (!path.empty() && path.front() == '"') {
             path.erase(0, 1);
-        if (!path.empty() && path.back() == '"')
+        }
+        if (!path.empty() && path.back() == '"') {
             path.pop_back();
+        }
         return strip_prefix(std::move(path));
     }
 
@@ -88,8 +90,9 @@ namespace {
     {
         const auto start_result
             = std::from_chars(value.data(), value.data() + value.size(), start);
-        if (start_result.ec != std::errc { })
+        if (start_result.ec != std::errc { }) {
             return false;
+        }
         count = 1;
         if (start_result.ptr == value.data() + value.size()
             || *start_result.ptr != ',') {
@@ -237,8 +240,9 @@ ReviewLoadResult parse_git_diff(std::string_view patch)
                                                : line_end - line_start);
         line_start
             = line_end == std::string_view::npos ? patch.size() : line_end + 1;
-        if (!line.empty() && line.back() == '\r')
+        if (!line.empty() && line.back() == '\r') {
             line.remove_suffix(1);
+        }
         if (line.starts_with("diff --git ")) {
             review.files.push_back(ReviewFile { });
             file           = &review.files.back();

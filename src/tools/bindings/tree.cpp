@@ -499,13 +499,11 @@ namespace {
         {
             "_lib.ts_query",
             binding_ts_query,
-            R"desc(
-tool._lib.ts_query(path: string, query: string) => { capture, line, text }[]
+            R"desc(tool._lib.ts_query(path: string, query: string) => { capture, line, text }[]
 #private: Execute an arbitrary tree-sitter query (S-expression pattern with
 @captures) over the file, one row per capture.
 Fails on an invalid query, naming the byte offset of the syntax error.
-Capped at 500 rows.
-            )desc",
+Capped at 500 rows.)desc",
             LuaCapability::NONE,
             "",
             true,
@@ -513,53 +511,45 @@ Capped at 500 rows.
         {
             "ts.index",
             binding_ts_index,
-            R"desc(
-tool.ts.index(path: string) => TsSymbol[]
+            R"desc(tool.ts.index(path: string) => TsSymbol[]
 List the named symbols in `path`: functions, methods, classes, structs,
 interfaces, enums, and other declaration/definition nodes parsed by the
 language grammar matched for the file's extension or name. Each entry
 reports `kind` (the grammar node type), `name`, `start_line`..`end_line`
 (1-based inclusive), and `text`.
-Capped at 50 entries; use tool.ts.nodes with a narrower type for more.
-            )desc",
+Capped at 50 entries; use tool.ts.nodes with a narrower type for more.)desc",
             LuaCapability::NONE,
         },
         {
             "ts.nodes",
             binding_ts_nodes,
-            R"desc(
-tool.ts.nodes(path: string, type: string) => TsSymbol[]
+            R"desc(tool.ts.nodes(path: string, type: string) => TsSymbol[]
 List every node in `path` whose grammar type name matches `type`: an exact
 grammar node type (e.g. "function_definition", "class_specifier") or a `*`
 glob ("*call*"). Entries carry `kind`, `name`, `start_line`..`end_line`,
 and `text`.
 Fails on an unknown exact type, naming it.
-Capped at 500 entries.
-            )desc",
+Capped at 500 entries.)desc",
             LuaCapability::NONE,
         },
         {
             "ts.symbols",
             binding_ts_symbols,
-            R"desc(
-tool.ts.symbols(path: string, symbol: string) => { file, line, text }[]
+            R"desc(tool.ts.symbols(path: string, symbol: string) => { file, line, text }[]
 List every occurrence of `symbol` (an identifier node) in `path`, one row
 per use with the file path, 1-based `line`, and the full source line as
-`text`. Grammar-typed, so comments and strings never match.
-            )desc",
+`text`. Grammar-typed, so comments and strings never match.)desc",
             LuaCapability::NONE,
         },
         {
             "ts.references",
             binding_ts_references,
-            R"desc(
-tool.ts.references(path: string, symbol: string) => { line, kind, text }[]
+            R"desc(tool.ts.references(path: string, symbol: string) => { line, kind, text }[]
 List the call sites of `symbol` in `path`: identifier nodes inside a call
 node, one row per site with 1-based `line`, the call node's grammar `kind`,
 and the full source line as `text`. Textual call-site matching, not a
 semantic resolution -- macros, virtual dispatch, and other files are out of
-scope. Capped at 500 entries.
-            )desc",
+scope. Capped at 500 entries.)desc",
             LuaCapability::NONE,
         },
     };

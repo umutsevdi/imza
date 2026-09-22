@@ -151,7 +151,7 @@ namespace {
         return true;
     }
 
-    std::string collapse_blank_lines(std::string text)
+    std::string collapse_blank_lines(const std::string& text)
     {
         std::string out;
         out.reserve(text.size());

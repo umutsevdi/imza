@@ -2,7 +2,6 @@
 
 #include "common/modal.h"
 
-#include <chrono>
 #include <string>
 #include <utility>
 
@@ -180,29 +179,23 @@ namespace {
         {
             "todo.get",
             binding_todo_get,
-            R"desc(
-tool.todo.get() => TodoItem[]
-The session task list in display order; empty array when unset.
-            )desc",
+            R"desc(tool.todo.get() => TodoItem[]
+The session task list in display order; empty array when unset.)desc",
         },
         { "todo.set", binding_todo_set,
-            R"desc(
-tool.todo.set(items: TodoItem[]) => true
+            R"desc(tool.todo.set(items: TodoItem[]) => true
 Set todo items.
 Replaces the entire list: get, modify, set the full array back.
-`status` defaults to "pending"; any other value is rejected.
-            )desc" },
+`status` defaults to "pending"; any other value is rejected.)desc" },
         {
             "ask",
             binding_ask,
-            R"desc(
-tool.ask(cards: AskCard[]) => AskAnswer[]
+            R"desc(tool.ask(cards: AskCard[]) => AskAnswer[]
 Asks the user one or more questions and returns their answers.
 `options` offers a choice list, `multi` allows several picks,
 `free_text` allows typed input; a card may combine them, and `answer` is the
 typed text plus the selected labels joined with ", ".
-nil, Err when dismissed. Unavailable in unattended runs.
-            )desc",
+nil, Err when dismissed. Unavailable in unattended runs.)desc",
         },
     };
 

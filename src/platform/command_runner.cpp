@@ -2,13 +2,13 @@
 
 #include <cerrno>
 #include <chrono>
-#include <cstdint>
 #include <cstring>
 #include <future>
 #include <string>
 #include <thread>
 
 #ifdef _WIN32
+#include <cstdint>
 #include <windows.h>
 /* Do not change the order. Windows API is cursed */
 #include <shellapi.h>

@@ -127,7 +127,7 @@ ShellEvaluation evaluate_shell_request(
 {
     if (request.command.empty()) {
         return { { PermissionDecision::Kind::REJECT,
-                     "shell: 'command' must be a non-empty string" },
+                     "'command' must be a non-empty string" },
             std::move(request), { } };
     }
     if (!context.grants) {
@@ -169,7 +169,7 @@ ShellEvaluation evaluate_shell_request(
             break;
         }
         if (!candidate.program.empty()) {
-            candidates.push_back(PermissionGrant { std::move(candidate) });
+            candidates.emplace_back(std::move(candidate));
         }
     }
     if (candidates.empty()) {

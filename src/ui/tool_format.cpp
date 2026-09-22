@@ -44,6 +44,23 @@ namespace {
         return summary;
     }
 
+    // Blockquote alert: renders bold red via the markdown sink's [!ERROR].
+    std::string quoted_error(const std::string& text)
+    {
+        std::string out   = "**Error**\n> [!ERROR]\n";
+        std::size_t start = 0;
+        while (start < text.size()) {
+            const std::size_t end = text.find('\n', start);
+            const std::size_t last
+                = end == std::string::npos ? text.size() : end;
+            if (last > start) {
+                out += "> " + text.substr(start, last - start) + "\n";
+            }
+            start = end == std::string::npos ? text.size() : end + 1;
+        }
+        return out;
+    }
+
 } // namespace
 
 std::string tool_display_name(const std::string& name)
@@ -184,8 +201,10 @@ ToolReport make_tool_report(const ToolCall& call)
         return report;
     }
     // A return value can speak for itself; no need for an empty-output
-    // placeholder when there is nothing printed.
-    if (!call.result->text.empty()) {
+    // placeholder when there is nothing printed. On failure the text is
+    // the error itself, carried by the quoted block below.
+    if (call.result->kind == ToolCall::Result::Kind::OUTPUT
+        && !call.result->text.empty()) {
         report.sections.push_back(ToolReportCode { "txt", call.result->text });
     }
     if (call.result->return_value) {
@@ -202,6 +221,11 @@ ToolReport make_tool_report(const ToolCall& call)
             report.sections.push_back(ToolReportMarkdown {
                 format_lua_return(*call.result->return_value) });
         }
+    }
+    if (call.result->kind != ToolCall::Result::Kind::OUTPUT
+        && !call.result->text.empty()) {
+        report.sections.push_back(
+            ToolReportMarkdown { quoted_error(call.result->text) });
     }
     for (std::size_t index = 0; index < call.result->diffs.size(); ++index) {
         report.sections.push_back(

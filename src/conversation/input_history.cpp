@@ -5,7 +5,6 @@
 
 #include <json/json.h>
 
-#include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <utility>

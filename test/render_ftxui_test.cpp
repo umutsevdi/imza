@@ -269,3 +269,14 @@ TEST_CASE("diff_split renders skip rows as elision markers")
     CHECK(out.find("8 unchanged line(s)") != std::string::npos);
     CHECK(out.find("14 + new") != std::string::npos);
 }
+TEST_CASE("markdown alert quote drops the [!ERROR] marker and keeps content")
+{
+    const std::string out = to_text(
+        imza::render_markdown_element("> [!ERROR]\n> disk full\n", 60), 60, 8);
+    CHECK(out.find("[!ERROR]") == std::string::npos);
+    CHECK(out.find("disk full") != std::string::npos);
+
+    const std::string plain
+        = to_text(imza::render_markdown_element("> note\n", 60), 60, 8);
+    CHECK(plain.find("note") != std::string::npos);
+}

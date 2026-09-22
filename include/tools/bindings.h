@@ -72,8 +72,6 @@ struct LuaRunContext {
 
 constexpr std::size_t MAX_OUTPUT_BYTES = 64 * 1024;
 
-// ---- binding helpers shared by every family --------------------------------
-
 // The run context stored in the VM's extra space by the driver.
 LuaRunContext* run_of(lua_State* L);
 

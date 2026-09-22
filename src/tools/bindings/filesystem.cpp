@@ -4,7 +4,6 @@
 #include "platform/command_runner.h"
 
 #include <algorithm>
-#include <cctype>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -327,35 +326,29 @@ namespace {
         {
             "read",
             binding_read,
-            R"desc(
-tool.read(path: string, first_line?: integer=1 last_line?: integer=nil) => string
+            R"desc(tool.read(path: string, first_line?: integer=1 last_line?: integer=nil) => string
 Read the file at `path` returning its content.
 first_line..last_line inclusive omit last_line to read to the end.
 Fails on no such file, first_line past the end, last_line < first_line, or a
-binary file. Over 64 KB is cut and marked "[truncated]".
-)desc",
+binary file. Over 64 KB is cut and marked "[truncated]".)desc",
         },
         {
             "list",
             binding_list,
-            R"desc(
-tool.list(path?: string=".", depth?: integer=1, show_hidden?: bool=false) => FileEntry[]
+            R"desc(tool.list(path?: string=".", depth?: integer=1, show_hidden?: bool=false) => FileEntry[]
 List files and directories in `path`, returning their paths and sizes.
 Paths are relative to the requested directory. Filename-sorted listing;
 depth (1..5) descends into subdirectories and their entries come back flat.
 `size` is absent for directories and "-" when unreadable.
-Capped at 2000 entries.
-            )desc",
+Capped at 2000 entries.)desc",
         },
         {
             "grep",
             binding_grep,
-            R"desc(
-tool.grep(path: string, pattern: string) => GrepHit[]
+            R"desc( tool.grep(path: string, pattern: string) => GrepHit[]
 Run a POSIX extended regex (not a Lua pattern) over a file or directory tree,
 one hit per matching line.
-Capped at 500 hits, followed by a hit whose text is "[truncated]".
-            )desc",
+Capped at 500 hits, followed by a hit whose text is "[truncated]".)desc",
         },
     };
 

@@ -14,7 +14,6 @@
 #include <ctime>
 #include <mutex>
 #include <string_view>
-#include <thread>
 
 namespace imza {
 

@@ -90,10 +90,6 @@ LuaReturnKind lua_return_kind(const Json::Value& value)
     return classify_return(value);
 }
 
-// Renders the JSON-encoded return value for display: scalars and scalar
-// lists print directly, uniform record lists render as markdown tables,
-// and everything else falls back to pretty JSON. `render` reports the
-// chosen form so callers can pick fence handling.
 std::string render_lua_return(const Json::Value& value, LuaReturnKind& render)
 {
     render = classify_return(value);
@@ -229,9 +225,6 @@ std::string format_lua_result(
         text += body;
         return text;
     }
-    // SCALAR_LIST ends with a newline; TABLE does too. Keep the list
-    // without its trailing newline to match scalar handling, keep the
-    // table intact.
     if (render == LuaReturnKind::SCALAR_LIST) {
         text += std::string_view(body).substr(0, body.size() - 1);
     } else {

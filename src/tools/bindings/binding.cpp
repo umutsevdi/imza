@@ -35,9 +35,13 @@ std::string gate_denied(
     lua_State* L, const std::string& denial, const std::string& path)
 {
     std::string text(run_of(L)->current_binding);
-    text += ": permission denied: " + path;
+    text += ": denied: " + path;
+    // The gate's own reason is authoritative; "permission denied" is only
+    // the fallback when a denial carries no reason (e.g. a dismissed ask).
     if (!denial.empty()) {
         text += " (" + denial + ")";
+    } else {
+        text += " (permission denied)";
     }
     return text;
 }

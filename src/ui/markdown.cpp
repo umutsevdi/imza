@@ -241,6 +241,13 @@ namespace {
 
         void text(std::string_view body, const Style& fl)
         {
+            if (quote_depth_ > 0 && quote_first_) {
+                quote_first_ = false;
+                if (body.rfind("[!ERROR]", 0) == 0) {
+                    body.remove_prefix(8);
+                    quote_alert_ = true;
+                }
+            }
             if (in_cell_) {
                 cell_buf_ += body;
                 return;
@@ -304,13 +311,23 @@ namespace {
             flush_words(std::move(decorate));
         }
 
-        void quote_begin() { frames_.emplace_back(); }
+        void quote_begin()
+        {
+            frames_.emplace_back();
+            ++quote_depth_;
+            quote_first_ = true;
+        }
 
         void quote_end()
         {
             Element body = frames_.back().empty() ? ftxui::text("")
                                                   : vbox(frames_.back());
             frames_.pop_back();
+            if (quote_alert_) {
+                body |= bold | color(HL_RED);
+                quote_alert_ = false;
+            }
+            --quote_depth_;
             add(std::move(body) | bgcolor(PANEL_COLOR_FOCUS));
         }
 
@@ -491,8 +508,13 @@ namespace {
         int width_;
 
         bool in_paragraph_ = false;
-        bool in_cell_      = false;
-        bool needs_sep_    = false;
+        // Open quote state: [!ERROR] on the first literal tints the whole
+        // quote red; nested frames keep the flag until the outermost close.
+        int quote_depth_  = 0;
+        bool quote_first_ = false;
+        bool quote_alert_ = false;
+        bool in_cell_     = false;
+        bool needs_sep_   = false;
         Elements words_;
         int heading_level_ = 0;
 

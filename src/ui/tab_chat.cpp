@@ -916,11 +916,6 @@ namespace {
             Component button
                 = make_lua_viewer_button(tc, failed, report.detail);
             Elements rows { button->Render() };
-            if (failed && !tc.result->text.empty()) {
-                // Show the reason the run died; the script stays in the viewer.
-                rows.push_back(
-                    text(take_lines(tc.result->text, 2)) | color(HL_RED));
-            }
             const LayoutCtx ctx = layout_();
             for (const ToolReportSection& section : report.sections) {
                 const auto* report_diff = std::get_if<ToolReportDiff>(&section);

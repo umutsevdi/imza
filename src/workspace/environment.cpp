@@ -2,7 +2,6 @@
 
 #include "common/util.h"
 #include "platform/command_runner.h"
-#include "platform/config.h"
 #include "platform/update.h"
 
 #include <algorithm>
