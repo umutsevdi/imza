@@ -1,11 +1,11 @@
 #include <doctest/doctest.h>
 #include <json/json.h>
-#include <unistd.h>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <utility>
 
+#include "common/util.h"
 #include "network/json_io.h"
 #include "permissions/store.h"
 #include "tools/tool.h"
@@ -344,12 +344,12 @@ TEST_CASE("tool.grep returns file, line, and text per match")
     TmpDir dir;
     write_file(dir.file("hay.cpp"), "int cat = 1;\nint dog = 2;\ncat();\n");
 
-    const imza::ToolOutput out
-        = run_script("local rows, err = tool.grep([[" + dir.path.string()
-            + "]], 'cat')\n"
-              "if err then error(err) end\n"
-              "print(#rows, rows[1].file, rows[1].line, rows[1].text)\n"
-              "for _, r in ipairs(rows) do print(r.file, r.line, r.text) end");
+    const imza::ToolOutput out = run_script("local rows, err = tool.grep([["
+        + imza::utf8_from_path(dir.path)
+        + "]], 'cat')\n"
+          "if err then error(err) end\n"
+          "print(#rows, rows[1].file, rows[1].line, rows[1].text)\n"
+          "for _, r in ipairs(rows) do print(r.file, r.line, r.text) end");
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(out.text.find("hay.cpp    1    int cat = 1;") != std::string::npos);
     CHECK(out.text.find("hay.cpp    3    cat();") != std::string::npos);
@@ -360,15 +360,132 @@ TEST_CASE("tool.grep accepts a single file target and fills the file field")
     TmpDir dir;
     write_file(dir.file("one.cpp"), "only match here\nnope\n");
 
-    const imza::ToolOutput file_out = run_script(
-        "local rows, err = tool.grep([[" + dir.file("one.cpp").string()
-        + "]], 'match')\n"
-          "if err then error(err) end\n"
-          "if #rows ~= 1 then error('expected 1 row') end\n"
-          "print(rows[1].file, rows[1].line, rows[1].text)");
+    const imza::ToolOutput file_out
+        = run_script("local rows, err = tool.grep([["
+            + imza::utf8_from_path(dir.file("one.cpp"))
+            + "]], 'match')\n"
+              "if err then error(err) end\n"
+              "if #rows ~= 1 then error('expected 1 row') end\n"
+              "print(rows[1].file, rows[1].line, rows[1].text)");
     CHECK(file_out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(file_out.text.find("one.cpp    1    only match here")
         != std::string::npos);
+}
+
+TEST_CASE("tool.grep uses POSIX extended regular expressions")
+{
+    TmpDir dir;
+    write_file(dir.file("ere.txt"),
+        "catcat 42\n"
+        "dogcat 7\n"
+        "cat 42\n"
+        "catcat xx\n");
+
+    const imza::ToolOutput out = run_script("local rows, err = tool.grep([["
+        + imza::utf8_from_path(dir.file("ere.txt"))
+        + "]], '^(cat|dog){2}[[:space:]][[:digit:]]+$')\n"
+          "if err then error(err) end\n"
+          "for _, r in ipairs(rows) do print(r.line, r.text) end");
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(out.text == "1    catcat 42\n2    dogcat 7\n");
+}
+
+#ifndef _WIN32
+TEST_CASE("tool.grep handles colons in filenames without parsing output")
+{
+    TmpDir dir;
+    const fs::path file = dir.file("part:one.txt");
+    write_file(file, "needle: value\n");
+
+    const imza::ToolOutput out = run_script("local rows, err = tool.grep([["
+        + imza::utf8_from_path(dir.path)
+        + "]], 'needle')\n"
+          "if err then error(err) end\n"
+          "print(#rows, rows[1].file == [["
+        + imza::utf8_from_path(file) + "]], rows[1].line, rows[1].text)");
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(out.text == "1    true    1    needle: value\n");
+}
+#endif
+
+TEST_CASE("tool.grep handles UTF-8 filenames and content")
+{
+    TmpDir dir;
+    const fs::path file = dir.file("café.txt");
+    write_file(file, "touché needle\n");
+    const std::string file_name = imza::utf8_from_path(file);
+
+    const imza::ToolOutput out
+        = run_script("local rows, err = tool.grep([[" + file_name
+            + "]], 'needle')\n"
+              "if err then error(err) end\n"
+              "print(rows[1].file == [["
+            + file_name + "]], rows[1].line, rows[1].text)");
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(out.text == "true    1    touché needle\n");
+}
+
+TEST_CASE("tool.grep normalizes CRLF lines")
+{
+    TmpDir dir;
+    write_file(dir.file("windows.txt"), "first\r\nmatching text\r\nlast");
+
+    const imza::ToolOutput out = run_script("local rows, err = tool.grep([["
+        + imza::utf8_from_path(dir.file("windows.txt"))
+        + "]], 'matching|last$')\n"
+          "if err then error(err) end\n"
+          "for _, r in ipairs(rows) do print(r.line, r.text) end");
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(out.text == "2    matching text\n3    last\n");
+}
+
+TEST_CASE("tool.grep returns a binding error for invalid expressions")
+{
+    TmpDir dir;
+    write_file(dir.file("text.txt"), "text\n");
+
+    const imza::ToolOutput out = run_script("local rows, err = tool.grep([["
+        + imza::utf8_from_path(dir.path)
+        + "]], '(')\n"
+          "print(rows == nil, err)");
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(out.text.find("true    grep: invalid POSIX extended regular "
+                        "expression")
+        != std::string::npos);
+}
+
+TEST_CASE("tool.grep caps results and appends a truncation marker")
+{
+    TmpDir dir;
+    std::string contents;
+    for (int line = 0; line < 501; ++line) {
+        contents += "match\n";
+    }
+    write_file(dir.file("many.txt"), contents);
+
+    const imza::ToolOutput out = run_script("local rows, err = tool.grep([["
+        + imza::utf8_from_path(dir.path)
+        + "]], 'match')\n"
+          "if err then error(err) end\n"
+          "print(#rows, rows[500].line, rows[501].text)");
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(out.text == "501    500    [truncated]\n");
+}
+
+TEST_CASE("tool.grep skips binary files")
+{
+    TmpDir dir;
+    write_file(dir.file("text.txt"), "needle in text\n");
+    write_file(dir.file("binary.dat"),
+        std::string("needle before null\0needle after null\n", 37));
+
+    const imza::ToolOutput out = run_script("local rows, err = tool.grep([["
+        + imza::utf8_from_path(dir.path)
+        + "]], 'needle')\n"
+          "if err then error(err) end\n"
+          "print(#rows, rows[1].text)");
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(out.text == "1    needle in text\n");
 }
 
 TEST_CASE("bindings outside the workspace return an error value")

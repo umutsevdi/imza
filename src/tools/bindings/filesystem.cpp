@@ -1,13 +1,15 @@
 #include "tools/bindings.h"
 
+#include "common/util.h"
 #include "permissions/filesystem.h"
-#include "platform/command_runner.h"
 
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <locale>
+#include <regex>
 #include <sstream>
 #include <string>
 
@@ -210,86 +212,147 @@ namespace {
         return 1;
     }
 
-    int grep_run(lua_State* L, const std::string& pattern,
-        const std::string& path, bool has_rg)
+    enum class GrepFileResult { COMPLETE, BINARY, UNREADABLE, TIMED_OUT };
+
+    struct GrepState {
+        lua_State* lua;
+        const std::regex& expression;
+        std::chrono::steady_clock::time_point deadline;
+        int rows       = 0;
+        bool truncated = false;
+    };
+
+    bool grep_timed_out(const GrepState& state)
     {
-        const std::string command = has_rg
-            ? "rg -n -- " + shell_quote(fs::path(pattern)) + " "
-                + shell_quote(fs::path(path))
-            : "grep -rsnE -- " + shell_quote(fs::path(pattern)) + " "
-                + shell_quote(fs::path(path));
-        constexpr auto timeout    = std::chrono::seconds { 10 };
-        CommandResult result      = run_command(command, timeout);
-        if (!result.spawned) {
-            return binding_error(L, "grep: failed to start search command");
-        }
-        if (result.timed_out) {
-            return binding_error(L, "grep: search timed out after 10 seconds");
-        }
-        if (result.exit_code > 1) {
-            return binding_error(L,
-                result.output.empty() ? "grep: search failed with exit code "
-                        + std::to_string(result.exit_code)
-                                      : "grep: " + result.output);
+        return std::chrono::steady_clock::now() >= state.deadline;
+    }
+
+    void push_grep_row(GrepState& state, const fs::path& file,
+        std::size_t line_number, const std::string& text)
+    {
+        ++state.rows;
+        lua_newtable(state.lua);
+        const std::string name = utf8_from_path(file);
+        lua_pushlstring(state.lua, name.data(), name.size());
+        lua_setfield(state.lua, -2, "file");
+        lua_pushinteger(state.lua, static_cast<lua_Integer>(line_number));
+        lua_setfield(state.lua, -2, "line");
+        lua_pushlstring(state.lua, text.data(), text.size());
+        lua_setfield(state.lua, -2, "text");
+        lua_rawseti(state.lua, -2, static_cast<lua_Integer>(state.rows));
+    }
+
+    GrepFileResult grep_file(GrepState& state, const fs::path& file)
+    {
+        std::ifstream input(file, std::ios::binary);
+        if (!input) {
+            return GrepFileResult::UNREADABLE;
         }
 
-        lua_newtable(L);
-        int row           = 0;
-        std::size_t start = 0;
-        bool truncated    = false;
-        // With a file target rg/grep print "line:text" (no filename);
-        // with a directory they print "file:line:text".
-        const bool directory   = fs::is_directory(fs::path(path));
-        const char* fixed_file = directory ? "" : path.c_str();
-        while (start < result.output.size()) {
-            const std::size_t stop = result.output.find('\n', start);
-            const std::string line = result.output.substr(start,
-                stop == std::string::npos ? std::string::npos : stop - start);
-            start = stop == std::string::npos ? result.output.size() : stop + 1;
-            if (line.empty()) {
-                continue;
+        char buffer[8192];
+        while (input) {
+            if (grep_timed_out(state)) {
+                return GrepFileResult::TIMED_OUT;
             }
-            std::string file;
-            std::size_t number_begin = 0;
-            const auto first         = line.find(':');
-            const auto second        = first == std::string::npos
-                ? std::string::npos
-                : line.find(':', first + 1);
-            if (directory && first != std::string::npos
-                && second != std::string::npos) {
-                number_begin = first + 1;
+            input.read(buffer, sizeof(buffer));
+            if (std::find(buffer, buffer + input.gcount(), '\0')
+                != buffer + input.gcount()) {
+                return GrepFileResult::BINARY;
             }
-            const std::size_t number_len
-                = (directory ? second : first) - number_begin;
-            if ((directory && second == std::string::npos)
-                || number_len == std::string::npos
-                || line.substr(number_begin, number_len)
-                        .find_first_not_of("0123456789")
-                    != std::string::npos) {
-                continue;
-            }
-            if (++row > MAX_GREP_ROWS) {
-                truncated = true;
-                break;
-            }
-            lua_newtable(L);
-            if (directory) {
-                file = line.substr(0, first);
-            } else {
-                file = fixed_file;
-            }
-            lua_pushlstring(L, file.data(), file.size());
-            lua_setfield(L, -2, "file");
-            lua_pushinteger(
-                L, std::stol(line.substr(number_begin, number_len)));
-            lua_setfield(L, -2, "line");
-            const std::string text
-                = line.substr((directory ? second : first) + 1);
-            lua_pushlstring(L, text.data(), text.size());
-            lua_setfield(L, -2, "text");
-            lua_rawseti(L, -2, static_cast<lua_Integer>(row));
         }
-        if (truncated) {
+        if (!input.eof()) {
+            return GrepFileResult::UNREADABLE;
+        }
+
+        input.clear();
+        input.seekg(0);
+        if (!input) {
+            return GrepFileResult::UNREADABLE;
+        }
+        std::string line;
+        std::size_t line_number = 0;
+        while (std::getline(input, line)) {
+            if (grep_timed_out(state)) {
+                return GrepFileResult::TIMED_OUT;
+            }
+            ++line_number;
+            if (!line.empty() && line.back() == '\r') {
+                line.pop_back();
+            }
+            if (!std::regex_search(line, state.expression)) {
+                continue;
+            }
+            if (state.rows == MAX_GREP_ROWS) {
+                state.truncated = true;
+                return GrepFileResult::COMPLETE;
+            }
+            push_grep_row(state, file, line_number, line);
+        }
+        return input.eof() ? GrepFileResult::COMPLETE
+                           : GrepFileResult::UNREADABLE;
+    }
+
+    int grep_run(
+        lua_State* L, const std::regex& expression, const fs::path& target)
+    {
+        constexpr auto timeout = std::chrono::seconds { 10 };
+        GrepState state { L, expression,
+            std::chrono::steady_clock::now() + timeout };
+        lua_newtable(L);
+
+        std::error_code ec;
+        const fs::file_status target_status = fs::status(target, ec);
+        if (ec) {
+            return binding_error(
+                L, "grep: cannot inspect target: " + utf8_from_path(target));
+        }
+        if (fs::is_regular_file(target_status)) {
+            const GrepFileResult result = grep_file(state, target);
+            if (result == GrepFileResult::TIMED_OUT) {
+                return binding_error(
+                    L, "grep: search timed out after 10 seconds");
+            }
+            if (result == GrepFileResult::UNREADABLE) {
+                return binding_error(
+                    L, "grep: cannot read file: " + utf8_from_path(target));
+            }
+        } else if (fs::is_directory(target_status)) {
+            fs::recursive_directory_iterator iterator(
+                target, fs::directory_options::skip_permission_denied, ec);
+            const fs::recursive_directory_iterator end;
+            if (ec) {
+                return binding_error(L,
+                    "grep: cannot read directory: " + utf8_from_path(target));
+            }
+            while (iterator != end && !state.truncated) {
+                if (grep_timed_out(state)) {
+                    return binding_error(
+                        L, "grep: search timed out after 10 seconds");
+                }
+                const fs::directory_entry entry = *iterator;
+                std::error_code status_error;
+                const fs::file_status status
+                    = entry.symlink_status(status_error);
+                if (!status_error && fs::is_regular_file(status)) {
+                    const GrepFileResult result
+                        = grep_file(state, entry.path());
+                    if (result == GrepFileResult::TIMED_OUT) {
+                        return binding_error(
+                            L, "grep: search timed out after 10 seconds");
+                    }
+                }
+                iterator.increment(ec);
+                if (ec) {
+                    ec.clear();
+                }
+            }
+        } else {
+            return binding_error(L,
+                "grep: target is not a file or directory: "
+                    + utf8_from_path(target));
+        }
+
+        if (state.truncated) {
             lua_newtable(L);
             lua_pushboolean(L, 0);
             lua_setfield(L, -2, "file");
@@ -297,7 +360,7 @@ namespace {
             lua_setfield(L, -2, "line");
             lua_pushliteral(L, "[truncated]");
             lua_setfield(L, -2, "text");
-            lua_rawseti(L, -2, static_cast<lua_Integer>(row));
+            lua_rawseti(L, -2, static_cast<lua_Integer>(state.rows + 1));
         }
         return 1;
     }
@@ -312,14 +375,24 @@ namespace {
             return binding_error(L, "grep: pattern must be a non-empty string");
         }
 
-        const FindFilesRequest request { path, pattern };
+        std::regex expression;
+        expression.imbue(std::locale::classic());
+        try {
+            expression.assign(pattern, std::regex_constants::extended);
+        } catch (const std::regex_error& error) {
+            return binding_error(L,
+                "grep: invalid POSIX extended regular expression: "
+                    + std::string(error.what()));
+        }
+
+        const FindFilesRequest request { path_from_utf8(path), pattern };
         const GateOutcome gate = authorize_filesystem(L, request);
         if (!gate) {
             return binding_error(L, gate_denied(L, gate.denial, path));
         }
-        const std::string target = filesystem_target(*gate.filesystem).string();
+        const fs::path& target = filesystem_target(*gate.filesystem);
 
-        return grep_run(L, pattern, target, run_of(L)->host->has_rg);
+        return grep_run(L, expression, target);
     }
 
     constexpr LuaBinding BINDINGS[] = {
