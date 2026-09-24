@@ -1,68 +1,95 @@
 # Imza
 
-Imza is a batteries-included, model-agnostic coding agent with native
-performance and a small runtime footprint.
+**Imza is a lightweight coding agent designed to improve the development 
+experience for both models and the people using them.**
 
-**\~20 MB binary · \~5-8 MB RAM at startup · \~20–40 MB during typical agentic work[^1]**
+It keeps you engaged with the codebase by surfacing diffs throughout 
+development and making review a first-class part of the workflow.
 
-Bring your own model, open Imza in a project, and describe the
-outcome you want. Imza reads the project instructions, gathers context, asks 
-questions when needed, and works through the task with visible reasoning,
-tool calls, diffs, and approval prompts along the way.
+For the agent, Imza provides a sandboxed programming environment where reads, 
+edits, searches, and commands can be composed into larger operations. This 
+reduces unnecessary tool calls and context overhead while keeping permissions 
+enforced and agent actions observable.
 
-> Imza is not lightweight because it does less.
-> It is lightweight because it was designed that way.
+Better orchestration can also reduce inference costs by avoiding unnecessary 
+model round trips and intermediate context[^1].
+
+> Imza is a native C++ application. It is not lightweight because it does less.
+
+**\~20 MB binary · \~5-8 MB RAM at startup · \~20–40 MB during typical agentic work[^2]**
+
+https://github.com/user-attachments/assets/a0096f0d-8337-4e6b-aabe-f9debe273594
 
 Download the [latest release](https://github.com/umutsevdi/imza/releases/latest).
 
 Check out the [user guide](https://github.com/umutsevdi/imza/wiki).
 
-https://github.com/user-attachments/assets/a0096f0d-8337-4e6b-aabe-f9debe273594
-
 ## Why Imza?
 
-Imza organizes development around three modes.
+Existing coding agents makes the development faster, but causes the developer gradually stops 
+reading the code.
 
-**Plan:** inspect the project, gather context, ask questions, and design an 
-implementation without modifying files.
+Plans, summaries, tool output, and completion messages start replacing direct 
+interaction with the implementation. The agent keeps working, while your 
+understanding of how the codebase is actually changing can fall behind.
 
-**Build:** edit files, run commands, manage tasks, and delegate work to concurrent 
-subagents.
+Imza is designed to keep the developer inside that implementation loop.
 
-**Review:** inspect the resulting Git diff, generate or manually add review 
-comments, then send the findings directly back to Plan mode.
+Development is separated into three explicit modes:
+
+- **Plan**: Investigate the repository, understand the problem, and design the 
+change without modifying files. The agent can explore freely while the codebase 
+remains read-only.
+
+- **Build**: Implement the plan using edits, commands, subagents, and 
+programmatic tool execution. Imza surfaces code changes as they happen, while 
+filesystem access and shell commands remain subject to explicit permissions.
+
+- **Review**: Inspect the resulting Git diff, add findings manually or with 
+the agent's help, and send those findings directly back into another planning 
+pass.
+
+This makes review part of the development loop rather than only a final 
+checkpoint:
 
 **Plan → Build → Review → Plan → Build**
 
+Imza aims to give the agent autonomy over the mechanical work without removing 
+the developer from the code itself. You still see what is being written, review 
+the resulting implementation, and decide how the next iteration should proceed.
+
+![imza-layout](./screenshots/layout.png)
+
 ## Highlights
 
-- Native terminal UI with a small runtime footprint
-- Plan → Build → Review workflow
-- Interactive diffs and AI-assisted code review
-- Sophisticated tool orchestration system for reduced token costs and faster task completion
-- Sidechat, a place to ask questions without disrupting the main agent's work
-- Shell-aware, scoped permission controls
-- Bring-your-own-model support
-- Persistent sessions, transcripts, and automatic context compaction
-- Up to five concurrent research or build subagents
-- Terminal notifications when an attended agent finishes or needs input
+* Plan → Build → Review workflow with review findings fed back into planning
+* Interactive diffs and AI-assisted code review throughout development
+* Sandboxed tool orchestration for fewer round trips and less context overhead
+* Shell-aware, scoped permission controls
+* Sidechat for asking questions without disrupting the main agent's work
+* Up to five concurrent research or build subagents
+* Bring-your-own-model support, including local OpenAI-compatible models
+* Native terminal UI with a small runtime footprint
+* Persistent sessions, transcripts, and automatic context compaction
+* Headless execution for scripts, CI, and development tooling
+* Terminal notifications when an attended agent finishes or needs input
 
 ## Bring Your Own Model
 
-Imza works with OpenAI-compatible endpoints and the Anthropic Messages API,
+Imza supports OpenAI-compatible endpoints and the Anthropic Messages API, 
 including locally hosted OpenAI-compatible models.
 
-Use your own API connection, a subscription-backed connection where supported, 
-or a locally hosted OpenAI-compatible model.
+Use your own API credentials, a subscription-backed connection where supported, 
+or a model running locally.
 
-## Headless mode
+## Headless Mode
 
 Run Imza non-interactively from scripts, CI jobs, or other development tools.
-Use `--ask` for a one-shot read-only Plan query or `--exec` for a one-shot
-Build task.
 
-Grant only the additional directory and command/subcommand pairs the task
-needs:
+Use `--ask` for a one-shot, read-only query or `--exec` for a one-shot 
+task that can modify files.
+
+Grant only the directories and commands required by the task:
 
 ```sh
 imza --exec "build the project and summarize the changes" \
@@ -70,84 +97,106 @@ imza --exec "build the project and summarize the changes" \
   --allow-cmd "git status" "cmake --build"
 ```
 
-`--allow-dir` grants access beneath that directory. A quoted `--allow-cmd`
-value such as `"git status"` grants only that command/subcommand pair; a value
-containing only the program name grants all of its subcommands for the current
-session.
+`--allow-dir` grants access beneath the specified directory.
 
-![imza-layout](./screenshots/layout.png)
+A quoted `--allow-cmd` value such as `"git status"` grants only that 
+command/subcommand pair. Providing only the program name grants access to all 
+of its subcommands for the current session.
 
-## Bulk Execution
-Imza provides models with a language runtime for executing sophisticated 
-scripts at once, enabling bulk edits and compact read calls that save tokens 
-and speed up development. [Read more](https://github.com/umutsevdi/imza/discussions/1)
+## Composable Tool Execution
+
+Instead of requiring a separate model round trip for every read, search, edit, 
+or command, Imza exposes its tools through a sandboxed programming environment.
+
+The model can compose multiple operations into a single execution, making tasks 
+such as filtering files, gathering context, and performing coordinated edits 
+more efficient.
+
+These operations still go through Imza's permission and mutation tracking 
+systems, so shell execution, filesystem access, and resulting code changes 
+remain observable.
+
+In Imza's own development sessions, this approach substantially reduced 
+intermediate tool output and context overhead. [Read the analysis](https://github.com/umutsevdi/imza/discussions/1).
 
 ## Capabilities
 
-- [X] Streaming Markdown and reasoning
-- [X] File reading, editing, and shell commands
-- [X] Interactive diffs
-- [X] Plan, Build, and Review modes
-- [X] Generated and manual review comments
-- [X] Review → Plan handoff
-- [X] Tool approval flows
-- [X] Scoped filesystem and skill permissions
-- [X] Structured questions
-- [X] Task tracking
-- [X] Concurrent subagents
-- [X] Persistent subagent transcripts
-- [X] Skills and project instructions
-- [X] @path file attachments
-- [X] $skill attachments
-- [X] Prompt queueing and generation interruption
-- [X] Automatic context compaction
-- [X] Persistent local sessions
-- [X] Repository, context, token, and cost information
-- [X] OpenAI-compatible APIs
-- [X] Anthropic Messages API
-- [X] Local OpenAI-compatible servers
-- [X] Web search and page fetch
-- [X] Subagent configuration
-- [X] Syntax highlighting
-- [X] Headless mode
-- [X] Shell-aware permissions with program and subcommand grants
-- [X] Notifications
-- [X] Sidechat
-- [X] Block execution
+### Workflow and Review
 
-### Roadmap
-- [ ] MCP
-- [ ] Image or other multimodal prompt attachments
-- [ ] Monthly usage analytics (local)
+* [x] Plan, Build, and Review modes
+* [x] Interactive diffs
+* [x] Generated and manual review comments
+* [x] Review → Plan handoff
+* [x] Structured questions and task tracking
+* [x] Prompt queueing and generation interruption
+* [x] Sidechat
+
+### Agent Execution
+
+* [x] File reading, editing, and shell execution
+* [x] Sandboxed composable tool execution
+* [x] Concurrent subagents
+* [x] Persistent subagent transcripts
+* [x] Configurable subagents
+* [x] Web search and page fetching
+* [x] Skills and project instructions
+* [x] `@path` file attachments
+* [x] `$skill` attachments
+
+### Permissions and Control
+
+* [x] Tool approval flows
+* [x] Scoped filesystem and skill permissions
+* [x] Shell-aware program and subcommand grants
+
+### Models and Context
+
+* [x] OpenAI-compatible APIs
+* [x] Anthropic Messages API
+* [x] Local OpenAI-compatible servers
+* [x] Streaming Markdown and reasoning
+* [x] Automatic context compaction
+* [x] Repository, context, token, and cost usage information
+
+### Sessions and Interface
+
+* [x] Persistent local sessions
+* [x] Syntax highlighting
+* [x] Headless mode
+* [x] Terminal notifications
+
+## Roadmap
+
+* [ ] MCP support
+* [ ] Image and multimodal prompt attachments
+* [ ] Background watchdogs that notify the agent when files or processes reach a target state
+* [ ] Local monthly usage analytics
 
 ## Installation
 
-> Pre-built binaries for the [latest release](https://github.com/umutsevdi/imza/releases/latest).
+Pre-built packages are available from the [latest release](https://github.com/umutsevdi/imza/releases/latest).
 
-Install build dependencies (C++23 compiler, CMake, Python 3, libcurl), then:
+> Downloaded macOS packages are currently unsigned. On first launch, 
+> right-click the application and select Open to allow it through Gatekeeper.
 
-```sh
-git clone https://github.com/umutsevdi/imza
-cd imza
-git submodule update --init --recursive
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target package
-sudo apt install build/*.deb     # Debian/Ubuntu
-```
+After installation, run `imza`.
 
->  Packages install under the configured prefix (default `/usr/local`). Pass
->  `-DCMAKE_INSTALL_PREFIX=/your/prefix` to the CMake step to relocate them.
->  Downloaded macOS packages are unsigned; right-click → Open on first launch
->  to bypass Gatekeeper. 
+On first launch, use `/connect` to configure a provider and `/model` to select a model.
 
-> Installed builds check for new releases and show a notice when one is
-> available. Use `imza --update` to install it.
+Type `/` in the chat input to browse the available commands.
 
-> Prefer to skip the installer? The binary is at `./build/release/imza` after the
-> build step.
+> Installed builds check for new releases and notify you when one is available. 
+> Run `imza --update` to install the latest version.
 
-On first launch, open `/connect` to add a provider, then use `/model` to choose
-a model. Type `/` in the chat input to browse the available commands.
+### Building from Source
 
-[^1]: Memory use may increase with conversation history, loaded skills, and
+Want to build Imza yourself or contribute to development?
+
+See the [build and installation guide](https://github.com/umutsevdi/imza/wiki/01_Installation#building-from-source)
+for dependencies, CMake configuration, packaging, and platform-specific instructions.
+
+---
+
+[^1]: <https://github.com/umutsevdi/imza/discussions/1>
+[^2]: Memory use may increase with conversation history, loaded skills, and
 Tree-sitter languages used in Review mode.
