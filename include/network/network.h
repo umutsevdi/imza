@@ -20,6 +20,7 @@ namespace imza {
 struct StreamEvent {
     enum class Kind {
         CONTENT_DELTA,
+        TOOL_CALL_START,
         TOOL_CALL,
         QUESTION,
         DONE,
@@ -38,6 +39,7 @@ struct StreamEvent {
 };
 
 StreamEvent make_delta_event(std::string text);
+StreamEvent make_tool_call_start_event(ToolCallRequest request);
 StreamEvent make_tool_call_event(ToolCallRequest request);
 StreamEvent make_question_event(QuestionForm form);
 StreamEvent make_done_event();

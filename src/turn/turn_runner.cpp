@@ -322,6 +322,7 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
             }
             if (ev.kind == StreamEvent::Kind::CONTENT_DELTA
                 || ev.kind == StreamEvent::Kind::REASONING
+                || ev.kind == StreamEvent::Kind::TOOL_CALL_START
                 || ev.kind == StreamEvent::Kind::TOOL_CALL
                 || ev.kind == StreamEvent::Kind::USAGE) {
                 received_data = true;

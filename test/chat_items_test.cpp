@@ -1,7 +1,10 @@
+#include <chrono>
+#include <functional>
 #include <string>
 
 #include <doctest/doctest.h>
 
+#include "app/application_state.h"
 #include "conversation/format.h"
 #include "test_helpers.h"
 #include "ui/ui.h"
@@ -24,6 +27,44 @@ TEST_CASE("render_item renders completed compaction")
     const std::string out
         = to_text(imza::render_item(item, { imza::LayoutCtx::Kind::WIDE, 60 }));
     CHECK(out.find("✓ Session compacted") != std::string::npos);
+}
+
+TEST_CASE("chat shows planning between thought and lua execution")
+{
+    auto state = imza::make_application_state(
+        [](std::function<void()> fn) { fn(); }, imza::Config { });
+    state->session->begin_send("inspect the project");
+    state->session->append_item(imza::AssistantTurn {
+        .reasoning        = "I should inspect the files.",
+        .reasoning_ms     = std::chrono::milliseconds { 1000 },
+        .reasoning_effort = "high",
+    });
+    state->session->set_phase(imza::Session::Phase::STREAMING);
+
+    const imza::ToolCallRequest request { "lua",
+        R"json({"script":"return tool.list('.')"})json", "", "call-1" };
+    state->session->apply(imza::make_tool_call_start_event(request), { });
+    auto chat = imza::make_chat(state, [] {
+        return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100, 40 };
+    });
+
+    std::string rendered          = to_text(chat->Render(), 100, 40);
+    const std::size_t thought_at  = rendered.find("Thought 1.0s");
+    const std::size_t planning_at = rendered.find("Planning…");
+    REQUIRE(thought_at != std::string::npos);
+    REQUIRE(planning_at != std::string::npos);
+    CHECK(thought_at < planning_at);
+
+    state->session->apply(imza::make_tool_call_event(request), { });
+    rendered = to_text(chat->Render(), 100, 40);
+    CHECK(rendered.find("Planning…") == std::string::npos);
+    CHECK(rendered.find("Executing…") != std::string::npos);
+
+    state->session->fill_tool_result(
+        request, { imza::ToolCall::Result::Kind::OUTPUT, "done" });
+    rendered = to_text(chat->Render(), 100, 40);
+    CHECK(rendered.find("Executing…") == std::string::npos);
+    CHECK(rendered.find("Executed") != std::string::npos);
 }
 
 TEST_CASE("virtual list selects only the visible rows")

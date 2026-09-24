@@ -17,6 +17,7 @@ struct ToolAccum {
     std::string id;
     std::string name;
     std::string args;
+    bool started = false;
 };
 
 ToolCallRequest finish_accum(const ToolAccum& acc);

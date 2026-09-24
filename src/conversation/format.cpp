@@ -80,7 +80,12 @@ namespace {
             value.begin(), value.end(), [](const Json::Value& entry) {
                 return !entry.isObject() && !entry.isArray();
             });
-        return all_scalars ? LuaReturnKind::SCALAR_LIST : LuaReturnKind::TABLE;
+        if (all_scalars) {
+            return LuaReturnKind::SCALAR_LIST;
+        }
+        const bool all_objects = std::all_of(value.begin(), value.end(),
+            [](const Json::Value& entry) { return entry.isObject(); });
+        return all_objects ? LuaReturnKind::TABLE : LuaReturnKind::JSON;
     }
 
 } // namespace

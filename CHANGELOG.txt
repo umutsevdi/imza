@@ -8,6 +8,17 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
+0.4.1 - 2026-09-24
+-------------------------------------------------------------------------------
+<https://github.com/umutsevdi/imza/releases/tag/v0.4.1>
+
+Changes:
+  - Tool calls show a unified Planning → Executing → Executed status, so the
+agent no longer looks idle while it streams a tool call's arguments.
+  - Fixed a crash when Lua returns a list containing mixed value types.
+  - Fixed a bug that caused `tool.grep(...)` to fail.
+
+-------------------------------------------------------------------------------
 0.4.0 - 2026-09-22
 -------------------------------------------------------------------------------
 <https://github.com/umutsevdi/imza/releases/tag/v0.4.0>

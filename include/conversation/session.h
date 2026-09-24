@@ -45,6 +45,7 @@ struct SubagentChat {
 };
 
 struct ToolCall {
+    enum class Phase { PLANNING, EXECUTING };
     struct Result {
         enum class Kind { OUTPUT, ERROR, REJECT, CANCEL };
         Kind kind;
@@ -61,6 +62,7 @@ struct ToolCall {
     std::vector<std::size_t> subagent_ids;
     std::vector<SubagentChat> subagent_chats;
     std::optional<Result> result;
+    Phase phase = Phase::EXECUTING;
 };
 
 struct CompactionEvent {
@@ -199,6 +201,7 @@ private:
     const AssistantTurn* last_assistant_locked() const;
     ToolCall* _find_tool_locked(
         const ToolCallRequest& req, bool unfinished_only);
+    ToolCall* find_planning_tool_locked(const ToolCallRequest& req);
     void finalize_reasoning(AssistantTurn& a);
     void finish_session_locked(const std::string& error);
     void update_usage(

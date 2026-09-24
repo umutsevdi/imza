@@ -155,6 +155,11 @@ namespace {
                 acc.id   = item.get("call_id", item.get("id", "")).asString();
                 acc.name = item.get("name", "").asString();
                 acc.args = item.get("arguments", "").asString();
+                if (!acc.started && !acc.name.empty()) {
+                    acc.started = true;
+                    outs.push_back(
+                        make_tool_call_start_event(finish_accum(acc)));
+                }
             }
             return;
         }
