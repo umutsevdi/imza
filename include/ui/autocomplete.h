@@ -29,7 +29,7 @@ public:
     // Applies the highlighted suggestion. Returns true when a command was
     // chosen and the caller should submit the input afterwards.
     bool accept(const ApplicationState& state, std::string& text, int& cursor,
-        std::vector<FileAttachment>& attachments);
+        std::vector<Attachment>& attachments);
 
     void clear();
     ftxui::Element render(const LayoutCtx& ctx) const;

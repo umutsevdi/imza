@@ -1,3 +1,4 @@
+#include "common/util.h"
 #include "network/json_io.h"
 #include "network/network.h"
 #include "network/sse_parse.h"
@@ -56,7 +57,8 @@ namespace {
             flush_results();
             Json::Value o;
             o["role"] = role_str(m.type);
-            if (!m.tool_calls.empty() || !m.thinking.empty()) {
+            if (!m.tool_calls.empty() || !m.thinking.empty()
+                || (m.type == Message::Type::USER && !m.media.empty())) {
                 Json::Value content(Json::arrayValue);
                 for (const auto& tb : m.thinking) {
                     Json::Value block;
@@ -70,6 +72,18 @@ namespace {
                     text["type"] = "text";
                     text["text"] = m.content;
                     content.append(text);
+                }
+                if (m.type == Message::Type::USER) {
+                    for (const Attachment& media : m.media) {
+                        Json::Value block;
+                        block["type"] = media.type == Attachment::Type::IMAGE
+                            ? "image"
+                            : "document";
+                        block["source"]["type"]       = "base64";
+                        block["source"]["media_type"] = media.media_type;
+                        block["source"]["data"] = base64_encode(media.content);
+                        content.append(std::move(block));
+                    }
                 }
                 for (const auto& tc : m.tool_calls) {
                     Json::Value use;

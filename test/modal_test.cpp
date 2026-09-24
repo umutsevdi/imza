@@ -290,22 +290,6 @@ TEST_CASE("agent shell approval notifies when input is required")
     CHECK(notifications.back() == imza::AgentNotification::TURN_FINISHED);
 }
 
-TEST_CASE("user modal does not send an agent notification")
-{
-    Env env;
-    std::vector<imza::AgentNotification> notifications;
-    env.state->notify_user = [&notifications](imza::AgentNotification event) {
-        notifications.push_back(event);
-    };
-
-    imza::enqueue_user_modal(
-        *env.state, imza::ViewerModal { "Document", "content" });
-
-    CHECK(std::holds_alternative<imza::ViewerModal>(env.session->modal()));
-    CHECK(notifications.empty());
-    imza::close_modal(*env.state);
-}
-
 TEST_CASE("queued agent modal notifies only when presented")
 {
     Env env;

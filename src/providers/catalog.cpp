@@ -107,6 +107,26 @@ namespace {
         return v.asUInt64();
     }
 
+    std::optional<Capabilities> input_capabilities(const Json::Value& entry)
+    {
+        const Json::Value& input = entry["modalities"]["input"];
+        if (!input.isArray()) {
+            return std::nullopt;
+        }
+        Capabilities capabilities = Capabilities::NONE;
+        for (const Json::Value& modality : input) {
+            if (!modality.isString()) {
+                continue;
+            }
+            if (modality.asString() == "image") {
+                capabilities = capabilities | Capabilities::IMAGE;
+            } else if (modality.asString() == "pdf") {
+                capabilities = capabilities | Capabilities::PDF;
+            }
+        }
+        return capabilities;
+    }
+
     bool endpoint_backed(const Connection& conn)
     {
         return !conn.endpoint.empty();
@@ -183,7 +203,8 @@ namespace {
             if (entry["reasoning"].isBool()) {
                 model.reasoning = entry["reasoning"].asBool();
             }
-            out.models[id] = std::move(model);
+            model.capabilities = input_capabilities(entry);
+            out.models[id]     = std::move(model);
         }
         return Status::OK;
     }
@@ -288,6 +309,18 @@ Status save_catalog(const std::filesystem::path& path, const Catalog& catalog)
             }
             if (model.reasoning) {
                 entry["reasoning"] = *model.reasoning;
+            }
+            if (model.capabilities) {
+                Json::Value input(Json::arrayValue);
+                if (has_capability(*model.capabilities, Capabilities::IMAGE)) {
+                    input.append("image");
+                }
+                if (has_capability(*model.capabilities, Capabilities::PDF)) {
+                    input.append("pdf");
+                }
+                Json::Value modalities(Json::objectValue);
+                modalities["input"] = std::move(input);
+                entry["modalities"] = std::move(modalities);
             }
             models[id] = entry;
         }

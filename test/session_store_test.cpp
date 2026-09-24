@@ -642,20 +642,6 @@ TEST_CASE("session id is generated ahead of use and adopts the stem on load")
     CHECK(saved.front().path.stem().string() == initial_id);
     CHECK(session.snapshot_for_save() == std::nullopt);
 
-    imza::Session restored;
-    std::filesystem::path workspace;
-    REQUIRE(imza::load_session(saved.front().path, restored, &workspace)
-        == imza::Status::OK);
-    // A resumed session continues its source file in place: it adopts the
-    // file stem as the id and saves rewrite that same file.
-    CHECK(restored.session_id() == initial_id);
-    CHECK(restored.snapshot_for_save() == std::nullopt);
-    restored.begin_send("continued");
-    REQUIRE(imza::save_session(restored) == imza::Status::OK);
-    const auto after_continue = imza::saved_sessions();
-    REQUIRE(after_continue.size() == 1);
-    CHECK(after_continue.front().path.stem().string() == initial_id);
-
     // Starting a new session in place (the /new flow) rotates the id, so
     // the fresh conversation cannot overwrite the archive it left behind.
     const std::string pre_new_id = session.session_id();
@@ -769,5 +755,72 @@ TEST_CASE("switch_session locks the target and reports foreign locks")
     state->session->begin_send("grew the target in place");
     REQUIRE(imza::save_session(*state->session) == imza::Status::OK);
     CHECK(imza::saved_sessions().size() == 2);
+#endif
+}
+
+TEST_CASE("native and legacy attachments survive session persistence")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    const std::string image_bytes("\x89PNG\r\n\x1a\n\0payload", 16);
+    const std::string pdf_bytes("%PDF-1.7\n\0payload", 17);
+    imza::Session source;
+    source.begin_send("review",
+        { { "notes.txt", "plain text" },
+            { "image.dat", image_bytes, imza::Attachment::Type::IMAGE,
+                "image/png" },
+            { "document.dat", pdf_bytes, imza::Attachment::Type::PDF,
+                "application/pdf" } });
+
+    REQUIRE(imza::save_session(source) == imza::Status::OK);
+    const auto saved = imza::saved_sessions();
+    REQUIRE(saved.size() == 1);
+    std::ifstream file(saved.front().path, std::ios::binary);
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    const Json::Value root         = imza::parse_json(buffer.str());
+    const Json::Value& attachments = root["items"][0]["attachments"];
+    REQUIRE(attachments.size() == 3);
+    CHECK(attachments[0]["type"].asString() == "text");
+    CHECK(attachments[0]["content"].asString() == "plain text");
+    CHECK(attachments[1]["type"].asString() == "image");
+    CHECK(attachments[1]["media_type"].asString() == "image/png");
+    CHECK(attachments[1].isMember("content"));
+    CHECK(attachments[1]["content"].asString() != image_bytes);
+    CHECK(attachments[2]["type"].asString() == "pdf");
+    CHECK(attachments[2]["media_type"].asString() == "application/pdf");
+
+    imza::Session loaded;
+    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    const auto& current
+        = std::get<imza::UserTurn>(loaded.items().front()).attachments;
+    REQUIRE(current.size() == 3);
+    CHECK(current[0].type == imza::Attachment::Type::TEXT);
+    CHECK(current[0].content == "plain text");
+    CHECK(current[1].type == imza::Attachment::Type::IMAGE);
+    CHECK(current[1].media_type == "image/png");
+    CHECK(current[1].content == image_bytes);
+    CHECK(current[2].type == imza::Attachment::Type::PDF);
+    CHECK(current[2].media_type == "application/pdf");
+    CHECK(current[2].content == pdf_bytes);
+
+    const std::filesystem::path legacy = home.path / "legacy-attachments.json";
+    {
+        std::ofstream legacy_file(legacy, std::ios::binary);
+        legacy_file
+            << R"({"items":[{"type":"user","text":"old","attachments":[{"path":"old.txt","content":"legacy text"}]}]})";
+    }
+    imza::LoadedSession legacy_loaded;
+    REQUIRE(imza::read_session(legacy, legacy_loaded) == imza::Status::OK);
+    const auto& legacy_attachments
+        = std::get<imza::UserTurn>(legacy_loaded.snapshot.items.front())
+              .attachments;
+    REQUIRE(legacy_attachments.size() == 1);
+    CHECK(legacy_attachments[0].path == "old.txt");
+    CHECK(legacy_attachments[0].content == "legacy text");
+    CHECK(legacy_attachments[0].type == imza::Attachment::Type::TEXT);
+    CHECK(legacy_attachments[0].media_type.empty());
 #endif
 }

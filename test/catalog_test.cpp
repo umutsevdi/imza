@@ -27,7 +27,10 @@ std::string provider_json()
                         "name": "GPT 5.5",
                         "description": "long text",
                         "attachment": true,
-                        "modalities": {"input": ["text"], "output": ["text"]},
+                        "modalities": {
+                            "input": ["text", "image", "audio", "pdf"],
+                            "output": ["text"]
+                        },
                         "tool_call": true,
                         "reasoning": true,
                         "cost": {"input": 1.25, "output": 10.0,
@@ -76,6 +79,9 @@ TEST_CASE("load_catalog prunes models.dev fields")
     CHECK(*model.output == 128000);
     REQUIRE(model.tool_call.has_value());
     CHECK(*model.tool_call);
+    REQUIRE(model.capabilities.has_value());
+    CHECK(imza::has_capability(*model.capabilities, imza::Capabilities::IMAGE));
+    CHECK(imza::has_capability(*model.capabilities, imza::Capabilities::PDF));
 }
 
 TEST_CASE("catalog roundtrip through presets file")
@@ -83,11 +89,13 @@ TEST_CASE("catalog roundtrip through presets file")
     imza::Catalog catalog;
     catalog.fetched_at = 1756390000;
     imza::CachedProvider openrouter;
-    openrouter.name                          = "OpenRouter";
-    openrouter.api                           = "https://openrouter.ai/api/v1";
-    openrouter.npm                           = "@ai-sdk/openai-compatible";
-    openrouter.models["openai/gpt-5.5"].name = "GPT 5.5";
-    catalog.providers["openrouter"]          = openrouter;
+    openrouter.name    = "OpenRouter";
+    openrouter.api     = "https://openrouter.ai/api/v1";
+    openrouter.npm     = "@ai-sdk/openai-compatible";
+    auto& model        = openrouter.models["openai/gpt-5.5"];
+    model.name         = "GPT 5.5";
+    model.capabilities = imza::Capabilities::IMAGE | imza::Capabilities::PDF;
+    catalog.providers["openrouter"] = openrouter;
 
     const auto path = std::filesystem::temp_directory_path()
         / ("imza-catalog-test-" + std::to_string(::getpid()) + ".json");
@@ -97,8 +105,15 @@ TEST_CASE("catalog roundtrip through presets file")
     CHECK(imza::load_catalog(path, loaded) == imza::Status::OK);
     REQUIRE(loaded.providers.count("openrouter") == 1);
     CHECK(loaded.providers.at("openrouter").name == "OpenRouter");
-    CHECK(
+    REQUIRE(
         loaded.providers.at("openrouter").models.count("openai/gpt-5.5") == 1);
+    const auto& loaded_model
+        = loaded.providers.at("openrouter").models.at("openai/gpt-5.5");
+    REQUIRE(loaded_model.capabilities.has_value());
+    CHECK(imza::has_capability(
+        *loaded_model.capabilities, imza::Capabilities::IMAGE));
+    CHECK(imza::has_capability(
+        *loaded_model.capabilities, imza::Capabilities::PDF));
     CHECK(loaded.fetched_at == 1756390000);
     std::filesystem::remove(path);
 }
@@ -120,29 +135,6 @@ TEST_CASE("catalog_stale respects the 7-day window")
     CHECK_FALSE(catalog_stale(catalog));
     catalog.fetched_at -= 8 * 24 * 3600;
     CHECK(catalog_stale(catalog));
-}
-
-TEST_CASE("auth_from_npm maps ai-sdk packages")
-{
-    CHECK(
-        imza::auth_from_npm("@ai-sdk/anthropic") == imza::AuthType::ANTHROPIC);
-    CHECK(imza::auth_from_npm("@ai-sdk/anthropic/vertex")
-        == imza::AuthType::ANTHROPIC);
-    CHECK(imza::auth_from_npm("@ai-sdk/openai-compatible")
-        == imza::AuthType::BEARER);
-    CHECK(imza::auth_from_npm("@ai-sdk/openai") == imza::AuthType::BEARER);
-    CHECK(imza::auth_from_npm("") == imza::AuthType::BEARER);
-}
-
-TEST_CASE("dialect_from_npm maps ai-sdk adapters")
-{
-    CHECK(imza::dialect_from_npm("@ai-sdk/openai")
-        == imza::ApiStandard::OPENAI_RESPONSES);
-    CHECK(imza::dialect_from_npm("@ai-sdk/openai-compatible")
-        == imza::ApiStandard::OPENAI);
-    CHECK(imza::dialect_from_npm("@ai-sdk/anthropic")
-        == imza::ApiStandard::ANTHROPIC);
-    CHECK(imza::dialect_from_npm("") == imza::ApiStandard::OPENAI);
 }
 
 TEST_CASE("backfill_catalog_urls patches only matching empty provider URLs")
@@ -205,6 +197,12 @@ TEST_CASE("resolve_route covers connection and dialect scenarios")
     anthropic.npm                  = "@ai-sdk/anthropic";
     catalog.providers["anthropic"] = anthropic;
 
+    imza::CachedProvider vertex;
+    vertex.name                 = "Vertex";
+    vertex.api                  = "https://api.anthropic.com/v1";
+    vertex.npm                  = "@ai-sdk/anthropic/vertex";
+    catalog.providers["vertex"] = vertex;
+
     struct RouteCase {
         const char* name;
         const char* connection_id;
@@ -239,6 +237,11 @@ TEST_CASE("resolve_route covers connection and dialect scenarios")
             "https://api.anthropic.com/v1", imza::ApiStandard::OPENAI,
             imza::AuthType::ANTHROPIC },
         RouteCase { "Anthropic provider native dialect", "anthropic", "",
+            "sk-ant", "", imza::ApiStandard::ANTHROPIC,
+            "https://api.anthropic.com/v1/messages",
+            "https://api.anthropic.com/v1", imza::ApiStandard::ANTHROPIC,
+            imza::AuthType::ANTHROPIC },
+        RouteCase { "vertex npm subpath keeps Anthropic auth", "vertex", "",
             "sk-ant", "", imza::ApiStandard::ANTHROPIC,
             "https://api.anthropic.com/v1/messages",
             "https://api.anthropic.com/v1", imza::ApiStandard::ANTHROPIC,
@@ -288,6 +291,9 @@ TEST_CASE("resolve_route covers connection and dialect scenarios")
         CHECK(route.api_key == route_case.api_key);
         CHECK(route.account_id == route_case.account_id);
     }
+
+    CHECK(imza::auth_from_npm("") == imza::AuthType::BEARER);
+    CHECK(imza::dialect_from_npm("") == imza::ApiStandard::OPENAI);
 }
 
 TEST_CASE("auth_headers by auth type")

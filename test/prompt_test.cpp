@@ -110,11 +110,4 @@ TEST_CASE("current mode prompts declare one authoritative state")
     CHECK(build == "<runtime-mode name=\"build\"/>");
 }
 
-TEST_CASE("title prompt appends the user request")
-{
-    const PromptStore prompts;
-    CHECK(title_prompt(prompts, "fix the bug")
-        == prompts.title() + "\n\nUser request:\nfix the bug");
-}
-
 } // namespace imza

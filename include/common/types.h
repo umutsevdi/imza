@@ -2,12 +2,46 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 
 namespace imza {
 
 struct ApplicationComponent { };
+
+struct Attachment {
+    enum class Type { TEXT, IMAGE, PDF };
+
+    std::string path;
+    std::string content;
+    Type type = Type::TEXT;
+    std::string media_type;
+
+    const char* type_name() const
+    {
+        switch (type) {
+        case Type::TEXT: return "text";
+        case Type::IMAGE: return "image";
+        case Type::PDF: return "pdf";
+        }
+        return "text";
+    }
+
+    static std::optional<Type> parse_type(std::string_view name)
+    {
+        if (name == "text") {
+            return Type::TEXT;
+        }
+        if (name == "image") {
+            return Type::IMAGE;
+        }
+        if (name == "pdf") {
+            return Type::PDF;
+        }
+        return std::nullopt;
+    }
+};
 
 struct SavedSession {
     std::filesystem::path path;

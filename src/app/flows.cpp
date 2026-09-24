@@ -47,7 +47,7 @@ namespace {
     }
 
     void start_turn(ApplicationState& state, std::string text,
-        std::vector<FileAttachment> attachments);
+        std::vector<Attachment> attachments);
 
     bool load_skill(ApplicationState& state, const Skill& skill,
         const ToolCallRequest& authorized)
@@ -97,7 +97,7 @@ namespace {
     }
 
     void submit_with_skills(ApplicationState& state, std::string text,
-        std::vector<FileAttachment> attachments)
+        std::vector<Attachment> attachments)
     {
         const std::vector<Skill> catalog = state.environment->skills();
         std::vector<Skill> awaiting;
@@ -134,7 +134,7 @@ namespace {
     }
 
     void start_turn(ApplicationState& state, std::string text,
-        std::vector<FileAttachment> attachments)
+        std::vector<Attachment> attachments)
     {
         const std::optional<ProviderSelection> selection
             = state.providers->active_selection();
@@ -281,7 +281,7 @@ namespace {
 } // namespace
 
 void submit(ApplicationState& state, std::string text,
-    std::vector<FileAttachment> attachments)
+    std::vector<Attachment> attachments)
 {
     const std::string_view t = trim(text);
     if (t.empty()) {

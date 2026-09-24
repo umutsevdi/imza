@@ -1242,7 +1242,7 @@ namespace {
         Component input_;
 
         Autocomplete autocomplete_;
-        std::vector<FileAttachment> attachments_;
+        std::vector<Attachment> attachments_;
         std::optional<std::size_t> history_index_;
         std::string history_draft_;
         int input_cursor_      = 0;

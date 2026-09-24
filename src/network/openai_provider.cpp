@@ -1,3 +1,4 @@
+#include "common/util.h"
 #include "network/json_io.h"
 #include "network/network.h"
 #include "network/sse_parse.h"
@@ -44,8 +45,33 @@ namespace {
         Json::Value messages(Json::arrayValue);
         for (const auto& m : req.messages) {
             Json::Value o;
-            o["role"]    = role_str(m.type);
-            o["content"] = m.content;
+            o["role"] = role_str(m.type);
+            if (m.type == Message::Type::USER && !m.media.empty()) {
+                Json::Value content(Json::arrayValue);
+                if (!m.content.empty()) {
+                    Json::Value text;
+                    text["type"] = "text";
+                    text["text"] = m.content;
+                    content.append(std::move(text));
+                }
+                for (const Attachment& media : m.media) {
+                    Json::Value block;
+                    if (media.type == Attachment::Type::IMAGE) {
+                        block["type"]             = "image_url";
+                        block["image_url"]["url"] = "data:" + media.media_type
+                            + ";base64," + base64_encode(media.content);
+                    } else {
+                        block["type"]              = "file";
+                        block["file"]["filename"]  = media.path;
+                        block["file"]["file_data"] = "data:" + media.media_type
+                            + ";base64," + base64_encode(media.content);
+                    }
+                    content.append(std::move(block));
+                }
+                o["content"] = std::move(content);
+            } else {
+                o["content"] = m.content;
+            }
             if (!m.tool_calls.empty()) {
                 Json::Value calls(Json::arrayValue);
                 for (const auto& tc : m.tool_calls) {

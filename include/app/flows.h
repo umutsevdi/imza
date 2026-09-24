@@ -54,7 +54,7 @@ OneShotResult run_one_shot(ApplicationState& state,
     MainThreadQueue& main_thread, const OneShotRequest& request);
 int one_shot_exit_code(OneShotResult::Kind kind);
 void submit(ApplicationState& state, std::string text,
-    std::vector<FileAttachment> attachments = { });
+    std::vector<Attachment> attachments = { });
 void resolve_modal(ApplicationState& state, ModalResult result);
 void close_modal(ApplicationState& state);
 void enqueue_user_modal(ApplicationState& state, ModalPayload payload);

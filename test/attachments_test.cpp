@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <tuple>
 
 #include <doctest/doctest.h>
 
@@ -61,6 +62,88 @@ TEST_CASE("attachment candidates list one directory without large directories")
     CHECK(src[0].path == "src/main.cpp");
 }
 
+TEST_CASE("attachments are classified by signatures instead of extensions")
+{
+    TempDir tmp;
+    const std::vector<std::tuple<std::string, std::string,
+        imza::Attachment::Type, std::string>>
+        cases {
+            { "png.txt", std::string("\x89PNG\r\n\x1a\n", 8),
+                imza::Attachment::Type::IMAGE, "image/png" },
+            { "jpeg.data", std::string("\xff\xd8\xff", 3),
+                imza::Attachment::Type::IMAGE, "image/jpeg" },
+            { "gif.bin", "GIF89a", imza::Attachment::Type::IMAGE, "image/gif" },
+            { "webp.unknown", "RIFF1234WEBP", imza::Attachment::Type::IMAGE,
+                "image/webp" },
+            { "document.dat", "%PDF-1.7\n", imza::Attachment::Type::PDF,
+                "application/pdf" },
+        };
+
+    for (const auto& [path, content, type, media_type] : cases) {
+        tmp.write(path, content);
+        const auto loaded = imza::load_attachment(tmp.path, path);
+        REQUIRE(loaded.attachment);
+        CHECK(loaded.attachment->type == type);
+        CHECK(loaded.attachment->media_type == media_type);
+        CHECK(loaded.attachment->content == content);
+    }
+
+    tmp.write("text.png", "not actually an image");
+    const auto text = imza::load_attachment(tmp.path, "text.png");
+    REQUIRE(text.attachment);
+    CHECK(text.attachment->type == imza::Attachment::Type::TEXT);
+    CHECK(text.attachment->media_type.empty());
+}
+
+TEST_CASE("native attachments are not inserted into prompt text")
+{
+    const std::vector<imza::Attachment> attachments {
+        { "image.png", "binary image", imza::Attachment::Type::IMAGE,
+            "image/png" },
+        { "notes.txt", "read me", imza::Attachment::Type::TEXT, "" },
+        { "document.pdf", "binary pdf", imza::Attachment::Type::PDF,
+            "application/pdf" },
+    };
+
+    const std::string message
+        = imza::message_with_attachments("review", attachments);
+    CHECK(message.find("notes.txt") != std::string::npos);
+    CHECK(message.find("read me") != std::string::npos);
+    CHECK(message.find("image.png") == std::string::npos);
+    CHECK(message.find("binary image") == std::string::npos);
+    CHECK(message.find("document.pdf") == std::string::npos);
+    CHECK(imza::message_with_attachments(
+              "review", { attachments.front(), attachments.back() })
+        == "review");
+}
+
+TEST_CASE("session history attaches native media to user messages")
+{
+    imza::Session session;
+    session.begin_send("review",
+        { { "notes.txt", "read me" },
+            { "photo.png", "binary image", imza::Attachment::Type::IMAGE,
+                "image/png" },
+            { "doc.pdf", "binary pdf", imza::Attachment::Type::PDF,
+                "application/pdf" } });
+
+    const auto history = session.build_history("system");
+    REQUIRE(history.size() == 2);
+    CHECK(history.back().content.find("read me") != std::string::npos);
+    CHECK(history.back().content.find("binary image") == std::string::npos);
+    CHECK(history.back().content.find("binary pdf") == std::string::npos);
+
+    REQUIRE(history.back().media.size() == 2);
+    CHECK(history.back().media[0].type == imza::Attachment::Type::IMAGE);
+    CHECK(history.back().media[0].path == "photo.png");
+    CHECK(history.back().media[0].media_type == "image/png");
+    CHECK(history.back().media[0].content == "binary image");
+    CHECK(history.back().media[1].type == imza::Attachment::Type::PDF);
+    CHECK(history.back().media[1].path == "doc.pdf");
+    CHECK(history.back().media[1].media_type == "application/pdf");
+    CHECK(history.back().media[1].content == "binary pdf");
+}
+
 TEST_CASE("text attachment is snapshotted and encoded into the message")
 {
     TempDir tmp;
@@ -82,6 +165,44 @@ TEST_CASE("attachments outside the workspace and binary files are rejected")
     tmp.write("binary.dat", std::string("a\0b", 3));
     CHECK_FALSE(imza::load_attachment(tmp.path, "../outside.txt").attachment);
     CHECK_FALSE(imza::load_attachment(tmp.path, "binary.dat").attachment);
+}
+
+TEST_CASE("byte limits apply to text but not native media")
+{
+    TempDir tmp;
+    const std::string big_text(1024 * 1024 + 1, 'x');
+    tmp.write("big.txt", big_text);
+    CHECK_FALSE(imza::load_attachment(tmp.path, "big.txt").attachment);
+
+    const std::string big_png
+        = std::string("\x89PNG\r\n\x1a\n", 8) + std::string(1200 * 1024, '\0');
+    tmp.write("big.png", big_png);
+    const auto image = imza::load_attachment(tmp.path, "big.png");
+    REQUIRE(image.attachment);
+    CHECK(image.attachment->type == imza::Attachment::Type::IMAGE);
+    CHECK(image.attachment->content == big_png);
+
+    const std::string big_pdf = "%PDF-1.7\n" + std::string(1200 * 1024, '\0');
+    tmp.write("big.pdf", big_pdf);
+    const auto pdf = imza::load_attachment(tmp.path, "big.pdf");
+    REQUIRE(pdf.attachment);
+    CHECK(pdf.attachment->type == imza::Attachment::Type::PDF);
+    CHECK(pdf.attachment->content == big_pdf);
+
+    std::string error;
+    const std::vector<imza::Attachment> existing {
+        { "notes.txt", std::string(3 * 1024 * 1024, 'x') },
+    };
+    const imza::Attachment big_media { "big.png", big_png,
+        imza::Attachment::Type::IMAGE, "image/png" };
+    CHECK(imza::can_add_attachment(existing, big_media, error));
+    CHECK(imza::can_add_attachment(existing,
+              { "more.txt", std::string(2 * 1024 * 1024, 'x') }, error)
+        == false);
+    CHECK(error.find("4 MiB") != std::string::npos);
+
+    std::vector<imza::Attachment> full(20, big_media);
+    CHECK(imza::can_add_attachment(full, big_media, error) == false);
 }
 
 TEST_CASE("session history keeps queued attachment snapshots")
@@ -215,7 +336,7 @@ TEST_CASE("streamed tool call starts planning then executes in place")
 
 TEST_CASE("removing a selected mention detaches its snapshot")
 {
-    std::vector<imza::FileAttachment> attachments { { "src/main.cpp", "main" },
+    std::vector<imza::Attachment> attachments { { "src/main.cpp", "main" },
         { "docs/design notes.md", "notes" } };
     imza::retain_mentioned_attachments(
         "review @docs/design notes.md", attachments);

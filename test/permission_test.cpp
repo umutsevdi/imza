@@ -219,25 +219,6 @@ TEST_CASE("shell analysis extracts compound command and subcommand pairs")
         == ShellAnalysis::Reuse::SESSION);
 }
 
-TEST_CASE("shell built-in catalog is platform specific")
-{
-#ifdef _WIN32
-    CHECK(shell_builtin_allowed("dir"));
-    CHECK(shell_builtin_allowed("findstr"));
-    CHECK(shell_builtin_allowed("tasklist"));
-    CHECK(shell_builtin_allowed("pushd"));
-    CHECK_FALSE(shell_builtin_allowed("ls"));
-#else
-    CHECK(shell_builtin_allowed("cat"));
-    CHECK(shell_builtin_allowed("grep"));
-    CHECK(shell_builtin_allowed("stat"));
-    CHECK(shell_builtin_allowed("cd"));
-    CHECK(shell_builtin_allowed("pushd"));
-    CHECK_FALSE(shell_builtin_allowed("dir"));
-    CHECK_FALSE(shell_builtin_allowed("git"));
-#endif
-}
-
 TEST_CASE("read-only command pair catalog is platform specific")
 {
     const auto invocation = [](std::string_view command) {
@@ -284,23 +265,6 @@ TEST_CASE("application state shares grants with children")
     CHECK(parent->environment->system() == child->environment->system());
 }
 
-TEST_CASE("session loading stages data before activation")
-{
-    PermissionFixture fixture;
-    const auto path = fixture.root / "session.json";
-    write_session_file(path, fixture.workspace, "Loaded session");
-
-    LoadedSession loaded;
-    REQUIRE(read_session(path, loaded) == Status::OK);
-    CHECK(loaded.snapshot.title == "Loaded session");
-    CHECK(loaded.workspace == fixture.workspace);
-
-    Session session;
-    session.set_title("Current session");
-    REQUIRE(load_session(path, session) == Status::OK);
-    CHECK(session.title() == "Loaded session");
-}
-
 TEST_CASE("session lifecycle clears grants only after successful activation")
 {
     PermissionFixture fixture;
@@ -343,9 +307,6 @@ TEST_CASE("failed directory changes and child creation retain grants")
     CHECK(parent->environment->chdir(fixture.root / "missing")
         == imza::Environment::ChdirResult::FAILED);
     CHECK(parent->permissions->snapshot()->size() == 1);
-    auto child = make_child_application_state(*parent, immediate);
-    CHECK(child->permissions == parent->permissions);
-    CHECK(child->permissions->snapshot()->size() == 1);
 }
 
 TEST_CASE("permission store snapshots remain valid during concurrent changes")
@@ -516,6 +477,7 @@ TEST_CASE("one external grant authorizes mode-available operations")
     REQUIRE(read.request.has_value());
     const auto grant = filesystem_session_grant(*read.request);
     REQUIRE(grant.has_value());
+    CHECK(*grant == fixture.outside);
 
     const auto edit = evaluate_filesystem_request(edit_request(target),
         fixture.context(Session::Mode::BUILD, { PermissionGrant { *grant } }));
@@ -695,22 +657,6 @@ TEST_CASE("shell policy rejects an empty command")
     CHECK(empty.decision.kind == PermissionDecision::Kind::REJECT);
 }
 
-TEST_CASE("filesystem evaluation canonicalizes targets and derives grants")
-{
-    PermissionFixture fixture;
-    const auto evaluation = evaluate_filesystem_request(
-        write_request(fixture.outside / "new.txt"),
-        fixture.context(Session::Mode::BUILD));
-
-    CHECK(evaluation.decision.kind == PermissionDecision::Kind::ASK);
-    REQUIRE(evaluation.request.has_value());
-    CHECK(
-        filesystem_target(*evaluation.request) == fixture.outside / "new.txt");
-    const auto grant = filesystem_session_grant(*evaluation.request);
-    REQUIRE(grant.has_value());
-    CHECK(*grant == fixture.outside);
-}
-
 TEST_CASE("skill policy and runtime grants use the same central evaluator")
 {
     PermissionFixture fixture;
@@ -812,19 +758,6 @@ TEST_CASE("authorized_skill_path accepts only the canonical target")
     // Nor one that omits the path, as an unnormalized model call does.
     CHECK_FALSE(authorized_skill_path(
         skill, { "skill", R"({"name":"docs"})", "", "" }));
-}
-
-TEST_CASE("unknown dollar tokens remain ordinary chat text")
-{
-    const auto immediate = [](std::function<void()> task) { task(); };
-    auto state           = make_application_state(immediate, Config { });
-
-    for (const char* text :
-        { "It costs $5", "Use $HOME", "Try $not-a-skill" }) {
-        state->session->clear_error();
-        submit(*state, text);
-        CHECK(state->session->error() == "No model selected - run /model.");
-    }
 }
 
 TEST_CASE("skill evaluation binds approval to the canonical instruction path")

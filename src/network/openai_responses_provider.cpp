@@ -1,3 +1,4 @@
+#include "common/util.h"
 #include "network/json_io.h"
 #include "network/network.h"
 #include "network/sse_parse.h"
@@ -52,10 +53,37 @@ namespace {
             input.append(std::move(item));
         }
 
-        if (!message.content.empty() || message.tool_calls.empty()) {
+        if (!message.content.empty() || message.tool_calls.empty()
+            || (message.type == Message::Type::USER
+                && !message.media.empty())) {
             Json::Value item;
-            item["role"]    = role_str(message.type);
-            item["content"] = message.content;
+            item["role"] = role_str(message.type);
+            if (message.type == Message::Type::USER && !message.media.empty()) {
+                Json::Value content(Json::arrayValue);
+                if (!message.content.empty()) {
+                    Json::Value text;
+                    text["type"] = "input_text";
+                    text["text"] = message.content;
+                    content.append(std::move(text));
+                }
+                for (const Attachment& media : message.media) {
+                    Json::Value block;
+                    if (media.type == Attachment::Type::IMAGE) {
+                        block["type"]      = "input_image";
+                        block["image_url"] = "data:" + media.media_type
+                            + ";base64," + base64_encode(media.content);
+                    } else {
+                        block["type"]      = "input_file";
+                        block["filename"]  = media.path;
+                        block["file_data"] = "data:" + media.media_type
+                            + ";base64," + base64_encode(media.content);
+                    }
+                    content.append(std::move(block));
+                }
+                item["content"] = std::move(content);
+            } else {
+                item["content"] = message.content;
+            }
             input.append(std::move(item));
         }
         for (const ToolCallEntry& call : message.tool_calls) {

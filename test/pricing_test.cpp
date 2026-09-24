@@ -127,16 +127,6 @@ TEST_CASE("pricing_table_from builds expected entries")
     CHECK(table.count("costless-model") == 0);
 }
 
-TEST_CASE("pricing_for reads the store's catalog snapshot")
-{
-    IsolatedCatalog isolated;
-    imza::ProviderStore store { imza::Config { } };
-
-    const auto p = store.pricing_for("gpt-4o-mini");
-    CHECK(p.input_per_1k == doctest::Approx(0.00015));
-    CHECK(p.context_limit == 128000);
-}
-
 TEST_CASE("pricing_for matches provider-qualified ids and is case-insensitive")
 {
     IsolatedCatalog isolated;

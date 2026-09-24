@@ -31,17 +31,36 @@ ModelRow make_model_row(const std::string& connection_id,
     row.name = slash == std::string::npos ? info.id : info.id.substr(slash + 1);
     row.tag
         = slash == std::string::npos ? provider_name : info.id.substr(0, slash);
+    row.capabilities = info.capabilities;
     return row;
+}
+
+std::string capability_tags(const std::optional<Capabilities>& capabilities)
+{
+    if (!capabilities) {
+        return "";
+    }
+    const bool image = has_capability(*capabilities, Capabilities::IMAGE);
+    const bool pdf   = has_capability(*capabilities, Capabilities::PDF);
+    if (image && pdf) {
+        return "image · pdf";
+    }
+    return image ? "image" : pdf ? "pdf" : "";
 }
 
 ftxui::Element model_picker_row(const ModelRow& row, bool selected)
 {
-    ftxui::Element e = ftxui::hbox({
+    std::vector<ftxui::Element> columns {
         ftxui::text(selected ? "› " : "  "),
         ftxui::text(row.name),
         ftxui::filler(),
-        ftxui::text(row.tag) | ftxui::dim,
-    });
+    };
+    const std::string tags = capability_tags(row.capabilities);
+    if (!tags.empty()) {
+        columns.push_back(ftxui::text(tags + " · ") | ftxui::dim);
+    }
+    columns.push_back(ftxui::text(row.tag) | ftxui::dim);
+    ftxui::Element e = ftxui::hbox(std::move(columns));
     if (selected) {
         e = std::move(e) | ftxui::bold;
     }

@@ -164,11 +164,16 @@ struct ModelRow {
     std::string model_id;
     std::string name;
     std::string tag;
+    std::optional<Capabilities> capabilities;
 };
 
 ModelRow make_model_row(const std::string& connection_id,
     const std::string& provider_name, const ModelInfo& info);
 ftxui::Element model_picker_row(const ModelRow& row, bool selected);
+
+// "image · pdf" labels for advertised input modalities; empty when the
+// capabilities are unknown or advertise neither.
+std::string capability_tags(const std::optional<Capabilities>& capabilities);
 
 // Filterable model list shared by the model pickers.
 struct ModelPickList {

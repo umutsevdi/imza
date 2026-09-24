@@ -25,6 +25,7 @@ struct CachedModel {
     std::optional<std::uint64_t> output;
     std::optional<bool> tool_call;
     std::optional<bool> reasoning;
+    std::optional<Capabilities> capabilities;
 };
 
 struct CachedProvider {

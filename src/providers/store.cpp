@@ -57,6 +57,7 @@ namespace {
             model.id             = model_id;
             model.name           = cached.name;
             model.context_length = cached.context;
+            model.capabilities   = cached.capabilities;
             models.push_back(std::move(model));
         }
         return models;
@@ -182,12 +183,15 @@ ModelList ProviderStore::models_for(std::string_view connection_id) const
         return list;
     }
     for (ModelInfo& info : list.models) {
-        if (info.context_length.has_value()) {
+        const auto model = provider->second.models.find(info.id);
+        if (model == provider->second.models.end()) {
             continue;
         }
-        const auto model = provider->second.models.find(info.id);
-        if (model != provider->second.models.end() && model->second.context) {
+        if (!info.context_length && model->second.context) {
             info.context_length = model->second.context;
+        }
+        if (!info.capabilities && model->second.capabilities) {
+            info.capabilities = model->second.capabilities;
         }
     }
     return list;

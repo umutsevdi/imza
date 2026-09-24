@@ -90,10 +90,31 @@ Status parse_api_error(std::string_view body, std::string& message);
 Status classify_failure(
     long code, const std::string& raw, std::string& message);
 
+enum class Capabilities : std::uint8_t {
+    NONE  = 0,
+    IMAGE = 2 << 0,
+    PDF   = 2 << 1,
+};
+
+constexpr Capabilities operator|(Capabilities lhs, Capabilities rhs)
+{
+    return static_cast<Capabilities>(
+        static_cast<std::uint8_t>(lhs) | static_cast<std::uint8_t>(rhs));
+}
+
+constexpr bool has_capability(
+    Capabilities capabilities, Capabilities capability)
+{
+    return (static_cast<std::uint8_t>(capabilities)
+               & static_cast<std::uint8_t>(capability))
+        != 0;
+}
+
 struct ModelInfo {
     std::string id;
     std::string name;
     std::optional<std::uint64_t> context_length;
+    std::optional<Capabilities> capabilities;
 };
 
 Status parse_models_response(

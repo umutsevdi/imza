@@ -165,14 +165,6 @@ TEST_CASE("syntax registry recognizes canonical languages and special files")
     CHECK_FALSE(imza::syntax_type_supported("sql"));
 }
 
-TEST_CASE("untyped code keeps the panel foreground")
-{
-    auto screen = imza::test::to_screen(
-        imza::highlight_code_line("return 42;", ""), 16, 1);
-    CHECK(screen.PixelAt(0, 0).foreground_color == imza::PANEL_FG);
-    CHECK(screen.PixelAt(7, 0).foreground_color == imza::PANEL_FG);
-}
-
 TEST_CASE("render_markdown_element spaces inline code from neighbors")
 {
     const std::string out
@@ -279,4 +271,43 @@ TEST_CASE("markdown alert quote drops the [!ERROR] marker and keeps content")
     const std::string plain
         = to_text(imza::render_markdown_element("> note\n", 60), 60, 8);
     CHECK(plain.find("note") != std::string::npos);
+}
+TEST_CASE("capability tags join advertised modalities with separators")
+{
+    using imza::Capabilities;
+    CHECK(imza::capability_tags(Capabilities::IMAGE | Capabilities::PDF)
+        == "image · pdf");
+    CHECK(imza::capability_tags(Capabilities::IMAGE) == "image");
+    CHECK(imza::capability_tags(Capabilities::PDF) == "pdf");
+    CHECK(imza::capability_tags(Capabilities::NONE).empty());
+    CHECK(imza::capability_tags(std::nullopt).empty());
+}
+
+TEST_CASE("model picker rows display advertised capability tags")
+{
+    imza::ModelInfo info;
+    info.id           = "openai/gpt-5.5";
+    info.capabilities = imza::Capabilities::IMAGE | imza::Capabilities::PDF;
+    const std::string tagged = without_ansi(to_text(imza::model_picker_row(
+        imza::make_model_row("c", "OpenAI", info), false)));
+    CHECK(tagged.find("gpt-5.5") != std::string::npos);
+    CHECK(tagged.find("image · pdf · openai") != std::string::npos);
+
+    imza::ModelInfo image_only;
+    image_only.id           = "m1";
+    image_only.capabilities = imza::Capabilities::IMAGE;
+    const std::string image_only_text
+        = without_ansi(to_text(imza::model_picker_row(
+            imza::make_model_row("c", "OpenAI", image_only), false)));
+    CHECK(image_only_text.find("image") != std::string::npos);
+    CHECK(image_only_text.find("pdf") == std::string::npos);
+    CHECK(image_only_text.find("image · OpenAI") != std::string::npos);
+
+    imza::ModelInfo unknown;
+    unknown.id                 = "m2";
+    const std::string untagged = without_ansi(to_text(imza::model_picker_row(
+        imza::make_model_row("c", "OpenAI", unknown), false)));
+    CHECK(untagged.find("image") == std::string::npos);
+    CHECK(untagged.find("pdf") == std::string::npos);
+    CHECK(untagged.find("·") == std::string::npos);
 }

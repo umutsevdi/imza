@@ -42,7 +42,11 @@ struct IsolatedConfig {
         provider.name                 = "Test Provider";
         provider.api                  = "http://127.0.0.1:9/v1";
         provider.npm                  = "@ai-sdk/openai-compatible";
-        catalog.providers["testprov"] = provider;
+        provider.models["m1"].context = 123;
+        provider.models["m1"].capabilities
+            = imza::Capabilities::IMAGE | imza::Capabilities::PDF;
+        provider.models["m2"].capabilities = imza::Capabilities::PDF;
+        catalog.providers["testprov"]      = provider;
         std::ignore
             = imza::save_catalog(dir / "imza" / "presets.json", catalog);
     }
@@ -114,7 +118,12 @@ std::shared_ptr<imza::ApplicationState> make_state(
 imza::ModelsFn fake_models_ok()
 {
     return [](const imza::Route&, std::vector<imza::ModelInfo>& out) {
-        out = { { "m1" }, { "m2" } };
+        imza::ModelInfo first;
+        first.id = "m1";
+        imza::ModelInfo second;
+        second.id           = "m2";
+        second.capabilities = imza::Capabilities::IMAGE;
+        out                 = { first, second };
         return imza::Status::OK;
     };
 }
@@ -158,6 +167,39 @@ TEST_CASE("connect commits a connection and lands models in the catalog")
     REQUIRE(saved.providers.size() == 1);
     CHECK(saved.providers[0].id == "testprov");
     CHECK(saved.providers[0].api_key == "key1");
+}
+
+TEST_CASE("provider store overlays catalog capabilities on discovered models")
+{
+    IsolatedConfig iso;
+    imza::Config config;
+    imza::Connection connection;
+    connection.id = "testprov";
+    config.providers.push_back(connection);
+    imza::ProviderStore providers(config, fake_models_ok());
+
+    providers.start_model_fetches();
+    for (int i = 0; i < 1000; ++i) {
+        const auto models = providers.models_for("testprov");
+        if (models.state == imza::ModelList::State::READY) {
+            REQUIRE(models.models.size() == 2);
+            REQUIRE(models.models[0].context_length.has_value());
+            CHECK(*models.models[0].context_length == 123);
+            REQUIRE(models.models[0].capabilities.has_value());
+            CHECK(imza::has_capability(
+                *models.models[0].capabilities, imza::Capabilities::IMAGE));
+            CHECK(imza::has_capability(
+                *models.models[0].capabilities, imza::Capabilities::PDF));
+            REQUIRE(models.models[1].capabilities.has_value());
+            CHECK(imza::has_capability(
+                *models.models[1].capabilities, imza::Capabilities::IMAGE));
+            CHECK_FALSE(imza::has_capability(
+                *models.models[1].capabilities, imza::Capabilities::PDF));
+            return;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    FAIL("model fetch did not complete");
 }
 
 TEST_CASE("subscription connect stores credentials without model discovery")

@@ -53,7 +53,7 @@ struct SkillRead {
 
 struct PendingSkillTurn {
     std::string text;
-    std::vector<FileAttachment> attachments;
+    std::vector<Attachment> attachments;
     std::vector<Skill> awaiting;
     std::size_t next = 0;
 };

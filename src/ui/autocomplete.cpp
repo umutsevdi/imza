@@ -86,7 +86,7 @@ void Autocomplete::refresh(
 }
 
 bool Autocomplete::accept(const ApplicationState& state, std::string& text,
-    int& cursor, std::vector<FileAttachment>& attachments)
+    int& cursor, std::vector<Attachment>& attachments)
 {
     if (!_files.empty() && _token) {
         const AttachmentCandidate& candidate
@@ -106,7 +106,7 @@ bool Autocomplete::accept(const ApplicationState& state, std::string& text,
             return false;
         }
         const auto duplicate = std::find_if(attachments.begin(),
-            attachments.end(), [&](const FileAttachment& attachment) {
+            attachments.end(), [&](const Attachment& attachment) {
                 return attachment.path == loaded.attachment->path;
             });
         if (duplicate == attachments.end()) {

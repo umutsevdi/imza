@@ -120,8 +120,15 @@ namespace {
             Json::Value attachments(Json::arrayValue);
             for (auto& attachment : user->attachments) {
                 Json::Value value;
-                value["path"]    = consume_string(attachment.path);
-                value["content"] = consume_string(attachment.content);
+                value["path"]       = consume_string(attachment.path);
+                value["type"]       = attachment.type_name();
+                value["media_type"] = consume_string(attachment.media_type);
+                if (attachment.type == Attachment::Type::TEXT) {
+                    value["content"] = consume_string(attachment.content);
+                } else {
+                    value["content"] = base64_encode(attachment.content);
+                    attachment.content.clear();
+                }
                 attachments.append(std::move(value));
             }
             out["attachments"] = std::move(attachments);
@@ -227,8 +234,32 @@ namespace {
             UserTurn user;
             user.text = value.get("text", "").asString();
             for (const auto& entry : value["attachments"]) {
-                user.attachments.push_back({ entry.get("path", "").asString(),
-                    entry.get("content", "").asString() });
+                Attachment attachment;
+                attachment.path = entry.get("path", "").asString();
+                if (!entry.isMember("type")) {
+                    attachment.content = entry.get("content", "").asString();
+                    user.attachments.push_back(std::move(attachment));
+                    continue;
+                }
+                const auto type = Attachment::parse_type(
+                    entry.get("type", "text").asString());
+                if (!type) {
+                    continue;
+                }
+                attachment.type = *type;
+                if (*type == Attachment::Type::TEXT) {
+                    attachment.content = entry.get("content", "").asString();
+                } else {
+                    const auto content
+                        = base64_decode(entry.get("content", "").asString());
+                    if (!content) {
+                        continue;
+                    }
+                    attachment.content = *content;
+                    attachment.media_type
+                        = entry.get("media_type", "").asString();
+                }
+                user.attachments.push_back(std::move(attachment));
             }
             return user;
         }

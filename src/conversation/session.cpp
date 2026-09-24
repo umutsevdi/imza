@@ -222,7 +222,7 @@ std::vector<std::string> Session::attachment_names() const
         if (user == nullptr) {
             continue;
         }
-        for (const FileAttachment& attachment : user->attachments) {
+        for (const Attachment& attachment : user->attachments) {
             std::string name
                 = utf8_from_path(path_from_utf8(attachment.path).filename());
             if (!name.empty()
@@ -268,7 +268,7 @@ void Session::cancel_queued(std::size_t id)
 }
 
 void Session::enqueue_message(
-    std::string text, std::vector<FileAttachment> attachments)
+    std::string text, std::vector<Attachment> attachments)
 {
     std::lock_guard lock(_mutex);
     _queued.push_back(QueuedMessage {
@@ -286,8 +286,7 @@ std::optional<QueuedMessage> Session::pop_queued()
     return next;
 }
 
-void Session::begin_send(
-    std::string text, std::vector<FileAttachment> attachments)
+void Session::begin_send(std::string text, std::vector<Attachment> attachments)
 {
     const bool has_attachments = !attachments.empty();
     {
@@ -542,8 +541,14 @@ std::vector<Message> Session::build_history(
     for (std::size_t index = begin; index < _items.size(); ++index) {
         const auto& item = _items[index];
         if (const auto* u = std::get_if<UserTurn>(&item)) {
-            history.push_back({ Message::Type::USER,
-                message_with_attachments(u->text, u->attachments) });
+            Message user { Message::Type::USER,
+                message_with_attachments(u->text, u->attachments) };
+            for (const Attachment& attachment : u->attachments) {
+                if (attachment.type != Attachment::Type::TEXT) {
+                    user.media.push_back(attachment);
+                }
+            }
+            history.push_back(std::move(user));
         } else if (const auto* a = std::get_if<AssistantTurn>(&item)) {
             history.push_back(assistant_message(a->markdown, a, dialect));
         } else if (const auto* tc = std::get_if<ToolCall>(&item)) {

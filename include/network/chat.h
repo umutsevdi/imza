@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "common/tool_call.h"
+#include "common/types.h"
 
 namespace imza {
 
@@ -22,6 +23,7 @@ struct Message {
     std::vector<ToolCallEntry> tool_calls;
     std::string tool_call_id;
     std::vector<ThinkingBlock> thinking;
+    std::vector<Attachment> media;
 };
 
 struct Usage {

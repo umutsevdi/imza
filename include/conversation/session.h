@@ -27,7 +27,7 @@ namespace imza {
 
 struct UserTurn {
     std::string text;
-    std::vector<FileAttachment> attachments;
+    std::vector<Attachment> attachments;
 };
 
 struct AssistantTurn {
@@ -100,7 +100,7 @@ struct LoadedSession {
 struct QueuedMessage {
     std::size_t id;
     std::string text;
-    std::vector<FileAttachment> attachments;
+    std::vector<Attachment> attachments;
 };
 
 class Session final : public ApplicationComponent {
@@ -152,11 +152,11 @@ public:
     void set_title(std::string title);
     void cancel_queued(std::size_t id);
     void enqueue_message(
-        std::string text, std::vector<FileAttachment> attachments = { });
+        std::string text, std::vector<Attachment> attachments = { });
     std::optional<QueuedMessage> pop_queued();
 
     void begin_send(
-        std::string text, std::vector<FileAttachment> attachments = { });
+        std::string text, std::vector<Attachment> attachments = { });
     void append_assistant(
         std::string model = "", std::string reasoning_effort = "");
     void set_last_assistant_metadata(

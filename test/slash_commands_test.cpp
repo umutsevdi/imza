@@ -53,6 +53,8 @@ TEST_CASE("find_command matches case-insensitively")
 {
     CHECK(find_command("/help") == nullptr);
     CHECK(find_command("/exit")->action == SlashCommand::Action::EXIT);
+    CHECK(find_command("/EXIT")->action == SlashCommand::Action::EXIT);
+    CHECK(find_command("/Connect")->action == SlashCommand::Action::CONNECT);
     CHECK(find_command("/new")->action == SlashCommand::Action::NEW);
     CHECK(find_command("/connect")->action == SlashCommand::Action::CONNECT);
     CHECK(find_command("/model")->action == SlashCommand::Action::MODEL);

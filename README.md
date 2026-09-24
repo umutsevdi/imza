@@ -165,6 +165,7 @@ intermediate tool output and context overhead. [Read the analysis](https://githu
 * [x] Syntax highlighting
 * [x] Headless mode
 * [x] Terminal notifications
+* [X] Image and multimodal prompt attachments
 
 ## Roadmap
 
