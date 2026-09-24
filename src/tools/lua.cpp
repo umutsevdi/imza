@@ -286,7 +286,7 @@ tool.<name>(args...) => Value | (nil, Err)
 - ? marks an optional argument; defaults are shown when applicable.
 - Ungranted paths return nil, Err.
 - Paths may be relative to the current working directory.
-- Operational failures return nil, Err.
+- Operational failures return nil, Err. Check error messages on Lua statements for less error prone results.
 - Invalid arguments raise and abort the script; use pcall only when recovery is intended.
 METHODS)desc";
         for (const LuaBinding& binding : all_bindings()) {
