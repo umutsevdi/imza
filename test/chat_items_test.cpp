@@ -42,7 +42,7 @@ TEST_CASE("chat shows planning between thought and lua execution")
     state->session->set_phase(imza::Session::Phase::STREAMING);
 
     const imza::ToolCallRequest request { "lua",
-        R"json({"script":"return tool.list('.')"})json", "", "call-1" };
+        R"json({"script":"return imza.fs.list('.')"})json", "", "call-1" };
     state->session->apply(imza::make_tool_call_start_event(request), { });
     auto chat = imza::make_chat(state, [] {
         return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100, 40 };

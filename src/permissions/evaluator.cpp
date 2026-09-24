@@ -210,6 +210,12 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
                 "lua: expected a non-empty 'script' string");
         }
         return accept(std::move(request));
+    case RosterTool::LOAD:
+        if (!arguments["name"].isString()
+            || arguments["name"].asString().empty()) {
+            return reject(std::move(request), "load: expected a module name");
+        }
+        return accept(std::move(request));
     }
     return reject(
         std::move(request), "tool has no permission policy: " + original.name);
@@ -225,6 +231,9 @@ std::optional<RosterTool> classify_roster_tool(std::string_view name)
     }
     if (name == "lua") {
         return RosterTool::LUA;
+    }
+    if (name == "load") {
+        return RosterTool::LOAD;
     }
     return std::nullopt;
 }

@@ -19,27 +19,7 @@ extern "C" {
 
 namespace imza {
 
-// Capabilities a binding needs from the host beyond the always-available
-// ones; a disabled capability makes the binding fail closed as nil, err.
-enum class LuaCapability { NONE, SHELL, WEB };
-
-// One model-facing binding: the dotted path it installs on the `tool`
-// table, the C function, and the signature/prose rendered into the lua
-// tool description. Registration and documentation both come from the
-// catalog, so a binding cannot exist without docs or be documented
-// without existing.
-struct LuaBinding {
-    std::string_view path;
-    lua_CFunction function;
-    std::string_view description;
-    LuaCapability capability = LuaCapability::NONE;
-    // Error text the registration-time gate returns when `capability` is
-    // off for the run; only meaningful for SHELL/WEB descriptors.
-    std::string_view capability_denied = "";
-    bool is_private                    = false;
-};
-
-// Per-file net mutation state for tool.file.*: original content at first
+// Per-file net mutation state for imza.fs.*: original content at first
 // touch, latest content after each accepted call. The driver turns these
 // into one diff per touched file when the run finishes.
 struct FileMutation {
@@ -66,7 +46,7 @@ struct LuaRunContext {
     // Dotted catalog path of the binding executing right now, set by the
     // registration trampoline. The gate logs under it, so the dispatch-log
     // vocabulary is the model-facing one by construction.
-    std::string_view current_binding;
+    std::string current_binding;
     bool blocked_permission = false;
 };
 
@@ -120,12 +100,15 @@ GateOutcome authorize_shell(lua_State* L, const ShellRequest& request);
 std::string gate_denied(
     lua_State* L, const std::string& denial, const std::string& path);
 
-// Family catalogs, defined one file per family under src/tools/bindings/.
-std::span<const LuaBinding> filesystem_lua_bindings();
-std::span<const LuaBinding> session_lua_bindings();
-std::span<const LuaBinding> shell_lua_bindings();
-std::span<const LuaBinding> web_lua_bindings();
-std::span<const LuaBinding> mutation_lua_bindings();
-std::span<const LuaBinding> tree_lua_bindings();
+// Module catalogs, one file per module under src/tools/bindings/.
+std::span<const LuaMethod> core_lua_methods();
+std::span<const LuaMethod> fs_lua_methods();
+std::span<const LuaMethod> web_lua_methods();
+std::span<const LuaMethod> tree_lua_methods();
+
+void register_core(LuaState& state);
+void register_fs(LuaState& state);
+void register_web(LuaState& state);
+void register_tree(LuaState& state);
 
 } // namespace imza

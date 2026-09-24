@@ -17,7 +17,7 @@ struct Skill;
 // The model-facing roster tools the permission layer knows. Adding a
 // roster tool means adding it here: classify_roster_tool returns nullopt
 // for anything else, and evaluate_tool_request rejects it as unpolicied.
-enum class RosterTool { SKILL, SUBAGENT, LUA };
+enum class RosterTool { SKILL, SUBAGENT, LUA, LOAD };
 
 std::optional<RosterTool> classify_roster_tool(std::string_view name);
 

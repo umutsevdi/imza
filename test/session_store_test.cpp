@@ -359,7 +359,7 @@ TEST_CASE("lua aggregate diffs survive session persistence")
     source.begin_send("run lua");
     source.append_assistant("model", "off");
     const imza::ToolCallRequest request { "lua",
-        R"json({"script":"tool.file.edit(...)"} )json", "", "call-1" };
+        R"json({"script":"imza.fs.edit(...)"} )json", "", "call-1" };
     source.append_tool(request);
     imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT, "" };
     imza::DiffView diff;

@@ -16,6 +16,7 @@
 #include "providers/store.h"
 #include "runtime/modal_queue.h"
 #include "runtime/subagent_manager.h"
+#include "tools/lua.h"
 #include "tools/tool.h"
 #include "workspace/environment.h"
 
@@ -47,6 +48,7 @@ struct ApplicationState {
     std::shared_ptr<PermissionStore> permissions;
     std::shared_ptr<PromptStore> prompts;
 
+    std::unique_ptr<LuaState> lua_state;
     std::unique_ptr<TurnRunner> runner;
     std::unique_ptr<Delegation> delegation;
     // Shared with the subagent tool; wire() fills it once both exist.

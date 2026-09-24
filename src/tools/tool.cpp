@@ -1,6 +1,7 @@
 #include "tools/tool.h"
 #include "common/util.h"
 #include "network/json_io.h"
+#include "tools/bindings.h"
 #include "tools/skills.h"
 
 #include <cstdint>
@@ -46,13 +47,14 @@ ToolOutput dispatch_tool(
     return tool->run(req, args);
 }
 
-std::vector<Tool> default_tools(
-    LuaHost lua_host, SkillToolDeps skill_deps, SubagentToolSlot subagent)
+std::vector<Tool> default_tools(LuaHost lua_host, SkillToolDeps skill_deps,
+    SubagentToolSlot subagent, LuaState& lua_state)
 {
     std::vector<Tool> tools;
     tools.push_back(make_skill_tool(std::move(skill_deps)));
+    tools.push_back(make_load_tool(lua_state));
     tools.push_back(make_subagent_tool(std::move(subagent)));
-    tools.push_back(make_lua_tool(std::move(lua_host)));
+    tools.push_back(make_lua_tool(lua_state, std::move(lua_host)));
     return tools;
 }
 
@@ -127,6 +129,35 @@ Tool make_skill_tool(SkillToolDeps deps)
                     path.value_or(skill->path), read.body);
             }
             return tool_output(read.body);
+        } };
+}
+
+Tool make_load_tool(LuaState& state)
+{
+    ToolSpec spec;
+    spec.name        = "load";
+    spec.description = "Load the documentation for a Lua module by name.";
+    spec.parameters  = parse_json(
+        R"json({"type":"object","properties":{"name":{"type":"string"}},"required":["name"]})json");
+    return { std::move(spec),
+        [&state](const ToolCallRequest&, const Json::Value& args) {
+            const std::string name = json_string(args, "name");
+            if (name.empty()) {
+                return tool_error("load: expected a module name");
+            }
+            for (const LuaModule& module : state.modules()) {
+                if (module.name == name) {
+                    return tool_output(render_module_documentation(module));
+                }
+            }
+            std::string available;
+            for (const LuaModule& module : state.modules()) {
+                if (!available.empty()) {
+                    available += ", ";
+                }
+                available += module.name;
+            }
+            return tool_error("load: unknown module, available: " + available);
         } };
 }
 

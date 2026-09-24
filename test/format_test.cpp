@@ -139,7 +139,7 @@ TEST_CASE("lua viewer renders table returns as markdown, not JSON")
 {
     imza::ToolCall call;
     call.name = "lua";
-    call.args = R"json({"script":"return tool.list()"})json";
+    call.args = R"json({"script":"return imza.fs.list()"})json";
     call.result
         = imza::ToolCall::Result { imza::ToolCall::Result::Kind::OUTPUT, "" };
     call.result->return_value = imza::parse_json(

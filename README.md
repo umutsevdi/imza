@@ -169,7 +169,7 @@ intermediate tool output and context overhead. [Read the analysis](https://githu
 
 ## Roadmap
 
-* [ ] Extension system
+* [ ] Extension System
 * [ ] MCP support
 * [ ] Background watchdogs that notify the agent when files or processes reach a target state
 * [ ] Local monthly usage analytics

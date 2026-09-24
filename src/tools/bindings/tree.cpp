@@ -495,11 +495,11 @@ namespace {
         return 1;
     }
 
-    constexpr LuaBinding BINDINGS[] = {
+    constexpr LuaMethod BINDINGS[] = {
         {
             "_lib.ts_query",
             binding_ts_query,
-            R"desc(tool._lib.ts_query(path: string, query: string) => { capture, line, text }[]
+            R"desc((path: string, query: string) => { capture, line, text }[]
 #private: Execute an arbitrary tree-sitter query (S-expression pattern with
 @captures) over the file, one row per capture.
 Fails on an invalid query, naming the byte offset of the syntax error.
@@ -509,21 +509,21 @@ Capped at 500 rows.)desc",
             true,
         },
         {
-            "ts.index",
+            "index",
             binding_ts_index,
-            R"desc(tool.ts.index(path: string) => TsSymbol[]
+            R"desc((path: string) => TsSymbol[]
 List the named symbols in `path`: functions, methods, classes, structs,
 interfaces, enums, and other declaration/definition nodes parsed by the
 language grammar matched for the file's extension or name. Each entry
 reports `kind` (the grammar node type), `name`, `start_line`..`end_line`
 (1-based inclusive), and `text`.
-Capped at 50 entries; use tool.ts.nodes with a narrower type for more.)desc",
+Capped at 50 entries; use imza.tree.nodes with a narrower type for more.)desc",
             LuaCapability::NONE,
         },
         {
-            "ts.nodes",
+            "nodes",
             binding_ts_nodes,
-            R"desc(tool.ts.nodes(path: string, type: string) => TsSymbol[]
+            R"desc((path: string, type: string) => TsSymbol[]
 List every node in `path` whose grammar type name matches `type`: an exact
 grammar node type (e.g. "function_definition", "class_specifier") or a `*`
 glob ("*call*"). Entries carry `kind`, `name`, `start_line`..`end_line`,
@@ -533,18 +533,18 @@ Capped at 500 entries.)desc",
             LuaCapability::NONE,
         },
         {
-            "ts.symbols",
+            "symbols",
             binding_ts_symbols,
-            R"desc(tool.ts.symbols(path: string, symbol: string) => { file, line, text }[]
+            R"desc((path: string, symbol: string) => { file, line, text }[]
 List every occurrence of `symbol` (an identifier node) in `path`, one row
 per use with the file path, 1-based `line`, and the full source line as
 `text`. Grammar-typed, so comments and strings never match.)desc",
             LuaCapability::NONE,
         },
         {
-            "ts.references",
+            "references",
             binding_ts_references,
-            R"desc(tool.ts.references(path: string, symbol: string) => { line, kind, text }[]
+            R"desc((path: string, symbol: string) => { line, kind, text }[]
 List the call sites of `symbol` in `path`: identifier nodes inside a call
 node, one row per site with 1-based `line`, the call node's grammar `kind`,
 and the full source line as `text`. Textual call-site matching, not a
@@ -556,6 +556,16 @@ scope. Capped at 500 entries.)desc",
 
 } // namespace
 
-std::span<const LuaBinding> tree_lua_bindings() { return BINDINGS; }
+std::span<const LuaMethod> tree_lua_methods() { return BINDINGS; }
+
+void register_tree(LuaState& state)
+{
+    static constexpr std::string_view types[] = {
+        "TsSymbol = { kind: string, name: string, start_line: integer, "
+        "end_line: integer, text: string }",
+    };
+    state.register_module({ false, "tree",
+        "Syntax tree inspection and querying.", types, tree_lua_methods() });
+}
 
 } // namespace imza

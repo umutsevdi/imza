@@ -3,16 +3,61 @@
 #include <cstddef>
 #include <functional>
 #include <future>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 
 #include "common/modal.h"
+#include "common/types.h"
 #include "permissions/filesystem.h"
+extern "C" {
+#include <lua.h>
+}
 
 namespace imza {
+
+enum class LuaCapability { NONE, SHELL, WEB };
+
+struct LuaMethod {
+    std::string_view name;
+    lua_CFunction function;
+    std::string_view description;
+    LuaCapability capability           = LuaCapability::NONE;
+    std::string_view capability_denied = "";
+    bool is_private                    = false;
+};
+
+struct LuaModule {
+    bool autoload = false;
+    std::string_view name;
+    std::string_view description;
+    std::span<const std::string_view> types;
+    std::span<const LuaMethod> methods;
+};
 
 constexpr std::size_t MAX_OUTPUT_BYTES = 64 * 1024;
 
 struct Tool; // defined in tools/tool.h; returned by value from make_lua_tool
+
+class LuaState final : public ApplicationComponent {
+public:
+    LuaState();
+
+    LuaState(const LuaState&)            = delete;
+    LuaState& operator=(const LuaState&) = delete;
+    ~LuaState();
+
+    void register_module(const LuaModule& module);
+    std::span<const LuaModule> modules() const;
+
+private:
+    std::vector<LuaModule> _modules;
+};
+
+std::unique_ptr<LuaState> make_lua_state();
+std::string render_module_documentation(const LuaModule& module);
 
 // Callbacks the lua bindings use to reach the world outside the VM.
 // Empty members mean the corresponding binding is unavailable (tests,
@@ -32,6 +77,6 @@ struct LuaHost {
     bool has_rg           = false;
 };
 
-Tool make_lua_tool(LuaHost host = { });
+Tool make_lua_tool(LuaState& state, LuaHost host = { });
 
 } // namespace imza

@@ -156,8 +156,8 @@ TEST_CASE("one-shot reports unattended permission blocks without a modal")
             const imza::StreamCallback& callback) {
             if (request.messages.back().type == imza::Message::Type::USER) {
                 Json::Value arguments(Json::objectValue);
-                arguments["script"] = "assert(tool.file.write([["
-                    + path.string() + "]], 'no'))";
+                arguments["script"]
+                    = "assert(imza.fs.write([[" + path.string() + "]], 'no'))";
                 callback(imza::make_tool_call_event(
                     { "lua", imza::write_json(arguments), "", "call" }));
             } else {

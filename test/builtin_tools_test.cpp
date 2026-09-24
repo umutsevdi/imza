@@ -10,7 +10,8 @@
 
 TEST_CASE("builtin tools expose the current tool set")
 {
-    const auto tools = imza::default_tools();
+    auto state       = imza::make_lua_state();
+    const auto tools = imza::default_tools({ }, { }, { }, *state);
 
     const auto* skill = find_tool(tools, "skill");
     REQUIRE(skill != nullptr);
@@ -21,6 +22,7 @@ TEST_CASE("builtin tools expose the current tool set")
     CHECK(subagent->spec.parameters["properties"].isMember("tasks"));
 
     REQUIRE(find_tool(tools, "lua") != nullptr);
+    REQUIRE(find_tool(tools, "load") != nullptr);
     CHECK(find_tool(tools, "read") == nullptr);
     CHECK(find_tool(tools, "list") == nullptr);
     CHECK(find_tool(tools, "find") == nullptr);
@@ -37,7 +39,8 @@ TEST_CASE("a removed native tool name is unknown to the roster")
 {
     // The roster no longer varies with runtime flags: WEB/SHELL gate the
     // lua bindings, not tool membership. A native name fails dispatch.
-    const auto tools = imza::default_tools();
+    auto state       = imza::make_lua_state();
+    const auto tools = imza::default_tools({ }, { }, { }, *state);
     REQUIRE(imza::find_tool(tools, "lua") != nullptr);
     REQUIRE(imza::find_tool(tools, "skill") != nullptr);
     REQUIRE(imza::find_tool(tools, "subagent") != nullptr);

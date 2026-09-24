@@ -104,11 +104,11 @@ namespace {
         return 1;
     }
 
-    constexpr LuaBinding BINDINGS[] = {
+    constexpr LuaMethod BINDINGS[] = {
         {
-            "web.fetch",
+            "fetch",
             binding_web_fetch,
-            R"desc(tool.web.fetch(url: string) => string
+            R"desc((url: string) => string
 Fetches an HTTP(S) URL as readable text. HTML is converted to plain text; JSON, 
 Markdown, and other raw bodies are returned as-is.
 Fails on non-http(s) URLs, network errors, non-2xx responses, bodies over 5 MB
@@ -117,9 +117,9 @@ and pages with no readable content. Capped at 40000 characters.)desc",
             "web.fetch: web access is disabled for this run",
         },
         {
-            "web.search",
+            "search",
             binding_web_search,
-            R"desc(tool.web.search(query: string, num_results?: integer=5) => string
+            R"desc((query: string, num_results?: integer=5) => string
 Search results as a formatted text block.
 num_results is clamped to 1..10.)desc",
             LuaCapability::WEB,
@@ -129,6 +129,12 @@ num_results is clamped to 1..10.)desc",
 
 } // namespace
 
-std::span<const LuaBinding> web_lua_bindings() { return BINDINGS; }
+std::span<const LuaMethod> web_lua_methods() { return BINDINGS; }
+
+void register_web(LuaState& state)
+{
+    state.register_module(
+        { true, "web", "HTTP fetching and search.", { }, web_lua_methods() });
+}
 
 } // namespace imza

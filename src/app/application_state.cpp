@@ -127,9 +127,10 @@ namespace {
         StreamFn stream_fn, std::vector<Tool> tools, RuntimeFlag runtime_flags,
         bool use_default_tools)
     {
-        state->prompts  = std::make_shared<PromptStore>(prompts_dir());
-        state->session  = std::make_shared<Session>();
-        state->sessions = std::make_shared<SessionStore>();
+        state->lua_state = make_lua_state();
+        state->prompts   = std::make_shared<PromptStore>(prompts_dir());
+        state->session   = std::make_shared<Session>();
+        state->sessions  = std::make_shared<SessionStore>();
         state->input_history
             = std::make_shared<InputHistoryStore>(input_history_path());
         state->providers   = std::make_shared<ProviderStore>(std::move(config));
@@ -148,7 +149,7 @@ namespace {
             ApplicationState* captured = state.get();
             tools                      = default_tools(
                 lua_host(captured, state->environment->system()->has_rg),
-                skill_deps(captured), state->subagent_slot);
+                skill_deps(captured), state->subagent_slot, *state->lua_state);
         }
         wire(state, std::move(stream_fn), std::move(tools));
         return state;
@@ -159,6 +160,9 @@ namespace {
         PostFn post, StreamFn stream_fn, ModalRequestFn parent_routing,
         std::string agent_label, std::vector<Tool> tools)
     {
+        if (!state->lua_state) {
+            state->lua_state = make_lua_state();
+        }
         state->session        = std::make_shared<Session>();
         state->sessions       = parent.sessions;
         state->input_history  = parent.input_history;
@@ -186,7 +190,7 @@ namespace {
     {
         std::vector<Tool> tools = default_tools(
             lua_host(&parent, parent.environment->system()->has_rg),
-            skill_deps(&child));
+            skill_deps(&child), { }, *child.lua_state);
         // The sidechat is a regular chat: it keeps the lua sandbox (and its
         // file bindings) but must not spawn its own subagents.
         std::erase_if(tools,
@@ -229,9 +233,10 @@ std::shared_ptr<ApplicationState> make_child_application_state(
     ModalRequestFn parent_routing, std::string agent_label)
 {
     std::shared_ptr<ApplicationState> state(new ApplicationState());
+    state->lua_state        = make_lua_state();
     std::vector<Tool> tools = default_tools(
         lua_host(state.get(), parent.environment->system()->has_rg),
-        skill_deps(state.get()));
+        skill_deps(state.get()), { }, *state->lua_state);
     std::erase_if(
         tools, [](const Tool& tool) { return tool.spec.name == "subagent"; });
     return initialize_child(std::move(state), parent, std::move(post),
@@ -243,6 +248,7 @@ std::shared_ptr<ApplicationState> make_sidechat_application_state(
     ApplicationState& parent)
 {
     std::shared_ptr<ApplicationState> state(new ApplicationState());
+    state->lua_state    = make_lua_state();
     state->parent_state = &parent;
     // Built first: the roster captures the child that is moved below.
     std::vector<Tool> roster = sidechat_roster(parent, *state);
