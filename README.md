@@ -12,7 +12,9 @@ reduces unnecessary tool calls and context overhead while keeping permissions
 enforced and agent actions observable.
 
 Better orchestration can also reduce inference costs by avoiding unnecessary 
-model round trips and intermediate context.[^1]
+model round trips and intermediate context[^1].
+
+> Imza is a native C++ application. It is not lightweight because it does less.
 
 **\~20 MB binary · \~5-8 MB RAM at startup · \~20–40 MB during typical agentic work[^2]**
 
@@ -24,8 +26,7 @@ Check out the [user guide](https://github.com/umutsevdi/imza/wiki).
 
 ## Why Imza?
 
-Coding agents are becoming increasingly autonomous. That can make development 
-faster, but it also creates an easy failure mode: the developer gradually stops 
+Existing coding agents makes the development faster, but causes the developer gradually stops 
 reading the code.
 
 Plans, summaries, tool output, and completion messages start replacing direct 
@@ -85,8 +86,8 @@ or a model running locally.
 
 Run Imza non-interactively from scripts, CI jobs, or other development tools.
 
-Use `--ask` for a one-shot, read-only Plan query or `--exec` for a one-shot 
-Build task.
+Use `--ask` for a one-shot, read-only query or `--exec` for a one-shot 
+task that can modify files.
 
 Grant only the directories and commands required by the task:
 
@@ -141,6 +142,7 @@ intermediate tool output and context overhead. [Read the analysis](https://githu
 * [x] Skills and project instructions
 * [x] `@path` file attachments
 * [x] `$skill` attachments
+* [X] Image and multimodal prompt attachments
 
 ### Permissions and Control
 
@@ -166,8 +168,8 @@ intermediate tool output and context overhead. [Read the analysis](https://githu
 
 ## Roadmap
 
+* [ ] Extension system
 * [ ] MCP support
-* [ ] Image and multimodal prompt attachments
 * [ ] Background watchdogs that notify the agent when files or processes reach a target state
 * [ ] Local monthly usage analytics
 
