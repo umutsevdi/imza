@@ -12,6 +12,13 @@ StreamEvent make_delta_event(std::string text)
     return ev;
 }
 
+StreamEvent make_tool_call_start_event(ToolCallRequest request)
+{
+    StreamEvent ev;
+    ev.kind      = StreamEvent::Kind::TOOL_CALL_START;
+    ev.tool_call = std::move(request);
+    return ev;
+}
 StreamEvent make_tool_call_event(ToolCallRequest request)
 {
     StreamEvent ev;

@@ -102,9 +102,9 @@ namespace {
         }
         if (const auto* tc = std::get_if<ToolCall>(&it)) {
             if (!tc->result.has_value()) {
-                return 0;
+                return tc->phase == ToolCall::Phase::PLANNING ? 0 : 1;
             }
-            return 1 + tc->result->text.size();
+            return 2 + tc->result->text.size();
         }
         if (const auto* event = std::get_if<CompactionEvent>(&it)) {
             return static_cast<std::size_t>(event->status);
@@ -272,6 +272,9 @@ namespace {
                         || tc->name == "lua")
                     && !tc->result.has_value()) {
                     eff_version = static_cast<std::size_t>(frame_);
+                    if (tc->phase == ToolCall::Phase::EXECUTING) {
+                        eff_version ^= std::size_t { 1 } << 60;
+                    }
                 }
                 if (final_segment) {
                     eff_version ^= std::size_t { 1 } << 62;
@@ -971,6 +974,21 @@ namespace {
 
         Element render_tool_pending(const ToolCall& tc)
         {
+            const bool planning = tc.phase == ToolCall::Phase::PLANNING;
+            if (planning) {
+                // Arguments are still streaming, so there is nothing to
+                // inspect yet; show a plain status row.
+                return vbox({
+                    hbox({
+                        spinner(15, static_cast<std::size_t>(frame_))
+                            | color(PANEL_FG_DIM),
+                        text(" Planning…" + elapsed_suffix(*session_)) | dim,
+                        filler(),
+                        text(INTERRUPT_HINT) | dim,
+                    }),
+                    separatorEmpty(),
+                });
+            }
             if (tc.name == "subagent") {
                 Elements rows {
                     hbox({

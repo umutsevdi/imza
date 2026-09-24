@@ -187,6 +187,12 @@ TEST_CASE("format_lua_result prints scalars and scalar lists directly")
     const Json::Value list = imza::parse_json(R"json([1,2,3])json");
     CHECK(imza::format_lua_result("", list) == "1\n2\n3");
 
+    const Json::Value mixed
+        = imza::parse_json(R"json([{"path":"src"},"done"])json");
+    const std::string mixed_result = imza::format_lua_result("", mixed);
+    CHECK(mixed_result.find("```json\n[") == 0);
+    CHECK(mixed_result.find("\"done\"") != std::string::npos);
+
     // A scalar string that merely starts with "[" must not be JSON-fenced.
     const Json::Value bracketed = imza::parse_json(R"json("[a]")json");
     CHECK(imza::format_lua_result("", bracketed) == "```\n[a]\n```");

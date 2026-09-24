@@ -68,7 +68,8 @@ namespace {
         return root;
     }
 
-    void take_delta(const Json::Value& delta, ParseState& state)
+    void take_delta(const Json::Value& delta, ParseState& state,
+        std::vector<StreamEvent>& outs)
     {
         const Json::Value& tcs = delta["tool_calls"];
         if (!tcs.isArray()) {
@@ -87,6 +88,10 @@ namespace {
                 if (fn["arguments"].isString()) {
                     acc.args += fn["arguments"].asString();
                 }
+            }
+            if (!acc.started && !acc.name.empty()) {
+                acc.started = true;
+                outs.push_back(make_tool_call_start_event(finish_accum(acc)));
             }
         }
     }
@@ -160,7 +165,7 @@ namespace {
                     outs.push_back(make_reasoning_event(
                         delta["reasoning_content"].asString()));
                 }
-                take_delta(delta, state);
+                take_delta(delta, state, outs);
             }
             if (choices[0]["finish_reason"].isString()) {
                 flush_tool_accums(state, outs);

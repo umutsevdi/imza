@@ -116,6 +116,11 @@ namespace {
                     = state.tool_accums[root.get("index", 0).asInt()];
                 acc.id   = block.get("id", "").asString();
                 acc.name = block.get("name", "").asString();
+                if (!acc.started && !acc.name.empty()) {
+                    acc.started = true;
+                    outs.push_back(
+                        make_tool_call_start_event(finish_accum(acc)));
+                }
             } else if (type == "thinking") {
                 ThinkingAccum& acc
                     = state.thinking_accums[root.get("index", 0).asInt()];

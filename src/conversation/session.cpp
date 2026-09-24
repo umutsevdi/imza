@@ -396,6 +396,22 @@ ToolCall* Session::_find_tool_locked(
     return nullptr;
 }
 
+ToolCall* Session::find_planning_tool_locked(const ToolCallRequest& req)
+{
+    for (auto it = _items.rbegin(); it != _items.rend(); ++it) {
+        auto* call = std::get_if<ToolCall>(&*it);
+        if (call == nullptr || call->phase != ToolCall::Phase::PLANNING) {
+            continue;
+        }
+        const bool matched = !req.id.empty() ? call->call_id == req.id
+                                             : call->name == req.name;
+        if (matched) {
+            return call;
+        }
+    }
+    return nullptr;
+}
+
 void Session::set_tool_subagent_chats(
     const ToolCallRequest& req, std::vector<SubagentChat> chats)
 {
@@ -531,6 +547,9 @@ std::vector<Message> Session::build_history(
         } else if (const auto* a = std::get_if<AssistantTurn>(&item)) {
             history.push_back(assistant_message(a->markdown, a, dialect));
         } else if (const auto* tc = std::get_if<ToolCall>(&item)) {
+            if (tc->phase == ToolCall::Phase::PLANNING) {
+                continue;
+            }
             if (history.empty()
                 || history.back().type != Message::Type::ASSISTANT) {
                 history.push_back({ Message::Type::ASSISTANT, "" });
@@ -577,13 +596,29 @@ void Session::apply(const StreamEvent& ev, const ModelPricing& pricing)
             }
         }
         break;
+    case StreamEvent::Kind::TOOL_CALL_START:
+        if (auto* a = last_assistant_locked()) {
+            finalize_reasoning(*a);
+        }
+        // Transient: arguments are still streaming, so the item is not
+        // marked dirty and is never persisted or sent back as history.
+        _items.emplace_back(
+            ToolCall { _next_tool_id++, ev.tool_call.id, ev.tool_call.name, "",
+                { }, { }, std::nullopt, ToolCall::Phase::PLANNING });
+        break;
     case StreamEvent::Kind::TOOL_CALL:
         if (auto* a = last_assistant_locked()) {
             finalize_reasoning(*a);
         }
+        if (auto* planned = find_planning_tool_locked(ev.tool_call)) {
+            planned->name  = ev.tool_call.name;
+            planned->args  = ev.tool_call.args;
+            planned->phase = ToolCall::Phase::EXECUTING;
+        } else {
+            _items.emplace_back(ToolCall { _next_tool_id++, ev.tool_call.id,
+                ev.tool_call.name, ev.tool_call.args, { }, { }, std::nullopt });
+        }
         _dirty = true;
-        _items.emplace_back(ToolCall { _next_tool_id++, ev.tool_call.id,
-            ev.tool_call.name, ev.tool_call.args, { }, { }, std::nullopt });
         break;
     case StreamEvent::Kind::QUESTION:
         if (!_items.empty()) {
@@ -650,6 +685,10 @@ void Session::finish_session_locked(const std::string& error)
         finalize_reasoning(*a);
     }
     _retry_countdown.reset();
+    std::erase_if(_items, [](const ConversationItem& item) {
+        const auto* tool = std::get_if<ToolCall>(&item);
+        return tool != nullptr && tool->phase == ToolCall::Phase::PLANNING;
+    });
     if (!error.empty() && _error.empty()) {
         _error = error;
     }

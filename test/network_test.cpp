@@ -268,23 +268,26 @@ TEST_CASE("OpenAI Responses streams text reasoning tools and usage")
             { "response.completed",
                 R"({"type":"response.completed","response":{"usage":{"input_tokens":100,"output_tokens":20,"total_tokens":120,"input_tokens_details":{"cached_tokens":60,"cache_write_tokens":5}}}})" } });
 
-    REQUIRE(outs.size() == 6);
+    REQUIRE(outs.size() == 7);
     CHECK(outs[0].kind == imza::StreamEvent::Kind::REASONING);
     CHECK(outs[0].text == "Thinking");
     CHECK(outs[1].kind == imza::StreamEvent::Kind::CONTENT_DELTA);
     CHECK(outs[1].text == "Hello");
-    CHECK(outs[2].kind == imza::StreamEvent::Kind::TOOL_CALL);
+    CHECK(outs[2].kind == imza::StreamEvent::Kind::TOOL_CALL_START);
     CHECK(outs[2].tool_call.id == "call_7");
     CHECK(outs[2].tool_call.name == "read");
-    CHECK(outs[2].tool_call.args == R"({"path":"a"})");
-    CHECK(outs[3].kind == imza::StreamEvent::Kind::REASONING);
-    CHECK(outs[3].thinking_signature == "secret");
-    CHECK(outs[4].kind == imza::StreamEvent::Kind::USAGE);
-    CHECK(outs[4].usage.prompt == 100);
-    CHECK(outs[4].usage.completion == 20);
-    CHECK(outs[4].usage.cached_read == 60);
-    CHECK(outs[4].usage.cached_write == 5);
-    CHECK(outs[5].kind == imza::StreamEvent::Kind::DONE);
+    CHECK(outs[3].kind == imza::StreamEvent::Kind::TOOL_CALL);
+    CHECK(outs[3].tool_call.id == "call_7");
+    CHECK(outs[3].tool_call.name == "read");
+    CHECK(outs[3].tool_call.args == R"({"path":"a"})");
+    CHECK(outs[4].kind == imza::StreamEvent::Kind::REASONING);
+    CHECK(outs[4].thinking_signature == "secret");
+    CHECK(outs[5].kind == imza::StreamEvent::Kind::USAGE);
+    CHECK(outs[5].usage.prompt == 100);
+    CHECK(outs[5].usage.completion == 20);
+    CHECK(outs[5].usage.cached_read == 60);
+    CHECK(outs[5].usage.cached_write == 5);
+    CHECK(outs[6].kind == imza::StreamEvent::Kind::DONE);
     CHECK(state.terminal);
 }
 
@@ -304,9 +307,13 @@ TEST_CASE("OpenAI accumulates fragmented tool calls and flushes")
                 R"({"choices":[{"delta":{},"finish_reason":"tool_calls"}]})" } });
 
     REQUIRE(outs.size() == 6);
-    for (size_t i = 0; i < 3; ++i) {
-        CHECK(outs[i].kind == imza::StreamEvent::Kind::CONTENT_DELTA);
-    }
+    CHECK(outs[0].kind == imza::StreamEvent::Kind::TOOL_CALL_START);
+    CHECK(outs[0].tool_call.id == "call_a");
+    CHECK(outs[0].tool_call.name == "read");
+    CHECK(outs[1].kind == imza::StreamEvent::Kind::CONTENT_DELTA);
+    CHECK(outs[2].kind == imza::StreamEvent::Kind::TOOL_CALL_START);
+    CHECK(outs[2].tool_call.id == "call_b");
+    CHECK(outs[2].tool_call.name == "grep");
     CHECK(outs[3].kind == imza::StreamEvent::Kind::TOOL_CALL);
     CHECK(outs[3].tool_call.id == "call_a");
     CHECK(outs[3].tool_call.name == "read");
@@ -340,12 +347,15 @@ TEST_CASE("Anthropic assembles tool_use block across deltas")
                 R"({"type":"content_block_stop","index":1})" },
             { "message_stop", R"({"type":"message_stop"})" } });
 
-    REQUIRE(outs.size() == 2);
-    CHECK(outs[0].kind == imza::StreamEvent::Kind::TOOL_CALL);
+    REQUIRE(outs.size() == 3);
+    CHECK(outs[0].kind == imza::StreamEvent::Kind::TOOL_CALL_START);
     CHECK(outs[0].tool_call.id == "tu_9");
     CHECK(outs[0].tool_call.name == "write");
-    CHECK(outs[0].tool_call.args == R"({"path":"b.txt"})");
-    CHECK(outs[1].kind == imza::StreamEvent::Kind::DONE);
+    CHECK(outs[1].kind == imza::StreamEvent::Kind::TOOL_CALL);
+    CHECK(outs[1].tool_call.id == "tu_9");
+    CHECK(outs[1].tool_call.name == "write");
+    CHECK(outs[1].tool_call.args == R"({"path":"b.txt"})");
+    CHECK(outs[2].kind == imza::StreamEvent::Kind::DONE);
 }
 
 TEST_CASE("OpenAI requests include_usage and emits a single usage event")

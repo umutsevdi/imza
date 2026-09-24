@@ -506,6 +506,12 @@ Status save_session(Session& session)
     root["workspace"] = utf8_from_path(workspace);
     Json::Value items(Json::arrayValue);
     for (auto& item : snapshot.items) {
+        // A still-streaming tool call has no complete arguments and must
+        // never be written out.
+        if (const auto* tool = std::get_if<ToolCall>(&item);
+            tool != nullptr && tool->phase == ToolCall::Phase::PLANNING) {
+            continue;
+        }
         items.append(item_json(item));
     }
     root["items"] = std::move(items);

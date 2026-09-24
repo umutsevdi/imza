@@ -169,6 +169,50 @@ TEST_CASE("session reports pending turns, queued messages and tools")
     CHECK_FALSE(session.has_pending_work());
 }
 
+TEST_CASE("streamed tool call starts planning then executes in place")
+{
+    imza::Session session;
+    session.begin_send("request");
+    session.append_assistant();
+
+    imza::ToolCallRequest request;
+    request.id   = "call-1";
+    request.name = "lua";
+    request.args = R"({"script":"return 1"})";
+
+    // The start event creates a single planning item with no arguments yet.
+    session.apply(imza::make_tool_call_start_event(request), { });
+    REQUIRE(session.items().size() == 3);
+    const auto* planning = std::get_if<imza::ToolCall>(&session.items()[2]);
+    REQUIRE(planning != nullptr);
+    CHECK(planning->phase == imza::ToolCall::Phase::PLANNING);
+    CHECK(planning->args.empty());
+    // A still-streaming call is not part of the model history.
+    CHECK(session.build_history("system").size() == 3);
+
+    // The complete call updates that same item rather than appending a new one.
+    session.apply(imza::make_tool_call_event(request), { });
+    REQUIRE(session.items().size() == 3);
+    const auto* executing = std::get_if<imza::ToolCall>(&session.items()[2]);
+    REQUIRE(executing != nullptr);
+    CHECK(executing->phase == imza::ToolCall::Phase::EXECUTING);
+    CHECK(executing->args == request.args);
+    CHECK(executing->id == planning->id);
+
+    // Now the call is part of history.
+    const auto history = session.build_history("system");
+    REQUIRE(history.size() == 4);
+    CHECK(history[2].tool_calls.size() == 1);
+
+    imza::Session interrupted;
+    interrupted.begin_send("request");
+    interrupted.append_assistant();
+    interrupted.apply(imza::make_tool_call_start_event(request), { });
+    REQUIRE(interrupted.finish_session(""));
+    REQUIRE(interrupted.items().size() == 2);
+    CHECK(std::holds_alternative<imza::AssistantTurn>(interrupted.items()[1]));
+}
+
 TEST_CASE("removing a selected mention detaches its snapshot")
 {
     std::vector<imza::FileAttachment> attachments { { "src/main.cpp", "main" },
