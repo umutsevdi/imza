@@ -2,6 +2,7 @@
 
 #include "common/util.h"
 #include "platform/command_runner.h"
+#include "platform/json_file.h"
 #include "platform/update.h"
 
 #include <algorithm>
@@ -265,20 +266,15 @@ std::optional<InstructionFile> load_agent_file(
         if (!std::filesystem::is_regular_file(path, ec) || ec) {
             continue;
         }
-        std::ifstream in(path, std::ios::binary);
-        if (!in) {
+        std::optional<std::string> content = read_text_file(path);
+        if (!content || content->empty()) {
             continue;
         }
-        std::string content { std::istreambuf_iterator<char>(in),
-            std::istreambuf_iterator<char>() };
-        if (content.empty()) {
-            continue;
+        if (content->size() > max_bytes) {
+            content->resize(max_bytes);
+            *content += "\n[truncated]";
         }
-        if (content.size() > max_bytes) {
-            content.resize(max_bytes);
-            content += "\n[truncated]";
-        }
-        return InstructionFile { name, std::move(content) };
+        return InstructionFile { name, std::move(*content) };
     }
     return std::nullopt;
 }

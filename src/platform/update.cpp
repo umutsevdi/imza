@@ -11,7 +11,7 @@
 #include <algorithm>
 #include <ctime>
 #include <fstream>
-#include <sstream>
+#include <optional>
 
 #if !defined(_WIN32)
 #include <unistd.h>
@@ -70,23 +70,14 @@ namespace {
 
     UpdateCache load_update_cache(const std::filesystem::path& path)
     {
-        std::ifstream file(path, std::ios::binary);
-        if (!file) {
-            return { };
-        }
-        std::stringstream text;
-        text << file.rdbuf();
-        Json::CharReaderBuilder reader;
-        Json::Value root;
-        std::string error;
-        if (!Json::parseFromStream(reader, text, &root, &error)
-            || !root.isObject()) {
+        const std::optional<Json::Value> root = read_json_file(path);
+        if (!root || !root->isObject()) {
             return { };
         }
         UpdateCache cache;
-        cache.last_checked_at = root.get("last_checked_at", 0).asInt64();
-        if (root["version"].isString()) {
-            cache.version = root["version"].asString();
+        cache.last_checked_at = root->get("last_checked_at", 0).asInt64();
+        if ((*root)["version"].isString()) {
+            cache.version = (*root)["version"].asString();
         }
         return cache;
     }

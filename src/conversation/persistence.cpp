@@ -7,11 +7,10 @@
 #include "platform/json_file.h"
 
 #include <algorithm>
-#include <fstream>
+#include <functional>
 #include <map>
 #include <optional>
 #include <set>
-#include <sstream>
 #include <utility>
 
 namespace imza {
@@ -446,13 +445,11 @@ namespace {
 
     std::optional<std::vector<SavedSession>> read_index()
     {
-        std::ifstream file(index_path(), std::ios::binary);
-        if (!file) {
+        const std::optional<Json::Value> stored = read_json_file(index_path());
+        if (!stored) {
             return std::nullopt;
         }
-        std::stringstream text;
-        text << file.rdbuf();
-        const Json::Value root = parse_json(text.str());
+        const Json::Value& root = *stored;
         if (!root.isObject() || root.get("version", 0).asInt() != 1
             || !root["sessions"].isArray()) {
             return std::nullopt;
@@ -514,16 +511,41 @@ namespace {
         return files;
     }
 
+    // Applies mutate to the freshly-read index under the index lock and
+    // writes the result. Entries whose session file no longer exists are
+    // dropped, so the fast paths keep repairing the index like reconcile
+    // does. Returns false — leaving reconciliation to the caller — when the
+    // lock is unavailable, the stored index is malformed, or the write
+    // fails.
+    bool mutate_index(
+        const std::function<bool(std::vector<SavedSession>&)>& mutate)
+    {
+        auto lock = acquire_file_lock(lock_path_for(index_path()));
+        if (!std::holds_alternative<FileLock>(lock)) {
+            return false;
+        }
+        auto indexed = read_index();
+        if (!indexed) {
+            return false;
+        }
+        const std::set<std::string> files = session_files();
+        std::erase_if(*indexed, [&](const SavedSession& session) {
+            return !files.contains(session.path.filename().string());
+        });
+        if (!mutate(*indexed)) {
+            return false;
+        }
+        return write_index(*indexed) == Status::OK;
+    }
+
     std::optional<SavedSession> read_session_metadata(
         const std::filesystem::path& path)
     {
-        std::ifstream file(path, std::ios::binary);
-        if (!file) {
+        const std::optional<Json::Value> stored = read_json_file(path);
+        if (!stored) {
             return std::nullopt;
         }
-        std::stringstream text;
-        text << file.rdbuf();
-        const Json::Value root = parse_json(text.str());
+        const Json::Value& root = *stored;
         if (!root.isObject() || !root["items"].isArray()) {
             return std::nullopt;
         }
@@ -635,22 +657,18 @@ Status save_session(Session& session)
     }
     session.set_persistence(PersistedSession { path });
     const SavedSession saved { path, title, saved_at };
-    {
-        auto lock = acquire_file_lock(lock_path_for(index_path()));
-        if (std::holds_alternative<FileLock>(lock)) {
-            if (auto indexed = read_index()) {
-                // A re-save of the same run rewrites the same file, so
-                // replace its index entry instead of duplicating it.
-                const std::string file = saved.path.filename().string();
-                std::erase_if(*indexed, [&](const SavedSession& entry) {
-                    return entry.path.filename().string() == file;
-                });
-                indexed->push_back(saved);
-                sort_sessions(*indexed);
-                write_index(*indexed);
-                return Status::OK;
-            }
-        }
+    if (mutate_index([&](std::vector<SavedSession>& indexed) {
+            // A re-save of the same run rewrites the same file, so replace
+            // its index entry instead of duplicating it.
+            const std::string file = saved.path.filename().string();
+            std::erase_if(indexed, [&](const SavedSession& entry) {
+                return entry.path.filename().string() == file;
+            });
+            indexed.push_back(saved);
+            sort_sessions(indexed);
+            return true;
+        })) {
+        return Status::OK;
     }
     reconcile_index(saved);
     return Status::OK;
@@ -665,13 +683,11 @@ Status read_session(const std::filesystem::path& path, LoadedSession& loaded)
     if (!std::holds_alternative<FileLock>(guard)) {
         return Status::CONFIG_ERROR;
     }
-    std::ifstream file(path, std::ios::binary);
-    if (!file) {
+    const std::optional<std::string> text = read_text_file(path);
+    if (!text) {
         return Status::CONFIG_ERROR;
     }
-    std::stringstream text;
-    text << file.rdbuf();
-    const Json::Value root = parse_json(text.str());
+    const Json::Value root = parse_json(*text);
     if (!root.isObject() || !root["items"].isArray()) {
         return Status::JSON_ERROR;
     }
@@ -746,17 +762,13 @@ DeleteSessionResult delete_saved_session(const std::filesystem::path& path)
         return DeleteSessionResult::REMOVE_FAILED;
     }
     {
-        auto lock = acquire_file_lock(lock_path_for(index_path()));
-        if (std::holds_alternative<FileLock>(lock)) {
-            if (auto indexed = read_index()) {
-                indexed->erase(std::remove_if(indexed->begin(), indexed->end(),
-                                   [&](const SavedSession& session) {
-                                       return session.path == target;
-                                   }),
-                    indexed->end());
-                write_index(*indexed);
-                return DeleteSessionResult::OK;
-            }
+        if (mutate_index([&](std::vector<SavedSession>& indexed) {
+                std::erase_if(indexed, [&](const SavedSession& session) {
+                    return session.path == target;
+                });
+                return true;
+            })) {
+            return DeleteSessionResult::OK;
         }
     }
     reconcile_index();

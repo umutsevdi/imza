@@ -1,6 +1,7 @@
 #include "tools/file_ops.h"
 
 #include "common/util.h"
+#include "platform/json_file.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -354,18 +355,16 @@ bool load_text(const std::string& path, std::string& out, std::string& err)
         err = "not a file: " + path;
         return false;
     }
-    std::ifstream in(file, std::ios::binary);
-    if (!in) {
+    std::optional<std::string> content = read_text_file(file);
+    if (!content) {
         err = "cannot open: " + path;
         return false;
     }
-    const std::string content(
-        (std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    if (content.find('\0') != std::string::npos) {
+    if (content->find('\0') != std::string::npos) {
         err = "binary file: " + path;
         return false;
     }
-    out = content;
+    out = std::move(*content);
     return true;
 }
 

@@ -6,7 +6,7 @@
 #include <json/json.h>
 #include <algorithm>
 #include <cstdlib>
-#include <fstream>
+#include <optional>
 #include <set>
 #include <sstream>
 
@@ -71,14 +71,11 @@ std::optional<std::string> read_changelog()
     if (!std::filesystem::is_regular_file(path, error) || error) {
         return std::nullopt;
     }
-    std::ifstream in(path, std::ios::binary);
-    if (!in) {
+    std::optional<std::string> content = read_text_file(path);
+    if (!content || content->empty()) {
         return std::nullopt;
     }
-    std::string content { std::istreambuf_iterator<char>(in),
-        std::istreambuf_iterator<char>() };
-    return content.empty() ? std::nullopt
-                           : std::optional<std::string> { std::move(content) };
+    return content;
 }
 
 std::string connection_key(const Connection& connection)
@@ -161,22 +158,19 @@ Status load_config(
 
     out = Config { };
 
-    std::ifstream file(path);
-    if (!file) {
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec) || ec) {
         return Status::OK;
     }
-
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    if (file.bad() && !file.eof()) {
+    const std::optional<std::string> text = read_text_file(path);
+    if (!text) {
         return fail(Status::CONFIG_ERROR, "failed to read " + path.string());
     }
-    const std::string text = buffer.str();
 
     Json::Value root;
     Json::CharReaderBuilder reader;
     std::string err;
-    std::istringstream parse_stream { text };
+    std::istringstream parse_stream { *text };
     if (!Json::parseFromStream(reader, parse_stream, &root, &err)) {
         return fail(Status::CONFIG_ERROR, "invalid JSON: " + err);
     }

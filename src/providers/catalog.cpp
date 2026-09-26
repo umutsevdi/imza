@@ -5,8 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <ctime>
-#include <fstream>
-#include <sstream>
+#include <optional>
 
 #include "common/util.h"
 
@@ -224,17 +223,15 @@ Status load_catalog(const std::filesystem::path& path, Catalog& out)
 {
     out = Catalog { };
 
-    std::ifstream file(path);
-    if (!file) {
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec) || ec) {
         return Status::OK;
     }
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-
-    const Json::Value root = parse_json(buffer.str());
-    if (root.isNull() || !root.isObject()) {
+    const std::optional<Json::Value> stored = read_json_file(path);
+    if (!stored || !stored->isObject()) {
         return Status::JSON_ERROR;
     }
+    const Json::Value& root = *stored;
     if (root["fetched_at"].isInt64()) {
         out.fetched_at = root["fetched_at"].asInt64();
     }

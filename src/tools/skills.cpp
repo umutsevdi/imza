@@ -2,15 +2,13 @@
 
 #include <algorithm>
 #include <cctype>
-#include <fstream>
-#include <iterator>
-#include <sstream>
 
 #include <json/json.h>
 
 #include "common/util.h"
 #include "network/json_io.h"
 #include "platform/config.h"
+#include "platform/json_file.h"
 
 namespace imza {
 
@@ -44,19 +42,16 @@ namespace {
 
 SkillRead read_skill(const Skill& skill)
 {
-    std::ifstream file(skill.path, std::ios::binary);
-    if (!file) {
+    const std::optional<std::string> content = read_text_file(skill.path);
+    if (!content) {
         return { SkillRead::Kind::READ_FAILED, "" };
     }
-    std::ostringstream buffer;
-    buffer << file.rdbuf();
-    std::string content = buffer.str();
-    if (content.size() > MAX_SKILL_BYTES) {
+    if (content->size() > MAX_SKILL_BYTES) {
         return { SkillRead::Kind::TOO_LARGE, "" };
     }
     return { SkillRead::Kind::OK,
         "<skill name=\"" + skill.name + "\" directory=\""
-            + skill.path.parent_path().string() + "\">\n" + content
+            + skill.path.parent_path().string() + "\">\n" + *content
             + "\n</skill>" };
 }
 

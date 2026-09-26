@@ -2,12 +2,12 @@
 #include "app/application_state.h"
 #include "common/util.h"
 #include "conversation/session.h"
+#include "platform/json_file.h"
 #include "tools/skills.h"
 
 #include <algorithm>
 #include <cctype>
-#include <fstream>
-#include <sstream>
+#include <optional>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -42,14 +42,10 @@ namespace {
         std::string_view file_name, std::string_view fallback)
     {
         if (!overrides.empty()) {
-            std::ifstream file(overrides / file_name, std::ios::binary);
-            if (file) {
-                std::ostringstream buffer;
-                buffer << file.rdbuf();
-                std::string text = buffer.str();
-                if (has_content(text)) {
-                    return strip_trailing_space(std::move(text));
-                }
+            std::optional<std::string> text
+                = read_text_file(overrides / file_name);
+            if (text && has_content(*text)) {
+                return strip_trailing_space(std::move(*text));
             }
         }
         return std::string(fallback);
