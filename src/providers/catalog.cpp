@@ -386,7 +386,7 @@ void backfill_catalog_urls(Catalog& catalog)
 void inject_subscription_providers(Catalog& catalog)
 {
     CachedProvider openai;
-    openai.name = "Open AI Subscription";
+    openai.name = std::string(OPENAI_SUBSCRIPTION_NAME);
     openai.api  = "https://chatgpt.com/backend-api/codex";
     openai.npm  = "@ai-sdk/openai";
     for (std::string_view id :

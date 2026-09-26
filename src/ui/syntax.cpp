@@ -500,30 +500,6 @@ std::string syntax_type_for_path(std::string_view path)
     return language == nullptr ? std::string { } : std::string(language->name);
 }
 
-Elements highlight_code(std::string_view code, std::string_view type)
-{
-    std::vector<SyntaxStyle> styles;
-    if (const LanguageDefinition* language = language_for_type(type)) {
-        styles = syntax_styles(code, *language);
-    } else {
-        styles.assign(code.size(), SyntaxStyle::PLAIN);
-    }
-
-    Elements lines;
-    std::size_t begin = 0;
-    for (;;) {
-        const std::size_t newline = code.find('\n', begin);
-        const std::size_t end
-            = newline == std::string_view::npos ? code.size() : newline;
-        lines.push_back(render_line(code, styles, begin, end));
-        if (newline == std::string_view::npos) {
-            break;
-        }
-        begin = newline + 1;
-    }
-    return lines;
-}
-
 std::vector<std::vector<Element>> highlight_code_wrapped(
     std::string_view code, std::string_view type, int width)
 {
@@ -553,13 +529,6 @@ std::vector<std::vector<Element>> highlight_code_wrapped(
         begin = newline + 1;
     }
     return lines;
-}
-
-Element highlight_code_line(std::string_view code, std::string_view type)
-{
-    Elements lines = highlight_code(code, type);
-    return lines.empty() ? text("") | color(PANEL_FG)
-                         : std::move(lines.front());
 }
 
 } // namespace imza

@@ -302,34 +302,4 @@ std::string modal_answer_markdown(const ModalAnswer& answer)
     return md;
 }
 
-std::string ask_answer_markdown(const ModalAnswer& answer)
-{
-    std::string md;
-    int n = 1;
-    for (const auto& card : answer.cards) {
-        if (!md.empty()) {
-            md += "\n";
-        }
-        md += std::to_string(n++) + ". **" + card.prompt + "**\n";
-        std::string body;
-        for (size_t i = 0; i < card.selected.size(); ++i) {
-            if (i) {
-                body += ", ";
-            }
-            body += card.selected[i];
-        }
-        if (!card.free_text.empty()) {
-            if (!body.empty()) {
-                body += " ";
-            }
-            body += card.free_text;
-        }
-        if (body.empty()) {
-            body = "-";
-        }
-        md += "> " + body;
-    }
-    return md;
-}
-
 } // namespace imza

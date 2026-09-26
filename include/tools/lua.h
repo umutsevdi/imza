@@ -74,7 +74,6 @@ struct LuaHost {
     bool shell_enabled    = false;
     bool skip_permissions = false;
     bool unattended       = false;
-    bool has_rg           = false;
 };
 
 Tool make_lua_tool(LuaState& state, LuaHost host = { });

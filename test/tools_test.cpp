@@ -32,19 +32,6 @@ TEST_CASE("dispatch parses object args for the handler")
     CHECK(out.text == "hi");
 }
 
-TEST_CASE("dispatch passes non-JSON args through as a string value")
-{
-    std::vector<Tool> tools {
-        { { "raw", "takes raw text", Json::Value(Json::objectValue) },
-            [](const ToolCallRequest&, const Json::Value& args) {
-                return ToolOutput { ToolOutput::Kind::OUTPUT, args.asString() };
-            } }
-    };
-    const ToolOutput out = dispatch_tool(tools, { "raw", "ls -la", "", "" });
-    CHECK(out.kind == ToolOutput::Kind::OUTPUT);
-    CHECK(out.text == "ls -la");
-}
-
 TEST_CASE("dispatch propagates handler errors")
 {
     std::vector<Tool> tools {

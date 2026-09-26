@@ -206,7 +206,6 @@ namespace {
         explicit ModalView(std::shared_ptr<ApplicationState> state)
             : state_(std::move(state))
             , session_(state_->session)
-            , providers_(*state_->providers)
         {
         }
 
@@ -648,7 +647,6 @@ namespace {
 
         std::shared_ptr<ApplicationState> state_;
         std::shared_ptr<Session> session_;
-        ProviderStore& providers_;
         bool built_           = false;
         std::uint64_t serial_ = 0;
 

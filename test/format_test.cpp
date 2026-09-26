@@ -296,25 +296,6 @@ TEST_CASE("lua headers summarize bindings and never echo the script")
         != std::string::npos);
 }
 
-TEST_CASE("ask_answer_markdown numbers questions and blockquotes answers")
-{
-    imza::ModalAnswer ans;
-    ans.cards.push_back(
-        imza::QuestionAnswer { { "Sunny" }, "", "What's the weather today?" });
-    ans.cards.push_back(
-        imza::QuestionAnswer { { "Reading files", "Listing directories" }, "",
-            "Which capabilities?" });
-
-    const std::string md = imza::ask_answer_markdown(ans);
-    CHECK(md
-        == "1. **What's the weather today?**\n> Sunny\n"
-           "2. **Which capabilities?**\n> Reading files, Listing directories");
-
-    imza::ModalAnswer empty;
-    empty.cards.push_back(imza::QuestionAnswer { { }, "", "Anything else?" });
-    CHECK(imza::ask_answer_markdown(empty) == "1. **Anything else?**\n> -");
-}
-
 TEST_CASE("shell status text hides success and preserves arbitrary timeout")
 {
     CHECK(imza::shell_status_text(imza::ShellExit { 0 }).empty());

@@ -110,8 +110,10 @@ TEST_CASE("markdown code blocks wrap long lines")
 TEST_CASE("highlight_code_wrapped keeps token colors across wrapped rows")
 {
     const std::string code = "return \"aaaaaaaaaaaaaaaa\";";
-    auto whole             = imza::test::to_screen(
-        imza::highlight_code_line(code, "cpp"), code.size(), 1);
+    const auto unwrapped   = imza::highlight_code_wrapped(
+        code, "cpp", static_cast<int>(code.size()));
+    REQUIRE(unwrapped.size() == 1);
+    auto whole = imza::test::to_screen(unwrapped[0][0], code.size(), 1);
     const ftxui::Color keyword = whole.PixelAt(0, 0).foreground_color;
     const ftxui::Color literal = whole.PixelAt(10, 0).foreground_color;
 

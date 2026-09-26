@@ -91,19 +91,6 @@ inline std::string join_lines(
     return out;
 }
 
-inline std::string join_lines(
-    const std::vector<std::string>& lines, std::size_t begin, std::size_t end)
-{
-    std::string out;
-    for (std::size_t i = begin; i <= end && i < lines.size(); ++i) {
-        if (!out.empty()) {
-            out += '\n';
-        }
-        out += lines[i];
-    }
-    return out;
-}
-
 inline std::string format_local_time(const char* fmt)
 {
     const auto now          = std::chrono::system_clock::now();

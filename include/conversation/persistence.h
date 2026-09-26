@@ -13,8 +13,6 @@ struct LoadedSession;
 
 Status save_session(Session& session);
 Status read_session(const std::filesystem::path& path, LoadedSession& loaded);
-Status load_session(const std::filesystem::path& path, Session& session,
-    std::filesystem::path* workspace = nullptr);
 std::vector<SavedSession> saved_sessions();
 bool session_file_locked(const std::filesystem::path& path);
 

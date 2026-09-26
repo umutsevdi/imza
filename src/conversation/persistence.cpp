@@ -19,6 +19,7 @@ namespace imza {
 namespace {
 
     constexpr std::string_view INDEX_FILENAME = ".index.json";
+    constexpr const char* UNTITLED_TITLE      = "Untitled session";
 
     std::filesystem::path index_path()
     {
@@ -528,7 +529,7 @@ namespace {
         }
         std::string title = root.get("title", "").asString();
         if (title.empty()) {
-            title = "Untitled session";
+            title = UNTITLED_TITLE;
         }
         return SavedSession { path, std::move(title),
             root.get("saved_at", "").asString() };
@@ -603,7 +604,7 @@ Status save_session(Session& session)
     }
     root["version"] = 1;
     const std::string title
-        = snapshot.title.empty() ? "Untitled session" : snapshot.title;
+        = snapshot.title.empty() ? UNTITLED_TITLE : snapshot.title;
     const std::string saved_at = format_local_time("%Y-%m-%d %H:%M:%S");
     root["title"]              = title;
     root["saved_at"]           = saved_at;
@@ -707,21 +708,6 @@ Status read_session(const std::filesystem::path& path, LoadedSession& loaded)
         return Status::JSON_ERROR;
     }
     loaded = LoadedSession { std::move(snapshot), std::move(workspace) };
-    return Status::OK;
-}
-
-Status load_session(const std::filesystem::path& path, Session& session,
-    std::filesystem::path* workspace)
-{
-    LoadedSession loaded;
-    const Status status = read_session(path, loaded);
-    if (status != Status::OK) {
-        return status;
-    }
-    if (workspace != nullptr) {
-        *workspace = loaded.workspace;
-    }
-    session.restore(std::move(loaded.snapshot));
     return Status::OK;
 }
 

@@ -166,7 +166,6 @@ public:
     std::pair<std::size_t, std::size_t> begin_compaction();
     void finish_compaction(std::size_t id, std::string summary,
         std::size_t compacted_item_count, bool success);
-    void append_tool(const ToolCallRequest& req);
     void fill_tool_result(const ToolCallRequest& req, ToolCall::Result result);
     void set_tool_subagents(
         const ToolCallRequest& req, std::vector<std::size_t> ids);
@@ -200,6 +199,7 @@ public:
 private:
     AssistantTurn* last_assistant_locked();
     const AssistantTurn* last_assistant_locked() const;
+    SessionSnapshot build_snapshot() const;
     ToolCall* _find_tool_locked(
         const ToolCallRequest& req, bool unfinished_only);
     ToolCall* find_planning_tool_locked(const ToolCallRequest& req);

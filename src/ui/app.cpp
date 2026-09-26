@@ -143,9 +143,8 @@ namespace {
 
     class Repl : public ComponentBase {
     public:
-        Repl(ScreenInteractive& screen, std::shared_ptr<ApplicationState> state)
-            : screen_(screen)
-            , state_(std::move(state))
+        Repl(std::shared_ptr<ApplicationState> state)
+            : state_(std::move(state))
         {
             const LayoutFn layout     = [this] { return layout_; };
             const WorkflowFn workflow = [this] { return phase_; };
@@ -366,7 +365,6 @@ namespace {
             }
         }
 
-        ScreenInteractive& screen_;
         std::shared_ptr<ApplicationState> state_;
         ftxui::Component sidechat_;
         SidechatStatus sidechat_status_;
@@ -424,7 +422,7 @@ int run_repl(
         imza::enqueue_user_modal(
             *state, ConnectModal { ConnectModal::Entry::MANAGE });
     }
-    auto app = ftxui::Make<Repl>(screen, state);
+    auto app = ftxui::Make<Repl>(state);
     screen.Loop(app);
     bracketed_paste.disable();
     if (!state->session->has_items()) {

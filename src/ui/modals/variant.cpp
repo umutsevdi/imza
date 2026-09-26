@@ -20,9 +20,8 @@ namespace {
     public:
         VariantView(std::shared_ptr<ApplicationState> state)
             : state_(std::move(state))
-            , session_(state_->session)
         {
-            const auto modal = std::get<VariantModal>(session_->modal());
+            const auto modal = std::get<VariantModal>(state_->session->modal());
             options_         = modal.options;
             const auto found
                 = std::find(options_.begin(), options_.end(), modal.current);
@@ -73,7 +72,6 @@ namespace {
         }
 
         std::shared_ptr<ApplicationState> state_;
-        std::shared_ptr<Session> session_;
         std::vector<std::string> options_;
         int current_ = 0;
         int cursor_  = 0;

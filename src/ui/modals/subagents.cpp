@@ -183,7 +183,7 @@ namespace {
                 save_model();
                 return true;
             }
-            return container_ ? container_->OnEvent(event) : false;
+            return container_->OnEvent(event);
         }
 
         bool handle_role_event(const Event& event)

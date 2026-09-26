@@ -198,9 +198,6 @@ ftxui::Element render_markdown_element(std::string_view md, int width);
 
 bool syntax_type_supported(std::string_view type);
 std::string syntax_type_for_path(std::string_view path);
-ftxui::Element highlight_code_line(
-    std::string_view code, std::string_view type);
-ftxui::Elements highlight_code(std::string_view code, std::string_view type);
 // One vector of visual-row elements per logical line of `code`.
 std::vector<std::vector<ftxui::Element>> highlight_code_wrapped(
     std::string_view code, std::string_view type, int width);

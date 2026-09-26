@@ -59,16 +59,6 @@ namespace {
         return value;
     }
 
-#if !defined(_WIN32) && !defined(__APPLE__)
-    bool contains(const std::vector<std::string>& values, std::string_view name)
-    {
-        return std::any_of(
-            values.begin(), values.end(), [name](const std::string& value) {
-                return std::string_view(value) == name;
-            });
-    }
-#endif
-
     bool update_cache_stale(
         const UpdateCache& cache, std::int64_t now_unix_secs)
     {
@@ -207,11 +197,11 @@ std::string expected_asset_name(
 #else
     const char* os  = "linux";
     const char* ext = nullptr;
-    if (contains(package_managers, "apt")
-        || contains(package_managers, "apt-get")) {
+    if (std::ranges::contains(package_managers, "apt")
+        || std::ranges::contains(package_managers, "apt-get")) {
         ext = "deb";
-    } else if (contains(package_managers, "dnf")
-        || contains(package_managers, "yum")) {
+    } else if (std::ranges::contains(package_managers, "dnf")
+        || std::ranges::contains(package_managers, "yum")) {
         ext = "rpm";
     }
     if (ext == nullptr) {

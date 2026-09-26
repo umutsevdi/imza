@@ -5,6 +5,7 @@
 #include <functional>
 #include <sstream>
 #include <thread>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -18,8 +19,24 @@
 #include "network/json_io.h"
 #include "platform/config.h"
 #include "platform/file_lock.h"
+#include "test_helpers.h"
 
 namespace {
+
+imza::Status load_session(const std::filesystem::path& path,
+    imza::Session& session, std::filesystem::path* workspace = nullptr)
+{
+    imza::LoadedSession loaded;
+    const imza::Status status = imza::read_session(path, loaded);
+    if (status != imza::Status::OK) {
+        return status;
+    }
+    if (workspace != nullptr) {
+        *workspace = loaded.workspace;
+    }
+    session.restore(std::move(loaded.snapshot));
+    return imza::Status::OK;
+}
 
 struct DataHome {
     std::filesystem::path path
@@ -117,8 +134,7 @@ TEST_CASE("saved sessions continue in place and rewrite the same file")
 
     imza::Session loaded;
     std::filesystem::path workspace;
-    REQUIRE(
-        imza::load_session(saved_path, loaded, &workspace) == imza::Status::OK);
+    REQUIRE(load_session(saved_path, loaded, &workspace) == imza::Status::OK);
     CHECK(workspace == directory.original);
     // A resumed session adopts the source file stem and saves back into the
     // same file once dirtied.
@@ -231,7 +247,7 @@ TEST_CASE("saved sessions retain delegated-agent chat transcripts")
     source.begin_send("delegate");
     source.append_assistant("model", "off");
     const imza::ToolCallRequest request { "subagent", "{}", "", "call-1" };
-    source.append_tool(request);
+    imza::test::append_tool(source, request);
     source.set_tool_subagent_chats(
         request, { { "Agent 1 (research)", "## Assistant\n\nreport" } });
     source.fill_tool_result(
@@ -242,7 +258,7 @@ TEST_CASE("saved sessions retain delegated-agent chat transcripts")
     const auto saved = imza::saved_sessions();
     REQUIRE(saved.size() == 1);
     imza::Session loaded;
-    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
     REQUIRE(loaded.items().size() == 3);
     const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
     REQUIRE(call.subagent_chats.size() == 1);
@@ -263,7 +279,7 @@ TEST_CASE("lua dispatch log survives session persistence")
     source.append_assistant("model", "off");
     const imza::ToolCallRequest request { "lua",
         R"json({"script":"print(1)"})json", "", "call-1" };
-    source.append_tool(request);
+    imza::test::append_tool(source, request);
     imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT,
         "1\n" };
     result.dispatch_log
@@ -275,7 +291,7 @@ TEST_CASE("lua dispatch log survives session persistence")
     const auto saved = imza::saved_sessions();
     REQUIRE(saved.size() == 1);
     imza::Session loaded;
-    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
     REQUIRE(loaded.items().size() == 3);
     const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
     REQUIRE(call.result.has_value());
@@ -298,7 +314,7 @@ TEST_CASE("lua return value survives session persistence")
     source.append_assistant("model", "off");
     const imza::ToolCallRequest request { "lua",
         R"json({"script":"return {a = 1}"})json", "", "call-1" };
-    source.append_tool(request);
+    imza::test::append_tool(source, request);
     imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT, "" };
     result.return_value
         = imza::parse_json(R"json({"a":1,"b":[true,null]})json");
@@ -309,7 +325,7 @@ TEST_CASE("lua return value survives session persistence")
     const auto saved = imza::saved_sessions();
     REQUIRE(saved.size() == 1);
     imza::Session loaded;
-    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
     const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
     REQUIRE(call.result.has_value());
     REQUIRE(call.result->return_value.has_value());
@@ -331,7 +347,7 @@ TEST_CASE("legacy lua result without a return value still loads")
     source.append_assistant("model", "off");
     const imza::ToolCallRequest request { "lua",
         R"json({"script":"print(1)"})json", "", "call-1" };
-    source.append_tool(request);
+    imza::test::append_tool(source, request);
     imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT,
         "1\n" };
     source.fill_tool_result(request, std::move(result));
@@ -341,7 +357,7 @@ TEST_CASE("legacy lua result without a return value still loads")
     const auto saved = imza::saved_sessions();
     REQUIRE(saved.size() == 1);
     imza::Session loaded;
-    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
     const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
     REQUIRE(call.result.has_value());
     CHECK_FALSE(call.result->return_value.has_value());
@@ -360,7 +376,7 @@ TEST_CASE("lua aggregate diffs survive session persistence")
     source.append_assistant("model", "off");
     const imza::ToolCallRequest request { "lua",
         R"json({"script":"imza.fs.edit(...)"} )json", "", "call-1" };
-    source.append_tool(request);
+    imza::test::append_tool(source, request);
     imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT, "" };
     imza::DiffView diff;
     diff.file = "/tmp/a.txt";
@@ -375,7 +391,7 @@ TEST_CASE("lua aggregate diffs survive session persistence")
     const auto saved = imza::saved_sessions();
     REQUIRE(saved.size() == 1);
     imza::Session loaded;
-    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
     const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
     REQUIRE(call.result.has_value());
     REQUIRE(call.result->diffs.size() == 1);
@@ -398,7 +414,7 @@ TEST_CASE("canvas charts survive session persistence")
     source.begin_send("run lua");
     source.append_assistant("model", "off");
     const imza::ToolCallRequest request { "lua", "{}", "", "call-1" };
-    source.append_tool(request);
+    imza::test::append_tool(source, request);
     imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT, "" };
     imza::CanvasView pie;
     pie.kind   = imza::CanvasView::Kind::PIE;
@@ -416,7 +432,7 @@ TEST_CASE("canvas charts survive session persistence")
     const auto saved = imza::saved_sessions();
     REQUIRE(saved.size() == 1);
     imza::Session loaded;
-    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
     const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
     REQUIRE(call.result.has_value());
     REQUIRE(call.result->canvases.size() == 2);
@@ -441,7 +457,7 @@ TEST_CASE("lua aggregate diffs round-trip SKIP and clamp unknown kinds")
     source.begin_send("run lua");
     source.append_assistant("model", "off");
     const imza::ToolCallRequest request { "lua", "{}", "", "call-1" };
-    source.append_tool(request);
+    imza::test::append_tool(source, request);
     imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT, "" };
     imza::DiffView diff;
     diff.file = "/tmp/a.txt";
@@ -458,7 +474,7 @@ TEST_CASE("lua aggregate diffs round-trip SKIP and clamp unknown kinds")
     const auto saved = imza::saved_sessions();
     REQUIRE(saved.size() == 1);
     imza::Session loaded;
-    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
     const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
     REQUIRE(call.result.has_value());
     REQUIRE(call.result->diffs.size() == 1);
@@ -481,8 +497,7 @@ TEST_CASE("lua aggregate diffs round-trip SKIP and clamp unknown kinds")
         out << json;
     }
     imza::Session clamped;
-    REQUIRE(
-        imza::load_session(saved.front().path, clamped) == imza::Status::OK);
+    REQUIRE(load_session(saved.front().path, clamped) == imza::Status::OK);
     const auto& clamped_call = std::get<imza::ToolCall>(clamped.items()[2]);
     REQUIRE(clamped_call.result.has_value());
     REQUIRE(clamped_call.result->diffs[0].rows.size() == 4);
@@ -505,7 +520,7 @@ TEST_CASE("empty title is normalized in both file and index")
     CHECK(saved.front().title == "Untitled session");
 
     imza::Session loaded;
-    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
     CHECK(loaded.title() == "Untitled session");
 #endif
 }
@@ -548,7 +563,7 @@ TEST_CASE("non-ASCII workspace paths round-trip as valid UTF-8")
 
     imza::Session loaded;
     std::filesystem::path loaded_workspace;
-    REQUIRE(imza::load_session(saved.front().path, loaded, &loaded_workspace)
+    REQUIRE(load_session(saved.front().path, loaded, &loaded_workspace)
         == imza::Status::OK);
     CHECK(loaded_workspace == workspace);
     CHECK(loaded.title() == "Unicode workspace");
@@ -836,7 +851,7 @@ TEST_CASE("native and legacy attachments survive session persistence")
     CHECK(attachments[2]["media_type"].asString() == "application/pdf");
 
     imza::Session loaded;
-    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
     const auto& current
         = std::get<imza::UserTurn>(loaded.items().front()).attachments;
     REQUIRE(current.size() == 3);

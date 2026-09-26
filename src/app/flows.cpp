@@ -569,11 +569,6 @@ void delete_saved_session(
     state.session->bump_modal_serial();
 }
 
-bool sidechat_open(const ApplicationState& state)
-{
-    return state.sidechat != nullptr && state.sidechat_open;
-}
-
 namespace {
 
     SessionSnapshot sidechat_seed(const ApplicationState& state)

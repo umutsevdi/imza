@@ -40,11 +40,7 @@ ToolOutput dispatch_tool(
     if (tool == nullptr) {
         return { ToolOutput::Kind::ERROR, "unknown tool: " + req.name };
     }
-    Json::Value args = parse_json(req.args);
-    if (args.isNull()) {
-        args = Json::Value(req.args);
-    }
-    return tool->run(req, args);
+    return tool->run(req, parse_json(req.args));
 }
 
 std::vector<Tool> default_tools(LuaHost lua_host, SkillToolDeps skill_deps,

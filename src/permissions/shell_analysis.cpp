@@ -1,5 +1,7 @@
 #include "permissions/shell_analysis.h"
 
+#include "common/util.h"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -52,10 +54,7 @@ namespace {
         ShellInvocation invocation;
         invocation.program = std::move(words[program]);
 #ifdef _WIN32
-        std::ranges::transform(invocation.program, invocation.program.begin(),
-            [](unsigned char character) {
-                return static_cast<char>(std::tolower(character));
-            });
+        invocation.program = to_lower(invocation.program);
 #endif
         // Subcommand identity: first word after the program that is not an
         // option. Options before the subcommand carry no grant identity; a

@@ -10,7 +10,6 @@ namespace imza {
 // Conversation-transcript text shared by the agent and the UI.
 std::string question_form_markdown(const QuestionForm& form);
 std::string modal_answer_markdown(const ModalAnswer& answer);
-std::string ask_answer_markdown(const ModalAnswer& answer);
 
 // How a lua return value renders for display: scalars and scalar lists
 // print as plain markdown, record lists as markdown tables, other values

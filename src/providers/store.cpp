@@ -203,8 +203,8 @@ ProviderStore::provider_options() const
     std::lock_guard lock(_mutex);
     std::vector<std::pair<std::string, std::string>> options;
     options.reserve(_catalog.providers.size() + 1);
-    options.emplace_back(
-        std::string(OPENAI_SUBSCRIPTION_ID), "Open AI Subscription");
+    options.emplace_back(std::string(OPENAI_SUBSCRIPTION_ID),
+        std::string(OPENAI_SUBSCRIPTION_NAME));
     for (const auto& [id, provider] : _catalog.providers) {
         if (id == OPENAI_SUBSCRIPTION_ID) {
             continue;

@@ -6,6 +6,7 @@
 #include <doctest/doctest.h>
 
 #include "conversation/session.h"
+#include "test_helpers.h"
 #include "workspace/attachments.h"
 
 namespace fs = std::filesystem;
@@ -283,7 +284,7 @@ TEST_CASE("session reports pending turns, queued messages and tools")
     request.id   = "call-1";
     request.name = "shell";
     request.args = R"({"command":"sleep 2"})";
-    session.append_tool(request);
+    imza::test::append_tool(session, request);
     CHECK(session.has_pending_work());
     session.fill_tool_result(
         request, { imza::ToolCall::Result::Kind::OUTPUT, "done" });

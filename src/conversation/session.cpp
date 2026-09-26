@@ -108,11 +108,16 @@ bool Session::has_pending_work() const
         });
 }
 
+SessionSnapshot Session::build_snapshot() const
+{
+    return { _title, _items, _todo, _compacted_summary, _compacted_item_count,
+        _mode == Mode::PLAN, _persistence };
+}
+
 SessionSnapshot Session::snapshot() const
 {
     std::lock_guard lock(_mutex);
-    return { _title, _items, _todo, _compacted_summary, _compacted_item_count,
-        _mode == Mode::PLAN, _persistence };
+    return build_snapshot();
 }
 
 std::optional<SessionSnapshot> Session::snapshot_for_save() const
@@ -121,8 +126,7 @@ std::optional<SessionSnapshot> Session::snapshot_for_save() const
     if (_items.empty() || !_dirty) {
         return std::nullopt;
     }
-    return SessionSnapshot { _title, _items, _todo, _compacted_summary,
-        _compacted_item_count, _mode == Mode::PLAN, _persistence };
+    return build_snapshot();
 }
 
 void Session::restore(SessionSnapshot snapshot)
@@ -363,18 +367,6 @@ void Session::finish_compaction(std::size_t id, std::string summary,
         }
         return;
     }
-}
-
-void Session::append_tool(const ToolCallRequest& req)
-{
-    std::lock_guard lock(_mutex);
-    if (auto* a = last_assistant_locked()) {
-        finalize_reasoning(*a);
-    }
-    _dirty               = true;
-    const std::size_t id = _next_tool_id++;
-    _items.emplace_back(
-        ToolCall { id, req.id, req.name, req.args, { }, { }, std::nullopt });
 }
 
 ToolCall* Session::_find_tool_locked(

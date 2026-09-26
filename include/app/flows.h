@@ -81,6 +81,5 @@ void ensure_sidechat_seeded(ApplicationState& state);
 // Clear the sidechat's context; the next prompt reloads it. Errors when no
 // sidechat exists.
 void refresh_sidechat(ApplicationState& state);
-bool sidechat_open(const ApplicationState& state);
 
 } // namespace imza
