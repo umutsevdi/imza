@@ -333,8 +333,8 @@ void register_canvas(LuaState& state)
     };
     state.register_module({ false, "canvas",
         R"desc(Line, bar, pie, and wireframe-surface charts rendered in the chat.
-Use when presenting numeric data - trends, comparisons, distributions, or
-matrices - without waiting to be asked.)desc",
+Use when presenting numeric data or explaining something to the user
+- trends, comparisons, distributions, or matrices.)desc",
         types, canvas_lua_methods() });
 }
 
