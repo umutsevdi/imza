@@ -16,6 +16,10 @@ Changes:
   - Added multi-modal input support for image types and PDF files.
   - Added module system.
   - Added Lua canvas charts that render directly in the chat.
+  - Fixed a hidden Sidechat intercepting clicks and keystrokes meant for the
+main chat.
+  - A welcome banner is shown in the chat when the app opens, until the
+first message is sent.
 
 -------------------------------------------------------------------------------
 0.4.1 - 2026-09-24

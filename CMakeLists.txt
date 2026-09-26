@@ -172,14 +172,17 @@ include("${TREE_SITTER_GENERATED_DIR}/tree_sitter_sources.cmake")
 
 set(PROMPTS_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(GLOB IMZA_PROMPT_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/misc/prompts/*.md")
+set(IMZA_BANNER_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/misc/banner.txt")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_prompts.py"
-    ${IMZA_PROMPT_SOURCES})
+    ${IMZA_PROMPT_SOURCES}
+    "${IMZA_BANNER_SOURCE}")
 execute_process(
     COMMAND
         "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_prompts.py"
         --source "${CMAKE_CURRENT_SOURCE_DIR}/misc/prompts"
+        --banner "${IMZA_BANNER_SOURCE}"
         --output "${PROMPTS_GENERATED_DIR}"
     COMMAND_ERROR_IS_FATAL ANY
 )

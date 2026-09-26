@@ -337,6 +337,8 @@ struct ChatHints {
     std::string placeholder = "Ask anything - type / for commands";
     std::string input_hint
         = "  Alt+Enter add line · @ attach file · $ use skill ";
+    // Rendered while the session has no items; off for the sidechat.
+    bool empty_state_banner = true;
 };
 
 ftxui::Component make_chat(std::shared_ptr<ApplicationState> state,

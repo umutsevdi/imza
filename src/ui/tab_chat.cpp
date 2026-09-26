@@ -8,6 +8,8 @@
 #include "ui/ui.h"
 #include "workspace/attachments.h"
 
+#include <banner.inc>
+
 #include <ftxui/component/animation.hpp>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_base.hpp>
@@ -45,6 +47,25 @@ namespace {
     Element vertical_space(int height)
     {
         return text("") | size(HEIGHT, EQUAL, std::max(0, height));
+    }
+
+    Element empty_state_banner()
+    {
+        Elements lines;
+        std::size_t start = 0;
+        while (start <= ui_detail::BANNER.size()) {
+            const std::size_t end = ui_detail::BANNER.find('\n', start);
+            lines.push_back(
+                text(std::string(ui_detail::BANNER.substr(start,
+                    end == std::string_view::npos ? std::string_view::npos
+                                                  : end - start)))
+                | dim);
+            if (end == std::string_view::npos) {
+                break;
+            }
+            start = end + 1;
+        }
+        return vbox(std::move(lines)) | center;
     }
 
     std::string assistant_metadata(const AssistantTurn& turn)
@@ -399,8 +420,11 @@ namespace {
                 items.push_back(hbox(std::move(row)));
             }
 
-            Element content = items.empty() ? text("")
-                                            : vbox(std::move(items))
+            Element content = items.empty()
+                ? (hints_.empty_state_banner && st.items().empty()
+                          ? empty_state_banner()
+                          : text(""))
+                : vbox(std::move(items))
                     | capture_content_height(&viewport_.content_height) | flex;
             Element log     = std::move(content) | vscroll_indicator
                 | focusPosition(0,
@@ -696,6 +720,9 @@ namespace {
         std::shared_ptr<Session> session_;
         LayoutFn layout_;
         ChatHints hints_;
+        // The empty-state banner is a first-open greeting; once any item
+        // lands in the conversation it never returns (including after /new).
+        bool show_banner_ = true;
 
         Component container_;
         std::map<std::size_t, Component> read_buttons_;
