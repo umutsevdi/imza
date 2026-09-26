@@ -11,25 +11,16 @@
 #include <vector>
 
 #include "platform/config.h"
+#include "test_fs.h"
 
 namespace {
 
+using imza::test::TempDir;
+
 std::filesystem::path temp_file(const std::string& name)
 {
-    static int counter = 0;
-    auto dir           = std::filesystem::temp_directory_path()
-        / ("imza-config-test-" + std::to_string(::getpid()) + "-"
-            + std::to_string(counter++));
-    std::filesystem::create_directories(dir);
-    return dir / name;
-}
-
-std::string read_all(const std::filesystem::path& path)
-{
-    std::ifstream file(path);
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    return buffer.str();
+    static TempDir dir;
+    return dir.file(name);
 }
 
 } // namespace
@@ -126,7 +117,7 @@ TEST_CASE("config roundtrip preserves connections and last_used")
     Json::Value written;
     Json::CharReaderBuilder reader;
     std::string errors;
-    std::istringstream stream(read_all(path));
+    std::istringstream stream(imza::test::read_all(path));
     REQUIRE(Json::parseFromStream(reader, stream, &written, &errors));
     CHECK(written["providers"][0]["id"] == "openrouter");
     CHECK_FALSE(written["providers"][0].isMember("active"));
@@ -273,7 +264,7 @@ TEST_CASE("empty config writes every editable option")
     Json::Value written;
     Json::CharReaderBuilder reader;
     std::string errors;
-    std::istringstream stream(read_all(path));
+    std::istringstream stream(imza::test::read_all(path));
     REQUIRE(Json::parseFromStream(reader, stream, &written, &errors));
     CHECK(written["providers"].isArray());
     CHECK_FALSE(written["models"]["main"].isMember("provider"));
@@ -295,7 +286,7 @@ TEST_CASE("save_config leaves no temporary or lock file behind")
     CHECK(imza::save_config(path, cfg) == imza::Status::OK);
     CHECK_FALSE(std::filesystem::exists(path.string() + ".tmp"));
     CHECK_FALSE(std::filesystem::exists(path.string() + ".lock"));
-    CHECK_FALSE(read_all(path).empty());
+    CHECK_FALSE(imza::test::read_all(path).empty());
 }
 
 TEST_CASE("concurrent config updates preserve unrelated changes")
@@ -366,7 +357,7 @@ TEST_CASE("config roundtrip preserves subagent models")
         == "gpt-builder");
     CHECK(loaded.subagents.at(imza::SubagentRole::RESEARCH).variant == "high");
     CHECK(loaded.subagents.at(imza::SubagentRole::BASIC).variant == "low");
-    const std::string json = read_all(path);
+    const std::string json = imza::test::read_all(path);
     CHECK(json.find("\"models\"") != std::string::npos);
     CHECK(json.find("\"researcher\"") != std::string::npos);
     CHECK(json.find("\"subagents\"") == std::string::npos);

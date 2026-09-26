@@ -8,6 +8,7 @@
 
 #include "platform/json_file.h"
 #include "platform/update.h"
+#include "test_fs.h"
 
 namespace {
 
@@ -53,26 +54,19 @@ TEST_CASE("expected_asset_name merges the version into the platform asset")
 
 TEST_CASE("cached_update reads the update.json state file")
 {
-    const std::filesystem::path data
-        = std::filesystem::temp_directory_path() / "imza-update-test" / "imza";
-    std::filesystem::create_directories(data);
-    setenv("XDG_DATA_HOME", data.parent_path().string().c_str(), 1);
+    const imza::test::IsolatedDataHome home;
 
     CHECK_FALSE(imza::cached_update("0.2.2").has_value());
 
     Json::Value root(Json::objectValue);
     root["last_checked_at"] = static_cast<Json::Int64>(1);
     root["version"]         = "9.9.9";
-    REQUIRE(imza::write_json_file(data / "update.json", root, "")
+    REQUIRE(imza::write_json_file(home.imza_dir() / "update.json", root, "")
         == imza::Status::OK);
     const std::optional<std::string> version = imza::cached_update("0.2.2");
     REQUIRE(version.has_value());
     CHECK(*version == "9.9.9");
     CHECK_FALSE(imza::cached_update("9.9.9").has_value());
-
-    unsetenv("XDG_DATA_HOME");
-    std::error_code error;
-    std::filesystem::remove_all(data.parent_path(), error);
 }
 
 } // namespace

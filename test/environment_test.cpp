@@ -2,7 +2,6 @@
 
 #include <chrono>
 #include <filesystem>
-#include <fstream>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -10,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "test_fs.h"
 #include "workspace/environment.h"
 
 namespace {
@@ -82,12 +82,6 @@ TEST_CASE("git diff summary counts lines and fingerprints content")
     CHECK(first.signature != second.signature);
 }
 
-void write_file(const std::filesystem::path& path, std::string_view content)
-{
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    out << content;
-}
-
 bool wait_until_ready(const imza::Environment& env, int timeout_ms = 5000)
 {
     const auto deadline = std::chrono::steady_clock::now()
@@ -118,10 +112,9 @@ TEST_CASE("system environment populates the core fields synchronously")
 
 TEST_CASE("Imza temporary directory is reusable and canonical")
 {
-    const auto base = std::filesystem::temp_directory_path()
-        / "imza_temporary_directory_test";
+    const imza::test::TempDir base_dir;
+    const auto base = base_dir.path;
     std::error_code error;
-    std::filesystem::remove_all(base, error);
     std::filesystem::create_directories(base / "real", error);
     REQUIRE_FALSE(error);
 #ifdef _WIN32
@@ -138,10 +131,9 @@ TEST_CASE("Imza temporary directory is reusable and canonical")
     CHECK(std::filesystem::is_directory(first));
 
     std::filesystem::remove_all(first, error);
-    write_file(first, "collision");
+    imza::test::write_file(first, "collision");
     CHECK_THROWS_AS(imza::prepare_imza_temporary_directory(input),
         std::filesystem::filesystem_error);
-    std::filesystem::remove_all(base, error);
 }
 
 TEST_CASE("workspace retains its directory outside a project")
@@ -180,12 +172,11 @@ TEST_CASE("workspace subscription fires on readiness")
 TEST_CASE("workspace carries an instruction and project skills when rooted")
 {
     const auto original = std::filesystem::current_path();
-    const auto root
-        = std::filesystem::temp_directory_path() / "imza_test_wsroot";
-    std::filesystem::remove_all(root);
-    const auto git = root / ".git";
+    const imza::test::TempDir root_dir;
+    const auto root = root_dir.path;
+    const auto git  = root / ".git";
     REQUIRE(std::filesystem::create_directories(git));
-    write_file(root / "AGENTS.md", "agents rules");
+    imza::test::write_file(root / "AGENTS.md", "agents rules");
 
     imza::Environment env;
     REQUIRE(wait_until_ready(env));
@@ -198,15 +189,13 @@ TEST_CASE("workspace carries an instruction and project skills when rooted")
     CHECK(env.agent_rules_path() == "AGENTS.md");
 
     std::filesystem::current_path(original);
-    std::filesystem::remove_all(root);
 }
 
 TEST_CASE("workspace scan retains nested cwd and discovers repository root")
 {
-    const auto root
-        = std::filesystem::temp_directory_path() / "imza_nested_wsroot";
+    const imza::test::TempDir root_dir;
+    const auto root = root_dir.path;
     std::error_code error;
-    std::filesystem::remove_all(root, error);
     std::filesystem::create_directories(root / ".git", error);
     std::filesystem::create_directories(root / "nested" / "deeper", error);
     REQUIRE_FALSE(error);
@@ -214,8 +203,6 @@ TEST_CASE("workspace scan retains nested cwd and discovers repository root")
     const auto workspace = imza::scan_workspace(root / "nested" / "deeper");
     CHECK(workspace.working_directory == root / "nested" / "deeper");
     CHECK(workspace.project_root == root);
-
-    std::filesystem::remove_all(root, error);
 }
 
 TEST_CASE("load_agent_file selects the first available candidate")
@@ -237,39 +224,29 @@ TEST_CASE("load_agent_file selects the first available candidate")
 
     for (const auto& test : cases) {
         CAPTURE(test.name);
-        const auto dir = std::filesystem::temp_directory_path()
-            / ("imza_test_agents_" + std::string(test.name));
-        std::filesystem::remove_all(dir);
-        REQUIRE(std::filesystem::create_directories(dir));
+        const imza::test::TempDir dir;
         for (const auto& [name, content] : test.files) {
-            write_file(dir / name, content);
+            imza::test::write_file(dir.file(std::string(name)), content);
         }
 
-        const auto found = imza::load_agent_file(dir);
+        const auto found = imza::load_agent_file(dir.path);
         REQUIRE(found.has_value() == test.expected.has_value());
         if (test.expected) {
             CHECK(found->path == test.expected->path);
             CHECK(found->content == test.expected->content);
         }
-
-        std::filesystem::remove_all(dir);
     }
 }
 
 TEST_CASE("load_agent_file truncates oversized content")
 {
-    const auto dir
-        = std::filesystem::temp_directory_path() / "imza_test_agents_big";
-    std::filesystem::remove_all(dir);
-    REQUIRE(std::filesystem::create_directories(dir));
-    write_file(dir / "AGENTS.md", std::string(64 * 1024, 'x'));
+    const imza::test::TempDir dir;
+    imza::test::write_file(dir.file("AGENTS.md"), std::string(64 * 1024, 'x'));
 
-    const auto found = imza::load_agent_file(dir);
+    const auto found = imza::load_agent_file(dir.path);
     REQUIRE(found.has_value());
     CHECK(found->content.find("[truncated]") != std::string::npos);
     CHECK(found->content.size() < 64 * 1024);
-
-    std::filesystem::remove_all(dir);
 }
 
 } // namespace

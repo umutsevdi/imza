@@ -3,30 +3,24 @@
 
 #include "app/application_state.h"
 #include "conversation/input_history.h"
+#include "test_fs.h"
+#include "test_state.h"
 #include "ui/ui.h"
 
 #include <filesystem>
-#include <fstream>
 #include <string>
+#include <string_view>
 
 namespace {
 
 struct HistoryFile {
-    std::filesystem::path directory
-        = std::filesystem::temp_directory_path() / "imza_input_history_test";
-    std::filesystem::path path = directory / "history.json";
-
     HistoryFile()
+        : path(dir.file("history.json"))
     {
-        std::error_code error;
-        std::filesystem::remove_all(directory, error);
     }
 
-    ~HistoryFile()
-    {
-        std::error_code error;
-        std::filesystem::remove_all(directory, error);
-    }
+    imza::test::TempDir dir;
+    std::filesystem::path path;
 };
 
 ftxui::Component make_test_chat(
@@ -88,8 +82,7 @@ TEST_CASE(
 TEST_CASE("input history recovers from malformed storage")
 {
     HistoryFile file;
-    std::filesystem::create_directories(file.directory);
-    std::ofstream(file.path) << "not json";
+    imza::test::write_file(file.path, "not json");
 
     imza::InputHistoryStore history(file.path);
     CHECK(history.entries().empty());
@@ -100,8 +93,7 @@ TEST_CASE("input history recovers from malformed storage")
 TEST_CASE("chat input history recalls entries and restores the draft")
 {
     HistoryFile file;
-    auto state = imza::make_application_state(
-        [](std::function<void()> fn) { fn(); }, imza::Config { });
+    auto state           = imza::test::make_test_state();
     state->input_history = std::make_shared<imza::InputHistoryStore>(file.path);
     REQUIRE(state->input_history->record("first") == imza::Status::OK);
     REQUIRE(
@@ -128,8 +120,7 @@ TEST_CASE("chat input history recalls entries and restores the draft")
 TEST_CASE("plain arrows do not recall chat input history")
 {
     HistoryFile file;
-    auto state = imza::make_application_state(
-        [](std::function<void()> fn) { fn(); }, imza::Config { });
+    auto state           = imza::test::make_test_state();
     state->input_history = std::make_shared<imza::InputHistoryStore>(file.path);
     REQUIRE(state->input_history->record("previous") == imza::Status::OK);
     auto chat = make_test_chat(state);
@@ -145,8 +136,7 @@ TEST_CASE("plain arrows do not recall chat input history")
 TEST_CASE("chat records slash commands and queued prompts")
 {
     HistoryFile file;
-    auto state = imza::make_application_state(
-        [](std::function<void()> fn) { fn(); }, imza::Config { });
+    auto state           = imza::test::make_test_state();
     state->input_history = std::make_shared<imza::InputHistoryStore>(file.path);
     auto chat            = make_test_chat(state);
 
@@ -164,8 +154,7 @@ TEST_CASE("chat records slash commands and queued prompts")
 TEST_CASE("bracketed multiline paste is submitted as one history entry")
 {
     HistoryFile file;
-    auto state = imza::make_application_state(
-        [](std::function<void()> fn) { fn(); }, imza::Config { });
+    auto state           = imza::test::make_test_state();
     state->input_history = std::make_shared<imza::InputHistoryStore>(file.path);
     auto chat            = make_test_chat(state);
 

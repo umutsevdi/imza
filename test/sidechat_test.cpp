@@ -2,6 +2,7 @@
 #include "app/flows.h"
 #include "common/modal.h"
 #include "platform/config.h"
+#include "test_state.h"
 #include "ui/ui.h"
 
 #include <doctest/doctest.h>
@@ -10,17 +11,11 @@ namespace imza {
 
 namespace {
 
-    std::shared_ptr<ApplicationState> make_root()
-    {
-        return make_application_state(
-            [](std::function<void()> f) { f(); }, Config { });
-    }
-
 } // namespace
 
 TEST_CASE("sidechat status reports no modal when the pane is open without one")
 {
-    auto state = make_root();
+    auto state = imza::test::make_test_state();
     SidechatStatus status;
     auto component = make_sidechat_component(state, [] { }, status);
 
@@ -43,7 +38,7 @@ TEST_CASE("sidechat status reports no modal when the pane is open without one")
 
 TEST_CASE("sidechat toggle hides and reopens without discarding the session")
 {
-    auto state = make_root();
+    auto state = imza::test::make_test_state();
     REQUIRE_FALSE(state->sidechat_open);
     REQUIRE(state->sidechat == nullptr);
 
@@ -76,7 +71,7 @@ TEST_CASE("sidechat toggle hides and reopens without discarding the session")
 
 TEST_CASE("sidechat loads its context lazily on the first prompt")
 {
-    auto state = make_root();
+    auto state = imza::test::make_test_state();
     state->session->append_item(UserTurn { "first question", { } });
     state->session->append_item(
         AssistantTurn { "first answer", "", "", { }, "", "" });
@@ -101,7 +96,7 @@ TEST_CASE("sidechat loads its context lazily on the first prompt")
 
 TEST_CASE("refresh_sidechat clears the sidechat and the next prompt reloads")
 {
-    auto state = make_root();
+    auto state = imza::test::make_test_state();
     state->session->append_item(UserTurn { "first question", { } });
     state->session->append_item(
         AssistantTurn { "first answer", "", "", { }, "", "" });
@@ -134,7 +129,7 @@ TEST_CASE("refresh_sidechat clears the sidechat and the next prompt reloads")
 
 TEST_CASE("refresh_sidechat requires an open sidechat")
 {
-    auto state = make_root();
+    auto state = imza::test::make_test_state();
     refresh_sidechat(*state);
     CHECK(state->session->error().find("No Sidechat is open")
         != std::string::npos);

@@ -7,6 +7,7 @@
 #include "app/application_state.h"
 #include "conversation/format.h"
 #include "test_helpers.h"
+#include "test_state.h"
 #include "ui/ui.h"
 
 using imza::test::to_text;
@@ -31,8 +32,7 @@ TEST_CASE("render_item renders completed compaction")
 
 TEST_CASE("chat shows planning between thought and lua execution")
 {
-    auto state = imza::make_application_state(
-        [](std::function<void()> fn) { fn(); }, imza::Config { });
+    auto state = imza::test::make_test_state();
     state->session->begin_send("inspect the project");
     state->session->append_item(imza::AssistantTurn {
         .reasoning        = "I should inspect the files.",

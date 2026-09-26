@@ -6,6 +6,7 @@
 #include <type_traits>
 
 #include "conversation/session.h"
+#include "test_fs.h"
 #include "turn/prompt.h"
 
 namespace imza {
@@ -36,17 +37,6 @@ namespace {
         return text;
     }
 
-    std::filesystem::path temporary_prompt_directory(std::string_view name)
-    {
-        static std::size_t sequence = 0;
-        const std::filesystem::path directory
-            = std::filesystem::temp_directory_path()
-            / ("imza-prompts-" + std::string(name) + "-"
-                + std::to_string(sequence++));
-        std::filesystem::remove_all(directory);
-        return directory;
-    }
-
 } // namespace
 
 static_assert(std::is_base_of_v<ApplicationComponent, PromptStore>);
@@ -66,8 +56,8 @@ TEST_CASE("embedded prompts match the repository sources")
 
 TEST_CASE("user directory overrides prompts independently")
 {
-    const std::filesystem::path directory
-        = temporary_prompt_directory("overrides");
+    const imza::test::TempDir dir;
+    const std::filesystem::path directory = dir.path;
     write_prompt(directory, "system.md", "Custom system prompt.\n");
     write_prompt(directory, "title.md", "Custom title prompt.");
 
@@ -75,19 +65,16 @@ TEST_CASE("user directory overrides prompts independently")
     CHECK(prompts.system() == "Custom system prompt.");
     CHECK(prompts.title() == "Custom title prompt.");
     CHECK(prompts.compaction() == PromptStore().compaction());
-
-    std::filesystem::remove_all(directory);
 }
 
 TEST_CASE("blank user files use embedded prompts")
 {
-    const std::filesystem::path directory = temporary_prompt_directory("blank");
+    const imza::test::TempDir dir;
+    const std::filesystem::path directory = dir.path;
     write_prompt(directory, "system.md", "   \n\t\n");
 
     const PromptStore prompts(directory);
     CHECK(prompts.system() == PromptStore().system());
-
-    std::filesystem::remove_all(directory);
 }
 
 TEST_CASE("prompt sources contain prose instead of runtime markup")

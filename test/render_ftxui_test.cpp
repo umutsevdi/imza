@@ -10,30 +10,7 @@
 #include "workspace/git.h"
 
 using imza::test::to_text;
-
-namespace {
-
-std::string without_ansi(std::string_view input)
-{
-    std::string out;
-    for (std::size_t i = 0; i < input.size();) {
-        if (input[i] != '\x1b' || i + 1 >= input.size()
-            || input[i + 1] != '[') {
-            out += input[i++];
-            continue;
-        }
-        i += 2;
-        while (i < input.size() && (input[i] < '@' || input[i] > '~')) {
-            ++i;
-        }
-        if (i < input.size()) {
-            ++i;
-        }
-    }
-    return out;
-}
-
-} // namespace
+using imza::test::without_ansi;
 
 TEST_CASE("fit truncates with an ellipsis and pads to width")
 {

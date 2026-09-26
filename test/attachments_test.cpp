@@ -1,11 +1,11 @@
 #include <algorithm>
 #include <filesystem>
-#include <fstream>
 #include <tuple>
 
 #include <doctest/doctest.h>
 
 #include "conversation/session.h"
+#include "test_fs.h"
 #include "test_helpers.h"
 #include "workspace/attachments.h"
 
@@ -13,29 +13,7 @@ namespace fs = std::filesystem;
 
 namespace {
 
-struct TempDir {
-    fs::path path = fs::temp_directory_path() / "imza_attachment_test";
-
-    TempDir()
-    {
-        std::error_code ec;
-        fs::remove_all(path, ec);
-        fs::create_directories(path / "src");
-        fs::create_directories(path / "node_modules");
-    }
-
-    ~TempDir()
-    {
-        std::error_code ec;
-        fs::remove_all(path, ec);
-    }
-
-    void write(const fs::path& relative, std::string_view content)
-    {
-        std::ofstream file(path / relative, std::ios::binary);
-        file << content;
-    }
-};
+using imza::test::TempDir;
 
 } // namespace
 
@@ -50,8 +28,12 @@ TEST_CASE("attachment token is recognized only at a token boundary")
 TEST_CASE("attachment candidates list one directory without large directories")
 {
     TempDir tmp;
-    tmp.write("src/main.cpp", "int main() {}\n");
-    tmp.write("readme.md", "hello\n");
+    // The scanner must skip node_modules; both subdirectories are part of
+    // this fixture's layout.
+    fs::create_directories(tmp.file("src"));
+    fs::create_directories(tmp.file("node_modules"));
+    imza::test::write_file(tmp.file("src/main.cpp"), "int main() {}\n");
+    imza::test::write_file(tmp.file("readme.md"), "hello\n");
 
     const auto root = imza::attachment_candidates(tmp.path, "");
     CHECK(std::none_of(root.begin(), root.end(), [](const auto& candidate) {
@@ -81,7 +63,7 @@ TEST_CASE("attachments are classified by signatures instead of extensions")
         };
 
     for (const auto& [path, content, type, media_type] : cases) {
-        tmp.write(path, content);
+        imza::test::write_file(tmp.file(path), content);
         const auto loaded = imza::load_attachment(tmp.path, path);
         REQUIRE(loaded.attachment);
         CHECK(loaded.attachment->type == type);
@@ -89,7 +71,7 @@ TEST_CASE("attachments are classified by signatures instead of extensions")
         CHECK(loaded.attachment->content == content);
     }
 
-    tmp.write("text.png", "not actually an image");
+    imza::test::write_file(tmp.file("text.png"), "not actually an image");
     const auto text = imza::load_attachment(tmp.path, "text.png");
     REQUIRE(text.attachment);
     CHECK(text.attachment->type == imza::Attachment::Type::TEXT);
@@ -148,10 +130,10 @@ TEST_CASE("session history attaches native media to user messages")
 TEST_CASE("text attachment is snapshotted and encoded into the message")
 {
     TempDir tmp;
-    tmp.write("src/main.cpp", "old body\n");
+    imza::test::write_file(tmp.file("src/main.cpp"), "old body\n");
     auto result = imza::load_attachment(tmp.path, "src/main.cpp");
     REQUIRE(result.attachment);
-    tmp.write("src/main.cpp", "new body\n");
+    imza::test::write_file(tmp.file("src/main.cpp"), "new body\n");
 
     const std::string message
         = imza::message_with_attachments("review it", { *result.attachment });
@@ -163,7 +145,7 @@ TEST_CASE("text attachment is snapshotted and encoded into the message")
 TEST_CASE("attachments outside the workspace and binary files are rejected")
 {
     TempDir tmp;
-    tmp.write("binary.dat", std::string("a\0b", 3));
+    imza::test::write_file(tmp.file("binary.dat"), std::string("a\0b", 3));
     CHECK_FALSE(imza::load_attachment(tmp.path, "../outside.txt").attachment);
     CHECK_FALSE(imza::load_attachment(tmp.path, "binary.dat").attachment);
 }
@@ -172,19 +154,19 @@ TEST_CASE("byte limits apply to text but not native media")
 {
     TempDir tmp;
     const std::string big_text(1024 * 1024 + 1, 'x');
-    tmp.write("big.txt", big_text);
+    imza::test::write_file(tmp.file("big.txt"), big_text);
     CHECK_FALSE(imza::load_attachment(tmp.path, "big.txt").attachment);
 
     const std::string big_png
         = std::string("\x89PNG\r\n\x1a\n", 8) + std::string(1200 * 1024, '\0');
-    tmp.write("big.png", big_png);
+    imza::test::write_file(tmp.file("big.png"), big_png);
     const auto image = imza::load_attachment(tmp.path, "big.png");
     REQUIRE(image.attachment);
     CHECK(image.attachment->type == imza::Attachment::Type::IMAGE);
     CHECK(image.attachment->content == big_png);
 
     const std::string big_pdf = "%PDF-1.7\n" + std::string(1200 * 1024, '\0');
-    tmp.write("big.pdf", big_pdf);
+    imza::test::write_file(tmp.file("big.pdf"), big_pdf);
     const auto pdf = imza::load_attachment(tmp.path, "big.pdf");
     REQUIRE(pdf.attachment);
     CHECK(pdf.attachment->type == imza::Attachment::Type::PDF);

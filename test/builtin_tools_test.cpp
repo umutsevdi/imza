@@ -1,10 +1,9 @@
 #include <doctest/doctest.h>
 
-#include <chrono>
 #include <filesystem>
-#include <fstream>
 
 #include "network/json_io.h"
+#include "test_fs.h"
 #include "tools/skills.h"
 #include "tools/tool.h"
 
@@ -53,16 +52,9 @@ TEST_CASE("a removed native tool name is unknown to the roster")
 
 TEST_CASE("the skill tool handler reads instructions and records the load")
 {
-    const auto stamp
-        = std::chrono::steady_clock::now().time_since_epoch().count();
-    const auto root = std::filesystem::temp_directory_path()
-        / ("imza-skill-tool-" + std::to_string(stamp));
-    std::filesystem::create_directories(root);
-    const auto path = root / "SKILL.md";
-    {
-        std::ofstream file(path);
-        file << "documented workflow";
-    }
+    const imza::test::TempDir root;
+    const auto path = root.file("SKILL.md");
+    imza::test::write_file(path, "documented workflow");
     const imza::Skill skill { "docs", "Documentation workflow", path,
         imza::Skill::Scope::GLOBAL, std::nullopt };
     auto store = std::make_shared<imza::SkillStore>();
@@ -82,23 +74,13 @@ TEST_CASE("the skill tool handler reads instructions and records the load")
         imza::parse_json(R"json({"name":"absent"})json"));
     CHECK(missing.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(missing.text == "skill: unknown or unavailable skill");
-
-    std::error_code ec;
-    std::filesystem::remove_all(root, ec);
 }
 
 TEST_CASE("the skill tool records nothing without a store but still reads")
 {
-    const auto stamp
-        = std::chrono::steady_clock::now().time_since_epoch().count();
-    const auto root = std::filesystem::temp_directory_path()
-        / ("imza-skill-nostore-" + std::to_string(stamp));
-    std::filesystem::create_directories(root);
-    const auto path = root / "SKILL.md";
-    {
-        std::ofstream file(path);
-        file << "instructions";
-    }
+    const imza::test::TempDir root;
+    const auto path = root.file("SKILL.md");
+    imza::test::write_file(path, "instructions");
     const imza::Skill skill { "docs", "d", path, imza::Skill::Scope::GLOBAL,
         std::nullopt };
     imza::SkillToolDeps deps;
@@ -107,6 +89,4 @@ TEST_CASE("the skill tool records nothing without a store but still reads")
     const auto out  = tool.run({ "skill", "", "", "" },
         imza::parse_json(R"json({"name":"docs"})json"));
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    std::error_code ec;
-    std::filesystem::remove_all(root, ec);
 }

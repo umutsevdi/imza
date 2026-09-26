@@ -15,6 +15,8 @@
 #include "permissions/shell_analysis.h"
 #include "permissions/store.h"
 #include "platform/config.h"
+#include "test_fs.h"
+#include "test_state.h"
 #include "tools/skills.h"
 #include "tools/tool.h"
 #include "workspace/environment.h"
@@ -27,13 +29,9 @@ namespace {
     public:
         PermissionFixture()
         {
-            const auto stamp
-                = std::chrono::steady_clock::now().time_since_epoch().count();
-            root = std::filesystem::temp_directory_path()
-                / ("imza-permission-test-" + std::to_string(stamp));
-            workspace = root / "workspace";
-            temporary = root / "temporary";
-            outside   = root / "outside";
+            workspace = _dir.file("workspace");
+            temporary = _dir.file("temporary");
+            outside   = _dir.file("outside");
             std::filesystem::create_directories(workspace);
             std::filesystem::create_directories(temporary);
             std::filesystem::create_directories(outside);
@@ -47,11 +45,7 @@ namespace {
             environment->project_root      = workspace;
         }
 
-        ~PermissionFixture()
-        {
-            std::error_code error;
-            std::filesystem::remove_all(root, error);
-        }
+        std::filesystem::path root() const { return _dir.path; }
 
         PermissionContext context(
             Session::Mode mode, PermissionStore::Grants grants = { }) const
@@ -62,7 +56,6 @@ namespace {
                 mode };
         }
 
-        std::filesystem::path root;
         std::filesystem::path workspace;
         std::filesystem::path temporary;
         std::filesystem::path outside;
@@ -70,10 +63,11 @@ namespace {
         std::shared_ptr<WorkspaceEnvironment> environment;
 
     private:
+        imza::test::TempDir _dir;
+
         static void write(const std::filesystem::path& path)
         {
-            std::ofstream file(path);
-            file << "content\n";
+            imza::test::write_file(path, "content\n");
         }
     };
 
@@ -252,12 +246,12 @@ TEST_CASE("read-only command pair catalog is platform specific")
 
 TEST_CASE("application state shares grants with children")
 {
-    const auto immediate = [](std::function<void()> task) { task(); };
-    auto parent          = make_application_state(immediate, Config { });
+    auto parent = imza::test::make_test_state();
     const std::vector<PermissionGrant> grants { ExternalGrant {
         std::filesystem::current_path().lexically_normal() } };
     REQUIRE(parent->permissions->install(grants));
-    auto child = make_child_application_state(*parent, immediate);
+    auto child = imza::make_child_application_state(
+        *parent, imza::test::run_immediately);
     CHECK(parent->permissions == child->permissions);
     CHECK(child->permissions->snapshot()->size() == 1);
     CHECK(parent->runtime_flags == child->runtime_flags);
@@ -268,18 +262,17 @@ TEST_CASE("application state shares grants with children")
 TEST_CASE("session lifecycle clears grants only after successful activation")
 {
     PermissionFixture fixture;
-    const auto immediate = [](std::function<void()> task) { task(); };
-    auto state           = make_application_state(immediate, Config { });
-    const auto grant     = ExternalGrant { fixture.outside };
+    auto state       = imza::test::make_test_state();
+    const auto grant = ExternalGrant { fixture.outside };
     REQUIRE(state->permissions->install({ grant }));
     state->session->set_title("Current session");
 
     enqueue_user_modal(*state, SessionsModal { });
-    resolve_modal(*state, fixture.root / "missing-session.json");
+    resolve_modal(*state, fixture.root() / "missing-session.json");
     CHECK(state->session->title() == "Current session");
     CHECK(state->permissions->snapshot()->size() == 1);
 
-    const auto path = fixture.root / "session.json";
+    const auto path = fixture.root() / "session.json";
     const auto workspace
         = std::filesystem::weakly_canonical(std::filesystem::current_path());
     write_session_file(path, workspace, "Loaded session");
@@ -299,12 +292,11 @@ TEST_CASE("session lifecycle clears grants only after successful activation")
 TEST_CASE("failed directory changes and child creation retain grants")
 {
     PermissionFixture fixture;
-    const auto immediate = [](std::function<void()> task) { task(); };
-    auto parent          = make_application_state(immediate, Config { });
-    const auto grant     = ExternalGrant { fixture.outside };
+    auto parent      = imza::test::make_test_state();
+    const auto grant = ExternalGrant { fixture.outside };
     REQUIRE(parent->permissions->install({ grant }));
 
-    CHECK(parent->environment->chdir(fixture.root / "missing")
+    CHECK(parent->environment->chdir(fixture.root() / "missing")
         == imza::Environment::ChdirResult::FAILED);
     CHECK(parent->permissions->snapshot()->size() == 1);
 }
@@ -458,7 +450,7 @@ TEST_CASE("external directory grants cover descendants but not siblings")
         fixture.context(Session::Mode::PLAN, { directory }));
     CHECK(recursive.decision.kind == PermissionDecision::Kind::ACCEPT);
 
-    const auto sibling = fixture.root / "outside-sibling";
+    const auto sibling = fixture.root() / "outside-sibling";
     std::filesystem::create_directories(sibling);
     std::ofstream(sibling / "file.txt") << "content\n";
     const auto sibling_result

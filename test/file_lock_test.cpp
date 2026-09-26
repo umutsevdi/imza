@@ -6,17 +6,11 @@
 #include <thread>
 
 #include "platform/file_lock.h"
+#include "test_fs.h"
 
 namespace {
 
-std::filesystem::path temp_path(const std::string& name)
-{
-    static int counter = 0;
-    auto dir           = std::filesystem::temp_directory_path()
-        / ("imza-file-lock-test-" + std::to_string(counter++));
-    std::filesystem::create_directories(dir);
-    return dir / name;
-}
+using imza::test::TempDir;
 
 } // namespace
 
@@ -25,7 +19,8 @@ TEST_CASE("acquired lock blocks a second holder until released")
 #ifdef _WIN32
     return;
 #else
-    const auto path = temp_path("mutex.lock");
+    const TempDir dir;
+    const auto path = dir.file("mutex.lock");
     auto first      = imza::acquire_file_lock(path);
     REQUIRE(std::holds_alternative<imza::FileLock>(first));
 
@@ -58,7 +53,8 @@ TEST_CASE("lock file is removed on release and can be reacquired")
 #ifdef _WIN32
     return;
 #else
-    const auto path = temp_path("persist.lock");
+    const TempDir dir;
+    const auto path = dir.file("persist.lock");
     {
         auto lock = imza::acquire_file_lock(path);
         REQUIRE(std::holds_alternative<imza::FileLock>(lock));
@@ -77,7 +73,8 @@ TEST_CASE("non-blocking request fails while another holder is live")
 #ifdef _WIN32
     return;
 #else
-    const auto path = temp_path("try.lock");
+    const TempDir dir;
+    const auto path = dir.file("try.lock");
     auto first      = imza::acquire_file_lock(path);
     REQUIRE(std::holds_alternative<imza::FileLock>(first));
 
@@ -105,7 +102,8 @@ TEST_CASE("shared locks coexist and yield to an exclusive holder")
 #ifdef _WIN32
     return;
 #else
-    const auto path = temp_path("shared.lock");
+    const TempDir dir;
+    const auto path = dir.file("shared.lock");
     auto first      = imza::acquire_file_lock(
         path, imza::FileLockRequest { imza::FileLockMode::SHARED, false });
     auto second = imza::acquire_file_lock(
@@ -138,7 +136,8 @@ TEST_CASE("exclusive holder blocks a shared request")
 #ifdef _WIN32
     return;
 #else
-    const auto path = temp_path("excl.lock");
+    const TempDir dir;
+    const auto path = dir.file("excl.lock");
     auto first      = imza::acquire_file_lock(path);
     REQUIRE(std::holds_alternative<imza::FileLock>(first));
 

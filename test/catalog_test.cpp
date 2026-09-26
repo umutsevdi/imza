@@ -1,12 +1,10 @@
 #include <doctest/doctest.h>
 
-#include <unistd.h>
-
 #include <array>
 #include <ctime>
-#include <fstream>
 
 #include "providers/catalog.h"
+#include "test_fs.h"
 
 namespace {
 
@@ -47,17 +45,12 @@ std::string provider_json()
 
 TEST_CASE("load_catalog prunes models.dev fields")
 {
-    const auto path = std::filesystem::temp_directory_path()
-        / ("imza-catalog-test-" + std::to_string(::getpid()) + ".json");
-    {
-        std::ofstream file(path);
-        REQUIRE(file.good());
-        file << provider_json();
-    }
+    const imza::test::TempDir dir;
+    const auto path = dir.file("catalog.json");
+    imza::test::write_file(path, provider_json());
 
     imza::Catalog loaded;
     REQUIRE(imza::load_catalog(path, loaded) == imza::Status::OK);
-    std::filesystem::remove(path);
     REQUIRE(loaded.providers.size() == 1);
     const auto& out = loaded.providers.at("openai");
     CHECK(out.name == "OpenAI");
@@ -97,8 +90,8 @@ TEST_CASE("catalog roundtrip through presets file")
     model.capabilities = imza::Capabilities::IMAGE | imza::Capabilities::PDF;
     catalog.providers["openrouter"] = openrouter;
 
-    const auto path = std::filesystem::temp_directory_path()
-        / ("imza-catalog-test-" + std::to_string(::getpid()) + ".json");
+    const imza::test::TempDir dir;
+    const auto path = dir.file("catalog.json");
     REQUIRE(imza::save_catalog(path, catalog) == imza::Status::OK);
 
     imza::Catalog loaded;
@@ -115,7 +108,6 @@ TEST_CASE("catalog roundtrip through presets file")
     CHECK(imza::has_capability(
         *loaded_model.capabilities, imza::Capabilities::PDF));
     CHECK(loaded.fetched_at == 1756390000);
-    std::filesystem::remove(path);
 }
 
 TEST_CASE("load_catalog missing file yields empty catalog")

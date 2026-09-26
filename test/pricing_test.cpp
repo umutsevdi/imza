@@ -10,6 +10,7 @@
 #include "providers/catalog.h"
 #include "providers/pricing.h"
 #include "providers/store.h"
+#include "test_fs.h"
 
 namespace {
 
@@ -55,36 +56,12 @@ imza::Catalog test_catalog()
     return catalog;
 }
 
-struct IsolatedCatalog {
-    std::filesystem::path dir;
-    std::string old_xdg;
-    bool had_xdg = false;
-
-    IsolatedCatalog()
+// Data home with a fetched catalog carrying the pricing rows above.
+struct CatalogHome : imza::test::IsolatedDataHome {
+    CatalogHome()
     {
-        static int counter = 0;
-        dir                = std::filesystem::temp_directory_path()
-            / ("imza-pricing-test-" + std::to_string(::getpid()) + "-"
-                + std::to_string(counter++));
-        std::filesystem::create_directories(dir);
-        if (const char* xdg = std::getenv("XDG_DATA_HOME")) {
-            old_xdg = xdg;
-            had_xdg = true;
-        }
-        setenv("XDG_DATA_HOME", dir.string().c_str(), 1);
         std::ignore
-            = imza::save_catalog(dir / "imza" / "presets.json", test_catalog());
-    }
-
-    ~IsolatedCatalog()
-    {
-        if (had_xdg) {
-            setenv("XDG_DATA_HOME", old_xdg.c_str(), 1);
-        } else {
-            unsetenv("XDG_DATA_HOME");
-        }
-        std::error_code ec;
-        std::filesystem::remove_all(dir, ec);
+            = imza::save_catalog(imza_dir() / "presets.json", test_catalog());
     }
 };
 
@@ -129,7 +106,7 @@ TEST_CASE("pricing_table_from builds expected entries")
 
 TEST_CASE("pricing_for matches provider-qualified ids and is case-insensitive")
 {
-    IsolatedCatalog isolated;
+    CatalogHome home;
     imza::ProviderStore store { imza::Config { } };
 
     const auto qualified = store.pricing_for("anthropic/claude-sonnet-4");
@@ -141,7 +118,7 @@ TEST_CASE("pricing_for matches provider-qualified ids and is case-insensitive")
 
 TEST_CASE("pricing_for matches by substring")
 {
-    IsolatedCatalog isolated;
+    CatalogHome home;
     imza::ProviderStore store { imza::Config { } };
 
     const auto p = store.pricing_for("openai/gpt-4o-mini-2024-07-18");
@@ -150,7 +127,7 @@ TEST_CASE("pricing_for matches by substring")
 
 TEST_CASE("pricing_for keeps zero-cost models and rejects unknown ones")
 {
-    IsolatedCatalog isolated;
+    CatalogHome home;
     imza::ProviderStore store { imza::Config { } };
 
     const auto free = store.pricing_for("zai/glm-5-flash");

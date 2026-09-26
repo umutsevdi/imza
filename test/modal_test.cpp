@@ -8,139 +8,37 @@
 #include "common/util.h"
 #include "conversation/format.h"
 #include "network/json_io.h"
-#include "permissions/filesystem.h"
-#include "permissions/store.h"
-#include "tools/skills.h"
+#include "test_fs.h"
+#include "test_helpers.h"
+#include "test_state.h"
 #include "tools/tool.h"
 #include "turn/delegation.h"
 #include "ui/ui.h"
 
 #include <algorithm>
 #include <chrono>
-#include <deque>
 #include <filesystem>
-#include <functional>
-#include <mutex>
 #include <string>
 #include <thread>
-#include <utility>
 #include <vector>
 
 namespace {
 
-class PostPump {
-public:
-    imza::PostFn fn()
-    {
-        return [this](std::function<void()> f) { _push(std::move(f)); };
-    }
-
-    void pump()
-    {
-        for (;;) {
-            std::function<void()> f;
-            {
-                std::lock_guard<std::mutex> lock(mutex_);
-                if (queue_.empty()) {
-                    return;
-                }
-                f = std::move(queue_.front());
-                queue_.pop_front();
-            }
-            f();
-        }
-    }
-
-    bool wait_for(std::function<bool()> pred)
-    {
-        for (int i = 0; i < 10000; ++i) {
-            pump();
-            if (pred()) {
-                return true;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
-        return false;
-    }
-
-private:
-    void _push(std::function<void()> f)
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        queue_.push_back(std::move(f));
-    }
-
-    std::mutex mutex_;
-    std::deque<std::function<void()>> queue_;
-};
-
-imza::Config test_config()
-{
-    imza::Config cfg;
-    imza::Connection conn;
-    conn.id = "test";
-    cfg.providers.push_back(conn);
-    cfg.last_used = imza::LastUsed { "test", "m" };
-    return cfg;
-}
-
 struct Env {
-    PostPump pump;
+    imza::test::PostPump pump;
     std::vector<imza::ChatRequest> requests;
     imza::StreamFn stream;
-    std::shared_ptr<imza::SubagentToolFn> subagent_slot;
     std::shared_ptr<imza::ApplicationState> state;
     std::shared_ptr<imza::Session> session;
-    std::unique_ptr<imza::LuaState> lua_state;
 
     explicit Env(imza::RuntimeFlag flags = imza::interactive_runtime_flags())
+        : state(imza::test::make_test_state(
+              pump.fn(), imza::test::test_config(),
+              [this](const imza::ChatRequest& req,
+                  const imza::StreamCallback& cb) { return stream(req, cb); },
+              flags))
+        , session(state->session)
     {
-        // Wire the lua tool the way application_state does, so the
-        // bindings gate through the live permission store and the modal
-        // queue instead of running in trusted mode.
-        imza::LuaHost lua_host;
-        lua_host.web_enabled
-            = (flags & imza::RuntimeFlag::WEB) != imza::RuntimeFlag::NONE;
-        lua_host.shell_enabled
-            = (flags & imza::RuntimeFlag::SHELL) != imza::RuntimeFlag::NONE;
-        lua_host.skip_permissions
-            = (flags & imza::SKIP_PERMISSIONS) != imza::RuntimeFlag::NONE;
-        lua_host.unattended
-            = (flags & imza::RuntimeFlag::ATTENDED) == imza::RuntimeFlag::NONE;
-        lua_host.permission_context = [this] {
-            return imza::make_permission_context(
-                *state->environment, *state->permissions, session->mode());
-        };
-        lua_host.ask =
-            [this, flags](
-                imza::ModalPayload payload) -> std::future<imza::ModalResult> {
-            if ((flags & imza::RuntimeFlag::ATTENDED)
-                == imza::RuntimeFlag::NONE) {
-                std::promise<imza::ModalResult> denied;
-                denied.set_value(imza::ToolVerdict {
-                    imza::ToolDecision::REJECT, "unattended run" });
-                return denied.get_future();
-            }
-            return imza::request_modal(*state, std::move(payload));
-        };
-        lua_host.install_grants = [this](imza::PermissionStore::Grants grants) {
-            return state->permissions->install(std::move(grants));
-        };
-
-        // The state's wire() fills this slot with its delegation; the
-        // subagent tool reads it per call, mirroring application wiring.
-        subagent_slot = std::make_shared<imza::SubagentToolFn>();
-        std::vector<imza::Tool> tools;
-        tools.push_back(imza::make_skill_tool());
-        tools.push_back(imza::make_subagent_tool(subagent_slot));
-        lua_state = imza::make_lua_state();
-        tools.push_back(imza::make_lua_tool(*lua_state, std::move(lua_host)));
-        state = imza::make_application_state_with_tools(
-            pump.fn(), test_config(), std::move(tools),
-            [this](const imza::ChatRequest& req,
-                const imza::StreamCallback& cb) { return stream(req, cb); },
-            flags, subagent_slot);
-        session = state->session;
         REQUIRE(pump.wait_for([&] { return state->environment->ready(); }));
     }
 
@@ -181,11 +79,6 @@ bool showing_question(const imza::Session& st)
         && st.phase() == imza::Session::Phase::AWAITING;
 }
 
-bool idle(const imza::Session& st)
-{
-    return st.phase() == imza::Session::Phase::IDLE && st.modal().index() == 0;
-}
-
 } // namespace
 
 TEST_CASE("plan requests omit edit and write tools")
@@ -199,7 +92,7 @@ TEST_CASE("plan requests omit edit and write tools")
           };
 
     imza::submit(*env.state, "inspect");
-    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
     REQUIRE_FALSE(env.requests.empty());
     const auto& tools = env.requests.front().tools;
     CHECK(std::none_of(tools.begin(), tools.end(),
@@ -224,7 +117,7 @@ TEST_CASE("attended root turn notifies once after completion")
           };
 
     imza::submit(*env.state, "inspect");
-    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
     REQUIRE(notifications.size() == 1);
     CHECK(notifications.front() == imza::AgentNotification::TURN_FINISHED);
 
@@ -257,7 +150,7 @@ TEST_CASE("agent question notifies when input is required")
 
     imza::resolve_modal(*env.state,
         imza::ModalResult { imza::ModalAnswer { { { { "yes" }, "", "" } } } });
-    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
     REQUIRE(notifications.size() == 2);
     CHECK(notifications.back() == imza::AgentNotification::TURN_FINISHED);
 }
@@ -287,7 +180,7 @@ TEST_CASE("agent shell approval notifies when input is required")
 
     imza::resolve_modal(
         *env.state, imza::ToolVerdict { imza::ToolDecision::REJECT, "" });
-    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
     REQUIRE(notifications.size() == 2);
     CHECK(notifications.back() == imza::AgentNotification::TURN_FINISHED);
 }
@@ -322,20 +215,15 @@ TEST_CASE("queued agent modal notifies only when presented")
 TEST_CASE("plan mode rejects mutating file operations at the gate")
 {
     Env env;
-    const auto stamp
-        = std::chrono::steady_clock::now().time_since_epoch().count();
-    const std::filesystem::path directory
-        = std::filesystem::temp_directory_path()
-        / ("imza-plan-write-" + std::to_string(stamp));
-    std::filesystem::create_directories(directory);
-    auto round = std::make_shared<int>(0);
-    env.stream = [directory, round](
+    const imza::test::TempDir directory;
+    const std::filesystem::path out_path = directory.file("out.txt");
+    auto round                           = std::make_shared<int>(0);
+    env.stream = [out_path, round](
                      const imza::ChatRequest&, const imza::StreamCallback& cb) {
         if ((*round)++ == 0) {
             Json::Value arguments(Json::objectValue);
             arguments["script"] = "local ok, err = imza.fs.write([["
-                + (directory / "out.txt").string()
-                + "]], 'no')\nprint(ok, err)";
+                + out_path.string() + "]], 'no')\nprint(ok, err)";
             cb(imza::make_tool_call_event(
                 { "lua", imza::write_json(arguments), "", "lua-call" }));
         }
@@ -344,7 +232,7 @@ TEST_CASE("plan mode rejects mutating file operations at the gate")
     };
 
     imza::submit(*env.state, "write");
-    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
     const imza::ToolCall* call = env.pending_tool();
     REQUIRE(call != nullptr);
     REQUIRE(call->result.has_value());
@@ -352,9 +240,7 @@ TEST_CASE("plan mode rejects mutating file operations at the gate")
     // surfaces as a binding error inside the tool result.
     CHECK(call->result->kind == imza::ToolCall::Result::Kind::OUTPUT);
     CHECK(call->result->text.find("fs.write: denied") != std::string::npos);
-    CHECK_FALSE(std::filesystem::is_regular_file(directory / "out.txt"));
-    std::error_code error;
-    std::filesystem::remove_all(directory, error);
+    CHECK_FALSE(std::filesystem::is_regular_file(out_path));
 }
 
 TEST_CASE("subagent tool waits for a research agent and retains its chat")
@@ -380,8 +266,9 @@ TEST_CASE("subagent tool waits for a research agent and retains its chat")
           };
 
     imza::submit(*env.state, "delegate");
-    const bool finished = env.pump.wait_for(
-        [&] { return idle(*env.session) && env.pending_tool() != nullptr; });
+    const bool finished = env.pump.wait_for([&] {
+        return imza::test::idle(*env.session) && env.pending_tool() != nullptr;
+    });
     CAPTURE(env.requests.size());
     if (!env.requests.empty() && !env.requests.front().messages.empty()) {
         CAPTURE(env.requests.front().messages.back().content);
@@ -441,8 +328,9 @@ TEST_CASE("subagent tool captures two concurrent agents separately")
     };
 
     imza::submit(*env.state, "delegate two");
-    REQUIRE(env.pump.wait_for(
-        [&] { return idle(*env.session) && env.pending_tool() != nullptr; }));
+    REQUIRE(env.pump.wait_for([&] {
+        return imza::test::idle(*env.session) && env.pending_tool() != nullptr;
+    }));
     const imza::ToolCall& call = *env.pending_tool();
     REQUIRE(call.result.has_value());
     CHECK(call.result->text.find("alpha report") != std::string::npos);
@@ -464,34 +352,15 @@ TEST_CASE("subagent tool captures two concurrent agents separately")
     CHECK(second.title == "Agent 2 (research)");
     CHECK(first.transcript != second.transcript);
 
-    auto chat        = imza::make_chat(env.state,
+    auto chat = imza::make_chat(env.state,
         [] { return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100 }; });
-    auto click_agent = [&](std::string_view label) {
-        auto screen = ftxui::Screen::Create(
-            ftxui::Dimension::Fixed(120), ftxui::Dimension::Fixed(50));
-        ftxui::Render(screen, chat->Render());
-        const std::vector<std::string> lines
-            = imza::split_lines(screen.ToString());
-        for (std::size_t y = 0; y < lines.size(); ++y) {
-            const std::size_t x = lines[y].find(label);
-            if (x == std::string::npos)
-                continue;
-            ftxui::Mouse mouse;
-            mouse.button = ftxui::Mouse::Left;
-            mouse.motion = ftxui::Mouse::Pressed;
-            mouse.x      = static_cast<int>(x);
-            mouse.y      = static_cast<int>(y);
-            return chat->OnEvent(ftxui::Event::Mouse("", mouse));
-        }
-        return false;
-    };
 
-    REQUIRE(click_agent("View Agent 1"));
+    REQUIRE(imza::test::click_label(chat, "View Agent 1", 120, 50));
     REQUIRE(std::holds_alternative<imza::ViewerModal>(env.session->modal()));
     CHECK(std::get<imza::ViewerModal>(env.session->modal()).title
         == "Agent 1 (research)");
     imza::close_modal(*env.state);
-    REQUIRE(click_agent("View Agent 2"));
+    REQUIRE(imza::test::click_label(chat, "View Agent 2", 120, 50));
     REQUIRE(std::holds_alternative<imza::ViewerModal>(env.session->modal()));
     CHECK(std::get<imza::ViewerModal>(env.session->modal()).title
         == "Agent 2 (research)");
@@ -534,8 +403,9 @@ TEST_CASE("delegated-agent approvals surface through the main modal queue")
     CHECK(request.description.find("research") != std::string::npos);
     imza::resolve_modal(
         *env.state, imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" });
-    REQUIRE(env.pump.wait_for(
-        [&] { return idle(*env.session) && env.pending_tool() != nullptr; }));
+    REQUIRE(env.pump.wait_for([&] {
+        return imza::test::idle(*env.session) && env.pending_tool() != nullptr;
+    }));
     const imza::ToolCall* call = env.pending_tool();
     REQUIRE(call != nullptr);
     REQUIRE(call->result.has_value());
@@ -578,8 +448,9 @@ TEST_CASE("subagent failure reports preserve the last completed tool output")
     REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
     imza::resolve_modal(
         *env.state, imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" });
-    REQUIRE(env.pump.wait_for(
-        [&] { return idle(*env.session) && env.pending_tool() != nullptr; }));
+    REQUIRE(env.pump.wait_for([&] {
+        return imza::test::idle(*env.session) && env.pending_tool() != nullptr;
+    }));
     const imza::ToolCall& call = *env.pending_tool();
     REQUIRE(call.result.has_value());
     CHECK(call.result->text.find("Failed: API error") != std::string::npos);
@@ -609,8 +480,9 @@ TEST_CASE("subagent tool rejects build tasks while main agent is planning")
           };
 
     imza::submit(*env.state, "delegate");
-    const bool finished = env.pump.wait_for(
-        [&] { return idle(*env.session) && env.pending_tool() != nullptr; });
+    const bool finished = env.pump.wait_for([&] {
+        return imza::test::idle(*env.session) && env.pending_tool() != nullptr;
+    });
     CAPTURE(env.session->items().size());
     CAPTURE(static_cast<int>(env.session->phase()));
     CAPTURE(env.session->error());
@@ -664,7 +536,7 @@ TEST_CASE(
     imza::resolve_modal(*env.state,
         imza::ModalResult { imza::ModalAnswer { { { { "B" }, "", "" } } } });
 
-    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
     CHECK(env.state->queue.size() == 0);
 
     const std::string after = assistant_corpus();
@@ -715,7 +587,7 @@ TEST_CASE("tool accept: output fills result, request half byte-stable")
         imza::ModalResult {
             imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" } });
 
-    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
     const imza::ToolCall* done = env.pending_tool();
     REQUIRE(done != nullptr);
     REQUIRE(done->result.has_value());
@@ -758,7 +630,7 @@ TEST_CASE("reject with reason reaches transcript and injected result")
         imza::ModalResult { imza::ToolVerdict {
             imza::ToolDecision::REJECT, "needs approval first" } });
 
-    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
 
     const imza::ToolCall* tc = env.pending_tool();
     REQUIRE(tc != nullptr);
@@ -794,7 +666,7 @@ TEST_CASE("esc on tool injects generic denial, appends nothing to transcript")
 
     imza::close_modal(*env.state);
 
-    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
 
     const imza::ToolCall* tc = env.pending_tool();
     REQUIRE(tc != nullptr);
@@ -825,7 +697,7 @@ TEST_CASE("esc on question skips form, appends nothing, no exception")
 
     imza::close_modal(*env.state);
 
-    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
     CHECK(env.user_turn_count() == 1);
     size_t answers = 0;
     for (const auto& it : env.session->items()) {
@@ -866,7 +738,7 @@ TEST_CASE("one drain cycle folds question answer and tool output correctly")
         imza::ModalResult {
             imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" } });
 
-    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
 
     CHECK(env.user_turn_count() == 1);
     const auto& msgs = env.last_request().messages;
@@ -930,7 +802,7 @@ TEST_CASE("FIFO order preserved and queue_size counts overlays")
     CHECK(env.state->queue.size() == 1);
 
     imza::close_modal(*env.state);
-    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
     CHECK(env.state->queue.size() == 0);
 }
 
@@ -989,7 +861,7 @@ TEST_CASE("one-time shell approval does not authorize later calls")
     imza::resolve_modal(*env.state,
         imza::ModalResult {
             imza::ToolVerdict { imza::ToolDecision::REJECT, "" } });
-    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
 
     std::vector<imza::ToolCall::Result> results;
     for (const auto& it : env.session->items()) {
@@ -1009,14 +881,9 @@ TEST_CASE("filesystem session approval installs an exact reusable grant")
 {
     Env env;
     env.session->set_mode(imza::Session::Mode::BUILD);
-    const auto stamp
-        = std::chrono::steady_clock::now().time_since_epoch().count();
-    const std::filesystem::path directory
-        = std::filesystem::temp_directory_path()
-        / ("imza-phase5-modal-" + std::to_string(stamp));
-    const std::filesystem::path path = directory / "approved.txt";
-    std::filesystem::create_directories(directory);
-    auto round = std::make_shared<int>(0);
+    imza::test::TempDir directory;
+    const std::filesystem::path path = directory.file("approved.txt");
+    auto round                       = std::make_shared<int>(0);
     env.stream = [path, round](
                      const imza::ChatRequest&, const imza::StreamCallback& cb) {
         if ((*round)++ < 2) {
@@ -1039,7 +906,7 @@ TEST_CASE("filesystem session approval installs an exact reusable grant")
     imza::resolve_modal(*env.state,
         imza::ToolVerdict { imza::ToolDecision::ACCEPT_FOR_SESSION, "" });
 
-    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
     CHECK(env.state->queue.size() == 0);
     CHECK(env.state->permissions->snapshot()->size() == 1);
     for (const auto& item : env.session->items()) {
@@ -1049,8 +916,6 @@ TEST_CASE("filesystem session approval installs an exact reusable grant")
         }
     }
     CHECK(std::filesystem::is_regular_file(path));
-    std::error_code error;
-    std::filesystem::remove_all(directory, error);
 }
 
 TEST_CASE("dangerous skip accepts permission-gated tools without a modal")
@@ -1068,7 +933,7 @@ TEST_CASE("dangerous skip accepts permission-gated tools without a modal")
         return imza::Status::OK;
     };
     imza::submit(*env.state, "go");
-    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
     const imza::ToolCall* call = env.pending_tool();
     REQUIRE(call != nullptr);
     REQUIRE(call->result.has_value());
@@ -1092,7 +957,7 @@ TEST_CASE("dangerous skip does not weaken hard rejection")
         return imza::Status::OK;
     };
     imza::submit(*env.state, "go");
-    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
     CHECK(env.state->queue.size() == 0);
     const imza::ToolCall* call = env.pending_tool();
     REQUIRE(call != nullptr);
@@ -1119,7 +984,7 @@ TEST_CASE("tools with an automatic policy run without an approval modal")
     };
 
     imza::submit(*env.state, "go");
-    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
 
     CHECK(env.state->queue.size() == 0);
 
@@ -1149,7 +1014,7 @@ TEST_CASE("unknown tools error back to the model without a modal")
     };
 
     imza::submit(*env.state, "go");
-    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
 
     CHECK(env.state->queue.size() == 0);
 
@@ -1162,29 +1027,6 @@ TEST_CASE("unknown tools error back to the model without a modal")
     CHECK(env.last_request().messages.back().type == imza::Message::Type::TOOL);
     CHECK(env.last_request().messages.back().content.find("unknown tool: nope")
         != std::string::npos);
-}
-
-// Display text of a rendered row: ANSI-styled cells decode to their visible
-// characters, so byte offsets become click columns.
-std::string plain_row(const std::string& row)
-{
-    std::string out;
-    for (std::size_t i = 0; i < row.size();) {
-        if (row[i] == '\x1b') {
-            ++i;
-            if (i < row.size() && row[i] == '[') {
-                ++i;
-                while (i < row.size()
-                    && !std::isalpha(static_cast<unsigned char>(row[i]))) {
-                    ++i;
-                }
-                ++i;
-            }
-            continue;
-        }
-        out += row[i++];
-    }
-    return out;
 }
 
 TEST_CASE("modal action buttons respond to mouse clicks")
@@ -1206,26 +1048,8 @@ TEST_CASE("modal action buttons respond to mouse clicks")
     REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
 
     ftxui::Component modal = imza::make_modal(env.state);
-    modal->Render();
-    auto screen = ftxui::Screen::Create(
-        ftxui::Dimension::Fixed(100), ftxui::Dimension::Fixed(40));
-    ftxui::Render(screen, modal->Render());
-    const std::vector<std::string> lines = imza::split_lines(screen.ToString());
-    bool clicked                         = false;
-    for (std::size_t y = 0; y < lines.size() && !clicked; ++y) {
-        const std::size_t x = plain_row(lines[y]).find("Allow once");
-        if (x == std::string::npos) {
-            continue;
-        }
-        ftxui::Mouse mouse;
-        mouse.button = ftxui::Mouse::Left;
-        mouse.motion = ftxui::Mouse::Pressed;
-        mouse.x      = static_cast<int>(x);
-        mouse.y      = static_cast<int>(y);
-        clicked      = modal->OnEvent(ftxui::Event::Mouse("", mouse));
-    }
-    CHECK(clicked);
-    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    CHECK(imza::test::click_label(modal, "Allow once"));
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
     const imza::ToolCall* call = env.pending_tool();
     REQUIRE(call != nullptr);
     REQUIRE(call->result.has_value());
@@ -1256,7 +1080,8 @@ TEST_CASE("skill approval modal renders its canonical baseline")
     ftxui::Render(screen, modal->Render());
     std::string rendered;
     for (const std::string& line : imza::split_lines(screen.ToString())) {
-        const std::string trimmed = std::string(imza::trim(plain_row(line)));
+        const std::string trimmed
+            = std::string(imza::trim(imza::test::without_ansi(line)));
         if (!trimmed.empty()) {
             rendered += trimmed + "\n";
         }

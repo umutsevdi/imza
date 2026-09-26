@@ -1,31 +1,14 @@
-#include <filesystem>
-#include <fstream>
 #include <vector>
 
 #include <doctest/doctest.h>
 #include <json/json.h>
 
 #include "platform/json_file.h"
+#include "test_fs.h"
 
 namespace {
 
-struct TempDir {
-    std::filesystem::path path
-        = std::filesystem::temp_directory_path() / "imza_json_file_test";
-
-    TempDir()
-    {
-        std::error_code ec;
-        std::filesystem::remove_all(path, ec);
-        std::filesystem::create_directories(path, ec);
-    }
-
-    ~TempDir()
-    {
-        std::error_code ec;
-        std::filesystem::remove_all(path, ec);
-    }
-};
+using imza::test::TempDir;
 
 } // namespace
 
@@ -50,10 +33,7 @@ TEST_CASE("read_json_file reports missing and malformed documents as absent")
     CHECK_FALSE(imza::read_json_file(dir.path / "missing.json").has_value());
 
     const auto malformed = dir.path / "malformed.json";
-    {
-        std::ofstream file(malformed, std::ios::binary);
-        file << "{\"version\": 1,";
-    }
+    imza::test::write_file(malformed, "{\"version\": 1,");
     CHECK_FALSE(imza::read_json_file(malformed).has_value());
 }
 
@@ -61,10 +41,7 @@ TEST_CASE("read_text_file returns exact content or nothing")
 {
     const TempDir dir;
     const auto path = dir.path / "text.txt";
-    {
-        std::ofstream file(path, std::ios::binary);
-        file << "line one\nline two";
-    }
+    imza::test::write_file(path, "line one\nline two");
     const auto content = imza::read_text_file(path);
     REQUIRE(content.has_value());
     CHECK(*content == "line one\nline two");

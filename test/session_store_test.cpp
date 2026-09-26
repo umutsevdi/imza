@@ -19,7 +19,9 @@
 #include "network/json_io.h"
 #include "platform/config.h"
 #include "platform/file_lock.h"
+#include "test_fs.h"
 #include "test_helpers.h"
+#include "test_state.h"
 
 namespace {
 
@@ -38,38 +40,7 @@ imza::Status load_session(const std::filesystem::path& path,
     return imza::Status::OK;
 }
 
-struct DataHome {
-    std::filesystem::path path
-        = std::filesystem::temp_directory_path() / "imza_session_store_test";
-    std::string previous;
-    bool had_previous = false;
-
-    DataHome()
-    {
-        if (const char* value = std::getenv("XDG_DATA_HOME")) {
-            previous     = value;
-            had_previous = true;
-        }
-        std::error_code ec;
-        std::filesystem::remove_all(path, ec);
-#ifndef _WIN32
-        setenv("XDG_DATA_HOME", path.c_str(), 1);
-#endif
-    }
-
-    ~DataHome()
-    {
-        std::error_code ec;
-        std::filesystem::remove_all(path, ec);
-#ifndef _WIN32
-        if (had_previous) {
-            setenv("XDG_DATA_HOME", previous.c_str(), 1);
-        } else {
-            unsetenv("XDG_DATA_HOME");
-        }
-#endif
-    }
-};
+using DataHome = imza::test::IsolatedDataHome;
 
 struct CurrentDirectory {
     std::filesystem::path original = std::filesystem::current_path();
@@ -126,7 +97,7 @@ TEST_CASE("saved sessions continue in place and rewrite the same file")
     CHECK(saved.front().path == saved_path);
 
     CurrentDirectory directory;
-    const auto other = home.path / "other-workspace";
+    const auto other = home.root() / "other-workspace";
     std::filesystem::create_directories(other);
     std::error_code ec;
     std::filesystem::current_path(other, ec);
@@ -532,7 +503,7 @@ TEST_CASE("non-ASCII workspace paths round-trip as valid UTF-8")
 #else
     DataHome home;
     CurrentDirectory directory;
-    const auto workspace = home.path / "Eylül çalışma";
+    const auto workspace = home.root() / "Eylül çalışma";
     std::filesystem::create_directories(workspace);
     std::error_code ec;
     std::filesystem::current_path(workspace, ec);
@@ -556,7 +527,7 @@ TEST_CASE("non-ASCII workspace paths round-trip as valid UTF-8")
     CHECK(encoded);
     CHECK(bytes.find("\xef\xbf\xbd") == std::string::npos);
 
-    const auto other = home.path / "other-workspace";
+    const auto other = home.root() / "other-workspace";
     std::filesystem::create_directories(other);
     std::filesystem::current_path(other, ec);
     REQUIRE_FALSE(ec);
@@ -577,8 +548,8 @@ TEST_CASE("missing or stale workspace falls back to the current directory")
 #else
     DataHome home;
     CurrentDirectory directory;
-    std::filesystem::create_directories(home.path);
-    const std::filesystem::path stale = home.path / "stale.json";
+    std::filesystem::create_directories(home.root());
+    const std::filesystem::path stale = home.root() / "stale.json";
     {
         std::ofstream file(stale, std::ios::binary);
         file << "{\n"
@@ -599,7 +570,7 @@ TEST_CASE("missing or stale workspace falls back to the current directory")
     CHECK(std::get<imza::UserTurn>(loaded.snapshot.items.front()).text
         == "hello");
 
-    const std::filesystem::path legacy = home.path / "legacy.json";
+    const std::filesystem::path legacy = home.root() / "legacy.json";
     {
         std::ofstream file(legacy, std::ios::binary);
         file << "{\n"
@@ -619,8 +590,8 @@ TEST_CASE("malformed field types fail the load instead of crashing")
 #else
     DataHome home;
     CurrentDirectory directory;
-    std::filesystem::create_directories(home.path);
-    const std::filesystem::path malformed = home.path / "malformed.json";
+    std::filesystem::create_directories(home.root());
+    const std::filesystem::path malformed = home.root() / "malformed.json";
     {
         std::ofstream file(malformed, std::ios::binary);
         file << "{\n"
@@ -770,8 +741,7 @@ TEST_CASE("switch_session locks the target and reports foreign locks")
 #else
     DataHome home;
     CurrentDirectory directory;
-    const auto immediate = [](std::function<void()> task) { task(); };
-    auto state = imza::make_application_state(immediate, imza::Config { });
+    auto state = imza::test::make_test_state();
     state->session->set_title("Current");
     state->session->begin_send("hello");
     state->session->append_assistant("model", "off");
@@ -864,7 +834,8 @@ TEST_CASE("native and legacy attachments survive session persistence")
     CHECK(current[2].media_type == "application/pdf");
     CHECK(current[2].content == pdf_bytes);
 
-    const std::filesystem::path legacy = home.path / "legacy-attachments.json";
+    const std::filesystem::path legacy
+        = home.root() / "legacy-attachments.json";
     {
         std::ofstream legacy_file(legacy, std::ios::binary);
         legacy_file

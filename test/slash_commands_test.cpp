@@ -2,6 +2,8 @@
 #include "app/flows.h"
 #include "app/slash_commands.h"
 #include "platform/config.h"
+#include "test_fs.h"
+#include "test_state.h"
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
@@ -134,10 +136,9 @@ TEST_CASE("CLI exposes dangerous permission skipping in interactive mode")
 
 TEST_CASE("CLI accepts multiple allowed directories")
 {
-    const std::filesystem::path root
-        = std::filesystem::temp_directory_path() / "imza-cli-allowed-dirs";
-    const std::filesystem::path first  = root / "first";
-    const std::filesystem::path second = root / "second";
+    const imza::test::TempDir root;
+    const std::filesystem::path first  = root.file("first");
+    const std::filesystem::path second = root.file("second");
     std::error_code error;
     std::filesystem::create_directories(first, error);
     REQUIRE_FALSE(error);
@@ -159,8 +160,6 @@ TEST_CASE("CLI accepts multiple allowed directories")
         == std::filesystem::weakly_canonical(first));
     CHECK(result.allowed_directories[1]
         == std::filesystem::weakly_canonical(second));
-
-    std::filesystem::remove_all(root, error);
 }
 
 TEST_CASE("CLI config creates the file and opens an editor")
@@ -168,17 +167,10 @@ TEST_CASE("CLI config creates the file and opens an editor")
 #ifdef _WIN32
     return;
 #else
-    const auto root
-        = std::filesystem::temp_directory_path() / "imza-cli-config-test";
-    std::error_code error;
-    std::filesystem::remove_all(root, error);
-    const char* previous_config = std::getenv("XDG_DATA_HOME");
+    const imza::test::IsolatedDataHome home;
     const char* previous_visual = std::getenv("VISUAL");
-    const std::string saved_config
-        = previous_config == nullptr ? "" : previous_config;
     const std::string saved_visual
         = previous_visual == nullptr ? "" : previous_visual;
-    setenv("XDG_DATA_HOME", root.c_str(), 1);
     setenv("VISUAL", "true", 1);
 
     char program[]         = "imza";
@@ -188,19 +180,13 @@ TEST_CASE("CLI config creates the file and opens an editor")
 
     CHECK_FALSE(result.continue_as_interactive);
     CHECK(result.exit_code == 0);
-    CHECK(std::filesystem::is_regular_file(root / "imza" / "config.json"));
+    CHECK(std::filesystem::is_regular_file(home.imza_dir() / "config.json"));
 
-    if (previous_config == nullptr) {
-        unsetenv("XDG_DATA_HOME");
-    } else {
-        setenv("XDG_DATA_HOME", saved_config.c_str(), 1);
-    }
     if (previous_visual == nullptr) {
         unsetenv("VISUAL");
     } else {
         setenv("VISUAL", saved_visual.c_str(), 1);
     }
-    std::filesystem::remove_all(root, error);
 #endif
 }
 
@@ -273,8 +259,7 @@ TEST_CASE("CLI parses exec with explicit shell access")
 
 TEST_CASE("run_slash emits application effects")
 {
-    auto state = make_application_state(
-        [](std::function<void()> f) { f(); }, Config { });
+    auto state     = imza::test::make_test_state();
     bool exited    = false;
     state->on_exit = [&] { exited = true; };
 

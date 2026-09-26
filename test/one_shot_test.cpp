@@ -2,6 +2,7 @@
 #include "app/flows.h"
 #include "network/json_io.h"
 #include "runtime/main_thread_queue.h"
+#include "test_state.h"
 
 #include <doctest/doctest.h>
 
@@ -15,29 +16,19 @@
 
 namespace {
 
-imza::Config one_shot_config()
-{
-    imza::Config config;
-    imza::Connection connection;
-    connection.id = "test";
-    config.providers.push_back(connection);
-    config.last_used = imza::LastUsed { "test", "model" };
-    return config;
-}
-
 std::shared_ptr<imza::ApplicationState> make_one_shot_state(
     imza::MainThreadQueue& queue, imza::StreamFn stream,
     imza::RuntimeFlag flags          = imza::WEB,
     std::atomic<std::size_t>* posted = nullptr)
 {
-    return imza::make_application_state(
+    return imza::test::make_test_state(
         [&queue, posted](std::function<void()> task) {
             if (posted != nullptr) {
                 posted->fetch_add(1);
             }
             queue.post(std::move(task));
         },
-        one_shot_config(), std::move(stream), flags);
+        imza::test::test_config(), std::move(stream), flags);
 }
 
 } // namespace
