@@ -497,7 +497,7 @@ TEST_CASE("todo bindings read and write the shared task board")
                      "{content = 'second'},"
                      "{content = 'third', status = 'completed'},"
                      "{content = 'fourth', status = 'cancelled'}})\n"
-                     "if err then error(err) end\nprint(ok)",
+                     "if err then error(err) end",
             std::move(host));
     CHECK(set.kind == imza::ToolOutput::Kind::OUTPUT);
     REQUIRE(board.items.size() == 4);
@@ -989,11 +989,12 @@ TEST_CASE("imza.fs.insert inserts before a line and appends with nil")
 {
     TmpDir dir;
     write_file(dir.file("a.txt"), "one\ntwo\nthree\n");
-    const std::string path     = dir.file("a.txt").string();
-    const imza::ToolOutput out = run_script("assert(imza.fs.insert([[" + path
-        + "]], 'inserted', 2))\n"
-          "assert(imza.fs.insert([["
-        + path + "]], 'tail'))");
+    const std::string path = dir.file("a.txt").string();
+    const imza::ToolOutput out
+        = run_script("assert(not imza.fs.insert([[" + path
+            + "]], 'inserted', 2))\n"
+              "assert(not imza.fs.insert([["
+            + path + "]], 'tail'))");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(read_all(dir.file("a.txt")) == "one\ninserted\ntwo\nthree\ntail\n");
     REQUIRE(out.diffs.size() == 1);
@@ -1025,9 +1026,9 @@ TEST_CASE("imza.fs.edit replaces first occurrence by default")
 {
     TmpDir dir;
     write_file(dir.file("a.txt"), "foo bar foo baz foo\n");
-    const std::string path = dir.file("a.txt").string();
-    const imza::ToolOutput out
-        = run_script("assert(imza.fs.edit([[" + path + "]], 'foo', 'qux'))");
+    const std::string path     = dir.file("a.txt").string();
+    const imza::ToolOutput out = run_script(
+        "assert(not imza.fs.edit([[" + path + "]], 'foo', 'qux'))");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(read_all(dir.file("a.txt")) == "qux bar foo baz foo\n");
 }
@@ -1036,9 +1037,9 @@ TEST_CASE("imza.fs.edit count=0 replaces all occurrences")
 {
     TmpDir dir;
     write_file(dir.file("a.txt"), "foo bar foo baz foo\n");
-    const std::string path = dir.file("a.txt").string();
-    const imza::ToolOutput out
-        = run_script("assert(imza.fs.edit([[" + path + "]], 'foo', 'qux', 0))");
+    const std::string path     = dir.file("a.txt").string();
+    const imza::ToolOutput out = run_script(
+        "assert(not imza.fs.edit([[" + path + "]], 'foo', 'qux', 0))");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(read_all(dir.file("a.txt")) == "qux bar qux baz qux\n");
 }
@@ -1069,9 +1070,9 @@ TEST_CASE("imza.fs.write creates and rewrites files")
 {
     TmpDir dir;
     const std::string path     = dir.file("new.txt").string();
-    const imza::ToolOutput out = run_script("assert(imza.fs.write([[" + path
+    const imza::ToolOutput out = run_script("assert(not imza.fs.write([[" + path
         + "]], 'v1\\n'))\n"
-          "assert(imza.fs.write([["
+          "assert(not imza.fs.write([["
         + path + "]], 'v2\\n'))");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(read_all(dir.file("new.txt")) == "v2\n");
@@ -1087,12 +1088,12 @@ TEST_CASE("lua file mutations collapse into one net diff per file")
     write_file(dir.file("b.txt"), "alpha\n");
     const std::string a        = dir.file("a.txt").string();
     const std::string b        = dir.file("b.txt").string();
-    const imza::ToolOutput out = run_script("assert(imza.fs.edit([[" + a
+    const imza::ToolOutput out = run_script("assert(not imza.fs.edit([[" + a
         + "]], 'two', 'TWO'))\n"
-          "assert(imza.fs.insert([["
+          "assert(not imza.fs.insert([["
         + a
         + "]], 'zero', 1))\n"
-          "assert(imza.fs.edit([["
+          "assert(not imza.fs.edit([["
         + b + "]], 'alpha', 'ALPHA'))");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     REQUIRE(out.diffs.size() == 2);
@@ -1120,7 +1121,7 @@ TEST_CASE("lua file diffs survive a mid-script error")
     TmpDir dir;
     write_file(dir.file("a.txt"), "one\n");
     const std::string a        = dir.file("a.txt").string();
-    const imza::ToolOutput out = run_script("assert(imza.fs.edit([[" + a
+    const imza::ToolOutput out = run_script("assert(not imza.fs.edit([[" + a
         + "]], 'one', 'ONE'))\n"
           "error('boom')");
     CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
@@ -1143,9 +1144,10 @@ TEST_CASE("imza.file mutations auto-accept in trusted Build mode")
         return imza::PermissionContext { system, workspace, store.snapshot(),
             imza::SessionMode::BUILD };
     };
-    const std::string a        = dir.file("a.txt").string();
-    const imza::ToolOutput out = run_script(
-        "assert(imza.fs.edit([[" + a + "]], 'one', 'ONE'))", std::move(host));
+    const std::string a = dir.file("a.txt").string();
+    const imza::ToolOutput out
+        = run_script("assert(not imza.fs.edit([[" + a + "]], 'one', 'ONE'))",
+            std::move(host));
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(read_all(dir.file("a.txt")) == "ONE\n");
 }
@@ -1205,20 +1207,20 @@ TEST_CASE("imza.file mutations proceed after attended approval")
             imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" } });
         return promise.get_future();
     };
-    const std::string a        = outside.file("a.txt").string();
-    const imza::ToolOutput out = run_script(
-        "assert(imza.fs.edit([[" + a + "]], 'one', 'ONE'))", std::move(host));
+    const std::string a = outside.file("a.txt").string();
+    const imza::ToolOutput out
+        = run_script("assert(not imza.fs.edit([[" + a + "]], 'one', 'ONE'))",
+            std::move(host));
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(read_all(outside.file("a.txt")) == "ONE\n");
 }
 
-TEST_CASE("canvas line emits a declarative chart and answers true")
+TEST_CASE("canvas line emits a declarative chart and returns nothing")
 {
     const imza::ToolOutput out = run_script(
         "return imza.canvas.line({ title = 'CPU', data = { 1, 2, 3 } })");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    REQUIRE(out.return_value.has_value());
-    CHECK(out.return_value->asBool());
+    CHECK_FALSE(out.return_value.has_value());
     REQUIRE(out.canvases.size() == 1);
     const imza::CanvasView& chart = out.canvases[0];
     CHECK(chart.kind == imza::CanvasView::Kind::LINE);
@@ -1259,7 +1261,6 @@ local bar = imza.canvas.bar({
 local pie = imza.canvas.pie({
   data = { { label = 'a', value = 1 }, { label = 'b', value = 2 } },
 })
-return { bar, pie }
 )lua");
     REQUIRE(out.canvases.size() == 2);
     CHECK(out.canvases[0].kind == imza::CanvasView::Kind::BAR);
@@ -1309,7 +1310,7 @@ TEST_CASE("canvas caps charts per run and fails closed")
 {
     const imza::ToolOutput out = run_script(R"lua(
 for _ = 1, 16 do
-  assert(imza.canvas.line({ data = { 1, 2 } }))
+  assert(not imza.canvas.line({ data = { 1, 2 } }))
 end
 local _, err = imza.canvas.line({ data = { 1, 2 } })
 print(err)

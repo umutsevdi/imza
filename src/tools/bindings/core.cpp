@@ -98,8 +98,7 @@ namespace {
         }
         run->host->set_todo(std::move(list));
         record_call(L, "todo.set", "", true);
-        lua_pushboolean(L, 1);
-        return 1;
+        return 0;
     }
 
     int binding_ask(lua_State* L)
@@ -269,7 +268,7 @@ namespace {
 The session task list in display order; empty array when unset.)desc",
         },
         { "todo.set", binding_todo_set,
-            R"desc((items: TodoItem[]) => true
+            R"desc((items: TodoItem[]) => Err?
 Set todo items.
 Replaces the entire list: get, modify, set the full array back.
 `status` defaults to "pending"; any other value is rejected.)desc" },

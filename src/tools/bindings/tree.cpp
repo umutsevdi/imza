@@ -565,7 +565,10 @@ void register_tree(LuaState& state)
         "end_line: integer, text: string }",
     };
     state.register_module({ false, "tree",
-        "Syntax tree inspection and querying.", types, tree_lua_methods() });
+        R"desc(Syntax tree inspection: list the symbols a file defines, find where
+an identifier appears, and enumerate call sites. Load for questions about
+code structure and references.)desc",
+        types, tree_lua_methods() });
 }
 
 } // namespace imza

@@ -301,6 +301,9 @@ imza.<name>(args...) => Value | (nil, Err)
 - Ungranted paths return nil, Err.
 - Paths may be relative to the requested working directory.
 - Invalid arguments raise and abort the script.
+- Methods documented `=> Err?` return an error string on failure and
+nothing on success. Check `if err then`: a failed operation invalidates
+the steps built on it. Other methods fail by raising instead.
 
 TYPES)desc";
     for (const LuaModule& module : modules) {

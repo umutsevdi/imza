@@ -488,8 +488,7 @@ namespace {
                             ? " (use fs.write to create it)"
                             : ""));
         }
-        lua_pushboolean(L, 1);
-        return 1;
+        return 0;
     }
 
     int binding_file_edit(lua_State* L)
@@ -526,8 +525,7 @@ namespace {
                 err)) {
             return binding_error(L, "fs.edit: " + target + ": " + err);
         }
-        lua_pushboolean(L, 1);
-        return 1;
+        return 0;
     }
 
     int binding_file_write(lua_State* L)
@@ -551,8 +549,7 @@ namespace {
                 err, true)) {
             return binding_error(L, "fs.write: " + target + ": " + err);
         }
-        lua_pushboolean(L, 1);
-        return 1;
+        return 0;
     }
 
     constexpr LuaMethod BINDINGS[] = {
@@ -586,14 +583,14 @@ Capped at 500 hits, followed by a hit whose text is "[truncated]".)desc",
         {
             "insert",
             binding_file_insert,
-            R"desc((path: string, text: string, line?: integer=nil) => true
+            R"desc((path: string, text: string, line?: integer=nil) => Err?
 Inserts text before the 1-based line, pushing it down; omit line to
 append at the end. A line past the end of the file is an error.)desc",
         },
         {
             "edit",
             binding_file_edit,
-            R"desc((path: string, old: string, new: string, count?: integer=1) => true
+            R"desc((path: string, old: string, new: string, count?: integer=1) => Err?
 Replaces the first count occurrences of old with new; count=0 replaces all.
 Old is an exact literal match, so include enough surrounding text to be unique.
 Errors if old is empty or not found.)desc",
@@ -601,7 +598,7 @@ Errors if old is empty or not found.)desc",
         {
             "write",
             binding_file_write,
-            R"desc((path: string, text: string) => true
+            R"desc((path: string, text: string) => Err?
 Replaces the file's entire content, creating it if absent.
 Prefer insert/edit for targeted changes; this discards everything else.)desc",
         },

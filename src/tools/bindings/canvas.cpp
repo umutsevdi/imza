@@ -72,14 +72,13 @@ namespace {
         out = std::move(values);
     }
 
-    // Stores a validated chart, logs the call, and answers the boolean
-    // success the model sees instead of rendered characters.
+    // Stores a validated chart and logs the call. Success returns
+    // nothing; failures take the nil, Err path before this is reached.
     void emit_canvas(lua_State* L, const std::string& binding, CanvasView view)
     {
         const std::string title = view.title;
         run_of(L)->canvases.push_back(std::move(view));
         record_call(L, binding, title, true);
-        lua_pushboolean(L, 1);
     }
 
     bool canvas_room(lua_State* L, const std::string& binding)
@@ -158,7 +157,7 @@ namespace {
             return 2;
         }
         emit_canvas(L, binding, std::move(view));
-        return 1;
+        return 0;
     }
 
     // Shared bar/pie parsing: data is a list of {label, value} points.
@@ -219,7 +218,7 @@ namespace {
             return 2;
         }
         emit_canvas(L, binding, std::move(view));
-        return 1;
+        return 0;
     }
 
     int binding_canvas_bar(lua_State* L)
@@ -288,45 +287,37 @@ namespace {
             return 2;
         }
         emit_canvas(L, binding, std::move(view));
-        return 1;
+        return 0;
     }
 
     constexpr LuaMethod BINDINGS[] = {
         {
             "line",
             binding_canvas_line,
-            R"desc((options: { title?: string, label?: string, data }) => true
+            R"desc((options: { title?: string, label?: string, data }) => Err?
 Renders a line chart directly in the chat, one polyline per series with
 x as the point index.
 `data` is a list of numbers or a list of CanvasSeries tables; `label`
-names a flat data series.
-Returns true once the chart is accepted for rendering; nil, Err on
-invalid data.)desc",
+names a flat data series.)desc",
         },
         {
             "bar",
             binding_canvas_bar,
-            R"desc((options: { title?: string, data: CanvasPoint[] }) => true
-Renders a vertical bar chart directly in the chat, one bar per point.
-Returns true once the chart is accepted for rendering; nil, Err on
-invalid data.)desc",
+            R"desc((options: { title?: string, data: CanvasPoint[] }) => Err?
+Renders a vertical bar chart directly in the chat, one bar per point.)desc",
         },
         {
             "pie",
             binding_canvas_pie,
-            R"desc((options: { title?: string, data: CanvasPoint[] }) => true
-Renders a pie chart directly in the chat, one slice per point.
-Returns true once the chart is accepted for rendering; nil, Err on
-invalid data.)desc",
+            R"desc((options: { title?: string, data: CanvasPoint[] }) => Err?
+Renders a pie chart directly in the chat, one slice per point.)desc",
         },
         {
             "surface",
             binding_canvas_surface,
-            R"desc((options: { title?: string, data: number[][] }) => true
+            R"desc((options: { title?: string, data: number[][] }) => Err?
 Renders a wireframe surface directly in the chat: `data` is a
-rectangular matrix of z values, row-major.
-Returns true once the chart is accepted for rendering; nil, Err on
-invalid data.)desc",
+rectangular matrix of z values, row-major.)desc",
         },
     };
 
@@ -341,7 +332,10 @@ void register_canvas(LuaState& state)
         "CanvasPoint = { label: string, value: number }",
     };
     state.register_module({ false, "canvas",
-        "Charts rendered inline in the chat.", types, canvas_lua_methods() });
+        R"desc(Line, bar, pie, and wireframe-surface charts rendered in the chat.
+Use when presenting numeric data - trends, comparisons, distributions, or
+matrices - without waiting to be asked.)desc",
+        types, canvas_lua_methods() });
 }
 
 } // namespace imza

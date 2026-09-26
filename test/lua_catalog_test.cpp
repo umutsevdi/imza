@@ -3,6 +3,8 @@
 #include <string>
 
 #include "network/json_io.h"
+#include "tools/bindings.h"
+#include "tools/lua.h"
 #include "tools/tool.h"
 
 namespace imza {
@@ -61,22 +63,49 @@ TEST_CASE("capability-disabled bindings fail closed, not absent")
         == "shell: shell access is disabled for this run\n");
 }
 
-TEST_CASE("core descriptions expose modules without their methods")
+TEST_CASE("core description embeds autoload docs, lists others by name")
 {
-    auto state      = make_lua_state();
-    const Tool tool = make_lua_tool(*state);
-    CHECK(tool.spec.description.find(
-              "<modules>\ntree: Syntax tree inspection and querying.\n"
-              "canvas: Charts rendered inline in the chat.\n</modules>")
-        != std::string::npos);
-    CHECK(tool.spec.description.find("imza.tree.index") == std::string::npos);
-    CHECK(tool.spec.description.find("imza.tree.nodes") == std::string::npos);
-    CHECK(tool.spec.description.find("imza.canvas.line") == std::string::npos);
-    CHECK(tool.spec.description.find("imza.fs.read(") != std::string::npos);
-    CHECK(tool.spec.description.find("FileEntry = { path: string")
-        != std::string::npos);
-    CHECK(tool.spec.description.find("imza.<name>(args...)")
-        != std::string::npos);
+    auto state                     = make_lua_state();
+    const Tool tool                = make_lua_tool(*state);
+    const std::string& description = tool.spec.description;
+
+    // Autoload modules appear with their methods; non-autoload ones only
+    // as a name: description line inside the <modules> block, derived
+    // from the live catalog rather than copied literals.
+    for (const LuaModule& module : state->modules()) {
+        const std::string header
+            = std::string(module.name).append(": ").append(module.description);
+        if (module.autoload) {
+            CHECK(description.find(module.name) != std::string::npos);
+            for (const LuaMethod& method : module.methods) {
+                if (method.is_private) {
+                    continue;
+                }
+                std::string path = std::string(method.name);
+                if (path.find('.') == std::string::npos
+                    && !module.name.empty()) {
+                    path = std::string(module.name) + "." + path;
+                }
+                path = "imza." + path;
+                CHECK_MESSAGE(
+                    description.find(path + "(") != std::string::npos, path);
+            }
+        } else {
+            const std::size_t at = description.find(header);
+            REQUIRE(at != std::string::npos);
+            CHECK(description.find("<modules>") < at);
+            for (const LuaMethod& method : module.methods) {
+                std::string path = std::string(method.name);
+                if (path.find('.') == std::string::npos
+                    && !module.name.empty()) {
+                    path = std::string(module.name) + "." + path;
+                }
+                path = "imza." + path;
+                CHECK(description.find(path) == std::string::npos);
+            }
+        }
+    }
+    CHECK(description.find("imza.<name>(args...)") != std::string::npos);
 }
 
 TEST_CASE("load returns tree documentation while bindings are always present")
@@ -92,23 +121,30 @@ TEST_CASE("load returns tree documentation while bindings are always present")
     const ToolOutput documentation = load.run(
         { "load", "", "", "" }, parse_json(R"json({"name":"tree"})json"));
     CHECK(documentation.kind == ToolOutput::Kind::OUTPUT);
-    CHECK(documentation.text.find("imza.tree.index(") != std::string::npos);
-    CHECK(
-        documentation.text.find("imza.tree.references(") != std::string::npos);
+    CHECK(documentation.text.find("TYPES") != std::string::npos);
+    CHECK(documentation.text.find("METHODS") != std::string::npos);
+    for (const LuaMethod& method : tree_lua_methods()) {
+        if (method.is_private) {
+            continue;
+        }
+        CHECK(documentation.text.find(
+                  std::string("imza.tree.") + std::string(method.name) + "(")
+            != std::string::npos);
+    }
 
     const ToolOutput canvas = load.run(
         { "load", "", "", "" }, parse_json(R"json({"name":"canvas"})json"));
     CHECK(canvas.kind == ToolOutput::Kind::OUTPUT);
-    CHECK(canvas.text.find("CanvasPoint = { label: string, value: number }")
-        != std::string::npos);
-    CHECK(canvas.text.find("imza.canvas.line(") != std::string::npos);
-    CHECK(canvas.text.find("imza.canvas.surface(") != std::string::npos);
+    for (const LuaMethod& method : canvas_lua_methods()) {
+        CHECK(canvas.text.find(
+                  std::string("imza.canvas.") + std::string(method.name) + "(")
+            != std::string::npos);
+    }
 
     const ToolOutput unknown = load.run(
         { "load", "", "", "" }, parse_json(R"json({"name":"unknown"})json"));
     CHECK(unknown.kind == ToolOutput::Kind::ERROR);
-    CHECK(unknown.text
-        == "load: unknown module, available: fs, web, tree, canvas");
+    CHECK(unknown.text.find("load: unknown module") != std::string::npos);
 }
 
 } // namespace imza

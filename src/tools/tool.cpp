@@ -136,7 +136,10 @@ Tool make_load_tool(LuaState& state)
 {
     ToolSpec spec;
     spec.name        = "load";
-    spec.description = "Load the documentation for a Lua module by name.";
+    spec.description = "Load the documentation for a Lua module by name. "
+                       "Returns the module's TYPES and METHODS reference; "
+                       "call it before first use of any module listed under "
+                       "<modules> in the lua tool description.";
     spec.parameters  = parse_json(
         R"json({"type":"object","properties":{"name":{"type":"string"}},"required":["name"]})json");
     return { std::move(spec),

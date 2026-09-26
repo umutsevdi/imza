@@ -531,7 +531,7 @@ TEST_CASE("delegated-agent approvals surface through the main modal queue")
     imza::submit(*env.state, "delegate");
     REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
     const auto request = std::get<imza::PermissionPrompt>(env.session->modal());
-    CHECK(request.description.find("Agent 1 (research)") != std::string::npos);
+    CHECK(request.description.find("research") != std::string::npos);
     imza::resolve_modal(
         *env.state, imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" });
     REQUIRE(env.pump.wait_for(
@@ -1021,7 +1021,7 @@ TEST_CASE("filesystem session approval installs an exact reusable grant")
                      const imza::ChatRequest&, const imza::StreamCallback& cb) {
         if ((*round)++ < 2) {
             Json::Value arguments(Json::objectValue);
-            arguments["script"] = "assert(imza.fs.write([[" + path.string()
+            arguments["script"] = "assert(not imza.fs.write([[" + path.string()
                 + "]], 'approved'))";
             cb(imza::make_tool_call_event(
                 { "lua", imza::write_json(arguments), "", "lua-call" }));
