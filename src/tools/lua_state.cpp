@@ -30,6 +30,7 @@ std::unique_ptr<LuaState> make_lua_state()
     register_fs(*state);
     register_web(*state);
     register_tree(*state);
+    register_canvas(*state);
     return state;
 }
 

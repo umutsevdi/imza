@@ -15,6 +15,7 @@ CHANGELOG
 Changes:
   - Added multi-modal input support for image types and PDF files.
   - Added module system.
+  - Added Lua canvas charts that render directly in the chat.
 
 -------------------------------------------------------------------------------
 0.4.1 - 2026-09-24

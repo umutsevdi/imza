@@ -1211,3 +1211,110 @@ TEST_CASE("imza.file mutations proceed after attended approval")
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(read_all(outside.file("a.txt")) == "ONE\n");
 }
+
+TEST_CASE("canvas line emits a declarative chart and answers true")
+{
+    const imza::ToolOutput out = run_script(
+        "return imza.canvas.line({ title = 'CPU', data = { 1, 2, 3 } })");
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    REQUIRE(out.return_value.has_value());
+    CHECK(out.return_value->asBool());
+    REQUIRE(out.canvases.size() == 1);
+    const imza::CanvasView& chart = out.canvases[0];
+    CHECK(chart.kind == imza::CanvasView::Kind::LINE);
+    CHECK(chart.title == "CPU");
+    REQUIRE(chart.series.size() == 1);
+    REQUIRE(chart.series[0].values.size() == 3);
+    CHECK(chart.series[0].values[2] == doctest::Approx(3.0));
+    REQUIRE(out.dispatch_log.size() == 1);
+    CHECK(out.dispatch_log[0].binding == "canvas.line");
+    CHECK(out.dispatch_log[0].target == "CPU");
+    CHECK(out.dispatch_log[0].ok);
+}
+
+TEST_CASE("canvas line accepts named series")
+{
+    const imza::ToolOutput out = run_script(R"lua(
+return imza.canvas.line({
+  title = 'Trend',
+  data = {
+    { label = 'a', values = { 1, 2 } },
+    { label = 'b', values = { 3, 4 } },
+  },
+})
+)lua");
+    REQUIRE(out.canvases.size() == 1);
+    REQUIRE(out.canvases[0].series.size() == 2);
+    CHECK(out.canvases[0].series[0].label == "a");
+    CHECK(out.canvases[0].series[1].values[1] == doctest::Approx(4.0));
+}
+
+TEST_CASE("canvas bar and pie take labeled points")
+{
+    const imza::ToolOutput out = run_script(R"lua(
+local bar = imza.canvas.bar({
+  title = 'Fruit',
+  data = { { label = 'apple', value = 3 }, { label = 'pear', value = 5 } },
+})
+local pie = imza.canvas.pie({
+  data = { { label = 'a', value = 1 }, { label = 'b', value = 2 } },
+})
+return { bar, pie }
+)lua");
+    REQUIRE(out.canvases.size() == 2);
+    CHECK(out.canvases[0].kind == imza::CanvasView::Kind::BAR);
+    CHECK(out.canvases[0].title == "Fruit");
+    CHECK(out.canvases[0].series[1].label == "pear");
+    CHECK(out.canvases[0].series[1].values[0] == doctest::Approx(5.0));
+    CHECK(out.canvases[1].kind == imza::CanvasView::Kind::PIE);
+}
+
+TEST_CASE("canvas rejects malformed and non-positive chart data")
+{
+    const imza::ToolOutput out = run_script(R"lua(
+local _, pie_err = imza.canvas.pie({ data = { { label = 'x', value = -1 } } })
+local _, bar_err = imza.canvas.bar({ data = { { label = 'x' } } })
+local _, line_err = imza.canvas.line({ data = { 1, 'x' } })
+local _, grid_err = imza.canvas.surface({ data = { { 1, 2 }, { 3 } } })
+print(pie_err, bar_err, line_err, grid_err)
+)lua");
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(
+        out.text.find("canvas.pie: 'data' point 1 needs a 'label' string and a "
+                      "finite positive 'value' number")
+        != std::string::npos);
+    CHECK(
+        out.text.find("canvas.bar: 'data' point 1 needs a 'label' string and a "
+                      "finite 'value' number")
+        != std::string::npos);
+    CHECK(out.text.find("canvas.line: 'data' entry 2 must be a finite number")
+        != std::string::npos);
+    CHECK(out.text.find("canvas.surface: row 2 must have 2 columns")
+        != std::string::npos);
+    CHECK(out.canvases.empty());
+}
+
+TEST_CASE("canvas surface takes a rectangular z grid")
+{
+    const imza::ToolOutput out
+        = run_script("return imza.canvas.surface("
+                     "{ title = 'Z', data = { { 1, 2, 3 }, { 4, 5, 6 } } })");
+    REQUIRE(out.canvases.size() == 1);
+    CHECK(out.canvases[0].kind == imza::CanvasView::Kind::SURFACE);
+    REQUIRE(out.canvases[0].grid.size() == 2);
+    CHECK(out.canvases[0].grid[1][2] == doctest::Approx(6.0));
+}
+
+TEST_CASE("canvas caps charts per run and fails closed")
+{
+    const imza::ToolOutput out = run_script(R"lua(
+for _ = 1, 16 do
+  assert(imza.canvas.line({ data = { 1, 2 } }))
+end
+local _, err = imza.canvas.line({ data = { 1, 2 } })
+print(err)
+)lua");
+    CHECK(out.text.find("canvas.line: too many charts in one run")
+        != std::string::npos);
+    CHECK(out.canvases.size() == 16);
+}

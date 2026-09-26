@@ -236,6 +236,9 @@ int diff_side_width(int width);
 int diff_content_width(int width);
 int review_content_width(const LayoutCtx& ctx);
 ftxui::Element diffstat_chip(std::size_t additions, std::size_t deletions);
+// Draws a canvas module chart as an inline chat element at a fixed
+// size that shrinks only when the content is narrower.
+ftxui::Element canvas_chart(const CanvasView& view, int available_width);
 ftxui::Element session_error_element(const Session& session);
 
 ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx);

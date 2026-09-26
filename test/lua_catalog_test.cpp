@@ -31,6 +31,7 @@ local paths = {
   "web.fetch", "web.search",
   "fs.insert", "fs.edit", "fs.write",
   "tree.index", "tree.nodes", "tree.symbols", "tree.references",
+  "canvas.line", "canvas.bar", "canvas.pie", "canvas.surface",
 }
 for _, path in ipairs(paths) do
   local t = imza
@@ -64,12 +65,13 @@ TEST_CASE("core descriptions expose modules without their methods")
 {
     auto state      = make_lua_state();
     const Tool tool = make_lua_tool(*state);
-    CHECK(
-        tool.spec.description.find(
-            "<modules>\ntree: Syntax tree inspection and querying.\n</modules>")
+    CHECK(tool.spec.description.find(
+              "<modules>\ntree: Syntax tree inspection and querying.\n"
+              "canvas: Charts rendered inline in the chat.\n</modules>")
         != std::string::npos);
     CHECK(tool.spec.description.find("imza.tree.index") == std::string::npos);
     CHECK(tool.spec.description.find("imza.tree.nodes") == std::string::npos);
+    CHECK(tool.spec.description.find("imza.canvas.line") == std::string::npos);
     CHECK(tool.spec.description.find("imza.fs.read(") != std::string::npos);
     CHECK(tool.spec.description.find("FileEntry = { path: string")
         != std::string::npos);
@@ -94,10 +96,19 @@ TEST_CASE("load returns tree documentation while bindings are always present")
     CHECK(
         documentation.text.find("imza.tree.references(") != std::string::npos);
 
+    const ToolOutput canvas = load.run(
+        { "load", "", "", "" }, parse_json(R"json({"name":"canvas"})json"));
+    CHECK(canvas.kind == ToolOutput::Kind::OUTPUT);
+    CHECK(canvas.text.find("CanvasPoint = { label: string, value: number }")
+        != std::string::npos);
+    CHECK(canvas.text.find("imza.canvas.line(") != std::string::npos);
+    CHECK(canvas.text.find("imza.canvas.surface(") != std::string::npos);
+
     const ToolOutput unknown = load.run(
         { "load", "", "", "" }, parse_json(R"json({"name":"unknown"})json"));
     CHECK(unknown.kind == ToolOutput::Kind::ERROR);
-    CHECK(unknown.text == "load: unknown module, available: fs, web, tree");
+    CHECK(unknown.text
+        == "load: unknown module, available: fs, web, tree, canvas");
 }
 
 } // namespace imza

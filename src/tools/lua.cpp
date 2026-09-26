@@ -511,6 +511,7 @@ ToolOutput lua_run(const Json::Value& args, const LuaHost& host,
     const auto finish = [&](ToolOutput out) {
         out.dispatch_log       = std::move(run.log);
         out.blocked_permission = run.blocked_permission;
+        out.canvases           = std::move(run.canvases);
         for (const FileMutation& m : run.mutations) {
             if (m.original == m.latest) {
                 continue;

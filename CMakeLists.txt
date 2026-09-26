@@ -297,6 +297,7 @@ add_library(imza_execution
     src/tools/lua.cpp
     src/tools/lua_state.cpp
     src/tools/bindings/binding.cpp
+    src/tools/bindings/canvas.cpp
     src/tools/bindings/core.cpp
     src/tools/bindings/fs.cpp
     src/tools/bindings/tree.cpp

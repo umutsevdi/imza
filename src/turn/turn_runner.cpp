@@ -691,6 +691,7 @@ void TurnRunner::_run_tool(const PermissionEvaluation& evaluation,
         ToolCall::Result result { kind, std::move(out.text) };
         result.return_value = std::move(out.return_value);
         result.diffs        = std::move(out.diffs);
+        result.canvases     = std::move(out.canvases);
         result.dispatch_log = std::move(out.dispatch_log);
         _state->session->fill_tool_result(req, std::move(result));
     });

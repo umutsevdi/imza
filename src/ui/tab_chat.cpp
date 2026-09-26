@@ -923,6 +923,13 @@ namespace {
             for (const ToolReportSection& section : report.sections) {
                 const auto* report_diff = std::get_if<ToolReportDiff>(&section);
                 if (report_diff == nullptr || report_diff->view == nullptr) {
+                    const auto* report_canvas
+                        = std::get_if<ToolReportCanvas>(&section);
+                    if (report_canvas != nullptr
+                        && report_canvas->view != nullptr) {
+                        rows.push_back(canvas_chart(
+                            *report_canvas->view, review_content_width(ctx)));
+                    }
                     continue;
                 }
                 const DiffView& diff  = *report_diff->view;

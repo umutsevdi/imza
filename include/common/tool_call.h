@@ -28,6 +28,28 @@ struct DiffView {
     std::vector<DiffRow> rows;
 };
 
+struct CanvasSeries {
+    std::string label;
+    std::vector<double> values;
+
+    bool operator==(const CanvasSeries&) const = default;
+};
+
+// A chart the lua canvas module emitted for inline chat rendering. The
+// transcript stores this declarative data; the UI draws it with an FTXUI
+// canvas sized to the current terminal width. Line stores one series per
+// plotted line; bar and pie store one entry per labeled value; surface
+// stores z values row-major.
+struct CanvasView {
+    enum class Kind { LINE, BAR, PIE, SURFACE };
+    Kind kind = Kind::LINE;
+    std::string title;
+    std::vector<CanvasSeries> series;
+    std::vector<std::vector<double>> grid;
+
+    bool operator==(const CanvasView&) const = default;
+};
+
 struct ShellExit {
     int code;
 };

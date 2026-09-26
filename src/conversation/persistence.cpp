@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <utility>
@@ -111,6 +112,68 @@ namespace {
         return diff;
     }
 
+    Json::Value canvas_json(CanvasView& canvas)
+    {
+        Json::Value out;
+        out["kind"]  = static_cast<int>(canvas.kind);
+        out["title"] = consume_string(canvas.title);
+        Json::Value series(Json::arrayValue);
+        for (auto& entry : canvas.series) {
+            Json::Value value;
+            value["label"] = consume_string(entry.label);
+            Json::Value values(Json::arrayValue);
+            for (double number : entry.values) {
+                values.append(number);
+            }
+            value["values"] = std::move(values);
+            series.append(std::move(value));
+        }
+        out["series"] = std::move(series);
+        Json::Value grid(Json::arrayValue);
+        for (auto& row : canvas.grid) {
+            Json::Value values(Json::arrayValue);
+            for (double number : row) {
+                values.append(number);
+            }
+            grid.append(std::move(values));
+        }
+        out["grid"] = std::move(grid);
+        return out;
+    }
+
+    std::optional<CanvasView> parse_canvas(const Json::Value& value)
+    {
+        const int kind = value.get("kind", -1).asInt();
+        // Unknown kinds cannot render; skip them so older or foreign
+        // sessions still load.
+        if (kind < 0 || kind > static_cast<int>(CanvasView::Kind::SURFACE)) {
+            return std::nullopt;
+        }
+        CanvasView canvas;
+        canvas.kind  = static_cast<CanvasView::Kind>(kind);
+        canvas.title = value.get("title", "").asString();
+        for (const Json::Value& entry : value["series"]) {
+            CanvasSeries series;
+            series.label = entry.get("label", "").asString();
+            for (const Json::Value& number : entry["values"]) {
+                if (number.isNumeric()) {
+                    series.values.push_back(number.asDouble());
+                }
+            }
+            canvas.series.push_back(std::move(series));
+        }
+        for (const Json::Value& row : value["grid"]) {
+            std::vector<double> values;
+            for (const Json::Value& number : row) {
+                if (number.isNumeric()) {
+                    values.push_back(number.asDouble());
+                }
+            }
+            canvas.grid.push_back(std::move(values));
+        }
+        return canvas;
+    }
+
     Json::Value item_json(ConversationItem& item)
     {
         Json::Value out;
@@ -174,6 +237,13 @@ namespace {
                         diffs.append(diff_json(diff));
                     }
                     out["diffs"] = std::move(diffs);
+                }
+                if (!tool->result->canvases.empty()) {
+                    Json::Value canvases(Json::arrayValue);
+                    for (auto& canvas : tool->result->canvases) {
+                        canvases.append(canvas_json(canvas));
+                    }
+                    out["canvases"] = std::move(canvases);
                 }
                 if (tool->result->shell_status) {
                     std::visit(
@@ -305,6 +375,14 @@ namespace {
                     if (value["diffs"].isArray()) {
                         for (const Json::Value& entry : value["diffs"]) {
                             tool.result->diffs.push_back(parse_diff(entry));
+                        }
+                    }
+                    if (value["canvases"].isArray()) {
+                        for (const Json::Value& entry : value["canvases"]) {
+                            if (auto canvas = parse_canvas(entry)) {
+                                tool.result->canvases.push_back(
+                                    std::move(*canvas));
+                            }
                         }
                     }
                     if (value.isMember("shell_exit")) {

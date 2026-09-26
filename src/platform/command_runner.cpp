@@ -8,8 +8,8 @@
 #include <thread>
 
 #ifdef _WIN32
-#include <cstdint>
 #include <windows.h>
+#include <cstdint>
 /* Do not change the order. Windows API is cursed */
 #include <shellapi.h>
 #else

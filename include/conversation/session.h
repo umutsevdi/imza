@@ -52,6 +52,7 @@ struct ToolCall {
         std::string text;
         std::optional<Json::Value> return_value;
         std::vector<DiffView> diffs;
+        std::vector<CanvasView> canvases;
         std::optional<ShellStatus> shell_status;
         std::vector<LuaBindingCall> dispatch_log;
     };

@@ -169,15 +169,15 @@ std::string format_session_list(const std::vector<SavedSession>& sessions)
     }
 
     std::string output;
-    const auto append_row
-        = [&](const std::string& id, const std::string& saved, std::string_view title) {
-              output += id;
-              output.append(id_width - id.size() + 2, ' ');
-              output += saved;
-              output.append(saved_width - saved.size() + 2, ' ');
-              output += title;
-              output += '\n';
-          };
+    const auto append_row = [&](const std::string& id, const std::string& saved,
+                                std::string_view title) {
+        output += id;
+        output.append(id_width - id.size() + 2, ' ');
+        output += saved;
+        output.append(saved_width - saved.size() + 2, ' ');
+        output += title;
+        output += '\n';
+    };
     append_row(std::string(id_header), std::string(saved_header), "TITLE");
     for (const SavedSession& session : sessions) {
         const std::string saved

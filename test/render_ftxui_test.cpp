@@ -311,3 +311,87 @@ TEST_CASE("model picker rows display advertised capability tags")
     CHECK(untagged.find("pdf") == std::string::npos);
     CHECK(untagged.find("·") == std::string::npos);
 }
+
+namespace {
+
+// Braille patterns U+2800..U+28FF are UTF-8 E2 A0..A3 80..BF.
+bool has_braille(const std::string& text)
+{
+    for (std::size_t i = 0; i + 2 < text.size(); ++i) {
+        if (static_cast<unsigned char>(text[i]) == 0xE2
+            && static_cast<unsigned char>(text[i + 1]) >= 0xA0
+            && static_cast<unsigned char>(text[i + 1]) <= 0xA3) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Block elements U+2580..U+259F are UTF-8 E2 96 80..9F.
+bool has_block(const std::string& text)
+{
+    for (std::size_t i = 0; i + 2 < text.size(); ++i) {
+        if (static_cast<unsigned char>(text[i]) == 0xE2
+            && static_cast<unsigned char>(text[i + 1]) == 0x96
+            && static_cast<unsigned char>(text[i + 2]) >= 0x80
+            && static_cast<unsigned char>(text[i + 2]) <= 0x9F) {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
+
+TEST_CASE("canvas line chart renders title, legend, and braille plot")
+{
+    imza::CanvasView line;
+    line.kind   = imza::CanvasView::Kind::LINE;
+    line.title  = "Traffic";
+    line.series = { { "in", { 1.0, 5.0, 3.0 } }, { "out", { 2.0, 1.0, 4.0 } } };
+    const std::string drawn
+        = without_ansi(to_text(imza::canvas_chart(line, 60), 60, 30));
+    CHECK(drawn.find("Traffic") != std::string::npos);
+    CHECK(drawn.find("● in") != std::string::npos);
+    CHECK(drawn.find("● out") != std::string::npos);
+    CHECK(has_braille(drawn));
+}
+
+TEST_CASE("canvas bar chart renders category labels and blocks")
+{
+    imza::CanvasView bar;
+    bar.kind   = imza::CanvasView::Kind::BAR;
+    bar.title  = "Sales";
+    bar.series = { { "mon", { 3.0 } }, { "tue", { 5.0 } }, { "wed", { 4.0 } } };
+    const std::string drawn
+        = without_ansi(to_text(imza::canvas_chart(bar, 60), 60, 30));
+    CHECK(drawn.find("Sales") != std::string::npos);
+    CHECK(drawn.find("mon") != std::string::npos);
+    CHECK(drawn.find("tue") != std::string::npos);
+    CHECK(drawn.find("wed") != std::string::npos);
+    CHECK(has_block(drawn));
+}
+
+TEST_CASE("canvas pie chart renders a legend for every slice")
+{
+    imza::CanvasView pie;
+    pie.kind   = imza::CanvasView::Kind::PIE;
+    pie.series = { { "red", { 3.0 } }, { "green", { 1.0 } } };
+    const std::string drawn
+        = without_ansi(to_text(imza::canvas_chart(pie, 40), 60, 40));
+    CHECK(drawn.find("● red") != std::string::npos);
+    CHECK(drawn.find("● green") != std::string::npos);
+    CHECK(has_braille(drawn));
+}
+
+TEST_CASE("canvas surface chart renders a wireframe")
+{
+    imza::CanvasView surface;
+    surface.kind  = imza::CanvasView::Kind::SURFACE;
+    surface.title = "Wave";
+    surface.grid  = { { 0, 1, 0 }, { 1, 5, 1 }, { 0, 1, 0 } };
+    const std::string drawn
+        = without_ansi(to_text(imza::canvas_chart(surface, 60), 60, 40));
+    CHECK(drawn.find("Wave") != std::string::npos);
+    CHECK(has_braille(drawn));
+}

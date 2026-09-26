@@ -388,6 +388,49 @@ TEST_CASE("lua aggregate diffs survive session persistence")
 #endif
 }
 
+TEST_CASE("canvas charts survive session persistence")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    imza::Session source;
+    source.begin_send("run lua");
+    source.append_assistant("model", "off");
+    const imza::ToolCallRequest request { "lua", "{}", "", "call-1" };
+    source.append_tool(request);
+    imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT, "" };
+    imza::CanvasView pie;
+    pie.kind   = imza::CanvasView::Kind::PIE;
+    pie.title  = "Share";
+    pie.series = { { "a", { 1.0 } }, { "b", { 2.5 } } };
+    imza::CanvasView surface;
+    surface.kind = imza::CanvasView::Kind::SURFACE;
+    surface.grid = { { 1, 2 }, { 3, 4 } };
+    result.canvases.push_back(std::move(pie));
+    result.canvases.push_back(std::move(surface));
+    source.fill_tool_result(request, std::move(result));
+    source.finish_session("");
+
+    REQUIRE(imza::save_session(source) == imza::Status::OK);
+    const auto saved = imza::saved_sessions();
+    REQUIRE(saved.size() == 1);
+    imza::Session loaded;
+    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
+    REQUIRE(call.result.has_value());
+    REQUIRE(call.result->canvases.size() == 2);
+    CHECK(call.result->canvases[0].kind == imza::CanvasView::Kind::PIE);
+    CHECK(call.result->canvases[0].title == "Share");
+    REQUIRE(call.result->canvases[0].series.size() == 2);
+    CHECK(call.result->canvases[0].series[1].label == "b");
+    CHECK(call.result->canvases[0].series[1].values[0] == doctest::Approx(2.5));
+    CHECK(call.result->canvases[1].kind == imza::CanvasView::Kind::SURFACE);
+    REQUIRE(call.result->canvases[1].grid.size() == 2);
+    CHECK(call.result->canvases[1].grid[1][0] == doctest::Approx(3.0));
+#endif
+}
+
 TEST_CASE("lua aggregate diffs round-trip SKIP and clamp unknown kinds")
 {
 #ifdef _WIN32

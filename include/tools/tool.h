@@ -27,6 +27,8 @@ struct ToolOutput {
     // Net per-file diffs a lua script produced through imza.fs.*;
     // multiple mutations of one file collapse into a single before/after.
     std::vector<DiffView> diffs { };
+    // Charts the canvas module rendered for the chat.
+    std::vector<CanvasView> canvases { };
     std::vector<LuaBindingCall> dispatch_log { };
     bool blocked_permission = false;
 };

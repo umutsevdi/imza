@@ -231,6 +231,10 @@ ToolReport make_tool_report(const ToolCall& call)
         report.sections.push_back(
             ToolReportDiff { index, &call.result->diffs[index] });
     }
+    for (std::size_t index = 0; index < call.result->canvases.size(); ++index) {
+        report.sections.push_back(
+            ToolReportCanvas { index, &call.result->canvases[index] });
+    }
     return report;
 }
 
@@ -260,6 +264,11 @@ std::string tool_report_markdown(const ToolReport& report)
                 + "\n";
         } else if (const auto* md = std::get_if<ToolReportMarkdown>(&section)) {
             out += md->content + "\n";
+        } else if (const auto* chart = std::get_if<ToolReportCanvas>(&section);
+            chart != nullptr && chart->view != nullptr) {
+            // The markdown viewer cannot draw; name the chart so the
+            // report still accounts for it.
+            out += "Chart: " + chart->view->title + "\n";
         }
     }
     return out;

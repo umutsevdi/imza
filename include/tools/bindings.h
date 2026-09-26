@@ -40,6 +40,7 @@ struct LuaRunContext {
     bool truncated = false;
     std::vector<LuaBindingCall> log;
     std::vector<FileMutation> mutations;
+    std::vector<CanvasView> canvases;
     // Borrowed; set by the driver before any binding can run, so
     // binding code never null-checks it.
     const LuaHost* host = nullptr;
@@ -105,10 +106,12 @@ std::span<const LuaMethod> core_lua_methods();
 std::span<const LuaMethod> fs_lua_methods();
 std::span<const LuaMethod> web_lua_methods();
 std::span<const LuaMethod> tree_lua_methods();
+std::span<const LuaMethod> canvas_lua_methods();
 
 void register_core(LuaState& state);
 void register_fs(LuaState& state);
 void register_web(LuaState& state);
 void register_tree(LuaState& state);
+void register_canvas(LuaState& state);
 
 } // namespace imza

@@ -4,16 +4,20 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <format>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/event.hpp>
+#include <ftxui/dom/canvas.hpp>
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/screen.hpp>
 #include <ftxui/screen/string.hpp>
 #include <functional>
 #include <iterator>
 #include <memory>
+#include <numbers>
 #include <optional>
 #include <string>
 #include <utility>
@@ -671,6 +675,303 @@ Element diffstat_chip(std::size_t additions, std::size_t deletions)
         text(" "),
         text("−" + std::to_string(deletions)) | color(HL_RED),
     });
+}
+
+namespace {
+
+    // One terminal cell spans 2x4 canvas pixels.
+    constexpr int CELL_X         = 2;
+    constexpr int CELL_Y         = 4;
+    constexpr int CHART_HEIGHT   = 64;
+    constexpr int SURFACE_HEIGHT = 72;
+    constexpr int AXIS_MARGIN    = 26;
+    constexpr int PLOT_TOP       = 4;
+    // Charts render at one fixed size; wide terminals must not stretch
+    // them, so the width only shrinks below this when the chat column
+    // is narrower.
+    constexpr int FIXED_WIDTH_PX = 144;
+
+    const Color& series_color(std::size_t index)
+    {
+        static const Color colors[]
+            = { HL_BLUE, HL_GREEN, HL_YELLOW, HL_MAGENTA, HL_CYAN, HL_RED };
+        return colors[index % 6];
+    }
+
+    int canvas_width(int available_width)
+    {
+        return std::min(FIXED_WIDTH_PX,
+            std::max(40, (std::max(available_width, 20) - 2) * CELL_X));
+    }
+
+    std::string axis_label(double value)
+    {
+        char buffer[32];
+        std::snprintf(buffer, sizeof(buffer), "%.4g", value);
+        return buffer;
+    }
+
+    double category_value(const CanvasSeries& point)
+    {
+        return point.values.empty() ? 0.0 : point.values.front();
+    }
+
+    Element legend(const std::vector<std::pair<std::string, Color>>& items)
+    {
+        Elements rows;
+        for (const auto& [label, tone] : items) {
+            rows.push_back(
+                hbox({ text("●") | color(tone), text(" " + label) }));
+        }
+        return vbox(std::move(rows));
+    }
+
+    void line_bounds(const CanvasView& view, double& vmin, double& vmax)
+    {
+        bool first = true;
+        for (const CanvasSeries& series : view.series) {
+            for (const double value : series.values) {
+                if (first || value < vmin) {
+                    vmin = value;
+                }
+                if (first || value > vmax) {
+                    vmax = value;
+                }
+                first = false;
+            }
+        }
+        if (vmin == vmax) {
+            vmin -= 1;
+            vmax += 1;
+        }
+    }
+
+    Element render_line(const CanvasView& view, int width_px)
+    {
+        double vmin = 0;
+        double vmax = 0;
+        line_bounds(view, vmin, vmax);
+        Canvas c(width_px, CHART_HEIGHT);
+        const int left   = AXIS_MARGIN;
+        const int right  = width_px - 2;
+        const int bottom = CHART_HEIGHT - 6;
+        c.DrawPointLine(left, PLOT_TOP, left, bottom, PANEL_FG_DIM);
+        c.DrawPointLine(left, bottom, right, bottom, PANEL_FG_DIM);
+        c.DrawText(0, PLOT_TOP, axis_label(vmax), PANEL_FG_DIM);
+        c.DrawText(0, bottom - CELL_Y, axis_label(vmin), PANEL_FG_DIM);
+        for (std::size_t s = 0; s < view.series.size(); ++s) {
+            const std::vector<double>& values = view.series[s].values;
+            const Color tone                  = series_color(s);
+            const auto x                      = [&](std::size_t i) {
+                const std::size_t n = values.size();
+                return n == 1 ? (left + right) / 2
+                              : left + int(i * (right - left) / (n - 1));
+            };
+            const auto y = [&](double value) {
+                const double norm = (value - vmin) / (vmax - vmin);
+                return bottom - int(norm * double(bottom - PLOT_TOP));
+            };
+            for (std::size_t i = 0; i + 1 < values.size(); ++i) {
+                c.DrawPointLine(
+                    x(i), y(values[i]), x(i + 1), y(values[i + 1]), tone);
+            }
+            if (values.size() == 1) {
+                c.DrawPointCircle(x(0), y(values.front()), 2, tone);
+            }
+        }
+        return canvas(std::move(c));
+    }
+
+    Element render_bar(const CanvasView& view, int width_px)
+    {
+        Canvas c(width_px, CHART_HEIGHT);
+        // The value range always includes zero so bars grow from a
+        // baseline at 0.
+        double vmin = 0;
+        double vmax = 0;
+        for (const CanvasSeries& point : view.series) {
+            vmin = std::min(vmin, category_value(point));
+            vmax = std::max(vmax, category_value(point));
+        }
+        if (vmin == vmax) {
+            vmax += 1;
+        }
+        const int left     = AXIS_MARGIN;
+        const int right    = width_px - 2;
+        const int top      = PLOT_TOP;
+        const int bottom   = CHART_HEIGHT - 12;
+        const auto block_y = [&](double value) {
+            const double norm = (value - vmin) / (vmax - vmin);
+            return (bottom - int(norm * double(bottom - top))) & ~1;
+        };
+        c.DrawBlockLine(left, top, left, bottom, PANEL_FG_DIM);
+        c.DrawBlockLine(left, bottom, right, bottom, PANEL_FG_DIM);
+        c.DrawText(0, top, axis_label(vmax), PANEL_FG_DIM);
+        c.DrawText(0, bottom - CELL_Y, axis_label(vmin), PANEL_FG_DIM);
+
+        const int n     = int(view.series.size());
+        const int span  = right - left;
+        const int slot  = std::max(1, span / std::max(1, n));
+        const int gap   = std::min(4, slot / 4);
+        const int x_end = left + n * slot;
+        for (int i = 0; i < n; ++i) {
+            const int x0     = left + i * slot + gap;
+            const int x1     = std::min(x_end - gap, x0 + slot - 2 * gap);
+            const int y0     = block_y(category_value(view.series[i]));
+            const int y1     = block_y(0);
+            const Color tone = series_color(std::size_t(i));
+            for (int x = x0; x <= x1; ++x) {
+                c.DrawBlockLine(x, y0, x, y1, tone);
+            }
+        }
+        // Category labels below the axis, thinned so each drawn label
+        // keeps at least four cells and truncated to its slot.
+        const int fit         = std::max(1, span / (4 * CELL_X));
+        const int step        = std::max(1, (n + fit - 1) / fit);
+        const int label_cells = std::max(2, slot * step / CELL_X - 1);
+        for (int i = 0; i < n; i += step) {
+            c.DrawText((left + i * slot) & ~1, bottom + CELL_Y,
+                view.series[i].label.substr(0, std::size_t(label_cells)),
+                PANEL_FG_DIM);
+        }
+        return canvas(std::move(c));
+    }
+
+    Element render_pie(const CanvasView& view, int width_px)
+    {
+        double total = 0;
+        for (const CanvasSeries& point : view.series) {
+            total += category_value(point);
+        }
+        // Capped so the chart stays compact in the chat timeline.
+        const int radius = std::max(8, std::min(width_px / 2, 56) - 4);
+        Canvas c(width_px, radius * 2 + 8);
+        const double cx = width_px / 2.0;
+        const double cy = radius + 4.0;
+        double angle    = -std::numbers::pi / 2;
+        for (std::size_t i = 0; i < view.series.size(); ++i) {
+            const double span = std::numbers::pi * 2.0
+                * category_value(view.series[i]) / total;
+            const Color tone = series_color(i);
+            const int steps = std::max(2, int(span * 360.0 / std::numbers::pi));
+            for (int s = 0; s <= steps; ++s) {
+                const double a = angle + span * double(s) / double(steps);
+                c.DrawPointLine(int(cx), int(cy),
+                    int(cx + radius * std::cos(a)),
+                    int(cy + radius * std::sin(a)), tone);
+            }
+            angle += span;
+        }
+        return canvas(std::move(c));
+    }
+
+    Element render_surface(const CanvasView& view, int width_px)
+    {
+        const auto& grid = view.grid;
+        if (grid.size() < 2 || grid[0].size() < 2) {
+            return text("");
+        }
+        double zmin = grid[0][0];
+        double zmax = grid[0][0];
+        for (const std::vector<double>& row : grid) {
+            for (const double value : row) {
+                zmin = std::min(zmin, value);
+                zmax = std::max(zmax, value);
+            }
+        }
+        const double zspan = zmax == zmin ? 1.0 : zmax - zmin;
+        // Isometric projection: row/col fold into a diamond, z lifts the
+        // wireframe; then a uniform scale fits it into the plot area.
+        const double rows    = double(grid.size());
+        const double columns = double(grid[0].size());
+        const double lift    = 0.35 * (rows + columns);
+        const auto raw_x     = [&](std::size_t i, std::size_t j) {
+            return double(j) - double(i);
+        };
+        const auto raw_y = [&](std::size_t i, std::size_t j) {
+            const double zn = (grid[i][j] - zmin) / zspan;
+            return (double(i) + double(j)) * 0.5 - zn * lift;
+        };
+        double x0 = raw_x(0, 0);
+        double x1 = x0;
+        double y0 = raw_y(0, 0);
+        double y1 = y0;
+        for (std::size_t i = 0; i < grid.size(); ++i) {
+            for (std::size_t j = 0; j < grid[i].size(); ++j) {
+                x0 = std::min(x0, raw_x(i, j));
+                x1 = std::max(x1, raw_x(i, j));
+                y0 = std::min(y0, raw_y(i, j));
+                y1 = std::max(y1, raw_y(i, j));
+            }
+        }
+        Canvas c(width_px, SURFACE_HEIGHT);
+        const int left     = 2;
+        const int right    = width_px - 2;
+        const int top      = 2;
+        const int bottom   = SURFACE_HEIGHT - 2;
+        const double scale = std::min(
+            double(right - left) / (x1 - x0), double(bottom - top) / (y1 - y0));
+        const auto px = [&](double rx) {
+            return int(double(left + right) / 2 + (rx - (x0 + x1) / 2) * scale);
+        };
+        const auto py = [&](double ry) {
+            return int(double(top + bottom) / 2 + (ry - (y0 + y1) / 2) * scale);
+        };
+        const auto draw = [&](std::size_t i, std::size_t j) {
+            if (j + 1 < grid[i].size()) {
+                c.DrawPointLine(px(raw_x(i, j)), py(raw_y(i, j)),
+                    px(raw_x(i, j + 1)), py(raw_y(i, j + 1)), HL_CYAN);
+            }
+            if (i + 1 < grid.size()) {
+                c.DrawPointLine(px(raw_x(i, j)), py(raw_y(i, j)),
+                    px(raw_x(i + 1, j)), py(raw_y(i + 1, j)), HL_CYAN);
+            }
+        };
+        for (std::size_t i = 0; i < grid.size(); ++i) {
+            for (std::size_t j = 0; j < grid[i].size(); ++j) {
+                draw(i, j);
+            }
+        }
+        return canvas(std::move(c));
+    }
+
+} // namespace
+
+Element canvas_chart(const CanvasView& view, int available_width)
+{
+    const int width_px = canvas_width(available_width);
+    Elements rows;
+    if (!view.title.empty()) {
+        rows.push_back(text(view.title) | bold | color(PANEL_FG));
+    }
+    std::vector<std::pair<std::string, Color>> legend_items;
+    switch (view.kind) {
+    case CanvasView::Kind::LINE:
+        rows.push_back(render_line(view, width_px));
+        for (std::size_t s = 0; s < view.series.size(); ++s) {
+            if (!view.series[s].label.empty()) {
+                legend_items.emplace_back(
+                    view.series[s].label, series_color(s));
+            }
+        }
+        break;
+    case CanvasView::Kind::BAR:
+        rows.push_back(render_bar(view, width_px));
+        break;
+    case CanvasView::Kind::PIE:
+        rows.push_back(render_pie(view, width_px));
+        for (std::size_t s = 0; s < view.series.size(); ++s) {
+            legend_items.emplace_back(view.series[s].label, series_color(s));
+        }
+        break;
+    case CanvasView::Kind::SURFACE:
+        rows.push_back(render_surface(view, width_px));
+        break;
+    }
+    if (!legend_items.empty()) {
+        rows.push_back(legend(legend_items));
+    }
+    return vbox(std::move(rows));
 }
 
 Element diff_split(const DiffView& diff, int available_width)
