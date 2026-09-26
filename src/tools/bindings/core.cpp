@@ -1,6 +1,7 @@
 #include "tools/bindings.h"
 
 #include "common/modal.h"
+#include "common/util.h"
 #include "permissions/shell.h"
 #include "permissions/shell_analysis.h"
 #include "platform/command_runner.h"
@@ -186,14 +187,12 @@ namespace {
     int binding_shell(lua_State* L)
     {
         const std::string command = luaL_checkstring(L, 1);
-        long timeout              = 10;
-        if (lua_gettop(L) >= 2 && !lua_isnil(L, 2)) {
-            timeout = std::clamp<long>(luaL_checkinteger(L, 2), 1, 120);
-        }
+        const long timeout
+            = std::clamp<long>(opt_integer(L, 2).value_or(10), 1, 120);
 
         std::string workspace;
-        if (lua_gettop(L) >= 3 && !lua_isnil(L, 3)) {
-            const std::string raw = luaL_checkstring(L, 3);
+        if (const auto given = opt_string(L, 3)) {
+            const std::string raw = *given;
             if (raw.empty()) {
                 return binding_error(L, "shell: workspace must not be empty");
             }
@@ -250,11 +249,8 @@ namespace {
                 L, "shell: timed out after " + std::to_string(timeout) + "s");
         }
         record_call(L, "shell", command, r.exit_code == 0);
-        std::string output = std::move(r.output);
-        if (output.size() > MAX_OUTPUT_BYTES) {
-            output.resize(MAX_OUTPUT_BYTES);
-            output += "\n[truncated]";
-        }
+        const std::string output
+            = truncate_marked(std::move(r.output), MAX_OUTPUT_BYTES);
         lua_pushlstring(L, output.data(), output.size());
         lua_pushinteger(L, r.exit_code);
         return 2;

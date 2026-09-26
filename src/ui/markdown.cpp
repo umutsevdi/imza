@@ -215,24 +215,12 @@ namespace {
 
         void code_block(std::string_view lit, const char* fence_info)
         {
-            Elements lines;
             const std::string_view type = fence_info == nullptr
                 ? std::string_view { }
                 : std::string_view(fence_info);
             const int content_width     = std::max(20, width_ - 6);
-            if (syntax_type_supported(type)) {
-                for (std::vector<Element>& rows :
-                    highlight_code_wrapped(lit, type, content_width)) {
-                    std::move(
-                        rows.begin(), rows.end(), std::back_inserter(lines));
-                }
-            } else {
-                for (const std::string& segment :
-                    wrap_text(lit, content_width)) {
-                    lines.push_back(ftxui::text(segment) | color(PANEL_FG_DIM)
-                        | bgcolor(PANEL_COLOR));
-                }
-            }
+            Elements lines
+                = highlighted_rows(lit, type, content_width, PANEL_FG_DIM);
             if (lines.empty()) {
                 lines.push_back(ftxui::text(""));
             }

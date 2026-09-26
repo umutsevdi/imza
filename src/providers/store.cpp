@@ -12,17 +12,6 @@ namespace imza {
 
 namespace {
 
-    const Connection* find_connection(
-        const std::vector<Connection>& providers, std::string_view key)
-    {
-        for (const Connection& connection : providers) {
-            if (connection_key(connection) == key) {
-                return &connection;
-            }
-        }
-        return nullptr;
-    }
-
     ApiStandard default_dialect(
         const Connection& connection, const Catalog& catalog)
     {

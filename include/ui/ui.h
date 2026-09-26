@@ -3,10 +3,12 @@
 #include <ftxui/component/component_base.hpp>
 #include <ftxui/component/component_options.hpp>
 #include <ftxui/component/event.hpp>
+#include <ftxui/component/mouse.hpp>
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/box.hpp>
 #include <ftxui/screen/color.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -188,6 +190,14 @@ struct ModelPickList {
     const ModelRow* chosen() const;
 };
 
+// The picker's filter input, wired to refill the visible rows; `pick` must
+// outlive the returned component.
+ftxui::Component make_model_pick_filter(ModelPickList& pick);
+// Arrow keys move the picker selection; false for other events.
+bool model_pick_move(ModelPickList& pick, const ftxui::Event& event);
+// Appends one row element per visible model entry.
+void append_model_pick_rows(const ModelPickList& pick, ftxui::Elements& rows);
+
 // Indices of `rows` whose `match` text contains the lowercased, trimmed
 // `filter`. Empty filter selects every row.
 std::vector<std::size_t> filter_visible(const std::string& filter,
@@ -201,6 +211,58 @@ std::string syntax_type_for_path(std::string_view path);
 // One vector of visual-row elements per logical line of `code`.
 std::vector<std::vector<ftxui::Element>> highlight_code_wrapped(
     std::string_view code, std::string_view type, int width);
+// Flattened visual rows of `code`: highlighted when the language is
+// supported, else wrapped text in `fallback_fg`.
+ftxui::Elements highlighted_rows(std::string_view code, std::string_view syntax,
+    int width, ftxui::Color fallback_fg);
+
+// Alt+Enter (both legacy encodings) inserts a newline in multi-line inputs.
+inline bool is_alt_enter(const ftxui::Event& event)
+{
+    return event == ftxui::Event::Special("\x1B\r")
+        || event == ftxui::Event::Special("\x1B\n");
+}
+inline bool is_bracketed_paste_begin(const ftxui::Event& event)
+{
+    return event == ftxui::Event::Special("\x1B[200~");
+}
+inline bool is_bracketed_paste_end(const ftxui::Event& event)
+{
+    return event == ftxui::Event::Special("\x1B[201~");
+}
+inline bool is_sidechat_toggle(const ftxui::Event& event)
+{
+    return event == ftxui::Event::CtrlS;
+}
+// Inserts a newline at `cursor` and advances it.
+inline void insert_newline_at(std::string& text, int& cursor)
+{
+    text.insert(static_cast<std::size_t>(cursor), "\n");
+    ++cursor;
+}
+
+// Wheel and page scroll steps shared by the scrollers; arrows stay
+// component-specific.
+inline constexpr int SCROLL_WHEEL_STEP = 3;
+inline std::optional<int> scroll_step(ftxui::Event& event, int viewport_lines)
+{
+    if (event.is_mouse()) {
+        if (event.mouse().button == ftxui::Mouse::WheelUp) {
+            return -SCROLL_WHEEL_STEP;
+        }
+        if (event.mouse().button == ftxui::Mouse::WheelDown) {
+            return SCROLL_WHEEL_STEP;
+        }
+        return std::nullopt;
+    }
+    if (event == ftxui::Event::PageUp) {
+        return -std::max(1, viewport_lines - 1);
+    }
+    if (event == ftxui::Event::PageDown) {
+        return std::max(1, viewport_lines - 1);
+    }
+    return std::nullopt;
+}
 
 struct ReviewLineHighlights {
     std::vector<ftxui::Element> old_side;
@@ -231,6 +293,12 @@ std::string diff_marker(bool added);
 ftxui::Color diff_background(bool added);
 int diff_side_width(int width);
 int diff_content_width(int width);
+// Text width of one diff side after the gutter; the highlight cache and
+// the row renderer must agree on it.
+inline int review_side_content_width(int side_width)
+{
+    return std::max(1, side_width - 8);
+}
 int review_content_width(const LayoutCtx& ctx);
 ftxui::Element diffstat_chip(std::size_t additions, std::size_t deletions);
 // Draws a canvas module chart as an inline chat element at a fixed

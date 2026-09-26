@@ -101,6 +101,16 @@ GateOutcome authorize_shell(lua_State* L, const ShellRequest& request);
 std::string gate_denied(
     lua_State* L, const std::string& denial, const std::string& path);
 
+// Value when the argument is present and not nil; type errors still raise.
+std::optional<std::string> opt_string(lua_State* L, int index);
+std::optional<lua_Integer> opt_integer(lua_State* L, int index);
+std::optional<bool> opt_boolean(lua_State* L, int index);
+
+// On denial pushes the (nil, err) convention and returns the binding return
+// count to propagate; otherwise fills `target` with the canonical path.
+int authorize_target(lua_State* L, const FilesystemRequest& request,
+    const std::string& path, std::string& target);
+
 // Module catalogs, one file per module under src/tools/bindings/.
 std::span<const LuaMethod> core_lua_methods();
 std::span<const LuaMethod> fs_lua_methods();

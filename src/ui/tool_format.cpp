@@ -246,11 +246,7 @@ std::string tool_report_markdown(const ToolReport& report)
         if (code == nullptr) {
             continue;
         }
-        std::size_t run = 0;
-        for (const char c : code->content) {
-            run   = c == '`' ? run + 1 : 0;
-            fence = std::max(fence, run + 1);
-        }
+        fence = fenced_width(code->content, fence);
     }
 
     const std::string open(fence, '`');

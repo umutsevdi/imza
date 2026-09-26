@@ -511,12 +511,8 @@ namespace {
         return files;
     }
 
-    // Applies mutate to the freshly-read index under the index lock and
-    // writes the result. Entries whose session file no longer exists are
-    // dropped, so the fast paths keep repairing the index like reconcile
-    // does. Returns false — leaving reconciliation to the caller — when the
-    // lock is unavailable, the stored index is malformed, or the write
-    // fails.
+    // Entries whose session file no longer exists are dropped, so fast
+    // paths keep repairing the index.
     bool mutate_index(
         const std::function<bool(std::vector<SavedSession>&)>& mutate)
     {

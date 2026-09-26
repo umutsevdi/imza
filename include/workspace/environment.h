@@ -29,6 +29,14 @@ struct SystemEnvironment {
     bool has_git { false };
 };
 
+struct InstructionFile {
+    std::string path;
+    std::string content;
+};
+
+std::optional<InstructionFile> load_agent_file(
+    const std::filesystem::path& root);
+
 struct WorkspaceEnvironment {
     std::filesystem::path working_directory;
     std::optional<std::filesystem::path> project_root;

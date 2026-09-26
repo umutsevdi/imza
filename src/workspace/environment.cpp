@@ -27,57 +27,14 @@
 namespace imza {
 
 namespace {
-    std::filesystem::path config_dir()
-    {
-#if defined(_WIN32)
-        const char* appdata = std::getenv("APPDATA");
-        return appdata ? appdata : ".";
-#elif defined(__APPLE__)
-        const char* home           = std::getenv("HOME");
-        std::filesystem::path base = home ? home : ".";
-        return base / "Library" / "Application Support";
-#else
-        const char* xdg  = std::getenv("XDG_CONFIG_HOME");
-        const char* home = std::getenv("HOME");
-        std::filesystem::path base;
-        if (xdg && *xdg) {
-            base = xdg;
-        } else if (home) {
-            base = home;
-            base /= ".config";
-        } else {
-            base = ".config";
-        }
-        return base;
-#endif
-    }
-
     std::string read_command_output(const std::string& cmd)
     {
-#ifdef _WIN32
-        FILE* pipe = _popen(cmd.c_str(), "r");
-#else
-        FILE* pipe = popen(cmd.c_str(), "r");
-#endif
-        if (pipe == nullptr) {
+        const CommandResult result
+            = run_command(cmd, std::chrono::seconds { 2 });
+        if (!result.spawned || result.timed_out || result.exit_code != 0) {
             return "";
         }
-        std::string out;
-        char buf[512];
-        while (std::fgets(buf, sizeof(buf), pipe) != nullptr) {
-            out += buf;
-        }
-#ifdef _WIN32
-        _pclose(pipe);
-#else
-        pclose(pipe);
-#endif
-        while (!out.empty()
-            && (out.back() == '\n' || out.back() == '\r'
-                || out.back() == ' ')) {
-            out.pop_back();
-        }
-        return out;
+        return std::string(trim(result.output));
     }
 
     bool find_in_path(const std::string& name)
@@ -212,6 +169,24 @@ namespace {
         = { ".opencode", ".claude", ".codex", ".grok", ".gemini", ".agents",
               ".cursor", ".openclaw" };
 
+    std::filesystem::path agent_config_base_dir()
+    {
+#ifdef _WIN32
+        const char* appdata = std::getenv("APPDATA");
+        return std::filesystem::path(appdata && *appdata ? appdata : ".");
+#else
+        const char* xdg = std::getenv("XDG_CONFIG_HOME");
+        if (xdg && *xdg) {
+            return std::filesystem::path(xdg);
+        }
+        const char* home = std::getenv("HOME");
+        if (home && *home) {
+            return std::filesystem::path(home) / ".config";
+        }
+        return std::filesystem::path(".config");
+#endif
+    }
+
     void detect_global_skills(
         std::unordered_map<std::string, Skill>& global_skills)
     {
@@ -220,7 +195,7 @@ namespace {
             auto p = home / skill_path / "skills";
             add_skills(p, Skill::Scope::GLOBAL, std::nullopt, global_skills);
         }
-        auto skills_generic_cfg = config_dir() / "agents" / "skills";
+        auto skills_generic_cfg = agent_config_base_dir() / "agents" / "skills";
         add_skills(skills_generic_cfg, Skill::Scope::GLOBAL, std::nullopt,
             global_skills);
     }
@@ -270,10 +245,7 @@ std::optional<InstructionFile> load_agent_file(
         if (!content || content->empty()) {
             continue;
         }
-        if (content->size() > max_bytes) {
-            content->resize(max_bytes);
-            *content += "\n[truncated]";
-        }
+        *content = truncate_marked(std::move(*content), max_bytes);
         return InstructionFile { name, std::move(*content) };
     }
     return std::nullopt;
@@ -398,24 +370,17 @@ Environment::Environment()
                     std::chrono::seconds { 1 });
                 const CommandResult branch = run_command(
                     "git branch --show-current", std::chrono::seconds { 1 });
-                CommandResult diff
-                    = run_command("git diff --no-ext-diff --no-color --numstat "
-                                  "--patch HEAD --",
-                        std::chrono::seconds { 10 });
-                if (diff.spawned && !diff.timed_out && diff.exit_code != 0) {
-                    diff = run_command("git diff --cached --no-ext-diff "
-                                       "--no-color --numstat --patch --",
-                        std::chrono::seconds { 10 });
-                }
+                const std::optional<std::string> diff
+                    = git_working_diff(observed_workspace->project_root.value(),
+                        { .renames = true, .numstat = true });
                 if (status.spawned && !status.timed_out && status.exit_code == 0
                     && branch.spawned && !branch.timed_out
-                    && branch.exit_code == 0 && diff.spawned && !diff.timed_out
-                    && diff.exit_code == 0) {
+                    && branch.exit_code == 0 && diff.has_value()) {
                     std::vector<ChangedFile> changed_files
                         = parse_git_status(status.output);
                     const std::string branch_name
                         = normalize_git_branch(branch.output);
-                    ChangeSummary changes = summarize_git_diff(diff.output);
+                    ChangeSummary changes = summarize_git_diff(*diff);
                     summarize_untracked_files(
                         observed_workspace->project_root.value(), changed_files,
                         changes);

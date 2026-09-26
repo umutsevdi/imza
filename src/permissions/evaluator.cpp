@@ -101,12 +101,9 @@ namespace {
             || grants_cover(context.grants, grant)) {
             return accept(std::move(request));
         }
-        const SkillRead read = read_skill(*skill);
-        if (read.kind == SkillRead::Kind::READ_FAILED) {
-            return reject(original, "skill: cannot read instructions");
-        }
-        if (read.kind == SkillRead::Kind::TOO_LARGE) {
-            return reject(original, "skill: instructions exceed 128 KiB");
+        std::string reason;
+        if (!load_skill_checked(*skill, reason)) {
+            return reject(original, "skill: " + reason);
         }
         if (skill_policy(config, *skill) == SkillPolicy::ALLOW) {
             return accept(std::move(request));

@@ -268,11 +268,8 @@ namespace {
                     _close_editor();
                     return true;
                 }
-                if (event == Event::Special("\x1B\r")
-                    || event == Event::Special("\x1B\n")) {
-                    draft_.insert(
-                        static_cast<std::size_t>(draft_cursor_), "\n");
-                    ++draft_cursor_;
+                if (is_alt_enter(event)) {
+                    insert_newline_at(draft_, draft_cursor_);
                     animation::RequestAnimationFrame();
                     return true;
                 }
@@ -297,10 +294,10 @@ namespace {
             if (event.is_mouse()) {
                 const Mouse& mouse = event.mouse();
                 if (mouse.button == Mouse::WheelUp) {
-                    return _move(-3);
+                    return _move(-SCROLL_WHEEL_STEP);
                 }
                 if (mouse.button == Mouse::WheelDown) {
-                    return _move(3);
+                    return _move(SCROLL_WHEEL_STEP);
                 }
                 if (mouse.button == Mouse::Left
                     && mouse.motion == Mouse::Pressed) {
@@ -369,8 +366,7 @@ namespace {
                 || event == Event::ArrowLeft || event == Event::ArrowRight
                 || event == Event::PageUp || event == Event::PageDown
                 || event == Event::Home || event == Event::End
-                || event == Event::Special("\x1B\r")
-                || event == Event::Special("\x1B\n");
+                || is_alt_enter(event);
         }
 
         void _send_to_plan()
@@ -790,8 +786,8 @@ namespace {
                 marker     = diff_marker(true);
                 background = diff_background(true);
             }
-            const std::vector<std::string> segments
-                = wrap_text(line->content, std::max(1, side_width - 8));
+            const std::vector<std::string> segments = wrap_text(
+                line->content, review_side_content_width(side_width));
             const Elements highlighted
                 = _highlighted_rows(*line, old_side, segments);
             const std::string blank_gutter(8, ' ');

@@ -38,7 +38,6 @@ namespace {
     constexpr std::size_t INLINE_DIFF_ROWS = 25;
 
     constexpr std::size_t INVALID_VERSION = ~std::size_t { 0 };
-    constexpr int WHEEL_STEP              = 3;
     constexpr int DEFAULT_VIEWPORT_LINES  = 24;
     constexpr int TIMELINE_OVERSCAN       = 20;
     constexpr const char* INTERRUPT_HINT  = "Esc interrupt";
@@ -454,16 +453,15 @@ namespace {
 
         bool OnEvent(Event event) override
         {
-            if (event == Event::Special("\x1B[200~")) {
+            if (is_bracketed_paste_begin(event)) {
                 paste_mode_ = true;
                 return true;
             }
-            if (event == Event::Special("\x1B[201~")) {
+            if (is_bracketed_paste_end(event)) {
                 paste_mode_ = false;
                 return true;
             }
-            if (event == Event::Special("\x1B\r")
-                || event == Event::Special("\x1B\n")) {
+            if (is_alt_enter(event)) {
                 insert_newline();
                 return true;
             }
@@ -527,15 +525,10 @@ namespace {
                 }
             }
             if (event.is_mouse()) {
-                const Mouse& m = event.mouse();
-                if (m.button == Mouse::WheelUp) {
+                if (event.mouse().button == Mouse::WheelUp
+                    || event.mouse().button == Mouse::WheelDown) {
                     hover_dirty_ = true;
-                    scroll_lines(-WHEEL_STEP);
-                    return true;
-                }
-                if (m.button == Mouse::WheelDown) {
-                    hover_dirty_ = true;
-                    scroll_lines(WHEEL_STEP);
+                    scroll_lines(*scroll_step(event, viewport_lines()));
                     return true;
                 }
                 return false;
@@ -558,12 +551,9 @@ namespace {
                 scroll_lines(1);
                 return true;
             }
-            if (event == Event::PageUp) {
-                scroll_lines(-std::max(1, viewport_lines() - 1));
-                return true;
-            }
-            if (event == Event::PageDown) {
-                scroll_lines(std::max(1, viewport_lines() - 1));
+            if (const std::optional<int> step
+                = scroll_step(event, viewport_lines())) {
+                scroll_lines(*step);
                 return true;
             }
             if (event == Event::Return) {
@@ -681,8 +671,7 @@ namespace {
 
         void insert_newline()
         {
-            input_buf_.insert(input_cursor_, "\n");
-            input_cursor_ += 1;
+            insert_newline_at(input_buf_, input_cursor_);
             on_input_changed();
         }
 

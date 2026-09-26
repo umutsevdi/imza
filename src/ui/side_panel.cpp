@@ -24,6 +24,11 @@ using namespace ftxui;
 
 namespace {
 
+    Element titled_section(std::string_view title, Element body)
+    {
+        return vbox({ section_title(std::string(title)), std::move(body) });
+    }
+
     Element changed_file_item(const ChangedFile& file);
 
     Element changed_files_panel(Elements rows, const ChangeSummary& changes)
@@ -206,10 +211,8 @@ private:
                         | color(PANEL_FG_DIM) })
                 | xflex);
         }
-        parts.push_back(vbox({
-            section_title("Review Comments"),
-            vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER),
-        }));
+        parts.push_back(titled_section("Review Comments",
+            vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER)));
     }
 
     Component _changed_file_link(const ChangedFile& file)
@@ -331,7 +334,7 @@ Element render_todo(const TodoList& todo, const LayoutCtx&)
     Element body = parts.empty()
         ? dim(text("none"))
         : vbox(std::move(parts)) | borderStyled(ROUNDED, PANEL_BORDER);
-    return vbox({ section_title("Tasks"), std::move(body) });
+    return titled_section("Tasks", std::move(body));
 }
 
 Element render_changed_files(
@@ -381,7 +384,7 @@ Element render_context_box(const std::optional<std::string>& rules,
     if (!context_box.empty()) {
         Element body = vbox(std::move(context_box))
             | borderStyled(ROUNDED, PANEL_BORDER);
-        return vbox({ section_title("Context"), std::move(body) });
+        return titled_section("Context", std::move(body));
     }
     return vbox();
 }
@@ -459,7 +462,7 @@ Element render_permissions_box(const PermissionView& view)
         return vbox();
     }
     Element body = vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER);
-    return vbox({ section_title("Permissions"), std::move(body) });
+    return titled_section("Permissions", std::move(body));
 }
 
 Element render_update_available(std::string version)

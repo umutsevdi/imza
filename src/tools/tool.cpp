@@ -61,11 +61,22 @@ std::optional<std::string> validate_subagent_tool_arguments(
         || arguments["tasks"].empty() || arguments["tasks"].size() > 5) {
         return "subagent: expected one to five tasks";
     }
+    // Keeps the validator in sync with the schema's additionalProperties.
+    for (const std::string& member : arguments.getMemberNames()) {
+        if (member != "tasks") {
+            return "subagent: unknown property '" + member + "'";
+        }
+    }
     for (const Json::Value& value : arguments["tasks"]) {
         if (!value.isObject() || !value["mode"].isString()
             || !value["prompt"].isString()
             || trim(value["prompt"].asString()).empty()) {
             return "subagent: every task requires a mode and prompt";
+        }
+        for (const std::string& member : value.getMemberNames()) {
+            if (member != "mode" && member != "prompt") {
+                return "subagent: unknown task property '" + member + "'";
+            }
         }
         const std::string mode = to_lower(value["mode"].asString());
         if (mode != "research" && mode != "build") {
@@ -111,20 +122,19 @@ Tool make_skill_tool(SkillToolDeps deps)
             if (!skill) {
                 return tool_error("skill: unknown or unavailable skill");
             }
-            const SkillRead read = read_skill(*skill);
-            if (read.kind == SkillRead::Kind::READ_FAILED) {
-                return tool_error("skill: cannot read instructions");
-            }
-            if (read.kind == SkillRead::Kind::TOO_LARGE) {
-                return tool_error("skill: instructions exceed 128 KiB");
+            std::string reason;
+            const std::optional<std::string> body
+                = load_skill_checked(*skill, reason);
+            if (!body) {
+                return tool_error("skill: " + reason);
             }
             if (deps.store) {
                 const std::optional<std::filesystem::path> path
                     = canonical_skill_path(*skill);
                 deps.store().record_tool_load(
-                    path.value_or(skill->path), read.body);
+                    path.value_or(skill->path), *body);
             }
-            return tool_output(read.body);
+            return tool_output(*body);
         } };
 }
 

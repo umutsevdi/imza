@@ -78,14 +78,6 @@ std::optional<std::string> read_changelog()
     return content;
 }
 
-std::string connection_key(const Connection& connection)
-{
-    if (connection.label.empty()) {
-        return connection.id;
-    }
-    return connection.id + "/" + connection.label;
-}
-
 namespace {
 
     std::string string_or_empty(const Json::Value& parent, const char* key)
@@ -250,10 +242,7 @@ Status load_config(
             return fail(Status::CONFIG_ERROR, "'models' must be an object");
         }
         const auto connection_exists = [&](const std::string& id) {
-            return std::any_of(out.providers.begin(), out.providers.end(),
-                [&](const Connection& connection) {
-                    return connection_key(connection) == id;
-                });
+            return find_connection(out.providers, id) != nullptr;
         };
         const Json::Value& main = models["main"];
         if (!main.isNull()) {
@@ -296,9 +285,8 @@ Status load_config(
                 && !connection_exists(config.provider)) {
                 return false;
             }
-            if (!config.variant.empty() && config.variant != "off"
-                && config.variant != "low" && config.variant != "default"
-                && config.variant != "medium" && config.variant != "high") {
+            if (!config.variant.empty()
+                && !std::ranges::contains(REASONING_EFFORTS, config.variant)) {
                 return false;
             }
             out.subagents[role] = std::move(config);

@@ -110,6 +110,37 @@ const ModelRow* ModelPickList::chosen() const
     return &rows[visible[static_cast<std::size_t>(selected)]];
 }
 
+ftxui::Component make_model_pick_filter(ModelPickList& pick)
+{
+    return Input(field_option(
+        &pick.filter, &pick.filter_cursor, "filter models", [&pick] {
+            pick.selected = 0;
+            pick.refill_visible();
+        }));
+}
+
+bool model_pick_move(ModelPickList& pick, const ftxui::Event& event)
+{
+    if (event == ftxui::Event::ArrowDown) {
+        pick.move(1);
+        return true;
+    }
+    if (event == ftxui::Event::ArrowUp) {
+        pick.move(-1);
+        return true;
+    }
+    return false;
+}
+
+void append_model_pick_rows(const ModelPickList& pick, ftxui::Elements& rows)
+{
+    for (int i = 0; i < static_cast<int>(pick.visible.size()); ++i) {
+        const ModelRow& row
+            = pick.rows[pick.visible[static_cast<std::size_t>(i)]];
+        rows.push_back(model_picker_row(row, i == pick.selected));
+    }
+}
+
 std::string compact_number(std::uint64_t n)
 {
     const auto scaled
@@ -367,27 +398,24 @@ namespace {
         return highlighted ? std::move(block) : std::move(block) | dim;
     }
 
-    // Visual rows of `content` wrapped to `width`; highlighting runs on the
-    // full line so tokens keep their color across the wrap.
-    Elements wrapped_content_rows(
-        const std::string& content, const std::string& syntax, int width)
-    {
-        const std::vector<std::string> segments = wrap_text(content, width);
-        Elements highlighted;
-        for (std::vector<Element>& rows :
-            highlight_code_wrapped(content, syntax, width)) {
-            std::move(
-                rows.begin(), rows.end(), std::back_inserter(highlighted));
-        }
-        Elements out;
-        for (std::size_t i = 0; i < segments.size(); ++i) {
-            out.push_back(i < highlighted.size()
-                    ? std::move(highlighted[i])
-                    : text(segments[i]) | color(PANEL_FG));
+} // namespace
+
+Elements highlighted_rows(std::string_view code, std::string_view syntax,
+    int width, Color fallback_fg)
+{
+    Elements out;
+    if (!syntax_type_supported(syntax)) {
+        for (const std::string& segment : wrap_text(code, width)) {
+            out.push_back(text(segment) | color(fallback_fg));
         }
         return out;
     }
-} // namespace
+    for (std::vector<Element>& rows :
+        highlight_code_wrapped(code, syntax, width)) {
+        std::move(rows.begin(), rows.end(), std::back_inserter(out));
+    }
+    return out;
+}
 
 Element code_block(const std::string& code, const std::string& lang, int width)
 {
@@ -398,16 +426,8 @@ Element code_block(const std::string& code, const std::string& lang, int width)
         body.push_back(text(lang) | color(PANEL_FG_DIM));
     }
     const int content_width = std::max(1, width - 4);
-    if (syntax_type_supported(lang)) {
-        for (std::vector<Element>& rows :
-            highlight_code_wrapped(code, lang, content_width)) {
-            std::move(rows.begin(), rows.end(), std::back_inserter(body));
-        }
-    } else {
-        for (const std::string& segment : wrap_text(code, content_width)) {
-            body.push_back(text(segment) | color(fg));
-        }
-    }
+    Elements rows           = highlighted_rows(code, lang, content_width, fg);
+    std::move(rows.begin(), rows.end(), std::back_inserter(body));
     return code_block_frame(std::move(body), bg, syntax_type_supported(lang));
 }
 
@@ -457,14 +477,14 @@ Element code_block_with_lines(const std::string& code, const std::string& lang,
         const std::string blank_gutter(number_size, ' ');
         const std::vector<std::string> segments
             = wrap_text(lines[i], content_width);
-        const std::vector<Element>& highlighted_rows
+        const std::vector<Element>& line_rows
             = i < highlighted.size() ? highlighted[i] : empty_rows;
         for (std::size_t j = 0; j < segments.size(); ++j) {
             body.push_back(hbox({
                 j == 0 ? text(padded) | color(gutter) : text(blank_gutter),
                 text(" "),
-                j < highlighted_rows.size() ? highlighted_rows[j]
-                                            : text(segments[j]) | color(fg),
+                j < line_rows.size() ? line_rows[j]
+                                     : text(segments[j]) | color(fg),
             }));
         }
     }
@@ -1008,32 +1028,32 @@ Element diff_split(const DiffView& diff, int available_width)
                     { text("  " + row.left) | color(PANEL_FG_DIM), filler() }));
                 continue;
             }
-            const auto append = [&](const std::optional<std::size_t>& old_no,
-                                    const std::optional<std::size_t>& new_no,
-                                    std::string marker,
-                                    const std::string& content,
-                                    std::optional<Color> background) {
-                const Elements content_rows
-                    = wrapped_content_rows(content, syntax, content_width);
-                for (std::size_t i = 0; i < content_rows.size(); ++i) {
-                    Elements parts;
-                    if (i == 0) {
-                        parts.push_back(line_number(old_no));
-                        parts.push_back(text(" "));
-                        parts.push_back(line_number(new_no));
-                        parts.push_back(text(" "));
-                        parts.push_back(text(std::move(marker) + " "));
-                    } else {
-                        parts.push_back(text(blank_gutter));
-                    }
-                    parts.push_back(content_rows[i]);
-                    Element line = hbox(std::move(parts));
-                    if (background) {
-                        line = std::move(line) | bgcolor(*background);
-                    }
-                    rows.push_back(std::move(line));
-                }
-            };
+            const auto append
+                = [&](const std::optional<std::size_t>& old_no,
+                      const std::optional<std::size_t>& new_no,
+                      std::string marker, const std::string& content,
+                      std::optional<Color> background) {
+                      const Elements content_rows = highlighted_rows(
+                          content, syntax, content_width, PANEL_FG);
+                      for (std::size_t i = 0; i < content_rows.size(); ++i) {
+                          Elements parts;
+                          if (i == 0) {
+                              parts.push_back(line_number(old_no));
+                              parts.push_back(text(" "));
+                              parts.push_back(line_number(new_no));
+                              parts.push_back(text(" "));
+                              parts.push_back(text(std::move(marker) + " "));
+                          } else {
+                              parts.push_back(text(blank_gutter));
+                          }
+                          parts.push_back(content_rows[i]);
+                          Element line = hbox(std::move(parts));
+                          if (background) {
+                              line = std::move(line) | bgcolor(*background);
+                          }
+                          rows.push_back(std::move(line));
+                      }
+                  };
             if (diff_row_left_changed(row)) {
                 append(row.left_no, std::nullopt, diff_marker(false), row.left,
                     diff_background(false));
@@ -1057,7 +1077,7 @@ Element diff_split(const DiffView& diff, int available_width)
                           std::string marker, const std::string& content,
                           std::optional<Color> background) {
         const Elements content_rows
-            = wrapped_content_rows(content, syntax, side_content_width);
+            = highlighted_rows(content, syntax, side_content_width, PANEL_FG);
         Elements visual;
         for (std::size_t i = 0; i < content_rows.size(); ++i) {
             Elements parts;

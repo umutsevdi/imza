@@ -70,13 +70,11 @@ namespace {
                     Json::Value block;
                     if (media.type == Attachment::Type::IMAGE) {
                         block["type"]      = "input_image";
-                        block["image_url"] = "data:" + media.media_type
-                            + ";base64," + base64_encode(media.content);
+                        block["image_url"] = media_data_url(media);
                     } else {
                         block["type"]      = "input_file";
                         block["filename"]  = media.path;
-                        block["file_data"] = "data:" + media.media_type
-                            + ";base64," + base64_encode(media.content);
+                        block["file_data"] = media_data_url(media);
                     }
                     content.append(std::move(block));
                 }

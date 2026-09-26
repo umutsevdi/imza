@@ -683,16 +683,16 @@ void TurnRunner::_run_tool(const PermissionEvaluation& evaluation,
     if (out.blocked_permission) {
         _blocked_permission.store(true);
     }
-    const auto kind          = out.kind == ToolOutput::Kind::OUTPUT
+    const auto kind = out.kind == ToolOutput::Kind::OUTPUT
         ? ToolCall::Result::Kind::OUTPUT
         : ToolCall::Result::Kind::ERROR;
-    std::string history_text = format_lua_result(out.text, out.return_value);
-    _post([this, req, kind, out = std::move(out)]() mutable {
-        ToolCall::Result result { kind, std::move(out.text) };
-        result.return_value = std::move(out.return_value);
-        result.diffs        = std::move(out.diffs);
-        result.canvases     = std::move(out.canvases);
-        result.dispatch_log = std::move(out.dispatch_log);
+    ToolCall::Result result { kind, std::move(out.text) };
+    result.return_value            = std::move(out.return_value);
+    result.diffs                   = std::move(out.diffs);
+    result.canvases                = std::move(out.canvases);
+    result.dispatch_log            = std::move(out.dispatch_log);
+    const std::string history_text = tool_result_text(result);
+    _post([this, req, result = std::move(result)]() mutable {
         _state->session->fill_tool_result(req, std::move(result));
     });
     tool_msgs.push_back(

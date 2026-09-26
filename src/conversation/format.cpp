@@ -26,20 +26,24 @@ std::string shell_status_text(const ShellStatus& status)
         status);
 }
 
-std::string append_shell_status(
-    std::string text, const std::optional<ShellStatus>& status)
-{
-    if (status.has_value()) {
-        const std::string status_text = shell_status_text(*status);
-        if (!status_text.empty()) {
-            if (!text.empty() && text.back() != '\n') {
-                text += '\n';
+namespace {
+
+    std::string append_shell_status(
+        std::string text, const std::optional<ShellStatus>& status)
+    {
+        if (status.has_value()) {
+            const std::string status_text = shell_status_text(*status);
+            if (!status_text.empty()) {
+                if (!text.empty() && text.back() != '\n') {
+                    text += '\n';
+                }
+                text += "[" + status_text + "]";
             }
-            text += "[" + status_text + "]";
         }
+        return text;
     }
-    return text;
-}
+
+} // namespace
 
 std::string denial_text(const std::string& reason)
 {
@@ -204,26 +208,14 @@ std::string format_lua_result(
         text += '\n';
     }
     if (render == LuaReturnKind::JSON) {
-        std::size_t fence = 3;
-        std::size_t run   = 0;
-        for (const char c : body) {
-            run   = c == '`' ? run + 1 : 0;
-            fence = std::max(fence, run + 1);
-        }
-        const std::string open(fence, '`');
+        const std::string open = code_fence(body);
         text += open + "json\n" + body + "\n" + open;
         return text;
     }
     if (render == LuaReturnKind::SCALAR) {
         if (return_value->isString()) {
             // Free-form output must not be interpreted as markdown.
-            std::size_t fence = 3;
-            std::size_t run   = 0;
-            for (const char c : body) {
-                run   = c == '`' ? run + 1 : 0;
-                fence = std::max(fence, run + 1);
-            }
-            const std::string open(fence, '`');
+            const std::string open = code_fence(body);
             text += open + "\n" + body + "\n" + open;
             return text;
         }
@@ -238,21 +230,23 @@ std::string format_lua_result(
     return text;
 }
 
-std::string tool_result_text(const ToolCall& call)
+std::string tool_result_text(const ToolCall::Result& result)
 {
-    if (!call.result.has_value()) {
-        return "";
-    }
-    switch (call.result->kind) {
+    switch (result.kind) {
     case ToolCall::Result::Kind::REJECT:
-    case ToolCall::Result::Kind::CANCEL: return denial_text(call.result->text);
+    case ToolCall::Result::Kind::CANCEL: return denial_text(result.text);
     case ToolCall::Result::Kind::OUTPUT:
     case ToolCall::Result::Kind::ERROR:
         return append_shell_status(
-            format_lua_result(call.result->text, call.result->return_value),
-            call.result->shell_status);
+            format_lua_result(result.text, result.return_value),
+            result.shell_status);
     }
     return "";
+}
+
+std::string tool_result_text(const ToolCall& call)
+{
+    return call.result.has_value() ? tool_result_text(*call.result) : "";
 }
 
 std::string question_form_markdown(const QuestionForm& form)

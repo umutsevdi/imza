@@ -30,7 +30,6 @@ namespace {
     constexpr std::size_t MAX_RETURN_DEPTH         = 16;
     constexpr std::size_t MAX_RETURN_NODES         = 10'000;
     constexpr std::size_t MAX_RETURN_TABLE_ENTRIES = 5'000;
-    constexpr std::string_view TRUNCATION_MARKER   = "\n[truncated]";
     // Hook fires every N VM instructions to check the wall-clock deadline;
     // short scripts pay one clock read per interval.
     constexpr int HOOK_INTERVAL = 1000 * 1000;

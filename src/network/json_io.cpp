@@ -1,5 +1,7 @@
 #include "network/json_io.h"
 
+#include "common/util.h"
+
 namespace imza {
 
 std::string write_json(const Json::Value& value)
@@ -7,6 +9,12 @@ std::string write_json(const Json::Value& value)
     Json::StreamWriterBuilder builder;
     builder["indentation"] = "";
     return Json::writeString(builder, value);
+}
+
+std::string media_data_url(const Attachment& media)
+{
+    return "data:" + media.media_type + ";base64,"
+        + base64_encode(media.content);
 }
 
 std::string write_pretty_json(const Json::Value& value)

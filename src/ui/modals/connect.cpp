@@ -116,12 +116,7 @@ namespace {
                 }
                 return true;
             }
-            if (event == Event::ArrowDown) {
-                pick_.move(1);
-                return true;
-            }
-            if (event == Event::ArrowUp) {
-                pick_.move(-1);
+            if (model_pick_move(pick_, event)) {
                 return true;
             }
             if (event == Event::Return) {
@@ -572,8 +567,7 @@ namespace {
                 res.id     = "";
                 return res;
             }
-            const std::string key
-                = res.label.empty() ? res.id : res.id + "/" + res.label;
+            const std::string key = connection_key_for(res.id, res.label);
             for (const auto& view : views()) {
                 if (view.id == key) {
                     row_error_ = "Already connected - use a different label.";
@@ -758,11 +752,7 @@ namespace {
             pick_.selected = 0;
             pick_.refill_visible();
 
-            pick_filter_ = Input(field_option(
-                &pick_.filter, &pick_.filter_cursor, "filter models", [this] {
-                    pick_.selected = 0;
-                    pick_.refill_visible();
-                }));
+            pick_filter_ = make_model_pick_filter(pick_);
 
             container_ = Container::Vertical({ pick_filter_ });
         }
@@ -806,13 +796,7 @@ namespace {
                             : text("no models") | dim);
                 }
             } else {
-                for (int i = 0; i < static_cast<int>(pick_.visible.size());
-                    ++i) {
-                    const ModelRow& row
-                        = pick_
-                              .rows[pick_.visible[static_cast<std::size_t>(i)]];
-                    rows.push_back(model_picker_row(row, i == pick_.selected));
-                }
+                append_model_pick_rows(pick_, rows);
             }
 
             rows.push_back(separatorEmpty());

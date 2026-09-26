@@ -55,6 +55,22 @@ SkillRead read_skill(const Skill& skill)
             + "\n</skill>" };
 }
 
+std::optional<std::string> load_skill_checked(
+    const Skill& skill, std::string& reason)
+{
+    const SkillRead read = read_skill(skill);
+    if (read.kind == SkillRead::Kind::READ_FAILED) {
+        reason = "cannot read instructions";
+        return std::nullopt;
+    }
+    if (read.kind == SkillRead::Kind::TOO_LARGE) {
+        reason = "instructions exceed " + std::to_string(MAX_SKILL_BYTES / 1024)
+            + " KiB";
+        return std::nullopt;
+    }
+    return read.body;
+}
+
 std::optional<std::filesystem::path> canonical_skill_path(const Skill& skill)
 {
     std::error_code error;
@@ -164,18 +180,15 @@ bool SkillStore::load(const Skill& skill, std::string& error)
     if (is_loaded(skill.path)) {
         return true;
     }
-    const SkillRead read = read_skill(skill);
-    if (read.kind == SkillRead::Kind::READ_FAILED) {
-        error = "Failed to read skill: " + skill.name + ".";
-        return false;
-    }
-    if (read.kind == SkillRead::Kind::TOO_LARGE) {
-        error = "Skill instructions exceed 128 KiB: " + skill.name + ".";
+    std::string reason;
+    const std::optional<std::string> body = load_skill_checked(skill, reason);
+    if (!body) {
+        error = "Cannot load skill '" + skill.name + "': " + reason + ".";
         return false;
     }
     std::lock_guard lock(_mutex);
     _loaded.insert(skill.path.string());
-    _contents[skill.path.string()] = read.body;
+    _contents[skill.path.string()] = std::move(*body);
     return true;
 }
 

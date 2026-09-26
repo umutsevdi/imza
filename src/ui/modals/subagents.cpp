@@ -58,11 +58,7 @@ namespace {
         explicit SubagentsView(ProviderStore& providers)
             : provider_store_(providers)
         {
-            pick_filter_ = Input(field_option(
-                &pick_.filter, &pick_.filter_cursor, "filter models", [this] {
-                    pick_.selected = 0;
-                    pick_.refill_visible();
-                }));
+            pick_filter_ = make_model_pick_filter(pick_);
             container_   = Container::Vertical({ pick_filter_ });
         }
 
@@ -171,12 +167,7 @@ namespace {
                 picking_ = false;
                 return true;
             }
-            if (event == Event::ArrowDown) {
-                pick_.move(1);
-                return true;
-            }
-            if (event == Event::ArrowUp) {
-                pick_.move(-1);
+            if (model_pick_move(pick_, event)) {
                 return true;
             }
             if (event == Event::Return) {
@@ -211,11 +202,7 @@ namespace {
             if (pick_.visible.empty()) {
                 rows.push_back(text("no matching models") | dim);
             }
-            for (int i = 0; i < static_cast<int>(pick_.visible.size()); ++i) {
-                const ModelRow& row
-                    = pick_.rows[pick_.visible[static_cast<std::size_t>(i)]];
-                rows.push_back(model_picker_row(row, i == pick_.selected));
-            }
+            append_model_pick_rows(pick_, rows);
             rows.push_back(separatorEmpty());
             rows.push_back(
                 hint_bar("arrows navigate · Enter select · Esc back"));

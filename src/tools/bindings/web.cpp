@@ -76,11 +76,8 @@ namespace {
     int binding_web_search(lua_State* L)
     {
         const std::string query = luaL_checkstring(L, 1);
-        int num_results         = 5;
-        if (lua_gettop(L) >= 2 && !lua_isnil(L, 2)) {
-            num_results = static_cast<int>(luaL_checkinteger(L, 2));
-        }
-        num_results = std::clamp(num_results, 1, 10);
+        const int num_results   = std::clamp<int>(
+            static_cast<int>(opt_integer(L, 2).value_or(5)), 1, 10);
         std::string text;
         const Status st = web_search(query, num_results, text);
         if (st == Status::NETWORK_ERROR) {

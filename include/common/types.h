@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -66,6 +67,9 @@ constexpr RuntimeFlag interactive_runtime_flags()
 
 // Reasoning-effort alias: config displays/stores "default" where the wire
 // API spells it "medium".
+inline constexpr std::array<std::string_view, 5> REASONING_EFFORTS { "off",
+    "low", "default", "medium", "high" };
+
 inline std::string to_config_effort(std::string_view effort)
 {
     return effort == "medium" ? "default" : std::string(effort);

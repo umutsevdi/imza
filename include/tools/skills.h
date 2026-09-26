@@ -23,11 +23,6 @@ namespace imza {
 
 struct Config;
 
-struct InstructionFile {
-    std::string path;
-    std::string content;
-};
-
 struct Skill {
     enum class Scope { GLOBAL, PROJECT };
     std::string name;
@@ -41,9 +36,6 @@ struct SkillCounts {
     std::size_t active = 0;
     std::size_t total  = 0;
 };
-
-std::optional<InstructionFile> load_agent_file(
-    const std::filesystem::path& root);
 
 struct SkillRead {
     enum class Kind { OK, READ_FAILED, TOO_LARGE };
@@ -59,6 +51,9 @@ struct PendingSkillTurn {
 };
 
 SkillRead read_skill(const Skill& skill);
+// nullopt with `reason` set when the read fails or the size limit is hit.
+std::optional<std::string> load_skill_checked(
+    const Skill& skill, std::string& reason);
 std::optional<std::filesystem::path> canonical_skill_path(const Skill& skill);
 
 // The skill's canonical path iff `request` binds exactly that path.

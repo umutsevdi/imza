@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -197,11 +198,8 @@ namespace {
         lua_pushliteral(L, "end_line");
         lua_pushinteger(L, ts_node_end_point(node).row + 1);
         lua_settable(L, -3);
-        std::string body(code.substr(
-            begin, std::min<std::size_t>(end - begin, MAX_NODE_TEXT)));
-        if (end - begin > MAX_NODE_TEXT) {
-            body += "\n[truncated]";
-        }
+        const std::string body
+            = truncate_marked(code.substr(begin, end - begin), MAX_NODE_TEXT);
         lua_pushliteral(L, "text");
         lua_pushlstring(L, body.data(), body.size());
         lua_settable(L, -3);
@@ -232,13 +230,12 @@ namespace {
     std::optional<Parsed> parse_file(lua_State* L, int index)
     {
         const std::string path = luaL_checkstring(L, index);
-        const GateOutcome gate = authorize_filesystem(
-            L, ReadFileRequest { path, 1, std::nullopt });
-        if (!gate) {
-            binding_error(L, gate_denied(L, gate.denial, path));
+        std::string target;
+        if (authorize_target(
+                L, ReadFileRequest { path, 1, std::nullopt }, path, target)
+            != 0) {
             return std::nullopt;
         }
-        const std::string target = filesystem_target(*gate.filesystem).string();
 
         const TSLanguage* language = language_for_path(target);
         if (language == nullptr) {
@@ -324,6 +321,26 @@ namespace {
         return 1;
     }
 
+    // Children are visited whether or not the parent matches: grammars nest
+    // declarations inside translation units, classes, and namespaces.
+    void walk_tree(const Parsed& parsed, std::size_t cap,
+        const std::function<bool(TSNode, int)>& emit)
+    {
+        std::vector<TSNode> stack { ts_tree_root_node(parsed.tree.get()) };
+        int row = 0;
+        while (!stack.empty() && static_cast<std::size_t>(row) < cap) {
+            const TSNode node = stack.back();
+            stack.pop_back();
+            const uint32_t count = ts_node_named_child_count(node);
+            for (uint32_t i = count; i > 0; --i) {
+                stack.push_back(ts_node_named_child(node, i - 1));
+            }
+            if (emit(node, row)) {
+                ++row;
+            }
+        }
+    }
+
     int binding_ts_index(lua_State* L)
     {
         const auto parsed = parse_file(L, 1);
@@ -331,24 +348,14 @@ namespace {
             return 2;
         }
         lua_newtable(L);
-        int row = 0;
-        std::vector<TSNode> stack { ts_tree_root_node(parsed->tree.get()) };
-        while (!stack.empty() && static_cast<std::size_t>(row) < MAX_SYMBOLS) {
-            const TSNode node = stack.back();
-            stack.pop_back();
-            // Children are visited whether or not the parent matches:
-            // grammars nest declarations inside translation units, classes,
-            // and namespaces.
-            const std::string_view kind = ts_node_type(node);
-            if (is_declaration_kind(kind)) {
-                push_symbol(L, node, parsed->code);
-                lua_rawseti(L, -2, ++row);
+        walk_tree(*parsed, MAX_SYMBOLS, [&](TSNode node, int row) {
+            if (!is_declaration_kind(ts_node_type(node))) {
+                return false;
             }
-            const uint32_t count = ts_node_named_child_count(node);
-            for (uint32_t i = count; i > 0; --i) {
-                stack.push_back(ts_node_named_child(node, i - 1));
-            }
-        }
+            push_symbol(L, node, parsed->code);
+            lua_rawseti(L, -2, row + 1);
+            return true;
+        });
         return 1;
     }
 
@@ -373,21 +380,15 @@ namespace {
         }
 
         lua_newtable(L);
-        int row = 0;
-        std::vector<TSNode> stack { ts_tree_root_node(parsed->tree.get()) };
-        while (!stack.empty() && static_cast<std::size_t>(row) < MAX_NODES) {
-            const TSNode node = stack.back();
-            stack.pop_back();
+        walk_tree(*parsed, MAX_NODES, [&](TSNode node, int row) {
             const std::string_view kind = ts_node_type(node);
-            if (exact ? kind == type : glob_match(type, kind)) {
-                push_symbol(L, node, parsed->code);
-                lua_rawseti(L, -2, ++row);
+            if (!(exact ? kind == type : glob_match(type, kind))) {
+                return false;
             }
-            const uint32_t count = ts_node_named_child_count(node);
-            for (uint32_t i = count; i > 0; --i) {
-                stack.push_back(ts_node_named_child(node, i - 1));
-            }
-        }
+            push_symbol(L, node, parsed->code);
+            lua_rawseti(L, -2, row + 1);
+            return true;
+        });
         return 1;
     }
 
@@ -416,22 +417,14 @@ namespace {
         }
 
         lua_newtable(L);
-        int row = 0;
-        std::vector<TSNode> stack { ts_tree_root_node(parsed->tree.get()) };
-        while (!stack.empty()) {
-            const TSNode node = stack.back();
-            stack.pop_back();
-            const uint32_t count = ts_node_named_child_count(node);
-            for (uint32_t i = count; i > 0; --i) {
-                stack.push_back(ts_node_named_child(node, i - 1));
-            }
+        walk_tree(*parsed, MAX_NODES, [&](TSNode node, int row) {
             if (std::string_view(ts_node_type(node)) != "identifier") {
-                continue;
+                return false;
             }
             const uint32_t begin = ts_node_start_byte(node);
             const uint32_t end   = ts_node_end_byte(node);
             if (parsed->code.substr(begin, end - begin) != symbol) {
-                continue;
+                return false;
             }
             lua_newtable(L);
             lua_pushlstring(L, parsed->target.data(), parsed->target.size());
@@ -441,8 +434,9 @@ namespace {
             const std::string_view line = line_at(parsed->code, begin);
             lua_pushlstring(L, line.data(), line.size());
             lua_setfield(L, -2, "text");
-            lua_rawseti(L, -2, ++row);
-        }
+            lua_rawseti(L, -2, row + 1);
+            return true;
+        });
         return 1;
     }
 
@@ -461,26 +455,18 @@ namespace {
         }
 
         lua_newtable(L);
-        int row = 0;
-        std::vector<TSNode> stack { ts_tree_root_node(parsed->tree.get()) };
-        while (!stack.empty() && static_cast<std::size_t>(row) < MAX_NODES) {
-            const TSNode node = stack.back();
-            stack.pop_back();
-            const uint32_t count = ts_node_named_child_count(node);
-            for (uint32_t i = count; i > 0; --i) {
-                stack.push_back(ts_node_named_child(node, i - 1));
-            }
+        walk_tree(*parsed, MAX_NODES, [&](TSNode node, int row) {
             if (std::string_view(ts_node_type(node)) != "identifier") {
-                continue;
+                return false;
             }
             const uint32_t begin = ts_node_start_byte(node);
             const uint32_t end   = ts_node_end_byte(node);
             if (parsed->code.substr(begin, end - begin) != symbol) {
-                continue;
+                return false;
             }
             const std::string_view parent = ts_node_type(ts_node_parent(node));
             if (parent.find("call") == std::string_view::npos) {
-                continue;
+                return false;
             }
             lua_newtable(L);
             lua_pushinteger(L, ts_node_start_point(node).row + 1);
@@ -490,8 +476,9 @@ namespace {
             const std::string_view line = line_at(parsed->code, begin);
             lua_pushlstring(L, line.data(), line.size());
             lua_setfield(L, -2, "text");
-            lua_rawseti(L, -2, ++row);
-        }
+            lua_rawseti(L, -2, row + 1);
+            return true;
+        });
         return 1;
     }
 
@@ -538,7 +525,8 @@ Capped at 500 entries.)desc",
             R"desc((path: string, symbol: string) => { file, line, text }[]
 List every occurrence of `symbol` (an identifier node) in `path`, one row
 per use with the file path, 1-based `line`, and the full source line as
-`text`. Grammar-typed, so comments and strings never match.)desc",
+`text`. Grammar-typed, so comments and strings never match.
+Capped at 500 entries.)desc",
             LuaCapability::NONE,
         },
         {

@@ -272,7 +272,16 @@ namespace {
             if (sidechat_status_.has_modal && sidechat_status_.has_modal()) {
                 return sidechat_->OnEvent(event);
             }
-            if (sidechat_->OnEvent(event)) {
+            // The sidechat receives all events while visible; hidden, only
+            // the toggle shortcut — stale clicks on its last-rendered box
+            // must not reach it.
+            const bool sidechat_visible = state_->sidechat_open
+                && (layout_.kind != LayoutCtx::Kind::NARROW
+                    || sidechat_status_.focused);
+            if (sidechat_visible && sidechat_->OnEvent(event)) {
+                return true;
+            }
+            if (is_sidechat_toggle(event) && sidechat_->OnEvent(event)) {
                 return true;
             }
             if (event == Event::Tab) {

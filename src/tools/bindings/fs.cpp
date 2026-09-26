@@ -31,68 +31,53 @@ namespace {
 
     int binding_read(lua_State* L)
     {
-        const std::string path  = luaL_checkstring(L, 1);
-        const lua_Integer first = lua_gettop(L) >= 2 && !lua_isnil(L, 2)
-            ? luaL_checkinteger(L, 2)
-            : 1;
-        const bool last_given   = lua_gettop(L) >= 3 && !lua_isnil(L, 3);
-        const lua_Integer last  = last_given ? luaL_checkinteger(L, 3) : 0;
-        if (first < 1 || (last_given && last < first)) {
+        const std::string path                 = luaL_checkstring(L, 1);
+        const std::optional<lua_Integer> first = opt_integer(L, 2);
+        const std::optional<lua_Integer> last  = opt_integer(L, 3);
+        const lua_Integer first_line           = first.value_or(1);
+        if (first_line < 1 || (last.has_value() && *last < first_line)) {
             return binding_error(L,
                 "read: line range must be 1-based and last_line >= first_line");
         }
 
-        const ReadFileRequest request { path, static_cast<std::size_t>(first),
-            last_given
-                ? std::optional<std::size_t>(static_cast<std::size_t>(last))
+        const ReadFileRequest request { path,
+            static_cast<std::size_t>(first_line),
+            last.has_value()
+                ? std::optional<std::size_t>(static_cast<std::size_t>(*last))
                 : std::nullopt };
-        const GateOutcome gate = authorize_filesystem(L, request);
-        if (!gate) {
-            return binding_error(L, gate_denied(L, gate.denial, path));
-        }
-        const std::string target = filesystem_target(*gate.filesystem).string();
-
-        std::error_code ec;
-        if (!fs::is_regular_file(fs::path(target), ec)) {
-            return binding_error(L,
-                "read: no such file: " + path + " (looked for " + target + ")");
-        }
-        std::ifstream in(target, std::ios::binary);
-        if (!in) {
-            return binding_error(L, "read: cannot open: " + path);
+        std::string target;
+        if (const int denied = authorize_target(L, request, path, target)) {
+            return denied;
         }
 
-        lua_Integer number = 0;
+        // load_text rejects binary files, so any read range agrees with edit.
+        std::string err;
         std::string content;
-        std::string line;
-        while (std::getline(in, line)) {
-            ++number;
-            if (number >= first && (!last_given || number <= last)) {
-                if (line.find('\0') != std::string::npos) {
-                    return binding_error(L, "read: binary file: " + path);
-                }
-                content += line;
-                content.push_back('\n');
-            }
+        if (!load_text(target, content, err)) {
+            return binding_error(
+                L, "read: " + err + " (requested " + path + ")");
         }
-        if (!in.eof()) {
-            return binding_error(L, "read: cannot read: " + path);
-        }
-        if (number == 0) {
+        const std::vector<std::string> lines = split_lines(content);
+        if (lines.empty()) {
             lua_pushlstring(L, "", 0);
             return 1;
         }
-        if (number < first) {
+        if (static_cast<std::size_t>(first_line) > lines.size()) {
             return binding_error(L,
-                "read: first_line " + std::to_string(first)
-                    + " exceeds file length " + std::to_string(number) + ": "
-                    + path);
+                "read: first_line " + std::to_string(first_line)
+                    + " exceeds file length " + std::to_string(lines.size())
+                    + ": " + path);
         }
-        if (content.size() > MAX_OUTPUT_BYTES) {
-            content.resize(MAX_OUTPUT_BYTES);
-            content += "\n[truncated]";
-        }
-        lua_pushlstring(L, content.data(), content.size());
+        const auto first_row
+            = lines.begin() + static_cast<std::ptrdiff_t>(first_line - 1);
+        const auto last_row = last.has_value() ? lines.begin()
+                + static_cast<std::ptrdiff_t>(std::min<std::size_t>(
+                    static_cast<std::size_t>(*last), lines.size()))
+                                               : lines.end();
+        std::string out
+            = join_lines(std::vector<std::string>(first_row, last_row), true);
+        out = truncate_marked(std::move(out), MAX_OUTPUT_BYTES);
+        lua_pushlstring(L, out.data(), out.size());
         return 1;
     }
 
@@ -176,15 +161,9 @@ namespace {
 
     int binding_list(lua_State* L)
     {
-        const std::string path = lua_gettop(L) >= 1 && !lua_isnil(L, 1)
-            ? luaL_checkstring(L, 1)
-            : ".";
-        int depth              = 1;
-        if (lua_gettop(L) >= 2 && !lua_isnil(L, 2)) {
-            depth = static_cast<int>(luaL_checkinteger(L, 2));
-        }
-        const bool show_hidden
-            = lua_gettop(L) >= 3 && !lua_isnil(L, 3) && lua_toboolean(L, 3);
+        const std::string path = opt_string(L, 1).value_or(".");
+        const int depth = static_cast<int>(opt_integer(L, 2).value_or(1));
+        const bool show_hidden = opt_boolean(L, 3).value_or(false);
         if (depth < 1 || depth > MAX_LIST_DEPTH) {
             return binding_error(L,
                 "list: depth must be between 1 and "
@@ -192,11 +171,10 @@ namespace {
         }
 
         const ListDirectoryRequest request { path, depth, show_hidden };
-        const GateOutcome gate = authorize_filesystem(L, request);
-        if (!gate) {
-            return binding_error(L, gate_denied(L, gate.denial, path));
+        std::string target;
+        if (const int denied = authorize_target(L, request, path, target)) {
+            return denied;
         }
-        const std::string target = filesystem_target(*gate.filesystem).string();
 
         std::error_code ec;
         if (!fs::is_directory(fs::path(target), ec)) {
@@ -369,9 +347,7 @@ namespace {
 
     int binding_grep(lua_State* L)
     {
-        const std::string path    = lua_gettop(L) >= 1 && !lua_isnil(L, 1)
-            ? luaL_checkstring(L, 1)
-            : ".";
+        const std::string path    = opt_string(L, 1).value_or(".");
         const std::string pattern = luaL_checkstring(L, 2);
         if (pattern.empty()) {
             return binding_error(L, "grep: pattern must be a non-empty string");
@@ -388,13 +364,12 @@ namespace {
         }
 
         const FindFilesRequest request { path_from_utf8(path), pattern };
-        const GateOutcome gate = authorize_filesystem(L, request);
-        if (!gate) {
-            return binding_error(L, gate_denied(L, gate.denial, path));
+        std::string target;
+        if (const int denied = authorize_target(L, request, path, target)) {
+            return denied;
         }
-        const fs::path& target = filesystem_target(*gate.filesystem);
 
-        return grep_run(L, expression, target);
+        return grep_run(L, expression, fs::path(target));
     }
 
     // The run's record for `target`, or nullptr when the file has not been
@@ -457,8 +432,8 @@ namespace {
         const std::string path = luaL_checkstring(L, 1);
         const std::string text = luaL_checkstring(L, 2);
         lua_Integer line       = 0;
-        if (lua_gettop(L) >= 3 && !lua_isnil(L, 3)) {
-            line = luaL_checkinteger(L, 3);
+        if (const auto given = opt_integer(L, 3)) {
+            line = *given;
             if (line < 1) {
                 return binding_error(L, "fs.insert: line must be 1-based");
             }
@@ -468,11 +443,10 @@ namespace {
             line > 0
                 ? std::optional<std::size_t>(static_cast<std::size_t>(line))
                 : std::nullopt };
-        const GateOutcome gate = authorize_filesystem(L, request);
-        if (!gate) {
-            return binding_error(L, gate_denied(L, gate.denial, path));
+        std::string target;
+        if (const int denied = authorize_target(L, request, path, target)) {
+            return denied;
         }
-        const std::string target = filesystem_target(*gate.filesystem).string();
 
         std::string err;
         const std::size_t at = static_cast<std::size_t>(line);
@@ -497,8 +471,8 @@ namespace {
         const std::string old   = luaL_checkstring(L, 2);
         const std::string fresh = luaL_checkstring(L, 3);
         lua_Integer count       = 1;
-        if (lua_gettop(L) >= 4 && !lua_isnil(L, 4)) {
-            count = luaL_checkinteger(L, 4);
+        if (const auto given = opt_integer(L, 4)) {
+            count = *given;
             if (count < 0) {
                 return binding_error(L, "fs.edit: count must be 0 or more");
             }
@@ -509,11 +483,10 @@ namespace {
 
         const EditFileRequest request { path, old, fresh,
             static_cast<std::size_t>(count) };
-        const GateOutcome gate = authorize_filesystem(L, request);
-        if (!gate) {
-            return binding_error(L, gate_denied(L, gate.denial, path));
+        std::string target;
+        if (const int denied = authorize_target(L, request, path, target)) {
+            return denied;
         }
-        const std::string target = filesystem_target(*gate.filesystem).string();
 
         std::string err;
         if (!apply_file_mutation(
@@ -534,11 +507,10 @@ namespace {
         const std::string text = luaL_checkstring(L, 2);
 
         const WriteFileRequest request { path, text };
-        const GateOutcome gate = authorize_filesystem(L, request);
-        if (!gate) {
-            return binding_error(L, gate_denied(L, gate.denial, path));
+        std::string target;
+        if (const int denied = authorize_target(L, request, path, target)) {
+            return denied;
         }
-        const std::string target = filesystem_target(*gate.filesystem).string();
 
         std::string err;
         if (!apply_file_mutation(

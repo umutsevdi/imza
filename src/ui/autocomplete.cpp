@@ -12,13 +12,23 @@
 
 namespace imza {
 
-int Autocomplete::count() const
+Autocomplete::Set Autocomplete::active_set() const
 {
     if (!_files.empty()) {
-        return static_cast<int>(_files.size());
+        return Set::FILES;
     }
     if (!_skills.empty()) {
-        return static_cast<int>(_skills.size());
+        return Set::SKILLS;
+    }
+    return Set::COMMANDS;
+}
+
+int Autocomplete::count() const
+{
+    switch (active_set()) {
+    case Set::FILES: return static_cast<int>(_files.size());
+    case Set::SKILLS: return static_cast<int>(_skills.size());
+    case Set::COMMANDS: break;
     }
     return static_cast<int>(_commands.size());
 }
@@ -159,9 +169,10 @@ ftxui::Element Autocomplete::render(const LayoutCtx& ctx) const
         ? ctx.width - LayoutCtx::PANEL_WIDTH
         : ctx.width;
     const int description_width = std::clamp(available_width - 28, 8, 56);
-    const size_t total          = !_files.empty() ? _files.size()
-        : !_skills.empty()                        ? _skills.size()
-                                                  : _commands.size();
+    const Set set               = active_set();
+    const size_t total          = set == Set::FILES ? _files.size()
+        : set == Set::SKILLS                        ? _skills.size()
+                                                    : _commands.size();
     const size_t shown          = std::min(total, max_rows);
     const size_t selected       = static_cast<size_t>(std::max(0, selected_));
     const size_t first
@@ -174,17 +185,17 @@ ftxui::Element Autocomplete::render(const LayoutCtx& ctx) const
     for (size_t row_index = 0; row_index < shown; ++row_index) {
         const size_t i              = first + row_index;
         const bool sel              = static_cast<int>(i) == selected_;
-        const std::string name_text = !_files.empty() ? "@" + _files[i].path
-            : !_skills.empty() ? "$" + _skills[i].name
-                               : std::string(_commands[i]->name);
+        const std::string name_text = set == Set::FILES ? "@" + _files[i].path
+            : set == Set::SKILLS ? "$" + _skills[i].name
+                                 : std::string(_commands[i]->name);
         Element name                = text(name_text);
         if (sel) {
             name = name | bold;
         }
-        const std::string description = !_files.empty()
+        const std::string description = set == Set::FILES
             ? (_files[i].directory ? "directory" : "file")
-            : !_skills.empty() ? _skills[i].description
-                               : std::string(_commands[i]->desc);
+            : set == Set::SKILLS ? _skills[i].description
+                                 : std::string(_commands[i]->desc);
         Element row                   = hbox({
             std::move(name) | xflex,
             text("  "),

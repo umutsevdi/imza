@@ -134,6 +134,41 @@ inline std::string_view truncate_utf8(
     return text.substr(0, cut);
 }
 
+inline constexpr std::string_view TRUNCATION_MARKER = "\n[truncated]";
+
+// Cut at a UTF-8 boundary and mark when over `cap`.
+inline std::string truncate_marked(std::string_view text, std::size_t cap,
+    std::string_view marker = TRUNCATION_MARKER)
+{
+    if (text.size() <= cap) {
+        return std::string(text);
+    }
+    std::string out { truncate_utf8(text, cap) };
+    out += marker;
+    return out;
+}
+
+// RFC 3986 unreserved characters; everything else is percent-encoded.
+inline std::string percent_encode(std::string_view value)
+{
+    constexpr char hex[] = "0123456789ABCDEF";
+    std::string out;
+    out.reserve(value.size());
+    for (const char c : value) {
+        const unsigned char u = static_cast<unsigned char>(c);
+        if ((u >= 'a' && u <= 'z') || (u >= 'A' && u <= 'Z')
+            || (u >= '0' && u <= '9') || u == '-' || u == '.' || u == '_'
+            || u == '~') {
+            out.push_back(static_cast<char>(u));
+        } else {
+            out += '%';
+            out += hex[u >> 4];
+            out += hex[u & 0xF];
+        }
+    }
+    return out;
+}
+
 // Start index of the whitespace-delimited token ending at `cursor`.
 inline std::size_t word_begin(std::string_view text, std::size_t cursor)
 {
