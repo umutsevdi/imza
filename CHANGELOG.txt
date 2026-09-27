@@ -13,6 +13,9 @@ CHANGELOG
 <https://github.com/umutsevdi/imza/releases/tag/v0.4.2>
 
 Changes:
+  - REWORKED: Plan mode
+  Plan mode builds up a document on demand, allowing user and agent to
+simultaneously edit the document. 
   - Added multi-modal input support for image types and PDF files.
   - Added module system.
   - Added Lua canvas charts that render directly in the chat.

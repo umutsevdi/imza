@@ -56,11 +56,6 @@ namespace {
 
 // Plans widget: the newest plan carries the live marker, superseded
 // ones stay dim; each row opens the plan in the viewer modal.
-std::string plan_label(std::size_t index)
-{
-    return index == 0 ? "Initial Plan" : "Revision " + std::to_string(index);
-}
-
 class SidePanel : public ComponentBase {
 public:
     SidePanel(std::shared_ptr<ApplicationState> state, LayoutFn layout,
@@ -261,7 +256,7 @@ private:
     {
         auto payload = std::make_shared<std::string>(content);
         return memoized_link(
-            plan_links_, index, std::make_shared<std::string>(content),
+            plan_links_, index, payload,
             [index, latest](const std::string&) {
                 // Explicit colors are only needed on the latest row: the
                 // link wrapper already paints inactive rows dim-colored,
@@ -269,17 +264,18 @@ private:
                 Element row = hbox({
                     text("●") | color(latest ? HL_GREEN : PANEL_FG_DIM),
                     text(" "),
-                    paragraph(plan_label(index))
+                    paragraph(plan_revision_label(index))
                         | color(latest ? PANEL_FG : PANEL_FG_DIM) | xflex,
                 });
                 return latest ? row : row | dim;
             },
             [this, index, payload] {
-                ViewerModal vm { plan_label(index), *payload, "md", 1 };
+                ViewerModal vm { plan_revision_label(index), *payload, "md",
+                    1 };
                 vm.line_numbers = false;
                 enqueue_user_modal(*state_, vm);
             },
-            [payload](std::string& existing) { existing = *payload; });
+            [content](std::string& existing) { existing = content; });
     }
 
     Component _comment_link(std::size_t id, std::string label)

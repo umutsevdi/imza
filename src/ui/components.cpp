@@ -141,6 +141,12 @@ void append_model_pick_rows(const ModelPickList& pick, ftxui::Elements& rows)
     }
 }
 
+std::string plan_revision_label(std::size_t index)
+{
+    return index == 0 ? std::string("Initial Plan")
+                      : "Revision " + std::to_string(index);
+}
+
 std::string compact_number(std::uint64_t n)
 {
     const auto scaled

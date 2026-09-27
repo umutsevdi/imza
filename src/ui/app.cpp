@@ -153,7 +153,8 @@ namespace {
             status_line_ = make_status_line(state_, layout, workflow);
             chat_hints_.phase_line_fn = [this] {
                 return phase_ == WorkflowPhase::PLAN
-                    ? std::string("Tab next phase · Shift+Tab previous phase")
+                    ? std::string("Tab next phase · Shift+Tab previous "
+                                  "phase · Ctrl+S chat")
                     : std::string(
                           "Tab next phase · Shift+Tab previous phase · Ctrl+S "
                           "Sidechat");
@@ -297,6 +298,11 @@ namespace {
             }
             if (is_sidechat_toggle(event) && phase_ != WorkflowPhase::PLAN
                 && sidechat_->OnEvent(event)) {
+                return true;
+            }
+            // PLAN: the tab swaps doc/chat on Ctrl+S (no sidechat there).
+            if (is_sidechat_toggle(event) && phase_ == WorkflowPhase::PLAN
+                && tabs_content_->OnEvent(event)) {
                 return true;
             }
             if (event == Event::Tab) {

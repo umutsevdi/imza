@@ -109,6 +109,8 @@ std::string elapsed_text(std::chrono::milliseconds elapsed);
 std::string compact_number(std::uint64_t n);
 ftxui::Element hint_bar(std::string hint);
 ftxui::Elements modal_header(std::string title, std::string subtitle = "");
+// Plan document #0 is the "Initial Plan"; later ones are "Revision N".
+std::string plan_revision_label(std::size_t index);
 
 // ◉/○ for single choice, ▣/☐ for multi choice.
 std::string choice_marker(bool multi, bool selected);
@@ -349,6 +351,10 @@ ftxui::Component make_chat(std::shared_ptr<ApplicationState> state,
 
 ftxui::Component make_plan_tab(std::shared_ptr<ApplicationState> state,
     LayoutFn layout, ftxui::Component chat);
+// `focused` is owned by the host tab: true when the pane is the editor,
+// false when it renders the markdown preview.
+ftxui::Component make_plan_doc(std::shared_ptr<ApplicationState> state,
+    LayoutFn layout, const bool* focused);
 ftxui::Component make_review(std::shared_ptr<ApplicationState> state,
     LayoutFn layout, WorkflowNavigateFn navigate);
 ftxui::Component make_side_panel(std::shared_ptr<ApplicationState> state,

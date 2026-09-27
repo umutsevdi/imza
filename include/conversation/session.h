@@ -221,6 +221,8 @@ public:
         Signal<>::Callback callback);
     [[nodiscard]] Signal<>::Subscription subscribe_to_attachments_change(
         Signal<>::Callback callback);
+    [[nodiscard]] Signal<>::Subscription subscribe_to_plan_change(
+        Signal<>::Callback callback);
 
 private:
     AssistantTurn* last_assistant_locked();
@@ -281,6 +283,7 @@ private:
 
     Signal<> title_changed_;
     Signal<> attachments_changed_;
+    Signal<> _plan_changed;
 };
 
 enum class WorkflowPhase { PLAN, BUILD, REVIEW };

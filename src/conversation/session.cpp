@@ -184,6 +184,12 @@ bool Session::has_pending_work() const
         });
 }
 
+Signal<>::Subscription Session::subscribe_to_plan_change(
+    Signal<>::Callback callback)
+{
+    return _plan_changed.subscribe(std::move(callback));
+}
+
 std::string Session::plan_doc() const
 {
     std::lock_guard lock(_mutex);
@@ -540,6 +546,7 @@ std::string Session::create_plan(std::string content)
     ++_plan_version;
     _plan_seen_version = _plan_version;
     _dirty             = true;
+    _plan_changed.publish();
     return "";
 }
 
@@ -564,6 +571,7 @@ std::string Session::edit_plan(
     ++_plan_version;
     _plan_seen_version = _plan_version;
     _dirty             = true;
+    _plan_changed.publish();
     return "";
 }
 

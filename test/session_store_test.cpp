@@ -994,3 +994,17 @@ TEST_CASE("a restored session submits its plan once on the first build turn")
     CHECK(submitted->find("Plan approved for build: <plan>") == 0);
     CHECK_FALSE(loaded.plan_submission_for_build().has_value());
 }
+TEST_CASE("plan changes publish the plan signal")
+{
+    imza::Session session;
+    int published = 0;
+    const auto subscription
+        = session.subscribe_to_plan_change([&published] { ++published; });
+
+    const std::string skeleton
+        = "# Goal\nx\n# Approach\nx\n# Files\nx\n# Verification\nx\n"
+          "# Open Questions\nx";
+    REQUIRE(session.create_plan(skeleton).empty());
+    REQUIRE(session.edit_plan("# Goal\nx", "# Goal\ny", 1).empty());
+    CHECK(published == 2);
+}

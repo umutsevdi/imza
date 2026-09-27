@@ -81,3 +81,28 @@ TEST_CASE("chat hints resolve the phase line provider per render")
     const std::string second = imza::test::to_text(chat->Render(), 100, 40);
     CHECK(second.find("Ctrl+S Sidechat") != std::string::npos);
 }
+TEST_CASE("plan tab is chat-only until a plan exists")
+{
+    auto state = imza::test::make_test_state();
+    state->session->begin_send("plan this");
+
+    auto chat = imza::make_chat(state, [] {
+        return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100, 40 };
+    });
+    auto plan = imza::make_plan_tab(state, [] { return wide_layout(); }, chat);
+    plan->Add(chat);
+
+    // Without a plan: chat only, no doc pane, no empty-state text.
+    const std::string no_plan = imza::test::to_text(plan->Render(), 100, 40);
+    CHECK(no_plan.find("plan this") != std::string::npos);
+    CHECK(no_plan.find("No plan") == std::string::npos);
+
+    REQUIRE(state->session
+            ->create_plan(
+                "# Goal\nx\n# Approach\nx\n# Files\nx\n# Verification\nx\n"
+                "# Open Questions\nx")
+            .empty());
+    const std::string with_plan = imza::test::to_text(plan->Render(), 100, 40);
+    CHECK(with_plan.find("plan this") != std::string::npos);
+    CHECK(with_plan.find("Initial Plan") != std::string::npos);
+}
