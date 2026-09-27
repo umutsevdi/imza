@@ -52,6 +52,21 @@ namespace {
             .set_todo
             = [state](
                   TodoList todo) { state->session->set_todo(std::move(todo)); },
+            .plan_doc = [state] { return state->session->plan_doc(); },
+            .create_plan =
+                [state](std::string content) {
+                    return state->session->create_plan(std::move(content));
+                },
+            .edit_plan =
+                [state](const std::string& old, const std::string& fresh,
+                    std::size_t count) {
+                    return state->session->edit_plan(old, fresh, count);
+                },
+            .mark_plan_seen = [state] { state->session->mark_plan_seen(); },
+            .plan_frozen =
+                [state] {
+                    return state->session->mode() == Session::Mode::BUILD;
+                },
             .install_grants =
                 [state](PermissionStore::Grants grants) {
                     return state->permissions->install(std::move(grants));

@@ -29,6 +29,7 @@ TEST_CASE("binding catalog registers every path as a callable function")
 local paths = {
   "fs.read", "fs.list", "fs.grep",
   "todo.get", "todo.set", "ask",
+  "plan.get", "plan.create", "plan.edit",
   "shell",
   "web.fetch", "web.search",
   "fs.insert", "fs.edit", "fs.write",

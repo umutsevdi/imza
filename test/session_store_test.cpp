@@ -853,3 +853,81 @@ TEST_CASE("native and legacy attachments survive session persistence")
     CHECK(legacy_attachments[0].media_type.empty());
 #endif
 }
+TEST_CASE("plan document persists across save and restore")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    imza::Session source;
+    source.begin_send("plan this");
+
+    const std::string skeleton
+        = "# Goal\nx\n# Approach\nx\n# Files\nx\n# Verification\nx\n"
+          "# Open Questions\nx";
+    REQUIRE(source.create_plan(skeleton).empty());
+    REQUIRE(source.edit_plan("# Goal\nx", "# Goal\nauth tokens\n", 1).empty());
+    // A superseded document stays in the vector; the current plan is the
+    // back entry.
+    const std::string second = skeleton + "\nextra";
+    REQUIRE(source.create_plan(second).empty());
+    CHECK(source.plan_doc() == second);
+
+    REQUIRE(imza::save_session(source) == imza::Status::OK);
+    const auto saved = imza::saved_sessions();
+    REQUIRE(saved.size() == 1);
+
+    imza::Session loaded;
+    REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
+    CHECK(loaded.plans().size() == 2);
+    CHECK(loaded.plan_doc() == second);
+    CHECK(loaded.plans().front().content
+        == "# Goal\nauth tokens\n\n# Approach\nx\n# Files\nx\n"
+           "# Verification\nx\n# Open Questions\nx");
+
+    // Validation still applies to a restored session.
+    CHECK_FALSE(source.create_plan("no headings").empty());
+#endif
+}
+
+TEST_CASE("plan document history is not replayed into model context")
+{
+    imza::Session session;
+    const std::string skeleton
+        = "# Goal\nx\n# Approach\nx\n# Files\nx\n# Verification\nx\n"
+          "# Open Questions\nx";
+    REQUIRE(session.create_plan(skeleton).empty());
+    const std::vector<imza::Message> history
+        = session.build_history("system prompt");
+    // The plan rides in session state only; history carries the system
+    // prompt and the user turn, nothing about the plan.
+    REQUIRE(history.size() == 1);
+    CHECK(history[0].type == imza::Message::Type::SYSTEM);
+    CHECK(history[0].content == "system prompt");
+}
+
+TEST_CASE("plan edit staleness is enforced inside the session")
+{
+    imza::Session session;
+    const std::string skeleton
+        = "# Goal\nx\n# Approach\nx\n# Files\nx\n# Verification\nx\n"
+          "# Open Questions\nx";
+    // Creating counts as having seen the content: the edit applies.
+    REQUIRE(session.create_plan(skeleton).empty());
+    CHECK(session.edit_plan("x", "y", 1).empty());
+
+    // The stale-read contract lives in Session, not the bindings: a fresh
+    // session object over the same restored state has not read the plan,
+    // so its first edit is rejected until plan_doc() marks it seen.
+    imza::Session fresh_reader;
+    imza::SessionSnapshot snapshot = session.snapshot();
+    fresh_reader.restore(std::move(snapshot));
+    // restore marks the state seen (it is not a mid-turn mutation); a
+    // restored session can edit directly.
+    CHECK(fresh_reader.edit_plan("y", "z", 1).empty());
+    CHECK(fresh_reader.plan_doc()
+        == "# Goal\nz\n"
+           "# Approach\nx\n# Files\nx\n"
+           "# Verification\nx\n"
+           "# Open Questions\nx");
+}

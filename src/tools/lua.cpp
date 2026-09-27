@@ -580,4 +580,28 @@ Tool make_lua_tool(LuaState& state, LuaHost host)
         } };
 }
 
+void LuaState::register_module(const LuaModule& module)
+{
+    if (std::ranges::any_of(_modules, [&module](const LuaModule& existing) {
+            return existing.name == module.name;
+        })) {
+        throw std::invalid_argument("LuaState: duplicate module");
+    }
+    _modules.push_back(module);
+}
+
+std::span<const LuaModule> LuaState::modules() const { return _modules; }
+
+std::unique_ptr<LuaState> make_lua_state()
+{
+    auto state = std::make_unique<LuaState>();
+    register_core(*state);
+    register_fs(*state);
+    register_web(*state);
+    register_tree(*state);
+    register_canvas(*state);
+    register_plan(*state);
+    return state;
+}
+
 } // namespace imza

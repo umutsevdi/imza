@@ -298,11 +298,11 @@ add_library(imza_execution
     src/tools/tool.cpp
     src/tools/file_ops.cpp
     src/tools/lua.cpp
-    src/tools/lua_state.cpp
     src/tools/bindings/binding.cpp
     src/tools/bindings/canvas.cpp
     src/tools/bindings/core.cpp
     src/tools/bindings/fs.cpp
+    src/tools/bindings/plan.cpp
     src/tools/bindings/tree.cpp
     src/tools/bindings/web.cpp
     src/turn/delegation.cpp

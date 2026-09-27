@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <mutex>
@@ -83,10 +84,24 @@ struct PersistedSession {
 
 using SessionPersistence = std::variant<UnsavedSession, PersistedSession>;
 
+// A plan document: markdown with a required skeleton (Goal / Approach /
+// Files / Verification / Open Questions). The session holds the sequence
+// of documents created over its lifetime; the current plan is the back.
+struct PlanDoc {
+    std::string content;
+
+    bool operator==(const PlanDoc&) const = default;
+};
+
+// Hard cap on one plan document, applied to both the stored object and
+// any future model-facing rendering of it.
+inline constexpr std::size_t MAX_PLAN_BYTES = 16 * 1024;
+
 struct SessionSnapshot {
     std::string title;
     std::vector<ConversationItem> items;
     TodoList todo;
+    std::vector<PlanDoc> plans;
     std::string compacted_summary;
     std::size_t compacted_item_count = 0;
     bool plan_mode                   = true;
@@ -134,6 +149,8 @@ public:
     std::vector<std::string> attachment_names() const;
     const TodoList& todo() const { return _todo; }
     const std::vector<QueuedMessage>& queued() const { return _queued; }
+    const std::vector<PlanDoc>& plans() const { return _plans; }
+    std::string plan_doc() const;
     std::optional<Countdown> retry_countdown() const;
     Usage last() const;
     std::optional<std::chrono::milliseconds> turn_elapsed() const;
@@ -172,6 +189,10 @@ public:
     void set_tool_subagent_chats(
         const ToolCallRequest& req, std::vector<SubagentChat> chats);
     void set_todo(TodoList todo);
+    std::string create_plan(std::string content);
+    std::string edit_plan(
+        const std::string& old, const std::string& fresh, std::size_t count);
+    void mark_plan_seen();
     void set_modal(ModalPayload payload);
     void clear_modal();
     void bump_modal_serial();
@@ -223,6 +244,12 @@ private:
     bool _title_generation_claimed = false;
 
     TodoList _todo;
+    std::vector<PlanDoc> _plans;
+    // Bumped on every plan mutation; _plan_seen_version is the version the
+    // agent last read. A mismatch rejects imza.plan.edit so the agent
+    // cannot patch content it has not seen.
+    std::size_t _plan_version      = 0;
+    std::size_t _plan_seen_version = 0;
     std::vector<QueuedMessage> _queued;
 
     std::optional<Countdown> _retry_countdown;

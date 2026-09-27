@@ -3,15 +3,91 @@
 #include "common/util.h"
 #include "conversation/format.h"
 #include "providers/pricing.h"
+#include "tools/file_ops.h"
 
 #include <algorithm>
 #include <cassert>
+#include <cctype>
 #include <chrono>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace imza {
+
+namespace {
+
+    constexpr std::string_view PLAN_SKELETON[]
+        = { "goal", "approach", "files", "verification", "open questions" };
+
+    bool plan_heading_matches(std::string_view line, std::string_view name)
+    {
+        std::size_t i = 0;
+        while (i < line.size() && (line[i] == '#' || line[i] == ' ')) {
+            ++i;
+        }
+        if (i >= line.size()) {
+            return false;
+        }
+        const std::size_t begin = i;
+        while (i < line.size() && line[i] != ':' && line[i] != '\n') {
+            ++i;
+        }
+        std::size_t end = i;
+        while (end > begin && line[end - 1] == ' ') {
+            --end;
+        }
+        const std::string_view heading = line.substr(begin, end - begin);
+        if (heading.size() != name.size()) {
+            return false;
+        }
+        return std::equal(
+            heading.begin(), heading.end(), name.begin(), [](char a, char b) {
+                return std::tolower(static_cast<unsigned char>(a))
+                    == static_cast<unsigned char>(b);
+            });
+    }
+
+    std::string plan_validation_error(const std::string& content)
+    {
+        if (content.size() > MAX_PLAN_BYTES) {
+            return "plan exceeds the " + std::to_string(MAX_PLAN_BYTES / 1024)
+                + " KiB cap (" + std::to_string(content.size())
+                + " bytes); split the work into a smaller plan";
+        }
+        std::string missing;
+        for (const std::string_view name : PLAN_SKELETON) {
+            bool found        = false;
+            std::size_t begin = 0;
+            while (begin <= content.size()) {
+                const std::size_t end       = content.find('\n', begin);
+                const std::string_view line = std::string_view(content).substr(
+                    begin,
+                    end == std::string::npos ? std::string::npos : end - begin);
+                if (plan_heading_matches(line, name)) {
+                    found = true;
+                    break;
+                }
+                if (end == std::string::npos) {
+                    break;
+                }
+                begin = end + 1;
+            }
+            if (!found) {
+                if (!missing.empty()) {
+                    missing += ", ";
+                }
+                missing += name;
+            }
+        }
+        if (!missing.empty()) {
+            return "plan is missing required headings: " + missing;
+        }
+        return "";
+    }
+
+} // namespace
 
 ModalPayload Session::modal() const
 {
@@ -108,10 +184,16 @@ bool Session::has_pending_work() const
         });
 }
 
+std::string Session::plan_doc() const
+{
+    std::lock_guard lock(_mutex);
+    return _plans.empty() ? std::string { } : _plans.back().content;
+}
+
 SessionSnapshot Session::build_snapshot() const
 {
-    return { _title, _items, _todo, _compacted_summary, _compacted_item_count,
-        _mode == Mode::PLAN, _persistence };
+    return { _title, _items, _todo, _plans, _compacted_summary,
+        _compacted_item_count, _mode == Mode::PLAN, _persistence };
 }
 
 SessionSnapshot Session::snapshot() const
@@ -136,6 +218,9 @@ void Session::restore(SessionSnapshot snapshot)
         _title                = std::move(snapshot.title);
         _items                = std::move(snapshot.items);
         _todo                 = std::move(snapshot.todo);
+        _plans                = std::move(snapshot.plans);
+        _plan_version         = _plans.size();
+        _plan_seen_version    = _plan_version;
         _compacted_summary    = std::move(snapshot.compacted_summary);
         _compacted_item_count = snapshot.compacted_item_count;
         _persistence          = std::move(snapshot.persistence);
@@ -440,6 +525,52 @@ void Session::set_todo(TodoList todo)
         _dirty = true;
     }
     _todo = std::move(todo);
+}
+
+// Appends a new document; the current plan is the vector back. Both
+// counters move together: the creating agent has seen exactly what it wrote.
+std::string Session::create_plan(std::string content)
+{
+    std::lock_guard lock(_mutex);
+    if (const std::string error = plan_validation_error(content);
+        !error.empty()) {
+        return error;
+    }
+    _plans.push_back(PlanDoc { std::move(content) });
+    ++_plan_version;
+    _plan_seen_version = _plan_version;
+    _dirty             = true;
+    return "";
+}
+
+std::string Session::edit_plan(
+    const std::string& old, const std::string& fresh, std::size_t count)
+{
+    std::lock_guard lock(_mutex);
+    if (_plans.empty()) {
+        return "no plan exists; create one with imza.plan.create";
+    }
+    if (_plan_seen_version != _plan_version) {
+        return "plan has changed since it was last read; call "
+               "imza.plan.get() and retry";
+    }
+    std::string error;
+    std::optional<std::string> patched
+        = replace_text(_plans.back().content, old, fresh, count, error);
+    if (!patched) {
+        return "imza.plan.edit: " + error;
+    }
+    _plans.back().content = std::move(*patched);
+    ++_plan_version;
+    _plan_seen_version = _plan_version;
+    _dirty             = true;
+    return "";
+}
+
+void Session::mark_plan_seen()
+{
+    std::lock_guard lock(_mutex);
+    _plan_seen_version = _plan_version;
 }
 
 void Session::set_modal(ModalPayload payload)

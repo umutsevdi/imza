@@ -627,7 +627,13 @@ Status save_session(Session& session)
     root["title"]              = title;
     root["saved_at"]           = saved_at;
     root["todo"]               = todo_json(snapshot.todo);
-    root["compacted_summary"]  = consume_string(snapshot.compacted_summary);
+    Json::Value plans(Json::arrayValue);
+    for (auto& plan : snapshot.plans) {
+        plans.append(consume_string(plan.content));
+    }
+    root["plans"] = std::move(plans);
+    ;
+    root["compacted_summary"] = consume_string(snapshot.compacted_summary);
     root["compacted_item_count"]
         = static_cast<Json::UInt64>(snapshot.compacted_item_count);
     root["mode"]      = snapshot.plan_mode ? "plan" : "build";
@@ -711,6 +717,11 @@ Status read_session(const std::filesystem::path& path, LoadedSession& loaded)
         snapshot.compacted_item_count
             = root.get("compacted_item_count", 0).asUInt64();
         snapshot.plan_mode = root.get("mode", "plan").asString() != "build";
+        for (const Json::Value& plan : root["plans"]) {
+            if (plan.isString()) {
+                snapshot.plans.push_back(PlanDoc { plan.asString() });
+            }
+        }
         for (const auto& value : root["items"]) {
             if (auto item = parse_item(value)) {
                 snapshot.items.push_back(std::move(*item));

@@ -117,11 +117,13 @@ std::span<const LuaMethod> fs_lua_methods();
 std::span<const LuaMethod> web_lua_methods();
 std::span<const LuaMethod> tree_lua_methods();
 std::span<const LuaMethod> canvas_lua_methods();
+std::span<const LuaMethod> plan_lua_methods();
 
 void register_core(LuaState& state);
 void register_fs(LuaState& state);
 void register_web(LuaState& state);
 void register_tree(LuaState& state);
 void register_canvas(LuaState& state);
+void register_plan(LuaState& state);
 
 } // namespace imza

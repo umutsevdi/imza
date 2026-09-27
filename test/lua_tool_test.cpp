@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "common/util.h"
+#include "conversation/session.h"
 #include "network/json_io.h"
 #include "permissions/store.h"
 #include "test_fs.h"
@@ -528,6 +529,118 @@ TEST_CASE("imza.ask surfaces answers and unattended runs reject")
     const imza::ToolOutput unattended = run_script(
         "local rows, err = imza.ask({{prompt = 'hello?'}})\nprint(err)");
     CHECK(unattended.text.find("unavailable") != std::string::npos);
+}
+
+TEST_CASE("plan bindings validate skeleton and cap through the session")
+{
+    imza::Session session;
+    imza::LuaHost host { };
+    host.plan_doc    = [&] { return session.plan_doc(); };
+    host.create_plan = [&](std::string content) {
+        return session.create_plan(std::move(content));
+    };
+    host.edit_plan = [&](const std::string& old, const std::string& fresh,
+                         std::size_t count) {
+        return session.edit_plan(old, fresh, count);
+    };
+    host.mark_plan_seen = [&] { session.mark_plan_seen(); };
+    host.plan_frozen    = [] { return false; };
+
+    const std::string skeleton = "# Goal\nx\n# Approach\nx\n# Files\nx\n"
+                                 "# Verification\nx\n# Open Questions\nx";
+
+    const imza::ToolOutput missing = run_script(
+        "local _, e = imza.plan.create('# Goal only')\nprint(e)", host);
+    CHECK(missing.text.find("missing required headings") != std::string::npos);
+    CHECK(missing.text.find("approach") != std::string::npos);
+    CHECK(missing.text.find("open questions") != std::string::npos);
+    CHECK(session.plans().empty());
+
+    std::string big = skeleton + "\n";
+    big.resize(imza::MAX_PLAN_BYTES + 1, 'x');
+    const imza::ToolOutput oversized = run_script(
+        "local _, e = imza.plan.create([[" + big + "]])\nprint(e)", host);
+    CHECK(oversized.text.find("cap") != std::string::npos);
+
+    const imza::ToolOutput created
+        = run_script("local _, e = imza.plan.create([[" + skeleton
+                + "]])\n"
+                  "if e then error(e) end\n"
+                  "print(imza.plan.get():find('# Open Questions') ~= nil)",
+            std::move(host));
+    CHECK(created.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(created.text == "true\n");
+    REQUIRE(session.plans().size() == 1);
+    CHECK(session.plan_doc() == skeleton);
+}
+
+TEST_CASE("plan edit requires a prior read and patches the current document")
+{
+    imza::Session session;
+    imza::LuaHost host { };
+    host.plan_doc    = [&] { return session.plan_doc(); };
+    host.create_plan = [&](std::string content) {
+        return session.create_plan(std::move(content));
+    };
+    host.edit_plan = [&](const std::string& old, const std::string& fresh,
+                         std::size_t count) {
+        return session.edit_plan(old, fresh, count);
+    };
+    host.mark_plan_seen = [&] { session.mark_plan_seen(); };
+    host.plan_frozen    = [] { return false; };
+
+    const imza::ToolOutput no_plan
+        = run_script("print(select(2, imza.plan.edit('a', 'b')))", host);
+    CHECK(no_plan.text.find("no plan exists") != std::string::npos);
+
+    const std::string skeleton = "# Goal\nx\n# Approach\nx\n# Files\nx\n"
+                                 "# Verification\nx\n# Open Questions\nx";
+    REQUIRE(session.create_plan(skeleton).empty());
+
+    const imza::ToolOutput reedited
+        = run_script("imza.plan.get()\n"
+                     "local _, e = imza.plan.edit('x', 'settled')\n"
+                     "if e then error(e) end\n"
+                     "print(imza.plan.get():find('settled') ~= nil)",
+            std::move(host));
+    CHECK(reedited.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(reedited.text == "true\n");
+}
+
+TEST_CASE("plan mutations are rejected while frozen in build mode")
+{
+    imza::LuaHost host { };
+    host.plan_doc    = [] { return std::string { }; };
+    host.create_plan = [](std::string) { return std::string { }; };
+    host.edit_plan   = [](const std::string&, const std::string&, std::size_t) {
+        return std::string { };
+    };
+    host.mark_plan_seen = [] { };
+    host.plan_frozen    = [] { return true; };
+
+    const imza::ToolOutput out
+        = run_script("local _, a = imza.plan.create('# Goal')\n"
+                     "local _, b = imza.plan.edit('a', 'b')\n"
+                     "print(a, b)",
+            host);
+    CHECK(out.text.find("plan.create: unavailable in Build mode")
+        != std::string::npos);
+    CHECK(out.text.find("plan.edit: unavailable in Build mode")
+        != std::string::npos);
+}
+
+TEST_CASE("plan bindings are unavailable without host callbacks")
+{
+    const imza::ToolOutput out
+        = run_script("select(2, imza.plan.get())\n"
+                     "local _, c = imza.plan.create('# Goal')\n"
+                     "local _, e = imza.plan.edit('a', 'b')\n"
+                     "print(c, e)",
+            imza::LuaHost { });
+    CHECK(out.text.find("plan.create: unavailable in this context")
+        != std::string::npos);
+    CHECK(out.text.find("plan.edit: unavailable in this context")
+        != std::string::npos);
 }
 
 TEST_CASE("web bindings fail closed without web access")
