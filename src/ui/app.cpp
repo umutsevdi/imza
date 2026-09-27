@@ -151,9 +151,16 @@ namespace {
             side_        = make_side_panel(state_, layout, workflow,
                 [this](WorkflowPhase phase) { _set_phase(phase); });
             status_line_ = make_status_line(state_, layout, workflow);
-            chat_        = make_chat(state_, layout);
-            plan_tab_    = make_plan_tab(state_, layout, chat_);
-            build_tab_   = make_build_tab(
+            chat_hints_.phase_line_fn = [this] {
+                return phase_ == WorkflowPhase::PLAN
+                    ? std::string("Tab next phase · Shift+Tab previous phase")
+                    : std::string(
+                          "Tab next phase · Shift+Tab previous phase · Ctrl+S "
+                          "Sidechat");
+            };
+            chat_      = make_chat(state_, layout, chat_hints_);
+            plan_tab_  = make_plan_tab(state_, layout, chat_);
+            build_tab_ = make_build_tab(
                 state_, layout, chat_, sidechat_, sidechat_status_);
             review_   = make_review(state_, layout,
                 [this](WorkflowPhase phase) { _set_phase(phase); });
@@ -207,10 +214,12 @@ namespace {
             Element title_p = paragraph(title.empty() ? "New Session" : title)
                 | bold | color(PANEL_FG);
             const bool narrow       = layout_.kind == LayoutCtx::Kind::NARROW;
-            const bool side_by_side = state_->sidechat_open && !narrow;
+            const bool side_by_side = state_->sidechat_open && !narrow
+                && phase_ != WorkflowPhase::PLAN;
 
             Element root;
-            if (narrow && sidechat_status_.focused) {
+            if (narrow && sidechat_status_.focused
+                && phase_ != WorkflowPhase::PLAN) {
                 root = vbox({ sidechat_->Render() | flex, separatorEmpty(),
                            status })
                     | flex;
@@ -280,12 +289,14 @@ namespace {
             // the toggle shortcut — stale clicks on its last-rendered box
             // must not reach it.
             const bool sidechat_visible = state_->sidechat_open
+                && phase_ != WorkflowPhase::PLAN
                 && (layout_.kind != LayoutCtx::Kind::NARROW
                     || sidechat_status_.focused);
             if (sidechat_visible && sidechat_->OnEvent(event)) {
                 return true;
             }
-            if (is_sidechat_toggle(event) && sidechat_->OnEvent(event)) {
+            if (is_sidechat_toggle(event) && phase_ != WorkflowPhase::PLAN
+                && sidechat_->OnEvent(event)) {
                 return true;
             }
             if (event == Event::Tab) {
@@ -319,7 +330,8 @@ namespace {
 
         Component ActiveChild() override
         {
-            if (state_->sidechat_open && sidechat_status_.focused) {
+            if (state_->sidechat_open && sidechat_status_.focused
+                && phase_ != WorkflowPhase::PLAN) {
                 return sidechat_;
             }
             return ComponentBase::ActiveChild();
@@ -361,10 +373,11 @@ namespace {
             if (phase != WorkflowPhase::REVIEW) {
                 _attach_chat();
             }
-            if (sidechat_status_.focused) {
-                return;
+            // The sidechat hides in PLAN; keeping focus on a hidden pane
+            // would swallow all input.
+            if (phase == WorkflowPhase::PLAN || !sidechat_status_.focused) {
+                _focus_main();
             }
-            _focus_main();
         }
 
         void _focus_main()
@@ -396,6 +409,7 @@ namespace {
         Component plan_tab_;
         Component build_tab_;
         Component review_;
+        ChatHints chat_hints_;
         Component tabs_content_;
         Component tabs_;
         Signal<>::Subscription workspace_subscription_;

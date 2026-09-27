@@ -451,8 +451,11 @@ namespace {
             if (!hints_.scroll_line.empty()) {
                 hints.push_back(hint_bar(hints_.scroll_line));
             }
-            if (!hints_.phase_line.empty()) {
-                hints.push_back(hint_bar(hints_.phase_line));
+            const std::string phase_line = hints_.phase_line_fn
+                ? hints_.phase_line_fn()
+                : hints_.phase_line;
+            if (!phase_line.empty()) {
+                hints.push_back(hint_bar(phase_line));
             }
             if (!hints.empty()) {
                 bottom.push_back(vbox(std::move(hints)) | xflex);

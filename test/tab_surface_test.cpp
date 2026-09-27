@@ -58,3 +58,26 @@ TEST_CASE("review tab renders its pane")
     const std::string rendered = imza::test::to_text(review->Render(), 100, 40);
     CHECK_FALSE(rendered.empty());
 }
+TEST_CASE("chat hints resolve the phase line provider per render")
+{
+    imza::ChatHints hints;
+    int calls           = 0;
+    hints.phase_line_fn = [&calls] {
+        ++calls;
+        return calls == 1 ? std::string("no toggle here")
+                          : std::string("Ctrl+S Sidechat");
+    };
+
+    auto state = imza::test::make_test_state();
+    auto chat  = imza::make_chat(
+        state,
+        [] { return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100, 40 }; },
+        hints);
+
+    const std::string first = imza::test::to_text(chat->Render(), 100, 40);
+    CHECK(first.find("no toggle here") != std::string::npos);
+    CHECK(first.find("Ctrl+S Sidechat") == std::string::npos);
+
+    const std::string second = imza::test::to_text(chat->Render(), 100, 40);
+    CHECK(second.find("Ctrl+S Sidechat") != std::string::npos);
+}

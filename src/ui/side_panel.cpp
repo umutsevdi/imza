@@ -1,4 +1,5 @@
 #include "app/application_state.h"
+#include "app/flows.h"
 #include "permissions/store.h"
 #include "ui/ui.h"
 
@@ -53,6 +54,13 @@ namespace {
 
 } // namespace
 
+// Plans widget: the newest plan carries the live marker, superseded
+// ones stay dim; each row opens the plan in the viewer modal.
+std::string plan_label(std::size_t index)
+{
+    return index == 0 ? "Initial Plan" : "Revision " + std::to_string(index);
+}
+
 class SidePanel : public ComponentBase {
 public:
     SidePanel(std::shared_ptr<ApplicationState> state, LayoutFn layout,
@@ -105,6 +113,8 @@ public:
         if (state_->session->todo().items.size()) {
             parts.push_back(render_todo(state_->session->todo(), ctx) | yflex);
         }
+
+        _append_plans(parts);
 
         if (!narrow) {
             const auto& env       = state_->environment;
@@ -177,6 +187,23 @@ private:
         return found->second.component;
     }
 
+    void _append_plans(Elements& parts)
+    {
+        const std::vector<PlanDoc> plans = state_->session->snapshot().plans;
+        if (plans.empty()) {
+            plan_links_.clear();
+            return;
+        }
+        Elements rows;
+        for (std::size_t index = 0; index < plans.size(); ++index) {
+            const bool latest = index + 1 == plans.size();
+            rows.push_back(
+                _plan_link(index, plans[index].content, latest)->Render());
+        }
+        parts.push_back(titled_section("Plans",
+            vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER)));
+    }
+
     Element _render_changed_files(const RepositoryState& repository)
     {
         Elements rows;
@@ -229,6 +256,32 @@ private:
             [&file](ChangedFile& existing) { existing = file; });
     }
 
+    Component _plan_link(
+        std::size_t index, const std::string& content, bool latest)
+    {
+        auto payload = std::make_shared<std::string>(content);
+        return memoized_link(
+            plan_links_, index, std::make_shared<std::string>(content),
+            [index, latest](const std::string&) {
+                // Explicit colors are only needed on the latest row: the
+                // link wrapper already paints inactive rows dim-colored,
+                // and | dim keeps them greyed on limited palettes.
+                Element row = hbox({
+                    text("●") | color(latest ? HL_GREEN : PANEL_FG_DIM),
+                    text(" "),
+                    paragraph(plan_label(index))
+                        | color(latest ? PANEL_FG : PANEL_FG_DIM) | xflex,
+                });
+                return latest ? row : row | dim;
+            },
+            [this, index, payload] {
+                ViewerModal vm { plan_label(index), *payload, "md", 1 };
+                vm.line_numbers = false;
+                enqueue_user_modal(*state_, vm);
+            },
+            [payload](std::string& existing) { existing = *payload; });
+    }
+
     Component _comment_link(std::size_t id, std::string label)
     {
         return memoized_link(
@@ -252,6 +305,7 @@ private:
     Signal<>::Subscription update_subscription_;
     Component links_container_;
     std::map<std::string, Link<ChangedFile>> file_links_;
+    std::map<std::size_t, Link<std::string>> plan_links_;
     std::map<std::size_t, Link<std::string>> comment_links_;
     std::vector<Component> active_links_;
 };

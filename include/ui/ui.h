@@ -334,6 +334,9 @@ struct ChatHints {
     std::string scroll_line = "Ctrl+↑↓ input history · ↑↓ scroll";
     std::string phase_line
         = "Tab next phase · Shift+Tab previous phase · Ctrl+S Sidechat";
+    // When set, replaces phase_line each render (the shared chat needs
+    // phase-accurate hints without being re-created).
+    std::function<std::string()> phase_line_fn;
     std::string placeholder = "Ask anything - type / for commands";
     std::string input_hint
         = "  Alt+Enter add line · @ attach file · $ use skill ";
