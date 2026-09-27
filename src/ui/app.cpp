@@ -152,10 +152,13 @@ namespace {
                 [this](WorkflowPhase phase) { _set_phase(phase); });
             status_line_ = make_status_line(state_, layout, workflow);
             chat_        = make_chat(state_, layout);
-            review_      = make_review(state_, layout,
+            plan_tab_    = make_plan_tab(state_, layout, chat_);
+            build_tab_   = make_build_tab(
+                state_, layout, chat_, sidechat_, sidechat_status_);
+            review_   = make_review(state_, layout,
                 [this](WorkflowPhase phase) { _set_phase(phase); });
-            modal_       = make_modal(state_);
-            sidechat_    = make_sidechat_component(
+            modal_    = make_modal(state_);
+            sidechat_ = make_sidechat_component(
                 state_, [this] { _focus_main(); }, sidechat_status_);
 
             workspace_subscription_
@@ -163,10 +166,11 @@ namespace {
                     [] { animation::RequestAnimationFrame(); });
             title_subscription_ = state_->session->subscribe_to_title_change(
                 [] { animation::RequestAnimationFrame(); });
-            phase_            = state_->session->mode() == Session::Mode::PLAN
+            phase_    = state_->session->mode() == Session::Mode::PLAN
                 ? WorkflowPhase::PLAN
                 : WorkflowPhase::BUILD;
-            selected_         = static_cast<int>(phase_);
+            selected_ = static_cast<int>(phase_);
+            _attach_chat();
             review_available_ = _review_available();
             tab_names_        = { "Plan", "Build" };
             if (review_available_) {
@@ -177,14 +181,14 @@ namespace {
                 [](const Event& event) {
                     return event == Event::Tab || event == Event::TabReverse;
                 });
-            tabs_content_ = Container::Tab({ chat_, review_ }, &selected_pane_);
+            tabs_content_ = Container::Tab(
+                { plan_tab_, build_tab_, review_ }, &selected_pane_);
             Add(Container::Stacked({
                 Container::Vertical({ tabs_, tabs_content_ }),
                 side_,
                 status_line_,
                 modal_,
             }));
-            Add(sidechat_);
             chat_->TakeFocus();
         }
 
@@ -310,8 +314,7 @@ namespace {
                     return true;
                 }
             }
-            return selected_pane_ == 0 ? chat_->OnEvent(event)
-                                       : review_->OnEvent(event);
+            return tabs_content_->OnEvent(event);
         }
 
         Component ActiveChild() override
@@ -351,26 +354,35 @@ namespace {
         {
             phase_         = phase;
             selected_      = static_cast<int>(phase);
-            selected_pane_ = phase == WorkflowPhase::REVIEW ? 1 : 0;
+            selected_pane_ = static_cast<int>(phase);
             if (const auto mode = workflow_mode(phase)) {
                 state_->session->set_mode(*mode);
+            }
+            if (phase != WorkflowPhase::REVIEW) {
+                _attach_chat();
             }
             if (sidechat_status_.focused) {
                 return;
             }
-            if (selected_pane_ == 0) {
-                chat_->TakeFocus();
-            } else {
-                review_->TakeFocus();
-            }
+            _focus_main();
         }
 
         void _focus_main()
         {
-            if (selected_pane_ == 0) {
-                chat_->TakeFocus();
-            } else {
+            if (selected_pane_ == static_cast<int>(WorkflowPhase::REVIEW)) {
                 review_->TakeFocus();
+            } else {
+                chat_->TakeFocus();
+            }
+        }
+
+        // Add detaches from the previous tab: one parent at all times.
+        void _attach_chat()
+        {
+            if (phase_ == WorkflowPhase::BUILD) {
+                build_tab_->Add(chat_);
+            } else {
+                plan_tab_->Add(chat_);
             }
         }
 
@@ -381,6 +393,8 @@ namespace {
         Component modal_;
         Component status_line_;
         Component chat_;
+        Component plan_tab_;
+        Component build_tab_;
         Component review_;
         Component tabs_content_;
         Component tabs_;

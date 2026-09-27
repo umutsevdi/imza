@@ -353,7 +353,9 @@ add_library(imza_ui
     src/ui/sidechat.cpp
     src/ui/status_line.cpp
     src/ui/syntax.cpp
-    src/ui/tab_chat.cpp
+    src/ui/chat.cpp
+    src/ui/tab_build.cpp
+    src/ui/tab_plan.cpp
     src/ui/tab_review.cpp
     src/ui/tool_format.cpp
 )

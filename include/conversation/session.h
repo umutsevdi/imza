@@ -193,6 +193,11 @@ public:
     std::string edit_plan(
         const std::string& old, const std::string& fresh, std::size_t count);
     void mark_plan_seen();
+    // Returns the size-capped plan submission message for the first build
+    // turn of a stint (or after a plan revision) and consumes the pending
+    // submission; nullopt when there is nothing to submit. Not const: the
+    // watermark sync shares the session lock with the mode check.
+    std::optional<std::string> plan_submission_for_build();
     void set_modal(ModalPayload payload);
     void clear_modal();
     void bump_modal_serial();
@@ -250,6 +255,9 @@ private:
     // cannot patch content it has not seen.
     std::size_t _plan_version      = 0;
     std::size_t _plan_seen_version = 0;
+    // Version of the plan the build context last received as a submission
+    // message; 0 means the plan was never submitted.
+    std::size_t _plan_submitted_version = 0;
     std::vector<QueuedMessage> _queued;
 
     std::optional<Countdown> _retry_countdown;

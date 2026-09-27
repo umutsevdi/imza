@@ -931,3 +931,66 @@ TEST_CASE("plan edit staleness is enforced inside the session")
            "# Verification\nx\n"
            "# Open Questions\nx");
 }
+TEST_CASE("plan submission messages are emitted once per revision in build")
+{
+    imza::Session session;
+    const std::string skeleton
+        = "# Goal\nx\n# Approach\nx\n# Files\nx\n# Verification\nx\n"
+          "# Open Questions\nx";
+    REQUIRE(session.create_plan(skeleton).empty());
+
+    // In PLAN mode there is nothing to submit.
+    CHECK_FALSE(session.plan_submission_for_build().has_value());
+
+    // First build turn of a stint: the plan rides as an approval message.
+    session.set_mode(imza::Session::Mode::BUILD);
+    const auto submitted = session.plan_submission_for_build();
+    REQUIRE(submitted.has_value());
+    CHECK(submitted->find("Plan approved for build: <plan>") == 0);
+    CHECK(submitted->find(skeleton) != std::string::npos);
+    CHECK(submitted->ends_with("</plan>"));
+
+    // No re-emission while the plan is unchanged.
+    CHECK_FALSE(session.plan_submission_for_build().has_value());
+
+    // A revision in PLAN mode re-submits with the changed wording.
+    session.set_mode(imza::Session::Mode::PLAN);
+    REQUIRE(session.edit_plan("# Goal\nx", "# Goal\ntokens\n", 1).empty());
+    session.set_mode(imza::Session::Mode::BUILD);
+    const auto amended = session.plan_submission_for_build();
+    REQUIRE(amended.has_value());
+    CHECK(amended->find("User has changed the plan: <plan>") == 0);
+    CHECK_FALSE(session.plan_submission_for_build().has_value());
+}
+
+TEST_CASE("plan submission requires build mode and a plan")
+{
+    imza::Session session;
+    CHECK_FALSE(session.plan_submission_for_build().has_value());
+
+    const std::string skeleton
+        = "# Goal\nx\n# Approach\nx\n# Files\nx\n# Verification\nx\n"
+          "# Open Questions\nx";
+    REQUIRE(session.create_plan(skeleton).empty());
+    // PLAN mode with a plan still holds nothing back for build.
+    CHECK_FALSE(session.plan_submission_for_build().has_value());
+}
+
+TEST_CASE("a restored session submits its plan once on the first build turn")
+{
+    imza::Session source;
+    const std::string skeleton
+        = "# Goal\nx\n# Approach\nx\n# Files\nx\n# Verification\nx\n"
+          "# Open Questions\nx";
+    REQUIRE(source.create_plan(skeleton).empty());
+
+    imza::Session loaded;
+    loaded.restore(source.snapshot());
+    loaded.set_mode(imza::Session::Mode::BUILD);
+    // The submission watermark is session state, not persisted: a loaded
+    // session re-submits the plan once, which is the safe direction.
+    const auto submitted = loaded.plan_submission_for_build();
+    REQUIRE(submitted.has_value());
+    CHECK(submitted->find("Plan approved for build: <plan>") == 0);
+    CHECK_FALSE(loaded.plan_submission_for_build().has_value());
+}

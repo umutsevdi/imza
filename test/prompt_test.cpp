@@ -97,4 +97,15 @@ TEST_CASE("current mode prompts declare one authoritative state")
     CHECK(build == "<runtime-mode name=\"build\"/>");
 }
 
+TEST_CASE("system prompt carries the plan artifact contract")
+{
+    const std::string system = PromptStore().system();
+    // Stable contract phrases, not exact prose, so wording can evolve.
+    CHECK(system.find("imza.plan.create") != std::string::npos);
+    CHECK(system.find("imza.plan.get()") != std::string::npos);
+    CHECK(system.find("ready for build") != std::string::npos);
+    CHECK(system.find("contract for future workspace mutation")
+        != std::string::npos);
+}
+
 } // namespace imza

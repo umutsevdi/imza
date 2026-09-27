@@ -343,10 +343,14 @@ struct ChatHints {
 
 ftxui::Component make_chat(std::shared_ptr<ApplicationState> state,
     LayoutFn layout, struct ChatHints hints = { });
-ftxui::Component make_side_panel(std::shared_ptr<ApplicationState> state,
-    LayoutFn layout, WorkflowFn workflow, WorkflowNavigateFn navigate);
+
+ftxui::Component make_plan_tab(std::shared_ptr<ApplicationState> state,
+    LayoutFn layout, ftxui::Component chat);
 ftxui::Component make_review(std::shared_ptr<ApplicationState> state,
     LayoutFn layout, WorkflowNavigateFn navigate);
+ftxui::Component make_side_panel(std::shared_ptr<ApplicationState> state,
+    LayoutFn layout, WorkflowFn workflow, WorkflowNavigateFn navigate);
+
 ftxui::Component make_status_line(std::shared_ptr<ApplicationState> state,
     LayoutFn layout, WorkflowFn workflow);
 ftxui::Component make_connect(std::shared_ptr<ApplicationState> state);
@@ -370,6 +374,9 @@ struct SidechatStatus {
 
 ftxui::Component make_sidechat_component(
     std::shared_ptr<ApplicationState> state, std::function<void()> on_focus,
+    SidechatStatus& status);
+ftxui::Component make_build_tab(std::shared_ptr<ApplicationState> state,
+    LayoutFn layout, ftxui::Component chat, ftxui::Component sidechat,
     SidechatStatus& status);
 
 int run_repl(

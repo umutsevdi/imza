@@ -573,6 +573,26 @@ void Session::mark_plan_seen()
     _plan_seen_version = _plan_version;
 }
 
+std::optional<std::string> Session::plan_submission_for_build()
+{
+    std::lock_guard lock(_mutex);
+    if (_plans.empty() || _mode != Mode::BUILD) {
+        return std::nullopt;
+    }
+    if (_plan_submitted_version == _plan_version) {
+        return std::nullopt;
+    }
+    std::string content = _plans.back().content;
+    if (content.size() > MAX_PLAN_BYTES) {
+        content.resize(MAX_PLAN_BYTES);
+    }
+    std::string message     = _plan_submitted_version == 0
+        ? "Plan approved for build: <plan>\n" + content + "\n</plan>"
+        : "User has changed the plan: <plan>\n" + content + "\n</plan>";
+    _plan_submitted_version = _plan_version;
+    return message;
+}
+
 void Session::set_modal(ModalPayload payload)
 {
     std::lock_guard lock(_mutex);

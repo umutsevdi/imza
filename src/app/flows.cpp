@@ -12,8 +12,10 @@
 #include "turn/turn_runner.h"
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace imza {
 
@@ -153,10 +155,14 @@ namespace {
         const std::string title_input = text;
         state.session->clear_interrupt();
         state.session->begin_send(std::move(text), std::move(attachments));
-        state.runner->spawn(
-            state.session->build_history(
-                full_system_prompt(state, settings.mode), settings.dialect),
-            std::move(settings));
+        std::optional<std::string> submission
+            = state.session->plan_submission_for_build();
+        std::vector<Message> history = state.session->build_history(
+            full_system_prompt(state, settings.mode), settings.dialect);
+        if (submission) {
+            history.push_back({ Message::Type::USER, std::move(*submission) });
+        }
+        state.runner->spawn(std::move(history), std::move(settings));
         if (generate_title && !state.runner->has_stream_override()) {
             const auto title_selection
                 = state.providers->subagent_selection(SubagentRole::BASIC);
