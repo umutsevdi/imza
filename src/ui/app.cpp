@@ -203,6 +203,7 @@ namespace {
         Element OnRender() override
         {
             _sync_review_availability();
+            _restore_focus_after_modal();
             const auto terminal_size = ftxui::Terminal::Size();
             layout_ = layout_context(terminal_size.dimx, terminal_size.dimy);
             const int w       = layout_.width;
@@ -395,6 +396,23 @@ namespace {
             }
         }
 
+        // Buttons that open modals (sidebar links, review actions) call
+        // TakeFocus, rotating the shared Stacked's active child away from
+        // the main column. After the modal closes the rotation persists:
+        // the main tree reports unfocused and keystrokes die.
+        void _restore_focus_after_modal()
+        {
+            const bool open = state_->session->modal().index() != 0;
+            if (_modal_was_open && !open) {
+                if (phase_ == WorkflowPhase::PLAN) {
+                    plan_tab_->TakeFocus();
+                } else {
+                    _focus_main();
+                }
+            }
+            _modal_was_open = open;
+        }
+
         // Add detaches from the previous tab: one parent at all times.
         void _attach_chat()
         {
@@ -427,6 +445,7 @@ namespace {
         int selected_ { 0 };
         int selected_pane_ { 0 };
         ftxui::Box main_pane_box_ { };
+        bool _modal_was_open = false;
     };
 
 } // namespace

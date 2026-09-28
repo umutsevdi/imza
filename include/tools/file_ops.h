@@ -10,7 +10,8 @@
 namespace imza {
 
 // Text file I/O behind the lua imza.fs.* bindings. load_text rejects
-// missing paths, directories, and binary content; save_text truncates.
+// missing paths, directories, and binary content; save_text creates
+// missing parent directories and truncates.
 bool load_text(const std::string& path, std::string& out, std::string& err);
 bool save_text(
     const std::string& path, const std::string& content, std::string& err);

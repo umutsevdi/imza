@@ -1120,3 +1120,67 @@ allow lasts until directory or session changes
 Esc reject
 )");
 }
+TEST_CASE("closing a modal keeps keyboard focus on the chat")
+{
+    Env env;
+    env.stream = [](const imza::ChatRequest& request,
+                     const imza::StreamCallback& callback) {
+        if (request.messages.back().type == imza::Message::Type::USER) {
+            callback(imza::make_tool_call_event({ "lua",
+                R"json({"script":"local out, code = imza.shell('custom one') print(code)"})json",
+                "" }));
+        }
+        callback(imza::make_done_event());
+        return imza::Status::OK;
+    };
+    imza::submit(*env.state, "run it");
+    REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
+
+    // Mirror the Repl composition: a tab container holding the build tab
+    // with the chat, modal stacked last, chat focused at construction.
+    auto chat = imza::make_chat(env.state, [] {
+        return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100, 40 };
+    });
+    imza::SidechatStatus sidechat_status;
+    auto sidechat
+        = imza::make_sidechat_component(env.state, [] { }, sidechat_status);
+    auto build = imza::make_build_tab(
+        env.state,
+        [] { return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100, 40 }; },
+        chat, sidechat, sidechat_status);
+    build->Add(chat);
+    int selected_pane = 1;
+    auto tabs_content = ftxui::Container::Tab({ build }, &selected_pane);
+    auto modal        = imza::make_modal(env.state);
+    auto root         = ftxui::Container::Stacked(
+        { ftxui::Container::Vertical({ tabs_content }), modal });
+    chat->TakeFocus();
+    REQUIRE(chat->Focused());
+    (void)root->Render();
+
+    // Present the modal and dismiss it with a mouse click on the "Allow
+    // once" button, like the screen loop does. Modals are typically opened
+    // from a sidebar link; that button's TakeFocus rotates the stacked
+    // root's active child away from the main column, which kills keyboard
+    // flow into the chat.
+    auto sidebar = ftxui::Container::Vertical({ });
+    sidebar->Add(ftxui::Button("Sessions", [] { }));
+    root->Add(sidebar);
+    (void)modal->Render();
+    REQUIRE(imza::test::click_label(sidebar, "Sessions"));
+    REQUIRE(imza::test::click_label(modal, "Allow once"));
+    REQUIRE(
+        env.pump.wait_for([&] { return env.session->modal().index() == 0; }));
+    CHECK_FALSE(chat->Focused());
+
+    // The Repl re-asserts main focus when the modal closes; keystrokes
+    // must reach the chat input again.
+    chat->TakeFocus();
+    REQUIRE(root->OnEvent(ftxui::Event::Character("k")));
+    (void)root->Render();
+    auto screen = ftxui::Screen::Create(
+        ftxui::Dimension::Fixed(100), ftxui::Dimension::Fixed(40));
+    ftxui::Render(screen, root->Render());
+    CHECK(imza::test::without_ansi(screen.ToString()).find("k")
+        != std::string::npos);
+}

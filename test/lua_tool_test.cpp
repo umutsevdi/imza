@@ -1156,6 +1156,70 @@ TEST_CASE("imza.fs.write creates and rewrites files")
     CHECK(out.diffs[0].file == path);
 }
 
+TEST_CASE("imza.fs.write creates missing parent directories")
+{
+    imza::test::TempDir dir;
+    const std::string path = dir.file("a/b/c.txt").string();
+    const imza::ToolOutput out
+        = run_script("assert(not imza.fs.write([[" + path + "]], 'deep\\n'))");
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(imza::test::read_all(dir.file("a/b/c.txt")) == "deep\n");
+    REQUIRE(out.diffs.size() == 1);
+    CHECK(out.diffs[0].file == path);
+}
+
+TEST_CASE("imza.fs.write rejects a file occupying the parent path")
+{
+    imza::test::TempDir dir;
+    imza::test::write_file(dir.file("a"), "blocker\n");
+    imza::LuaHost host;
+    auto system    = std::make_shared<imza::SystemEnvironment>();
+    auto workspace = std::make_shared<imza::WorkspaceEnvironment>();
+    workspace->working_directory = dir.path;
+    workspace->project_root      = dir.path;
+    imza::PermissionStore store;
+    host.permission_context = [&] {
+        return imza::PermissionContext { system, workspace, store.snapshot(),
+            imza::SessionMode::BUILD };
+    };
+    const std::string path     = dir.file("a/b.txt").string();
+    const imza::ToolOutput out = run_script("local ok, err = imza.fs.write([["
+            + path + "]], 'x\\n')\nprint('DBG:' .. tostring(err))",
+        std::move(host));
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(
+        out.text.find("target parent is not a directory") != std::string::npos);
+    CHECK(imza::test::read_all(dir.file("a")) == "blocker\n");
+    CHECK(!fs::exists(dir.file("a/b.txt")));
+    CHECK(out.diffs.empty());
+}
+
+TEST_CASE("imza.fs.write with nested path fails closed unattended outside "
+          "trusted roots")
+{
+    imza::test::TempDir dir;
+    imza::test::TempDir outside;
+    imza::LuaHost host;
+    auto system    = std::make_shared<imza::SystemEnvironment>();
+    auto workspace = std::make_shared<imza::WorkspaceEnvironment>();
+    workspace->working_directory = dir.path;
+    workspace->project_root      = dir.path;
+    imza::PermissionStore store;
+    host.permission_context = [&] {
+        return imza::PermissionContext { system, workspace, store.snapshot(),
+            imza::SessionMode::BUILD };
+    };
+    // No ask callback: ASK verdicts must fail closed.
+    const std::string path     = outside.file("a/b/c.txt").string();
+    const imza::ToolOutput out = run_script("local ok, err = imza.fs.write([["
+            + path + "]], 'x\\n')\nprint(ok, err)",
+        std::move(host));
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(out.text.find("denied") != std::string::npos);
+    CHECK(!fs::exists(outside.file("a")));
+    CHECK(out.diffs.empty());
+}
+
 TEST_CASE("lua file mutations collapse into one net diff per file")
 {
     imza::test::TempDir dir;

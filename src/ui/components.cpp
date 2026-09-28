@@ -690,7 +690,7 @@ int diff_content_width(int width) { return std::max(1, width - 14); }
 int review_content_width(const LayoutCtx& ctx)
 {
     return ctx.kind == LayoutCtx::Kind::WIDE
-        ? ctx.width - LayoutCtx::PANEL_WIDTH - 4
+        ? ctx.width - LayoutCtx::RIGHT_WIDTH - 4
         : ctx.width;
 }
 

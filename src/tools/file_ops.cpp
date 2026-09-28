@@ -371,6 +371,18 @@ bool load_text(const std::string& path, std::string& out, std::string& err)
 bool save_text(
     const std::string& path, const std::string& content, std::string& err)
 {
+    // Reached only after permission authorization; a whole-file write may
+    // target a not-yet-existing nested path.
+    const std::filesystem::path parent
+        = std::filesystem::path(path).parent_path();
+    if (!parent.empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(parent, ec);
+        if (ec) {
+            err = "cannot create directory: " + path;
+            return false;
+        }
+    }
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     if (!out) {
         err = "cannot write: " + path;

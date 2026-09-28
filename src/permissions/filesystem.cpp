@@ -162,9 +162,30 @@ FilesystemEvaluation evaluate_filesystem_request(
         if (exists && !std::filesystem::is_regular_file(target, error)) {
             return reject("target is not a file");
         }
-        if (!exists
-            && !std::filesystem::is_directory(target.parent_path(), error)) {
-            return reject("target parent is not a directory");
+        // save_text creates missing parent directories, so the check is
+        // on the nearest existing ancestor: it must be a directory, else
+        // the parents can never come into existence.
+        if (!exists) {
+            std::filesystem::path parent = target.parent_path();
+            bool parent_ok               = false;
+            while (!parent.empty()) {
+                const std::filesystem::file_status status
+                    = std::filesystem::status(parent, error);
+                if (error) {
+                    break;
+                }
+                if (std::filesystem::exists(status)) {
+                    parent_ok = std::filesystem::is_directory(status);
+                    break;
+                }
+                parent = parent.parent_path();
+            }
+            if (error) {
+                return reject("cannot inspect target");
+            }
+            if (!parent_ok) {
+                return reject("target parent is not a directory");
+            }
         }
     }
     if (error) {

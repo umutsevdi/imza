@@ -104,13 +104,11 @@ public:
         const bool narrow   = ctx.kind == LayoutCtx::Kind::NARROW;
         active_links_.clear();
         Elements parts;
+        _append_plans(parts);
         _append_review_comments(parts);
         if (state_->session->todo().items.size()) {
             parts.push_back(render_todo(state_->session->todo(), ctx) | yflex);
         }
-
-        _append_plans(parts);
-
         if (!narrow) {
             const auto& env       = state_->environment;
             const auto repository = env->repository();
@@ -140,7 +138,7 @@ public:
         if (narrow) {
             return panel(body) | xflex;
         }
-        return panel(body) | size(WIDTH, EQUAL, LayoutCtx::PANEL_WIDTH);
+        return panel(body) | size(WIDTH, EQUAL, LayoutCtx::LEFT_WIDTH);
     }
 
     bool OnEvent(Event event) override
@@ -229,7 +227,7 @@ private:
                 + (comment.stale ? "  stale" : "");
             rows.push_back(
                 hbox({ _comment_link(comment.id, label)->Render(), filler(),
-                    text(fit(comment.body, LayoutCtx::PANEL_WIDTH / 2 - 6))
+                    text(fit(comment.body, LayoutCtx::LEFT_WIDTH / 2 - 6))
                         | color(PANEL_FG_DIM) })
                 | xflex);
         }

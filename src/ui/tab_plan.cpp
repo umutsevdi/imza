@@ -4,9 +4,8 @@
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_base.hpp>
 #include <ftxui/component/event.hpp>
+#include <ftxui/component/mouse.hpp>
 #include <ftxui/dom/elements.hpp>
-
-#include <algorithm>
 
 namespace imza {
 
@@ -42,11 +41,11 @@ namespace {
             if (ctx.kind == LayoutCtx::Kind::NARROW) {
                 return _doc_focused ? _doc->Render() : chat_->Render();
             }
-            const int half = std::max(20, ctx.width / 2);
             return hbox({
-                _doc->Render() | size(WIDTH, EQUAL, half),
+                _doc->Render() | xflex | reflect(_doc_box),
                 separatorEmpty(),
-                chat_->Render() | xflex,
+                chat_->Render() | reflect(_chat_box)
+                    | size(WIDTH, EQUAL, LayoutCtx::RIGHT_WIDTH),
             });
         }
 
@@ -60,6 +59,9 @@ namespace {
                 _toggle_focus();
                 return true;
             }
+            if (_handle_focus_click(event)) {
+                return true;
+            }
             return _doc_focused ? _doc->OnEvent(event) : chat_->OnEvent(event);
         }
 
@@ -69,6 +71,28 @@ namespace {
         }
 
     private:
+        // A left press over a pane moves focus there; presses on the
+        // separator or outside both boxes change nothing.
+        bool _handle_focus_click(Event event)
+        {
+            if (!event.is_mouse()) {
+                return false;
+            }
+            const Mouse& m = event.mouse();
+            if (m.button != Mouse::Left || m.motion != Mouse::Pressed) {
+                return false;
+            }
+            if (_doc_box.Contain(m.x, m.y) && !_doc_focused) {
+                _toggle_focus();
+                return true;
+            }
+            if (_chat_box.Contain(m.x, m.y) && _doc_focused) {
+                _toggle_focus();
+                return true;
+            }
+            return false;
+        }
+
         bool _has_plan() const { return !state_->session->plan_doc().empty(); }
 
         void _toggle_focus()
@@ -85,6 +109,8 @@ namespace {
         LayoutFn layout_;
         Component chat_;
         Component _doc;
+        Box _doc_box { };
+        Box _chat_box { };
         bool _doc_focused = false;
     };
 

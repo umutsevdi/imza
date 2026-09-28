@@ -166,7 +166,7 @@ ftxui::Element Autocomplete::render(const LayoutCtx& ctx) const
     using namespace ftxui;
     const size_t max_rows       = 8;
     const int available_width   = ctx.kind == LayoutCtx::Kind::WIDE
-        ? ctx.width - LayoutCtx::PANEL_WIDTH
+        ? ctx.width - LayoutCtx::RIGHT_WIDTH
         : ctx.width;
     const int description_width = std::clamp(available_width - 28, 8, 56);
     const Set set               = active_set();

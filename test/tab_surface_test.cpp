@@ -106,3 +106,60 @@ TEST_CASE("plan tab is chat-only until a plan exists")
     CHECK(with_plan.find("plan this") != std::string::npos);
     CHECK(with_plan.find("Initial Plan") != std::string::npos);
 }
+TEST_CASE("plan tab moves focus to the doc pane on click")
+{
+    auto state = imza::test::make_test_state();
+    REQUIRE(state->session
+            ->create_plan("# Goal\nsecret source\n# Approach\nx\n# Files\nx\n"
+                          "# Verification\nx\n# Open Questions\nx")
+            .empty());
+
+    auto chat = imza::make_chat(state, [] {
+        return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100, 40 };
+    });
+    auto plan = imza::make_plan_tab(state, [] { return wide_layout(); }, chat);
+    plan->Add(chat);
+    plan->TakeFocus();
+
+    // Chat focused: the doc renders as markdown preview showing "Goal" as
+    // a styled heading. Clicking the doc pane header focuses it and swaps
+    // in the editor, exposing the raw source.
+    const std::string chat_focused
+        = imza::test::to_text(plan->Render(), 100, 40);
+    CHECK(chat_focused.find("# Goal") == std::string::npos);
+
+    REQUIRE(imza::test::click_label(plan, "Plan"));
+    const std::string doc_focused
+        = imza::test::to_text(plan->Render(), 100, 40);
+    CHECK(doc_focused.find("# Goal") != std::string::npos);
+}
+TEST_CASE("plan tab moves focus back to the chat pane on click")
+{
+    auto state = imza::test::make_test_state();
+    REQUIRE(state->session
+            ->create_plan(
+                "# Goal\nx\n# Approach\nx\n# Files\nx\n# Verification\nx\n"
+                "# Open Questions\nx")
+            .empty());
+    state->session->begin_send("build this");
+
+    auto chat = imza::make_chat(state, [] {
+        return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100, 40 };
+    });
+    auto plan = imza::make_plan_tab(state, [] { return wide_layout(); }, chat);
+    plan->Add(chat);
+    plan->TakeFocus();
+
+    REQUIRE(imza::test::click_label(plan, "Plan"));
+    CHECK(imza::test::to_text(plan->Render(), 100, 40).find("# Goal")
+        != std::string::npos);
+
+    // Click the chat pane (an ASCII row, so the label offset matches the
+    // click column): typing must reach the chat input again.
+    REQUIRE(imza::test::click_label(plan, "Ask anything"));
+    REQUIRE(plan->OnEvent(ftxui::Event::Character("q")));
+    CHECK(imza::test::to_text(plan->Render(), 100, 40).find("q")
+        != std::string::npos);
+    CHECK(imza::test::to_text(plan->Render(), 100, 40).find("# Goal")
+        == std::string::npos);
+}

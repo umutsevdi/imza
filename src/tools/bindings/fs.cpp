@@ -571,7 +571,8 @@ Errors if old is empty or not found.)desc",
             "write",
             binding_file_write,
             R"desc((path: string, text: string) => Err?
-Replaces the file's entire content, creating it if absent.
+Replaces the file's entire content, creating it (and missing parent
+directories) if absent.
 Prefer insert/edit for targeted changes; this discards everything else.)desc",
         },
     };

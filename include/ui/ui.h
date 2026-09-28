@@ -39,7 +39,8 @@ struct RepositoryState;
 struct LayoutCtx {
     enum class Kind { WIDE, NARROW };
     static constexpr int WIDE_THRESHOLD = 100;
-    static constexpr int PANEL_WIDTH    = 40;
+    static constexpr int LEFT_WIDTH     = 40;
+    static constexpr int RIGHT_WIDTH    = 50;
     Kind kind                           = Kind::NARROW;
     int width                           = 0;
     int height                          = 0;

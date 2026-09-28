@@ -8,21 +8,25 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
-0.4.2 - 2026-09-30
+0.5.0 - 2026-09-30
 -------------------------------------------------------------------------------
-<https://github.com/umutsevdi/imza/releases/tag/v0.4.2>
+<https://github.com/umutsevdi/imza/releases/tag/v0.5.0>
 
 Changes:
-  - REWORKED: Plan mode
-  Plan mode builds up a document on demand, allowing user and agent to
-simultaneously edit the document. 
+  - Plan mode generates a document on demand
+  that can be edited either by the user or the agent and switched to the 
+  Build mode on request. Plans and it's revisions are stored in session data.
   - Added multi-modal input support for image types and PDF files.
-  - Added module system.
-  - Added Lua canvas charts that render directly in the chat.
-  - Fixed a hidden Sidechat intercepting clicks and keystrokes meant for the
-main chat.
+  - Added the module system.
+  - Added support for charts.
   - A welcome banner is shown in the chat when the app opens, until the
 first message is sent.
+  - Fixed a hidden Sidechat intercepting clicks and keystrokes meant for the
+main chat.
+  - Clicking the plan document or chat pane now moves focus between them on
+the Plan tab.
+  - Fixed keyboard focus not returning to the chat after closing a dialog.
+  - fs.write now creates missing parent directories instead of failing.
 
 -------------------------------------------------------------------------------
 0.4.1 - 2026-09-24
