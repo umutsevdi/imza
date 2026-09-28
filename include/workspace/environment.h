@@ -27,6 +27,7 @@ struct SystemEnvironment {
     std::unordered_map<std::string, Skill> global_skills;
     std::filesystem::path temporary_directory;
     bool has_git { false };
+    std::string clipboard_tool;
 };
 
 struct InstructionFile {

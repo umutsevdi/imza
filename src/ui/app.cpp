@@ -1,5 +1,6 @@
 #include "app/flows.h"
 #include "conversation/persistence.h"
+#include "platform/clipboard.h"
 #include "runtime/main_thread_queue.h"
 #include "tools/skills.h"
 #include "ui/ui.h"
@@ -141,10 +142,78 @@ namespace {
         bool _enabled = true;
     };
 
+    // Copies a finished mouse selection to the clipboard. A release at the
+    // last motion position writes the same selection coordinates, so FTXUI
+    // fires no change callback; the copy then runs on the release itself,
+    // while a moving release is handled on the follow-up Custom event.
+    class SelectionCopier {
+    public:
+        explicit SelectionCopier(ftxui::ScreenInteractive* screen)
+            : screen_(screen)
+        {
+        }
+
+        bool handle(Event& event, const ApplicationState& state)
+        {
+            if (event.is_mouse()) {
+                const Mouse& m = event.mouse();
+                if (m.button == Mouse::Left && m.motion == Mouse::Pressed) {
+                    active_ = true;
+                    moved_  = false;
+                    x_      = m.x;
+                    y_      = m.y;
+                } else if (active_ && m.motion == Mouse::Moved) {
+                    moved_ = moved_ || m.x != x_ || m.y != y_;
+                    x_     = m.x;
+                    y_     = m.y;
+                } else if (active_ && m.button == Mouse::Left
+                    && m.motion == Mouse::Released) {
+                    active_ = false;
+                    if (!moved_) {
+                        return false;
+                    }
+                    if (m.x == x_ && m.y == y_) {
+                        return copy(state);
+                    }
+                    release_ = true;
+                } else if (m.button != Mouse::Left) {
+                    active_ = false;
+                }
+                return false;
+            }
+            if (event == Event::Custom && release_) {
+                release_ = false;
+                copy(state);
+                return true;
+            }
+            return false;
+        }
+
+    private:
+        bool copy(const ApplicationState& state)
+        {
+            const std::string selected = screen_->GetSelection();
+            if (selected.empty()) {
+                return false;
+            }
+            copy_to_clipboard(*state.environment->system(), selected);
+            return true;
+        }
+
+        ftxui::ScreenInteractive* screen_;
+        bool active_  = false;
+        bool moved_   = false;
+        int x_        = 0;
+        int y_        = 0;
+        bool release_ = false;
+    };
+
     class Repl : public ComponentBase {
     public:
-        Repl(std::shared_ptr<ApplicationState> state)
+        Repl(std::shared_ptr<ApplicationState> state,
+            ftxui::ScreenInteractive* screen)
             : state_(std::move(state))
+            , selection_(screen)
         {
             const LayoutFn layout     = [this] { return layout_; };
             const WorkflowFn workflow = [this] { return phase_; };
@@ -280,6 +349,9 @@ namespace {
                 state_->on_exit();
                 return true;
             }
+            if (selection_.handle(event, *state_)) {
+                return true;
+            }
             if (state_->session->modal().index() != 0) {
                 return modal_->OnEvent(event);
             }
@@ -343,7 +415,6 @@ namespace {
             return ComponentBase::ActiveChild();
         }
 
-    private:
         bool _review_available() const
         {
             const auto& environment = state_->environment;
@@ -423,6 +494,7 @@ namespace {
         }
 
         std::shared_ptr<ApplicationState> state_;
+        SelectionCopier selection_;
         ftxui::Component sidechat_;
         SidechatStatus sidechat_status_;
         Component side_;
@@ -483,7 +555,10 @@ int run_repl(
         imza::enqueue_user_modal(
             *state, ConnectModal { ConnectModal::Entry::MANAGE });
     }
-    auto app = ftxui::Make<Repl>(state);
+    auto app = ftxui::Make<Repl>(state, &screen);
+    // Empty callback: FTXUI only posts Event::Custom after selection changes
+    // when one is registered; SelectionCopier consumes it.
+    screen.SelectionChange([] { });
     screen.Loop(app);
     bracketed_paste.disable();
     if (!state->session->has_items()) {

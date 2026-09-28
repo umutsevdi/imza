@@ -287,7 +287,21 @@ SystemEnvironment detect_system_environment()
     environment.temporary_directory
         = prepare_imza_temporary_directory(temporary_directory);
     environment.has_git = find_in_path("git");
-    environment.today   = format_local_time("%Y-%m-%d");
+#ifdef _WIN32
+    static const char* const clipboard_candidates[] = { "clip", "win32yank" };
+#elif defined(__APPLE__)
+    static const char* const clipboard_candidates[] = { "pbcopy" };
+#else
+    static const char* const clipboard_candidates[]
+        = { "wl-copy", "xclip", "xsel" };
+#endif
+    for (const char* tool : clipboard_candidates) {
+        if (find_in_path(tool)) {
+            environment.clipboard_tool = tool;
+            break;
+        }
+    }
+    environment.today = format_local_time("%Y-%m-%d");
     return environment;
 }
 

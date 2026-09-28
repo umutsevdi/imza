@@ -27,6 +27,7 @@ main chat.
 the Plan tab.
   - Fixed keyboard focus not returning to the chat after closing a dialog.
   - fs.write now creates missing parent directories instead of failing.
+  - Added select-to-copy.
 
 -------------------------------------------------------------------------------
 0.4.1 - 2026-09-24

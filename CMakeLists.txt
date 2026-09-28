@@ -229,6 +229,7 @@ target_link_libraries(imza_network PRIVATE
 
 # Platform services and stateless domain support (no ftxui, no cmark)
 add_library(imza_foundation
+    src/platform/clipboard.cpp
     src/platform/command_runner.cpp
     src/platform/config.cpp
     src/platform/file_lock.cpp
