@@ -226,17 +226,16 @@ namespace {
                            status })
                     | flex;
             } else if (layout_.kind == LayoutCtx::Kind::WIDE) {
-                Element main_panel
-                    = vbox({
-                          hbox({ text(" "), title_p | xflex, tab }),
-                          std::move(right_col) | reflect(main_pane_box_)
-                              | yflex,
-                      })
-                    | xflex | yflex;
+                Element content
+                    = std::move(right_col) | reflect(main_pane_box_) | yflex;
                 if (side_by_side) {
-                    main_panel = hbox({ std::move(main_panel), separatorEmpty(),
+                    content = hbox({ std::move(content), separatorEmpty(),
                         sidechat_->Render() });
                 }
+                Element main_panel
+                    = vbox({ hbox({ text(" "), title_p | xflex, tab }),
+                          std::move(content) })
+                    | xflex | yflex;
                 root = vbox({ hbox({ side | yflex, text(" "),
                                   std::move(main_panel) | xflex | yflex })
                                | flex,
