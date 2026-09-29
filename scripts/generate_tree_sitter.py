@@ -36,6 +36,7 @@ class Language:
     filenames: tuple[str, ...] = ()
     package: str | None = None
     grammar_path: str = "."
+    query_path: str = "queries/highlights.scm"
     symbol: str | None = None
     highlight_bases: tuple[str, ...] = ()
 
@@ -55,6 +56,12 @@ LANGUAGES: dict[str, Language] = {
         grammar_path="typescript",
         highlight_bases=("javascript",),
     ),
+    "tsx": Language(
+        extensions=("tsx",),
+        package="typescript",
+        grammar_path="tsx",
+        highlight_bases=("javascript",),
+    ),
     "go": Language(extensions=("go",)),
     "rust": Language(extensions=("rs",)),
     "swift": Language(extensions=("swift",)),
@@ -72,8 +79,27 @@ LANGUAGES: dict[str, Language] = {
         extensions=("mk", "mak"),
         filenames=("makefile", "gnumakefile", "bsdmakefile"),
     ),
-    "json": Language(extensions=("json",)),
+    "json": Language(extensions=("json", "ipynb")),
     "lua": Language(extensions=("lua",)),
+    "markdown": Language(
+        extensions=("md", "markdown"),
+        package="markdown",
+        grammar_path="tree-sitter-markdown",
+        query_path="tree-sitter-markdown/queries/highlights.scm",
+    ),
+    "toml": Language(extensions=("toml",)),
+    "xml": Language(
+        extensions=("xml", "svg", "xsl"),
+        package="xml",
+        grammar_path="xml",
+        query_path="queries/xml/highlights.scm",
+    ),
+    "yaml": Language(extensions=("yaml", "yml")),
+    "csharp": Language(
+        extensions=("cs",),
+        package="c-sharp",
+        symbol="tree_sitter_c_sharp",
+    ),
     "python": Language(extensions=("py", "pyw", "pyi")),
     "php": Language(
         extensions=("php", "phtml"),
@@ -135,8 +161,10 @@ def _resolve_sources(root: Path, name: str, language: Language) -> tuple[Path, .
 def _resolve_query(root: Path, name: str, language: Language) -> str:
     packages = (*language.highlight_bases, _package_name(name, language))
     parts: list[str] = []
-    for package in packages:
-        query = _package_root(root, package) / "queries" / "highlights.scm"
+    for index, package in enumerate(packages):
+        path = language.query_path if index == len(packages) - 1 else (
+            "queries/highlights.scm")
+        query = _package_root(root, package) / path
         if not query.is_file():
             raise ValueError(f"Tree-sitter highlight query is missing: {query}")
         parts.append(query.read_text(encoding="utf-8"))

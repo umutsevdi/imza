@@ -33,6 +33,12 @@ Treesitter Grammers:
 - Rust grammar - Copyright (c) 2017 Maxim Sokolov
 - Swift grammar - Copyright (c) 2021 alex-pinkus
 - TypeScript grammar - Copyright (c) 2017 Max Brunsfeld
+- TSX grammar - Copyright (c) 2017 Max Brunsfeld
+- YAML grammar - Copyright (c) 2024 tree-sitter-grammars contributors
+- TOML grammar - Copyright (c) Ika <ikatyang@gmail.com> (https://github.com/ikatyang)
+- Markdown grammar - Copyright (c) 2021 Matthias Deiml
+- C# grammar - Copyright (c) 2014-2023 Max Brunsfeld, Damien Guard, Amaan Qureshi, and contributors
+- XML grammar - Copyright (c) 2023 ObserverOfTime
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
