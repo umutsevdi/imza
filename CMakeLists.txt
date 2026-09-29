@@ -3,7 +3,7 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 project(
     imza
-    VERSION 0.4.1
+    VERSION 0.5.0
     HOMEPAGE_URL "https://github.com/umutsevdi/imza"
     LANGUAGES C CXX
 )
@@ -337,6 +337,7 @@ target_link_libraries(imza_execution PUBLIC
 
 # UI: ftxui components + renderers
 add_library(imza_ui
+    src/ui/annotations.cpp
     src/ui/app.cpp
     src/ui/autocomplete.cpp
     src/ui/components.cpp

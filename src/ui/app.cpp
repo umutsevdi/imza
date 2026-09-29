@@ -228,6 +228,13 @@ namespace {
                           "Tab next phase · Shift+Tab previous phase · Ctrl+S "
                           "Sidechat");
             };
+            // The plan tab splits 50/50 once a document exists; the chat
+            // renders its left half and must budget for those columns.
+            chat_hints_.content_width = [this](const LayoutCtx& ctx) {
+                return phase_ == WorkflowPhase::PLAN && ctx.width > 0
+                    ? ctx.width / 2
+                    : review_content_width(ctx);
+            };
             chat_      = make_chat(state_, layout, chat_hints_);
             plan_tab_  = make_plan_tab(state_, layout, chat_);
             build_tab_ = make_build_tab(
@@ -310,8 +317,8 @@ namespace {
                            status })
                     | flex;
             } else if (layout_.kind == LayoutCtx::Kind::WIDE) {
-                Element content
-                    = std::move(right_col) | reflect(main_pane_box_) | yflex;
+                Element content = std::move(right_col) | xflex | yflex
+                    | reflect(main_pane_box_);
                 if (side_by_side) {
                     content = hbox({ std::move(content), separatorEmpty(),
                         sidechat_->Render() });

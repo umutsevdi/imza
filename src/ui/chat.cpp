@@ -498,11 +498,18 @@ namespace {
                           : text(""))
                 : vbox(std::move(items))
                     | capture_content_height(&viewport_.content_height) | flex;
-            Element log     = std::move(content) | vscroll_indicator
-                | focusPosition(0,
-                    viewport_.scroll
-                        + std::max(0, viewport_.viewport_lines() - 1) / 2)
-                | yframe;
+            // Following the tail anchors the bottom of the content: an
+            // item whose rendered height outruns the virtual-list
+            // estimate (wrapped long lines) keeps its newest lines on
+            // screen instead of scrolling them below the fold.
+            Element log = std::move(content)
+                | (follow_ ? focusPositionRelative(0.0f, 1.0f)
+                           : focusPosition(0,
+                               viewport_.scroll
+                                   + std::max(0,
+                                       viewport_.viewport_lines() - 1)
+                                   / 2))
+                | vscroll_indicator | yframe;
 
             Element input_box = panel(vbox({
                 separatorEmpty(),
@@ -1028,6 +1035,9 @@ namespace {
 
         int content_width()
         {
+            if (hints_.content_width) {
+                return std::max(20, hints_.content_width(layout_()) - 4);
+            }
             return std::max(20, review_content_width(layout_()) - 4);
         }
 

@@ -93,6 +93,15 @@ struct PlanDoc {
     bool operator==(const PlanDoc&) const = default;
 };
 
+// One user annotation on the plan document, pinned to a 1-based document
+// line. Section and anchor text derive from the document at revise time.
+struct PlanNote {
+    std::size_t line = 0;
+    std::string body;
+
+    bool operator==(const PlanNote&) const = default;
+};
+
 // Hard cap on one plan document, applied to both the stored object and
 // any future model-facing rendering of it.
 inline constexpr std::size_t MAX_PLAN_BYTES = 16 * 1024;

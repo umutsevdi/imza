@@ -14,9 +14,9 @@ namespace {
     using namespace ftxui;
 
     // PLAN tab content: chat until a plan exists; once the agent creates
-    // one, the document pane appears (50/50 wide, alternating narrow) and
-    // Ctrl+S moves focus between the two. Focus decides editor vs
-    // markdown preview.
+    // one, the annotator pane appears beside the chat (50/50 wide, chat
+    // left; alternating full-pane narrow) and Ctrl+S moves focus between
+    // the two.
     class PlanTab : public ComponentBase {
     public:
         PlanTab(std::shared_ptr<ApplicationState> state, LayoutFn layout,
@@ -24,7 +24,8 @@ namespace {
             : state_(std::move(state))
             , layout_(std::move(layout))
             , chat_(std::move(chat))
-            , _doc(make_plan_doc(state_, layout_, &_doc_focused))
+            , _doc(make_plan_doc(
+                  state_, [this] { return _pane_ctx(); }, &_doc_focused))
         {
             Add(_doc);
         }
@@ -42,10 +43,10 @@ namespace {
                 return _doc_focused ? _doc->Render() : chat_->Render();
             }
             return hbox({
-                _doc->Render() | xflex | reflect(_doc_box),
+                chat_->Render() | size(WIDTH, EQUAL, ctx.width / 2)
+                    | reflect(_chat_box),
                 separatorEmpty(),
-                chat_->Render() | reflect(_chat_box)
-                    | size(WIDTH, EQUAL, LayoutCtx::RIGHT_WIDTH),
+                _doc->Render() | xflex | reflect(_doc_box),
             });
         }
 
@@ -62,10 +63,11 @@ namespace {
             if (_handle_focus_click(event)) {
                 return true;
             }
+            // Wheel over the doc pane scrolls it even when unfocused
+            // (the dim pane stays wheel-scroll only).
             if (event.is_mouse()
                 && (event.mouse().button == Mouse::WheelUp
                     || event.mouse().button == Mouse::WheelDown)
-                && !_doc_focused
                 && _doc_box.Contain(event.mouse().x, event.mouse().y)) {
                 return _doc->OnEvent(event);
             }
@@ -78,6 +80,18 @@ namespace {
         }
 
     private:
+        // The doc pane occupies the right half in wide layout; it must
+        // measure wrap and scroll widths against its own columns, not the
+        // terminal's.
+        LayoutCtx _pane_ctx() const
+        {
+            LayoutCtx ctx = layout_();
+            if (ctx.kind == LayoutCtx::Kind::WIDE) {
+                ctx.width = std::max(20, ctx.width / 2 - 1);
+            }
+            return ctx;
+        }
+
         // A left press over a pane moves focus there; presses on the
         // separator or outside both boxes change nothing.
         bool _handle_focus_click(Event event)

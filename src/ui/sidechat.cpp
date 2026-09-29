@@ -65,7 +65,7 @@ public:
                   separatorEmpty(),
                   host_->Render() | yflex,
               })
-            | size(WIDTH, EQUAL, column_width) | reflect(pane_box_);
+            | yflex | size(WIDTH, EQUAL, column_width) | reflect(pane_box_);
         return focused_ ? column : std::move(column) | dim;
     }
 

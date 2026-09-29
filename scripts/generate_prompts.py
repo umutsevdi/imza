@@ -16,6 +16,7 @@ PROMPT_NAMES: tuple[str, ...] = (
     "make_skill",
     "review",
     "review_plan",
+    "plan_annotations",
 )
 
 

@@ -228,6 +228,21 @@ std::vector<std::size_t> filter_visible(const std::string& filter,
 
 ftxui::Element render_markdown_element(std::string_view md, int width);
 
+// One rendered block of a markdown document: the pretty element, the
+// block's first source line (the edit anchor), and its 1-based start line.
+struct MarkdownBlock {
+    ftxui::Element element;
+    std::string source;
+    int line = 0;
+};
+
+// Renders `md` as one element per top-level block (paragraph, list item,
+// table, code block, quote); heading blocks delimit sections. Boundaries
+// come from cmark positions, so hash characters inside fenced code never
+// split a block.
+std::vector<MarkdownBlock> render_markdown_blocks(
+    std::string_view md, int width);
+
 bool syntax_type_supported(std::string_view type);
 std::string syntax_type_for_path(std::string_view path);
 // One vector of visual-row elements per logical line of `code`.
@@ -353,6 +368,11 @@ ftxui::Element render_update_available(std::string version);
 // Per-chat footer text; the sidechat clears hints and sets its own input
 // hint.
 struct ChatHints {
+    // Content width budget override; the default derives it from the
+    // layout (full terminal). Hosts that place the chat in a narrower
+    // column (the plan tab's 50/50 split) supply the real column width so
+    // items wrap for the slot they render in.
+    std::function<int(const LayoutCtx&)> content_width;
     std::string scroll_line = "Ctrl+↑↓ input history · ↑↓ scroll";
     std::string phase_line
         = "Tab next phase · Shift+Tab previous phase · Ctrl+S Sidechat";
@@ -371,8 +391,9 @@ ftxui::Component make_chat(std::shared_ptr<ApplicationState> state,
 
 ftxui::Component make_plan_tab(std::shared_ptr<ApplicationState> state,
     LayoutFn layout, ftxui::Component chat);
-// `focused` is owned by the host tab: true when the pane is the editor,
-// false when it renders the markdown preview.
+// Plan annotator pane: renders the document as block rows; focused, it
+// accepts annotation keys (c/e/d, s revise, [/] sections) and unfocused
+// it renders dim and only scrolls. `focused` is owned by the host tab.
 ftxui::Component make_plan_doc(std::shared_ptr<ApplicationState> state,
     LayoutFn layout, const bool* focused);
 ftxui::Component make_review(std::shared_ptr<ApplicationState> state,

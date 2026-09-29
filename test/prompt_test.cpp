@@ -52,6 +52,7 @@ TEST_CASE("embedded prompts match the repository sources")
     CHECK(prompts.compaction() == read_prompt("compaction.md"));
     CHECK(prompts.review() == read_prompt("review.md"));
     CHECK(prompts.review_plan() == read_prompt("review_plan.md"));
+    CHECK(prompts.plan_annotations() == read_prompt("plan_annotations.md"));
 }
 
 TEST_CASE("user directory overrides prompts independently")
@@ -79,9 +80,10 @@ TEST_CASE("blank user files use embedded prompts")
 
 TEST_CASE("prompt sources contain prose instead of runtime markup")
 {
-    for (const std::string_view name : { "system.md", "subagent.md",
-             "subagent_research.md", "subagent_build.md", "title.md",
-             "compaction.md", "review.md", "review_plan.md" }) {
+    for (const std::string_view name :
+        { "system.md", "subagent.md", "subagent_research.md",
+            "subagent_build.md", "title.md", "compaction.md", "review.md",
+            "review_plan.md", "plan_annotations.md" }) {
         const std::string prompt = read_prompt(name);
         CHECK(prompt.find("<system-reminder") == std::string::npos);
         CHECK(prompt.find("{{") == std::string::npos);
@@ -108,4 +110,23 @@ TEST_CASE("system prompt carries the plan artifact contract")
         != std::string::npos);
 }
 
+TEST_CASE("plan annotations prompt derives section and line anchors")
+{
+    const std::string document
+        = "# Goal\nfirst plan\n# Approach\n1. first step\n2. second step\n";
+    const std::vector<PlanNote> notes {
+        { 5, "reorder these" },
+        { 2, "sharpen the contract" },
+        { 40, "gone" },
+    };
+    const std::string prompt = format_plan_annotations_prompt(
+        PromptStore().plan_annotations(), notes, document);
+    CHECK(prompt.find("imza.plan.edit") != std::string::npos);
+    CHECK(prompt.find("`Approach > 2. second step`") != std::string::npos);
+    CHECK(prompt.find("`Goal > first plan`") != std::string::npos);
+    CHECK(prompt.find("(stale)") != std::string::npos);
+    CHECK(format_plan_annotations_prompt(
+        PromptStore().plan_annotations(), { }, document)
+            .empty());
+}
 } // namespace imza

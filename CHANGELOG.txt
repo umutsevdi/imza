@@ -13,16 +13,15 @@ CHANGELOG
 <https://github.com/umutsevdi/imza/releases/tag/v0.5.0>
 
 Changes:
+  - Redesigned Plan Mode. Plan mode now generates a spec document on demand on
+  side pane. You can attach notes to any block or section in the document 
+  and send them as one revise request to update. You can also request for update
+  via chat messages.
+  Plans and it's revisions are stored in session data.
   - Added the /compact and /make-skill commands.
-  - Plan mode generates a document on demand
-  that can be edited either by the user or the agent and switched to the 
-  Build mode on request. Plans and it's revisions are stored in session data.
   - Added multi-modal input support for image types and PDF files.
-  - Added the module system.
   - Added support for charts.
   - Added select-to-copy.
-  - A welcome banner is shown in the chat when the app opens, until the
-first message is sent.
   - Fixed a hidden Sidechat intercepting clicks and keystrokes meant for the
 main chat.
   - Clicking the plan document or chat pane now moves focus between them on
@@ -31,6 +30,8 @@ the Plan tab.
   - Added syntax highlighting for Markdown, YAML, TOML, C#, and XML files,
 registered TSX and Jupyter notebook files.
   - fs.write now creates missing parent directories instead of failing.
+  - A welcome banner is shown in the chat when the app opens, until the
+first message is sent.
 
 -------------------------------------------------------------------------------
 0.4.1 - 2026-09-24
