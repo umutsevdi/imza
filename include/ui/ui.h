@@ -62,6 +62,25 @@ inline const ftxui::Color HL_BLUE           = ftxui::Color::RGB(121, 192, 255);
 inline const ftxui::Color HL_MAGENTA        = ftxui::Color::RGB(210, 168, 255);
 inline const ftxui::Color HL_CYAN           = ftxui::Color::RGB(104, 216, 232);
 inline constexpr int MODAL_MAX_WIDTH        = 100;
+// Streaming tail playout: the view releases queued characters at a paced
+// rate instead of materializing each arrival burst at once. The release
+// budget rises with the backlog but never past the display ceiling, so the
+// queue (not the network) decides the cadence, and a burst drains smoothly
+// after the turn ends. The markdown re-parse stays gated by
+// TRAILING_MARKDOWN_INTERVAL regardless.
+// Display ceiling: characters per tick the view never exceeds, whatever the
+// backlog. ~8 chars per 60 fps frame ≈ 480 chars/s of steady typing.
+inline constexpr std::size_t PLAYOUT_MAX_CHARS_PER_TICK = 8;
+// Backlogs beyond this snap to full text instead of animating (tool-call
+// result insertions, compaction, restored turns).
+inline constexpr std::size_t PLAYOUT_HARD_CAP = 4000;
+
+// The streaming chat tail's markdown re-parse cadence. Matched to the
+// stream-update batch period (src/turn/stream_updates.cpp) so the tail
+// advances every batch, i.e. visibly per arrived chunk of characters.
+// Tests sleep across it to assert the deferral.
+inline constexpr auto TRAILING_MARKDOWN_INTERVAL
+    = std::chrono::milliseconds(20);
 // Wider frame for the side-by-side diff viewer, which needs two panes of
 // readable code; every other modal keeps MODAL_MAX_WIDTH.
 inline constexpr int DIFF_VIEWER_MODAL_MAX_WIDTH = 160;

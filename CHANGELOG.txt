@@ -28,6 +28,8 @@ main chat.
   - Clicking the plan document or chat pane now moves focus between them on
 the Plan tab.
   - Fixed keyboard focus not returning to the chat after closing a dialog.
+  - Added syntax highlighting for Markdown, YAML, TOML, C#, and XML files,
+registered TSX and Jupyter notebook files.
   - fs.write now creates missing parent directories instead of failing.
 
 -------------------------------------------------------------------------------

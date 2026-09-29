@@ -19,6 +19,7 @@
 #include <ftxui/dom/node.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <functional>
 #include <map>
 #include <optional>
@@ -146,10 +147,15 @@ namespace {
         return card(vbox(std::move(rows)), PANEL_COLOR, false);
     }
 
-    Element assistant_item(const AssistantTurn& t, int width)
+    Element assistant_item(std::string_view markdown, int width)
     {
         return card(
-            render_markdown_element(t.markdown, width), std::nullopt, false);
+            render_markdown_element(markdown, width), std::nullopt, false);
+    }
+
+    Element assistant_item(const AssistantTurn& t, int width)
+    {
+        return assistant_item(std::string_view(t.markdown), width);
     }
 
     Element modal_answer_item(const ModalAnswer& ans, int width)
@@ -252,11 +258,15 @@ namespace {
                     item_cache_.resize(item_count);
                     item_versions_.assign(item_count, INVALID_VERSION);
                 }
-                cache_kind_     = ctx.kind;
-                cache_width_    = ctx.width;
-                content_serial_ = content_serial;
-                _cached_begin   = 0;
-                _cached_end     = 0;
+                _trailing_markdown.reset();
+                _trailing_markdown_index = ~std::size_t { 0 };
+                _playout_index           = ~std::size_t { 0 };
+                _playout_chars           = 0;
+                cache_kind_              = ctx.kind;
+                cache_width_             = ctx.width;
+                content_serial_          = content_serial;
+                _cached_begin            = 0;
+                _cached_end              = 0;
                 clear_interaction_cache();
             } else if (item_cache_.size() < item_count) {
                 const std::size_t previous_size = item_cache_.size();
@@ -302,6 +312,17 @@ namespace {
                 if (active) {
                     eff_version ^= std::size_t { 1 } << 61;
                 }
+                // Pacing continues after the turn finishes so the tail
+                // drains at display rate instead of popping the remainder;
+                // interrupts snap (interrupt_requested stays set until the
+                // next turn).
+                const bool pacing = is_trailing
+                    && std::holds_alternative<AssistantTurn>(it)
+                    && (active
+                        || (_playout_index == item_index
+                            && !st.interrupt_requested()
+                            && _playout_chars
+                                < std::get<AssistantTurn>(it).markdown.size()));
                 if (active) {
                     const auto& at = std::get<AssistantTurn>(it);
                     const bool thinking_now
@@ -312,6 +333,56 @@ namespace {
                     if (thinking_now) {
                         eff_version = static_cast<std::size_t>(frame_);
                     }
+                }
+                if (pacing) {
+                    // Released characters and parse generations are part of
+                    // the rendered identity: the paced element re-renders on
+                    // every release and every throttled re-parse.
+                    eff_version = (eff_version * 31 + _playout_chars) * 31
+                        + _playout_parses;
+                }
+                Element markdown_element;
+                bool markdown_cached = false;
+                if (pacing) {
+                    const auto& at = std::get<AssistantTurn>(it);
+                    const auto now = std::chrono::steady_clock::now();
+                    if (_playout_index != item_index) {
+                        // A new turn animates from its first character.
+                        _playout_index = item_index;
+                        _playout_chars = 0;
+                    }
+                    // Budget rises with the backlog but never past the
+                    // display ceiling: without it, the release rate would
+                    // converge to the arrival rate and the pacing vanish.
+                    const std::size_t backlog
+                        = at.markdown.size() - _playout_chars;
+                    if (backlog > PLAYOUT_HARD_CAP) {
+                        _playout_chars = at.markdown.size();
+                        // A snap is a forced repaint: don't let the parse
+                        // gate hide it behind the previous element.
+                        _trailing_markdown_at = { };
+                    } else {
+                        const std::size_t budget = std::min(backlog,
+                            std::clamp(backlog / 15, std::size_t { 1 },
+                                PLAYOUT_MAX_CHARS_PER_TICK));
+                        _playout_chars           = std::min(
+                            at.markdown.size(), _playout_chars + budget);
+                    }
+                    const bool due = _trailing_markdown_index != item_index
+                        || item_versions_[item_index] == INVALID_VERSION
+                        || now - _trailing_markdown_at
+                            >= TRAILING_MARKDOWN_INTERVAL;
+                    if (due) {
+                        _trailing_markdown
+                            = assistant_item(std::string_view(at.markdown)
+                                                 .substr(0, _playout_chars),
+                                content_width());
+                        _trailing_markdown_index = item_index;
+                        _trailing_markdown_at    = now;
+                        ++_playout_parses;
+                    }
+                    markdown_element = *_trailing_markdown;
+                    markdown_cached  = true;
                 }
                 if (item_versions_[item_index] != eff_version) {
                     if (std::holds_alternative<ToolCall>(it)) {
@@ -349,7 +420,8 @@ namespace {
                     } else if (std::holds_alternative<AssistantTurn>(it)) {
                         item_cache_[item_index]
                             = render_assistant(std::get<AssistantTurn>(it),
-                                item_index, ctx, active, final_segment);
+                                item_index, ctx, active, final_segment,
+                                markdown_element, markdown_cached);
                     } else {
                         item_cache_[item_index] = render_item(it, ctx);
                     }
@@ -600,12 +672,26 @@ namespace {
         void OnAnimation(animation::Params&) override
         {
             const auto phase = session_->phase();
-            if (phase != Session::Phase::STREAMING
-                && phase != Session::Phase::CONNECTING) {
+            const bool busy  = phase == Session::Phase::STREAMING
+                || phase == Session::Phase::CONNECTING;
+            if (busy) {
+                ++frame_;
+                animation::RequestAnimationFrame();
                 return;
             }
-            ++frame_;
-            animation::RequestAnimationFrame();
+            // The playout drain outlives the turn: keep the frame loop
+            // alive until the queued tail has fully released, or the
+            // response freezes a few characters short.
+            if (_playout_index != ~std::size_t { 0 }
+                && !session_->interrupt_requested()
+                && _playout_index < session_->items().size()) {
+                const auto* turn = std::get_if<AssistantTurn>(
+                    &session_->items()[_playout_index]);
+                if (turn != nullptr && _playout_chars < turn->markdown.size()) {
+                    ++frame_;
+                    animation::RequestAnimationFrame();
+                }
+            }
         }
 
     private:
@@ -743,6 +829,21 @@ namespace {
 
         std::vector<Element> item_cache_;
         std::vector<std::size_t> item_versions_;
+        // Throttled markdown element of the streaming trailing item; kept
+        // between re-parses so frames stay cheap (see
+        // TRAILING_MARKDOWN_INTERVAL).
+        std::optional<Element> _trailing_markdown;
+        std::size_t _trailing_markdown_index = ~std::size_t { 0 };
+        std::chrono::steady_clock::time_point _trailing_markdown_at { };
+        // Playout pacing: how much of the active trailing turn's markdown
+        // the view has released, advanced per frame by the PLAYOUT_*
+        // constants (ui.h). Session truth is never delayed — only pixels.
+        std::size_t _playout_index = ~std::size_t { 0 };
+        std::size_t _playout_chars = 0;
+        // Parse generation of the paced element: bumped on every throttled
+        // re-parse so the item version reflects refreshes even after the
+        // release has caught up with the truth.
+        std::size_t _playout_parses = 0;
         VirtualListState _timeline;
         std::size_t _cached_begin   = 0;
         std::size_t _cached_end     = 0;
@@ -808,6 +909,15 @@ namespace {
             if (reasoning != reasoning_links_.end()) {
                 reasoning->second.component->Detach();
                 reasoning_links_.erase(reasoning);
+            }
+            if (_trailing_markdown_index == index) {
+                _trailing_markdown.reset();
+                _trailing_markdown_index = ~std::size_t { 0 };
+            }
+            if (_playout_index == index) {
+                _playout_index = ~std::size_t { 0 };
+                _playout_chars = 0;
+                ++_playout_parses;
             }
         }
 
@@ -1192,7 +1302,8 @@ namespace {
         }
 
         Element render_assistant(const AssistantTurn& t, std::size_t index,
-            const LayoutCtx&, bool active, bool show_metadata)
+            const LayoutCtx&, bool active, bool show_metadata,
+            Element markdown_element, bool markdown_cached)
         {
             Elements parts;
             const bool has_reasoning = !t.reasoning.empty();
@@ -1224,7 +1335,9 @@ namespace {
                 parts.push_back(row);
             }
             if (!t.markdown.empty()) {
-                parts.push_back(assistant_item(t, content_width()));
+                parts.push_back(markdown_cached
+                        ? markdown_element
+                        : assistant_item(t, content_width()));
             }
             if (show_metadata) {
                 parts.push_back(hint_bar(assistant_metadata(t)));
