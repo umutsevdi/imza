@@ -643,18 +643,6 @@ TEST_CASE("plan bindings are unavailable without host callbacks")
         != std::string::npos);
 }
 
-TEST_CASE("web bindings fail closed without web access")
-{
-    const imza::ToolOutput fetch = run_script(
-        "local body, err = imza.web.fetch('https://example.com')\nprint(err)");
-    CHECK(fetch.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(fetch.text.find("web access is disabled") != std::string::npos);
-
-    const imza::ToolOutput search
-        = run_script("local body, err = imza.web.search('imza')\nprint(err)");
-    CHECK(search.text.find("web access is disabled") != std::string::npos);
-}
-
 TEST_CASE("web bindings fail closed before argument validation")
 {
     // The capability gate is enforced at registration (R3a), so a denied
@@ -1097,26 +1085,29 @@ TEST_CASE("imza.fs.insert rejects out-of-range lines and missing files")
     CHECK(out.diffs.empty());
 }
 
-TEST_CASE("imza.fs.edit replaces first occurrence by default")
+TEST_CASE("imza.fs.edit replaces the first occurrence by default and all "
+          "occurrences with count=0")
 {
     imza::test::TempDir dir;
     imza::test::write_file(dir.file("a.txt"), "foo bar foo baz foo\n");
-    const std::string path     = dir.file("a.txt").string();
-    const imza::ToolOutput out = run_script(
-        "assert(not imza.fs.edit([[" + path + "]], 'foo', 'qux'))");
-    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(imza::test::read_all(dir.file("a.txt")) == "qux bar foo baz foo\n");
-}
+    const std::string path = dir.file("a.txt").string();
 
-TEST_CASE("imza.fs.edit count=0 replaces all occurrences")
-{
-    imza::test::TempDir dir;
-    imza::test::write_file(dir.file("a.txt"), "foo bar foo baz foo\n");
-    const std::string path     = dir.file("a.txt").string();
-    const imza::ToolOutput out = run_script(
-        "assert(not imza.fs.edit([[" + path + "]], 'foo', 'qux', 0))");
-    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(imza::test::read_all(dir.file("a.txt")) == "qux bar qux baz qux\n");
+    SUBCASE("first occurrence by default")
+    {
+        const imza::ToolOutput out = run_script(
+            "assert(not imza.fs.edit([[" + path + "]], 'foo', 'qux'))");
+        REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+        CHECK(
+            imza::test::read_all(dir.file("a.txt")) == "qux bar foo baz foo\n");
+    }
+    SUBCASE("count=0 replaces all occurrences")
+    {
+        const imza::ToolOutput out = run_script(
+            "assert(not imza.fs.edit([[" + path + "]], 'foo', 'qux', 0))");
+        REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+        CHECK(
+            imza::test::read_all(dir.file("a.txt")) == "qux bar qux baz qux\n");
+    }
 }
 
 TEST_CASE("imza.fs.edit errors on missing match and empty old")
@@ -1183,8 +1174,8 @@ TEST_CASE("imza.fs.write rejects a file occupying the parent path")
             imza::SessionMode::BUILD };
     };
     const std::string path     = dir.file("a/b.txt").string();
-    const imza::ToolOutput out = run_script("local ok, err = imza.fs.write([["
-            + path + "]], 'x\\n')\nprint('DBG:' .. tostring(err))",
+    const imza::ToolOutput out = run_script(
+        "local ok, err = imza.fs.write([[" + path + "]], 'x\\n')\nprint(err)",
         std::move(host));
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(

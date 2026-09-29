@@ -366,8 +366,6 @@ RuntimeFlag runtime_flags_for(const CliResult& result)
     }
     if (!result.shell.value_or(true)) {
         flags &= ~RuntimeFlag::SHELL;
-    } else {
-        flags |= RuntimeFlag::SHELL;
     }
     if (result.skip_permissions) {
         flags |= RuntimeFlag::SKIP_PERMISSIONS;

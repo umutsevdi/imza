@@ -171,9 +171,6 @@ namespace {
         PostFn post, StreamFn stream_fn, ModalRequestFn parent_routing,
         std::string agent_label, std::vector<Tool> tools)
     {
-        if (!state->lua_state) {
-            state->lua_state = make_lua_state();
-        }
         state->session        = std::make_shared<Session>();
         state->sessions       = parent.sessions;
         state->input_history  = parent.input_history;

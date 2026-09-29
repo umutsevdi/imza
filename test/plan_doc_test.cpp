@@ -329,7 +329,6 @@ TEST_CASE("click on a block row opens the note editor inline")
     REQUIRE(editor_at != -1);
     CHECK(editor_at > plan_at);
     CHECK(editor_at < next_at);
-    // The bottom bar keeps the revise button while editing.
     CHECK(imza::test::to_text(doc->Render(), 100, 40).find("Revise Plan")
         != std::string::npos);
 

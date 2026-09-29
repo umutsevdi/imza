@@ -61,8 +61,7 @@ namespace {
             && (head.starts_with("<!doctype html") || head.starts_with("<html")
                 || head.starts_with("<head") || head.starts_with("<body")
                 || head.starts_with("<div") || head.starts_with("<p")
-                || head.starts_with("<h1") || head.starts_with("<h2")
-                || head.starts_with("<!doctype html public"));
+                || head.starts_with("<h1") || head.starts_with("<h2"));
         std::string text = is_html ? html_to_text(page.body) : page.body;
         if (trim(text).empty()) {
             return binding_error(

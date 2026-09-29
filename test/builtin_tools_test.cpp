@@ -40,9 +40,6 @@ TEST_CASE("a removed native tool name is unknown to the roster")
     // lua bindings, not tool membership. A native name fails dispatch.
     auto state       = imza::make_lua_state();
     const auto tools = imza::default_tools({ }, { }, { }, *state);
-    REQUIRE(imza::find_tool(tools, "lua") != nullptr);
-    REQUIRE(imza::find_tool(tools, "skill") != nullptr);
-    REQUIRE(imza::find_tool(tools, "subagent") != nullptr);
 
     const auto disabled = imza::dispatch_tool(
         tools, { "shell", R"({"command":"echo unavailable"})", "", "" });

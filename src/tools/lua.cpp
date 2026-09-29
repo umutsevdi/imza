@@ -162,8 +162,6 @@ namespace {
         lua_pushcclosure(L, lua_print, 1);
         lua_setglobal(L, "print");
     }
-    // Roster order: the order here is the order of METHODS entries in the
-    // model-facing description.
     bool capability_allowed(const LuaHost& host, LuaCapability capability)
     {
         switch (capability) {

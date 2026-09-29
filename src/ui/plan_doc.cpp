@@ -1,7 +1,3 @@
-// Annotator pane over the plan document: the document renders as block
-// rows (pretty markdown per block), notes pin to block lines and collect
-// into one revise turn; there is no direct document editing.
-
 #include "app/flows.h"
 #include "turn/prompt.h"
 #include "ui/annotations.h"

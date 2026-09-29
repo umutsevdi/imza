@@ -11,8 +11,6 @@
 #include "turn/prompt.h"
 #include "turn/turn_runner.h"
 
-#include <cstdio>
-
 #include <memory>
 #include <optional>
 #include <string>
@@ -175,12 +173,7 @@ namespace {
         }
     }
 
-    SessionsModal sessions_modal(const ApplicationState& state)
-    {
-        SessionsModal modal;
-        modal.sessions = state.sessions->sessions();
-        return modal;
-    }
+    SessionsModal sessions_modal(const ApplicationState&) { return { }; }
 
     SkillsModal skills_modal(const ApplicationState& state)
     {

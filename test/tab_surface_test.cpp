@@ -20,22 +20,20 @@ TEST_CASE("sidechat and main chat fill the wide layout when open")
     auto state = imza::test::make_test_state();
     state->session->begin_send("hello there this is the main chat");
     imza::SidechatStatus status;
-    auto chat = imza::make_chat(state, [] {
+    auto chat     = imza::make_chat(state, [] {
         return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 120, 40 };
     });
-    auto sidechat = imza::make_sidechat_component(
-        state, [] { }, status);
+    auto sidechat = imza::make_sidechat_component(state, [] { }, status);
     imza::open_sidechat(*state);
     (void)chat->Render();
     (void)sidechat->Render();
 
     using namespace ftxui;
     Element content = vbox({ text("TITLE ROW") }) | xflex | yflex;
-    content         = hbox(
-        { std::move(content), separatorEmpty(), sidechat->Render() });
-    Element main_panel
-        = vbox({ hbox({ text(" "), text("title") | xflex }),
-            std::move(content) })
+    content
+        = hbox({ std::move(content), separatorEmpty(), sidechat->Render() });
+    Element main_panel = vbox({ hbox({ text(" "), text("title") | xflex }),
+                             std::move(content) })
         | xflex | yflex;
     Element root = vbox({ std::move(main_panel) | flex }) | flex;
     auto screen  = ftxui::Screen::Create(
@@ -48,8 +46,8 @@ TEST_CASE("sidechat and main chat fill the wide layout when open")
     bool sidechat_reaches_bottom = false;
     for (int y = 34; y < 40 && y < static_cast<int>(raw_lines.size()); ++y) {
         const std::string clean = imza::test::without_ansi(raw_lines[y]);
-        if (clean.size() > 70 && clean.find_first_not_of(' ', 70)
-                != std::string::npos) {
+        if (clean.size() > 70
+            && clean.find_first_not_of(' ', 70) != std::string::npos) {
             sidechat_reaches_bottom = true;
         }
         MESSAGE("[", clean, "]");

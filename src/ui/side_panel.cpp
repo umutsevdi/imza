@@ -114,7 +114,7 @@ public:
             const auto repository = env->repository();
             if (repository && !repository->changed_files.empty()) {
                 parts.push_back(_render_changed_files(*repository) | yflex);
-            };
+            }
             if (attachments_dirty_.exchange(false)) {
                 attachment_names_ = state_->session->attachment_names();
             }

@@ -72,7 +72,6 @@ public:
         draft_cursor_ = 0;
     }
 
-    // Inserts a newline at the cursor (Alt+Enter).
     void newline();
 
 private:

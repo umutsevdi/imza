@@ -939,7 +939,6 @@ TEST_CASE("plan submission messages are emitted once per revision in build")
           "# Open Questions\nx";
     REQUIRE(session.create_plan(skeleton).empty());
 
-    // In PLAN mode there is nothing to submit.
     CHECK_FALSE(session.plan_submission_for_build().has_value());
 
     // First build turn of a stint: the plan rides as an approval message.
@@ -961,6 +960,19 @@ TEST_CASE("plan submission messages are emitted once per revision in build")
     REQUIRE(amended.has_value());
     CHECK(amended->find("User has changed the plan: <plan>") == 0);
     CHECK_FALSE(session.plan_submission_for_build().has_value());
+
+    SUBCASE("a restored session re-submits its plan once")
+    {
+        imza::Session loaded;
+        loaded.restore(session.snapshot());
+        loaded.set_mode(imza::Session::Mode::BUILD);
+        // The submission watermark is session state, not persisted: a
+        // loaded session re-submits the plan once, the safe direction.
+        const auto submitted = loaded.plan_submission_for_build();
+        REQUIRE(submitted.has_value());
+        CHECK(submitted->find("Plan approved for build: <plan>") == 0);
+        CHECK_FALSE(loaded.plan_submission_for_build().has_value());
+    }
 }
 
 TEST_CASE("plan submission requires build mode and a plan")
@@ -976,24 +988,6 @@ TEST_CASE("plan submission requires build mode and a plan")
     CHECK_FALSE(session.plan_submission_for_build().has_value());
 }
 
-TEST_CASE("a restored session submits its plan once on the first build turn")
-{
-    imza::Session source;
-    const std::string skeleton
-        = "# Goal\nx\n# Approach\nx\n# Files\nx\n# Verification\nx\n"
-          "# Open Questions\nx";
-    REQUIRE(source.create_plan(skeleton).empty());
-
-    imza::Session loaded;
-    loaded.restore(source.snapshot());
-    loaded.set_mode(imza::Session::Mode::BUILD);
-    // The submission watermark is session state, not persisted: a loaded
-    // session re-submits the plan once, which is the safe direction.
-    const auto submitted = loaded.plan_submission_for_build();
-    REQUIRE(submitted.has_value());
-    CHECK(submitted->find("Plan approved for build: <plan>") == 0);
-    CHECK_FALSE(loaded.plan_submission_for_build().has_value());
-}
 TEST_CASE("plan changes publish the plan signal")
 {
     imza::Session session;

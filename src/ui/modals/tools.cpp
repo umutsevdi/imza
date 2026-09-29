@@ -1,5 +1,4 @@
 #include "app/flows.h"
-#include "network/json_io.h"
 #include "ui/tool_format.h"
 #include "ui/ui.h"
 #include "workspace/environment.h"
@@ -8,7 +7,6 @@
 #include <ftxui/component/component_base.hpp>
 #include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
-#include <ftxui/dom/node.hpp>
 #include <ftxui/screen/terminal.hpp>
 
 #include <algorithm>
@@ -232,19 +230,7 @@ namespace {
             if (std::holds_alternative<ViewerModal>(st.modal())) {
                 return viewer_body(std::get<ViewerModal>(st.modal()));
             }
-            if (std::holds_alternative<ConnectModal>(st.modal())) {
-                return connect_->Render();
-            }
-            if (std::holds_alternative<VariantModal>(st.modal())) {
-                return variant_->Render();
-            }
-            if (std::holds_alternative<SessionsModal>(st.modal())) {
-                return sessions_->Render();
-            }
-            if (std::holds_alternative<SkillsModal>(st.modal())) {
-                return skills_->Render();
-            }
-            return text("");
+            return body_->Render();
         }
 
         bool OnEvent(Event event) override
@@ -431,30 +417,17 @@ namespace {
         void build(const ConnectModal& modal)
         {
             if (modal.entry == ConnectModal::Entry::SUBAGENTS) {
-                connect_ = make_subagents(state_);
+                body_ = make_subagents(state_);
             } else {
-                connect_ = make_connect(state_);
+                body_ = make_connect(state_);
             }
-            body_ = connect_;
         }
 
-        void build(const VariantModal&)
-        {
-            variant_ = make_variant(state_);
-            body_    = variant_;
-        }
+        void build(const VariantModal&) { body_ = make_variant(state_); }
 
-        void build(const SessionsModal&)
-        {
-            sessions_ = make_sessions(state_);
-            body_     = sessions_;
-        }
+        void build(const SessionsModal&) { body_ = make_sessions(state_); }
 
-        void build(const SkillsModal&)
-        {
-            skills_ = make_skills(state_);
-            body_   = skills_;
-        }
+        void build(const SkillsModal&) { body_ = make_skills(state_); }
 
         void build(const ViewerModal& payload)
         {
@@ -490,10 +463,6 @@ namespace {
             reject_.reset();
             confirm_reject_.reset();
             back_.reset();
-            connect_.reset();
-            variant_.reset();
-            sessions_.reset();
-            skills_.reset();
         }
 
         Component make_option_row(
@@ -665,10 +634,6 @@ namespace {
         Component reject_;
         Component confirm_reject_;
         Component back_;
-        Component connect_;
-        Component variant_;
-        Component sessions_;
-        Component skills_;
         Element viewer_content_;
 
         Component body_;

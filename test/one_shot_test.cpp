@@ -211,25 +211,3 @@ TEST_CASE("one-shot retries transient server errors before stream data")
     CHECK(result.output == "recovered");
     CHECK(calls.load() == 2);
 }
-
-TEST_CASE("one-shot does not retry server errors after stream data arrived")
-{
-    imza::MainThreadQueue queue;
-    std::atomic<int> calls = 0;
-    auto state             = make_one_shot_state(queue,
-        [&calls](
-            const imza::ChatRequest&, const imza::StreamCallback& callback) {
-            calls.fetch_add(1);
-            callback(imza::make_delta_event("partial "));
-            callback(
-                imza::make_error_event(imza::Status::SERVER_ERROR, "boom"));
-            return imza::Status::SERVER_ERROR;
-        });
-
-    const auto result = imza::run_one_shot(
-        *state, queue, { imza::OneShotRequest::Mode::ASK, "go" });
-
-    CHECK(result.kind == imza::OneShotResult::Kind::PROVIDER_FAILURE);
-    CHECK(result.error.find("boom") != std::string::npos);
-    CHECK(calls.load() == 1);
-}

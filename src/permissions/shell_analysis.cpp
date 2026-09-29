@@ -329,7 +329,6 @@ bool shell_readonly_allowed(const ShellInvocation& invocation)
             { "uptime", std::nullopt, "-p -s" } }
     };
 #endif
-    // Shared read-only combinations available on every platform.
     static constexpr std::array<ReadOnlyCommand, 26> shared {
         { { "git", "status",
               "-s -b -v --short --branch --porcelain -u "

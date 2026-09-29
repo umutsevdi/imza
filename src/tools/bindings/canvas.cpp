@@ -1,7 +1,6 @@
 #include "tools/bindings.h"
 
 #include <cmath>
-#include <optional>
 #include <string>
 #include <vector>
 

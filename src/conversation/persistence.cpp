@@ -631,8 +631,7 @@ Status save_session(Session& session)
     for (auto& plan : snapshot.plans) {
         plans.append(consume_string(plan.content));
     }
-    root["plans"] = std::move(plans);
-    ;
+    root["plans"]             = std::move(plans);
     root["compacted_summary"] = consume_string(snapshot.compacted_summary);
     root["compacted_item_count"]
         = static_cast<Json::UInt64>(snapshot.compacted_item_count);

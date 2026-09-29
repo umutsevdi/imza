@@ -85,7 +85,6 @@ inline constexpr auto TRAILING_MARKDOWN_INTERVAL
 // readable code; every other modal keeps MODAL_MAX_WIDTH.
 inline constexpr int DIFF_VIEWER_MODAL_MAX_WIDTH = 160;
 
-// Width cap for the active modal payload.
 int modal_max_width(const ModalPayload& modal);
 
 std::string fit(const std::string& text, int width);
@@ -271,7 +270,6 @@ inline bool is_sidechat_toggle(const ftxui::Event& event)
 {
     return event == ftxui::Event::CtrlS;
 }
-// Inserts a newline at `cursor` and advances it.
 inline void insert_newline_at(std::string& text, int& cursor)
 {
     text.insert(static_cast<std::size_t>(cursor), "\n");

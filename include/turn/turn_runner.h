@@ -79,15 +79,12 @@ public:
     void set_on_finish(std::function<void(std::string)> on_finish);
     bool has_stream_override() const { return _has_stream_override; }
     const StreamFn& stream_fn() const { return _stream_fn; }
-    const std::vector<ToolSpec>& specs() const { return _specs_all; }
     Status run_stream(const ChatRequest& req, const Route& route,
         const StreamCallback& cb) const;
     bool blocked_permission() const { return _blocked_permission.load(); }
 
 private:
     void _drive(std::vector<Message> history, TurnSettings settings);
-    // Streams a summary of history[begin..end) through the compaction
-    // prompt. The caller owns the CompactionEvent lifecycle.
     std::optional<std::string> _summarize(const std::vector<Message>& history,
         std::size_t begin, std::size_t end, const TurnSettings& settings);
     bool _compact_history(std::vector<Message>& history,

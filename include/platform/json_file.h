@@ -17,7 +17,6 @@ namespace imza {
 Status write_json_file(const std::filesystem::path& path,
     const Json::Value& root, std::string_view indentation);
 
-// Reads a file completely.
 std::optional<std::string> read_text_file(const std::filesystem::path& path);
 
 // nullopt when absent, unreadable, or malformed; check existence first when

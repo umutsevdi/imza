@@ -38,22 +38,28 @@ namespace {
         return names;
     }
 
-} // namespace
+    struct SkillRead {
+        enum class Kind { OK, READ_FAILED, TOO_LARGE };
+        Kind kind = Kind::OK;
+        std::string body;
+    };
 
-SkillRead read_skill(const Skill& skill)
-{
-    const std::optional<std::string> content = read_text_file(skill.path);
-    if (!content) {
-        return { SkillRead::Kind::READ_FAILED, "" };
+    SkillRead read_skill(const Skill& skill)
+    {
+        const std::optional<std::string> content = read_text_file(skill.path);
+        if (!content) {
+            return { SkillRead::Kind::READ_FAILED, "" };
+        }
+        if (content->size() > MAX_SKILL_BYTES) {
+            return { SkillRead::Kind::TOO_LARGE, "" };
+        }
+        return { SkillRead::Kind::OK,
+            "<skill name=\"" + skill.name + "\" directory=\""
+                + skill.path.parent_path().string() + "\">\n" + *content
+                + "\n</skill>" };
     }
-    if (content->size() > MAX_SKILL_BYTES) {
-        return { SkillRead::Kind::TOO_LARGE, "" };
-    }
-    return { SkillRead::Kind::OK,
-        "<skill name=\"" + skill.name + "\" directory=\""
-            + skill.path.parent_path().string() + "\">\n" + *content
-            + "\n</skill>" };
-}
+
+} // namespace
 
 std::optional<std::string> load_skill_checked(
     const Skill& skill, std::string& reason)

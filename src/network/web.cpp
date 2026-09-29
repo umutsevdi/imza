@@ -96,8 +96,7 @@ namespace {
         return map;
     }
 
-    // Decodes an entity spanning [begin+1, semi); appends to out and returns
-    // true on success.
+    // The entity body spans [begin+1, semi); decodes it into out.
     bool decode_entity(const std::string& low, std::size_t begin,
         std::size_t semi, std::string& out)
     {

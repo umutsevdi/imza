@@ -96,7 +96,7 @@ namespace {
     // Shallowest identifier in `node`'s subtree: the `name` field when
     // the grammar defines one, else the first child of grammar type
     // `identifier`. Null node when it has neither.
-    TSNode node_name_inner(const TSNode& node, std::string_view)
+    TSNode node_name_inner(const TSNode& node)
     {
         std::vector<TSNode> stack { node };
         while (!stack.empty()) {
@@ -152,7 +152,7 @@ namespace {
                 }
             }
             if (!ts_node_is_null(name_node)) {
-                name_node = node_name_inner(name_node, code);
+                name_node = node_name_inner(name_node);
             }
         }
         if (ts_node_is_null(name_node)) {

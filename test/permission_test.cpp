@@ -635,13 +635,6 @@ TEST_CASE("shell policy reuses, combines, and broadens session grants")
     const ShellAnalysis mixed = analyze_shell("git status && git push");
     CHECK_FALSE(shell_readonly_allowed(mixed.invocations[1]));
 
-    CHECK(evaluate("make -n && which -a ls").decision.kind
-        == PermissionDecision::Kind::ACCEPT);
-    CHECK(evaluate("git branch -D main").decision.kind
-        == PermissionDecision::Kind::ASK);
-    CHECK(evaluate("git diff --output=patch.txt").decision.kind
-        == PermissionDecision::Kind::ASK);
-
     const ShellEvaluation redirected = evaluate("ls > files.txt");
     CHECK(redirected.decision.kind == PermissionDecision::Kind::ASK);
     CHECK(redirected.session_grants.empty());

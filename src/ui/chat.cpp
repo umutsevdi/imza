@@ -503,12 +503,12 @@ namespace {
             // estimate (wrapped long lines) keeps its newest lines on
             // screen instead of scrolling them below the fold.
             Element log = std::move(content)
-                | (follow_ ? focusPositionRelative(0.0f, 1.0f)
-                           : focusPosition(0,
-                               viewport_.scroll
-                                   + std::max(0,
-                                       viewport_.viewport_lines() - 1)
-                                   / 2))
+                | (follow_
+                        ? focusPositionRelative(0.0f, 1.0f)
+                        : focusPosition(0,
+                              viewport_.scroll
+                                  + std::max(0, viewport_.viewport_lines() - 1)
+                                      / 2))
                 | vscroll_indicator | yframe;
 
             Element input_box = panel(vbox({
@@ -816,9 +816,6 @@ namespace {
         std::shared_ptr<Session> session_;
         LayoutFn layout_;
         ChatHints hints_;
-        // The empty-state banner is a first-open greeting; once any item
-        // lands in the conversation it never returns (including after /new).
-        bool show_banner_ = true;
 
         Component container_;
         std::map<std::size_t, Component> read_buttons_;

@@ -20,13 +20,6 @@ namespace {
     template <typename T>
     constexpr bool is_find_request = std::is_same_v<T, FindFilesRequest>;
 
-    template <typename T>
-    constexpr bool is_edit_request = std::is_same_v<T, InsertFileRequest>
-        || std::is_same_v<T, EditFileRequest>;
-
-    template <typename T>
-    constexpr bool is_write_request = std::is_same_v<T, WriteFileRequest>;
-
     bool matches_path(const PermissionStore::Grants& grants,
         const std::filesystem::path& target)
     {

@@ -28,7 +28,6 @@ namespace {
             { }, std::nullopt };
     }
 
-    // The ASK verdict's own carrier: reason, session scope, typed details.
     PermissionEvaluation ask(ToolCallRequest request, std::string reason,
         PermissionStore::Grants grants, SkillRequest details)
     {

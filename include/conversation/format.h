@@ -28,14 +28,12 @@ inline std::string code_fence(std::string_view body)
 std::string question_form_markdown(const QuestionForm& form);
 std::string modal_answer_markdown(const ModalAnswer& answer);
 
-// How a lua return value renders for display: scalars and scalar lists
-// print as plain markdown, record lists as markdown tables, other values
-// as pretty JSON that needs a code fence.
+// Lua tool return values render the same way for the model transcript and
+// the UI report: scalars and scalar lists print as plain markdown, record
+// lists as markdown tables, other values as pretty JSON that needs a code
+// fence.
 enum class LuaReturnKind { SCALAR, SCALAR_LIST, TABLE, JSON };
 LuaReturnKind lua_return_kind(const Json::Value& return_value);
-// Single rendering of a lua tool's JSON return value for both the model
-// transcript and the UI report: scalars print directly, uniform record
-// lists render as markdown tables, other values as pretty JSON.
 std::string format_lua_return(const Json::Value& return_value);
 std::string format_lua_result(
     std::string text, const std::optional<Json::Value>& return_value);

@@ -13,8 +13,6 @@
 #include <ftxui/screen/terminal.hpp>
 
 #include <algorithm>
-#include <cstdio>
-#include <functional>
 #include <map>
 #include <string>
 #include <vector>

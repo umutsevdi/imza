@@ -37,12 +37,6 @@ struct SkillCounts {
     std::size_t total  = 0;
 };
 
-struct SkillRead {
-    enum class Kind { OK, READ_FAILED, TOO_LARGE };
-    Kind kind = Kind::OK;
-    std::string body;
-};
-
 struct PendingSkillTurn {
     std::string text;
     std::vector<Attachment> attachments;
@@ -50,7 +44,6 @@ struct PendingSkillTurn {
     std::size_t next = 0;
 };
 
-SkillRead read_skill(const Skill& skill);
 // nullopt with `reason` set when the read fails or the size limit is hit.
 std::optional<std::string> load_skill_checked(
     const Skill& skill, std::string& reason);
