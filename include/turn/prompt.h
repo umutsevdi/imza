@@ -24,6 +24,7 @@ public:
     const std::string& subagent_build() const { return _subagent_build; }
     const std::string& title() const { return _title; }
     const std::string& compaction() const { return _compaction; }
+    const std::string& make_skill() const { return _make_skill; }
     const std::string& review() const { return _review; }
     const std::string& review_plan() const { return _review_plan; }
 
@@ -34,6 +35,7 @@ private:
     std::string _subagent_build;
     std::string _title;
     std::string _compaction;
+    std::string _make_skill;
     std::string _review;
     std::string _review_plan;
 };

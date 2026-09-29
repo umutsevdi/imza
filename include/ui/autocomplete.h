@@ -26,8 +26,9 @@ public:
     void refresh(
         const ApplicationState& state, const std::string& text, int cursor);
 
-    // Applies the highlighted suggestion. Returns true when a command was
-    // chosen and the caller should submit the input afterwards.
+    // Applies the highlighted suggestion. Returns true only when the
+    // input is ready to submit; command completions return false so the
+    // user can type arguments before submitting.
     bool accept(const ApplicationState& state, std::string& text, int& cursor,
         std::vector<Attachment>& attachments);
 

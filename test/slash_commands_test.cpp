@@ -4,9 +4,11 @@
 #include "platform/config.h"
 #include "test_fs.h"
 #include "test_state.h"
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
+#include <thread>
 
 #include <doctest/doctest.h>
 
@@ -46,13 +48,18 @@ TEST_CASE("slash_commands includes built-ins")
             || c.action == SlashCommand::Action::VARIANT
             || c.action == SlashCommand::Action::SUBAGENTS
             || c.action == SlashCommand::Action::SESSIONS
-            || c.action == SlashCommand::Action::SKILLS;
+            || c.action == SlashCommand::Action::SKILLS
+            || c.action == SlashCommand::Action::COMPACT
+            || c.action == SlashCommand::Action::MAKE_SKILL;
         CHECK(known);
     }
 }
 
 TEST_CASE("find_command matches case-insensitively")
 {
+    CHECK(find_command("/compact")->action == SlashCommand::Action::COMPACT);
+    CHECK(find_command("/make-skill")->action
+        == SlashCommand::Action::MAKE_SKILL);
     CHECK(find_command("/help") == nullptr);
     CHECK(find_command("/exit")->action == SlashCommand::Action::EXIT);
     CHECK(find_command("/EXIT")->action == SlashCommand::Action::EXIT);
@@ -255,6 +262,129 @@ TEST_CASE("CLI parses exec with explicit shell access")
     CHECK(result.one_shot->query == query);
     CHECK((flags & RuntimeFlag::SHELL) != RuntimeFlag::NONE);
     CHECK((flags & RuntimeFlag::ATTENDED) == RuntimeFlag::NONE);
+}
+
+TEST_CASE("run_slash /make-skill requires a description")
+{
+    auto state = imza::test::make_test_state();
+
+    run_slash(*state, "/make-skill");
+    CHECK(
+        state->session->error() == "Usage: /make-skill <workflow description>");
+    CHECK(state->session->phase() == imza::Session::Phase::IDLE);
+    CHECK_FALSE(state->session->has_items());
+}
+
+TEST_CASE("run_slash /make-skill seeds a Build-mode turn")
+{
+    std::string transcript_user_turn;
+    std::string last_model_message;
+    bool build_mode = false;
+    auto state      = imza::test::make_test_state(imza::test::run_immediately,
+        imza::test::test_config(),
+        [&](const imza::ChatRequest& request, const imza::StreamCallback& cb) {
+            const auto& messages = request.messages;
+            transcript_user_turn = messages[1].content;
+            last_model_message   = messages.back().content;
+            build_mode           = messages.front().content.find(
+                                       "<runtime-mode name=\"build\"/>")
+                != std::string::npos;
+            cb(imza::make_delta_event("ok"));
+            cb(imza::make_done_event());
+            return imza::Status::OK;
+        });
+    REQUIRE(state->providers->active_selection().has_value());
+    while (!state->environment->ready()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    int mode_changes = 0;
+    const auto subscription
+        = state->session->subscribe_to_mode_change([&] { ++mode_changes; });
+
+    run_slash(*state, "/make-skill deploy with docker compose");
+    while (state->session->phase() != imza::Session::Phase::IDLE) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    CHECK(state->session->mode() == imza::Session::Mode::BUILD);
+    CHECK(mode_changes > 0);
+    CHECK(build_mode);
+    // The transcript records the command line; the seeded instructions
+    // ride the model history's final user message.
+    CHECK(transcript_user_turn.find("deploy with docker compose")
+        != std::string::npos);
+    CHECK(transcript_user_turn.find(".agents/skills") == std::string::npos);
+    CHECK(last_model_message.find("deploy with docker compose")
+        != std::string::npos);
+    CHECK(last_model_message.find(".agents/skills") != std::string::npos);
+    REQUIRE(state->session->has_items());
+    const SessionSnapshot snapshot = state->session->snapshot();
+    const auto* user_turn = std::get_if<UserTurn>(&snapshot.items.front());
+    REQUIRE(user_turn != nullptr);
+    CHECK(user_turn->text == "/make-skill deploy with docker compose");
+}
+
+TEST_CASE("run_slash /compact guards an empty or busy session")
+{
+    auto state = imza::test::make_test_state();
+
+    run_slash(*state, "/compact");
+    CHECK(state->session->error() == "Nothing to compact.");
+}
+
+TEST_CASE("run_slash /compact folds a forced summary into the session")
+{
+    std::string summarizer_input;
+    auto state = imza::test::make_test_state(imza::test::run_immediately,
+        imza::test::test_config(),
+        [&](const imza::ChatRequest& request, const imza::StreamCallback& cb) {
+            // The compaction request: system prompt is the compaction
+            // prompt, single user message is the transcript.
+            if (request.messages.size() == 2
+                && request.messages[0].content.find("Summarize")
+                    != std::string::npos) {
+                summarizer_input = request.messages[1].content;
+                cb(imza::make_delta_event("condensed history"));
+                cb(imza::make_done_event());
+                return imza::Status::OK;
+            }
+            return imza::Status::OK;
+        });
+    REQUIRE(state->providers->active_selection().has_value());
+    while (!state->environment->ready()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    submit(*state, "first user message");
+    while (state->session->phase() != imza::Session::Phase::IDLE) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    state->session->clear_error();
+
+    run_slash(*state, "/compact");
+    while (state->session->phase() != imza::Session::Phase::IDLE) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    CHECK(summarizer_input.find("first user message") != std::string::npos);
+    CHECK(state->session->error().empty());
+    // build_history now leads with the summary; the raw turn stays in the
+    // timeline but is skipped as compacted.
+    const std::string prompt
+        = state->session->build_history("system", imza::ApiStandard::OPENAI)
+              .empty()
+        ? ""
+        : [&] {
+              std::string joined;
+              for (const auto& m : state->session->build_history(
+                       "system", imza::ApiStandard::OPENAI)) {
+                  joined += m.content + "\n";
+              }
+              return joined;
+          }();
+    CHECK(prompt.find("condensed history") != std::string::npos);
+    CHECK(prompt.find("first user message") == std::string::npos);
 }
 
 TEST_CASE("run_slash emits application effects")

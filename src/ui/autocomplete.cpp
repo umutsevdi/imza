@@ -147,8 +147,11 @@ bool Autocomplete::accept(const ApplicationState& state, std::string& text,
     const SlashCommand* cmd = _commands[static_cast<std::size_t>(selected_)];
     text                    = cmd->name;
     cursor                  = static_cast<int>(text.size());
+    // Argument-taking commands (/make-skill …) complete without
+    // submitting so the user can type the argument; with the menu closed
+    // the next Enter submits. Argument-less commands execute right away.
     refresh(state, text, cursor);
-    return true;
+    return !cmd->takes_argument;
 }
 
 void Autocomplete::clear()

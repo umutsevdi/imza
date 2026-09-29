@@ -1137,8 +1137,8 @@ namespace {
 
 } // namespace
 
-Component make_review(std::shared_ptr<ApplicationState> state,
-    LayoutFn layout, WorkflowNavigateFn navigate)
+Component make_review(std::shared_ptr<ApplicationState> state, LayoutFn layout,
+    WorkflowNavigateFn navigate)
 {
     return ftxui::Make<Review>(
         std::move(state), std::move(layout), std::move(navigate));

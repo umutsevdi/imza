@@ -243,6 +243,21 @@ namespace {
                     [] { animation::RequestAnimationFrame(); });
             title_subscription_ = state_->session->subscribe_to_title_change(
                 [] { animation::RequestAnimationFrame(); });
+            // Flows can flip the session mode directly (/make-skill seeds
+            // a Build turn); follow so the tabs and status line agree.
+            mode_subscription_ = state_->session->subscribe_to_mode_change(
+                [this] {
+                    state_->post([this] {
+                        const Session::Mode mode  = state_->session->mode();
+                        const WorkflowPhase phase = mode == Session::Mode::PLAN
+                            ? WorkflowPhase::PLAN
+                            : WorkflowPhase::BUILD;
+                        if (phase_ != phase
+                            && phase_ != WorkflowPhase::REVIEW) {
+                            _set_phase(phase);
+                        }
+                    });
+                });
             phase_    = state_->session->mode() == Session::Mode::PLAN
                 ? WorkflowPhase::PLAN
                 : WorkflowPhase::BUILD;
@@ -509,6 +524,7 @@ namespace {
         Component tabs_;
         Signal<>::Subscription workspace_subscription_;
         Signal<>::Subscription title_subscription_;
+        Signal<>::Subscription mode_subscription_;
         LayoutCtx layout_ = layout_context(0);
         WorkflowPhase phase_ { WorkflowPhase::PLAN };
         std::vector<std::string> tab_names_;

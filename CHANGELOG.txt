@@ -13,12 +13,14 @@ CHANGELOG
 <https://github.com/umutsevdi/imza/releases/tag/v0.5.0>
 
 Changes:
+  - Added the /compact and /make-skill commands.
   - Plan mode generates a document on demand
   that can be edited either by the user or the agent and switched to the 
   Build mode on request. Plans and it's revisions are stored in session data.
   - Added multi-modal input support for image types and PDF files.
   - Added the module system.
   - Added support for charts.
+  - Added select-to-copy.
   - A welcome banner is shown in the chat when the app opens, until the
 first message is sent.
   - Fixed a hidden Sidechat intercepting clicks and keystrokes meant for the
@@ -27,7 +29,6 @@ main chat.
 the Plan tab.
   - Fixed keyboard focus not returning to the chat after closing a dialog.
   - fs.write now creates missing parent directories instead of failing.
-  - Added select-to-copy.
 
 -------------------------------------------------------------------------------
 0.4.1 - 2026-09-24

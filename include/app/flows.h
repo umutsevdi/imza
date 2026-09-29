@@ -8,6 +8,7 @@
 
 #include "app/application_state.h"
 #include "permissions/store.h"
+#include "turn/turn_runner.h"
 
 namespace imza {
 
@@ -64,6 +65,8 @@ void present_front(ApplicationState& state);
 void drain_queued(ApplicationState& state);
 void on_turn_finished(ApplicationState& state, std::string error);
 void run_slash(ApplicationState& state, std::string_view command);
+// Forced manual compaction of the active session through the turn runner.
+void compact_session(ApplicationState& state, TurnSettings settings);
 void interrupt(ApplicationState& state);
 void delete_saved_session(
     ApplicationState& state, const std::filesystem::path& path);

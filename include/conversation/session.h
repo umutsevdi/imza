@@ -183,6 +183,12 @@ public:
     std::pair<std::size_t, std::size_t> begin_compaction();
     void finish_compaction(std::size_t id, std::string summary,
         std::size_t compacted_item_count, bool success);
+    // Manual /compact completion: completes `id`, folds `summary` into
+    // the compacted context (preceded by the previous summary when one
+    // exists), and advances the boundary by `absorbed_items` so
+    // build_history skips what the summary covers.
+    void complete_manual_compaction(
+        std::size_t id, std::string summary, std::size_t absorbed_items);
     void fill_tool_result(const ToolCallRequest& req, ToolCall::Result result);
     void set_tool_subagents(
         const ToolCallRequest& req, std::vector<std::size_t> ids);
@@ -217,6 +223,8 @@ public:
     void clear_interrupt();
     bool interrupt_requested() const;
 
+    [[nodiscard]] Signal<>::Subscription subscribe_to_mode_change(
+        Signal<>::Callback callback);
     [[nodiscard]] Signal<>::Subscription subscribe_to_title_change(
         Signal<>::Callback callback);
     [[nodiscard]] Signal<>::Subscription subscribe_to_attachments_change(
@@ -281,6 +289,7 @@ private:
     bool _dirty                       = false;
     std::string _session_id           = unique_session_id();
 
+    Signal<> mode_changed_;
     Signal<> title_changed_;
     Signal<> attachments_changed_;
     Signal<> _plan_changed;

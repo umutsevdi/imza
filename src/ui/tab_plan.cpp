@@ -62,6 +62,13 @@ namespace {
             if (_handle_focus_click(event)) {
                 return true;
             }
+            if (event.is_mouse()
+                && (event.mouse().button == Mouse::WheelUp
+                    || event.mouse().button == Mouse::WheelDown)
+                && !_doc_focused
+                && _doc_box.Contain(event.mouse().x, event.mouse().y)) {
+                return _doc->OnEvent(event);
+            }
             return _doc_focused ? _doc->OnEvent(event) : chat_->OnEvent(event);
         }
 

@@ -60,11 +60,11 @@ namespace {
         return out;
     }
 
-    std::string compaction_transcript(
-        const std::vector<Message>& history, std::size_t end)
+    std::string transcript_range(
+        const std::vector<Message>& history, std::size_t begin, std::size_t end)
     {
         std::string out;
-        for (std::size_t index = 1; index < end; ++index) {
+        for (std::size_t index = begin; index < end; ++index) {
             const Message& message = history[index];
             out += message.type == Message::Type::USER     ? "\nUSER:\n"
                 : message.type == Message::Type::ASSISTANT ? "\nASSISTANT:\n"
@@ -203,6 +203,42 @@ Status TurnRunner::run_stream(
                                 : stream(route, req, cb, nullptr);
 }
 
+// Streams a summary of history[begin..end) through the compaction
+// prompt. The caller owns the CompactionEvent lifecycle: it calls
+// begin_compaction, then commits — finish_compaction for the in-turn
+// path, complete_manual_compaction for the /compact path. Returns the
+// raw summary on success.
+std::optional<std::string> TurnRunner::_summarize(
+    const std::vector<Message>& history, std::size_t begin, std::size_t end,
+    const TurnSettings& settings)
+{
+    ChatRequest request;
+    request.model       = settings.model;
+    request.temperature = 0.2;
+    request.interrupted = [session = _state->session] {
+        return session->interrupt_requested();
+    };
+    request.messages = {
+        { Message::Type::SYSTEM, _state->prompts->compaction() },
+        { Message::Type::USER, transcript_range(history, begin, end) },
+    };
+
+    std::string summary;
+    std::string error;
+    const StreamCallback callback = [&](const StreamEvent& event) {
+        if (event.kind == StreamEvent::Kind::CONTENT_DELTA) {
+            summary += event.text;
+        } else if (event.kind == StreamEvent::Kind::ERROR) {
+            error = event.text;
+        }
+    };
+
+    const Status status = run_stream(request, settings.route, callback);
+    const bool success  = status == Status::OK && error.empty()
+        && !summary.empty() && !_state->session->interrupt_requested();
+    return success ? std::optional(std::move(summary)) : std::nullopt;
+}
+
 bool TurnRunner::_compact_history(std::vector<Message>& history,
     const TurnSettings& settings, std::uint64_t prompt_tokens)
 {
@@ -221,42 +257,86 @@ bool TurnRunner::_compact_history(std::vector<Message>& history,
     --tail;
 
     const auto [event_id, prefix_size] = _state->session->begin_compaction();
-    ChatRequest request;
-    request.model       = settings.model;
-    request.temperature = 0.2;
-    request.interrupted = [session = _state->session] {
-        return session->interrupt_requested();
-    };
-    request.messages = {
-        { Message::Type::SYSTEM, _state->prompts->compaction() },
-        { Message::Type::USER, compaction_transcript(history, tail) },
-    };
-
-    std::string summary;
-    std::string error;
-    const StreamCallback callback = [&](const StreamEvent& event) {
-        if (event.kind == StreamEvent::Kind::CONTENT_DELTA) {
-            summary += event.text;
-        } else if (event.kind == StreamEvent::Kind::ERROR) {
-            error = event.text;
-        }
-    };
-
-    const Status status = run_stream(request, settings.route, callback);
-    const bool success  = status == Status::OK && error.empty()
-        && !summary.empty() && !_state->session->interrupt_requested();
-    _state->session->finish_compaction(event_id, summary, prefix_size, success);
-    if (!success) {
+    const std::optional<std::string> summary
+        = _summarize(history, 1, tail, settings);
+    _state->session->finish_compaction(
+        event_id, summary.value_or(""), prefix_size, summary.has_value());
+    if (!summary) {
         return !_state->session->interrupt_requested();
     }
 
     std::vector<Message> recent(history.begin() + tail, history.end());
     history.erase(history.begin() + 1, history.end());
     history.push_back({ Message::Type::USER,
-        "<session-summary>\n" + summary + "\n</session-summary>" });
+        "<session-summary>\n" + *summary + "\n</session-summary>" });
     history.insert(history.end(), std::make_move_iterator(recent.begin()),
         std::make_move_iterator(recent.end()));
     return true;
+}
+
+// The manual /compact path: no turn is in flight, so the model history
+// is rebuilt from the session and a forced summary is folded into the
+// session's compacted context — previous summary included — with the
+// boundary advanced over the absorbed timeline items.
+void TurnRunner::spawn_compaction(TurnSettings settings)
+{
+    _blocked_permission.store(false);
+    _worker.emplace([this, settings = std::move(settings)]() mutable {
+        if (!_has_stream_override) {
+            settings.route = _state->providers->authenticated_route_for(
+                settings.connection_id, settings.dialect,
+                _state->session->session_id());
+            settings.dialect = settings.route.dialect;
+        }
+        const SessionSnapshot snapshot = _state->session->snapshot();
+        // The absorbed range is the timeline past the previous compaction
+        // boundary up to the last user item — the live head nothing can
+        // follow. Nothing user-led at all, or everything already behind
+        // the boundary, means there is nothing new to summarize.
+        std::size_t boundary = 0;
+        for (std::size_t index = snapshot.items.size(); index > 0; --index) {
+            if (std::holds_alternative<UserTurn>(snapshot.items[index - 1])) {
+                boundary = index;
+                break;
+            }
+        }
+        if (boundary <= snapshot.compacted_item_count) {
+            _post([this] {
+                _state->session->set_error("Nothing to compact.");
+                _on_finish("");
+            });
+            return;
+        }
+
+        std::vector<Message> history = _state->session->build_history(
+            _state->prompts->system(), settings.dialect);
+        if (history.size() < 2) {
+            _post([this] {
+                _state->session->set_error("Nothing to compact.");
+                _on_finish("");
+            });
+            return;
+        }
+
+        const auto [event_id, prefix_size]
+            = _state->session->begin_compaction();
+        const std::optional<std::string> summary
+            = _summarize(history, 1, history.size(), settings);
+        if (!summary) {
+            _state->session->finish_compaction(
+                event_id, "", prefix_size, false);
+            _post([this] { _on_finish(""); });
+            return;
+        }
+
+        _post(
+            [this, event_id, prefix_size, summary = *summary,
+                absorbed = boundary - snapshot.compacted_item_count]() mutable {
+                _state->session->complete_manual_compaction(
+                    event_id, std::move(summary), absorbed);
+                _on_finish("");
+            });
+    });
 }
 
 void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)

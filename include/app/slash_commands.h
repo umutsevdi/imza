@@ -16,12 +16,17 @@ struct SlashCommand {
         VARIANT,
         SUBAGENTS,
         SESSIONS,
-        SKILLS
+        SKILLS,
+        COMPACT,
+        MAKE_SKILL
     };
 
     std::string_view name;
     std::string_view desc;
     Action action = Action::EXIT;
+    // Argument-taking commands complete without submitting, so the user
+    // can type the argument; the rest execute on the same Enter.
+    bool takes_argument = false;
 };
 
 std::span<const SlashCommand> slash_commands();

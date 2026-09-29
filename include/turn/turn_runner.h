@@ -70,6 +70,10 @@ public:
     TurnRunner& operator=(const TurnRunner&) = delete;
 
     void spawn(std::vector<Message> history, TurnSettings settings);
+    // Forced compaction of the active session, outside any agent turn:
+    // the caller guarantees the IDLE phase and a non-empty session. No
+    // user or assistant item is appended; only the CompactionEvent shows.
+    void spawn_compaction(TurnSettings settings);
     void clear();
     void stop();
     void set_on_finish(std::function<void(std::string)> on_finish);
@@ -82,6 +86,10 @@ public:
 
 private:
     void _drive(std::vector<Message> history, TurnSettings settings);
+    // Streams a summary of history[begin..end) through the compaction
+    // prompt. The caller owns the CompactionEvent lifecycle.
+    std::optional<std::string> _summarize(const std::vector<Message>& history,
+        std::size_t begin, std::size_t end, const TurnSettings& settings);
     bool _compact_history(std::vector<Message>& history,
         const TurnSettings& settings, std::uint64_t prompt_tokens);
     void _drain_pending_asks(std::vector<Message>& history,

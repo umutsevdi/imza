@@ -6,6 +6,8 @@
 #include <ftxui/component/component.hpp>
 
 #include "test_helpers.h"
+#include "test_state.h"
+#include "ui/autocomplete.h"
 #include "ui/ui.h"
 #include "workspace/git.h"
 
@@ -373,4 +375,48 @@ TEST_CASE("canvas surface chart renders a wireframe")
         = without_ansi(to_text(imza::canvas_chart(surface, 60), 60, 40));
     CHECK(drawn.find("Wave") != std::string::npos);
     CHECK(has_braille(drawn));
+}
+TEST_CASE("autocomplete completes a command on Enter without submitting")
+{
+    auto state = imza::test::make_test_state();
+    imza::Autocomplete autocomplete;
+
+    autocomplete.refresh(*state, "/mak", 4);
+    REQUIRE(autocomplete.active());
+
+    std::string text = "/mak";
+    int cursor       = 4;
+    std::vector<imza::Attachment> attachments;
+    const bool submit = autocomplete.accept(*state, text, cursor, attachments);
+
+    // /make-skill takes an argument: Enter completes, keeps editing.
+    CHECK_FALSE(submit);
+    CHECK(text == "/make-skill");
+    CHECK(cursor == static_cast<int>(text.size()));
+    // The popup is gone, so the next Enter takes the plain submit path.
+    CHECK_FALSE(autocomplete.active());
+    autocomplete.clear();
+}
+
+TEST_CASE("autocomplete submits argument-less commands on Enter")
+{
+    auto state = imza::test::make_test_state();
+    imza::Autocomplete autocomplete;
+
+    // A fully typed command clears the popup; Enter then submits
+    // directly through the normal path — accept() is not involved.
+    autocomplete.refresh(*state, "/exit", 5);
+    CHECK_FALSE(autocomplete.active());
+    autocomplete.clear();
+
+    // A one-match prefix of an argument-less command completes AND
+    // submits on the same Enter.
+    autocomplete.refresh(*state, "/ex", 3);
+    REQUIRE(autocomplete.active());
+    std::string text = "/ex";
+    int cursor       = 3;
+    std::vector<imza::Attachment> attachments;
+    const bool submit = autocomplete.accept(*state, text, cursor, attachments);
+    CHECK(submit);
+    CHECK(text == "/exit");
 }

@@ -280,8 +280,16 @@ void Session::set_persistence(SessionPersistence persistence)
 
 void Session::set_mode(Mode next_mode)
 {
-    std::lock_guard lock(_mutex);
-    _mode = next_mode;
+    bool changed = false;
+    {
+        std::lock_guard lock(_mutex);
+        changed = _mode != next_mode;
+        _mode   = next_mode;
+    }
+    // Published outside the lock; callbacks may re-enter accessors.
+    if (changed) {
+        mode_changed_.publish();
+    }
 }
 
 void Session::set_error(std::string msg)
@@ -456,6 +464,28 @@ void Session::finish_compaction(std::size_t id, std::string summary,
             _compacted_summary    = std::move(summary);
             _compacted_item_count = compacted_item_count;
         }
+        return;
+    }
+}
+
+void Session::complete_manual_compaction(
+    std::size_t id, std::string summary, std::size_t absorbed_items)
+{
+    std::lock_guard lock(_mutex);
+    for (auto& item : _items) {
+        auto* event = std::get_if<CompactionEvent>(&item);
+        if (event == nullptr || event->id != id) {
+            continue;
+        }
+        event->status = CompactionEvent::Status::COMPLETED;
+        _dirty        = true;
+        if (!_compacted_summary.empty()) {
+            summary.insert(
+                0, _compacted_summary + "\n\n<earlier-compactions>\n");
+            summary += "\n</earlier-compactions>";
+        }
+        _compacted_summary = std::move(summary);
+        _compacted_item_count += absorbed_items;
         return;
     }
 }
@@ -859,6 +889,12 @@ void Session::update_usage(
     _totals.completion += usage_event.usage.completion;
     _totals.total += usage_event.usage.total;
     _total_cost += compute_cost(usage_event.usage, pricing);
+}
+
+Signal<>::Subscription Session::subscribe_to_mode_change(
+    Signal<>::Callback callback)
+{
+    return mode_changed_.subscribe(std::move(callback));
 }
 
 Signal<>::Subscription Session::subscribe_to_title_change(

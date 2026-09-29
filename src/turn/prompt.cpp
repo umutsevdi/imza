@@ -168,6 +168,8 @@ PromptStore::PromptStore(const std::filesystem::path& overrides)
     , _title(load_prompt(overrides, "title.md", prompts_detail::TITLE))
     , _compaction(
           load_prompt(overrides, "compaction.md", prompts_detail::COMPACTION))
+    , _make_skill(
+          load_prompt(overrides, "make_skill.md", prompts_detail::MAKE_SKILL))
     , _review(load_prompt(overrides, "review.md", prompts_detail::REVIEW))
     , _review_plan(
           load_prompt(overrides, "review_plan.md", prompts_detail::REVIEW_PLAN))

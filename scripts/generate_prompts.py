@@ -13,6 +13,7 @@ PROMPT_NAMES: tuple[str, ...] = (
     "subagent_build",
     "title",
     "compaction",
+    "make_skill",
     "review",
     "review_plan",
 )
