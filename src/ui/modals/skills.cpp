@@ -21,9 +21,8 @@ namespace {
     public:
         SkillsView(std::shared_ptr<ApplicationState> state)
             : state_(std::move(state))
-            , session_(state_->session)
         {
-            entries_ = std::get<SkillsModal>(session_->modal()).entries;
+            entries_ = std::get<SkillsModal>(state_->session->modal()).entries;
         }
 
         Element OnRender() override
@@ -106,7 +105,6 @@ namespace {
 
     private:
         std::shared_ptr<ApplicationState> state_;
-        std::shared_ptr<Session> session_;
         std::vector<SkillsModal::Entry> entries_;
         int cursor_ = 0;
     };

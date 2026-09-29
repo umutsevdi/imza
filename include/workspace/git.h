@@ -44,6 +44,14 @@ ChangeSummary summarize_git_diff(std::string_view diff);
 void summarize_untracked_files(const std::filesystem::path& root,
     const std::vector<ChangedFile>& files, ChangeSummary& summary);
 
+struct GitDiffOptions {
+    bool renames = false; // detect renames and copies
+    bool numstat = false; // prepend added/deleted counts before the patch
+};
+
+std::optional<std::string> git_working_diff(
+    const std::filesystem::path& root, const GitDiffOptions& options);
+
 struct RepositoryState {
     std::string branch;
     std::vector<ChangedFile> changed_files;

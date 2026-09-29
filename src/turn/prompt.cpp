@@ -2,12 +2,12 @@
 #include "app/application_state.h"
 #include "common/util.h"
 #include "conversation/session.h"
+#include "platform/json_file.h"
 #include "tools/skills.h"
 
 #include <algorithm>
 #include <cctype>
-#include <fstream>
-#include <sstream>
+#include <optional>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -42,14 +42,10 @@ namespace {
         std::string_view file_name, std::string_view fallback)
     {
         if (!overrides.empty()) {
-            std::ifstream file(overrides / file_name, std::ios::binary);
-            if (file) {
-                std::ostringstream buffer;
-                buffer << file.rdbuf();
-                std::string text = buffer.str();
-                if (has_content(text)) {
-                    return strip_trailing_space(std::move(text));
-                }
+            std::optional<std::string> text
+                = read_text_file(overrides / file_name);
+            if (text && has_content(*text)) {
+                return strip_trailing_space(std::move(*text));
             }
         }
         return std::string(fallback);
@@ -172,9 +168,13 @@ PromptStore::PromptStore(const std::filesystem::path& overrides)
     , _title(load_prompt(overrides, "title.md", prompts_detail::TITLE))
     , _compaction(
           load_prompt(overrides, "compaction.md", prompts_detail::COMPACTION))
+    , _make_skill(
+          load_prompt(overrides, "make_skill.md", prompts_detail::MAKE_SKILL))
     , _review(load_prompt(overrides, "review.md", prompts_detail::REVIEW))
     , _review_plan(
           load_prompt(overrides, "review_plan.md", prompts_detail::REVIEW_PLAN))
+    , _plan_annotations(load_prompt(
+          overrides, "plan_annotations.md", prompts_detail::PLAN_ANNOTATIONS))
 {
 }
 
@@ -227,6 +227,70 @@ std::string full_system_prompt(
     if (mode) {
         prompt += "\n\n";
         prompt += current_mode_prompt(*mode);
+    }
+    return prompt;
+}
+
+std::string format_plan_annotations_prompt(std::string_view instructions,
+    const std::vector<PlanNote>& notes, std::string_view document)
+{
+    if (notes.empty()) {
+        return { };
+    }
+    std::vector<std::string_view> lines;
+    std::size_t begin = 0;
+    for (std::size_t i = 0; i <= document.size(); ++i) {
+        if (i == document.size() || document[i] == '\n') {
+            lines.push_back(document.substr(begin, i - begin));
+            begin = i + 1;
+        }
+    }
+    // Nearest heading above each pinned line: a plain line scan, mirroring
+    // the cmark-derived sections without a ui dependency.
+    const auto section_of = [&lines](std::size_t line) {
+        for (std::size_t l = std::min(line, lines.size()); l >= 1; --l) {
+            std::string_view text = lines[l - 1];
+            if (text.rfind("#", 0) == 0) {
+                while (!text.empty()
+                    && (text.back() == '\r' || text.back() == ' ')) {
+                    text.remove_suffix(1);
+                }
+                std::size_t hashes = 0;
+                while (hashes < text.size() && text[hashes] == '#') {
+                    ++hashes;
+                }
+                if (hashes < text.size() && text[hashes] == ' ') {
+                    return text.substr(hashes + 1);
+                }
+            }
+            if (l == 1) {
+                break;
+            }
+        }
+        return std::string_view("Document");
+    };
+    std::string prompt(instructions);
+    for (const PlanNote& note : notes) {
+        prompt += "\n\n- `";
+        if (note.line == 0 || note.line > lines.size()) {
+            prompt += "(stale)";
+        } else {
+            prompt += section_of(note.line);
+            prompt += " > ";
+            std::string_view anchor = lines[note.line - 1];
+            while (!anchor.empty()
+                && (anchor.back() == '\r' || anchor.back() == ' ')) {
+                anchor.remove_suffix(1);
+            }
+            prompt += anchor;
+        }
+        prompt += "`\n  ";
+        for (const char c : note.body) {
+            prompt += c;
+            if (c == '\n') {
+                prompt += "  ";
+            }
+        }
     }
     return prompt;
 }

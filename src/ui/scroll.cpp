@@ -93,14 +93,6 @@ bool scroll_viewport_event(ScrollView& view, ftxui::Event& event)
         view.scroll_lines(1);
         return true;
     }
-    if (event == ftxui::Event::PageUp) {
-        view.scroll_lines(-std::max(1, view.viewport_lines() - 1));
-        return true;
-    }
-    if (event == ftxui::Event::PageDown) {
-        view.scroll_lines(std::max(1, view.viewport_lines() - 1));
-        return true;
-    }
     if (event == ftxui::Event::Home) {
         view.scroll = 0;
         return true;
@@ -109,16 +101,10 @@ bool scroll_viewport_event(ScrollView& view, ftxui::Event& event)
         view.scroll = view.max_scroll();
         return true;
     }
-    if (event.is_mouse()) {
-        const ftxui::Mouse& mouse = event.mouse();
-        if (mouse.button == ftxui::Mouse::WheelUp) {
-            view.scroll_lines(-3);
-            return true;
-        }
-        if (mouse.button == ftxui::Mouse::WheelDown) {
-            view.scroll_lines(3);
-            return true;
-        }
+    if (const std::optional<int> step
+        = scroll_step(event, view.viewport_lines())) {
+        view.scroll_lines(*step);
+        return true;
     }
     return false;
 }

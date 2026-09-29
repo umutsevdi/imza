@@ -5,12 +5,14 @@
 #include "runtime/subagent_manager.h"
 #include "ui/ui.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
 #include <iomanip>
+#include <optional>
 #include <sstream>
 #include <string>
 
@@ -103,6 +105,10 @@ namespace {
                 bar.push_back(text(" · " + money_text(session.total_cost))
                     | color(PANEL_FG_DIM));
             }
+            const std::string tags = capability_tags(_active_capabilities());
+            if (!tags.empty()) {
+                bar.push_back(text(" · " + tags) | color(PANEL_FG_DIM));
+            }
             bar.push_back(filler());
             const std::size_t running_agents
                 = state_->subagents->running_count(false);
@@ -161,6 +167,25 @@ namespace {
                 cached_     = state_->providers->pricing_for(model);
             }
             return cached_;
+        }
+
+        std::optional<Capabilities> _active_capabilities()
+        {
+            const auto selection = state_->providers->active_selection();
+            if (!selection) {
+                return std::nullopt;
+            }
+            const ModelList models
+                = state_->providers->models_for(selection->connection_id);
+            if (models.state != ModelList::State::READY) {
+                return std::nullopt;
+            }
+            const auto model = std::find_if(models.models.begin(),
+                models.models.end(), [&](const ModelInfo& info) {
+                    return info.id == selection->model;
+                });
+            return model == models.models.end() ? std::nullopt
+                                                : model->capabilities;
         }
 
         std::string money_text(double cost)

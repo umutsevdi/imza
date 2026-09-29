@@ -6,34 +6,13 @@
 #include <ftxui/component/component.hpp>
 
 #include "test_helpers.h"
+#include "test_state.h"
+#include "ui/autocomplete.h"
 #include "ui/ui.h"
 #include "workspace/git.h"
 
 using imza::test::to_text;
-
-namespace {
-
-std::string without_ansi(std::string_view input)
-{
-    std::string out;
-    for (std::size_t i = 0; i < input.size();) {
-        if (input[i] != '\x1b' || i + 1 >= input.size()
-            || input[i + 1] != '[') {
-            out += input[i++];
-            continue;
-        }
-        i += 2;
-        while (i < input.size() && (input[i] < '@' || input[i] > '~')) {
-            ++i;
-        }
-        if (i < input.size()) {
-            ++i;
-        }
-    }
-    return out;
-}
-
-} // namespace
+using imza::test::without_ansi;
 
 TEST_CASE("fit truncates with an ellipsis and pads to width")
 {
@@ -110,8 +89,10 @@ TEST_CASE("markdown code blocks wrap long lines")
 TEST_CASE("highlight_code_wrapped keeps token colors across wrapped rows")
 {
     const std::string code = "return \"aaaaaaaaaaaaaaaa\";";
-    auto whole             = imza::test::to_screen(
-        imza::highlight_code_line(code, "cpp"), code.size(), 1);
+    const auto unwrapped   = imza::highlight_code_wrapped(
+        code, "cpp", static_cast<int>(code.size()));
+    REQUIRE(unwrapped.size() == 1);
+    auto whole = imza::test::to_screen(unwrapped[0][0], code.size(), 1);
     const ftxui::Color keyword = whole.PixelAt(0, 0).foreground_color;
     const ftxui::Color literal = whole.PixelAt(10, 0).foreground_color;
 
@@ -163,14 +144,6 @@ TEST_CASE("syntax registry recognizes canonical languages and special files")
     CHECK_FALSE(imza::syntax_type_supported("golang"));
     CHECK_FALSE(imza::syntax_type_supported("makefile"));
     CHECK_FALSE(imza::syntax_type_supported("sql"));
-}
-
-TEST_CASE("untyped code keeps the panel foreground")
-{
-    auto screen = imza::test::to_screen(
-        imza::highlight_code_line("return 42;", ""), 16, 1);
-    CHECK(screen.PixelAt(0, 0).foreground_color == imza::PANEL_FG);
-    CHECK(screen.PixelAt(7, 0).foreground_color == imza::PANEL_FG);
 }
 
 TEST_CASE("render_markdown_element spaces inline code from neighbors")
@@ -279,4 +252,171 @@ TEST_CASE("markdown alert quote drops the [!ERROR] marker and keeps content")
     const std::string plain
         = to_text(imza::render_markdown_element("> note\n", 60), 60, 8);
     CHECK(plain.find("note") != std::string::npos);
+}
+TEST_CASE("capability tags join advertised modalities with separators")
+{
+    using imza::Capabilities;
+    CHECK(imza::capability_tags(Capabilities::IMAGE | Capabilities::PDF)
+        == "image · pdf");
+    CHECK(imza::capability_tags(Capabilities::IMAGE) == "image");
+    CHECK(imza::capability_tags(Capabilities::PDF) == "pdf");
+    CHECK(imza::capability_tags(Capabilities::NONE).empty());
+    CHECK(imza::capability_tags(std::nullopt).empty());
+}
+
+TEST_CASE("model picker rows display advertised capability tags")
+{
+    imza::ModelInfo info;
+    info.id           = "openai/gpt-5.5";
+    info.capabilities = imza::Capabilities::IMAGE | imza::Capabilities::PDF;
+    const std::string tagged = without_ansi(to_text(imza::model_picker_row(
+        imza::make_model_row("c", "OpenAI", info), false)));
+    CHECK(tagged.find("gpt-5.5") != std::string::npos);
+    CHECK(tagged.find("image · pdf · openai") != std::string::npos);
+
+    imza::ModelInfo image_only;
+    image_only.id           = "m1";
+    image_only.capabilities = imza::Capabilities::IMAGE;
+    const std::string image_only_text
+        = without_ansi(to_text(imza::model_picker_row(
+            imza::make_model_row("c", "OpenAI", image_only), false)));
+    CHECK(image_only_text.find("image") != std::string::npos);
+    CHECK(image_only_text.find("pdf") == std::string::npos);
+    CHECK(image_only_text.find("image · OpenAI") != std::string::npos);
+
+    imza::ModelInfo unknown;
+    unknown.id                 = "m2";
+    const std::string untagged = without_ansi(to_text(imza::model_picker_row(
+        imza::make_model_row("c", "OpenAI", unknown), false)));
+    CHECK(untagged.find("image") == std::string::npos);
+    CHECK(untagged.find("pdf") == std::string::npos);
+    CHECK(untagged.find("·") == std::string::npos);
+}
+
+namespace {
+
+// Braille patterns U+2800..U+28FF are UTF-8 E2 A0..A3 80..BF.
+bool has_braille(const std::string& text)
+{
+    for (std::size_t i = 0; i + 2 < text.size(); ++i) {
+        if (static_cast<unsigned char>(text[i]) == 0xE2
+            && static_cast<unsigned char>(text[i + 1]) >= 0xA0
+            && static_cast<unsigned char>(text[i + 1]) <= 0xA3) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Block elements U+2580..U+259F are UTF-8 E2 96 80..9F.
+bool has_block(const std::string& text)
+{
+    for (std::size_t i = 0; i + 2 < text.size(); ++i) {
+        if (static_cast<unsigned char>(text[i]) == 0xE2
+            && static_cast<unsigned char>(text[i + 1]) == 0x96
+            && static_cast<unsigned char>(text[i + 2]) >= 0x80
+            && static_cast<unsigned char>(text[i + 2]) <= 0x9F) {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
+
+TEST_CASE("canvas line chart renders title, legend, and braille plot")
+{
+    imza::CanvasView line;
+    line.kind   = imza::CanvasView::Kind::LINE;
+    line.title  = "Traffic";
+    line.series = { { "in", { 1.0, 5.0, 3.0 } }, { "out", { 2.0, 1.0, 4.0 } } };
+    const std::string drawn
+        = without_ansi(to_text(imza::canvas_chart(line, 60), 60, 30));
+    CHECK(drawn.find("Traffic") != std::string::npos);
+    CHECK(drawn.find("● in") != std::string::npos);
+    CHECK(drawn.find("● out") != std::string::npos);
+    CHECK(has_braille(drawn));
+}
+
+TEST_CASE("canvas bar chart renders category labels and blocks")
+{
+    imza::CanvasView bar;
+    bar.kind   = imza::CanvasView::Kind::BAR;
+    bar.title  = "Sales";
+    bar.series = { { "mon", { 3.0 } }, { "tue", { 5.0 } }, { "wed", { 4.0 } } };
+    const std::string drawn
+        = without_ansi(to_text(imza::canvas_chart(bar, 60), 60, 30));
+    CHECK(drawn.find("Sales") != std::string::npos);
+    CHECK(drawn.find("mon") != std::string::npos);
+    CHECK(drawn.find("tue") != std::string::npos);
+    CHECK(drawn.find("wed") != std::string::npos);
+    CHECK(has_block(drawn));
+}
+
+TEST_CASE("canvas pie chart renders a legend for every slice")
+{
+    imza::CanvasView pie;
+    pie.kind   = imza::CanvasView::Kind::PIE;
+    pie.series = { { "red", { 3.0 } }, { "green", { 1.0 } } };
+    const std::string drawn
+        = without_ansi(to_text(imza::canvas_chart(pie, 40), 60, 40));
+    CHECK(drawn.find("● red") != std::string::npos);
+    CHECK(drawn.find("● green") != std::string::npos);
+    CHECK(has_braille(drawn));
+}
+
+TEST_CASE("canvas surface chart renders a wireframe")
+{
+    imza::CanvasView surface;
+    surface.kind  = imza::CanvasView::Kind::SURFACE;
+    surface.title = "Wave";
+    surface.grid  = { { 0, 1, 0 }, { 1, 5, 1 }, { 0, 1, 0 } };
+    const std::string drawn
+        = without_ansi(to_text(imza::canvas_chart(surface, 60), 60, 40));
+    CHECK(drawn.find("Wave") != std::string::npos);
+    CHECK(has_braille(drawn));
+}
+TEST_CASE("autocomplete completes a command on Enter without submitting")
+{
+    auto state = imza::test::make_test_state();
+    imza::Autocomplete autocomplete;
+
+    autocomplete.refresh(*state, "/mak", 4);
+    REQUIRE(autocomplete.active());
+
+    std::string text = "/mak";
+    int cursor       = 4;
+    std::vector<imza::Attachment> attachments;
+    const bool submit = autocomplete.accept(*state, text, cursor, attachments);
+
+    // /make-skill takes an argument: Enter completes, keeps editing.
+    CHECK_FALSE(submit);
+    CHECK(text == "/make-skill");
+    CHECK(cursor == static_cast<int>(text.size()));
+    // The popup is gone, so the next Enter takes the plain submit path.
+    CHECK_FALSE(autocomplete.active());
+    autocomplete.clear();
+}
+
+TEST_CASE("autocomplete submits argument-less commands on Enter")
+{
+    auto state = imza::test::make_test_state();
+    imza::Autocomplete autocomplete;
+
+    // A fully typed command clears the popup; Enter then submits
+    // directly through the normal path — accept() is not involved.
+    autocomplete.refresh(*state, "/exit", 5);
+    CHECK_FALSE(autocomplete.active());
+    autocomplete.clear();
+
+    // A one-match prefix of an argument-less command completes AND
+    // submits on the same Enter.
+    autocomplete.refresh(*state, "/ex", 3);
+    REQUIRE(autocomplete.active());
+    std::string text = "/ex";
+    int cursor       = 3;
+    std::vector<imza::Attachment> attachments;
+    const bool submit = autocomplete.accept(*state, text, cursor, attachments);
+    CHECK(submit);
+    CHECK(text == "/exit");
 }

@@ -24,9 +24,11 @@ struct ToolOutput {
     Kind kind;
     std::string text;
     std::optional<Json::Value> return_value = std::nullopt;
-    // Net per-file diffs a lua script produced through tool.file.*;
+    // Net per-file diffs a lua script produced through imza.fs.*;
     // multiple mutations of one file collapse into a single before/after.
     std::vector<DiffView> diffs { };
+    // Charts the canvas module rendered for the chat.
+    std::vector<CanvasView> canvases { };
     std::vector<LuaBindingCall> dispatch_log { };
     bool blocked_permission = false;
 };
@@ -71,6 +73,7 @@ struct SkillToolDeps {
 };
 
 Tool make_skill_tool(SkillToolDeps deps = { });
+Tool make_load_tool(LuaState& state);
 
 // Slot indirection breaks the TurnRunner/Delegation cycle: the tool
 // captures it empty, wire() fills it once both exist.
@@ -82,7 +85,7 @@ Tool make_subagent_tool(SubagentToolSlot delegate = { });
 
 // Builds the model-facing roster: skill, subagent, and the lua sandbox
 // (see tools/lua.h for the LuaHost the lua tool is wired with).
-std::vector<Tool> default_tools(LuaHost lua_host = { },
-    SkillToolDeps skill_deps = { }, SubagentToolSlot subagent = { });
+std::vector<Tool> default_tools(LuaHost lua_host, SkillToolDeps skill_deps,
+    SubagentToolSlot subagent, LuaState& lua_state);
 
 } // namespace imza

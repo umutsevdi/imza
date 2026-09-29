@@ -142,6 +142,10 @@ intermediate tool output and context overhead. [Read the analysis](https://githu
 * [x] Skills and project instructions
 * [x] `@path` file attachments
 * [x] `$skill` attachments
+<<<<<<< HEAD
+=======
+* [X] Image and multimodal prompt attachments
+>>>>>>> dev
 
 ### Permissions and Control
 
@@ -164,11 +168,20 @@ intermediate tool output and context overhead. [Read the analysis](https://githu
 * [x] Syntax highlighting
 * [x] Headless mode
 * [x] Terminal notifications
+<<<<<<< HEAD
 
 ## Roadmap
 
 * [ ] MCP support
 * [ ] Image and multimodal prompt attachments
+=======
+* [X] Image and multimodal prompt attachments
+
+## Roadmap
+
+* [ ] Extension System
+* [ ] MCP support
+>>>>>>> dev
 * [ ] Background watchdogs that notify the agent when files or processes reach a target state
 * [ ] Local monthly usage analytics
 

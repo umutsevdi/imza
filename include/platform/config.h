@@ -25,7 +25,28 @@ struct Connection {
     std::map<std::string, ApiStandard> dialects;
 };
 
-std::string connection_key(const Connection& connection);
+// "id" or "id/label" identity of a connection entry.
+inline std::string connection_key_for(
+    std::string_view id, std::string_view label)
+{
+    return label.empty() ? std::string(id)
+                         : std::string(id) + "/" + std::string(label);
+}
+inline std::string connection_key(const Connection& connection)
+{
+    return connection_key_for(connection.id, connection.label);
+}
+// First connection whose identity key matches `key`; nullptr when absent.
+inline const Connection* find_connection(
+    const std::vector<Connection>& connections, std::string_view key)
+{
+    for (const Connection& connection : connections) {
+        if (connection_key(connection) == key) {
+            return &connection;
+        }
+    }
+    return nullptr;
+}
 
 struct LastUsed {
     std::string provider;
@@ -69,6 +90,8 @@ ConfigUpdateResult update_config(const std::filesystem::path& path,
     const Config& initial, const ConfigMutator& mutate,
     Config* result = nullptr);
 void apply_skill_policies(Config& config, const SkillPolicyChanges& changes);
+
+// Imza's own persisted-state root: config, sessions, history, caches.
 std::filesystem::path data_dir(void);
 inline std::filesystem::path config_path()
 {

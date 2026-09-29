@@ -46,6 +46,42 @@ std::string gate_denied(
     return text;
 }
 
+std::optional<std::string> opt_string(lua_State* L, int index)
+{
+    if (lua_gettop(L) < index || lua_isnil(L, index)) {
+        return std::nullopt;
+    }
+    const char* value = luaL_checkstring(L, index);
+    return std::string(value);
+}
+
+std::optional<lua_Integer> opt_integer(lua_State* L, int index)
+{
+    if (lua_gettop(L) < index || lua_isnil(L, index)) {
+        return std::nullopt;
+    }
+    return luaL_checkinteger(L, index);
+}
+
+std::optional<bool> opt_boolean(lua_State* L, int index)
+{
+    if (lua_gettop(L) < index || lua_isnil(L, index)) {
+        return std::nullopt;
+    }
+    return lua_toboolean(L, index) != 0;
+}
+
+int authorize_target(lua_State* L, const FilesystemRequest& request,
+    const std::string& path, std::string& target)
+{
+    const GateOutcome gate = authorize_filesystem(L, request);
+    if (!gate) {
+        return binding_error(L, gate_denied(L, gate.denial, path));
+    }
+    target = filesystem_target(*gate.filesystem).string();
+    return 0;
+}
+
 ModalResult ask_with_deadline_credit(LuaRunContext& run, ModalPayload payload)
 {
     // Human think-time is free: shift the wall-clock deadline by the

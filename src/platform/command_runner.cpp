@@ -1,15 +1,17 @@
 #include "platform/command_runner.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
 #include <future>
 #include <string>
+#include <string_view>
 #include <thread>
 
 #ifdef _WIN32
-#include <cstdint>
 #include <windows.h>
+#include <cstdint>
 /* Do not change the order. Windows API is cursed */
 #include <shellapi.h>
 #else
@@ -40,7 +42,8 @@ namespace {
 
     CommandResult run_windows(const std::string& command,
         std::chrono::seconds timeout, CommandResult result,
-        const std::filesystem::path& working_directory)
+        const std::filesystem::path& working_directory,
+        std::string_view stdin_data)
     {
         std::wstring cmdline = L"cmd.exe /c " + to_wide(command);
 
@@ -54,12 +57,20 @@ namespace {
         }
         SetHandleInformation(out_read, HANDLE_FLAG_INHERIT, 0);
 
+        HANDLE in_read  = nullptr;
+        HANDLE in_write = nullptr;
+        const bool has_stdin
+            = !stdin_data.empty() && CreatePipe(&in_read, &in_write, &sa, 0);
+        if (has_stdin) {
+            SetHandleInformation(in_write, HANDLE_FLAG_INHERIT, 0);
+        }
+
         STARTUPINFOW si { };
         si.cb         = sizeof(si);
         si.dwFlags    = STARTF_USESTDHANDLES;
         si.hStdOutput = out_write;
         si.hStdError  = out_write;
-        si.hStdInput  = GetStdHandle(STD_INPUT_HANDLE);
+        si.hStdInput  = has_stdin ? in_read : GetStdHandle(STD_INPUT_HANDLE);
 
         PROCESS_INFORMATION pi { };
         const std::wstring wide_directory = working_directory.empty()
@@ -71,9 +82,16 @@ namespace {
                 &pi)) {
             CloseHandle(out_read);
             CloseHandle(out_write);
+            if (has_stdin) {
+                CloseHandle(in_read);
+                CloseHandle(in_write);
+            }
             return result;
         }
         CloseHandle(out_write);
+        if (has_stdin) {
+            CloseHandle(in_read);
+        }
 
         std::string output;
         std::thread reader([&out_read, &output] {
@@ -83,6 +101,28 @@ namespace {
                 output.append(buf, static_cast<std::size_t>(n));
             }
         });
+
+        std::thread stdin_writer;
+        if (has_stdin) {
+            stdin_writer
+                = std::thread([data = std::string(stdin_data), in_write] {
+                      const char* cursor    = data.data();
+                      std::size_t remaining = data.size();
+                      while (remaining > 0) {
+                          DWORD written = 0;
+                          if (!WriteFile(in_write, cursor,
+                                  static_cast<DWORD>(std::min<std::size_t>(
+                                      remaining, 0x7fffffff)),
+                                  &written, nullptr)
+                              || written == 0) {
+                              break;
+                          }
+                          cursor += written;
+                          remaining -= written;
+                      }
+                      CloseHandle(in_write);
+                  });
+        }
 
         const DWORD ms   = timeout.count() > 0x7fffffff / 1000
             ? INFINITE
@@ -98,6 +138,9 @@ namespace {
         result.exit_code = static_cast<int>(code);
 
         reader.join();
+        if (stdin_writer.joinable()) {
+            stdin_writer.join();
+        }
         CloseHandle(out_read);
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
@@ -132,16 +175,23 @@ namespace {
 
     CommandResult run_posix(const std::string& command,
         std::chrono::seconds timeout, CommandResult result,
-        const std::filesystem::path& working_directory)
+        const std::filesystem::path& working_directory,
+        std::string_view stdin_data)
     {
         int pipefd[2];
         if (pipe(pipefd) != 0) {
             return result;
         }
-        const pid_t pid = fork();
+        int stdin_pipefd[2];
+        const bool has_stdin = !stdin_data.empty() && pipe(stdin_pipefd) == 0;
+        const pid_t pid      = fork();
         if (pid < 0) {
             close(pipefd[0]);
             close(pipefd[1]);
+            if (has_stdin) {
+                close(stdin_pipefd[0]);
+                close(stdin_pipefd[1]);
+            }
             return result;
         }
         if (pid == 0) {
@@ -153,6 +203,11 @@ namespace {
                 _exit(126);
             }
             setpgid(0, 0);
+            if (has_stdin) {
+                dup2(stdin_pipefd[0], STDIN_FILENO);
+                close(stdin_pipefd[0]);
+                close(stdin_pipefd[1]);
+            }
             dup2(pipefd[1], STDOUT_FILENO);
             dup2(pipefd[1], STDERR_FILENO);
             close(pipefd[0]);
@@ -164,6 +219,37 @@ namespace {
 
         close(pipefd[1]);
         const int read_end = pipefd[0];
+
+        std::thread stdin_writer;
+        int stdin_write_end = -1;
+        if (has_stdin) {
+            close(stdin_pipefd[0]);
+            stdin_write_end = stdin_pipefd[1];
+            // An early child exit makes the write raise SIGPIPE; blocking it
+            // here turns that into a returnable EPIPE so the caller keeps
+            // running. write() unblocks once the child is reaped and the
+            // descriptor closes.
+            stdin_writer = std::thread([stdin_data, fd = stdin_write_end] {
+                sigset_t mask;
+                sigemptyset(&mask);
+                sigaddset(&mask, SIGPIPE);
+                pthread_sigmask(SIG_BLOCK, &mask, nullptr);
+                const char* cursor    = stdin_data.data();
+                std::size_t remaining = stdin_data.size();
+                while (remaining > 0) {
+                    const ssize_t written = write(fd, cursor, remaining);
+                    if (written < 0) {
+                        if (errno == EINTR) {
+                            continue;
+                        }
+                        break;
+                    }
+                    cursor += written;
+                    remaining -= static_cast<std::size_t>(written);
+                }
+                close(fd);
+            });
+        }
 
         std::string output;
         std::thread reader([read_end, &output] {
@@ -197,6 +283,9 @@ namespace {
 
         reader.join();
         close(read_end);
+        if (stdin_writer.joinable()) {
+            stdin_writer.join();
+        }
 
         result.spawned = true;
         result.output  = std::move(output);
@@ -257,16 +346,18 @@ std::string shell_quote(const std::filesystem::path& path)
 
 CommandResult run_command(const std::string& command,
     std::chrono::seconds timeout,
-    const std::filesystem::path& working_directory)
+    const std::filesystem::path& working_directory, std::string_view stdin_data)
 {
     CommandResult result;
     if (command.empty() || timeout < std::chrono::seconds(0)) {
         return result;
     }
 #ifdef _WIN32
-    return run_windows(command, timeout, std::move(result), working_directory);
+    return run_windows(
+        command, timeout, std::move(result), working_directory, stdin_data);
 #else
-    return run_posix(command, timeout, std::move(result), working_directory);
+    return run_posix(
+        command, timeout, std::move(result), working_directory, stdin_data);
 #endif
 }
 

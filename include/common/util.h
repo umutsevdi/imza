@@ -3,10 +3,12 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <ctime>
 #include <filesystem>
 #include <iomanip>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <string>
@@ -90,19 +92,6 @@ inline std::string join_lines(
     return out;
 }
 
-inline std::string join_lines(
-    const std::vector<std::string>& lines, std::size_t begin, std::size_t end)
-{
-    std::string out;
-    for (std::size_t i = begin; i <= end && i < lines.size(); ++i) {
-        if (!out.empty()) {
-            out += '\n';
-        }
-        out += lines[i];
-    }
-    return out;
-}
-
 inline std::string format_local_time(const char* fmt)
 {
     const auto now          = std::chrono::system_clock::now();
@@ -144,6 +133,44 @@ inline std::string_view truncate_utf8(
         --cut;
     }
     return text.substr(0, cut);
+}
+
+// Cap shared by tool outputs; enforced with truncate_marked.
+inline constexpr std::size_t MAX_OUTPUT_BYTES = 64 * 1024;
+
+inline constexpr std::string_view TRUNCATION_MARKER = "\n[truncated]";
+
+// Cut at a UTF-8 boundary and mark when over `cap`.
+inline std::string truncate_marked(std::string_view text, std::size_t cap,
+    std::string_view marker = TRUNCATION_MARKER)
+{
+    if (text.size() <= cap) {
+        return std::string(text);
+    }
+    std::string out { truncate_utf8(text, cap) };
+    out += marker;
+    return out;
+}
+
+// RFC 3986 unreserved characters; everything else is percent-encoded.
+inline std::string percent_encode(std::string_view value)
+{
+    constexpr char hex[] = "0123456789ABCDEF";
+    std::string out;
+    out.reserve(value.size());
+    for (const char c : value) {
+        const unsigned char u = static_cast<unsigned char>(c);
+        if ((u >= 'a' && u <= 'z') || (u >= 'A' && u <= 'Z')
+            || (u >= '0' && u <= '9') || u == '-' || u == '.' || u == '_'
+            || u == '~') {
+            out.push_back(static_cast<char>(u));
+        } else {
+            out += '%';
+            out += hex[u >> 4];
+            out += hex[u & 0xF];
+        }
+    }
+    return out;
 }
 
 // Start index of the whitespace-delimited token ending at `cursor`.
@@ -304,6 +331,85 @@ inline std::string unique_session_id()
     out << milliseconds << '-' << std::hex << std::setw(8) << std::setfill('0')
         << suffix;
     return out.str();
+}
+
+inline std::string base64_encode(std::string_view data)
+{
+    constexpr std::string_view ALPHABET
+        = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string encoded;
+    encoded.reserve(((data.size() + 2) / 3) * 4);
+
+    for (std::size_t offset = 0; offset < data.size(); offset += 3) {
+        const auto first         = static_cast<unsigned char>(data[offset]);
+        const auto second        = offset + 1 < data.size()
+            ? static_cast<unsigned char>(data[offset + 1])
+            : 0;
+        const auto third         = offset + 2 < data.size()
+            ? static_cast<unsigned char>(data[offset + 2])
+            : 0;
+        const unsigned int value = (static_cast<unsigned int>(first) << 16)
+            | (static_cast<unsigned int>(second) << 8)
+            | static_cast<unsigned int>(third);
+
+        encoded.push_back(ALPHABET[(value >> 18) & 0x3f]);
+        encoded.push_back(ALPHABET[(value >> 12) & 0x3f]);
+        encoded.push_back(
+            offset + 1 < data.size() ? ALPHABET[(value >> 6) & 0x3f] : '=');
+        encoded.push_back(
+            offset + 2 < data.size() ? ALPHABET[value & 0x3f] : '=');
+    }
+    return encoded;
+}
+
+inline std::optional<std::string> base64_decode(std::string_view input)
+{
+    const auto value = [](char c) -> int {
+        if (c >= 'A' && c <= 'Z') {
+            return c - 'A';
+        }
+        if (c >= 'a' && c <= 'z') {
+            return c - 'a' + 26;
+        }
+        if (c >= '0' && c <= '9') {
+            return c - '0' + 52;
+        }
+        if (c == '+') {
+            return 62;
+        }
+        if (c == '/') {
+            return 63;
+        }
+        return -1;
+    };
+    if (input.size() % 4 != 0) {
+        return std::nullopt;
+    }
+    std::string out;
+    out.reserve(input.size() / 4 * 3);
+    for (std::size_t i = 0; i < input.size(); i += 4) {
+        const int first  = value(input[i]);
+        const int second = value(input[i + 1]);
+        if (first < 0 || second < 0) {
+            return std::nullopt;
+        }
+        const bool third_padding  = input[i + 2] == '=';
+        const bool fourth_padding = input[i + 3] == '=';
+        const int third           = third_padding ? 0 : value(input[i + 2]);
+        const int fourth          = fourth_padding ? 0 : value(input[i + 3]);
+        if (third < 0 || fourth < 0 || (third_padding && !fourth_padding)
+            || ((third_padding || fourth_padding) && i + 4 != input.size())) {
+            return std::nullopt;
+        }
+        out += static_cast<char>((first << 2) | (second >> 4));
+        if (!third_padding) {
+            out += static_cast<char>(((second & 0x0f) << 4) | (third >> 2));
+        }
+        if (!fourth_padding) {
+            out += static_cast<char>(((third & 0x03) << 6) | fourth);
+        }
+    }
+    return out;
 }
 
 } // namespace imza

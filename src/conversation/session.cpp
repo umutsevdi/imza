@@ -3,15 +3,91 @@
 #include "common/util.h"
 #include "conversation/format.h"
 #include "providers/pricing.h"
+#include "tools/file_ops.h"
 
 #include <algorithm>
 #include <cassert>
+#include <cctype>
 #include <chrono>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace imza {
+
+namespace {
+
+    constexpr std::string_view PLAN_SKELETON[]
+        = { "goal", "approach", "files", "verification", "open questions" };
+
+    bool plan_heading_matches(std::string_view line, std::string_view name)
+    {
+        std::size_t i = 0;
+        while (i < line.size() && (line[i] == '#' || line[i] == ' ')) {
+            ++i;
+        }
+        if (i >= line.size()) {
+            return false;
+        }
+        const std::size_t begin = i;
+        while (i < line.size() && line[i] != ':' && line[i] != '\n') {
+            ++i;
+        }
+        std::size_t end = i;
+        while (end > begin && line[end - 1] == ' ') {
+            --end;
+        }
+        const std::string_view heading = line.substr(begin, end - begin);
+        if (heading.size() != name.size()) {
+            return false;
+        }
+        return std::equal(
+            heading.begin(), heading.end(), name.begin(), [](char a, char b) {
+                return std::tolower(static_cast<unsigned char>(a))
+                    == static_cast<unsigned char>(b);
+            });
+    }
+
+    std::string plan_validation_error(const std::string& content)
+    {
+        if (content.size() > MAX_PLAN_BYTES) {
+            return "plan exceeds the " + std::to_string(MAX_PLAN_BYTES / 1024)
+                + " KiB cap (" + std::to_string(content.size())
+                + " bytes); split the work into a smaller plan";
+        }
+        std::string missing;
+        for (const std::string_view name : PLAN_SKELETON) {
+            bool found        = false;
+            std::size_t begin = 0;
+            while (begin <= content.size()) {
+                const std::size_t end       = content.find('\n', begin);
+                const std::string_view line = std::string_view(content).substr(
+                    begin,
+                    end == std::string::npos ? std::string::npos : end - begin);
+                if (plan_heading_matches(line, name)) {
+                    found = true;
+                    break;
+                }
+                if (end == std::string::npos) {
+                    break;
+                }
+                begin = end + 1;
+            }
+            if (!found) {
+                if (!missing.empty()) {
+                    missing += ", ";
+                }
+                missing += name;
+            }
+        }
+        if (!missing.empty()) {
+            return "plan is missing required headings: " + missing;
+        }
+        return "";
+    }
+
+} // namespace
 
 ModalPayload Session::modal() const
 {
@@ -108,11 +184,28 @@ bool Session::has_pending_work() const
         });
 }
 
+Signal<>::Subscription Session::subscribe_to_plan_change(
+    Signal<>::Callback callback)
+{
+    return _plan_changed.subscribe(std::move(callback));
+}
+
+std::string Session::plan_doc() const
+{
+    std::lock_guard lock(_mutex);
+    return _plans.empty() ? std::string { } : _plans.back().content;
+}
+
+SessionSnapshot Session::build_snapshot() const
+{
+    return { _title, _items, _todo, _plans, _compacted_summary,
+        _compacted_item_count, _mode == Mode::PLAN, _persistence };
+}
+
 SessionSnapshot Session::snapshot() const
 {
     std::lock_guard lock(_mutex);
-    return { _title, _items, _todo, _compacted_summary, _compacted_item_count,
-        _mode == Mode::PLAN, _persistence };
+    return build_snapshot();
 }
 
 std::optional<SessionSnapshot> Session::snapshot_for_save() const
@@ -121,8 +214,7 @@ std::optional<SessionSnapshot> Session::snapshot_for_save() const
     if (_items.empty() || !_dirty) {
         return std::nullopt;
     }
-    return SessionSnapshot { _title, _items, _todo, _compacted_summary,
-        _compacted_item_count, _mode == Mode::PLAN, _persistence };
+    return build_snapshot();
 }
 
 void Session::restore(SessionSnapshot snapshot)
@@ -132,6 +224,9 @@ void Session::restore(SessionSnapshot snapshot)
         _title                = std::move(snapshot.title);
         _items                = std::move(snapshot.items);
         _todo                 = std::move(snapshot.todo);
+        _plans                = std::move(snapshot.plans);
+        _plan_version         = _plans.size();
+        _plan_seen_version    = _plan_version;
         _compacted_summary    = std::move(snapshot.compacted_summary);
         _compacted_item_count = snapshot.compacted_item_count;
         _persistence          = std::move(snapshot.persistence);
@@ -185,8 +280,16 @@ void Session::set_persistence(SessionPersistence persistence)
 
 void Session::set_mode(Mode next_mode)
 {
-    std::lock_guard lock(_mutex);
-    _mode = next_mode;
+    bool changed = false;
+    {
+        std::lock_guard lock(_mutex);
+        changed = _mode != next_mode;
+        _mode   = next_mode;
+    }
+    // Published outside the lock; callbacks may re-enter accessors.
+    if (changed) {
+        mode_changed_.publish();
+    }
 }
 
 void Session::set_error(std::string msg)
@@ -222,7 +325,7 @@ std::vector<std::string> Session::attachment_names() const
         if (user == nullptr) {
             continue;
         }
-        for (const FileAttachment& attachment : user->attachments) {
+        for (const Attachment& attachment : user->attachments) {
             std::string name
                 = utf8_from_path(path_from_utf8(attachment.path).filename());
             if (!name.empty()
@@ -268,7 +371,7 @@ void Session::cancel_queued(std::size_t id)
 }
 
 void Session::enqueue_message(
-    std::string text, std::vector<FileAttachment> attachments)
+    std::string text, std::vector<Attachment> attachments)
 {
     std::lock_guard lock(_mutex);
     _queued.push_back(QueuedMessage {
@@ -286,8 +389,7 @@ std::optional<QueuedMessage> Session::pop_queued()
     return next;
 }
 
-void Session::begin_send(
-    std::string text, std::vector<FileAttachment> attachments)
+void Session::begin_send(std::string text, std::vector<Attachment> attachments)
 {
     const bool has_attachments = !attachments.empty();
     {
@@ -366,16 +468,26 @@ void Session::finish_compaction(std::size_t id, std::string summary,
     }
 }
 
-void Session::append_tool(const ToolCallRequest& req)
+void Session::complete_manual_compaction(
+    std::size_t id, std::string summary, std::size_t absorbed_items)
 {
     std::lock_guard lock(_mutex);
-    if (auto* a = last_assistant_locked()) {
-        finalize_reasoning(*a);
+    for (auto& item : _items) {
+        auto* event = std::get_if<CompactionEvent>(&item);
+        if (event == nullptr || event->id != id) {
+            continue;
+        }
+        event->status = CompactionEvent::Status::COMPLETED;
+        _dirty        = true;
+        if (!_compacted_summary.empty()) {
+            summary.insert(
+                0, _compacted_summary + "\n\n<earlier-compactions>\n");
+            summary += "\n</earlier-compactions>";
+        }
+        _compacted_summary = std::move(summary);
+        _compacted_item_count += absorbed_items;
+        return;
     }
-    _dirty               = true;
-    const std::size_t id = _next_tool_id++;
-    _items.emplace_back(
-        ToolCall { id, req.id, req.name, req.args, { }, { }, std::nullopt });
 }
 
 ToolCall* Session::_find_tool_locked(
@@ -449,6 +561,74 @@ void Session::set_todo(TodoList todo)
         _dirty = true;
     }
     _todo = std::move(todo);
+}
+
+// Appends a new document; the current plan is the vector back. Both
+// counters move together: the creating agent has seen exactly what it wrote.
+std::string Session::create_plan(std::string content)
+{
+    std::lock_guard lock(_mutex);
+    if (const std::string error = plan_validation_error(content);
+        !error.empty()) {
+        return error;
+    }
+    _plans.push_back(PlanDoc { std::move(content) });
+    ++_plan_version;
+    _plan_seen_version = _plan_version;
+    _dirty             = true;
+    _plan_changed.publish();
+    return "";
+}
+
+std::string Session::edit_plan(
+    const std::string& old, const std::string& fresh, std::size_t count)
+{
+    std::lock_guard lock(_mutex);
+    if (_plans.empty()) {
+        return "no plan exists; create one with imza.plan.create";
+    }
+    if (_plan_seen_version != _plan_version) {
+        return "plan has changed since it was last read; call "
+               "imza.plan.get() and retry";
+    }
+    std::string error;
+    std::optional<std::string> patched
+        = replace_text(_plans.back().content, old, fresh, count, error);
+    if (!patched) {
+        return "imza.plan.edit: " + error;
+    }
+    _plans.back().content = std::move(*patched);
+    ++_plan_version;
+    _plan_seen_version = _plan_version;
+    _dirty             = true;
+    _plan_changed.publish();
+    return "";
+}
+
+void Session::mark_plan_seen()
+{
+    std::lock_guard lock(_mutex);
+    _plan_seen_version = _plan_version;
+}
+
+std::optional<std::string> Session::plan_submission_for_build()
+{
+    std::lock_guard lock(_mutex);
+    if (_plans.empty() || _mode != Mode::BUILD) {
+        return std::nullopt;
+    }
+    if (_plan_submitted_version == _plan_version) {
+        return std::nullopt;
+    }
+    std::string content = _plans.back().content;
+    if (content.size() > MAX_PLAN_BYTES) {
+        content.resize(MAX_PLAN_BYTES);
+    }
+    std::string message     = _plan_submitted_version == 0
+        ? "Plan approved for build: <plan>\n" + content + "\n</plan>"
+        : "User has changed the plan: <plan>\n" + content + "\n</plan>";
+    _plan_submitted_version = _plan_version;
+    return message;
 }
 
 void Session::set_modal(ModalPayload payload)
@@ -542,8 +722,14 @@ std::vector<Message> Session::build_history(
     for (std::size_t index = begin; index < _items.size(); ++index) {
         const auto& item = _items[index];
         if (const auto* u = std::get_if<UserTurn>(&item)) {
-            history.push_back({ Message::Type::USER,
-                message_with_attachments(u->text, u->attachments) });
+            Message user { Message::Type::USER,
+                message_with_attachments(u->text, u->attachments) };
+            for (const Attachment& attachment : u->attachments) {
+                if (attachment.type != Attachment::Type::TEXT) {
+                    user.media.push_back(attachment);
+                }
+            }
+            history.push_back(std::move(user));
         } else if (const auto* a = std::get_if<AssistantTurn>(&item)) {
             history.push_back(assistant_message(a->markdown, a, dialect));
         } else if (const auto* tc = std::get_if<ToolCall>(&item)) {
@@ -703,6 +889,12 @@ void Session::update_usage(
     _totals.completion += usage_event.usage.completion;
     _totals.total += usage_event.usage.total;
     _total_cost += compute_cost(usage_event.usage, pricing);
+}
+
+Signal<>::Subscription Session::subscribe_to_mode_change(
+    Signal<>::Callback callback)
+{
+    return mode_changed_.subscribe(std::move(callback));
 }
 
 Signal<>::Subscription Session::subscribe_to_title_change(

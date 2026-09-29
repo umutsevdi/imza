@@ -1,6 +1,7 @@
 #include "tools/tool.h"
 #include "common/util.h"
 #include "network/json_io.h"
+#include "tools/bindings.h"
 #include "tools/skills.h"
 
 #include <cstdint>
@@ -39,20 +40,17 @@ ToolOutput dispatch_tool(
     if (tool == nullptr) {
         return { ToolOutput::Kind::ERROR, "unknown tool: " + req.name };
     }
-    Json::Value args = parse_json(req.args);
-    if (args.isNull()) {
-        args = Json::Value(req.args);
-    }
-    return tool->run(req, args);
+    return tool->run(req, parse_json(req.args));
 }
 
-std::vector<Tool> default_tools(
-    LuaHost lua_host, SkillToolDeps skill_deps, SubagentToolSlot subagent)
+std::vector<Tool> default_tools(LuaHost lua_host, SkillToolDeps skill_deps,
+    SubagentToolSlot subagent, LuaState& lua_state)
 {
     std::vector<Tool> tools;
     tools.push_back(make_skill_tool(std::move(skill_deps)));
+    tools.push_back(make_load_tool(lua_state));
     tools.push_back(make_subagent_tool(std::move(subagent)));
-    tools.push_back(make_lua_tool(std::move(lua_host)));
+    tools.push_back(make_lua_tool(lua_state, std::move(lua_host)));
     return tools;
 }
 
@@ -63,11 +61,22 @@ std::optional<std::string> validate_subagent_tool_arguments(
         || arguments["tasks"].empty() || arguments["tasks"].size() > 5) {
         return "subagent: expected one to five tasks";
     }
+    // Keeps the validator in sync with the schema's additionalProperties.
+    for (const std::string& member : arguments.getMemberNames()) {
+        if (member != "tasks") {
+            return "subagent: unknown property '" + member + "'";
+        }
+    }
     for (const Json::Value& value : arguments["tasks"]) {
         if (!value.isObject() || !value["mode"].isString()
             || !value["prompt"].isString()
             || trim(value["prompt"].asString()).empty()) {
             return "subagent: every task requires a mode and prompt";
+        }
+        for (const std::string& member : value.getMemberNames()) {
+            if (member != "mode" && member != "prompt") {
+                return "subagent: unknown task property '" + member + "'";
+            }
         }
         const std::string mode = to_lower(value["mode"].asString());
         if (mode != "research" && mode != "build") {
@@ -113,20 +122,51 @@ Tool make_skill_tool(SkillToolDeps deps)
             if (!skill) {
                 return tool_error("skill: unknown or unavailable skill");
             }
-            const SkillRead read = read_skill(*skill);
-            if (read.kind == SkillRead::Kind::READ_FAILED) {
-                return tool_error("skill: cannot read instructions");
-            }
-            if (read.kind == SkillRead::Kind::TOO_LARGE) {
-                return tool_error("skill: instructions exceed 128 KiB");
+            std::string reason;
+            const std::optional<std::string> body
+                = load_skill_checked(*skill, reason);
+            if (!body) {
+                return tool_error("skill: " + reason);
             }
             if (deps.store) {
                 const std::optional<std::filesystem::path> path
                     = canonical_skill_path(*skill);
                 deps.store().record_tool_load(
-                    path.value_or(skill->path), read.body);
+                    path.value_or(skill->path), *body);
             }
-            return tool_output(read.body);
+            return tool_output(*body);
+        } };
+}
+
+Tool make_load_tool(LuaState& state)
+{
+    ToolSpec spec;
+    spec.name        = "load";
+    spec.description = "Load the documentation for a Lua module by name. "
+                       "Returns the module's TYPES and METHODS reference; "
+                       "call it before first use of any module listed under "
+                       "<modules> in the lua tool description.";
+    spec.parameters  = parse_json(
+        R"json({"type":"object","properties":{"name":{"type":"string"}},"required":["name"]})json");
+    return { std::move(spec),
+        [&state](const ToolCallRequest&, const Json::Value& args) {
+            const std::string name = json_string(args, "name");
+            if (name.empty()) {
+                return tool_error("load: expected a module name");
+            }
+            for (const LuaModule& module : state.modules()) {
+                if (module.name == name) {
+                    return tool_output(render_module_documentation(module));
+                }
+            }
+            std::string available;
+            for (const LuaModule& module : state.modules()) {
+                if (!available.empty()) {
+                    available += ", ";
+                }
+                available += module.name;
+            }
+            return tool_error("load: unknown module, available: " + available);
         } };
 }
 

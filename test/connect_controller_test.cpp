@@ -6,97 +6,34 @@
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
-#include <mutex>
-#include <queue>
 #include <thread>
 
 #include "app/flows.h"
 #include "platform/config.h"
 #include "providers/catalog.h"
+#include "test_fs.h"
+#include "test_state.h"
 #include "tools/skills.h"
 #include "workspace/review.h"
 
 namespace {
 
-struct IsolatedConfig {
-    std::filesystem::path dir;
-    std::string old_xdg;
-    bool had_xdg = false;
-
-    IsolatedConfig()
+// Data home with a fetched catalog listing testprov and its m1/m2 models.
+struct CatalogHome : imza::test::IsolatedDataHome {
+    CatalogHome()
     {
-        static int counter = 0;
-        dir                = std::filesystem::temp_directory_path()
-            / ("imza-ctrl-test-" + std::to_string(::getpid()) + "-"
-                + std::to_string(counter++));
-        std::filesystem::create_directories(dir);
-        if (const char* xdg = std::getenv("XDG_DATA_HOME")) {
-            old_xdg = xdg;
-            had_xdg = true;
-        }
-        setenv("XDG_DATA_HOME", dir.string().c_str(), 1);
-
         imza::Catalog catalog;
         catalog.fetched_at = static_cast<std::int64_t>(std::time(nullptr));
         imza::CachedProvider provider;
         provider.name                 = "Test Provider";
         provider.api                  = "http://127.0.0.1:9/v1";
         provider.npm                  = "@ai-sdk/openai-compatible";
-        catalog.providers["testprov"] = provider;
-        std::ignore
-            = imza::save_catalog(dir / "imza" / "presets.json", catalog);
-    }
-
-    ~IsolatedConfig()
-    {
-        if (had_xdg) {
-            setenv("XDG_DATA_HOME", old_xdg.c_str(), 1);
-        } else {
-            unsetenv("XDG_DATA_HOME");
-        }
-        std::error_code ec;
-        std::filesystem::remove_all(dir, ec);
-    }
-};
-
-struct PostPump {
-    std::mutex mutex;
-    std::queue<std::function<void()>> queue;
-
-    imza::PostFn fn()
-    {
-        return [this](std::function<void()> f) {
-            std::lock_guard lock(mutex);
-            queue.push(std::move(f));
-        };
-    }
-
-    void drain()
-    {
-        for (;;) {
-            std::function<void()> f;
-            {
-                std::lock_guard lock(mutex);
-                if (queue.empty()) {
-                    return;
-                }
-                f = std::move(queue.front());
-                queue.pop();
-            }
-            f();
-        }
-    }
-
-    template <typename Pred> bool wait_for(Pred pred)
-    {
-        for (int i = 0; i < 10000; ++i) {
-            drain();
-            if (pred()) {
-                return true;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
-        return false;
+        provider.models["m1"].context = 123;
+        provider.models["m1"].capabilities
+            = imza::Capabilities::IMAGE | imza::Capabilities::PDF;
+        provider.models["m2"].capabilities = imza::Capabilities::PDF;
+        catalog.providers["testprov"]      = provider;
+        std::ignore = imza::save_catalog(imza_dir() / "presets.json", catalog);
     }
 };
 
@@ -104,8 +41,7 @@ std::shared_ptr<imza::ApplicationState> make_state(
     std::shared_ptr<imza::Session> session,
     std::shared_ptr<imza::ProviderStore> providers, imza::PostFn post)
 {
-    auto state
-        = imza::make_application_state(std::move(post), imza::Config { });
+    auto state       = imza::test::make_test_state(std::move(post));
     state->session   = session;
     state->providers = providers;
     return state;
@@ -114,7 +50,12 @@ std::shared_ptr<imza::ApplicationState> make_state(
 imza::ModelsFn fake_models_ok()
 {
     return [](const imza::Route&, std::vector<imza::ModelInfo>& out) {
-        out = { { "m1" }, { "m2" } };
+        imza::ModelInfo first;
+        first.id = "m1";
+        imza::ModelInfo second;
+        second.id           = "m2";
+        second.capabilities = imza::Capabilities::IMAGE;
+        out                 = { first, second };
         return imza::Status::OK;
     };
 }
@@ -130,13 +71,13 @@ imza::ModelsFn fake_models_fail()
 
 TEST_CASE("connect commits a connection and lands models in the catalog")
 {
-    IsolatedConfig iso;
-    PostPump pump;
+    CatalogHome home;
+    imza::test::PostPump pump;
     auto providers = std::make_shared<imza::ProviderStore>(
         imza::Config { }, fake_models_ok());
     auto session = std::make_shared<imza::Session>();
     auto state   = make_state(session, providers, pump.fn());
-    pump.drain();
+    pump.pump();
 
     resolve_modal(*state,
         imza::ModalResult {
@@ -160,10 +101,43 @@ TEST_CASE("connect commits a connection and lands models in the catalog")
     CHECK(saved.providers[0].api_key == "key1");
 }
 
+TEST_CASE("provider store overlays catalog capabilities on discovered models")
+{
+    CatalogHome home;
+    imza::Config config;
+    imza::Connection connection;
+    connection.id = "testprov";
+    config.providers.push_back(connection);
+    imza::ProviderStore providers(config, fake_models_ok());
+
+    providers.start_model_fetches();
+    for (int i = 0; i < 1000; ++i) {
+        const auto models = providers.models_for("testprov");
+        if (models.state == imza::ModelList::State::READY) {
+            REQUIRE(models.models.size() == 2);
+            REQUIRE(models.models[0].context_length.has_value());
+            CHECK(*models.models[0].context_length == 123);
+            REQUIRE(models.models[0].capabilities.has_value());
+            CHECK(imza::has_capability(
+                *models.models[0].capabilities, imza::Capabilities::IMAGE));
+            CHECK(imza::has_capability(
+                *models.models[0].capabilities, imza::Capabilities::PDF));
+            REQUIRE(models.models[1].capabilities.has_value());
+            CHECK(imza::has_capability(
+                *models.models[1].capabilities, imza::Capabilities::IMAGE));
+            CHECK_FALSE(imza::has_capability(
+                *models.models[1].capabilities, imza::Capabilities::PDF));
+            return;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    FAIL("model fetch did not complete");
+}
+
 TEST_CASE("subscription connect stores credentials without model discovery")
 {
-    IsolatedConfig iso;
-    PostPump pump;
+    CatalogHome home;
+    imza::test::PostPump pump;
     bool fetched   = false;
     auto providers = std::make_shared<imza::ProviderStore>(imza::Config { },
         [&](const imza::Route&, std::vector<imza::ModelInfo>&) {
@@ -172,7 +146,7 @@ TEST_CASE("subscription connect stores credentials without model discovery")
         });
     auto session   = std::make_shared<imza::Session>();
     auto state     = make_state(session, providers, pump.fn());
-    pump.drain();
+    pump.pump();
     const auto options = providers->provider_options();
     REQUIRE_FALSE(options.empty());
     CHECK(options[0].first == "openai-subscription");
@@ -211,13 +185,13 @@ TEST_CASE("subscription connect stores credentials without model discovery")
 
 TEST_CASE("connecting a labeled custom endpoint stores the label")
 {
-    IsolatedConfig iso;
-    PostPump pump;
+    CatalogHome home;
+    imza::test::PostPump pump;
     auto providers = std::make_shared<imza::ProviderStore>(
         imza::Config { }, fake_models_ok());
     auto session = std::make_shared<imza::Session>();
     auto state   = make_state(session, providers, pump.fn());
-    pump.drain();
+    pump.pump();
 
     resolve_modal(*state,
         imza::ModalResult { imza::ConnectResult { "custom",
@@ -244,13 +218,13 @@ TEST_CASE("connecting a labeled custom endpoint stores the label")
 
 TEST_CASE("connecting the same provider requires a distinct label")
 {
-    IsolatedConfig iso;
-    PostPump pump;
+    CatalogHome home;
+    imza::test::PostPump pump;
     auto providers = std::make_shared<imza::ProviderStore>(
         imza::Config { }, fake_models_ok());
     auto session = std::make_shared<imza::Session>();
     auto state   = make_state(session, providers, pump.fn());
-    pump.drain();
+    pump.pump();
 
     resolve_modal(*state,
         imza::ModalResult {
@@ -262,7 +236,7 @@ TEST_CASE("connecting the same provider requires a distinct label")
         imza::ModalResult {
             imza::ConnectResult { "testprov", "", "key2", "", true } });
     pump.wait_for([&] { return !session->connect_status().empty(); });
-    pump.drain();
+    pump.pump();
     REQUIRE(providers->connections().size() == 1);
     CHECK(providers->connections()[0].api_key == "key1");
 
@@ -273,7 +247,7 @@ TEST_CASE("connecting the same provider requires a distinct label")
         const auto views = providers->connections();
         return views.size() == 2 && views[1].api_key == "key2";
     }));
-    pump.drain();
+    pump.pump();
 
     const auto views = providers->connections();
     REQUIRE(views.size() == 2);
@@ -296,13 +270,13 @@ TEST_CASE("connecting the same provider requires a distinct label")
 
 TEST_CASE("test-only connect does not persist")
 {
-    IsolatedConfig iso;
-    PostPump pump;
+    CatalogHome home;
+    imza::test::PostPump pump;
     auto providers = std::make_shared<imza::ProviderStore>(
         imza::Config { }, fake_models_ok());
     auto session = std::make_shared<imza::Session>();
     auto state   = make_state(session, providers, pump.fn());
-    pump.drain();
+    pump.pump();
 
     resolve_modal(*state,
         imza::ModalResult {
@@ -318,13 +292,13 @@ TEST_CASE("test-only connect does not persist")
 
 TEST_CASE("failing test keeps the connection absent")
 {
-    IsolatedConfig iso;
-    PostPump pump;
+    CatalogHome home;
+    imza::test::PostPump pump;
     auto providers = std::make_shared<imza::ProviderStore>(
         imza::Config { }, fake_models_fail());
     auto session = std::make_shared<imza::Session>();
     auto state   = make_state(session, providers, pump.fn());
-    pump.drain();
+    pump.pump();
 
     resolve_modal(*state,
         imza::ModalResult {
@@ -336,8 +310,8 @@ TEST_CASE("failing test keeps the connection absent")
 
 TEST_CASE("model pick sets last_used and persists")
 {
-    IsolatedConfig iso;
-    PostPump pump;
+    CatalogHome home;
+    imza::test::PostPump pump;
     imza::Config cfg;
     imza::Connection conn;
     conn.id      = "testprov";
@@ -348,11 +322,11 @@ TEST_CASE("model pick sets last_used and persists")
         = std::make_shared<imza::ProviderStore>(cfg, fake_models_ok());
     auto state
         = make_state(std::make_shared<imza::Session>(), providers, pump.fn());
-    pump.drain();
+    pump.pump();
 
     resolve_modal(
         *state, imza::ModalResult { imza::ModelChoice { "testprov", "m1" } });
-    pump.drain();
+    pump.pump();
 
     const auto snapshot = providers->config();
     REQUIRE(snapshot.last_used.has_value());
@@ -460,8 +434,8 @@ TEST_CASE("subagent configuration does not change main model reasoning")
 
 TEST_CASE("removing the connected connection re-points last_used")
 {
-    IsolatedConfig iso;
-    PostPump pump;
+    CatalogHome home;
+    imza::test::PostPump pump;
     imza::Config cfg;
     imza::Connection a;
     a.id = "a";
@@ -474,10 +448,10 @@ TEST_CASE("removing the connected connection re-points last_used")
         = std::make_shared<imza::ProviderStore>(cfg, fake_models_ok());
     auto state
         = make_state(std::make_shared<imza::Session>(), providers, pump.fn());
-    pump.drain();
+    pump.pump();
 
     CHECK(providers->remove_connection(0, "a"));
-    pump.drain();
+    pump.pump();
 
     const auto snapshot = providers->config();
     REQUIRE(snapshot.last_used.has_value());
@@ -487,8 +461,8 @@ TEST_CASE("removing the connected connection re-points last_used")
 
 TEST_CASE("removing the last connection is refused")
 {
-    IsolatedConfig iso;
-    PostPump pump;
+    CatalogHome home;
+    imza::test::PostPump pump;
     imza::Config cfg;
     imza::Connection a;
     a.id          = "a";
@@ -505,13 +479,13 @@ TEST_CASE("removing the last connection is refused")
 
 TEST_CASE("send guard blocks messages without an active model")
 {
-    IsolatedConfig iso;
-    PostPump pump;
+    CatalogHome home;
+    imza::test::PostPump pump;
     auto providers = std::make_shared<imza::ProviderStore>(
         imza::Config { }, fake_models_ok());
     auto session = std::make_shared<imza::Session>();
     auto state   = make_state(session, providers, pump.fn());
-    pump.drain();
+    pump.pump();
 
     submit(*state, "hello");
     CHECK(session->items().empty());

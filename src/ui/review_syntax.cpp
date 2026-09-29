@@ -73,7 +73,7 @@ void append_review_hunk_highlights(ReviewHighlights& cache,
         return;
     }
     const int content_width  = side_by_side
-        ? std::max(1, diff_side_width(review_width) - 8)
+        ? review_side_content_width(diff_side_width(review_width))
         : diff_content_width(review_width);
     const std::string syntax = syntax_type_for_path(path);
     std::vector<std::pair<const ReviewLine*, std::string_view>> old;

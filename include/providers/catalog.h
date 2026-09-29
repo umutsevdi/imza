@@ -25,6 +25,7 @@ struct CachedModel {
     std::optional<std::uint64_t> output;
     std::optional<bool> tool_call;
     std::optional<bool> reasoning;
+    std::optional<Capabilities> capabilities;
 };
 
 struct CachedProvider {
@@ -42,6 +43,8 @@ struct Catalog {
 inline constexpr std::string_view CUSTOM_PROVIDER_ID = "custom";
 inline constexpr std::string_view OPENAI_SUBSCRIPTION_ID
     = "openai-subscription";
+inline constexpr std::string_view OPENAI_SUBSCRIPTION_NAME
+    = "Open AI Subscription";
 
 bool catalog_stale(const Catalog& catalog);
 Status load_catalog(const std::filesystem::path& path, Catalog& out);

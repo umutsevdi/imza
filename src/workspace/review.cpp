@@ -156,28 +156,17 @@ namespace {
 
 ReviewLoadResult load_repository_review(const std::filesystem::path& root)
 {
-    const std::string prefix = "git -C " + shell_quote(root);
-    CommandResult diff       = run_command(prefix
-            + " diff --no-ext-diff --no-color --find-renames --find-copies "
-              "HEAD --",
-        std::chrono::seconds { 10 });
-    if (!diff.spawned || diff.timed_out) {
+    const std::optional<std::string> diff
+        = git_working_diff(root, { .renames = true });
+    if (!diff.has_value()) {
         return "Git diff could not be loaded.";
     }
-    if (diff.exit_code != 0) {
-        diff = run_command(prefix
-                + " diff --cached --no-ext-diff --no-color --find-renames "
-                  "--find-copies --",
-            std::chrono::seconds { 10 });
-    }
-    if (!diff.spawned || diff.timed_out || diff.exit_code != 0) {
-        return diff.output.empty() ? "git diff failed" : diff.output;
-    }
-    ReviewLoadResult parsed = parse_git_diff(diff.output);
+    ReviewLoadResult parsed = parse_git_diff(*diff);
     auto* review            = std::get_if<RepositoryReview>(&parsed);
     if (review == nullptr) {
         return parsed;
     }
+    const std::string prefix = "git -C " + shell_quote(root);
     const CommandResult untracked
         = run_command(prefix + " ls-files --others --exclude-standard",
             std::chrono::seconds { 5 });

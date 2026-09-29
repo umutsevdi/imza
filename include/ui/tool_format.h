@@ -25,8 +25,13 @@ struct ToolReportDiff {
     const DiffView* view;
 };
 
-using ToolReportSection
-    = std::variant<ToolReportCode, ToolReportMarkdown, ToolReportDiff>;
+struct ToolReportCanvas {
+    std::size_t index;
+    const CanvasView* view;
+};
+
+using ToolReportSection = std::variant<ToolReportCode, ToolReportMarkdown,
+    ToolReportDiff, ToolReportCanvas>;
 
 struct ToolReport {
     std::string summary;

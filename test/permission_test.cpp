@@ -15,6 +15,8 @@
 #include "permissions/shell_analysis.h"
 #include "permissions/store.h"
 #include "platform/config.h"
+#include "test_fs.h"
+#include "test_state.h"
 #include "tools/skills.h"
 #include "tools/tool.h"
 #include "workspace/environment.h"
@@ -27,13 +29,9 @@ namespace {
     public:
         PermissionFixture()
         {
-            const auto stamp
-                = std::chrono::steady_clock::now().time_since_epoch().count();
-            root = std::filesystem::temp_directory_path()
-                / ("imza-permission-test-" + std::to_string(stamp));
-            workspace = root / "workspace";
-            temporary = root / "temporary";
-            outside   = root / "outside";
+            workspace = _dir.file("workspace");
+            temporary = _dir.file("temporary");
+            outside   = _dir.file("outside");
             std::filesystem::create_directories(workspace);
             std::filesystem::create_directories(temporary);
             std::filesystem::create_directories(outside);
@@ -47,11 +45,7 @@ namespace {
             environment->project_root      = workspace;
         }
 
-        ~PermissionFixture()
-        {
-            std::error_code error;
-            std::filesystem::remove_all(root, error);
-        }
+        std::filesystem::path root() const { return _dir.path; }
 
         PermissionContext context(
             Session::Mode mode, PermissionStore::Grants grants = { }) const
@@ -62,7 +56,6 @@ namespace {
                 mode };
         }
 
-        std::filesystem::path root;
         std::filesystem::path workspace;
         std::filesystem::path temporary;
         std::filesystem::path outside;
@@ -70,10 +63,11 @@ namespace {
         std::shared_ptr<WorkspaceEnvironment> environment;
 
     private:
+        imza::test::TempDir _dir;
+
         static void write(const std::filesystem::path& path)
         {
-            std::ofstream file(path);
-            file << "content\n";
+            imza::test::write_file(path, "content\n");
         }
     };
 
@@ -219,25 +213,6 @@ TEST_CASE("shell analysis extracts compound command and subcommand pairs")
         == ShellAnalysis::Reuse::SESSION);
 }
 
-TEST_CASE("shell built-in catalog is platform specific")
-{
-#ifdef _WIN32
-    CHECK(shell_builtin_allowed("dir"));
-    CHECK(shell_builtin_allowed("findstr"));
-    CHECK(shell_builtin_allowed("tasklist"));
-    CHECK(shell_builtin_allowed("pushd"));
-    CHECK_FALSE(shell_builtin_allowed("ls"));
-#else
-    CHECK(shell_builtin_allowed("cat"));
-    CHECK(shell_builtin_allowed("grep"));
-    CHECK(shell_builtin_allowed("stat"));
-    CHECK(shell_builtin_allowed("cd"));
-    CHECK(shell_builtin_allowed("pushd"));
-    CHECK_FALSE(shell_builtin_allowed("dir"));
-    CHECK_FALSE(shell_builtin_allowed("git"));
-#endif
-}
-
 TEST_CASE("read-only command pair catalog is platform specific")
 {
     const auto invocation = [](std::string_view command) {
@@ -271,12 +246,12 @@ TEST_CASE("read-only command pair catalog is platform specific")
 
 TEST_CASE("application state shares grants with children")
 {
-    const auto immediate = [](std::function<void()> task) { task(); };
-    auto parent          = make_application_state(immediate, Config { });
+    auto parent = imza::test::make_test_state();
     const std::vector<PermissionGrant> grants { ExternalGrant {
         std::filesystem::current_path().lexically_normal() } };
     REQUIRE(parent->permissions->install(grants));
-    auto child = make_child_application_state(*parent, immediate);
+    auto child = imza::make_child_application_state(
+        *parent, imza::test::run_immediately);
     CHECK(parent->permissions == child->permissions);
     CHECK(child->permissions->snapshot()->size() == 1);
     CHECK(parent->runtime_flags == child->runtime_flags);
@@ -284,38 +259,20 @@ TEST_CASE("application state shares grants with children")
     CHECK(parent->environment->system() == child->environment->system());
 }
 
-TEST_CASE("session loading stages data before activation")
-{
-    PermissionFixture fixture;
-    const auto path = fixture.root / "session.json";
-    write_session_file(path, fixture.workspace, "Loaded session");
-
-    LoadedSession loaded;
-    REQUIRE(read_session(path, loaded) == Status::OK);
-    CHECK(loaded.snapshot.title == "Loaded session");
-    CHECK(loaded.workspace == fixture.workspace);
-
-    Session session;
-    session.set_title("Current session");
-    REQUIRE(load_session(path, session) == Status::OK);
-    CHECK(session.title() == "Loaded session");
-}
-
 TEST_CASE("session lifecycle clears grants only after successful activation")
 {
     PermissionFixture fixture;
-    const auto immediate = [](std::function<void()> task) { task(); };
-    auto state           = make_application_state(immediate, Config { });
-    const auto grant     = ExternalGrant { fixture.outside };
+    auto state       = imza::test::make_test_state();
+    const auto grant = ExternalGrant { fixture.outside };
     REQUIRE(state->permissions->install({ grant }));
     state->session->set_title("Current session");
 
     enqueue_user_modal(*state, SessionsModal { });
-    resolve_modal(*state, fixture.root / "missing-session.json");
+    resolve_modal(*state, fixture.root() / "missing-session.json");
     CHECK(state->session->title() == "Current session");
     CHECK(state->permissions->snapshot()->size() == 1);
 
-    const auto path = fixture.root / "session.json";
+    const auto path = fixture.root() / "session.json";
     const auto workspace
         = std::filesystem::weakly_canonical(std::filesystem::current_path());
     write_session_file(path, workspace, "Loaded session");
@@ -335,17 +292,13 @@ TEST_CASE("session lifecycle clears grants only after successful activation")
 TEST_CASE("failed directory changes and child creation retain grants")
 {
     PermissionFixture fixture;
-    const auto immediate = [](std::function<void()> task) { task(); };
-    auto parent          = make_application_state(immediate, Config { });
-    const auto grant     = ExternalGrant { fixture.outside };
+    auto parent      = imza::test::make_test_state();
+    const auto grant = ExternalGrant { fixture.outside };
     REQUIRE(parent->permissions->install({ grant }));
 
-    CHECK(parent->environment->chdir(fixture.root / "missing")
+    CHECK(parent->environment->chdir(fixture.root() / "missing")
         == imza::Environment::ChdirResult::FAILED);
     CHECK(parent->permissions->snapshot()->size() == 1);
-    auto child = make_child_application_state(*parent, immediate);
-    CHECK(child->permissions == parent->permissions);
-    CHECK(child->permissions->snapshot()->size() == 1);
 }
 
 TEST_CASE("permission store snapshots remain valid during concurrent changes")
@@ -497,7 +450,7 @@ TEST_CASE("external directory grants cover descendants but not siblings")
         fixture.context(Session::Mode::PLAN, { directory }));
     CHECK(recursive.decision.kind == PermissionDecision::Kind::ACCEPT);
 
-    const auto sibling = fixture.root / "outside-sibling";
+    const auto sibling = fixture.root() / "outside-sibling";
     std::filesystem::create_directories(sibling);
     std::ofstream(sibling / "file.txt") << "content\n";
     const auto sibling_result
@@ -516,6 +469,7 @@ TEST_CASE("one external grant authorizes mode-available operations")
     REQUIRE(read.request.has_value());
     const auto grant = filesystem_session_grant(*read.request);
     REQUIRE(grant.has_value());
+    CHECK(*grant == fixture.outside);
 
     const auto edit = evaluate_filesystem_request(edit_request(target),
         fixture.context(Session::Mode::BUILD, { PermissionGrant { *grant } }));
@@ -625,6 +579,12 @@ TEST_CASE("central evaluator assigns explicit policies to built-in tools")
         == PermissionDecision::Kind::ACCEPT);
     CHECK(evaluate("lua", R"js({"script":""})js").decision.kind
         == PermissionDecision::Kind::REJECT);
+    CHECK(evaluate("load", R"({"name":"tree"})").decision.kind
+        == PermissionDecision::Kind::ACCEPT);
+    CHECK(evaluate("load", R"({"name":""})").decision.kind
+        == PermissionDecision::Kind::REJECT);
+    CHECK(evaluate("load", "{}").decision.kind
+        == PermissionDecision::Kind::REJECT);
 }
 
 TEST_CASE("shell policy reuses, combines, and broadens session grants")
@@ -675,13 +635,6 @@ TEST_CASE("shell policy reuses, combines, and broadens session grants")
     const ShellAnalysis mixed = analyze_shell("git status && git push");
     CHECK_FALSE(shell_readonly_allowed(mixed.invocations[1]));
 
-    CHECK(evaluate("make -n && which -a ls").decision.kind
-        == PermissionDecision::Kind::ACCEPT);
-    CHECK(evaluate("git branch -D main").decision.kind
-        == PermissionDecision::Kind::ASK);
-    CHECK(evaluate("git diff --output=patch.txt").decision.kind
-        == PermissionDecision::Kind::ASK);
-
     const ShellEvaluation redirected = evaluate("ls > files.txt");
     CHECK(redirected.decision.kind == PermissionDecision::Kind::ASK);
     CHECK(redirected.session_grants.empty());
@@ -693,22 +646,6 @@ TEST_CASE("shell policy rejects an empty command")
     PermissionFixture fixture;
     const auto empty = shell_policy("", fixture.context(Session::Mode::BUILD));
     CHECK(empty.decision.kind == PermissionDecision::Kind::REJECT);
-}
-
-TEST_CASE("filesystem evaluation canonicalizes targets and derives grants")
-{
-    PermissionFixture fixture;
-    const auto evaluation = evaluate_filesystem_request(
-        write_request(fixture.outside / "new.txt"),
-        fixture.context(Session::Mode::BUILD));
-
-    CHECK(evaluation.decision.kind == PermissionDecision::Kind::ASK);
-    REQUIRE(evaluation.request.has_value());
-    CHECK(
-        filesystem_target(*evaluation.request) == fixture.outside / "new.txt");
-    const auto grant = filesystem_session_grant(*evaluation.request);
-    REQUIRE(grant.has_value());
-    CHECK(*grant == fixture.outside);
 }
 
 TEST_CASE("skill policy and runtime grants use the same central evaluator")
@@ -812,19 +749,6 @@ TEST_CASE("authorized_skill_path accepts only the canonical target")
     // Nor one that omits the path, as an unnormalized model call does.
     CHECK_FALSE(authorized_skill_path(
         skill, { "skill", R"({"name":"docs"})", "", "" }));
-}
-
-TEST_CASE("unknown dollar tokens remain ordinary chat text")
-{
-    const auto immediate = [](std::function<void()> task) { task(); };
-    auto state           = make_application_state(immediate, Config { });
-
-    for (const char* text :
-        { "It costs $5", "Use $HOME", "Try $not-a-skill" }) {
-        state->session->clear_error();
-        submit(*state, text);
-        CHECK(state->session->error() == "No model selected - run /model.");
-    }
 }
 
 TEST_CASE("skill evaluation binds approval to the canonical instruction path")

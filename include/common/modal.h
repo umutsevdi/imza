@@ -82,9 +82,7 @@ struct VariantModal {
     std::string current;
 };
 
-struct SessionsModal {
-    std::vector<SavedSession> sessions;
-};
+struct SessionsModal { };
 
 struct SkillsModal {
     struct Entry {

@@ -74,6 +74,18 @@ TEST_CASE("lua viewer appends a rendered return-value block")
     const std::size_t json_at = report.find("```json");
     const std::size_t txt_at  = report.find("```txt");
     CHECK(json_at > txt_at);
+
+    // A string return is fenced as plain text, not rendered as markdown.
+    imza::ToolCall string_call;
+    string_call.name = "lua";
+    string_call.args = R"json({"script":"return '## not a heading'"})json";
+    string_call.result
+        = imza::ToolCall::Result { imza::ToolCall::Result::Kind::OUTPUT, "" };
+    string_call.result->return_value
+        = imza::parse_json(R"json("## not a heading")json");
+    CHECK(imza::lua_viewer_content(string_call)
+              .find("```txt\n## not a heading\n```")
+        != std::string::npos);
 }
 
 TEST_CASE("lua viewer appends a quoted error block after the return value")
@@ -123,24 +135,11 @@ TEST_CASE("lua viewer skips the output block when nothing was printed")
     CHECK(report.find("\n42") != std::string::npos);
 }
 
-TEST_CASE("lua viewer puts string returns in a code block")
-{
-    imza::ToolCall call;
-    call.name = "lua";
-    call.args = R"json({"script":"return '## not a heading'"})json";
-    call.result
-        = imza::ToolCall::Result { imza::ToolCall::Result::Kind::OUTPUT, "" };
-    call.result->return_value
-        = imza::parse_json(R"json("## not a heading")json");
-    const std::string report = imza::lua_viewer_content(call);
-    CHECK(report.find("```txt\n## not a heading\n```") != std::string::npos);
-}
-
 TEST_CASE("lua viewer renders table returns as markdown, not JSON")
 {
     imza::ToolCall call;
     call.name = "lua";
-    call.args = R"json({"script":"return tool.list()"})json";
+    call.args = R"json({"script":"return imza.fs.list()"})json";
     call.result
         = imza::ToolCall::Result { imza::ToolCall::Result::Kind::OUTPUT, "" };
     call.result->return_value = imza::parse_json(
@@ -295,25 +294,6 @@ TEST_CASE("lua headers summarize bindings and never echo the script")
     CHECK(imza::lua_viewer_content(done).find(
               "Bindings: 1 read · 1 shell (1 failed)")
         != std::string::npos);
-}
-
-TEST_CASE("ask_answer_markdown numbers questions and blockquotes answers")
-{
-    imza::ModalAnswer ans;
-    ans.cards.push_back(
-        imza::QuestionAnswer { { "Sunny" }, "", "What's the weather today?" });
-    ans.cards.push_back(
-        imza::QuestionAnswer { { "Reading files", "Listing directories" }, "",
-            "Which capabilities?" });
-
-    const std::string md = imza::ask_answer_markdown(ans);
-    CHECK(md
-        == "1. **What's the weather today?**\n> Sunny\n"
-           "2. **Which capabilities?**\n> Reading files, Listing directories");
-
-    imza::ModalAnswer empty;
-    empty.cards.push_back(imza::QuestionAnswer { { }, "", "Anything else?" });
-    CHECK(imza::ask_answer_markdown(empty) == "1. **Anything else?**\n> -");
 }
 
 TEST_CASE("shell status text hides success and preserves arbitrary timeout")

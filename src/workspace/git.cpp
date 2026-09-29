@@ -1,11 +1,14 @@
 #include "workspace/git.h"
 
 #include "common/util.h"
+#include "platform/command_runner.h"
 
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <chrono>
 #include <fstream>
+#include <utility>
 
 namespace imza {
 
@@ -311,6 +314,29 @@ ReviewLoadResult parse_git_diff(std::string_view patch)
         }
     }
     return review;
+}
+
+std::optional<std::string> git_working_diff(
+    const std::filesystem::path& root, const GitDiffOptions& options)
+{
+    const std::string prefix = "git -C " + shell_quote(root) + " diff";
+    std::string flags        = " --no-ext-diff --no-color";
+    if (options.renames) {
+        flags += " --find-renames --find-copies";
+    }
+    if (options.numstat) {
+        flags += " --numstat --patch";
+    }
+    CommandResult diff
+        = run_command(prefix + flags + " HEAD --", std::chrono::seconds { 10 });
+    if (diff.spawned && !diff.timed_out && diff.exit_code != 0) {
+        diff = run_command(
+            prefix + flags + " --cached --", std::chrono::seconds { 10 });
+    }
+    if (!diff.spawned || diff.timed_out || diff.exit_code != 0) {
+        return std::nullopt;
+    }
+    return std::move(diff.output);
 }
 
 } // namespace imza

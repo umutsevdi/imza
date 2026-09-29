@@ -28,7 +28,6 @@ namespace {
             { }, std::nullopt };
     }
 
-    // The ASK verdict's own carrier: reason, session scope, typed details.
     PermissionEvaluation ask(ToolCallRequest request, std::string reason,
         PermissionStore::Grants grants, SkillRequest details)
     {
@@ -101,12 +100,9 @@ namespace {
             || grants_cover(context.grants, grant)) {
             return accept(std::move(request));
         }
-        const SkillRead read = read_skill(*skill);
-        if (read.kind == SkillRead::Kind::READ_FAILED) {
-            return reject(original, "skill: cannot read instructions");
-        }
-        if (read.kind == SkillRead::Kind::TOO_LARGE) {
-            return reject(original, "skill: instructions exceed 128 KiB");
+        std::string reason;
+        if (!load_skill_checked(*skill, reason)) {
+            return reject(original, "skill: " + reason);
         }
         if (skill_policy(config, *skill) == SkillPolicy::ALLOW) {
             return accept(std::move(request));
@@ -210,6 +206,12 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
                 "lua: expected a non-empty 'script' string");
         }
         return accept(std::move(request));
+    case RosterTool::LOAD:
+        if (!arguments["name"].isString()
+            || arguments["name"].asString().empty()) {
+            return reject(std::move(request), "load: expected a module name");
+        }
+        return accept(std::move(request));
     }
     return reject(
         std::move(request), "tool has no permission policy: " + original.name);
@@ -225,6 +227,9 @@ std::optional<RosterTool> classify_roster_tool(std::string_view name)
     }
     if (name == "lua") {
         return RosterTool::LUA;
+    }
+    if (name == "load") {
+        return RosterTool::LOAD;
     }
     return std::nullopt;
 }

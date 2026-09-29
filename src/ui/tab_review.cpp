@@ -2,6 +2,7 @@
 #include "common/types.h"
 #include "turn/delegation.h"
 #include "turn/prompt.h"
+#include "ui/annotations.h"
 #include "ui/ui.h"
 #include "workspace/review.h"
 
@@ -57,19 +58,6 @@ namespace {
         return old_range + " → " + new_range;
     }
 
-    Element review_comment_row(Element body, int height)
-    {
-        Elements rail;
-        rail.reserve(static_cast<std::size_t>(height));
-        for (int row = 0; row < height; ++row) {
-            rail.push_back(text(" ") | bgcolor(HL_CYAN));
-        }
-        Element comment = hbox({ vbox(std::move(rail)), text(" "),
-                              std::move(body) | xflex, filler() })
-            | color(PANEL_FG) | bgcolor(PANEL_COLOR_FOCUS);
-        return hbox({ text("             "), std::move(comment) | xflex });
-    }
-
     class Review : public ComponentBase {
     public:
         Review(std::shared_ptr<ApplicationState> state, LayoutFn layout,
@@ -77,9 +65,7 @@ namespace {
             : state_(std::move(state))
             , layout_(std::move(layout))
             , navigate_(std::move(navigate))
-            , comment_input_(Input(&draft_,
-                  multiline_field_option(
-                      &draft_, &draft_cursor_, "Leave a comment")))
+            , editor_([this] { animation::RequestAnimationFrame(); })
             , repository_subscription_(
                   state_->environment->subscribe_to_repository_change([this] {
                       load_generation_->fetch_add(1);
@@ -130,7 +116,7 @@ namespace {
             };
             review_cancel_button_ = space_activates(
                 Button(cancel_option), cancel_option.on_click);
-            Add(comment_input_);
+            Add(editor_.input());
             Add(plan_button_);
             Add(ai_review_button_);
             Add(review_viewer_button_);
@@ -221,7 +207,7 @@ namespace {
             Element content      = vbox(std::move(rows))
                 | focusPosition(0, selected_y) | yframe | vscroll_indicator
                 | flex;
-            const std::string hint = editor_anchor_
+            const std::string hint = editor_.is_open()
                 ? "Enter save · Alt+Enter new line · Esc cancel"
                 : selected_comment_
                 ? "↑↓ navigate · e edit · d delete"
@@ -263,16 +249,13 @@ namespace {
                 && _is_user_interaction(event)) {
                 state_->session->clear_error();
             }
-            if (editor_anchor_) {
+            if (editor_.is_open()) {
                 if (event == Event::Escape) {
                     _close_editor();
                     return true;
                 }
-                if (event == Event::Special("\x1B\r")
-                    || event == Event::Special("\x1B\n")) {
-                    draft_.insert(
-                        static_cast<std::size_t>(draft_cursor_), "\n");
-                    ++draft_cursor_;
+                if (is_alt_enter(event)) {
+                    editor_.newline();
                     animation::RequestAnimationFrame();
                     return true;
                 }
@@ -280,7 +263,7 @@ namespace {
                     _save_editor();
                     return true;
                 }
-                return comment_input_->OnEvent(event);
+                return editor_.input()->OnEvent(event);
             }
             if (plan_button_->OnEvent(event)
                 || ai_review_button_->OnEvent(event)) {
@@ -297,10 +280,10 @@ namespace {
             if (event.is_mouse()) {
                 const Mouse& mouse = event.mouse();
                 if (mouse.button == Mouse::WheelUp) {
-                    return _move(-3);
+                    return _move(-SCROLL_WHEEL_STEP);
                 }
                 if (mouse.button == Mouse::WheelDown) {
-                    return _move(3);
+                    return _move(SCROLL_WHEEL_STEP);
                 }
                 if (mouse.button == Mouse::Left
                     && mouse.motion == Mouse::Pressed) {
@@ -369,8 +352,7 @@ namespace {
                 || event == Event::ArrowLeft || event == Event::ArrowRight
                 || event == Event::PageUp || event == Event::PageDown
                 || event == Event::Home || event == Event::End
-                || event == Event::Special("\x1B\r")
-                || event == Event::Special("\x1B\n");
+                || is_alt_enter(event);
         }
 
         void _send_to_plan()
@@ -671,7 +653,7 @@ namespace {
                         for (const std::string& text_line : segments) {
                             body.push_back(text(text_line));
                         }
-                        return review_comment_row(vbox(std::move(body)),
+                        return annotation_card(vbox(std::move(body)),
                             static_cast<int>(segments.size()));
                     },
                     VisibleRow { VisibleRow::Kind::COMMENT, file_index, nullptr,
@@ -684,17 +666,17 @@ namespace {
         void _push_editor(Elements& rows, const std::string& path,
             const ReviewLine& line, int review_width)
         {
-            if (!editor_anchor_ || !_matches(*editor_anchor_, path, line)) {
+            if (!editor_.is_open() || !_matches(editor_.anchor(), path, line)) {
                 return;
             }
             const int content_width = std::max(1, review_width - 15);
-            const int height
-                = static_cast<int>(wrap_text(draft_, content_width).size());
+            const int height        = static_cast<int>(
+                wrap_text(editor_.draft(), content_width).size());
             _flush_spacer(rows);
             rows.push_back(
-                review_comment_row(wrapped_input_element(draft_,
-                                       static_cast<std::size_t>(draft_cursor_),
-                                       content_width, "Leave a comment"),
+                annotation_card(wrapped_input_element(editor_.draft(),
+                                    static_cast<std::size_t>(0), content_width,
+                                    "Leave a comment"),
                     height));
             rendered_y_ += height;
         }
@@ -790,8 +772,8 @@ namespace {
                 marker     = diff_marker(true);
                 background = diff_background(true);
             }
-            const std::vector<std::string> segments
-                = wrap_text(line->content, std::max(1, side_width - 8));
+            const std::vector<std::string> segments = wrap_text(
+                line->content, review_side_content_width(side_width));
             const Elements highlighted
                 = _highlighted_rows(*line, old_side, segments);
             const std::string blank_gutter(8, ' ');
@@ -960,11 +942,8 @@ namespace {
             if (row.kind != VisibleRow::Kind::LINE || row.line == nullptr) {
                 return false;
             }
-            editor_anchor_ = _anchor(_path(row.file_index), *row.line);
             editing_comment_.reset();
-            draft_.clear();
-            draft_cursor_ = 0;
-            comment_input_->TakeFocus();
+            editor_.begin(_anchor(_path(row.file_index), *row.line));
             return true;
         }
 
@@ -979,11 +958,8 @@ namespace {
             if (it == snapshot.comments.end()) {
                 return false;
             }
-            editor_anchor_   = it->anchor;
             editing_comment_ = it->id;
-            draft_           = it->body;
-            draft_cursor_    = static_cast<int>(draft_.size());
-            comment_input_->TakeFocus();
+            editor_.begin_edit(static_cast<int>(it->id), it->body);
             return true;
         }
 
@@ -999,23 +975,22 @@ namespace {
 
         void _save_editor()
         {
-            if (!editor_anchor_ || draft_.empty()) {
+            if (!editor_.is_open() || editor_.draft().empty()) {
                 return;
             }
+            const std::string body = editor_.save();
             if (editing_comment_) {
-                state_->review->update_comment(*editing_comment_, draft_);
+                state_->review->update_comment(*editing_comment_, body);
             } else {
-                state_->review->add_comment(*editor_anchor_, draft_);
+                state_->review->add_comment(editor_.anchor(), body);
             }
             _close_editor();
         }
 
         void _close_editor()
         {
-            editor_anchor_.reset();
+            editor_.close();
             editing_comment_.reset();
-            draft_.clear();
-            draft_cursor_ = 0;
         }
 
         bool _jump_file(int direction)
@@ -1103,10 +1078,7 @@ namespace {
         std::shared_ptr<ApplicationState> state_;
         LayoutFn layout_;
         WorkflowNavigateFn navigate_;
-        Component comment_input_;
-        std::string draft_;
-        int draft_cursor_ = 0;
-        std::optional<ReviewLineAnchor> editor_anchor_;
+        AnnotationEditor<ReviewLineAnchor> editor_;
         std::optional<std::size_t> editing_comment_;
         std::optional<std::size_t> selected_comment_;
         std::optional<std::size_t> pending_jump_;

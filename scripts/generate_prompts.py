@@ -13,8 +13,10 @@ PROMPT_NAMES: tuple[str, ...] = (
     "subagent_build",
     "title",
     "compaction",
+    "make_skill",
     "review",
     "review_plan",
+    "plan_annotations",
 )
 
 
@@ -45,6 +47,20 @@ def _render(prompts: dict[str, str]) -> str:
     return "\n".join(lines)
 
 
+def _render_banner(path: Path) -> str:
+    banner = _normalize(path.read_text(encoding="utf-8"))
+    return "\n".join([
+        "#include <string_view>",
+        "",
+        "namespace imza::ui_detail {",
+        "",
+        f"constexpr std::string_view BANNER = {_raw_cpp_string(banner)};",
+        "",
+        "} // namespace imza::ui_detail",
+        "",
+    ])
+
+
 def _write_if_changed(path: Path, content: str) -> None:
     if path.is_file() and path.read_text(encoding="utf-8") == content:
         return
@@ -55,6 +71,7 @@ def _write_if_changed(path: Path, content: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--banner", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
@@ -65,6 +82,8 @@ def main() -> int:
             parser.error(f"prompt source is missing: {path}")
         prompts[name] = path.read_text(encoding="utf-8")
     _write_if_changed(args.output / "prompt_defaults.inc", _render(prompts))
+
+    _write_if_changed(args.output / "banner.inc", _render_banner(args.banner))
     return 0
 
 

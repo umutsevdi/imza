@@ -26,15 +26,20 @@ public:
     void refresh(
         const ApplicationState& state, const std::string& text, int cursor);
 
-    // Applies the highlighted suggestion. Returns true when a command was
-    // chosen and the caller should submit the input afterwards.
+    // Applies the highlighted suggestion. Returns true only when the
+    // input is ready to submit; command completions return false so the
+    // user can type arguments before submitting.
     bool accept(const ApplicationState& state, std::string& text, int& cursor,
-        std::vector<FileAttachment>& attachments);
+        std::vector<Attachment>& attachments);
 
     void clear();
     ftxui::Element render(const LayoutCtx& ctx) const;
 
 private:
+    // Which suggestion set the priority rule selected: files, then skills,
+    // then commands.
+    enum class Set { FILES, SKILLS, COMMANDS };
+    Set active_set() const;
     int count() const;
 
     std::vector<const SlashCommand*> _commands;

@@ -1,5 +1,6 @@
 #include "providers/subscriptions.h"
 
+#include "common/util.h"
 #include "network/json_io.h"
 #include "network/network.h"
 #include "providers/catalog.h"
@@ -69,24 +70,6 @@ namespace {
         return out;
     }
 
-    std::string url_encode(std::string_view value)
-    {
-        constexpr char hex[] = "0123456789ABCDEF";
-        std::string out;
-        for (const unsigned char c : value) {
-            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-                || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.'
-                || c == '~') {
-                out.push_back(static_cast<char>(c));
-            } else {
-                out.push_back('%');
-                out.push_back(hex[c >> 4]);
-                out.push_back(hex[c & 0xf]);
-            }
-        }
-        return out;
-    }
-
     bool wait_default(std::stop_token stop, std::chrono::seconds duration)
     {
         std::mutex mutex;
@@ -145,11 +128,12 @@ namespace {
             return failure(Status::JSON_ERROR, authorization.toStyledString());
         }
         const std::string payload = "grant_type=authorization_code&code="
-            + url_encode(authorization["authorization_code"].asString())
+            + percent_encode(authorization["authorization_code"].asString())
             + "&redirect_uri="
-            + url_encode("https://auth.openai.com/deviceauth/callback")
-            + "&client_id=" + url_encode(OPENAI_CLIENT_ID) + "&code_verifier="
-            + url_encode(authorization["code_verifier"].asString());
+            + percent_encode("https://auth.openai.com/deviceauth/callback")
+            + "&client_id=" + percent_encode(OPENAI_CLIENT_ID)
+            + "&code_verifier="
+            + percent_encode(authorization["code_verifier"].asString());
         std::string body;
         long code           = 0;
         const Status status = post("https://auth.openai.com/oauth/token",

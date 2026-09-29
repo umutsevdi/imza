@@ -3,10 +3,12 @@
 #include <ftxui/component/component_base.hpp>
 #include <ftxui/component/component_options.hpp>
 #include <ftxui/component/event.hpp>
+#include <ftxui/component/mouse.hpp>
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/box.hpp>
 #include <ftxui/screen/color.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -37,7 +39,8 @@ struct RepositoryState;
 struct LayoutCtx {
     enum class Kind { WIDE, NARROW };
     static constexpr int WIDE_THRESHOLD = 100;
-    static constexpr int PANEL_WIDTH    = 40;
+    static constexpr int LEFT_WIDTH     = 40;
+    static constexpr int RIGHT_WIDTH    = 50;
     Kind kind                           = Kind::NARROW;
     int width                           = 0;
     int height                          = 0;
@@ -59,11 +62,29 @@ inline const ftxui::Color HL_BLUE           = ftxui::Color::RGB(121, 192, 255);
 inline const ftxui::Color HL_MAGENTA        = ftxui::Color::RGB(210, 168, 255);
 inline const ftxui::Color HL_CYAN           = ftxui::Color::RGB(104, 216, 232);
 inline constexpr int MODAL_MAX_WIDTH        = 100;
+// Streaming tail playout: the view releases queued characters at a paced
+// rate instead of materializing each arrival burst at once. The release
+// budget rises with the backlog but never past the display ceiling, so the
+// queue (not the network) decides the cadence, and a burst drains smoothly
+// after the turn ends. The markdown re-parse stays gated by
+// TRAILING_MARKDOWN_INTERVAL regardless.
+// Display ceiling: characters per tick the view never exceeds, whatever the
+// backlog. ~8 chars per 60 fps frame ≈ 480 chars/s of steady typing.
+inline constexpr std::size_t PLAYOUT_MAX_CHARS_PER_TICK = 8;
+// Backlogs beyond this snap to full text instead of animating (tool-call
+// result insertions, compaction, restored turns).
+inline constexpr std::size_t PLAYOUT_HARD_CAP = 4000;
+
+// The streaming chat tail's markdown re-parse cadence. Matched to the
+// stream-update batch period (src/turn/stream_updates.cpp) so the tail
+// advances every batch, i.e. visibly per arrived chunk of characters.
+// Tests sleep across it to assert the deferral.
+inline constexpr auto TRAILING_MARKDOWN_INTERVAL
+    = std::chrono::milliseconds(20);
 // Wider frame for the side-by-side diff viewer, which needs two panes of
 // readable code; every other modal keeps MODAL_MAX_WIDTH.
 inline constexpr int DIFF_VIEWER_MODAL_MAX_WIDTH = 160;
 
-// Width cap for the active modal payload.
 int modal_max_width(const ModalPayload& modal);
 
 std::string fit(const std::string& text, int width);
@@ -107,6 +128,8 @@ std::string elapsed_text(std::chrono::milliseconds elapsed);
 std::string compact_number(std::uint64_t n);
 ftxui::Element hint_bar(std::string hint);
 ftxui::Elements modal_header(std::string title, std::string subtitle = "");
+// Plan document #0 is the "Initial Plan"; later ones are "Revision N".
+std::string plan_revision_label(std::size_t index);
 
 // ◉/○ for single choice, ▣/☐ for multi choice.
 std::string choice_marker(bool multi, bool selected);
@@ -164,11 +187,16 @@ struct ModelRow {
     std::string model_id;
     std::string name;
     std::string tag;
+    std::optional<Capabilities> capabilities;
 };
 
 ModelRow make_model_row(const std::string& connection_id,
     const std::string& provider_name, const ModelInfo& info);
 ftxui::Element model_picker_row(const ModelRow& row, bool selected);
+
+// "image · pdf" labels for advertised input modalities; empty when the
+// capabilities are unknown or advertise neither.
+std::string capability_tags(const std::optional<Capabilities>& capabilities);
 
 // Filterable model list shared by the model pickers.
 struct ModelPickList {
@@ -183,6 +211,14 @@ struct ModelPickList {
     const ModelRow* chosen() const;
 };
 
+// The picker's filter input, wired to refill the visible rows; `pick` must
+// outlive the returned component.
+ftxui::Component make_model_pick_filter(ModelPickList& pick);
+// Arrow keys move the picker selection; false for other events.
+bool model_pick_move(ModelPickList& pick, const ftxui::Event& event);
+// Appends one row element per visible model entry.
+void append_model_pick_rows(const ModelPickList& pick, ftxui::Elements& rows);
+
 // Indices of `rows` whose `match` text contains the lowercased, trimmed
 // `filter`. Empty filter selects every row.
 std::vector<std::size_t> filter_visible(const std::string& filter,
@@ -191,14 +227,77 @@ std::vector<std::size_t> filter_visible(const std::string& filter,
 
 ftxui::Element render_markdown_element(std::string_view md, int width);
 
+// One rendered block of a markdown document: the pretty element, the
+// block's first source line (the edit anchor), and its 1-based start line.
+struct MarkdownBlock {
+    ftxui::Element element;
+    std::string source;
+    int line = 0;
+};
+
+// Renders `md` as one element per top-level block (paragraph, list item,
+// table, code block, quote); heading blocks delimit sections. Boundaries
+// come from cmark positions, so hash characters inside fenced code never
+// split a block.
+std::vector<MarkdownBlock> render_markdown_blocks(
+    std::string_view md, int width);
+
 bool syntax_type_supported(std::string_view type);
 std::string syntax_type_for_path(std::string_view path);
-ftxui::Element highlight_code_line(
-    std::string_view code, std::string_view type);
-ftxui::Elements highlight_code(std::string_view code, std::string_view type);
 // One vector of visual-row elements per logical line of `code`.
 std::vector<std::vector<ftxui::Element>> highlight_code_wrapped(
     std::string_view code, std::string_view type, int width);
+// Flattened visual rows of `code`: highlighted when the language is
+// supported, else wrapped text in `fallback_fg`.
+ftxui::Elements highlighted_rows(std::string_view code, std::string_view syntax,
+    int width, ftxui::Color fallback_fg);
+
+// Alt+Enter (both legacy encodings) inserts a newline in multi-line inputs.
+inline bool is_alt_enter(const ftxui::Event& event)
+{
+    return event == ftxui::Event::Special("\x1B\r")
+        || event == ftxui::Event::Special("\x1B\n");
+}
+inline bool is_bracketed_paste_begin(const ftxui::Event& event)
+{
+    return event == ftxui::Event::Special("\x1B[200~");
+}
+inline bool is_bracketed_paste_end(const ftxui::Event& event)
+{
+    return event == ftxui::Event::Special("\x1B[201~");
+}
+inline bool is_sidechat_toggle(const ftxui::Event& event)
+{
+    return event == ftxui::Event::CtrlS;
+}
+inline void insert_newline_at(std::string& text, int& cursor)
+{
+    text.insert(static_cast<std::size_t>(cursor), "\n");
+    ++cursor;
+}
+
+// Wheel and page scroll steps shared by the scrollers; arrows stay
+// component-specific.
+inline constexpr int SCROLL_WHEEL_STEP = 3;
+inline std::optional<int> scroll_step(ftxui::Event& event, int viewport_lines)
+{
+    if (event.is_mouse()) {
+        if (event.mouse().button == ftxui::Mouse::WheelUp) {
+            return -SCROLL_WHEEL_STEP;
+        }
+        if (event.mouse().button == ftxui::Mouse::WheelDown) {
+            return SCROLL_WHEEL_STEP;
+        }
+        return std::nullopt;
+    }
+    if (event == ftxui::Event::PageUp) {
+        return -std::max(1, viewport_lines - 1);
+    }
+    if (event == ftxui::Event::PageDown) {
+        return std::max(1, viewport_lines - 1);
+    }
+    return std::nullopt;
+}
 
 struct ReviewLineHighlights {
     std::vector<ftxui::Element> old_side;
@@ -229,8 +328,17 @@ std::string diff_marker(bool added);
 ftxui::Color diff_background(bool added);
 int diff_side_width(int width);
 int diff_content_width(int width);
+// Text width of one diff side after the gutter; the highlight cache and
+// the row renderer must agree on it.
+inline int review_side_content_width(int side_width)
+{
+    return std::max(1, side_width - 8);
+}
 int review_content_width(const LayoutCtx& ctx);
 ftxui::Element diffstat_chip(std::size_t additions, std::size_t deletions);
+// Draws a canvas module chart as an inline chat element at a fixed
+// size that shrinks only when the content is narrower.
+ftxui::Element canvas_chart(const CanvasView& view, int available_width);
 ftxui::Element session_error_element(const Session& session);
 
 ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx);
@@ -258,20 +366,39 @@ ftxui::Element render_update_available(std::string version);
 // Per-chat footer text; the sidechat clears hints and sets its own input
 // hint.
 struct ChatHints {
+    // Content width budget override; the default derives it from the
+    // layout (full terminal). Hosts that place the chat in a narrower
+    // column (the plan tab's 50/50 split) supply the real column width so
+    // items wrap for the slot they render in.
+    std::function<int(const LayoutCtx&)> content_width;
     std::string scroll_line = "Ctrl+↑↓ input history · ↑↓ scroll";
     std::string phase_line
         = "Tab next phase · Shift+Tab previous phase · Ctrl+S Sidechat";
+    // When set, replaces phase_line each render (the shared chat needs
+    // phase-accurate hints without being re-created).
+    std::function<std::string()> phase_line_fn;
     std::string placeholder = "Ask anything - type / for commands";
     std::string input_hint
         = "  Alt+Enter add line · @ attach file · $ use skill ";
+    // Rendered while the session has no items; off for the sidechat.
+    bool empty_state_banner = true;
 };
 
 ftxui::Component make_chat(std::shared_ptr<ApplicationState> state,
     LayoutFn layout, struct ChatHints hints = { });
-ftxui::Component make_side_panel(std::shared_ptr<ApplicationState> state,
-    LayoutFn layout, WorkflowFn workflow, WorkflowNavigateFn navigate);
+
+ftxui::Component make_plan_tab(std::shared_ptr<ApplicationState> state,
+    LayoutFn layout, ftxui::Component chat);
+// Plan annotator pane: renders the document as block rows; focused, it
+// accepts annotation keys (c/e/d, s revise, [/] sections) and unfocused
+// it renders dim and only scrolls. `focused` is owned by the host tab.
+ftxui::Component make_plan_doc(std::shared_ptr<ApplicationState> state,
+    LayoutFn layout, const bool* focused);
 ftxui::Component make_review(std::shared_ptr<ApplicationState> state,
     LayoutFn layout, WorkflowNavigateFn navigate);
+ftxui::Component make_side_panel(std::shared_ptr<ApplicationState> state,
+    LayoutFn layout, WorkflowFn workflow, WorkflowNavigateFn navigate);
+
 ftxui::Component make_status_line(std::shared_ptr<ApplicationState> state,
     LayoutFn layout, WorkflowFn workflow);
 ftxui::Component make_connect(std::shared_ptr<ApplicationState> state);
@@ -295,6 +422,9 @@ struct SidechatStatus {
 
 ftxui::Component make_sidechat_component(
     std::shared_ptr<ApplicationState> state, std::function<void()> on_focus,
+    SidechatStatus& status);
+ftxui::Component make_build_tab(std::shared_ptr<ApplicationState> state,
+    LayoutFn layout, ftxui::Component chat, ftxui::Component sidechat,
     SidechatStatus& status);
 
 int run_repl(

@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -95,7 +96,7 @@ namespace {
     // Shallowest identifier in `node`'s subtree: the `name` field when
     // the grammar defines one, else the first child of grammar type
     // `identifier`. Null node when it has neither.
-    TSNode node_name_inner(const TSNode& node, std::string_view)
+    TSNode node_name_inner(const TSNode& node)
     {
         std::vector<TSNode> stack { node };
         while (!stack.empty()) {
@@ -151,7 +152,7 @@ namespace {
                 }
             }
             if (!ts_node_is_null(name_node)) {
-                name_node = node_name_inner(name_node, code);
+                name_node = node_name_inner(name_node);
             }
         }
         if (ts_node_is_null(name_node)) {
@@ -197,11 +198,8 @@ namespace {
         lua_pushliteral(L, "end_line");
         lua_pushinteger(L, ts_node_end_point(node).row + 1);
         lua_settable(L, -3);
-        std::string body(code.substr(
-            begin, std::min<std::size_t>(end - begin, MAX_NODE_TEXT)));
-        if (end - begin > MAX_NODE_TEXT) {
-            body += "\n[truncated]";
-        }
+        const std::string body
+            = truncate_marked(code.substr(begin, end - begin), MAX_NODE_TEXT);
         lua_pushliteral(L, "text");
         lua_pushlstring(L, body.data(), body.size());
         lua_settable(L, -3);
@@ -232,13 +230,12 @@ namespace {
     std::optional<Parsed> parse_file(lua_State* L, int index)
     {
         const std::string path = luaL_checkstring(L, index);
-        const GateOutcome gate = authorize_filesystem(
-            L, ReadFileRequest { path, 1, std::nullopt });
-        if (!gate) {
-            binding_error(L, gate_denied(L, gate.denial, path));
+        std::string target;
+        if (authorize_target(
+                L, ReadFileRequest { path, 1, std::nullopt }, path, target)
+            != 0) {
             return std::nullopt;
         }
-        const std::string target = filesystem_target(*gate.filesystem).string();
 
         const TSLanguage* language = language_for_path(target);
         if (language == nullptr) {
@@ -324,6 +321,26 @@ namespace {
         return 1;
     }
 
+    // Children are visited whether or not the parent matches: grammars nest
+    // declarations inside translation units, classes, and namespaces.
+    void walk_tree(const Parsed& parsed, std::size_t cap,
+        const std::function<bool(TSNode, int)>& emit)
+    {
+        std::vector<TSNode> stack { ts_tree_root_node(parsed.tree.get()) };
+        int row = 0;
+        while (!stack.empty() && static_cast<std::size_t>(row) < cap) {
+            const TSNode node = stack.back();
+            stack.pop_back();
+            const uint32_t count = ts_node_named_child_count(node);
+            for (uint32_t i = count; i > 0; --i) {
+                stack.push_back(ts_node_named_child(node, i - 1));
+            }
+            if (emit(node, row)) {
+                ++row;
+            }
+        }
+    }
+
     int binding_ts_index(lua_State* L)
     {
         const auto parsed = parse_file(L, 1);
@@ -331,24 +348,14 @@ namespace {
             return 2;
         }
         lua_newtable(L);
-        int row = 0;
-        std::vector<TSNode> stack { ts_tree_root_node(parsed->tree.get()) };
-        while (!stack.empty() && static_cast<std::size_t>(row) < MAX_SYMBOLS) {
-            const TSNode node = stack.back();
-            stack.pop_back();
-            // Children are visited whether or not the parent matches:
-            // grammars nest declarations inside translation units, classes,
-            // and namespaces.
-            const std::string_view kind = ts_node_type(node);
-            if (is_declaration_kind(kind)) {
-                push_symbol(L, node, parsed->code);
-                lua_rawseti(L, -2, ++row);
+        walk_tree(*parsed, MAX_SYMBOLS, [&](TSNode node, int row) {
+            if (!is_declaration_kind(ts_node_type(node))) {
+                return false;
             }
-            const uint32_t count = ts_node_named_child_count(node);
-            for (uint32_t i = count; i > 0; --i) {
-                stack.push_back(ts_node_named_child(node, i - 1));
-            }
-        }
+            push_symbol(L, node, parsed->code);
+            lua_rawseti(L, -2, row + 1);
+            return true;
+        });
         return 1;
     }
 
@@ -373,21 +380,15 @@ namespace {
         }
 
         lua_newtable(L);
-        int row = 0;
-        std::vector<TSNode> stack { ts_tree_root_node(parsed->tree.get()) };
-        while (!stack.empty() && static_cast<std::size_t>(row) < MAX_NODES) {
-            const TSNode node = stack.back();
-            stack.pop_back();
+        walk_tree(*parsed, MAX_NODES, [&](TSNode node, int row) {
             const std::string_view kind = ts_node_type(node);
-            if (exact ? kind == type : glob_match(type, kind)) {
-                push_symbol(L, node, parsed->code);
-                lua_rawseti(L, -2, ++row);
+            if (!(exact ? kind == type : glob_match(type, kind))) {
+                return false;
             }
-            const uint32_t count = ts_node_named_child_count(node);
-            for (uint32_t i = count; i > 0; --i) {
-                stack.push_back(ts_node_named_child(node, i - 1));
-            }
-        }
+            push_symbol(L, node, parsed->code);
+            lua_rawseti(L, -2, row + 1);
+            return true;
+        });
         return 1;
     }
 
@@ -416,22 +417,14 @@ namespace {
         }
 
         lua_newtable(L);
-        int row = 0;
-        std::vector<TSNode> stack { ts_tree_root_node(parsed->tree.get()) };
-        while (!stack.empty()) {
-            const TSNode node = stack.back();
-            stack.pop_back();
-            const uint32_t count = ts_node_named_child_count(node);
-            for (uint32_t i = count; i > 0; --i) {
-                stack.push_back(ts_node_named_child(node, i - 1));
-            }
+        walk_tree(*parsed, MAX_NODES, [&](TSNode node, int row) {
             if (std::string_view(ts_node_type(node)) != "identifier") {
-                continue;
+                return false;
             }
             const uint32_t begin = ts_node_start_byte(node);
             const uint32_t end   = ts_node_end_byte(node);
             if (parsed->code.substr(begin, end - begin) != symbol) {
-                continue;
+                return false;
             }
             lua_newtable(L);
             lua_pushlstring(L, parsed->target.data(), parsed->target.size());
@@ -441,8 +434,9 @@ namespace {
             const std::string_view line = line_at(parsed->code, begin);
             lua_pushlstring(L, line.data(), line.size());
             lua_setfield(L, -2, "text");
-            lua_rawseti(L, -2, ++row);
-        }
+            lua_rawseti(L, -2, row + 1);
+            return true;
+        });
         return 1;
     }
 
@@ -461,26 +455,18 @@ namespace {
         }
 
         lua_newtable(L);
-        int row = 0;
-        std::vector<TSNode> stack { ts_tree_root_node(parsed->tree.get()) };
-        while (!stack.empty() && static_cast<std::size_t>(row) < MAX_NODES) {
-            const TSNode node = stack.back();
-            stack.pop_back();
-            const uint32_t count = ts_node_named_child_count(node);
-            for (uint32_t i = count; i > 0; --i) {
-                stack.push_back(ts_node_named_child(node, i - 1));
-            }
+        walk_tree(*parsed, MAX_NODES, [&](TSNode node, int row) {
             if (std::string_view(ts_node_type(node)) != "identifier") {
-                continue;
+                return false;
             }
             const uint32_t begin = ts_node_start_byte(node);
             const uint32_t end   = ts_node_end_byte(node);
             if (parsed->code.substr(begin, end - begin) != symbol) {
-                continue;
+                return false;
             }
             const std::string_view parent = ts_node_type(ts_node_parent(node));
             if (parent.find("call") == std::string_view::npos) {
-                continue;
+                return false;
             }
             lua_newtable(L);
             lua_pushinteger(L, ts_node_start_point(node).row + 1);
@@ -490,16 +476,17 @@ namespace {
             const std::string_view line = line_at(parsed->code, begin);
             lua_pushlstring(L, line.data(), line.size());
             lua_setfield(L, -2, "text");
-            lua_rawseti(L, -2, ++row);
-        }
+            lua_rawseti(L, -2, row + 1);
+            return true;
+        });
         return 1;
     }
 
-    constexpr LuaBinding BINDINGS[] = {
+    constexpr LuaMethod BINDINGS[] = {
         {
             "_lib.ts_query",
             binding_ts_query,
-            R"desc(tool._lib.ts_query(path: string, query: string) => { capture, line, text }[]
+            R"desc((path: string, query: string) => { capture, line, text }[]
 #private: Execute an arbitrary tree-sitter query (S-expression pattern with
 @captures) over the file, one row per capture.
 Fails on an invalid query, naming the byte offset of the syntax error.
@@ -509,21 +496,21 @@ Capped at 500 rows.)desc",
             true,
         },
         {
-            "ts.index",
+            "index",
             binding_ts_index,
-            R"desc(tool.ts.index(path: string) => TsSymbol[]
+            R"desc((path: string) => TsSymbol[]
 List the named symbols in `path`: functions, methods, classes, structs,
 interfaces, enums, and other declaration/definition nodes parsed by the
 language grammar matched for the file's extension or name. Each entry
 reports `kind` (the grammar node type), `name`, `start_line`..`end_line`
 (1-based inclusive), and `text`.
-Capped at 50 entries; use tool.ts.nodes with a narrower type for more.)desc",
+Capped at 50 entries; use imza.tree.nodes with a narrower type for more.)desc",
             LuaCapability::NONE,
         },
         {
-            "ts.nodes",
+            "nodes",
             binding_ts_nodes,
-            R"desc(tool.ts.nodes(path: string, type: string) => TsSymbol[]
+            R"desc((path: string, type: string) => TsSymbol[]
 List every node in `path` whose grammar type name matches `type`: an exact
 grammar node type (e.g. "function_definition", "class_specifier") or a `*`
 glob ("*call*"). Entries carry `kind`, `name`, `start_line`..`end_line`,
@@ -533,18 +520,19 @@ Capped at 500 entries.)desc",
             LuaCapability::NONE,
         },
         {
-            "ts.symbols",
+            "symbols",
             binding_ts_symbols,
-            R"desc(tool.ts.symbols(path: string, symbol: string) => { file, line, text }[]
+            R"desc((path: string, symbol: string) => { file, line, text }[]
 List every occurrence of `symbol` (an identifier node) in `path`, one row
 per use with the file path, 1-based `line`, and the full source line as
-`text`. Grammar-typed, so comments and strings never match.)desc",
+`text`. Grammar-typed, so comments and strings never match.
+Capped at 500 entries.)desc",
             LuaCapability::NONE,
         },
         {
-            "ts.references",
+            "references",
             binding_ts_references,
-            R"desc(tool.ts.references(path: string, symbol: string) => { line, kind, text }[]
+            R"desc((path: string, symbol: string) => { line, kind, text }[]
 List the call sites of `symbol` in `path`: identifier nodes inside a call
 node, one row per site with 1-based `line`, the call node's grammar `kind`,
 and the full source line as `text`. Textual call-site matching, not a
@@ -556,6 +544,19 @@ scope. Capped at 500 entries.)desc",
 
 } // namespace
 
-std::span<const LuaBinding> tree_lua_bindings() { return BINDINGS; }
+std::span<const LuaMethod> tree_lua_methods() { return BINDINGS; }
+
+void register_tree(LuaState& state)
+{
+    static constexpr std::string_view types[] = {
+        "TsSymbol = { kind: string, name: string, start_line: integer, "
+        "end_line: integer, text: string }",
+    };
+    state.register_module({ false, "tree",
+        R"desc(Syntax tree inspection: list the symbols a file defines, find where
+an identifier appears, and enumerate call sites. Load for questions about
+code structure and references.)desc",
+        types, tree_lua_methods() });
+}
 
 } // namespace imza

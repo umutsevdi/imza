@@ -57,25 +57,6 @@ namespace {
             || name == "figure" || name == "figcaption" || name == "address";
     }
 
-    std::string percent_encode(std::string_view value)
-    {
-        static const char* hex = "0123456789ABCDEF";
-        std::string out;
-        out.reserve(value.size());
-        for (const char c : value) {
-            const unsigned char u = static_cast<unsigned char>(c);
-            if (std::isalnum(u) || c == '-' || c == '.' || c == '_'
-                || c == '~') {
-                out += c;
-            } else {
-                out += '%';
-                out += hex[u >> 4];
-                out += hex[u & 0xF];
-            }
-        }
-        return out;
-    }
-
     void append_utf8(std::string& out, unsigned int cp)
     {
         if (cp < 0x80) {
@@ -115,8 +96,7 @@ namespace {
         return map;
     }
 
-    // Decodes an entity spanning [begin+1, semi); appends to out and returns
-    // true on success.
+    // The entity body spans [begin+1, semi); decodes it into out.
     bool decode_entity(const std::string& low, std::size_t begin,
         std::size_t semi, std::string& out)
     {

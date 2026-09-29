@@ -2,15 +2,13 @@
 
 #include <algorithm>
 #include <cctype>
-#include <fstream>
-#include <iterator>
-#include <sstream>
 
 #include <json/json.h>
 
 #include "common/util.h"
 #include "network/json_io.h"
 #include "platform/config.h"
+#include "platform/json_file.h"
 
 namespace imza {
 
@@ -40,24 +38,43 @@ namespace {
         return names;
     }
 
+    struct SkillRead {
+        enum class Kind { OK, READ_FAILED, TOO_LARGE };
+        Kind kind = Kind::OK;
+        std::string body;
+    };
+
+    SkillRead read_skill(const Skill& skill)
+    {
+        const std::optional<std::string> content = read_text_file(skill.path);
+        if (!content) {
+            return { SkillRead::Kind::READ_FAILED, "" };
+        }
+        if (content->size() > MAX_SKILL_BYTES) {
+            return { SkillRead::Kind::TOO_LARGE, "" };
+        }
+        return { SkillRead::Kind::OK,
+            "<skill name=\"" + skill.name + "\" directory=\""
+                + skill.path.parent_path().string() + "\">\n" + *content
+                + "\n</skill>" };
+    }
+
 } // namespace
 
-SkillRead read_skill(const Skill& skill)
+std::optional<std::string> load_skill_checked(
+    const Skill& skill, std::string& reason)
 {
-    std::ifstream file(skill.path, std::ios::binary);
-    if (!file) {
-        return { SkillRead::Kind::READ_FAILED, "" };
+    const SkillRead read = read_skill(skill);
+    if (read.kind == SkillRead::Kind::READ_FAILED) {
+        reason = "cannot read instructions";
+        return std::nullopt;
     }
-    std::ostringstream buffer;
-    buffer << file.rdbuf();
-    std::string content = buffer.str();
-    if (content.size() > MAX_SKILL_BYTES) {
-        return { SkillRead::Kind::TOO_LARGE, "" };
+    if (read.kind == SkillRead::Kind::TOO_LARGE) {
+        reason = "instructions exceed " + std::to_string(MAX_SKILL_BYTES / 1024)
+            + " KiB";
+        return std::nullopt;
     }
-    return { SkillRead::Kind::OK,
-        "<skill name=\"" + skill.name + "\" directory=\""
-            + skill.path.parent_path().string() + "\">\n" + content
-            + "\n</skill>" };
+    return read.body;
 }
 
 std::optional<std::filesystem::path> canonical_skill_path(const Skill& skill)
@@ -169,18 +186,15 @@ bool SkillStore::load(const Skill& skill, std::string& error)
     if (is_loaded(skill.path)) {
         return true;
     }
-    const SkillRead read = read_skill(skill);
-    if (read.kind == SkillRead::Kind::READ_FAILED) {
-        error = "Failed to read skill: " + skill.name + ".";
-        return false;
-    }
-    if (read.kind == SkillRead::Kind::TOO_LARGE) {
-        error = "Skill instructions exceed 128 KiB: " + skill.name + ".";
+    std::string reason;
+    const std::optional<std::string> body = load_skill_checked(skill, reason);
+    if (!body) {
+        error = "Cannot load skill '" + skill.name + "': " + reason + ".";
         return false;
     }
     std::lock_guard lock(_mutex);
     _loaded.insert(skill.path.string());
-    _contents[skill.path.string()] = read.body;
+    _contents[skill.path.string()] = std::move(*body);
     return true;
 }
 

@@ -2,11 +2,13 @@
 
 #include "common/util.h"
 #include "permissions/filesystem.h"
+#include "tools/file_ops.h"
 
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <locale>
 #include <regex>
@@ -29,68 +31,53 @@ namespace {
 
     int binding_read(lua_State* L)
     {
-        const std::string path  = luaL_checkstring(L, 1);
-        const lua_Integer first = lua_gettop(L) >= 2 && !lua_isnil(L, 2)
-            ? luaL_checkinteger(L, 2)
-            : 1;
-        const bool last_given   = lua_gettop(L) >= 3 && !lua_isnil(L, 3);
-        const lua_Integer last  = last_given ? luaL_checkinteger(L, 3) : 0;
-        if (first < 1 || (last_given && last < first)) {
+        const std::string path                 = luaL_checkstring(L, 1);
+        const std::optional<lua_Integer> first = opt_integer(L, 2);
+        const std::optional<lua_Integer> last  = opt_integer(L, 3);
+        const lua_Integer first_line           = first.value_or(1);
+        if (first_line < 1 || (last.has_value() && *last < first_line)) {
             return binding_error(L,
                 "read: line range must be 1-based and last_line >= first_line");
         }
 
-        const ReadFileRequest request { path, static_cast<std::size_t>(first),
-            last_given
-                ? std::optional<std::size_t>(static_cast<std::size_t>(last))
+        const ReadFileRequest request { path,
+            static_cast<std::size_t>(first_line),
+            last.has_value()
+                ? std::optional<std::size_t>(static_cast<std::size_t>(*last))
                 : std::nullopt };
-        const GateOutcome gate = authorize_filesystem(L, request);
-        if (!gate) {
-            return binding_error(L, gate_denied(L, gate.denial, path));
-        }
-        const std::string target = filesystem_target(*gate.filesystem).string();
-
-        std::error_code ec;
-        if (!fs::is_regular_file(fs::path(target), ec)) {
-            return binding_error(L,
-                "read: no such file: " + path + " (looked for " + target + ")");
-        }
-        std::ifstream in(target, std::ios::binary);
-        if (!in) {
-            return binding_error(L, "read: cannot open: " + path);
+        std::string target;
+        if (const int denied = authorize_target(L, request, path, target)) {
+            return denied;
         }
 
-        lua_Integer number = 0;
+        // load_text rejects binary files, so any read range agrees with edit.
+        std::string err;
         std::string content;
-        std::string line;
-        while (std::getline(in, line)) {
-            ++number;
-            if (number >= first && (!last_given || number <= last)) {
-                if (line.find('\0') != std::string::npos) {
-                    return binding_error(L, "read: binary file: " + path);
-                }
-                content += line;
-                content.push_back('\n');
-            }
+        if (!load_text(target, content, err)) {
+            return binding_error(
+                L, "read: " + err + " (requested " + path + ")");
         }
-        if (!in.eof()) {
-            return binding_error(L, "read: cannot read: " + path);
-        }
-        if (number == 0) {
+        const std::vector<std::string> lines = split_lines(content);
+        if (lines.empty()) {
             lua_pushlstring(L, "", 0);
             return 1;
         }
-        if (number < first) {
+        if (static_cast<std::size_t>(first_line) > lines.size()) {
             return binding_error(L,
-                "read: first_line " + std::to_string(first)
-                    + " exceeds file length " + std::to_string(number) + ": "
-                    + path);
+                "read: first_line " + std::to_string(first_line)
+                    + " exceeds file length " + std::to_string(lines.size())
+                    + ": " + path);
         }
-        if (content.size() > MAX_OUTPUT_BYTES) {
-            content.resize(MAX_OUTPUT_BYTES);
-            content += "\n[truncated]";
-        }
-        lua_pushlstring(L, content.data(), content.size());
+        const auto first_row
+            = lines.begin() + static_cast<std::ptrdiff_t>(first_line - 1);
+        const auto last_row = last.has_value() ? lines.begin()
+                + static_cast<std::ptrdiff_t>(std::min<std::size_t>(
+                    static_cast<std::size_t>(*last), lines.size()))
+                                               : lines.end();
+        std::string out
+            = join_lines(std::vector<std::string>(first_row, last_row), true);
+        out = truncate_marked(std::move(out), MAX_OUTPUT_BYTES);
+        lua_pushlstring(L, out.data(), out.size());
         return 1;
     }
 
@@ -174,15 +161,9 @@ namespace {
 
     int binding_list(lua_State* L)
     {
-        const std::string path = lua_gettop(L) >= 1 && !lua_isnil(L, 1)
-            ? luaL_checkstring(L, 1)
-            : ".";
-        int depth              = 1;
-        if (lua_gettop(L) >= 2 && !lua_isnil(L, 2)) {
-            depth = static_cast<int>(luaL_checkinteger(L, 2));
-        }
-        const bool show_hidden
-            = lua_gettop(L) >= 3 && !lua_isnil(L, 3) && lua_toboolean(L, 3);
+        const std::string path = opt_string(L, 1).value_or(".");
+        const int depth = static_cast<int>(opt_integer(L, 2).value_or(1));
+        const bool show_hidden = opt_boolean(L, 3).value_or(false);
         if (depth < 1 || depth > MAX_LIST_DEPTH) {
             return binding_error(L,
                 "list: depth must be between 1 and "
@@ -190,11 +171,10 @@ namespace {
         }
 
         const ListDirectoryRequest request { path, depth, show_hidden };
-        const GateOutcome gate = authorize_filesystem(L, request);
-        if (!gate) {
-            return binding_error(L, gate_denied(L, gate.denial, path));
+        std::string target;
+        if (const int denied = authorize_target(L, request, path, target)) {
+            return denied;
         }
-        const std::string target = filesystem_target(*gate.filesystem).string();
 
         std::error_code ec;
         if (!fs::is_directory(fs::path(target), ec)) {
@@ -367,9 +347,7 @@ namespace {
 
     int binding_grep(lua_State* L)
     {
-        const std::string path    = lua_gettop(L) >= 1 && !lua_isnil(L, 1)
-            ? luaL_checkstring(L, 1)
-            : ".";
+        const std::string path    = opt_string(L, 1).value_or(".");
         const std::string pattern = luaL_checkstring(L, 2);
         if (pattern.empty()) {
             return binding_error(L, "grep: pattern must be a non-empty string");
@@ -386,20 +364,171 @@ namespace {
         }
 
         const FindFilesRequest request { path_from_utf8(path), pattern };
-        const GateOutcome gate = authorize_filesystem(L, request);
-        if (!gate) {
-            return binding_error(L, gate_denied(L, gate.denial, path));
+        std::string target;
+        if (const int denied = authorize_target(L, request, path, target)) {
+            return denied;
         }
-        const fs::path& target = filesystem_target(*gate.filesystem);
 
-        return grep_run(L, expression, target);
+        return grep_run(L, expression, fs::path(target));
     }
 
-    constexpr LuaBinding BINDINGS[] = {
+    // The run's record for `target`, or nullptr when the file has not been
+    // mutated yet this run.
+    FileMutation* find_mutation(LuaRunContext* run, const std::string& target)
+    {
+        for (FileMutation& m : run->mutations) {
+            if (m.path == target) {
+                return &m;
+            }
+        }
+        return nullptr;
+    }
+
+    // Reads the file at `target` (the run's cached latest once touched),
+    // applies `transform`, persists, and records the net mutation for the
+    // run's final diff. `whole_file` (imza.fs.write) tolerates a missing
+    // target: the original is then empty, so a fresh file diffs from blank.
+    bool apply_file_mutation(lua_State* L, const std::string& target,
+        const std::function<std::optional<std::string>(
+            const std::string&, std::string&)>& transform,
+        std::string& err, bool whole_file = false)
+    {
+        LuaRunContext* run     = run_of(L);
+        FileMutation* mutation = find_mutation(run, target);
+        std::string original;
+        std::string content;
+        if (mutation != nullptr) {
+            original = mutation->original;
+            content  = mutation->latest;
+        } else {
+            // load_text distinguishes a missing file (whole_file: a fresh
+            // write from empty) from unreadable content (always an error).
+            if (!load_text(target, content, err)) {
+                if (!whole_file || !err.starts_with("no such file")) {
+                    return false;
+                }
+                err.clear();
+                content.clear();
+            }
+            original = content;
+        }
+        std::optional<std::string> next = transform(content, err);
+        if (!next) {
+            return false;
+        }
+        if (!save_text(target, *next, err)) {
+            return false;
+        }
+        if (mutation == nullptr) {
+            run->mutations.push_back({ target, original, *next });
+        } else {
+            mutation->latest = *next;
+        }
+        return true;
+    }
+
+    int binding_file_insert(lua_State* L)
+    {
+        const std::string path = luaL_checkstring(L, 1);
+        const std::string text = luaL_checkstring(L, 2);
+        lua_Integer line       = 0;
+        if (const auto given = opt_integer(L, 3)) {
+            line = *given;
+            if (line < 1) {
+                return binding_error(L, "fs.insert: line must be 1-based");
+            }
+        }
+
+        const InsertFileRequest request { path, text,
+            line > 0
+                ? std::optional<std::size_t>(static_cast<std::size_t>(line))
+                : std::nullopt };
+        std::string target;
+        if (const int denied = authorize_target(L, request, path, target)) {
+            return denied;
+        }
+
+        std::string err;
+        const std::size_t at = static_cast<std::size_t>(line);
+        if (!apply_file_mutation(
+                L, target,
+                [&](const std::string& content, std::string& error) {
+                    return insert_text(content, text, at, error);
+                },
+                err)) {
+            return binding_error(L,
+                "fs.insert: " + target + ": " + err
+                    + (err.starts_with("no such file")
+                            ? " (use fs.write to create it)"
+                            : ""));
+        }
+        return 0;
+    }
+
+    int binding_file_edit(lua_State* L)
+    {
+        const std::string path  = luaL_checkstring(L, 1);
+        const std::string old   = luaL_checkstring(L, 2);
+        const std::string fresh = luaL_checkstring(L, 3);
+        lua_Integer count       = 1;
+        if (const auto given = opt_integer(L, 4)) {
+            count = *given;
+            if (count < 0) {
+                return binding_error(L, "fs.edit: count must be 0 or more");
+            }
+        }
+        if (old.empty()) {
+            return binding_error(L, "fs.edit: old must be non-empty");
+        }
+
+        const EditFileRequest request { path, old, fresh,
+            static_cast<std::size_t>(count) };
+        std::string target;
+        if (const int denied = authorize_target(L, request, path, target)) {
+            return denied;
+        }
+
+        std::string err;
+        if (!apply_file_mutation(
+                L, target,
+                [&](const std::string& content, std::string& error) {
+                    return replace_text(content, old, fresh,
+                        static_cast<std::size_t>(count), error);
+                },
+                err)) {
+            return binding_error(L, "fs.edit: " + target + ": " + err);
+        }
+        return 0;
+    }
+
+    int binding_file_write(lua_State* L)
+    {
+        const std::string path = luaL_checkstring(L, 1);
+        const std::string text = luaL_checkstring(L, 2);
+
+        const WriteFileRequest request { path, text };
+        std::string target;
+        if (const int denied = authorize_target(L, request, path, target)) {
+            return denied;
+        }
+
+        std::string err;
+        if (!apply_file_mutation(
+                L, target,
+                [&](const std::string&, std::string&) {
+                    return std::optional<std::string>(text);
+                },
+                err, true)) {
+            return binding_error(L, "fs.write: " + target + ": " + err);
+        }
+        return 0;
+    }
+
+    constexpr LuaMethod BINDINGS[] = {
         {
             "read",
             binding_read,
-            R"desc(tool.read(path: string, first_line?: integer=1 last_line?: integer=nil) => string
+            R"desc((path: string, first_line?: integer=1 last_line?: integer=nil) => string
 Read the file at `path` returning its content.
 first_line..last_line inclusive omit last_line to read to the end.
 Fails on no such file, first_line past the end, last_line < first_line, or a
@@ -408,7 +537,7 @@ binary file. Over 64 KB is cut and marked "[truncated]".)desc",
         {
             "list",
             binding_list,
-            R"desc(tool.list(path?: string=".", depth?: integer=1, show_hidden?: bool=false) => FileEntry[]
+            R"desc((path?: string=".", depth?: integer=1, show_hidden?: bool=false) => FileEntry[]
 List files and directories in `path`, returning their paths and sizes.
 Paths are relative to the requested directory. Filename-sorted listing;
 depth (1..5) descends into subdirectories and their entries come back flat.
@@ -418,15 +547,49 @@ Capped at 2000 entries.)desc",
         {
             "grep",
             binding_grep,
-            R"desc( tool.grep(path: string, pattern: string) => GrepHit[]
+            R"desc((path: string, pattern: string) => GrepHit[]
 Run a POSIX extended regex (not a Lua pattern) over a file or directory tree,
 one hit per matching line.
 Capped at 500 hits, followed by a hit whose text is "[truncated]".)desc",
+        },
+        {
+            "insert",
+            binding_file_insert,
+            R"desc((path: string, text: string, line?: integer=nil) => Err?
+Inserts text before the 1-based line, pushing it down; omit line to
+append at the end. A line past the end of the file is an error.)desc",
+        },
+        {
+            "edit",
+            binding_file_edit,
+            R"desc((path: string, old: string, new: string, count?: integer=1) => Err?
+Replaces the first count occurrences of old with new; count=0 replaces all.
+Old is an exact literal match, so include enough surrounding text to be unique.
+Errors if old is empty or not found.)desc",
+        },
+        {
+            "write",
+            binding_file_write,
+            R"desc((path: string, text: string) => Err?
+Replaces the file's entire content, creating it (and missing parent
+directories) if absent.
+Prefer insert/edit for targeted changes; this discards everything else.)desc",
         },
     };
 
 } // namespace
 
-std::span<const LuaBinding> filesystem_lua_bindings() { return BINDINGS; }
+std::span<const LuaMethod> fs_lua_methods() { return BINDINGS; }
+
+void register_fs(LuaState& state)
+{
+    static constexpr std::string_view types[] = {
+        "FileEntry = { path: string, type: \\\"file\\\" | \\\"dir\\\", size?: "
+        "string }",
+        "GrepHit = { file: string, line: integer, text: string }",
+    };
+    state.register_module({ true, "fs", "Filesystem inspection and mutation.",
+        types, fs_lua_methods() });
+}
 
 } // namespace imza

@@ -27,8 +27,16 @@ struct SystemEnvironment {
     std::unordered_map<std::string, Skill> global_skills;
     std::filesystem::path temporary_directory;
     bool has_git { false };
-    bool has_rg { false };
+    std::string clipboard_tool;
 };
+
+struct InstructionFile {
+    std::string path;
+    std::string content;
+};
+
+std::optional<InstructionFile> load_agent_file(
+    const std::filesystem::path& root);
 
 struct WorkspaceEnvironment {
     std::filesystem::path working_directory;

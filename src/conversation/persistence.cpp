@@ -7,10 +7,10 @@
 #include "platform/json_file.h"
 
 #include <algorithm>
-#include <fstream>
+#include <functional>
 #include <map>
+#include <optional>
 #include <set>
-#include <sstream>
 #include <utility>
 
 namespace imza {
@@ -18,6 +18,7 @@ namespace imza {
 namespace {
 
     constexpr std::string_view INDEX_FILENAME = ".index.json";
+    constexpr const char* UNTITLED_TITLE      = "Untitled session";
 
     std::filesystem::path index_path()
     {
@@ -111,6 +112,68 @@ namespace {
         return diff;
     }
 
+    Json::Value canvas_json(CanvasView& canvas)
+    {
+        Json::Value out;
+        out["kind"]  = static_cast<int>(canvas.kind);
+        out["title"] = consume_string(canvas.title);
+        Json::Value series(Json::arrayValue);
+        for (auto& entry : canvas.series) {
+            Json::Value value;
+            value["label"] = consume_string(entry.label);
+            Json::Value values(Json::arrayValue);
+            for (double number : entry.values) {
+                values.append(number);
+            }
+            value["values"] = std::move(values);
+            series.append(std::move(value));
+        }
+        out["series"] = std::move(series);
+        Json::Value grid(Json::arrayValue);
+        for (auto& row : canvas.grid) {
+            Json::Value values(Json::arrayValue);
+            for (double number : row) {
+                values.append(number);
+            }
+            grid.append(std::move(values));
+        }
+        out["grid"] = std::move(grid);
+        return out;
+    }
+
+    std::optional<CanvasView> parse_canvas(const Json::Value& value)
+    {
+        const int kind = value.get("kind", -1).asInt();
+        // Unknown kinds cannot render; skip them so older or foreign
+        // sessions still load.
+        if (kind < 0 || kind > static_cast<int>(CanvasView::Kind::SURFACE)) {
+            return std::nullopt;
+        }
+        CanvasView canvas;
+        canvas.kind  = static_cast<CanvasView::Kind>(kind);
+        canvas.title = value.get("title", "").asString();
+        for (const Json::Value& entry : value["series"]) {
+            CanvasSeries series;
+            series.label = entry.get("label", "").asString();
+            for (const Json::Value& number : entry["values"]) {
+                if (number.isNumeric()) {
+                    series.values.push_back(number.asDouble());
+                }
+            }
+            canvas.series.push_back(std::move(series));
+        }
+        for (const Json::Value& row : value["grid"]) {
+            std::vector<double> values;
+            for (const Json::Value& number : row) {
+                if (number.isNumeric()) {
+                    values.push_back(number.asDouble());
+                }
+            }
+            canvas.grid.push_back(std::move(values));
+        }
+        return canvas;
+    }
+
     Json::Value item_json(ConversationItem& item)
     {
         Json::Value out;
@@ -120,8 +183,15 @@ namespace {
             Json::Value attachments(Json::arrayValue);
             for (auto& attachment : user->attachments) {
                 Json::Value value;
-                value["path"]    = consume_string(attachment.path);
-                value["content"] = consume_string(attachment.content);
+                value["path"]       = consume_string(attachment.path);
+                value["type"]       = attachment.type_name();
+                value["media_type"] = consume_string(attachment.media_type);
+                if (attachment.type == Attachment::Type::TEXT) {
+                    value["content"] = consume_string(attachment.content);
+                } else {
+                    value["content"] = base64_encode(attachment.content);
+                    attachment.content.clear();
+                }
                 attachments.append(std::move(value));
             }
             out["attachments"] = std::move(attachments);
@@ -167,6 +237,13 @@ namespace {
                         diffs.append(diff_json(diff));
                     }
                     out["diffs"] = std::move(diffs);
+                }
+                if (!tool->result->canvases.empty()) {
+                    Json::Value canvases(Json::arrayValue);
+                    for (auto& canvas : tool->result->canvases) {
+                        canvases.append(canvas_json(canvas));
+                    }
+                    out["canvases"] = std::move(canvases);
                 }
                 if (tool->result->shell_status) {
                     std::visit(
@@ -227,8 +304,32 @@ namespace {
             UserTurn user;
             user.text = value.get("text", "").asString();
             for (const auto& entry : value["attachments"]) {
-                user.attachments.push_back({ entry.get("path", "").asString(),
-                    entry.get("content", "").asString() });
+                Attachment attachment;
+                attachment.path = entry.get("path", "").asString();
+                if (!entry.isMember("type")) {
+                    attachment.content = entry.get("content", "").asString();
+                    user.attachments.push_back(std::move(attachment));
+                    continue;
+                }
+                const auto type = Attachment::parse_type(
+                    entry.get("type", "text").asString());
+                if (!type) {
+                    continue;
+                }
+                attachment.type = *type;
+                if (*type == Attachment::Type::TEXT) {
+                    attachment.content = entry.get("content", "").asString();
+                } else {
+                    const auto content
+                        = base64_decode(entry.get("content", "").asString());
+                    if (!content) {
+                        continue;
+                    }
+                    attachment.content = *content;
+                    attachment.media_type
+                        = entry.get("media_type", "").asString();
+                }
+                user.attachments.push_back(std::move(attachment));
             }
             return user;
         }
@@ -274,6 +375,14 @@ namespace {
                     if (value["diffs"].isArray()) {
                         for (const Json::Value& entry : value["diffs"]) {
                             tool.result->diffs.push_back(parse_diff(entry));
+                        }
+                    }
+                    if (value["canvases"].isArray()) {
+                        for (const Json::Value& entry : value["canvases"]) {
+                            if (auto canvas = parse_canvas(entry)) {
+                                tool.result->canvases.push_back(
+                                    std::move(*canvas));
+                            }
                         }
                     }
                     if (value.isMember("shell_exit")) {
@@ -336,13 +445,11 @@ namespace {
 
     std::optional<std::vector<SavedSession>> read_index()
     {
-        std::ifstream file(index_path(), std::ios::binary);
-        if (!file) {
+        const std::optional<Json::Value> stored = read_json_file(index_path());
+        if (!stored) {
             return std::nullopt;
         }
-        std::stringstream text;
-        text << file.rdbuf();
-        const Json::Value root = parse_json(text.str());
+        const Json::Value& root = *stored;
         if (!root.isObject() || root.get("version", 0).asInt() != 1
             || !root["sessions"].isArray()) {
             return std::nullopt;
@@ -404,22 +511,43 @@ namespace {
         return files;
     }
 
+    // Entries whose session file no longer exists are dropped, so fast
+    // paths keep repairing the index.
+    bool mutate_index(
+        const std::function<bool(std::vector<SavedSession>&)>& mutate)
+    {
+        auto lock = acquire_file_lock(lock_path_for(index_path()));
+        if (!std::holds_alternative<FileLock>(lock)) {
+            return false;
+        }
+        auto indexed = read_index();
+        if (!indexed) {
+            return false;
+        }
+        const std::set<std::string> files = session_files();
+        std::erase_if(*indexed, [&](const SavedSession& session) {
+            return !files.contains(session.path.filename().string());
+        });
+        if (!mutate(*indexed)) {
+            return false;
+        }
+        return write_index(*indexed) == Status::OK;
+    }
+
     std::optional<SavedSession> read_session_metadata(
         const std::filesystem::path& path)
     {
-        std::ifstream file(path, std::ios::binary);
-        if (!file) {
+        const std::optional<Json::Value> stored = read_json_file(path);
+        if (!stored) {
             return std::nullopt;
         }
-        std::stringstream text;
-        text << file.rdbuf();
-        const Json::Value root = parse_json(text.str());
+        const Json::Value& root = *stored;
         if (!root.isObject() || !root["items"].isArray()) {
             return std::nullopt;
         }
         std::string title = root.get("title", "").asString();
         if (title.empty()) {
-            title = "Untitled session";
+            title = UNTITLED_TITLE;
         }
         return SavedSession { path, std::move(title),
             root.get("saved_at", "").asString() };
@@ -494,12 +622,17 @@ Status save_session(Session& session)
     }
     root["version"] = 1;
     const std::string title
-        = snapshot.title.empty() ? "Untitled session" : snapshot.title;
+        = snapshot.title.empty() ? UNTITLED_TITLE : snapshot.title;
     const std::string saved_at = format_local_time("%Y-%m-%d %H:%M:%S");
     root["title"]              = title;
     root["saved_at"]           = saved_at;
     root["todo"]               = todo_json(snapshot.todo);
-    root["compacted_summary"]  = consume_string(snapshot.compacted_summary);
+    Json::Value plans(Json::arrayValue);
+    for (auto& plan : snapshot.plans) {
+        plans.append(consume_string(plan.content));
+    }
+    root["plans"]             = std::move(plans);
+    root["compacted_summary"] = consume_string(snapshot.compacted_summary);
     root["compacted_item_count"]
         = static_cast<Json::UInt64>(snapshot.compacted_item_count);
     root["mode"]      = snapshot.plan_mode ? "plan" : "build";
@@ -525,22 +658,18 @@ Status save_session(Session& session)
     }
     session.set_persistence(PersistedSession { path });
     const SavedSession saved { path, title, saved_at };
-    {
-        auto lock = acquire_file_lock(lock_path_for(index_path()));
-        if (std::holds_alternative<FileLock>(lock)) {
-            if (auto indexed = read_index()) {
-                // A re-save of the same run rewrites the same file, so
-                // replace its index entry instead of duplicating it.
-                const std::string file = saved.path.filename().string();
-                std::erase_if(*indexed, [&](const SavedSession& entry) {
-                    return entry.path.filename().string() == file;
-                });
-                indexed->push_back(saved);
-                sort_sessions(*indexed);
-                write_index(*indexed);
-                return Status::OK;
-            }
-        }
+    if (mutate_index([&](std::vector<SavedSession>& indexed) {
+            // A re-save of the same run rewrites the same file, so replace
+            // its index entry instead of duplicating it.
+            const std::string file = saved.path.filename().string();
+            std::erase_if(indexed, [&](const SavedSession& entry) {
+                return entry.path.filename().string() == file;
+            });
+            indexed.push_back(saved);
+            sort_sessions(indexed);
+            return true;
+        })) {
+        return Status::OK;
     }
     reconcile_index(saved);
     return Status::OK;
@@ -555,13 +684,11 @@ Status read_session(const std::filesystem::path& path, LoadedSession& loaded)
     if (!std::holds_alternative<FileLock>(guard)) {
         return Status::CONFIG_ERROR;
     }
-    std::ifstream file(path, std::ios::binary);
-    if (!file) {
+    const std::optional<std::string> text = read_text_file(path);
+    if (!text) {
         return Status::CONFIG_ERROR;
     }
-    std::stringstream text;
-    text << file.rdbuf();
-    const Json::Value root = parse_json(text.str());
+    const Json::Value root = parse_json(*text);
     if (!root.isObject() || !root["items"].isArray()) {
         return Status::JSON_ERROR;
     }
@@ -589,6 +716,11 @@ Status read_session(const std::filesystem::path& path, LoadedSession& loaded)
         snapshot.compacted_item_count
             = root.get("compacted_item_count", 0).asUInt64();
         snapshot.plan_mode = root.get("mode", "plan").asString() != "build";
+        for (const Json::Value& plan : root["plans"]) {
+            if (plan.isString()) {
+                snapshot.plans.push_back(PlanDoc { plan.asString() });
+            }
+        }
         for (const auto& value : root["items"]) {
             if (auto item = parse_item(value)) {
                 snapshot.items.push_back(std::move(*item));
@@ -598,21 +730,6 @@ Status read_session(const std::filesystem::path& path, LoadedSession& loaded)
         return Status::JSON_ERROR;
     }
     loaded = LoadedSession { std::move(snapshot), std::move(workspace) };
-    return Status::OK;
-}
-
-Status load_session(const std::filesystem::path& path, Session& session,
-    std::filesystem::path* workspace)
-{
-    LoadedSession loaded;
-    const Status status = read_session(path, loaded);
-    if (status != Status::OK) {
-        return status;
-    }
-    if (workspace != nullptr) {
-        *workspace = loaded.workspace;
-    }
-    session.restore(std::move(loaded.snapshot));
     return Status::OK;
 }
 
@@ -651,17 +768,13 @@ DeleteSessionResult delete_saved_session(const std::filesystem::path& path)
         return DeleteSessionResult::REMOVE_FAILED;
     }
     {
-        auto lock = acquire_file_lock(lock_path_for(index_path()));
-        if (std::holds_alternative<FileLock>(lock)) {
-            if (auto indexed = read_index()) {
-                indexed->erase(std::remove_if(indexed->begin(), indexed->end(),
-                                   [&](const SavedSession& session) {
-                                       return session.path == target;
-                                   }),
-                    indexed->end());
-                write_index(*indexed);
-                return DeleteSessionResult::OK;
-            }
+        if (mutate_index([&](std::vector<SavedSession>& indexed) {
+                std::erase_if(indexed, [&](const SavedSession& session) {
+                    return session.path == target;
+                });
+                return true;
+            })) {
+            return DeleteSessionResult::OK;
         }
     }
     reconcile_index();

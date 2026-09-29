@@ -61,8 +61,7 @@ namespace {
             && (head.starts_with("<!doctype html") || head.starts_with("<html")
                 || head.starts_with("<head") || head.starts_with("<body")
                 || head.starts_with("<div") || head.starts_with("<p")
-                || head.starts_with("<h1") || head.starts_with("<h2")
-                || head.starts_with("<!doctype html public"));
+                || head.starts_with("<h1") || head.starts_with("<h2"));
         std::string text = is_html ? html_to_text(page.body) : page.body;
         if (trim(text).empty()) {
             return binding_error(
@@ -76,11 +75,8 @@ namespace {
     int binding_web_search(lua_State* L)
     {
         const std::string query = luaL_checkstring(L, 1);
-        int num_results         = 5;
-        if (lua_gettop(L) >= 2 && !lua_isnil(L, 2)) {
-            num_results = static_cast<int>(luaL_checkinteger(L, 2));
-        }
-        num_results = std::clamp(num_results, 1, 10);
+        const int num_results   = std::clamp<int>(
+            static_cast<int>(opt_integer(L, 2).value_or(5)), 1, 10);
         std::string text;
         const Status st = web_search(query, num_results, text);
         if (st == Status::NETWORK_ERROR) {
@@ -104,11 +100,11 @@ namespace {
         return 1;
     }
 
-    constexpr LuaBinding BINDINGS[] = {
+    constexpr LuaMethod BINDINGS[] = {
         {
-            "web.fetch",
+            "fetch",
             binding_web_fetch,
-            R"desc(tool.web.fetch(url: string) => string
+            R"desc((url: string) => string
 Fetches an HTTP(S) URL as readable text. HTML is converted to plain text; JSON, 
 Markdown, and other raw bodies are returned as-is.
 Fails on non-http(s) URLs, network errors, non-2xx responses, bodies over 5 MB
@@ -117,9 +113,9 @@ and pages with no readable content. Capped at 40000 characters.)desc",
             "web.fetch: web access is disabled for this run",
         },
         {
-            "web.search",
+            "search",
             binding_web_search,
-            R"desc(tool.web.search(query: string, num_results?: integer=5) => string
+            R"desc((query: string, num_results?: integer=5) => string
 Search results as a formatted text block.
 num_results is clamped to 1..10.)desc",
             LuaCapability::WEB,
@@ -129,6 +125,12 @@ num_results is clamped to 1..10.)desc",
 
 } // namespace
 
-std::span<const LuaBinding> web_lua_bindings() { return BINDINGS; }
+std::span<const LuaMethod> web_lua_methods() { return BINDINGS; }
+
+void register_web(LuaState& state)
+{
+    state.register_module(
+        { true, "web", "HTTP fetching and search.", { }, web_lua_methods() });
+}
 
 } // namespace imza

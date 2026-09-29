@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <mutex>
@@ -27,7 +28,7 @@ namespace imza {
 
 struct UserTurn {
     std::string text;
-    std::vector<FileAttachment> attachments;
+    std::vector<Attachment> attachments;
 };
 
 struct AssistantTurn {
@@ -52,6 +53,7 @@ struct ToolCall {
         std::string text;
         std::optional<Json::Value> return_value;
         std::vector<DiffView> diffs;
+        std::vector<CanvasView> canvases;
         std::optional<ShellStatus> shell_status;
         std::vector<LuaBindingCall> dispatch_log;
     };
@@ -82,10 +84,33 @@ struct PersistedSession {
 
 using SessionPersistence = std::variant<UnsavedSession, PersistedSession>;
 
+// A plan document: markdown with a required skeleton (Goal / Approach /
+// Files / Verification / Open Questions). The session holds the sequence
+// of documents created over its lifetime; the current plan is the back.
+struct PlanDoc {
+    std::string content;
+
+    bool operator==(const PlanDoc&) const = default;
+};
+
+// One user annotation on the plan document, pinned to a 1-based document
+// line. Section and anchor text derive from the document at revise time.
+struct PlanNote {
+    std::size_t line = 0;
+    std::string body;
+
+    bool operator==(const PlanNote&) const = default;
+};
+
+// Hard cap on one plan document, applied to both the stored object and
+// any future model-facing rendering of it.
+inline constexpr std::size_t MAX_PLAN_BYTES = 16 * 1024;
+
 struct SessionSnapshot {
     std::string title;
     std::vector<ConversationItem> items;
     TodoList todo;
+    std::vector<PlanDoc> plans;
     std::string compacted_summary;
     std::size_t compacted_item_count = 0;
     bool plan_mode                   = true;
@@ -100,7 +125,7 @@ struct LoadedSession {
 struct QueuedMessage {
     std::size_t id;
     std::string text;
-    std::vector<FileAttachment> attachments;
+    std::vector<Attachment> attachments;
 };
 
 class Session final : public ApplicationComponent {
@@ -133,6 +158,8 @@ public:
     std::vector<std::string> attachment_names() const;
     const TodoList& todo() const { return _todo; }
     const std::vector<QueuedMessage>& queued() const { return _queued; }
+    const std::vector<PlanDoc>& plans() const { return _plans; }
+    std::string plan_doc() const;
     std::optional<Countdown> retry_countdown() const;
     Usage last() const;
     std::optional<std::chrono::milliseconds> turn_elapsed() const;
@@ -152,11 +179,11 @@ public:
     void set_title(std::string title);
     void cancel_queued(std::size_t id);
     void enqueue_message(
-        std::string text, std::vector<FileAttachment> attachments = { });
+        std::string text, std::vector<Attachment> attachments = { });
     std::optional<QueuedMessage> pop_queued();
 
     void begin_send(
-        std::string text, std::vector<FileAttachment> attachments = { });
+        std::string text, std::vector<Attachment> attachments = { });
     void append_assistant(
         std::string model = "", std::string reasoning_effort = "");
     void set_last_assistant_metadata(
@@ -165,13 +192,27 @@ public:
     std::pair<std::size_t, std::size_t> begin_compaction();
     void finish_compaction(std::size_t id, std::string summary,
         std::size_t compacted_item_count, bool success);
-    void append_tool(const ToolCallRequest& req);
+    // Manual /compact completion: completes `id`, folds `summary` into
+    // the compacted context (preceded by the previous summary when one
+    // exists), and advances the boundary by `absorbed_items` so
+    // build_history skips what the summary covers.
+    void complete_manual_compaction(
+        std::size_t id, std::string summary, std::size_t absorbed_items);
     void fill_tool_result(const ToolCallRequest& req, ToolCall::Result result);
     void set_tool_subagents(
         const ToolCallRequest& req, std::vector<std::size_t> ids);
     void set_tool_subagent_chats(
         const ToolCallRequest& req, std::vector<SubagentChat> chats);
     void set_todo(TodoList todo);
+    std::string create_plan(std::string content);
+    std::string edit_plan(
+        const std::string& old, const std::string& fresh, std::size_t count);
+    void mark_plan_seen();
+    // Returns the size-capped plan submission message for the first build
+    // turn of a stint (or after a plan revision) and consumes the pending
+    // submission; nullopt when there is nothing to submit. Not const: the
+    // watermark sync shares the session lock with the mode check.
+    std::optional<std::string> plan_submission_for_build();
     void set_modal(ModalPayload payload);
     void clear_modal();
     void bump_modal_serial();
@@ -191,14 +232,19 @@ public:
     void clear_interrupt();
     bool interrupt_requested() const;
 
+    [[nodiscard]] Signal<>::Subscription subscribe_to_mode_change(
+        Signal<>::Callback callback);
     [[nodiscard]] Signal<>::Subscription subscribe_to_title_change(
         Signal<>::Callback callback);
     [[nodiscard]] Signal<>::Subscription subscribe_to_attachments_change(
+        Signal<>::Callback callback);
+    [[nodiscard]] Signal<>::Subscription subscribe_to_plan_change(
         Signal<>::Callback callback);
 
 private:
     AssistantTurn* last_assistant_locked();
     const AssistantTurn* last_assistant_locked() const;
+    SessionSnapshot build_snapshot() const;
     ToolCall* _find_tool_locked(
         const ToolCallRequest& req, bool unfinished_only);
     ToolCall* find_planning_tool_locked(const ToolCallRequest& req);
@@ -222,6 +268,15 @@ private:
     bool _title_generation_claimed = false;
 
     TodoList _todo;
+    std::vector<PlanDoc> _plans;
+    // Bumped on every plan mutation; _plan_seen_version is the version the
+    // agent last read. A mismatch rejects imza.plan.edit so the agent
+    // cannot patch content it has not seen.
+    std::size_t _plan_version      = 0;
+    std::size_t _plan_seen_version = 0;
+    // Version of the plan the build context last received as a submission
+    // message; 0 means the plan was never submitted.
+    std::size_t _plan_submitted_version = 0;
     std::vector<QueuedMessage> _queued;
 
     std::optional<Countdown> _retry_countdown;
@@ -243,8 +298,10 @@ private:
     bool _dirty                       = false;
     std::string _session_id           = unique_session_id();
 
+    Signal<> mode_changed_;
     Signal<> title_changed_;
     Signal<> attachments_changed_;
+    Signal<> _plan_changed;
 };
 
 enum class WorkflowPhase { PLAN, BUILD, REVIEW };

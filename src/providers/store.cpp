@@ -12,17 +12,6 @@ namespace imza {
 
 namespace {
 
-    const Connection* find_connection(
-        const std::vector<Connection>& providers, std::string_view key)
-    {
-        for (const Connection& connection : providers) {
-            if (connection_key(connection) == key) {
-                return &connection;
-            }
-        }
-        return nullptr;
-    }
-
     ApiStandard default_dialect(
         const Connection& connection, const Catalog& catalog)
     {
@@ -57,6 +46,7 @@ namespace {
             model.id             = model_id;
             model.name           = cached.name;
             model.context_length = cached.context;
+            model.capabilities   = cached.capabilities;
             models.push_back(std::move(model));
         }
         return models;
@@ -182,12 +172,15 @@ ModelList ProviderStore::models_for(std::string_view connection_id) const
         return list;
     }
     for (ModelInfo& info : list.models) {
-        if (info.context_length.has_value()) {
+        const auto model = provider->second.models.find(info.id);
+        if (model == provider->second.models.end()) {
             continue;
         }
-        const auto model = provider->second.models.find(info.id);
-        if (model != provider->second.models.end() && model->second.context) {
+        if (!info.context_length && model->second.context) {
             info.context_length = model->second.context;
+        }
+        if (!info.capabilities && model->second.capabilities) {
+            info.capabilities = model->second.capabilities;
         }
     }
     return list;
@@ -199,8 +192,8 @@ ProviderStore::provider_options() const
     std::lock_guard lock(_mutex);
     std::vector<std::pair<std::string, std::string>> options;
     options.reserve(_catalog.providers.size() + 1);
-    options.emplace_back(
-        std::string(OPENAI_SUBSCRIPTION_ID), "Open AI Subscription");
+    options.emplace_back(std::string(OPENAI_SUBSCRIPTION_ID),
+        std::string(OPENAI_SUBSCRIPTION_NAME));
     for (const auto& [id, provider] : _catalog.providers) {
         if (id == OPENAI_SUBSCRIPTION_ID) {
             continue;

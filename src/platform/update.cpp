@@ -11,7 +11,7 @@
 #include <algorithm>
 #include <ctime>
 #include <fstream>
-#include <sstream>
+#include <optional>
 
 #if !defined(_WIN32)
 #include <unistd.h>
@@ -59,16 +59,6 @@ namespace {
         return value;
     }
 
-#if !defined(_WIN32) && !defined(__APPLE__)
-    bool contains(const std::vector<std::string>& values, std::string_view name)
-    {
-        return std::any_of(
-            values.begin(), values.end(), [name](const std::string& value) {
-                return std::string_view(value) == name;
-            });
-    }
-#endif
-
     bool update_cache_stale(
         const UpdateCache& cache, std::int64_t now_unix_secs)
     {
@@ -80,23 +70,14 @@ namespace {
 
     UpdateCache load_update_cache(const std::filesystem::path& path)
     {
-        std::ifstream file(path, std::ios::binary);
-        if (!file) {
-            return { };
-        }
-        std::stringstream text;
-        text << file.rdbuf();
-        Json::CharReaderBuilder reader;
-        Json::Value root;
-        std::string error;
-        if (!Json::parseFromStream(reader, text, &root, &error)
-            || !root.isObject()) {
+        const std::optional<Json::Value> root = read_json_file(path);
+        if (!root || !root->isObject()) {
             return { };
         }
         UpdateCache cache;
-        cache.last_checked_at = root.get("last_checked_at", 0).asInt64();
-        if (root["version"].isString()) {
-            cache.version = root["version"].asString();
+        cache.last_checked_at = root->get("last_checked_at", 0).asInt64();
+        if ((*root)["version"].isString()) {
+            cache.version = (*root)["version"].asString();
         }
         return cache;
     }
@@ -207,11 +188,11 @@ std::string expected_asset_name(
 #else
     const char* os  = "linux";
     const char* ext = nullptr;
-    if (contains(package_managers, "apt")
-        || contains(package_managers, "apt-get")) {
+    if (std::ranges::contains(package_managers, "apt")
+        || std::ranges::contains(package_managers, "apt-get")) {
         ext = "deb";
-    } else if (contains(package_managers, "dnf")
-        || contains(package_managers, "yum")) {
+    } else if (std::ranges::contains(package_managers, "dnf")
+        || std::ranges::contains(package_managers, "yum")) {
         ext = "rpm";
     }
     if (ext == nullptr) {

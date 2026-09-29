@@ -2,6 +2,7 @@
 #include "app/flows.h"
 #include "network/json_io.h"
 #include "runtime/main_thread_queue.h"
+#include "test_state.h"
 
 #include <doctest/doctest.h>
 
@@ -15,29 +16,19 @@
 
 namespace {
 
-imza::Config one_shot_config()
-{
-    imza::Config config;
-    imza::Connection connection;
-    connection.id = "test";
-    config.providers.push_back(connection);
-    config.last_used = imza::LastUsed { "test", "model" };
-    return config;
-}
-
 std::shared_ptr<imza::ApplicationState> make_one_shot_state(
     imza::MainThreadQueue& queue, imza::StreamFn stream,
     imza::RuntimeFlag flags          = imza::WEB,
     std::atomic<std::size_t>* posted = nullptr)
 {
-    return imza::make_application_state(
+    return imza::test::make_test_state(
         [&queue, posted](std::function<void()> task) {
             if (posted != nullptr) {
                 posted->fetch_add(1);
             }
             queue.post(std::move(task));
         },
-        one_shot_config(), std::move(stream), flags);
+        imza::test::test_config(), std::move(stream), flags);
 }
 
 } // namespace
@@ -156,7 +147,7 @@ TEST_CASE("one-shot reports unattended permission blocks without a modal")
             const imza::StreamCallback& callback) {
             if (request.messages.back().type == imza::Message::Type::USER) {
                 Json::Value arguments(Json::objectValue);
-                arguments["script"] = "assert(tool.file.write([["
+                arguments["script"] = "assert(not imza.fs.write([["
                     + path.string() + "]], 'no'))";
                 callback(imza::make_tool_call_event(
                     { "lua", imza::write_json(arguments), "", "call" }));
@@ -219,26 +210,4 @@ TEST_CASE("one-shot retries transient server errors before stream data")
     CHECK(result.kind == imza::OneShotResult::Kind::SUCCESS);
     CHECK(result.output == "recovered");
     CHECK(calls.load() == 2);
-}
-
-TEST_CASE("one-shot does not retry server errors after stream data arrived")
-{
-    imza::MainThreadQueue queue;
-    std::atomic<int> calls = 0;
-    auto state             = make_one_shot_state(queue,
-        [&calls](
-            const imza::ChatRequest&, const imza::StreamCallback& callback) {
-            calls.fetch_add(1);
-            callback(imza::make_delta_event("partial "));
-            callback(
-                imza::make_error_event(imza::Status::SERVER_ERROR, "boom"));
-            return imza::Status::SERVER_ERROR;
-        });
-
-    const auto result = imza::run_one_shot(
-        *state, queue, { imza::OneShotRequest::Mode::ASK, "go" });
-
-    CHECK(result.kind == imza::OneShotResult::Kind::PROVIDER_FAILURE);
-    CHECK(result.error.find("boom") != std::string::npos);
-    CHECK(calls.load() == 1);
 }

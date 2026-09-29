@@ -1,4 +1,5 @@
 #include "app/application_state.h"
+#include "app/flows.h"
 #include "permissions/store.h"
 #include "ui/ui.h"
 
@@ -24,6 +25,11 @@ using namespace ftxui;
 
 namespace {
 
+    Element titled_section(std::string_view title, Element body)
+    {
+        return vbox({ section_title(std::string(title)), std::move(body) });
+    }
+
     Element changed_file_item(const ChangedFile& file);
 
     Element changed_files_panel(Elements rows, const ChangeSummary& changes)
@@ -48,6 +54,8 @@ namespace {
 
 } // namespace
 
+// Plans widget: the newest plan carries the live marker, superseded
+// ones stay dim; each row opens the plan in the viewer modal.
 class SidePanel : public ComponentBase {
 public:
     SidePanel(std::shared_ptr<ApplicationState> state, LayoutFn layout,
@@ -96,17 +104,17 @@ public:
         const bool narrow   = ctx.kind == LayoutCtx::Kind::NARROW;
         active_links_.clear();
         Elements parts;
+        _append_plans(parts);
         _append_review_comments(parts);
         if (state_->session->todo().items.size()) {
             parts.push_back(render_todo(state_->session->todo(), ctx) | yflex);
         }
-
         if (!narrow) {
             const auto& env       = state_->environment;
             const auto repository = env->repository();
             if (repository && !repository->changed_files.empty()) {
                 parts.push_back(_render_changed_files(*repository) | yflex);
-            };
+            }
             if (attachments_dirty_.exchange(false)) {
                 attachment_names_ = state_->session->attachment_names();
             }
@@ -130,7 +138,7 @@ public:
         if (narrow) {
             return panel(body) | xflex;
         }
-        return panel(body) | size(WIDTH, EQUAL, LayoutCtx::PANEL_WIDTH);
+        return panel(body) | size(WIDTH, EQUAL, LayoutCtx::LEFT_WIDTH);
     }
 
     bool OnEvent(Event event) override
@@ -172,6 +180,23 @@ private:
         return found->second.component;
     }
 
+    void _append_plans(Elements& parts)
+    {
+        const std::vector<PlanDoc> plans = state_->session->snapshot().plans;
+        if (plans.empty()) {
+            plan_links_.clear();
+            return;
+        }
+        Elements rows;
+        for (std::size_t index = 0; index < plans.size(); ++index) {
+            const bool latest = index + 1 == plans.size();
+            rows.push_back(
+                _plan_link(index, plans[index].content, latest)->Render());
+        }
+        parts.push_back(titled_section("Plans",
+            vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER)));
+    }
+
     Element _render_changed_files(const RepositoryState& repository)
     {
         Elements rows;
@@ -202,14 +227,12 @@ private:
                 + (comment.stale ? "  stale" : "");
             rows.push_back(
                 hbox({ _comment_link(comment.id, label)->Render(), filler(),
-                    text(fit(comment.body, LayoutCtx::PANEL_WIDTH / 2 - 6))
+                    text(fit(comment.body, LayoutCtx::LEFT_WIDTH / 2 - 6))
                         | color(PANEL_FG_DIM) })
                 | xflex);
         }
-        parts.push_back(vbox({
-            section_title("Review Comments"),
-            vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER),
-        }));
+        parts.push_back(titled_section("Review Comments",
+            vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER)));
     }
 
     Component _changed_file_link(const ChangedFile& file)
@@ -224,6 +247,33 @@ private:
                 navigate_(WorkflowPhase::REVIEW);
             },
             [&file](ChangedFile& existing) { existing = file; });
+    }
+
+    Component _plan_link(
+        std::size_t index, const std::string& content, bool latest)
+    {
+        auto payload = std::make_shared<std::string>(content);
+        return memoized_link(
+            plan_links_, index, payload,
+            [index, latest](const std::string&) {
+                // Explicit colors are only needed on the latest row: the
+                // link wrapper already paints inactive rows dim-colored,
+                // and | dim keeps them greyed on limited palettes.
+                Element row = hbox({
+                    text("●") | color(latest ? HL_GREEN : PANEL_FG_DIM),
+                    text(" "),
+                    paragraph(plan_revision_label(index))
+                        | color(latest ? PANEL_FG : PANEL_FG_DIM) | xflex,
+                });
+                return latest ? row : row | dim;
+            },
+            [this, index, payload] {
+                ViewerModal vm { plan_revision_label(index), *payload, "md",
+                    1 };
+                vm.line_numbers = false;
+                enqueue_user_modal(*state_, vm);
+            },
+            [content](std::string& existing) { existing = content; });
     }
 
     Component _comment_link(std::size_t id, std::string label)
@@ -249,6 +299,7 @@ private:
     Signal<>::Subscription update_subscription_;
     Component links_container_;
     std::map<std::string, Link<ChangedFile>> file_links_;
+    std::map<std::size_t, Link<std::string>> plan_links_;
     std::map<std::size_t, Link<std::string>> comment_links_;
     std::vector<Component> active_links_;
 };
@@ -331,7 +382,7 @@ Element render_todo(const TodoList& todo, const LayoutCtx&)
     Element body = parts.empty()
         ? dim(text("none"))
         : vbox(std::move(parts)) | borderStyled(ROUNDED, PANEL_BORDER);
-    return vbox({ section_title("Tasks"), std::move(body) });
+    return titled_section("Tasks", std::move(body));
 }
 
 Element render_changed_files(
@@ -381,7 +432,7 @@ Element render_context_box(const std::optional<std::string>& rules,
     if (!context_box.empty()) {
         Element body = vbox(std::move(context_box))
             | borderStyled(ROUNDED, PANEL_BORDER);
-        return vbox({ section_title("Context"), std::move(body) });
+        return titled_section("Context", std::move(body));
     }
     return vbox();
 }
@@ -459,7 +510,7 @@ Element render_permissions_box(const PermissionView& view)
         return vbox();
     }
     Element body = vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER);
-    return vbox({ section_title("Permissions"), std::move(body) });
+    return titled_section("Permissions", std::move(body));
 }
 
 Element render_update_available(std::string version)

@@ -12,8 +12,10 @@
 #include "turn/turn_runner.h"
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace imza {
 
@@ -47,7 +49,7 @@ namespace {
     }
 
     void start_turn(ApplicationState& state, std::string text,
-        std::vector<FileAttachment> attachments);
+        std::vector<Attachment> attachments);
 
     bool load_skill(ApplicationState& state, const Skill& skill,
         const ToolCallRequest& authorized)
@@ -97,7 +99,7 @@ namespace {
     }
 
     void submit_with_skills(ApplicationState& state, std::string text,
-        std::vector<FileAttachment> attachments)
+        std::vector<Attachment> attachments)
     {
         const std::vector<Skill> catalog = state.environment->skills();
         std::vector<Skill> awaiting;
@@ -134,7 +136,7 @@ namespace {
     }
 
     void start_turn(ApplicationState& state, std::string text,
-        std::vector<FileAttachment> attachments)
+        std::vector<Attachment> attachments)
     {
         const std::optional<ProviderSelection> selection
             = state.providers->active_selection();
@@ -153,10 +155,14 @@ namespace {
         const std::string title_input = text;
         state.session->clear_interrupt();
         state.session->begin_send(std::move(text), std::move(attachments));
-        state.runner->spawn(
-            state.session->build_history(
-                full_system_prompt(state, settings.mode), settings.dialect),
-            std::move(settings));
+        std::optional<std::string> submission
+            = state.session->plan_submission_for_build();
+        std::vector<Message> history = state.session->build_history(
+            full_system_prompt(state, settings.mode), settings.dialect);
+        if (submission) {
+            history.push_back({ Message::Type::USER, std::move(*submission) });
+        }
+        state.runner->spawn(std::move(history), std::move(settings));
         if (generate_title && !state.runner->has_stream_override()) {
             const auto title_selection
                 = state.providers->subagent_selection(SubagentRole::BASIC);
@@ -167,12 +173,7 @@ namespace {
         }
     }
 
-    SessionsModal sessions_modal(const ApplicationState& state)
-    {
-        SessionsModal modal;
-        modal.sessions = state.sessions->sessions();
-        return modal;
-    }
+    SessionsModal sessions_modal(const ApplicationState&) { return { }; }
 
     SkillsModal skills_modal(const ApplicationState& state)
     {
@@ -281,7 +282,7 @@ namespace {
 } // namespace
 
 void submit(ApplicationState& state, std::string text,
-    std::vector<FileAttachment> attachments)
+    std::vector<Attachment> attachments)
 {
     const std::string_view t = trim(text);
     if (t.empty()) {
@@ -450,16 +451,74 @@ void resolve_modal(ApplicationState& state, ModalResult result)
     advance_pending_skill(state);
 }
 
+// Forced manual compaction on the runner worker; the session is IDLE.
+void compact_session(ApplicationState& state, TurnSettings settings)
+{
+    state.session->clear_interrupt();
+    state.session->set_phase(Session::Phase::CONNECTING);
+    state.runner->spawn_compaction(std::move(settings));
+}
+
+// Seeded Build turn: flips the session to Build. The visible transcript
+// records only the command line; the seeded instructions ride the model
+// history as an extra user message, like the plan submission.
+void start_make_skill_turn(ApplicationState& state, std::string description)
+{
+    const std::optional<ProviderSelection> selection
+        = state.providers->active_selection();
+    if (!selection.has_value()) {
+        state.session->set_error("No model selected - run /model.");
+        return;
+    }
+    const std::string command_line
+        = "/make-skill " + std::string(trim(description));
+    state.session->set_mode(Session::Mode::BUILD);
+    if (!state.environment->ready()) {
+        state.session->enqueue_message(std::move(command_line));
+        return;
+    }
+    const bool generate_title = state.session->claim_title_generation();
+    state.session->clear_interrupt();
+    state.session->begin_send(std::move(command_line));
+    std::optional<std::string> submission
+        = state.session->plan_submission_for_build();
+    const TurnSettings settings
+        = make_turn_settings(*selection, state.session->mode());
+    std::vector<Message> history = state.session->build_history(
+        full_system_prompt(state, settings.mode), settings.dialect);
+    if (submission) {
+        history.push_back({ Message::Type::USER, std::move(*submission) });
+    }
+    std::string prompt = state.prompts->make_skill();
+    prompt += description;
+    history.push_back({ Message::Type::USER, std::move(prompt) });
+    state.runner->spawn(std::move(history), std::move(settings));
+    if (generate_title && !state.runner->has_stream_override()) {
+        const auto title_selection
+            = state.providers->subagent_selection(SubagentRole::BASIC);
+        const ProviderSelection& selected
+            = title_selection ? *title_selection : *selection;
+        state.delegation->spawn_title("/make-skill " + description,
+            make_turn_settings(selected, state.session->mode()));
+    }
+}
+
 void run_slash(ApplicationState& state, std::string_view command)
 {
     if (state.parent_state != nullptr) {
         run_slash(*state.parent_state, command);
         return;
     }
-    const SlashCommand* found = find_command(command);
+    std::string_view args;
+    std::string_view base = command;
+    if (const std::size_t space = command.find(' ');
+        space != std::string_view::npos) {
+        base = command.substr(0, space);
+        args = trim(command.substr(space + 1));
+    }
+    const SlashCommand* found = find_command(base);
     if (found == nullptr) {
-        state.session->set_error(
-            "Unknown command: " + std::string(command) + ".");
+        state.session->set_error("Unknown command: " + std::string(base) + ".");
         return;
     }
     switch (found->action) {
@@ -493,6 +552,36 @@ void run_slash(ApplicationState& state, std::string_view command)
         break;
     case SlashCommand::Action::SKILLS:
         enqueue_user_modal(state, skills_modal(state));
+        break;
+    case SlashCommand::Action::COMPACT:
+        if (state.session->has_pending_work()) {
+            state.session->set_error(
+                "Finish or interrupt pending work before compacting.");
+            break;
+        }
+        if (!state.session->has_items()) {
+            state.session->set_error("Nothing to compact.");
+            break;
+        }
+        if (const auto selection = state.providers->active_selection();
+            !selection.has_value()) {
+            state.session->set_error("No model selected - run /model.");
+            break;
+        }
+        compact_session(state,
+            make_turn_settings(
+                *state.providers->active_selection(), state.session->mode()));
+        break;
+    case SlashCommand::Action::MAKE_SKILL:
+        if (args.empty()) {
+            state.session->set_error(
+                "Usage: /make-skill <workflow description>");
+            break;
+        }
+        if (args.size() > 2000) {
+            args = args.substr(0, 2000);
+        }
+        start_make_skill_turn(state, std::string(args));
         break;
     case SlashCommand::Action::CHANGELOG: {
         const std::optional<std::string> changelog = read_changelog();
@@ -567,11 +656,6 @@ void delete_saved_session(
     }
     state.session->set_modal(sessions_modal(state));
     state.session->bump_modal_serial();
-}
-
-bool sidechat_open(const ApplicationState& state)
-{
-    return state.sidechat != nullptr && state.sidechat_open;
 }
 
 namespace {

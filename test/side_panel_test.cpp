@@ -1,4 +1,5 @@
 #include <string>
+#include <variant>
 
 #include <doctest/doctest.h>
 
@@ -7,6 +8,91 @@
 #include "workspace/environment.h"
 
 using imza::test::to_screen;
+#include "test_state.h"
+
+TEST_CASE("side panel plans widget hides when empty and lists plans")
+{
+    auto state    = imza::test::make_test_state();
+    int navigated = 0;
+    auto panel    = imza::make_side_panel(
+        state,
+        [] { return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 120, 40 }; },
+        [] { return imza::WorkflowPhase::PLAN; },
+        [&navigated](imza::WorkflowPhase) { ++navigated; });
+
+    const std::string empty = imza::test::to_text(panel->Render(), 120, 40);
+    CHECK(empty.find("Plans") == std::string::npos);
+
+    const std::string skeleton = "# Goal\nx\n# Approach\nx\n# Files\nx\n"
+                                 "# Verification\nx\n# Open Questions\nx";
+    REQUIRE(state->session->create_plan(skeleton).empty());
+    REQUIRE(state->session->create_plan(skeleton + "\nmore").empty());
+
+    const std::string out = imza::test::to_text(panel->Render(), 120, 40);
+    CHECK(out.find("Plans") != std::string::npos);
+    CHECK(out.find("Initial Plan") != std::string::npos);
+    CHECK(out.find("Revision 1") != std::string::npos);
+}
+
+TEST_CASE("only the latest plan renders bright, older ones stay dim")
+{
+    auto state                 = imza::test::make_test_state();
+    const std::string skeleton = "# Goal\nx\n# Approach\nx\n# Files\nx\n"
+                                 "# Verification\nx\n# Open Questions\nx";
+    REQUIRE(state->session->create_plan(skeleton).empty());
+    REQUIRE(state->session->create_plan(skeleton + "\nmore").empty());
+
+    auto panel = imza::make_side_panel(
+        state,
+        [] { return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 120, 40 }; },
+        [] { return imza::WorkflowPhase::PLAN; }, [](imza::WorkflowPhase) { });
+
+    auto screen = imza::test::to_screen(panel->Render(), 120, 40);
+
+    bool initial_is_dim  = false;
+    bool revision_is_dim = false;
+    bool initial_found   = false;
+    bool revision_found  = false;
+    for (int y = 0; y < screen.dimy(); ++y) {
+        std::string row;
+        for (int x = 0; x < screen.dimx(); ++x) {
+            row += screen.at(x, y);
+        }
+        // Narrow panels squeeze word spaces out of wrapped paragraphs.
+        if (row.find("Initial") != std::string::npos) {
+            initial_found  = true;
+            initial_is_dim = screen.CellAt(1, y).dim;
+        }
+        if (row.find("Revision") != std::string::npos) {
+            revision_found  = true;
+            revision_is_dim = screen.CellAt(1, y).dim;
+        }
+    }
+    REQUIRE(initial_found);
+    REQUIRE(revision_found);
+    REQUIRE(initial_is_dim);
+    REQUIRE_FALSE(revision_is_dim);
+}
+
+TEST_CASE("clicking a plan opens it in the viewer modal")
+{
+    auto state                 = imza::test::make_test_state();
+    const std::string skeleton = "# Goal\nx\n# Approach\nx\n# Files\nx\n"
+                                 "# Verification\nx\n# Open Questions\nx";
+    REQUIRE(state->session->create_plan(skeleton).empty());
+
+    auto panel = imza::make_side_panel(
+        state,
+        [] { return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 120, 40 }; },
+        [] { return imza::WorkflowPhase::PLAN; }, [](imza::WorkflowPhase) { });
+
+    REQUIRE(imza::test::click_label(panel, "Initial Plan", 120, 40));
+    const imza::ModalPayload payload = state->session->modal();
+    const auto* viewer               = std::get_if<imza::ViewerModal>(&payload);
+    REQUIRE(viewer != nullptr);
+    CHECK(viewer->title == "Initial Plan");
+    CHECK(viewer->content == skeleton);
+}
 using imza::test::to_text;
 
 TEST_CASE("render_todo renders status marks")

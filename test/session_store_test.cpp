@@ -5,6 +5,7 @@
 #include <functional>
 #include <sstream>
 #include <thread>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -18,41 +19,28 @@
 #include "network/json_io.h"
 #include "platform/config.h"
 #include "platform/file_lock.h"
+#include "test_fs.h"
+#include "test_helpers.h"
+#include "test_state.h"
 
 namespace {
 
-struct DataHome {
-    std::filesystem::path path
-        = std::filesystem::temp_directory_path() / "imza_session_store_test";
-    std::string previous;
-    bool had_previous = false;
-
-    DataHome()
-    {
-        if (const char* value = std::getenv("XDG_DATA_HOME")) {
-            previous     = value;
-            had_previous = true;
-        }
-        std::error_code ec;
-        std::filesystem::remove_all(path, ec);
-#ifndef _WIN32
-        setenv("XDG_DATA_HOME", path.c_str(), 1);
-#endif
+imza::Status load_session(const std::filesystem::path& path,
+    imza::Session& session, std::filesystem::path* workspace = nullptr)
+{
+    imza::LoadedSession loaded;
+    const imza::Status status = imza::read_session(path, loaded);
+    if (status != imza::Status::OK) {
+        return status;
     }
-
-    ~DataHome()
-    {
-        std::error_code ec;
-        std::filesystem::remove_all(path, ec);
-#ifndef _WIN32
-        if (had_previous) {
-            setenv("XDG_DATA_HOME", previous.c_str(), 1);
-        } else {
-            unsetenv("XDG_DATA_HOME");
-        }
-#endif
+    if (workspace != nullptr) {
+        *workspace = loaded.workspace;
     }
-};
+    session.restore(std::move(loaded.snapshot));
+    return imza::Status::OK;
+}
+
+using DataHome = imza::test::IsolatedDataHome;
 
 struct CurrentDirectory {
     std::filesystem::path original = std::filesystem::current_path();
@@ -109,7 +97,7 @@ TEST_CASE("saved sessions continue in place and rewrite the same file")
     CHECK(saved.front().path == saved_path);
 
     CurrentDirectory directory;
-    const auto other = home.path / "other-workspace";
+    const auto other = home.root() / "other-workspace";
     std::filesystem::create_directories(other);
     std::error_code ec;
     std::filesystem::current_path(other, ec);
@@ -117,8 +105,7 @@ TEST_CASE("saved sessions continue in place and rewrite the same file")
 
     imza::Session loaded;
     std::filesystem::path workspace;
-    REQUIRE(
-        imza::load_session(saved_path, loaded, &workspace) == imza::Status::OK);
+    REQUIRE(load_session(saved_path, loaded, &workspace) == imza::Status::OK);
     CHECK(workspace == directory.original);
     // A resumed session adopts the source file stem and saves back into the
     // same file once dirtied.
@@ -231,7 +218,7 @@ TEST_CASE("saved sessions retain delegated-agent chat transcripts")
     source.begin_send("delegate");
     source.append_assistant("model", "off");
     const imza::ToolCallRequest request { "subagent", "{}", "", "call-1" };
-    source.append_tool(request);
+    imza::test::append_tool(source, request);
     source.set_tool_subagent_chats(
         request, { { "Agent 1 (research)", "## Assistant\n\nreport" } });
     source.fill_tool_result(
@@ -242,7 +229,7 @@ TEST_CASE("saved sessions retain delegated-agent chat transcripts")
     const auto saved = imza::saved_sessions();
     REQUIRE(saved.size() == 1);
     imza::Session loaded;
-    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
     REQUIRE(loaded.items().size() == 3);
     const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
     REQUIRE(call.subagent_chats.size() == 1);
@@ -263,7 +250,7 @@ TEST_CASE("lua dispatch log survives session persistence")
     source.append_assistant("model", "off");
     const imza::ToolCallRequest request { "lua",
         R"json({"script":"print(1)"})json", "", "call-1" };
-    source.append_tool(request);
+    imza::test::append_tool(source, request);
     imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT,
         "1\n" };
     result.dispatch_log
@@ -275,7 +262,7 @@ TEST_CASE("lua dispatch log survives session persistence")
     const auto saved = imza::saved_sessions();
     REQUIRE(saved.size() == 1);
     imza::Session loaded;
-    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
     REQUIRE(loaded.items().size() == 3);
     const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
     REQUIRE(call.result.has_value());
@@ -298,7 +285,7 @@ TEST_CASE("lua return value survives session persistence")
     source.append_assistant("model", "off");
     const imza::ToolCallRequest request { "lua",
         R"json({"script":"return {a = 1}"})json", "", "call-1" };
-    source.append_tool(request);
+    imza::test::append_tool(source, request);
     imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT, "" };
     result.return_value
         = imza::parse_json(R"json({"a":1,"b":[true,null]})json");
@@ -309,7 +296,7 @@ TEST_CASE("lua return value survives session persistence")
     const auto saved = imza::saved_sessions();
     REQUIRE(saved.size() == 1);
     imza::Session loaded;
-    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
     const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
     REQUIRE(call.result.has_value());
     REQUIRE(call.result->return_value.has_value());
@@ -331,7 +318,7 @@ TEST_CASE("legacy lua result without a return value still loads")
     source.append_assistant("model", "off");
     const imza::ToolCallRequest request { "lua",
         R"json({"script":"print(1)"})json", "", "call-1" };
-    source.append_tool(request);
+    imza::test::append_tool(source, request);
     imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT,
         "1\n" };
     source.fill_tool_result(request, std::move(result));
@@ -341,7 +328,7 @@ TEST_CASE("legacy lua result without a return value still loads")
     const auto saved = imza::saved_sessions();
     REQUIRE(saved.size() == 1);
     imza::Session loaded;
-    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
     const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
     REQUIRE(call.result.has_value());
     CHECK_FALSE(call.result->return_value.has_value());
@@ -359,8 +346,8 @@ TEST_CASE("lua aggregate diffs survive session persistence")
     source.begin_send("run lua");
     source.append_assistant("model", "off");
     const imza::ToolCallRequest request { "lua",
-        R"json({"script":"tool.file.edit(...)"} )json", "", "call-1" };
-    source.append_tool(request);
+        R"json({"script":"imza.fs.edit(...)"} )json", "", "call-1" };
+    imza::test::append_tool(source, request);
     imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT, "" };
     imza::DiffView diff;
     diff.file = "/tmp/a.txt";
@@ -375,7 +362,7 @@ TEST_CASE("lua aggregate diffs survive session persistence")
     const auto saved = imza::saved_sessions();
     REQUIRE(saved.size() == 1);
     imza::Session loaded;
-    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
     const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
     REQUIRE(call.result.has_value());
     REQUIRE(call.result->diffs.size() == 1);
@@ -385,6 +372,49 @@ TEST_CASE("lua aggregate diffs survive session persistence")
     CHECK(call.result->diffs[0].rows[1].left == "old");
     CHECK(call.result->diffs[0].rows[2].kind == imza::DiffRow::Kind::ADD);
     CHECK(call.result->diffs[0].rows[2].right == "new");
+#endif
+}
+
+TEST_CASE("canvas charts survive session persistence")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    imza::Session source;
+    source.begin_send("run lua");
+    source.append_assistant("model", "off");
+    const imza::ToolCallRequest request { "lua", "{}", "", "call-1" };
+    imza::test::append_tool(source, request);
+    imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT, "" };
+    imza::CanvasView pie;
+    pie.kind   = imza::CanvasView::Kind::PIE;
+    pie.title  = "Share";
+    pie.series = { { "a", { 1.0 } }, { "b", { 2.5 } } };
+    imza::CanvasView surface;
+    surface.kind = imza::CanvasView::Kind::SURFACE;
+    surface.grid = { { 1, 2 }, { 3, 4 } };
+    result.canvases.push_back(std::move(pie));
+    result.canvases.push_back(std::move(surface));
+    source.fill_tool_result(request, std::move(result));
+    source.finish_session("");
+
+    REQUIRE(imza::save_session(source) == imza::Status::OK);
+    const auto saved = imza::saved_sessions();
+    REQUIRE(saved.size() == 1);
+    imza::Session loaded;
+    REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
+    const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
+    REQUIRE(call.result.has_value());
+    REQUIRE(call.result->canvases.size() == 2);
+    CHECK(call.result->canvases[0].kind == imza::CanvasView::Kind::PIE);
+    CHECK(call.result->canvases[0].title == "Share");
+    REQUIRE(call.result->canvases[0].series.size() == 2);
+    CHECK(call.result->canvases[0].series[1].label == "b");
+    CHECK(call.result->canvases[0].series[1].values[0] == doctest::Approx(2.5));
+    CHECK(call.result->canvases[1].kind == imza::CanvasView::Kind::SURFACE);
+    REQUIRE(call.result->canvases[1].grid.size() == 2);
+    CHECK(call.result->canvases[1].grid[1][0] == doctest::Approx(3.0));
 #endif
 }
 
@@ -398,7 +428,7 @@ TEST_CASE("lua aggregate diffs round-trip SKIP and clamp unknown kinds")
     source.begin_send("run lua");
     source.append_assistant("model", "off");
     const imza::ToolCallRequest request { "lua", "{}", "", "call-1" };
-    source.append_tool(request);
+    imza::test::append_tool(source, request);
     imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT, "" };
     imza::DiffView diff;
     diff.file = "/tmp/a.txt";
@@ -415,7 +445,7 @@ TEST_CASE("lua aggregate diffs round-trip SKIP and clamp unknown kinds")
     const auto saved = imza::saved_sessions();
     REQUIRE(saved.size() == 1);
     imza::Session loaded;
-    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
     const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
     REQUIRE(call.result.has_value());
     REQUIRE(call.result->diffs.size() == 1);
@@ -438,8 +468,7 @@ TEST_CASE("lua aggregate diffs round-trip SKIP and clamp unknown kinds")
         out << json;
     }
     imza::Session clamped;
-    REQUIRE(
-        imza::load_session(saved.front().path, clamped) == imza::Status::OK);
+    REQUIRE(load_session(saved.front().path, clamped) == imza::Status::OK);
     const auto& clamped_call = std::get<imza::ToolCall>(clamped.items()[2]);
     REQUIRE(clamped_call.result.has_value());
     REQUIRE(clamped_call.result->diffs[0].rows.size() == 4);
@@ -462,7 +491,7 @@ TEST_CASE("empty title is normalized in both file and index")
     CHECK(saved.front().title == "Untitled session");
 
     imza::Session loaded;
-    REQUIRE(imza::load_session(saved.front().path, loaded) == imza::Status::OK);
+    REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
     CHECK(loaded.title() == "Untitled session");
 #endif
 }
@@ -474,7 +503,7 @@ TEST_CASE("non-ASCII workspace paths round-trip as valid UTF-8")
 #else
     DataHome home;
     CurrentDirectory directory;
-    const auto workspace = home.path / "Eylül çalışma";
+    const auto workspace = home.root() / "Eylül çalışma";
     std::filesystem::create_directories(workspace);
     std::error_code ec;
     std::filesystem::current_path(workspace, ec);
@@ -498,14 +527,14 @@ TEST_CASE("non-ASCII workspace paths round-trip as valid UTF-8")
     CHECK(encoded);
     CHECK(bytes.find("\xef\xbf\xbd") == std::string::npos);
 
-    const auto other = home.path / "other-workspace";
+    const auto other = home.root() / "other-workspace";
     std::filesystem::create_directories(other);
     std::filesystem::current_path(other, ec);
     REQUIRE_FALSE(ec);
 
     imza::Session loaded;
     std::filesystem::path loaded_workspace;
-    REQUIRE(imza::load_session(saved.front().path, loaded, &loaded_workspace)
+    REQUIRE(load_session(saved.front().path, loaded, &loaded_workspace)
         == imza::Status::OK);
     CHECK(loaded_workspace == workspace);
     CHECK(loaded.title() == "Unicode workspace");
@@ -519,8 +548,8 @@ TEST_CASE("missing or stale workspace falls back to the current directory")
 #else
     DataHome home;
     CurrentDirectory directory;
-    std::filesystem::create_directories(home.path);
-    const std::filesystem::path stale = home.path / "stale.json";
+    std::filesystem::create_directories(home.root());
+    const std::filesystem::path stale = home.root() / "stale.json";
     {
         std::ofstream file(stale, std::ios::binary);
         file << "{\n"
@@ -541,7 +570,7 @@ TEST_CASE("missing or stale workspace falls back to the current directory")
     CHECK(std::get<imza::UserTurn>(loaded.snapshot.items.front()).text
         == "hello");
 
-    const std::filesystem::path legacy = home.path / "legacy.json";
+    const std::filesystem::path legacy = home.root() / "legacy.json";
     {
         std::ofstream file(legacy, std::ios::binary);
         file << "{\n"
@@ -561,8 +590,8 @@ TEST_CASE("malformed field types fail the load instead of crashing")
 #else
     DataHome home;
     CurrentDirectory directory;
-    std::filesystem::create_directories(home.path);
-    const std::filesystem::path malformed = home.path / "malformed.json";
+    std::filesystem::create_directories(home.root());
+    const std::filesystem::path malformed = home.root() / "malformed.json";
     {
         std::ofstream file(malformed, std::ios::binary);
         file << "{\n"
@@ -642,20 +671,6 @@ TEST_CASE("session id is generated ahead of use and adopts the stem on load")
     CHECK(saved.front().path.stem().string() == initial_id);
     CHECK(session.snapshot_for_save() == std::nullopt);
 
-    imza::Session restored;
-    std::filesystem::path workspace;
-    REQUIRE(imza::load_session(saved.front().path, restored, &workspace)
-        == imza::Status::OK);
-    // A resumed session continues its source file in place: it adopts the
-    // file stem as the id and saves rewrite that same file.
-    CHECK(restored.session_id() == initial_id);
-    CHECK(restored.snapshot_for_save() == std::nullopt);
-    restored.begin_send("continued");
-    REQUIRE(imza::save_session(restored) == imza::Status::OK);
-    const auto after_continue = imza::saved_sessions();
-    REQUIRE(after_continue.size() == 1);
-    CHECK(after_continue.front().path.stem().string() == initial_id);
-
     // Starting a new session in place (the /new flow) rotates the id, so
     // the fresh conversation cannot overwrite the archive it left behind.
     const std::string pre_new_id = session.session_id();
@@ -726,8 +741,7 @@ TEST_CASE("switch_session locks the target and reports foreign locks")
 #else
     DataHome home;
     CurrentDirectory directory;
-    const auto immediate = [](std::function<void()> task) { task(); };
-    auto state = imza::make_application_state(immediate, imza::Config { });
+    auto state = imza::test::make_test_state();
     state->session->set_title("Current");
     state->session->begin_send("hello");
     state->session->append_assistant("model", "off");
@@ -770,4 +784,221 @@ TEST_CASE("switch_session locks the target and reports foreign locks")
     REQUIRE(imza::save_session(*state->session) == imza::Status::OK);
     CHECK(imza::saved_sessions().size() == 2);
 #endif
+}
+
+TEST_CASE("native and legacy attachments survive session persistence")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    const std::string image_bytes("\x89PNG\r\n\x1a\n\0payload", 16);
+    const std::string pdf_bytes("%PDF-1.7\n\0payload", 17);
+    imza::Session source;
+    source.begin_send("review",
+        { { "notes.txt", "plain text" },
+            { "image.dat", image_bytes, imza::Attachment::Type::IMAGE,
+                "image/png" },
+            { "document.dat", pdf_bytes, imza::Attachment::Type::PDF,
+                "application/pdf" } });
+
+    REQUIRE(imza::save_session(source) == imza::Status::OK);
+    const auto saved = imza::saved_sessions();
+    REQUIRE(saved.size() == 1);
+    std::ifstream file(saved.front().path, std::ios::binary);
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    const Json::Value root         = imza::parse_json(buffer.str());
+    const Json::Value& attachments = root["items"][0]["attachments"];
+    REQUIRE(attachments.size() == 3);
+    CHECK(attachments[0]["type"].asString() == "text");
+    CHECK(attachments[0]["content"].asString() == "plain text");
+    CHECK(attachments[1]["type"].asString() == "image");
+    CHECK(attachments[1]["media_type"].asString() == "image/png");
+    CHECK(attachments[1].isMember("content"));
+    CHECK(attachments[1]["content"].asString() != image_bytes);
+    CHECK(attachments[2]["type"].asString() == "pdf");
+    CHECK(attachments[2]["media_type"].asString() == "application/pdf");
+
+    imza::Session loaded;
+    REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
+    const auto& current
+        = std::get<imza::UserTurn>(loaded.items().front()).attachments;
+    REQUIRE(current.size() == 3);
+    CHECK(current[0].type == imza::Attachment::Type::TEXT);
+    CHECK(current[0].content == "plain text");
+    CHECK(current[1].type == imza::Attachment::Type::IMAGE);
+    CHECK(current[1].media_type == "image/png");
+    CHECK(current[1].content == image_bytes);
+    CHECK(current[2].type == imza::Attachment::Type::PDF);
+    CHECK(current[2].media_type == "application/pdf");
+    CHECK(current[2].content == pdf_bytes);
+
+    const std::filesystem::path legacy
+        = home.root() / "legacy-attachments.json";
+    {
+        std::ofstream legacy_file(legacy, std::ios::binary);
+        legacy_file
+            << R"({"items":[{"type":"user","text":"old","attachments":[{"path":"old.txt","content":"legacy text"}]}]})";
+    }
+    imza::LoadedSession legacy_loaded;
+    REQUIRE(imza::read_session(legacy, legacy_loaded) == imza::Status::OK);
+    const auto& legacy_attachments
+        = std::get<imza::UserTurn>(legacy_loaded.snapshot.items.front())
+              .attachments;
+    REQUIRE(legacy_attachments.size() == 1);
+    CHECK(legacy_attachments[0].path == "old.txt");
+    CHECK(legacy_attachments[0].content == "legacy text");
+    CHECK(legacy_attachments[0].type == imza::Attachment::Type::TEXT);
+    CHECK(legacy_attachments[0].media_type.empty());
+#endif
+}
+TEST_CASE("plan document persists across save and restore")
+{
+#ifdef _WIN32
+    return;
+#else
+    DataHome home;
+    imza::Session source;
+    source.begin_send("plan this");
+
+    const std::string skeleton
+        = "# Goal\nx\n# Approach\nx\n# Files\nx\n# Verification\nx\n"
+          "# Open Questions\nx";
+    REQUIRE(source.create_plan(skeleton).empty());
+    REQUIRE(source.edit_plan("# Goal\nx", "# Goal\nauth tokens\n", 1).empty());
+    // A superseded document stays in the vector; the current plan is the
+    // back entry.
+    const std::string second = skeleton + "\nextra";
+    REQUIRE(source.create_plan(second).empty());
+    CHECK(source.plan_doc() == second);
+
+    REQUIRE(imza::save_session(source) == imza::Status::OK);
+    const auto saved = imza::saved_sessions();
+    REQUIRE(saved.size() == 1);
+
+    imza::Session loaded;
+    REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
+    CHECK(loaded.plans().size() == 2);
+    CHECK(loaded.plan_doc() == second);
+    CHECK(loaded.plans().front().content
+        == "# Goal\nauth tokens\n\n# Approach\nx\n# Files\nx\n"
+           "# Verification\nx\n# Open Questions\nx");
+
+    // Validation still applies to a restored session.
+    CHECK_FALSE(source.create_plan("no headings").empty());
+#endif
+}
+
+TEST_CASE("plan document history is not replayed into model context")
+{
+    imza::Session session;
+    const std::string skeleton
+        = "# Goal\nx\n# Approach\nx\n# Files\nx\n# Verification\nx\n"
+          "# Open Questions\nx";
+    REQUIRE(session.create_plan(skeleton).empty());
+    const std::vector<imza::Message> history
+        = session.build_history("system prompt");
+    // The plan rides in session state only; history carries the system
+    // prompt and the user turn, nothing about the plan.
+    REQUIRE(history.size() == 1);
+    CHECK(history[0].type == imza::Message::Type::SYSTEM);
+    CHECK(history[0].content == "system prompt");
+}
+
+TEST_CASE("plan edit staleness is enforced inside the session")
+{
+    imza::Session session;
+    const std::string skeleton
+        = "# Goal\nx\n# Approach\nx\n# Files\nx\n# Verification\nx\n"
+          "# Open Questions\nx";
+    // Creating counts as having seen the content: the edit applies.
+    REQUIRE(session.create_plan(skeleton).empty());
+    CHECK(session.edit_plan("x", "y", 1).empty());
+
+    // The stale-read contract lives in Session, not the bindings: a fresh
+    // session object over the same restored state has not read the plan,
+    // so its first edit is rejected until plan_doc() marks it seen.
+    imza::Session fresh_reader;
+    imza::SessionSnapshot snapshot = session.snapshot();
+    fresh_reader.restore(std::move(snapshot));
+    // restore marks the state seen (it is not a mid-turn mutation); a
+    // restored session can edit directly.
+    CHECK(fresh_reader.edit_plan("y", "z", 1).empty());
+    CHECK(fresh_reader.plan_doc()
+        == "# Goal\nz\n"
+           "# Approach\nx\n# Files\nx\n"
+           "# Verification\nx\n"
+           "# Open Questions\nx");
+}
+TEST_CASE("plan submission messages are emitted once per revision in build")
+{
+    imza::Session session;
+    const std::string skeleton
+        = "# Goal\nx\n# Approach\nx\n# Files\nx\n# Verification\nx\n"
+          "# Open Questions\nx";
+    REQUIRE(session.create_plan(skeleton).empty());
+
+    CHECK_FALSE(session.plan_submission_for_build().has_value());
+
+    // First build turn of a stint: the plan rides as an approval message.
+    session.set_mode(imza::Session::Mode::BUILD);
+    const auto submitted = session.plan_submission_for_build();
+    REQUIRE(submitted.has_value());
+    CHECK(submitted->find("Plan approved for build: <plan>") == 0);
+    CHECK(submitted->find(skeleton) != std::string::npos);
+    CHECK(submitted->ends_with("</plan>"));
+
+    // No re-emission while the plan is unchanged.
+    CHECK_FALSE(session.plan_submission_for_build().has_value());
+
+    // A revision in PLAN mode re-submits with the changed wording.
+    session.set_mode(imza::Session::Mode::PLAN);
+    REQUIRE(session.edit_plan("# Goal\nx", "# Goal\ntokens\n", 1).empty());
+    session.set_mode(imza::Session::Mode::BUILD);
+    const auto amended = session.plan_submission_for_build();
+    REQUIRE(amended.has_value());
+    CHECK(amended->find("User has changed the plan: <plan>") == 0);
+    CHECK_FALSE(session.plan_submission_for_build().has_value());
+
+    SUBCASE("a restored session re-submits its plan once")
+    {
+        imza::Session loaded;
+        loaded.restore(session.snapshot());
+        loaded.set_mode(imza::Session::Mode::BUILD);
+        // The submission watermark is session state, not persisted: a
+        // loaded session re-submits the plan once, the safe direction.
+        const auto submitted = loaded.plan_submission_for_build();
+        REQUIRE(submitted.has_value());
+        CHECK(submitted->find("Plan approved for build: <plan>") == 0);
+        CHECK_FALSE(loaded.plan_submission_for_build().has_value());
+    }
+}
+
+TEST_CASE("plan submission requires build mode and a plan")
+{
+    imza::Session session;
+    CHECK_FALSE(session.plan_submission_for_build().has_value());
+
+    const std::string skeleton
+        = "# Goal\nx\n# Approach\nx\n# Files\nx\n# Verification\nx\n"
+          "# Open Questions\nx";
+    REQUIRE(session.create_plan(skeleton).empty());
+    // PLAN mode with a plan still holds nothing back for build.
+    CHECK_FALSE(session.plan_submission_for_build().has_value());
+}
+
+TEST_CASE("plan changes publish the plan signal")
+{
+    imza::Session session;
+    int published = 0;
+    const auto subscription
+        = session.subscribe_to_plan_change([&published] { ++published; });
+
+    const std::string skeleton
+        = "# Goal\nx\n# Approach\nx\n# Files\nx\n# Verification\nx\n"
+          "# Open Questions\nx";
+    REQUIRE(session.create_plan(skeleton).empty());
+    REQUIRE(session.edit_plan("# Goal\nx", "# Goal\ny", 1).empty());
+    CHECK(published == 2);
 }

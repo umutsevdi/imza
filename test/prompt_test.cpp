@@ -6,6 +6,7 @@
 #include <type_traits>
 
 #include "conversation/session.h"
+#include "test_fs.h"
 #include "turn/prompt.h"
 
 namespace imza {
@@ -36,17 +37,6 @@ namespace {
         return text;
     }
 
-    std::filesystem::path temporary_prompt_directory(std::string_view name)
-    {
-        static std::size_t sequence = 0;
-        const std::filesystem::path directory
-            = std::filesystem::temp_directory_path()
-            / ("imza-prompts-" + std::string(name) + "-"
-                + std::to_string(sequence++));
-        std::filesystem::remove_all(directory);
-        return directory;
-    }
-
 } // namespace
 
 static_assert(std::is_base_of_v<ApplicationComponent, PromptStore>);
@@ -62,12 +52,13 @@ TEST_CASE("embedded prompts match the repository sources")
     CHECK(prompts.compaction() == read_prompt("compaction.md"));
     CHECK(prompts.review() == read_prompt("review.md"));
     CHECK(prompts.review_plan() == read_prompt("review_plan.md"));
+    CHECK(prompts.plan_annotations() == read_prompt("plan_annotations.md"));
 }
 
 TEST_CASE("user directory overrides prompts independently")
 {
-    const std::filesystem::path directory
-        = temporary_prompt_directory("overrides");
+    const imza::test::TempDir dir;
+    const std::filesystem::path directory = dir.path;
     write_prompt(directory, "system.md", "Custom system prompt.\n");
     write_prompt(directory, "title.md", "Custom title prompt.");
 
@@ -75,26 +66,24 @@ TEST_CASE("user directory overrides prompts independently")
     CHECK(prompts.system() == "Custom system prompt.");
     CHECK(prompts.title() == "Custom title prompt.");
     CHECK(prompts.compaction() == PromptStore().compaction());
-
-    std::filesystem::remove_all(directory);
 }
 
 TEST_CASE("blank user files use embedded prompts")
 {
-    const std::filesystem::path directory = temporary_prompt_directory("blank");
+    const imza::test::TempDir dir;
+    const std::filesystem::path directory = dir.path;
     write_prompt(directory, "system.md", "   \n\t\n");
 
     const PromptStore prompts(directory);
     CHECK(prompts.system() == PromptStore().system());
-
-    std::filesystem::remove_all(directory);
 }
 
 TEST_CASE("prompt sources contain prose instead of runtime markup")
 {
-    for (const std::string_view name : { "system.md", "subagent.md",
-             "subagent_research.md", "subagent_build.md", "title.md",
-             "compaction.md", "review.md", "review_plan.md" }) {
+    for (const std::string_view name :
+        { "system.md", "subagent.md", "subagent_research.md",
+            "subagent_build.md", "title.md", "compaction.md", "review.md",
+            "review_plan.md", "plan_annotations.md" }) {
         const std::string prompt = read_prompt(name);
         CHECK(prompt.find("<system-reminder") == std::string::npos);
         CHECK(prompt.find("{{") == std::string::npos);
@@ -110,11 +99,34 @@ TEST_CASE("current mode prompts declare one authoritative state")
     CHECK(build == "<runtime-mode name=\"build\"/>");
 }
 
-TEST_CASE("title prompt appends the user request")
+TEST_CASE("system prompt carries the plan artifact contract")
 {
-    const PromptStore prompts;
-    CHECK(title_prompt(prompts, "fix the bug")
-        == prompts.title() + "\n\nUser request:\nfix the bug");
+    const std::string system = PromptStore().system();
+    // Stable contract phrases, not exact prose, so wording can evolve.
+    CHECK(system.find("imza.plan.create") != std::string::npos);
+    CHECK(system.find("imza.plan.get()") != std::string::npos);
+    CHECK(system.find("ready for build") != std::string::npos);
+    CHECK(system.find("contract for future workspace mutation")
+        != std::string::npos);
 }
 
+TEST_CASE("plan annotations prompt derives section and line anchors")
+{
+    const std::string document
+        = "# Goal\nfirst plan\n# Approach\n1. first step\n2. second step\n";
+    const std::vector<PlanNote> notes {
+        { 5, "reorder these" },
+        { 2, "sharpen the contract" },
+        { 40, "gone" },
+    };
+    const std::string prompt = format_plan_annotations_prompt(
+        PromptStore().plan_annotations(), notes, document);
+    CHECK(prompt.find("imza.plan.edit") != std::string::npos);
+    CHECK(prompt.find("`Approach > 2. second step`") != std::string::npos);
+    CHECK(prompt.find("`Goal > first plan`") != std::string::npos);
+    CHECK(prompt.find("(stale)") != std::string::npos);
+    CHECK(format_plan_annotations_prompt(
+        PromptStore().plan_annotations(), { }, document)
+            .empty());
+}
 } // namespace imza

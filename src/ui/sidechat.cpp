@@ -14,14 +14,13 @@ using namespace ftxui;
 
 namespace {
 
-    constexpr int SIDECHAT_COLUMN_WIDTH = 45;
-
     ChatHints sidechat_hints()
     {
         ChatHints hints;
         hints.scroll_line.clear();
         hints.phase_line.clear();
-        hints.input_hint = "  Ctrl+S hide · Ctrl+R clear";
+        hints.input_hint         = "  Ctrl+S hide · Ctrl+R clear";
+        hints.empty_state_banner = false;
         return hints;
     }
 
@@ -49,8 +48,9 @@ public:
         const LayoutCtx ctx
             = layout_context(terminal_size.dimx, terminal_size.dimy);
         const bool narrow = ctx.kind == LayoutCtx::Kind::NARROW;
-        column_width_ = focused_ && narrow ? ctx.width : SIDECHAT_COLUMN_WIDTH;
-        layout_       = layout_context(column_width_, ctx.height);
+        const int column_width
+            = focused_ && narrow ? ctx.width : LayoutCtx::RIGHT_WIDTH;
+        layout_ = layout_context(column_width, ctx.height);
         if (state_->sidechat == nullptr) {
             return vbox();
         }
@@ -65,7 +65,7 @@ public:
                   separatorEmpty(),
                   host_->Render() | yflex,
               })
-            | size(WIDTH, EQUAL, column_width_) | reflect(pane_box_);
+            | yflex | size(WIDTH, EQUAL, column_width) | reflect(pane_box_);
         return focused_ ? column : std::move(column) | dim;
     }
 
@@ -167,7 +167,6 @@ private:
     Component modal_;
     bool focused_     = false;
     LayoutCtx layout_ = layout_context(0);
-    int column_width_ { SIDECHAT_COLUMN_WIDTH };
     ftxui::Box pane_box_ { };
 };
 

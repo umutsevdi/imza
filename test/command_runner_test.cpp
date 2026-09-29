@@ -53,6 +53,38 @@ TEST_CASE("run_command enforces the timeout")
     CHECK(r.timed_out);
 }
 
+TEST_CASE("run_command pipes stdin_data to the child")
+{
+#ifdef _WIN32
+    const auto r = imza::run_command("findstr x", 10s, { }, "stdin-payload");
+    CHECK(r.spawned);
+    CHECK(r.exit_code == 0);
+#else
+    const auto r = imza::run_command("cat", 10s, { }, "stdin-payload");
+    CHECK(r.spawned);
+    CHECK_FALSE(r.timed_out);
+    CHECK(r.exit_code == 0);
+    CHECK(r.output == "stdin-payload");
+#endif
+}
+
+TEST_CASE("run_command streams stdin larger than the pipe buffer")
+{
+    const std::string big(256 * 1024, 'x');
+    const auto r = imza::run_command("cat", 10s, { }, big);
+    CHECK(r.spawned);
+    CHECK_FALSE(r.timed_out);
+    CHECK(r.exit_code == 0);
+    CHECK(r.output == big);
+}
+
+TEST_CASE("run_command survives a child that exits before reading stdin")
+{
+    const auto r = imza::run_command("true", 10s, { }, "ignored");
+    CHECK(r.spawned);
+    CHECK(r.exit_code == 0);
+}
+
 TEST_CASE("run_attached_command reports completion")
 {
 #ifdef _WIN32

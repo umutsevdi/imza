@@ -8,6 +8,7 @@
 
 #include "app/application_state.h"
 #include "permissions/store.h"
+#include "turn/turn_runner.h"
 
 namespace imza {
 
@@ -54,7 +55,7 @@ OneShotResult run_one_shot(ApplicationState& state,
     MainThreadQueue& main_thread, const OneShotRequest& request);
 int one_shot_exit_code(OneShotResult::Kind kind);
 void submit(ApplicationState& state, std::string text,
-    std::vector<FileAttachment> attachments = { });
+    std::vector<Attachment> attachments = { });
 void resolve_modal(ApplicationState& state, ModalResult result);
 void close_modal(ApplicationState& state);
 void enqueue_user_modal(ApplicationState& state, ModalPayload payload);
@@ -64,6 +65,7 @@ void present_front(ApplicationState& state);
 void drain_queued(ApplicationState& state);
 void on_turn_finished(ApplicationState& state, std::string error);
 void run_slash(ApplicationState& state, std::string_view command);
+void compact_session(ApplicationState& state, TurnSettings settings);
 void interrupt(ApplicationState& state);
 void delete_saved_session(
     ApplicationState& state, const std::filesystem::path& path);
@@ -81,6 +83,5 @@ void ensure_sidechat_seeded(ApplicationState& state);
 // Clear the sidechat's context; the next prompt reloads it. Errors when no
 // sidechat exists.
 void refresh_sidechat(ApplicationState& state);
-bool sidechat_open(const ApplicationState& state);
 
 } // namespace imza

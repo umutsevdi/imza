@@ -384,8 +384,7 @@ void Delegation::spawn_title(std::string input, TurnSettings settings)
                     title += event.text;
                 }
             };
-            Route route = settings.route;
-            route       = _state->providers->authenticated_route_for(
+            const Route route = _state->providers->authenticated_route_for(
                 settings.connection_id, settings.dialect,
                 _state->session->session_id());
             const Status status = stream(route, req, cb, nullptr);

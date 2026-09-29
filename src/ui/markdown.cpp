@@ -15,6 +15,8 @@ extern "C" {
 #include <string_view>
 #include <vector>
 
+#include <algorithm>
+
 namespace imza {
 
 using namespace ftxui;
@@ -147,6 +149,10 @@ namespace {
                         cmark_node_get_list_type(node) == CMARK_ORDERED_LIST
                             ? 1
                             : 0);
+                    // Restart numbering per list so a bullet list does
+                    // not skew the next ordered list's first marker;
+                    // start honors the source's first number.
+                    item_index = cmark_node_get_list_start(node) - 1;
                     s.list_begin(lists.back() == 1);
                     break;
                 case CMARK_NODE_ITEM: {
@@ -215,24 +221,12 @@ namespace {
 
         void code_block(std::string_view lit, const char* fence_info)
         {
-            Elements lines;
             const std::string_view type = fence_info == nullptr
                 ? std::string_view { }
                 : std::string_view(fence_info);
             const int content_width     = std::max(20, width_ - 6);
-            if (syntax_type_supported(type)) {
-                for (std::vector<Element>& rows :
-                    highlight_code_wrapped(lit, type, content_width)) {
-                    std::move(
-                        rows.begin(), rows.end(), std::back_inserter(lines));
-                }
-            } else {
-                for (const std::string& segment :
-                    wrap_text(lit, content_width)) {
-                    lines.push_back(ftxui::text(segment) | color(PANEL_FG_DIM)
-                        | bgcolor(PANEL_COLOR));
-                }
-            }
+            Elements lines
+                = highlighted_rows(lit, type, content_width, PANEL_FG_DIM);
             if (lines.empty()) {
                 lines.push_back(ftxui::text(""));
             }
@@ -453,6 +447,15 @@ namespace {
                 words_.push_back(ftxui::text(" "));
             }
             needs_sep_ = false;
+            // Flexbox cannot break an over-long word; hard-split it so
+            // paragraphs never overflow the pane width.
+            const std::size_t budget = std::max<std::size_t>(
+                8, static_cast<std::size_t>(std::max(8, width_ - 2)));
+            while (word.size() > budget) {
+                words_.push_back(styled(word.substr(0, budget), fl));
+                words_.push_back(ftxui::text(" "));
+                word.remove_prefix(budget);
+            }
             words_.push_back(styled(word, fl));
         }
 
@@ -535,6 +538,86 @@ Element render_markdown_element(std::string_view md, int width)
     }
     cmark_node_free(doc);
     return sink.take();
+}
+
+namespace {
+
+    // Byte offsets of every line start; the sentinel past the last line
+    // makes end-of-text slices uniform.
+    std::vector<std::size_t> line_offsets(std::string_view md)
+    {
+        std::vector<std::size_t> offsets { 0 };
+        for (std::size_t i = 0; i < md.size(); ++i) {
+            if (md[i] == '\n') {
+                offsets.push_back(i + 1);
+            }
+        }
+        offsets.push_back(md.size());
+        return offsets;
+    }
+
+    std::string_view line_slice(std::string_view md,
+        const std::vector<std::size_t>& offsets, int start_line, int end_line)
+    {
+        const std::size_t last  = offsets.size() - 2;
+        const std::size_t begin = offsets[std::clamp<std::size_t>(
+            static_cast<std::size_t>(std::max(1, start_line) - 1), 0, last)];
+        const std::size_t end   = offsets[std::clamp<std::size_t>(
+            static_cast<std::size_t>(std::max(1, end_line)), 0, last + 1)];
+        return begin <= end ? md.substr(begin, end - begin)
+                            : std::string_view { };
+    }
+
+    std::string_view first_line(std::string_view text)
+    {
+        while (!text.empty()
+            && (text.back() == '\n' || text.back() == '\r'
+                || text.back() == ' ')) {
+            text.remove_suffix(1);
+        }
+        return text;
+    }
+
+} // namespace
+
+std::vector<MarkdownBlock> render_markdown_blocks(
+    std::string_view md, int width)
+{
+    std::vector<MarkdownBlock> blocks;
+    cmark_node* doc = parse(md);
+    if (doc == nullptr) {
+        return blocks;
+    }
+    const std::vector<std::size_t> offsets = line_offsets(md);
+    // Top-level blocks; a list expands to one selectable block per item so
+    // a single "1." / "-" line can carry its own annotation. Rendering each
+    // slice separately keeps tables, code, and quotes intact, and the
+    // excerpt is the block's first source line - the natural
+    // imza.plan.edit old-string target.
+    const std::function<void(cmark_node*)> emit = [&](cmark_node* node) {
+        MarkdownBlock block;
+        block.line    = cmark_node_get_start_line(node);
+        block.source  = std::string(first_line(line_slice(md, offsets,
+            cmark_node_get_start_line(node), cmark_node_get_start_line(node))));
+        block.element = render_markdown_element(
+            line_slice(md, offsets, cmark_node_get_start_line(node),
+                cmark_node_get_end_line(node)),
+            width);
+        blocks.push_back(std::move(block));
+    };
+    for (cmark_node* node = cmark_node_first_child(doc); node != nullptr;
+        node              = cmark_node_next(node)) {
+        if (cmark_node_get_type(node) == CMARK_NODE_LIST) {
+            for (cmark_node* item     = cmark_node_first_child(node);
+                item != nullptr; item = cmark_node_next(item)) {
+                emit(item);
+            }
+            continue;
+        }
+        emit(node);
+    }
+    cmark_node_free(doc);
+    return blocks;
 }
 
 } // namespace imza

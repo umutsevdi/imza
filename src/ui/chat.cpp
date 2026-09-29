@@ -8,6 +8,8 @@
 #include "ui/ui.h"
 #include "workspace/attachments.h"
 
+#include <banner.inc>
+
 #include <ftxui/component/animation.hpp>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_base.hpp>
@@ -17,6 +19,7 @@
 #include <ftxui/dom/node.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <functional>
 #include <map>
 #include <optional>
@@ -38,7 +41,6 @@ namespace {
     constexpr std::size_t INLINE_DIFF_ROWS = 25;
 
     constexpr std::size_t INVALID_VERSION = ~std::size_t { 0 };
-    constexpr int WHEEL_STEP              = 3;
     constexpr int DEFAULT_VIEWPORT_LINES  = 24;
     constexpr int TIMELINE_OVERSCAN       = 20;
     constexpr const char* INTERRUPT_HINT  = "Esc interrupt";
@@ -46,6 +48,25 @@ namespace {
     Element vertical_space(int height)
     {
         return text("") | size(HEIGHT, EQUAL, std::max(0, height));
+    }
+
+    Element empty_state_banner()
+    {
+        Elements lines;
+        std::size_t start = 0;
+        while (start <= ui_detail::BANNER.size()) {
+            const std::size_t end = ui_detail::BANNER.find('\n', start);
+            lines.push_back(
+                text(std::string(ui_detail::BANNER.substr(start,
+                    end == std::string_view::npos ? std::string_view::npos
+                                                  : end - start)))
+                | dim);
+            if (end == std::string_view::npos) {
+                break;
+            }
+            start = end + 1;
+        }
+        return vbox(std::move(lines)) | center;
     }
 
     std::string assistant_metadata(const AssistantTurn& turn)
@@ -126,10 +147,15 @@ namespace {
         return card(vbox(std::move(rows)), PANEL_COLOR, false);
     }
 
-    Element assistant_item(const AssistantTurn& t, int width)
+    Element assistant_item(std::string_view markdown, int width)
     {
         return card(
-            render_markdown_element(t.markdown, width), std::nullopt, false);
+            render_markdown_element(markdown, width), std::nullopt, false);
+    }
+
+    Element assistant_item(const AssistantTurn& t, int width)
+    {
+        return assistant_item(std::string_view(t.markdown), width);
     }
 
     Element modal_answer_item(const ModalAnswer& ans, int width)
@@ -232,11 +258,15 @@ namespace {
                     item_cache_.resize(item_count);
                     item_versions_.assign(item_count, INVALID_VERSION);
                 }
-                cache_kind_     = ctx.kind;
-                cache_width_    = ctx.width;
-                content_serial_ = content_serial;
-                _cached_begin   = 0;
-                _cached_end     = 0;
+                _trailing_markdown.reset();
+                _trailing_markdown_index = ~std::size_t { 0 };
+                _playout_index           = ~std::size_t { 0 };
+                _playout_chars           = 0;
+                cache_kind_              = ctx.kind;
+                cache_width_             = ctx.width;
+                content_serial_          = content_serial;
+                _cached_begin            = 0;
+                _cached_end              = 0;
                 clear_interaction_cache();
             } else if (item_cache_.size() < item_count) {
                 const std::size_t previous_size = item_cache_.size();
@@ -282,6 +312,17 @@ namespace {
                 if (active) {
                     eff_version ^= std::size_t { 1 } << 61;
                 }
+                // Pacing continues after the turn finishes so the tail
+                // drains at display rate instead of popping the remainder;
+                // interrupts snap (interrupt_requested stays set until the
+                // next turn).
+                const bool pacing = is_trailing
+                    && std::holds_alternative<AssistantTurn>(it)
+                    && (active
+                        || (_playout_index == item_index
+                            && !st.interrupt_requested()
+                            && _playout_chars
+                                < std::get<AssistantTurn>(it).markdown.size()));
                 if (active) {
                     const auto& at = std::get<AssistantTurn>(it);
                     const bool thinking_now
@@ -292,6 +333,56 @@ namespace {
                     if (thinking_now) {
                         eff_version = static_cast<std::size_t>(frame_);
                     }
+                }
+                if (pacing) {
+                    // Released characters and parse generations are part of
+                    // the rendered identity: the paced element re-renders on
+                    // every release and every throttled re-parse.
+                    eff_version = (eff_version * 31 + _playout_chars) * 31
+                        + _playout_parses;
+                }
+                Element markdown_element;
+                bool markdown_cached = false;
+                if (pacing) {
+                    const auto& at = std::get<AssistantTurn>(it);
+                    const auto now = std::chrono::steady_clock::now();
+                    if (_playout_index != item_index) {
+                        // A new turn animates from its first character.
+                        _playout_index = item_index;
+                        _playout_chars = 0;
+                    }
+                    // Budget rises with the backlog but never past the
+                    // display ceiling: without it, the release rate would
+                    // converge to the arrival rate and the pacing vanish.
+                    const std::size_t backlog
+                        = at.markdown.size() - _playout_chars;
+                    if (backlog > PLAYOUT_HARD_CAP) {
+                        _playout_chars = at.markdown.size();
+                        // A snap is a forced repaint: don't let the parse
+                        // gate hide it behind the previous element.
+                        _trailing_markdown_at = { };
+                    } else {
+                        const std::size_t budget = std::min(backlog,
+                            std::clamp(backlog / 15, std::size_t { 1 },
+                                PLAYOUT_MAX_CHARS_PER_TICK));
+                        _playout_chars           = std::min(
+                            at.markdown.size(), _playout_chars + budget);
+                    }
+                    const bool due = _trailing_markdown_index != item_index
+                        || item_versions_[item_index] == INVALID_VERSION
+                        || now - _trailing_markdown_at
+                            >= TRAILING_MARKDOWN_INTERVAL;
+                    if (due) {
+                        _trailing_markdown
+                            = assistant_item(std::string_view(at.markdown)
+                                                 .substr(0, _playout_chars),
+                                content_width());
+                        _trailing_markdown_index = item_index;
+                        _trailing_markdown_at    = now;
+                        ++_playout_parses;
+                    }
+                    markdown_element = *_trailing_markdown;
+                    markdown_cached  = true;
                 }
                 if (item_versions_[item_index] != eff_version) {
                     if (std::holds_alternative<ToolCall>(it)) {
@@ -329,7 +420,8 @@ namespace {
                     } else if (std::holds_alternative<AssistantTurn>(it)) {
                         item_cache_[item_index]
                             = render_assistant(std::get<AssistantTurn>(it),
-                                item_index, ctx, active, final_segment);
+                                item_index, ctx, active, final_segment,
+                                markdown_element, markdown_cached);
                     } else {
                         item_cache_[item_index] = render_item(it, ctx);
                     }
@@ -400,14 +492,24 @@ namespace {
                 items.push_back(hbox(std::move(row)));
             }
 
-            Element content = items.empty() ? text("")
-                                            : vbox(std::move(items))
+            Element content = items.empty()
+                ? (hints_.empty_state_banner && st.items().empty()
+                          ? empty_state_banner()
+                          : text(""))
+                : vbox(std::move(items))
                     | capture_content_height(&viewport_.content_height) | flex;
-            Element log     = std::move(content) | vscroll_indicator
-                | focusPosition(0,
-                    viewport_.scroll
-                        + std::max(0, viewport_.viewport_lines() - 1) / 2)
-                | yframe;
+            // Following the tail anchors the bottom of the content: an
+            // item whose rendered height outruns the virtual-list
+            // estimate (wrapped long lines) keeps its newest lines on
+            // screen instead of scrolling them below the fold.
+            Element log = std::move(content)
+                | (follow_
+                        ? focusPositionRelative(0.0f, 1.0f)
+                        : focusPosition(0,
+                              viewport_.scroll
+                                  + std::max(0, viewport_.viewport_lines() - 1)
+                                      / 2))
+                | vscroll_indicator | yframe;
 
             Element input_box = panel(vbox({
                 separatorEmpty(),
@@ -428,8 +530,11 @@ namespace {
             if (!hints_.scroll_line.empty()) {
                 hints.push_back(hint_bar(hints_.scroll_line));
             }
-            if (!hints_.phase_line.empty()) {
-                hints.push_back(hint_bar(hints_.phase_line));
+            const std::string phase_line = hints_.phase_line_fn
+                ? hints_.phase_line_fn()
+                : hints_.phase_line;
+            if (!phase_line.empty()) {
+                hints.push_back(hint_bar(phase_line));
             }
             if (!hints.empty()) {
                 bottom.push_back(vbox(std::move(hints)) | xflex);
@@ -454,16 +559,15 @@ namespace {
 
         bool OnEvent(Event event) override
         {
-            if (event == Event::Special("\x1B[200~")) {
+            if (is_bracketed_paste_begin(event)) {
                 paste_mode_ = true;
                 return true;
             }
-            if (event == Event::Special("\x1B[201~")) {
+            if (is_bracketed_paste_end(event)) {
                 paste_mode_ = false;
                 return true;
             }
-            if (event == Event::Special("\x1B\r")
-                || event == Event::Special("\x1B\n")) {
+            if (is_alt_enter(event)) {
                 insert_newline();
                 return true;
             }
@@ -527,15 +631,10 @@ namespace {
                 }
             }
             if (event.is_mouse()) {
-                const Mouse& m = event.mouse();
-                if (m.button == Mouse::WheelUp) {
+                if (event.mouse().button == Mouse::WheelUp
+                    || event.mouse().button == Mouse::WheelDown) {
                     hover_dirty_ = true;
-                    scroll_lines(-WHEEL_STEP);
-                    return true;
-                }
-                if (m.button == Mouse::WheelDown) {
-                    hover_dirty_ = true;
-                    scroll_lines(WHEEL_STEP);
+                    scroll_lines(*scroll_step(event, viewport_lines()));
                     return true;
                 }
                 return false;
@@ -558,12 +657,9 @@ namespace {
                 scroll_lines(1);
                 return true;
             }
-            if (event == Event::PageUp) {
-                scroll_lines(-std::max(1, viewport_lines() - 1));
-                return true;
-            }
-            if (event == Event::PageDown) {
-                scroll_lines(std::max(1, viewport_lines() - 1));
+            if (const std::optional<int> step
+                = scroll_step(event, viewport_lines())) {
+                scroll_lines(*step);
                 return true;
             }
             if (event == Event::Return) {
@@ -583,12 +679,26 @@ namespace {
         void OnAnimation(animation::Params&) override
         {
             const auto phase = session_->phase();
-            if (phase != Session::Phase::STREAMING
-                && phase != Session::Phase::CONNECTING) {
+            const bool busy  = phase == Session::Phase::STREAMING
+                || phase == Session::Phase::CONNECTING;
+            if (busy) {
+                ++frame_;
+                animation::RequestAnimationFrame();
                 return;
             }
-            ++frame_;
-            animation::RequestAnimationFrame();
+            // The playout drain outlives the turn: keep the frame loop
+            // alive until the queued tail has fully released, or the
+            // response freezes a few characters short.
+            if (_playout_index != ~std::size_t { 0 }
+                && !session_->interrupt_requested()
+                && _playout_index < session_->items().size()) {
+                const auto* turn = std::get_if<AssistantTurn>(
+                    &session_->items()[_playout_index]);
+                if (turn != nullptr && _playout_chars < turn->markdown.size()) {
+                    ++frame_;
+                    animation::RequestAnimationFrame();
+                }
+            }
         }
 
     private:
@@ -681,8 +791,7 @@ namespace {
 
         void insert_newline()
         {
-            input_buf_.insert(input_cursor_, "\n");
-            input_cursor_ += 1;
+            insert_newline_at(input_buf_, input_cursor_);
             on_input_changed();
         }
 
@@ -724,6 +833,21 @@ namespace {
 
         std::vector<Element> item_cache_;
         std::vector<std::size_t> item_versions_;
+        // Throttled markdown element of the streaming trailing item; kept
+        // between re-parses so frames stay cheap (see
+        // TRAILING_MARKDOWN_INTERVAL).
+        std::optional<Element> _trailing_markdown;
+        std::size_t _trailing_markdown_index = ~std::size_t { 0 };
+        std::chrono::steady_clock::time_point _trailing_markdown_at { };
+        // Playout pacing: how much of the active trailing turn's markdown
+        // the view has released, advanced per frame by the PLAYOUT_*
+        // constants (ui.h). Session truth is never delayed — only pixels.
+        std::size_t _playout_index = ~std::size_t { 0 };
+        std::size_t _playout_chars = 0;
+        // Parse generation of the paced element: bumped on every throttled
+        // re-parse so the item version reflects refreshes even after the
+        // release has caught up with the truth.
+        std::size_t _playout_parses = 0;
         VirtualListState _timeline;
         std::size_t _cached_begin   = 0;
         std::size_t _cached_end     = 0;
@@ -789,6 +913,15 @@ namespace {
             if (reasoning != reasoning_links_.end()) {
                 reasoning->second.component->Detach();
                 reasoning_links_.erase(reasoning);
+            }
+            if (_trailing_markdown_index == index) {
+                _trailing_markdown.reset();
+                _trailing_markdown_index = ~std::size_t { 0 };
+            }
+            if (_playout_index == index) {
+                _playout_index = ~std::size_t { 0 };
+                _playout_chars = 0;
+                ++_playout_parses;
             }
         }
 
@@ -899,6 +1032,9 @@ namespace {
 
         int content_width()
         {
+            if (hints_.content_width) {
+                return std::max(20, hints_.content_width(layout_()) - 4);
+            }
             return std::max(20, review_content_width(layout_()) - 4);
         }
 
@@ -923,6 +1059,13 @@ namespace {
             for (const ToolReportSection& section : report.sections) {
                 const auto* report_diff = std::get_if<ToolReportDiff>(&section);
                 if (report_diff == nullptr || report_diff->view == nullptr) {
+                    const auto* report_canvas
+                        = std::get_if<ToolReportCanvas>(&section);
+                    if (report_canvas != nullptr
+                        && report_canvas->view != nullptr) {
+                        rows.push_back(canvas_chart(
+                            *report_canvas->view, review_content_width(ctx)));
+                    }
                     continue;
                 }
                 const DiffView& diff  = *report_diff->view;
@@ -1166,7 +1309,8 @@ namespace {
         }
 
         Element render_assistant(const AssistantTurn& t, std::size_t index,
-            const LayoutCtx&, bool active, bool show_metadata)
+            const LayoutCtx&, bool active, bool show_metadata,
+            Element markdown_element, bool markdown_cached)
         {
             Elements parts;
             const bool has_reasoning = !t.reasoning.empty();
@@ -1198,7 +1342,9 @@ namespace {
                 parts.push_back(row);
             }
             if (!t.markdown.empty()) {
-                parts.push_back(assistant_item(t, content_width()));
+                parts.push_back(markdown_cached
+                        ? markdown_element
+                        : assistant_item(t, content_width()));
             }
             if (show_metadata) {
                 parts.push_back(hint_bar(assistant_metadata(t)));
@@ -1242,7 +1388,7 @@ namespace {
         Component input_;
 
         Autocomplete autocomplete_;
-        std::vector<FileAttachment> attachments_;
+        std::vector<Attachment> attachments_;
         std::optional<std::size_t> history_index_;
         std::string history_draft_;
         int input_cursor_      = 0;

@@ -5,6 +5,7 @@
 #include "common/types.h"
 #include "network/network.h"
 #include "network/sse_parse.h"
+#include "test_state.h"
 #include "tools/skills.h"
 #include "workspace/review.h"
 
@@ -13,11 +14,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include <chrono>
 #include <cstring>
-#include <deque>
-#include <functional>
-#include <mutex>
 #include <string>
 #include <thread>
 #include <utility>
@@ -73,68 +70,12 @@ TEST_CASE("OpenAI parse turns mid-stream error blocks into ERROR events")
     CHECK(outs[0].text == "Provider had an incident");
 }
 
-class PostPump {
-public:
-    imza::PostFn fn()
-    {
-        return [this](std::function<void()> f) { _push(std::move(f)); };
-    }
-
-    void pump()
-    {
-        for (;;) {
-            std::function<void()> f;
-            {
-                std::lock_guard<std::mutex> lock(mutex_);
-                if (queue_.empty()) {
-                    return;
-                }
-                f = std::move(queue_.front());
-                queue_.pop_front();
-            }
-            f();
-        }
-    }
-
-    bool wait_for(std::function<bool()> pred)
-    {
-        for (int i = 0; i < 20000; ++i) {
-            pump();
-            if (pred()) {
-                return true;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
-        return false;
-    }
-
-private:
-    void _push(std::function<void()> f)
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        queue_.push_back(std::move(f));
-    }
-
-    std::mutex mutex_;
-    std::deque<std::function<void()>> queue_;
-};
-
-imza::Config test_config()
-{
-    imza::Config cfg;
-    imza::Connection conn;
-    conn.id = "test";
-    cfg.providers.push_back(conn);
-    cfg.last_used = imza::LastUsed { "test", "m" };
-    return cfg;
-}
-
 struct AgentEnv {
-    PostPump pump;
+    imza::test::PostPump pump;
     std::vector<imza::ChatRequest> requests;
     imza::StreamFn stream;
     std::shared_ptr<imza::ApplicationState> state
-        = imza::make_application_state(pump.fn(), test_config(),
+        = imza::test::make_test_state(pump.fn(), imza::test::test_config(),
             [this](const imza::ChatRequest& req,
                 const imza::StreamCallback& cb) { return stream(req, cb); });
     std::shared_ptr<imza::Session> session = state->session;
@@ -144,11 +85,6 @@ struct AgentEnv {
         REQUIRE(pump.wait_for([&] { return state->environment->ready(); }));
     }
 };
-
-bool idle(const imza::Session& st)
-{
-    return st.phase() == imza::Session::Phase::IDLE && st.modal().index() == 0;
-}
 
 TEST_CASE("controller retries rate-limited requests and then completes")
 {
@@ -168,7 +104,7 @@ TEST_CASE("controller retries rate-limited requests and then completes")
         return imza::Status::OK;
     };
     imza::submit(*env.state, "hello");
-    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
     CHECK(env.requests.size() == 2);
     CHECK(env.session->error().empty());
     const auto& items = env.session->items();
@@ -194,7 +130,7 @@ TEST_CASE("controller does not retry budget errors")
         return imza::Status::BUDGET_EXCEEDED;
     };
     imza::submit(*env.state, "hello");
-    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
     CHECK(env.requests.size() == 1);
     CHECK(env.session->error()
         == "Out of budget / insufficient credits: insufficient credits.");
@@ -220,7 +156,7 @@ TEST_CASE("controller retries stalled connections before any data arrives")
         return imza::Status::OK;
     };
     imza::submit(*env.state, "hello");
-    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
     CHECK(env.requests.size() == 2);
     CHECK(env.session->error().empty());
     const auto& items = env.session->items();
@@ -246,7 +182,7 @@ TEST_CASE("controller does not retry a stall after content arrived")
         return imza::Status::TIMEOUT;
     };
     imza::submit(*env.state, "hello");
-    REQUIRE(env.pump.wait_for([&] { return idle(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
     CHECK(env.requests.size() == 1);
     CHECK(env.session->error() == "Timed out: Operation too slow.");
 }

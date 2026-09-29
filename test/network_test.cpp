@@ -2,6 +2,7 @@
 #include <json/json.h>
 
 #include "common/types.h"
+#include "common/util.h"
 #include "network/json_io.h"
 #include "network/network.h"
 #include "network/sse_parse.h"
@@ -459,4 +460,149 @@ TEST_CASE("Anthropic emits usage and content across the message lifecycle")
     CHECK(outs[1].usage.total == 107);
     CHECK(outs[2].kind == imza::StreamEvent::Kind::DONE);
     CHECK(state.terminal);
+}
+
+TEST_CASE("base64 encodes raw bytes with standard padding")
+{
+    CHECK(imza::base64_encode("").empty());
+    CHECK(imza::base64_encode("f") == "Zg==");
+    CHECK(imza::base64_encode("fo") == "Zm8=");
+    CHECK(imza::base64_encode("foo") == "Zm9v");
+    CHECK(imza::base64_encode(std::string("\0\xff", 2)) == "AP8=");
+}
+
+TEST_CASE("base64 decodes padded input and rejects malformed data")
+{
+    CHECK(imza::base64_decode("").value_or("x").empty());
+    CHECK(imza::base64_decode("Zg==").value_or("?") == "f");
+    CHECK(imza::base64_decode("Zm8=").value_or("?") == "fo");
+    CHECK(imza::base64_decode("Zm9v").value_or("?") == "foo");
+    CHECK(
+        imza::base64_decode("AP8=").value_or("?") == std::string("\0\xff", 2));
+
+    CHECK_FALSE(imza::base64_decode("Zm9vY").has_value());
+    CHECK_FALSE(imza::base64_decode("Zm9vY2Fk!").has_value());
+    CHECK_FALSE(imza::base64_decode("Zm9=Y2F0").has_value());
+    CHECK_FALSE(imza::base64_decode("Z=====").has_value());
+}
+
+TEST_CASE("base64 round-trips every byte value")
+{
+    std::string bytes;
+    for (int i = 0; i < 256; ++i) {
+        bytes += static_cast<char>(i);
+    }
+    CHECK(
+        imza::base64_decode(imza::base64_encode(bytes)).value_or("?") == bytes);
+}
+
+TEST_CASE("OpenAI Chat serializes user images and PDFs")
+{
+    const auto provider = imza::get_provider(imza::Route { });
+    imza::ChatRequest request;
+    request.model = "gpt-4o";
+    imza::Message user { imza::Message::Type::USER, "inspect" };
+    user.media.push_back(
+        { "photo.png", "cat", imza::Attachment::Type::IMAGE, "image/png" });
+    user.media.push_back({ "report.pdf", std::string("\xff\0", 2),
+        imza::Attachment::Type::PDF, "application/pdf" });
+    request.messages.push_back(std::move(user));
+
+    const Json::Value value    = provider.build(request);
+    const Json::Value& content = value["messages"][0]["content"];
+    REQUIRE(content.size() == 3);
+    CHECK(content[0]["type"].asString() == "text");
+    CHECK(content[0]["text"].asString() == "inspect");
+    CHECK(content[1]["type"].asString() == "image_url");
+    CHECK(content[1]["image_url"]["url"].asString()
+        == "data:image/png;base64,Y2F0");
+    CHECK(content[2]["type"].asString() == "file");
+    CHECK(content[2]["file"]["filename"].asString() == "report.pdf");
+    CHECK(content[2]["file"]["file_data"].asString()
+        == "data:application/pdf;base64,/wA=");
+}
+
+TEST_CASE("OpenAI Responses serializes user images and PDFs")
+{
+    imza::Route route;
+    route.dialect       = imza::ApiStandard::OPENAI_RESPONSES;
+    const auto provider = imza::get_provider(route);
+    imza::ChatRequest request;
+    request.model = "gpt-5";
+    imza::Message user { imza::Message::Type::USER, "inspect" };
+    user.media.push_back(
+        { "photo.png", "cat", imza::Attachment::Type::IMAGE, "image/png" });
+    user.media.push_back({ "report.pdf", std::string("\xff\0", 2),
+        imza::Attachment::Type::PDF, "application/pdf" });
+    request.messages.push_back(std::move(user));
+
+    const Json::Value value    = provider.build(request);
+    const Json::Value& content = value["input"][0]["content"];
+    REQUIRE(content.size() == 3);
+    CHECK(content[0]["type"].asString() == "input_text");
+    CHECK(content[0]["text"].asString() == "inspect");
+    CHECK(content[1]["type"].asString() == "input_image");
+    CHECK(content[1]["image_url"].asString() == "data:image/png;base64,Y2F0");
+    CHECK(content[2]["type"].asString() == "input_file");
+    CHECK(content[2]["filename"].asString() == "report.pdf");
+    CHECK(content[2]["file_data"].asString()
+        == "data:application/pdf;base64,/wA=");
+}
+
+TEST_CASE("Anthropic serializes user images and PDFs")
+{
+    imza::Route route;
+    route.dialect       = imza::ApiStandard::ANTHROPIC;
+    const auto provider = imza::get_provider(route);
+    imza::ChatRequest request;
+    request.model = "claude";
+    imza::Message user { imza::Message::Type::USER, "inspect" };
+    user.media.push_back(
+        { "photo.png", "cat", imza::Attachment::Type::IMAGE, "image/png" });
+    user.media.push_back({ "report.pdf", std::string("\xff\0", 2),
+        imza::Attachment::Type::PDF, "application/pdf" });
+    request.messages.push_back(std::move(user));
+
+    const Json::Value value    = provider.build(request);
+    const Json::Value& content = value["messages"][0]["content"];
+    REQUIRE(content.size() == 3);
+    CHECK(content[0]["type"].asString() == "text");
+    CHECK(content[0]["text"].asString() == "inspect");
+    CHECK(content[1]["type"].asString() == "image");
+    CHECK(content[1]["source"]["type"].asString() == "base64");
+    CHECK(content[1]["source"]["media_type"].asString() == "image/png");
+    CHECK(content[1]["source"]["data"].asString() == "Y2F0");
+    CHECK(content[2]["type"].asString() == "document");
+    CHECK(content[2]["source"]["type"].asString() == "base64");
+    CHECK(content[2]["source"]["media_type"].asString() == "application/pdf");
+    CHECK(content[2]["source"]["data"].asString() == "/wA=");
+}
+
+TEST_CASE(
+    "providers keep scalar content and ignore media on assistant messages")
+{
+    imza::ChatRequest request;
+    request.model = "model";
+    imza::Message assistant { imza::Message::Type::ASSISTANT, "answer" };
+    assistant.media.push_back(
+        { "ignored.png", "cat", imza::Attachment::Type::IMAGE, "image/png" });
+    request.messages.push_back(std::move(assistant));
+
+    const Json::Value chat = imza::get_provider(imza::Route { }).build(request);
+    CHECK(chat["messages"][0]["content"].isString());
+    CHECK(chat["messages"][0]["content"].asString() == "answer");
+
+    imza::Route responses_route;
+    responses_route.dialect = imza::ApiStandard::OPENAI_RESPONSES;
+    const Json::Value responses
+        = imza::get_provider(responses_route).build(request);
+    CHECK(responses["input"][0]["content"].isString());
+    CHECK(responses["input"][0]["content"].asString() == "answer");
+
+    imza::Route anthropic_route;
+    anthropic_route.dialect = imza::ApiStandard::ANTHROPIC;
+    const Json::Value anthropic
+        = imza::get_provider(anthropic_route).build(request);
+    CHECK(anthropic["messages"][0]["content"].isString());
+    CHECK(anthropic["messages"][0]["content"].asString() == "answer");
 }

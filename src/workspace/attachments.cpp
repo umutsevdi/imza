@@ -6,6 +6,7 @@
 #include <fstream>
 #include <sstream>
 #include <unordered_set>
+#include <utility>
 
 namespace imza {
 
@@ -22,6 +23,32 @@ namespace {
             "venv", "node_modules", "build", "dist", "out", "target", "vendor",
             "coverage", "__pycache__" };
         return ignored.contains(std::string(name));
+    }
+
+    std::optional<std::pair<Attachment::Type, std::string>> native_type(
+        std::string_view content)
+    {
+        const auto starts_with = [&](std::string_view signature) {
+            return content.size() >= signature.size()
+                && content.compare(0, signature.size(), signature) == 0;
+        };
+        if (starts_with(std::string_view("\x89PNG\r\n\x1a\n", 8))) {
+            return std::pair { Attachment::Type::IMAGE, "image/png" };
+        }
+        if (starts_with(std::string_view("\xff\xd8\xff", 3))) {
+            return std::pair { Attachment::Type::IMAGE, "image/jpeg" };
+        }
+        if (starts_with("GIF87a") || starts_with("GIF89a")) {
+            return std::pair { Attachment::Type::IMAGE, "image/gif" };
+        }
+        if (content.size() >= 12 && content.compare(0, 4, "RIFF") == 0
+            && content.compare(8, 4, "WEBP") == 0) {
+            return std::pair { Attachment::Type::IMAGE, "image/webp" };
+        }
+        if (starts_with("%PDF-")) {
+            return std::pair { Attachment::Type::PDF, "application/pdf" };
+        }
+        return std::nullopt;
     }
 
     std::string escape_attribute(std::string_view value)
@@ -60,15 +87,18 @@ std::optional<AttachmentToken> attachment_token_at(
     return AttachmentToken { begin, cursor, std::string(token) };
 }
 
-bool can_add_attachment(const std::vector<FileAttachment>& existing,
-    const FileAttachment& next, std::string& error)
+bool can_add_attachment(const std::vector<Attachment>& existing,
+    const Attachment& next, std::string& error)
 {
-    std::size_t total = next.content.size();
+    std::size_t total
+        = next.type == Attachment::Type::TEXT ? next.content.size() : 0;
     for (const auto& attachment : existing) {
-        total += attachment.content.size();
+        if (attachment.type == Attachment::Type::TEXT) {
+            total += attachment.content.size();
+        }
     }
     if (existing.size() >= MAX_ATTACHMENTS || total > MAX_TOTAL_BYTES) {
-        error = "Attachments exceed the 20-file or 4 MiB total limit.";
+        error = "Attachments exceed the 20-file or 4 MiB total text limit.";
         return false;
     }
     return true;
@@ -146,39 +176,61 @@ AttachmentResult load_attachment(
             "Attachment is not a readable file: " + std::string(relative_path)
                 + "." };
     }
-    const std::uintmax_t size = std::filesystem::file_size(path, ec);
-    if (ec || size > MAX_ATTACHMENT_BYTES) {
-        return { Status::CONFIG_ERROR, std::nullopt,
-            "Attachment exceeds the 1 MiB limit: " + std::string(relative_path)
-                + "." };
-    }
     std::ifstream file(path, std::ios::binary);
+    char signature[16];
+    file.read(signature, sizeof signature);
+    const auto native = native_type(
+        std::string_view(signature, static_cast<std::size_t>(file.gcount())));
+    if (!native) {
+        const std::uintmax_t size = std::filesystem::file_size(path, ec);
+        if (ec || size > MAX_ATTACHMENT_BYTES) {
+            return { Status::CONFIG_ERROR, std::nullopt,
+                "Attachment exceeds the 1 MiB limit: "
+                    + std::string(relative_path) + "." };
+        }
+    }
+    file.clear();
+    file.seekg(0);
     std::ostringstream buffer;
     buffer << file.rdbuf();
     if (!file && !file.eof()) {
         return { Status::CONFIG_ERROR, std::nullopt,
             "Could not read attachment: " + std::string(relative_path) + "." };
     }
-    std::string content = buffer.str();
-    if (content.find('\0') != std::string::npos) {
+    std::string content   = buffer.str();
+    Attachment::Type type = Attachment::Type::TEXT;
+    std::string media_type;
+    if (native) {
+        type       = native->first;
+        media_type = native->second;
+    } else if (content.find('\0') != std::string::npos) {
         return { Status::CONFIG_ERROR, std::nullopt,
-            "Binary files cannot be attached: " + std::string(relative_path)
-                + "." };
+            "Unsupported attachment: Imza supports text, images, and PDFs: "
+                + std::string(relative_path) + "." };
     }
     const std::string display
         = utf8_from_path(std::filesystem::relative(path, canonical_root, ec));
-    return { Status::OK, FileAttachment { display, std::move(content) }, "" };
+    return { Status::OK,
+        Attachment { display, std::move(content), type, std::move(media_type) },
+        "" };
 }
 
 std::string message_with_attachments(
-    std::string_view text, const std::vector<FileAttachment>& attachments)
+    std::string_view text, const std::vector<Attachment>& attachments)
 {
-    if (attachments.empty()) {
+    const bool has_text = std::any_of(attachments.begin(), attachments.end(),
+        [](const Attachment& attachment) {
+            return attachment.type == Attachment::Type::TEXT;
+        });
+    if (!has_text) {
         return std::string(text);
     }
     std::string out(text);
     out += "\n\n<attachments>\n";
     for (const auto& attachment : attachments) {
+        if (attachment.type != Attachment::Type::TEXT) {
+            continue;
+        }
         out += "<file path=\"" + escape_attribute(attachment.path) + "\">\n";
         out += attachment.content;
         if (!attachment.content.empty() && attachment.content.back() != '\n') {
@@ -191,9 +243,9 @@ std::string message_with_attachments(
 }
 
 void retain_mentioned_attachments(
-    std::string_view text, std::vector<FileAttachment>& attachments)
+    std::string_view text, std::vector<Attachment>& attachments)
 {
-    std::erase_if(attachments, [&](const FileAttachment& attachment) {
+    std::erase_if(attachments, [&](const Attachment& attachment) {
         const std::string mention = "@" + attachment.path;
         std::size_t pos           = text.find(mention);
         while (pos != std::string_view::npos) {

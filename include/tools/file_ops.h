@@ -9,15 +9,16 @@
 
 namespace imza {
 
-// Text file I/O behind the lua tool.file.* bindings. load_text rejects
-// missing paths, directories, and binary content; save_text truncates.
+// Text file I/O behind the lua imza.fs.* bindings. load_text rejects
+// missing paths, directories, and binary content; save_text creates
+// missing parent directories and truncates.
 bool load_text(const std::string& path, std::string& out, std::string& err);
 bool save_text(
     const std::string& path, const std::string& content, std::string& err);
 
 // Pure content transforms. Each returns the new content or an error;
 // the caller decides whether to persist. Semantics match the lua
-// tool.file.* bindings:
+// imza.fs.* bindings:
 //   insert: 1-based line; the text goes before that line, pushing it
 //     down. line == 0 or line == length+1 appends; beyond is an error.
 //   replace: first `count` occurrences of `old`; count == 0 = all.

@@ -20,6 +20,10 @@ std::span<const SlashCommand> slash_commands()
         { "/skills", "manage discovered skills", SlashCommand::Action::SKILLS },
         { "/changelog", "show the version history",
             SlashCommand::Action::CHANGELOG },
+        { "/compact", "summarize and compact the conversation",
+            SlashCommand::Action::COMPACT },
+        { "/make-skill", "draft a skill from a workflow description",
+            SlashCommand::Action::MAKE_SKILL, true },
     };
     return commands;
 }

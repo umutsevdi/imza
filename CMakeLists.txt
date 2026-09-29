@@ -3,7 +3,7 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 project(
     imza
-    VERSION 0.4.1
+    VERSION 0.5.0
     HOMEPAGE_URL "https://github.com/umutsevdi/imza"
     LANGUAGES C CXX
 )
@@ -172,14 +172,17 @@ include("${TREE_SITTER_GENERATED_DIR}/tree_sitter_sources.cmake")
 
 set(PROMPTS_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(GLOB IMZA_PROMPT_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/misc/prompts/*.md")
+set(IMZA_BANNER_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/misc/banner.txt")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_prompts.py"
-    ${IMZA_PROMPT_SOURCES})
+    ${IMZA_PROMPT_SOURCES}
+    "${IMZA_BANNER_SOURCE}")
 execute_process(
     COMMAND
         "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_prompts.py"
         --source "${CMAKE_CURRENT_SOURCE_DIR}/misc/prompts"
+        --banner "${IMZA_BANNER_SOURCE}"
         --output "${PROMPTS_GENERATED_DIR}"
     COMMAND_ERROR_IS_FATAL ANY
 )
@@ -226,6 +229,7 @@ target_link_libraries(imza_network PRIVATE
 
 # Platform services and stateless domain support (no ftxui, no cmark)
 add_library(imza_foundation
+    src/platform/clipboard.cpp
     src/platform/command_runner.cpp
     src/platform/config.cpp
     src/platform/file_lock.cpp
@@ -296,10 +300,10 @@ add_library(imza_execution
     src/tools/file_ops.cpp
     src/tools/lua.cpp
     src/tools/bindings/binding.cpp
-    src/tools/bindings/filesystem.cpp
-    src/tools/bindings/mutation.cpp
-    src/tools/bindings/session.cpp
-    src/tools/bindings/shell.cpp
+    src/tools/bindings/canvas.cpp
+    src/tools/bindings/core.cpp
+    src/tools/bindings/fs.cpp
+    src/tools/bindings/plan.cpp
     src/tools/bindings/tree.cpp
     src/tools/bindings/web.cpp
     src/turn/delegation.cpp
@@ -333,6 +337,7 @@ target_link_libraries(imza_execution PUBLIC
 
 # UI: ftxui components + renderers
 add_library(imza_ui
+    src/ui/annotations.cpp
     src/ui/app.cpp
     src/ui/autocomplete.cpp
     src/ui/components.cpp
@@ -350,7 +355,10 @@ add_library(imza_ui
     src/ui/sidechat.cpp
     src/ui/status_line.cpp
     src/ui/syntax.cpp
-    src/ui/tab_chat.cpp
+    src/ui/chat.cpp
+    src/ui/plan_doc.cpp
+    src/ui/tab_build.cpp
+    src/ui/tab_plan.cpp
     src/ui/tab_review.cpp
     src/ui/tool_format.cpp
 )

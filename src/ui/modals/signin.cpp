@@ -14,7 +14,6 @@
 #include <atomic>
 #include <functional>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
@@ -128,7 +127,7 @@ namespace {
         bool _label_free()
         {
             const std::string label = label_ ? label_() : "";
-            const std::string key   = label.empty() ? id_ : id_ + "/" + label;
+            const std::string key   = connection_key_for(id_, label);
             const Config config     = state_->providers->config();
             return !std::any_of(config.providers.begin(),
                 config.providers.end(), [&](const Connection& connection) {
@@ -169,12 +168,10 @@ namespace {
                     return;
                 }
                 const std::string label = label_getter ? label_getter() : "";
-                const std::string key   = label.empty() ? id : id + "/" + label;
+                const std::string key   = connection_key_for(id, label);
                 const Config config     = state->providers->config();
-                const bool exists       = std::any_of(config.providers.begin(),
-                    config.providers.end(), [&](const Connection& connection) {
-                        return connection_key(connection) == key;
-                    });
+                const bool exists
+                    = find_connection(config.providers, key) != nullptr;
                 if (exists) {
                     data->phase = SigninData::Phase::FAILED;
                     data->error

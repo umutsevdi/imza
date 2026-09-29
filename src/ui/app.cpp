@@ -1,5 +1,6 @@
 #include "app/flows.h"
 #include "conversation/persistence.h"
+#include "platform/clipboard.h"
 #include "runtime/main_thread_queue.h"
 #include "tools/skills.h"
 #include "ui/ui.h"
@@ -141,22 +142,107 @@ namespace {
         bool _enabled = true;
     };
 
+    // Copies a finished mouse selection to the clipboard. A release at the
+    // last motion position writes the same selection coordinates, so FTXUI
+    // fires no change callback; the copy then runs on the release itself,
+    // while a moving release is handled on the follow-up Custom event.
+    class SelectionCopier {
+    public:
+        explicit SelectionCopier(ftxui::ScreenInteractive* screen)
+            : screen_(screen)
+        {
+        }
+
+        bool handle(Event& event, const ApplicationState& state)
+        {
+            if (event.is_mouse()) {
+                const Mouse& m = event.mouse();
+                if (m.button == Mouse::Left && m.motion == Mouse::Pressed) {
+                    active_ = true;
+                    moved_  = false;
+                    x_      = m.x;
+                    y_      = m.y;
+                } else if (active_ && m.motion == Mouse::Moved) {
+                    moved_ = moved_ || m.x != x_ || m.y != y_;
+                    x_     = m.x;
+                    y_     = m.y;
+                } else if (active_ && m.button == Mouse::Left
+                    && m.motion == Mouse::Released) {
+                    active_ = false;
+                    if (!moved_) {
+                        return false;
+                    }
+                    if (m.x == x_ && m.y == y_) {
+                        return copy(state);
+                    }
+                    release_ = true;
+                } else if (m.button != Mouse::Left) {
+                    active_ = false;
+                }
+                return false;
+            }
+            if (event == Event::Custom && release_) {
+                release_ = false;
+                copy(state);
+                return true;
+            }
+            return false;
+        }
+
+    private:
+        bool copy(const ApplicationState& state)
+        {
+            const std::string selected = screen_->GetSelection();
+            if (selected.empty()) {
+                return false;
+            }
+            copy_to_clipboard(*state.environment->system(), selected);
+            return true;
+        }
+
+        ftxui::ScreenInteractive* screen_;
+        bool active_  = false;
+        bool moved_   = false;
+        int x_        = 0;
+        int y_        = 0;
+        bool release_ = false;
+    };
+
     class Repl : public ComponentBase {
     public:
-        Repl(ScreenInteractive& screen, std::shared_ptr<ApplicationState> state)
-            : screen_(screen)
-            , state_(std::move(state))
+        Repl(std::shared_ptr<ApplicationState> state,
+            ftxui::ScreenInteractive* screen)
+            : state_(std::move(state))
+            , selection_(screen)
         {
             const LayoutFn layout     = [this] { return layout_; };
             const WorkflowFn workflow = [this] { return phase_; };
             side_        = make_side_panel(state_, layout, workflow,
                 [this](WorkflowPhase phase) { _set_phase(phase); });
             status_line_ = make_status_line(state_, layout, workflow);
-            chat_        = make_chat(state_, layout);
-            review_      = make_review(state_, layout,
+            chat_hints_.phase_line_fn = [this] {
+                return phase_ == WorkflowPhase::PLAN
+                    ? std::string("Tab next phase · Shift+Tab previous "
+                                  "phase · Ctrl+S chat")
+                    : std::string(
+                          "Tab next phase · Shift+Tab previous phase · Ctrl+S "
+                          "Sidechat");
+            };
+            // The plan tab splits 50/50 once a document exists; the chat
+            // renders its left half and must budget for those columns.
+            chat_hints_.content_width = [this](const LayoutCtx& ctx) {
+                return phase_ == WorkflowPhase::PLAN && ctx.width > 0
+                    ? ctx.width / 2
+                    : review_content_width(ctx);
+            };
+            chat_      = make_chat(state_, layout, chat_hints_);
+            plan_tab_  = make_plan_tab(state_, layout, chat_);
+            build_tab_ = make_build_tab(
+                state_, layout, chat_, sidechat_, sidechat_status_);
+            review_   = make_review(state_, layout,
                 [this](WorkflowPhase phase) { _set_phase(phase); });
-            modal_       = make_modal(state_);
-            sidechat_    = make_sidechat_component(
+            modal_    = make_modal(state_);
+            sidechat_ = make_sidechat_component(
                 state_, [this] { _focus_main(); }, sidechat_status_);
 
             workspace_subscription_
@@ -164,10 +250,26 @@ namespace {
                     [] { animation::RequestAnimationFrame(); });
             title_subscription_ = state_->session->subscribe_to_title_change(
                 [] { animation::RequestAnimationFrame(); });
-            phase_            = state_->session->mode() == Session::Mode::PLAN
+            // Flows can flip the session mode directly (/make-skill seeds
+            // a Build turn); follow so the tabs and status line agree.
+            mode_subscription_ = state_->session->subscribe_to_mode_change(
+                [this] {
+                    state_->post([this] {
+                        const Session::Mode mode  = state_->session->mode();
+                        const WorkflowPhase phase = mode == Session::Mode::PLAN
+                            ? WorkflowPhase::PLAN
+                            : WorkflowPhase::BUILD;
+                        if (phase_ != phase
+                            && phase_ != WorkflowPhase::REVIEW) {
+                            _set_phase(phase);
+                        }
+                    });
+                });
+            phase_    = state_->session->mode() == Session::Mode::PLAN
                 ? WorkflowPhase::PLAN
                 : WorkflowPhase::BUILD;
-            selected_         = static_cast<int>(phase_);
+            selected_ = static_cast<int>(phase_);
+            _attach_chat();
             review_available_ = _review_available();
             tab_names_        = { "Plan", "Build" };
             if (review_available_) {
@@ -178,20 +280,21 @@ namespace {
                 [](const Event& event) {
                     return event == Event::Tab || event == Event::TabReverse;
                 });
-            tabs_content_ = Container::Tab({ chat_, review_ }, &selected_pane_);
+            tabs_content_ = Container::Tab(
+                { plan_tab_, build_tab_, review_ }, &selected_pane_);
             Add(Container::Stacked({
                 Container::Vertical({ tabs_, tabs_content_ }),
                 side_,
                 status_line_,
                 modal_,
             }));
-            Add(sidechat_);
             chat_->TakeFocus();
         }
 
         Element OnRender() override
         {
             _sync_review_availability();
+            _restore_focus_after_modal();
             const auto terminal_size = ftxui::Terminal::Size();
             layout_ = layout_context(terminal_size.dimx, terminal_size.dimy);
             const int w       = layout_.width;
@@ -204,25 +307,26 @@ namespace {
             Element title_p = paragraph(title.empty() ? "New Session" : title)
                 | bold | color(PANEL_FG);
             const bool narrow       = layout_.kind == LayoutCtx::Kind::NARROW;
-            const bool side_by_side = state_->sidechat_open && !narrow;
+            const bool side_by_side = state_->sidechat_open && !narrow
+                && phase_ != WorkflowPhase::PLAN;
 
             Element root;
-            if (narrow && sidechat_status_.focused) {
+            if (narrow && sidechat_status_.focused
+                && phase_ != WorkflowPhase::PLAN) {
                 root = vbox({ sidechat_->Render() | flex, separatorEmpty(),
                            status })
                     | flex;
             } else if (layout_.kind == LayoutCtx::Kind::WIDE) {
-                Element main_panel
-                    = vbox({
-                          hbox({ text(" "), title_p | xflex, tab }),
-                          std::move(right_col) | reflect(main_pane_box_)
-                              | yflex,
-                      })
-                    | xflex | yflex;
+                Element content = std::move(right_col) | xflex | yflex
+                    | reflect(main_pane_box_);
                 if (side_by_side) {
-                    main_panel = hbox({ std::move(main_panel), separatorEmpty(),
+                    content = hbox({ std::move(content), separatorEmpty(),
                         sidechat_->Render() });
                 }
+                Element main_panel
+                    = vbox({ hbox({ text(" "), title_p | xflex, tab }),
+                          std::move(content) })
+                    | xflex | yflex;
                 root = vbox({ hbox({ side | yflex, text(" "),
                                   std::move(main_panel) | xflex | yflex })
                                | flex,
@@ -267,13 +371,32 @@ namespace {
                 state_->on_exit();
                 return true;
             }
+            if (selection_.handle(event, *state_)) {
+                return true;
+            }
             if (state_->session->modal().index() != 0) {
                 return modal_->OnEvent(event);
             }
             if (sidechat_status_.has_modal && sidechat_status_.has_modal()) {
                 return sidechat_->OnEvent(event);
             }
-            if (sidechat_->OnEvent(event)) {
+            // The sidechat receives all events while visible; hidden, only
+            // the toggle shortcut — stale clicks on its last-rendered box
+            // must not reach it.
+            const bool sidechat_visible = state_->sidechat_open
+                && phase_ != WorkflowPhase::PLAN
+                && (layout_.kind != LayoutCtx::Kind::NARROW
+                    || sidechat_status_.focused);
+            if (sidechat_visible && sidechat_->OnEvent(event)) {
+                return true;
+            }
+            if (is_sidechat_toggle(event) && phase_ != WorkflowPhase::PLAN
+                && sidechat_->OnEvent(event)) {
+                return true;
+            }
+            // PLAN: the tab swaps doc/chat on Ctrl+S (no sidechat there).
+            if (is_sidechat_toggle(event) && phase_ == WorkflowPhase::PLAN
+                && tabs_content_->OnEvent(event)) {
                 return true;
             }
             if (event == Event::Tab) {
@@ -302,19 +425,18 @@ namespace {
                     return true;
                 }
             }
-            return selected_pane_ == 0 ? chat_->OnEvent(event)
-                                       : review_->OnEvent(event);
+            return tabs_content_->OnEvent(event);
         }
 
         Component ActiveChild() override
         {
-            if (state_->sidechat_open && sidechat_status_.focused) {
+            if (state_->sidechat_open && sidechat_status_.focused
+                && phase_ != WorkflowPhase::PLAN) {
                 return sidechat_;
             }
             return ComponentBase::ActiveChild();
         }
 
-    private:
         bool _review_available() const
         {
             const auto& environment = state_->environment;
@@ -343,42 +465,73 @@ namespace {
         {
             phase_         = phase;
             selected_      = static_cast<int>(phase);
-            selected_pane_ = phase == WorkflowPhase::REVIEW ? 1 : 0;
+            selected_pane_ = static_cast<int>(phase);
             if (const auto mode = workflow_mode(phase)) {
                 state_->session->set_mode(*mode);
             }
-            if (sidechat_status_.focused) {
-                return;
+            if (phase != WorkflowPhase::REVIEW) {
+                _attach_chat();
             }
-            if (selected_pane_ == 0) {
-                chat_->TakeFocus();
-            } else {
-                review_->TakeFocus();
+            // The sidechat hides in PLAN; keeping focus on a hidden pane
+            // would swallow all input.
+            if (phase == WorkflowPhase::PLAN || !sidechat_status_.focused) {
+                _focus_main();
             }
         }
 
         void _focus_main()
         {
-            if (selected_pane_ == 0) {
-                chat_->TakeFocus();
-            } else {
+            if (selected_pane_ == static_cast<int>(WorkflowPhase::REVIEW)) {
                 review_->TakeFocus();
+            } else {
+                chat_->TakeFocus();
             }
         }
 
-        ScreenInteractive& screen_;
+        // Buttons that open modals (sidebar links, review actions) call
+        // TakeFocus, rotating the shared Stacked's active child away from
+        // the main column. After the modal closes the rotation persists:
+        // the main tree reports unfocused and keystrokes die.
+        void _restore_focus_after_modal()
+        {
+            const bool open = state_->session->modal().index() != 0;
+            if (_modal_was_open && !open) {
+                if (phase_ == WorkflowPhase::PLAN) {
+                    plan_tab_->TakeFocus();
+                } else {
+                    _focus_main();
+                }
+            }
+            _modal_was_open = open;
+        }
+
+        // Add detaches from the previous tab: one parent at all times.
+        void _attach_chat()
+        {
+            if (phase_ == WorkflowPhase::BUILD) {
+                build_tab_->Add(chat_);
+            } else {
+                plan_tab_->Add(chat_);
+            }
+        }
+
         std::shared_ptr<ApplicationState> state_;
+        SelectionCopier selection_;
         ftxui::Component sidechat_;
         SidechatStatus sidechat_status_;
         Component side_;
         Component modal_;
         Component status_line_;
         Component chat_;
+        Component plan_tab_;
+        Component build_tab_;
         Component review_;
+        ChatHints chat_hints_;
         Component tabs_content_;
         Component tabs_;
         Signal<>::Subscription workspace_subscription_;
         Signal<>::Subscription title_subscription_;
+        Signal<>::Subscription mode_subscription_;
         LayoutCtx layout_ = layout_context(0);
         WorkflowPhase phase_ { WorkflowPhase::PLAN };
         std::vector<std::string> tab_names_;
@@ -386,6 +539,7 @@ namespace {
         int selected_ { 0 };
         int selected_pane_ { 0 };
         ftxui::Box main_pane_box_ { };
+        bool _modal_was_open = false;
     };
 
 } // namespace
@@ -424,7 +578,10 @@ int run_repl(
         imza::enqueue_user_modal(
             *state, ConnectModal { ConnectModal::Entry::MANAGE });
     }
-    auto app = ftxui::Make<Repl>(screen, state);
+    auto app = ftxui::Make<Repl>(state, &screen);
+    // Empty callback: FTXUI only posts Event::Custom after selection changes
+    // when one is registered; SelectionCopier consumes it.
+    screen.SelectionChange([] { });
     screen.Loop(app);
     bracketed_paste.disable();
     if (!state->session->has_items()) {
