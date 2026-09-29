@@ -37,8 +37,6 @@ struct LuaModule {
     std::span<const LuaMethod> methods;
 };
 
-constexpr std::size_t MAX_OUTPUT_BYTES = 64 * 1024;
-
 struct Tool; // defined in tools/tool.h; returned by value from make_lua_tool
 
 class LuaState final : public ApplicationComponent {

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <ctime>
 #include <filesystem>
@@ -133,6 +134,9 @@ inline std::string_view truncate_utf8(
     }
     return text.substr(0, cut);
 }
+
+// Cap shared by tool outputs; enforced with truncate_marked.
+inline constexpr std::size_t MAX_OUTPUT_BYTES = 64 * 1024;
 
 inline constexpr std::string_view TRUNCATION_MARKER = "\n[truncated]";
 

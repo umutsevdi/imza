@@ -1,7 +1,7 @@
 #include "conversation/format.h"
 
+#include "common/util.h"
 #include "network/json_io.h"
-#include "tools/lua.h"
 
 #include <algorithm>
 #include <string>
