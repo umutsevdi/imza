@@ -44,11 +44,19 @@ namespace {
         return tasks;
     }
 
+    std::string agent_label(std::size_t index, std::string_view mode_name)
+    {
+        std::string label = "Agent " + std::to_string(index + 1) + " (";
+        label += mode_name;
+        label += ")";
+        return label;
+    }
+
     std::string task_report(std::size_t index, const DelegatedTask& task,
         const SubagentResult& result)
     {
-        std::string output = "## Agent " + std::to_string(index + 1) + " ("
-            + task.mode_name + ")\n\n";
+        std::string output
+            = "## " + agent_label(index, task.mode_name) + "\n\n";
         if (result.status != Status::OK) {
             output += "Failed: " + error_text(result.status);
             if (!result.output.empty()) {
@@ -118,7 +126,7 @@ Delegation::Delegation(ApplicationState& state, PostFn post,
     : _state(&state)
     , _post(std::move(post))
     , _modal_request(std::move(modal_request))
-    , runner_(runner)
+    , _runner(runner)
 {
 }
 
@@ -141,7 +149,7 @@ void Delegation::submit_delegated(
                 env->workspace().get(), role, &config) },
         { Message::Type::USER, task },
     };
-    runner_.spawn(std::move(history), std::move(settings));
+    _runner.spawn(std::move(history), std::move(settings));
 }
 
 ToolOutput Delegation::run_subagents(
@@ -168,14 +176,13 @@ ToolOutput Delegation::run_subagents(
                 + std::to_string(index + 1);
             break;
         }
-        const std::string label = "Agent " + std::to_string(index + 1) + " ("
-            + task.mode_name + ")";
+        const std::string label           = agent_label(index, task.mode_name);
         const ProviderSelection& selected = *selection;
         const std::string prompt          = task.prompt;
         const Session::Mode mode          = task.mode;
         auto child_state                  = make_child_application_state(
             *_state, [](const std::function<void()>& action) { action(); },
-            runner_.has_stream_override() ? runner_.stream_fn() : StreamFn { },
+            _runner.has_stream_override() ? _runner.stream_fn() : StreamFn { },
             [modal_request = _modal_request](ModalPayload payload) {
                 return modal_request(std::move(payload));
             },
@@ -224,9 +231,9 @@ ToolOutput Delegation::run_subagents(
             output += "\n\n";
         }
         output += task_report(index, (*parsed)[index], result);
-        chats.push_back(SubagentChat { "Agent " + std::to_string(index + 1)
-                + " (" + (*parsed)[index].mode_name + ")",
-            session_transcript(*sessions[index]) });
+        chats.push_back(
+            SubagentChat { agent_label(index, (*parsed)[index].mode_name),
+                session_transcript(*sessions[index]) });
     }
     if (!validation_error.empty()) {
         if (!output.empty()) {
@@ -250,13 +257,12 @@ SubagentChat Delegation::subagent_chat(
     }
     const Json::Value args = parse_json(call.args);
     std::string title      = "Agent " + std::to_string(index + 1);
-    if (args["tasks"].isArray() && index < args["tasks"].size()
-        && args["tasks"][static_cast<Json::ArrayIndex>(index)]["mode"]
-            .isString()) {
-        title += " ("
-            + args["tasks"][static_cast<Json::ArrayIndex>(index)]["mode"]
-                  .asString()
-            + ")";
+    if (args["tasks"].isArray() && index < args["tasks"].size()) {
+        const Json::Value& mode
+            = args["tasks"][static_cast<Json::ArrayIndex>(index)]["mode"];
+        if (mode.isString()) {
+            title = agent_label(index, mode.asString());
+        }
     }
     if (index >= call.subagent_ids.size()) {
         return { std::move(title), "No delegated-agent history is available." };
@@ -346,7 +352,7 @@ SubagentHandle Delegation::run_subagent(std::string prompt, std::string model,
                     output += event.text;
                 }
             };
-            Status status = runner_.run_stream(req, route, callback);
+            Status status = _runner.run_stream(req, route, callback);
             if (stop.stop_requested()) {
                 status = Status::CANCELLED;
             } else if (deadline

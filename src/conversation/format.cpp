@@ -280,13 +280,7 @@ std::string modal_answer_markdown(const ModalAnswer& answer)
             if (!card.free_text.empty()) {
                 body = card.free_text;
             } else if (!card.selected.empty()) {
-                body = "";
-                for (size_t i = 0; i < card.selected.size(); ++i) {
-                    if (i) {
-                        body += ", ";
-                    }
-                    body += card.selected[i];
-                }
+                body = join(card.selected, ", ");
             }
             md += "  " + (body.empty() ? "-" : body);
         } else {

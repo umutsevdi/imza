@@ -45,7 +45,7 @@ private:
     ApplicationState* _state;
     PostFn _post;
     ModalRequestFn _modal_request;
-    TurnRunner& runner_;
+    TurnRunner& _runner;
 };
 
 } // namespace imza

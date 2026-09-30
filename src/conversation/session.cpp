@@ -56,23 +56,15 @@ namespace {
                 + " KiB cap (" + std::to_string(content.size())
                 + " bytes); split the work into a smaller plan";
         }
+        const std::vector<std::string> lines = split_lines(content);
         std::string missing;
         for (const std::string_view name : PLAN_SKELETON) {
-            bool found        = false;
-            std::size_t begin = 0;
-            while (begin <= content.size()) {
-                const std::size_t end       = content.find('\n', begin);
-                const std::string_view line = std::string_view(content).substr(
-                    begin,
-                    end == std::string::npos ? std::string::npos : end - begin);
+            bool found = false;
+            for (const std::string& line : lines) {
                 if (plan_heading_matches(line, name)) {
                     found = true;
                     break;
                 }
-                if (end == std::string::npos) {
-                    break;
-                }
-                begin = end + 1;
             }
             if (!found) {
                 if (!missing.empty()) {
@@ -87,7 +79,44 @@ namespace {
         return "";
     }
 
+    // Reverse scan shared by the tool-call lookups; `skip` drops candidates
+    // before `matches` is consulted.
+    template <typename Skip, typename Match>
+    ToolCall* find_call_locked(std::vector<ConversationItem>& items,
+        const ToolCallRequest& req, Skip skip, Match matches)
+    {
+        for (auto it = items.rbegin(); it != items.rend(); ++it) {
+            auto* call = std::get_if<ToolCall>(&*it);
+            if (call == nullptr || skip(*call)) {
+                continue;
+            }
+            if (matches(*call)) {
+                return call;
+            }
+        }
+        return nullptr;
+    }
+
+    bool call_matches_request(
+        const ToolCall& call, const ToolCallRequest& req, bool match_args)
+    {
+        return !req.id.empty()
+            ? call.call_id == req.id
+            : call.name == req.name && (!match_args || call.args == req.args);
+    }
+
 } // namespace
+
+std::optional<std::size_t> last_user_turn_index(
+    const std::vector<ConversationItem>& items)
+{
+    for (std::size_t index = items.size(); index > 0; --index) {
+        if (std::holds_alternative<UserTurn>(items[index - 1])) {
+            return index - 1;
+        }
+    }
+    return std::nullopt;
+}
 
 ModalPayload Session::modal() const
 {
@@ -196,7 +225,7 @@ std::string Session::plan_doc() const
     return _plans.empty() ? std::string { } : _plans.back().content;
 }
 
-SessionSnapshot Session::build_snapshot() const
+SessionSnapshot Session::_build_snapshot() const
 {
     return { _title, _items, _todo, _plans, _compacted_summary,
         _compacted_item_count, _mode == Mode::PLAN, _persistence };
@@ -205,7 +234,7 @@ SessionSnapshot Session::build_snapshot() const
 SessionSnapshot Session::snapshot() const
 {
     std::lock_guard lock(_mutex);
-    return build_snapshot();
+    return _build_snapshot();
 }
 
 std::optional<SessionSnapshot> Session::snapshot_for_save() const
@@ -214,7 +243,7 @@ std::optional<SessionSnapshot> Session::snapshot_for_save() const
     if (_items.empty() || !_dirty) {
         return std::nullopt;
     }
-    return build_snapshot();
+    return _build_snapshot();
 }
 
 void Session::restore(SessionSnapshot snapshot)
@@ -267,7 +296,7 @@ void Session::restore(SessionSnapshot snapshot)
         ++_modal_serial;
         ++_content_serial;
     }
-    attachments_changed_.publish();
+    _attachments_changed.publish();
 }
 
 void Session::set_persistence(SessionPersistence persistence)
@@ -288,7 +317,7 @@ void Session::set_mode(Mode next_mode)
     }
     // Published outside the lock; callbacks may re-enter accessors.
     if (changed) {
-        mode_changed_.publish();
+        _mode_changed.publish();
     }
 }
 
@@ -403,7 +432,7 @@ void Session::begin_send(std::string text, std::vector<Attachment> attachments)
         _turn_started = std::chrono::steady_clock::now();
     }
     if (has_attachments) {
-        attachments_changed_.publish();
+        _attachments_changed.publish();
     }
 }
 
@@ -419,7 +448,7 @@ void Session::set_last_assistant_metadata(
     std::string model, std::string reasoning_effort)
 {
     std::lock_guard lock(_mutex);
-    if (AssistantTurn* assistant = last_assistant_locked()) {
+    if (AssistantTurn* assistant = _last_assistant_locked()) {
         assistant->model            = std::move(model);
         assistant->reasoning_effort = std::move(reasoning_effort);
     }
@@ -435,36 +464,38 @@ void Session::append_item(ConversationItem item)
 std::pair<std::size_t, std::size_t> Session::begin_compaction()
 {
     std::lock_guard lock(_mutex);
-    const std::size_t id = _next_compaction_id++;
-    std::size_t prefix   = 0;
-    for (std::size_t index = _items.size(); index > 0; --index) {
-        if (std::holds_alternative<UserTurn>(_items[index - 1])) {
-            prefix = index - 1;
-            break;
-        }
-    }
+    const std::size_t id     = _next_compaction_id++;
+    const std::size_t prefix = last_user_turn_index(_items).value_or(0);
     _items.emplace_back(
         CompactionEvent { id, CompactionEvent::Status::RUNNING });
     return { id, prefix };
+}
+
+CompactionEvent* Session::_find_compaction_locked(std::size_t id)
+{
+    for (auto& item : _items) {
+        auto* event = std::get_if<CompactionEvent>(&item);
+        if (event != nullptr && event->id == id) {
+            return event;
+        }
+    }
+    return nullptr;
 }
 
 void Session::finish_compaction(std::size_t id, std::string summary,
     std::size_t compacted_item_count, bool success)
 {
     std::lock_guard lock(_mutex);
-    for (auto& item : _items) {
-        auto* event = std::get_if<CompactionEvent>(&item);
-        if (event == nullptr || event->id != id) {
-            continue;
-        }
-        event->status = success ? CompactionEvent::Status::COMPLETED
-                                : CompactionEvent::Status::FAILED;
-        _dirty        = true;
-        if (success) {
-            _compacted_summary    = std::move(summary);
-            _compacted_item_count = compacted_item_count;
-        }
+    CompactionEvent* event = _find_compaction_locked(id);
+    if (event == nullptr) {
         return;
+    }
+    event->status = success ? CompactionEvent::Status::COMPLETED
+                            : CompactionEvent::Status::FAILED;
+    _dirty        = true;
+    if (success) {
+        _compacted_summary    = std::move(summary);
+        _compacted_item_count = compacted_item_count;
     }
 }
 
@@ -472,56 +503,43 @@ void Session::complete_manual_compaction(
     std::size_t id, std::string summary, std::size_t absorbed_items)
 {
     std::lock_guard lock(_mutex);
-    for (auto& item : _items) {
-        auto* event = std::get_if<CompactionEvent>(&item);
-        if (event == nullptr || event->id != id) {
-            continue;
-        }
-        event->status = CompactionEvent::Status::COMPLETED;
-        _dirty        = true;
-        if (!_compacted_summary.empty()) {
-            summary.insert(
-                0, _compacted_summary + "\n\n<earlier-compactions>\n");
-            summary += "\n</earlier-compactions>";
-        }
-        _compacted_summary = std::move(summary);
-        _compacted_item_count += absorbed_items;
+    CompactionEvent* event = _find_compaction_locked(id);
+    if (event == nullptr) {
         return;
     }
+    event->status = CompactionEvent::Status::COMPLETED;
+    _dirty        = true;
+    if (!_compacted_summary.empty()) {
+        summary.insert(0, _compacted_summary + "\n\n<earlier-compactions>\n");
+        summary += "\n</earlier-compactions>";
+    }
+    _compacted_summary = std::move(summary);
+    _compacted_item_count += absorbed_items;
 }
 
 ToolCall* Session::_find_tool_locked(
     const ToolCallRequest& req, const bool unfinished_only)
 {
-    for (auto it = _items.rbegin(); it != _items.rend(); ++it) {
-        auto* call = std::get_if<ToolCall>(&*it);
-        if (call == nullptr || (unfinished_only && call->result.has_value())) {
-            continue;
-        }
-        const bool matched = !req.id.empty()
-            ? call->call_id == req.id
-            : call->name == req.name && call->args == req.args;
-        if (matched) {
-            return call;
-        }
-    }
-    return nullptr;
+    return find_call_locked(
+        _items, req,
+        [unfinished_only](const ToolCall& call) {
+            return unfinished_only && call.result.has_value();
+        },
+        [&req](const ToolCall& call) {
+            return call_matches_request(call, req, true);
+        });
 }
 
-ToolCall* Session::find_planning_tool_locked(const ToolCallRequest& req)
+ToolCall* Session::_find_planning_tool_locked(const ToolCallRequest& req)
 {
-    for (auto it = _items.rbegin(); it != _items.rend(); ++it) {
-        auto* call = std::get_if<ToolCall>(&*it);
-        if (call == nullptr || call->phase != ToolCall::Phase::PLANNING) {
-            continue;
-        }
-        const bool matched = !req.id.empty() ? call->call_id == req.id
-                                             : call->name == req.name;
-        if (matched) {
-            return call;
-        }
-    }
-    return nullptr;
+    return find_call_locked(
+        _items, req,
+        [](const ToolCall& call) {
+            return call.phase != ToolCall::Phase::PLANNING;
+        },
+        [&req](const ToolCall& call) {
+            return call_matches_request(call, req, false);
+        });
 }
 
 void Session::set_tool_subagent_chats(
@@ -693,7 +711,7 @@ bool Session::interrupt_requested() const
 std::optional<AssistantTurn> Session::last_assistant() const
 {
     std::lock_guard lock(_mutex);
-    if (const auto* assistant = last_assistant_locked()) {
+    if (const auto* assistant = _last_assistant_locked()) {
         return *assistant;
     }
     return std::nullopt;
@@ -703,7 +721,7 @@ bool Session::finish_session(std::string error)
 {
     std::lock_guard lock(_mutex);
     const bool finished = _phase != Phase::IDLE;
-    finish_session_locked(error);
+    _finish_session_locked(error);
     return finished;
 }
 
@@ -759,7 +777,7 @@ void Session::apply(const StreamEvent& ev, const ModelPricing& pricing)
         if (!_items.empty()) {
             if (auto* a = std::get_if<AssistantTurn>(&_items.back())) {
                 if (!ev.text.empty()) {
-                    finalize_reasoning(*a);
+                    _finalize_reasoning(*a);
                     _dirty = true;
                 }
                 a->markdown += ev.text;
@@ -783,8 +801,8 @@ void Session::apply(const StreamEvent& ev, const ModelPricing& pricing)
         }
         break;
     case StreamEvent::Kind::TOOL_CALL_START:
-        if (auto* a = last_assistant_locked()) {
-            finalize_reasoning(*a);
+        if (auto* a = _last_assistant_locked()) {
+            _finalize_reasoning(*a);
         }
         // Transient: arguments are still streaming, so the item is not
         // marked dirty and is never persisted or sent back as history.
@@ -793,10 +811,10 @@ void Session::apply(const StreamEvent& ev, const ModelPricing& pricing)
                 { }, { }, std::nullopt, ToolCall::Phase::PLANNING });
         break;
     case StreamEvent::Kind::TOOL_CALL:
-        if (auto* a = last_assistant_locked()) {
-            finalize_reasoning(*a);
+        if (auto* a = _last_assistant_locked()) {
+            _finalize_reasoning(*a);
         }
-        if (auto* planned = find_planning_tool_locked(ev.tool_call)) {
+        if (auto* planned = _find_planning_tool_locked(ev.tool_call)) {
             planned->name  = ev.tool_call.name;
             planned->args  = ev.tool_call.args;
             planned->phase = ToolCall::Phase::EXECUTING;
@@ -818,12 +836,12 @@ void Session::apply(const StreamEvent& ev, const ModelPricing& pricing)
         }
         break;
     case StreamEvent::Kind::DONE:
-        if (auto* a = last_assistant_locked()) {
-            finalize_reasoning(*a);
+        if (auto* a = _last_assistant_locked()) {
+            _finalize_reasoning(*a);
         }
         break;
     case StreamEvent::Kind::ERROR:
-        finish_session_locked(error_text(ev.error));
+        _finish_session_locked(error_text(ev.error));
         break;
     case StreamEvent::Kind::CONNECTED:
         if (_phase == Phase::CONNECTING) {
@@ -832,17 +850,17 @@ void Session::apply(const StreamEvent& ev, const ModelPricing& pricing)
             _phase = Phase::STREAMING;
         }
         break;
-    case StreamEvent::Kind::USAGE: update_usage(ev, pricing); break;
+    case StreamEvent::Kind::USAGE: _update_usage(ev, pricing); break;
     }
 }
 
-AssistantTurn* Session::last_assistant_locked()
+AssistantTurn* Session::_last_assistant_locked()
 {
     return const_cast<AssistantTurn*>(
-        static_cast<const Session*>(this)->last_assistant_locked());
+        static_cast<const Session*>(this)->_last_assistant_locked());
 }
 
-const AssistantTurn* Session::last_assistant_locked() const
+const AssistantTurn* Session::_last_assistant_locked() const
 {
     for (auto it = _items.rbegin(); it != _items.rend(); ++it) {
         if (const auto* a = std::get_if<AssistantTurn>(&*it)) {
@@ -852,7 +870,7 @@ const AssistantTurn* Session::last_assistant_locked() const
     return nullptr;
 }
 
-void Session::finalize_reasoning(AssistantTurn& a)
+void Session::_finalize_reasoning(AssistantTurn& a)
 {
     if (!_reasoning_start.has_value() || a.reasoning_ms.has_value()) {
         return;
@@ -862,13 +880,13 @@ void Session::finalize_reasoning(AssistantTurn& a)
         now - *_reasoning_start);
 }
 
-void Session::finish_session_locked(const std::string& error)
+void Session::_finish_session_locked(const std::string& error)
 {
     if (_phase == Phase::IDLE) {
         return;
     }
-    if (auto* a = last_assistant_locked()) {
-        finalize_reasoning(*a);
+    if (auto* a = _last_assistant_locked()) {
+        _finalize_reasoning(*a);
     }
     _retry_countdown.reset();
     std::erase_if(_items, [](const ConversationItem& item) {
@@ -881,7 +899,7 @@ void Session::finish_session_locked(const std::string& error)
     _phase = Phase::IDLE;
 }
 
-void Session::update_usage(
+void Session::_update_usage(
     const StreamEvent& usage_event, const ModelPricing& pricing)
 {
     _last = usage_event.usage;
@@ -894,22 +912,22 @@ void Session::update_usage(
 Signal<>::Subscription Session::subscribe_to_mode_change(
     Signal<>::Callback callback)
 {
-    return mode_changed_.subscribe(std::move(callback));
+    return _mode_changed.subscribe(std::move(callback));
 }
 
 Signal<>::Subscription Session::subscribe_to_title_change(
     Signal<>::Callback callback)
 {
-    return title_changed_.subscribe(std::move(callback));
+    return _title_changed.subscribe(std::move(callback));
 }
 
 Signal<>::Subscription Session::subscribe_to_attachments_change(
     Signal<>::Callback callback)
 {
-    return attachments_changed_.subscribe(std::move(callback));
+    return _attachments_changed.subscribe(std::move(callback));
 }
 
-void Session::_notify_title_change() { title_changed_.publish(); }
+void Session::_notify_title_change() { _title_changed.publish(); }
 
 WorkflowPhase next_workflow_phase(WorkflowPhase phase, bool review_available)
 {

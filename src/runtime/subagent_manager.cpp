@@ -85,13 +85,12 @@ void SubagentManager::prune_completed()
     {
         std::lock_guard lock(_mutex);
         std::unordered_set<std::size_t> completed_ids;
-        for (const SubagentTask& task : _tasks) {
-            if (task.state != SubagentTask::State::RUNNING) {
-                completed_ids.insert(task.id);
-            }
-        }
         std::erase_if(_tasks, [&completed_ids](const SubagentTask& task) {
-            return completed_ids.contains(task.id);
+            if (task.state == SubagentTask::State::RUNNING) {
+                return false;
+            }
+            completed_ids.insert(task.id);
+            return true;
         });
         for (auto it = _workers.begin(); it != _workers.end();) {
             if (!completed_ids.contains(it->first)) {
