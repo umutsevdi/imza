@@ -126,6 +126,16 @@ namespace {
         return normalized;
     }
 
+    // A duplicate anchors the same line and matches after normalization,
+    // so the severity prefix does not distinguish two findings.
+    template <typename Candidate, typename Comment>
+    bool duplicate_comment(const Candidate& candidate, const Comment& comment)
+    {
+        return candidate.anchor == comment.anchor
+            && normalized_comment_body(candidate.body)
+            == normalized_comment_body(comment.body);
+    }
+
     std::optional<ReviewLineAnchor> resolve_finding_anchor(
         const RepositoryReview& review, std::string_view requested_path,
         std::string_view side, std::size_t line_number)
@@ -170,7 +180,7 @@ ReviewLoadResult load_repository_review(const std::filesystem::path& root)
     const CommandResult untracked
         = run_command(prefix + " ls-files --others --exclude-standard",
             std::chrono::seconds { 5 });
-    if (untracked.spawned && !untracked.timed_out && untracked.exit_code == 0) {
+    if (command_ok(untracked)) {
         append_untracked(*review, root, untracked.output);
     }
     return parsed;
@@ -278,9 +288,7 @@ AiReviewParseResult parse_ai_review_response(
         ReviewCommentDraft comment { *anchor, "[" + severity + "] " + body };
         const bool duplicate = std::ranges::any_of(
             comments, [&comment](const ReviewCommentDraft& candidate) {
-                return candidate.anchor == comment.anchor
-                    && normalized_comment_body(candidate.body)
-                    == normalized_comment_body(comment.body);
+                return duplicate_comment(candidate, comment);
             });
         if (!duplicate) {
             comments.push_back(std::move(comment));
@@ -330,8 +338,7 @@ void ReviewState::set_result(ReviewLoadResult result)
             for (ReviewComment& comment : _state.comments) {
                 comment.stale = true;
                 for (const ReviewFile& file : next->files) {
-                    const std::string& path
-                        = file.new_path.empty() ? file.old_path : file.new_path;
+                    const std::string path = review_path(file);
                     if (path != comment.anchor.file) {
                         continue;
                     }
@@ -371,7 +378,7 @@ std::size_t ReviewState::add_comment(ReviewLineAnchor anchor, std::string body)
     std::size_t id;
     {
         std::lock_guard lock(_mutex);
-        id = next_comment_id_++;
+        id = _next_comment_id++;
         _state.comments.push_back(
             ReviewComment { id, std::move(anchor), std::move(body), false });
         ++_state.generation;
@@ -388,14 +395,12 @@ std::size_t ReviewState::add_comments(std::vector<ReviewCommentDraft> comments)
         for (ReviewCommentDraft& comment : comments) {
             const bool duplicate = std::ranges::any_of(
                 _state.comments, [&comment](const ReviewComment& candidate) {
-                    return candidate.anchor == comment.anchor
-                        && normalized_comment_body(candidate.body)
-                        == normalized_comment_body(comment.body);
+                    return duplicate_comment(candidate, comment);
                 });
             if (duplicate) {
                 continue;
             }
-            _state.comments.push_back(ReviewComment { next_comment_id_++,
+            _state.comments.push_back(ReviewComment { _next_comment_id++,
                 std::move(comment.anchor), std::move(comment.body), false });
             ++added;
         }
@@ -483,9 +488,9 @@ void ReviewState::clear_comments()
 
 Signal<>::Subscription ReviewState::subscribe(Signal<>::Callback callback)
 {
-    return changed_.subscribe(std::move(callback));
+    return _changed.subscribe(std::move(callback));
 }
 
-void ReviewState::_publish() { changed_.publish(); }
+void ReviewState::_publish() { _changed.publish(); }
 
 } // namespace imza

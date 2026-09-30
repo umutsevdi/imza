@@ -275,7 +275,9 @@ namespace {
     int grep_run(
         lua_State* L, const std::regex& expression, const fs::path& target)
     {
-        constexpr auto timeout = std::chrono::seconds { 10 };
+        constexpr auto timeout              = std::chrono::seconds { 10 };
+        const std::string timed_out_message = "grep: search timed out after "
+            + std::to_string(timeout.count()) + " seconds";
         GrepState state { L, expression,
             std::chrono::steady_clock::now() + timeout };
         lua_newtable(L);
@@ -289,8 +291,7 @@ namespace {
         if (fs::is_regular_file(target_status)) {
             const GrepFileResult result = grep_file(state, target);
             if (result == GrepFileResult::TIMED_OUT) {
-                return binding_error(
-                    L, "grep: search timed out after 10 seconds");
+                return binding_error(L, timed_out_message);
             }
             if (result == GrepFileResult::UNREADABLE) {
                 return binding_error(
@@ -306,8 +307,7 @@ namespace {
             }
             while (iterator != end && !state.truncated) {
                 if (grep_timed_out(state)) {
-                    return binding_error(
-                        L, "grep: search timed out after 10 seconds");
+                    return binding_error(L, timed_out_message);
                 }
                 const fs::directory_entry entry = *iterator;
                 std::error_code status_error;
@@ -317,8 +317,7 @@ namespace {
                     const GrepFileResult result
                         = grep_file(state, entry.path());
                     if (result == GrepFileResult::TIMED_OUT) {
-                        return binding_error(
-                            L, "grep: search timed out after 10 seconds");
+                        return binding_error(L, timed_out_message);
                     }
                 }
                 iterator.increment(ec);

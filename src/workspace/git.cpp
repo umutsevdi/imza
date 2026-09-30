@@ -148,29 +148,22 @@ ChangeSummary summarize_git_diff(std::string_view diff)
     ChangeSummary summary;
     summary.signature = FNV_OFFSET;
     hash_bytes(summary.signature, diff);
-    std::size_t line_start = 0;
-    while (line_start < diff.size()) {
-        const std::size_t line_end  = diff.find('\n', line_start);
-        const std::string_view line = diff.substr(line_start,
-            line_end == std::string_view::npos ? diff.size() - line_start
-                                               : line_end - line_start);
-        line_start
-            = line_end == std::string_view::npos ? diff.size() : line_end + 1;
+    for (const std::string& line : split_lines(diff)) {
         if (line.empty()) {
             break;
         }
         const std::size_t first_tab = line.find('\t');
-        if (first_tab == std::string_view::npos) {
+        if (first_tab == std::string::npos) {
             break;
         }
         const std::size_t second_tab = line.find('\t', first_tab + 1);
-        if (second_tab == std::string_view::npos) {
+        if (second_tab == std::string::npos) {
             break;
         }
-        std::size_t additions        = 0;
-        std::size_t deletions        = 0;
-        const std::string_view added = line.substr(0, first_tab);
-        const std::string_view deleted
+        std::size_t additions   = 0;
+        std::size_t deletions   = 0;
+        const std::string added = line.substr(0, first_tab);
+        const std::string deleted
             = line.substr(first_tab + 1, second_tab - first_tab - 1);
         const auto added_result = std::from_chars(
             added.data(), added.data() + added.size(), additions);
@@ -235,16 +228,9 @@ ReviewLoadResult parse_git_diff(std::string_view patch)
     std::size_t old_line = 0;
     std::size_t new_line = 0;
 
-    std::size_t line_start = 0;
-    while (line_start < patch.size()) {
-        const std::size_t line_end = patch.find('\n', line_start);
-        std::string_view line      = patch.substr(line_start,
-            line_end == std::string_view::npos ? patch.size() - line_start
-                                               : line_end - line_start);
-        line_start
-            = line_end == std::string_view::npos ? patch.size() : line_end + 1;
+    for (std::string line : split_lines(patch)) {
         if (!line.empty() && line.back() == '\r') {
-            line.remove_suffix(1);
+            line.pop_back();
         }
         if (line.starts_with("diff --git ")) {
             review.files.push_back(ReviewFile { });
@@ -266,14 +252,14 @@ ReviewLoadResult parse_git_diff(std::string_view patch)
             file->kind = ReviewFile::Kind::DELETED;
         } else if (line.starts_with("rename from ")) {
             file->kind     = ReviewFile::Kind::RENAMED;
-            file->old_path = std::string(line.substr(12));
+            file->old_path = line.substr(12);
         } else if (line.starts_with("rename to ")) {
-            file->new_path = std::string(line.substr(10));
+            file->new_path = line.substr(10);
         } else if (line.starts_with("copy from ")) {
             file->kind     = ReviewFile::Kind::COPIED;
-            file->old_path = std::string(line.substr(10));
+            file->old_path = line.substr(10);
         } else if (line.starts_with("copy to ")) {
-            file->new_path = std::string(line.substr(8));
+            file->new_path = line.substr(8);
         } else if (line.starts_with("Binary files ")
             || line.starts_with("GIT binary patch")) {
             file->kind = ReviewFile::Kind::BINARY;
@@ -288,7 +274,7 @@ ReviewLoadResult parse_git_diff(std::string_view patch)
                 file->new_path = strip_prefix(path);
             }
         } else if (line.starts_with("@@ ")) {
-            file->hunks.push_back(ReviewHunk { std::string(line), { } });
+            file->hunks.push_back(ReviewHunk { line, { } });
             hunk = &file->hunks.back();
             if (!parse_hunk_header(line, *hunk)) {
                 return "Invalid git patch: malformed hunk header.";
@@ -298,18 +284,18 @@ ReviewLoadResult parse_git_diff(std::string_view patch)
         } else if (hunk != nullptr && !line.empty()) {
             if (line.front() == '+') {
                 hunk->lines.push_back(ReviewLine { ReviewLine::Kind::ADDITION,
-                    std::nullopt, new_line++, std::string(line.substr(1)) });
+                    std::nullopt, new_line++, line.substr(1) });
                 ++file->additions;
             } else if (line.front() == '-') {
                 hunk->lines.push_back(ReviewLine { ReviewLine::Kind::DELETION,
-                    old_line++, std::nullopt, std::string(line.substr(1)) });
+                    old_line++, std::nullopt, line.substr(1) });
                 ++file->deletions;
             } else if (line.front() == ' ') {
                 hunk->lines.push_back(ReviewLine { ReviewLine::Kind::CONTEXT,
-                    old_line++, new_line++, std::string(line.substr(1)) });
+                    old_line++, new_line++, line.substr(1) });
             } else if (line.front() == '\\') {
-                hunk->lines.push_back(ReviewLine { ReviewLine::Kind::META,
-                    std::nullopt, std::nullopt, std::string(line) });
+                hunk->lines.push_back(ReviewLine {
+                    ReviewLine::Kind::META, std::nullopt, std::nullopt, line });
             }
         }
     }
@@ -329,11 +315,13 @@ std::optional<std::string> git_working_diff(
     }
     CommandResult diff
         = run_command(prefix + flags + " HEAD --", std::chrono::seconds { 10 });
-    if (diff.spawned && !diff.timed_out && diff.exit_code != 0) {
+    // Only a diff that ran to completion and failed is retried; a
+    // timeout or spawn failure is rejected below without a retry.
+    if (diff.spawned && !diff.timed_out && !command_ok(diff)) {
         diff = run_command(
             prefix + flags + " --cached --", std::chrono::seconds { 10 });
     }
-    if (!diff.spawned || diff.timed_out || diff.exit_code != 0) {
+    if (!command_ok(diff)) {
         return std::nullopt;
     }
     return std::move(diff.output);

@@ -286,19 +286,6 @@ namespace {
         }
     }
 
-} // namespace
-
-std::string render_module_documentation(const LuaModule& module)
-{
-    std::string out = "TYPES";
-    append_types(out, { &module, 1 }, false);
-    out += "\n\nMETHODS";
-    append_methods(out, { &module, 1 }, false);
-    return out;
-}
-
-namespace {
-
     std::string render_description(std::span<const LuaModule> modules)
     {
         std::string out
@@ -563,6 +550,15 @@ TYPES)desc";
     }
 
 } // namespace
+
+std::string render_module_documentation(const LuaModule& module)
+{
+    std::string out = "TYPES";
+    append_types(out, { &module, 1 }, false);
+    out += "\n\nMETHODS";
+    append_methods(out, { &module, 1 }, false);
+    return out;
+}
 
 Tool make_lua_tool(LuaState& state, LuaHost host)
 {

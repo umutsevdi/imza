@@ -405,38 +405,57 @@ namespace {
         return code.substr(line_begin, stop - line_begin);
     }
 
+    // Shared walker behind `tree.symbols` and `tree.references`: one row
+    // per identifier node whose source text equals `symbol`. `accept` may
+    // apply extra gates after the textual match; `fill_row` populates the
+    // fresh row table.
+    void collect_symbol_matches(lua_State* L, const Parsed& parsed,
+        std::string_view symbol, const std::function<bool(TSNode)>& accept,
+        const std::function<void(TSNode, uint32_t)>& fill_row)
+    {
+        lua_newtable(L);
+        walk_tree(parsed, MAX_NODES, [&](TSNode node, int row) {
+            if (std::string_view(ts_node_type(node)) != "identifier") {
+                return false;
+            }
+            const uint32_t begin = ts_node_start_byte(node);
+            const uint32_t end   = ts_node_end_byte(node);
+            if (parsed.code.substr(begin, end - begin) != symbol) {
+                return false;
+            }
+            if (!accept(node)) {
+                return false;
+            }
+            lua_newtable(L);
+            fill_row(node, begin);
+            lua_rawseti(L, -2, row + 1);
+            return true;
+        });
+    }
+
     int binding_ts_symbols(lua_State* L)
     {
         std::size_t symbol_size = 0;
         const char* symbol_raw  = luaL_checklstring(L, 2, &symbol_size);
-        const std::string_view symbol(symbol_raw, symbol_size);
 
         const auto parsed = parse_file(L, 1);
         if (!parsed) {
             return 2;
         }
 
-        lua_newtable(L);
-        walk_tree(*parsed, MAX_NODES, [&](TSNode node, int row) {
-            if (std::string_view(ts_node_type(node)) != "identifier") {
-                return false;
-            }
-            const uint32_t begin = ts_node_start_byte(node);
-            const uint32_t end   = ts_node_end_byte(node);
-            if (parsed->code.substr(begin, end - begin) != symbol) {
-                return false;
-            }
-            lua_newtable(L);
-            lua_pushlstring(L, parsed->target.data(), parsed->target.size());
-            lua_setfield(L, -2, "file");
-            lua_pushinteger(L, ts_node_start_point(node).row + 1);
-            lua_setfield(L, -2, "line");
-            const std::string_view line = line_at(parsed->code, begin);
-            lua_pushlstring(L, line.data(), line.size());
-            lua_setfield(L, -2, "text");
-            lua_rawseti(L, -2, row + 1);
-            return true;
-        });
+        collect_symbol_matches(
+            L, *parsed, std::string_view(symbol_raw, symbol_size),
+            [](TSNode) { return true; },
+            [&](TSNode node, uint32_t begin) {
+                lua_pushlstring(
+                    L, parsed->target.data(), parsed->target.size());
+                lua_setfield(L, -2, "file");
+                lua_pushinteger(L, ts_node_start_point(node).row + 1);
+                lua_setfield(L, -2, "line");
+                const std::string_view line = line_at(parsed->code, begin);
+                lua_pushlstring(L, line.data(), line.size());
+                lua_setfield(L, -2, "text");
+            });
         return 1;
     }
 
@@ -447,38 +466,30 @@ namespace {
     {
         std::size_t symbol_size = 0;
         const char* symbol_raw  = luaL_checklstring(L, 2, &symbol_size);
-        const std::string_view symbol(symbol_raw, symbol_size);
 
         const auto parsed = parse_file(L, 1);
         if (!parsed) {
             return 2;
         }
 
-        lua_newtable(L);
-        walk_tree(*parsed, MAX_NODES, [&](TSNode node, int row) {
-            if (std::string_view(ts_node_type(node)) != "identifier") {
-                return false;
-            }
-            const uint32_t begin = ts_node_start_byte(node);
-            const uint32_t end   = ts_node_end_byte(node);
-            if (parsed->code.substr(begin, end - begin) != symbol) {
-                return false;
-            }
-            const std::string_view parent = ts_node_type(ts_node_parent(node));
-            if (parent.find("call") == std::string_view::npos) {
-                return false;
-            }
-            lua_newtable(L);
-            lua_pushinteger(L, ts_node_start_point(node).row + 1);
-            lua_setfield(L, -2, "line");
-            lua_pushlstring(L, parent.data(), parent.size());
-            lua_setfield(L, -2, "kind");
-            const std::string_view line = line_at(parsed->code, begin);
-            lua_pushlstring(L, line.data(), line.size());
-            lua_setfield(L, -2, "text");
-            lua_rawseti(L, -2, row + 1);
-            return true;
-        });
+        collect_symbol_matches(
+            L, *parsed, std::string_view(symbol_raw, symbol_size),
+            [](TSNode node) {
+                const std::string_view parent
+                    = ts_node_type(ts_node_parent(node));
+                return parent.find("call") != std::string_view::npos;
+            },
+            [&](TSNode node, uint32_t begin) {
+                lua_pushinteger(L, ts_node_start_point(node).row + 1);
+                lua_setfield(L, -2, "line");
+                const std::string_view parent
+                    = ts_node_type(ts_node_parent(node));
+                lua_pushlstring(L, parent.data(), parent.size());
+                lua_setfield(L, -2, "kind");
+                const std::string_view line = line_at(parsed->code, begin);
+                lua_pushlstring(L, line.data(), line.size());
+                lua_setfield(L, -2, "text");
+            });
         return 1;
     }
 

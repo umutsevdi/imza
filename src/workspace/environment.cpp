@@ -28,7 +28,7 @@ namespace {
     {
         const CommandResult result
             = run_command(cmd, std::chrono::seconds { 2 });
-        if (!result.spawned || result.timed_out || result.exit_code != 0) {
+        if (!command_ok(result)) {
             return "";
         }
         return std::string(trim(result.output));
@@ -347,7 +347,7 @@ Environment::Environment()
             "cannot canonicalize working directory", initial_directory,
             initial_error);
     }
-    worker_ = std::jthread([this, working_directory] {
+    _worker = std::jthread([this, working_directory] {
         auto workspace = std::make_shared<WorkspaceEnvironment>(
             scan_workspace(working_directory));
         _publish_workspace(std::move(workspace), 0);
@@ -384,9 +384,8 @@ Environment::Environment()
                 const std::optional<std::string> diff
                     = git_working_diff(observed_workspace->project_root.value(),
                         { .renames = true, .numstat = true });
-                if (status.spawned && !status.timed_out && status.exit_code == 0
-                    && branch.spawned && !branch.timed_out
-                    && branch.exit_code == 0 && diff.has_value()) {
+                if (command_ok(status) && command_ok(branch)
+                    && diff.has_value()) {
                     std::vector<ChangedFile> changed_files
                         = parse_git_status(status.output);
                     const std::string branch_name
