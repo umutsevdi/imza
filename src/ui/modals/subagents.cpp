@@ -56,98 +56,98 @@ namespace {
     class SubagentsView : public ComponentBase {
     public:
         explicit SubagentsView(ProviderStore& providers)
-            : provider_store_(providers)
+            : _provider_store(providers)
         {
-            pick_filter_ = make_model_pick_filter(pick_);
-            container_   = Container::Vertical({ pick_filter_ });
+            _pick_filter = make_model_pick_filter(_pick);
+            _container   = Container::Vertical({ _pick_filter });
         }
 
         Element OnRender() override
         {
-            if (picking_) {
-                return render_pick();
+            if (_picking) {
+                return _render_pick();
             }
-            return render_roles();
+            return _render_roles();
         }
 
         bool OnEvent(Event event) override
         {
-            if (picking_) {
-                return handle_pick_event(event);
+            if (_picking) {
+                return _handle_pick_event(event);
             }
-            return handle_role_event(event);
+            return _handle_role_event(event);
         }
 
     private:
-        std::string subagent_variant(SubagentRole role) const
+        std::string _subagent_variant(SubagentRole role) const
         {
-            const Config config = provider_store_.config();
+            const Config config = _provider_store.config();
             const auto found    = config.subagents.find(role);
             return to_wire_effort(subagent_variant_or_default(
                 found != config.subagents.end() ? &found->second : nullptr,
                 role));
         }
 
-        void begin_pick()
+        void _begin_pick()
         {
-            pick_.rows.clear();
-            pick_.rows.push_back(
+            _pick.rows.clear();
+            _pick.rows.push_back(
                 ModelRow { "", "", "<Default>", "use main chat model" });
-            for (const auto& view : provider_store_.connections()) {
-                const ModelList list = provider_store_.models_for(view.id);
+            for (const auto& view : _provider_store.connections()) {
+                const ModelList list = _provider_store.models_for(view.id);
                 for (const ModelInfo& info : list.models) {
-                    pick_.rows.push_back(
+                    _pick.rows.push_back(
                         make_model_row(view.id, view.name, info));
                 }
             }
-            pick_.filter.clear();
-            pick_.filter_cursor = 0;
-            pick_.refill_visible();
-            pick_.selected          = 0;
-            const SubagentRole role = role_at(selected_);
-            const Config config     = provider_store_.config();
+            _pick.filter.clear();
+            _pick.filter_cursor = 0;
+            _pick.refill_visible();
+            _pick.selected          = 0;
+            const SubagentRole role = role_at(_selected);
+            const Config config     = _provider_store.config();
             const auto found        = config.subagents.find(role);
             if (found != config.subagents.end()) {
-                for (int i = 0; i < static_cast<int>(pick_.visible.size());
+                for (int i = 0; i < static_cast<int>(_pick.visible.size());
                     ++i) {
                     const ModelRow& row
-                        = pick_
-                              .rows[pick_.visible[static_cast<std::size_t>(i)]];
+                        = _pick
+                              .rows[_pick.visible[static_cast<std::size_t>(i)]];
                     if (row.connection_id == found->second.provider
                         && row.model_id == found->second.model) {
-                        pick_.selected = i;
+                        _pick.selected = i;
                         break;
                     }
                 }
             }
-            if (pick_filter_) {
-                pick_filter_->TakeFocus();
+            if (_pick_filter) {
+                _pick_filter->TakeFocus();
             }
-            picking_ = true;
+            _picking = true;
         }
 
-        void save_model()
+        void _save_model()
         {
-            const ModelRow* row = pick_.chosen();
+            const ModelRow* row = _pick.chosen();
             if (!row) {
                 return;
             }
-            const SubagentRole role = role_at(selected_);
-            provider_store_.set_subagent_model(role,
+            const SubagentRole role = role_at(_selected);
+            _provider_store.set_subagent_model(role,
                 SubagentModelConfig { row->connection_id, row->model_id,
-                    subagent_variant(role) });
-            picking_ = false;
+                    _subagent_variant(role) });
+            _picking = false;
         }
 
-        void change_variant(int delta)
+        void _change_variant(int delta)
         {
-            const SubagentRole role = role_at(selected_);
+            const SubagentRole role = role_at(_selected);
             static const std::vector<std::string> variants { "off", "low",
                 "medium", "high" };
-            const Config config = provider_store_.config();
+            const Config config = _provider_store.config();
             const auto found    = config.subagents.find(role);
             auto current        = std::find(
-                variants.begin(), variants.end(), subagent_variant(role));
+                variants.begin(), variants.end(), _subagent_variant(role));
             int index = current == variants.end()
                 ? 2
                 : static_cast<int>(current - variants.begin());
@@ -158,60 +158,47 @@ namespace {
                 next = found->second;
             }
             next.variant = variants[static_cast<std::size_t>(index)];
-            provider_store_.set_subagent_model(role, std::move(next));
+            _provider_store.set_subagent_model(role, std::move(next));
         }
 
-        bool handle_pick_event(const Event& event)
+        bool _handle_pick_event(const Event& event)
         {
             if (event == Event::Escape) {
-                picking_ = false;
+                _picking = false;
                 return true;
             }
-            if (model_pick_move(pick_, event)) {
-                return true;
-            }
-            if (event == Event::Return) {
-                save_model();
-                return true;
-            }
-            return container_->OnEvent(event);
+            return handle_model_pick_event(
+                _pick, _container, event, [this] { _save_model(); });
         }
 
-        bool handle_role_event(const Event& event)
+        bool _handle_role_event(const Event& event)
         {
             if (event == Event::ArrowDown || event == Event::ArrowUp) {
-                move_list_cursor(event, selected_, SUBAGENT_ROLES);
+                move_list_cursor(event, _selected, SUBAGENT_ROLES);
                 return true;
             }
             if (event == Event::ArrowLeft || event == Event::ArrowRight) {
-                change_variant(event == Event::ArrowRight ? 1 : -1);
+                _change_variant(event == Event::ArrowRight ? 1 : -1);
                 return true;
             }
             if (event == Event::Return) {
-                begin_pick();
+                _begin_pick();
                 return true;
             }
             return false;
         }
 
-        Element render_pick()
+        Element _render_pick()
         {
-            Elements rows { modal_header(
-                role_name(role_at(selected_)) + " Subagent Model") };
-            rows.push_back(pick_filter_->Render() | xflex);
-            if (pick_.visible.empty()) {
-                rows.push_back(text("no matching models") | dim);
-            }
-            append_model_pick_rows(pick_, rows);
-            rows.push_back(separatorEmpty());
-            rows.push_back(
-                hint_bar("arrows navigate · Enter select · Esc back"));
-            return vbox(std::move(rows)) | xflex;
+            return render_model_pick(
+                role_name(role_at(_selected)) + " Subagent Model", _pick_filter,
+                _pick, nullptr, text("no matching models") | dim,
+                "arrows navigate · Enter select · Esc back");
         }
 
-        Element render_roles()
+        Element _render_roles()
         {
-            const Config config = provider_store_.config();
+            const Config config = _provider_store.config();
             Elements rows       = modal_header("Subagent Models",
                 "Tune subagent tasks. Choose <Default> to follow the main "
                 "chat model.");
@@ -226,8 +213,8 @@ namespace {
                 Element row = hbox({ text(role_name(role) + " Subagent"),
                     text("  " + role_description(role)) | dim, filler(),
                     text(model),
-                    text("  < " + subagent_variant(role) + " >") | dim });
-                if (index == selected_) {
+                    text("  < " + _subagent_variant(role) + " >") | dim });
+                if (index == _selected) {
                     row |= bgcolor(PANEL_COLOR_FOCUS);
                     row |= bold;
                 }
@@ -239,12 +226,12 @@ namespace {
             return vbox(std::move(rows)) | xflex;
         }
 
-        ProviderStore& provider_store_;
-        ModelPickList pick_;
-        Component pick_filter_;
-        Component container_;
-        int selected_ = 0;
-        bool picking_ = false;
+        ProviderStore& _provider_store;
+        ModelPickList _pick;
+        Component _pick_filter;
+        Component _container;
+        int _selected = 0;
+        bool _picking = false;
     };
 
 } // namespace

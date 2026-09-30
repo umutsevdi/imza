@@ -21,29 +21,29 @@ namespace {
     public:
         PlanTab(std::shared_ptr<ApplicationState> state, LayoutFn layout,
             Component chat)
-            : state_(std::move(state))
-            , layout_(std::move(layout))
-            , chat_(std::move(chat))
+            : _state(std::move(state))
+            , _layout(std::move(layout))
+            , _chat(std::move(chat))
             , _doc(make_plan_doc(
-                  state_, [this] { return _pane_ctx(); }, &_doc_focused))
+                  _state, [this] { return _pane_ctx(); }, &_doc_focused))
         {
             Add(_doc);
         }
 
-        Component chat() { return chat_; }
+        Component chat() { return _chat; }
 
         Element OnRender() override
         {
-            const LayoutCtx ctx = layout_();
+            const LayoutCtx ctx = _layout();
             const bool has_plan = _has_plan();
             if (!has_plan) {
-                return chat_->Render();
+                return _chat->Render();
             }
             if (ctx.kind == LayoutCtx::Kind::NARROW) {
-                return _doc_focused ? _doc->Render() : chat_->Render();
+                return _doc_focused ? _doc->Render() : _chat->Render();
             }
             return hbox({
-                chat_->Render() | size(WIDTH, EQUAL, ctx.width / 2)
+                _chat->Render() | size(WIDTH, EQUAL, ctx.width / 2)
                     | reflect(_chat_box),
                 separatorEmpty(),
                 _doc->Render() | xflex | reflect(_doc_box),
@@ -54,7 +54,7 @@ namespace {
         {
             const bool has_plan = _has_plan();
             if (!has_plan) {
-                return chat_->OnEvent(event);
+                return _chat->OnEvent(event);
             }
             if (is_sidechat_toggle(event)) {
                 _toggle_focus();
@@ -71,12 +71,12 @@ namespace {
                 && _doc_box.Contain(event.mouse().x, event.mouse().y)) {
                 return _doc->OnEvent(event);
             }
-            return _doc_focused ? _doc->OnEvent(event) : chat_->OnEvent(event);
+            return _doc_focused ? _doc->OnEvent(event) : _chat->OnEvent(event);
         }
 
         Component ActiveChild() override
         {
-            return _has_plan() && _doc_focused ? _doc : chat_;
+            return _has_plan() && _doc_focused ? _doc : _chat;
         }
 
     private:
@@ -85,7 +85,7 @@ namespace {
         // terminal's.
         LayoutCtx _pane_ctx() const
         {
-            LayoutCtx ctx = layout_();
+            LayoutCtx ctx = _layout();
             if (ctx.kind == LayoutCtx::Kind::WIDE) {
                 ctx.width = std::max(20, ctx.width / 2 - 1);
             }
@@ -114,7 +114,7 @@ namespace {
             return false;
         }
 
-        bool _has_plan() const { return !state_->session->plan_doc().empty(); }
+        bool _has_plan() const { return !_state->session->plan_doc().empty(); }
 
         void _toggle_focus()
         {
@@ -122,13 +122,13 @@ namespace {
             if (_doc_focused) {
                 _doc->TakeFocus();
             } else {
-                chat_->TakeFocus();
+                _chat->TakeFocus();
             }
         }
 
-        std::shared_ptr<ApplicationState> state_;
-        LayoutFn layout_;
-        Component chat_;
+        std::shared_ptr<ApplicationState> _state;
+        LayoutFn _layout;
+        Component _chat;
         Component _doc;
         Box _doc_box { };
         Box _chat_box { };

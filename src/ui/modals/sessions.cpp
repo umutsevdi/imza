@@ -23,43 +23,43 @@ namespace {
     class SessionsView : public ComponentBase {
     public:
         SessionsView(std::shared_ptr<ApplicationState> state)
-            : state_(std::move(state))
-            , session_(state_->session)
+            : _state(std::move(state))
+            , _session(_state->session)
         {
-            store_subscription_ = state_->sessions->subscribe(
+            _store_subscription = _state->sessions->subscribe(
                 [] { animation::RequestAnimationFrame(); });
-            filter_input_ = Input(field_option(
-                &filter_text_, &filter_cursor_, "filter sessions", [this] {
-                    selected_ = 0;
+            _filter_input = Input(field_option(
+                &_filter_text, &_filter_cursor, "filter sessions", [this] {
+                    _selected = 0;
                     _refill();
                 }));
             _refresh();
-            filter_input_->TakeFocus();
+            _filter_input->TakeFocus();
         }
 
         Element OnRender() override
         {
             _refresh();
             Elements rows              = modal_header("Sessions");
-            const bool loading_blocked = session_->has_pending_work();
-            if (!state_->sessions->ready()) {
+            const bool loading_blocked = _session->has_pending_work();
+            if (!_state->sessions->ready()) {
                 rows.push_back(text("Loading sessions…") | dim);
-            } else if (sessions_.empty()) {
+            } else if (_sessions.empty()) {
                 rows.push_back(text("No saved sessions") | dim);
-            } else if (confirming_) {
+            } else if (_confirming) {
                 rows.push_back(text("Delete “" + _row().title + "”?") | bold);
                 rows.push_back(separatorEmpty());
                 rows.push_back(hint_bar("Enter delete · Esc cancel"));
             } else {
-                rows.push_back(filter_input_->Render() | xflex);
-                if (visible_.empty()) {
+                rows.push_back(_filter_input->Render() | xflex);
+                if (_visible.empty()) {
                     rows.push_back(text("no matching sessions") | dim);
                 }
-                for (int i = 0; i < static_cast<int>(visible_.size()); ++i) {
-                    const SavedSession& entry = sessions_[visible_[i]];
-                    const bool locked         = locked_.contains(entry.path);
+                for (int i = 0; i < static_cast<int>(_visible.size()); ++i) {
+                    const SavedSession& entry = _sessions[_visible[i]];
+                    const bool locked         = _locked.contains(entry.path);
                     Element row               = hbox({
-                        text(i == selected_ ? "› " : "  "),
+                        text(i == _selected ? "› " : "  "),
                         text(entry.title),
                         filler(),
                         text(locked ? "locked" : entry.saved_at)
@@ -68,7 +68,7 @@ namespace {
                     if (locked) {
                         row = std::move(row) | dim;
                     }
-                    if (i == selected_) {
+                    if (i == _selected) {
                         row = std::move(row) | bold;
                     }
                     rows.push_back(std::move(row));
@@ -90,84 +90,84 @@ namespace {
         bool OnEvent(Event event) override
         {
             _refresh();
-            if (confirming_) {
+            if (_confirming) {
                 if (event == Event::Escape) {
-                    confirming_ = false;
+                    _confirming = false;
                     return true;
                 }
                 if (event == Event::Return) {
-                    imza::delete_saved_session(*state_, _row().path);
+                    imza::delete_saved_session(*_state, _row().path);
                     return true;
                 }
                 return true;
             }
             if (event == Event::Escape) {
-                imza::close_modal(*state_);
+                imza::close_modal(*_state);
                 return true;
             }
             if (event == Event::ArrowDown || event == Event::ArrowUp) {
                 move_list_cursor(
-                    event, selected_, static_cast<int>(visible_.size()));
+                    event, _selected, static_cast<int>(_visible.size()));
                 return true;
             }
-            if (event == Event::Delete && !visible_.empty()) {
-                confirming_ = true;
+            if (event == Event::Delete && !_visible.empty()) {
+                _confirming = true;
                 return true;
             }
-            if (event == Event::Return && !visible_.empty()) {
-                if (session_->has_pending_work() || _row_locked()) {
+            if (event == Event::Return && !_visible.empty()) {
+                if (_session->has_pending_work() || _row_locked()) {
                     return true;
                 }
-                imza::resolve_modal(*state_, ModalResult { _row().path });
+                imza::resolve_modal(*_state, ModalResult { _row().path });
                 return true;
             }
-            return filter_input_->OnEvent(event);
+            return _filter_input->OnEvent(event);
         }
 
     private:
         const SavedSession& _row() const
         {
-            return sessions_[visible_[static_cast<std::size_t>(selected_)]];
+            return _sessions[_visible[static_cast<std::size_t>(_selected)]];
         }
 
-        bool _row_locked() const { return locked_.contains(_row().path); }
+        bool _row_locked() const { return _locked.contains(_row().path); }
 
         void _refill()
         {
-            visible_ = filter_visible(filter_text_, sessions_.size(),
-                [this](std::size_t index) { return sessions_[index].title; });
+            _visible = filter_visible(_filter_text, _sessions.size(),
+                [this](std::size_t index) { return _sessions[index].title; });
         }
 
         void _refresh()
         {
-            const auto sessions = state_->sessions->sessions();
-            if (sessions == last_sessions_) {
+            const auto sessions = _state->sessions->sessions();
+            if (sessions == _last_sessions) {
                 return;
             }
-            last_sessions_ = sessions;
-            sessions_      = std::move(sessions);
-            locked_.clear();
-            for (const SavedSession& entry : sessions_) {
-                if (state_->sessions->is_locked(entry.path)) {
-                    locked_.insert(entry.path);
+            _last_sessions = sessions;
+            _sessions      = std::move(sessions);
+            _locked.clear();
+            for (const SavedSession& entry : _sessions) {
+                if (_state->sessions->is_locked(entry.path)) {
+                    _locked.insert(entry.path);
                 }
             }
-            selected_ = 0;
+            _selected = 0;
             _refill();
         }
 
-        std::shared_ptr<ApplicationState> state_;
-        std::shared_ptr<Session> session_;
-        Signal<>::Subscription store_subscription_;
-        std::vector<SavedSession> sessions_;
-        std::vector<SavedSession> last_sessions_;
-        std::vector<std::size_t> visible_;
-        std::set<std::filesystem::path> locked_;
-        std::string filter_text_;
-        int filter_cursor_ = 0;
-        int selected_      = 0;
-        Component filter_input_;
-        bool confirming_ = false;
+        std::shared_ptr<ApplicationState> _state;
+        std::shared_ptr<Session> _session;
+        Signal<>::Subscription _store_subscription;
+        std::vector<SavedSession> _sessions;
+        std::vector<SavedSession> _last_sessions;
+        std::vector<std::size_t> _visible;
+        std::set<std::filesystem::path> _locked;
+        std::string _filter_text;
+        int _filter_cursor = 0;
+        int _selected      = 0;
+        Component _filter_input;
+        bool _confirming = false;
     };
 
 } // namespace

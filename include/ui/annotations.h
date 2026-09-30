@@ -17,6 +17,15 @@ ftxui::InputOption multiline_field_option(std::string* content, int* cursor,
 // Review-style annotation card: cyan rail, focused background, body rows.
 ftxui::Element annotation_card(ftxui::Element body, int height);
 
+// Note card over `body` wrapped to `width`; *height receives the wrapped
+// row count for the host's row bookkeeping.
+ftxui::Element annotation_note_card(
+    std::string_view body, int width, int* height);
+// Editor card showing `draft` as a wrapped, cursor-less input with
+// `placeholder`; *height as above.
+ftxui::Element annotation_editor_card(std::string_view draft, int width,
+    std::string_view placeholder, int* height);
+
 // Inline draft editor for annotation cards: the multiline input, the draft
 // buffer, and the new-versus-edit state. The host pane decides when to
 // open, save, and cancel; it applies the note using anchor() and
@@ -25,62 +34,62 @@ ftxui::Element annotation_card(ftxui::Element body, int height);
 template <typename Anchor> class AnnotationEditor {
 public:
     explicit AnnotationEditor(std::function<void()> on_change = { })
-        : input_(ftxui::Input(&draft_,
-              multiline_field_option(&draft_, &draft_cursor_, "Leave a comment",
+        : _input(ftxui::Input(&_draft,
+              multiline_field_option(&_draft, &_draft_cursor, "Leave a comment",
                   std::move(on_change))))
     {
     }
 
-    ftxui::Component input() const { return input_; }
-    bool is_open() const { return open_; }
-    const std::string& draft() const { return draft_; }
-    const Anchor& anchor() const { return anchor_; }
+    ftxui::Component input() const { return _input; }
+    bool is_open() const { return _open; }
+    const std::string& draft() const { return _draft; }
+    const Anchor& anchor() const { return _anchor; }
     // Set when editing an existing note; nullopt for a new note.
-    std::optional<int> editing_id() const { return editing_; }
+    std::optional<int> editing_id() const { return _editing; }
 
     void begin(const Anchor& anchor)
     {
-        anchor_ = anchor;
-        editing_.reset();
-        open_ = true;
-        draft_.clear();
-        draft_cursor_ = 0;
-        input_->TakeFocus();
+        _anchor = anchor;
+        _editing.reset();
+        _open = true;
+        _draft.clear();
+        _draft_cursor = 0;
+        _input->TakeFocus();
     }
 
     void begin_edit(int id, std::string body)
     {
-        editing_      = id;
-        open_         = true;
-        draft_        = std::move(body);
-        draft_cursor_ = static_cast<int>(draft_.size());
-        input_->TakeFocus();
+        _editing      = id;
+        _open         = true;
+        _draft        = std::move(body);
+        _draft_cursor = static_cast<int>(_draft.size());
+        _input->TakeFocus();
     }
 
     // Closes the editor and returns the draft; empty means nothing to save.
     std::string save()
     {
-        open_ = false;
-        return std::exchange(draft_, { });
+        _open = false;
+        return std::exchange(_draft, { });
     }
 
     void close()
     {
-        open_ = false;
-        editing_.reset();
-        draft_.clear();
-        draft_cursor_ = 0;
+        _open = false;
+        _editing.reset();
+        _draft.clear();
+        _draft_cursor = 0;
     }
 
     void newline();
 
 private:
-    std::string draft_;
-    int draft_cursor_ = 0;
-    Anchor anchor_ { };
-    std::optional<int> editing_;
-    bool open_ = false;
-    ftxui::Component input_;
+    std::string _draft;
+    int _draft_cursor = 0;
+    Anchor _anchor { };
+    std::optional<int> _editing;
+    bool _open = false;
+    ftxui::Component _input;
 };
 
 } // namespace imza

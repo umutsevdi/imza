@@ -115,6 +115,10 @@ ftxui::InputOption password_option(std::string* content, int* cursor,
 ftxui::Component action_button(std::string label,
     std::function<void()> on_click, const ftxui::Color& color = PANEL_BORDER,
     const ftxui::Color& color_focussed = PANEL_COLOR_FOCUS);
+// Live-label variant: every frame renders the current value of *label.
+ftxui::Component action_button(const std::string* label,
+    std::function<void()> on_click, const ftxui::Color& color = PANEL_BORDER,
+    const ftxui::Color& color_focussed = PANEL_COLOR_FOCUS);
 ftxui::Component inline_link_button(std::function<ftxui::Element()> render,
     std::function<void()> on_click,
     const ftxui::Color& inactive_color = PANEL_FG_DIM);
@@ -127,6 +131,8 @@ ftxui::Component split_inline_link_button(std::string primary,
 std::string elapsed_text(std::chrono::milliseconds elapsed);
 std::string compact_number(std::uint64_t n);
 ftxui::Element hint_bar(std::string hint);
+// The shared busy spinner, dimmed to the panel palette.
+ftxui::Element dim_spinner(int frame);
 ftxui::Elements modal_header(std::string title, std::string subtitle = "");
 // Plan document #0 is the "Initial Plan"; later ones are "Revision N".
 std::string plan_revision_label(std::size_t index);
@@ -216,8 +222,19 @@ struct ModelPickList {
 ftxui::Component make_model_pick_filter(ModelPickList& pick);
 // Arrow keys move the picker selection; false for other events.
 bool model_pick_move(ModelPickList& pick, const ftxui::Event& event);
+// Shared picker event flow: arrows move the selection, Return calls
+// `on_submit`, other events reach `container`. Modal-specific keys
+// (refresh, cancel) are handled by the caller before this.
+bool handle_model_pick_event(ModelPickList& pick, ftxui::Component container,
+    const ftxui::Event& event, std::function<void()> on_submit);
 // Appends one row element per visible model entry.
 void append_model_pick_rows(const ModelPickList& pick, ftxui::Elements& rows);
+// Picker modal body: header, filter row, `status_row` (fetch progress,
+// when given), `empty_state` when no row is visible, the visible rows,
+// and the hint bar.
+ftxui::Element render_model_pick(const std::string& title,
+    ftxui::Component filter, const ModelPickList& pick,
+    ftxui::Element status_row, ftxui::Element empty_state, std::string hint);
 
 // Indices of `rows` whose `match` text contains the lowercased, trimmed
 // `filter`. Empty filter selects every row.

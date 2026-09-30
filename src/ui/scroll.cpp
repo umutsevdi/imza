@@ -25,7 +25,7 @@ ftxui::Decorator capture_content_height(std::function<void(int)> out)
     public:
         Impl(ftxui::Element child, std::function<void(int)> out)
             : ftxui::Node(ftxui::Elements { std::move(child) })
-            , out_(std::move(out))
+            , _out(std::move(out))
         {
         }
 
@@ -33,7 +33,7 @@ ftxui::Decorator capture_content_height(std::function<void(int)> out)
         {
             ftxui::Node::ComputeRequirement();
             requirement_ = children_[0]->requirement();
-            out_(requirement_.min_y);
+            _out(requirement_.min_y);
         }
 
         void SetBox(ftxui::Box box) override
@@ -43,7 +43,7 @@ ftxui::Decorator capture_content_height(std::function<void(int)> out)
         }
 
     private:
-        std::function<void(int)> out_;
+        std::function<void(int)> _out;
     };
     return [out = std::move(out)](ftxui::Element child) {
         return std::make_shared<Impl>(std::move(child), out);

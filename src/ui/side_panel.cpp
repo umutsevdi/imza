@@ -54,84 +54,82 @@ namespace {
 
 } // namespace
 
-// Plans widget: the newest plan carries the live marker, superseded
-// ones stay dim; each row opens the plan in the viewer modal.
 class SidePanel : public ComponentBase {
 public:
     SidePanel(std::shared_ptr<ApplicationState> state, LayoutFn layout,
         WorkflowFn workflow, WorkflowNavigateFn navigate)
-        : state_(std::move(state))
-        , layout_(std::move(layout))
-        , workflow_(std::move(workflow))
-        , navigate_(std::move(navigate))
-        , workspace_subscription_(
-              state_->environment->subscribe_to_workspace_change(
+        : _state(std::move(state))
+        , _layout(std::move(layout))
+        , _workflow(std::move(workflow))
+        , _navigate(std::move(navigate))
+        , _workspace_subscription(
+              _state->environment->subscribe_to_workspace_change(
                   [] { animation::RequestAnimationFrame(); }))
-        , repository_subscription_(
-              state_->environment->subscribe_to_repository_change(
+        , _repository_subscription(
+              _state->environment->subscribe_to_repository_change(
                   [] { animation::RequestAnimationFrame(); }))
-        , attachments_subscription_(
-              state_->session->subscribe_to_attachments_change([this] {
-                  attachments_dirty_.store(true);
+        , _attachments_subscription(
+              _state->session->subscribe_to_attachments_change([this] {
+                  _attachments_dirty.store(true);
                   animation::RequestAnimationFrame();
               }))
-        , review_subscription_(state_->review ? state_->review->subscribe([] {
+        , _review_subscription(_state->review ? _state->review->subscribe([] {
             animation::RequestAnimationFrame();
         })
                                               : Signal<>::Subscription { })
-        , permission_subscription_(
-              state_->permissions->subscribe_to_grants_change(
-                  [state = std::weak_ptr<ApplicationState>(state_)] {
+        , _permission_subscription(
+              _state->permissions->subscribe_to_grants_change(
+                  [state = std::weak_ptr<ApplicationState>(_state)] {
                       if (const auto current = state.lock()) {
                           current->post(
                               [] { animation::RequestAnimationFrame(); });
                       }
                   }))
-        , update_subscription_(state_->environment->subscribe_to_update_change(
-              [state = std::weak_ptr<ApplicationState>(state_)] {
+        , _update_subscription(_state->environment->subscribe_to_update_change(
+              [state = std::weak_ptr<ApplicationState>(_state)] {
                   if (const auto current = state.lock()) {
                       current->post([] { animation::RequestAnimationFrame(); });
                   }
               }))
     {
-        links_container_ = Container::Vertical({ });
-        Add(links_container_);
+        _links_container = Container::Vertical({ });
+        Add(_links_container);
     }
 
     Element OnRender() override
     {
-        const LayoutCtx ctx = layout_();
+        const LayoutCtx ctx = _layout();
         const bool narrow   = ctx.kind == LayoutCtx::Kind::NARROW;
-        active_links_.clear();
+        _active_links.clear();
         Elements parts;
         _append_plans(parts);
         _append_review_comments(parts);
-        if (state_->session->todo().items.size()) {
-            parts.push_back(render_todo(state_->session->todo(), ctx) | yflex);
+        if (_state->session->todo().items.size()) {
+            parts.push_back(render_todo(_state->session->todo(), ctx) | yflex);
         }
         if (!narrow) {
-            const auto& env       = state_->environment;
+            const auto& env       = _state->environment;
             const auto repository = env->repository();
             if (repository && !repository->changed_files.empty()) {
                 parts.push_back(_render_changed_files(*repository) | yflex);
             }
-            if (attachments_dirty_.exchange(false)) {
-                attachment_names_ = state_->session->attachment_names();
+            if (_attachments_dirty.exchange(false)) {
+                _attachment_names = _state->session->attachment_names();
             }
             const auto [project, global]
-                = state_->skills->counts(state_->environment->skills());
+                = _state->skills->counts(_state->environment->skills());
             parts.push_back(render_context_box(
-                env->agent_rules_path(), attachment_names_, project, global));
+                env->agent_rules_path(), _attachment_names, project, global));
             const PermissionStore::Snapshot grants
-                = state_->permissions->snapshot();
+                = _state->permissions->snapshot();
             PermissionView permissions
-                = make_permission_view(state_->runtime_flags, *grants);
+                = make_permission_view(_state->runtime_flags, *grants);
             if (has_custom_permissions(permissions)) {
                 parts.push_back(render_permissions_box(permissions));
             }
         }
         if (const std::optional<std::string> update
-            = state_->environment->update_available()) {
+            = _state->environment->update_available()) {
             parts.push_back(render_update_available(*update));
         }
         Element body = vbox(std::move(parts));
@@ -143,7 +141,7 @@ public:
 
     bool OnEvent(Event event) override
     {
-        for (const Component& link : active_links_) {
+        for (const Component& link : _active_links) {
             if (link->OnEvent(event)) {
                 return true;
             }
@@ -159,7 +157,7 @@ private:
 
     template <typename Key, typename Payload, typename Render, typename Click,
         typename Update>
-    Component memoized_link(std::map<Key, Link<Payload>>& cache, Key key,
+    Component _memoized_link(std::map<Key, Link<Payload>>& cache, Key key,
         std::shared_ptr<Payload> payload, Render render, Click on_click,
         Update update)
     {
@@ -168,7 +166,7 @@ private:
             Component component = inline_link_button(
                 [payload, render] { return render(*payload); },
                 std::move(on_click), PANEL_FG_DIM);
-            links_container_->Add(component);
+            _links_container->Add(component);
             found = cache
                         .emplace(std::move(key),
                             Link<Payload> { std::move(payload), component })
@@ -176,15 +174,17 @@ private:
         } else {
             update(*found->second.data);
         }
-        active_links_.push_back(found->second.component);
+        _active_links.push_back(found->second.component);
         return found->second.component;
     }
 
+    // Plans widget: the newest plan carries the live marker, superseded
+    // ones stay dim; each row opens the plan in the viewer modal.
     void _append_plans(Elements& parts)
     {
-        const std::vector<PlanDoc> plans = state_->session->snapshot().plans;
+        const std::vector<PlanDoc> plans = _state->session->snapshot().plans;
         if (plans.empty()) {
-            plan_links_.clear();
+            _plan_links.clear();
             return;
         }
         Elements rows;
@@ -208,10 +208,10 @@ private:
 
     void _append_review_comments(Elements& parts)
     {
-        if (workflow_() != WorkflowPhase::REVIEW || !state_->review) {
+        if (_workflow() != WorkflowPhase::REVIEW || !_state->review) {
             return;
         }
-        const std::vector<ReviewComment> comments = state_->review->comments();
+        const std::vector<ReviewComment> comments = _state->review->comments();
         if (comments.empty()) {
             return;
         }
@@ -237,14 +237,14 @@ private:
 
     Component _changed_file_link(const ChangedFile& file)
     {
-        return memoized_link(
-            file_links_, file.path, std::make_shared<ChangedFile>(file),
+        return _memoized_link(
+            _file_links, file.path, std::make_shared<ChangedFile>(file),
             [](const ChangedFile& current) {
                 return changed_file_item(current);
             },
             [this, target = changed_file_target(file)] {
-                state_->review->request_file_jump(target);
-                navigate_(WorkflowPhase::REVIEW);
+                _state->review->request_file_jump(target);
+                _navigate(WorkflowPhase::REVIEW);
             },
             [&file](ChangedFile& existing) { existing = file; });
     }
@@ -253,8 +253,8 @@ private:
         std::size_t index, const std::string& content, bool latest)
     {
         auto payload = std::make_shared<std::string>(content);
-        return memoized_link(
-            plan_links_, index, payload,
+        return _memoized_link(
+            _plan_links, index, payload,
             [index, latest](const std::string&) {
                 // Explicit colors are only needed on the latest row: the
                 // link wrapper already paints inactive rows dim-colored,
@@ -271,37 +271,37 @@ private:
                 ViewerModal vm { plan_revision_label(index), *payload, "md",
                     1 };
                 vm.line_numbers = false;
-                enqueue_user_modal(*state_, vm);
+                enqueue_user_modal(*_state, vm);
             },
             [content](std::string& existing) { existing = content; });
     }
 
     Component _comment_link(std::size_t id, std::string label)
     {
-        return memoized_link(
-            comment_links_, id, std::make_shared<std::string>(label),
+        return _memoized_link(
+            _comment_links, id, std::make_shared<std::string>(label),
             [](const std::string& current) { return text(current) | bold; },
-            [this, id] { state_->review->request_jump(id); },
+            [this, id] { _state->review->request_jump(id); },
             [&label](std::string& existing) { existing = std::move(label); });
     }
 
-    std::shared_ptr<ApplicationState> state_;
-    LayoutFn layout_;
-    WorkflowFn workflow_;
-    WorkflowNavigateFn navigate_;
-    Signal<>::Subscription workspace_subscription_;
-    Signal<>::Subscription repository_subscription_;
-    std::atomic<bool> attachments_dirty_ { true };
-    std::vector<std::string> attachment_names_;
-    Signal<>::Subscription attachments_subscription_;
-    Signal<>::Subscription review_subscription_;
-    Signal<>::Subscription permission_subscription_;
-    Signal<>::Subscription update_subscription_;
-    Component links_container_;
-    std::map<std::string, Link<ChangedFile>> file_links_;
-    std::map<std::size_t, Link<std::string>> plan_links_;
-    std::map<std::size_t, Link<std::string>> comment_links_;
-    std::vector<Component> active_links_;
+    std::shared_ptr<ApplicationState> _state;
+    LayoutFn _layout;
+    WorkflowFn _workflow;
+    WorkflowNavigateFn _navigate;
+    Signal<>::Subscription _workspace_subscription;
+    Signal<>::Subscription _repository_subscription;
+    std::atomic<bool> _attachments_dirty { true };
+    std::vector<std::string> _attachment_names;
+    Signal<>::Subscription _attachments_subscription;
+    Signal<>::Subscription _review_subscription;
+    Signal<>::Subscription _permission_subscription;
+    Signal<>::Subscription _update_subscription;
+    Component _links_container;
+    std::map<std::string, Link<ChangedFile>> _file_links;
+    std::map<std::size_t, Link<std::string>> _plan_links;
+    std::map<std::size_t, Link<std::string>> _comment_links;
+    std::vector<Component> _active_links;
 };
 
 ftxui::Component make_side_panel(std::shared_ptr<ApplicationState> state,

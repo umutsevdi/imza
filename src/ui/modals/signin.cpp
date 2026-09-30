@@ -7,10 +7,8 @@
 #include "providers/subscriptions.h"
 
 #include <ftxui/component/component.hpp>
-#include <ftxui/component/component_options.hpp>
 #include <ftxui/dom/elements.hpp>
 
-#include <algorithm>
 #include <atomic>
 #include <functional>
 #include <memory>
@@ -51,48 +49,37 @@ namespace {
     public:
         SubscriptionSignin(std::shared_ptr<ApplicationState> state,
             std::string id, std::function<std::string()> label = { })
-            : state_(std::move(state))
-            , id_(std::move(id))
-            , label_(std::move(label))
-            , data_(std::make_shared<SigninData>())
+            : _state(std::move(state))
+            , _id(std::move(id))
+            , _label(std::move(label))
+            , _data(std::make_shared<SigninData>())
+            , _button(action_button(&_button_label, [this] { _primary(); }))
         {
-            ButtonOption option;
-            option.label     = &button_label_;
-            option.on_click  = [this] { _primary(); };
-            option.transform = [](const EntryState& entry) {
-                Element element = text(" " + entry.label + " ");
-                if (entry.focused) {
-                    return element | bold | bgcolor(PANEL_COLOR_FOCUS)
-                        | color(PANEL_FG);
-                }
-                return element | bgcolor(PANEL_BORDER) | color(PANEL_FG);
-            };
-            button_ = Button(option);
-            Add(Container::Vertical({ button_ }));
+            Add(Container::Vertical({ _button }));
         }
 
         ~SubscriptionSignin() override
         {
-            data_->active.store(false);
-            worker_.reset();
+            _data->active.store(false);
+            _worker.reset();
         }
 
         Element OnRender() override
         {
             _sync_button();
             Elements rows;
-            if (!data_->code.empty()) {
+            if (!_data->code.empty()) {
                 rows.push_back(hbox({ text("Device code  ") | bold,
-                    text(data_->code) | bold }));
+                    text(_data->code) | bold }));
             }
-            rows.push_back(button_->Render());
-            if (data_->phase == SigninData::Phase::STARTING) {
+            rows.push_back(_button->Render());
+            if (_data->phase == SigninData::Phase::STARTING) {
                 rows.push_back(text("requesting sign-in code…") | dim);
-            } else if (data_->phase == SigninData::Phase::WAITING) {
+            } else if (_data->phase == SigninData::Phase::WAITING) {
                 rows.push_back(
                     text("waiting for browser authorization…") | dim);
-            } else if (data_->phase == SigninData::Phase::FAILED) {
-                rows.push_back(text(data_->error) | color(HL_RED));
+            } else if (_data->phase == SigninData::Phase::FAILED) {
+                rows.push_back(text(_data->error) | color(HL_RED));
             }
             return vbox(std::move(rows));
         }
@@ -100,22 +87,22 @@ namespace {
     private:
         void _sync_button()
         {
-            switch (data_->phase) {
+            switch (_data->phase) {
             case SigninData::Phase::WAITING:
-                button_label_ = "Open browser";
+                _button_label = "Open browser";
                 return;
-            case SigninData::Phase::FAILED: button_label_ = "Retry"; return;
+            case SigninData::Phase::FAILED: _button_label = "Retry"; return;
             case SigninData::Phase::IDLE:
-            case SigninData::Phase::STARTING: button_label_ = "Connect"; return;
+            case SigninData::Phase::STARTING: _button_label = "Connect"; return;
             }
         }
 
         void _primary()
         {
-            switch (data_->phase) {
+            switch (_data->phase) {
             case SigninData::Phase::WAITING:
-                if (!data_->url.empty()) {
-                    open_browser(data_->url);
+                if (!_data->url.empty()) {
+                    open_browser(_data->url);
                 }
                 return;
             case SigninData::Phase::STARTING: return;
@@ -126,38 +113,35 @@ namespace {
 
         bool _label_free()
         {
-            const std::string label = label_ ? label_() : "";
-            const std::string key   = connection_key_for(id_, label);
-            const Config config     = state_->providers->config();
-            return !std::any_of(config.providers.begin(),
-                config.providers.end(), [&](const Connection& connection) {
-                    return connection_key(connection) == key;
-                });
+            const std::string label = _label ? _label() : "";
+            const std::string key   = connection_key_for(_id, label);
+            const Config config     = _state->providers->config();
+            return find_connection(config.providers, key) == nullptr;
         }
 
         void _start()
         {
             if (!_label_free()) {
-                data_->phase = SigninData::Phase::FAILED;
-                data_->error = "Set a label above first - this provider is "
+                _data->phase = SigninData::Phase::FAILED;
+                _data->error = "Set a label above first - this provider is "
                                "already connected.";
                 return;
             }
-            data_->phase = SigninData::Phase::STARTING;
-            data_->code.clear();
-            data_->url.clear();
-            data_->error.clear();
-            worker_.reset();
-            start_openai();
+            _data->phase = SigninData::Phase::STARTING;
+            _data->code.clear();
+            _data->url.clear();
+            _data->error.clear();
+            _worker.reset();
+            _start_openai();
         }
 
-        void post_result(SubscriptionResult result)
+        void _post_result(SubscriptionResult result)
         {
-            const std::weak_ptr<SigninData> weak          = data_;
-            const std::shared_ptr<ApplicationState> state = state_;
-            const std::string id                          = id_;
-            state_->post([weak, state, id, result = std::move(result),
-                             label_getter = label_] {
+            const std::weak_ptr<SigninData> weak          = _data;
+            const std::shared_ptr<ApplicationState> state = _state;
+            const std::string id                          = _id;
+            _state->post([weak, state, id, result = std::move(result),
+                             label_getter = _label] {
                 const auto data = weak.lock();
                 if (!data || !data->active.load()) {
                     return;
@@ -184,11 +168,11 @@ namespace {
             });
         }
 
-        void start_openai()
+        void _start_openai()
         {
-            const std::weak_ptr<SigninData> weak          = data_;
-            const std::shared_ptr<ApplicationState> state = state_;
-            worker_.emplace([this, weak, state](std::stop_token stop) {
+            const std::weak_ptr<SigninData> weak          = _data;
+            const std::shared_ptr<ApplicationState> state = _state;
+            _worker.emplace([this, weak, state](std::stop_token stop) {
                 const OpenAIDeviceCodeResult requested
                     = request_openai_device_code();
                 const auto data = weak.lock();
@@ -196,7 +180,7 @@ namespace {
                     return;
                 }
                 if (requested.status != Status::OK) {
-                    post_result({ requested.status, { }, requested.error });
+                    _post_result({ requested.status, { }, requested.error });
                     return;
                 }
                 state->post([weak, code = requested.code] {
@@ -209,17 +193,17 @@ namespace {
                     current->url   = code.verification_url;
                     open_browser(current->url);
                 });
-                post_result(await_openai_device_code(requested.code, stop));
+                _post_result(await_openai_device_code(requested.code, stop));
             });
         }
 
-        std::shared_ptr<ApplicationState> state_;
-        std::string id_;
-        std::function<std::string()> label_;
-        std::shared_ptr<SigninData> data_;
-        std::optional<std::jthread> worker_;
-        std::string button_label_ = "Connect";
-        Component button_;
+        std::shared_ptr<ApplicationState> _state;
+        std::string _id;
+        std::function<std::string()> _label;
+        std::shared_ptr<SigninData> _data;
+        std::optional<std::jthread> _worker;
+        std::string _button_label = "Connect";
+        Component _button;
     };
 
 } // namespace
