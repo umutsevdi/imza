@@ -78,14 +78,14 @@ ProviderStore::ProviderStore(Config config, ModelsFn models_fn)
 
 ProviderStore::~ProviderStore()
 {
-    alive_.store(false);
+    _alive.store(false);
     _catalog_worker.reset();
     _workers.clear();
 }
 
 Signal<>::Subscription ProviderStore::subscribe(ProviderChangedFn callback)
 {
-    return changed_.subscribe(std::move(callback));
+    return _changed.subscribe(std::move(callback));
 }
 
 Config ProviderStore::config() const
@@ -421,7 +421,7 @@ void ProviderStore::connect(ConnectResult result, ConnectCompleteFn complete)
             const Status fetched          = subscription_connection(result.id)
                 ? Status::OK
                 : _models_fn(route, models);
-            if (!alive_.load()) {
+            if (!_alive.load()) {
                 return;
             }
             ConnectOutcome outcome;
@@ -545,7 +545,7 @@ void ProviderStore::ensure_catalog_fresh()
     _catalog_worker.emplace([this] {
         Catalog catalog;
         const Status status = fetch_catalog(catalog);
-        if (!alive_.load()) {
+        if (!_alive.load()) {
             return;
         }
         {
@@ -627,7 +627,7 @@ void ProviderStore::_start_fetch_locked(const std::string& connection_id)
     _workers.emplace_back([this, connection_id, generation, route] {
         std::vector<ModelInfo> models;
         const Status status = _models_fn(route, models);
-        if (!alive_.load()) {
+        if (!_alive.load()) {
             return;
         }
         {
@@ -687,6 +687,6 @@ Status ProviderStore::_commit_connection_locked(const ConnectResult& result,
     return Status::OK;
 }
 
-void ProviderStore::_notify_changed() { changed_.publish(); }
+void ProviderStore::_notify_changed() { _changed.publish(); }
 
 } // namespace imza

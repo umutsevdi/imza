@@ -24,7 +24,7 @@ bool copy_to_clipboard(
 #endif
     const CommandResult result
         = run_command(command, std::chrono::seconds { 2 }, { }, text);
-    return result.spawned && !result.timed_out && result.exit_code == 0;
+    return command_ok(result);
 }
 
 } // namespace imza

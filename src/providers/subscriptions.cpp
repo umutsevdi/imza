@@ -142,7 +142,7 @@ namespace {
         if (status != Status::OK) {
             return failure(status, body);
         }
-        if (code < 200 || code >= 300) {
+        if (!http_ok(code)) {
             return failure(Status::API_ERROR, body);
         }
         return parse_token_response(body);
@@ -197,7 +197,7 @@ OpenAIDeviceCodeResult request_openai_device_code(SubscriptionHttpPost post)
     if (status != Status::OK) {
         return { status, { }, body.empty() ? error_text(status) : body };
     }
-    if (code < 200 || code >= 300) {
+    if (!http_ok(code)) {
         return { Status::API_ERROR, { }, body };
     }
     const Json::Value root = parse_json(body);
@@ -242,7 +242,7 @@ SubscriptionResult await_openai_device_code(const OpenAIDeviceCode& code,
         if (status != Status::OK) {
             return failure(status, body);
         }
-        if (http_code >= 200 && http_code < 300) {
+        if (http_ok(http_code)) {
             return exchange_openai(parse_json(body), post);
         }
         if (http_code != 403 && http_code != 404) {
@@ -277,7 +277,7 @@ SubscriptionResult refresh_subscription(std::string_view connection_id,
     if (status != Status::OK) {
         return failure(status, body);
     }
-    if (http_code < 200 || http_code >= 300) {
+    if (!http_ok(http_code)) {
         return failure(Status::API_ERROR, body);
     }
     return parse_token_response(body, refresh_token, account_id);

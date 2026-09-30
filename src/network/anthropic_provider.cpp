@@ -130,11 +130,7 @@ namespace {
                     = state.tool_accums[root.get("index", 0).asInt()];
                 acc.id   = block.get("id", "").asString();
                 acc.name = block.get("name", "").asString();
-                if (!acc.started && !acc.name.empty()) {
-                    acc.started = true;
-                    outs.push_back(
-                        make_tool_call_start_event(finish_accum(acc)));
-                }
+                emit_ready_tool_start(acc, outs);
             } else if (type == "thinking") {
                 ThinkingAccum& acc
                     = state.thinking_accums[root.get("index", 0).asInt()];
@@ -216,10 +212,7 @@ namespace {
         if (event == "message_stop") {
             state.terminal = true;
             flush_tool_accums(state, outs);
-            if (state.usage.prompt > 0 || state.usage.completion > 0
-                || state.usage.total > 0) {
-                outs.push_back(make_usage_event(state.usage));
-            }
+            emit_usage_once(state, state.usage, outs);
             outs.push_back(make_done_event());
             return;
         }

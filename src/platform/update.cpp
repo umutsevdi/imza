@@ -232,7 +232,7 @@ std::optional<UpdateInfo> fetch_update(
         { "User-Agent: imza-updater", "Accept: application/vnd.github+json" },
         FETCH_TIMEOUT_SECS, body, &http_code);
     const std::optional<UpdateInfo> update
-        = status == Status::OK && http_code == 200
+        = status == Status::OK && http_ok(http_code)
         ? parse_latest_release(body, package_managers, current_version)
         : std::nullopt;
     save_update_cache(update_state_path(),
@@ -252,7 +252,7 @@ int install_update(
     const Status status
         = http_get(update.download_url, { "User-Agent: imza-updater" },
             DOWNLOAD_TIMEOUT_SECS, body, &http_code);
-    if (status != Status::OK || http_code != 200) {
+    if (status != Status::OK || !http_ok(http_code)) {
         return 1;
     }
     std::error_code error;

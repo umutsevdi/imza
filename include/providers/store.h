@@ -139,8 +139,8 @@ private:
     std::set<std::string> _refreshing;
     std::vector<std::jthread> _workers;
     std::optional<std::jthread> _catalog_worker;
-    Signal<> changed_;
-    std::atomic<bool> alive_ { true };
+    Signal<> _changed;
+    std::atomic<bool> _alive { true };
 };
 
 } // namespace imza
