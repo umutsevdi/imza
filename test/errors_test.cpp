@@ -70,21 +70,7 @@ TEST_CASE("OpenAI parse turns mid-stream error blocks into ERROR events")
     CHECK(outs[0].text == "Provider had an incident");
 }
 
-struct AgentEnv {
-    imza::test::PostPump pump;
-    std::vector<imza::ChatRequest> requests;
-    imza::StreamFn stream;
-    std::shared_ptr<imza::ApplicationState> state
-        = imza::test::make_test_state(pump.fn(), imza::test::test_config(),
-            [this](const imza::ChatRequest& req,
-                const imza::StreamCallback& cb) { return stream(req, cb); });
-    std::shared_ptr<imza::Session> session = state->session;
-
-    AgentEnv()
-    {
-        REQUIRE(pump.wait_for([&] { return state->environment->ready(); }));
-    }
-};
+using AgentEnv = imza::test::AgentEnv;
 
 TEST_CASE("controller retries rate-limited requests and then completes")
 {

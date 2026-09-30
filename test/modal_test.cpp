@@ -24,48 +24,7 @@
 
 namespace {
 
-struct Env {
-    imza::test::PostPump pump;
-    std::vector<imza::ChatRequest> requests;
-    imza::StreamFn stream;
-    std::shared_ptr<imza::ApplicationState> state;
-    std::shared_ptr<imza::Session> session;
-
-    explicit Env(imza::RuntimeFlag flags = imza::interactive_runtime_flags())
-        : state(imza::test::make_test_state(
-              pump.fn(), imza::test::test_config(),
-              [this](const imza::ChatRequest& req,
-                  const imza::StreamCallback& cb) { return stream(req, cb); },
-              flags))
-        , session(state->session)
-    {
-        REQUIRE(pump.wait_for([&] { return state->environment->ready(); }));
-    }
-
-    const imza::ChatRequest& last_request() const { return requests.back(); }
-
-    size_t user_turn_count() const
-    {
-        size_t n = 0;
-        for (const auto& it : session->items()) {
-            if (std::holds_alternative<imza::UserTurn>(it)) {
-                ++n;
-            }
-        }
-        return n;
-    }
-
-    const imza::ToolCall* pending_tool() const
-    {
-        for (auto it = session->items().rbegin(); it != session->items().rend();
-            ++it) {
-            if (const auto* tc = std::get_if<imza::ToolCall>(&*it)) {
-                return tc;
-            }
-        }
-        return nullptr;
-    }
-};
+using AgentEnv = imza::test::AgentEnv;
 
 bool showing_tool_ask(const imza::Session& st)
 {
@@ -83,7 +42,7 @@ bool showing_question(const imza::Session& st)
 
 TEST_CASE("plan requests omit edit and write tools")
 {
-    Env env;
+    AgentEnv env;
     env.stream
         = [&env](const imza::ChatRequest& req, const imza::StreamCallback& cb) {
               env.requests.push_back(req);
@@ -105,7 +64,7 @@ TEST_CASE("plan requests omit edit and write tools")
 
 TEST_CASE("attended root turn notifies once after completion")
 {
-    Env env;
+    AgentEnv env;
     std::vector<imza::AgentNotification> notifications;
     env.state->notify_user = [&notifications](imza::AgentNotification event) {
         notifications.push_back(event);
@@ -127,7 +86,7 @@ TEST_CASE("attended root turn notifies once after completion")
 
 TEST_CASE("agent question notifies when input is required")
 {
-    Env env;
+    AgentEnv env;
     std::vector<imza::AgentNotification> notifications;
     env.state->notify_user = [&notifications](imza::AgentNotification event) {
         notifications.push_back(event);
@@ -157,7 +116,7 @@ TEST_CASE("agent question notifies when input is required")
 
 TEST_CASE("agent shell approval notifies when input is required")
 {
-    Env env;
+    AgentEnv env;
     std::vector<imza::AgentNotification> notifications;
     env.state->notify_user = [&notifications](imza::AgentNotification event) {
         notifications.push_back(event);
@@ -187,7 +146,7 @@ TEST_CASE("agent shell approval notifies when input is required")
 
 TEST_CASE("queued agent modal notifies only when presented")
 {
-    Env env;
+    AgentEnv env;
     std::vector<imza::AgentNotification> notifications;
     env.state->notify_user = [&notifications](imza::AgentNotification event) {
         notifications.push_back(event);
@@ -214,7 +173,7 @@ TEST_CASE("queued agent modal notifies only when presented")
 
 TEST_CASE("plan mode rejects mutating file operations at the gate")
 {
-    Env env;
+    AgentEnv env;
     const imza::test::TempDir directory;
     const std::filesystem::path out_path = directory.file("out.txt");
     auto round                           = std::make_shared<int>(0);
@@ -245,7 +204,7 @@ TEST_CASE("plan mode rejects mutating file operations at the gate")
 
 TEST_CASE("subagent tool waits for a research agent and retains its chat")
 {
-    Env env;
+    AgentEnv env;
     env.stream
         = [&env](const imza::ChatRequest& req, const imza::StreamCallback& cb) {
               env.requests.push_back(req);
@@ -269,13 +228,6 @@ TEST_CASE("subagent tool waits for a research agent and retains its chat")
     const bool finished = env.pump.wait_for([&] {
         return imza::test::idle(*env.session) && env.pending_tool() != nullptr;
     });
-    CAPTURE(env.requests.size());
-    if (!env.requests.empty() && !env.requests.front().messages.empty()) {
-        CAPTURE(env.requests.front().messages.back().content);
-    }
-    CAPTURE(env.session->items().size());
-    CAPTURE(static_cast<int>(env.session->phase()));
-    CAPTURE(env.session->error());
     REQUIRE(finished);
     const imza::ToolCall* call = env.pending_tool();
     REQUIRE(call != nullptr);
@@ -305,7 +257,7 @@ TEST_CASE("subagent tool waits for a research agent and retains its chat")
 
 TEST_CASE("subagent tool captures two concurrent agents separately")
 {
-    Env env;
+    AgentEnv env;
     env.stream = [](const imza::ChatRequest& req,
                      const imza::StreamCallback& cb) {
         const std::string last = req.messages.empty()
@@ -369,7 +321,7 @@ TEST_CASE("subagent tool captures two concurrent agents separately")
 
 TEST_CASE("delegated-agent approvals surface through the main modal queue")
 {
-    Env env;
+    AgentEnv env;
     env.stream = [](const imza::ChatRequest& req,
                      const imza::StreamCallback& cb) {
         const bool child = std::any_of(req.messages.begin(), req.messages.end(),
@@ -414,7 +366,7 @@ TEST_CASE("delegated-agent approvals surface through the main modal queue")
 
 TEST_CASE("subagent failure reports preserve the last completed tool output")
 {
-    Env env;
+    AgentEnv env;
     env.stream = [](const imza::ChatRequest& req,
                      const imza::StreamCallback& cb) {
         const bool child = std::any_of(req.messages.begin(), req.messages.end(),
@@ -464,7 +416,7 @@ TEST_CASE("subagent failure reports preserve the last completed tool output")
 
 TEST_CASE("subagent tool rejects build tasks while main agent is planning")
 {
-    Env env;
+    AgentEnv env;
     env.stream
         = [](const imza::ChatRequest& req, const imza::StreamCallback& cb) {
               if (!req.messages.empty()
@@ -483,9 +435,6 @@ TEST_CASE("subagent tool rejects build tasks while main agent is planning")
     const bool finished = env.pump.wait_for([&] {
         return imza::test::idle(*env.session) && env.pending_tool() != nullptr;
     });
-    CAPTURE(env.session->items().size());
-    CAPTURE(static_cast<int>(env.session->phase()));
-    CAPTURE(env.session->error());
     REQUIRE(finished);
     const imza::ToolCall* call = env.pending_tool();
     REQUIRE(call != nullptr);
@@ -499,7 +448,7 @@ TEST_CASE("subagent tool rejects build tasks while main agent is planning")
 TEST_CASE(
     "question round-trip: AWAITING while pending, reply folded, ask stable")
 {
-    Env env;
+    AgentEnv env;
     auto round = std::make_shared<int>(0);
     env.stream = [&env, round](const imza::ChatRequest& req,
                      const imza::StreamCallback& cb) {
@@ -560,7 +509,7 @@ TEST_CASE(
 
 TEST_CASE("tool accept: output fills result, request half byte-stable")
 {
-    Env env;
+    AgentEnv env;
     env.session->set_mode(imza::Session::Mode::BUILD);
     auto round = std::make_shared<int>(0);
     env.stream = [&env, round](const imza::ChatRequest& req,
@@ -609,7 +558,7 @@ TEST_CASE("tool accept: output fills result, request half byte-stable")
 
 TEST_CASE("reject with reason reaches transcript and injected result")
 {
-    Env env;
+    AgentEnv env;
     auto round = std::make_shared<int>(0);
     env.stream = [&env, round](const imza::ChatRequest& req,
                      const imza::StreamCallback& cb) {
@@ -647,7 +596,7 @@ TEST_CASE("reject with reason reaches transcript and injected result")
 
 TEST_CASE("esc on tool injects generic denial, appends nothing to transcript")
 {
-    Env env;
+    AgentEnv env;
     auto round = std::make_shared<int>(0);
     env.stream = [&env, round](const imza::ChatRequest& req,
                      const imza::StreamCallback& cb) {
@@ -682,7 +631,7 @@ TEST_CASE("esc on tool injects generic denial, appends nothing to transcript")
 
 TEST_CASE("esc on question skips form, appends nothing, no exception")
 {
-    Env env;
+    AgentEnv env;
     env.stream
         = [&env](const imza::ChatRequest& req, const imza::StreamCallback& cb) {
               env.requests.push_back(req);
@@ -710,7 +659,7 @@ TEST_CASE("esc on question skips form, appends nothing, no exception")
 
 TEST_CASE("one drain cycle folds question answer and tool output correctly")
 {
-    Env env;
+    AgentEnv env;
     auto round = std::make_shared<int>(0);
     env.stream = [&env, round](const imza::ChatRequest& req,
                      const imza::StreamCallback& cb) {
@@ -766,7 +715,7 @@ TEST_CASE("one drain cycle folds question answer and tool output correctly")
 
 TEST_CASE("FIFO order preserved and queue_size counts overlays")
 {
-    Env env;
+    AgentEnv env;
     auto round = std::make_shared<int>(0);
     env.stream = [&env, round](const imza::ChatRequest& req,
                      const imza::StreamCallback& cb) {
@@ -808,7 +757,7 @@ TEST_CASE("FIFO order preserved and queue_size counts overlays")
 
 TEST_CASE("markdown viewer renders markdown instead of source lines")
 {
-    Env env;
+    AgentEnv env;
     imza::enqueue_user_modal(*env.state,
         imza::ViewerModal { "Document", "# Heading\n\n```cpp\nreturn 1;\n```",
             "markdown", 1, true, "" });
@@ -827,7 +776,7 @@ TEST_CASE("markdown viewer renders markdown instead of source lines")
 
 TEST_CASE("one-time shell approval does not authorize later calls")
 {
-    Env env;
+    AgentEnv env;
     auto round = std::make_shared<int>(0);
     env.stream = [&env, round](const imza::ChatRequest& req,
                      const imza::StreamCallback& cb) {
@@ -879,7 +828,7 @@ TEST_CASE("one-time shell approval does not authorize later calls")
 
 TEST_CASE("filesystem session approval installs an exact reusable grant")
 {
-    Env env;
+    AgentEnv env;
     env.session->set_mode(imza::Session::Mode::BUILD);
     imza::test::TempDir directory;
     const std::filesystem::path path = directory.file("approved.txt");
@@ -920,7 +869,7 @@ TEST_CASE("filesystem session approval installs an exact reusable grant")
 
 TEST_CASE("dangerous skip accepts permission-gated tools without a modal")
 {
-    Env env(static_cast<imza::RuntimeFlag>(
+    AgentEnv env(static_cast<imza::RuntimeFlag>(
         imza::ATTENDED | imza::SHELL | imza::SKIP_PERMISSIONS));
     env.stream = [](const imza::ChatRequest& req,
                      const imza::StreamCallback& cb) {
@@ -944,7 +893,7 @@ TEST_CASE("dangerous skip accepts permission-gated tools without a modal")
 
 TEST_CASE("dangerous skip does not weaken hard rejection")
 {
-    Env env(
+    AgentEnv env(
         static_cast<imza::RuntimeFlag>(imza::SHELL | imza::SKIP_PERMISSIONS));
     env.stream = [](const imza::ChatRequest& req,
                      const imza::StreamCallback& cb) {
@@ -968,7 +917,7 @@ TEST_CASE("dangerous skip does not weaken hard rejection")
 
 TEST_CASE("tools with an automatic policy run without an approval modal")
 {
-    Env env(static_cast<imza::RuntimeFlag>(
+    AgentEnv env(static_cast<imza::RuntimeFlag>(
         imza::interactive_runtime_flags() | imza::RuntimeFlag::WEB));
     auto round = std::make_shared<int>(0);
     env.stream = [&env, round](const imza::ChatRequest& req,
@@ -1001,7 +950,7 @@ TEST_CASE("tools with an automatic policy run without an approval modal")
 
 TEST_CASE("unknown tools error back to the model without a modal")
 {
-    Env env;
+    AgentEnv env;
     auto round = std::make_shared<int>(0);
     env.stream = [&env, round](const imza::ChatRequest& req,
                      const imza::StreamCallback& cb) {
@@ -1031,7 +980,7 @@ TEST_CASE("unknown tools error back to the model without a modal")
 
 TEST_CASE("modal action buttons respond to mouse clicks")
 {
-    Env env;
+    AgentEnv env;
     env.session->set_mode(imza::Session::Mode::BUILD);
     env.stream = [&env](const imza::ChatRequest& req,
                      const imza::StreamCallback& cb) {
@@ -1058,7 +1007,7 @@ TEST_CASE("modal action buttons respond to mouse clicks")
 
 TEST_CASE("skill approval modal renders its canonical baseline")
 {
-    Env env;
+    AgentEnv env;
     imza::PermissionPrompt prompt;
     prompt.name              = "skill";
     prompt.description       = "Load skill docs";
@@ -1122,7 +1071,7 @@ Esc reject
 }
 TEST_CASE("closing a modal keeps keyboard focus on the chat")
 {
-    Env env;
+    AgentEnv env;
     env.stream = [](const imza::ChatRequest& request,
                      const imza::StreamCallback& callback) {
         if (request.messages.back().type == imza::Message::Type::USER) {

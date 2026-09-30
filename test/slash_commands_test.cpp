@@ -3,12 +3,11 @@
 #include "app/slash_commands.h"
 #include "platform/config.h"
 #include "test_fs.h"
+#include "test_helpers.h"
 #include "test_state.h"
-#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
-#include <thread>
 
 #include <doctest/doctest.h>
 
@@ -172,8 +171,8 @@ TEST_CASE("CLI accepts multiple allowed directories")
 TEST_CASE("CLI config creates the file and opens an editor")
 {
 #ifdef _WIN32
-    return;
-#else
+    SKIP_ON_WIN32()
+#endif
     const imza::test::IsolatedDataHome home;
     const char* previous_visual = std::getenv("VISUAL");
     const std::string saved_visual
@@ -194,7 +193,6 @@ TEST_CASE("CLI config creates the file and opens an editor")
     } else {
         setenv("VISUAL", saved_visual.c_str(), 1);
     }
-#endif
 }
 
 TEST_CASE("CLI parses ask as an unattended Plan one-shot")
@@ -294,18 +292,16 @@ TEST_CASE("run_slash /make-skill seeds a Build-mode turn")
             return imza::Status::OK;
         });
     REQUIRE(state->providers->active_selection().has_value());
-    while (!state->environment->ready()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+    REQUIRE(
+        imza::test::wait_until([&] { return state->environment->ready(); }));
 
     int mode_changes = 0;
     const auto subscription
         = state->session->subscribe_to_mode_change([&] { ++mode_changes; });
 
     run_slash(*state, "/make-skill deploy with docker compose");
-    while (state->session->phase() != imza::Session::Phase::IDLE) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+    REQUIRE(imza::test::wait_until(
+        [&] { return state->session->phase() == imza::Session::Phase::IDLE; }));
 
     CHECK(state->session->mode() == imza::Session::Mode::BUILD);
     CHECK(mode_changes > 0);
@@ -352,20 +348,17 @@ TEST_CASE("run_slash /compact folds a forced summary into the session")
             return imza::Status::OK;
         });
     REQUIRE(state->providers->active_selection().has_value());
-    while (!state->environment->ready()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+    REQUIRE(
+        imza::test::wait_until([&] { return state->environment->ready(); }));
 
     submit(*state, "first user message");
-    while (state->session->phase() != imza::Session::Phase::IDLE) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+    REQUIRE(imza::test::wait_until(
+        [&] { return state->session->phase() == imza::Session::Phase::IDLE; }));
     state->session->clear_error();
 
     run_slash(*state, "/compact");
-    while (state->session->phase() != imza::Session::Phase::IDLE) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+    REQUIRE(imza::test::wait_until(
+        [&] { return state->session->phase() == imza::Session::Phase::IDLE; }));
 
     CHECK(summarizer_input.find("first user message") != std::string::npos);
     CHECK(state->session->error().empty());
