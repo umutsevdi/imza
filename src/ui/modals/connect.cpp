@@ -75,29 +75,29 @@ namespace {
     public:
         explicit ConnectView(
             std::shared_ptr<ApplicationState> state, ProviderStore& providers)
-            : state_(std::move(state))
-            , session_(state_->session)
-            , provider_store_(providers)
+            : _state(std::move(state))
+            , _session(_state->session)
+            , _provider_store(providers)
         {
         }
 
         Element OnRender() override
         {
-            sync_phase();
-            if (entry_ == ConnectModal::Entry::PICK_MODEL) {
-                maybe_rebuild_pick();
-                return render_pick();
+            _sync_phase();
+            if (_entry == ConnectModal::Entry::PICK_MODEL) {
+                _maybe_rebuild_pick();
+                return _render_pick();
             }
-            maybe_rebuild_manage();
-            return render_manage();
+            _maybe_rebuild_manage();
+            return _render_manage();
         }
 
         bool OnEvent(Event event) override
         {
-            if (entry_ == ConnectModal::Entry::PICK_MODEL) {
-                return handle_pick_event(event);
+            if (_entry == ConnectModal::Entry::PICK_MODEL) {
+                return _handle_pick_event(event);
             }
-            return handle_manage_event(event);
+            return _handle_manage_event(event);
         }
 
     private:
@@ -106,116 +106,110 @@ namespace {
             ModelList list;
         };
 
-        bool handle_pick_event(const Event& event)
+        bool _handle_pick_event(const Event& event)
         {
             if (event == Event::F5 || event == Event::CtrlR) {
-                for (const auto& view : views()) {
-                    provider_store_.refetch_models(view.id);
+                for (const auto& view : _views()) {
+                    _provider_store.refetch_models(view.id);
                 }
                 return true;
             }
-            if (model_pick_move(pick_, event)) {
-                return true;
-            }
-            if (event == Event::Return) {
-                submit_pick();
-                return true;
-            }
-            return container_ ? container_->OnEvent(event) : false;
+            return handle_model_pick_event(
+                _pick, _container, event, [this] { _submit_pick(); });
         }
 
-        bool handle_manage_event(const Event& event)
+        bool _handle_manage_event(const Event& event)
         {
-            if (picker_open_) {
+            if (_picker_open) {
                 if (event == Event::ArrowDown || event == Event::ArrowUp) {
-                    move_list_cursor(event, picker_selected_,
-                        static_cast<int>(picker_ids_.size()));
+                    move_list_cursor(event, _picker_selected,
+                        static_cast<int>(_picker_ids.size()));
                     return true;
                 }
                 if (event == Event::Escape) {
-                    close_picker();
+                    _close_picker();
                     return true;
                 }
                 if (event == Event::Return) {
-                    commit_picker();
+                    _commit_picker();
                     return true;
                 }
-                return container_ ? container_->OnEvent(event) : false;
+                return _container ? _container->OnEvent(event) : false;
             }
 
             bool confirming = false;
-            for (const auto& entry : confirm_) {
+            for (const auto& entry : _confirm) {
                 confirming = confirming || entry.second;
             }
             if (confirming) {
                 if (event == Event::Character('y')) {
-                    confirm_remove(row_selected_);
+                    _confirm_remove(_row_selected);
                     return true;
                 }
                 if (event == Event::Character('n') || event == Event::Escape) {
-                    confirm_.clear();
-                    rebuild_manage();
+                    _confirm.clear();
+                    _rebuild_manage();
                     return true;
                 }
-                return container_ ? container_->OnEvent(event) : false;
+                return _container ? _container->OnEvent(event) : false;
             }
 
             const bool focus_in_add
-                = add_container_ && add_container_->Focused();
-            if (!in_add_ && !focus_in_add) {
+                = _add_container && _add_container->Focused();
+            if (!_in_add && !focus_in_add) {
                 if (event == Event::ArrowDown) {
-                    row_move(1);
+                    _row_move(1);
                     return true;
                 }
                 if (event == Event::ArrowUp) {
-                    row_move(-1);
+                    _row_move(-1);
                     return true;
                 }
                 if (event == Event::Delete) {
-                    if (row_selected_ >= 0
-                        && row_selected_ < static_cast<int>(views().size())) {
-                        confirm_[row_selected_] = true;
-                        rebuild_manage();
+                    if (_row_selected >= 0
+                        && _row_selected < static_cast<int>(_views().size())) {
+                        _confirm[_row_selected] = true;
+                        _rebuild_manage();
                     }
                     return true;
                 }
-            } else if (event == Event::ArrowUp && picker_input_
-                && picker_input_->Focused()) {
-                in_add_        = false;
-                const auto all = views();
-                row_selected_
+            } else if (event == Event::ArrowUp && _picker_input
+                && _picker_input->Focused()) {
+                _in_add        = false;
+                const auto all = _views();
+                _row_selected
                     = all.empty() ? 0 : static_cast<int>(all.size()) - 1;
-                if (row_selected_ < static_cast<int>(row_buttons_.size())) {
-                    row_buttons_[static_cast<std::size_t>(row_selected_)]
+                if (_row_selected < static_cast<int>(_row_buttons.size())) {
+                    _row_buttons[static_cast<std::size_t>(_row_selected)]
                         ->TakeFocus();
                 }
                 return true;
             }
-            return container_ ? container_->OnEvent(event) : false;
+            return _container ? _container->OnEvent(event) : false;
         }
 
-        void sync_phase()
+        void _sync_phase()
         {
-            const Session& st = *session_;
+            const Session& st = *_session;
             const auto modal  = st.modal();
             if (const auto* m = std::get_if<ConnectModal>(&modal)) {
-                if (m->entry != entry_) {
-                    picker_open_  = false;
-                    in_add_       = false;
-                    row_selected_ = 0;
-                    entry_        = m->entry;
+                if (m->entry != _entry) {
+                    _picker_open  = false;
+                    _in_add       = false;
+                    _row_selected = 0;
+                    _entry        = m->entry;
                 }
             }
         }
 
-        std::vector<ConnectionView> views() const
+        std::vector<ConnectionView> _views() const
         {
-            return provider_store_.connections();
+            return _provider_store.connections();
         }
 
-        bool provider_connected(std::string_view provider_id)
+        bool _provider_connected(std::string_view provider_id)
         {
-            for (const auto& view : views()) {
+            for (const auto& view : _views()) {
                 if (view.provider == provider_id) {
                     return true;
                 }
@@ -223,219 +217,218 @@ namespace {
             return false;
         }
 
-        void row_move(int delta)
+        void _row_move(int delta)
         {
-            const auto all = views();
+            const auto all = _views();
             if (all.empty()) {
-                in_add_ = true;
-                if (picker_input_) {
-                    picker_input_->TakeFocus();
+                _in_add = true;
+                if (_picker_input) {
+                    _picker_input->TakeFocus();
                 }
                 return;
             }
             if (delta > 0
-                && row_selected_ >= static_cast<int>(all.size()) - 1) {
-                in_add_ = true;
-                if (picker_input_) {
-                    picker_input_->TakeFocus();
+                && _row_selected >= static_cast<int>(all.size()) - 1) {
+                _in_add = true;
+                if (_picker_input) {
+                    _picker_input->TakeFocus();
                 }
                 return;
             }
-            row_selected_ = std::clamp(
-                row_selected_ + delta, 0, static_cast<int>(all.size()) - 1);
-            if (row_selected_ < static_cast<int>(row_buttons_.size())) {
-                row_buttons_[static_cast<std::size_t>(row_selected_)]
+            _row_selected = std::clamp(
+                _row_selected + delta, 0, static_cast<int>(all.size()) - 1);
+            if (_row_selected < static_cast<int>(_row_buttons.size())) {
+                _row_buttons[static_cast<std::size_t>(_row_selected)]
                     ->TakeFocus();
             }
         }
 
-        std::string selected_provider_name()
+        std::string _selected_provider_name()
         {
-            for (const auto& [id, name] : providers_) {
-                if (id == selected_provider_) {
+            for (const auto& [id, name] : _providers) {
+                if (id == _selected_provider) {
                     return name;
                 }
             }
             return "";
         }
 
-        void refill_picker()
+        void _refill_picker()
         {
-            const std::string needle = to_lower(trim(picker_buf_));
-            picker_labels_.clear();
-            picker_ids_.clear();
-            picker_selected_ = 0;
-            for (const auto& [id, name] : providers_) {
+            const std::string needle = to_lower(trim(_picker_buf));
+            _picker_labels.clear();
+            _picker_ids.clear();
+            _picker_selected = 0;
+            for (const auto& [id, name] : _providers) {
                 if (!needle.empty()
                     && to_lower(name).find(needle) == std::string::npos
                     && id.find(needle) == std::string::npos) {
                     continue;
                 }
-                picker_ids_.push_back(id);
-                picker_labels_.push_back(name);
+                _picker_ids.push_back(id);
+                _picker_labels.push_back(name);
             }
         }
 
-        void commit_picker()
+        void _commit_picker()
         {
-            if (picker_ids_.empty()
-                || picker_selected_ >= static_cast<int>(picker_ids_.size())) {
-                close_picker();
+            if (_picker_ids.empty()
+                || _picker_selected >= static_cast<int>(_picker_ids.size())) {
+                _close_picker();
                 return;
             }
-            selected_provider_
-                = picker_ids_[static_cast<std::size_t>(picker_selected_)];
-            picker_buf_    = selected_provider_name();
-            picker_cursor_ = static_cast<int>(picker_buf_.size());
-            picker_open_   = false;
-            rebuild_manage();
-            if (subscription_signin_) {
-                subscription_signin_->TakeFocus();
-            } else if (key_input_) {
-                key_input_->TakeFocus();
+            _selected_provider
+                = _picker_ids[static_cast<std::size_t>(_picker_selected)];
+            _picker_buf    = _selected_provider_name();
+            _picker_cursor = static_cast<int>(_picker_buf.size());
+            _picker_open   = false;
+            _rebuild_manage();
+            if (_subscription_signin) {
+                _subscription_signin->TakeFocus();
+            } else if (_key_input) {
+                _key_input->TakeFocus();
             }
         }
 
-        void close_picker()
+        void _close_picker()
         {
-            picker_buf_    = selected_provider_name();
-            picker_cursor_ = static_cast<int>(picker_buf_.size());
-            picker_open_   = false;
+            _picker_buf    = _selected_provider_name();
+            _picker_cursor = static_cast<int>(_picker_buf.size());
+            _picker_open   = false;
         }
 
-        std::string current_endpoint()
+        std::string _current_endpoint()
         {
-            if (selected_provider_ != CUSTOM_PROVIDER_ID) {
+            if (_selected_provider != CUSTOM_PROVIDER_ID) {
                 return "";
             }
-            return endpoint_for_base(strip_slash(trim(base_buf_)));
+            return endpoint_for_base(strip_slash(trim(_base_buf)));
         }
 
-        std::string current_signature()
+        std::string _current_signature()
         {
-            return selected_provider_ + "|" + current_endpoint() + "|"
-                + std::string(trim(key_buf_));
+            return _selected_provider + "|" + _current_endpoint() + "|"
+                + std::string(trim(_key_buf));
         }
 
-        bool test_ok()
+        bool _test_ok()
         {
-            return tested_signature_ == current_signature()
-                && session_->connect_status().rfind("✓", 0) == 0;
+            return _tested_signature == _current_signature()
+                && _session->connect_status().rfind("✓", 0) == 0;
         }
 
-        void maybe_rebuild_manage()
+        void _maybe_rebuild_manage()
         {
-            const Session& st = *session_;
+            const Session& st = *_session;
             bool confirming   = false;
-            for (const auto& entry : confirm_) {
+            for (const auto& entry : _confirm) {
                 confirming = confirming || entry.second;
             }
-            const bool base_visible = selected_provider_ == CUSTOM_PROVIDER_ID;
+            const bool base_visible = _selected_provider == CUSTOM_PROVIDER_ID;
             const std::uint64_t status_key
                 = std::hash<std::string> { }(st.connect_status()) << 32;
             const std::uint64_t key = status_key + st.modal_serial() * 16ULL
                 + (confirming ? 4ULL : 0ULL) + (base_visible ? 2ULL : 0ULL)
-                + (selected_provider_.empty() ? 0ULL : 1ULL);
-            if (key == manage_key_) {
+                + (_selected_provider.empty() ? 0ULL : 1ULL);
+            if (key == _manage_key) {
                 return;
             }
-            manage_key_ = key;
-            rebuild_manage();
+            _manage_key = key;
+            _rebuild_manage();
         }
 
-        void rebuild_manage()
+        void _rebuild_manage()
         {
-            providers_ = provider_store_.provider_options();
-            refill_picker();
-            picker_input_ = Input(field_option(
-                &picker_buf_, &picker_cursor_, "type to search providers",
+            _providers = _provider_store.provider_options();
+            _refill_picker();
+            _picker_input = Input(field_option(
+                &_picker_buf, &_picker_cursor, "type to search providers",
                 [this] {
-                    row_error_.clear();
-                    if (!picker_open_) {
-                        picker_open_ = true;
+                    _row_error.clear();
+                    if (!_picker_open) {
+                        _picker_open = true;
                     }
-                    refill_picker();
+                    _refill_picker();
                 },
                 [this] {
-                    if (picker_open_) {
-                        commit_picker();
+                    if (_picker_open) {
+                        _commit_picker();
                     }
                 }));
 
-            const bool base_visible = selected_provider_ == CUSTOM_PROVIDER_ID;
-            const bool subscription = subscription_provider(selected_provider_);
-            label_input_ = Input(field_option(&label_buf_, &label_cursor_,
-                provider_connected(selected_provider_)
+            const bool base_visible = _selected_provider == CUSTOM_PROVIDER_ID;
+            const bool subscription = subscription_provider(_selected_provider);
+            _label_input = Input(field_option(&_label_buf, &_label_cursor,
+                _provider_connected(_selected_provider)
                     ? "label (required - already connected)"
                     : "label (optional), e.g. my Ollama",
-                [this] { row_error_.clear(); }));
-            base_input_  = Input(field_option(&base_buf_, &base_cursor_,
+                [this] { _row_error.clear(); }));
+            _base_input  = Input(field_option(&_base_buf, &_base_cursor,
                 "base URL, e.g. http://localhost:1234/v1",
-                [this] { row_error_.clear(); }));
-            key_input_   = Input(password_option(&key_buf_, &key_cursor_,
+                [this] { _row_error.clear(); }));
+            _key_input   = Input(password_option(&_key_buf, &_key_cursor,
                 base_visible ? "API key (optional)" : "API key",
-                [this] { row_error_.clear(); }));
+                [this] { _row_error.clear(); }));
 
-            const auto on_action
-                = [this] { test_ok() ? run_save() : run_test(); };
-            action_button_
-                = action_button(test_ok() ? "Save" : "Test", on_action);
+            const auto on_action = [this] { _run_action(_test_ok()); };
+            _action_button
+                = action_button(_test_ok() ? "Save" : "Test", on_action);
 
             Components rows;
-            const auto all = views();
-            row_buttons_.clear();
+            const auto all = _views();
+            _row_buttons.clear();
             for (int i = 0; i < static_cast<int>(all.size()); ++i) {
-                rows.push_back(make_row(i));
+                rows.push_back(_make_row(i));
             }
-            rows_container_ = Container::Vertical(std::move(rows));
+            _rows_container = Container::Vertical(std::move(rows));
 
             Components add_parts;
-            add_parts.push_back(picker_input_);
-            add_parts.push_back(label_input_);
+            add_parts.push_back(_picker_input);
+            add_parts.push_back(_label_input);
             if (base_visible) {
-                add_parts.push_back(base_input_);
+                add_parts.push_back(_base_input);
             }
             if (subscription) {
-                if (subscription_id_ != selected_provider_) {
-                    subscription_signin_
-                        = make_subscription_signin(state_, selected_provider_,
-                            [this] { return std::string(trim(label_buf_)); });
-                    subscription_id_ = selected_provider_;
+                if (_subscription_id != _selected_provider) {
+                    _subscription_signin
+                        = make_subscription_signin(_state, _selected_provider,
+                            [this] { return std::string(trim(_label_buf)); });
+                    _subscription_id = _selected_provider;
                 }
-                add_parts.push_back(subscription_signin_);
+                add_parts.push_back(_subscription_signin);
             } else {
-                subscription_signin_.reset();
-                subscription_id_.clear();
-                add_parts.push_back(key_input_);
-                add_parts.push_back(action_button_);
+                _subscription_signin.reset();
+                _subscription_id.clear();
+                add_parts.push_back(_key_input);
+                add_parts.push_back(_action_button);
             }
-            add_container_ = Container::Vertical(std::move(add_parts));
+            _add_container = Container::Vertical(std::move(add_parts));
 
-            container_
-                = Container::Vertical({ rows_container_, add_container_ });
+            _container
+                = Container::Vertical({ _rows_container, _add_container });
 
-            if (in_add_) {
-                if (picker_input_) {
-                    picker_input_->TakeFocus();
+            if (_in_add) {
+                if (_picker_input) {
+                    _picker_input->TakeFocus();
                 }
-            } else if (!row_buttons_.empty()) {
-                row_buttons_[static_cast<std::size_t>(std::min(row_selected_,
-                                 static_cast<int>(row_buttons_.size()) - 1))]
+            } else if (!_row_buttons.empty()) {
+                _row_buttons[static_cast<std::size_t>(std::min(_row_selected,
+                                 static_cast<int>(_row_buttons.size()) - 1))]
                     ->TakeFocus();
             }
         }
 
-        Component make_row(int index)
+        Component _make_row(int index)
         {
             const bool is_confirm
-                = confirm_.count(index) != 0 && confirm_.at(index);
+                = _confirm.count(index) != 0 && _confirm.at(index);
 
             Component label = Renderer([this, index] {
-                const auto all = views();
+                const auto all = _views();
                 if (index >= 0 && index < static_cast<int>(all.size())) {
                     const ConnectionView& view
                         = all[static_cast<std::size_t>(index)];
-                    const bool highlighted = index == row_selected_ && !in_add_;
+                    const bool highlighted = index == _row_selected && !_in_add;
                     Element state_el       = text("");
                     if (view.state == ConnectionView::State::READY) {
                         state_el = text("✓") | color(HL_GREEN);
@@ -480,121 +473,115 @@ namespace {
             Component right;
             if (is_confirm) {
                 Component yes = action_button(
-                    "Yes", [this, index] { confirm_remove(index); });
+                    "Yes", [this, index] { _confirm_remove(index); });
                 Component no = action_button("No", [this, index] {
-                    confirm_.erase(index);
-                    rebuild_manage();
+                    _confirm.erase(index);
+                    _rebuild_manage();
                 });
                 right        = Container::Horizontal(
                     { yes, Renderer([] { return text(" "); }), no });
             } else {
                 right = action_button("Remove", [this, index] {
-                    confirm_[index] = true;
-                    rebuild_manage();
+                    _confirm[index] = true;
+                    _rebuild_manage();
                 });
             }
 
             Component row = Container::Horizontal({ label, right });
             row->SetActiveChild(right);
-            row_buttons_.push_back(right);
+            _row_buttons.push_back(right);
             return Renderer(row, [row, this, index, is_confirm] {
                 Element e = row->Render() | xflex;
-                if (is_confirm || (index == row_selected_ && !in_add_)) {
+                if (is_confirm || (index == _row_selected && !_in_add)) {
                     e |= bgcolor(PANEL_COLOR_FOCUS);
                 }
                 return e;
             });
         }
 
-        void confirm_remove(int index)
+        void _confirm_remove(int index)
         {
-            const auto all = views();
+            const auto all = _views();
             if (index < 0 || index >= static_cast<int>(all.size())
-                || !provider_store_.remove_connection(
+                || !_provider_store.remove_connection(
                     static_cast<std::size_t>(index),
                     all[static_cast<std::size_t>(index)].id)) {
-                row_error_ = "Cannot remove the last connection.";
-                confirm_.erase(index);
-                rebuild_manage();
+                _row_error = "Cannot remove the last connection.";
+                _confirm.erase(index);
+                _rebuild_manage();
                 return;
             }
-            confirm_.erase(index);
-            row_error_.clear();
-            row_selected_ = 0;
-            rebuild_manage();
+            _confirm.erase(index);
+            _row_error.clear();
+            _row_selected = 0;
+            _rebuild_manage();
         }
 
-        void run_test()
+        void _run_action(bool persist)
         {
-            const ConnectResult res = build_result(false);
+            const ConnectResult res = _build_result(persist);
             if (res.id.empty()) {
                 return;
             }
-            tested_signature_ = current_signature();
-            imza::resolve_modal(*state_, ModalResult { res });
-        }
-
-        void run_save()
-        {
-            const ConnectResult res = build_result(true);
-            if (res.id.empty()) {
-                return;
+            // Only Test records the signature; Save already requires one.
+            if (!persist) {
+                _tested_signature = _current_signature();
             }
-            imza::resolve_modal(*state_, ModalResult { res });
+            imza::resolve_modal(*_state, ModalResult { res });
         }
 
-        ConnectResult build_result(bool persist)
+        ConnectResult _build_result(bool persist)
         {
             ConnectResult res;
-            res.id      = selected_provider_;
+            res.id      = _selected_provider;
             res.persist = persist;
             if (res.id.empty()) {
-                row_error_ = "Select a provider.";
+                _row_error = "Select a provider.";
                 return res;
             }
-            res.endpoint = current_endpoint();
+            res.endpoint = _current_endpoint();
             if ((res.id == CUSTOM_PROVIDER_ID) && res.endpoint.empty()) {
-                row_error_ = "Enter a base URL.";
+                _row_error = "Enter a base URL.";
                 res.id     = "";
                 return res;
             }
-            res.api_key = trim(key_buf_);
-            res.label   = trim(label_buf_);
+            res.api_key = trim(_key_buf);
+            res.label   = trim(_label_buf);
             if (res.label.find('/') != std::string::npos) {
-                row_error_ = "Label cannot contain '/'.";
+                _row_error = "Label cannot contain '/'.";
                 res.id     = "";
                 return res;
             }
             const std::string key = connection_key_for(res.id, res.label);
-            for (const auto& view : views()) {
+            for (const auto& view : _views()) {
                 if (view.id == key) {
-                    row_error_ = "Already connected - use a different label.";
+                    _row_error = "Already connected - use a different label.";
                     res.id     = "";
                     return res;
                 }
             }
-            row_error_.clear();
+            _row_error.clear();
             return res;
         }
 
-        Element picker_area()
+        Element _picker_area()
         {
             const std::string pad(FORM_LABEL + 2, ' ');
             Elements rows;
-            rows.push_back(picker_input_->Render() | xflex);
-            if (picker_open_) {
+            rows.push_back(_picker_input->Render() | xflex);
+            if (_picker_open) {
                 rows.push_back(
-                    text(pad + std::to_string(picker_ids_.size()) + " provider"
-                        + (picker_ids_.size() == 1 ? "" : "s"))
+                    text(pad + std::to_string(_picker_ids.size()) + " provider"
+                        + (_picker_ids.size() == 1 ? "" : "s"))
                     | dim);
-                if (picker_ids_.empty()) {
+                if (_picker_ids.empty()) {
                     rows.push_back(text(pad + "no matching providers") | dim);
                 } else {
-                    for (int i = 0; i < static_cast<int>(picker_labels_.size());
+                    for (int i = 0; i < static_cast<int>(_picker_labels.size());
                         ++i) {
-                        const bool selected = i == picker_selected_;
+                        const bool selected = i == _picker_selected;
                         Element e = text(pad + (selected ? "› " : "  ")
-                            + picker_labels_[static_cast<std::size_t>(i)]);
+                            + _picker_labels[static_cast<std::size_t>(i)]);
                         if (selected) {
                             e = std::move(e) | bold | color(PANEL_FG);
                         } else {
@@ -607,83 +594,83 @@ namespace {
             return vbox(std::move(rows));
         }
 
-        Element render_manage()
+        Element _render_manage()
         {
             Elements rows = modal_header("Connections");
 
-            const auto all = views();
+            const auto all = _views();
             if (all.empty()) {
                 rows.push_back(text("  (none - add one below)") | dim);
             } else {
                 rows.push_back(hbox({
-                    name_cell(views(), "Providers") | bold,
+                    name_cell(_views(), "Providers") | bold,
                     text(fit("Key", COL_KEY)) | dim,
                     text(fit("Status", COL_STATE)) | dim,
                     text(fit("Models", COL_MODELS)) | dim,
                     text(fit("Action", COL_ACTION)) | dim,
                 }));
             }
-            if (rows_container_ != nullptr) {
-                rows.push_back(rows_container_->Render() | yflex);
+            if (_rows_container != nullptr) {
+                rows.push_back(_rows_container->Render() | yflex);
             }
 
             rows.push_back(separator() | color(PANEL_BORDER));
             rows.push_back(hbox({
                 section_title("Add Provider"),
-                text(subscription_provider(selected_provider_)
+                text(subscription_provider(_selected_provider)
                         ? "  sign in using your existing subscription"
                         : "  pick a provider, paste your key, test, then save")
                     | dim,
             }));
-            if (add_container_ != nullptr) {
+            if (_add_container != nullptr) {
                 rows.push_back(hbox({
                     form_gutter("Provider"),
-                    picker_area() | xflex,
+                    _picker_area() | xflex,
                 }));
                 rows.push_back(hbox({
                     form_gutter("Label"),
-                    label_input_->Render() | xflex,
+                    _label_input->Render() | xflex,
                 }));
-                if (selected_provider_ == CUSTOM_PROVIDER_ID) {
+                if (_selected_provider == CUSTOM_PROVIDER_ID) {
                     rows.push_back(hbox({
                         form_gutter("Base URL"),
-                        base_input_->Render() | xflex,
+                        _base_input->Render() | xflex,
                     }));
                 }
-                if (subscription_provider(selected_provider_)) {
+                if (subscription_provider(_selected_provider)) {
                     rows.push_back(hbox({
                         text(std::string(FORM_LABEL + 2, ' ')),
-                        subscription_signin_->Render() | xflex,
+                        _subscription_signin->Render() | xflex,
                     }));
                 } else {
                     rows.push_back(hbox({
                         form_gutter("API Key"),
-                        key_input_->Render() | xflex,
+                        _key_input->Render() | xflex,
                     }));
                     rows.push_back(hbox({
                         text(std::string(FORM_LABEL + 2, ' ')),
-                        action_button_->Render(),
+                        _action_button->Render(),
                         text("  "),
-                        status_line_element(),
+                        _status_line_element(),
                     }));
                 }
             }
             rows.push_back(separatorEmpty());
             std::string hint = "↑↓ navigate · Enter/DEL remove · Esc close";
-            if (!confirm_.empty()) {
+            if (!_confirm.empty()) {
                 hint = "y confirm · n cancel";
             }
             rows.push_back(hint_bar(hint));
             return vbox(std::move(rows)) | xflex;
         }
 
-        Element status_line_element()
+        Element _status_line_element()
         {
-            const Session& st = *session_;
-            if (!row_error_.empty()) {
-                return status_element(row_error_, false);
+            const Session& st = *_session;
+            if (!_row_error.empty()) {
+                return status_element(_row_error, false);
             }
-            const bool fresh = tested_signature_ == current_signature();
+            const bool fresh = _tested_signature == _current_signature();
             if (fresh && !st.connect_status().empty()) {
                 const bool ok = st.connect_status().rfind("✓", 0) == 0;
                 return status_element(st.connect_status(), ok);
@@ -691,19 +678,19 @@ namespace {
             return text("");
         }
 
-        void maybe_rebuild_pick()
+        void _maybe_rebuild_pick()
         {
-            const Session& st = *session_;
-            const Config cfg  = provider_store_.config();
+            const Session& st = *_session;
+            const Config cfg  = _provider_store.config();
             std::uint64_t key = st.modal_serial() * 1000003ULL;
             key += std::hash<std::string> { }(cfg.last_used
                     ? cfg.last_used->provider + " " + cfg.last_used->model
                     : std::string { });
             std::vector<PickSnap> snapshot;
-            for (const auto& view : views()) {
+            for (const auto& view : _views()) {
                 PickSnap snap;
                 snap.view = view;
-                snap.list = provider_store_.models_for(view.id);
+                snap.list = _provider_store.models_for(view.id);
                 key += std::hash<std::string> { }(view.id)
                         * (static_cast<std::uint64_t>(
                                static_cast<int>(snap.list.state))
@@ -712,68 +699,65 @@ namespace {
                 snapshot.push_back(std::move(snap));
             }
             key += snapshot.size() * 7919ULL;
-            if (key == pick_key_) {
+            if (key == _pick_key) {
                 return;
             }
-            pick_key_      = key;
-            pick_snapshot_ = std::move(snapshot);
-            rebuild_pick();
+            _pick_key      = key;
+            _pick_snapshot = std::move(snapshot);
+            _rebuild_pick();
         }
 
-        void rebuild_pick()
+        void _rebuild_pick()
         {
-            pick_.rows.clear();
-            for (const auto& snap : pick_snapshot_) {
+            _pick.rows.clear();
+            for (const auto& snap : _pick_snapshot) {
                 for (const ModelInfo& info : snap.list.models) {
                     ModelRow row
                         = make_model_row(snap.view.id, snap.view.name, info);
                     if (info.context_length && *info.context_length > 0) {
                         row.tag += " · " + compact_number(*info.context_length);
                     }
-                    pick_.rows.push_back(std::move(row));
+                    _pick.rows.push_back(std::move(row));
                 }
             }
-            const Config cfg = provider_store_.config();
+            const Config cfg = _provider_store.config();
             if (cfg.last_used && !cfg.last_used->model.empty()) {
-                for (std::size_t i = 0; i < pick_.rows.size(); ++i) {
-                    ModelRow& row = pick_.rows[i];
+                for (std::size_t i = 0; i < _pick.rows.size(); ++i) {
+                    ModelRow& row = _pick.rows[i];
                     if (row.connection_id == cfg.last_used->provider
                         && row.model_id == cfg.last_used->model) {
                         row.tag += " · current";
-                        std::rotate(pick_.rows.begin(),
-                            pick_.rows.begin() + static_cast<std::ptrdiff_t>(i),
-                            pick_.rows.end());
+                        std::rotate(_pick.rows.begin(),
+                            _pick.rows.begin() + static_cast<std::ptrdiff_t>(i),
+                            _pick.rows.end());
                         break;
                     }
                 }
             }
-            pick_.selected = 0;
-            pick_.refill_visible();
+            _pick.selected = 0;
+            _pick.refill_visible();
 
-            pick_filter_ = make_model_pick_filter(pick_);
+            _pick_filter = make_model_pick_filter(_pick);
 
-            container_ = Container::Vertical({ pick_filter_ });
+            _container = Container::Vertical({ _pick_filter });
         }
 
-        void submit_pick()
+        void _submit_pick()
         {
-            const ModelRow* row = pick_.chosen();
+            const ModelRow* row = _pick.chosen();
             if (!row) {
                 return;
             }
-            imza::resolve_modal(*state_,
+            imza::resolve_modal(*_state,
                 ModalResult {
                     ModelChoice { row->connection_id, row->model_id } });
         }
 
-        Element render_pick()
+        Element _render_pick()
         {
-            Elements rows = modal_header("Models");
-            rows.push_back(pick_filter_->Render() | xflex);
-
             bool any_fetching = false;
             bool any_failed   = false;
-            for (const auto& snap : pick_snapshot_) {
+            for (const auto& snap : _pick_snapshot) {
                 if (snap.list.state == ModelList::State::FETCHING) {
                     any_fetching = true;
                 }
@@ -781,71 +765,66 @@ namespace {
                     any_failed = true;
                 }
             }
-            if (any_fetching) {
-                rows.push_back(text("⟳ fetching providers…") | dim);
+            Element empty_state;
+            if (!any_fetching) {
+                empty_state = any_failed
+                    ? status_element("✗ Some providers failed - press "
+                                     "F5 to retry.",
+                          false)
+                    : text("no models") | dim;
             }
-
-            if (pick_.visible.empty()) {
-                if (!any_fetching) {
-                    rows.push_back(any_failed
-                            ? status_element("✗ Some providers failed - press "
-                                             "F5 to retry.",
-                                  false)
-                            : text("no models") | dim);
-                }
-            } else {
-                append_model_pick_rows(pick_, rows);
-            }
-
-            rows.push_back(separatorEmpty());
-            rows.push_back(hint_bar("Enter pick · F5 refresh · Esc close"));
-            return vbox(std::move(rows)) | xflex;
+            Element status_row = any_fetching
+                ? text("⟳ fetching providers…") | dim
+                : Element { };
+            return render_model_pick("Models", _pick_filter, _pick,
+                std::move(status_row), std::move(empty_state),
+                "Enter pick · F5 refresh · Esc close");
         }
 
-        std::shared_ptr<ApplicationState> state_;
-        std::shared_ptr<Session> session_;
-        ProviderStore& provider_store_;
-        ConnectModal::Entry entry_ = ConnectModal::Entry::MANAGE;
+        std::shared_ptr<ApplicationState> _state;
+        std::shared_ptr<Session> _session;
+        ProviderStore& _provider_store;
+        ConnectModal::Entry _entry = ConnectModal::Entry::MANAGE;
 
-        Component container_;
-        Component rows_container_;
-        Component add_container_;
-        std::vector<Component> row_buttons_;
-        std::uint64_t manage_key_ = 0;
-        std::uint64_t pick_key_   = 0;
+        Component _container;
+        Component _rows_container;
+        Component _add_container;
+        std::vector<Component> _row_buttons;
+        std::uint64_t _manage_key = 0;
+        std::uint64_t _pick_key   = 0;
 
-        std::vector<std::pair<std::string, std::string>> providers_;
-        std::string selected_provider_;
-        bool picker_open_ = false;
-        std::string picker_buf_;
-        int picker_cursor_ = 0;
-        std::vector<std::string> picker_labels_;
-        std::vector<std::string> picker_ids_;
-        int picker_selected_ = 0;
-        Component picker_input_;
+        std::vector<std::pair<std::string, std::string>> _providers;
+        std::string _selected_provider;
+        bool _picker_open = false;
+        std::string _picker_buf;
+        int _picker_cursor = 0;
+        std::vector<std::string> _picker_labels;
+        std::vector<std::string> _picker_ids;
+        int _picker_selected = 0;
+        Component _picker_input;
 
-        bool in_add_      = false;
-        int row_selected_ = 0;
+        bool _in_add      = false;
+        int _row_selected = 0;
 
-        Component base_input_;
-        Component label_input_;
-        Component key_input_;
-        Component action_button_;
-        Component subscription_signin_;
-        std::string subscription_id_;
-        std::string base_buf_;
-        int base_cursor_ = 0;
-        std::string label_buf_;
-        int label_cursor_ = 0;
-        std::string key_buf_;
-        int key_cursor_ = 0;
-        std::string tested_signature_;
-        std::map<int, bool> confirm_;
-        std::string row_error_;
+        Component _base_input;
+        Component _label_input;
+        Component _key_input;
+        Component _action_button;
+        Component _subscription_signin;
+        std::string _subscription_id;
+        std::string _base_buf;
+        int _base_cursor = 0;
+        std::string _label_buf;
+        int _label_cursor = 0;
+        std::string _key_buf;
+        int _key_cursor = 0;
+        std::string _tested_signature;
+        std::map<int, bool> _confirm;
+        std::string _row_error;
 
-        std::vector<PickSnap> pick_snapshot_;
-        ModelPickList pick_;
-        Component pick_filter_;
+        std::vector<PickSnap> _pick_snapshot;
+        ModelPickList _pick;
+        Component _pick_filter;
     };
 
 } // namespace

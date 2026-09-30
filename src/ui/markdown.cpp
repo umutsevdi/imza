@@ -215,7 +215,7 @@ namespace {
     class FtxuiSink {
     public:
         explicit FtxuiSink(int width)
-            : width_(width)
+            : _width(width)
         {
         }
 
@@ -224,39 +224,39 @@ namespace {
             const std::string_view type = fence_info == nullptr
                 ? std::string_view { }
                 : std::string_view(fence_info);
-            const int content_width     = std::max(20, width_ - 6);
+            const int content_width     = std::max(20, _width - 6);
             Elements lines
                 = highlighted_rows(lit, type, content_width, PANEL_FG_DIM);
             if (lines.empty()) {
                 lines.push_back(ftxui::text(""));
             }
-            add(vbox(std::move(lines)) | bgcolor(PANEL_COLOR) | borderLight);
+            _add(vbox(std::move(lines)) | bgcolor(PANEL_COLOR) | borderLight);
         }
 
         void text(std::string_view body, const Style& fl)
         {
-            if (quote_depth_ > 0 && quote_first_) {
-                quote_first_ = false;
+            if (_quote_depth > 0 && _quote_first) {
+                _quote_first = false;
                 if (body.rfind("[!ERROR]", 0) == 0) {
                     body.remove_prefix(8);
-                    quote_alert_ = true;
+                    _quote_alert = true;
                 }
             }
-            if (in_cell_) {
-                cell_buf_ += body;
+            if (_in_cell) {
+                _cell_buf += body;
                 return;
             }
-            if (in_paragraph_) {
-                push_words(body, fl);
+            if (_in_paragraph) {
+                _push_words(body, fl);
             }
         }
 
         void softbreak()
         {
-            if (in_cell_) {
-                cell_buf_ += ' ';
-            } else if (in_paragraph_) {
-                needs_sep_ = true;
+            if (_in_cell) {
+                _cell_buf += ' ';
+            } else if (_in_paragraph) {
+                _needs_sep = true;
             }
         }
 
@@ -266,30 +266,30 @@ namespace {
 
         void paragraph_begin(bool)
         {
-            in_paragraph_ = true;
-            words_.clear();
-            needs_sep_ = false;
+            _in_paragraph = true;
+            _words.clear();
+            _needs_sep = false;
         }
 
         void paragraph_end()
         {
-            in_paragraph_ = false;
-            flush_words(passthrough);
+            _in_paragraph = false;
+            _flush_words(_passthrough);
         }
 
         void heading_begin(int lvl)
         {
-            in_paragraph_ = true;
-            words_.clear();
-            needs_sep_     = false;
-            heading_level_ = lvl;
+            _in_paragraph = true;
+            _words.clear();
+            _needs_sep     = false;
+            _heading_level = lvl;
         }
 
         void heading_end()
         {
-            const int lvl                    = heading_level_;
-            heading_level_                   = 0;
-            in_paragraph_                    = false;
+            const int lvl                    = _heading_level;
+            _heading_level                   = 0;
+            _in_paragraph                    = false;
             static const Color HEAD_COLORS[] = {
                 PANEL_FG,
                 HL_CYAN,
@@ -302,164 +302,160 @@ namespace {
                 const int idx = (lvl < 1 || lvl > 6) ? 0 : lvl - 1;
                 return std::move(e) | bold | color(HEAD_COLORS[idx]);
             };
-            flush_words(std::move(decorate));
+            _flush_words(std::move(decorate));
         }
 
         void quote_begin()
         {
-            frames_.emplace_back();
-            ++quote_depth_;
-            quote_first_ = true;
+            _frames.emplace_back();
+            ++_quote_depth;
+            _quote_first = true;
         }
 
         void quote_end()
         {
-            Element body = frames_.back().empty() ? ftxui::text("")
-                                                  : vbox(frames_.back());
-            frames_.pop_back();
-            if (quote_alert_) {
+            Element body = _frames.back().empty() ? ftxui::text("")
+                                                  : vbox(_frames.back());
+            _frames.pop_back();
+            if (_quote_alert) {
                 body |= bold | color(HL_RED);
-                quote_alert_ = false;
+                _quote_alert = false;
             }
-            --quote_depth_;
-            add(std::move(body) | bgcolor(PANEL_COLOR_FOCUS));
+            --_quote_depth;
+            _add(std::move(body) | bgcolor(PANEL_COLOR_FOCUS));
         }
 
-        void list_begin(bool) { lists_.emplace_back(); }
+        void list_begin(bool) { _lists.emplace_back(); }
         void list_end()
         {
-            ListFrame list = std::move(lists_.back());
-            lists_.pop_back();
-            Element body = list.items.empty() ? ftxui::text("")
-                                              : vbox(std::move(list.items));
-            add(std::move(body));
+            Elements list = std::move(_lists.back());
+            _lists.pop_back();
+            Element body
+                = list.empty() ? ftxui::text("") : vbox(std::move(list));
+            _add(std::move(body));
         }
 
         void item_begin(std::string_view prefix)
         {
-            frames_.emplace_back();
-            item_prefixes_.emplace_back(prefix);
+            _frames.emplace_back();
+            _item_prefixes.emplace_back(prefix);
         }
 
         void item_end()
         {
-            Element body = frames_.back().empty() ? ftxui::text("")
-                                                  : vbox(frames_.back());
-            frames_.pop_back();
-            Element label = ftxui::text(item_prefixes_.back());
-            item_prefixes_.pop_back();
+            Element body = _frames.back().empty() ? ftxui::text("")
+                                                  : vbox(_frames.back());
+            _frames.pop_back();
+            Element label = ftxui::text(_item_prefixes.back());
+            _item_prefixes.pop_back();
             Element item = hbox({ std::move(label), std::move(body) });
-            if (lists_.empty()) {
-                add(std::move(item));
+            if (_lists.empty()) {
+                _add(std::move(item));
             } else {
-                lists_.back().items.push_back(std::move(item));
+                _lists.back().push_back(std::move(item));
             }
         }
 
-        void thematic_break() { add(separator()); }
+        void thematic_break() { _add(separator()); }
 
         void table_begin(const TableSpec& spec)
         {
-            aligns_ = spec.aligns;
-            rows_.clear();
-            header_flags_.clear();
+            _aligns = spec.aligns;
+            _rows.clear();
+            _header_flags.clear();
         }
 
-        void row_begin() { rows_.emplace_back(); }
-        void row_end(bool header) { header_flags_.push_back(header); }
+        void row_begin() { _rows.emplace_back(); }
+        void row_end(bool header) { _header_flags.push_back(header); }
 
         void cell_begin()
         {
-            cell_buf_.clear();
-            in_cell_ = true;
+            _cell_buf.clear();
+            _in_cell = true;
         }
 
         void cell_end()
         {
-            rows_.back().push_back(cell_buf_);
-            in_cell_ = false;
+            _rows.back().push_back(_cell_buf);
+            _in_cell = false;
         }
 
         void table_end()
         {
-            if (rows_.empty() || rows_[0].empty()) {
-                rows_.clear();
-                header_flags_.clear();
-                aligns_.clear();
+            if (_rows.empty() || _rows[0].empty()) {
+                _rows.clear();
+                _header_flags.clear();
+                _aligns.clear();
                 return;
             }
-            Table table(rows_);
+            Table table(_rows);
             table.SelectAll().Border(LIGHT);
             table.SelectAll().SeparatorVertical(LIGHT);
-            if (header_flags_[0]) {
+            if (_header_flags[0]) {
                 table.SelectRow(0).Decorate(bold);
             }
-            for (size_t c = 0; c < aligns_.size(); ++c) {
-                if (aligns_[c] == 'r') {
+            for (size_t c = 0; c < _aligns.size(); ++c) {
+                if (_aligns[c] == 'r') {
                     table.SelectColumn(static_cast<int>(c))
                         .DecorateCells(align_right);
-                } else if (aligns_[c] == 'c') {
+                } else if (_aligns[c] == 'c') {
                     table.SelectColumn(static_cast<int>(c))
                         .DecorateCells(hcenter);
                 }
             }
-            add(table.Render());
-            rows_.clear();
-            header_flags_.clear();
-            aligns_.clear();
+            _add(table.Render());
+            _rows.clear();
+            _header_flags.clear();
+            _aligns.clear();
         }
 
         Element take()
         {
-            return root_.empty() ? ftxui::text("") : vbox(std::move(root_));
+            return _root.empty() ? ftxui::text("") : vbox(std::move(_root));
         }
 
     private:
         using Decorator = std::function<Element(Element)>;
 
-        struct ListFrame {
-            std::vector<Element> items;
-        };
-
-        void add(Element e)
+        void _add(Element e)
         {
-            if (!frames_.empty()) {
-                frames_.back().push_back(std::move(e));
+            if (!_frames.empty()) {
+                _frames.back().push_back(std::move(e));
             } else {
-                root_.push_back(std::move(e));
+                _root.push_back(std::move(e));
             }
         }
 
-        static Element passthrough(Element e) { return e; }
+        static Element _passthrough(Element e) { return e; }
 
-        void flush_words(const Decorator& extra)
+        void _flush_words(const Decorator& extra)
         {
-            if (words_.empty()) {
+            if (_words.empty()) {
                 return;
             }
-            add(extra(flexbox(std::move(words_))));
-            words_.clear();
+            _add(extra(flexbox(std::move(_words))));
+            _words.clear();
         }
 
-        void push_word(std::string_view word, const Style& fl)
+        void _push_word(std::string_view word, const Style& fl)
         {
-            if (needs_sep_ && !words_.empty()) {
-                words_.push_back(ftxui::text(" "));
+            if (_needs_sep && !_words.empty()) {
+                _words.push_back(ftxui::text(" "));
             }
-            needs_sep_ = false;
+            _needs_sep = false;
             // Flexbox cannot break an over-long word; hard-split it so
             // paragraphs never overflow the pane width.
             const std::size_t budget = std::max<std::size_t>(
-                8, static_cast<std::size_t>(std::max(8, width_ - 2)));
+                8, static_cast<std::size_t>(std::max(8, _width - 2)));
             while (word.size() > budget) {
-                words_.push_back(styled(word.substr(0, budget), fl));
-                words_.push_back(ftxui::text(" "));
+                _words.push_back(_styled(word.substr(0, budget), fl));
+                _words.push_back(ftxui::text(" "));
                 word.remove_prefix(budget);
             }
-            words_.push_back(styled(word, fl));
+            _words.push_back(_styled(word, fl));
         }
 
-        void push_words(std::string_view body, const Style& fl)
+        void _push_words(std::string_view body, const Style& fl)
         {
             size_t i = 0;
             while (i < body.size()) {
@@ -468,7 +464,7 @@ namespace {
                     ++i;
                 }
                 if (gap) {
-                    needs_sep_ = true;
+                    _needs_sep = true;
                 }
                 if (i == body.size()) {
                     break;
@@ -477,11 +473,11 @@ namespace {
                 while (i < body.size() && body[i] != ' ') {
                     ++i;
                 }
-                push_word(body.substr(start, i - start), fl);
+                _push_word(body.substr(start, i - start), fl);
             }
         }
 
-        static Element styled(std::string_view body, const Style& fl)
+        static Element _styled(std::string_view body, const Style& fl)
         {
             Element e = ftxui::text(std::string(body));
             if (fl.bold) {
@@ -504,27 +500,27 @@ namespace {
             return e;
         }
 
-        std::vector<Elements> frames_;
-        std::vector<std::string> item_prefixes_;
-        std::vector<ListFrame> lists_;
-        Elements root_;
-        int width_;
+        std::vector<Elements> _frames;
+        std::vector<std::string> _item_prefixes;
+        std::vector<Elements> _lists;
+        Elements _root;
+        int _width;
 
-        bool in_paragraph_ = false;
+        bool _in_paragraph = false;
         // Open quote state: [!ERROR] on the first literal tints the whole
         // quote red; nested frames keep the flag until the outermost close.
-        int quote_depth_  = 0;
-        bool quote_first_ = false;
-        bool quote_alert_ = false;
-        bool in_cell_     = false;
-        bool needs_sep_   = false;
-        Elements words_;
-        int heading_level_ = 0;
+        int _quote_depth  = 0;
+        bool _quote_first = false;
+        bool _quote_alert = false;
+        bool _in_cell     = false;
+        bool _needs_sep   = false;
+        Elements _words;
+        int _heading_level = 0;
 
-        std::string cell_buf_;
-        std::vector<std::vector<std::string>> rows_;
-        std::vector<bool> header_flags_;
-        std::vector<uint8_t> aligns_;
+        std::string _cell_buf;
+        std::vector<std::vector<std::string>> _rows;
+        std::vector<bool> _header_flags;
+        std::vector<uint8_t> _aligns;
     };
 
 } // namespace

@@ -66,6 +66,9 @@ struct Route {
 std::vector<std::string> auth_headers(
     AuthType auth, const std::string& key, const std::string& account_id = { });
 
+std::vector<std::string> request_headers(
+    const Route& route, std::vector<std::string> base);
+
 struct HttpGetOptions {
     std::size_t max_bytes = 0;
     bool* truncated       = nullptr;
@@ -79,6 +82,8 @@ Status http_get(const std::string& url, const std::vector<std::string>& headers,
 Status http_post(const std::string& url,
     const std::vector<std::string>& headers, const std::string& payload,
     long timeout_secs, std::string& body, long* http_code, long max_redirs = 5);
+
+inline bool http_ok(long code) { return code >= 200 && code < 300; }
 
 using StreamCallback = std::function<void(const StreamEvent&)>;
 

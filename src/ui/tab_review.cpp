@@ -62,28 +62,28 @@ namespace {
     public:
         Review(std::shared_ptr<ApplicationState> state, LayoutFn layout,
             WorkflowNavigateFn navigate)
-            : state_(std::move(state))
-            , layout_(std::move(layout))
-            , navigate_(std::move(navigate))
-            , editor_([this] { animation::RequestAnimationFrame(); })
-            , repository_subscription_(
-                  state_->environment->subscribe_to_repository_change([this] {
-                      load_generation_->fetch_add(1);
-                      reload_pending_.store(true);
+            : _state(std::move(state))
+            , _layout(std::move(layout))
+            , _navigate(std::move(navigate))
+            , _editor([this] { animation::RequestAnimationFrame(); })
+            , _repository_subscription(
+                  _state->environment->subscribe_to_repository_change([this] {
+                      _load_generation->fetch_add(1);
+                      _reload_pending.store(true);
                       animation::RequestAnimationFrame();
                   }))
-            , workspace_subscription_(
-                  state_->environment->subscribe_to_workspace_change([this] {
-                      load_generation_->fetch_add(1);
-                      reload_pending_.store(true);
+            , _workspace_subscription(
+                  _state->environment->subscribe_to_workspace_change([this] {
+                      _load_generation->fetch_add(1);
+                      _reload_pending.store(true);
                       animation::RequestAnimationFrame();
                   }))
-            , review_subscription_(state_->review->subscribe(
+            , _review_subscription(_state->review->subscribe(
                   [] { animation::RequestAnimationFrame(); }))
         {
-            plan_button_
+            _plan_button
                 = action_button("Send to Plan", [this] { _send_to_plan(); });
-            ai_review_button_
+            _ai_review_button
                 = action_button("AI Review", [this] { _provide_review(); });
             ButtonOption viewer_option;
             viewer_option.label     = "Reviewing…";
@@ -98,14 +98,14 @@ namespace {
                 }
                 return label;
             };
-            review_viewer_button_ = space_activates(
+            _review_viewer_button = space_activates(
                 Button(viewer_option), viewer_option.on_click);
             ButtonOption cancel_option;
             cancel_option.label     = "cancel";
             cancel_option.on_click  = [this] { _cancel_review(); };
             cancel_option.transform = [this](const EntryState& entry) {
                 Element label = text(
-                    review_cancelling_->load() ? "cancelling…" : entry.label);
+                    _review_cancelling->load() ? "cancelling…" : entry.label);
                 if (entry.focused) {
                     label = std::move(label) | bold | underlined
                         | color(PANEL_FG);
@@ -114,30 +114,30 @@ namespace {
                 }
                 return label;
             };
-            review_cancel_button_ = space_activates(
+            _review_cancel_button = space_activates(
                 Button(cancel_option), cancel_option.on_click);
-            Add(editor_.input());
-            Add(plan_button_);
-            Add(ai_review_button_);
-            Add(review_viewer_button_);
-            Add(review_cancel_button_);
+            Add(_editor.input());
+            Add(_plan_button);
+            Add(_ai_review_button);
+            Add(_review_viewer_button);
+            Add(_review_cancel_button);
         }
 
-        ~Review() override { load_generation_->fetch_add(1); }
+        ~Review() override { _load_generation->fetch_add(1); }
 
         Element OnRender() override
         {
-            if (reload_pending_.load() && !load_running_->load()) {
-                reload_pending_.store(false);
+            if (_reload_pending.load() && !_load_running->load()) {
+                _reload_pending.store(false);
                 _reload();
             }
-            const ReviewState::Snapshot snapshot = state_->review->snapshot();
+            const ReviewState::Snapshot snapshot = _state->review->snapshot();
             _consume_jump(snapshot);
-            visible_.clear();
-            boxes_.clear();
-            box_rows_.clear();
-            rendered_y_     = 0;
-            skipped_height_ = 0;
+            _visible.clear();
+            _boxes.clear();
+            _box_rows.clear();
+            _rendered_y     = 0;
+            _skipped_height = 0;
 
             if (snapshot.status == ReviewState::LoadStatus::IDLE
                 || snapshot.status == ReviewState::LoadStatus::LOADING) {
@@ -149,16 +149,16 @@ namespace {
                            paragraph(snapshot.error) | color(PANEL_FG_DIM) }))
                     | flex;
             }
-            rendered_review_ = snapshot.review;
+            _rendered_review = snapshot.review;
             if (snapshot.review->files.empty()) {
                 return center(
                            text("Working tree is clean") | color(PANEL_FG_DIM))
                     | flex;
             }
-            const LayoutCtx ctx     = layout_();
+            const LayoutCtx ctx     = _layout();
             const int review_width  = review_content_width(ctx);
             const bool side_by_side = review_width >= 100;
-            render_radius_ = ctx.height > 0 ? std::max(20, ctx.height) : 120;
+            _render_radius = ctx.height > 0 ? std::max(20, ctx.height) : 120;
             _prepare_highlights(*snapshot.review, review_width, side_by_side);
 
             Elements rows;
@@ -170,61 +170,61 @@ namespace {
                 if (file_index + 1 < snapshot.review->files.size()) {
                     _flush_spacer(rows);
                     rows.push_back(separatorEmpty());
-                    ++rendered_y_;
+                    ++_rendered_y;
                 }
             }
-            if (pending_jump_) {
-                for (std::size_t i = 0; i < visible_.size(); ++i) {
-                    if (visible_[i].comment_id == pending_jump_) {
-                        selected_         = static_cast<int>(i);
-                        selected_comment_ = pending_jump_;
-                        pending_jump_.reset();
+            if (_pending_jump) {
+                for (std::size_t i = 0; i < _visible.size(); ++i) {
+                    if (_visible[i].comment_id == _pending_jump) {
+                        _selected         = static_cast<int>(i);
+                        _selected_comment = _pending_jump;
+                        _pending_jump.reset();
                         animation::RequestAnimationFrame();
                         break;
                     }
                 }
             }
-            if (pending_file_jump_) {
-                for (std::size_t i = 0; i < visible_.size(); ++i) {
-                    if (visible_[i].kind == VisibleRow::Kind::FILE
-                        && _path(visible_[i].file_index)
-                            == *pending_file_jump_) {
-                        selected_ = static_cast<int>(i);
-                        selected_comment_.reset();
+            if (_pending_file_jump) {
+                for (std::size_t i = 0; i < _visible.size(); ++i) {
+                    if (_visible[i].kind == VisibleRow::Kind::FILE
+                        && _path(_visible[i].file_index)
+                            == *_pending_file_jump) {
+                        _selected = static_cast<int>(i);
+                        _selected_comment.reset();
                         animation::RequestAnimationFrame();
                         break;
                     }
                 }
-                pending_file_jump_.reset();
+                _pending_file_jump.reset();
             }
-            if (visible_.empty()) {
+            if (_visible.empty()) {
                 return text("") | flex;
             }
-            selected_ = std::clamp(
-                selected_, 0, static_cast<int>(visible_.size()) - 1);
+            _selected = std::clamp(
+                _selected, 0, static_cast<int>(_visible.size()) - 1);
 
-            const int selected_y = visible_[selected_].display_y;
+            const int selected_y = _visible[_selected].display_y;
             Element content      = vbox(std::move(rows))
                 | focusPosition(0, selected_y) | yframe | vscroll_indicator
                 | flex;
-            const std::string hint = editor_.is_open()
+            const std::string hint = _editor.is_open()
                 ? "Enter save · Alt+Enter new line · Esc cancel"
-                : selected_comment_
+                : _selected_comment
                 ? "↑↓ navigate · e edit · d delete"
                 : "↑↓ navigate · [] files · Enter collapse · c comment  ";
             // Advertise the Sidechat toggle while no pane is on screen.
             const std::string hint_sidechat
-                = state_->sidechat_open ? "" : " · Ctrl+S Sidechat";
+                = _state->sidechat_open ? "" : " · Ctrl+S Sidechat";
             const std::string hint_line = hint + hint_sidechat;
             Elements bottom { };
 
-            if (!state_->session->error().empty()
-                || state_->session->retry_countdown()) {
-                bottom.push_back(session_error_element(*state_->session));
+            if (!_state->session->error().empty()
+                || _state->session->retry_countdown()) {
+                bottom.push_back(session_error_element(*_state->session));
             }
-            const bool review_running = review_running_->load();
-            Element plan_action       = plan_button_->Render();
-            Element review_action     = ai_review_button_->Render();
+            const bool review_running = _review_running->load();
+            Element plan_action       = _plan_button->Render();
+            Element review_action     = _ai_review_button->Render();
             if (review_running) {
                 plan_action   = std::move(plan_action) | dim;
                 review_action = std::move(review_action) | dim;
@@ -233,9 +233,9 @@ namespace {
                 std::move(review_action) };
             if (review_running) {
                 actions.push_back(text(" "));
-                actions.push_back(review_viewer_button_->Render());
+                actions.push_back(_review_viewer_button->Render());
                 actions.push_back(text(" · "));
-                actions.push_back(review_cancel_button_->Render());
+                actions.push_back(_review_cancel_button->Render());
             }
             actions.push_back(filler());
             actions.push_back(text(hint_line) | dim);
@@ -245,17 +245,17 @@ namespace {
 
         bool OnEvent(Event event) override
         {
-            if (!state_->session->error().empty()
+            if (!_state->session->error().empty()
                 && _is_user_interaction(event)) {
-                state_->session->clear_error();
+                _state->session->clear_error();
             }
-            if (editor_.is_open()) {
+            if (_editor.is_open()) {
                 if (event == Event::Escape) {
                     _close_editor();
                     return true;
                 }
                 if (is_alt_enter(event)) {
-                    editor_.newline();
+                    _editor.newline();
                     animation::RequestAnimationFrame();
                     return true;
                 }
@@ -263,18 +263,18 @@ namespace {
                     _save_editor();
                     return true;
                 }
-                return editor_.input()->OnEvent(event);
+                return _editor.input()->OnEvent(event);
             }
-            if (plan_button_->OnEvent(event)
-                || ai_review_button_->OnEvent(event)) {
+            if (_plan_button->OnEvent(event)
+                || _ai_review_button->OnEvent(event)) {
                 return true;
             }
-            if (review_running_->load()
-                && review_viewer_button_->OnEvent(event)) {
+            if (_review_running->load()
+                && _review_viewer_button->OnEvent(event)) {
                 return true;
             }
-            if (review_running_->load()
-                && review_cancel_button_->OnEvent(event)) {
+            if (_review_running->load()
+                && _review_cancel_button->OnEvent(event)) {
                 return true;
             }
             if (event.is_mouse()) {
@@ -287,9 +287,9 @@ namespace {
                 }
                 if (mouse.button == Mouse::Left
                     && mouse.motion == Mouse::Pressed) {
-                    for (std::size_t i = 0; i < boxes_.size(); ++i) {
-                        if (boxes_[i].Contain(mouse.x, mouse.y)) {
-                            selected_ = box_rows_[i];
+                    for (std::size_t i = 0; i < _boxes.size(); ++i) {
+                        if (_boxes[i].Contain(mouse.x, mouse.y)) {
+                            _selected = _box_rows[i];
                             _activate(true);
                             return true;
                         }
@@ -310,11 +310,11 @@ namespace {
                 return _move(10);
             }
             if (event == Event::Home) {
-                selected_ = 0;
+                _selected = 0;
                 return true;
             }
             if (event == Event::End) {
-                selected_ = std::max(0, static_cast<int>(visible_.size()) - 1);
+                _selected = std::max(0, static_cast<int>(_visible.size()) - 1);
                 return true;
             }
             if (event == Event::Character("[")) {
@@ -357,67 +357,67 @@ namespace {
 
         void _send_to_plan()
         {
-            if (review_running_->load()) {
+            if (_review_running->load()) {
                 return;
             }
             const std::vector<ReviewComment> comments
-                = state_->review->comments();
+                = _state->review->comments();
             if (comments.empty()) {
-                state_->session->set_error(
+                _state->session->set_error(
                     "Add a review comment before sending.");
                 return;
             }
-            if (!state_->providers->active_selection()) {
-                state_->session->set_error("No model selected - run /model.");
+            if (!_state->providers->active_selection()) {
+                _state->session->set_error(NO_MODEL_SELECTED);
                 return;
             }
             std::string prompt = format_review_plan_prompt(
-                state_->prompts->review_plan(), comments);
-            navigate_(WorkflowPhase::PLAN);
-            imza::submit(*state_, std::move(prompt));
-            state_->review->clear_comments();
-            selected_comment_.reset();
-            pending_jump_.reset();
+                _state->prompts->review_plan(), comments);
+            _navigate(WorkflowPhase::PLAN);
+            imza::submit(*_state, std::move(prompt));
+            _state->review->clear_comments();
+            _selected_comment.reset();
+            _pending_jump.reset();
         }
 
         void _provide_review()
         {
-            if (review_running_->exchange(true)) {
+            if (_review_running->exchange(true)) {
                 return;
             }
-            review_cancelling_->store(false);
-            const auto selection = state_->providers->active_selection();
+            _review_cancelling->store(false);
+            const auto selection = _state->providers->active_selection();
             if (!selection) {
-                review_running_->store(false);
-                state_->session->set_error("No model selected - run /model.");
+                _review_running->store(false);
+                _state->session->set_error(NO_MODEL_SELECTED);
                 return;
             }
-            const ReviewState::Snapshot snapshot = state_->review->snapshot();
+            const ReviewState::Snapshot snapshot = _state->review->snapshot();
             if (snapshot.status != ReviewState::LoadStatus::LOADED
                 || snapshot.review->files.empty()) {
-                review_running_->store(false);
-                state_->session->set_error("There are no changes to review.");
+                _review_running->store(false);
+                _state->session->set_error("There are no changes to review.");
                 return;
             }
             std::string prompt = format_ai_review_prompt(
-                state_->prompts->review(), *snapshot.review, snapshot.comments);
+                _state->prompts->review(), *snapshot.review, snapshot.comments);
             constexpr std::size_t MAX_REVIEW_PROMPT_BYTES = 200 * 1024;
             if (prompt.size() > MAX_REVIEW_PROMPT_BYTES) {
-                review_running_->store(false);
-                state_->session->set_error(
+                _review_running->store(false);
+                _state->session->set_error(
                     "AI review is too large (limit: 200 KiB). Reduce the diff "
                     "or review it in smaller commits.");
                 return;
             }
             auto transcript = std::make_shared<Session>();
             const SubagentHandle handle
-                = state_->delegation->run_subagent(std::move(prompt),
+                = _state->delegation->run_subagent(std::move(prompt),
                     selection->model, selection->reasoning_effort,
                     SubagentOptions { .visible = false,
                         .timeout               = std::chrono::minutes { 5 },
                         .max_output_tokens     = 4096,
                         .transcript            = std::move(transcript) },
-                    [state = state_, running = review_running_](
+                    [state = _state, running = _review_running](
                         const SubagentResult& result) {
                         running->store(false);
                         animation::RequestAnimationFrame();
@@ -440,27 +440,27 @@ namespace {
                         state->review->add_comments(std::move(
                             std::get<std::vector<ReviewCommentDraft>>(parsed)));
                     });
-            review_task_id_ = handle.id;
+            _review_task_id = handle.id;
         }
 
         void _cancel_review()
         {
-            if (!review_task_id_ || review_cancelling_->exchange(true)) {
+            if (!_review_task_id || _review_cancelling->exchange(true)) {
                 return;
             }
-            if (!state_->subagents->cancel(*review_task_id_)) {
-                review_cancelling_->store(false);
+            if (!_state->subagents->cancel(*_review_task_id)) {
+                _review_cancelling->store(false);
             }
         }
 
         void _open_review_viewer()
         {
-            if (!review_task_id_) {
+            if (!_review_task_id) {
                 return;
             }
-            SubagentChat chat = state_->delegation->subagent_chat(
-                *review_task_id_, "AI Review");
-            imza::enqueue_user_modal(*state_,
+            SubagentChat chat = _state->delegation->subagent_chat(
+                *_review_task_id, "AI Review");
+            imza::enqueue_user_modal(*_state,
                 ViewerModal { std::move(chat.title), std::move(chat.transcript),
                     "markdown", 1, true, "" });
         }
@@ -477,15 +477,15 @@ namespace {
         void _prepare_highlights(
             const RepositoryReview& review, int review_width, bool side_by_side)
         {
-            if (highlighted_review_ == &review
-                && highlighted_width_ == review_width
-                && highlighted_side_by_side_ == side_by_side) {
+            if (_highlighted_review == &review
+                && _highlighted_width == review_width
+                && _highlighted_side_by_side == side_by_side) {
                 return;
             }
-            highlights_.clear();
-            highlighted_review_       = &review;
-            highlighted_width_        = review_width;
-            highlighted_side_by_side_ = side_by_side;
+            _highlights.clear();
+            _highlighted_review       = &review;
+            _highlighted_width        = review_width;
+            _highlighted_side_by_side = side_by_side;
         }
 
         // Highlighted visual rows for a non-META line, falling back to the
@@ -493,8 +493,8 @@ namespace {
         Elements _highlighted_rows(const ReviewLine& line, bool old_side,
             const std::vector<std::string>& fallback) const
         {
-            const auto found = highlights_.find(&line);
-            if (found != highlights_.end()) {
+            const auto found = _highlights.find(&line);
+            if (found != _highlights.end()) {
                 const std::vector<Element>& highlighted = old_side
                     ? found->second.old_side
                     : found->second.new_side;
@@ -512,23 +512,23 @@ namespace {
 
         void _flush_spacer(Elements& rows)
         {
-            if (skipped_height_ == 0) {
+            if (_skipped_height == 0) {
                 return;
             }
-            rows.push_back(text("") | size(HEIGHT, EQUAL, skipped_height_));
-            skipped_height_ = 0;
+            rows.push_back(text("") | size(HEIGHT, EQUAL, _skipped_height));
+            _skipped_height = 0;
         }
 
         template <typename Render>
         void _push(Elements& rows, Render&& render, VisibleRow visible,
             bool selected, int height = 1)
         {
-            const int row_index = static_cast<int>(visible_.size());
-            visible.display_y   = rendered_y_;
-            rendered_y_ += height;
-            visible_.push_back(std::move(visible));
-            if (std::abs(row_index - selected_) > render_radius_) {
-                skipped_height_ += height;
+            const int row_index = static_cast<int>(_visible.size());
+            visible.display_y   = _rendered_y;
+            _rendered_y += height;
+            _visible.push_back(std::move(visible));
+            if (std::abs(row_index - _selected) > _render_radius) {
+                _skipped_height += height;
                 return;
             }
             _flush_spacer(rows);
@@ -536,9 +536,9 @@ namespace {
             if (selected) {
                 row = std::move(row) | bgcolor(PANEL_COLOR_FOCUS);
             }
-            boxes_.push_back(Box { });
-            box_rows_.push_back(row_index);
-            rows.push_back(std::move(row) | xflex | reflect(boxes_.back()));
+            _boxes.push_back(Box { });
+            _box_rows.push_back(row_index);
+            rows.push_back(std::move(row) | xflex | reflect(_boxes.back()));
         }
 
         void _push_file(Elements& rows, const ReviewState::Snapshot& snapshot,
@@ -548,7 +548,7 @@ namespace {
             Elements file_rows;
             const std::string& path
                 = file.new_path.empty() ? file.old_path : file.new_path;
-            const bool collapsed       = collapsed_.contains(path);
+            const bool collapsed       = _collapsed.contains(path);
             const std::size_t comments = std::ranges::count_if(
                 snapshot.comments, [&path](const ReviewComment& comment) {
                     return comment.anchor.file == path;
@@ -571,7 +571,7 @@ namespace {
                 },
                 VisibleRow { VisibleRow::Kind::FILE, file_index, nullptr,
                     std::nullopt, 0 },
-                selected_ == static_cast<int>(visible_.size()));
+                _selected == static_cast<int>(_visible.size()));
             if (!collapsed && file.kind == ReviewFile::Kind::BINARY) {
                 _push(
                     file_rows,
@@ -581,17 +581,17 @@ namespace {
                     },
                     VisibleRow { VisibleRow::Kind::HUNK, file_index, nullptr,
                         std::nullopt, 0 },
-                    selected_ == static_cast<int>(visible_.size()));
+                    _selected == static_cast<int>(_visible.size()));
             } else if (!collapsed) {
                 const int side_width = diff_side_width(review_width);
                 for (const ReviewHunk& hunk : file.hunks) {
-                    const int hunk_begin = static_cast<int>(visible_.size());
+                    const int hunk_begin = static_cast<int>(_visible.size());
                     const int hunk_end   = hunk_begin + 1
                         + static_cast<int>(hunk.lines.size())
                         + static_cast<int>(snapshot.comments.size());
-                    if (hunk_begin <= selected_ + render_radius_
-                        && hunk_end >= selected_ - render_radius_) {
-                        append_review_hunk_highlights(highlights_, hunk, path,
+                    if (hunk_begin <= _selected + _render_radius
+                        && hunk_end >= _selected - _render_radius) {
+                        append_review_hunk_highlights(_highlights, hunk, path,
                             review_width, side_by_side);
                     }
                     _push(
@@ -604,7 +604,7 @@ namespace {
                         },
                         VisibleRow { VisibleRow::Kind::HUNK, file_index,
                             nullptr, std::nullopt, 0 },
-                        selected_ == static_cast<int>(visible_.size()));
+                        _selected == static_cast<int>(_visible.size()));
                     if (side_by_side) {
                         _push_side_by_side_hunk(file_rows, snapshot, file_index,
                             path, hunk, side_width);
@@ -643,42 +643,29 @@ namespace {
                     continue;
                 }
                 const int content_width = std::max(1, review_width - 15);
-                const std::vector<std::string> segments
-                    = wrap_text(comment.body, content_width);
+                int height              = 0;
+                Element card            = annotation_note_card(
+                    comment.body, content_width, &height);
                 _push(
-                    rows,
-                    [segments] {
-                        Elements body;
-                        body.reserve(segments.size());
-                        for (const std::string& text_line : segments) {
-                            body.push_back(text(text_line));
-                        }
-                        return annotation_card(vbox(std::move(body)),
-                            static_cast<int>(segments.size()));
-                    },
+                    rows, [card = std::move(card)] { return card; },
                     VisibleRow { VisibleRow::Kind::COMMENT, file_index, nullptr,
                         comment.id, 0 },
-                    selected_ == static_cast<int>(visible_.size()),
-                    static_cast<int>(segments.size()));
+                    _selected == static_cast<int>(_visible.size()), height);
             }
         }
 
         void _push_editor(Elements& rows, const std::string& path,
             const ReviewLine& line, int review_width)
         {
-            if (!editor_.is_open() || !_matches(editor_.anchor(), path, line)) {
+            if (!_editor.is_open() || !_matches(_editor.anchor(), path, line)) {
                 return;
             }
             const int content_width = std::max(1, review_width - 15);
-            const int height        = static_cast<int>(
-                wrap_text(editor_.draft(), content_width).size());
+            int height              = 0;
             _flush_spacer(rows);
-            rows.push_back(
-                annotation_card(wrapped_input_element(editor_.draft(),
-                                    static_cast<std::size_t>(0), content_width,
-                                    "Leave a comment"),
-                    height));
-            rendered_y_ += height;
+            rows.push_back(annotation_editor_card(
+                _editor.draft(), content_width, "Leave a comment", &height));
+            _rendered_y += height;
         }
 
         void _push_unified_line(Elements& rows,
@@ -702,7 +689,7 @@ namespace {
             const std::vector<std::string> segments
                 = wrap_text(line.content, content_width);
             const bool selected
-                = selected_ == static_cast<int>(visible_.size());
+                = _selected == static_cast<int>(_visible.size());
             _push(
                 rows,
                 [this, &line, marker = std::move(marker), background, number,
@@ -812,7 +799,7 @@ namespace {
             if (target == nullptr) {
                 return;
             }
-            const int content_width = std::max(1, side_width - 8);
+            const int content_width = review_side_content_width(side_width);
             const int height        = std::max(old_line != nullptr
                     ? static_cast<int>(
                           wrap_text(old_line->content, content_width).size())
@@ -822,7 +809,7 @@ namespace {
                           wrap_text(new_line->content, content_width).size())
                     : 1);
             const bool selected
-                = selected_ == static_cast<int>(visible_.size());
+                = _selected == static_cast<int>(_visible.size());
             _push(
                 rows,
                 [this, old_line, new_line, side_width, height, selected] {
@@ -901,28 +888,28 @@ namespace {
 
         bool _move(int delta)
         {
-            if (visible_.empty()) {
+            if (_visible.empty()) {
                 return false;
             }
-            selected_ = std::clamp(
-                selected_ + delta, 0, static_cast<int>(visible_.size()) - 1);
-            selected_comment_ = visible_[selected_].comment_id;
+            _selected = std::clamp(
+                _selected + delta, 0, static_cast<int>(_visible.size()) - 1);
+            _selected_comment = _visible[_selected].comment_id;
             return true;
         }
 
         bool _activate(bool mouse)
         {
-            if (visible_.empty()) {
+            if (_visible.empty()) {
                 return false;
             }
-            VisibleRow& row   = visible_[selected_];
-            selected_comment_ = row.comment_id;
+            VisibleRow& row   = _visible[_selected];
+            _selected_comment = row.comment_id;
             if (row.kind == VisibleRow::Kind::FILE) {
                 const std::string& path = _path(row.file_index);
-                if (collapsed_.contains(path)) {
-                    collapsed_.erase(path);
+                if (_collapsed.contains(path)) {
+                    _collapsed.erase(path);
                 } else {
-                    collapsed_.insert(path);
+                    _collapsed.insert(path);
                 }
                 animation::RequestAnimationFrame();
                 return true;
@@ -935,83 +922,83 @@ namespace {
 
         bool _open_editor()
         {
-            if (visible_.empty()) {
+            if (_visible.empty()) {
                 return false;
             }
-            const VisibleRow& row = visible_[selected_];
+            const VisibleRow& row = _visible[_selected];
             if (row.kind != VisibleRow::Kind::LINE || row.line == nullptr) {
                 return false;
             }
-            editing_comment_.reset();
-            editor_.begin(_anchor(_path(row.file_index), *row.line));
+            _editing_comment.reset();
+            _editor.begin(_anchor(_path(row.file_index), *row.line));
             return true;
         }
 
         bool _edit_comment()
         {
-            if (!selected_comment_) {
+            if (!_selected_comment) {
                 return false;
             }
-            const auto snapshot = state_->review->snapshot();
+            const auto snapshot = _state->review->snapshot();
             const auto it       = std::ranges::find(
-                snapshot.comments, *selected_comment_, &ReviewComment::id);
+                snapshot.comments, *_selected_comment, &ReviewComment::id);
             if (it == snapshot.comments.end()) {
                 return false;
             }
-            editing_comment_ = it->id;
-            editor_.begin_edit(static_cast<int>(it->id), it->body);
+            _editing_comment = it->id;
+            _editor.begin_edit(static_cast<int>(it->id), it->body);
             return true;
         }
 
         bool _delete_comment()
         {
-            if (!selected_comment_) {
+            if (!_selected_comment) {
                 return false;
             }
-            state_->review->delete_comment(*selected_comment_);
-            selected_comment_.reset();
+            _state->review->delete_comment(*_selected_comment);
+            _selected_comment.reset();
             return true;
         }
 
         void _save_editor()
         {
-            if (!editor_.is_open() || editor_.draft().empty()) {
+            if (!_editor.is_open() || _editor.draft().empty()) {
                 return;
             }
-            const std::string body = editor_.save();
-            if (editing_comment_) {
-                state_->review->update_comment(*editing_comment_, body);
+            const std::string body = _editor.save();
+            if (_editing_comment) {
+                _state->review->update_comment(*_editing_comment, body);
             } else {
-                state_->review->add_comment(editor_.anchor(), body);
+                _state->review->add_comment(_editor.anchor(), body);
             }
             _close_editor();
         }
 
         void _close_editor()
         {
-            editor_.close();
-            editing_comment_.reset();
+            _editor.close();
+            _editing_comment.reset();
         }
 
         bool _jump_file(int direction)
         {
-            if (visible_.empty()) {
+            if (_visible.empty()) {
                 return false;
             }
-            const std::size_t current = visible_[selected_].file_index;
+            const std::size_t current = _visible[_selected].file_index;
             if (direction > 0) {
-                for (std::size_t i = selected_ + 1; i < visible_.size(); ++i) {
-                    if (visible_[i].kind == VisibleRow::Kind::FILE
-                        && visible_[i].file_index > current) {
-                        selected_ = static_cast<int>(i);
+                for (std::size_t i = _selected + 1; i < _visible.size(); ++i) {
+                    if (_visible[i].kind == VisibleRow::Kind::FILE
+                        && _visible[i].file_index > current) {
+                        _selected = static_cast<int>(i);
                         return true;
                     }
                 }
             } else {
-                for (int i = selected_ - 1; i >= 0; --i) {
-                    if (visible_[i].kind == VisibleRow::Kind::FILE
-                        && visible_[i].file_index < current) {
-                        selected_ = i;
+                for (int i = _selected - 1; i >= 0; --i) {
+                    if (_visible[i].kind == VisibleRow::Kind::FILE
+                        && _visible[i].file_index < current) {
+                        _selected = i;
                         return true;
                     }
                 }
@@ -1022,9 +1009,9 @@ namespace {
         void _consume_jump(const ReviewState::Snapshot& snapshot)
         {
             if (snapshot.jump_file) {
-                collapsed_.erase(*snapshot.jump_file);
-                pending_file_jump_ = *snapshot.jump_file;
-                state_->review->clear_file_jump();
+                _collapsed.erase(*snapshot.jump_file);
+                _pending_file_jump = *snapshot.jump_file;
+                _state->review->clear_file_jump();
             }
             if (!snapshot.jump_comment) {
                 return;
@@ -1032,36 +1019,36 @@ namespace {
             const auto comment = std::ranges::find(
                 snapshot.comments, *snapshot.jump_comment, &ReviewComment::id);
             if (comment == snapshot.comments.end()) {
-                state_->review->clear_jump();
+                _state->review->clear_jump();
                 return;
             }
-            collapsed_.erase(comment->anchor.file);
-            pending_jump_ = comment->id;
-            state_->review->clear_jump();
+            _collapsed.erase(comment->anchor.file);
+            _pending_jump = comment->id;
+            _state->review->clear_jump();
         }
 
         const std::string& _path(std::size_t file_index) const
         {
-            const ReviewFile& file = rendered_review_->files[file_index];
+            const ReviewFile& file = _rendered_review->files[file_index];
             return file.new_path.empty() ? file.old_path : file.new_path;
         }
 
         void _reload()
         {
-            const auto workspace = state_->environment->workspace();
+            const auto workspace = _state->environment->workspace();
             if (!workspace || !workspace->project_root) {
                 return;
             }
-            if (load_running_->exchange(true)) {
-                reload_pending_.store(true);
+            if (_load_running->exchange(true)) {
+                _reload_pending.store(true);
                 return;
             }
             const std::filesystem::path root = *workspace->project_root;
-            state_->review->set_loading();
-            const std::uint64_t generation = load_generation_->load();
-            std::thread([review             = state_->review, root,
-                            load_generation = load_generation_,
-                            load_running    = load_running_, generation] {
+            _state->review->set_loading();
+            const std::uint64_t generation = _load_generation->load();
+            std::thread([review             = _state->review, root,
+                            load_generation = _load_generation,
+                            load_running    = _load_running, generation] {
                 ReviewLoadResult result = load_repository_review(root);
                 if (load_generation->load() == generation) {
                     review->set_result(std::move(result));
@@ -1070,45 +1057,45 @@ namespace {
                 animation::RequestAnimationFrame();
             }).detach();
         }
-        Component plan_button_;
-        Component ai_review_button_;
-        Component review_viewer_button_;
-        Component review_cancel_button_;
+        Component _plan_button;
+        Component _ai_review_button;
+        Component _review_viewer_button;
+        Component _review_cancel_button;
 
-        std::shared_ptr<ApplicationState> state_;
-        LayoutFn layout_;
-        WorkflowNavigateFn navigate_;
-        AnnotationEditor<ReviewLineAnchor> editor_;
-        std::optional<std::size_t> editing_comment_;
-        std::optional<std::size_t> selected_comment_;
-        std::optional<std::size_t> pending_jump_;
-        std::optional<std::size_t> review_task_id_;
-        std::optional<std::string> pending_file_jump_;
-        std::set<std::string> collapsed_;
-        std::vector<VisibleRow> visible_;
-        std::shared_ptr<const RepositoryReview> rendered_review_;
-        ReviewHighlights highlights_;
-        const RepositoryReview* highlighted_review_ = nullptr;
-        std::deque<Box> boxes_;
-        std::vector<int> box_rows_;
-        int selected_                  = 0;
-        int rendered_y_                = 0;
-        int skipped_height_            = 0;
-        int render_radius_             = 120;
-        int highlighted_width_         = 0;
-        bool highlighted_side_by_side_ = false;
-        std::shared_ptr<std::atomic<std::uint64_t>> load_generation_
+        std::shared_ptr<ApplicationState> _state;
+        LayoutFn _layout;
+        WorkflowNavigateFn _navigate;
+        AnnotationEditor<ReviewLineAnchor> _editor;
+        std::optional<std::size_t> _editing_comment;
+        std::optional<std::size_t> _selected_comment;
+        std::optional<std::size_t> _pending_jump;
+        std::optional<std::size_t> _review_task_id;
+        std::optional<std::string> _pending_file_jump;
+        std::set<std::string> _collapsed;
+        std::vector<VisibleRow> _visible;
+        std::shared_ptr<const RepositoryReview> _rendered_review;
+        ReviewHighlights _highlights;
+        const RepositoryReview* _highlighted_review = nullptr;
+        std::deque<Box> _boxes;
+        std::vector<int> _box_rows;
+        int _selected                  = 0;
+        int _rendered_y                = 0;
+        int _skipped_height            = 0;
+        int _render_radius             = 120;
+        int _highlighted_width         = 0;
+        bool _highlighted_side_by_side = false;
+        std::shared_ptr<std::atomic<std::uint64_t>> _load_generation
             = std::make_shared<std::atomic<std::uint64_t>>(0);
-        std::shared_ptr<std::atomic<bool>> load_running_
+        std::shared_ptr<std::atomic<bool>> _load_running
             = std::make_shared<std::atomic<bool>>(false);
-        std::shared_ptr<std::atomic<bool>> review_running_
+        std::shared_ptr<std::atomic<bool>> _review_running
             = std::make_shared<std::atomic<bool>>(false);
-        std::shared_ptr<std::atomic<bool>> review_cancelling_
+        std::shared_ptr<std::atomic<bool>> _review_cancelling
             = std::make_shared<std::atomic<bool>>(false);
-        std::atomic<bool> reload_pending_ { true };
-        Signal<>::Subscription repository_subscription_;
-        Signal<>::Subscription workspace_subscription_;
-        Signal<>::Subscription review_subscription_;
+        std::atomic<bool> _reload_pending { true };
+        Signal<>::Subscription _repository_subscription;
+        Signal<>::Subscription _workspace_subscription;
+        Signal<>::Subscription _review_subscription;
     };
 
 } // namespace

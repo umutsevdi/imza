@@ -34,6 +34,18 @@ std::vector<std::string> auth_headers(
     return { "Authorization: Bearer " + key };
 }
 
+std::vector<std::string> request_headers(
+    const Route& route, std::vector<std::string> base)
+{
+    if (!route.user_agent.empty()) {
+        base.push_back(route.user_agent);
+    }
+    for (auto& h : auth_headers(route.auth, route.api_key, route.account_id)) {
+        base.push_back(std::move(h));
+    }
+    return base;
+}
+
 namespace {
 
     struct BodySink {
@@ -64,6 +76,17 @@ namespace {
         }
     };
 
+    struct SlistGuard {
+        curl_slist* value = nullptr;
+
+        ~SlistGuard()
+        {
+            if (value != nullptr) {
+                curl_slist_free_all(value);
+            }
+        }
+    };
+
     CURL* reuse_handle()
     {
         static thread_local CurlHandle handle;
@@ -88,7 +111,7 @@ namespace {
         if (!handle) {
             return Status::NETWORK_ERROR;
         }
-        curl_slist* list = build_header_list(headers);
+        const SlistGuard list { build_header_list(headers) };
 
         BodySink sink { &body, max_bytes, false };
         curl_easy_reset(handle);
@@ -101,7 +124,7 @@ namespace {
             curl_easy_setopt(handle, CURLOPT_MAXREDIRS, max_redirs);
         }
         curl_easy_setopt(handle, CURLOPT_URL, url.c_str());
-        curl_easy_setopt(handle, CURLOPT_HTTPHEADER, list);
+        curl_easy_setopt(handle, CURLOPT_HTTPHEADER, list.value);
         if (post) {
             curl_easy_setopt(handle, CURLOPT_POST, 1L);
             curl_easy_setopt(handle, CURLOPT_POSTFIELDS, payload.c_str());
@@ -114,7 +137,6 @@ namespace {
         curl_easy_setopt(handle, CURLOPT_WRITEDATA, &sink);
 
         const CURLcode res = curl_easy_perform(handle);
-        curl_slist_free_all(list);
 
         long code = 0;
         curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &code);
@@ -176,7 +198,7 @@ namespace {
 
     void mark_connected(StreamCtx& ctx)
     {
-        if (ctx.connected || ctx.http_status < 200 || ctx.http_status >= 300) {
+        if (ctx.connected || !http_ok(ctx.http_status)) {
             return;
         }
         ctx.connected = true;
@@ -340,17 +362,12 @@ Status stream(const Route& route, const ChatRequest& req, StreamCallback cb,
     const std::string body   = write_json(provider.build(req));
     const std::string& url   = route.endpoint;
 
-    std::vector<std::string> header_strs = provider.headers();
-    for (auto& h : auth_headers(route.auth, route.api_key, route.account_id)) {
-        header_strs.push_back(std::move(h));
-    }
-    if (!route.user_agent.empty()) {
-        header_strs.push_back(route.user_agent);
-    }
+    std::vector<std::string> header_strs
+        = request_headers(route, provider.headers());
     if (!route.opencode_session.empty()) {
         header_strs.push_back("x-opencode-session: " + route.opencode_session);
     }
-    curl_slist* list = build_header_list(header_strs);
+    const SlistGuard list { build_header_list(header_strs) };
 
     StreamCtx ctx;
     ctx.provider = &provider;
@@ -358,7 +375,6 @@ Status stream(const Route& route, const ChatRequest& req, StreamCallback cb,
     ctx.req      = &req;
     CURL* curl   = reuse_handle();
     if (!curl) {
-        curl_slist_free_all(list);
         return Status::NETWORK_ERROR;
     }
 
@@ -369,7 +385,7 @@ Status stream(const Route& route, const ChatRequest& req, StreamCallback cb,
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, STALL_LIMIT_BYTES_PER_S);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, STALL_WINDOW_SECS);
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, list);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, list.value);
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
     curl_easy_setopt(
@@ -387,7 +403,6 @@ Status stream(const Route& route, const ChatRequest& req, StreamCallback cb,
 
     long code = 0;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code);
-    curl_slist_free_all(list);
 
     if (res == CURLE_ABORTED_BY_CALLBACK && req.interrupted
         && req.interrupted()) {
@@ -458,6 +473,26 @@ void flush_tool_accums(ParseState& state, std::vector<StreamEvent>& outs)
         outs.push_back(make_tool_call_event(finish_accum(acc)));
     }
     state.tool_accums.clear();
+}
+
+void emit_ready_tool_start(ToolAccum& acc, std::vector<StreamEvent>& outs)
+{
+    if (acc.started || acc.name.empty()) {
+        return;
+    }
+    acc.started = true;
+    outs.push_back(make_tool_call_start_event(finish_accum(acc)));
+}
+
+void emit_usage_once(
+    ParseState& state, const Usage& usage, std::vector<StreamEvent>& outs)
+{
+    if (state.usage_emitted
+        || (usage.prompt == 0 && usage.completion == 0 && usage.total == 0)) {
+        return;
+    }
+    state.usage_emitted = true;
+    outs.push_back(make_usage_event(usage));
 }
 
 const char* role_str(Message::Type type)

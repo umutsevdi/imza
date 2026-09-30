@@ -76,6 +76,11 @@ struct CompactionEvent {
 using ConversationItem = std::variant<UserTurn, AssistantTurn, ToolCall,
     TodoList, ModalAnswer, CompactionEvent>;
 
+// 0-based index of the final UserTurn in `items`, or nullopt when there
+// is none; shared by the compaction boundary scans.
+std::optional<std::size_t> last_user_turn_index(
+    const std::vector<ConversationItem>& items);
+
 struct UnsavedSession { };
 
 struct PersistedSession {
@@ -242,15 +247,16 @@ public:
         Signal<>::Callback callback);
 
 private:
-    AssistantTurn* last_assistant_locked();
-    const AssistantTurn* last_assistant_locked() const;
-    SessionSnapshot build_snapshot() const;
+    AssistantTurn* _last_assistant_locked();
+    const AssistantTurn* _last_assistant_locked() const;
+    SessionSnapshot _build_snapshot() const;
+    CompactionEvent* _find_compaction_locked(std::size_t id);
     ToolCall* _find_tool_locked(
         const ToolCallRequest& req, bool unfinished_only);
-    ToolCall* find_planning_tool_locked(const ToolCallRequest& req);
-    void finalize_reasoning(AssistantTurn& a);
-    void finish_session_locked(const std::string& error);
-    void update_usage(
+    ToolCall* _find_planning_tool_locked(const ToolCallRequest& req);
+    void _finalize_reasoning(AssistantTurn& a);
+    void _finish_session_locked(const std::string& error);
+    void _update_usage(
         const StreamEvent& usage_event, const ModelPricing& pricing);
     void _notify_title_change();
 
@@ -298,9 +304,9 @@ private:
     bool _dirty                       = false;
     std::string _session_id           = unique_session_id();
 
-    Signal<> mode_changed_;
-    Signal<> title_changed_;
-    Signal<> attachments_changed_;
+    Signal<> _mode_changed;
+    Signal<> _title_changed;
+    Signal<> _attachments_changed;
     Signal<> _plan_changed;
 };
 

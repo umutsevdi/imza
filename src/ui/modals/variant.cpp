@@ -19,27 +19,27 @@ namespace {
     class VariantView : public ComponentBase {
     public:
         VariantView(std::shared_ptr<ApplicationState> state)
-            : state_(std::move(state))
+            : _state(std::move(state))
         {
-            const auto modal = std::get<VariantModal>(state_->session->modal());
-            options_         = modal.options;
+            const auto modal = std::get<VariantModal>(_state->session->modal());
+            _options         = modal.options;
             const auto found
-                = std::find(options_.begin(), options_.end(), modal.current);
-            if (found != options_.end()) {
-                current_ = static_cast<int>(found - options_.begin());
+                = std::find(_options.begin(), _options.end(), modal.current);
+            if (found != _options.end()) {
+                _current = static_cast<int>(found - _options.begin());
             }
-            cursor_ = current_;
+            _cursor = _current;
         }
 
         Element OnRender() override
         {
             Elements rows = modal_header("Reasoning effort");
-            for (int i = 0; i < static_cast<int>(options_.size()); ++i) {
+            for (int i = 0; i < static_cast<int>(_options.size()); ++i) {
                 const std::string option
-                    = options_[static_cast<std::size_t>(i)];
+                    = _options[static_cast<std::size_t>(i)];
                 rows.push_back(hbox({
-                    text(choice_marker(false, i == current_)),
-                    choice_label(option, i == current_, i == cursor_),
+                    text(choice_marker(false, i == _current)),
+                    choice_label(option, i == _current, i == _cursor),
                 }));
             }
             rows.push_back(separatorEmpty());
@@ -51,30 +51,30 @@ namespace {
         bool OnEvent(Event event) override
         {
             if (event == Event::Escape) {
-                imza::close_modal(*state_);
+                imza::close_modal(*_state);
                 return true;
             }
             if (event == Event::Return) {
-                apply();
+                _apply();
                 return true;
             }
             return move_list_cursor(
-                event, cursor_, static_cast<int>(options_.size()));
+                event, _cursor, static_cast<int>(_options.size()));
         }
 
     private:
-        void apply()
+        void _apply()
         {
-            if (cursor_ >= 0 && cursor_ < static_cast<int>(options_.size())) {
-                imza::resolve_modal(*state_,
-                    ModalResult { VariantChoice { options_[cursor_] } });
+            if (_cursor >= 0 && _cursor < static_cast<int>(_options.size())) {
+                imza::resolve_modal(*_state,
+                    ModalResult { VariantChoice { _options[_cursor] } });
             }
         }
 
-        std::shared_ptr<ApplicationState> state_;
-        std::vector<std::string> options_;
-        int current_ = 0;
-        int cursor_  = 0;
+        std::shared_ptr<ApplicationState> _state;
+        std::vector<std::string> _options;
+        int _current = 0;
+        int _cursor  = 0;
     };
 
 } // namespace

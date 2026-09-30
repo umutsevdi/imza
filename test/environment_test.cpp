@@ -138,8 +138,8 @@ TEST_CASE("Imza temporary directory is reusable and canonical")
 
 TEST_CASE("workspace retains its directory outside a project")
 {
-    const auto original = std::filesystem::current_path();
-    const auto dir      = original.root_path();
+    const imza::test::CurrentDirectory directory;
+    const auto dir = directory.original.root_path();
 
     imza::Environment env;
     REQUIRE(wait_until_ready(env));
@@ -153,8 +153,6 @@ TEST_CASE("workspace retains its directory outside a project")
     CHECK(env.repository()->changed_files.empty());
 
     CHECK(env.chdir(dir) == imza::Environment::ChdirResult::UNCHANGED);
-
-    std::filesystem::current_path(original);
 }
 
 TEST_CASE("workspace subscription fires on readiness")
@@ -171,7 +169,7 @@ TEST_CASE("workspace subscription fires on readiness")
 
 TEST_CASE("workspace carries an instruction and project skills when rooted")
 {
-    const auto original = std::filesystem::current_path();
+    const imza::test::CurrentDirectory directory;
     const imza::test::TempDir root_dir;
     const auto root = root_dir.path;
     const auto git  = root / ".git";
@@ -187,8 +185,6 @@ TEST_CASE("workspace carries an instruction and project skills when rooted")
     REQUIRE(ws->instruction.has_value());
     CHECK(ws->instruction->content == "agents rules");
     CHECK(env.agent_rules_path() == "AGENTS.md");
-
-    std::filesystem::current_path(original);
 }
 
 TEST_CASE("workspace scan retains nested cwd and discovers repository root")

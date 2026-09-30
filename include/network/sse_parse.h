@@ -37,6 +37,9 @@ struct ParseState {
 
 std::vector<std::string> stream_headers();
 void flush_tool_accums(ParseState& state, std::vector<StreamEvent>& outs);
+void emit_ready_tool_start(ToolAccum& acc, std::vector<StreamEvent>& outs);
+void emit_usage_once(
+    ParseState& state, const Usage& usage, std::vector<StreamEvent>& outs);
 
 struct Provider {
     Json::Value (*build)(const ChatRequest& req);

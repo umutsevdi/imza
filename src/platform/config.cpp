@@ -5,10 +5,12 @@
 
 #include <json/json.h>
 #include <algorithm>
+#include <array>
 #include <cstdlib>
 #include <optional>
 #include <set>
 #include <sstream>
+#include <utility>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -86,54 +88,64 @@ namespace {
         return v.isString() ? v.asString() : std::string();
     }
 
+    template <typename Enum, std::size_t N>
+    bool parse_enum(const std::array<std::pair<const char*, Enum>, N>& table,
+        const std::string& text, Enum& out)
+    {
+        const auto found = std::find_if(table.begin(), table.end(),
+            [&](const auto& entry) { return text == entry.first; });
+        if (found == table.end()) {
+            return false;
+        }
+        out = found->second;
+        return true;
+    }
+
+    template <typename Enum, std::size_t N>
+    const char* enum_str(
+        const std::array<std::pair<const char*, Enum>, N>& table, Enum value,
+        const char* fallback)
+    {
+        for (const auto& entry : table) {
+            if (entry.second == value) {
+                return entry.first;
+            }
+        }
+        return fallback;
+    }
+
+    constexpr std::array<std::pair<const char*, ApiStandard>, 3> DIALECT_NAMES
+        = { {
+            { "openai", ApiStandard::OPENAI },
+            { "openai-responses", ApiStandard::OPENAI_RESPONSES },
+            { "anthropic", ApiStandard::ANTHROPIC },
+        } };
+
+    constexpr std::array<std::pair<const char*, SkillPolicy>, 3>
+        SKILL_POLICY_NAMES = { {
+            { "allow", SkillPolicy::ALLOW },
+            { "ask", SkillPolicy::ASK },
+            { "deny", SkillPolicy::DENY },
+        } };
+
     bool parse_dialect(const std::string& text, ApiStandard& out)
     {
-        if (text == "openai") {
-            out = ApiStandard::OPENAI;
-            return true;
-        }
-        if (text == "openai-responses") {
-            out = ApiStandard::OPENAI_RESPONSES;
-            return true;
-        }
-        if (text == "anthropic") {
-            out = ApiStandard::ANTHROPIC;
-            return true;
-        }
-        return false;
+        return parse_enum(DIALECT_NAMES, text, out);
     }
 
     const char* dialect_str(ApiStandard standard)
     {
-        switch (standard) {
-        case ApiStandard::OPENAI: return "openai";
-        case ApiStandard::OPENAI_RESPONSES: return "openai-responses";
-        case ApiStandard::ANTHROPIC: return "anthropic";
-        }
-        return "openai";
+        return enum_str(DIALECT_NAMES, standard, "openai");
     }
 
     bool parse_skill_policy(const std::string& text, SkillPolicy& out)
     {
-        if (text == "allow")
-            out = SkillPolicy::ALLOW;
-        else if (text == "ask")
-            out = SkillPolicy::ASK;
-        else if (text == "deny")
-            out = SkillPolicy::DENY;
-        else
-            return false;
-        return true;
+        return parse_enum(SKILL_POLICY_NAMES, text, out);
     }
 
     const char* skill_policy_str(SkillPolicy policy)
     {
-        switch (policy) {
-        case SkillPolicy::ALLOW: return "allow";
-        case SkillPolicy::ASK: return "ask";
-        case SkillPolicy::DENY: return "deny";
-        }
-        return "ask";
+        return enum_str(SKILL_POLICY_NAMES, policy, "ask");
     }
 
 } // namespace

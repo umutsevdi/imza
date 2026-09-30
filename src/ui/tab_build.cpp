@@ -13,22 +13,22 @@ namespace {
     public:
         BuildTab(std::shared_ptr<ApplicationState> state, LayoutFn layout,
             Component chat, Component sidechat, SidechatStatus& status)
-            : state_(std::move(state))
-            , layout_(std::move(layout))
-            , chat_(std::move(chat))
-            , sidechat_(std::move(sidechat))
-            , status_(status)
+            : _state(std::move(state))
+            , _layout(std::move(layout))
+            , _chat(std::move(chat))
+            , _sidechat(std::move(sidechat))
+            , _status(status)
         {
         }
 
-        Component chat() { return chat_; }
+        Component chat() { return _chat; }
 
     private:
-        std::shared_ptr<ApplicationState> state_;
-        LayoutFn layout_;
-        Component chat_;
-        Component sidechat_;
-        SidechatStatus& status_;
+        std::shared_ptr<ApplicationState> _state;
+        LayoutFn _layout;
+        Component _chat;
+        Component _sidechat;
+        SidechatStatus& _status;
     };
 
 } // namespace

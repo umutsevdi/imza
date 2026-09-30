@@ -11,6 +11,9 @@ namespace imza {
 class Session;
 struct LoadedSession;
 
+// Title shown for sessions saved without a user-set name.
+inline constexpr char UNTITLED_TITLE[] = "Untitled session";
+
 Status save_session(Session& session);
 Status read_session(const std::filesystem::path& path, LoadedSession& loaded);
 std::vector<SavedSession> saved_sessions();

@@ -4,11 +4,12 @@
 #include <doctest/doctest.h>
 
 #include "test_helpers.h"
+#include "test_state.h"
 #include "ui/ui.h"
 #include "workspace/environment.h"
 
 using imza::test::to_screen;
-#include "test_state.h"
+using imza::test::to_text;
 
 TEST_CASE("side panel plans widget hides when empty and lists plans")
 {
@@ -23,10 +24,9 @@ TEST_CASE("side panel plans widget hides when empty and lists plans")
     const std::string empty = imza::test::to_text(panel->Render(), 120, 40);
     CHECK(empty.find("Plans") == std::string::npos);
 
-    const std::string skeleton = "# Goal\nx\n# Approach\nx\n# Files\nx\n"
-                                 "# Verification\nx\n# Open Questions\nx";
-    REQUIRE(state->session->create_plan(skeleton).empty());
-    REQUIRE(state->session->create_plan(skeleton + "\nmore").empty());
+    REQUIRE(state->session->create_plan(imza::test::PLAN_SKELETON).empty());
+    REQUIRE(state->session->create_plan(imza::test::PLAN_SKELETON + "\nmore")
+            .empty());
 
     const std::string out = imza::test::to_text(panel->Render(), 120, 40);
     CHECK(out.find("Plans") != std::string::npos);
@@ -36,11 +36,10 @@ TEST_CASE("side panel plans widget hides when empty and lists plans")
 
 TEST_CASE("only the latest plan renders bright, older ones stay dim")
 {
-    auto state                 = imza::test::make_test_state();
-    const std::string skeleton = "# Goal\nx\n# Approach\nx\n# Files\nx\n"
-                                 "# Verification\nx\n# Open Questions\nx";
-    REQUIRE(state->session->create_plan(skeleton).empty());
-    REQUIRE(state->session->create_plan(skeleton + "\nmore").empty());
+    auto state = imza::test::make_test_state();
+    REQUIRE(state->session->create_plan(imza::test::PLAN_SKELETON).empty());
+    REQUIRE(state->session->create_plan(imza::test::PLAN_SKELETON + "\nmore")
+            .empty());
 
     auto panel = imza::make_side_panel(
         state,
@@ -76,10 +75,8 @@ TEST_CASE("only the latest plan renders bright, older ones stay dim")
 
 TEST_CASE("clicking a plan opens it in the viewer modal")
 {
-    auto state                 = imza::test::make_test_state();
-    const std::string skeleton = "# Goal\nx\n# Approach\nx\n# Files\nx\n"
-                                 "# Verification\nx\n# Open Questions\nx";
-    REQUIRE(state->session->create_plan(skeleton).empty());
+    auto state = imza::test::make_test_state();
+    REQUIRE(state->session->create_plan(imza::test::PLAN_SKELETON).empty());
 
     auto panel = imza::make_side_panel(
         state,
@@ -91,9 +88,8 @@ TEST_CASE("clicking a plan opens it in the viewer modal")
     const auto* viewer               = std::get_if<imza::ViewerModal>(&payload);
     REQUIRE(viewer != nullptr);
     CHECK(viewer->title == "Initial Plan");
-    CHECK(viewer->content == skeleton);
+    CHECK(viewer->content == imza::test::PLAN_SKELETON);
 }
-using imza::test::to_text;
 
 TEST_CASE("render_todo renders status marks")
 {

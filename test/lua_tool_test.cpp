@@ -10,6 +10,7 @@
 #include "network/json_io.h"
 #include "permissions/store.h"
 #include "test_fs.h"
+#include "test_helpers.h"
 #include "tools/tool.h"
 #include "workspace/environment.h"
 
@@ -77,6 +78,34 @@ struct ShellFixture {
                 return promise.get_future();
             };
         }
+        return host;
+    }
+};
+
+// A host whose permission context sees a BUILD-mode workspace rooted in
+// `dir`, backed by a live (empty) permission store; tests attach an ask
+// route on the returned host when they need one.
+struct WorkspaceFixture {
+    imza::test::TempDir dir;
+    std::shared_ptr<imza::SystemEnvironment> system
+        = std::make_shared<imza::SystemEnvironment>();
+    std::shared_ptr<imza::WorkspaceEnvironment> workspace
+        = std::make_shared<imza::WorkspaceEnvironment>();
+    imza::PermissionStore store;
+
+    WorkspaceFixture()
+    {
+        workspace->working_directory = dir.path;
+        workspace->project_root      = dir.path;
+    }
+
+    imza::LuaHost host()
+    {
+        imza::LuaHost host;
+        host.permission_context = [this] {
+            return imza::PermissionContext { system, workspace,
+                store.snapshot(), imza::SessionMode::BUILD };
+        };
         return host;
     }
 };
@@ -546,8 +575,7 @@ TEST_CASE("plan bindings validate skeleton and cap through the session")
     host.mark_plan_seen = [&] { session.mark_plan_seen(); };
     host.plan_frozen    = [] { return false; };
 
-    const std::string skeleton = "# Goal\nx\n# Approach\nx\n# Files\nx\n"
-                                 "# Verification\nx\n# Open Questions\nx";
+    const std::string& skeleton = imza::test::PLAN_SKELETON;
 
     const imza::ToolOutput missing = run_script(
         "local _, e = imza.plan.create('# Goal only')\nprint(e)", host);
@@ -593,8 +621,7 @@ TEST_CASE("plan edit requires a prior read and patches the current document")
         = run_script("print(select(2, imza.plan.edit('a', 'b')))", host);
     CHECK(no_plan.text.find("no plan exists") != std::string::npos);
 
-    const std::string skeleton = "# Goal\nx\n# Approach\nx\n# Files\nx\n"
-                                 "# Verification\nx\n# Open Questions\nx";
+    const std::string& skeleton = imza::test::PLAN_SKELETON;
     REQUIRE(session.create_plan(skeleton).empty());
 
     const imza::ToolOutput reedited
@@ -928,7 +955,6 @@ TEST_CASE("imza.tree.symbols lists identifier occurrences with lines")
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     // Grammar-typed: the 'cat' inside 'use_cat' never matches.
     CHECK(out.text.find("    1    int cat;\n") != std::string::npos);
-    CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
     // Grammar-typed: no row's line is exactly 'use_cat'; but its line 3
     // row exists because it contains the standalone `cat` identifier.
     CHECK(out.text.find("    3    int use_cat() { return cat; }\n")
@@ -1161,50 +1187,30 @@ TEST_CASE("imza.fs.write creates missing parent directories")
 
 TEST_CASE("imza.fs.write rejects a file occupying the parent path")
 {
-    imza::test::TempDir dir;
-    imza::test::write_file(dir.file("a"), "blocker\n");
-    imza::LuaHost host;
-    auto system    = std::make_shared<imza::SystemEnvironment>();
-    auto workspace = std::make_shared<imza::WorkspaceEnvironment>();
-    workspace->working_directory = dir.path;
-    workspace->project_root      = dir.path;
-    imza::PermissionStore store;
-    host.permission_context = [&] {
-        return imza::PermissionContext { system, workspace, store.snapshot(),
-            imza::SessionMode::BUILD };
-    };
-    const std::string path     = dir.file("a/b.txt").string();
+    WorkspaceFixture fx;
+    imza::test::write_file(fx.dir.file("a"), "blocker\n");
+    const std::string path     = fx.dir.file("a/b.txt").string();
     const imza::ToolOutput out = run_script(
         "local ok, err = imza.fs.write([[" + path + "]], 'x\\n')\nprint(err)",
-        std::move(host));
+        fx.host());
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(
         out.text.find("target parent is not a directory") != std::string::npos);
-    CHECK(imza::test::read_all(dir.file("a")) == "blocker\n");
-    CHECK(!fs::exists(dir.file("a/b.txt")));
+    CHECK(imza::test::read_all(fx.dir.file("a")) == "blocker\n");
+    CHECK(!fs::exists(fx.dir.file("a/b.txt")));
     CHECK(out.diffs.empty());
 }
 
 TEST_CASE("imza.fs.write with nested path fails closed unattended outside "
           "trusted roots")
 {
-    imza::test::TempDir dir;
+    WorkspaceFixture fx;
     imza::test::TempDir outside;
-    imza::LuaHost host;
-    auto system    = std::make_shared<imza::SystemEnvironment>();
-    auto workspace = std::make_shared<imza::WorkspaceEnvironment>();
-    workspace->working_directory = dir.path;
-    workspace->project_root      = dir.path;
-    imza::PermissionStore store;
-    host.permission_context = [&] {
-        return imza::PermissionContext { system, workspace, store.snapshot(),
-            imza::SessionMode::BUILD };
-    };
     // No ask callback: ASK verdicts must fail closed.
     const std::string path     = outside.file("a/b/c.txt").string();
     const imza::ToolOutput out = run_script("local ok, err = imza.fs.write([["
             + path + "]], 'x\\n')\nprint(ok, err)",
-        std::move(host));
+        fx.host());
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(out.text.find("denied") != std::string::npos);
     CHECK(!fs::exists(outside.file("a")));
@@ -1262,87 +1268,57 @@ TEST_CASE("lua file diffs survive a mid-script error")
 
 TEST_CASE("imza.file mutations auto-accept in trusted Build mode")
 {
-    imza::test::TempDir dir;
-    imza::test::write_file(dir.file("a.txt"), "one\n");
-    imza::LuaHost host;
-    auto system    = std::make_shared<imza::SystemEnvironment>();
-    auto workspace = std::make_shared<imza::WorkspaceEnvironment>();
-    workspace->working_directory = dir.path;
-    workspace->project_root      = dir.path;
-    imza::PermissionStore store;
-    host.permission_context = [&] {
-        return imza::PermissionContext { system, workspace, store.snapshot(),
-            imza::SessionMode::BUILD };
-    };
-    const std::string a = dir.file("a.txt").string();
-    const imza::ToolOutput out
-        = run_script("assert(not imza.fs.edit([[" + a + "]], 'one', 'ONE'))",
-            std::move(host));
+    WorkspaceFixture fx;
+    imza::test::write_file(fx.dir.file("a.txt"), "one\n");
+    const std::string a        = fx.dir.file("a.txt").string();
+    const imza::ToolOutput out = run_script(
+        "assert(not imza.fs.edit([[" + a + "]], 'one', 'ONE'))", fx.host());
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(imza::test::read_all(dir.file("a.txt")) == "ONE\n");
+    CHECK(imza::test::read_all(fx.dir.file("a.txt")) == "ONE\n");
 }
 
-TEST_CASE("imza.file mutations outside the workspace ask and fail closed "
-          "unattended")
+TEST_CASE("imza.file mutations outside the workspace follow the ask verdict")
 {
-    imza::test::TempDir dir;
+    WorkspaceFixture fx;
     imza::test::TempDir outside;
     imza::test::write_file(outside.file("a.txt"), "one\n");
-    imza::LuaHost host;
-    auto system    = std::make_shared<imza::SystemEnvironment>();
-    auto workspace = std::make_shared<imza::WorkspaceEnvironment>();
-    workspace->working_directory = dir.path;
-    workspace->project_root      = dir.path;
-    imza::PermissionStore store;
-    host.permission_context = [&] {
-        return imza::PermissionContext { system, workspace, store.snapshot(),
-            imza::SessionMode::BUILD };
-    };
-    // No ask callback: ASK verdicts must fail closed.
-    const std::string a        = outside.file("a.txt").string();
-    const imza::ToolOutput out = run_script("local ok, err = imza.fs.edit([["
-            + a + "]], 'one', 'ONE')\nprint(ok, err)",
-        std::move(host));
-    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(out.text.find("denied") != std::string::npos);
-    CHECK(imza::test::read_all(outside.file("a.txt")) == "one\n");
-}
-
-TEST_CASE("imza.file mutations proceed after attended approval")
-{
-    imza::test::TempDir dir;
-    imza::test::TempDir outside;
-    imza::test::write_file(outside.file("a.txt"), "one\n");
-    imza::LuaHost host;
-    auto system    = std::make_shared<imza::SystemEnvironment>();
-    auto workspace = std::make_shared<imza::WorkspaceEnvironment>();
-    workspace->working_directory = dir.path;
-    workspace->project_root      = dir.path;
-    imza::PermissionStore store;
-    host.permission_context = [&] {
-        return imza::PermissionContext { system, workspace, store.snapshot(),
-            imza::SessionMode::BUILD };
-    };
-    host.ask = [&](imza::ModalPayload payload) {
-        const auto& prompt = std::get<imza::PermissionPrompt>(payload);
-        CHECK(prompt.name == "edit");
-        CHECK(prompt.target == outside.file("a.txt").string());
-        const auto& edit = std::get<imza::EditFileRequest>(
-            std::get<imza::FilesystemRequest>(prompt.request));
-        CHECK(edit.old_text == "one");
-        CHECK(edit.new_text == "ONE");
-        CHECK_FALSE(prompt.reason.empty());
-        std::promise<imza::ModalResult> promise;
-        promise.set_value(imza::ModalResult {
-            imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" } });
-        return promise.get_future();
-    };
     const std::string a = outside.file("a.txt").string();
-    const imza::ToolOutput out
-        = run_script("assert(not imza.fs.edit([[" + a + "]], 'one', 'ONE'))",
+
+    SUBCASE("unattended: the ask fails closed")
+    {
+        // No ask callback: ASK verdicts must fail closed.
+        const imza::ToolOutput out
+            = run_script("local ok, err = imza.fs.edit([[" + a
+                    + "]], 'one', 'ONE')\nprint(ok, err)",
+                fx.host());
+        REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+        CHECK(out.text.find("denied") != std::string::npos);
+        CHECK(imza::test::read_all(outside.file("a.txt")) == "one\n");
+    }
+
+    SUBCASE("attended: approval lets the edit proceed")
+    {
+        imza::LuaHost host = fx.host();
+        host.ask           = [&](imza::ModalPayload payload) {
+            const auto& prompt = std::get<imza::PermissionPrompt>(payload);
+            CHECK(prompt.name == "edit");
+            CHECK(prompt.target == outside.file("a.txt").string());
+            const auto& edit = std::get<imza::EditFileRequest>(
+                std::get<imza::FilesystemRequest>(prompt.request));
+            CHECK(edit.old_text == "one");
+            CHECK(edit.new_text == "ONE");
+            CHECK_FALSE(prompt.reason.empty());
+            std::promise<imza::ModalResult> promise;
+            promise.set_value(imza::ModalResult {
+                imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" } });
+            return promise.get_future();
+        };
+        const imza::ToolOutput out = run_script(
+            "assert(not imza.fs.edit([[" + a + "]], 'one', 'ONE'))",
             std::move(host));
-    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(imza::test::read_all(outside.file("a.txt")) == "ONE\n");
+        REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+        CHECK(imza::test::read_all(outside.file("a.txt")) == "ONE\n");
+    }
 }
 
 TEST_CASE("canvas line emits a declarative chart and returns nothing")

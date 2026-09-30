@@ -133,6 +133,7 @@ namespace {
 
     constexpr std::string_view CHAT_SUFFIX      = "/chat/completions";
     constexpr std::string_view RESPONSES_SUFFIX = "/responses";
+    constexpr std::string_view MESSAGES_SUFFIX  = "/messages";
 
     std::string normalize_base(std::string_view base)
     {
@@ -338,7 +339,7 @@ Status fetch_catalog(Catalog& out)
     if (st != Status::OK) {
         return st;
     }
-    if (code < 200 || code >= 300) {
+    if (!http_ok(code)) {
         return Status::API_ERROR;
     }
 
@@ -483,7 +484,7 @@ Route resolve_route(const Connection& conn, const Catalog& catalog,
 
     if (conn.id == OPENAI_SUBSCRIPTION_ID) {
         route.api      = "https://chatgpt.com/backend-api/codex";
-        route.endpoint = route.api + "/responses";
+        route.endpoint = route.api + std::string(RESPONSES_SUFFIX);
         route.dialect  = ApiStandard::OPENAI_RESPONSES;
         route.auth     = AuthType::OPENAI_SUBSCRIPTION;
         return route;
@@ -502,13 +503,13 @@ Route resolve_route(const Connection& conn, const Catalog& catalog,
         = conn.api_key.empty() ? AuthType::NONE : auth_from_npm(provider.npm);
     switch (dialect) {
     case ApiStandard::OPENAI:
-        route.endpoint = route.api + "/chat/completions";
+        route.endpoint = route.api + std::string(CHAT_SUFFIX);
         break;
     case ApiStandard::OPENAI_RESPONSES:
-        route.endpoint = route.api + "/responses";
+        route.endpoint = route.api + std::string(RESPONSES_SUFFIX);
         break;
     case ApiStandard::ANTHROPIC:
-        route.endpoint = route.api + "/messages";
+        route.endpoint = route.api + std::string(MESSAGES_SUFFIX);
         break;
     }
     return route;

@@ -32,6 +32,10 @@ registered TSX and Jupyter notebook files.
   - fs.write now creates missing parent directories instead of failing.
   - A welcome banner is shown in the chat when the app opens, until the
 first message is sent.
+  - Fixed a crash when a mentioned skill is denied by project permissions.
+  - Fixed update downloads rejecting certain successful server responses.
+  - Fixed the tab menu highlighting the wrong tab when a session opens in
+Build mode.
 
 -------------------------------------------------------------------------------
 0.4.1 - 2026-09-24

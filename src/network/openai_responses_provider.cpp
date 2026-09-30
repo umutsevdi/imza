@@ -141,12 +141,7 @@ namespace {
     void finish_response(ParseState& state, const Json::Value& response,
         std::vector<StreamEvent>& outs)
     {
-        const Usage usage = read_usage(response);
-        if (!state.usage_emitted
-            && (usage.prompt > 0 || usage.completion > 0 || usage.total > 0)) {
-            state.usage_emitted = true;
-            outs.push_back(make_usage_event(usage));
-        }
+        emit_usage_once(state, read_usage(response), outs);
         state.terminal = true;
         flush_tool_accums(state, outs);
         outs.push_back(make_done_event());
@@ -181,11 +176,7 @@ namespace {
                 acc.id   = item.get("call_id", item.get("id", "")).asString();
                 acc.name = item.get("name", "").asString();
                 acc.args = item.get("arguments", "").asString();
-                if (!acc.started && !acc.name.empty()) {
-                    acc.started = true;
-                    outs.push_back(
-                        make_tool_call_start_event(finish_accum(acc)));
-                }
+                emit_ready_tool_start(acc, outs);
             }
             return;
         }

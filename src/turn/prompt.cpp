@@ -6,7 +6,6 @@
 #include "tools/skills.h"
 
 #include <algorithm>
-#include <cctype>
 #include <optional>
 #include <string_view>
 #include <utility>
@@ -18,15 +17,7 @@ namespace imza {
 
 namespace {
 
-    bool has_content(std::string_view text)
-    {
-        for (const char c : text) {
-            if (!std::isspace(static_cast<unsigned char>(c))) {
-                return true;
-            }
-        }
-        return false;
-    }
+    bool has_content(std::string_view text) { return !trim(text).empty(); }
 
     std::string strip_trailing_space(std::string text)
     {
@@ -237,13 +228,11 @@ std::string format_plan_annotations_prompt(std::string_view instructions,
     if (notes.empty()) {
         return { };
     }
-    std::vector<std::string_view> lines;
-    std::size_t begin = 0;
-    for (std::size_t i = 0; i <= document.size(); ++i) {
-        if (i == document.size() || document[i] == '\n') {
-            lines.push_back(document.substr(begin, i - begin));
-            begin = i + 1;
-        }
+    std::vector<std::string> lines = split_lines(document);
+    // A document ending in '\n' pins one final empty line; keep it so
+    // notes on that line resolve instead of turning stale.
+    if (document.empty() || document.back() == '\n') {
+        lines.emplace_back();
     }
     // Nearest heading above each pinned line: a plain line scan, mirroring
     // the cmark-derived sections without a ui dependency.

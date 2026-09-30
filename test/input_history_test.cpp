@@ -4,12 +4,12 @@
 #include "app/application_state.h"
 #include "conversation/input_history.h"
 #include "test_fs.h"
+#include "test_helpers.h"
 #include "test_state.h"
 #include "ui/ui.h"
 
 #include <filesystem>
 #include <string>
-#include <string_view>
 
 namespace {
 
@@ -29,13 +29,6 @@ ftxui::Component make_test_chat(
     return imza::make_chat(state, [] {
         return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100, 40 };
     });
-}
-
-void type(ftxui::Component& chat, std::string_view text)
-{
-    for (const char character : text) {
-        chat->OnEvent(ftxui::Event::Character(character));
-    }
 }
 
 ftxui::Event ctrl_up() { return ftxui::Event::ArrowUpCtrl; }
@@ -101,12 +94,12 @@ TEST_CASE("chat input history recalls entries and restores the draft")
     REQUIRE(state->input_history->record("second") == imza::Status::OK);
     auto chat = make_test_chat(state);
 
-    type(chat, "draft");
+    imza::test::type(chat, "draft");
     REQUIRE(chat->OnEvent(ctrl_up()));
     chat->OnEvent(ftxui::Event::Return);
     CHECK(state->input_history->entries().back() == "second");
 
-    type(chat, "draft");
+    imza::test::type(chat, "draft");
     REQUIRE(chat->OnEvent(ctrl_up()));
     REQUIRE(chat->OnEvent(ctrl_up()));
     REQUIRE(chat->OnEvent(ctrl_up()));
@@ -125,7 +118,7 @@ TEST_CASE("plain arrows do not recall chat input history")
     REQUIRE(state->input_history->record("previous") == imza::Status::OK);
     auto chat = make_test_chat(state);
 
-    type(chat, "draft");
+    imza::test::type(chat, "draft");
     REQUIRE(chat->OnEvent(ftxui::Event::ArrowUp));
     REQUIRE(chat->OnEvent(ftxui::Event::ArrowDown));
     REQUIRE(chat->OnEvent(ftxui::Event::Return));
@@ -140,10 +133,10 @@ TEST_CASE("chat records slash commands and queued prompts")
     state->input_history = std::make_shared<imza::InputHistoryStore>(file.path);
     auto chat            = make_test_chat(state);
 
-    type(chat, "/new");
+    imza::test::type(chat, "/new");
     REQUIRE(chat->OnEvent(ftxui::Event::Return));
     state->session->set_phase(imza::Session::Phase::STREAMING);
-    type(chat, "queued prompt");
+    imza::test::type(chat, "queued prompt");
     REQUIRE(chat->OnEvent(ftxui::Event::Return));
 
     CHECK(state->input_history->entries()
@@ -159,9 +152,9 @@ TEST_CASE("bracketed multiline paste is submitted as one history entry")
     auto chat            = make_test_chat(state);
 
     REQUIRE(chat->OnEvent(ftxui::Event::Special("\x1B[200~")));
-    type(chat, "  line one");
+    imza::test::type(chat, "  line one");
     REQUIRE(chat->OnEvent(ftxui::Event::Return));
-    type(chat, "line two  ");
+    imza::test::type(chat, "line two  ");
     REQUIRE(chat->OnEvent(ftxui::Event::Special("\x1B[201~")));
     REQUIRE(chat->OnEvent(ftxui::Event::Return));
 

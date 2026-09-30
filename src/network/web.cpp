@@ -221,7 +221,7 @@ Status fetch_url(
         detail = "response too large (limit 5 MB)";
         return Status::API_ERROR;
     }
-    if (code < 200 || code >= 300) {
+    if (!http_ok(code)) {
         page.http_code = code;
         detail         = "HTTP " + std::to_string(code);
         return Status::API_ERROR;
@@ -388,7 +388,7 @@ Status web_search(const std::string& query, int num_results, std::string& text)
         != Status::OK) {
         return Status::NETWORK_ERROR;
     }
-    if (code < 200 || code >= 300) {
+    if (!http_ok(code)) {
         return Status::API_ERROR;
     }
     text = mcp_search_text(response);

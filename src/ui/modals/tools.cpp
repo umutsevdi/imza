@@ -202,73 +202,73 @@ namespace {
     class ModalView : public ComponentBase {
     public:
         explicit ModalView(std::shared_ptr<ApplicationState> state)
-            : state_(std::move(state))
-            , session_(state_->session)
+            : _state(std::move(state))
+            , _session(_state->session)
         {
         }
 
         Element OnRender() override
         {
-            const Session& st = *session_;
+            const Session& st = *_session;
             if (st.modal().index() == 0) {
-                if (built_) {
-                    clear_built_content();
+                if (_built) {
+                    _clear_built_content();
                 }
-                built_ = false;
+                _built = false;
                 return text("");
             }
-            ensure_built(st);
+            _ensure_built(st);
             // AppleClang fails to emit member-template instantiations
             // referenced only from a visit lambda; dispatch with
             // holds_alternative instead.
             if (std::holds_alternative<PermissionPrompt>(st.modal())) {
-                return tool_body(std::get<PermissionPrompt>(st.modal()));
+                return _tool_body(std::get<PermissionPrompt>(st.modal()));
             }
             if (std::holds_alternative<QuestionForm>(st.modal())) {
-                return question_body();
+                return _question_body();
             }
             if (std::holds_alternative<ViewerModal>(st.modal())) {
-                return viewer_body(std::get<ViewerModal>(st.modal()));
+                return _viewer_body(std::get<ViewerModal>(st.modal()));
             }
-            return body_->Render();
+            return _body->Render();
         }
 
         bool OnEvent(Event event) override
         {
-            const Session& st = *session_;
+            const Session& st = *_session;
             if (st.modal().index() == 0) {
                 return false;
             }
-            ensure_built(st);
+            _ensure_built(st);
             if (event == Event::Escape) {
                 if (std::holds_alternative<ConnectModal>(st.modal())) {
-                    if (body_ && body_->OnEvent(event)) {
+                    if (_body && _body->OnEvent(event)) {
                         return true;
                     }
-                    imza::close_modal(*state_);
+                    imza::close_modal(*_state);
                     return true;
                 }
-                if (std::holds_alternative<SessionsModal>(st.modal()) && body_
-                    && body_->OnEvent(event)) {
+                if (std::holds_alternative<SessionsModal>(st.modal()) && _body
+                    && _body->OnEvent(event)) {
                     return true;
                 }
                 if (std::holds_alternative<PermissionPrompt>(st.modal())
-                    && tool_phase_ == ToolPhase::REASON) {
+                    && _tool_phase == ToolPhase::REASON) {
                     _set_tool_phase(ToolPhase::DECIDE);
                     return true;
                 }
-                imza::close_modal(*state_);
+                imza::close_modal(*_state);
                 return true;
             }
             if (std::holds_alternative<ViewerModal>(st.modal())) {
                 if (event == Event::Return) {
-                    imza::close_modal(*state_);
+                    imza::close_modal(*_state);
                     return true;
                 }
-                return scroll_static(event);
+                return _scroll_static(event);
             }
-            if (body_) {
-                return body_->OnEvent(event);
+            if (_body) {
+                return _body->OnEvent(event);
             }
             return true;
         }
@@ -285,48 +285,48 @@ namespace {
             Component input;
         };
 
-        void ensure_built(const Session& st)
+        void _ensure_built(const Session& st)
         {
-            if (built_ && serial_ == st.modal_serial()) {
+            if (_built && _serial == st.modal_serial()) {
                 return;
             }
-            built_  = true;
-            serial_ = st.modal_serial();
+            _built  = true;
+            _serial = st.modal_serial();
             std::visit(
-                [this](const auto& payload) { build(payload); }, st.modal());
+                [this](const auto& payload) { _build(payload); }, st.modal());
         }
 
-        void build(const PermissionPrompt& request)
+        void _build(const PermissionPrompt& request)
         {
             build_tool_approval(request.allow_for_session);
         }
 
         void build_tool_approval(bool allow_for_session)
         {
-            tool_phase_ = ToolPhase::DECIDE;
-            reason_buf_.clear();
-            reason_cursor_ = 0;
+            _tool_phase = ToolPhase::DECIDE;
+            _reason_buf.clear();
+            _reason_cursor = 0;
 
-            reason_input_ = Input(field_option(&reason_buf_, &reason_cursor_,
+            _reason_input = Input(field_option(&_reason_buf, &_reason_cursor,
                 "optional reason", { }, [this] { _confirm_reject(); }));
 
             auto resolve = [this](ToolDecision d, std::string r) {
                 imza::resolve_modal(
-                    *state_, ModalResult { ToolVerdict { d, std::move(r) } });
+                    *_state, ModalResult { ToolVerdict { d, std::move(r) } });
             };
-            accept_         = action_button("Allow once",
+            _accept         = action_button("Allow once",
                 [resolve] { resolve(ToolDecision::ACCEPT_ONCE, ""); });
-            accept_session_ = allow_for_session
+            _accept_session = allow_for_session
                 ? action_button("Allow for this session",
                       [resolve] {
                           resolve(ToolDecision::ACCEPT_FOR_SESSION, "");
                       })
                 : Component { };
-            reject_         = action_button(
+            _reject         = action_button(
                 "Reject", [this] { _set_tool_phase(ToolPhase::REASON); });
-            confirm_reject_
+            _confirm_reject_button
                 = action_button("Reject", [this] { _confirm_reject(); });
-            back_ = action_button(
+            _back = action_button(
                 "Back", [this] { _set_tool_phase(ToolPhase::DECIDE); });
 
             _build_tool_body();
@@ -334,50 +334,50 @@ namespace {
 
         void _set_tool_phase(ToolPhase next)
         {
-            tool_phase_ = next;
+            _tool_phase = next;
             _build_tool_body();
         }
 
         void _build_tool_body()
         {
-            if (tool_phase_ == ToolPhase::DECIDE) {
-                Components buttons { accept_ };
-                if (accept_session_) {
-                    buttons.push_back(accept_session_);
+            if (_tool_phase == ToolPhase::DECIDE) {
+                Components buttons { _accept };
+                if (_accept_session) {
+                    buttons.push_back(_accept_session);
                 }
-                buttons.push_back(reject_);
-                body_ = Container::Horizontal(std::move(buttons));
+                buttons.push_back(_reject);
+                _body = Container::Horizontal(std::move(buttons));
             } else {
-                body_ = Container::Vertical({ reason_input_,
-                    Container::Horizontal({ confirm_reject_, back_ }) });
-                reason_input_->TakeFocus();
+                _body = Container::Vertical({ _reason_input,
+                    Container::Horizontal({ _confirm_reject_button, _back }) });
+                _reason_input->TakeFocus();
             }
         }
 
         void _confirm_reject()
         {
-            imza::resolve_modal(*state_,
+            imza::resolve_modal(*_state,
                 ModalResult {
-                    ToolVerdict { ToolDecision::REJECT, reason_buf_ } });
+                    ToolVerdict { ToolDecision::REJECT, _reason_buf } });
         }
 
-        void build(const QuestionForm& form)
+        void _build(const QuestionForm& form)
         {
-            form_ = form;
-            cards_.clear();
-            cards_.reserve(form.size());
-            focusables_.clear();
+            _form = form;
+            _cards.clear();
+            _cards.reserve(form.size());
+            _focusables.clear();
 
             Components children;
             for (const auto& card : form) {
-                cards_.emplace_back();
-                CardState& cs = cards_.back();
+                _cards.emplace_back();
+                CardState& cs = _cards.back();
                 cs.checked.assign(card.options.size(), false);
 
                 Components rows;
                 for (size_t j = 0; j < card.options.size(); ++j) {
                     rows.push_back(
-                        make_option_row(cs, card.options[j], j, card.multi));
+                        _make_option_row(cs, card.options[j], j, card.multi));
                 }
                 if (card.free_text) {
                     const bool multi    = card.multi;
@@ -390,7 +390,7 @@ namespace {
                                 cs.text_live = true;
                             }
                         },
-                        [this] { submit_question(); }));
+                        [this] { _submit_question(); }));
                     Component input_row = Renderer(cs.input, [&cs, multi] {
                         const bool live
                             = cs.text_live && !trim(cs.free_text).empty();
@@ -402,70 +402,70 @@ namespace {
 
                 cs.selector = Container::Vertical(std::move(rows));
                 children.push_back(cs.selector);
-                focusables_.push_back(cs.selector);
+                _focusables.push_back(cs.selector);
             }
-            submit_ = action_button("Submit", [this] { submit_question(); });
-            children.push_back(submit_);
-            focusables_.push_back(submit_);
+            _submit = action_button("Submit", [this] { _submit_question(); });
+            children.push_back(_submit);
+            _focusables.push_back(_submit);
 
-            body_ = Container::Vertical(std::move(children));
-            if (!focusables_.empty()) {
-                focusables_.front()->TakeFocus();
+            _body = Container::Vertical(std::move(children));
+            if (!_focusables.empty()) {
+                _focusables.front()->TakeFocus();
             }
         }
 
-        void build(const ConnectModal& modal)
+        void _build(const ConnectModal& modal)
         {
             if (modal.entry == ConnectModal::Entry::SUBAGENTS) {
-                body_ = make_subagents(state_);
+                _body = make_subagents(_state);
             } else {
-                body_ = make_connect(state_);
+                _body = make_connect(_state);
             }
         }
 
-        void build(const VariantModal&) { body_ = make_variant(state_); }
+        void _build(const VariantModal&) { _body = make_variant(_state); }
 
-        void build(const SessionsModal&) { body_ = make_sessions(state_); }
+        void _build(const SessionsModal&) { _body = make_sessions(_state); }
 
-        void build(const SkillsModal&) { body_ = make_skills(state_); }
+        void _build(const SkillsModal&) { _body = make_skills(_state); }
 
-        void build(const ViewerModal& payload)
+        void _build(const ViewerModal& payload)
         {
-            reset_static_scroll();
-            const int content_width = modal_content_width(session_->modal());
+            _reset_static_scroll();
+            const int content_width = modal_content_width(_session->modal());
             if (payload.diff.has_value()) {
-                viewer_content_ = diff_split(*payload.diff, content_width);
+                _viewer_content = diff_split(*payload.diff, content_width);
             } else if (is_markdown_type(payload.lang)) {
-                viewer_content_
+                _viewer_content
                     = render_markdown_element(payload.content, content_width);
             } else if (payload.line_numbers) {
-                viewer_content_ = code_block_with_lines(payload.content,
+                _viewer_content = code_block_with_lines(payload.content,
                     payload.lang, payload.start_line, content_width);
             } else {
-                viewer_content_
+                _viewer_content
                     = code_block(payload.content, payload.lang, content_width);
             }
         }
 
-        void build(std::monostate) { clear_built_content(); }
+        void _build(std::monostate) { _clear_built_content(); }
 
-        void clear_built_content()
+        void _clear_built_content()
         {
-            viewer_content_.reset();
-            body_.reset();
-            form_.clear();
-            cards_.clear();
-            focusables_.clear();
-            submit_.reset();
-            reason_input_.reset();
-            accept_.reset();
-            accept_session_.reset();
-            reject_.reset();
-            confirm_reject_.reset();
-            back_.reset();
+            _viewer_content.reset();
+            _body.reset();
+            _form.clear();
+            _cards.clear();
+            _focusables.clear();
+            _submit.reset();
+            _reason_input.reset();
+            _accept.reset();
+            _accept_session.reset();
+            _reject.reset();
+            _confirm_reject_button.reset();
+            _back.reset();
         }
 
-        Component make_option_row(
+        Component _make_option_row(
             CardState& cs, const std::string& label, size_t idx, bool multi)
         {
             auto toggle = [&cs, idx, multi] {
@@ -490,12 +490,12 @@ namespace {
             return space_activates(row, toggle);
         }
 
-        void submit_question()
+        void _submit_question()
         {
             ModalAnswer answer;
-            for (size_t i = 0; i < form_.size() && i < cards_.size(); ++i) {
-                const QuestionCard& card = form_[i];
-                const CardState& cs      = cards_[i];
+            for (size_t i = 0; i < _form.size() && i < _cards.size(); ++i) {
+                const QuestionCard& card = _form[i];
+                const CardState& cs      = _cards[i];
                 QuestionAnswer qa;
                 qa.prompt       = card.prompt;
                 const bool live = card.free_text && cs.text_live
@@ -517,12 +517,12 @@ namespace {
                 }
                 answer.cards.push_back(std::move(qa));
             }
-            imza::resolve_modal(*state_, ModalResult { std::move(answer) });
+            imza::resolve_modal(*_state, ModalResult { std::move(answer) });
         }
 
-        Element header_line(std::string_view title)
+        Element _header_line(std::string_view title)
         {
-            const size_t remaining = state_->queue.size();
+            const size_t remaining = _state->queue.size();
             return hbox({
                 text(std::string(title)) | bold,
                 filler(),
@@ -531,38 +531,38 @@ namespace {
             });
         }
 
-        template <typename Request> Element tool_body(const Request& req)
+        template <typename Request> Element _tool_body(const Request& req)
         {
-            Elements rows { header_line(tool_display_name(req.name)) };
+            Elements rows { _header_line(tool_display_name(req.name)) };
             rows.push_back(
                 text(tool_action_description(req)) | color(PANEL_FG_DIM));
             rows.push_back(tool_approval_reason(req));
             rows.push_back(separatorEmpty());
             rows.push_back(
-                tool_request_body(req, *state_->environment->system(),
-                    modal_content_width(session_->modal())));
+                tool_request_body(req, *_state->environment->system(),
+                    modal_content_width(_session->modal())));
             rows.push_back(separatorEmpty());
-            if (tool_phase_ == ToolPhase::REASON) {
+            if (_tool_phase == ToolPhase::REASON) {
                 rows.push_back(section_title("Reason for rejecting", PANEL_FG));
-                rows.push_back(reason_input_->Render());
+                rows.push_back(_reason_input->Render());
                 rows.push_back(hbox({
-                    confirm_reject_->Render(),
+                    _confirm_reject_button->Render(),
                     text(" "),
-                    back_->Render(),
+                    _back->Render(),
                 }));
                 rows.push_back(separatorEmpty());
                 rows.push_back(hint_bar("Enter confirm rejection · Esc back"));
             } else {
                 rows.push_back(hbox({
-                    accept_->Render(),
-                    accept_session_
-                        ? hbox({ text(" "), accept_session_->Render(),
+                    _accept->Render(),
+                    _accept_session
+                        ? hbox({ text(" "), _accept_session->Render(),
                               text(" ") })
                         : text(" "),
-                    reject_->Render(),
+                    _reject->Render(),
                 }));
                 rows.push_back(separatorEmpty());
-                if (accept_session_) {
+                if (_accept_session) {
                     rows.push_back(hint_bar(
                         "allow lasts until directory or session changes"));
                 }
@@ -571,34 +571,34 @@ namespace {
             return vbox(std::move(rows)) | xflex;
         }
 
-        Element question_body()
+        Element _question_body()
         {
-            Elements rows { header_line("Question") };
-            for (size_t i = 0; i < form_.size(); ++i) {
+            Elements rows { _header_line("Question") };
+            for (size_t i = 0; i < _form.size(); ++i) {
                 rows.push_back(separatorEmpty());
-                rows.push_back(text(form_[i].prompt) | bold);
-                if (cards_[i].selector) {
-                    rows.push_back(cards_[i].selector->Render());
+                rows.push_back(text(_form[i].prompt) | bold);
+                if (_cards[i].selector) {
+                    rows.push_back(_cards[i].selector->Render());
                 }
             }
             rows.push_back(separatorEmpty());
-            rows.push_back(submit_->Render() | center);
+            rows.push_back(_submit->Render() | center);
             rows.push_back(separatorEmpty());
             rows.push_back(hint_bar("↑/↓ navigate · Enter confirm"));
             return vbox(std::move(rows)) | xflex;
         }
 
-        Element viewer_body(const ViewerModal& payload)
+        Element _viewer_body(const ViewerModal& payload)
         {
-            return vbox({ header_line(payload.title), separatorEmpty(),
-                       static_viewport(viewer_content_, payload.metadata) })
+            return vbox({ _header_line(payload.title), separatorEmpty(),
+                       _static_viewport(_viewer_content, payload.metadata) })
                 | xflex;
         }
 
-        Element static_viewport(Element content, const std::string& metadata)
+        Element _static_viewport(Element content, const std::string& metadata)
         {
             Element viewport
-                = scroll_viewport(std::move(content), static_view_);
+                = scroll_viewport(std::move(content), _static_view);
             Elements rows { std::move(viewport), separatorEmpty() };
             if (!metadata.empty()) {
                 rows.push_back(hint_bar(metadata));
@@ -607,36 +607,36 @@ namespace {
             return vbox(std::move(rows)) | xflex | yflex;
         }
 
-        bool scroll_static(Event event)
+        bool _scroll_static(Event event)
         {
-            return scroll_viewport_event(static_view_, event);
+            return scroll_viewport_event(_static_view, event);
         }
 
-        void reset_static_scroll() { static_view_ = { }; }
+        void _reset_static_scroll() { _static_view = { }; }
 
-        std::shared_ptr<ApplicationState> state_;
-        std::shared_ptr<Session> session_;
-        bool built_           = false;
-        std::uint64_t serial_ = 0;
+        std::shared_ptr<ApplicationState> _state;
+        std::shared_ptr<Session> _session;
+        bool _built           = false;
+        std::uint64_t _serial = 0;
 
-        QuestionForm form_;
-        std::vector<CardState> cards_;
-        std::vector<Component> focusables_;
-        Component submit_;
+        QuestionForm _form;
+        std::vector<CardState> _cards;
+        std::vector<Component> _focusables;
+        Component _submit;
 
-        ToolPhase tool_phase_ = ToolPhase::DECIDE;
-        std::string reason_buf_;
-        int reason_cursor_ = 0;
-        ScrollView static_view_ { };
-        Component reason_input_;
-        Component accept_;
-        Component accept_session_;
-        Component reject_;
-        Component confirm_reject_;
-        Component back_;
-        Element viewer_content_;
+        ToolPhase _tool_phase = ToolPhase::DECIDE;
+        std::string _reason_buf;
+        int _reason_cursor = 0;
+        ScrollView _static_view { };
+        Component _reason_input;
+        Component _accept;
+        Component _accept_session;
+        Component _reject;
+        Component _confirm_reject_button;
+        Component _back;
+        Element _viewer_content;
 
-        Component body_;
+        Component _body;
     };
 
 } // namespace

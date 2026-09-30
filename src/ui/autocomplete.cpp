@@ -12,7 +12,7 @@
 
 namespace imza {
 
-Autocomplete::Set Autocomplete::active_set() const
+Autocomplete::Set Autocomplete::_active_set() const
 {
     if (!_files.empty()) {
         return Set::FILES;
@@ -23,9 +23,9 @@ Autocomplete::Set Autocomplete::active_set() const
     return Set::COMMANDS;
 }
 
-int Autocomplete::count() const
+int Autocomplete::_count() const
 {
-    switch (active_set()) {
+    switch (_active_set()) {
     case Set::FILES: return static_cast<int>(_files.size());
     case Set::SKILLS: return static_cast<int>(_skills.size());
     case Set::COMMANDS: break;
@@ -33,20 +33,20 @@ int Autocomplete::count() const
     return static_cast<int>(_commands.size());
 }
 
-bool Autocomplete::active() const { return count() > 0; }
+bool Autocomplete::active() const { return _count() > 0; }
 
 bool Autocomplete::handle_event(const ftxui::Event& event)
 {
-    const int n = count();
+    const int n = _count();
     if (n == 0) {
         return false;
     }
     if (event == ftxui::Event::ArrowDown) {
-        selected_ = (selected_ + 1) % n;
+        _selected = (_selected + 1) % n;
         return true;
     }
     if (event == ftxui::Event::ArrowUp) {
-        selected_ = (selected_ - 1 + n) % n;
+        _selected = (_selected - 1 + n) % n;
         return true;
     }
     return false;
@@ -100,7 +100,7 @@ bool Autocomplete::accept(const ApplicationState& state, std::string& text,
 {
     if (!_files.empty() && _token) {
         const AttachmentCandidate& candidate
-            = _files[static_cast<std::size_t>(selected_)];
+            = _files[static_cast<std::size_t>(_selected)];
         const std::string replacement = "@" + candidate.path;
         text.replace(_token->begin, _token->end - _token->begin, replacement);
         cursor = static_cast<int>(_token->begin + replacement.size());
@@ -135,7 +135,7 @@ bool Autocomplete::accept(const ApplicationState& state, std::string& text,
     }
     if (!_skills.empty() && _skill_begin) {
         const std::string replacement
-            = "$" + _skills[static_cast<std::size_t>(selected_)].name;
+            = "$" + _skills[static_cast<std::size_t>(_selected)].name;
         text.replace(*_skill_begin,
             static_cast<std::size_t>(cursor) - *_skill_begin, replacement);
         cursor = static_cast<int>(*_skill_begin + replacement.size());
@@ -144,7 +144,7 @@ bool Autocomplete::accept(const ApplicationState& state, std::string& text,
         refresh(state, text, cursor);
         return false;
     }
-    const SlashCommand* cmd = _commands[static_cast<std::size_t>(selected_)];
+    const SlashCommand* cmd = _commands[static_cast<std::size_t>(_selected)];
     text                    = cmd->name;
     cursor                  = static_cast<int>(text.size());
     // Argument-taking commands (/make-skill …) complete without
@@ -161,7 +161,7 @@ void Autocomplete::clear()
     _files.clear();
     _token.reset();
     _skill_begin.reset();
-    selected_ = 0;
+    _selected = 0;
 }
 
 ftxui::Element Autocomplete::render(const LayoutCtx& ctx) const
@@ -172,12 +172,12 @@ ftxui::Element Autocomplete::render(const LayoutCtx& ctx) const
         ? ctx.width - LayoutCtx::RIGHT_WIDTH
         : ctx.width;
     const int description_width = std::clamp(available_width - 28, 8, 56);
-    const Set set               = active_set();
+    const Set set               = _active_set();
     const size_t total          = set == Set::FILES ? _files.size()
         : set == Set::SKILLS                        ? _skills.size()
                                                     : _commands.size();
     const size_t shown          = std::min(total, max_rows);
-    const size_t selected       = static_cast<size_t>(std::max(0, selected_));
+    const size_t selected       = static_cast<size_t>(std::max(0, _selected));
     const size_t first
         = selected < shown ? 0 : std::min(selected - shown + 1, total - shown);
     Elements rows;
@@ -187,7 +187,7 @@ ftxui::Element Autocomplete::render(const LayoutCtx& ctx) const
     }
     for (size_t row_index = 0; row_index < shown; ++row_index) {
         const size_t i              = first + row_index;
-        const bool sel              = static_cast<int>(i) == selected_;
+        const bool sel              = static_cast<int>(i) == _selected;
         const std::string name_text = set == Set::FILES ? "@" + _files[i].path
             : set == Set::SKILLS ? "$" + _skills[i].name
                                  : std::string(_commands[i]->name);

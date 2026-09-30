@@ -14,6 +14,11 @@ struct CommandResult {
     bool spawned   = false;
 };
 
+inline bool command_ok(const CommandResult& result)
+{
+    return result.spawned && !result.timed_out && result.exit_code == 0;
+}
+
 std::string shell_quote(const std::filesystem::path& path);
 CommandResult run_command(const std::string& command,
     std::chrono::seconds timeout,

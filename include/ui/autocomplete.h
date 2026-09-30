@@ -39,15 +39,15 @@ private:
     // Which suggestion set the priority rule selected: files, then skills,
     // then commands.
     enum class Set { FILES, SKILLS, COMMANDS };
-    Set active_set() const;
-    int count() const;
+    Set _active_set() const;
+    int _count() const;
 
     std::vector<const SlashCommand*> _commands;
     std::vector<Skill> _skills;
     std::vector<AttachmentCandidate> _files;
     std::optional<AttachmentToken> _token;
     std::optional<std::size_t> _skill_begin;
-    int selected_ = 0;
+    int _selected = 0;
 };
 
 } // namespace imza

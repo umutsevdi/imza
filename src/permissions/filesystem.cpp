@@ -20,6 +20,8 @@ namespace {
     template <typename T>
     constexpr bool is_find_request = std::is_same_v<T, FindFilesRequest>;
 
+    constexpr const char* CANNOT_INSPECT_TARGET = "cannot inspect target";
+
     bool matches_path(const PermissionStore::Grants& grants,
         const std::filesystem::path& target)
     {
@@ -135,7 +137,7 @@ FilesystemEvaluation evaluate_filesystem_request(
     }
     const bool exists = std::filesystem::exists(target, error);
     if (error) {
-        return reject("cannot inspect target");
+        return reject(CANNOT_INSPECT_TARGET);
     }
     if ((is_read(request) || is_edit(request))
         && (!exists || !std::filesystem::is_regular_file(target, error))) {
@@ -174,7 +176,7 @@ FilesystemEvaluation evaluate_filesystem_request(
                 parent = parent.parent_path();
             }
             if (error) {
-                return reject("cannot inspect target");
+                return reject(CANNOT_INSPECT_TARGET);
             }
             if (!parent_ok) {
                 return reject("target parent is not a directory");
@@ -182,7 +184,7 @@ FilesystemEvaluation evaluate_filesystem_request(
         }
     }
     if (error) {
-        return reject("cannot inspect target");
+        return reject(CANNOT_INSPECT_TARGET);
     }
 
     set_target(request, target);

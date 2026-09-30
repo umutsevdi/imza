@@ -141,6 +141,37 @@ void append_model_pick_rows(const ModelPickList& pick, ftxui::Elements& rows)
     }
 }
 
+bool handle_model_pick_event(ModelPickList& pick, ftxui::Component container,
+    const ftxui::Event& event, std::function<void()> on_submit)
+{
+    if (model_pick_move(pick, event)) {
+        return true;
+    }
+    if (event == ftxui::Event::Return) {
+        on_submit();
+        return true;
+    }
+    return container ? container->OnEvent(event) : false;
+}
+
+ftxui::Element render_model_pick(const std::string& title,
+    ftxui::Component filter, const ModelPickList& pick,
+    ftxui::Element status_row, ftxui::Element empty_state, std::string hint)
+{
+    ftxui::Elements rows = modal_header(title);
+    rows.push_back(filter->Render() | ftxui::xflex);
+    if (status_row) {
+        rows.push_back(std::move(status_row));
+    }
+    if (pick.visible.empty() && empty_state) {
+        rows.push_back(std::move(empty_state));
+    }
+    append_model_pick_rows(pick, rows);
+    rows.push_back(ftxui::separatorEmpty());
+    rows.push_back(hint_bar(std::move(hint)));
+    return ftxui::vbox(std::move(rows)) | ftxui::xflex;
+}
+
 std::string plan_revision_label(std::size_t index)
 {
     return index == 0 ? std::string("Initial Plan")
@@ -174,6 +205,12 @@ ftxui::Element hint_bar(std::string hint)
 {
     return ftxui::hbox(
         { ftxui::filler(), ftxui::text(std::move(hint)) | ftxui::dim });
+}
+
+ftxui::Element dim_spinner(int frame)
+{
+    return ftxui::spinner(15, static_cast<std::size_t>(frame))
+        | ftxui::color(PANEL_FG_DIM);
 }
 
 ftxui::Element choice_label(std::string label, bool selected, bool focused)
@@ -576,20 +613,43 @@ InputOption multiline_field_option(std::string* content, int* cursor,
     return option;
 }
 
+namespace {
+
+    // Shared action-button styling; EntryState::label tracks both stored
+    // and live (pointer) labels, so one transform serves both.
+    ButtonOption action_button_option(
+        const Color& color_bg, const Color& color_focussed)
+    {
+        ButtonOption option;
+        option.transform = [color_bg, color_focussed](const EntryState& state) {
+            Element e = text(" " + state.label + " ");
+            if (state.focused) {
+                return std::move(e) | bold | bgcolor(color_focussed)
+                    | color(PANEL_FG);
+            }
+            return std::move(e) | bgcolor(color_bg) | color(PANEL_FG);
+        };
+        return option;
+    }
+
+} // namespace
+
 Component action_button(std::string label, std::function<void()> on_click,
     const Color& color_bg, const Color& color_focussed)
 {
-    ButtonOption bo;
-    bo.transform = [label, color_focussed, color_bg](const EntryState& state) {
-        Element e = text(" " + label + " ");
-        if (state.focused) {
-            e = std::move(e) | bold | bgcolor(color_focussed) | color(PANEL_FG);
-        } else {
-            e = std::move(e) | bgcolor(color_bg) | color(PANEL_FG);
-        }
-        return e;
-    };
-    return space_activates(Button(std::move(label), on_click, bo), on_click);
+    return space_activates(Button(std::move(label), on_click,
+                               action_button_option(color_bg, color_focussed)),
+        on_click);
+}
+
+Component action_button(const std::string* label,
+    std::function<void()> on_click, const Color& color_bg,
+    const Color& color_focussed)
+{
+    ButtonOption option = action_button_option(color_bg, color_focussed);
+    option.label        = label;
+    option.on_click     = on_click;
+    return space_activates(Button(std::move(option)), on_click);
 }
 
 Component inline_link_button(std::function<Element()> render,

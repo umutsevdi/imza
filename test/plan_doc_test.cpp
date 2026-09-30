@@ -1,6 +1,5 @@
-#include <chrono>
 #include <string>
-#include <thread>
+#include <utility>
 
 #include <doctest/doctest.h>
 
@@ -12,27 +11,39 @@
 
 namespace {
 
-imza::LayoutCtx wide_layout()
-{
-    return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100, 40 };
-}
-
 const std::string skeleton
     = "# Goal\nfirst plan\n# Approach\n1. first step\n2. second step\n"
       "# Files\nx\n# Verification\ncheck it\n# Open Questions\nx";
+
+struct FocusedDoc {
+    std::shared_ptr<imza::ApplicationState> state;
+    ftxui::Component doc;
+    bool focused = false;
+};
+
+// Build the annotator pane over `state`, seeding the plan first when one
+// is given; the pane reads `focused` by address for its lifetime.
+FocusedDoc make_focused_doc(std::shared_ptr<imza::ApplicationState> state,
+    bool focused, const std::string& plan = { })
+{
+    if (!plan.empty()) {
+        REQUIRE(state->session->create_plan(plan).empty());
+    }
+    FocusedDoc doc;
+    doc.state   = std::move(state);
+    doc.focused = focused;
+    doc.doc     = imza::make_plan_doc(
+        doc.state, [] { return imza::test::wide_layout(); }, &doc.focused);
+    return doc;
+}
 
 } // namespace
 
 TEST_CASE("plan doc renders the initial plan as block rows when unfocused")
 {
-    auto state = imza::test::make_test_state();
-    REQUIRE(state->session->create_plan(skeleton).empty());
-    bool focused = false;
+    auto fx = make_focused_doc(imza::test::make_test_state(), false, skeleton);
 
-    auto doc
-        = imza::make_plan_doc(state, [] { return wide_layout(); }, &focused);
-
-    const std::string rendered = imza::test::to_text(doc->Render(), 100, 40);
+    const std::string rendered = imza::test::to_text(fx.doc->Render(), 100, 40);
     CHECK(rendered.find("Plan") != std::string::npos);
     CHECK(rendered.find("Initial Plan") != std::string::npos);
     CHECK(rendered.find("first plan") != std::string::npos);
@@ -41,68 +52,49 @@ TEST_CASE("plan doc renders the initial plan as block rows when unfocused")
 
 TEST_CASE("plan doc updates live and labels agent revisions")
 {
-    auto state = imza::test::make_test_state();
-    REQUIRE(state->session->create_plan(skeleton).empty());
-    bool focused = false;
-
-    auto doc
-        = imza::make_plan_doc(state, [] { return wide_layout(); }, &focused);
-    (void)doc->Render();
+    auto fx = make_focused_doc(imza::test::make_test_state(), false, skeleton);
+    (void)fx.doc->Render();
 
     REQUIRE(
-        state->session->create_plan(skeleton + "\nextra note from the agent")
+        fx.state->session->create_plan(skeleton + "\nextra note from the agent")
             .empty());
-    const std::string rendered = imza::test::to_text(doc->Render(), 100, 40);
+    const std::string rendered = imza::test::to_text(fx.doc->Render(), 100, 40);
     CHECK(rendered.find("Revision 1") != std::string::npos);
     CHECK(rendered.find("extra note from the agent") != std::string::npos);
 }
 
 TEST_CASE("note editor opens on c and saves on Enter")
 {
-    auto state = imza::test::make_test_state();
-    REQUIRE(state->session->create_plan(skeleton).empty());
-    bool focused = true;
+    auto fx = make_focused_doc(imza::test::make_test_state(), true, skeleton);
+    (void)fx.doc->Render();
 
-    auto doc
-        = imza::make_plan_doc(state, [] { return wide_layout(); }, &focused);
-    (void)doc->Render();
-
-    REQUIRE(doc->OnEvent(ftxui::Event::Character("c")));
-    const std::string editor = imza::test::to_text(doc->Render(), 100, 40);
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
+    const std::string editor = imza::test::to_text(fx.doc->Render(), 100, 40);
     CHECK(editor.find("Leave a note") != std::string::npos);
 
-    for (const char c : std::string("make it faster")) {
-        REQUIRE(doc->OnEvent(ftxui::Event::Character(std::string(1, c))));
-    }
-    REQUIRE(doc->OnEvent(ftxui::Event::Return));
+    imza::test::require_type(fx.doc, "make it faster");
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
 
-    const std::string rendered = imza::test::to_text(doc->Render(), 100, 40);
+    const std::string rendered = imza::test::to_text(fx.doc->Render(), 100, 40);
     CHECK(rendered.find("make it faster") != std::string::npos);
     CHECK(rendered.find("1 notes") != std::string::npos);
 }
 
 TEST_CASE("note card renders under the annotated block")
 {
-    auto state = imza::test::make_test_state();
-    REQUIRE(state->session->create_plan(skeleton).empty());
-    bool focused = true;
-
-    auto doc
-        = imza::make_plan_doc(state, [] { return wide_layout(); }, &focused);
-    (void)doc->Render();
+    auto fx = make_focused_doc(imza::test::make_test_state(), true, skeleton);
+    (void)fx.doc->Render();
 
     // Walk to the second list item: heading Goal, first plan, heading
     // Approach, first item, second item.
     for (int i = 0; i < 4; ++i) {
-        REQUIRE(doc->OnEvent(ftxui::Event::ArrowDown));
+        REQUIRE(fx.doc->OnEvent(ftxui::Event::ArrowDown));
     }
-    REQUIRE(doc->OnEvent(ftxui::Event::Character("c")));
-    for (const char c : std::string("split this step")) {
-        REQUIRE(doc->OnEvent(ftxui::Event::Character(std::string(1, c))));
-    }
-    REQUIRE(doc->OnEvent(ftxui::Event::Return));
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
+    imza::test::require_type(fx.doc, "split this step");
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
 
-    const std::string rendered = imza::test::to_text(doc->Render(), 100, 40);
+    const std::string rendered = imza::test::to_text(fx.doc->Render(), 100, 40);
     const auto note_at         = rendered.find("split this step");
     const auto item_at         = rendered.find("second step");
     REQUIRE(note_at != std::string::npos);
@@ -112,114 +104,91 @@ TEST_CASE("note card renders under the annotated block")
 
 TEST_CASE("revise submits one turn with section and line locators")
 {
-    auto state = imza::test::make_test_state(
-        imza::test::run_immediately, imza::test::test_config());
-    REQUIRE(state->session->create_plan(skeleton).empty());
-    bool focused = true;
-
-    auto doc
-        = imza::make_plan_doc(state, [] { return wide_layout(); }, &focused);
-    (void)doc->Render();
+    auto fx = make_focused_doc(
+        imza::test::make_test_state(
+            imza::test::run_immediately, imza::test::test_config()),
+        true, skeleton);
+    (void)fx.doc->Render();
 
     // Walk to the second list item: heading Goal, first plan, heading
     // Approach, first item, second item.
     for (int i = 0; i < 4; ++i) {
-        REQUIRE(doc->OnEvent(ftxui::Event::ArrowDown));
+        REQUIRE(fx.doc->OnEvent(ftxui::Event::ArrowDown));
     }
-    REQUIRE(doc->OnEvent(ftxui::Event::Character("c")));
-    for (const char c : std::string("reorder these")) {
-        REQUIRE(doc->OnEvent(ftxui::Event::Character(std::string(1, c))));
-    }
-    REQUIRE(doc->OnEvent(ftxui::Event::Return));
-    REQUIRE(doc->OnEvent(ftxui::Event::Character("s")));
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
+    imza::test::require_type(fx.doc, "reorder these");
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("s")));
 
     // The revise turn starts immediately (a provider is configured); the
     // user turn carries the derived locators and the note body.
-    REQUIRE(state->session->items().size() >= 1);
+    REQUIRE(fx.state->session->items().size() >= 1);
     const auto* user
-        = std::get_if<imza::UserTurn>(&state->session->items().front());
+        = std::get_if<imza::UserTurn>(&fx.state->session->items().front());
     REQUIRE(user != nullptr);
     CHECK(user->text.find("Approach > 2. second step") != std::string::npos);
     CHECK(user->text.find("reorder these") != std::string::npos);
     // Notes clear after the revise turn is sent.
-    const std::string rendered = imza::test::to_text(doc->Render(), 100, 40);
+    const std::string rendered = imza::test::to_text(fx.doc->Render(), 100, 40);
     CHECK(rendered.find("reorder these") == std::string::npos);
 }
 
 TEST_CASE("unfocused pane ignores annotator keys and opens no editor")
 {
-    auto state = imza::test::make_test_state();
-    REQUIRE(state->session->create_plan(skeleton).empty());
-    bool focused = false;
+    auto fx = make_focused_doc(imza::test::make_test_state(), false, skeleton);
+    (void)fx.doc->Render();
 
-    auto doc
-        = imza::make_plan_doc(state, [] { return wide_layout(); }, &focused);
-    (void)doc->Render();
-
-    CHECK_FALSE(doc->OnEvent(ftxui::Event::Character("c")));
-    CHECK_FALSE(doc->OnEvent(ftxui::Event::Character("s")));
-    const std::string rendered = imza::test::to_text(doc->Render(), 100, 40);
+    CHECK_FALSE(fx.doc->OnEvent(ftxui::Event::Character("c")));
+    CHECK_FALSE(fx.doc->OnEvent(ftxui::Event::Character("s")));
+    const std::string rendered = imza::test::to_text(fx.doc->Render(), 100, 40);
     CHECK(rendered.find("Leave a note") == std::string::npos);
     CHECK(rendered.find("first plan") != std::string::npos);
 }
 
 TEST_CASE("e and d edit and delete the selected note")
 {
-    auto state = imza::test::make_test_state();
-    REQUIRE(state->session->create_plan(skeleton).empty());
-    bool focused = true;
+    auto fx = make_focused_doc(imza::test::make_test_state(), true, skeleton);
+    (void)fx.doc->Render();
 
-    auto doc
-        = imza::make_plan_doc(state, [] { return wide_layout(); }, &focused);
-    (void)doc->Render();
-
-    REQUIRE(doc->OnEvent(ftxui::Event::Character("c")));
-    for (const char c : std::string("first draft")) {
-        REQUIRE(doc->OnEvent(ftxui::Event::Character(std::string(1, c))));
-    }
-    REQUIRE(doc->OnEvent(ftxui::Event::Return));
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
+    imza::test::require_type(fx.doc, "first draft");
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
 
     // The cursor parks on the saved note card after the next render;
     // edit it.
-    (void)doc->Render();
-    REQUIRE(doc->OnEvent(ftxui::Event::Character("e")));
-    for (const char c : std::string(" plus")) {
-        REQUIRE(doc->OnEvent(ftxui::Event::Character(std::string(1, c))));
-    }
-    REQUIRE(doc->OnEvent(ftxui::Event::Return));
-    CHECK(imza::test::to_text(doc->Render(), 100, 40).find("first draft plus")
+    (void)fx.doc->Render();
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("e")));
+    imza::test::require_type(fx.doc, " plus");
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
+    CHECK(
+        imza::test::to_text(fx.doc->Render(), 100, 40).find("first draft plus")
         != std::string::npos);
 
     // Delete it from the note row.
-    REQUIRE(doc->OnEvent(ftxui::Event::Character("d")));
-    CHECK(imza::test::to_text(doc->Render(), 100, 40).find("first draft")
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("d")));
+    CHECK(imza::test::to_text(fx.doc->Render(), 100, 40).find("first draft")
         == std::string::npos);
 }
 
 TEST_CASE("section jumps with brackets and a heading note anchors the section")
 {
-    auto state = imza::test::make_test_state(
-        imza::test::run_immediately, imza::test::test_config());
-    REQUIRE(state->session->create_plan(skeleton).empty());
-    bool focused = true;
-
-    auto doc
-        = imza::make_plan_doc(state, [] { return wide_layout(); }, &focused);
-    (void)doc->Render();
+    auto fx = make_focused_doc(
+        imza::test::make_test_state(
+            imza::test::run_immediately, imza::test::test_config()),
+        true, skeleton);
+    (void)fx.doc->Render();
 
     // ] jumps to the next section heading (Approach); a note on the
     // heading row anchors the whole section without a block excerpt.
-    REQUIRE(doc->OnEvent(ftxui::Event::Character("]")));
-    REQUIRE(doc->OnEvent(ftxui::Event::Character("c")));
-    for (const char c : std::string("too detailed")) {
-        REQUIRE(doc->OnEvent(ftxui::Event::Character(std::string(1, c))));
-    }
-    REQUIRE(doc->OnEvent(ftxui::Event::Return));
-    REQUIRE(doc->OnEvent(ftxui::Event::Character("s")));
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("]")));
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
+    imza::test::require_type(fx.doc, "too detailed");
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("s")));
 
-    REQUIRE(state->session->items().size() >= 1);
+    REQUIRE(fx.state->session->items().size() >= 1);
     const auto* user
-        = std::get_if<imza::UserTurn>(&state->session->items().front());
+        = std::get_if<imza::UserTurn>(&fx.state->session->items().front());
     REQUIRE(user != nullptr);
     // The heading note pins the heading line; the locator cites the
     // section with the heading line itself as the edit anchor.
@@ -229,32 +198,24 @@ TEST_CASE("section jumps with brackets and a heading note anchors the section")
 
 TEST_CASE("plan doc without a plan shows the empty hint")
 {
-    auto state   = imza::test::make_test_state();
-    bool focused = false;
-
-    auto doc
-        = imza::make_plan_doc(state, [] { return wide_layout(); }, &focused);
-    const std::string rendered = imza::test::to_text(doc->Render(), 100, 40);
+    auto fx = make_focused_doc(imza::test::make_test_state(), false);
+    const std::string rendered = imza::test::to_text(fx.doc->Render(), 100, 40);
     CHECK(rendered.find("No plan") != std::string::npos);
 }
 
 TEST_CASE("plan created after pane construction renders immediately")
 {
-    auto state   = imza::test::make_test_state();
-    bool focused = false;
+    auto fx = make_focused_doc(imza::test::make_test_state(), false);
 
-    auto doc
-        = imza::make_plan_doc(state, [] { return wide_layout(); }, &focused);
-
-    const std::string empty = imza::test::to_text(doc->Render(), 100, 40);
+    const std::string empty = imza::test::to_text(fx.doc->Render(), 100, 40);
     CHECK(empty.find("No plan") != std::string::npos);
 
-    REQUIRE(state->session
+    REQUIRE(fx.state->session
             ->create_plan("# Goal\nlate draft\n# Approach\nx\n# Files\nx\n# "
                           "Verification\nx\n"
                           "# Open Questions\nx")
             .empty());
-    const std::string rendered = imza::test::to_text(doc->Render(), 100, 40);
+    const std::string rendered = imza::test::to_text(fx.doc->Render(), 100, 40);
     CHECK(rendered.find("late draft") != std::string::npos);
     CHECK(rendered.find("Initial Plan") != std::string::npos);
 }
@@ -295,21 +256,16 @@ TEST_CASE("long document lines wrap inside the pane instead of overflowing")
 }
 TEST_CASE("click on a block row opens the note editor inline")
 {
-    auto state = imza::test::make_test_state();
-    REQUIRE(state->session->create_plan(skeleton).empty());
-    bool focused = true;
-
-    auto doc
-        = imza::make_plan_doc(state, [] { return wide_layout(); }, &focused);
-    (void)doc->Render();
+    auto fx = make_focused_doc(imza::test::make_test_state(), true, skeleton);
+    (void)fx.doc->Render();
 
     // Click the "first plan" block row.
-    REQUIRE(imza::test::click_label(doc, "first plan"));
+    REQUIRE(imza::test::click_label(fx.doc, "first plan"));
 
     // The editor card renders in-flow between the clicked block and the
     // next block row, not at the bottom bar.
     const std::vector<std::string> lines
-        = imza::split_lines(imza::test::to_text(doc->Render(), 100, 40));
+        = imza::split_lines(imza::test::to_text(fx.doc->Render(), 100, 40));
     int editor_at = -1;
     int next_at   = -1;
     int plan_at   = -1;
@@ -329,24 +285,19 @@ TEST_CASE("click on a block row opens the note editor inline")
     REQUIRE(editor_at != -1);
     CHECK(editor_at > plan_at);
     CHECK(editor_at < next_at);
-    CHECK(imza::test::to_text(doc->Render(), 100, 40).find("Revise Plan")
+    CHECK(imza::test::to_text(fx.doc->Render(), 100, 40).find("Revise Plan")
         != std::string::npos);
 
     // Escape closes the editor; typing and Enter still save.
-    REQUIRE(doc->OnEvent(ftxui::Event::Escape));
-    const std::string closed = imza::test::to_text(doc->Render(), 100, 40);
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Escape));
+    const std::string closed = imza::test::to_text(fx.doc->Render(), 100, 40);
     CHECK(closed.find("Leave a note") == std::string::npos);
 }
 
 TEST_CASE("moving with keys highlights the selected row")
 {
-    auto state = imza::test::make_test_state();
-    REQUIRE(state->session->create_plan(skeleton).empty());
-    bool focused = true;
-
-    auto doc
-        = imza::make_plan_doc(state, [] { return wide_layout(); }, &focused);
-    (void)doc->Render();
+    auto fx = make_focused_doc(imza::test::make_test_state(), true, skeleton);
+    (void)fx.doc->Render();
 
     // The raw render carries background escapes; find which visible line
     // holds the panel-focus background and follow it as the cursor moves.
@@ -366,134 +317,110 @@ TEST_CASE("moving with keys highlights the selected row")
     };
 
     // Row 0 is selected: the "Goal" heading row is highlighted.
-    CHECK(highlight_at(imza::test::to_text(doc->Render(), 100, 40), "Goal")
+    CHECK(highlight_at(imza::test::to_text(fx.doc->Render(), 100, 40), "Goal")
         != -1);
 
     // Move down twice: row 2 is the "Approach" heading; it is highlighted
     // and "Goal" is not.
-    REQUIRE(doc->OnEvent(ftxui::Event::ArrowDown));
-    REQUIRE(doc->OnEvent(ftxui::Event::ArrowDown));
-    const std::string rendered = imza::test::to_text(doc->Render(), 100, 40);
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::ArrowDown));
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::ArrowDown));
+    const std::string rendered = imza::test::to_text(fx.doc->Render(), 100, 40);
     CHECK(highlight_at(rendered, "Approach") != -1);
     CHECK(highlight_at(rendered, "Goal") == -1);
 }
 
 TEST_CASE("click on a note card selects it for edit and delete")
 {
-    auto state = imza::test::make_test_state();
-    REQUIRE(state->session->create_plan(skeleton).empty());
-    bool focused = true;
-
-    auto doc
-        = imza::make_plan_doc(state, [] { return wide_layout(); }, &focused);
-    (void)doc->Render();
-    REQUIRE(imza::test::click_label(doc, "first plan"));
-    for (const char c : std::string("annotate this")) {
-        REQUIRE(doc->OnEvent(ftxui::Event::Character(std::string(1, c))));
-    }
-    REQUIRE(doc->OnEvent(ftxui::Event::Return));
-    (void)doc->Render();
+    auto fx = make_focused_doc(imza::test::make_test_state(), true, skeleton);
+    (void)fx.doc->Render();
+    REQUIRE(imza::test::click_label(fx.doc, "first plan"));
+    imza::test::require_type(fx.doc, "annotate this");
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
+    (void)fx.doc->Render();
 
     // Clicking elsewhere selects a block row (and opens the editor);
     // closing it leaves the cursor off the card, so e has nothing to edit.
-    REQUIRE(imza::test::click_label(doc, "Open Questions"));
-    REQUIRE(doc->OnEvent(ftxui::Event::Escape));
-    REQUIRE_FALSE(doc->OnEvent(ftxui::Event::Character("e")));
+    REQUIRE(imza::test::click_label(fx.doc, "Open Questions"));
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Escape));
+    REQUIRE_FALSE(fx.doc->OnEvent(ftxui::Event::Character("e")));
 
     // Clicking the card selects it; e focuses the editor with the body.
-    REQUIRE(imza::test::click_label(doc, "annotate this"));
-    REQUIRE(doc->OnEvent(ftxui::Event::Character("e")));
-    for (const char c : std::string(" more")) {
-        REQUIRE(doc->OnEvent(ftxui::Event::Character(std::string(1, c))));
-    }
-    REQUIRE(doc->OnEvent(ftxui::Event::Return));
-    const std::string rendered = imza::test::to_text(doc->Render(), 100, 40);
+    REQUIRE(imza::test::click_label(fx.doc, "annotate this"));
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("e")));
+    imza::test::require_type(fx.doc, " more");
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
+    const std::string rendered = imza::test::to_text(fx.doc->Render(), 100, 40);
     CHECK(rendered.find("annotate this more") != std::string::npos);
 
-    REQUIRE(imza::test::click_label(doc, "annotate this"));
-    REQUIRE(doc->OnEvent(ftxui::Event::Character("d")));
-    CHECK(imza::test::to_text(doc->Render(), 100, 40).find("annotate this")
+    REQUIRE(imza::test::click_label(fx.doc, "annotate this"));
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("d")));
+    CHECK(imza::test::to_text(fx.doc->Render(), 100, 40).find("annotate this")
         == std::string::npos);
 }
 
 TEST_CASE("space opens a note instead of triggering revise")
 {
-    auto state = imza::test::make_test_state(
-        imza::test::run_immediately, imza::test::test_config());
-    REQUIRE(state->session->create_plan(skeleton).empty());
-    bool focused = true;
+    auto fx = make_focused_doc(
+        imza::test::make_test_state(
+            imza::test::run_immediately, imza::test::test_config()),
+        true, skeleton);
+    (void)fx.doc->Render();
 
-    auto doc
-        = imza::make_plan_doc(state, [] { return wide_layout(); }, &focused);
-    (void)doc->Render();
-
-    REQUIRE(doc->OnEvent(ftxui::Event::Character(" ")));
-    const std::string rendered = imza::test::to_text(doc->Render(), 100, 40);
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character(" ")));
+    const std::string rendered = imza::test::to_text(fx.doc->Render(), 100, 40);
     CHECK(rendered.find("Leave a note") != std::string::npos);
     // No revise turn was submitted.
-    CHECK(state->session->items().empty());
+    CHECK(fx.state->session->items().empty());
 }
 
 TEST_CASE("revise button click submits the notes")
 {
-    auto state = imza::test::make_test_state(
-        imza::test::run_immediately, imza::test::test_config());
-    REQUIRE(state->session->create_plan(skeleton).empty());
-    bool focused = true;
+    auto fx = make_focused_doc(
+        imza::test::make_test_state(
+            imza::test::run_immediately, imza::test::test_config()),
+        true, skeleton);
+    (void)fx.doc->Render();
 
-    auto doc
-        = imza::make_plan_doc(state, [] { return wide_layout(); }, &focused);
-    (void)doc->Render();
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
+    imza::test::require_type(fx.doc, "tighten scope");
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
+    (void)fx.doc->Render();
 
-    REQUIRE(doc->OnEvent(ftxui::Event::Character("c")));
-    for (const char c : std::string("tighten scope")) {
-        REQUIRE(doc->OnEvent(ftxui::Event::Character(std::string(1, c))));
-    }
-    REQUIRE(doc->OnEvent(ftxui::Event::Return));
-    (void)doc->Render();
-
-    REQUIRE(imza::test::click_label(doc, "Revise Plan"));
-    REQUIRE(state->session->items().size() >= 1);
+    REQUIRE(imza::test::click_label(fx.doc, "Revise Plan"));
+    REQUIRE(fx.state->session->items().size() >= 1);
     const auto* user
-        = std::get_if<imza::UserTurn>(&state->session->items().front());
+        = std::get_if<imza::UserTurn>(&fx.state->session->items().front());
     REQUIRE(user != nullptr);
     CHECK(user->text.find("tighten scope") != std::string::npos);
 }
 
 TEST_CASE("revise works repeatedly without a plan change in between")
 {
-    auto state = imza::test::make_test_state(
-        imza::test::run_immediately, imza::test::test_config());
-    REQUIRE(state->session->create_plan(skeleton).empty());
-    bool focused = true;
-
-    auto doc
-        = imza::make_plan_doc(state, [] { return wide_layout(); }, &focused);
+    auto fx = make_focused_doc(
+        imza::test::make_test_state(
+            imza::test::run_immediately, imza::test::test_config()),
+        true, skeleton);
 
     // First revise via the keyboard.
-    (void)doc->Render();
-    REQUIRE(doc->OnEvent(ftxui::Event::Character("c")));
-    for (const char c : std::string("first pass")) {
-        REQUIRE(doc->OnEvent(ftxui::Event::Character(std::string(1, c))));
-    }
-    REQUIRE(doc->OnEvent(ftxui::Event::Return));
-    (void)doc->Render();
-    REQUIRE(doc->OnEvent(ftxui::Event::Character("s")));
-    REQUIRE(state->session->items().size() >= 1);
+    (void)fx.doc->Render();
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
+    imza::test::require_type(fx.doc, "first pass");
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
+    (void)fx.doc->Render();
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("s")));
+    REQUIRE(fx.state->session->items().size() >= 1);
 
     // The agent answers without touching the plan; a second note and the
     // button must still submit (no revise latch). The pane re-renders
     // between keystrokes in the app, so mirror that here.
-    (void)doc->Render();
-    REQUIRE(doc->OnEvent(ftxui::Event::Character("c")));
-    for (const char c : std::string("second pass")) {
-        REQUIRE(doc->OnEvent(ftxui::Event::Character(std::string(1, c))));
-    }
-    REQUIRE(doc->OnEvent(ftxui::Event::Return));
-    (void)doc->Render();
-    REQUIRE(imza::test::click_label(doc, "Revise Plan"));
+    (void)fx.doc->Render();
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
+    imza::test::require_type(fx.doc, "second pass");
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
+    (void)fx.doc->Render();
+    REQUIRE(imza::test::click_label(fx.doc, "Revise Plan"));
     bool found = false;
-    for (const auto& item : state->session->items()) {
+    for (const auto& item : fx.state->session->items()) {
         const auto* user = std::get_if<imza::UserTurn>(&item);
         if (user != nullptr
             && user->text.find("second pass") != std::string::npos) {
@@ -501,7 +428,7 @@ TEST_CASE("revise works repeatedly without a plan change in between")
         }
     }
     // A busy session queues the revise instead of dropping it.
-    for (const auto& queued : state->session->queued()) {
+    for (const auto& queued : fx.state->session->queued()) {
         if (queued.text.find("second pass") != std::string::npos) {
             found = true;
         }
@@ -511,13 +438,11 @@ TEST_CASE("revise works repeatedly without a plan change in between")
 
 TEST_CASE("revise button highlights on click like review buttons")
 {
-    auto state = imza::test::make_test_state(
-        imza::test::run_immediately, imza::test::test_config());
-    REQUIRE(state->session->create_plan(skeleton).empty());
-    bool focused = true;
-    auto doc
-        = imza::make_plan_doc(state, [] { return wide_layout(); }, &focused);
-    (void)doc->Render();
+    auto fx = make_focused_doc(
+        imza::test::make_test_state(
+            imza::test::run_immediately, imza::test::test_config()),
+        true, skeleton);
+    (void)fx.doc->Render();
 
     const auto button_row = [](const std::string& rendered) {
         for (const std::string& line : imza::split_lines(rendered)) {
@@ -529,34 +454,31 @@ TEST_CASE("revise button highlights on click like review buttons")
         return std::string { };
     };
     const std::string rest
-        = button_row(imza::test::to_text(doc->Render(), 100, 40));
+        = button_row(imza::test::to_text(fx.doc->Render(), 100, 40));
     // Rest: calm background (not the focus panel), not bold.
     CHECK(rest.find("\x1b[48;2;72;79;88m") != std::string::npos);
     CHECK(rest.find("\x1b[1m") == std::string::npos);
 
     // Clicking the button submits and switches it to the focus style.
-    REQUIRE(imza::test::click_label(doc, "Revise Plan"));
+    REQUIRE(imza::test::click_label(fx.doc, "Revise Plan"));
     const std::string clicked
-        = button_row(imza::test::to_text(doc->Render(), 100, 40));
+        = button_row(imza::test::to_text(fx.doc->Render(), 100, 40));
     CHECK(clicked.find("\x1b[1m") != std::string::npos);
     CHECK(clicked.find("\x1b[48;2;45;50;56m") != std::string::npos);
 }
 TEST_CASE("revise guards are visible in the pane header")
 {
-    auto state = imza::test::make_test_state(
-        imza::test::run_immediately, imza::test::test_config());
-    REQUIRE(state->session->create_plan(skeleton).empty());
-    bool focused = true;
+    auto fx = make_focused_doc(
+        imza::test::make_test_state(
+            imza::test::run_immediately, imza::test::test_config()),
+        true, skeleton);
+    (void)fx.doc->Render();
 
-    auto doc
-        = imza::make_plan_doc(state, [] { return wide_layout(); }, &focused);
-    (void)doc->Render();
-
-    REQUIRE(doc->OnEvent(ftxui::Event::Character("s")));
-    CHECK(state->session->error().find("note") != std::string::npos);
-    const std::string rendered = imza::test::to_text(doc->Render(), 100, 40);
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("s")));
+    CHECK(fx.state->session->error().find("note") != std::string::npos);
+    const std::string rendered = imza::test::to_text(fx.doc->Render(), 100, 40);
     CHECK(rendered.find("Add a note before sending.") != std::string::npos);
-    CHECK(state->session->items().empty());
+    CHECK(fx.state->session->items().empty());
 }
 
 TEST_CASE("a second revise works after the agent updates the plan")
@@ -569,38 +491,31 @@ TEST_CASE("a second revise works after the agent updates the plan")
                 cb(imza::make_done_event());
                 return imza::Status::OK;
             });
-    REQUIRE(state->session->create_plan(skeleton).empty());
-    bool focused = true;
-
-    auto doc
-        = imza::make_plan_doc(state, [] { return wide_layout(); }, &focused);
+    auto fx = make_focused_doc(state, true, skeleton);
 
     // First revise.
-    (void)doc->Render();
-    REQUIRE(doc->OnEvent(ftxui::Event::Character("c")));
-    for (const char c : std::string("first pass")) {
-        REQUIRE(doc->OnEvent(ftxui::Event::Character(std::string(1, c))));
-    }
-    REQUIRE(doc->OnEvent(ftxui::Event::Return));
-    (void)doc->Render();
-    REQUIRE(doc->OnEvent(ftxui::Event::Character("s")));
-    REQUIRE(pump.wait_for([&] { return imza::test::idle(*state->session); }));
+    (void)fx.doc->Render();
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
+    imza::test::require_type(fx.doc, "first pass");
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
+    (void)fx.doc->Render();
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("s")));
+    REQUIRE(
+        pump.wait_for([&] { return imza::test::idle(*fx.state->session); }));
 
     // The agent revises: a plan change lands.
-    REQUIRE(state->session->create_plan(skeleton + "\nagent applied notes")
+    REQUIRE(fx.state->session->create_plan(skeleton + "\nagent applied notes")
             .empty());
-    (void)doc->Render();
+    (void)fx.doc->Render();
 
     // Second revise starts a fresh turn.
-    REQUIRE(doc->OnEvent(ftxui::Event::Character("c")));
-    for (const char c : std::string("second pass")) {
-        REQUIRE(doc->OnEvent(ftxui::Event::Character(std::string(1, c))));
-    }
-    REQUIRE(doc->OnEvent(ftxui::Event::Return));
-    (void)doc->Render();
-    REQUIRE(doc->OnEvent(ftxui::Event::Character("s")));
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
+    imza::test::require_type(fx.doc, "second pass");
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
+    (void)fx.doc->Render();
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("s")));
     bool found = false;
-    for (const auto& item : state->session->items()) {
+    for (const auto& item : fx.state->session->items()) {
         const auto* user = std::get_if<imza::UserTurn>(&item);
         if (user != nullptr
             && user->text.find("second pass") != std::string::npos) {

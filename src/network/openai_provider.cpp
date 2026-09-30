@@ -113,10 +113,7 @@ namespace {
                     acc.args += fn["arguments"].asString();
                 }
             }
-            if (!acc.started && !acc.name.empty()) {
-                acc.started = true;
-                outs.push_back(make_tool_call_start_event(finish_accum(acc)));
-            }
+            emit_ready_tool_start(acc, outs);
         }
     }
 
@@ -196,11 +193,7 @@ namespace {
                 done = true;
             }
         }
-        if (!state.usage_emitted
-            && (u.prompt > 0 || u.completion > 0 || u.total > 0)) {
-            state.usage_emitted = true;
-            outs.push_back(make_usage_event(u));
-        }
+        emit_usage_once(state, u, outs);
         if (done) {
             outs.push_back(make_done_event());
         } else if (outs.empty()) {

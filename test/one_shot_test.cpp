@@ -12,7 +12,6 @@
 #include <functional>
 #include <memory>
 #include <string>
-#include <thread>
 
 namespace {
 
@@ -97,9 +96,8 @@ TEST_CASE("one-shot coalesces adjacent streaming deltas")
             return imza::Status::OK;
         },
         imza::WEB, &posted);
-    while (!state->environment->ready()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds { 1 });
-    }
+    REQUIRE(
+        imza::test::wait_until([&] { return state->environment->ready(); }));
     queue.drain();
     posted.store(0);
 

@@ -74,13 +74,8 @@ Status fetch_models(const Route& route, std::vector<ModelInfo>& out)
         url += "?limit=1000";
     }
 
-    std::vector<std::string> headers = { "Accept: application/json" };
-    if (!route.user_agent.empty()) {
-        headers.push_back(route.user_agent);
-    }
-    for (auto& h : auth_headers(route.auth, route.api_key, route.account_id)) {
-        headers.push_back(std::move(h));
-    }
+    const std::vector<std::string> headers
+        = request_headers(route, { "Accept: application/json" });
 
     std::string body;
     long code       = 0;
@@ -88,7 +83,7 @@ Status fetch_models(const Route& route, std::vector<ModelInfo>& out)
     if (st != Status::OK) {
         return st;
     }
-    if (code < 200 || code >= 300) {
+    if (!http_ok(code)) {
         return Status::API_ERROR;
     }
     return parse_models_response(body, out);

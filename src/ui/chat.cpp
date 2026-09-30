@@ -34,8 +34,6 @@ using namespace ftxui;
 
 namespace {
 
-    using namespace ftxui;
-
     // Inline cap for a lua run's per-file diffs; beyond this the rest
     // collapses behind a viewer button.
     constexpr std::size_t INLINE_DIFF_ROWS = 25;
@@ -164,39 +162,76 @@ namespace {
             PANEL_COLOR, false);
     }
 
+    // Interaction maps store either a bare Component or a struct wrapping
+    // one (ReasoningLink); this picks the component out of either.
+    template <typename T> Component& interaction_component(T& value)
+    {
+        if constexpr (requires { value.component; }) {
+            return value.component;
+        } else {
+            return value;
+        }
+    }
+
+    template <typename... Maps>
+    bool forward_interaction_event(const Event& event, Maps&... maps)
+    {
+        const auto forward = [&event](auto& map) {
+            for (auto& [key, value] : map) {
+                if (interaction_component(value)->OnEvent(event)) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        return (forward(maps) || ...);
+    }
+
+    template <typename... Maps>
+    void detach_and_clear_interactions(Maps&... maps)
+    {
+        const auto detach = [](auto& map) {
+            for (auto& [key, value] : map) {
+                interaction_component(value)->Detach();
+            }
+            map.clear();
+        };
+        (detach(maps), ...);
+    }
+
     class ChatImpl : public ComponentBase {
     public:
         ChatImpl(std::shared_ptr<ApplicationState> state, LayoutFn layout,
             ChatHints hints = { })
-            : state_(std::move(state))
-            , session_(state_->session)
-            , layout_(std::move(layout))
-            , hints_(std::move(hints))
+            : _state(std::move(state))
+            , _session(_state->session)
+            , _layout(std::move(layout))
+            , _hints(std::move(hints))
         {
-            input_options_.content         = &input_buf_;
-            input_options_.placeholder     = hints_.placeholder.c_str();
-            input_options_.multiline       = true;
-            input_options_.on_change       = [this] { on_input_changed(); };
-            input_options_.on_enter        = [this] { submit(); };
-            input_options_.cursor_position = Ref<int>(&input_cursor_);
-            input_options_.insert          = true;
-            input_options_.transform       = [](InputState state) {
+            _input_options.content         = &_input_buf;
+            _input_options.placeholder     = _hints.placeholder.c_str();
+            _input_options.multiline       = true;
+            _input_options.on_change       = [this] { _on_input_changed(); };
+            _input_options.on_enter        = [this] { _submit(); };
+            _input_options.cursor_position = Ref<int>(&_input_cursor);
+            _input_options.insert          = true;
+            _input_options.transform       = [](InputState state) {
                 if (state.is_placeholder) {
                     state.element |= dim;
                 }
                 state.element |= bgcolor(PANEL_COLOR) | block_cursor();
                 return state.element;
             };
-            input_     = ftxui::Input(input_options_);
-            container_ = Container::Vertical({ input_ });
-            Add(container_);
-            input_->TakeFocus();
+            _input     = ftxui::Input(_input_options);
+            _container = Container::Vertical({ _input });
+            Add(_container);
+            _input->TakeFocus();
         }
 
         Element OnRender() override
         {
-            const Session& st   = *session_;
-            const LayoutCtx ctx = layout_();
+            const Session& st   = *_session;
+            const LayoutCtx ctx = _layout();
 
             const bool streaming    = st.phase() == Session::Phase::STREAMING;
             const bool connecting   = st.phase() == Session::Phase::CONNECTING;
@@ -224,62 +259,61 @@ namespace {
             const std::vector<ConversationItem>& conversation = st.items();
             const std::size_t item_count = conversation.size();
             const std::size_t queued_n   = st.queued().size();
-            const bool content_changed   = content_serial_ != content_serial;
+            const bool content_changed   = _content_serial != content_serial;
             const bool layout_changed
-                = cache_kind_ != ctx.kind || cache_width_ != ctx.width;
-            if (content_changed || layout_changed
-                || item_cache_.size() > item_count) {
+                = _cache_kind != ctx.kind || _cache_width != ctx.width;
+            const bool reset_cache = content_changed || layout_changed
+                || _item_cache.size() > item_count;
+            if (reset_cache) {
                 _timeline.reset(item_count);
             } else {
                 _timeline.resize(item_count);
             }
-            viewport_.content_height
+            _viewport.content_height
                 = _timeline.total_height() + static_cast<int>(queued_n);
-            if (follow_) {
-                viewport_.scroll = viewport_.max_scroll();
+            if (_follow) {
+                _viewport.scroll = _viewport.max_scroll();
             } else {
-                viewport_.scroll_lines(0);
+                _viewport.scroll_lines(0);
             }
-            const int viewport_lines = std::max({ DEFAULT_VIEWPORT_LINES,
-                viewport_.viewport_lines(), ctx.height });
+            const int _viewport_lines = std::max({ DEFAULT_VIEWPORT_LINES,
+                _viewport.viewport_lines(), ctx.height });
             const VirtualListWindow visible
-                = _timeline.window(viewport_.scroll, viewport_lines, 0);
+                = _timeline.window(_viewport.scroll, _viewport_lines, 0);
             const VirtualListWindow window = _timeline.window(
-                viewport_.scroll, viewport_lines, TIMELINE_OVERSCAN);
-            _anchor_index          = visible.begin;
-            const bool reset_cache = layout_changed || content_changed
-                || item_cache_.size() > item_count;
+                _viewport.scroll, _viewport_lines, TIMELINE_OVERSCAN);
+            _anchor_index = visible.begin;
             if (reset_cache) {
                 if (item_count == 0) {
-                    std::vector<Element>().swap(item_cache_);
-                    std::vector<std::size_t>().swap(item_versions_);
+                    std::vector<Element>().swap(_item_cache);
+                    std::vector<std::size_t>().swap(_item_versions);
                 } else {
-                    item_cache_.clear();
-                    item_cache_.resize(item_count);
-                    item_versions_.assign(item_count, INVALID_VERSION);
+                    _item_cache.clear();
+                    _item_cache.resize(item_count);
+                    _item_versions.assign(item_count, INVALID_VERSION);
                 }
                 _trailing_markdown.reset();
                 _trailing_markdown_index = ~std::size_t { 0 };
                 _playout_index           = ~std::size_t { 0 };
                 _playout_chars           = 0;
-                cache_kind_              = ctx.kind;
-                cache_width_             = ctx.width;
-                content_serial_          = content_serial;
+                _cache_kind              = ctx.kind;
+                _cache_width             = ctx.width;
+                _content_serial          = content_serial;
                 _cached_begin            = 0;
                 _cached_end              = 0;
-                clear_interaction_cache();
-            } else if (item_cache_.size() < item_count) {
-                const std::size_t previous_size = item_cache_.size();
-                item_cache_.resize(item_count);
-                item_versions_.resize(item_count, INVALID_VERSION);
+                _clear_interaction_cache();
+            } else if (_item_cache.size() < item_count) {
+                const std::size_t previous_size = _item_cache.size();
+                _item_cache.resize(item_count);
+                _item_versions.resize(item_count, INVALID_VERSION);
                 if (previous_size > 0) {
-                    item_versions_[previous_size - 1] = INVALID_VERSION;
+                    _item_versions[previous_size - 1] = INVALID_VERSION;
                 }
             }
-            evict_outside(window, conversation);
-            if (std::exchange(hover_dirty_, false)) {
-                std::fill(item_versions_.begin() + window.begin,
-                    item_versions_.begin() + window.end, INVALID_VERSION);
+            _evict_outside(window, conversation);
+            if (std::exchange(_hover_dirty, false)) {
+                std::fill(_item_versions.begin() + window.begin,
+                    _item_versions.begin() + window.end, INVALID_VERSION);
             }
             Elements items;
             if (window.before > 0) {
@@ -301,7 +335,7 @@ namespace {
                     && (tc->name == "shell" || tc->name == "subagent"
                         || tc->name == "lua")
                     && !tc->result.has_value()) {
-                    eff_version = static_cast<std::size_t>(frame_);
+                    eff_version = static_cast<std::size_t>(_frame);
                     if (tc->phase == ToolCall::Phase::EXECUTING) {
                         eff_version ^= std::size_t { 1 } << 60;
                     }
@@ -329,9 +363,9 @@ namespace {
                         = (!at.reasoning.empty()
                               && !at.reasoning_ms.has_value())
                         || (at.reasoning.empty() && !at.reasoning_ms.has_value()
-                            && reasoning_enabled(at));
+                            && _reasoning_enabled(at));
                     if (thinking_now) {
-                        eff_version = static_cast<std::size_t>(frame_);
+                        eff_version = static_cast<std::size_t>(_frame);
                     }
                 }
                 if (pacing) {
@@ -369,14 +403,14 @@ namespace {
                             at.markdown.size(), _playout_chars + budget);
                     }
                     const bool due = _trailing_markdown_index != item_index
-                        || item_versions_[item_index] == INVALID_VERSION
+                        || _item_versions[item_index] == INVALID_VERSION
                         || now - _trailing_markdown_at
                             >= TRAILING_MARKDOWN_INTERVAL;
                     if (due) {
                         _trailing_markdown
                             = assistant_item(std::string_view(at.markdown)
                                                  .substr(0, _playout_chars),
-                                content_width());
+                                _content_width());
                         _trailing_markdown_index = item_index;
                         _trailing_markdown_at    = now;
                         ++_playout_parses;
@@ -384,56 +418,56 @@ namespace {
                     markdown_element = *_trailing_markdown;
                     markdown_cached  = true;
                 }
-                if (item_versions_[item_index] != eff_version) {
+                if (_item_versions[item_index] != eff_version) {
                     if (std::holds_alternative<ToolCall>(it)) {
                         const ToolCall& tc = std::get<ToolCall>(it);
                         if (!tc.result.has_value()) {
-                            item_cache_[item_index] = render_tool_pending(tc);
+                            _item_cache[item_index] = _render_tool_pending(tc);
                         } else {
                             switch (tc.result->kind) {
                             case ToolCall::Result::Kind::OUTPUT: {
                                 if (tc.name == "subagent") {
-                                    item_cache_[item_index]
-                                        = render_subagent_item(tc);
+                                    _item_cache[item_index]
+                                        = _render_subagent_item(tc);
                                 } else if (tc.name == "lua") {
-                                    item_cache_[item_index]
-                                        = render_lua_item(tc);
+                                    _item_cache[item_index]
+                                        = _render_lua_item(tc);
                                 } else {
-                                    item_cache_[item_index]
-                                        = render_generic_tool(tc);
+                                    _item_cache[item_index]
+                                        = _render_generic_tool(tc);
                                 }
                                 break;
                             }
                             case ToolCall::Result::Kind::ERROR:
-                                item_cache_[item_index] = render_tool_error(tc);
+                                _item_cache[item_index]
+                                    = _render_tool_error(tc);
                                 break;
                             case ToolCall::Result::Kind::REJECT:
-                                item_cache_[item_index]
-                                    = render_tool_reject(tc);
+                                _item_cache[item_index]
+                                    = _render_tool_reject(tc);
                                 break;
                             case ToolCall::Result::Kind::CANCEL:
-                                item_cache_[item_index]
-                                    = render_tool_pending(tc);
+                                _item_cache[item_index]
+                                    = _render_tool_pending(tc);
                                 break;
                             }
                         }
                     } else if (std::holds_alternative<AssistantTurn>(it)) {
-                        item_cache_[item_index]
-                            = render_assistant(std::get<AssistantTurn>(it),
+                        _item_cache[item_index]
+                            = _render_assistant(std::get<AssistantTurn>(it),
                                 item_index, ctx, active, final_segment,
                                 markdown_element, markdown_cached);
                     } else {
-                        item_cache_[item_index] = render_item(it, ctx);
+                        _item_cache[item_index] = render_item(it, ctx);
                     }
-                    item_versions_[item_index] = eff_version;
+                    _item_versions[item_index] = eff_version;
                 }
-                Element el = item_cache_[item_index];
+                Element el = _item_cache[item_index];
                 if (const auto* event = std::get_if<CompactionEvent>(&it);
                     event != nullptr
                     && event->status == CompactionEvent::Status::RUNNING) {
                     el = hbox({
-                        spinner(15, static_cast<size_t>(frame_))
-                            | color(PANEL_FG_DIM),
+                        dim_spinner(_frame),
                         text(" Compacting…") | dim,
                     });
                 }
@@ -442,15 +476,14 @@ namespace {
                     && is_trailing) {
                     const auto& at = std::get<AssistantTurn>(it);
                     if (at.reasoning.empty()
-                        && (!reasoning_enabled(at) || connecting)) {
+                        && (!_reasoning_enabled(at) || connecting)) {
                         std::string status
                             = connecting ? " Connecting…" : " Thinking…";
                         status += elapsed_suffix(st);
                         el = vbox({
                             hbox({
-                                spinner(15, static_cast<size_t>(frame_))
-                                    | color(PANEL_FG_DIM),
-                                make_reasoning_button(item_index,
+                                dim_spinner(_frame),
+                                _make_reasoning_button(item_index,
                                     std::move(status), at.reasoning,
                                     assistant_metadata(at))
                                     ->Render(),
@@ -469,9 +502,9 @@ namespace {
                             if (delta == 0) {
                                 return;
                             }
-                            if (!follow_ && item_index < _anchor_index) {
-                                viewport_.scroll
-                                    = std::max(0, viewport_.scroll + delta);
+                            if (!_follow && item_index < _anchor_index) {
+                                _viewport.scroll
+                                    = std::max(0, _viewport.scroll + delta);
                             }
                         }));
             }
@@ -493,21 +526,21 @@ namespace {
             }
 
             Element content = items.empty()
-                ? (hints_.empty_state_banner && st.items().empty()
+                ? (_hints.empty_state_banner && st.items().empty()
                           ? empty_state_banner()
                           : text(""))
                 : vbox(std::move(items))
-                    | capture_content_height(&viewport_.content_height) | flex;
+                    | capture_content_height(&_viewport.content_height) | flex;
             // Following the tail anchors the bottom of the content: an
             // item whose rendered height outruns the virtual-list
             // estimate (wrapped long lines) keeps its newest lines on
             // screen instead of scrolling them below the fold.
             Element log = std::move(content)
-                | (follow_
+                | (_follow
                         ? focusPositionRelative(0.0f, 1.0f)
                         : focusPosition(0,
-                              viewport_.scroll
-                                  + std::max(0, viewport_.viewport_lines() - 1)
+                              _viewport.scroll
+                                  + std::max(0, _viewport.viewport_lines() - 1)
                                       / 2))
                 | vscroll_indicator | yframe;
 
@@ -515,7 +548,7 @@ namespace {
                 separatorEmpty(),
                 hbox({
                     text("  "),
-                    input_->Render() | xflex,
+                    _input->Render() | xflex,
                     text("  "),
                 }),
                 separatorEmpty(),
@@ -523,27 +556,27 @@ namespace {
             Element main      = vbox({
                                     std::move(log) | flex,
                                 })
-                | flex | reflect(viewport_.box);
+                | flex | reflect(_viewport.box);
 
             Elements bottom;
             Elements hints;
-            if (!hints_.scroll_line.empty()) {
-                hints.push_back(hint_bar(hints_.scroll_line));
+            if (!_hints.scroll_line.empty()) {
+                hints.push_back(hint_bar(_hints.scroll_line));
             }
-            const std::string phase_line = hints_.phase_line_fn
-                ? hints_.phase_line_fn()
-                : hints_.phase_line;
+            const std::string phase_line = _hints.phase_line_fn
+                ? _hints.phase_line_fn()
+                : _hints.phase_line;
             if (!phase_line.empty()) {
                 hints.push_back(hint_bar(phase_line));
             }
             if (!hints.empty()) {
                 bottom.push_back(vbox(std::move(hints)) | xflex);
             }
-            if (autocomplete_.active()) {
-                bottom.push_back(autocomplete_.render(ctx));
+            if (_autocomplete.active()) {
+                bottom.push_back(_autocomplete.render(ctx));
             }
             bottom.push_back(vbox({ std::move(input_box) | yflex,
-                text(hints_.input_hint) | color(PANEL_FG_DIM)
+                text(_hints.input_hint) | color(PANEL_FG_DIM)
                     | bgcolor(PANEL_COLOR) }));
             if (!st.error().empty() || st.retry_countdown()) {
                 bottom.push_back(session_error_element(st));
@@ -560,129 +593,109 @@ namespace {
         bool OnEvent(Event event) override
         {
             if (is_bracketed_paste_begin(event)) {
-                paste_mode_ = true;
+                _paste_mode = true;
                 return true;
             }
             if (is_bracketed_paste_end(event)) {
-                paste_mode_ = false;
+                _paste_mode = false;
                 return true;
             }
             if (is_alt_enter(event)) {
-                insert_newline();
+                _insert_newline();
                 return true;
             }
             if (event.is_mouse()) {
                 if (event.mouse().motion == Mouse::Moved) {
-                    hover_dirty_ = true;
+                    _hover_dirty = true;
                     animation::RequestAnimationFrame();
                 }
-                for (auto& [id, btn] : read_buttons_) {
-                    if (btn->OnEvent(event)) {
-                        return true;
-                    }
-                }
-                for (auto& [key, button] : subagent_buttons_) {
-                    if (button->OnEvent(event)) {
-                        return true;
-                    }
-                }
-                for (auto& [key, button] : diff_buttons_) {
-                    if (button->OnEvent(event)) {
-                        return true;
-                    }
-                }
-                for (auto& [id, button] : pending_lua_buttons_) {
-                    if (button->OnEvent(event)) {
-                        return true;
-                    }
-                }
-                for (auto& [id, link] : reasoning_links_) {
-                    if (link.component->OnEvent(event)) {
-                        return true;
-                    }
+                if (forward_interaction_event(event, _read_buttons,
+                        _subagent_buttons, _diff_buttons, _pending_lua_buttons,
+                        _reasoning_links)) {
+                    return true;
                 }
             }
             if (event == Event::Escape) {
-                if (autocomplete_.active()) {
-                    autocomplete_.clear();
+                if (_autocomplete.active()) {
+                    _autocomplete.clear();
                     return true;
                 }
-                if (!session_->queued().empty()) {
-                    session_->cancel_queued(session_->queued().back().id);
+                if (!_session->queued().empty()) {
+                    _session->cancel_queued(_session->queued().back().id);
                     return true;
                 }
-                if (session_->phase() != Session::Phase::IDLE) {
-                    imza::interrupt(*state_);
+                if (_session->phase() != Session::Phase::IDLE) {
+                    imza::interrupt(*_state);
                     return true;
                 }
                 return true;
             }
-            if (autocomplete_.active()) {
-                if (autocomplete_.handle_event(event)) {
+            if (_autocomplete.active()) {
+                if (_autocomplete.handle_event(event)) {
                     return true;
                 }
                 if (event == Event::Return) {
-                    if (!autocomplete_.accept(
-                            *state_, input_buf_, input_cursor_, attachments_)) {
+                    if (!_autocomplete.accept(
+                            *_state, _input_buf, _input_cursor, _attachments)) {
                         return true;
                     }
-                    submit();
+                    _submit();
                     return true;
                 }
             }
             if (event.is_mouse()) {
                 if (event.mouse().button == Mouse::WheelUp
                     || event.mouse().button == Mouse::WheelDown) {
-                    hover_dirty_ = true;
-                    scroll_lines(*scroll_step(event, viewport_lines()));
+                    _hover_dirty = true;
+                    _scroll_lines(*scroll_step(event, _viewport_lines()));
                     return true;
                 }
                 return false;
             }
             const bool multiline_input
-                = input_buf_.find('\n') != std::string::npos;
+                = _input_buf.find('\n') != std::string::npos;
             if (event == Event::ArrowUpCtrl) {
-                recall_previous_input();
+                _recall_previous_input();
                 return true;
             }
             if (event == Event::ArrowDownCtrl) {
-                recall_next_input();
+                _recall_next_input();
                 return true;
             }
             if (!multiline_input && event == Event::ArrowUp) {
-                scroll_lines(-1);
+                _scroll_lines(-1);
                 return true;
             }
             if (!multiline_input && event == Event::ArrowDown) {
-                scroll_lines(1);
+                _scroll_lines(1);
                 return true;
             }
             if (const std::optional<int> step
-                = scroll_step(event, viewport_lines())) {
-                scroll_lines(*step);
+                = scroll_step(event, _viewport_lines())) {
+                _scroll_lines(*step);
                 return true;
             }
             if (event == Event::Return) {
-                if (paste_mode_) {
-                    insert_newline();
+                if (_paste_mode) {
+                    _insert_newline();
                     return true;
                 }
-                if (input_buf_.empty()) {
+                if (_input_buf.empty()) {
                     return true;
                 }
-                submit();
+                _submit();
                 return true;
             }
-            return input_->OnEvent(event);
+            return _input->OnEvent(event);
         }
 
         void OnAnimation(animation::Params&) override
         {
-            const auto phase = session_->phase();
+            const auto phase = _session->phase();
             const bool busy  = phase == Session::Phase::STREAMING
                 || phase == Session::Phase::CONNECTING;
             if (busy) {
-                ++frame_;
+                ++_frame;
                 animation::RequestAnimationFrame();
                 return;
             }
@@ -690,149 +703,149 @@ namespace {
             // alive until the queued tail has fully released, or the
             // response freezes a few characters short.
             if (_playout_index != ~std::size_t { 0 }
-                && !session_->interrupt_requested()
-                && _playout_index < session_->items().size()) {
+                && !_session->interrupt_requested()
+                && _playout_index < _session->items().size()) {
                 const auto* turn = std::get_if<AssistantTurn>(
-                    &session_->items()[_playout_index]);
+                    &_session->items()[_playout_index]);
                 if (turn != nullptr && _playout_chars < turn->markdown.size()) {
-                    ++frame_;
+                    ++_frame;
                     animation::RequestAnimationFrame();
                 }
             }
         }
 
     private:
-        int viewport_lines() const { return viewport_.viewport_lines(); }
+        int _viewport_lines() const { return _viewport.viewport_lines(); }
 
-        void scroll_lines(int delta)
+        void _scroll_lines(int delta)
         {
-            viewport_.scroll_lines(delta);
-            follow_ = viewport_.scroll == viewport_.max_scroll();
+            _viewport.scroll_lines(delta);
+            _follow = _viewport.scroll == _viewport.max_scroll();
         }
 
-        void open_viewer_for(const ToolCall& tc)
+        void _open_viewer_for(const ToolCall& tc)
         {
             if (tc.name == "skill") {
-                imza::enqueue_user_modal(*state_,
+                imza::enqueue_user_modal(*_state,
                     ViewerModal { tool_call_head(tc), tc.result->text,
                         "markdown", 1, true });
             } else if (tc.name == "lua") {
-                imza::enqueue_user_modal(*state_,
+                imza::enqueue_user_modal(*_state,
                     ViewerModal { "Lua execution", lua_viewer_content(tc),
                         "markdown", 1, false });
             } else {
-                imza::enqueue_user_modal(*state_,
+                imza::enqueue_user_modal(*_state,
                     ViewerModal { tool_call_head(tc), tc.result->text, "", 1 });
             }
         }
 
-        void open_subagent_viewer(const ToolCall& tc, std::size_t index)
+        void _open_subagent_viewer(const ToolCall& tc, std::size_t index)
         {
-            SubagentChat chat = state_->delegation->subagent_chat(tc, index);
-            imza::enqueue_user_modal(*state_,
+            SubagentChat chat = _state->delegation->subagent_chat(tc, index);
+            imza::enqueue_user_modal(*_state,
                 ViewerModal { std::move(chat.title), std::move(chat.transcript),
                     "markdown", 1, true, "" });
         }
 
-        void on_input_changed()
+        void _on_input_changed()
         {
-            if (!changing_history_) {
-                history_index_.reset();
-                history_draft_.clear();
+            if (!_changing_history) {
+                _history_index.reset();
+                _history_draft.clear();
             }
-            session_->clear_error();
-            retain_mentioned_attachments(input_buf_, attachments_);
-            autocomplete_.refresh(*state_, input_buf_, input_cursor_);
+            _session->clear_error();
+            retain_mentioned_attachments(_input_buf, _attachments);
+            _autocomplete.refresh(*_state, _input_buf, _input_cursor);
         }
 
-        void set_input_from_history(std::string text)
+        void _set_input_from_history(std::string text)
         {
-            changing_history_ = true;
-            input_buf_        = std::move(text);
-            input_cursor_     = static_cast<int>(input_buf_.size());
-            on_input_changed();
-            changing_history_ = false;
+            _changing_history = true;
+            _input_buf        = std::move(text);
+            _input_cursor     = static_cast<int>(_input_buf.size());
+            _on_input_changed();
+            _changing_history = false;
         }
 
-        void recall_previous_input()
+        void _recall_previous_input()
         {
             const std::vector<std::string> entries
-                = state_->input_history->entries();
+                = _state->input_history->entries();
             if (entries.empty()) {
                 return;
             }
-            if (!history_index_) {
-                history_draft_ = input_buf_;
-                history_index_ = entries.size();
+            if (!_history_index) {
+                _history_draft = _input_buf;
+                _history_index = entries.size();
             }
-            if (*history_index_ == 0) {
+            if (*_history_index == 0) {
                 return;
             }
-            --*history_index_;
-            set_input_from_history(entries[*history_index_]);
+            --*_history_index;
+            _set_input_from_history(entries[*_history_index]);
         }
 
-        void recall_next_input()
+        void _recall_next_input()
         {
-            if (!history_index_) {
+            if (!_history_index) {
                 return;
             }
             const std::vector<std::string> entries
-                = state_->input_history->entries();
-            if (*history_index_ + 1 < entries.size()) {
-                ++*history_index_;
-                set_input_from_history(entries[*history_index_]);
+                = _state->input_history->entries();
+            if (*_history_index + 1 < entries.size()) {
+                ++*_history_index;
+                _set_input_from_history(entries[*_history_index]);
                 return;
             }
-            history_index_.reset();
-            set_input_from_history(std::move(history_draft_));
-            history_draft_.clear();
+            _history_index.reset();
+            _set_input_from_history(std::move(_history_draft));
+            _history_draft.clear();
         }
 
-        void insert_newline()
+        void _insert_newline()
         {
-            insert_newline_at(input_buf_, input_cursor_);
-            on_input_changed();
+            insert_newline_at(_input_buf, _input_cursor);
+            _on_input_changed();
         }
 
-        void submit()
+        void _submit()
         {
-            const std::string text(input_buf_);
-            input_buf_.clear();
-            input_cursor_ = 0;
-            history_index_.reset();
-            history_draft_.clear();
+            const std::string text(_input_buf);
+            _input_buf.clear();
+            _input_cursor = 0;
+            _history_index.reset();
+            _history_draft.clear();
             if (!trim(text).empty()) {
-                state_->input_history->record(text);
+                _state->input_history->record(text);
             }
-            imza::submit(*state_, text, std::move(attachments_));
-            attachments_.clear();
-            autocomplete_.clear();
-            follow_ = true;
+            imza::submit(*_state, text, std::move(_attachments));
+            _attachments.clear();
+            _autocomplete.clear();
+            _follow = true;
             animation::RequestAnimationFrame();
         }
 
-        std::shared_ptr<ApplicationState> state_;
-        std::shared_ptr<Session> session_;
-        LayoutFn layout_;
-        ChatHints hints_;
+        std::shared_ptr<ApplicationState> _state;
+        std::shared_ptr<Session> _session;
+        LayoutFn _layout;
+        ChatHints _hints;
 
-        Component container_;
-        std::map<std::size_t, Component> read_buttons_;
-        std::map<std::size_t, Component> pending_lua_buttons_;
+        Component _container;
+        std::map<std::size_t, Component> _read_buttons;
+        std::map<std::size_t, Component> _pending_lua_buttons;
         std::map<std::pair<std::size_t, std::size_t>, Component>
-            subagent_buttons_;
-        std::map<std::pair<std::size_t, std::size_t>, Component> diff_buttons_;
+            _subagent_buttons;
+        std::map<std::pair<std::size_t, std::size_t>, Component> _diff_buttons;
         struct ReasoningLink {
             std::shared_ptr<std::string> label;
             std::shared_ptr<std::string> content;
             std::shared_ptr<std::string> metadata;
             Component component;
         };
-        std::map<std::size_t, ReasoningLink> reasoning_links_;
+        std::map<std::size_t, ReasoningLink> _reasoning_links;
 
-        std::vector<Element> item_cache_;
-        std::vector<std::size_t> item_versions_;
+        std::vector<Element> _item_cache;
+        std::vector<std::size_t> _item_versions;
         // Throttled markdown element of the streaming trailing item; kept
         // between re-parses so frames stay cheap (see
         // TRAILING_MARKDOWN_INTERVAL).
@@ -852,67 +865,49 @@ namespace {
         std::size_t _cached_begin   = 0;
         std::size_t _cached_end     = 0;
         std::size_t _anchor_index   = 0;
-        LayoutCtx::Kind cache_kind_ = LayoutCtx::Kind::NARROW;
-        int cache_width_            = 0;
+        LayoutCtx::Kind _cache_kind = LayoutCtx::Kind::NARROW;
+        int _cache_width            = 0;
 
-        void clear_interaction_cache()
+        void _clear_interaction_cache()
         {
-            for (auto& [id, component] : read_buttons_) {
-                component->Detach();
-            }
-            for (auto& [key, component] : subagent_buttons_) {
-                component->Detach();
-            }
-            for (auto& [key, component] : diff_buttons_) {
-                component->Detach();
-            }
-            for (auto& [id, component] : pending_lua_buttons_) {
-                component->Detach();
-            }
-            for (auto& [index, link] : reasoning_links_) {
-                link.component->Detach();
-            }
-            read_buttons_.clear();
-            subagent_buttons_.clear();
-            diff_buttons_.clear();
-            pending_lua_buttons_.clear();
-            reasoning_links_.clear();
+            detach_and_clear_interactions(_read_buttons, _subagent_buttons,
+                _diff_buttons, _pending_lua_buttons, _reasoning_links);
         }
 
-        void evict_item(std::size_t index, const ConversationItem& item)
+        void _evict_item(std::size_t index, const ConversationItem& item)
         {
-            if (index < item_cache_.size()) {
-                item_cache_[index].reset();
-                item_versions_[index] = INVALID_VERSION;
+            if (index < _item_cache.size()) {
+                _item_cache[index].reset();
+                _item_versions[index] = INVALID_VERSION;
             }
             if (const auto* tool = std::get_if<ToolCall>(&item)) {
-                const auto read = read_buttons_.find(tool->id);
-                if (read != read_buttons_.end()) {
+                const auto read = _read_buttons.find(tool->id);
+                if (read != _read_buttons.end()) {
                     read->second->Detach();
-                    read_buttons_.erase(read);
+                    _read_buttons.erase(read);
                 }
-                auto subagent = subagent_buttons_.lower_bound({ tool->id, 0 });
-                while (subagent != subagent_buttons_.end()
+                auto subagent = _subagent_buttons.lower_bound({ tool->id, 0 });
+                while (subagent != _subagent_buttons.end()
                     && subagent->first.first == tool->id) {
                     subagent->second->Detach();
-                    subagent = subagent_buttons_.erase(subagent);
+                    subagent = _subagent_buttons.erase(subagent);
                 }
-                auto diff = diff_buttons_.lower_bound({ tool->id, 0 });
-                while (diff != diff_buttons_.end()
+                auto diff = _diff_buttons.lower_bound({ tool->id, 0 });
+                while (diff != _diff_buttons.end()
                     && diff->first.first == tool->id) {
                     diff->second->Detach();
-                    diff = diff_buttons_.erase(diff);
+                    diff = _diff_buttons.erase(diff);
                 }
-                const auto pending = pending_lua_buttons_.find(tool->id);
-                if (pending != pending_lua_buttons_.end()) {
+                const auto pending = _pending_lua_buttons.find(tool->id);
+                if (pending != _pending_lua_buttons.end()) {
                     pending->second->Detach();
-                    pending_lua_buttons_.erase(pending);
+                    _pending_lua_buttons.erase(pending);
                 }
             }
-            const auto reasoning = reasoning_links_.find(index);
-            if (reasoning != reasoning_links_.end()) {
+            const auto reasoning = _reasoning_links.find(index);
+            if (reasoning != _reasoning_links.end()) {
                 reasoning->second.component->Detach();
-                reasoning_links_.erase(reasoning);
+                _reasoning_links.erase(reasoning);
             }
             if (_trailing_markdown_index == index) {
                 _trailing_markdown.reset();
@@ -925,27 +920,27 @@ namespace {
             }
         }
 
-        void evict_range(std::size_t begin, std::size_t end,
+        void _evict_range(std::size_t begin, std::size_t end,
             const std::vector<ConversationItem>& conversation)
         {
             end = std::min(end, conversation.size());
             for (std::size_t index = begin; index < end; ++index) {
-                evict_item(index, conversation[index]);
+                _evict_item(index, conversation[index]);
             }
         }
 
-        void evict_outside(const VirtualListWindow& window,
+        void _evict_outside(const VirtualListWindow& window,
             const std::vector<ConversationItem>& conversation)
         {
-            evict_range(_cached_begin, std::min(_cached_end, window.begin),
+            _evict_range(_cached_begin, std::min(_cached_end, window.begin),
                 conversation);
-            evict_range(
+            _evict_range(
                 std::max(_cached_begin, window.end), _cached_end, conversation);
             _cached_begin = window.begin;
             _cached_end   = window.end;
         }
 
-        Element tool_header_element(const ToolCall& tc)
+        Element _tool_header_element(const ToolCall& tc)
         {
             Elements parts {
                 text(tc.name == "skill" ? "Load Skill"
@@ -965,16 +960,16 @@ namespace {
             return hbox(std::move(parts));
         }
 
-        Element tool_card(const ToolCall& tc, Element body)
+        Element _tool_card(const ToolCall& tc, Element body)
         {
             return vbox({
-                tool_header_element(tc),
+                _tool_header_element(tc),
                 std::move(body),
                 separatorEmpty(),
             });
         }
 
-        std::string viewer_header_detail(
+        std::string _viewer_header_detail(
             const ToolCall& tc, std::size_t count, std::string_view unit)
         {
             std::string label = tool_header_args(tc);
@@ -993,11 +988,11 @@ namespace {
             return label;
         }
 
-        Element render_viewer_header(
+        Element _render_viewer_header(
             const ToolCall& tc, std::size_t count, std::string_view unit)
         {
-            Component button = make_viewer_header_button(
-                tc, viewer_header_detail(tc, count, unit));
+            Component button = _make_viewer_header_button(
+                tc, _viewer_header_detail(tc, count, unit));
             Elements parts { button->Render() };
             if (tc.result->shell_status.has_value()) {
                 const std::string status
@@ -1009,9 +1004,9 @@ namespace {
             return hbox(std::move(parts));
         }
 
-        const ToolCall* find_tool_call(std::size_t id) const
+        const ToolCall* _find_tool_call(std::size_t id) const
         {
-            for (const ConversationItem& item : session_->items()) {
+            for (const ConversationItem& item : _session->items()) {
                 if (const auto* call = std::get_if<ToolCall>(&item);
                     call != nullptr && call->id == id) {
                     return call;
@@ -1020,42 +1015,42 @@ namespace {
             return nullptr;
         }
 
-        Element render_tool_status(
+        Element _render_tool_status(
             const ToolCall& tc, std::string marker, ftxui::Color tone)
         {
-            return tool_card(tc,
+            return _tool_card(tc,
                 hbox({
                     text(marker) | bold | color(tone),
                     text(tc.result->text) | color(tone),
                 }));
         }
 
-        int content_width()
+        int _content_width()
         {
-            if (hints_.content_width) {
-                return std::max(20, hints_.content_width(layout_()) - 4);
+            if (_hints.content_width) {
+                return std::max(20, _hints.content_width(_layout()) - 4);
             }
-            return std::max(20, review_content_width(layout_()) - 4);
+            return std::max(20, review_content_width(_layout()) - 4);
         }
 
         // The default: a collapsed link row that opens the result in the
         // viewer instead of spilling its text into the timeline.
-        Element render_generic_tool(const ToolCall& tc)
+        Element _render_generic_tool(const ToolCall& tc)
         {
-            return vbox({ render_viewer_header(
+            return vbox({ _render_viewer_header(
                               tc, count_lines(tc.result->text), "line"),
                 separatorEmpty() });
         }
 
-        Element render_lua_item(const ToolCall& tc)
+        Element _render_lua_item(const ToolCall& tc)
         {
             const bool failed = tc.result->kind == ToolCall::Result::Kind::ERROR
                 || tc.result->kind == ToolCall::Result::Kind::REJECT;
             const ToolReport report = make_tool_report(tc);
             Component button
-                = make_lua_viewer_button(tc, failed, report.detail);
+                = _make_lua_viewer_button(tc, failed, report.detail);
             Elements rows { button->Render() };
-            const LayoutCtx ctx = layout_();
+            const LayoutCtx ctx = _layout();
             for (const ToolReportSection& section : report.sections) {
                 const auto* report_diff = std::get_if<ToolReportDiff>(&section);
                 if (report_diff == nullptr || report_diff->view == nullptr) {
@@ -1090,32 +1085,32 @@ namespace {
                 const std::string label = "‹ View full diff ("
                     + std::to_string(diff.rows.size()) + " lines) ›";
                 rows.push_back(
-                    make_diff_viewer_button(tc.id, report_diff->index, label)
+                    _make_diff_viewer_button(tc.id, report_diff->index, label)
                         ->Render());
             }
             rows.push_back(separatorEmpty());
             return vbox(std::move(rows));
         }
 
-        Element render_tool_error(const ToolCall& tc)
+        Element _render_tool_error(const ToolCall& tc)
         {
             // Keep the lua card shape: the status header would echo
             // the whole script into the chat.
             if (tc.name == "lua") {
-                return render_lua_item(tc);
+                return _render_lua_item(tc);
             }
-            return render_tool_status(tc, "Error: ", HL_RED);
+            return _render_tool_status(tc, "Error: ", HL_RED);
         }
 
-        Element render_tool_reject(const ToolCall& tc)
+        Element _render_tool_reject(const ToolCall& tc)
         {
             if (tc.name == "lua") {
-                return render_lua_item(tc);
+                return _render_lua_item(tc);
             }
-            return render_tool_status(tc, "Rejected: ", HL_YELLOW);
+            return _render_tool_status(tc, "Rejected: ", HL_YELLOW);
         }
 
-        Element render_tool_pending(const ToolCall& tc)
+        Element _render_tool_pending(const ToolCall& tc)
         {
             const bool planning = tc.phase == ToolCall::Phase::PLANNING;
             if (planning) {
@@ -1123,9 +1118,8 @@ namespace {
                 // inspect yet; show a plain status row.
                 return vbox({
                     hbox({
-                        spinner(15, static_cast<std::size_t>(frame_))
-                            | color(PANEL_FG_DIM),
-                        text(" Planning…" + elapsed_suffix(*session_)) | dim,
+                        dim_spinner(_frame),
+                        text(" Planning…" + elapsed_suffix(*_session)) | dim,
                         filler(),
                         text(INTERRUPT_HINT) | dim,
                     }),
@@ -1135,16 +1129,15 @@ namespace {
             if (tc.name == "subagent") {
                 Elements rows {
                     hbox({
-                        spinner(15, static_cast<std::size_t>(frame_))
-                            | color(PANEL_FG_DIM),
-                        text(" Delegating…" + elapsed_suffix(*session_)) | dim,
+                        dim_spinner(_frame),
+                        text(" Delegating…" + elapsed_suffix(*_session)) | dim,
                     }),
                 };
                 for (std::size_t index = 0; index < tc.subagent_ids.size();
                     ++index) {
                     const SubagentChat chat
-                        = state_->delegation->subagent_chat(tc, index);
-                    rows.push_back(make_subagent_viewer_button(
+                        = _state->delegation->subagent_chat(tc, index);
+                    rows.push_back(_make_subagent_viewer_button(
                         tc.id, index, "‹ View " + chat.title + " chat ›")
                             ->Render());
                 }
@@ -1154,29 +1147,28 @@ namespace {
             if (tc.name == "lua") {
                 return vbox({
                     hbox({
-                        spinner(15, static_cast<std::size_t>(frame_))
-                            | color(PANEL_FG_DIM),
+                        dim_spinner(_frame),
                         text(" "),
-                        make_lua_pending_button(tc)->Render(),
+                        _make_lua_pending_button(tc)->Render(),
                     }),
                     separatorEmpty(),
                 });
             }
             return vbox({
-                tool_header_element(tc),
+                _tool_header_element(tc),
                 separatorEmpty(),
             });
         }
 
-        Element render_subagent_item(const ToolCall& tc)
+        Element _render_subagent_item(const ToolCall& tc)
         {
-            Elements rows { tool_header_element(tc) };
+            Elements rows { _tool_header_element(tc) };
             const std::size_t count
                 = std::max(tc.subagent_ids.size(), tc.subagent_chats.size());
             for (std::size_t index = 0; index < count; ++index) {
                 const SubagentChat chat
-                    = state_->delegation->subagent_chat(tc, index);
-                rows.push_back(make_subagent_viewer_button(
+                    = _state->delegation->subagent_chat(tc, index);
+                rows.push_back(_make_subagent_viewer_button(
                     tc.id, index, "‹ View " + chat.title + " chat ›")
                         ->Render());
             }
@@ -1185,7 +1177,7 @@ namespace {
         }
 
         template <typename Key>
-        Component memoized_label_button(std::map<Key, Component>& cache,
+        Component _memoized_label_button(std::map<Key, Component>& cache,
             Key key, std::string label, std::function<void()> on_click)
         {
             if (const auto found = cache.find(key); found != cache.end()) {
@@ -1197,63 +1189,63 @@ namespace {
                 [shared_label] { return text(*shared_label); },
                 std::move(on_click), PANEL_FG_DIM);
             cache.emplace(std::move(key), btn);
-            container_->Add(btn);
+            _container->Add(btn);
             return btn;
         }
 
-        Component make_subagent_viewer_button(
+        Component _make_subagent_viewer_button(
             std::size_t id, std::size_t index, std::string label)
         {
-            return memoized_label_button(subagent_buttons_,
+            return _memoized_label_button(_subagent_buttons,
                 std::pair { id, index }, std::move(label), [this, id, index] {
-                    if (const auto* call = find_tool_call(id);
+                    if (const auto* call = _find_tool_call(id);
                         call != nullptr) {
-                        open_subagent_viewer(*call, index);
+                        _open_subagent_viewer(*call, index);
                     }
                 });
         }
 
-        Component make_diff_viewer_button(
+        Component _make_diff_viewer_button(
             std::size_t id, std::size_t index, std::string label)
         {
-            return memoized_label_button(diff_buttons_, std::pair { id, index },
-                std::move(label), [this, id, index] {
-                    const auto* call = find_tool_call(id);
+            return _memoized_label_button(_diff_buttons,
+                std::pair { id, index }, std::move(label), [this, id, index] {
+                    const auto* call = _find_tool_call(id);
                     if (call == nullptr || !call->result.has_value()
                         || index >= call->result->diffs.size()) {
                         return;
                     }
                     const DiffView& diff = call->result->diffs[index];
-                    imza::enqueue_user_modal(*state_,
+                    imza::enqueue_user_modal(*_state,
                         ViewerModal {
                             diff.file, "", "diff", 1, false, "", diff });
                 });
         }
 
-        Component make_lua_pending_button(const ToolCall& tc)
+        Component _make_lua_pending_button(const ToolCall& tc)
         {
-            return memoized_label_button(
-                pending_lua_buttons_, tc.id, "Executing…", [this, id = tc.id] {
-                    const auto* call = find_tool_call(id);
+            return _memoized_label_button(
+                _pending_lua_buttons, tc.id, "Executing…", [this, id = tc.id] {
+                    const auto* call = _find_tool_call(id);
                     if (call == nullptr) {
                         return;
                     }
                     if (call->result.has_value()) {
-                        open_viewer_for(*call);
+                        _open_viewer_for(*call);
                         return;
                     }
                     const std::string script
                         = json_string(parse_json(call->args), "script");
-                    imza::enqueue_user_modal(*state_,
+                    imza::enqueue_user_modal(*_state,
                         ViewerModal { "Lua script", script, "lua", 1 });
                 });
         }
 
-        Component make_lua_viewer_button(
+        Component _make_lua_viewer_button(
             const ToolCall& tc, bool failed, const std::string& counts)
         {
-            if (const auto found = read_buttons_.find(tc.id);
-                found != read_buttons_.end()) {
+            if (const auto found = _read_buttons.find(tc.id);
+                found != _read_buttons.end()) {
                 return found->second;
             }
             std::string label = failed ? "Execution Failed" : "Executed";
@@ -1269,22 +1261,22 @@ namespace {
                                   : text(*shared_label) | bold;
                 },
                 [this, id] {
-                    if (const auto* call = find_tool_call(id);
+                    if (const auto* call = _find_tool_call(id);
                         call != nullptr) {
-                        open_viewer_for(*call);
+                        _open_viewer_for(*call);
                     }
                 },
                 failed ? PANEL_FG_DIM : HL_GREEN);
-            read_buttons_.emplace(id, button);
-            container_->Add(button);
+            _read_buttons.emplace(id, button);
+            _container->Add(button);
             return button;
         }
 
-        Component make_viewer_header_button(
+        Component _make_viewer_header_button(
             const ToolCall& tc, std::string detail)
         {
-            if (const auto found = read_buttons_.find(tc.id);
-                found != read_buttons_.end()) {
+            if (const auto found = _read_buttons.find(tc.id);
+                found != _read_buttons.end()) {
                 return found->second;
             }
             std::string name     = tc.name == "skill" ? "Load Skill"
@@ -1292,29 +1284,29 @@ namespace {
             const std::size_t id = tc.id;
             Component button     = split_inline_link_button(
                 std::move(name), std::move(detail), [this, id] {
-                    if (const auto* call = find_tool_call(id);
+                    if (const auto* call = _find_tool_call(id);
                         call != nullptr) {
-                        open_viewer_for(*call);
+                        _open_viewer_for(*call);
                     }
                 });
-            read_buttons_.emplace(id, button);
-            container_->Add(button);
+            _read_buttons.emplace(id, button);
+            _container->Add(button);
             return button;
         }
 
-        bool reasoning_enabled(const AssistantTurn& turn) const
+        bool _reasoning_enabled(const AssistantTurn& turn) const
         {
             return !turn.reasoning_effort.empty()
                 && turn.reasoning_effort != "off";
         }
 
-        Element render_assistant(const AssistantTurn& t, std::size_t index,
+        Element _render_assistant(const AssistantTurn& t, std::size_t index,
             const LayoutCtx&, bool active, bool show_metadata,
             Element markdown_element, bool markdown_cached)
         {
             Elements parts;
             const bool has_reasoning = !t.reasoning.empty();
-            const bool expected      = reasoning_enabled(t);
+            const bool expected      = _reasoning_enabled(t);
             const bool done          = t.reasoning_ms.has_value();
             const bool placeholder
                 = active && !has_reasoning && !done && expected;
@@ -1328,23 +1320,21 @@ namespace {
                     std::snprintf(buf, sizeof(buf), "%.1f", secs);
                     label = "▸ Thought " + std::string(buf) + "s";
                 } else {
-                    label = " Thinking…" + elapsed_suffix(*session_);
+                    label = " Thinking…" + elapsed_suffix(*_session);
                 }
-                Component btn = make_reasoning_button(index, label,
+                Component btn = _make_reasoning_button(index, label,
                     placeholder ? std::string() : t.reasoning,
                     assistant_metadata(t));
                 Element row   = done
                     ? btn->Render()
-                    : hbox({ spinner(15, static_cast<size_t>(frame_))
-                              | color(PANEL_FG_DIM),
-                          btn->Render(), filler(),
+                    : hbox({ dim_spinner(_frame), btn->Render(), filler(),
                           text(INTERRUPT_HINT) | dim });
                 parts.push_back(row);
             }
             if (!t.markdown.empty()) {
                 parts.push_back(markdown_cached
                         ? markdown_element
-                        : assistant_item(t, content_width()));
+                        : assistant_item(t, _content_width()));
             }
             if (show_metadata) {
                 parts.push_back(hint_bar(assistant_metadata(t)));
@@ -1352,11 +1342,11 @@ namespace {
             return vbox(std::move(parts));
         }
 
-        Component make_reasoning_button(std::size_t index, std::string label,
+        Component _make_reasoning_button(std::size_t index, std::string label,
             const std::string& content, std::string metadata)
         {
-            if (auto it = reasoning_links_.find(index);
-                it != reasoning_links_.end()) {
+            if (auto it = _reasoning_links.find(index);
+                it != _reasoning_links.end()) {
                 *it->second.label    = std::move(label);
                 *it->second.content  = content;
                 *it->second.metadata = std::move(metadata);
@@ -1375,31 +1365,31 @@ namespace {
                         ViewerModal vm { " Thinking", *content_ptr, "md", 1 };
                         vm.line_numbers = false;
                         vm.metadata     = *metadata_ptr;
-                        enqueue_user_modal(*state_, vm);
+                        enqueue_user_modal(*_state, vm);
                     },
                     PANEL_FG_DIM);
-            container_->Add(entry.component);
-            reasoning_links_.emplace(index, std::move(entry));
-            return reasoning_links_.find(index)->second.component;
+            _container->Add(entry.component);
+            _reasoning_links.emplace(index, std::move(entry));
+            return _reasoning_links.find(index)->second.component;
         }
 
-        std::string input_buf_;
-        InputOption input_options_;
-        Component input_;
+        std::string _input_buf;
+        InputOption _input_options;
+        Component _input;
 
-        Autocomplete autocomplete_;
-        std::vector<Attachment> attachments_;
-        std::optional<std::size_t> history_index_;
-        std::string history_draft_;
-        int input_cursor_      = 0;
-        bool changing_history_ = false;
-        bool paste_mode_       = false;
+        Autocomplete _autocomplete;
+        std::vector<Attachment> _attachments;
+        std::optional<std::size_t> _history_index;
+        std::string _history_draft;
+        int _input_cursor      = 0;
+        bool _changing_history = false;
+        bool _paste_mode       = false;
 
-        bool follow_                  = true;
-        bool hover_dirty_             = false;
-        int frame_                    = 0;
-        std::uint64_t content_serial_ = 0;
-        ScrollView viewport_ { };
+        bool _follow                  = true;
+        bool _hover_dirty             = false;
+        int _frame                    = 0;
+        std::uint64_t _content_serial = 0;
+        ScrollView _viewport { };
     };
 
 } // namespace

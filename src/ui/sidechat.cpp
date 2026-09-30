@@ -30,18 +30,18 @@ class SidechatComponent : public ComponentBase {
 public:
     SidechatComponent(std::shared_ptr<ApplicationState> state,
         std::function<void()> on_focus, SidechatStatus& status)
-        : state_(std::move(state))
-        , on_focus_(std::move(on_focus))
-        , status_(status)
-        , host_(Container::Vertical({ }))
+        : _state(std::move(state))
+        , _on_focus(std::move(on_focus))
+        , _status(status)
+        , _host(Container::Vertical({ }))
     {
-        Add(host_);
+        Add(_host);
     }
 
     Element OnRender() override
     {
         _sync();
-        if (pane_ == nullptr) {
+        if (_pane == nullptr) {
             return vbox();
         }
         const auto terminal_size = Terminal::Size();
@@ -49,13 +49,13 @@ public:
             = layout_context(terminal_size.dimx, terminal_size.dimy);
         const bool narrow = ctx.kind == LayoutCtx::Kind::NARROW;
         const int column_width
-            = focused_ && narrow ? ctx.width : LayoutCtx::RIGHT_WIDTH;
-        layout_ = layout_context(column_width, ctx.height);
-        if (state_->sidechat == nullptr) {
+            = _focused && narrow ? ctx.width : LayoutCtx::RIGHT_WIDTH;
+        _layout = layout_context(column_width, ctx.height);
+        if (_state->sidechat == nullptr) {
             return vbox();
         }
         const Session::StatusView usage
-            = state_->sidechat->session->status_view();
+            = _state->sidechat->session->status_view();
         Element column
             = vbox({
                   hbox({ text("Sidechat") | bold | color(PANEL_FG), filler(),
@@ -63,49 +63,49 @@ public:
                           | dim }),
                   separatorLight(),
                   separatorEmpty(),
-                  host_->Render() | yflex,
+                  _host->Render() | yflex,
               })
-            | yflex | size(WIDTH, EQUAL, column_width) | reflect(pane_box_);
-        return focused_ ? column : std::move(column) | dim;
+            | yflex | size(WIDTH, EQUAL, column_width) | reflect(_pane_box);
+        return _focused ? column : std::move(column) | dim;
     }
 
     bool OnEvent(Event event) override
     {
         if (event == Event::CtrlS) {
-            if (state_->sidechat_open) {
-                imza::close_sidechat(*state_);
+            if (_state->sidechat_open) {
+                imza::close_sidechat(*_state);
                 _unfocus();
             } else {
-                imza::open_sidechat(*state_);
+                imza::open_sidechat(*_state);
                 _set_focused(true);
             }
             return true;
         }
-        if (pane_ == nullptr) {
+        if (_pane == nullptr) {
             return false;
         }
         if (event == Event::CtrlR) {
-            imza::refresh_sidechat(*state_);
+            imza::refresh_sidechat(*_state);
             return true;
         }
-        if (modal_ != nullptr && _has_modal()) {
-            return modal_->OnEvent(event);
+        if (_modal != nullptr && _has_modal()) {
+            return _modal->OnEvent(event);
         }
         if (!event.is_mouse()) {
-            if (focused_ && pane_->OnEvent(event)) {
+            if (_focused && _pane->OnEvent(event)) {
                 return true;
             }
             return false;
         }
         const Mouse& m = event.mouse();
-        if (pane_box_.Contain(m.x, m.y)) {
+        if (_pane_box.Contain(m.x, m.y)) {
             if (m.button == Mouse::Left && m.motion == Mouse::Pressed
-                && !focused_) {
+                && !_focused) {
                 _set_focused(true);
             }
-            return pane_->OnEvent(event);
+            return _pane->OnEvent(event);
         }
-        if (m.button == Mouse::Left && m.motion == Mouse::Pressed && focused_) {
+        if (m.button == Mouse::Left && m.motion == Mouse::Pressed && _focused) {
             _unfocus();
         }
         return false;
@@ -118,56 +118,56 @@ private:
 
     bool _has_modal() const
     {
-        return state_->sidechat != nullptr
-            && state_->sidechat->session->modal().index() != 0;
+        return _state->sidechat != nullptr
+            && _state->sidechat->session->modal().index() != 0;
     }
 
     void _sync()
     {
-        const bool open = state_->sidechat_open;
-        if (open == (pane_ != nullptr)) {
+        const bool open = _state->sidechat_open;
+        if (open == (_pane != nullptr)) {
             return;
         }
         if (open) {
-            modal_ = make_modal(state_->sidechat);
-            pane_  = make_chat(
-                state_->sidechat, [this] { return layout_; }, sidechat_hints());
-            status_.modal = modal_;
-            host_->Add(modal_);
-            host_->Add(pane_);
+            _modal = make_modal(_state->sidechat);
+            _pane  = make_chat(
+                _state->sidechat, [this] { return _layout; }, sidechat_hints());
+            _status.modal = _modal;
+            _host->Add(_modal);
+            _host->Add(_pane);
             return;
         }
-        pane_.reset();
-        modal_.reset();
-        status_.modal.reset();
-        host_->DetachAllChildren();
+        _pane.reset();
+        _modal.reset();
+        _status.modal.reset();
+        _host->DetachAllChildren();
         _unfocus();
     }
 
     void _unfocus()
     {
-        if (!focused_) {
+        if (!_focused) {
             return;
         }
         _set_focused(false);
-        on_focus_();
+        _on_focus();
     }
 
     void _set_focused(bool focused)
     {
-        focused_        = focused;
-        status_.focused = focused;
+        _focused        = focused;
+        _status.focused = focused;
     }
 
-    std::shared_ptr<ApplicationState> state_;
-    std::function<void()> on_focus_;
-    SidechatStatus& status_;
-    Component host_;
-    Component pane_;
-    Component modal_;
-    bool focused_     = false;
-    LayoutCtx layout_ = layout_context(0);
-    ftxui::Box pane_box_ { };
+    std::shared_ptr<ApplicationState> _state;
+    std::function<void()> _on_focus;
+    SidechatStatus& _status;
+    Component _host;
+    Component _pane;
+    Component _modal;
+    bool _focused     = false;
+    LayoutCtx _layout = layout_context(0);
+    ftxui::Box _pane_box { };
 };
 
 ftxui::Component make_sidechat_component(

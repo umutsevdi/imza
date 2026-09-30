@@ -4,10 +4,13 @@
 #include <string_view>
 #include <vector>
 
+#include <doctest/doctest.h>
+
 #include "common/util.h"
 #include "conversation/session.h"
 #include "network/network.h"
 #include "providers/pricing.h"
+#include "ui/ui.h"
 
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/event.hpp>
@@ -15,7 +18,30 @@
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/screen.hpp>
 
+#ifdef _WIN32
+// Windows-only tests abort here with a visible marker instead of a silent
+// early return.
+#define SKIP_ON_WIN32()                                                        \
+    do {                                                                       \
+        MESSAGE("skipped: windows-only test");                                 \
+        return;                                                                \
+    } while (false)
+#else
+#define SKIP_ON_WIN32()
+#endif
+
 namespace imza::test {
+
+// The minimal plan document the plan-validation contract accepts.
+inline const std::string PLAN_SKELETON
+    = "# Goal\nx\n# Approach\nx\n# Files\nx\n# Verification\nx\n"
+      "# Open Questions\nx";
+
+// The wide pane geometry most tab and pane tests render against.
+inline imza::LayoutCtx wide_layout()
+{
+    return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100, 40 };
+}
 
 // Records a tool call through the production path (Session::apply).
 inline void append_tool(
@@ -86,6 +112,23 @@ inline bool click_label(ftxui::Component& component, std::string_view label,
         }
     }
     return false;
+}
+
+// Type text into a component as one character event per key.
+inline void type(ftxui::Component& component, std::string_view text)
+{
+    for (const char character : text) {
+        component->OnEvent(ftxui::Event::Character(character));
+    }
+}
+
+// type() that requires every keystroke to be accepted, so a swallowed key
+// fails at the keystroke that dropped it rather than at a later assertion.
+inline void require_type(ftxui::Component& component, std::string_view text)
+{
+    for (const char character : text) {
+        REQUIRE(component->OnEvent(ftxui::Event::Character(character)));
+    }
 }
 
 } // namespace imza::test

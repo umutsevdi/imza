@@ -38,7 +38,7 @@ ToolOutput dispatch_tool(
 {
     const Tool* tool = find_tool(tools, req.name);
     if (tool == nullptr) {
-        return { ToolOutput::Kind::ERROR, "unknown tool: " + req.name };
+        return tool_error(UNKNOWN_TOOL_PREFIX + req.name);
     }
     return tool->run(req, parse_json(req.args));
 }

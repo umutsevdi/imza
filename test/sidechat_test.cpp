@@ -9,10 +9,6 @@
 
 namespace imza {
 
-namespace {
-
-} // namespace
-
 TEST_CASE("sidechat status reports no modal when the pane is open without one")
 {
     auto state = imza::test::make_test_state();

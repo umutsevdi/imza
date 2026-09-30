@@ -16,6 +16,7 @@
 #include "permissions/store.h"
 #include "platform/config.h"
 #include "test_fs.h"
+#include "test_helpers.h"
 #include "test_state.h"
 #include "tools/skills.h"
 #include "tools/tool.h"
@@ -526,8 +527,8 @@ TEST_CASE("filesystem normalization resolves traversal and missing writes")
 TEST_CASE("filesystem normalization follows symlinked targets and parents")
 {
 #ifdef _WIN32
-    return;
-#else
+    SKIP_ON_WIN32()
+#endif
     PermissionFixture fixture;
     std::filesystem::create_directory_symlink(
         fixture.outside, fixture.workspace / "outside-link");
@@ -546,7 +547,6 @@ TEST_CASE("filesystem normalization follows symlinked targets and parents")
     REQUIRE(linked_write.request.has_value());
     CHECK(filesystem_target(*linked_write.request)
         == fixture.outside / "new.txt");
-#endif
 }
 
 TEST_CASE("central evaluator assigns explicit policies to built-in tools")
@@ -754,8 +754,8 @@ TEST_CASE("authorized_skill_path accepts only the canonical target")
 TEST_CASE("skill evaluation binds approval to the canonical instruction path")
 {
 #ifdef _WIN32
-    return;
-#else
+    SKIP_ON_WIN32()
+#endif
     PermissionFixture fixture;
     const auto first  = fixture.outside / "first-skill.md";
     const auto second = fixture.outside / "second-skill.md";
@@ -791,7 +791,6 @@ TEST_CASE("skill evaluation binds approval to the canonical instruction path")
     CHECK(current.request.args != approved.request.args);
     CHECK(
         parse_json(current.request.args)["path"].asString() == second.string());
-#endif
 }
 
 } // namespace imza

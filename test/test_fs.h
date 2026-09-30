@@ -46,6 +46,28 @@ private:
     }
 };
 
+// RAII restoration of the process working directory: a test that chdirs
+// cannot leak the change into the tests that follow when an assertion
+// fails before its manual restore runs.
+class CurrentDirectory {
+public:
+    CurrentDirectory()
+        : original(std::filesystem::current_path())
+    {
+    }
+
+    ~CurrentDirectory()
+    {
+        std::error_code ec;
+        std::filesystem::current_path(original, ec);
+    }
+
+    CurrentDirectory(const CurrentDirectory&)            = delete;
+    CurrentDirectory& operator=(const CurrentDirectory&) = delete;
+
+    const std::filesystem::path original;
+};
+
 // RAII isolation of Imza's data home: a fresh TempDir is exported as
 // XDG_DATA_HOME and the previous value is restored on destruction, so a
 // suite cannot leak it process-wide into the ones that follow.

@@ -51,6 +51,8 @@ namespace {
     void start_turn(ApplicationState& state, std::string text,
         std::vector<Attachment> attachments);
 
+    void advance_pending_skill(ApplicationState& state);
+
     bool load_skill(ApplicationState& state, const Skill& skill,
         const ToolCallRequest& authorized)
     {
@@ -129,30 +131,40 @@ namespace {
         const Skill first = awaiting.front();
         state.skills->set_pending_turn(PendingSkillTurn {
             std::move(text), std::move(attachments), std::move(awaiting), 0 });
-        enqueue_user_modal(state,
-            *evaluate_permission(
-                state, skill_request(first), state.session->mode())
-                .prompt);
+        const PermissionEvaluation evaluation = evaluate_permission(
+            state, skill_request(first), state.session->mode());
+        if (evaluation.prompt) {
+            enqueue_user_modal(state, *evaluation.prompt);
+            return;
+        }
+        // No prompt: the skill was denied or is already authorized;
+        // skip it and prompt for the next awaiting skill or start the turn.
+        advance_pending_skill(state);
     }
 
-    void start_turn(ApplicationState& state, std::string text,
-        std::vector<Attachment> attachments)
+    // Shared launch path for submit- and slash-initiated turns. Applies
+    // `mode` when it differs from the session's, so the make-skill flow can
+    // switch into Build only after the model guard passes.
+    void begin_turn(ApplicationState& state, Session::Mode mode,
+        std::string text, std::vector<Attachment> attachments,
+        std::string title, std::optional<Message> extra)
     {
         const std::optional<ProviderSelection> selection
             = state.providers->active_selection();
         if (!selection.has_value()) {
-            state.session->set_error("No model selected - run /model.");
+            state.session->set_error(NO_MODEL_SELECTED);
             return;
         }
-        const TurnSettings settings
-            = make_turn_settings(*selection, state.session->mode());
+        if (mode != state.session->mode()) {
+            state.session->set_mode(mode);
+        }
         if (!state.environment->ready()) {
             state.session->enqueue_message(
                 std::move(text), std::move(attachments));
             return;
         }
-        const bool generate_title     = state.session->claim_title_generation();
-        const std::string title_input = text;
+        const TurnSettings settings = make_turn_settings(*selection, mode);
+        const bool generate_title   = state.session->claim_title_generation();
         state.session->clear_interrupt();
         state.session->begin_send(std::move(text), std::move(attachments));
         std::optional<std::string> submission
@@ -162,15 +174,25 @@ namespace {
         if (submission) {
             history.push_back({ Message::Type::USER, std::move(*submission) });
         }
+        if (extra) {
+            history.push_back(std::move(*extra));
+        }
         state.runner->spawn(std::move(history), std::move(settings));
         if (generate_title && !state.runner->has_stream_override()) {
             const auto title_selection
                 = state.providers->subagent_selection(SubagentRole::BASIC);
             const ProviderSelection& selected
                 = title_selection ? *title_selection : *selection;
-            state.delegation->spawn_title(title_input,
+            state.delegation->spawn_title(std::move(title),
                 make_turn_settings(selected, state.session->mode()));
         }
+    }
+
+    void start_turn(ApplicationState& state, std::string text,
+        std::vector<Attachment> attachments)
+    {
+        begin_turn(state, state.session->mode(), text, std::move(attachments),
+            text, std::nullopt);
     }
 
     SessionsModal sessions_modal(const ApplicationState&) { return { }; }
@@ -232,6 +254,23 @@ namespace {
         });
     }
 
+    bool save_active_session(ApplicationState& state)
+    {
+        if (state.sessions->save(*state.session) != Status::OK) {
+            state.session->set_error("Failed to save current session.");
+            return false;
+        }
+        return true;
+    }
+
+    void clear_runtime_state(ApplicationState& state)
+    {
+        state.skills->clear();
+        state.permissions->clear();
+        state.runner->clear();
+        state.subagents->prune_completed();
+    }
+
     void new_session(ApplicationState& state)
     {
         if (state.session->has_pending_work()) {
@@ -240,17 +279,13 @@ namespace {
                 "session.");
             return;
         }
-        if (state.sessions->save(*state.session) != Status::OK) {
-            state.session->set_error("Failed to save current session.");
+        if (!save_active_session(state)) {
             return;
         }
         // The archived file is no longer chat-active in this process.
         state.sessions->deactivate();
         state.queue.clear();
-        state.skills->clear();
-        state.permissions->clear();
-        state.runner->clear();
-        state.subagents->prune_completed();
+        clear_runtime_state(state);
         state.session->restore(SessionSnapshot { });
     }
 
@@ -464,43 +499,11 @@ void compact_session(ApplicationState& state, TurnSettings settings)
 // history as an extra user message, like the plan submission.
 void start_make_skill_turn(ApplicationState& state, std::string description)
 {
-    const std::optional<ProviderSelection> selection
-        = state.providers->active_selection();
-    if (!selection.has_value()) {
-        state.session->set_error("No model selected - run /model.");
-        return;
-    }
-    const std::string command_line
-        = "/make-skill " + std::string(trim(description));
-    state.session->set_mode(Session::Mode::BUILD);
-    if (!state.environment->ready()) {
-        state.session->enqueue_message(std::move(command_line));
-        return;
-    }
-    const bool generate_title = state.session->claim_title_generation();
-    state.session->clear_interrupt();
-    state.session->begin_send(std::move(command_line));
-    std::optional<std::string> submission
-        = state.session->plan_submission_for_build();
-    const TurnSettings settings
-        = make_turn_settings(*selection, state.session->mode());
-    std::vector<Message> history = state.session->build_history(
-        full_system_prompt(state, settings.mode), settings.dialect);
-    if (submission) {
-        history.push_back({ Message::Type::USER, std::move(*submission) });
-    }
-    std::string prompt = state.prompts->make_skill();
-    prompt += description;
-    history.push_back({ Message::Type::USER, std::move(prompt) });
-    state.runner->spawn(std::move(history), std::move(settings));
-    if (generate_title && !state.runner->has_stream_override()) {
-        const auto title_selection
-            = state.providers->subagent_selection(SubagentRole::BASIC);
-        const ProviderSelection& selected
-            = title_selection ? *title_selection : *selection;
-        state.delegation->spawn_title("/make-skill " + description,
-            make_turn_settings(selected, state.session->mode()));
-    }
+    begin_turn(state, Session::Mode::BUILD,
+        "/make-skill " + std::string(trim(description)), { },
+        "/make-skill " + description,
+        Message {
+            Message::Type::USER, state.prompts->make_skill() + description });
 }
 
 void run_slash(ApplicationState& state, std::string_view command)
@@ -536,11 +539,11 @@ void run_slash(ApplicationState& state, std::string_view command)
             state, ConnectModal { ConnectModal::Entry::PICK_MODEL });
         break;
     case SlashCommand::Action::VARIANT: {
+        const std::vector<std::string> choices(
+            REASONING_EFFORT_CHOICES.begin(), REASONING_EFFORT_CHOICES.end());
         std::string current
             = to_config_effort(state.providers->status().reasoning_effort);
-        enqueue_user_modal(state,
-            VariantModal {
-                { "off", "low", "default", "high" }, std::move(current) });
+        enqueue_user_modal(state, VariantModal { choices, std::move(current) });
         break;
     }
     case SlashCommand::Action::SUBAGENTS:
@@ -565,7 +568,7 @@ void run_slash(ApplicationState& state, std::string_view command)
         }
         if (const auto selection = state.providers->active_selection();
             !selection.has_value()) {
-            state.session->set_error("No model selected - run /model.");
+            state.session->set_error(NO_MODEL_SELECTED);
             break;
         }
         compact_session(state,
@@ -614,8 +617,7 @@ void switch_session(ApplicationState& state, const std::filesystem::path& path)
         state.session->set_error("Session is open in another imza process.");
         return;
     }
-    if (state.sessions->save(*state.session) != Status::OK) {
-        state.session->set_error("Failed to save current session.");
+    if (!save_active_session(state)) {
         return;
     }
     // Validate-then-commit: the target is read and locked before the active
@@ -636,10 +638,7 @@ void switch_session(ApplicationState& state, const std::filesystem::path& path)
         return;
     }
     state.session->restore(std::move(loaded.snapshot));
-    state.skills->clear();
-    state.permissions->clear();
-    state.runner->clear();
-    state.subagents->prune_completed();
+    clear_runtime_state(state);
 }
 
 void delete_saved_session(

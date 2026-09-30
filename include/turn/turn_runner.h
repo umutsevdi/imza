@@ -77,13 +77,17 @@ public:
     void clear();
     void stop();
     void set_on_finish(std::function<void(std::string)> on_finish);
-    bool has_stream_override() const { return _has_stream_override; }
+    bool has_stream_override() const { return _has_stream(); }
     const StreamFn& stream_fn() const { return _stream_fn; }
     Status run_stream(const ChatRequest& req, const Route& route,
         const StreamCallback& cb) const;
     bool blocked_permission() const { return _blocked_permission.load(); }
 
 private:
+    // Null unless the caller supplied a stream override; the default
+    // transport is reached through the explicit non-override paths.
+    bool _has_stream() const { return _stream_fn != nullptr; }
+    void _authenticate_route(TurnSettings& settings);
     void _drive(std::vector<Message> history, TurnSettings settings);
     std::optional<std::string> _summarize(const std::vector<Message>& history,
         std::size_t begin, std::size_t end, const TurnSettings& settings);
@@ -114,7 +118,6 @@ private:
     std::shared_ptr<SkillStore> _skills;
     std::function<void(std::string)> _on_finish;
     StreamFn _stream_fn;
-    bool _has_stream_override { false };
     std::vector<Tool> _tools;
     std::vector<ToolSpec> _specs_all;
     std::vector<StreamEvent> _stream_events;

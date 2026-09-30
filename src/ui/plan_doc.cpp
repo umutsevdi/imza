@@ -52,7 +52,7 @@ namespace {
 
         Element OnRender() override
         {
-            maybe_reload();
+            _maybe_reload();
             const LayoutCtx ctx = _layout();
             const int width     = std::max(20, ctx.width - 4);
             _height             = ctx.height;
@@ -224,7 +224,7 @@ namespace {
         // signal flag plus a direct comparison keeps missed signals
         // (pane constructed after a plan existed, restored sessions)
         // converging on the session state.
-        void maybe_reload()
+        void _maybe_reload()
         {
             const bool signaled           = _on_plan_changed.exchange(false);
             const std::string session_doc = _state->session->plan_doc();
@@ -307,29 +307,20 @@ namespace {
                 if (_editor.is_open()
                     && _editor.anchor() == static_cast<int>(_blocks[b].line)) {
                     const int editor_width = std::max(1, width - 15);
-                    const int editor_height
-                        = static_cast<int>(std::max<std::size_t>(1,
-                            wrap_text(_editor.draft(), editor_width).size()));
-                    Element editor
-                        = annotation_card(wrapped_input_element(_editor.draft(),
-                                              static_cast<std::size_t>(0),
-                                              editor_width, "Leave a note"),
-                            editor_height);
-                    rows.push_back(std::move(editor) | xflex);
+                    int editor_height      = 0;
+                    rows.push_back(
+                        annotation_editor_card(_editor.draft(), editor_width,
+                            "Leave a note", &editor_height)
+                        | xflex);
                     y += editor_height;
                 }
                 if (const int n = note_at_block[b]; n != -1) {
                     const PlanNote& note = _notes[static_cast<std::size_t>(n)];
                     const int card_width = std::max(1, width - 15);
-                    const int card_height
-                        = static_cast<int>(std::max<std::size_t>(
-                            1, wrap_text(note.body, card_width).size()));
-                    Elements body;
-                    for (const std::string& line_text :
-                        wrap_text(note.body, card_width)) {
-                        body.push_back(text(line_text));
-                    }
-                    push(annotation_card(vbox(std::move(body)), card_height),
+                    int card_height      = 0;
+                    Element card         = annotation_note_card(
+                        note.body, card_width, &card_height);
+                    push(std::move(card),
                         Row { Row::Kind::NOTE, b, static_cast<std::size_t>(n),
                             section, 0, card_height });
                 }
@@ -477,7 +468,7 @@ namespace {
                 return;
             }
             if (!_state->providers->active_selection()) {
-                _status = "No model selected - run /model.";
+                _status = NO_MODEL_SELECTED;
                 _state->session->set_error(_status);
                 return;
             }

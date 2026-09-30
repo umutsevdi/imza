@@ -144,19 +144,9 @@ TurnRunner::TurnRunner(ApplicationState& state, PostFn post,
     , _skills(std::move(skills))
     , _on_finish(std::move(on_finish))
     , _stream_fn(std::move(stream_fn))
-    , _has_stream_override(static_cast<bool>(_stream_fn))
     , _tools(std::move(tools))
 {
     _specs_all = tool_specs(_tools);
-
-    if (!_stream_fn) {
-        _stream_fn = [this](const ChatRequest& req, const StreamCallback& cb) {
-            const auto selection = _state->providers->active_selection();
-            const Route route
-                = selection.has_value() ? selection->route : Route { };
-            return stream(route, req, cb, &_retry_after_secs);
-        };
-    }
 }
 
 TurnRunner::~TurnRunner()
@@ -196,11 +186,22 @@ void TurnRunner::_post(std::function<void()> f)
     }
 }
 
+void TurnRunner::_authenticate_route(TurnSettings& settings)
+{
+    if (_has_stream()) {
+        return;
+    }
+    settings.route
+        = _state->providers->authenticated_route_for(settings.connection_id,
+            settings.dialect, _state->session->session_id());
+    settings.dialect = settings.route.dialect;
+}
+
 Status TurnRunner::run_stream(
     const ChatRequest& req, const Route& route, const StreamCallback& cb) const
 {
-    return _has_stream_override ? _stream_fn(req, cb)
-                                : stream(route, req, cb, nullptr);
+    return _has_stream() ? _stream_fn(req, cb)
+                         : stream(route, req, cb, nullptr);
 }
 
 // Streams a summary of history[begin..end) through the compaction
@@ -282,39 +283,30 @@ void TurnRunner::spawn_compaction(TurnSettings settings)
 {
     _blocked_permission.store(false);
     _worker.emplace([this, settings = std::move(settings)]() mutable {
-        if (!_has_stream_override) {
-            settings.route = _state->providers->authenticated_route_for(
-                settings.connection_id, settings.dialect,
-                _state->session->session_id());
-            settings.dialect = settings.route.dialect;
-        }
+        _authenticate_route(settings);
         const SessionSnapshot snapshot = _state->session->snapshot();
         // The absorbed range is the timeline past the previous compaction
         // boundary up to the last user item — the live head nothing can
         // follow. Nothing user-led at all, or everything already behind
         // the boundary, means there is nothing new to summarize.
-        std::size_t boundary = 0;
-        for (std::size_t index = snapshot.items.size(); index > 0; --index) {
-            if (std::holds_alternative<UserTurn>(snapshot.items[index - 1])) {
-                boundary = index;
-                break;
-            }
-        }
-        if (boundary <= snapshot.compacted_item_count) {
+        const std::optional<std::size_t> last_user
+            = last_user_turn_index(snapshot.items);
+        const std::size_t boundary = last_user.has_value() ? *last_user + 1 : 0;
+        const auto nothing_to_compact = [this] {
             _post([this] {
                 _state->session->set_error("Nothing to compact.");
                 _on_finish("");
             });
+        };
+        if (boundary <= snapshot.compacted_item_count) {
+            nothing_to_compact();
             return;
         }
 
         std::vector<Message> history = _state->session->build_history(
             _state->prompts->system(), settings.dialect);
         if (history.size() < 2) {
-            _post([this] {
-                _state->session->set_error("Nothing to compact.");
-                _on_finish("");
-            });
+            nothing_to_compact();
             return;
         }
 
@@ -341,12 +333,7 @@ void TurnRunner::spawn_compaction(TurnSettings settings)
 
 void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
 {
-    if (!_has_stream_override) {
-        settings.route
-            = _state->providers->authenticated_route_for(settings.connection_id,
-                settings.dialect, _state->session->session_id());
-        settings.dialect = settings.route.dialect;
-    }
+    _authenticate_route(settings);
     int retries                 = 0;
     std::uint64_t prompt_tokens = _state->session->last().prompt;
     bool compaction_attempted   = false;
@@ -425,7 +412,7 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
         ApiStandard active_dialect = ApiStandard::OPENAI;
         std::string current_model;
         std::string current_effort;
-        if (_has_stream_override) {
+        if (_has_stream()) {
             req.reasoning_effort = settings.reasoning_effort == "off"
                 ? std::nullopt
                 : std::optional<std::string>(
@@ -610,7 +597,7 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
         had_tool_calls                  = true;
         const ToolCallRequest& original = ev.tool_call;
         if (find_tool(_tools, original.name) == nullptr) {
-            const std::string error = "unknown tool: " + original.name;
+            const std::string error = UNKNOWN_TOOL_PREFIX + original.name;
             _finish_tool(
                 original, ToolCall::Result::Kind::ERROR, error, tool_msgs);
             continue;

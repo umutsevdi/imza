@@ -107,7 +107,7 @@ private:
     std::uint64_t _workspace_generation { 0 };
     std::atomic<bool> _ready { false };
     std::condition_variable_any _workspace_ready_cv;
-    std::jthread worker_;
+    std::jthread _worker;
     std::jthread _update_worker;
 
     std::jthread _git_worker;
