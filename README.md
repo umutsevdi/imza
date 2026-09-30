@@ -39,15 +39,22 @@ Development is separated into three explicit modes:
 
 - **Plan**: Investigate the repository, understand the problem, and design the 
 change without modifying files. The agent can explore freely while the codebase 
-remains read-only.
+remains read-only, and the outcome is a plan document: a Markdown spec with a 
+required skeleton
+that lives beside the conversation instead of getting lost in it. Every 
+revision is kept. You can pin notes to any part of the document and send them 
+back to the agent as one revise request, iterating until the plan says exactly 
+what you intend.
 
-- **Build**: Implement the plan using edits, commands, subagents, and 
-programmatic tool execution. Imza surfaces code changes as they happen, while 
-filesystem access and shell commands remain subject to explicit permissions.
+- **Build**: Agent implements the plan using edits, commands, subagents, and 
+programmatic tool execution. The approved plan stays with the agent as the 
+reference for the work. 
+
+Imza displays changes as they happen, keeping the developer informed.
 
 - **Review**: Inspect the resulting Git diff, add findings manually or with 
-the agent's help, and send those findings directly back into another planning 
-pass.
+the agent's help, and send those findings back into another planning pass as a 
+new revision of the plan.
 
 This makes review part of the development loop rather than only a final 
 checkpoint:
@@ -62,17 +69,22 @@ the resulting implementation, and decide how the next iteration should proceed.
 
 ## Highlights
 
-* Plan → Build → Review workflow with review findings fed back into planning
+* Plan → Build → Review workflow built around a co-editable plan document, 
+with review findings fed back into planning as revisions
 * Interactive diffs and AI-assisted code review throughout development
 * Sandboxed tool orchestration for fewer round trips and less context overhead
 * Shell-aware, scoped permission controls
 * Sidechat for asking questions without disrupting the main agent's work
-* Up to five concurrent research or build subagents
 * Bring-your-own-model support, including local OpenAI-compatible models
 * Native terminal UI with a small runtime footprint
+* Up to five concurrent research or build subagents
 * Persistent sessions, transcripts, and automatic context compaction
+* `@path` file and `$skill` skill attachments, plus image and multimodal prompts
+* Session-level token, context, and cost usage insight
 * Headless execution for scripts, CI, and development tooling
 * Terminal notifications when an attended agent finishes or needs input
+
+[Full feature list and roadmap](https://github.com/umutsevdi/imza/wiki/10_Features-and-Roadmap)
 
 ## Bring Your Own Model
 
@@ -118,72 +130,6 @@ remain observable.
 
 In Imza's own development sessions, this approach substantially reduced 
 intermediate tool output and context overhead. [Read the analysis](https://github.com/umutsevdi/imza/discussions/1).
-
-## Capabilities
-
-### Workflow and Review
-
-* [x] Plan, Build, and Review modes
-* [x] Interactive diffs
-* [x] Generated and manual review comments
-* [x] Review → Plan handoff
-* [x] Structured questions and task tracking
-* [x] Prompt queueing and generation interruption
-* [x] Sidechat
-
-### Agent Execution
-
-* [x] File reading, editing, and shell execution
-* [x] Sandboxed composable tool execution
-* [x] Concurrent subagents
-* [x] Persistent subagent transcripts
-* [x] Configurable subagents
-* [x] Web search and page fetching
-* [x] Skills and project instructions
-* [x] `@path` file attachments
-* [x] `$skill` attachments
-<<<<<<< HEAD
-=======
-* [X] Image and multimodal prompt attachments
->>>>>>> dev
-
-### Permissions and Control
-
-* [x] Tool approval flows
-* [x] Scoped filesystem and skill permissions
-* [x] Shell-aware program and subcommand grants
-
-### Models and Context
-
-* [x] OpenAI-compatible APIs
-* [x] Anthropic Messages API
-* [x] Local OpenAI-compatible servers
-* [x] Streaming Markdown and reasoning
-* [x] Automatic context compaction
-* [x] Repository, context, token, and cost usage information
-
-### Sessions and Interface
-
-* [x] Persistent local sessions
-* [x] Syntax highlighting
-* [x] Headless mode
-* [x] Terminal notifications
-<<<<<<< HEAD
-
-## Roadmap
-
-* [ ] MCP support
-* [ ] Image and multimodal prompt attachments
-=======
-* [X] Image and multimodal prompt attachments
-
-## Roadmap
-
-* [ ] Extension System
-* [ ] MCP support
->>>>>>> dev
-* [ ] Background watchdogs that notify the agent when files or processes reach a target state
-* [ ] Local monthly usage analytics
 
 ## Installation
 
