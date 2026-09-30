@@ -232,7 +232,7 @@ CliResult run_cli(int argc, char** argv)
     app.add_option(
            "-V,--variant", variant, "Reasoning variant to use for this session")
         ->type_name("<variant>")
-        ->check(CLI::IsMember({ "off", "low", "default", "high" }));
+        ->check(CLI::IsMember(REASONING_EFFORT_CHOICES));
     app.add_option(
            "-W,--web", web, "Enable or disable web tools (default: true)")
         ->type_name("<bool>")
