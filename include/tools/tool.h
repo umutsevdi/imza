@@ -19,6 +19,9 @@ namespace imza {
 struct Skill;
 class SkillStore;
 
+// Exact prefix tests match on when the model calls an unregistered tool.
+inline constexpr const char* UNKNOWN_TOOL_PREFIX = "unknown tool: ";
+
 struct ToolOutput {
     enum class Kind { OUTPUT, ERROR };
     Kind kind;

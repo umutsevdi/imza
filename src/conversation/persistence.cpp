@@ -18,7 +18,6 @@ namespace imza {
 namespace {
 
     constexpr std::string_view INDEX_FILENAME = ".index.json";
-    constexpr const char* UNTITLED_TITLE      = "Untitled session";
 
     std::filesystem::path index_path()
     {

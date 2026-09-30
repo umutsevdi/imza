@@ -249,13 +249,7 @@ inline std::size_t count_lines(std::string_view text)
     if (text.empty()) {
         return 0;
     }
-    std::size_t n = 1;
-    for (const char c : text) {
-        if (c == '\n') {
-            ++n;
-        }
-    }
-    return n;
+    return 1 + static_cast<std::size_t>(std::ranges::count(text, '\n'));
 }
 
 inline std::string take_lines(std::string_view text, std::size_t max)

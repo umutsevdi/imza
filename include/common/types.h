@@ -65,10 +65,19 @@ constexpr RuntimeFlag interactive_runtime_flags()
     return static_cast<RuntimeFlag>(WEB | SHELL | ATTENDED);
 }
 
+inline constexpr const char* NO_MODEL_SELECTED
+    = "No model selected - run /model.";
+
 // Reasoning-effort alias: config displays/stores "default" where the wire
 // API spells it "medium".
 inline constexpr std::array<std::string_view, 5> REASONING_EFFORTS { "off",
     "low", "default", "medium", "high" };
+
+// User-facing effort choices: the REASONING_EFFORTS keys minus the wire-only
+// "medium".
+inline constexpr std::array<std::string_view, 4> REASONING_EFFORT_CHOICES {
+    "off", "low", "default", "high"
+};
 
 inline std::string to_config_effort(std::string_view effort)
 {
