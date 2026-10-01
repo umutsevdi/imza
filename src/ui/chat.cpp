@@ -86,6 +86,34 @@ namespace {
         return " " + elapsed_text(*elapsed);
     }
 
+    Element queued_indicator(int frame)
+    {
+        constexpr int period = PROCESS_PERIOD_FRAMES;
+        const auto triangle  = [](int t, int p) {
+            t %= 2 * p;
+            if (t < 0) {
+                t += 2 * p;
+            }
+            return t < p ? t : 2 * p - t;
+        };
+        const int travel = triangle(frame, period);
+        const int half   = std::max(1, period / 2);
+        const int width  = 1
+            + std::min(PROCESS_MAX_BLOCKS - 1,
+                triangle(travel, half) * PROCESS_MAX_BLOCKS / half);
+        const int center = std::min(
+            PROCESS_TRACK_BLOCKS - 1, travel * PROCESS_TRACK_BLOCKS / period);
+        const int begin
+            = std::clamp(center - width / 2, 0, PROCESS_TRACK_BLOCKS - width);
+        Elements blocks;
+        for (int i = 0; i < PROCESS_TRACK_BLOCKS; ++i) {
+            const bool filled = i >= begin && i < begin + width;
+            blocks.push_back(text("─") | color(filled ? HL_GREEN : PANEL_FG_DIM)
+                | bgcolor(PANEL_COLOR));
+        }
+        return hbox(std::move(blocks));
+    }
+
     Decorator block_cursor()
     {
         class Impl : public Node {
@@ -575,9 +603,15 @@ namespace {
             if (_autocomplete.active()) {
                 bottom.push_back(_autocomplete.render(ctx));
             }
-            bottom.push_back(vbox({ std::move(input_box) | yflex,
-                text(_hints.input_hint) | color(PANEL_FG_DIM)
-                    | bgcolor(PANEL_COLOR) }));
+            Element hint_line = text(_hints.input_hint) | color(PANEL_FG_DIM)
+                | bgcolor(PANEL_COLOR);
+            if (busy) {
+                hint_line = hbox({ std::move(hint_line), filler(),
+                                queued_indicator(_frame) })
+                    | bgcolor(PANEL_COLOR);
+            }
+            bottom.push_back(
+                vbox({ std::move(input_box) | yflex, std::move(hint_line) }));
             if (!st.error().empty() || st.retry_countdown()) {
                 bottom.push_back(session_error_element(st));
             }
@@ -694,7 +728,7 @@ namespace {
             const auto phase = _session->phase();
             const bool busy  = phase == Session::Phase::STREAMING
                 || phase == Session::Phase::CONNECTING;
-            if (busy) {
+            if (phase != Session::Phase::IDLE) {
                 ++_frame;
                 animation::RequestAnimationFrame();
                 return;

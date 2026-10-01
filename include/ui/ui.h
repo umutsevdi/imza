@@ -85,6 +85,11 @@ inline constexpr auto TRAILING_MARKDOWN_INTERVAL
 // readable code; every other modal keeps MODAL_MAX_WIDTH.
 inline constexpr int DIFF_VIEWER_MODAL_MAX_WIDTH = 160;
 
+// Processing indicator 
+inline constexpr int PROCESS_TRACK_BLOCKS  = 10;
+inline constexpr int PROCESS_MAX_BLOCKS    = 5;
+inline constexpr int PROCESS_PERIOD_FRAMES = 30;
+
 int modal_max_width(const ModalPayload& modal);
 
 std::string fit(const std::string& text, int width);
