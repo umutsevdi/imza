@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <atomic>
 #include <deque>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -55,7 +56,6 @@ namespace {
             _maybe_reload();
             const LayoutCtx ctx = _layout();
             const int width     = std::max(20, ctx.width - 4);
-            _height             = ctx.height;
             Elements rows;
             rows.push_back(_header());
             rows.push_back(separatorLight());
@@ -80,11 +80,8 @@ namespace {
             }
             _selected = std::clamp(
                 _selected, 0, std::max(0, static_cast<int>(_rows.size()) - 1));
-            const int focus_y = _rows.empty()
-                ? 0
-                : _rows[static_cast<std::size_t>(_selected)].display_y;
-            Element content = vbox(std::move(rows)) | focusPosition(0, focus_y)
-                | yframe | vscroll_indicator | flex;
+            _follow_selection();
+            Element content = scroll_viewport(vbox(std::move(rows)), _viewport);
             Elements bottom;
             bottom.push_back(
                 hbox({ _revise_button->Render() | reflect(_button_box),
@@ -107,7 +104,13 @@ namespace {
             if (event.is_mouse()
                 && (event.mouse().button == Mouse::WheelUp
                     || event.mouse().button == Mouse::WheelDown)) {
-                return scroll_step(event, _height).has_value();
+                if (const std::optional<int> step
+                    = scroll_step(event, _viewport.viewport_lines())) {
+                    _viewport.scroll_lines(*step);
+                    _follow = false;
+                    return true;
+                }
+                return false;
             }
             if (!*_focused) {
                 return false;
@@ -148,10 +151,12 @@ namespace {
             }
             if (event == Event::Home) {
                 _selected = 0;
+                _follow   = true;
                 return true;
             }
             if (event == Event::End) {
                 _selected = std::max(0, static_cast<int>(_rows.size()) - 1);
+                _follow   = true;
                 return true;
             }
             if (event == Event::Character("[")) {
@@ -370,6 +375,27 @@ namespace {
                                                : -1;
         }
 
+        // Keep the selected row inside the viewport: navigation moves the
+        // selection, the viewport follows it. Heights come from
+        // capture_content_height, so max_scroll is exact and the document
+        // end is always reachable.
+        void _follow_selection()
+        {
+            _viewport.scroll_lines(0);
+            if (!_follow || _rows.empty()) {
+                return;
+            }
+            const Row& row   = _rows[static_cast<std::size_t>(_selected)];
+            const int top    = _viewport.scroll;
+            const int bottom = top + std::max(1, _viewport.viewport_lines());
+            if (row.display_y < top) {
+                _viewport.scroll = row.display_y;
+            } else if (row.display_y + std::max(1, row.height) > bottom) {
+                _viewport.scroll = std::min(
+                    row.display_y + row.height - top, _viewport.max_scroll());
+            }
+        }
+
         bool _move(int delta)
         {
             if (_rows.empty()) {
@@ -377,6 +403,7 @@ namespace {
             }
             _selected = std::clamp(
                 _selected + delta, 0, static_cast<int>(_rows.size()) - 1);
+            _follow = true;
             return true;
         }
 
@@ -392,6 +419,7 @@ namespace {
                     i < _rows.size(); ++i) {
                     if (_rows[i].section > current) {
                         _selected = static_cast<int>(i);
+                        _follow   = true;
                         return true;
                     }
                 }
@@ -401,6 +429,7 @@ namespace {
                 i-- > 0;) {
                 if (_rows[i].section < current) {
                     _selected = static_cast<int>(i);
+                    _follow   = true;
                     return true;
                 }
             }
@@ -496,12 +525,13 @@ namespace {
         std::vector<PlanNote> _notes;
         Box _button_box { };
         int _selected = 0;
+        bool _follow  = true;
         // Row to select on the next render: the just-saved note card.
         int _pending_note_select = -1;
         bool _has_plan           = false;
         std::size_t _revision    = 0;
         std::string _status;
-        int _height = 0;
+        ScrollView _viewport { };
         std::atomic<bool> _on_plan_changed { false };
     };
 
