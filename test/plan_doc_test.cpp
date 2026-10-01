@@ -15,6 +15,16 @@ const std::string skeleton
     = "# Goal\nfirst plan\n# Approach\n1. first step\n2. second step\n"
       "# Files\nx\n# Verification\ncheck it\n# Open Questions\nx";
 
+// Taller document with a unique last line for scroll-follow tests;
+// long paragraphs wrap, like real plan documents.
+const std::string wrapped(200, 'w');
+const std::string tall
+    = "# Goal\nfirst plan\n# Approach\n1. first step\n2. second step\n"
+      "# Files\nx\n# Verification\ncheck it\n"
+    + wrapped
+    + "\n# Open Questions\n"
+      "tail marker zzz";
+
 struct FocusedDoc {
     std::shared_ptr<imza::ApplicationState> state;
     ftxui::Component doc;
@@ -53,7 +63,7 @@ TEST_CASE("plan doc renders the initial plan as block rows when unfocused")
 TEST_CASE("plan doc updates live and labels agent revisions")
 {
     auto fx = make_focused_doc(imza::test::make_test_state(), false, skeleton);
-    (void)fx.doc->Render();
+    (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
     REQUIRE(
         fx.state->session->create_plan(skeleton + "\nextra note from the agent")
@@ -66,7 +76,7 @@ TEST_CASE("plan doc updates live and labels agent revisions")
 TEST_CASE("note editor opens on c and saves on Enter")
 {
     auto fx = make_focused_doc(imza::test::make_test_state(), true, skeleton);
-    (void)fx.doc->Render();
+    (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
     const std::string editor = imza::test::to_text(fx.doc->Render(), 100, 40);
@@ -83,7 +93,7 @@ TEST_CASE("note editor opens on c and saves on Enter")
 TEST_CASE("note card renders under the annotated block")
 {
     auto fx = make_focused_doc(imza::test::make_test_state(), true, skeleton);
-    (void)fx.doc->Render();
+    (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
     // Walk to the second list item: heading Goal, first plan, heading
     // Approach, first item, second item.
@@ -108,7 +118,7 @@ TEST_CASE("revise submits one turn with section and line locators")
         imza::test::make_test_state(
             imza::test::run_immediately, imza::test::test_config()),
         true, skeleton);
-    (void)fx.doc->Render();
+    (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
     // Walk to the second list item: heading Goal, first plan, heading
     // Approach, first item, second item.
@@ -136,7 +146,7 @@ TEST_CASE("revise submits one turn with section and line locators")
 TEST_CASE("unfocused pane ignores annotator keys and opens no editor")
 {
     auto fx = make_focused_doc(imza::test::make_test_state(), false, skeleton);
-    (void)fx.doc->Render();
+    (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
     CHECK_FALSE(fx.doc->OnEvent(ftxui::Event::Character("c")));
     CHECK_FALSE(fx.doc->OnEvent(ftxui::Event::Character("s")));
@@ -148,7 +158,7 @@ TEST_CASE("unfocused pane ignores annotator keys and opens no editor")
 TEST_CASE("e and d edit and delete the selected note")
 {
     auto fx = make_focused_doc(imza::test::make_test_state(), true, skeleton);
-    (void)fx.doc->Render();
+    (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
     imza::test::require_type(fx.doc, "first draft");
@@ -156,7 +166,7 @@ TEST_CASE("e and d edit and delete the selected note")
 
     // The cursor parks on the saved note card after the next render;
     // edit it.
-    (void)fx.doc->Render();
+    (void)imza::test::to_text(fx.doc->Render(), 100, 40);
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("e")));
     imza::test::require_type(fx.doc, " plus");
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
@@ -176,7 +186,7 @@ TEST_CASE("section jumps with brackets and a heading note anchors the section")
         imza::test::make_test_state(
             imza::test::run_immediately, imza::test::test_config()),
         true, skeleton);
-    (void)fx.doc->Render();
+    (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
     // ] jumps to the next section heading (Approach); a note on the
     // heading row anchors the whole section without a block excerpt.
@@ -257,7 +267,7 @@ TEST_CASE("long document lines wrap inside the pane instead of overflowing")
 TEST_CASE("click on a block row opens the note editor inline")
 {
     auto fx = make_focused_doc(imza::test::make_test_state(), true, skeleton);
-    (void)fx.doc->Render();
+    (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
     // Click the "first plan" block row.
     REQUIRE(imza::test::click_label(fx.doc, "first plan"));
@@ -297,7 +307,7 @@ TEST_CASE("click on a block row opens the note editor inline")
 TEST_CASE("moving with keys highlights the selected row")
 {
     auto fx = make_focused_doc(imza::test::make_test_state(), true, skeleton);
-    (void)fx.doc->Render();
+    (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
     // The raw render carries background escapes; find which visible line
     // holds the panel-focus background and follow it as the cursor moves.
@@ -332,11 +342,11 @@ TEST_CASE("moving with keys highlights the selected row")
 TEST_CASE("click on a note card selects it for edit and delete")
 {
     auto fx = make_focused_doc(imza::test::make_test_state(), true, skeleton);
-    (void)fx.doc->Render();
+    (void)imza::test::to_text(fx.doc->Render(), 100, 40);
     REQUIRE(imza::test::click_label(fx.doc, "first plan"));
     imza::test::require_type(fx.doc, "annotate this");
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
-    (void)fx.doc->Render();
+    (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
     // Clicking elsewhere selects a block row (and opens the editor);
     // closing it leaves the cursor off the card, so e has nothing to edit.
@@ -364,7 +374,7 @@ TEST_CASE("space opens a note instead of triggering revise")
         imza::test::make_test_state(
             imza::test::run_immediately, imza::test::test_config()),
         true, skeleton);
-    (void)fx.doc->Render();
+    (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Character(" ")));
     const std::string rendered = imza::test::to_text(fx.doc->Render(), 100, 40);
@@ -379,12 +389,12 @@ TEST_CASE("revise button click submits the notes")
         imza::test::make_test_state(
             imza::test::run_immediately, imza::test::test_config()),
         true, skeleton);
-    (void)fx.doc->Render();
+    (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
     imza::test::require_type(fx.doc, "tighten scope");
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
-    (void)fx.doc->Render();
+    (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
     REQUIRE(imza::test::click_label(fx.doc, "Revise Plan"));
     REQUIRE(fx.state->session->items().size() >= 1);
@@ -402,22 +412,22 @@ TEST_CASE("revise works repeatedly without a plan change in between")
         true, skeleton);
 
     // First revise via the keyboard.
-    (void)fx.doc->Render();
+    (void)imza::test::to_text(fx.doc->Render(), 100, 40);
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
     imza::test::require_type(fx.doc, "first pass");
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
-    (void)fx.doc->Render();
+    (void)imza::test::to_text(fx.doc->Render(), 100, 40);
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("s")));
     REQUIRE(fx.state->session->items().size() >= 1);
 
     // The agent answers without touching the plan; a second note and the
     // button must still submit (no revise latch). The pane re-renders
     // between keystrokes in the app, so mirror that here.
-    (void)fx.doc->Render();
+    (void)imza::test::to_text(fx.doc->Render(), 100, 40);
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
     imza::test::require_type(fx.doc, "second pass");
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
-    (void)fx.doc->Render();
+    (void)imza::test::to_text(fx.doc->Render(), 100, 40);
     REQUIRE(imza::test::click_label(fx.doc, "Revise Plan"));
     bool found = false;
     for (const auto& item : fx.state->session->items()) {
@@ -442,7 +452,7 @@ TEST_CASE("revise button highlights on click like review buttons")
         imza::test::make_test_state(
             imza::test::run_immediately, imza::test::test_config()),
         true, skeleton);
-    (void)fx.doc->Render();
+    (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
     const auto button_row = [](const std::string& rendered) {
         for (const std::string& line : imza::split_lines(rendered)) {
@@ -472,7 +482,7 @@ TEST_CASE("revise guards are visible in the pane header")
         imza::test::make_test_state(
             imza::test::run_immediately, imza::test::test_config()),
         true, skeleton);
-    (void)fx.doc->Render();
+    (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("s")));
     CHECK(fx.state->session->error().find("note") != std::string::npos);
@@ -494,11 +504,11 @@ TEST_CASE("a second revise works after the agent updates the plan")
     auto fx = make_focused_doc(state, true, skeleton);
 
     // First revise.
-    (void)fx.doc->Render();
+    (void)imza::test::to_text(fx.doc->Render(), 100, 40);
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
     imza::test::require_type(fx.doc, "first pass");
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
-    (void)fx.doc->Render();
+    (void)imza::test::to_text(fx.doc->Render(), 100, 40);
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("s")));
     REQUIRE(
         pump.wait_for([&] { return imza::test::idle(*fx.state->session); }));
@@ -506,13 +516,13 @@ TEST_CASE("a second revise works after the agent updates the plan")
     // The agent revises: a plan change lands.
     REQUIRE(fx.state->session->create_plan(skeleton + "\nagent applied notes")
             .empty());
-    (void)fx.doc->Render();
+    (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
     // Second revise starts a fresh turn.
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
     imza::test::require_type(fx.doc, "second pass");
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
-    (void)fx.doc->Render();
+    (void)imza::test::to_text(fx.doc->Render(), 100, 40);
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("s")));
     bool found = false;
     for (const auto& item : fx.state->session->items()) {
@@ -523,4 +533,83 @@ TEST_CASE("a second revise works after the agent updates the plan")
         }
     }
     CHECK(found);
+}
+TEST_CASE("keyboard follow scrolls the window inside the tab layout")
+{
+    auto fx = make_focused_doc(imza::test::make_test_state(), true, tall);
+
+    // Mimic PlanTab::OnRender: the pane is nested inside an hbox and
+    // the element tree is rebuilt on every frame.
+    const auto frame = [&] {
+        return imza::test::to_text(
+            ftxui::hbox({
+                ftxui::text("chat")
+                    | ftxui::size(ftxui::WIDTH, ftxui::EQUAL, 30),
+                ftxui::separatorEmpty(),
+                fx.doc->Render() | ftxui::xflex,
+            }),
+            60, 9);
+    };
+
+    const std::string head = frame();
+    (void)frame();
+    CHECK(head.find("Goal") != std::string::npos);
+
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::End));
+    const std::string tail = frame();
+    CHECK(tail.find("tail marker zzz") != std::string::npos);
+    CHECK(tail.find("Goal") == std::string::npos);
+
+    // Walking down row by row from the top: the selected row's text
+    // must stay on screen at every step.
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Home));
+    (void)frame();
+    const std::string wrapped_prefix(20, 'w');
+    const std::vector<std::string> row_text = { "Goal", "first plan",
+        "Approach", "first step", "second step", "Files", "Verification",
+        "check it", wrapped_prefix, "Open Questions", "tail marker zzz" };
+    for (int i = 0; i < static_cast<int>(row_text.size()) - 1; ++i) {
+        REQUIRE(fx.doc->OnEvent(ftxui::Event::ArrowDown));
+        const std::string window = frame();
+        CHECK(window.find(row_text[static_cast<std::size_t>(i + 1)])
+            != std::string::npos);
+    }
+    CHECK(frame().find("tail marker zzz") != std::string::npos);
+}
+
+TEST_CASE("wheel scroll moves the selection like review")
+{
+    auto fx = make_focused_doc(imza::test::make_test_state(), true, tall);
+    const auto frame = [&] {
+        return imza::test::to_text(
+            ftxui::hbox({
+                ftxui::text("chat")
+                    | ftxui::size(ftxui::WIDTH, ftxui::EQUAL, 30),
+                ftxui::separatorEmpty(),
+                fx.doc->Render() | ftxui::xflex,
+            }),
+            60, 9);
+    };
+    const auto wheel = [](ftxui::Mouse::Button button) {
+        ftxui::Mouse mouse;
+        mouse.button = button;
+        mouse.motion = ftxui::Mouse::Pressed;
+        mouse.x      = 50;
+        mouse.y      = 4;
+        return ftxui::Event::Mouse("", mouse);
+    };
+
+    (void)frame();
+    for (int i = 0; i < 10; ++i) {
+        REQUIRE(fx.doc->OnEvent(wheel(ftxui::Mouse::WheelDown)));
+        (void)frame();
+    }
+    CHECK(imza::test::without_ansi(frame()).find("tail marker zzz")
+        != std::string::npos);
+
+    for (int i = 0; i < 10; ++i) {
+        REQUIRE(fx.doc->OnEvent(wheel(ftxui::Mouse::WheelUp)));
+    }
+    const std::string head = frame();
+    CHECK(head.find("Goal") != std::string::npos);
 }

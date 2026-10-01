@@ -134,6 +134,7 @@ TEST_CASE("backfill_catalog_urls patches only matching empty provider URLs")
     imza::Catalog catalog;
     catalog.providers["anthropic"].npm       = "@ai-sdk/anthropic";
     catalog.providers["cerebras"].npm        = "@ai-sdk/cerebras";
+    catalog.providers["deepinfra"].npm       = "@ai-sdk/deepinfra";
     catalog.providers["groq"].npm            = "@ai-sdk/groq";
     catalog.providers["mistral"].npm         = "@ai-sdk/mistral";
     catalog.providers["openai"].npm          = "@ai-sdk/openai";
@@ -148,6 +149,8 @@ TEST_CASE("backfill_catalog_urls patches only matching empty provider URLs")
     CHECK(catalog.providers.at("anthropic").api
         == "https://api.anthropic.com/v1");
     CHECK(catalog.providers.at("cerebras").api == "https://api.cerebras.ai/v1");
+    CHECK(catalog.providers.at("deepinfra").api
+        == "https://api.deepinfra.com/v1/openai");
     CHECK(catalog.providers.at("groq").api == "https://api.groq.com/openai/v1");
     CHECK(catalog.providers.at("mistral").api == "https://api.mistral.ai/v1");
     CHECK(catalog.providers.at("openai").api == "https://api.openai.com/v1");
@@ -327,7 +330,10 @@ TEST_CASE("resolve_route stamps the client User-Agent")
     CHECK(user_agent_for("zai-coding-plan") == "User-Agent: Pi/3.1.0");
     CHECK(user_agent_for("zhipuai") == "User-Agent: Pi/3.1.0");
     CHECK(user_agent_for("zhipuai-coding-plan") == "User-Agent: Pi/3.1.0");
-    CHECK(user_agent_for("kimi-for-coding") == "User-Agent: hermes-agent/1.0");
+    CHECK(
+        user_agent_for("kimi-code-plan-cn") == "User-Agent: hermes-agent/1.0");
+    CHECK(user_agent_for("kimi-code-plan-global")
+        == "User-Agent: hermes-agent/1.0");
 
     CHECK(user_agent_for("moonshotai").starts_with("User-Agent: imza/"));
     CHECK(user_agent_for("openrouter").starts_with("User-Agent: imza/"));

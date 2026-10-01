@@ -14,7 +14,6 @@
 #include <algorithm>
 #include <atomic>
 #include <deque>
-#include <optional>
 #include <string>
 #include <vector>
 
@@ -53,13 +52,26 @@ namespace {
 
         Element OnRender() override
         {
+            bool same = _measured.size() == _captured.size()
+                && _row_kinds == _last_kinds;
+            std::swap(_measured, _captured);
+            std::fill(_captured.begin(), _captured.end(), 0);
+            if (!same) {
+                std::fill(_measured.begin(), _measured.end(), 0);
+            }
             _maybe_reload();
-            const LayoutCtx ctx = _layout();
-            const int width     = std::max(20, ctx.width - 4);
+            const LayoutCtx ctx      = _layout();
+            const int measured_width = _content_box.x_max >= _content_box.x_min
+                ? _content_box.x_max - _content_box.x_min + 1
+                : 0;
+            const int width          = std::max(20,
+                measured_width > 1
+                    ? std::min(measured_width, std::max(20, ctx.width - 4))
+                    : std::max(20, ctx.width - 4));
             Elements rows;
-            rows.push_back(_header());
-            rows.push_back(separatorLight());
             if (!_has_plan) {
+                rows.push_back(_header());
+                rows.push_back(separatorLight());
                 rows.push_back(
                     paragraph("No plan yet - ask for one in the "
                               "chat, or send review comments to plan.")
@@ -80,8 +92,11 @@ namespace {
             }
             _selected = std::clamp(
                 _selected, 0, std::max(0, static_cast<int>(_rows.size()) - 1));
-            _follow_selection();
-            Element content = scroll_viewport(vbox(std::move(rows)), _viewport);
+            const int focus_y = _rows.empty()
+                ? 0
+                : _rows[static_cast<std::size_t>(_selected)].display_y;
+            Element content = vbox(std::move(rows)) | focusPosition(0, focus_y)
+                | yframe | vscroll_indicator | flex | reflect(_content_box);
             Elements bottom;
             bottom.push_back(
                 hbox({ _revise_button->Render() | reflect(_button_box),
@@ -91,7 +106,8 @@ namespace {
                     text("Enter save · Alt+Enter new line · Esc cancel")
                     | color(PANEL_FG_DIM));
             }
-            Element pane = vbox({ std::move(content), vbox(std::move(bottom)) })
+            Element pane = vbox({ _header(), separatorLight(),
+                               std::move(content), vbox(std::move(bottom)) })
                 | xflex | yflex;
             return *_focused ? pane : std::move(pane) | dim;
         }
@@ -101,14 +117,17 @@ namespace {
             if (!_has_plan) {
                 return false;
             }
-            if (event.is_mouse()
-                && (event.mouse().button == Mouse::WheelUp
-                    || event.mouse().button == Mouse::WheelDown)) {
-                if (const std::optional<int> step
-                    = scroll_step(event, _viewport.viewport_lines())) {
-                    _viewport.scroll_lines(*step);
-                    _follow = false;
-                    return true;
+            if (event.is_mouse()) {
+                const Mouse& mouse = event.mouse();
+                if (mouse.button == Mouse::WheelUp) {
+                    return _move(-SCROLL_WHEEL_STEP);
+                }
+                if (mouse.button == Mouse::WheelDown) {
+                    return _move(SCROLL_WHEEL_STEP);
+                }
+                if (mouse.button == Mouse::Left
+                    && mouse.motion == Mouse::Pressed) {
+                    return _click(mouse);
                 }
                 return false;
             }
@@ -131,10 +150,6 @@ namespace {
                 }
                 return _editor.input()->OnEvent(event);
             }
-            if (event.is_mouse() && event.mouse().button == Mouse::Left
-                && event.mouse().motion == Mouse::Pressed) {
-                return _click(event.mouse());
-            }
             // The pane's keys own ' ' and Enter; the button must not see
             // them first (space_activates would fire revise on space).
             if (event == Event::ArrowUp) {
@@ -151,12 +166,10 @@ namespace {
             }
             if (event == Event::Home) {
                 _selected = 0;
-                _follow   = true;
                 return true;
             }
             if (event == Event::End) {
                 _selected = std::max(0, static_cast<int>(_rows.size()) - 1);
-                _follow   = true;
                 return true;
             }
             if (event == Event::Character("[")) {
@@ -281,13 +294,31 @@ namespace {
                     note_at_block[host[n]] = static_cast<int>(n);
                 }
             }
+            _last_kinds = _row_kinds;
+            _row_kinds.clear();
             const auto push = [&](Element row, Row record) {
                 const int row_index = static_cast<int>(_rows.size());
+                _row_kinds.push_back(static_cast<int>(record.kind));
+                if (row_index < static_cast<int>(_measured.size())
+                    && _measured[static_cast<std::size_t>(row_index)] > 0) {
+                    record.height
+                        = _measured[static_cast<std::size_t>(row_index)];
+                }
                 _boxes.push_back(Box { });
                 if (*_focused && row_index == _selected && !_editor.is_open()) {
                     row = std::move(row) | bgcolor(PANEL_COLOR_FOCUS);
                 }
-                row = std::move(row) | xflex | reflect(_boxes.back());
+                row = std::move(row)
+                    | capture_content_height([this, row_index](
+                                                 const int height) {
+                          if (row_index >= static_cast<int>(_captured.size())) {
+                              _captured.resize(
+                                  static_cast<std::size_t>(row_index) + 1, 0);
+                          }
+                          _captured[static_cast<std::size_t>(row_index)]
+                              = height;
+                      })
+                    | reflect(_boxes.back());
                 record.display_y = y;
                 y += std::max(1, record.height);
                 _rows.push_back(record);
@@ -375,27 +406,6 @@ namespace {
                                                : -1;
         }
 
-        // Keep the selected row inside the viewport: navigation moves the
-        // selection, the viewport follows it. Heights come from
-        // capture_content_height, so max_scroll is exact and the document
-        // end is always reachable.
-        void _follow_selection()
-        {
-            _viewport.scroll_lines(0);
-            if (!_follow || _rows.empty()) {
-                return;
-            }
-            const Row& row   = _rows[static_cast<std::size_t>(_selected)];
-            const int top    = _viewport.scroll;
-            const int bottom = top + std::max(1, _viewport.viewport_lines());
-            if (row.display_y < top) {
-                _viewport.scroll = row.display_y;
-            } else if (row.display_y + std::max(1, row.height) > bottom) {
-                _viewport.scroll = std::min(
-                    row.display_y + row.height - top, _viewport.max_scroll());
-            }
-        }
-
         bool _move(int delta)
         {
             if (_rows.empty()) {
@@ -403,7 +413,6 @@ namespace {
             }
             _selected = std::clamp(
                 _selected + delta, 0, static_cast<int>(_rows.size()) - 1);
-            _follow = true;
             return true;
         }
 
@@ -419,7 +428,6 @@ namespace {
                     i < _rows.size(); ++i) {
                     if (_rows[i].section > current) {
                         _selected = static_cast<int>(i);
-                        _follow   = true;
                         return true;
                     }
                 }
@@ -429,7 +437,6 @@ namespace {
                 i-- > 0;) {
                 if (_rows[i].section < current) {
                     _selected = static_cast<int>(i);
-                    _follow   = true;
                     return true;
                 }
             }
@@ -522,16 +529,19 @@ namespace {
         std::vector<MarkdownBlock> _blocks;
         std::vector<Row> _rows;
         std::deque<Box> _boxes;
+        Box _content_box { };
+        std::vector<int> _measured;
+        std::vector<int> _captured;
+        std::vector<int> _row_kinds;
+        std::vector<int> _last_kinds;
         std::vector<PlanNote> _notes;
         Box _button_box { };
         int _selected = 0;
-        bool _follow  = true;
         // Row to select on the next render: the just-saved note card.
         int _pending_note_select = -1;
         bool _has_plan           = false;
         std::size_t _revision    = 0;
         std::string _status;
-        ScrollView _viewport { };
         std::atomic<bool> _on_plan_changed { false };
     };
 

@@ -17,7 +17,7 @@ namespace {
     constexpr long FETCH_TIMEOUT_SECS       = 60;
     constexpr std::int64_t STALE_AFTER_SECS = 7 * 24 * 3600;
 
-    constexpr std::array<std::string_view, 51> WHITELIST = {
+    constexpr std::array<std::string_view, 57> WHITELIST = {
         "abacus",
         "alibaba",
         "alibaba-cn",
@@ -29,15 +29,19 @@ namespace {
         "anthropic",
         "cerebras",
         "databricks",
+        "deepinfra",
         "deepseek",
         "digitalocean",
+        "fireworks-ai",
         "github-copilot",
+        "google",
         "groq",
         "hetzner",
         "huggingface",
         "hyper",
         "kilo",
-        "kimi-for-coding",
+        "kimi-code-plan-cn",
+        "kimi-code-plan-global",
         "llama",
         "llmgateway",
         "llmgateway-providers",
@@ -55,12 +59,14 @@ namespace {
         "opencode-go",
         "openrouter",
         "perplexity-agent",
+        "siliconflow",
         "tencent-coding-plan",
         "tencent-token-plan",
         "tencent-tokenhub",
         "thinkingmachines",
         "togetherai",
         "vultr",
+        "wandb",
         "xai",
         "xiaomi-token-plan-ams",
         "xiaomi-token-plan-cn",
@@ -77,6 +83,10 @@ namespace {
                 "https://api.anthropic.com/v1" },
             { { "cerebras", ApiStandard::OPENAI },
                 "https://api.cerebras.ai/v1" },
+            { { "deepinfra", ApiStandard::OPENAI },
+                "https://api.deepinfra.com/v1/openai" },
+            { { "google", ApiStandard::OPENAI },
+                "https://generativelanguage.googleapis.com/v1beta/openai" },
             { { "groq", ApiStandard::OPENAI },
                 "https://api.groq.com/openai/v1" },
             { { "mistral", ApiStandard::OPENAI }, "https://api.mistral.ai/v1" },
@@ -431,7 +441,7 @@ namespace {
     };
     constexpr std::array<Disguise, 3> DISGUISE_LIST = {
         { { "zai", "Pi/3.1.0" }, { "zhipuai", "Pi/3.1.0" },
-            { "kimi-for-coding", "hermes-agent/1.0" } },
+            { "kimi-code-plan", "hermes-agent/1.0" } },
     };
 
     std::string client_user_agent(std::string_view provider_id)
