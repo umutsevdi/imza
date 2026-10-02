@@ -24,11 +24,17 @@ void record_call(
     run_of(L)->log.push_back({ std::string(binding), std::move(target), ok });
 }
 
-int binding_error(lua_State* L, std::string message)
+int binding_error(
+    lua_State* L, const std::string& message, const bool already_logged)
 {
-    lua_pushnil(L);
-    lua_pushlstring(L, message.data(), message.size());
-    return 2;
+    // Fatal convention: any binding failure raises and aborts the script;
+    // tolerating one is the script's explicit pcall. Log the failed call so
+    // the dispatch record shows it despite the abort (gate denials already
+    // log themselves with the target).
+    if (!already_logged) {
+        record_call(L, run_of(L)->current_binding, "", false);
+    }
+    return luaL_error(L, "%s", message.c_str());
 }
 
 std::string gate_denied(
@@ -76,7 +82,9 @@ int authorize_target(lua_State* L, const FilesystemRequest& request,
 {
     const GateOutcome gate = authorize_filesystem(L, request);
     if (!gate) {
-        return binding_error(L, gate_denied(L, gate.denial, path));
+        // authorize_filesystem already logged the denied call with its
+        // target; skip the duplicate entry in binding_error.
+        return binding_error(L, gate_denied(L, gate.denial, path), true);
     }
     target = filesystem_target(*gate.filesystem).string();
     return 0;

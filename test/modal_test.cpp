@@ -125,7 +125,7 @@ TEST_CASE("agent shell approval notifies when input is required")
                      const imza::StreamCallback& callback) {
         if (request.messages.back().type == imza::Message::Type::USER) {
             callback(imza::make_tool_call_event({ "lua",
-                R"json({"script":"local out, code = imza.shell('custom notify') print(code)"})json",
+                R"json({"script":"pcall(imza.shell, 'custom notify') print('ran')"})json",
                 "", "call" }));
         }
         callback(imza::make_done_event());
@@ -181,8 +181,8 @@ TEST_CASE("plan mode rejects mutating file operations at the gate")
                      const imza::ChatRequest&, const imza::StreamCallback& cb) {
         if ((*round)++ == 0) {
             Json::Value arguments(Json::objectValue);
-            arguments["script"] = "local ok, err = imza.fs.write([["
-                + out_path.string() + "]], 'no')\nprint(ok, err)";
+            arguments["script"]
+                = "imza.fs.write([[" + out_path.string() + "]], 'no')";
             cb(imza::make_tool_call_event(
                 { "lua", imza::write_json(arguments), "", "lua-call" }));
         }
@@ -196,8 +196,8 @@ TEST_CASE("plan mode rejects mutating file operations at the gate")
     REQUIRE(call != nullptr);
     REQUIRE(call->result.has_value());
     // The roster-level gate accepts a lua call, so the Plan-mode refusal
-    // surfaces as a binding error inside the tool result.
-    CHECK(call->result->kind == imza::ToolCall::Result::Kind::OUTPUT);
+    // surfaces as a raised binding error that aborts the script.
+    CHECK(call->result->kind == imza::ToolCall::Result::Kind::ERROR);
     CHECK(call->result->text.find("fs.write: denied") != std::string::npos);
     CHECK_FALSE(std::filesystem::is_regular_file(out_path));
 }
@@ -339,7 +339,7 @@ TEST_CASE("delegated-agent approvals surface through the main modal queue")
                 "delegate inspection", "delegate-1" }));
         } else if (child && !has_tool_result) {
             cb(imza::make_tool_call_event({ "lua",
-                R"json({"script":"local rows, err = imza.shell('probe child') print(err ~= nil)"})json",
+                R"json({"script":"print(pcall(imza.shell, 'probe child') == false)"})json",
                 "probe child", "child-lua" }));
         } else {
             cb(imza::make_delta_event(
@@ -384,7 +384,7 @@ TEST_CASE("subagent failure reports preserve the last completed tool output")
                 "delegate failing child", "delegate-failure" }));
         } else if (child && !has_tool_result) {
             cb(imza::make_tool_call_event({ "lua",
-                R"json({"script":"local out, code = imza.shell('custom child') print('child-output')"})json",
+                R"json({"script":"pcall(imza.shell, 'custom child') print('child-output')"})json",
                 "run command", "child-lua" }));
         } else if (child) {
             cb(imza::make_error_event(
@@ -565,8 +565,7 @@ TEST_CASE("reject with reason reaches transcript and injected result")
         env.requests.push_back(req);
         if ((*round)++ == 0) {
             cb(imza::make_tool_call_event({ "lua",
-                R"json({"script":"local out, err = imza.shell('rm -rf /') print(out, err)"})json",
-                "danger" }));
+                R"json({"script":"imza.shell('rm -rf /')"})json", "danger" }));
         }
         cb(imza::make_done_event());
         return imza::Status::OK;
@@ -584,7 +583,7 @@ TEST_CASE("reject with reason reaches transcript and injected result")
     const imza::ToolCall* tc = env.pending_tool();
     REQUIRE(tc != nullptr);
     REQUIRE(tc->result.has_value());
-    CHECK(tc->result->kind == imza::ToolCall::Result::Kind::OUTPUT);
+    CHECK(tc->result->kind == imza::ToolCall::Result::Kind::ERROR);
     CHECK(tc->result->text.find("shell: needs approval first")
         != std::string::npos);
 
@@ -603,8 +602,7 @@ TEST_CASE("esc on tool injects generic denial, appends nothing to transcript")
         env.requests.push_back(req);
         if ((*round)++ == 0) {
             cb(imza::make_tool_call_event({ "lua",
-                R"json({"script":"local out, err = imza.shell('inspect') print(out, err)"})json",
-                "" }));
+                R"json({"script":"imza.shell('inspect')"})json", "" }));
         }
         cb(imza::make_done_event());
         return imza::Status::OK;
@@ -620,7 +618,7 @@ TEST_CASE("esc on tool injects generic denial, appends nothing to transcript")
     const imza::ToolCall* tc = env.pending_tool();
     REQUIRE(tc != nullptr);
     REQUIRE(tc->result.has_value());
-    CHECK(tc->result->kind == imza::ToolCall::Result::Kind::OUTPUT);
+    CHECK(tc->result->kind == imza::ToolCall::Result::Kind::ERROR);
     CHECK(tc->result->text.find("shell: permission dismissed")
         != std::string::npos);
     CHECK(env.user_turn_count() == 1);
@@ -784,12 +782,12 @@ TEST_CASE("one-time shell approval does not authorize later calls")
         switch ((*round)++) {
         case 0:
             cb(imza::make_tool_call_event({ "lua",
-                R"json({"script":"local out, code = imza.shell('custom one') print(code)"})json",
+                R"json({"script":"pcall(imza.shell, 'custom one') print('ran one')"})json",
                 "" }));
             break;
         case 1:
             cb(imza::make_tool_call_event({ "lua",
-                R"json({"script":"local out, code = imza.shell('custom two') print(code)"})json",
+                R"json({"script":"print(select(2, pcall(imza.shell, 'custom two')))"})json",
                 "" }));
             break;
         default: break;
@@ -875,7 +873,7 @@ TEST_CASE("dangerous skip accepts permission-gated tools without a modal")
                      const imza::StreamCallback& cb) {
         if (req.messages.back().type == imza::Message::Type::USER) {
             cb(imza::make_tool_call_event({ "lua",
-                R"json({"script":"local out, code = imza.shell('custom skipped') print(code)"})json",
+                R"json({"script":"local out, code = imza.shell('true') print(code)"})json",
                 "", "call" }));
         }
         cb(imza::make_done_event());
@@ -895,23 +893,22 @@ TEST_CASE("dangerous skip does not weaken hard rejection")
 {
     AgentEnv env(
         static_cast<imza::RuntimeFlag>(imza::SHELL | imza::SKIP_PERMISSIONS));
-    env.stream = [](const imza::ChatRequest& req,
-                     const imza::StreamCallback& cb) {
-        if (req.messages.back().type == imza::Message::Type::USER) {
-            cb(imza::make_tool_call_event({ "lua",
-                R"json({"script":"local out, err = imza.shell('') print(err)"})json",
-                "", "call" }));
-        }
-        cb(imza::make_done_event());
-        return imza::Status::OK;
-    };
+    env.stream
+        = [](const imza::ChatRequest& req, const imza::StreamCallback& cb) {
+              if (req.messages.back().type == imza::Message::Type::USER) {
+                  cb(imza::make_tool_call_event({ "lua",
+                      R"json({"script":"imza.shell('')"})json", "", "call" }));
+              }
+              cb(imza::make_done_event());
+              return imza::Status::OK;
+          };
     imza::submit(*env.state, "go");
     REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
     CHECK(env.state->queue.size() == 0);
     const imza::ToolCall* call = env.pending_tool();
     REQUIRE(call != nullptr);
     REQUIRE(call->result.has_value());
-    CHECK(call->result->kind == imza::ToolCall::Result::Kind::OUTPUT);
+    CHECK(call->result->kind == imza::ToolCall::Result::Kind::ERROR);
     CHECK(call->result->text.find("empty command") != std::string::npos);
 }
 
@@ -925,7 +922,7 @@ TEST_CASE("tools with an automatic policy run without an approval modal")
         env.requests.push_back(req);
         if ((*round)++ == 0) {
             cb(imza::make_tool_call_event({ "lua",
-                R"json({"script":"local body, err = imza.web.search('imza') if err then error(err) end print('searched: imza')"})json",
+                R"json({"script":"pcall(imza.web.search, 'imza') print('searched: imza')"})json",
                 "", "" }));
         }
         cb(imza::make_done_event());
@@ -987,7 +984,7 @@ TEST_CASE("modal action buttons respond to mouse clicks")
         env.requests.push_back(req);
         if (req.messages.back().type == imza::Message::Type::USER) {
             cb(imza::make_tool_call_event({ "lua",
-                R"json({"script":"local out, code = imza.shell('custom click') print(code)"})json",
+                R"json({"script":"pcall(imza.shell, 'custom click') print('ran')"})json",
                 "", "call-1" }));
         }
         cb(imza::make_done_event());
@@ -1076,7 +1073,7 @@ TEST_CASE("closing a modal keeps keyboard focus on the chat")
                      const imza::StreamCallback& callback) {
         if (request.messages.back().type == imza::Message::Type::USER) {
             callback(imza::make_tool_call_event({ "lua",
-                R"json({"script":"local out, code = imza.shell('custom one') print(code)"})json",
+                R"json({"script":"pcall(imza.shell, 'custom one') print('ran')"})json",
                 "" }));
         }
         callback(imza::make_done_event());

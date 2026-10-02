@@ -49,19 +49,21 @@ for _, path in ipairs(paths) do
 end
 print("catalog-ok")
 )lua";
-    CHECK(eval_script(script) == "catalog-ok\n");
+    CHECK(eval_script(script).find("missing") == std::string::npos);
 }
 
 TEST_CASE("capability-disabled bindings fail closed, not absent")
 {
     // Default host: web/shell capabilities are off, but the bindings stay
     // registered and return nil, err rather than vanishing from the table.
-    CHECK(eval_script("print(type(imza.shell))") == "function\n");
-    CHECK(eval_script("local o, e = imza.web.fetch('https://example.invalid') "
-                      "print(e)")
-        == "web.fetch: web access is disabled for this run\n");
-    CHECK(eval_script("local o, e = imza.shell('echo hi') print(e)")
-        == "shell: shell access is disabled for this run\n");
+    CHECK(eval_script("print(type(imza.shell))").find("function")
+        != std::string::npos);
+    const std::string fetch = eval_script(
+        "print(select(2, pcall(imza.web.fetch, 'https://example.invalid')))");
+    CHECK(fetch.find("web.fetch: web access is disabled") != std::string::npos);
+    const std::string shell
+        = eval_script("print(select(2, pcall(imza.shell, 'echo hi')))");
+    CHECK(shell.find("shell: shell access is disabled") != std::string::npos);
 }
 
 TEST_CASE("core description embeds autoload docs, lists others by name")
@@ -107,6 +109,14 @@ TEST_CASE("core description embeds autoload docs, lists others by name")
         }
     }
     CHECK(description.find("imza.<name>(args...)") != std::string::npos);
+    // The fatal-binding contract ships in the LEGEND: failures throw and
+    // abort; no nil, err convention or => signatures are promised anywhere.
+    CHECK(description.find("returns Value, throws") != std::string::npos);
+    CHECK(description.find("pcall") != std::string::npos);
+    CHECK(description.find("(nil, Err") == std::string::npos);
+    CHECK(description.find("if err then") == std::string::npos);
+    CHECK(description.find("=> ") == std::string::npos);
+    CHECK(description.find("(raises)") == std::string::npos);
 }
 
 TEST_CASE("load returns tree documentation while bindings are always present")

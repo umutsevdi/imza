@@ -119,32 +119,33 @@ TEST_CASE("lua tool prints values to its output")
     CHECK(out.text == "hello    42    true\n");
 }
 
-TEST_CASE("binding errors split: operational failures are values, type "
-          "mistakes raise")
+TEST_CASE("binding failures raise and abort; pcall tolerates")
 {
-    // An operational failure (missing file) is the documented nil, err
-    // value; the script survives and keeps running.
-    const imza::ToolOutput value_error
-        = run_script("local data, err = imza.fs.read('no-such-file.txt')\n"
-                     "print(data == nil, err ~= nil)");
-    CHECK(value_error.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(value_error.text == "true    true\n");
-
-    // A wrong argument type is a script bug: it raises with a Lua error
-    // position and aborts the run. (Numbers coerce to strings per the Lua
-    // C API; nil, booleans, and tables are the rejected shapes.)
+    // Every binding failure raises: an operational failure (missing file)
+    // aborts the script just like a type mistake.
     const imza::ToolOutput raised
-        = run_script("imza.fs.read({})\nprint('dead')");
+        = run_script("imza.fs.read('no-such-file.txt')\nprint('dead')");
     CHECK(raised.kind == imza::ToolOutput::Kind::ERROR);
-    CHECK(raised.text.find("bad argument #1 to 'read'") != std::string::npos);
-    CHECK(raised.text.find("string expected, got table") != std::string::npos);
+    CHECK(raised.text.find("no such file") != std::string::npos);
     CHECK(raised.text.find("dead") == std::string::npos);
 
-    // pcall is the sanctioned way to survive a type mistake.
+    // A wrong argument type is a script bug: it raises with a Lua error
+    // position. (Numbers coerce to strings per the Lua C API; nil,
+    // booleans, and tables are the rejected shapes.)
+    const imza::ToolOutput bad_type
+        = run_script("imza.fs.read({})\nprint('dead')");
+    CHECK(bad_type.kind == imza::ToolOutput::Kind::ERROR);
+    CHECK(bad_type.text.find("bad argument #1 to 'read'") != std::string::npos);
+    CHECK(
+        bad_type.text.find("string expected, got table") != std::string::npos);
+
+    // pcall is the sanctioned way to survive any expected failure.
     const imza::ToolOutput caught
-        = run_script("print(pcall(imza.fs.read, {}) == false)");
+        = run_script("local ok, err = pcall(imza.fs.read, 'no-such-file.txt')\n"
+                     "print(ok, err)");
     CHECK(caught.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(caught.text == "true\n");
+    CHECK(caught.text.find("false") == std::size_t(0));
+    CHECK(caught.text.find("no such file") != std::string::npos);
 }
 
 TEST_CASE("lua tool rejects empty scripts and reports errors with positions")
@@ -282,24 +283,24 @@ TEST_CASE("imza.fs.read returns 1-based windows and empty for empty files")
     imza::test::write_file(dir.file("lines.txt"), "alpha\nbeta\ngamma\n");
     imza::test::write_file(dir.file("empty.txt"), "");
 
-    const imza::ToolOutput full = run_script("local s, e = imza.fs.read([["
-        + dir.file("lines.txt").string()
-        + "]])\n"
-          "print(s)");
-    CHECK(full.text == "alpha\nbeta\ngamma\n\n");
+    const imza::ToolOutput full = run_script(
+        "return imza.fs.read([[" + dir.file("lines.txt").string() + "]])");
+    REQUIRE(full.return_value.has_value());
+    CHECK(full.return_value->asString() == "alpha\nbeta\ngamma\n");
 
-    const imza::ToolOutput window = run_script("local s = imza.fs.read([["
-        + dir.file("lines.txt").string() + "]], 2, 3)\nprint(s)");
-    CHECK(window.text == "beta\ngamma\n\n");
+    const imza::ToolOutput window = run_script("return imza.fs.read([["
+        + dir.file("lines.txt").string() + "]], 2, 3)");
+    REQUIRE(window.return_value.has_value());
+    CHECK(window.return_value->asString() == "beta\ngamma\n");
 
-    const imza::ToolOutput empty = run_script("local s = imza.fs.read([["
-        + dir.file("empty.txt").string()
-        + "]])\n"
-          "print(s == '')");
-    CHECK(empty.text == "true\n");
+    const imza::ToolOutput empty = run_script(
+        "return imza.fs.read([[" + dir.file("empty.txt").string() + "]])");
+    REQUIRE(empty.return_value.has_value());
+    CHECK(empty.return_value->asString().empty());
 
-    const imza::ToolOutput bad_range = run_script("local s, e = imza.fs.read([["
-        + dir.file("lines.txt").string() + "]], 0)\nprint(e)");
+    const imza::ToolOutput bad_range = run_script(
+        "imza.fs.read([[" + dir.file("lines.txt").string() + "]], 0)");
+    CHECK(bad_range.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(bad_range.text.find("1-based") != std::string::npos);
 }
 
@@ -311,9 +312,8 @@ TEST_CASE("imza.fs.list returns entries with type and size fields")
     imza::test::write_file(dir.file("sub/nested.txt"), "content");
 
     const imza::ToolOutput out
-        = run_script("local rows, err = imza.fs.list([[" + dir.path.string()
+        = run_script("local rows = imza.fs.list([[" + dir.path.string()
             + "]], 2)\n"
-              "if err then error(err) end\n"
               "for _, r in ipairs(rows) do print(r.path, r.type) end");
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(out.text.find("visible.txt    file") != std::string::npos);
@@ -327,10 +327,9 @@ TEST_CASE("imza.fs.grep returns file, line, and text per match")
     imza::test::write_file(
         dir.file("hay.cpp"), "int cat = 1;\nint dog = 2;\ncat();\n");
 
-    const imza::ToolOutput out = run_script("local rows, err = imza.fs.grep([["
+    const imza::ToolOutput out = run_script("local rows = imza.fs.grep([["
         + imza::utf8_from_path(dir.path)
         + "]], 'cat')\n"
-          "if err then error(err) end\n"
           "print(#rows, rows[1].file, rows[1].line, rows[1].text)\n"
           "for _, r in ipairs(rows) do print(r.file, r.line, r.text) end");
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
@@ -343,13 +342,11 @@ TEST_CASE("imza.fs.grep accepts a single file target and fills the file field")
     imza::test::TempDir dir;
     imza::test::write_file(dir.file("one.cpp"), "only match here\nnope\n");
 
-    const imza::ToolOutput file_out
-        = run_script("local rows, err = imza.fs.grep([["
-            + imza::utf8_from_path(dir.file("one.cpp"))
-            + "]], 'match')\n"
-              "if err then error(err) end\n"
-              "if #rows ~= 1 then error('expected 1 row') end\n"
-              "print(rows[1].file, rows[1].line, rows[1].text)");
+    const imza::ToolOutput file_out = run_script("local rows = imza.fs.grep([["
+        + imza::utf8_from_path(dir.file("one.cpp"))
+        + "]], 'match')\n"
+          "if #rows ~= 1 then error('expected 1 row') end\n"
+          "print(rows[1].file, rows[1].line, rows[1].text)");
     CHECK(file_out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(file_out.text.find("one.cpp    1    only match here")
         != std::string::npos);
@@ -364,10 +361,9 @@ TEST_CASE("imza.fs.grep uses POSIX extended regular expressions")
         "cat 42\n"
         "catcat xx\n");
 
-    const imza::ToolOutput out = run_script("local rows, err = imza.fs.grep([["
+    const imza::ToolOutput out = run_script("local rows = imza.fs.grep([["
         + imza::utf8_from_path(dir.file("ere.txt"))
         + "]], '^(cat|dog){2}[[:space:]][[:digit:]]+$')\n"
-          "if err then error(err) end\n"
           "for _, r in ipairs(rows) do print(r.line, r.text) end");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(out.text == "1    catcat 42\n2    dogcat 7\n");
@@ -380,10 +376,9 @@ TEST_CASE("imza.fs.grep handles colons in filenames without parsing output")
     const fs::path file = dir.file("part:one.txt");
     imza::test::write_file(file, "needle: value\n");
 
-    const imza::ToolOutput out = run_script("local rows, err = imza.fs.grep([["
+    const imza::ToolOutput out = run_script("local rows = imza.fs.grep([["
         + imza::utf8_from_path(dir.path)
         + "]], 'needle')\n"
-          "if err then error(err) end\n"
           "print(#rows, rows[1].file == [["
         + imza::utf8_from_path(file) + "]], rows[1].line, rows[1].text)");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
@@ -399,9 +394,8 @@ TEST_CASE("imza.fs.grep handles UTF-8 filenames and content")
     const std::string file_name = imza::utf8_from_path(file);
 
     const imza::ToolOutput out
-        = run_script("local rows, err = imza.fs.grep([[" + file_name
+        = run_script("local rows = imza.fs.grep([[" + file_name
             + "]], 'needle')\n"
-              "if err then error(err) end\n"
               "print(rows[1].file == [["
             + file_name + "]], rows[1].line, rows[1].text)");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
@@ -414,28 +408,25 @@ TEST_CASE("imza.fs.grep normalizes CRLF lines")
     imza::test::write_file(
         dir.file("windows.txt"), "first\r\nmatching text\r\nlast");
 
-    const imza::ToolOutput out = run_script("local rows, err = imza.fs.grep([["
+    const imza::ToolOutput out = run_script("local rows = imza.fs.grep([["
         + imza::utf8_from_path(dir.file("windows.txt"))
         + "]], 'matching|last$')\n"
-          "if err then error(err) end\n"
           "for _, r in ipairs(rows) do print(r.line, r.text) end");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(out.text == "2    matching text\n3    last\n");
 }
 
-TEST_CASE("imza.fs.grep returns a binding error for invalid expressions")
+TEST_CASE("imza.fs.grep raises on invalid expressions")
 {
     imza::test::TempDir dir;
     imza::test::write_file(dir.file("text.txt"), "text\n");
 
-    const imza::ToolOutput out = run_script("local rows, err = imza.fs.grep([["
-        + imza::utf8_from_path(dir.path)
-        + "]], '(')\n"
-          "print(rows == nil, err)");
-    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(out.text.find("true    grep: invalid POSIX extended regular "
-                        "expression")
+    const imza::ToolOutput out = run_script("imza.fs.grep([["
+        + imza::utf8_from_path(dir.path) + "]], '(')\nprint('dead')");
+    CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
+    CHECK(out.text.find("grep: invalid POSIX extended regular expression")
         != std::string::npos);
+    CHECK(out.text.find("dead") == std::string::npos);
 }
 
 TEST_CASE("imza.fs.grep caps results and appends a truncation marker")
@@ -447,10 +438,9 @@ TEST_CASE("imza.fs.grep caps results and appends a truncation marker")
     }
     imza::test::write_file(dir.file("many.txt"), contents);
 
-    const imza::ToolOutput out = run_script("local rows, err = imza.fs.grep([["
+    const imza::ToolOutput out = run_script("local rows = imza.fs.grep([["
         + imza::utf8_from_path(dir.path)
         + "]], 'match')\n"
-          "if err then error(err) end\n"
           "print(#rows, rows[500].line, rows[501].text)");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(out.text == "501    500    [truncated]\n");
@@ -463,10 +453,9 @@ TEST_CASE("imza.fs.grep skips binary files")
     imza::test::write_file(dir.file("binary.dat"),
         std::string("needle before null\0needle after null\n", 37));
 
-    const imza::ToolOutput out = run_script("local rows, err = imza.fs.grep([["
+    const imza::ToolOutput out = run_script("local rows = imza.fs.grep([["
         + imza::utf8_from_path(dir.path)
         + "]], 'needle')\n"
-          "if err then error(err) end\n"
           "print(#rows, rows[1].text)");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(out.text == "1    needle in text\n");
@@ -478,11 +467,11 @@ TEST_CASE("bindings outside the workspace return an error value")
     // Without a provider the binding runs in trusted mode; with a provider
     // whose context lacks workspace/system it must reject, not crash.
     imza::LuaHost empty { };
-    empty.permission_context   = [] { return imza::PermissionContext { }; };
-    const imza::ToolOutput out = run_script("local s, e = imza.fs.read([["
-            + dir.file("lines.txt").string() + "]])\nprint(s, e)",
-        std::move(empty));
-    CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    empty.permission_context = [] { return imza::PermissionContext { }; };
+    const imza::ToolOutput out
+        = run_script("imza.fs.read([[" + dir.file("lines.txt").string() + "]])",
+            std::move(empty));
+    CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(out.text.find("denied") != std::string::npos);
 }
 
@@ -494,12 +483,11 @@ TEST_CASE("todo bindings read and write the shared task board")
     host.set_todo = [&board](imza::TodoList todo) { board = std::move(todo); };
 
     const imza::ToolOutput set
-        = run_script("local ok, err = imza.todo.set({"
+        = run_script("imza.todo.set({"
                      "{content = 'first', status = 'in_progress'},"
                      "{content = 'second'},"
                      "{content = 'third', status = 'completed'},"
-                     "{content = 'fourth', status = 'cancelled'}})\n"
-                     "if err then error(err) end",
+                     "{content = 'fourth', status = 'cancelled'}})",
             std::move(host));
     CHECK(set.kind == imza::ToolOutput::Kind::OUTPUT);
     REQUIRE(board.items.size() == 4);
@@ -520,10 +508,9 @@ TEST_CASE("todo bindings read and write the shared task board")
     CHECK(get.text
         == "4    first    in_progress    pending    completed    cancelled\n");
 
-    const imza::ToolOutput bad
-        = run_script("local ok, err = imza.todo.set({"
-                     "{content = 'x', status = 'nope'}})\nprint(err)",
-            imza::LuaHost { });
+    const imza::ToolOutput bad = run_script(
+        "imza.todo.set({{content = 'x', status = 'nope'}})", imza::LuaHost { });
+    CHECK(bad.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(bad.text.find("unknown status") != std::string::npos);
 }
 
@@ -547,17 +534,18 @@ TEST_CASE("imza.ask surfaces answers and unattended runs reject")
     };
 
     const imza::ToolOutput out
-        = run_script("local rows, err = imza.ask({{prompt = 'deploy?', "
-                     "options = {'yes', 'no'}}})\n"
-                     "if err then error(err) end\n"
+        = run_script("local rows = imza.ask({{prompt = 'deploy?', options = "
+                     "{'yes', 'no'}}})\n"
                      "print(rows[1].question, rows[1].answer)",
             std::move(host));
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(out.text == "deploy?    yes\n");
 
-    const imza::ToolOutput unattended = run_script(
-        "local rows, err = imza.ask({{prompt = 'hello?'}})\nprint(err)");
+    const imza::ToolOutput unattended
+        = run_script("imza.ask({{prompt = 'hello?'}})\nprint('dead')");
+    CHECK(unattended.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(unattended.text.find("unavailable") != std::string::npos);
+    CHECK(unattended.text.find("dead") == std::string::npos);
 }
 
 TEST_CASE("plan bindings validate skeleton and cap through the session")
@@ -577,25 +565,26 @@ TEST_CASE("plan bindings validate skeleton and cap through the session")
 
     const std::string& skeleton = imza::test::PLAN_SKELETON;
 
-    const imza::ToolOutput missing = run_script(
-        "local _, e = imza.plan.create('# Goal only')\nprint(e)", host);
+    const imza::ToolOutput missing
+        = run_script("imza.plan.create('# Goal only')\nprint('dead')", host);
+    CHECK(missing.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(missing.text.find("missing required headings") != std::string::npos);
     CHECK(missing.text.find("approach") != std::string::npos);
     CHECK(missing.text.find("open questions") != std::string::npos);
+    CHECK(missing.text.find("dead") == std::string::npos);
     CHECK(session.plans().empty());
 
     std::string big = skeleton + "\n";
     big.resize(imza::MAX_PLAN_BYTES + 1, 'x');
-    const imza::ToolOutput oversized = run_script(
-        "local _, e = imza.plan.create([[" + big + "]])\nprint(e)", host);
+    const imza::ToolOutput oversized
+        = run_script("imza.plan.create([[" + big + "]])\nprint('dead')", host);
+    CHECK(oversized.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(oversized.text.find("cap") != std::string::npos);
 
-    const imza::ToolOutput created
-        = run_script("local _, e = imza.plan.create([[" + skeleton
-                + "]])\n"
-                  "if e then error(e) end\n"
-                  "print(imza.plan.get():find('# Open Questions') ~= nil)",
-            std::move(host));
+    const imza::ToolOutput created = run_script("imza.plan.create([[" + skeleton
+            + "]])\n"
+              "print(imza.plan.get():find('# Open Questions') ~= nil)",
+        std::move(host));
     CHECK(created.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(created.text == "true\n");
     REQUIRE(session.plans().size() == 1);
@@ -618,7 +607,8 @@ TEST_CASE("plan edit requires a prior read and patches the current document")
     host.plan_frozen    = [] { return false; };
 
     const imza::ToolOutput no_plan
-        = run_script("print(select(2, imza.plan.edit('a', 'b')))", host);
+        = run_script("imza.plan.edit('a', 'b')\nprint('dead')", host);
+    CHECK(no_plan.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(no_plan.text.find("no plan exists") != std::string::npos);
 
     const std::string& skeleton = imza::test::PLAN_SKELETON;
@@ -626,8 +616,7 @@ TEST_CASE("plan edit requires a prior read and patches the current document")
 
     const imza::ToolOutput reedited
         = run_script("imza.plan.get()\n"
-                     "local _, e = imza.plan.edit('x', 'settled')\n"
-                     "if e then error(e) end\n"
+                     "imza.plan.edit('x', 'settled')\n"
                      "print(imza.plan.get():find('settled') ~= nil)",
             std::move(host));
     CHECK(reedited.kind == imza::ToolOutput::Kind::OUTPUT);
@@ -646,43 +635,48 @@ TEST_CASE("plan mutations are rejected while frozen in build mode")
     host.plan_frozen    = [] { return true; };
 
     const imza::ToolOutput out
-        = run_script("local _, a = imza.plan.create('# Goal')\n"
-                     "local _, b = imza.plan.edit('a', 'b')\n"
-                     "print(a, b)",
-            host);
+        = run_script("imza.plan.create('# Goal')\nprint('dead')", host);
+    CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(out.text.find("plan.create: unavailable in Build mode")
         != std::string::npos);
-    CHECK(out.text.find("plan.edit: unavailable in Build mode")
+    CHECK(out.text.find("dead") == std::string::npos);
+
+    const imza::ToolOutput edit
+        = run_script("imza.plan.edit('a', 'b')\nprint('dead')", host);
+    CHECK(edit.kind == imza::ToolOutput::Kind::ERROR);
+    CHECK(edit.text.find("plan.edit: unavailable in Build mode")
         != std::string::npos);
 }
 
 TEST_CASE("plan bindings are unavailable without host callbacks")
 {
-    const imza::ToolOutput out
-        = run_script("select(2, imza.plan.get())\n"
-                     "local _, c = imza.plan.create('# Goal')\n"
-                     "local _, e = imza.plan.edit('a', 'b')\n"
-                     "print(c, e)",
-            imza::LuaHost { });
+    const imza::ToolOutput out = run_script(
+        "imza.plan.create('# Goal')\nprint('dead')", imza::LuaHost { });
+    CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(out.text.find("plan.create: unavailable in this context")
         != std::string::npos);
-    CHECK(out.text.find("plan.edit: unavailable in this context")
+    CHECK(out.text.find("dead") == std::string::npos);
+
+    const imza::ToolOutput edit
+        = run_script("imza.plan.edit('a', 'b')", imza::LuaHost { });
+    CHECK(edit.text.find("plan.edit: unavailable in this context")
         != std::string::npos);
 }
 
 TEST_CASE("web bindings fail closed before argument validation")
 {
     // The capability gate is enforced at registration (R3a), so a denied
-    // binding returns `nil, err` even when called with missing arguments:
-    // access is checked before the handler could raise a type error.
+    // binding raises even when called with missing arguments: access is
+    // checked before the handler could report a type error.
     const imza::ToolOutput fetch
-        = run_script("local body, err = imza.web.fetch()\nprint(err)");
-    CHECK(fetch.kind == imza::ToolOutput::Kind::OUTPUT);
+        = run_script("imza.web.fetch()\nprint('dead')");
+    CHECK(fetch.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(fetch.text.find("web access is disabled") != std::string::npos);
+    CHECK(fetch.text.find("dead") == std::string::npos);
 
     const imza::ToolOutput search
-        = run_script("local body, err = imza.web.search()\nprint(err)");
-    CHECK(search.kind == imza::ToolOutput::Kind::OUTPUT);
+        = run_script("imza.web.search()\nprint('dead')");
+    CHECK(search.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(search.text.find("web access is disabled") != std::string::npos);
 }
 
@@ -703,12 +697,13 @@ TEST_CASE("imza.sh runs a single command and returns exit code")
     CHECK(failing.text == "    1\n");
 
     const imza::ToolOutput disabled
-        = run_script("local out, err = imza.shell('echo x')\nprint(err)");
-    CHECK(disabled.kind == imza::ToolOutput::Kind::OUTPUT);
+        = run_script("imza.shell('echo x')\nprint('dead')");
+    CHECK(disabled.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(disabled.text.find("shell access is disabled") != std::string::npos);
 
     const imza::ToolOutput empty
-        = run_script("local out, err = imza.shell('')\nprint(err)", fx.host());
+        = run_script("imza.shell('')\nprint('dead')", fx.host());
+    CHECK(empty.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(empty.text.find("empty command") != std::string::npos);
 }
 
@@ -735,12 +730,13 @@ TEST_CASE("imza.sh workspace argument selects the run directory")
     CHECK(relative.text.find((dir.file("sub")).string()) != std::string::npos);
 
     const imza::ToolOutput missing = run_script(
-        "local out, err = imza.shell('pwd', 10, 'no-such-dir')\nprint(err)",
-        fx.host());
+        "imza.shell('pwd', 10, 'no-such-dir')\nprint('dead')", fx.host());
+    CHECK(missing.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(missing.text.find("not a directory") != std::string::npos);
 
-    const imza::ToolOutput empty = run_script(
-        "local out, err = imza.shell('pwd', 10, '')\nprint(err)", fx.host());
+    const imza::ToolOutput empty
+        = run_script("imza.shell('pwd', 10, '')\nprint('dead')", fx.host());
+    CHECK(empty.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(empty.text.find("must not be empty") != std::string::npos);
 }
 
@@ -748,19 +744,18 @@ TEST_CASE("imza.sh rejects only multiple command expressions")
 {
     ShellFixture fx;
     const imza::ToolOutput chained = run_script(
-        "local out, err = imza.shell('echo a && echo b')\nprint(err)",
-        fx.host());
+        "imza.shell('echo a && echo b')\nprint('dead')", fx.host());
+    CHECK(chained.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(chained.text.find("one command per call") != std::string::npos);
     CHECK(fx.ask_calls == 0);
 
-    const imza::ToolOutput piped = run_script(
-        "local out, err = imza.shell('echo a | grep a')\nprint(err)",
-        fx.host());
+    const imza::ToolOutput piped
+        = run_script("imza.shell('echo a | grep a')\nprint('dead')", fx.host());
     CHECK(piped.text.find("one command per call") != std::string::npos);
 
-    const imza::ToolOutput multiline = run_script(
-        "local out, err = imza.shell('echo a\\necho b')\nprint(err)",
-        fx.host());
+    const imza::ToolOutput multiline
+        = run_script("imza.shell('echo a\\necho b')\nprint('dead')", fx.host());
+    CHECK(multiline.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(multiline.text.find("one command per call") != std::string::npos);
 }
 
@@ -769,23 +764,18 @@ TEST_CASE("imza.sh routes redirects and non-catalog commands to the gate")
     const fs::path marker
         = fs::temp_directory_path() / "imza_sh_redirect_out.txt";
     ShellFixture unattended;
-    unattended.attendable = false;
-    const imza::ToolOutput redirected
-        = run_script("local out, err = imza.shell('echo hi > " + marker.string()
-                + "')\n"
-                  "print(err)",
-            unattended.host());
+    unattended.attendable             = false;
+    const imza::ToolOutput redirected = run_script(
+        "imza.shell('echo hi > " + marker.string() + "')", unattended.host());
+    CHECK(redirected.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(redirected.text.find("approval") != std::string::npos);
 
     const imza::ToolOutput expanded
-        = run_script("local out, err = imza.shell('echo $HOME')\nprint(err)",
-            unattended.host());
+        = run_script("imza.shell('echo $HOME')", unattended.host());
     CHECK(expanded.text.find("approval") != std::string::npos);
 
     const imza::ToolOutput mutating = run_script(
-        "local out, err = imza.shell('touch /tmp/imza_sh_unattended')\n"
-        "print(err)",
-        unattended.host());
+        "imza.shell('touch /tmp/imza_sh_unattended')", unattended.host());
     CHECK(mutating.text.find("approval") != std::string::npos);
 }
 
@@ -832,11 +822,9 @@ TEST_CASE("imza.sh applies the native approval and session grant flow")
     rejected.verdict
         = imza::ToolVerdict { imza::ToolDecision::REJECT, "no thanks" };
     const imza::ToolOutput denied = run_script(
-        "local out, err = imza.shell('touch " + dir.file("b").string()
-            + "')\n"
-              "print(err)",
-        rejected.host());
+        "imza.shell('touch " + dir.file("b").string() + "')", rejected.host());
     REQUIRE(rejected.ask_calls == 1);
+    CHECK(denied.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(denied.text.find("no thanks") != std::string::npos);
     CHECK(rejected.installed.empty());
 }
@@ -879,10 +867,9 @@ TEST_CASE("imza.tree.index lists declarations parsed by the grammar")
         "int beta(int v) { return v; }\n"
         "class Gamma { };\n");
 
-    const imza::ToolOutput out = run_script(
-        "local rows, err = imza.tree.index([[" + dir.file("sym.cpp").string()
+    const imza::ToolOutput out = run_script("local rows = imza.tree.index([["
+        + dir.file("sym.cpp").string()
         + "]])\n"
-          "if err then error(err) end\n"
           "for _, r in ipairs(rows) do print(r.kind, r.name, "
           "r.start_line, r.end_line) end");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
@@ -906,10 +893,8 @@ TEST_CASE("imza.tree.index caps results and reports node text")
     }
     imza::test::write_file(dir.file("many.cpp"), body);
 
-    const imza::ToolOutput out = run_script(
-        "local rows, err = imza.tree.index([[" + dir.file("many.cpp").string()
-        + "]])\n"
-          "if err then error(err) end\nprint(#rows, rows[1].text)");
+    const imza::ToolOutput out = run_script("local rows = imza.tree.index([["
+        + dir.file("many.cpp").string() + "]])\nprint(#rows, rows[1].text)");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(
         out.text.find("50    int fn1() { return 1; }\n") != std::string::npos);
@@ -921,9 +906,8 @@ TEST_CASE("imza.tree.nodes matches an exact type and reports node text")
     imza::test::write_file(dir.file("nodes.c"), "int main() { return 0; }\n");
 
     const imza::ToolOutput declared = run_script(
-        "local rows, err = imza.tree.nodes([[" + dir.file("nodes.c").string()
+        "local rows = imza.tree.nodes([[" + dir.file("nodes.c").string()
         + "]], 'function_definition')\n"
-          "if err then error(err) end\n"
           "print(#rows, rows[1].kind, rows[1].name)");
     CHECK(declared.text.find("1    function_definition    main\n")
         != std::string::npos);
@@ -933,10 +917,12 @@ TEST_CASE("imza.tree.nodes rejects unknown exact types")
 {
     imza::test::TempDir dir;
     imza::test::write_file(dir.file("a.c"), "int main() { return 0; }\n");
-    const imza::ToolOutput out = run_script(
-        "local rows, err = imza.tree.nodes([[" + dir.file("a.c").string()
-        + "]], 'not_a_real_node')\nprint(rows, err)");
-    CHECK(out.text.find("not_a_real_node") != std::string::npos);
+    const imza::ToolOutput out = run_script("imza.tree.nodes([["
+        + dir.file("a.c").string() + "]], 'not_a_real_node')\nprint('dead')");
+    CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
+    CHECK(out.text.find("unknown node type: not_a_real_node")
+        != std::string::npos);
+    CHECK(out.text.find("dead") == std::string::npos);
 }
 
 TEST_CASE("imza.tree.symbols lists identifier occurrences with lines")
@@ -947,10 +933,9 @@ TEST_CASE("imza.tree.symbols lists identifier occurrences with lines")
         "int dog;\n"
         "int use_cat() { return cat; }\n");
 
-    const imza::ToolOutput out = run_script(
-        "local rows, err = imza.tree.symbols([[" + dir.file("use.c").string()
+    const imza::ToolOutput out = run_script("local rows = imza.tree.symbols([["
+        + dir.file("use.c").string()
         + "]], 'cat')\n"
-          "if err then error(err) end\n"
           "for _, r in ipairs(rows) do print(r.file, r.line, r.text) end");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     // Grammar-typed: the 'cat' inside 'use_cat' never matches.
@@ -972,9 +957,8 @@ TEST_CASE("imza.tree.references lists call sites of a symbol")
         "// cat() in a comment\n");
 
     const imza::ToolOutput out = run_script(
-        "local rows, err = imza.tree.references([[" + dir.file("use.c").string()
+        "local rows = imza.tree.references([[" + dir.file("use.c").string()
         + "]], 'cat')\n"
-          "if err then error(err) end\n"
           "for _, r in ipairs(rows) do print(r.line, r.kind, r.text) end");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     // Only the call site on line 4 matches; the variable uses and the
@@ -982,22 +966,22 @@ TEST_CASE("imza.tree.references lists call sites of a symbol")
     CHECK(out.text
         == "4    call_expression    int call_cat() { return cat(); }\n");
 }
-TEST_CASE("ts bindings fail with values on bad paths and unknown grammars")
+TEST_CASE("ts bindings raise on bad paths and unknown grammars")
 {
     imza::test::TempDir dir;
     imza::test::write_file(dir.file("a.c"), "int main() { return 0; }\n");
     imza::test::write_file(dir.file("note.unknownext"), "hello\n");
 
     const imza::ToolOutput missing
-        = run_script("local rows, err = "
-                     "imza.tree.index('no-such-file.c')\nprint(rows, err)");
+        = run_script("imza.tree.index('no-such-file.c')\nprint('dead')");
+    CHECK(missing.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(missing.text.find("no such file") != std::string::npos);
     CHECK(missing.text.find("looked for ") != std::string::npos);
+    CHECK(missing.text.find("dead") == std::string::npos);
 
-    const imza::ToolOutput nogramever
-        = run_script("local rows, err = imza.tree.index([["
-            + dir.file("note.unknownext").string() + "]])\nprint(rows, err)");
-    CHECK(nogramever.text.find("no grammar") != std::string::npos);
+    const imza::ToolOutput nogrammar = run_script(
+        "imza.tree.index([[" + dir.file("note.unknownext").string() + "]])");
+    CHECK(nogrammar.text.find("no grammar") != std::string::npos);
 }
 
 TEST_CASE("imza.tree._lib.ts_query runs captures and rejects invalid queries")
@@ -1007,16 +991,16 @@ TEST_CASE("imza.tree._lib.ts_query runs captures and rejects invalid queries")
     const std::string path = dir.file("q.c").string();
 
     const imza::ToolOutput out
-        = run_script("local rows, err = imza.tree._lib.ts_query([[" + path
+        = run_script("local rows = imza.tree._lib.ts_query([[" + path
             + "]], '(function_definition declarator: (function_declarator "
               "declarator: (identifier) @name))')\n"
-              "if err then error(err) end\n"
               "print(#rows, rows[1].capture, rows[1].line, rows[1].text)");
     CHECK(out.text.find("1    name    1    main\n") != std::string::npos);
 
     const imza::ToolOutput bad
-        = run_script("local rows, err = imza.tree._lib.ts_query([[" + path
-            + "]], '(function_definition')\nprint(rows, err)");
+        = run_script("print(select(2, pcall(imza.tree._lib.ts_query, [[" + path
+            + "]], '(function_definition')))");
+    CHECK(bad.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(bad.text.find("invalid query") != std::string::npos);
 }
 
@@ -1047,12 +1031,17 @@ TEST_CASE("sh binding logs commands with exit status")
 {
     imza::test::TempDir dir;
     ShellFixture fx;
-    const imza::ToolOutput out = run_script(
-        "imza.shell('echo hi')\nimza.shell('false')\nlocal _, err = "
-        "imza.shell('echo a && echo b')\nprint(err ~= nil)",
-        fx.host());
+    const imza::ToolOutput out
+        = run_script("imza.shell('echo hi')\nimza.shell('false')\n"
+                     "pcall(imza.shell, 'echo a && echo b')",
+            fx.host());
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    REQUIRE(out.dispatch_log.size() == 2);
+    // The pcall'd chain failure logs a third failed entry; argument
+    // validation never reaches execution, so it carries no target.
+    REQUIRE(out.dispatch_log.size() == 3);
+    CHECK(out.dispatch_log[2].binding == "shell");
+    CHECK(out.dispatch_log[2].target.empty());
+    CHECK_FALSE(out.dispatch_log[2].ok);
     CHECK(out.dispatch_log[0].binding == "shell");
     CHECK(out.dispatch_log[0].target == "echo hi");
     CHECK(out.dispatch_log[0].ok);
@@ -1094,21 +1083,19 @@ TEST_CASE("imza.fs.insert rejects out-of-range lines and missing files")
 {
     imza::test::TempDir dir;
     imza::test::write_file(dir.file("a.txt"), "one\ntwo\n");
-    const std::string path = dir.file("a.txt").string();
-    const imza::ToolOutput out
-        = run_script("local ok, err = imza.fs.insert([[" + path
-            + "]], 'x', 10)\n"
-              "print(ok, err)\n"
-              "local ok2, err2 = imza.fs.insert([["
-            + dir.file("missing.txt").string()
-            + "]], 'x')\n"
-              "print(ok2, err2)");
-    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    const std::string path     = dir.file("a.txt").string();
+    const imza::ToolOutput out = run_script(
+        "print(select(2, pcall(imza.fs.insert, [[" + path + "]], 'x', 10)))");
+    CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(out.text.find("exceeds file length") != std::string::npos);
-    CHECK(out.text.find("line is 1-based") != std::string::npos);
-    CHECK(out.text.find("no such file") != std::string::npos);
-    CHECK(out.text.find("use fs.write to create it") != std::string::npos);
     CHECK(out.diffs.empty());
+
+    const imza::ToolOutput missing
+        = run_script("print(select(2, pcall(imza.fs.insert, [["
+            + dir.file("missing.txt").string() + "]], 'x')))");
+    CHECK(missing.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(missing.text.find("no such file") != std::string::npos);
+    CHECK(missing.text.find("use fs.write to create it") != std::string::npos);
 }
 
 TEST_CASE("imza.fs.edit replaces the first occurrence by default and all "
@@ -1120,16 +1107,16 @@ TEST_CASE("imza.fs.edit replaces the first occurrence by default and all "
 
     SUBCASE("first occurrence by default")
     {
-        const imza::ToolOutput out = run_script(
-            "assert(not imza.fs.edit([[" + path + "]], 'foo', 'qux'))");
+        const imza::ToolOutput out
+            = run_script("imza.fs.edit([[" + path + "]], 'foo', 'qux')");
         REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
         CHECK(
             imza::test::read_all(dir.file("a.txt")) == "qux bar foo baz foo\n");
     }
     SUBCASE("count=0 replaces all occurrences")
     {
-        const imza::ToolOutput out = run_script(
-            "assert(not imza.fs.edit([[" + path + "]], 'foo', 'qux', 0))");
+        const imza::ToolOutput out
+            = run_script("imza.fs.edit([[" + path + "]], 'foo', 'qux', 0)");
         REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
         CHECK(
             imza::test::read_all(dir.file("a.txt")) == "qux bar qux baz qux\n");
@@ -1142,30 +1129,29 @@ TEST_CASE("imza.fs.edit errors on missing match and empty old")
     imza::test::write_file(dir.file("a.txt"), "hello\n");
     const std::string path = dir.file("a.txt").string();
     const imza::ToolOutput out
-        = run_script("local ok, err = imza.fs.edit([[" + path
-            + "]], 'absent', 'x')\n"
-              "print(ok, err)\n"
-              "local ok2, err2 = imza.fs.edit([["
-            + path
-            + "]], '', 'x')\n"
-              "print(ok2, err2)");
-    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+        = run_script("print(select(2, pcall(imza.fs.edit, [[" + path
+            + "]], 'absent', 'x')))");
+    CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(out.text.find("old text not found in file: \"absent\"; it must match")
         != std::string::npos);
     CHECK(out.text.find("must match exactly") != std::string::npos);
     CHECK(out.text.find(path + ":") != std::string::npos);
-    CHECK(out.text.find("non-empty") != std::string::npos);
     CHECK(imza::test::read_all(dir.file("a.txt")) == "hello\n");
+
+    const imza::ToolOutput empty_old = run_script(
+        "print(select(2, pcall(imza.fs.edit, [[" + path + "]], '', 'x')))");
+    CHECK(empty_old.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(empty_old.text.find("non-empty") != std::string::npos);
 }
 
 TEST_CASE("imza.fs.write creates and rewrites files")
 {
     imza::test::TempDir dir;
     const std::string path     = dir.file("new.txt").string();
-    const imza::ToolOutput out = run_script("assert(not imza.fs.write([[" + path
-        + "]], 'v1\\n'))\n"
-          "assert(not imza.fs.write([["
-        + path + "]], 'v2\\n'))");
+    const imza::ToolOutput out = run_script("imza.fs.write([[" + path
+        + "]], 'v1\\n')\n"
+          "imza.fs.write([["
+        + path + "]], 'v2\\n')");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(imza::test::read_all(dir.file("new.txt")) == "v2\n");
     // One net diff per file: original (empty) to latest.
@@ -1178,7 +1164,7 @@ TEST_CASE("imza.fs.write creates missing parent directories")
     imza::test::TempDir dir;
     const std::string path = dir.file("a/b/c.txt").string();
     const imza::ToolOutput out
-        = run_script("assert(not imza.fs.write([[" + path + "]], 'deep\\n'))");
+        = run_script("imza.fs.write([[" + path + "]], 'deep\\n')");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(imza::test::read_all(dir.file("a/b/c.txt")) == "deep\n");
     REQUIRE(out.diffs.size() == 1);
@@ -1191,9 +1177,8 @@ TEST_CASE("imza.fs.write rejects a file occupying the parent path")
     imza::test::write_file(fx.dir.file("a"), "blocker\n");
     const std::string path     = fx.dir.file("a/b.txt").string();
     const imza::ToolOutput out = run_script(
-        "local ok, err = imza.fs.write([[" + path + "]], 'x\\n')\nprint(err)",
-        fx.host());
-    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+        "imza.fs.write([[" + path + "]], 'x\\n')\nprint('dead')", fx.host());
+    CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(
         out.text.find("target parent is not a directory") != std::string::npos);
     CHECK(imza::test::read_all(fx.dir.file("a")) == "blocker\n");
@@ -1207,11 +1192,10 @@ TEST_CASE("imza.fs.write with nested path fails closed unattended outside "
     WorkspaceFixture fx;
     imza::test::TempDir outside;
     // No ask callback: ASK verdicts must fail closed.
-    const std::string path     = outside.file("a/b/c.txt").string();
-    const imza::ToolOutput out = run_script("local ok, err = imza.fs.write([["
-            + path + "]], 'x\\n')\nprint(ok, err)",
-        fx.host());
-    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    const std::string path = outside.file("a/b/c.txt").string();
+    const imza::ToolOutput out
+        = run_script("imza.fs.write([[" + path + "]], 'x\\n')", fx.host());
+    CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(out.text.find("denied") != std::string::npos);
     CHECK(!fs::exists(outside.file("a")));
     CHECK(out.diffs.empty());
@@ -1224,13 +1208,13 @@ TEST_CASE("lua file mutations collapse into one net diff per file")
     imza::test::write_file(dir.file("b.txt"), "alpha\n");
     const std::string a        = dir.file("a.txt").string();
     const std::string b        = dir.file("b.txt").string();
-    const imza::ToolOutput out = run_script("assert(not imza.fs.edit([[" + a
-        + "]], 'two', 'TWO'))\n"
-          "assert(not imza.fs.insert([["
+    const imza::ToolOutput out = run_script("imza.fs.edit([[" + a
+        + "]], 'two', 'TWO')\n"
+          "imza.fs.insert([["
         + a
-        + "]], 'zero', 1))\n"
-          "assert(not imza.fs.edit([["
-        + b + "]], 'alpha', 'ALPHA'))");
+        + "]], 'zero', 1)\n"
+          "imza.fs.edit([["
+        + b + "]], 'alpha', 'ALPHA')");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     REQUIRE(out.diffs.size() == 2);
     CHECK(out.diffs[0].file == a);
@@ -1257,8 +1241,8 @@ TEST_CASE("lua file diffs survive a mid-script error")
     imza::test::TempDir dir;
     imza::test::write_file(dir.file("a.txt"), "one\n");
     const std::string a        = dir.file("a.txt").string();
-    const imza::ToolOutput out = run_script("assert(not imza.fs.edit([[" + a
-        + "]], 'one', 'ONE'))\n"
+    const imza::ToolOutput out = run_script("imza.fs.edit([[" + a
+        + "]], 'one', 'ONE')\n"
           "error('boom')");
     CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
     REQUIRE(out.diffs.size() == 1);
@@ -1266,13 +1250,75 @@ TEST_CASE("lua file diffs survive a mid-script error")
     CHECK(imza::test::read_all(dir.file("a.txt")) == "ONE\n");
 }
 
+TEST_CASE("a failed fs.edit aborts mid-script leaving the last good state")
+{
+    imza::test::TempDir dir;
+    imza::test::write_file(dir.file("a.txt"), "one\n");
+    imza::test::write_file(dir.file("b.txt"), "keep\n");
+    const std::string a        = dir.file("a.txt").string();
+    const std::string b        = dir.file("b.txt").string();
+    const imza::ToolOutput out = run_script("imza.fs.edit([[" + a
+        + "]], 'one', 'ONE')\n"
+          "imza.fs.edit([["
+        + b
+        + "]], 'absent', 'x')\n"
+          "print('dead')");
+    CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
+    CHECK(out.text.find("old text not found") != std::string::npos);
+    CHECK(out.text.find("dead") == std::string::npos);
+    CHECK(imza::test::read_all(dir.file("a.txt")) == "ONE\n");
+    // The abort happened before b.txt was touched.
+    CHECK(imza::test::read_all(dir.file("b.txt")) == "keep\n");
+}
+
+TEST_CASE("pcall around a failed fs.edit recovers")
+{
+    imza::test::TempDir dir;
+    imza::test::write_file(dir.file("a.txt"), "one\n");
+    const std::string path     = dir.file("a.txt").string();
+    const imza::ToolOutput out = run_script("if pcall(imza.fs.edit, [[" + path
+        + "]], 'absent', 'x') then\n"
+          "  print('unexpected success')\n"
+          "else\n"
+          "  imza.fs.edit([["
+        + path
+        + "]], 'one', 'ONE')\n"
+          "end\n"
+          "return imza.fs.read([["
+        + path + "]])");
+    CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(imza::test::read_all(dir.file("a.txt")) == "ONE\n");
+    REQUIRE(out.return_value.has_value());
+    CHECK(out.return_value->asString() == "ONE\n");
+}
+
+TEST_CASE("a denied write aborts and the dispatch log records the denial")
+{
+    WorkspaceFixture fx;
+    imza::test::TempDir outside;
+    // No ask callback: ASK verdicts fail closed.
+    const std::string path     = outside.file("a.txt").string();
+    const imza::ToolOutput out = run_script("imza.fs.write([[" + path
+            + "]], 'x\\n')\n"
+              "print('dead')",
+        fx.host());
+    CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
+    CHECK(out.text.find("denied") != std::string::npos);
+    CHECK(out.text.find("dead") == std::string::npos);
+    REQUIRE(out.dispatch_log.size() == 1);
+    CHECK(out.dispatch_log[0].binding == "fs.write");
+    CHECK(out.dispatch_log[0].target == path);
+    CHECK_FALSE(out.dispatch_log[0].ok);
+    CHECK(!fs::exists(outside.file("a.txt")));
+}
+
 TEST_CASE("imza.file mutations auto-accept in trusted Build mode")
 {
     WorkspaceFixture fx;
     imza::test::write_file(fx.dir.file("a.txt"), "one\n");
-    const std::string a        = fx.dir.file("a.txt").string();
-    const imza::ToolOutput out = run_script(
-        "assert(not imza.fs.edit([[" + a + "]], 'one', 'ONE'))", fx.host());
+    const std::string a = fx.dir.file("a.txt").string();
+    const imza::ToolOutput out
+        = run_script("imza.fs.edit([[" + a + "]], 'one', 'ONE')", fx.host());
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(imza::test::read_all(fx.dir.file("a.txt")) == "ONE\n");
 }
@@ -1287,11 +1333,9 @@ TEST_CASE("imza.file mutations outside the workspace follow the ask verdict")
     SUBCASE("unattended: the ask fails closed")
     {
         // No ask callback: ASK verdicts must fail closed.
-        const imza::ToolOutput out
-            = run_script("local ok, err = imza.fs.edit([[" + a
-                    + "]], 'one', 'ONE')\nprint(ok, err)",
-                fx.host());
-        REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+        const imza::ToolOutput out = run_script(
+            "imza.fs.edit([[" + a + "]], 'one', 'ONE')", fx.host());
+        CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
         CHECK(out.text.find("denied") != std::string::npos);
         CHECK(imza::test::read_all(outside.file("a.txt")) == "one\n");
     }
@@ -1314,8 +1358,7 @@ TEST_CASE("imza.file mutations outside the workspace follow the ask verdict")
             return promise.get_future();
         };
         const imza::ToolOutput out = run_script(
-            "assert(not imza.fs.edit([[" + a + "]], 'one', 'ONE'))",
-            std::move(host));
+            "imza.fs.edit([[" + a + "]], 'one', 'ONE')", std::move(host));
         REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
         CHECK(imza::test::read_all(outside.file("a.txt")) == "ONE\n");
     }
@@ -1379,11 +1422,11 @@ local pie = imza.canvas.pie({
 TEST_CASE("canvas rejects malformed and non-positive chart data")
 {
     const imza::ToolOutput out = run_script(R"lua(
-local _, pie_err = imza.canvas.pie({ data = { { label = 'x', value = -1 } } })
-local _, bar_err = imza.canvas.bar({ data = { { label = 'x' } } })
-local _, line_err = imza.canvas.line({ data = { 1, 'x' } })
-local _, grid_err = imza.canvas.surface({ data = { { 1, 2 }, { 3 } } })
-print(pie_err, bar_err, line_err, grid_err)
+print(select(2, pcall(imza.canvas.pie,
+  { data = { { label = 'x', value = -1 } } })))
+print(select(2, pcall(imza.canvas.bar, { data = { { label = 'x' } } })))
+print(select(2, pcall(imza.canvas.line, { data = { 1, 'x' } })))
+print(select(2, pcall(imza.canvas.surface, { data = { { 1, 2 }, { 3 } } })))
 )lua");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(
@@ -1416,11 +1459,11 @@ TEST_CASE("canvas caps charts per run and fails closed")
 {
     const imza::ToolOutput out = run_script(R"lua(
 for _ = 1, 16 do
-  assert(not imza.canvas.line({ data = { 1, 2 } }))
+  imza.canvas.line({ data = { 1, 2 } })
 end
-local _, err = imza.canvas.line({ data = { 1, 2 } })
-print(err)
+print(select(2, pcall(imza.canvas.line, { data = { 1, 2 } })))
 )lua");
+    CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(out.text.find("canvas.line: too many charts in one run")
         != std::string::npos);
     CHECK(out.canvases.size() == 16);

@@ -260,32 +260,32 @@ namespace {
         {
             "todo.get",
             binding_todo_get,
-            R"desc(() => TodoItem[]
+            R"desc(() returns TodoItem[]
 The session task list in display order; empty array when unset.)desc",
         },
         { "todo.set", binding_todo_set,
-            R"desc((items: TodoItem[]) => Err?
+            R"desc((items: TodoItem[]) throws
 Set todo items.
 Replaces the entire list: get, modify, set the full array back.
 `status` defaults to "pending"; any other value is rejected.)desc" },
         {
             "ask",
             binding_ask,
-            R"desc((cards: AskCard[]) => AskAnswer[]
+            R"desc((cards: AskCard[]) returns AskAnswer[], throws
 Asks the user one or more questions and returns their answers.
 `options` offers a choice list, `multi` allows several picks,
 `free_text` allows typed input; a card may combine them, and `answer` is the
 typed text plus the selected labels joined with ", ".
-nil, Err when dismissed. Unavailable in unattended runs.)desc",
+Throws when dismissed by the user; unavailable in unattended runs.)desc",
         },
         {
             "shell",
             binding_shell,
-            R"desc((command: string, timeout?: integer=10, workspace?: string) => output: string, exit_code: integer
+            R"desc((command: string, timeout?: integer=10, workspace?: string) returns output: string, exit_code: integer, throws
 Runs a single external command, returning its captured output (capped at 64 KB)
 and exit status.
 A non-zero exit_code is a successful call, so test exit_code rather than nil.
-nil, Err means it could not start, timed out (1..120 s) or was denied.
+Throws when the command could not start, timed out (1..120 s) or was denied.
 Chains and pipelines are rejected. Compose results in Lua instead.
 `workspace` is the directory the command runs in.)desc",
             LuaCapability::SHELL,

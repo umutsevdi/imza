@@ -497,10 +497,10 @@ namespace {
         {
             "_lib.ts_query",
             binding_ts_query,
-            R"desc((path: string, query: string) => { capture, line, text }[]
+            R"desc((path: string, query: string) returns { capture, line, text }[], throws
 #private: Execute an arbitrary tree-sitter query (S-expression pattern with
 @captures) over the file, one row per capture.
-Fails on an invalid query, naming the byte offset of the syntax error.
+Throws on an invalid query, naming the byte offset of the syntax error.
 Capped at 500 rows.)desc",
             LuaCapability::NONE,
             "",
@@ -509,7 +509,7 @@ Capped at 500 rows.)desc",
         {
             "index",
             binding_ts_index,
-            R"desc((path: string) => TsSymbol[]
+            R"desc((path: string) returns TsSymbol[], throws
 List the named symbols in `path`: functions, methods, classes, structs,
 interfaces, enums, and other declaration/definition nodes parsed by the
 language grammar matched for the file's extension or name. Each entry
@@ -521,19 +521,19 @@ Capped at 50 entries; use imza.tree.nodes with a narrower type for more.)desc",
         {
             "nodes",
             binding_ts_nodes,
-            R"desc((path: string, type: string) => TsSymbol[]
+            R"desc((path: string, type: string) returns TsSymbol[], throws
 List every node in `path` whose grammar type name matches `type`: an exact
 grammar node type (e.g. "function_definition", "class_specifier") or a `*`
 glob ("*call*"). Entries carry `kind`, `name`, `start_line`..`end_line`,
 and `text`.
-Fails on an unknown exact type, naming it.
+Throws on an unknown exact type, naming it.
 Capped at 500 entries.)desc",
             LuaCapability::NONE,
         },
         {
             "symbols",
             binding_ts_symbols,
-            R"desc((path: string, symbol: string) => { file, line, text }[]
+            R"desc((path: string, symbol: string) returns { file, line, text }[], throws
 List every occurrence of `symbol` (an identifier node) in `path`, one row
 per use with the file path, 1-based `line`, and the full source line as
 `text`. Grammar-typed, so comments and strings never match.
@@ -543,7 +543,7 @@ Capped at 500 entries.)desc",
         {
             "references",
             binding_ts_references,
-            R"desc((path: string, symbol: string) => { line, kind, text }[]
+            R"desc((path: string, symbol: string) returns { line, kind, text }[], throws
 List the call sites of `symbol` in `path`: identifier nodes inside a call
 node, one row per site with 1-based `line`, the call node's grammar `kind`,
 and the full source line as `text`. Textual call-site matching, not a

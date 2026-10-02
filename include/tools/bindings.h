@@ -54,8 +54,11 @@ struct LuaRunContext {
 // The run context stored in the VM's extra space by the driver.
 LuaRunContext* run_of(lua_State* L);
 
-// Pushes the binding error convention: nil, err.
-int binding_error(lua_State* L, std::string message);
+// Raises a Lua error carrying `message`: every binding failure aborts the
+// script; wrap the call in pcall to tolerate it. Logs a failed dispatch
+// entry unless the caller already logged one (gate denials do).
+int binding_error(
+    lua_State* L, const std::string& message, bool already_logged = false);
 
 void record_call(
     lua_State* L, std::string_view binding, std::string target, bool ok);
@@ -106,8 +109,9 @@ std::optional<std::string> opt_string(lua_State* L, int index);
 std::optional<lua_Integer> opt_integer(lua_State* L, int index);
 std::optional<bool> opt_boolean(lua_State* L, int index);
 
-// On denial pushes the (nil, err) convention and returns the binding return
-// count to propagate; otherwise fills `target` with the canonical path.
+// On denial raises the binding error and returns the binding return count
+// (unreachable past the raise); otherwise fills `target` with the
+// canonical path.
 int authorize_target(lua_State* L, const FilesystemRequest& request,
     const std::string& path, std::string& target);
 

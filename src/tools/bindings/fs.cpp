@@ -527,26 +527,27 @@ namespace {
         {
             "read",
             binding_read,
-            R"desc((path: string, first_line?: integer=1 last_line?: integer=nil) => string
+            R"desc((path: string, first_line?: integer=1 last_line?: integer=nil) returns string, throws
 Read the file at `path` returning its content.
 first_line..last_line inclusive omit last_line to read to the end.
-Fails on no such file, first_line past the end, last_line < first_line, or a
+Throws on no such file, first_line past the end, last_line < first_line, or a
 binary file. Over 64 KB is cut and marked "[truncated]".)desc",
         },
         {
             "list",
             binding_list,
-            R"desc((path?: string=".", depth?: integer=1, show_hidden?: bool=false) => FileEntry[]
+            R"desc((path?: string=".", depth?: integer=1, show_hidden?: bool=false) returns FileEntry[], throws
 List files and directories in `path`, returning their paths and sizes.
 Paths are relative to the requested directory. Filename-sorted listing;
 depth (1..5) descends into subdirectories and their entries come back flat.
 `size` is absent for directories and "-" when unreadable.
-Capped at 2000 entries.)desc",
+Capped at 2000 entries. Throws when the directory is missing or
+unreadable.)desc",
         },
         {
             "grep",
             binding_grep,
-            R"desc((path: string, pattern: string) => GrepHit[]
+            R"desc((path: string, pattern: string) returns GrepHit[], throws
 Run a POSIX extended regex (not a Lua pattern) over a file or directory tree,
 one hit per matching line.
 Capped at 500 hits, followed by a hit whose text is "[truncated]".)desc",
@@ -554,22 +555,24 @@ Capped at 500 hits, followed by a hit whose text is "[truncated]".)desc",
         {
             "insert",
             binding_file_insert,
-            R"desc((path: string, text: string, line?: integer=nil) => Err?
+            R"desc((path: string, text: string, line?: integer=nil) throws
 Inserts text before the 1-based line, pushing it down; omit line to
-append at the end. A line past the end of the file is an error.)desc",
+append at the end. Throws when the line is past the end of the file or
+the file is missing (use fs.write to create it).)desc",
         },
         {
             "edit",
             binding_file_edit,
-            R"desc((path: string, old: string, new: string, count?: integer=1) => Err?
+            R"desc((path: string, old: string, new: string, count?: integer=1) throws
 Replaces the first count occurrences of old with new; count=0 replaces all.
 Old is an exact literal match, so include enough surrounding text to be unique.
-Errors if old is empty or not found.)desc",
+Throws when old is empty or not found; wrap in pcall when not-found is
+expected.)desc",
         },
         {
             "write",
             binding_file_write,
-            R"desc((path: string, text: string) => Err?
+            R"desc((path: string, text: string) throws
 Replaces the file's entire content, creating it (and missing parent
 directories) if absent.
 Prefer insert/edit for targeted changes; this discards everything else.)desc",

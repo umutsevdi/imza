@@ -301,15 +301,12 @@ OUTPUT
 Returned values are rendered as follows: scalars and scalar lists directly, record lists as Markdown tables, and other structures as JSON.
 
 LEGEND
-imza.<name>(args...) => Value | (nil, Err)
-- Err is a string.
+imza.<name>(args...) returns Value, throws
+- `returns` names the value(s) on success; `throws` marks a binding that
+aborts the script with an error on any failure. The error becomes the tool
+result. Wrap the call in `pcall` when a failure is expected and tolerated.
 - ? marks an optional argument; defaults are shown when applicable.
-- Ungranted paths return nil, Err.
 - Paths may be relative to the requested working directory.
-- Invalid arguments raise and abort the script.
-- Methods documented `=> Err?` return an error string on failure and
-nothing on success. Check `if err then`: a failed operation invalidates
-the steps built on it. Other methods fail by raising instead.
 
 TYPES)desc";
         append_types(out, modules, true);

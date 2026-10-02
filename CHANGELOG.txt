@@ -17,6 +17,7 @@ Changes:
     CoreWeave.
   - Added a loading animation to the input bar while the agent is working.
   - Fixed scroll behaviour of Plan Document pane.
+  - Bindings now aborts the script on error instead of being silently ignored.
 
 -------------------------------------------------------------------------------
 0.5.0 - 2026-09-30

@@ -72,7 +72,7 @@ namespace {
     }
 
     // Stores a validated chart and logs the call. Success returns
-    // nothing; failures take the nil, Err path before this is reached.
+    // nothing; failures raise before this is reached.
     void emit_canvas(lua_State* L, const std::string& binding, CanvasView view)
     {
         const std::string title = view.title;
@@ -293,7 +293,7 @@ namespace {
         {
             "line",
             binding_canvas_line,
-            R"desc((options: { title?: string, label?: string, data }) => Err?
+            R"desc((options: { title?: string, label?: string, data }) throws
 Renders a line chart directly in the chat, one polyline per series with
 x as the point index.
 `data` is a list of numbers or a list of CanvasSeries tables; `label`
@@ -302,19 +302,19 @@ names a flat data series.)desc",
         {
             "bar",
             binding_canvas_bar,
-            R"desc((options: { title?: string, data: CanvasPoint[] }) => Err?
+            R"desc((options: { title?: string, data: CanvasPoint[] }) throws
 Renders a vertical bar chart directly in the chat, one bar per point.)desc",
         },
         {
             "pie",
             binding_canvas_pie,
-            R"desc((options: { title?: string, data: CanvasPoint[] }) => Err?
+            R"desc((options: { title?: string, data: CanvasPoint[] }) throws
 Renders a pie chart directly in the chat, one slice per point.)desc",
         },
         {
             "surface",
             binding_canvas_surface,
-            R"desc((options: { title?: string, data: number[][] }) => Err?
+            R"desc((options: { title?: string, data: number[][] }) throws
 Renders a wireframe surface directly in the chat: `data` is a
 rectangular matrix of z values, row-major.)desc",
         },

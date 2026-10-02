@@ -83,7 +83,7 @@ namespace {
         {
             "get",
             binding_plan_get,
-            R"desc(() => string
+            R"desc(() returns string, throws
 Returns the current plan document: markdown with a required skeleton
 (Goal / Approach / Files / Verification / Open Questions), or an empty
 string when none exists. Marks the plan as read; imza.plan.edit compares
@@ -92,7 +92,7 @@ against this.)desc",
         {
             "create",
             binding_plan_create,
-            R"desc((doc: string) => Err?
+            R"desc((doc: string) throws
 Creates a new plan document as the current plan; the previous one is
 kept in the session but superseded. Validates the skeleton and the
 16 KiB cap. Never mutates an existing document.)desc",
@@ -100,11 +100,11 @@ kept in the session but superseded. Validates the skeleton and the
         {
             "edit",
             binding_plan_edit,
-            R"desc((old: string, new: string, count?: integer=1) => Err?
+            R"desc((old: string, new: string, count?: integer=1) throws
 Replaces the first count occurrences of old in the current plan with new;
 count=0 replaces all. Exact literal match, same semantics as imza.fs.edit.
-Rejected when the plan changed since the last imza.plan.get(); re-read
-and retry. Errors when no plan exists.)desc",
+Throws when the plan changed since the last imza.plan.get(); re-read
+and retry. Throws when no plan exists.)desc",
         },
     };
 

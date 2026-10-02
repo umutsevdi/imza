@@ -104,18 +104,18 @@ namespace {
         {
             "fetch",
             binding_web_fetch,
-            R"desc((url: string) => string
+            R"desc((url: string) returns string, throws
 Fetches an HTTP(S) URL as readable text. HTML is converted to plain text; JSON, 
 Markdown, and other raw bodies are returned as-is.
-Fails on non-http(s) URLs, network errors, non-2xx responses, bodies over 5 MB
-and pages with no readable content. Capped at 40000 characters.)desc",
+Throws on non-http(s) URLs, network errors, non-2xx responses, bodies over
+5 MB and pages with no readable content. Capped at 40000 characters.)desc",
             LuaCapability::WEB,
             "web.fetch: web access is disabled for this run",
         },
         {
             "search",
             binding_web_search,
-            R"desc((query: string, num_results?: integer=5) => string
+            R"desc((query: string, num_results?: integer=5) returns string, throws
 Search results as a formatted text block.
 num_results is clamped to 1..10.)desc",
             LuaCapability::WEB,
