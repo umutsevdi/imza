@@ -1,6 +1,7 @@
 #include "app/flows.h"
 #include "ui/ui.h"
 
+#include <ftxui/component/animation.hpp>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_base.hpp>
 #include <ftxui/component/event.hpp>
@@ -109,6 +110,11 @@ public:
             _unfocus();
         }
         return false;
+    }
+
+    void OnAnimation(animation::Params& params) override
+    {
+        _host->OnAnimation(params);
     }
 
 private:

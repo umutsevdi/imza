@@ -320,7 +320,8 @@ namespace {
                     | reflect(_main_pane_box);
                 if (side_by_side) {
                     content = hbox({ std::move(content), separatorEmpty(),
-                        _sidechat->Render() });
+                                  _sidechat->Render() })
+                        | yflex;
                 }
                 Element main_panel
                     = vbox({ hbox({ text(" "), title_p | xflex, tab }),
@@ -427,6 +428,12 @@ namespace {
                 }
             }
             return _tabs_content->OnEvent(event);
+        }
+
+        void OnAnimation(animation::Params& params) override
+        {
+            ComponentBase::OnAnimation(params);
+            _sidechat->OnAnimation(params);
         }
 
         Component ActiveChild() override

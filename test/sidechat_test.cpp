@@ -1,11 +1,18 @@
 #include "app/application_state.h"
 #include "app/flows.h"
 #include "common/modal.h"
+#include "conversation/session.h"
 #include "platform/config.h"
+#include "test_helpers.h"
 #include "test_state.h"
 #include "ui/ui.h"
 
+#include <chrono>
+#include <string>
+#include <vector>
+
 #include <doctest/doctest.h>
+#include <ftxui/component/animation.hpp>
 
 namespace imza {
 
@@ -129,6 +136,44 @@ TEST_CASE("refresh_sidechat requires an open sidechat")
     refresh_sidechat(*state);
     CHECK(state->session->error().find("No Sidechat is open")
         != std::string::npos);
+}
+
+TEST_CASE("sidechat and main chat fill the height side by side")
+{
+    auto state = imza::test::make_test_state();
+    open_sidechat(*state);
+    auto sidechat_state = state->sidechat;
+    REQUIRE(sidechat_state != nullptr);
+    sidechat_state->session->begin_send("stretch me");
+
+    SidechatStatus status;
+    auto sidechat = make_sidechat_component(state, [] { }, status);
+
+    using namespace ftxui;
+    // Mirrors the Repl wide layout: title row above a side-by-side row
+    // that must grow to the remaining height.
+    Element row = hbox({ vbox({ text("MAIN") }) | xflex | yflex,
+                      separatorEmpty(), sidechat->Render() })
+        | yflex;
+    Element root = vbox({ hbox({ text(" "), text("title") }), std::move(row),
+                       text("STATUS") })
+        | flex;
+    auto screen                          = imza::test::to_screen(root, 120, 30);
+    const std::vector<std::string> lines = imza::split_lines(screen.ToString());
+    REQUIRE(static_cast<int>(lines.size()) == 30);
+    // The sidechat input sits in the fixed right column; its hint line
+    // ("Ctrl+S hide") must render near the bottom of the stretched pane,
+    // not stop right below the short main content.
+    int hint_row = -1;
+    for (int y = 0; y < 30; ++y) {
+        const std::string clean
+            = imza::test::without_ansi(imza::split_lines(screen.ToString())[y]);
+        if (clean.find("Ctrl+S hide") != std::string::npos) {
+            hint_row = y;
+        }
+    }
+    REQUIRE(hint_row != -1);
+    CHECK(hint_row >= 25);
 }
 
 } // namespace imza
