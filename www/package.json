@@ -1,0 +1,35 @@
+{
+    "name": "imza",
+    "type": "module",
+    "version": "0.0.1",
+    "engines": {
+        "node": ">=22.12.0"
+    },
+    "scripts": {
+        "predev": "node scripts/ensure-wiki.mjs",
+        "prebuild": "node scripts/ensure-wiki.mjs",
+        "dev": "astro dev",
+        "build": "astro build",
+        "preview": "astro preview",
+        "astro": "astro",
+        "prettier": "prettier src --write",
+        "lint": "tsc --noEmit && eslint ."
+    },
+    "dependencies": {
+        "@astrojs/check": "^0.9.10",
+        "@astrojs/mdx": "^8.0.2",
+        "@astrojs/rss": "^4.0.19",
+        "@astrojs/sitemap": "^3.7.4",
+        "astro": "^7.3.5"
+    },
+    "devDependencies": {
+        "@eslint/js": "^9.0.0",
+        "astro-eslint-parser": "^3.2.0",
+        "eslint": "^10.2.1",
+        "prettier": "3.7.4",
+        "prettier-plugin-astro": "0.14.1",
+        "terser": "^5.46.1",
+        "typescript": "^5.9.3",
+        "typescript-eslint": "^8.0.0"
+    }
+}

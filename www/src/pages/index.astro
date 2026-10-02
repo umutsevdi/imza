@@ -1,0 +1,35 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import SidePanel from "../components/SidePanel.astro";
+import Statusbar from "../components/Statusbar.astro";
+import Hero from "../components/Hero.astro";
+import ModeSwitcher from "../components/ModeSwitcher.astro";
+import DiffTerminal from "../components/DiffTerminal.astro";
+import Permissions from "../components/Permissions.astro";
+import Models from "../components/Models.astro";
+import Headless from "../components/Headless.astro";
+import FeatureList from "../components/FeatureList.astro";
+---
+
+<BaseLayout
+  title="imza - Open Source Coding Harness"
+  description="Imza is a lightweight coding agent designed to improve the development experience for both models and the people using them."
+>
+  <div class="app">
+    <div class="app-row">
+      <SidePanel />
+      <div class="maincol">
+        <main id="main">
+          <Hero />
+          <ModeSwitcher />
+          <DiffTerminal />
+          <Permissions />
+          <Models />
+          <Headless />
+          <FeatureList />
+        </main>
+      </div>
+    </div>
+    <Statusbar />
+  </div>
+</BaseLayout>

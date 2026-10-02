@@ -1,0 +1,49 @@
+---
+const adds = [
+  {
+    key: "live diffs",
+    pad: 10,
+    desc: "changes render as they happen: you read code, not summaries."
+  },
+  {
+    key: "plan document",
+    pad: 6,
+    desc: "a Markdown spec beside the conversation; every revision is kept."
+  },
+  {
+    key: "bring-your-own-model",
+    pad: 0,
+    desc: "OpenAI-compatible and Anthropic, local or hosted."
+  },
+  {
+    key: "headless mode",
+    pad: 7,
+    desc: "run non-interactively from scripts, CI, or tooling."
+  },
+  {
+    key: "subagents",
+    pad: 10,
+    desc: "delegate up to five research or build tasks."
+  },
+  {
+    key: "small footprint",
+    pad: 4,
+    desc: "a native binary with a quiet runtime."
+  }
+];
+---
+
+<section class="help" id="help" aria-labelledby="help-h">
+  <p class="section-label" id="help-h">What Imza Adds</p>
+  <div class="tui-panel">
+    <pre
+      class="hunk-body"
+      set:html={adds
+        .map(
+          (a) =>
+            `<span class="t-add">+ ${a.key}</span>${" ".repeat(a.pad)}${a.desc}\n`
+        )
+        .join("")}
+    />
+  </div>
+</section>

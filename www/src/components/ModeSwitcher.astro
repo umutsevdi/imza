@@ -1,0 +1,124 @@
+---
+import { Image } from "astro:assets";
+import planShot from "../../../wiki/images/plan-document.png";
+import buildShot from "../../../wiki/images/build.png";
+import reviewShot from "../../../wiki/images/review.png";
+
+const modes = [
+  {
+    id: "plan",
+    name: "Plan",
+    cls: "plan",
+    line: "Build a flawless spec, together",
+    dim: "Describe the outcome and the agent explores your codebase, then drafts a plan beside the chat. You edit it together until it's ready; every revision is kept, and no code changes until you switch to Build.",
+    shot: planShot,
+    alt: "imza Plan tab: a co-editable plan document beside the chat, codebase read-only."
+  },
+  {
+    id: "build",
+    name: "Build",
+    cls: "build",
+    line: "Watch the work happen, not a summary",
+    dim: "The agent implements the plan with file edits, shell commands, and subagents, streaming every change as a diff the moment it's written. Imza gives the model efficient tools to discover and edit code, saving both time and tokens. Permissions only interrupt when it's genuinely unsure.",
+    shot: buildShot,
+    alt: "imza Build tab: live diffs appearing as the agent edits files and runs commands."
+  },
+  {
+    id: "review",
+    name: "Review",
+    cls: "review",
+    line: "Read one diff, not a hundred files",
+    dim: "The whole change lands in a smooth code review tool. Leave comments where it matters, and AI review checks the diff against your project's guidelines to catch the boring parts for you. One click sends every finding back as a new plan revision.",
+    shot: reviewShot,
+    alt: "imza Review tab: the resulting Git diff with findings you can add and send back into the next plan."
+  }
+];
+---
+
+<section class="loop" id="loop" aria-labelledby="loop-h">
+  <p class="section-label" id="loop-h">The Loop</p>
+  <div class="tui-panel">
+    <div class="mode-switch" role="tablist" aria-label="Workflow phases">
+      {
+        modes.map((m, idx) => (
+          <button
+            class="mode-cell"
+            class:list={{ "is-active": idx === 0 }}
+            role="tab"
+            id={`tab-${m.id}`}
+            aria-selected={idx === 0 ? "true" : "false"}
+            aria-controls={`panel-${m.id}`}
+            tabindex={idx === 0 ? undefined : "-1"}
+          >
+            <span class={`mode-name ${m.cls}`}>{m.name}</span>
+          </button>
+        ))
+      }
+    </div>
+    <div class="tui-tabpanels">
+      {
+        modes.map((m, idx) => (
+          <div
+            class="tui-tabpanel"
+            class:list={{ "is-active": idx === 0 }}
+            role="tabpanel"
+            id={`panel-${m.id}`}
+            aria-labelledby={`tab-${m.id}`}
+            hidden={idx !== 0}
+          >
+            <p class="tp-line">{m.line}</p>
+            <Image
+              class="mode-shot"
+              src={m.shot}
+              alt={m.alt}
+              loading="lazy"
+              width={900}
+              height={560}
+            />
+            <p class="tp-line tp-dim">{m.dim}</p>
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</section>
+
+<script>
+  // Plan / Build / Review mode switcher with roving keyboard focus.
+  const cells = Array.from(
+    document.querySelectorAll<HTMLButtonElement>(".mode-cell")
+  );
+
+  function activate(cell: HTMLButtonElement) {
+    for (const c of cells) {
+      const on = c === cell;
+      c.classList.toggle("is-active", on);
+      c.setAttribute("aria-selected", on ? "true" : "false");
+      c.tabIndex = on ? 0 : -1;
+    }
+    for (const p of document.querySelectorAll<HTMLElement>(".tui-tabpanel")) {
+      const tab = document.getElementById(
+        p.getAttribute("aria-labelledby") ?? ""
+      );
+      p.hidden = tab !== cell;
+    }
+  }
+
+  cells.forEach((cell, idx) => {
+    cell.addEventListener("click", () => activate(cell));
+    cell.addEventListener("keydown", (e) => {
+      let next: HTMLElement | null = null;
+      if (e.key === "ArrowRight" || e.key === "ArrowDown")
+        next = cells[(idx + 1) % cells.length];
+      else if (e.key === "ArrowLeft" || e.key === "ArrowUp")
+        next = cells[(idx - 1 + cells.length) % cells.length];
+      else if (e.key === "Home") next = cells[0];
+      else if (e.key === "End") next = cells[cells.length - 1];
+      if (next) {
+        e.preventDefault();
+        next.focus();
+        activate(next as HTMLButtonElement);
+      }
+    });
+  });
+</script>

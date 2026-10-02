@@ -1,0 +1,26 @@
+---
+
+---
+
+<section class="headless" id="headless" aria-labelledby="headless-h">
+  <p class="section-label" id="headless-h">Headless</p>
+  <p class="block-intro">
+    Run imza without the terminal UI: same core, tools, providers, and
+    permission logic. Final output goes to stdout, diagnostics to stderr.
+  </p>
+  <div class="tui-panel command-panel" aria-label="Headless command examples">
+    <pre
+      class="command-body"><span class="t-prompt">$</span> imza --ask <span class="t-arg">"summarize the architecture of this repo"</span>
+
+<span class="t-prompt">$</span> imza --session my-session --exec <span class="t-arg">"finish the TODOs in NOTES.md"</span>
+
+<span class="t-prompt">$</span> imza --exec <span class="t-arg">"build and summarize the changes"</span> \
+    --allow-dir ../shared-assets \
+    --allow-cmd <span class="t-arg">"git status"</span> <span class="t-arg">"cmake --build"</span></pre>
+    <p class="command-note">
+      <code>--ask</code> runs one read-only Plan turn;
+      <code>--exec</code> runs one Build turn. Unresolved approvals come back to the
+      model as rejections, so grant only what the task needs.
+    </p>
+  </div>
+</section>

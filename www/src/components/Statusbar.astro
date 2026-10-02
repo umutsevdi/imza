@@ -1,0 +1,78 @@
+---
+
+---
+
+<footer class="statusbar-bar" role="contentinfo">
+  <span class="sb-left">
+    <span class="sb-mode" id="sb-mode"> PLAN </span>
+    <span class="sb-sep">·</span>
+
+    <a href="https://github.com/umutsevdi/imza">repository</a>
+    <span class="sb-sep">·</span>
+    <a href="https://github.com/umutsevdi/imza/wiki">wiki</a>
+    <span class="sb-sep">·</span>
+    <a href="https://github.com/umutsevdi/imza/releases">releases</a>
+  </span>
+  <span class="sb-gap"></span>
+  <span class="sb-right">
+    <span class="sb-dir">~/dev/imza</span>
+    <span class="sb-ver">IMZA v0.5.0</span>
+  </span>
+</footer>
+
+<script>
+  // Scroll-spy: highlight sidebar nav + set status-bar phase label/color.
+  const widgets = Array.from(
+    document.querySelectorAll<HTMLElement>(".nav-link[data-label]")
+  );
+  const sbMode = document.getElementById("sb-mode");
+  const byHash = new Map<string, HTMLElement>();
+  for (const w of widgets) byHash.set(w.getAttribute("href") ?? "", w);
+
+  if ("IntersectionObserver" in window) {
+    const sections = Array.from(
+      document.querySelectorAll<HTMLElement>("main section[id]")
+    );
+    const visible = new Map<string, number>();
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const en of entries) {
+          visible.set(
+            en.target.id,
+            en.isIntersecting ? en.intersectionRatio : 0
+          );
+        }
+        let best: HTMLElement | null = null;
+        let bestR = 0;
+        for (const s of sections) {
+          const r = visible.get(s.id) ?? 0;
+          if (r > bestR) {
+            bestR = r;
+            best = s;
+          }
+        }
+        if (!best) return;
+        for (const w of widgets) w.classList.remove("is-active");
+        const w = byHash.get("#" + best.id);
+        if (!w) return;
+        w.classList.add("is-active");
+        if (sbMode) {
+          const label = (w.dataset.label ?? "imza").toUpperCase();
+          sbMode.textContent = ` ${label} `;
+          // imza phase colors: PLAN=green, BUILD=red, REVIEW=cyan
+          let phaseColor = "#68D8E8";
+          if (best.id === "loop" || best.id === "plandoc")
+            phaseColor = "#7EE787";
+          else if (
+            ["diff", "permissions", "models", "headless"].includes(best.id)
+          )
+            phaseColor = "#F77272";
+          sbMode.style.background = phaseColor;
+          sbMode.style.color = "#2D3238";
+        }
+      },
+      { rootMargin: "-45% 0px -45% 0px", threshold: [0, 0.25, 0.5, 1] }
+    );
+    for (const s of sections) io.observe(s);
+  }
+</script>

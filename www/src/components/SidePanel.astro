@@ -1,0 +1,77 @@
+---
+import icon from "../../../misc/icon.png";
+
+const sections = [
+  { id: "top", label: "home", text: "Home", active: true },
+  { id: "loop", label: "the loop", text: "The Loop", active: false },
+  { id: "diff", label: "live diffs", text: "Live Diffs", active: false },
+  {
+    id: "permissions",
+    label: "permissions",
+    text: "Permissions",
+    active: false
+  },
+  { id: "models", label: "models", text: "Models", active: false },
+  { id: "headless", label: "headless", text: "Headless", active: false },
+  { id: "help", label: "what it adds", text: "What It Adds", active: false }
+];
+
+const links = [
+  {
+    href: "https://github.com/umutsevdi/imza/releases",
+    text: "Download"
+  },
+  {
+    href: "https://github.com/umutsevdi/imza#building-from-source",
+    text: "Build"
+  },
+  { href: "https://github.com/umutsevdi/imza/wiki", text: "Guide" }
+];
+---
+
+<aside class="sidepanel" aria-label="Page navigation">
+  <div class="side-brand">
+    <img class="titlebar-icon" src={icon.src} alt="" width="22" height="22" />
+    <span class="side-name">imza</span>
+  </div>
+
+  <nav class="side-widget" aria-label="Sections">
+    <p class="widget-title">Navigation</p>
+    <div class="widget-body">
+      {
+        sections.map((s) => (
+          <a
+            class="nav-link"
+            class:list={{ "is-active": s.active }}
+            href={`#${s.id}`}
+            data-label={s.label}
+          >
+            <span class="nav-text">{s.text}</span>
+          </a>
+        ))
+      }
+    </div>
+  </nav>
+
+  <div class="side-widget">
+    <p class="widget-title">See</p>
+    <div class="widget-body">
+      {
+        links.map((l) => (
+          <a class="nav-link" href={l.href}>
+            <span class="nav-text">{l.text}</span>
+          </a>
+        ))
+      }
+    </div>
+  </div>
+
+  <div class="side-widget">
+    <p class="widget-title">Build</p>
+    <div class="widget-body">
+      <p class="meta-line"><span class="meta-key">Language</span> C++</p>
+      <p class="meta-line"><span class="meta-key">Binary</span> ~20 MB</p>
+      <p class="meta-line"><span class="meta-key">RAM</span> 5–8 MB</p>
+    </div>
+  </div>
+</aside>
