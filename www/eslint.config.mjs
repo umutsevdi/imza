@@ -29,7 +29,9 @@ export default tseslint.config(
         extraFileExtensions: [".astro"]
       },
       globals: {
-        process: "readonly"
+        process: "readonly",
+        fetch: "readonly",
+        AbortSignal: "readonly"
       }
     },
     rules: {

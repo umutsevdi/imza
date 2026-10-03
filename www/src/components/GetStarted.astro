@@ -1,22 +1,27 @@
 ---
-// Download links resolve at build time from the latest GitHub release;
-// artifact names are discovered by extension, never hardcoded.
+import { VERSION } from "../version";
+
+// Download links resolve at build time from the tagged GitHub release; the
+// release pipeline runs this build after attaching assets, passing
+// IMZA_VERSION. Artifact names are discovered by extension, never hardcoded.
+// Without IMZA_VERSION (local dev) fall back to the latest release.
 interface Asset {
   url: string;
   file: string;
 }
 
 const RELEASES = "https://github.com/umutsevdi/imza/releases";
+const pinned = VERSION !== "v0.0.0";
+const endpoint = pinned
+  ? `https://api.github.com/repos/umutsevdi/imza/releases/tags/${VERSION}`
+  : "https://api.github.com/repos/umutsevdi/imza/releases/latest";
 
 async function fetchAssets(): Promise<Record<string, Asset> | null> {
   try {
-    const res = await fetch(
-      "https://api.github.com/repos/umutsevdi/imza/releases/latest",
-      {
-        headers: { Accept: "application/vnd.github+json" },
-        signal: AbortSignal.timeout(5000)
-      }
-    );
+    const res = await fetch(endpoint, {
+      headers: { Accept: "application/vnd.github+json" },
+      signal: AbortSignal.timeout(5000)
+    });
     if (!res.ok) return null;
     const data = await res.json();
     const found: Record<string, Asset> = {};
@@ -32,6 +37,15 @@ async function fetchAssets(): Promise<Record<string, Asset> | null> {
 }
 
 const assets = await fetchAssets();
+if (pinned) {
+  const missing = ["pkg", "exe", "deb", "rpm"].filter((k) => !assets?.[k]);
+  if (missing.length > 0) {
+    throw new Error(
+      `IMZA_VERSION=${VERSION} but release assets missing: ` +
+        missing.join(", ")
+    );
+  }
+}
 
 interface Platform {
   key: string;
@@ -81,13 +95,13 @@ const resolved: Resolved[] = platforms.map((p) => {
   };
 });
 
-const tagName = resolved[0]?.file.match(/-(\d+\.\d+\.\d+)-/)?.[1];
+const tagName = pinned ? VERSION : undefined;
 ---
 
 <section class="get-started" id="get-started" aria-labelledby="get-started-h">
   <p class="section-label" id="get-started-h">
     Get started
-    <span class="gs-tag"> · Download {tagName ? " v" + tagName : ""} </span>
+    <span class="gs-tag"> · Download {tagName ?? ""} </span>
   </p>
   <div class="gs-grid">
     {

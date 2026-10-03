@@ -159,3 +159,31 @@ jobs:
         run: |
           gh release upload "$GITHUB_REF_NAME" dist/* --clobber \
             -R "$GITHUB_REPOSITORY"
+
+  website:
+    # site downloads fetch the tagged release's assets, so this must only
+    # run once they are attached (needs: release); "set as latest" is
+    # independent of the site
+    runs-on: ubuntu-latest
+    needs: [prepare, release]
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: www/package-lock.json
+      - name: Build site
+        env:
+          IMZA_VERSION: v${{ needs.prepare.outputs.version }}
+        run: |
+          cd www
+          npm ci
+          npm run build
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: www/dist
+      - uses: actions/deploy-pages@v4
