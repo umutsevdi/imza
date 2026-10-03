@@ -1,0 +1,125 @@
+---
+import { docPages, hrefFor } from "../lib/docs";
+import { VERSION } from "../version";
+
+interface Props {
+  activeSlug?: string;
+}
+
+const { activeSlug } = Astro.props;
+const pages = docPages();
+
+const sections = [
+  { id: "top", label: "home", text: "Home", active: true },
+  { id: "loop", label: "the loop", text: "The Loop", active: false },
+  { id: "why", label: "why imza", text: "Why Imza", active: false },
+  { id: "headless", label: "headless", text: "Headless", active: false },
+  { id: "help", label: "what it adds", text: "What It Adds", active: false }
+];
+
+const links = [
+  {
+    href: "https://github.com/umutsevdi/imza",
+    text: "Source Code"
+  },
+  {
+    href: "https://github.com/umutsevdi/imza/releases",
+    text: "Download"
+  },
+  {
+    href: "https://github.com/umutsevdi/imza#building-from-source",
+    text: "Build"
+  },
+  { href: "/docs/", text: "Guide" },
+  { href: "/changelog/", text: "Changelog" },
+  { href: "/license/", text: "License" }
+];
+---
+
+{
+  activeSlug !== undefined ? (
+    <nav class="side-widget" aria-label="Documentation pages">
+      <p class="widget-title">Guide</p>
+      <div class="widget-body">
+        {pages.map((p) => (
+          <a
+            class="nav-link"
+            class:list={{ "is-active": p.slug === activeSlug }}
+            href={hrefFor(p.slug)}
+          >
+            <span class="nav-text">{p.title}</span>
+          </a>
+        ))}
+      </div>
+    </nav>
+  ) : (
+    <nav class="side-widget" aria-label="Sections">
+      <p class="widget-title">Navigation</p>
+      <div class="widget-body">
+        {sections.map((s) => (
+          <a
+            class="nav-link"
+            class:list={{ "is-active": s.active }}
+            href={`#${s.id}`}
+            data-label={s.label}
+          >
+            <span class="nav-text">{s.text}</span>
+          </a>
+        ))}
+      </div>
+    </nav>
+  )
+}
+
+<div class="side-widget">
+  <p class="widget-title">See</p>
+  <div class="widget-body">
+    {
+      links.map((l) => (
+        <a class="nav-link" href={l.href}>
+          <span class="nav-text">{l.text}</span>
+        </a>
+      ))
+    }
+  </div>
+</div>
+
+<div class="side-widget">
+  <p class="widget-title">About</p>
+  <div class="widget-body">
+    <p class="meta-line"><span class="meta-key">Language</span> C++</p>
+    <p class="meta-line">
+      <span class="meta-key">License</span>
+      <a
+        class="nav-link"
+        href="/license/"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <span class="nav-text">GPL</span>
+      </a>
+    </p>
+    <p class="meta-line">
+      <span class="meta-key">Version</span>
+      <a
+        class="nav-link"
+        href="/changelog/"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <span class="nav-text">{VERSION}</span>
+      </a>
+    </p>
+    <p class="meta-line">
+      <span class="meta-key">Developer</span>
+      <a
+        class="nav-link"
+        href="https://umutsevdi.com"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <span class="nav-text">Umut Can Sevdi</span>
+      </a>
+    </p>
+  </div>
+</div>

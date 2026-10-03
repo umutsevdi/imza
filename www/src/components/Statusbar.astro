@@ -72,3 +72,81 @@ import { VERSION } from "../version";
     for (const s of sections) io.observe(s);
   }
 </script>
+
+<style>
+  .statusbar-bar {
+    position: sticky;
+    bottom: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    white-space: nowrap;
+    overflow: hidden;
+    background: var(--focus);
+    color: var(--fg);
+    font-size: 0.95rem;
+    font-weight: 500;
+    border-top: 0;
+  }
+  .statusbar-bar :global(a) {
+    color: var(--fg);
+    text-decoration: none;
+  }
+  .statusbar-bar :global(a:hover) {
+    color: var(--hl-cyan);
+    text-decoration: underline;
+  }
+  .sb-left {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex: 0 0 auto;
+  }
+  .sb-right {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+  }
+  /* mode token: inverted like imza — colored bg + dark panel text, flush left.
+     Boots PLAN green like the app (status_line.cpp); scroll-spy recolors it. */
+  .sb-mode {
+    font-weight: 700;
+    background: var(--hl-green);
+    color: var(--focus);
+    padding: 0.05rem 0.5rem 0.05rem 0.6rem;
+  }
+  .sb-sep {
+    color: var(--fg-dim);
+    flex: 0 0 auto;
+  }
+  /* the filler: absorbs slack so right side stays pinned right, imza-style */
+  .sb-gap {
+    flex: 1 1 auto;
+    min-width: 1rem;
+  }
+  .sb-dir {
+    color: var(--fg-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 28vw;
+    flex: 0 0 auto;
+  }
+  /* IMZA token: inverted like imza — PANEL_FG bg + PANEL_COLOR text, flush right */
+  .sb-ver {
+    color: var(--fg-dim);
+    background: var(--fg);
+    color: var(--bg);
+    padding: 0.05rem 0.6rem 0.05rem 0.5rem;
+    font-weight: 700;
+    flex: 0 0 auto;
+  }
+  @media (max-width: 40rem) {
+    .sb-dir {
+      display: none;
+    }
+  }
+</style>

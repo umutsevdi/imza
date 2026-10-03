@@ -63,11 +63,20 @@ npm run prettier   # format src/
 
 ```
 src/
-  layouts/       BaseLayout.astro — head, skip-link, global CSS, statusbar
-  components/    One component per page section + SidePanel + Statusbar
+  layouts/       BaseLayout.astro — head, skip-link, global CSS import
+  components/    One component per page section + SidePanel + Statusbar;
+                 each carries its own scoped <style> block
   pages/         index.astro — composition only
-  styles/        global.css — imza's ftxui palette and all section styles
+  styles/        global.css — ftxui palette, reset, app shell, and the
+                 widget styles shared by both side panels
 ```
+
+Styling convention: component-specific rules live in a scoped
+`<style>` block inside the component that owns them; `global.css` holds
+only design tokens, the reset, base typography, the `.app` shell, and
+patterns shared across components (`.tui-panel`, `.section-label`, the
+side-panel widget family). Docs article styles (which target rendered
+markdown) stay in `styles/docs.css`.
 
 Interactive behavior (hero type-in, Plan/Build/Review tab switching,
 scroll-spy) lives in co-located `<script>` blocks inside the component

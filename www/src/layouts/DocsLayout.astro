@@ -2,10 +2,10 @@
 import "../styles/global.css";
 import "../styles/docs.css";
 import BaseLayout from "./BaseLayout.astro";
-import WikiSidePanel from "../components/WikiSidePanel.astro";
-import ChapterStrip from "../components/ChapterStrip.astro";
+import SidePanel from "../components/SidePanel.astro";
+import TopBar from "../components/TopBar.astro";
 import Statusbar from "../components/Statusbar.astro";
-import { docNeighbors, docPages, hrefFor } from "../lib/docs";
+import { docNeighbors, hrefFor } from "../lib/docs";
 
 interface Props {
   slug: string;
@@ -14,7 +14,6 @@ interface Props {
 
 const { slug, title } = Astro.props;
 const { prev, next } = docNeighbors(slug);
-const isWiki = docPages().some((p) => p.slug === slug);
 ---
 
 <BaseLayout
@@ -22,9 +21,9 @@ const isWiki = docPages().some((p) => p.slug === slug);
   description="imza user guide: installation, connecting models, the Plan-Build-Review workflow, permissions, and more."
 >
   <div class="app">
+    <TopBar slug={slug} />
     <div class="app-row">
-      <WikiSidePanel activeSlug={slug} />
-      {isWiki && <ChapterStrip activeSlug={slug} />}
+      <SidePanel activeSlug={slug} />
       <div class="maincol">
         <main id="main" class="docs-main">
           <article class="wiki-doc tui-panel">

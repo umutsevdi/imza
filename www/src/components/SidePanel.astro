@@ -1,83 +1,27 @@
 ---
 import icon from "../../../misc/icon.png";
-import { VERSION } from "../version";
+import SidePanelBody from "./SidePanelBody.astro";
 
-const sections = [
-  { id: "top", label: "home", text: "Home", active: true },
-  { id: "loop", label: "the loop", text: "The Loop", active: false },
-  { id: "why", label: "why imza", text: "Why Imza", active: false },
-  { id: "headless", label: "headless", text: "Headless", active: false },
-  { id: "help", label: "what it adds", text: "What It Adds", active: false }
-];
+interface Props {
+  activeSlug?: string;
+}
 
-const links = [
-  {
-    href: "https://github.com/umutsevdi/imza/releases",
-    text: "Download"
-  },
-  {
-    href: "https://github.com/umutsevdi/imza#building-from-source",
-    text: "Build"
-  },
-  { href: "/docs/", text: "Guide" },
-  { href: "/changelog/", text: "Changelog" },
-  { href: "/license/", text: "License" }
-];
+const { activeSlug } = Astro.props;
 ---
 
 <aside class="sidepanel" aria-label="Page navigation">
   <div class="side-brand">
-    <img class="titlebar-icon" src={icon.src} alt="" width="22" height="22" />
-    <span class="side-name">imza</span>
+    <a class="side-brand-link" href="/">
+      <img
+        class="sidepanel-icon"
+        src={icon.src}
+        alt=""
+        width="22"
+        height="22"
+      />
+      <span class="side-name">imza</span>
+    </a>
   </div>
 
-  <nav class="side-widget" aria-label="Sections">
-    <p class="widget-title">Navigation</p>
-    <div class="widget-body">
-      {
-        sections.map((s) => (
-          <a
-            class="nav-link"
-            class:list={{ "is-active": s.active }}
-            href={`#${s.id}`}
-            data-label={s.label}
-          >
-            <span class="nav-text">{s.text}</span>
-          </a>
-        ))
-      }
-    </div>
-  </nav>
-
-  <div class="side-widget">
-    <p class="widget-title">See</p>
-    <div class="widget-body">
-      {
-        links.map((l) => (
-          <a class="nav-link" href={l.href}>
-            <span class="nav-text">{l.text}</span>
-          </a>
-        ))
-      }
-    </div>
-  </div>
-
-  <div class="side-widget">
-    <p class="widget-title">About</p>
-    <div class="widget-body">
-      <p class="meta-line">
-        <span class="meta-key">Language</span> C++
-      </p>
-      <p class="meta-line">
-        <span class="meta-key">License</span> GPL
-      </p>
-      <p class="meta-line">
-        <span class="meta-key">Version</span>
-        {VERSION}
-      </p>
-      <p class="meta-line">
-        <span class="meta-key">Developer</span> Umut Can Sevdi
-      </p>
-    </div>
-  </div>
+  <SidePanelBody activeSlug={activeSlug} />
 </aside>

@@ -24,3 +24,38 @@
     </p>
   </div>
 </section>
+
+<style>
+  .command-body {
+    margin: 0;
+    padding: 1.2rem 1.3rem;
+    font-family: var(--mono);
+    font-size: clamp(0.72rem, 0.66rem + 0.3vw, 0.9rem);
+    line-height: 1.8;
+    color: var(--fg);
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .command-note :global(code) {
+    font-family: var(--mono);
+    font-size: 0.85em;
+    background: var(--focus);
+    padding: 0.05em 0.35em;
+    border-radius: 0.125rem;
+    color: var(--fg);
+  }
+  .command-note {
+    margin: 0;
+    padding: 0.8rem 1.3rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.88rem;
+    color: var(--fg-dim);
+    background: var(--focus);
+  }
+  .t-prompt {
+    color: var(--hl-green);
+  }
+  .t-arg {
+    color: var(--hl-blue);
+  }
+</style>

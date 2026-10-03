@@ -1,53 +1,3 @@
-/* ---- chapter strip: docs TOC on narrow screens (docs pages only) ---- */
-.chapter-strip {
-  display: none;
-}
-
-@media (max-width: 51.25rem) {
-  .chapter-strip {
-    display: flex;
-    align-items: center;
-    gap: 0.7rem;
-    padding: 0.5rem var(--gutter);
-    background: var(--bg);
-    border-bottom: 1px solid var(--border);
-  }
-  .strip-label {
-    font-size: 0.85rem;
-    font-weight: 700;
-    color: var(--fg-dim);
-    flex: 0 0 auto;
-  }
-  .strip-track {
-    display: flex;
-    gap: 0.3rem;
-    overflow-x: auto;
-    scrollbar-width: thin;
-    padding: 0.15rem 0;
-  }
-  .strip-pill {
-    flex: 0 0 auto;
-    font-family: var(--mono);
-    font-size: 0.85rem;
-    color: var(--fg-dim);
-    text-decoration: none;
-    padding: 0.2rem 0.6rem;
-    border: 1px solid var(--border);
-    border-radius: 0.1875rem;
-    white-space: nowrap;
-  }
-  .strip-pill:hover {
-    color: var(--fg);
-    background: var(--focus);
-    text-decoration: none;
-  }
-  .strip-pill.is-active {
-    background: var(--fg);
-    border-color: var(--fg);
-    color: var(--bg);
-    font-weight: 700;
-  }
-}
 :root {
   /* imza's real ftxui palette (src) — used verbatim */
   --bg: #212428;
@@ -79,9 +29,7 @@
   font-weight: 400;
   src:
     url("/fonts/CommitMono VariableFont.woff2") format("woff2"),
-    /* Chrome 26+, Opera 23+, Firefox 39+ */
-      url("/fonts/CommitMono VariableFont.woff") format("woff");
-  /* Chrome 6+, Firefox 3.6+, IE 9+, Safari 5.1+ */
+    url("/fonts/CommitMono VariableFont.woff") format("woff");
 }
 
 * {
@@ -120,18 +68,6 @@ a:hover {
   border-radius: 0.125rem;
 }
 
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-  border: 0;
-}
-
 .skip-link {
   position: absolute;
   left: -100rem;
@@ -145,63 +81,6 @@ a:hover {
 .skip-link:focus {
   left: 0.5rem;
   top: 0.5rem;
-}
-
-/* ---- title bar ---- */
-.titlebar {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  flex-wrap: wrap;
-  padding: 0.6rem var(--gutter);
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
-}
-.titlebar-name {
-  font-weight: 700;
-  font-size: 1.05rem;
-  color: var(--fg);
-  letter-spacing: 0.02em;
-}
-.titlebar-icon {
-  width: 1.375rem;
-  height: 1.375rem;
-  border-radius: 0.25rem;
-  display: block;
-}
-.titlebar-sub {
-  color: var(--fg-dim);
-  font-size: 0.9rem;
-}
-.titlebar-tabs {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  flex-wrap: wrap;
-  font-size: 0.88rem;
-}
-.titlebar-tabs a {
-  color: var(--fg-dim);
-  padding: 0.25rem 0.55rem;
-  border-radius: 0.125rem;
-  border: 1px solid transparent;
-}
-.titlebar-tabs a:hover {
-  color: var(--fg);
-  border-color: var(--border);
-  text-decoration: none;
-}
-.tab-install {
-  color: var(--fg) !important;
-  border: 1px solid var(--border) !important;
-}
-.tab-install:hover {
-  background: var(--focus);
-  color: var(--fg) !important;
 }
 
 /* ---- shared section rhythm ---- */
@@ -241,445 +120,12 @@ section {
   color: var(--fg);
 }
 
-/* ---- hero ---- */
-.hero {
-  padding-top: clamp(2.5rem, 6vw, 4rem);
-}
-.banner-wrap {
-  display: flex;
-  justify-content: center;
-  margin: 0 0 1.8rem;
-}
-.banner {
-  margin: 0;
-  font-family: var(--mono);
-  font-size: clamp(0.3rem, 0.45vw + 0.18rem, 0.55rem);
-  line-height: 1.05;
-  color: var(--fg-dim);
-  text-align: left;
-  white-space: pre;
-  overflow-x: auto;
-  max-width: 100%;
-}
-.banner-group {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  margin: 0 0 1.8rem;
-}
-.hero-name {
-  font-family: var(--mono);
-  font-weight: 700;
-  font-size: clamp(2.6rem, 1.6rem + 4.6vw, 4.6rem);
-  line-height: 1;
-  letter-spacing: -0.02em;
-  margin: 0 0 1rem;
-  color: var(--fg);
-}
-.hero-name::after {
-  content: "_";
-  color: var(--hl-cyan);
-  animation: blink 1.1s steps(1) infinite;
-}
-.hero-support {
-  max-width: var(--measure);
-  color: var(--fg-dim);
-  font-size: clamp(1rem, 0.95rem + 0.3vw, 1.2rem);
-  margin: 0 0 1.6rem;
-}
-.hero-support + .hero-support {
-  margin-top: -0.8rem;
-  color: var(--fg);
-  font-weight: 700;
-}
-@keyframes blink {
-  50% {
-    opacity: 0;
-  }
-}
-
-.hero-actions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.9rem;
-  margin: 0 auto 0.5rem;
-  max-width: 28rem;
-}
-.btn {
-  font-family: var(--mono);
-  font-weight: 700;
-  font-size: 0.95rem;
-  padding: 0.35rem 1rem;
-  text-align: center;
-  display: block;
-  border-radius: 0;
-  transition:
-    background-color 0.15s ease,
-    color 0.15s ease,
-    border-color 0.15s ease;
-  margin: 0;
-}
-.btn-primary {
-  background: var(--hl-blue);
-  color: #0b0e12;
-  border-color: var(--hl-blue);
-}
-.btn-primary:hover {
-  background: var(--hl-cyan);
-  border-color: var(--hl-cyan);
-  color: #0b0e12;
-  text-decoration: none;
-}
-.btn-ghost {
-  background: transparent;
-  color: var(--fg);
-}
-.btn-ghost:hover {
-  background-color: var(--hl-cyan);
-  color: #0b0e12;
-  text-decoration: none;
-}
-
-.prompt-path {
-  color: var(--hl-green);
-}
-.prompt-glyph {
-  color: var(--hl-cyan);
-}
-
-/* ---- mode switcher (Plan/Build/Review) ---- */
-.mode-switch {
-  display: flex;
-  justify-content: center;
-  border-bottom: 1px solid var(--border);
-}
-.mode-cell {
-  flex: 1 1 0;
-  font-family: var(--mono);
-  background: var(--focus);
-  border: 0;
-  border-right: 1px solid var(--border);
-  padding: 0.9rem 1.4rem;
-  cursor: pointer;
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  align-items: center;
-  justify-content: center;
-  color: var(--fg-dim);
-  transition: background-color 0.12s ease;
-}
-.mode-cell:last-child {
-  border-right: 0;
-}
-.mode-cell:hover {
-  color: var(--fg);
-}
-.mode-cell.is-active {
-  background: var(--bg);
-  box-shadow: inset 0 0.125rem 0 var(--hl-cyan);
-}
-.mode-name {
-  font-weight: 700;
-  font-size: 1.3rem;
-}
-.mode-name.plan {
-  color: var(--hl-green);
-}
-.mode-name.build {
-  color: var(--hl-red);
-}
-.mode-name.review {
-  color: var(--hl-cyan);
-}
-.mode-cell:not(.is-active) .mode-name {
-  color: var(--fg-dim);
-}
-
-.tui-tabpanels {
-  padding: 1.4rem 1.5rem;
-  text-align: center;
-}
-.mode-shot {
-  display: block;
-  width: auto;
-  max-width: 100%;
-  height: auto;
-  margin: 1rem auto 0;
-  border-radius: 0.25rem;
-}
-.mode-shot[alt] {
-  font-family: var(--mono);
-  font-size: 0.85rem;
-}
-.tui-tabpanel[hidden] {
-  display: none;
-}
-.tp-line {
-  margin: 0;
-}
-.tp-line.tp-dim {
-  margin: 0.9rem auto 0;
-  max-width: 80ch;
-}
-.tp-line:last-child {
-  margin-bottom: 0;
-}
-.tp-dim {
-  color: var(--fg-dim);
-}
-.hl-blue {
-  color: var(--hl-blue);
-}
-.hl-green {
-  color: var(--hl-green);
-}
-.hl-red {
-  color: var(--hl-red);
-}
-.hl-yellow {
-  color: var(--hl-yellow);
-}
-
-/* ---- faux file (plan.md) ---- */
-.file-body {
-  margin: 0;
-  padding: 1.2rem 1.3rem;
-  font-family: var(--mono);
-  font-size: clamp(0.74rem, 0.68rem + 0.3vw, 0.92rem);
-  line-height: 1.8;
-  color: var(--fg);
-  overflow-x: auto;
-  white-space: pre;
-}
-.f-com {
-  color: var(--hl-magenta);
-  font-weight: 700;
-}
-.f-h {
-  color: var(--hl-blue);
-  font-weight: 700;
-}
-.f-dim {
-  color: var(--fg-dim);
-}
-
-.t-prompt {
-  color: var(--hl-green);
-}
-.t-arg {
-  color: var(--hl-blue);
-}
-.t-add {
-  color: var(--hl-green);
-  background: var(--diff-add);
-  display: block;
-  padding: 0 0.4rem;
-  margin: 0 -0.4rem;
-}
-
 /* ---- TUI panel (shared) ---- */
 .tui-panel {
   border: 1px solid var(--border);
   border-radius: 0.25rem;
   background: var(--bg);
   overflow: hidden;
-}
-
-/* ---- why imza: differentiator grid ---- */
-.why-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  border: 1px solid var(--border);
-  border-radius: 0.25rem;
-  background: var(--bg);
-  overflow: hidden;
-}
-.why-card {
-  padding: 1.4rem 1.5rem;
-  border-top: 1px solid var(--border);
-  border-left: 1px solid var(--border);
-  margin: -1px 0 0 -1px;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-.why-card:hover {
-  background: var(--focus);
-}
-.why-card.is-wide {
-  grid-column: 1 / -1;
-}
-.why-key {
-  margin: 0;
-  font-family: var(--mono);
-  font-size: 0.8rem;
-  color: var(--hl-yellow);
-}
-.why-title {
-  margin: 0;
-  font-size: 1.15rem;
-  font-weight: 700;
-  color: var(--fg);
-}
-.why-body {
-  margin: 0;
-  font-size: 0.92rem;
-  line-height: 1.6;
-  color: var(--fg-dim);
-}
-.why-link {
-  font-size: 0.88rem;
-  align-self: start;
-}
-@media (max-width: 47.5rem) {
-  .why-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* ---- command panel (headless) ---- */
-.command-body {
-  margin: 0;
-  padding: 1.2rem 1.3rem;
-  font-family: var(--mono);
-  font-size: clamp(0.72rem, 0.66rem + 0.3vw, 0.9rem);
-  line-height: 1.8;
-  color: var(--fg);
-  overflow-x: auto;
-  white-space: pre;
-}
-.command-note {
-  margin: 0;
-  padding: 0.8rem 1.3rem;
-  border-top: 1px solid var(--border);
-  font-size: 0.88rem;
-  color: var(--fg-dim);
-  background: var(--focus);
-}
-
-/* ---- highlights as diff hunk ---- */
-.hunk-body {
-  margin: 0;
-  padding: 1.2rem 1.3rem;
-  font-family: var(--mono);
-  font-size: clamp(0.74rem, 0.68rem + 0.3vw, 0.92rem);
-  line-height: 1.7;
-  color: var(--fg);
-  overflow-x: auto;
-  white-space: pre;
-}
-
-/* ---- footprint status bar ---- */
-.statusbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1px;
-  background: var(--border);
-  border: 1px solid var(--border);
-  border-radius: 0.1875rem;
-  overflow: hidden;
-  margin-bottom: 1.6rem;
-}
-.sb-cell {
-  flex: 1 1 10rem;
-  background: var(--focus);
-  padding: 0.7rem 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-.sb-key {
-  font-size: 0.78rem;
-  color: var(--fg-dim);
-}
-.sb-val {
-  font-weight: 700;
-  color: var(--hl-yellow);
-}
-.footprint-links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1.3rem;
-  align-items: center;
-  font-size: 0.95rem;
-}
-.copy-cmd {
-  font-family: var(--mono);
-  font-size: 0.9rem;
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--fg-dim);
-  padding: 0.35rem 0.7rem;
-  border-radius: 0.1875rem;
-  cursor: pointer;
-}
-.copy-cmd:hover {
-  border-color: var(--hl-cyan);
-  color: var(--hl-cyan);
-}
-.copy-cmd code {
-  font-family: var(--mono);
-  font-size: 0.85em;
-}
-.copy-cmd.copied {
-  border-color: var(--hl-green);
-  color: var(--hl-green);
-}
-
-/* ---- footer ---- */
-.site-footer {
-  max-width: var(--maxw);
-  margin: 0 auto;
-  padding: 1.4rem var(--gutter);
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.6rem 1.6rem;
-  font-size: 0.9rem;
-}
-.footer-status {
-  color: var(--fg);
-}
-.footer-dim {
-  color: var(--fg-dim);
-}
-.footer-nav {
-  margin-left: auto;
-  display: flex;
-  gap: 1.3rem;
-}
-
-/* ---- responsive ---- */
-@media (max-width: 47.5rem) {
-  .titlebar-sub {
-    display: none;
-  }
-  .mode-cell {
-    padding: 0.7rem 0.5rem;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  html {
-    scroll-behavior: auto;
-  }
-  .hero-name::after {
-    animation: none;
-  }
-  .btn {
-    transition: none;
-  }
-}
-
-/* ---- icon + mode screenshots ---- */
-.titlebar-icon {
-  width: 1.375rem;
-  height: 1.375rem;
-  border-radius: 0.25rem;
-  display: block;
 }
 
 /* ---- app shell: full-width statusbar row below side+main hbox (app.cpp) ---- */
@@ -699,7 +145,8 @@ section {
   background: var(--canvas);
 }
 
-/* ---- left side panel (imza SidePanel: titled_section + rounded PANEL_BORDER) ---- */
+/* ---- side panel (imza SidePanel: titled_section + rounded PANEL_BORDER),
+     shared by the home and docs side panels ---- */
 .sidepanel {
   flex: 0 0 20rem;
   align-self: flex-start;
@@ -722,7 +169,7 @@ section {
   gap: 0.5rem;
   padding: 0 0.2rem;
 }
-.titlebar-icon {
+.sidepanel-icon {
   width: 1.375rem;
   height: 1.375rem;
   border-radius: 0.25rem;
@@ -826,70 +273,21 @@ section {
   color: var(--hl-cyan);
   text-decoration: underline;
 }
-.sb-left {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex: 0 0 auto;
-}
-.sb-right {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-}
-/* mode token: inverted like imza — colored bg + dark panel text, flush left.
-   Boots PLAN green like the app (status_line.cpp); scroll-spy recolors it. */
-.sb-mode {
-  font-weight: 700;
-  background: var(--hl-green);
-  color: var(--focus);
-  padding: 0.05rem 0.5rem 0.05rem 0.6rem;
-}
-.sb-sep {
-  color: var(--fg-dim);
-  flex: 0 0 auto;
-}
-/* the filler: absorbs slack so right side stays pinned right, imza-style */
-.sb-gap {
-  flex: 1 1 auto;
-  min-width: 1rem;
-}
-.sb-dir,
-.sb-ver {
-  color: var(--fg-dim);
-  flex: 0 0 auto;
-}
-.sb-branch {
-  color: var(--fg-dim);
-  font-style: italic;
-}
-.sb-dir {
-  color: var(--fg-dim);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 28vw;
-}
-/* IMZA token: inverted like imza — PANEL_FG bg + PANEL_COLOR text, flush right */
-.sb-ver {
-  background: var(--fg);
-  color: var(--bg);
-  padding: 0.05rem 0.6rem 0.05rem 0.5rem;
-  font-weight: 700;
-}
 
 /* ---- responsive: collapse sidebar into a top strip ---- */
-/* narrow: no sidebar chrome at all — content takes over */
+/* narrow: no sidebar chrome at all — content takes over; app-row stacks
+   so the docs chapter strip sits above the article, not beside it */
 @media (max-width: 51.25rem) {
   .sidepanel {
     display: none;
   }
+  .app-row {
+    flex-direction: column;
+  }
 }
-@media (max-width: 40rem) {
-  .sb-dir,
-  .sb-branch {
-    display: none;
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
   }
 }

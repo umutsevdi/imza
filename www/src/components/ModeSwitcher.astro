@@ -117,3 +117,91 @@ const modes = [
     });
   });
 </script>
+
+<style>
+  .mode-switch {
+    display: flex;
+    justify-content: center;
+    border-bottom: 1px solid var(--border);
+  }
+  .mode-cell {
+    flex: 1 1 0;
+    font-family: var(--mono);
+    background: var(--focus);
+    border: 0;
+    border-right: 1px solid var(--border);
+    padding: 0.9rem 1.4rem;
+    cursor: pointer;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    align-items: center;
+    justify-content: center;
+    color: var(--fg-dim);
+    transition: background-color 0.12s ease;
+  }
+  .mode-cell:last-child {
+    border-right: 0;
+  }
+  .mode-cell:hover {
+    color: var(--fg);
+  }
+  .mode-cell.is-active {
+    background: var(--bg);
+    box-shadow: inset 0 0.125rem 0 var(--hl-cyan);
+  }
+  .mode-name {
+    font-weight: 700;
+    font-size: 1.3rem;
+  }
+  .mode-name.plan {
+    color: var(--hl-green);
+  }
+  .mode-name.build {
+    color: var(--hl-red);
+  }
+  .mode-name.review {
+    color: var(--hl-cyan);
+  }
+  .mode-cell:not(.is-active) .mode-name {
+    color: var(--fg-dim);
+  }
+  .tui-tabpanels {
+    padding: 1.4rem 1.5rem;
+    text-align: center;
+  }
+  .mode-shot {
+    display: block;
+    width: auto;
+    max-width: 100%;
+    height: auto;
+    margin: 1rem auto 0;
+    border-radius: 0.25rem;
+  }
+  .mode-shot[alt] {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+  }
+  .tui-tabpanel[hidden] {
+    display: none;
+  }
+  .tp-line {
+    margin: 0;
+  }
+  .tp-line.tp-dim {
+    margin: 0.9rem auto 0;
+    max-width: 80ch;
+  }
+  .tp-line:last-child {
+    margin-bottom: 0;
+  }
+  .tp-dim {
+    color: var(--fg-dim);
+  }
+  @media (max-width: 47.5rem) {
+    .mode-cell {
+      padding: 0.7rem 0.5rem;
+    }
+  }
+</style>

@@ -47,3 +47,24 @@ const adds = [
     />
   </div>
 </section>
+
+<style>
+  .hunk-body {
+    margin: 0;
+    padding: 1.2rem 1.3rem;
+    font-family: var(--mono);
+    font-size: clamp(0.74rem, 0.68rem + 0.3vw, 0.92rem);
+    line-height: 1.7;
+    color: var(--fg);
+    overflow-x: auto;
+    white-space: pre;
+  }
+  /* spans come from set:html, so they escape Astro's scoping */
+  .hunk-body :global(.t-add) {
+    color: var(--hl-green);
+    background: var(--diff-add);
+    display: block;
+    padding: 0 0.4rem;
+    margin: 0 -0.4rem;
+  }
+</style>

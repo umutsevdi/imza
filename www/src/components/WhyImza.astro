@@ -62,3 +62,56 @@ const cards = [
     }
   </div>
 </section>
+
+<style>
+  .why-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border: 1px solid var(--border);
+    border-radius: 0.25rem;
+    background: var(--bg);
+    overflow: hidden;
+  }
+  .why-card {
+    padding: 1.4rem 1.5rem;
+    border-top: 1px solid var(--border);
+    border-left: 1px solid var(--border);
+    margin: -1px 0 0 -1px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .why-card:hover {
+    background: var(--focus);
+  }
+  .why-card.is-wide {
+    grid-column: 1 / -1;
+  }
+  .why-key {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    color: var(--hl-yellow);
+  }
+  .why-title {
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--fg);
+  }
+  .why-body {
+    margin: 0;
+    font-size: 0.92rem;
+    line-height: 1.6;
+    color: var(--fg-dim);
+  }
+  .why-link {
+    font-size: 0.88rem;
+    align-self: start;
+  }
+  @media (max-width: 47.5rem) {
+    .why-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

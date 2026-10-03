@@ -1,0 +1,194 @@
+---
+import icon from "../../../misc/icon.png";
+import SidePanelBody from "./SidePanelBody.astro";
+
+interface Props {
+  slug?: string;
+}
+
+const { slug } = Astro.props;
+---
+
+<div class="topbar" data-open="false">
+  <a class="topbar-brand" href="/">
+    <img class="topbar-icon" src={icon.src} alt="" width="22" height="22" />
+    <span class="topbar-name">imza</span>
+  </a>
+  <button
+    class="topbar-burger"
+    type="button"
+    aria-label="Open navigation menu"
+    aria-expanded="false"
+    aria-controls="topbar-menu"
+  >
+    <span></span>
+    <span></span>
+    <span></span>
+  </button>
+</div>
+
+<div id="topbar-menu" class="topbar-menu" hidden>
+  <div class="topbar-menu-head">
+    <span class="topbar-menu-title">Menu</span>
+    <button
+      class="topbar-close"
+      type="button"
+      aria-label="Close navigation menu"
+    >
+      &times;
+    </button>
+  </div>
+  <div class="topbar-menu-body">
+    <SidePanelBody activeSlug={slug} />
+  </div>
+</div>
+<div class="topbar-backdrop" hidden></div>
+
+<script>
+  const bar = document.querySelector<HTMLElement>(".topbar");
+  const menu = document.getElementById("topbar-menu");
+  const backdrop = document.querySelector<HTMLElement>(".topbar-backdrop");
+  const burger = document.querySelector<HTMLButtonElement>(".topbar-burger");
+  const close = document.querySelector<HTMLButtonElement>(".topbar-close");
+
+  function setOpen(open: boolean) {
+    if (!bar || !menu || !backdrop || !burger) return;
+    bar.dataset.open = String(open);
+    menu.hidden = !open;
+    backdrop.hidden = !open;
+    burger.setAttribute("aria-expanded", String(open));
+    document.body.style.overflow = open ? "hidden" : "";
+    if (open) close?.focus();
+    else burger.focus();
+  }
+
+  burger?.addEventListener("click", () =>
+    setOpen(bar?.dataset.open !== "true")
+  );
+  close?.addEventListener("click", () => setOpen(false));
+  backdrop?.addEventListener("click", () => setOpen(false));
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && bar?.dataset.open === "true") setOpen(false);
+  });
+  // follow in-page section links close the menu without leaving the page
+  menu
+    ?.querySelectorAll<HTMLAnchorElement>('a[href^="#"]')
+    .forEach((a) => a.addEventListener("click", () => setOpen(false)));
+</script>
+
+<style>
+  .topbar {
+    display: none;
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.9rem;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+  }
+  .topbar-brand {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    text-decoration: none;
+  }
+  .topbar-brand:hover {
+    text-decoration: none;
+  }
+  .topbar-brand:hover .topbar-name {
+    color: var(--hl-cyan);
+  }
+  .topbar-icon {
+    width: 1.375rem;
+    height: 1.375rem;
+    border-radius: 0.25rem;
+    display: block;
+  }
+  .topbar-name {
+    font-weight: 700;
+    font-size: 1.1rem;
+    color: var(--fg);
+  }
+  .topbar-burger {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.28rem;
+    width: 2.4rem;
+    height: 2.4rem;
+    padding: 0.55rem 0.5rem;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 0.25rem;
+    cursor: pointer;
+  }
+  .topbar-burger span {
+    display: block;
+    height: 2px;
+    width: 100%;
+    background: var(--fg);
+  }
+  .topbar-burger:hover {
+    border-color: var(--fg-dim);
+  }
+
+  .topbar-menu {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    overflow-y: auto;
+    background: var(--bg);
+    padding: 0.9rem;
+  }
+  .topbar-menu-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.6rem;
+  }
+  .topbar-menu-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--fg-dim);
+  }
+  .topbar-close {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 0.25rem;
+    color: var(--fg);
+    font-family: var(--mono);
+    font-size: 1.2rem;
+    line-height: 1;
+    width: 2.4rem;
+    height: 2.4rem;
+    cursor: pointer;
+  }
+  .topbar-close:hover {
+    background: var(--focus);
+  }
+  .topbar-menu-body {
+    display: flex;
+    flex-direction: column;
+    gap: 1.1rem;
+  }
+  .topbar-menu-body :global(.side-widget:last-child) {
+    margin-top: 0;
+  }
+  .topbar-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgb(0 0 0 / 60%);
+  }
+
+  @media (max-width: 51.25rem) {
+    .topbar {
+      display: flex;
+    }
+  }
+</style>

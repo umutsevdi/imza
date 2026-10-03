@@ -12,3 +12,16 @@ const thirdparty = fs.readFileSync("../misc/LICENSE.thirdparty.txt", "utf8");
   <h2 class="file-heading">Third-Party Licenses</h2>
   <pre class="file-body">{thirdparty}</pre>
 </DocsLayout>
+
+<style>
+  .file-body {
+    margin: 0;
+    padding: 1.2rem 1.3rem;
+    font-family: var(--mono);
+    font-size: clamp(0.74rem, 0.68rem + 0.3vw, 0.92rem);
+    line-height: 1.8;
+    color: var(--fg);
+    overflow-x: auto;
+    white-space: pre;
+  }
+</style>
