@@ -1,3 +1,53 @@
+/* ---- chapter strip: docs TOC on narrow screens (docs pages only) ---- */
+.chapter-strip {
+  display: none;
+}
+
+@media (max-width: 51.25rem) {
+  .chapter-strip {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.5rem var(--gutter);
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+  }
+  .strip-label {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--fg-dim);
+    flex: 0 0 auto;
+  }
+  .strip-track {
+    display: flex;
+    gap: 0.3rem;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    padding: 0.15rem 0;
+  }
+  .strip-pill {
+    flex: 0 0 auto;
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    color: var(--fg-dim);
+    text-decoration: none;
+    padding: 0.2rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 0.1875rem;
+    white-space: nowrap;
+  }
+  .strip-pill:hover {
+    color: var(--fg);
+    background: var(--focus);
+    text-decoration: none;
+  }
+  .strip-pill.is-active {
+    background: var(--fg);
+    border-color: var(--fg);
+    color: var(--bg);
+    font-weight: 700;
+  }
+}
 :root {
   /* imza's real ftxui palette (src) — used verbatim */
   --bg: #212428;

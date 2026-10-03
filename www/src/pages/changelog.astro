@@ -1,0 +1,12 @@
+---
+import fs from "node:fs";
+import DocsLayout from "../layouts/DocsLayout.astro";
+
+// Generated from CHANGELOG.txt by scripts/ensure-wiki.mjs. Rendered
+// literally: the file is plain text with ASCII rules, not markdown.
+const changelog = fs.readFileSync("../CHANGELOG.txt", "utf8");
+---
+
+<DocsLayout slug="changelog" title="Changelog">
+  <pre class="file-body">{changelog}</pre>
+</DocsLayout>

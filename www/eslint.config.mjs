@@ -27,6 +27,9 @@ export default tseslint.config(
       parserOptions: {
         parser: "@typescript-eslint/parser",
         extraFileExtensions: [".astro"]
+      },
+      globals: {
+        process: "readonly"
       }
     },
     rules: {

@@ -1,5 +1,5 @@
 ---
-
+import { VERSION } from "../version";
 ---
 
 <footer class="statusbar-bar" role="contentinfo">
@@ -16,7 +16,7 @@
   <span class="sb-gap"></span>
   <span class="sb-right">
     <span class="sb-dir">~/dev/imza</span>
-    <span class="sb-ver">IMZA v0.5.0</span>
+    <span class="sb-ver">IMZA {VERSION}</span>
   </span>
 </footer>
 
@@ -61,10 +61,8 @@
           sbMode.textContent = ` ${label} `;
           // imza phase colors: PLAN=green, BUILD=red, REVIEW=cyan
           let phaseColor = "#68D8E8";
-          if (best.id === "loop" || best.id === "plandoc")
-            phaseColor = "#7EE787";
-          else if (["why", "headless"].includes(best.id))
-            phaseColor = "#F77272";
+          if (best.id === "home" || best.id === "loop") phaseColor = "#7EE787";
+          else if (["why"].includes(best.id)) phaseColor = "#F77272";
           sbMode.style.background = phaseColor;
           sbMode.style.color = "#2D3238";
         }

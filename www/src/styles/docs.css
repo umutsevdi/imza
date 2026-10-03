@@ -14,6 +14,14 @@
   max-width: 76ch;
 }
 
+/* literal text files (changelog, licenses) rendered as mono blocks */
+.file-heading {
+  font-size: 1.35rem;
+  margin: 0;
+  padding: 1.2rem 1.8rem 0;
+  border-top: 1px solid var(--border);
+}
+
 /* markdown body */
 .docs-body h1 {
   font-size: 1.8rem;

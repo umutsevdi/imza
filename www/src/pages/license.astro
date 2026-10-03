@@ -1,0 +1,15 @@
+---
+import fs from "node:fs";
+import DocsLayout from "../layouts/DocsLayout.astro";
+
+// Generated from LICENSE + misc/LICENSE.thirdparty.txt by
+// scripts/ensure-wiki.mjs. Rendered literally: license text is not markdown.
+const license = fs.readFileSync("../LICENSE", "utf8");
+const thirdparty = fs.readFileSync("../misc/LICENSE.thirdparty.txt", "utf8");
+---
+
+<DocsLayout slug="license" title="License">
+  <pre class="file-body">{license}</pre>
+  <h2 class="file-heading">Third-Party Licenses</h2>
+  <pre class="file-body">{thirdparty}</pre>
+</DocsLayout>

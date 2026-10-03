@@ -3,8 +3,9 @@ import "../styles/global.css";
 import "../styles/docs.css";
 import BaseLayout from "./BaseLayout.astro";
 import WikiSidePanel from "../components/WikiSidePanel.astro";
+import ChapterStrip from "../components/ChapterStrip.astro";
 import Statusbar from "../components/Statusbar.astro";
-import { docNeighbors, hrefFor } from "../lib/docs";
+import { docNeighbors, docPages, hrefFor } from "../lib/docs";
 
 interface Props {
   slug: string;
@@ -13,6 +14,7 @@ interface Props {
 
 const { slug, title } = Astro.props;
 const { prev, next } = docNeighbors(slug);
+const isWiki = docPages().some((p) => p.slug === slug);
 ---
 
 <BaseLayout
@@ -22,6 +24,7 @@ const { prev, next } = docNeighbors(slug);
   <div class="app">
     <div class="app-row">
       <WikiSidePanel activeSlug={slug} />
+      {isWiki && <ChapterStrip activeSlug={slug} />}
       <div class="maincol">
         <main id="main" class="docs-main">
           <article class="wiki-doc tui-panel">

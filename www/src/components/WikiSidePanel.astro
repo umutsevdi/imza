@@ -1,6 +1,7 @@
 ---
 import icon from "../../../misc/icon.png";
 import { docPages, hrefFor } from "../lib/docs";
+import { VERSION } from "../version";
 
 interface Props {
   activeSlug: string;
@@ -14,7 +15,9 @@ const links = [
     href: "https://github.com/umutsevdi/imza",
     text: "Source Code"
   },
-  { href: "https://github.com/umutsevdi/imza/releases", text: "Download" }
+  { href: "https://github.com/umutsevdi/imza/releases", text: "Download" },
+  { href: "/changelog/", text: "Changelog" },
+  { href: "/license/", text: "License" }
 ];
 ---
 
@@ -53,6 +56,18 @@ const links = [
           </a>
         ))
       }
+    </div>
+  </div>
+
+  <div class="side-widget">
+    <p class="widget-title">About</p>
+    <div class="widget-body">
+      <p class="meta-line"><span class="meta-key">Language</span> C++</p>
+      <p class="meta-line"><span class="meta-key">License</span> GPL</p>
+      <p class="meta-line"><span class="meta-key">Version</span> {VERSION}</p>
+      <p class="meta-line">
+        <span class="meta-key">Developer</span> Umut Can Sevdi
+      </p>
     </div>
   </div>
 </aside>
