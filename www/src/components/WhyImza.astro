@@ -1,0 +1,64 @@
+---
+const cards = [
+  {
+    wide: true,
+    key: "lua orchestration",
+    title: "One sandbox instead of a tool bag",
+    body: "The agent doesn't juggle single-purpose tools: it writes sandboxed Lua scripts where reads, edits, searches, and shell compose into one operation. It works in bulk and discards data it doesn't need before it ever reaches your context. Measured on real sessions: mean 1.9 operations per round-trip, ~25-40% fewer context tokens per unit of work.",
+    link: {
+      href: "https://github.com/umutsevdi/imza/discussions/1",
+      text: "Read the numbers"
+    }
+  },
+  {
+    key: "performance",
+    title: "Fast and small, yet it does it all",
+    body: "A ~20 MB C++ binary that idles at 5-8 MB of RAM. No JavaScript runtime, no Electron. Starts instantly, runs smoothly."
+  },
+  {
+    key: "subagents, skills & more",
+    title: "Batteries included",
+    body: "Subagents, skills, project instruction files (AGENTS.md, CLAUDE.md, GEMINI.md), multimodal inputs, terminal notifications, and more."
+  },
+  {
+    key: "50+ providers",
+    title: "Bring the model you already pay for",
+    body: "Any OpenAI-compatible endpoint or the Anthropic API: hosted, subscription-backed, or running on your own machine. Connect the same provider twice under different labels and easily switch between accounts."
+  },
+  {
+    key: "sane permissions",
+    title: "Permissions that respect the workspace",
+    body: "Most harnesses either push you toward dangerous full-access modes or ask about every single command. imza monitors the model's behaviour and only asks when an action can mutate the workspace. Runtime flags can remove entire tool families before the session even starts."
+  },
+  {
+    key: "configuration without obscurity",
+    title: "Configure everything from the TUI",
+    body: "Every setting has an interface: swap models with /model, reasoning effort with /variant, give each subagent role its own model with /subagents. No environment magic, no hand-rolled config files; and when you do want the file, it's plain JSON."
+  },
+  {
+    key: "context engineering",
+    title: "The prompts are yours",
+    body: "Every built-in prompt fragment (system, subagents, compaction, AI review, plan revision) can be overridden with your own Markdown in a prompts/ directory. Defaults ship in the repo, so you diff against them instead of guessing."
+  }
+];
+---
+
+<section class="why" id="why" aria-labelledby="why-h">
+  <p class="section-label" id="why-h">Why imza</p>
+  <div class="why-grid">
+    {
+      cards.map((c) => (
+        <article class="why-card" class:list={{ "is-wide": c.wide }}>
+          <p class="why-key">{c.key}</p>
+          <h3 class="why-title">{c.title}</h3>
+          <p class="why-body">{c.body}</p>
+          {c.link && (
+            <a class="why-link" href={c.link.href}>
+              {c.link.text} <span aria-hidden="true">&gt;</span>
+            </a>
+          )}
+        </article>
+      ))
+    }
+  </div>
+</section>

@@ -63,9 +63,7 @@
           let phaseColor = "#68D8E8";
           if (best.id === "loop" || best.id === "plandoc")
             phaseColor = "#7EE787";
-          else if (
-            ["diff", "permissions", "models", "headless"].includes(best.id)
-          )
+          else if (["why", "headless"].includes(best.id))
             phaseColor = "#F77272";
           sbMode.style.background = phaseColor;
           sbMode.style.color = "#2D3238";

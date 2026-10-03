@@ -182,8 +182,6 @@ section {
   line-height: 1.55;
 }
 .block-intro code,
-.policy-desc code,
-.help-desc code,
 .command-note code {
   font-family: var(--mono);
   font-size: 0.85em;
@@ -298,33 +296,6 @@ section {
 }
 .prompt-glyph {
   color: var(--hl-cyan);
-}
-
-/* ---- TUI panel (shared) ---- */
-.tui-panel {
-  border: 1px solid var(--border);
-  border-radius: 0.25rem;
-  background: var(--bg);
-  overflow: hidden;
-}
-.tui-bar {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.5rem 0.9rem;
-  background: var(--focus);
-  border-bottom: 1px solid var(--border);
-}
-.tui-dot {
-  width: 0.65rem;
-  height: 0.65rem;
-  border-radius: 50%;
-  background: var(--border);
-}
-.tui-title {
-  margin-left: 0.5rem;
-  color: var(--fg-dim);
-  font-size: 0.82rem;
 }
 
 /* ---- mode switcher (Plan/Build/Review) ---- */
@@ -445,29 +416,11 @@ section {
   color: var(--fg-dim);
 }
 
-/* ---- terminal / diff ---- */
-.terminal .term-body {
-  margin: 0;
-  padding: 1.2rem 1.3rem;
-  font-family: var(--mono);
-  font-size: clamp(0.74rem, 0.68rem + 0.3vw, 0.92rem);
-  line-height: 1.7;
-  color: var(--fg);
-  overflow-x: auto;
-  white-space: pre;
-}
 .t-prompt {
   color: var(--hl-green);
 }
 .t-arg {
   color: var(--hl-blue);
-}
-.t-file {
-  color: var(--fg);
-  font-weight: 700;
-}
-.t-ctx {
-  color: var(--fg-dim);
 }
 .t-add {
   color: var(--hl-green);
@@ -476,77 +429,65 @@ section {
   padding: 0 0.4rem;
   margin: 0 -0.4rem;
 }
-.t-del {
-  color: var(--hl-red);
-  background: var(--diff-del);
-  display: block;
-  padding: 0 0.4rem;
-  margin: 0 -0.4rem;
+
+/* ---- TUI panel (shared) ---- */
+.tui-panel {
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  background: var(--bg);
+  overflow: hidden;
 }
-.t-muted {
-  color: var(--fg-dim);
+
+/* ---- why imza: differentiator grid ---- */
+.why-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  background: var(--bg);
+  overflow: hidden;
 }
-.term-note {
-  margin: 0;
-  padding: 0.7rem 1.3rem;
+.why-card {
+  padding: 1.4rem 1.5rem;
   border-top: 1px solid var(--border);
-  font-size: 0.88rem;
-  color: var(--fg);
+  border-left: 1px solid var(--border);
+  margin: -1px 0 0 -1px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.why-card:hover {
   background: var(--focus);
 }
-
-/* ---- policy block (permissions) ---- */
-.policy {
-  padding: 0.4rem 0;
+.why-card.is-wide {
+  grid-column: 1 / -1;
 }
-.policy-list {
-  list-style: none;
+.why-key {
   margin: 0;
-  padding: 0;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--hl-yellow);
 }
-.policy-item {
-  display: grid;
-  grid-template-columns: 12rem 1fr;
-  gap: 0.2rem 1.4rem;
-  padding: 0.9rem 1.3rem;
-  border-top: 1px solid var(--border);
-  align-items: baseline;
-}
-.policy-item:first-child {
-  border-top: 0;
-}
-.policy-desc {
-  color: var(--fg-dim);
-  font-size: 0.92rem;
-  line-height: 1.5;
-}
-
-/* ---- models & execution / help list ---- */
-.help-cmd {
+.why-title {
   margin: 0;
-  padding: 1rem 1.3rem 0;
+  font-size: 1.15rem;
+  font-weight: 700;
   color: var(--fg);
 }
-.help-list {
-  list-style: none;
+.why-body {
   margin: 0;
-  padding: 0.6rem 0 1rem;
-}
-.help-item {
-  display: grid;
-  grid-template-columns: 13rem 1fr;
-  gap: 0.2rem 1.4rem;
-  padding: 0.7rem 1.3rem;
-  border-top: 1px solid var(--border);
-  align-items: baseline;
-}
-.help-item:first-child {
-  border-top: 0;
-}
-.help-desc {
-  color: var(--fg-dim);
   font-size: 0.92rem;
-  line-height: 1.5;
+  line-height: 1.6;
+  color: var(--fg-dim);
+}
+.why-link {
+  font-size: 0.88rem;
+  align-self: start;
+}
+@media (max-width: 47.5rem) {
+  .why-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ---- command panel (headless) ---- */
@@ -668,11 +609,6 @@ section {
   }
   .mode-cell {
     padding: 0.7rem 0.5rem;
-  }
-  .policy-item,
-  .help-item {
-    grid-template-columns: 1fr;
-    gap: 0.15rem;
   }
 }
 
