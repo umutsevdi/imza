@@ -1,4 +1,3 @@
-/* ---- /docs pages: article styles inside the tui-panel chrome ---- */
 .docs-main {
   padding: clamp(1.5rem, 4vw, 3rem) var(--gutter);
   max-width: var(--maxw);
@@ -22,7 +21,6 @@
   border-top: 1px solid var(--border);
 }
 
-/* markdown body */
 .docs-body h1 {
   font-size: 1.8rem;
   line-height: 1.2;
@@ -54,12 +52,6 @@
 }
 .docs-body li {
   margin: 0 0 0.35rem;
-}
-.docs-body a {
-  color: var(--hl-blue);
-}
-.docs-body a:hover {
-  color: var(--hl-cyan);
 }
 .docs-body strong {
   color: var(--fg);

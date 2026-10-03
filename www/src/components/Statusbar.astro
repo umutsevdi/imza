@@ -1,5 +1,8 @@
 ---
 import { VERSION } from "../version";
+
+// status bar mimics the app's cwd prompt: ~/, ~/docs/, ~/changelog/ ...
+const dir = "~" + Astro.url.pathname;
 ---
 
 <footer class="statusbar-bar" role="contentinfo">
@@ -15,13 +18,12 @@ import { VERSION } from "../version";
   </span>
   <span class="sb-gap"></span>
   <span class="sb-right">
-    <span class="sb-dir">~/dev/imza</span>
+    <span class="sb-dir">{dir}</span>
     <span class="sb-ver">IMZA {VERSION}</span>
   </span>
 </footer>
 
 <script>
-  // Scroll-spy: highlight sidebar nav + set status-bar phase label/color.
   const widgets = Array.from(
     document.querySelectorAll<HTMLElement>(".nav-link[data-label]")
   );
@@ -61,7 +63,7 @@ import { VERSION } from "../version";
           sbMode.textContent = ` ${label} `;
           // imza phase colors: PLAN=green, BUILD=red, REVIEW=cyan
           let phaseColor = "#68D8E8";
-          if (best.id === "home" || best.id === "loop") phaseColor = "#7EE787";
+          if (best.id === "top" || best.id === "loop") phaseColor = "#7EE787";
           else if (["why"].includes(best.id)) phaseColor = "#F77272";
           sbMode.style.background = phaseColor;
           sbMode.style.color = "#2D3238";
@@ -89,11 +91,11 @@ import { VERSION } from "../version";
     font-weight: 500;
     border-top: 0;
   }
-  .statusbar-bar :global(a) {
+  .statusbar-bar a {
     color: var(--fg);
     text-decoration: none;
   }
-  .statusbar-bar :global(a:hover) {
+  .statusbar-bar a:hover {
     color: var(--hl-cyan);
     text-decoration: underline;
   }
@@ -114,7 +116,7 @@ import { VERSION } from "../version";
   /* mode token: inverted like imza — colored bg + dark panel text, flush left.
      Boots PLAN green like the app (status_line.cpp); scroll-spy recolors it. */
   .sb-mode {
-    font-weight: 700;
+    font-weight: bold;
     background: var(--hl-green);
     color: var(--focus);
     padding: 0.05rem 0.5rem 0.05rem 0.6rem;
@@ -123,7 +125,6 @@ import { VERSION } from "../version";
     color: var(--fg-dim);
     flex: 0 0 auto;
   }
-  /* the filler: absorbs slack so right side stays pinned right, imza-style */
   .sb-gap {
     flex: 1 1 auto;
     min-width: 1rem;
@@ -135,9 +136,7 @@ import { VERSION } from "../version";
     max-width: 28vw;
     flex: 0 0 auto;
   }
-  /* IMZA token: inverted like imza — PANEL_FG bg + PANEL_COLOR text, flush right */
   .sb-ver {
-    color: var(--fg-dim);
     background: var(--fg);
     color: var(--bg);
     padding: 0.05rem 0.6rem 0.05rem 0.5rem;

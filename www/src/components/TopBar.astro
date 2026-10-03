@@ -1,5 +1,5 @@
 ---
-import icon from "../../../misc/icon.png";
+import BrandLink from "./BrandLink.astro";
 import SidePanelBody from "./SidePanelBody.astro";
 
 interface Props {
@@ -10,10 +10,9 @@ const { slug } = Astro.props;
 ---
 
 <div class="topbar" data-open="false">
-  <a class="topbar-brand" href="/">
-    <img class="topbar-icon" src={icon.src} alt="" width="22" height="22" />
-    <span class="topbar-name">imza</span>
-  </a>
+  <div class="topbar-brand">
+    <BrandLink />
+  </div>
   <button
     class="topbar-burger"
     type="button"
@@ -54,12 +53,33 @@ const { slug } = Astro.props;
   function setOpen(open: boolean) {
     if (!bar || !menu || !backdrop || !burger) return;
     bar.dataset.open = String(open);
-    menu.hidden = !open;
-    backdrop.hidden = !open;
     burger.setAttribute("aria-expanded", String(open));
-    document.body.style.overflow = open ? "hidden" : "";
-    if (open) close?.focus();
-    else burger.focus();
+    if (open) {
+      menu.classList.remove("is-closing");
+      backdrop.classList.remove("is-closing");
+      menu.hidden = false;
+      backdrop.hidden = false;
+      document.body.style.overflow = "hidden";
+      close?.focus();
+      return;
+    }
+    // let the fade-out play before hiding; skip it under reduced motion,
+    // where the animation is disabled and animationend never fires
+    const finish = () => {
+      menu.classList.remove("is-closing");
+      backdrop.classList.remove("is-closing");
+      menu.hidden = true;
+      backdrop.hidden = true;
+      document.body.style.overflow = "";
+      burger.focus();
+    };
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      finish();
+      return;
+    }
+    menu.addEventListener("animationend", finish, { once: true });
+    menu.classList.add("is-closing");
+    backdrop.classList.add("is-closing");
   }
 
   burger?.addEventListener("click", () =>
@@ -70,7 +90,6 @@ const { slug } = Astro.props;
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && bar?.dataset.open === "true") setOpen(false);
   });
-  // follow in-page section links close the menu without leaving the page
   menu
     ?.querySelectorAll<HTMLAnchorElement>('a[href^="#"]')
     .forEach((a) => a.addEventListener("click", () => setOpen(false)));
@@ -92,27 +111,6 @@ const { slug } = Astro.props;
     position: absolute;
     left: 50%;
     transform: translateX(-50%);
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    text-decoration: none;
-  }
-  .topbar-brand:hover {
-    text-decoration: none;
-  }
-  .topbar-brand:hover .topbar-name {
-    color: var(--hl-cyan);
-  }
-  .topbar-icon {
-    width: 1.375rem;
-    height: 1.375rem;
-    border-radius: 0.25rem;
-    display: block;
-  }
-  .topbar-name {
-    font-weight: 700;
-    font-size: 1.1rem;
-    color: var(--fg);
   }
   .topbar-burger {
     display: flex;
@@ -121,10 +119,10 @@ const { slug } = Astro.props;
     gap: 0.28rem;
     width: 2.4rem;
     height: 2.4rem;
+    margin-left: auto;
     padding: 0.55rem 0.5rem;
     background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 0.25rem;
+    border: 0;
     cursor: pointer;
   }
   .topbar-burger span {
@@ -132,9 +130,15 @@ const { slug } = Astro.props;
     height: 2px;
     width: 100%;
     background: var(--fg);
+    transition: width 0.15s ease;
   }
-  .topbar-burger:hover {
-    border-color: var(--fg-dim);
+  /* middle bar rests tucked in; hover completes it, terminal-cursor style */
+  .topbar-burger span:nth-child(2) {
+    width: 65%;
+    transition-delay: 0.03s;
+  }
+  .topbar-burger:hover span {
+    width: 100%;
   }
 
   .topbar-menu {
@@ -144,6 +148,54 @@ const { slug } = Astro.props;
     overflow-y: auto;
     background: var(--bg);
     padding: 0.9rem;
+  }
+  .topbar-menu:not([hidden]) {
+    animation: menu-in 0.18s ease;
+  }
+  .topbar-menu.is-closing {
+    animation: menu-out 0.15s ease forwards;
+  }
+  .topbar-backdrop.is-closing {
+    animation: fade-out 0.15s ease forwards;
+  }
+  @keyframes menu-out {
+    from {
+      opacity: 1;
+      transform: none;
+    }
+    to {
+      opacity: 0;
+      transform: translateY(-0.5rem);
+    }
+  }
+  @keyframes fade-out {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+  @keyframes menu-in {
+    from {
+      opacity: 0;
+      transform: translateY(-0.5rem);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .topbar-backdrop:not([hidden]) {
+    animation: fade-in 0.18s ease;
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
   }
   .topbar-menu-head {
     display: flex;
@@ -158,18 +210,18 @@ const { slug } = Astro.props;
   }
   .topbar-close {
     background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 0.25rem;
-    color: var(--fg);
+    border: 0;
+    color: var(--fg-dim);
     font-family: var(--mono);
-    font-size: 1.2rem;
+    font-size: 1.4rem;
     line-height: 1;
     width: 2.4rem;
     height: 2.4rem;
     cursor: pointer;
+    transition: color 0.15s ease;
   }
   .topbar-close:hover {
-    background: var(--focus);
+    color: var(--fg);
   }
   .topbar-menu-body {
     display: flex;
@@ -189,6 +241,15 @@ const { slug } = Astro.props;
   @media (max-width: 51.25rem) {
     .topbar {
       display: flex;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .topbar-burger span,
+    .topbar-menu:not([hidden]),
+    .topbar-backdrop:not([hidden]) {
+      animation: none;
+      transition: none;
     }
   }
 </style>

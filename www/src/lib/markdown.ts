@@ -1,8 +1,7 @@
 import { createMarkdownProcessor } from "@astrojs/markdown-remark";
 
-// Mirrors the markdown section of astro.config.mjs (minus remarkDocsLinks,
-// which only applies to wiki-relative links) so standalone files render
-// exactly like collection entries.
+// Mirrors the markdown section of astro.config.mjs minus remarkDocsLinks
+// (wiki-relative links only) so standalone files render like collection entries.
 const processor = await createMarkdownProcessor({
   shikiConfig: { theme: "github-dark-default" }
 });

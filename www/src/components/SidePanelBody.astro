@@ -14,7 +14,12 @@ const sections = [
   { id: "loop", label: "the loop", text: "The Loop", active: false },
   { id: "why", label: "why imza", text: "Why Imza", active: false },
   { id: "headless", label: "headless", text: "Headless", active: false },
-  { id: "help", label: "what it adds", text: "What It Adds", active: false }
+  {
+    id: "get-started",
+    label: "get started",
+    text: "Get Started",
+    active: false
+  }
 ];
 
 const links = [
@@ -23,14 +28,14 @@ const links = [
     text: "Source Code"
   },
   {
-    href: "https://github.com/umutsevdi/imza/releases",
+    href: "/#get-started",
     text: "Download"
   },
   {
     href: "https://github.com/umutsevdi/imza#building-from-source",
     text: "Build"
   },
-  { href: "/docs/", text: "Guide" },
+  { href: "/docs/", text: "Wiki" },
   { href: "/changelog/", text: "Changelog" },
   { href: "/license/", text: "License" }
 ];
@@ -39,7 +44,7 @@ const links = [
 {
   activeSlug !== undefined ? (
     <nav class="side-widget" aria-label="Documentation pages">
-      <p class="widget-title">Guide</p>
+      <p class="widget-title">Wiki</p>
       <div class="widget-body">
         {pages.map((p) => (
           <a
@@ -90,23 +95,13 @@ const links = [
     <p class="meta-line"><span class="meta-key">Language</span> C++</p>
     <p class="meta-line">
       <span class="meta-key">License</span>
-      <a
-        class="nav-link"
-        href="/license/"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
+      <a class="nav-link" href="/license/">
         <span class="nav-text">GPL</span>
       </a>
     </p>
     <p class="meta-line">
       <span class="meta-key">Version</span>
-      <a
-        class="nav-link"
-        href="/changelog/"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
+      <a class="nav-link" href="/changelog/">
         <span class="nav-text">{VERSION}</span>
       </a>
     </p>

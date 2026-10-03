@@ -1,5 +1,5 @@
 ---
-import icon from "../../../misc/icon.png";
+import BrandLink from "./BrandLink.astro";
 import SidePanelBody from "./SidePanelBody.astro";
 
 interface Props {
@@ -11,16 +11,7 @@ const { activeSlug } = Astro.props;
 
 <aside class="sidepanel" aria-label="Page navigation">
   <div class="side-brand">
-    <a class="side-brand-link" href="/">
-      <img
-        class="sidepanel-icon"
-        src={icon.src}
-        alt=""
-        width="22"
-        height="22"
-      />
-      <span class="side-name">imza</span>
-    </a>
+    <BrandLink />
   </div>
 
   <SidePanelBody activeSlug={activeSlug} />

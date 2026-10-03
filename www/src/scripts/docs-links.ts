@@ -5,8 +5,6 @@ import { visit } from "unist-util-visit";
 
 // imza.wiki pages link with bare filenames (04_Sessions, Home) and image
 // paths (images/x.png); rewrite them to site routes before rendering.
-// The page table is derived from the wiki clone itself at module load.
-// (cwd-relative: this module loads inside the astro config process.)
 const WIKI_DIR = path.resolve(process.cwd(), "../wiki");
 
 function pageSlugs(): Record<string, string> {

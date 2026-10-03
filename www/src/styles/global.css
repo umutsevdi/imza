@@ -110,8 +110,7 @@ section {
   font-size: 0.98rem;
   line-height: 1.55;
 }
-.block-intro code,
-.command-note code {
+.block-intro code {
   font-family: var(--mono);
   font-size: 0.85em;
   background: var(--focus);
@@ -120,7 +119,7 @@ section {
   color: var(--fg);
 }
 
-/* ---- TUI panel (shared) ---- */
+/* ---- TUI panel ---- */
 .tui-panel {
   border: 1px solid var(--border);
   border-radius: 0.25rem;
@@ -128,7 +127,7 @@ section {
   overflow: hidden;
 }
 
-/* ---- app shell: full-width statusbar row below side+main hbox (app.cpp) ---- */
+/* ---- app shell ---- */
 .app {
   display: flex;
   flex-direction: column;
@@ -145,8 +144,76 @@ section {
   background: var(--canvas);
 }
 
-/* ---- side panel (imza SidePanel: titled_section + rounded PANEL_BORDER),
-     shared by the home and docs side panels ---- */
+/* ---- literal/terminal block ---- */
+.code-block {
+  margin: 0;
+  padding: 1.2rem 1.3rem;
+  font-family: var(--mono);
+  font-size: clamp(0.72rem, 0.66rem + 0.3vw, 0.9rem);
+  line-height: 1.8;
+  color: var(--fg);
+  overflow-x: auto;
+  white-space: pre;
+}
+.code-note {
+  margin: 0;
+  padding: 0.8rem 1.3rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.88rem;
+  color: var(--fg-dim);
+  background: var(--focus);
+}
+.code-note code {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  background: var(--focus);
+  padding: 0.05em 0.35em;
+  border-radius: 0.125rem;
+  color: var(--fg);
+}
+
+/* ---- buttons ---- */
+.btn {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 0.95rem;
+  padding: 0.35rem 1rem;
+  text-align: center;
+  display: block;
+  border-radius: 0;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+  margin: 0;
+}
+.btn-primary {
+  background: var(--hl-blue);
+  color: #0b0e12;
+  border-color: var(--hl-blue);
+}
+.btn-primary:hover {
+  background: var(--hl-cyan);
+  border-color: var(--hl-cyan);
+  color: #0b0e12;
+  text-decoration: none;
+}
+.btn-ghost {
+  background: transparent;
+  color: var(--fg);
+}
+.btn-ghost:hover {
+  background-color: var(--hl-cyan);
+  color: #0b0e12;
+  text-decoration: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn {
+    transition: none;
+  }
+}
+
+/* ---- side panel, styled like imza's SidePanel ---- */
 .sidepanel {
   flex: 0 0 20rem;
   align-self: flex-start;
@@ -164,33 +231,30 @@ section {
   margin-top: auto;
 }
 .side-brand {
+  padding: 0 0.2rem;
+}
+.brand-link {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0 0.2rem;
+  text-decoration: none;
 }
-.sidepanel-icon {
+.brand-link:hover {
+  text-decoration: none;
+}
+.brand-link:hover .brand-name {
+  color: var(--hl-cyan);
+}
+.brand-icon {
   width: 1.375rem;
   height: 1.375rem;
   border-radius: 0.25rem;
   display: block;
 }
-.side-name {
+.brand-name {
   font-weight: 700;
   font-size: 1.1rem;
   color: var(--fg);
-}
-.side-brand-link {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  text-decoration: none;
-}
-.side-brand-link:hover {
-  text-decoration: none;
-}
-.side-brand-link:hover .side-name {
-  color: var(--hl-cyan);
 }
 
 /* section_title: title case, bold, leading space, PANEL_FG_DIM (#9298A0) */
@@ -249,34 +313,7 @@ section {
   min-width: 5rem;
 }
 
-/* ---- bottom status bar (imza StatusLine: PANEL_COLOR_FOCUS bg + PANEL_FG) ---- */
-.statusbar-bar {
-  position: sticky;
-  bottom: 0;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  white-space: nowrap;
-  overflow: hidden;
-  background: var(--focus);
-  color: var(--fg);
-  font-size: 0.95rem;
-  font-weight: 500;
-  border-top: 0;
-}
-.statusbar-bar a {
-  color: var(--fg);
-  text-decoration: none;
-}
-.statusbar-bar a:hover {
-  color: var(--hl-cyan);
-  text-decoration: underline;
-}
-
-/* ---- responsive: collapse sidebar into a top strip ---- */
-/* narrow: no sidebar chrome at all — content takes over; app-row stacks
-   so the docs chapter strip sits above the article, not beside it */
+/* ---- responsive ---- */
 @media (max-width: 51.25rem) {
   .sidepanel {
     display: none;

@@ -2,10 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 
 // The wiki clone is the single source of truth: pages, order (NN_ prefix),
-// and titles (first h1) are read from it at build time. Nothing here is
-// hand-maintained. Resolved from the process cwd (the npm scripts always
-// run inside www/) because the prerender bundle's import.meta.url points
-// into dist/.
+// and titles (first h1) are read from it at build time, never hand-maintained.
+// Resolved from the process cwd because the prerender bundle's import.meta.url
+// points into dist/.
 const WIKI_DIR = path.resolve(process.cwd(), "../wiki");
 
 export interface DocPage {
