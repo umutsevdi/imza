@@ -28,8 +28,8 @@
   font-style: normal;
   font-weight: 400;
   src:
-    url("/fonts/CommitMono VariableFont.woff2") format("woff2"),
-    url("/fonts/CommitMono VariableFont.woff") format("woff");
+    url("../fonts/CommitMono VariableFont.woff2") format("woff2"),
+    url("../fonts/CommitMono VariableFont.woff") format("woff");
 }
 
 * {

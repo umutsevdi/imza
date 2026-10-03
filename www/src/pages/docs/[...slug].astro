@@ -1,0 +1,24 @@
+---
+import { getEntry } from "astro:content";
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import DocsContent from "../../components/DocsContent.astro";
+import { docPages } from "../../lib/docs";
+
+export async function getStaticPaths() {
+  const pages = docPages().filter((p) => p.slug !== "");
+  return pages.map((p) => ({ params: { slug: p.slug } }));
+}
+
+const { slug } = Astro.params;
+const page = docPages().find((p) => p.slug === slug);
+const entry = page
+  ? await getEntry("docs", page.file.replace(/\.md$/, ""))
+  : undefined;
+if (!entry) {
+  return Astro.redirect("/404");
+}
+---
+
+<DocsLayout slug={slug ?? ""} title={page?.title ?? "Wiki"}>
+  <DocsContent entry={entry} />
+</DocsLayout>

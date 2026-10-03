@@ -1,0 +1,14 @@
+---
+import { getEntry } from "astro:content";
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import DocsContent from "../../components/DocsContent.astro";
+
+const entry = await getEntry("docs", "Home");
+if (!entry) {
+  return Astro.redirect("/404");
+}
+---
+
+<DocsLayout slug="" title="Wiki">
+  <DocsContent entry={entry} />
+</DocsLayout>

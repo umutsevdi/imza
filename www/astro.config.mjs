@@ -8,6 +8,7 @@ import { remarkDocsLinks } from "./src/scripts/docs-links.ts";
 // https://astro.build/config
 export default defineConfig({
     site: "https://umutsevdi.github.io/imza",
+    base: "/imza",
     integrations: [mdx(), sitemap()],
     markdown: {
         processor: unified({

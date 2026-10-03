@@ -42,8 +42,15 @@ export function docPages(): DocPage[] {
   return PAGES;
 }
 
+const BASE = import.meta.env.BASE_URL;
+
+/** Prefix a site-absolute path with the configured base (GitHub Pages subpath). */
+export function withBase(path: string): string {
+  return BASE + path;
+}
+
 export function hrefFor(slug: string): string {
-  return slug === "" ? "/docs/" : `/docs/${slug}`;
+  return withBase(slug === "" ? "/docs/" : `/docs/${slug}`);
 }
 
 export function docNeighbors(slug: string): { prev?: DocPage; next?: DocPage } {

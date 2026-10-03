@@ -1,8 +1,10 @@
 ---
 import { VERSION } from "../version";
+import { withBase } from "../lib/docs";
 
 // status bar mimics the app's cwd prompt: ~/, ~/docs/, ~/changelog/ ...
-const dir = "~" + Astro.url.pathname;
+// pathname carries the Pages base (/imza) — display paths relative to the site root
+const dir = "~" + Astro.url.pathname.slice(import.meta.env.BASE_URL.length);
 ---
 
 <footer class="statusbar-bar" role="contentinfo">
@@ -12,7 +14,7 @@ const dir = "~" + Astro.url.pathname;
 
     <a href="https://github.com/umutsevdi/imza">repository</a>
     <span class="sb-sep">·</span>
-    <a href="/docs/">wiki</a>
+    <a href={withBase("/docs/")}>wiki</a>
     <span class="sb-sep">·</span>
     <a href="https://github.com/umutsevdi/imza/releases">releases</a>
   </span>

@@ -1,5 +1,5 @@
 ---
-import { docPages, hrefFor } from "../lib/docs";
+import { docPages, hrefFor, withBase } from "../lib/docs";
 import { VERSION } from "../version";
 
 interface Props {
@@ -28,14 +28,14 @@ const links = [
     text: "Source Code"
   },
   {
-    href: "/#get-started",
+    href: withBase("/#get-started"),
     text: "Download"
   },
   {
     href: "https://github.com/umutsevdi/imza#building-from-source",
     text: "Build"
   },
-  { href: "/docs/", text: "Wiki" },
+  { href: withBase("/docs/"), text: "Wiki" },
   { href: "/changelog/", text: "Changelog" },
   { href: "/license/", text: "License" }
 ];
@@ -95,13 +95,13 @@ const links = [
     <p class="meta-line"><span class="meta-key">Language</span> C++</p>
     <p class="meta-line">
       <span class="meta-key">License</span>
-      <a class="nav-link" href="/license/">
+      <a class="nav-link" href={withBase("/license/")}>
         <span class="nav-text">GPL</span>
       </a>
     </p>
     <p class="meta-line">
       <span class="meta-key">Version</span>
-      <a class="nav-link" href="/changelog/">
+      <a class="nav-link" href={withBase("/changelog/")}>
         <span class="nav-text">{VERSION}</span>
       </a>
     </p>
