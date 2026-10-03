@@ -683,6 +683,18 @@ section {
   font-size: 1.1rem;
   color: var(--fg);
 }
+.side-brand-link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-decoration: none;
+}
+.side-brand-link:hover {
+  text-decoration: none;
+}
+.side-brand-link:hover .side-name {
+  color: var(--hl-cyan);
+}
 
 /* section_title: title case, bold, leading space, PANEL_FG_DIM (#9298A0) */
 .widget-title {

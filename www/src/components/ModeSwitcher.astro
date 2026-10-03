@@ -1,9 +1,4 @@
 ---
-import { Image } from "astro:assets";
-import planShot from "../../../wiki/images/plan-document.png";
-import buildShot from "../../../wiki/images/build.png";
-import reviewShot from "../../../wiki/images/review.png";
-
 const modes = [
   {
     id: "plan",
@@ -11,7 +6,7 @@ const modes = [
     cls: "plan",
     line: "Build a flawless spec, together",
     dim: "Describe the outcome and the agent explores your codebase, then drafts a plan beside the chat. You edit it together until it's ready; every revision is kept, and no code changes until you switch to Build.",
-    shot: planShot,
+    shot: "/docs-images/plan-document.png",
     alt: "imza Plan tab: a co-editable plan document beside the chat, codebase read-only."
   },
   {
@@ -20,7 +15,7 @@ const modes = [
     cls: "build",
     line: "Watch the work happen, not a summary",
     dim: "The agent implements the plan with file edits, shell commands, and subagents, streaming every change as a diff the moment it's written. imza gives the model efficient tools to discover and edit code, saving both time and tokens. Permissions only interrupt when it's genuinely unsure.",
-    shot: buildShot,
+    shot: "/docs-images/build.png",
     alt: "imza Build tab: live diffs appearing as the agent edits files and runs commands."
   },
   {
@@ -29,7 +24,7 @@ const modes = [
     cls: "review",
     line: "Read one diff, not a hundred files",
     dim: "The whole change lands in a smooth code review tool. Leave comments where it matters, and AI review checks the diff against your project's guidelines to catch the boring parts for you. One click sends every finding back as a new plan revision.",
-    shot: reviewShot,
+    shot: "/docs-images/review.png",
     alt: "imza Review tab: the resulting Git diff with findings you can add and send back into the next plan."
   }
 ];
@@ -67,13 +62,13 @@ const modes = [
             hidden={idx !== 0}
           >
             <p class="tp-line">{m.line}</p>
-            <Image
+            <img
               class="mode-shot"
               src={m.shot}
               alt={m.alt}
               loading="lazy"
-              width={900}
-              height={560}
+              width="900"
+              height="560"
             />
             <p class="tp-line tp-dim">{m.dim}</p>
           </div>

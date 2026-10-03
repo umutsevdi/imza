@@ -12,10 +12,10 @@ scripts do not touch it. Node.js >= 22.12 is required.
 The site has almost no assets of its own — shared files live elsewhere
 in the repository and are imported **in place**:
 
-| Import                       | Actual source                                  |
-| ---------------------------- | ---------------------------------------------- |
+| Import                            | Actual source                                                                                       |
+| --------------------------------- | --------------------------------------------------------------------------------------------------- |
 | screenshots (`plan/build/review`) | `../wiki/images/` — a clone of [imza.wiki](https://github.com/umutsevdi/imza.wiki) at the repo root |
-| app icon                     | `../misc/icon.png` (`public/icon.png` is the favicon copy) |
+| app icon                          | `../misc/icon.png` (`public/icon.png` is the favicon copy)                                          |
 
 Consequences:
 
@@ -31,10 +31,12 @@ Consequences:
   ```sh
   git clone https://github.com/umutsevdi/imza.wiki.git wiki
   ```
+
 - Screenshot and icon updates made upstream flow into the site on the
   next rebuild; nothing is duplicated under `www/`.
-- Images outside `src/` still go through `astro:assets` optimization
-  (webp, sized, lazy-loaded).
+- All wiki images are served as-is from `public/docs-images/`
+  (copied by the prebuild hook). The landing page and the docs pages
+  share those same files, so no asset exists twice in `dist/`.
 - When a deploy pipeline is added, the same prebuild hook covers CI —
   no extra clone step needed in the workflow.
 
@@ -62,3 +64,27 @@ src/
 Interactive behavior (hero type-in, Plan/Build/Review tab switching,
 scroll-spy) lives in co-located `<script>` blocks inside the component
 that owns it — there are no separate script files.
+
+## Docs pages (/docs)
+
+The wiki clone is rendered at `/docs/` (Home) and `/docs/<slug>` for the
+ten numbered pages. At build time a content collection globs
+`../../wiki/*.md`; the `remarkDocsLinks` plugin rewrites wiki-style links
+(`04_Sessions`, `Home`, `images/x.png`) to site routes
+(`/docs/sessions`, `/docs/`, `/docs-images/x.png`). Wiki images are
+copied to `public/docs-images/` by the prebuild hook and served as-is.
+
+- `src/lib/docs.ts` - reads the page list (slugs, titles, order) from
+  the wiki clone at build time: numbered filenames give the order, each
+  page's first `#` heading gives its title. Adding a page to the wiki
+  repo is all it takes; the routes, sidebar TOC, and pager follow
+  automatically
+- `src/layouts/DocsLayout.astro` - index chrome (WikiSidePanel +
+  statusbar) around the article, pager, and edit-on-GitHub link
+- Editing docs content happens in the imza.wiki repo; this site picks it
+  up on the next build.
+
+Note: the remark plugin means the Markdown pipeline is the classic
+`unified()` one (`markdown.processor` in `astro.config.mjs`), not the
+newer Satteri default; the shiki gruvbox themes apply to docs code
+blocks as before.

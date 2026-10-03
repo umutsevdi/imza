@@ -1,0 +1,151 @@
+/* ---- /docs pages: article styles inside the tui-panel chrome ---- */
+.docs-main {
+  padding: clamp(1.5rem, 4vw, 3rem) var(--gutter);
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+.wiki-doc {
+  text-align: left;
+}
+
+.docs-body {
+  padding: 1.6rem 1.8rem;
+  max-width: 76ch;
+}
+
+/* markdown body */
+.docs-body h1 {
+  font-size: 1.8rem;
+  line-height: 1.2;
+  margin: 0 0 1.2rem;
+  letter-spacing: -0.01em;
+}
+.docs-body h2 {
+  font-size: 1.35rem;
+  margin: 2.2rem 0 0.9rem;
+  padding-top: 1.2rem;
+  border-top: 1px solid var(--border);
+}
+.docs-body h3 {
+  font-size: 1.1rem;
+  margin: 1.8rem 0 0.7rem;
+}
+.docs-body h1:first-child {
+  margin-top: 0;
+}
+.docs-body p,
+.docs-body ul,
+.docs-body ol {
+  margin: 0 0 1rem;
+  line-height: 1.7;
+}
+.docs-body ul,
+.docs-body ol {
+  padding-left: 1.4rem;
+}
+.docs-body li {
+  margin: 0 0 0.35rem;
+}
+.docs-body a {
+  color: var(--hl-blue);
+}
+.docs-body a:hover {
+  color: var(--hl-cyan);
+}
+.docs-body strong {
+  color: var(--fg);
+}
+.docs-body img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 1.2rem auto;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+}
+.docs-body hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 2rem 0;
+}
+.docs-body blockquote {
+  margin: 0 0 1rem;
+  padding: 0.2rem 0 0.2rem 1rem;
+  border-left: 3px solid var(--border);
+  color: var(--fg-dim);
+}
+.docs-body code {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  background: var(--focus);
+  padding: 0.1em 0.35em;
+  border-radius: 0.1875rem;
+}
+.docs-body pre {
+  padding: 1rem 1.2rem;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  overflow-x: auto;
+  background: var(--bg);
+  margin: 0 0 1.2rem;
+  line-height: 1.6;
+  font-size: 0.85rem;
+}
+.docs-body pre code {
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+}
+.docs-body table {
+  border-collapse: collapse;
+  margin: 0 0 1.2rem;
+  font-size: 0.9rem;
+  width: 100%;
+}
+.docs-body th,
+.docs-body td {
+  border: 1px solid var(--border);
+  padding: 0.45rem 0.7rem;
+  text-align: left;
+}
+.docs-body th {
+  background: var(--focus);
+}
+
+/* pager */
+.docs-pager {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  border-top: 1px solid var(--border);
+  padding: 1rem 1.3rem;
+  background: var(--focus);
+}
+.docs-pager-link {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  color: var(--fg);
+  text-decoration: none;
+}
+.docs-pager-link:hover {
+  color: var(--hl-cyan);
+}
+.docs-pager-link.is-next {
+  text-align: right;
+  margin-left: auto;
+}
+.docs-pager-dir {
+  font-size: 0.8rem;
+  color: var(--fg-dim);
+}
+.docs-pager-title {
+  font-weight: 700;
+}
+
+@media (max-width: 47.5rem) {
+  .docs-body {
+    padding: 1.2rem 1.1rem;
+  }
+}

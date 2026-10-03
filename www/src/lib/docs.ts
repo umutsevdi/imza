@@ -1,0 +1,54 @@
+import fs from "node:fs";
+import path from "node:path";
+
+// The wiki clone is the single source of truth: pages, order (NN_ prefix),
+// and titles (first h1) are read from it at build time. Nothing here is
+// hand-maintained. Resolved from the process cwd (the npm scripts always
+// run inside www/) because the prerender bundle's import.meta.url points
+// into dist/.
+const WIKI_DIR = path.resolve(process.cwd(), "../wiki");
+
+export interface DocPage {
+  file: string;
+  slug: string;
+  title: string;
+}
+
+function readWikiPages(): DocPage[] {
+  const files = fs
+    .readdirSync(WIKI_DIR)
+    .filter((f) => f.endsWith(".md"))
+    .sort((a, b) => {
+      // numbered pages in filename order, then Home last for the pager
+      const na = Number.parseInt(a, 10) || Number.MAX_SAFE_INTEGER;
+      const nb = Number.parseInt(b, 10) || Number.MAX_SAFE_INTEGER;
+      return na === nb ? a.localeCompare(b) : na - nb;
+    });
+  return files.map((file) => {
+    const base = file.replace(/\.md$/, "");
+    const numbered = base.match(/^(\d+)_(.*)$/);
+    const stem = numbered ? numbered[2] : base;
+    const slug = base === "Home" ? "" : stem.toLowerCase().replace(/_/g, "-");
+    const h1 = fs
+      .readFileSync(path.join(WIKI_DIR, file), "utf8")
+      .match(/^#\s+(.+)$/m);
+    const title = h1 ? h1[1].trim() : stem.replace(/_/g, " ");
+    return { file, slug, title };
+  });
+}
+
+const PAGES: DocPage[] = readWikiPages();
+
+export function docPages(): DocPage[] {
+  return PAGES;
+}
+
+export function hrefFor(slug: string): string {
+  return slug === "" ? "/docs/" : `/docs/${slug}`;
+}
+
+export function docNeighbors(slug: string): { prev?: DocPage; next?: DocPage } {
+  const idx = PAGES.findIndex((p) => p.slug === slug);
+  if (idx < 0) return {};
+  return { prev: PAGES[idx - 1], next: PAGES[idx + 1] };
+}

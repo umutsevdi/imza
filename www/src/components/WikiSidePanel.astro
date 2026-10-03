@@ -1,0 +1,58 @@
+---
+import icon from "../../../misc/icon.png";
+import { docPages, hrefFor } from "../lib/docs";
+
+interface Props {
+  activeSlug: string;
+}
+
+const { activeSlug } = Astro.props;
+const pages = docPages();
+
+const links = [
+  {
+    href: "https://github.com/umutsevdi/imza",
+    text: "Source Code"
+  },
+  { href: "https://github.com/umutsevdi/imza/releases", text: "Download" }
+];
+---
+
+<aside class="sidepanel" aria-label="Documentation navigation">
+  <div class="side-brand">
+    <a class="side-brand-link" href="/">
+      <img class="titlebar-icon" src={icon.src} alt="" width="22" height="22" />
+      <span class="side-name">imza</span>
+    </a>
+  </div>
+
+  <nav class="side-widget" aria-label="Documentation pages">
+    <p class="widget-title">Guide</p>
+    <div class="widget-body">
+      {
+        pages.map((p) => (
+          <a
+            class="nav-link"
+            class:list={{ "is-active": p.slug === activeSlug }}
+            href={hrefFor(p.slug)}
+          >
+            <span class="nav-text">{p.title}</span>
+          </a>
+        ))
+      }
+    </div>
+  </nav>
+
+  <div class="side-widget">
+    <p class="widget-title">See</p>
+    <div class="widget-body">
+      {
+        links.map((l) => (
+          <a class="nav-link" href={l.href}>
+            <span class="nav-text">{l.text}</span>
+          </a>
+        ))
+      }
+    </div>
+  </div>
+</aside>

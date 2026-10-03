@@ -1,0 +1,59 @@
+---
+import "../styles/global.css";
+import "../styles/docs.css";
+import BaseLayout from "./BaseLayout.astro";
+import WikiSidePanel from "../components/WikiSidePanel.astro";
+import Statusbar from "../components/Statusbar.astro";
+import { docNeighbors, hrefFor } from "../lib/docs";
+
+interface Props {
+  slug: string;
+  title: string;
+}
+
+const { slug, title } = Astro.props;
+const { prev, next } = docNeighbors(slug);
+---
+
+<BaseLayout
+  title={`${title} - imza docs`}
+  description="imza user guide: installation, connecting models, the Plan-Build-Review workflow, permissions, and more."
+>
+  <div class="app">
+    <div class="app-row">
+      <WikiSidePanel activeSlug={slug} />
+      <div class="maincol">
+        <main id="main" class="docs-main">
+          <article class="wiki-doc tui-panel">
+            <div class="docs-body">
+              <slot />
+            </div>
+            <div class="docs-pager">
+              {
+                prev ? (
+                  <a class="docs-pager-link" href={hrefFor(prev.slug)}>
+                    <span class="docs-pager-dir">&lt; previous</span>
+                    <span class="docs-pager-title">{prev.title}</span>
+                  </a>
+                ) : (
+                  <span />
+                )
+              }
+              {
+                next ? (
+                  <a class="docs-pager-link is-next" href={hrefFor(next.slug)}>
+                    <span class="docs-pager-dir">next &gt;</span>
+                    <span class="docs-pager-title">{next.title}</span>
+                  </a>
+                ) : (
+                  <span />
+                )
+              }
+            </div>
+          </article>
+        </main>
+      </div>
+    </div>
+    <Statusbar />
+  </div>
+</BaseLayout>

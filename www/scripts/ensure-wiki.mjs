@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, cpSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -10,6 +10,7 @@ const repoRoot = path.resolve(
 const wiki = path.join(repoRoot, "wiki");
 
 if (existsSync(path.join(wiki, "Home.md"))) {
+  copyImages(wiki);
   process.exit(0);
 }
 
@@ -27,3 +28,15 @@ execFileSync(
   ["clone", "https://github.com/umutsevdi/imza.wiki.git", wiki],
   { stdio: "inherit" }
 );
+copyImages(wiki);
+
+// Serve wiki images as-is under /docs-images/ for the /docs pages.
+function copyImages(wikiDir) {
+  const src = path.join(wikiDir, "images");
+  const dest = path.join(repoRoot, "www", "public", "docs-images");
+  if (!existsSync(src)) {
+    return;
+  }
+  mkdirSync(dest, { recursive: true });
+  cpSync(src, dest, { recursive: true });
+}
