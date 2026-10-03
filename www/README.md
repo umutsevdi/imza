@@ -17,7 +17,7 @@ in the repository and are imported **in place**:
 | screenshots (`plan/build/review`) | `../wiki/images/` — a clone of [imza.wiki](https://github.com/umutsevdi/imza.wiki) at the repo root                               |
 | app icon                          | `../misc/icon.png` (`public/icon.png` is the favicon copy)                                                                        |
 | version (`src/version.ts`)        | `IMZA_VERSION` environment variable set by the build pipeline (same name as the app's compile definition); falls back to `v0.0.0` |
-| `/changelog/` page                | `../CHANGELOG.txt`, read directly at build time (rendered literally, not markdown)                                                |
+| `/changelog/` page                | `../CHANGELOG.txt`, read directly at build time and rendered as markdown                                                          |
 | `/license/` page                  | `../LICENSE` + `../misc/LICENSE.thirdparty.txt`, read directly (rendered literally, not markdown)                                 |
 
 Consequences:

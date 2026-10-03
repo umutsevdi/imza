@@ -2,8 +2,7 @@
 import fs from "node:fs";
 import DocsLayout from "../layouts/DocsLayout.astro";
 
-// Generated from LICENSE + misc/LICENSE.thirdparty.txt by
-// scripts/ensure-wiki.mjs. Rendered literally: license text is not markdown.
+// License text is plain text, not markdown — rendered literally.
 const license = fs.readFileSync("../LICENSE", "utf8");
 const thirdparty = fs.readFileSync("../misc/LICENSE.thirdparty.txt", "utf8");
 ---

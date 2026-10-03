@@ -14,7 +14,7 @@
   max-width: 76ch;
 }
 
-/* literal text files (changelog, licenses) rendered as mono blocks */
+/* literal text files (licenses) rendered as mono blocks */
 .file-heading {
   font-size: 1.35rem;
   margin: 0;
