@@ -1,5 +1,6 @@
 # build output
 dist/
+src/content/wiki/
 # generated types
 .astro/
 

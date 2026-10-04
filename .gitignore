@@ -90,6 +90,4 @@ CMakeUserPresets.json
 #cmake-build-*
 
 AGENTS.md
-/wiki/
 /docs/
-www/public/docs-images/

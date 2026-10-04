@@ -3,10 +3,10 @@ import { fileURLToPath } from "node:url";
 import { defineCollection, z } from "astro:content";
 import { glob } from "astro/loaders";
 
-// The imza.wiki clone lives at the repo root, two levels up from www/.
+// The imza.wiki clone is materialized here by scripts/ensure-wiki.mjs.
 const wikiDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "../../wiki"
+  "content/wiki"
 );
 
 const docs = defineCollection({

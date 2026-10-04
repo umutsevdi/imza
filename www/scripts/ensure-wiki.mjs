@@ -1,16 +1,18 @@
-import { existsSync, cpSync, mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-const repoRoot = path.resolve(
+// The wiki clone lives inside the Astro source tree so markdown image
+// references (images/x.png) resolve through the content pipeline and get
+// hashed, base-aware URLs on any deploy target.
+const wwwRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "../.."
+  ".."
 );
-const wiki = path.join(repoRoot, "wiki");
+const wiki = path.join(wwwRoot, "src", "content", "wiki");
 
 if (existsSync(path.join(wiki, "Home.md"))) {
-  copyImages(wiki);
   process.exit(0);
 }
 
@@ -28,15 +30,3 @@ execFileSync(
   ["clone", "https://github.com/umutsevdi/imza.wiki.git", wiki],
   { stdio: "inherit" }
 );
-copyImages(wiki);
-
-// Serve wiki images as-is under /docs-images/ for the /docs pages.
-function copyImages(wikiDir) {
-  const src = path.join(wikiDir, "images");
-  const dest = path.join(repoRoot, "www", "public", "docs-images");
-  if (!existsSync(src)) {
-    return;
-  }
-  mkdirSync(dest, { recursive: true });
-  cpSync(src, dest, { recursive: true });
-}

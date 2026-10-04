@@ -1,4 +1,6 @@
 ---
+import { withBase } from "../lib/docs";
+
 const modes = [
   {
     id: "plan",
@@ -6,7 +8,7 @@ const modes = [
     cls: "plan",
     line: "Build a flawless spec, together",
     dim: "Describe the outcome and the agent explores your codebase, then drafts a plan beside the chat. You edit it together until it's ready; every revision is kept, and no code changes until you switch to Build.",
-    shot: "/docs-images/plan-document.png",
+    shot: withBase("/docs-images/plan-document.png"),
     alt: "imza Plan tab: a co-editable plan document beside the chat, codebase read-only."
   },
   {
@@ -15,7 +17,7 @@ const modes = [
     cls: "build",
     line: "Watch the work happen, not a summary",
     dim: "The agent implements the plan with file edits, shell commands, and subagents, streaming every change as a diff the moment it's written. imza gives the model efficient tools to discover and edit code, saving both time and tokens. Permissions only interrupt when it's genuinely unsure.",
-    shot: "/docs-images/build.png",
+    shot: withBase("/docs-images/build.png"),
     alt: "imza Build tab: live diffs appearing as the agent edits files and runs commands."
   },
   {
@@ -24,7 +26,7 @@ const modes = [
     cls: "review",
     line: "Read one diff, not a hundred files",
     dim: "The whole change lands in a smooth code review tool. Leave comments where it matters, and AI review checks the diff against your project's guidelines to catch the boring parts for you. One click sends every finding back as a new plan revision.",
-    shot: "/docs-images/review.png",
+    shot: withBase("/docs-images/review.png"),
     alt: "imza Review tab: the resulting Git diff with findings you can add and send back into the next plan."
   }
 ];

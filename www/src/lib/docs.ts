@@ -1,11 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 
-// The wiki clone is the single source of truth: pages, order (NN_ prefix),
-// and titles (first h1) are read from it at build time, never hand-maintained.
-// Resolved from the process cwd because the prerender bundle's import.meta.url
-// points into dist/.
-const WIKI_DIR = path.resolve(process.cwd(), "../wiki");
+// The wiki clone (materialized by scripts/ensure-wiki.mjs) is the single
+// source of truth: pages, order (NN_ prefix), and titles (first h1) are read
+// from it at build time, never hand-maintained. Resolved from the process cwd
+// because the prerender bundle's import.meta.url points into dist/.
+const WIKI_DIR = path.resolve(process.cwd(), "src/content/wiki");
 
 export interface DocPage {
   file: string;
@@ -42,7 +42,7 @@ export function docPages(): DocPage[] {
   return PAGES;
 }
 
-const BASE = import.meta.env.BASE_URL;
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 /** Prefix a site-absolute path with the configured base (GitHub Pages subpath). */
 export function withBase(path: string): string {
