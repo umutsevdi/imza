@@ -168,6 +168,13 @@ public:
     StatusView status_view() const;
     bool has_items() const;
     bool has_pending_work() const;
+    // True while any CompactionEvent is still running; drives the status
+    // bar spinner without scanning the timeline.
+    bool compaction_running() const
+    {
+        std::lock_guard lock(_mutex);
+        return _running_compactions > 0;
+    }
     SessionSnapshot snapshot() const;
     std::optional<SessionSnapshot> snapshot_for_save() const;
     void restore(SessionSnapshot snapshot);
@@ -242,6 +249,8 @@ public:
         Signal<>::Callback callback);
     [[nodiscard]] Signal<>::Subscription subscribe_to_plan_change(
         Signal<>::Callback callback);
+    [[nodiscard]] Signal<>::Subscription subscribe_to_compaction_change(
+        Signal<>::Callback callback);
 
 private:
     AssistantTurn* _last_assistant_locked();
@@ -253,6 +262,9 @@ private:
     ToolCall* _find_planning_tool_locked(const ToolCallRequest& req);
     void _finalize_reasoning(AssistantTurn& a);
     void _finish_session_locked(const std::string& error);
+    // Fill unfinished tool calls with a cancelled result so an
+    // interrupted turn cannot block compaction or switching forever.
+    void _cancel_dangling_tools_locked();
     void _update_usage(
         const StreamEvent& usage_event, const ModelPricing& pricing);
     void _notify_title_change();
@@ -288,9 +300,10 @@ private:
     Usage _last;
     double _total_cost = 0.0;
 
-    std::size_t _next_tool_id       = 1;
-    std::size_t _next_compaction_id = 1;
-    std::size_t _next_queued_id     = 0;
+    std::size_t _next_tool_id        = 1;
+    std::size_t _next_compaction_id  = 1;
+    std::size_t _running_compactions = 0;
+    std::size_t _next_queued_id      = 0;
     std::optional<std::chrono::steady_clock::time_point> _reasoning_start;
     std::optional<std::chrono::steady_clock::time_point> _turn_started;
     std::atomic<bool> _interrupt_requested { false };
@@ -305,6 +318,7 @@ private:
     Signal<> _title_changed;
     Signal<> _attachments_changed;
     Signal<> _plan_changed;
+    Signal<> _compaction_changed;
 };
 
 enum class WorkflowPhase { PLAN, BUILD, REVIEW };

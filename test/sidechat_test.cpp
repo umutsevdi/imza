@@ -138,6 +138,49 @@ TEST_CASE("refresh_sidechat requires an open sidechat")
         != std::string::npos);
 }
 
+TEST_CASE("compacting a sidechat drops the stale seed without a model call")
+{
+    auto state = imza::test::make_test_state(
+        imza::test::run_immediately, imza::test::test_config());
+    state->session->append_item(UserTurn { "first question", { } });
+    state->session->append_item(
+        AssistantTurn { "first answer", "", "", { }, "", "" });
+    open_sidechat(*state);
+    ensure_sidechat_seeded(*state->sidechat);
+    REQUIRE_FALSE(
+        state->sidechat->session->snapshot().compacted_summary.empty());
+    state->sidechat->session->append_item(UserTurn { "own question", { } });
+
+    const auto selection = state->providers->active_selection();
+    REQUIRE(selection.has_value());
+    compact_session(*state->sidechat,
+        make_turn_settings(*selection, state->sidechat->session->mode()));
+
+    // The seeded transcript is dropped wholesale while the sidechat's
+    // own turn survives; the compaction runs on its own worker.
+    REQUIRE(imza::test::wait_until([&] {
+        return state->sidechat->session->snapshot().compacted_summary.empty();
+    }));
+    const SessionSnapshot after = state->sidechat->session->snapshot();
+    CHECK(after.compacted_summary.empty());
+    CHECK(after.compacted_item_count == 0);
+    bool own_turn_survives = false;
+    bool event_completed   = false;
+    for (const auto& item : after.items) {
+        if (const auto* turn = std::get_if<UserTurn>(&item)) {
+            own_turn_survives
+                = own_turn_survives || turn->text == "own question";
+        }
+        if (const auto* event = std::get_if<CompactionEvent>(&item)) {
+            event_completed = event_completed
+                || event->status == CompactionEvent::Status::COMPLETED;
+        }
+    }
+    CHECK(own_turn_survives);
+    CHECK(event_completed);
+    CHECK(state->sidechat->session->error().empty());
+}
+
 TEST_CASE("sidechat and main chat fill the height side by side")
 {
     auto state = imza::test::make_test_state();

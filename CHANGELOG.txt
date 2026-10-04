@@ -13,9 +13,16 @@ CHANGELOG
 <https://github.com/umutsevdi/imza/releases/tag/v0.5.2>
 
 Changes:
+  - Compaction now runs in the background after a turn finishes, so
+    replies are no longer delayed by it.
+  - The Sidechat no longer re-summarizes the whole conversation.
   - Thought blocks are no longer shown when the model produced no
     reasoning content.
   - Simplified plan document generation.
+  - The loading animation now sits to the left of the hints line while
+    the agent is working.
+  - Fixed a stuck state after interrupting a tool that blocked /compact
+    and session switching.
 
 -------------------------------------------------------------------------------
 0.5.1 - 2026-10-3

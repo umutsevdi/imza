@@ -108,8 +108,7 @@ namespace {
         Elements blocks;
         for (int i = 0; i < PROCESS_TRACK_BLOCKS; ++i) {
             const bool filled = i >= begin && i < begin + width;
-            blocks.push_back(text("─") | color(filled ? HL_GREEN : PANEL_FG_DIM)
-                | bgcolor(PANEL_COLOR));
+            blocks.push_back(text("─") | color(filled ? HL_GREEN : PANEL_FG_DIM));
         }
         return hbox(std::move(blocks));
     }
@@ -273,16 +272,6 @@ namespace {
                                 || tc->name == "lua")
                             && !tc->result.has_value();
                     });
-            const bool compaction_running = std::any_of(st.items().begin(),
-                st.items().end(), [](const ConversationItem& item) {
-                    const auto* event = std::get_if<CompactionEvent>(&item);
-                    return event != nullptr
-                        && event->status == CompactionEvent::Status::RUNNING;
-                });
-            if (tool_running || compaction_running) {
-                animation::RequestAnimationFrame();
-            }
-
             const std::uint64_t content_serial = st.content_serial();
             const std::vector<ConversationItem>& conversation = st.items();
             const std::size_t item_count = conversation.size();
@@ -491,14 +480,6 @@ namespace {
                     _item_versions[item_index] = eff_version;
                 }
                 Element el = _item_cache[item_index];
-                if (const auto* event = std::get_if<CompactionEvent>(&it);
-                    event != nullptr
-                    && event->status == CompactionEvent::Status::RUNNING) {
-                    el = hbox({
-                        dim_spinner(_frame),
-                        text(" Compacting…") | dim,
-                    });
-                }
                 if ((streaming || connecting)
                     && std::holds_alternative<AssistantTurn>(it)
                     && is_trailing) {
@@ -595,7 +576,12 @@ namespace {
                 ? _hints.phase_line_fn()
                 : _hints.phase_line;
             if (!phase_line.empty()) {
-                hints.push_back(hint_bar(phase_line));
+                if (busy) {
+                    hints.push_back(hbox({ queued_indicator(_frame), filler(),
+                        text(phase_line) | dim }));
+                } else {
+                    hints.push_back(hint_bar(phase_line));
+                }
             }
             if (!hints.empty()) {
                 bottom.push_back(vbox(std::move(hints)) | xflex);
@@ -605,11 +591,6 @@ namespace {
             }
             Element hint_line = text(_hints.input_hint) | color(PANEL_FG_DIM)
                 | bgcolor(PANEL_COLOR);
-            if (busy) {
-                hint_line = hbox({ std::move(hint_line), filler(),
-                                queued_indicator(_frame) })
-                    | bgcolor(PANEL_COLOR);
-            }
             bottom.push_back(
                 vbox({ std::move(input_box) | yflex, std::move(hint_line) }));
             if (!st.error().empty() || st.retry_countdown()) {
@@ -726,9 +707,14 @@ namespace {
         void OnAnimation(animation::Params&) override
         {
             const auto phase = _session->phase();
-            const bool busy  = phase == Session::Phase::STREAMING
-                || phase == Session::Phase::CONNECTING;
             if (phase != Session::Phase::IDLE) {
+                ++_frame;
+                animation::RequestAnimationFrame();
+                return;
+            }
+            // Background compaction outlives the turn: keep the timeline
+            // spinner alive while its event is still running.
+            if (_session->compaction_running()) {
                 ++_frame;
                 animation::RequestAnimationFrame();
                 return;

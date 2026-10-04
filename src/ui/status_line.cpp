@@ -15,6 +15,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <vector>]
 
 namespace imza {
 using namespace ftxui;
@@ -38,6 +39,9 @@ namespace {
                   _state->subagents->subscribe([](const SubagentEvent&) {
                       animation::RequestAnimationFrame();
                   }))
+            , _compaction_subscription(
+                  _state->session->subscribe_to_compaction_change(
+                      [] { animation::RequestAnimationFrame(); }))
         {
         }
 
@@ -46,9 +50,8 @@ namespace {
             const StatusConfigView config     = _state->providers->status();
             const Session::StatusView session = _state->session->status_view();
             const LayoutCtx ctx               = _layout();
-            const bool wide              = ctx.kind == LayoutCtx::Kind::WIDE;
-            const bool environment_ready = _state->environment->ready();
-            const WorkflowPhase phase    = _workflow();
+            const bool wide           = ctx.kind == LayoutCtx::Kind::WIDE;
+            const WorkflowPhase phase = _workflow();
             std::string mode_label;
             Color mode_color;
             switch (phase) {
@@ -109,20 +112,9 @@ namespace {
                 bar.push_back(text(" · " + tags) | color(PANEL_FG_DIM));
             }
             bar.push_back(filler());
-            const std::size_t running_agents
-                = _state->subagents->running_count(false);
-            if (!environment_ready || running_agents > 0) {
+            const bool any_task = append_background_tasks(bar, wide);
+            if (any_task) {
                 animation::RequestAnimationFrame();
-                bar.push_back(dim_spinner(_frame));
-                if (wide) {
-                    bar.push_back(!environment_ready
-                            ? text(" Caching…")
-                            : text(" " + std::to_string(running_agents)
-                                  + (running_agents == 1 ? " agent  "
-                                                         : " agents  "))
-                                | color(PANEL_FG_DIM));
-                }
-                bar.push_back(text("  "));
             }
             if (wide) {
                 bar.push_back(text(_cwd()) | color(PANEL_FG_DIM));
@@ -140,14 +132,82 @@ namespace {
 
         void OnAnimation(animation::Params&) override
         {
-            if (!_state->environment->ready()
-                || _state->subagents->running_count(false) > 0) {
+            if (any_background_task()) {
                 ++_frame;
                 animation::RequestAnimationFrame();
             }
         }
 
     private:
+        struct BackgroundTask {
+            std::string label;
+            bool active;
+        };
+
+        std::size_t running_agents() const
+        {
+            return _state->subagents->running_count(false);
+        }
+
+        BackgroundTask agents_task() const
+        {
+            const std::size_t count = running_agents();
+            return { std::to_string(count)
+                    + (count == 1 ? " agent" : " agents"),
+                count > 0 };
+        }
+
+        // Every long-running background job the bar advertises, in
+        // display order. One row per task keeps render, label and the
+        // animation keep-alive in step.
+        std::vector<BackgroundTask> background_tasks() const
+        {
+            return {
+                { "Caching…", !_state->environment->ready() },
+                { "Compacting…", _state->session->compaction_running() },
+                agents_task(),
+            };
+        }
+
+        bool any_background_task() const
+        {
+            for (const BackgroundTask& task : background_tasks()) {
+                if (task.active) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Spinner plus the active labels; returns true when anything is
+        // shown, so the caller keeps the frame loop alive.
+        bool append_background_tasks(Elements& bar, bool wide) const
+        {
+            const auto tasks = background_tasks();
+            bool any         = false;
+            std::string label;
+            for (const BackgroundTask& task : tasks) {
+                if (!task.active) {
+                    continue;
+                }
+                if (any) {
+                    label += " · ";
+                }
+                label += task.label;
+                any = true;
+            }
+            if (!any) {
+                return false;
+            }
+            animation::RequestAnimationFrame();
+            bar.push_back(dim_spinner(_frame));
+            if (wide) {
+                bar.push_back(text(" " + label) | color(PANEL_FG_DIM));
+            }
+            bar.push_back(text("  "));
+            return true;
+        }
+
         std::shared_ptr<ApplicationState> _state;
         LayoutFn _layout;
         WorkflowFn _workflow;
@@ -157,6 +217,7 @@ namespace {
         Signal<>::Subscription _workspace_subscription;
         Signal<>::Subscription _repository_subscription;
         Signal<const SubagentEvent&>::Subscription _subagent_subscription;
+        Signal<>::Subscription _compaction_subscription;
 
         ModelPricing _cached_pricing(const std::string& model)
         {

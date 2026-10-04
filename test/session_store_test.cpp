@@ -140,6 +140,27 @@ TEST_CASE("saved sessions continue in place and rewrite the same file")
     CHECK(imza::saved_sessions().size() == 1);
 }
 
+TEST_CASE("a dangling tool call from an interrupted turn heals on restore")
+{
+    DataHome home;
+    imza::Session source;
+    source.begin_send("run lua");
+    source.append_assistant("model", "off");
+    imza::test::append_tool(
+        source, imza::ToolCallRequest { "t1", "lua", "{}" });
+    // Interrupted mid-tool: no result, saved as-is.
+    REQUIRE(imza::save_session(source) == imza::Status::OK);
+    const auto saved = imza::saved_sessions();
+    REQUIRE(saved.size() == 1);
+
+    imza::Session loaded;
+    REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
+    // The restored session must not carry pending work, or compaction
+    // and session switching stay blocked forever.
+    CHECK_FALSE(loaded.has_pending_work());
+    CHECK(loaded.phase() == imza::Session::Phase::IDLE);
+}
+
 TEST_CASE("empty sessions are not saved")
 {
 #ifdef _WIN32

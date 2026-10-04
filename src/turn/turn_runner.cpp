@@ -152,6 +152,7 @@ TurnRunner::TurnRunner(ApplicationState& state, PostFn post,
 TurnRunner::~TurnRunner()
 {
     _alive.store(false);
+    _compaction_worker.reset();
     _worker.reset();
 }
 
@@ -172,7 +173,11 @@ void TurnRunner::clear()
     _stream_events.clear();
 }
 
-void TurnRunner::stop() { _alive.store(false); }
+void TurnRunner::stop()
+{
+    _alive.store(false);
+    _compaction_worker.reset();
+}
 
 void TurnRunner::set_on_finish(std::function<void(std::string)> on_finish)
 {
@@ -240,95 +245,101 @@ std::optional<std::string> TurnRunner::_summarize(
     return success ? std::optional(std::move(summary)) : std::nullopt;
 }
 
-bool TurnRunner::_compact_history(std::vector<Message>& history,
-    const TurnSettings& settings, std::uint64_t prompt_tokens)
+// Summarize everything past the previous compaction boundary and fold the
+// result into the session's compacted context. Runs on the compaction
+// worker; the caller dispatched `_begin_compaction_job` first.
+void TurnRunner::_run_compaction(TurnSettings settings, bool report_nothing)
 {
-    const ModelPricing pricing = _state->providers->pricing_for(settings.model);
-    if (!compaction_due(pricing, prompt_tokens, history.size())) {
-        return true;
+    _authenticate_route(settings);
+    const auto nothing_to_compact = [this, report_nothing] {
+        if (!report_nothing) {
+            return;
+        }
+        _post([this] {
+            _state->session->set_error("Nothing to compact.");
+            _on_finish("");
+        });
+    };
+
+    const SessionSnapshot snapshot = _state->session->snapshot();
+    const std::optional<std::size_t> last_user
+        = last_user_turn_index(snapshot.items);
+    const std::size_t boundary = last_user.has_value() ? *last_user + 1 : 0;
+    if (boundary <= snapshot.compacted_item_count) {
+        nothing_to_compact();
+        return;
     }
 
-    std::size_t tail = history.size();
-    while (tail > 1 && history[tail - 1].type != Message::Type::USER) {
-        --tail;
+    // A sidechat's seeded context is a verbatim copy of the parent
+    // transcript: re-summarizing it would pay a full round-trip over
+    // material the parent already owns. Drop the stale seed instead;
+    // the sidechat's own items stay in the timeline.
+    if (_state->parent_state != nullptr
+        && !snapshot.compacted_summary.empty()) {
+        const auto event_id = _state->session->begin_compaction().first;
+        _state->session->finish_compaction(event_id, "", 0, true);
+        _post([this] { _on_finish(""); });
+        return;
     }
-    if (tail <= 1) {
-        return true;
+
+    std::vector<Message> history = _state->session->build_history(
+        _state->prompts->system(), settings.dialect);
+    if (history.size() < 2) {
+        nothing_to_compact();
+        return;
     }
-    --tail;
+
+    // build_history leads with [system, <session-summary>] when a
+    // summary exists; summarize only what that summary does not cover.
+    const std::size_t begin = snapshot.compacted_summary.empty() ? 1 : 2;
 
     const auto [event_id, prefix_size] = _state->session->begin_compaction();
     const std::optional<std::string> summary
-        = _summarize(history, 1, tail, settings);
-    _state->session->finish_compaction(
-        event_id, summary.value_or(""), prefix_size, summary.has_value());
+        = _summarize(history, begin, history.size(), settings);
     if (!summary) {
-        return !_state->session->interrupt_requested();
+        _state->session->finish_compaction(event_id, "", prefix_size, false);
+        _post([this] { _on_finish(""); });
+        return;
     }
 
-    std::vector<Message> recent(history.begin() + tail, history.end());
-    history.erase(history.begin() + 1, history.end());
-    history.push_back({ Message::Type::USER,
-        "<session-summary>\n" + *summary + "\n</session-summary>" });
-    history.insert(history.end(), std::make_move_iterator(recent.begin()),
-        std::make_move_iterator(recent.end()));
-    return true;
+    const auto absorbed = boundary - snapshot.compacted_item_count;
+    if (report_nothing) {
+        _post([this, event_id, text = *summary, absorbed] {
+            _state->session->complete_manual_compaction(
+                event_id, std::move(text), absorbed);
+            _on_finish("");
+        });
+        return;
+    }
+    // The automatic path replaces the compacted context wholesale, so
+    // the previous summary rides along under the earlier-compactions tag.
+    std::string merged = *summary;
+    if (!snapshot.compacted_summary.empty()) {
+        merged += "\n\n<earlier-compactions>\n" + snapshot.compacted_summary
+            + "\n</earlier-compactions>";
+    }
+    _state->session->finish_compaction(
+        event_id, std::move(merged), prefix_size, true);
 }
 
-// The manual /compact path: no turn is in flight, so the model history
-// is rebuilt from the session and a forced summary is folded into the
-// session's compacted context — previous summary included — with the
-// boundary advanced over the absorbed timeline items.
+void TurnRunner::_begin_compaction_job(
+    TurnSettings settings, bool report_nothing)
+{
+    if (_compaction_active.exchange(true)) {
+        return;
+    }
+    _compaction_worker.emplace(
+        [this, settings = std::move(settings), report_nothing]() mutable {
+            _run_compaction(std::move(settings), report_nothing);
+            _compaction_active.store(false);
+        });
+}
+
+// The manual /compact path: forced compaction while the session is idle.
 void TurnRunner::spawn_compaction(TurnSettings settings)
 {
     _blocked_permission.store(false);
-    _worker.emplace([this, settings = std::move(settings)]() mutable {
-        _authenticate_route(settings);
-        const SessionSnapshot snapshot = _state->session->snapshot();
-        // The absorbed range is the timeline past the previous compaction
-        // boundary up to the last user item — the live head nothing can
-        // follow. Nothing user-led at all, or everything already behind
-        // the boundary, means there is nothing new to summarize.
-        const std::optional<std::size_t> last_user
-            = last_user_turn_index(snapshot.items);
-        const std::size_t boundary = last_user.has_value() ? *last_user + 1 : 0;
-        const auto nothing_to_compact = [this] {
-            _post([this] {
-                _state->session->set_error("Nothing to compact.");
-                _on_finish("");
-            });
-        };
-        if (boundary <= snapshot.compacted_item_count) {
-            nothing_to_compact();
-            return;
-        }
-
-        std::vector<Message> history = _state->session->build_history(
-            _state->prompts->system(), settings.dialect);
-        if (history.size() < 2) {
-            nothing_to_compact();
-            return;
-        }
-
-        const auto [event_id, prefix_size]
-            = _state->session->begin_compaction();
-        const std::optional<std::string> summary
-            = _summarize(history, 1, history.size(), settings);
-        if (!summary) {
-            _state->session->finish_compaction(
-                event_id, "", prefix_size, false);
-            _post([this] { _on_finish(""); });
-            return;
-        }
-
-        _post(
-            [this, event_id, prefix_size, summary = *summary,
-                absorbed = boundary - snapshot.compacted_item_count]() mutable {
-                _state->session->complete_manual_compaction(
-                    event_id, std::move(summary), absorbed);
-                _on_finish("");
-            });
-    });
+    _begin_compaction_job(std::move(settings), true);
 }
 
 void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
@@ -336,20 +347,7 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
     _authenticate_route(settings);
     int retries                 = 0;
     std::uint64_t prompt_tokens = _state->session->last().prompt;
-    bool compaction_attempted   = false;
     for (;;) {
-        const ModelPricing pricing
-            = _state->providers->pricing_for(settings.model);
-        const bool should_compact = !compaction_attempted
-            && compaction_due(pricing, prompt_tokens, history.size());
-        if (should_compact) {
-            compaction_attempted = true;
-        }
-        if (should_compact
-            && !_compact_history(history, settings, prompt_tokens)) {
-            _post([this] { _on_finish(""); });
-            return;
-        }
         prompt_tokens = 0;
         ChatRequest req;
         req.model       = settings.model;
@@ -557,6 +555,14 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
 
         if (history.size() == history_before) {
             _post([this] { _on_finish(""); });
+            // Compact in the background: the next submission never waits
+            // on a summarize round-trip, and the 80% trigger leaves
+            // headroom for this turn's uncompacted history.
+            const ModelPricing pricing
+                = _state->providers->pricing_for(settings.model);
+            if (compaction_due(pricing, prompt_tokens, history.size())) {
+                _begin_compaction_job(settings, false);
+            }
             return;
         }
         _post([this, settings] {

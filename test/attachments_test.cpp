@@ -227,6 +227,32 @@ TEST_CASE("session exposes unique attachment basenames and publishes changes")
     CHECK(changes == 2);
 }
 
+TEST_CASE("compaction lifecycle reports the running event and signals it")
+{
+    imza::Session session;
+    CHECK_FALSE(session.compaction_running());
+    int changes = 0;
+    auto subscription
+        = session.subscribe_to_compaction_change([&] { ++changes; });
+
+    const auto [id, prefix] = session.begin_compaction();
+    CHECK(session.compaction_running());
+    session.finish_compaction(id, "summary", prefix, true);
+    CHECK_FALSE(session.compaction_running());
+    CHECK(changes == 2);
+
+    const auto [failed, prefix2] = session.begin_compaction();
+    CHECK(session.compaction_running());
+    session.finish_compaction(failed, "", prefix2, false);
+    CHECK_FALSE(session.compaction_running());
+    CHECK(changes == 4);
+
+    subscription.disconnect();
+    const auto [again, prefix3] = session.begin_compaction();
+    session.finish_compaction(again, "", prefix3, false);
+    CHECK(changes == 4);
+}
+
 TEST_CASE("session compaction replaces only old model history")
 {
     imza::Session session;

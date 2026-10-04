@@ -73,7 +73,9 @@ public:
     // Forced compaction of the active session, outside any agent turn:
     // the caller guarantees the IDLE phase and a non-empty session. No
     // user or assistant item is appended; only the CompactionEvent shows.
+    // No-op when a compaction is already running.
     void spawn_compaction(TurnSettings settings);
+    bool compaction_active() const { return _compaction_active.load(); }
     void clear();
     void stop();
     void set_on_finish(std::function<void(std::string)> on_finish);
@@ -91,8 +93,10 @@ private:
     void _drive(std::vector<Message> history, TurnSettings settings);
     std::optional<std::string> _summarize(const std::vector<Message>& history,
         std::size_t begin, std::size_t end, const TurnSettings& settings);
-    bool _compact_history(std::vector<Message>& history,
-        const TurnSettings& settings, std::uint64_t prompt_tokens);
+    // Shared body of the automatic trigger and manual /compact, run on
+    // the compaction worker.
+    void _run_compaction(TurnSettings settings, bool report_nothing);
+    void _begin_compaction_job(TurnSettings settings, bool report_nothing);
     void _drain_pending_asks(std::vector<Message>& history,
         std::string& reply_buffer, const std::string& assistant_text,
         ApiStandard dialect, Session::Mode mode);
@@ -123,7 +127,9 @@ private:
     std::vector<StreamEvent> _stream_events;
     std::atomic<bool> _alive { true };
     std::atomic<bool> _blocked_permission { false };
+    std::atomic<bool> _compaction_active { false };
     std::optional<std::jthread> _worker;
+    std::optional<std::jthread> _compaction_worker;
     int _retry_after_secs = 0;
 };
 

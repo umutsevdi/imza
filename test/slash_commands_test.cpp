@@ -357,8 +357,15 @@ TEST_CASE("run_slash /compact folds a forced summary into the session")
     state->session->clear_error();
 
     run_slash(*state, "/compact");
-    REQUIRE(imza::test::wait_until(
-        [&] { return state->session->phase() == imza::Session::Phase::IDLE; }));
+    // The worker terminalizes the compaction event when it commits.
+    REQUIRE(imza::test::wait_until([&] {
+        for (const auto& item : state->session->items()) {
+            if (const auto* event = std::get_if<imza::CompactionEvent>(&item)) {
+                return event->status != imza::CompactionEvent::Status::RUNNING;
+            }
+        }
+        return false;
+    }));
 
     CHECK(summarizer_input.find("first user message") != std::string::npos);
     CHECK(state->session->error().empty());

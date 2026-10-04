@@ -219,6 +219,12 @@ Signal<>::Subscription Session::subscribe_to_plan_change(
     return _plan_changed.subscribe(std::move(callback));
 }
 
+Signal<>::Subscription Session::subscribe_to_compaction_change(
+    Signal<>::Callback callback)
+{
+    return _compaction_changed.subscribe(std::move(callback));
+}
+
 std::string Session::plan_doc() const
 {
     std::lock_guard lock(_mutex);
@@ -282,8 +288,9 @@ void Session::restore(SessionSnapshot snapshot)
         _total_cost               = 0.0;
         _title_generation_claimed = !_title.empty();
         _interrupt_requested.store(false);
-        _next_tool_id       = 1;
-        _next_compaction_id = 1;
+        _next_tool_id        = 1;
+        _next_compaction_id  = 1;
+        _running_compactions = 0;
         for (const auto& item : _items) {
             if (const auto* tool = std::get_if<ToolCall>(&item)) {
                 _next_tool_id = std::max(_next_tool_id, tool->id + 1);
@@ -293,6 +300,10 @@ void Session::restore(SessionSnapshot snapshot)
                     = std::max(_next_compaction_id, event->id + 1);
             }
         }
+        // Heal sessions saved mid-interrupt: dangling tool calls would
+        // otherwise block compaction and switching forever.
+        _cancel_dangling_tools_locked();
+        _dirty = false;
         ++_modal_serial;
         ++_content_serial;
     }
@@ -468,6 +479,8 @@ std::pair<std::size_t, std::size_t> Session::begin_compaction()
     const std::size_t prefix = last_user_turn_index(_items).value_or(0);
     _items.emplace_back(
         CompactionEvent { id, CompactionEvent::Status::RUNNING });
+    ++_running_compactions;
+    _compaction_changed.publish();
     return { id, prefix };
 }
 
@@ -493,6 +506,8 @@ void Session::finish_compaction(std::size_t id, std::string summary,
     event->status = success ? CompactionEvent::Status::COMPLETED
                             : CompactionEvent::Status::FAILED;
     _dirty        = true;
+    --_running_compactions;
+    _compaction_changed.publish();
     if (success) {
         _compacted_summary    = std::move(summary);
         _compacted_item_count = compacted_item_count;
@@ -509,6 +524,8 @@ void Session::complete_manual_compaction(
     }
     event->status = CompactionEvent::Status::COMPLETED;
     _dirty        = true;
+    --_running_compactions;
+    _compaction_changed.publish();
     if (!_compacted_summary.empty()) {
         summary.insert(0, _compacted_summary + "\n\n<earlier-compactions>\n");
         summary += "\n</earlier-compactions>";
@@ -893,10 +910,23 @@ void Session::_finish_session_locked(const std::string& error)
         const auto* tool = std::get_if<ToolCall>(&item);
         return tool != nullptr && tool->phase == ToolCall::Phase::PLANNING;
     });
+    _cancel_dangling_tools_locked();
     if (!error.empty() && _error.empty()) {
         _error = error;
     }
     _phase = Phase::IDLE;
+}
+
+void Session::_cancel_dangling_tools_locked()
+{
+    for (auto& item : _items) {
+        auto* tool = std::get_if<ToolCall>(&item);
+        if (tool != nullptr && !tool->result.has_value()) {
+            tool->result = ToolCall::Result { ToolCall::Result::Kind::CANCEL,
+                "interrupted" };
+            _dirty       = true;
+        }
+    }
 }
 
 void Session::_update_usage(

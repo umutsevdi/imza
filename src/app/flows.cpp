@@ -486,11 +486,15 @@ void resolve_modal(ApplicationState& state, ModalResult result)
     advance_pending_skill(state);
 }
 
-// Forced manual compaction on the runner worker; the session is IDLE.
+// Forced manual compaction on the runner's compaction worker; the session
+// is IDLE and stays that way - the compaction event shows progress.
 void compact_session(ApplicationState& state, TurnSettings settings)
 {
+    if (state.runner->compaction_active()) {
+        state.session->set_error("Compaction already in progress.");
+        return;
+    }
     state.session->clear_interrupt();
-    state.session->set_phase(Session::Phase::CONNECTING);
     state.runner->spawn_compaction(std::move(settings));
 }
 
@@ -668,6 +672,9 @@ namespace {
         if (!seed_transcript.empty()) {
             seed.compacted_summary = seed_transcript;
             seed.items.clear();
+            // The transcript absorbed everything the parent had marked
+            // compacted; nothing is skipped until the sidechat compacts.
+            seed.compacted_item_count = 0;
         }
         seed.title = "Sidechat · "
             + (parent_title.empty() ? "New Session" : parent_title);
