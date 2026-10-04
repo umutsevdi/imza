@@ -113,7 +113,8 @@ TEST_CASE("system prompt carries the plan artifact contract")
 TEST_CASE("plan annotations prompt derives section and line anchors")
 {
     const std::string document
-        = "# Goal\nfirst plan\n# Approach\n1. first step\n2. second step\n";
+        = "# Requirements\nfirst plan\n# Approach\n1. first step\n"
+          "2. second step\n";
     const std::vector<PlanNote> notes {
         { 5, "reorder these" },
         { 2, "sharpen the contract" },
@@ -123,7 +124,7 @@ TEST_CASE("plan annotations prompt derives section and line anchors")
         PromptStore().plan_annotations(), notes, document);
     CHECK(prompt.find("imza.plan.edit") != std::string::npos);
     CHECK(prompt.find("`Approach > 2. second step`") != std::string::npos);
-    CHECK(prompt.find("`Goal > first plan`") != std::string::npos);
+    CHECK(prompt.find("`Requirements > first plan`") != std::string::npos);
     CHECK(prompt.find("(stale)") != std::string::npos);
     CHECK(format_plan_annotations_prompt(
         PromptStore().plan_annotations(), { }, document)

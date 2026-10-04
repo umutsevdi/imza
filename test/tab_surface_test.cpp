@@ -147,8 +147,9 @@ TEST_CASE("plan tab moves focus to the doc pane on click")
 {
     auto state = imza::test::make_test_state();
     REQUIRE(state->session
-            ->create_plan("# Goal\nsecret source\n# Approach\nx\n# Files\nx\n"
-                          "# Verification\nx\n# Open Questions\nx")
+            ->create_plan(
+                "# Requirements\nsecret source\n# Approach\nx\n# Changes\nx\n"
+                "# Verification\nx")
             .empty());
 
     auto chat = imza::make_chat(state, [] {
@@ -199,8 +200,9 @@ TEST_CASE("wide plan tab places the chat left of the doc pane")
 {
     auto state = imza::test::make_test_state();
     REQUIRE(state->session
-            ->create_plan("# Goal\nside by side\n# Approach\nx\n# Files\nx\n"
-                          "# Verification\nx\n# Open Questions\nx")
+            ->create_plan(
+                "# Requirements\nside by side\n# Approach\nx\n# Changes\nx\n"
+                "# Verification\nx")
             .empty());
 
     auto chat = imza::make_chat(state, [] {
@@ -240,9 +242,8 @@ TEST_CASE("chat focused: annotator keys land in the chat input")
 {
     auto state = imza::test::make_test_state();
     REQUIRE(state->session
-            ->create_plan(
-                "# Goal\nannotator source\n# Approach\nx\n# Files\nx\n"
-                "# Verification\nx\n# Open Questions\nx")
+            ->create_plan("# Requirements\nannotator source\n# Approach\nx\n"
+                          "# Changes\nx\n# Verification\nx")
             .empty());
 
     auto chat = imza::make_chat(state, [] {

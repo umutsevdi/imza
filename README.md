@@ -22,12 +22,13 @@ https://github.com/user-attachments/assets/a0096f0d-8337-4e6b-aabe-f9debe273594
 
 Download the [latest release](https://github.com/umutsevdi/imza/releases/latest).
 
-Check out the [user guide](https://github.com/umutsevdi/imza/wiki).
+Browse the [wiki](https://github.com/umutsevdi/imza/wiki) or the
+[website](https://umutsevdi.github.io/imza/).
 
 ## Why Imza?
 
-Existing coding agents makes the development faster, but causes the developer gradually stops 
-reading the code.
+Existing coding agents make development faster, but the developer gradually
+stops reading the code.
 
 Plans, summaries, tool output, and completion messages start replacing direct 
 interaction with the implementation. The agent keeps working, while your 
@@ -37,14 +38,13 @@ Imza is designed to keep the developer inside that implementation loop.
 
 Development is separated into three explicit modes:
 
-- **Plan**: Investigate the repository, understand the problem, and design the 
-change without modifying files. The agent can explore freely while the codebase 
-remains read-only, and the outcome is a plan document: a Markdown spec with a 
-required skeleton
-that lives beside the conversation instead of getting lost in it. Every 
-revision is kept. You can pin notes to any part of the document and send them 
-back to the agent as one revise request, iterating until the plan says exactly 
-what you intend.
+- **Plan**: Investigate the repository, understand the problem, and design the
+change without modifying files. The agent can explore freely while the codebase
+remains read-only, and the outcome is a plan document: a Markdown spec with a
+required skeleton that lives beside the conversation instead of getting lost in
+it. Every revision is kept. You can pin notes to any part of the document and
+send them back to the agent as one revise request, iterating until the plan
+says exactly what you intend.
 
 - **Build**: Agent implements the plan using edits, commands, subagents, and 
 programmatic tool execution. The approved plan stays with the agent as the 
@@ -79,12 +79,14 @@ with review findings fed back into planning as revisions
 * Native terminal UI with a small runtime footprint
 * Up to five concurrent research or build subagents
 * Persistent sessions, transcripts, and automatic context compaction
+* Overridable prompts: replace any built-in prompt fragment with your own
+  Markdown in a `prompts/` directory
 * `@path` file and `$skill` skill attachments, plus image and multimodal prompts
 * Session-level token, context, and cost usage insight
 * Headless execution for scripts, CI, and development tooling
 * Terminal notifications when an attended agent finishes or needs input
 
-[Full feature list and roadmap](https://github.com/umutsevdi/imza/wiki/10_Features-and-Roadmap)
+[Features and roadmap in the wiki](https://github.com/umutsevdi/imza/wiki/10_Features-and-Roadmap)
 
 ## Bring Your Own Model
 
@@ -117,12 +119,13 @@ of its subcommands for the current session.
 
 ## Composable Tool Execution
 
-Instead of requiring a separate model round trip for every read, search, edit, 
-or command, Imza exposes its tools through a sandboxed programming environment.
+Instead of requiring a separate model round trip for every read, search, edit,
+or command, Imza has the model write sandboxed Lua scripts where reads, edits,
+searches, and shell commands compose into one operation.
 
-The model can compose multiple operations into a single execution, making tasks 
-such as filtering files, gathering context, and performing coordinated edits 
-more efficient.
+The model works in bulk and discards data it doesn't need before it ever
+reaches your context, making tasks such as filtering files, gathering context,
+and performing coordinated edits more efficient.
 
 These operations still go through Imza's permission and mutation tracking 
 systems, so shell execution, filesystem access, and resulting code changes 
@@ -138,9 +141,8 @@ Pre-built packages are available from the [latest release](https://github.com/um
 > Downloaded macOS packages are currently unsigned. On first launch, 
 > right-click the application and select Open to allow it through Gatekeeper.
 
-After installation, run `imza`.
-
-On first launch, use `/connect` to configure a provider and `/model` to select a model.
+Run `imza` after installation. On first launch, use `/connect` to configure a
+provider and `/model` to select a model.
 
 Type `/` in the chat input to browse the available commands.
 

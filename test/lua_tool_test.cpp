@@ -565,12 +565,12 @@ TEST_CASE("plan bindings validate skeleton and cap through the session")
 
     const std::string& skeleton = imza::test::PLAN_SKELETON;
 
-    const imza::ToolOutput missing
-        = run_script("imza.plan.create('# Goal only')\nprint('dead')", host);
+    const imza::ToolOutput missing = run_script(
+        "imza.plan.create('# Requirements only')\nprint('dead')", host);
     CHECK(missing.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(missing.text.find("missing required headings") != std::string::npos);
     CHECK(missing.text.find("approach") != std::string::npos);
-    CHECK(missing.text.find("open questions") != std::string::npos);
+    CHECK(missing.text.find("changes") != std::string::npos);
     CHECK(missing.text.find("dead") == std::string::npos);
     CHECK(session.plans().empty());
 
@@ -583,7 +583,7 @@ TEST_CASE("plan bindings validate skeleton and cap through the session")
 
     const imza::ToolOutput created = run_script("imza.plan.create([[" + skeleton
             + "]])\n"
-              "print(imza.plan.get():find('# Open Questions') ~= nil)",
+              "print(imza.plan.get():find('# Verification') ~= nil)",
         std::move(host));
     CHECK(created.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(created.text == "true\n");
@@ -635,7 +635,7 @@ TEST_CASE("plan mutations are rejected while frozen in build mode")
     host.plan_frozen    = [] { return true; };
 
     const imza::ToolOutput out
-        = run_script("imza.plan.create('# Goal')\nprint('dead')", host);
+        = run_script("imza.plan.create('# Requirements')\nprint('dead')", host);
     CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(out.text.find("plan.create: unavailable in Build mode")
         != std::string::npos);
@@ -651,7 +651,7 @@ TEST_CASE("plan mutations are rejected while frozen in build mode")
 TEST_CASE("plan bindings are unavailable without host callbacks")
 {
     const imza::ToolOutput out = run_script(
-        "imza.plan.create('# Goal')\nprint('dead')", imza::LuaHost { });
+        "imza.plan.create('# Requirements')\nprint('dead')", imza::LuaHost { });
     CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(out.text.find("plan.create: unavailable in this context")
         != std::string::npos);

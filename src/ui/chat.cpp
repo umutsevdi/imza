@@ -1339,13 +1339,12 @@ namespace {
             Element markdown_element, bool markdown_cached)
         {
             Elements parts;
-            const bool has_reasoning = !t.reasoning.empty();
+            const bool has_reasoning = !trim(t.reasoning).empty();
             const bool expected      = _reasoning_enabled(t);
             const bool done          = t.reasoning_ms.has_value();
             const bool placeholder
                 = active && !has_reasoning && !done && expected;
-            if (has_reasoning || placeholder
-                || (done && expected && t.reasoning_ms->count() >= 50)) {
+            if (has_reasoning || placeholder) {
                 std::string label;
                 if (done) {
                     const double secs

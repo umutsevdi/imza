@@ -34,8 +34,7 @@ namespace imza::test {
 
 // The minimal plan document the plan-validation contract accepts.
 inline const std::string PLAN_SKELETON
-    = "# Goal\nx\n# Approach\nx\n# Files\nx\n# Verification\nx\n"
-      "# Open Questions\nx";
+    = "# Requirements\nx\n# Approach\nx\n# Changes\nx\n# Verification\nx";
 
 // The wide pane geometry most tab and pane tests render against.
 inline imza::LayoutCtx wide_layout()

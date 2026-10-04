@@ -31,6 +31,32 @@ TEST_CASE("render_item renders completed compaction")
     CHECK(out.find("✓ Session compacted") != std::string::npos);
 }
 
+TEST_CASE("finished turn without reasoning content hides the thought row")
+{
+    auto state = imza::test::make_test_state();
+    state->session->begin_send("hello");
+    state->session->append_item(imza::AssistantTurn {
+        .reasoning        = "  \n\t",
+        .reasoning_ms     = std::chrono::milliseconds { 800 },
+        .reasoning_effort = "high",
+    });
+    auto chat = imza::make_chat(state, [] {
+        return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100, 40 };
+    });
+
+    std::string rendered = to_text(chat->Render(), 100, 40);
+    CHECK(rendered.find("Thought") == std::string::npos);
+    CHECK(rendered.find("Thinking") == std::string::npos);
+
+    state->session->append_item(imza::AssistantTurn {
+        .reasoning        = "deliberating",
+        .reasoning_ms     = std::chrono::milliseconds { 800 },
+        .reasoning_effort = "high",
+    });
+    rendered = to_text(chat->Render(), 100, 40);
+    CHECK(rendered.find("Thought 0.8s") != std::string::npos);
+}
+
 TEST_CASE("chat shows planning between thought and lua execution")
 {
     auto state = imza::test::make_test_state();

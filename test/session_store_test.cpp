@@ -817,7 +817,9 @@ TEST_CASE("plan document persists across save and restore")
 
     const std::string& skeleton = imza::test::PLAN_SKELETON;
     REQUIRE(source.create_plan(skeleton).empty());
-    REQUIRE(source.edit_plan("# Goal\nx", "# Goal\nauth tokens\n", 1).empty());
+    REQUIRE(source
+            .edit_plan("# Requirements\nx", "# Requirements\nauth tokens\n", 1)
+            .empty());
     // A superseded document stays in the vector; the current plan is the
     // back entry.
     const std::string second = skeleton + "\nextra";
@@ -833,8 +835,8 @@ TEST_CASE("plan document persists across save and restore")
     CHECK(loaded.plans().size() == 2);
     CHECK(loaded.plan_doc() == second);
     CHECK(loaded.plans().front().content
-        == "# Goal\nauth tokens\n\n# Approach\nx\n# Files\nx\n"
-           "# Verification\nx\n# Open Questions\nx");
+        == "# Requirements\nauth tokens\n\n# Approach\nx\n# Changes\nx\n"
+           "# Verification\nx");
 
     // Validation still applies to a restored session.
     CHECK_FALSE(source.create_plan("no headings").empty());
@@ -872,10 +874,9 @@ TEST_CASE("plan edit staleness is enforced inside the session")
     // restored session can edit directly.
     CHECK(fresh_reader.edit_plan("y", "z", 1).empty());
     CHECK(fresh_reader.plan_doc()
-        == "# Goal\nz\n"
-           "# Approach\nx\n# Files\nx\n"
-           "# Verification\nx\n"
-           "# Open Questions\nx");
+        == "# Requirements\nz\n"
+           "# Approach\nx\n# Changes\nx\n"
+           "# Verification\nx");
 }
 TEST_CASE("plan submission messages are emitted once per revision in build")
 {
@@ -898,7 +899,9 @@ TEST_CASE("plan submission messages are emitted once per revision in build")
 
     // A revision in PLAN mode re-submits with the changed wording.
     session.set_mode(imza::Session::Mode::PLAN);
-    REQUIRE(session.edit_plan("# Goal\nx", "# Goal\ntokens\n", 1).empty());
+    REQUIRE(
+        session.edit_plan("# Requirements\nx", "# Requirements\ntokens\n", 1)
+            .empty());
     session.set_mode(imza::Session::Mode::BUILD);
     const auto amended = session.plan_submission_for_build();
     REQUIRE(amended.has_value());
@@ -939,6 +942,7 @@ TEST_CASE("plan changes publish the plan signal")
 
     const std::string& skeleton = imza::test::PLAN_SKELETON;
     REQUIRE(session.create_plan(skeleton).empty());
-    REQUIRE(session.edit_plan("# Goal\nx", "# Goal\ny", 1).empty());
+    REQUIRE(
+        session.edit_plan("# Requirements\nx", "# Requirements\ny", 1).empty());
     CHECK(published == 2);
 }

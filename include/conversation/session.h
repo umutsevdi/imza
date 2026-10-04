@@ -89,9 +89,6 @@ struct PersistedSession {
 
 using SessionPersistence = std::variant<UnsavedSession, PersistedSession>;
 
-// A plan document: markdown with a required skeleton (Goal / Approach /
-// Files / Verification / Open Questions). The session holds the sequence
-// of documents created over its lifetime; the current plan is the back.
 struct PlanDoc {
     std::string content;
 

@@ -12,18 +12,16 @@
 namespace {
 
 const std::string skeleton
-    = "# Goal\nfirst plan\n# Approach\n1. first step\n2. second step\n"
-      "# Files\nx\n# Verification\ncheck it\n# Open Questions\nx";
+    = "# Requirements\nfirst plan\n# Approach\n1. first step\n2. second step\n"
+      "# Changes\nx\n# Verification\ncheck it";
 
 // Taller document with a unique last line for scroll-follow tests;
 // long paragraphs wrap, like real plan documents.
 const std::string wrapped(200, 'w');
 const std::string tall
-    = "# Goal\nfirst plan\n# Approach\n1. first step\n2. second step\n"
-      "# Files\nx\n# Verification\ncheck it\n"
-    + wrapped
-    + "\n# Open Questions\n"
-      "tail marker zzz";
+    = "# Requirements\nfirst plan\n# Approach\n1. first step\n2. second step\n"
+      "# Changes\nx\n# Verification\ncheck it\n"
+    + wrapped + "\n# Notes\ntail marker zzz";
 
 struct FocusedDoc {
     std::shared_ptr<imza::ApplicationState> state;
@@ -95,8 +93,8 @@ TEST_CASE("note card renders under the annotated block")
     auto fx = make_focused_doc(imza::test::make_test_state(), true, skeleton);
     (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
-    // Walk to the second list item: heading Goal, first plan, heading
-    // Approach, first item, second item.
+    // Walk to the second list item: heading Requirements, first plan,
+    // heading Approach, first item, second item.
     for (int i = 0; i < 4; ++i) {
         REQUIRE(fx.doc->OnEvent(ftxui::Event::ArrowDown));
     }
@@ -120,8 +118,8 @@ TEST_CASE("revise submits one turn with section and line locators")
         true, skeleton);
     (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
-    // Walk to the second list item: heading Goal, first plan, heading
-    // Approach, first item, second item.
+    // Walk to the second list item: heading Requirements, first plan,
+    // heading Approach, first item, second item.
     for (int i = 0; i < 4; ++i) {
         REQUIRE(fx.doc->OnEvent(ftxui::Event::ArrowDown));
     }
@@ -221,9 +219,8 @@ TEST_CASE("plan created after pane construction renders immediately")
     CHECK(empty.find("No plan") != std::string::npos);
 
     REQUIRE(fx.state->session
-            ->create_plan("# Goal\nlate draft\n# Approach\nx\n# Files\nx\n# "
-                          "Verification\nx\n"
-                          "# Open Questions\nx")
+            ->create_plan("# Requirements\nlate draft\n# Approach\nx\n# "
+                          "Changes\nx\n# Verification\nx")
             .empty());
     const std::string rendered = imza::test::to_text(fx.doc->Render(), 100, 40);
     CHECK(rendered.find("late draft") != std::string::npos);
@@ -233,9 +230,8 @@ TEST_CASE("plan created after pane construction renders immediately")
 TEST_CASE("long document lines wrap inside the pane instead of overflowing")
 {
     auto state                  = imza::test::make_test_state();
-    const std::string long_line = "# Goal\n" + std::string(300, 'x')
-        + "\n# Approach\nx\n# Files\nx\n# Verification\nx\n"
-          "# Open Questions\nx";
+    const std::string long_line = "# Requirements\n" + std::string(300, 'x')
+        + "\n# Approach\nx\n# Changes\nx\n# Verification\nx";
     REQUIRE(state->session->create_plan(long_line).empty());
     bool focused = false;
 
@@ -326,17 +322,18 @@ TEST_CASE("moving with keys highlights the selected row")
         return -1;
     };
 
-    // Row 0 is selected: the "Goal" heading row is highlighted.
-    CHECK(highlight_at(imza::test::to_text(fx.doc->Render(), 100, 40), "Goal")
+    // Row 0 is selected: the "Requirements" heading row is highlighted.
+    CHECK(highlight_at(
+              imza::test::to_text(fx.doc->Render(), 100, 40), "Requirements")
         != -1);
 
     // Move down twice: row 2 is the "Approach" heading; it is highlighted
-    // and "Goal" is not.
+    // and "Requirements" is not.
     REQUIRE(fx.doc->OnEvent(ftxui::Event::ArrowDown));
     REQUIRE(fx.doc->OnEvent(ftxui::Event::ArrowDown));
     const std::string rendered = imza::test::to_text(fx.doc->Render(), 100, 40);
     CHECK(highlight_at(rendered, "Approach") != -1);
-    CHECK(highlight_at(rendered, "Goal") == -1);
+    CHECK(highlight_at(rendered, "Requirements") == -1);
 }
 
 TEST_CASE("click on a note card selects it for edit and delete")
@@ -350,7 +347,7 @@ TEST_CASE("click on a note card selects it for edit and delete")
 
     // Clicking elsewhere selects a block row (and opens the editor);
     // closing it leaves the cursor off the card, so e has nothing to edit.
-    REQUIRE(imza::test::click_label(fx.doc, "Open Questions"));
+    REQUIRE(imza::test::click_label(fx.doc, "Verification"));
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Escape));
     REQUIRE_FALSE(fx.doc->OnEvent(ftxui::Event::Character("e")));
 
@@ -553,21 +550,21 @@ TEST_CASE("keyboard follow scrolls the window inside the tab layout")
 
     const std::string head = frame();
     (void)frame();
-    CHECK(head.find("Goal") != std::string::npos);
+    CHECK(head.find("Requirements") != std::string::npos);
 
     REQUIRE(fx.doc->OnEvent(ftxui::Event::End));
     const std::string tail = frame();
     CHECK(tail.find("tail marker zzz") != std::string::npos);
-    CHECK(tail.find("Goal") == std::string::npos);
+    CHECK(tail.find("Requirements") == std::string::npos);
 
     // Walking down row by row from the top: the selected row's text
     // must stay on screen at every step.
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Home));
     (void)frame();
     const std::string wrapped_prefix(20, 'w');
-    const std::vector<std::string> row_text = { "Goal", "first plan",
-        "Approach", "first step", "second step", "Files", "Verification",
-        "check it", wrapped_prefix, "Open Questions", "tail marker zzz" };
+    const std::vector<std::string> row_text = { "Requirements", "first plan",
+        "Approach", "first step", "second step", "Changes", "Verification",
+        "check it", wrapped_prefix, "Notes", "tail marker zzz" };
     for (int i = 0; i < static_cast<int>(row_text.size()) - 1; ++i) {
         REQUIRE(fx.doc->OnEvent(ftxui::Event::ArrowDown));
         const std::string window = frame();
@@ -611,5 +608,5 @@ TEST_CASE("wheel scroll moves the selection like review")
         REQUIRE(fx.doc->OnEvent(wheel(ftxui::Mouse::WheelUp)));
     }
     const std::string head = frame();
-    CHECK(head.find("Goal") != std::string::npos);
+    CHECK(head.find("Requirements") != std::string::npos);
 }

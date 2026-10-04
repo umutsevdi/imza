@@ -3,8 +3,8 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 project(
     imza
-    VERSION 0.5.1
-    HOMEPAGE_URL "https://github.com/umutsevdi/imza"
+    VERSION 0.5.2
+    HOMEPAGE_URL "https://umutsevdi.github.io/imza"
     LANGUAGES C CXX
 )
 include(GNUInstallDirs)

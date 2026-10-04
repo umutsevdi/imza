@@ -85,7 +85,7 @@ namespace {
             binding_plan_get,
             R"desc(() returns string, throws
 Returns the current plan document: markdown with a required skeleton
-(Goal / Approach / Files / Verification / Open Questions), or an empty
+(Requirements / Approach / Changes / Verification), or an empty
 string when none exists. Marks the plan as read; imza.plan.edit compares
 against this.)desc",
         },

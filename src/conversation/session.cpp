@@ -19,7 +19,7 @@ namespace imza {
 namespace {
 
     constexpr std::string_view PLAN_SKELETON[]
-        = { "goal", "approach", "files", "verification", "open questions" };
+        = { "requirements", "approach", "changes", "verification" };
 
     bool plan_heading_matches(std::string_view line, std::string_view name)
     {
