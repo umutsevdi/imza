@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -10,10 +10,14 @@ const wwwRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   ".."
 );
-const wiki = path.join(wwwRoot, "src", "content", "wiki");
+const contentDir = path.join(wwwRoot, "src", "content");
+const wiki = path.join(contentDir, "wiki");
 
 // CHANGELOG.txt is repo-root canon (the app reads it from there); mirror it
 // as a markdown entry so the site renders it through the content pipeline.
+// The directory holds no tracked files (wiki/ and changelog.md are
+// gitignored), so it does not exist on a fresh checkout.
+mkdirSync(contentDir, { recursive: true });
 copyFileSync(
   path.join(wwwRoot, "..", "CHANGELOG.txt"),
   path.join(wwwRoot, "src", "content", "changelog.md")
