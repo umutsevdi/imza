@@ -13,7 +13,7 @@ interface Props {
 }
 
 const { slug, title } = Astro.props;
-const { prev, next } = docNeighbors(slug);
+const { prev, next } = await docNeighbors(slug);
 ---
 
 <BaseLayout

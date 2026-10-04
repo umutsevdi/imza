@@ -10,13 +10,14 @@ const dir = "~" + stripBase(Astro.url.pathname);
 <footer class="statusbar-bar" role="contentinfo">
   <span class="sb-left">
     <span class="sb-mode" id="sb-mode"> PLAN </span>
-    <span class="sb-sep">·</span>
-
-    <a href="https://github.com/umutsevdi/imza">repository</a>
-    <span class="sb-sep">·</span>
-    <a href={withBase("/docs/")}>wiki</a>
-    <span class="sb-sep">·</span>
-    <a href="https://github.com/umutsevdi/imza/releases">releases</a>
+    <div class="sb-hide">
+      <span class="sb-sep">·</span>
+      <a href="https://github.com/umutsevdi/imza">repository</a>
+      <span class="sb-sep">·</span>
+      <a href={withBase("/docs/")}>wiki</a>
+      <span class="sb-sep">·</span>
+      <a href="https://github.com/umutsevdi/imza/releases">releases</a>
+    </div>
   </span>
   <span class="sb-gap"></span>
   <span class="sb-right">
@@ -101,6 +102,7 @@ const dir = "~" + stripBase(Astro.url.pathname);
     color: var(--hl-cyan);
     text-decoration: underline;
   }
+  .sb-hide,
   .sb-left {
     display: flex;
     align-items: center;
@@ -146,6 +148,7 @@ const dir = "~" + stripBase(Astro.url.pathname);
     flex: 0 0 auto;
   }
   @media (max-width: 40rem) {
+    .sb-hide,
     .sb-dir {
       display: none;
     }
