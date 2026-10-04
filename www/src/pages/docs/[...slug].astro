@@ -5,17 +5,18 @@ import DocsContent from "../../components/DocsContent.astro";
 import { docPages } from "../../lib/docs";
 
 export async function getStaticPaths() {
-  const pages = docPages().filter((p) => p.slug !== "");
-  return pages.map((p) => ({ params: { slug: p.slug } }));
+  const pages = await docPages();
+  return pages
+    .filter((p) => p.slug !== "")
+    .map((p) => ({ params: { slug: p.slug } }));
 }
 
 const { slug } = Astro.params;
-const page = docPages().find((p) => p.slug === slug);
-const entry = page
-  ? await getEntry("docs", page.file.replace(/\.md$/, ""))
-  : undefined;
-if (!entry) {
-  return Astro.redirect("/404");
+const pages = await docPages();
+const page = pages.find((p) => p.slug === slug);
+const entry = page ? await getEntry("docs", page.id) : undefined;
+if (!page || !entry) {
+  return new Response(null, { status: 404 });
 }
 ---
 

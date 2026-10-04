@@ -22,14 +22,7 @@ export default defineConfig({
         }
     },
     vite: {
-        build: {
-            terserOptions: {
-                compress: {
-                    drop_console: true,
-                    drop_debugger: true
-                },
-                mangle: true
-            }
-        }
+        build: { minify: "esbuild" },
+        esbuild: { drop: ["console", "debugger"] }
     }
 });

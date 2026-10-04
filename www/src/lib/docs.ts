@@ -1,45 +1,42 @@
-import fs from "node:fs";
-import path from "node:path";
+import { getCollection } from "astro:content";
+import { slugFor } from "./wiki-slugs";
 
-// The wiki clone (materialized by scripts/ensure-wiki.mjs) is the single
-// source of truth: pages, order (NN_ prefix), and titles (first h1) are read
-// from it at build time, never hand-maintained. Resolved from the process cwd
-// because the prerender bundle's import.meta.url points into dist/.
-const WIKI_DIR = path.resolve(process.cwd(), "src/content/wiki");
+// Page helpers over the wiki content collection. Filename conventions
+// live in lib/wiki-slugs.ts (kept dependency-free so the remark link
+// rewriter can share them).
 
 export interface DocPage {
-  file: string;
+  /** Collection entry id: "Home", "01_Installation", ... */
+  id: string;
+  /** Route slug: "" for Home, "installation" for 01_Installation, ... */
   slug: string;
+  /** First h1 of the page body, falling back to the id stem. */
   title: string;
 }
 
-function readWikiPages(): DocPage[] {
-  const files = fs
-    .readdirSync(WIKI_DIR)
-    .filter((f) => f.endsWith(".md"))
+export async function docPages(): Promise<DocPage[]> {
+  const entries = await getCollection("docs");
+  return entries
+    .map((e) => ({
+      id: e.id,
+      slug: slugFor(e.id),
+      title:
+        e.data.title ??
+        h1Of(e.body) ??
+        e.id.replace(/^\d+_/, "").replace(/_/g, " ")
+    }))
     .sort((a, b) => {
-      // numbered pages in filename order, then Home last for the pager
-      const na = Number.parseInt(a, 10) || Number.MAX_SAFE_INTEGER;
-      const nb = Number.parseInt(b, 10) || Number.MAX_SAFE_INTEGER;
-      return na === nb ? a.localeCompare(b) : na - nb;
+      // numbered pages in id order, then Home last for the pager
+      const na = Number.parseInt(a.id, 10) || Number.MAX_SAFE_INTEGER;
+      const nb = Number.parseInt(b.id, 10) || Number.MAX_SAFE_INTEGER;
+      return na === nb ? a.id.localeCompare(b.id) : na - nb;
     });
-  return files.map((file) => {
-    const base = file.replace(/\.md$/, "");
-    const numbered = base.match(/^(\d+)_(.*)$/);
-    const stem = numbered ? numbered[2] : base;
-    const slug = base === "Home" ? "" : stem.toLowerCase().replace(/_/g, "-");
-    const h1 = fs
-      .readFileSync(path.join(WIKI_DIR, file), "utf8")
-      .match(/^#\s+(.+)$/m);
-    const title = h1 ? h1[1].trim() : stem.replace(/_/g, " ");
-    return { file, slug, title };
-  });
 }
 
-const PAGES: DocPage[] = readWikiPages();
-
-export function docPages(): DocPage[] {
-  return PAGES;
+/** First level-1 heading of the markdown body, if any. */
+function h1Of(body?: string): string | undefined {
+  const m = body?.match(/^#\s+(.+)$/m);
+  return m ? m[1].trim() : undefined;
 }
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -49,12 +46,21 @@ export function withBase(path: string): string {
   return BASE + path;
 }
 
+/** Strip the configured base from a pathname ("~/docs/" style display paths). */
+export function stripBase(pathname: string): string {
+  return pathname.startsWith(BASE) ? pathname.slice(BASE.length) : pathname;
+}
+
 export function hrefFor(slug: string): string {
   return withBase(slug === "" ? "/docs/" : `/docs/${slug}`);
 }
 
-export function docNeighbors(slug: string): { prev?: DocPage; next?: DocPage } {
-  const idx = PAGES.findIndex((p) => p.slug === slug);
+export async function docNeighbors(slug: string): Promise<{
+  prev?: DocPage;
+  next?: DocPage;
+}> {
+  const pages = await docPages();
+  const idx = pages.findIndex((p) => p.slug === slug);
   if (idx < 0) return {};
-  return { prev: PAGES[idx - 1], next: PAGES[idx + 1] };
+  return { prev: pages[idx - 1], next: pages[idx + 1] };
 }

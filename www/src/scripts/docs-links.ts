@@ -1,7 +1,7 @@
 import fs from "node:fs";
-import path from "node:path";
 import type { Root } from "mdast";
 import { visit } from "unist-util-visit";
+import { slugFor } from "../lib/wiki-slugs";
 
 // imza.wiki pages link with bare filenames (04_Sessions, Home); rewrite
 // them to site routes before rendering. The base comes from the astro
@@ -11,18 +11,13 @@ interface Options {
 }
 
 function pageSlugs(): Record<string, string> {
+  // The wiki clone is materialized at src/content/wiki by
+  // scripts/ensure-wiki.mjs before the build starts.
   const map: Record<string, string> = {};
   for (const f of fs.readdirSync("src/content/wiki")) {
     if (!f.endsWith(".md")) continue;
-    const base = f.replace(/\.md$/, "");
-    if (base === "Home") {
-      map[base] = "";
-      continue;
-    }
-    const m = base.match(/^(\d+)_(.*)$/);
-    if (m) {
-      map[base] = m[2].toLowerCase().replace(/_/g, "-");
-    }
+    const id = f.replace(/\.md$/, "");
+    map[id] = slugFor(id);
   }
   return map;
 }

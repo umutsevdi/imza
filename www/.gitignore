@@ -1,6 +1,7 @@
 # build output
 dist/
 src/content/wiki/
+src/content/changelog.md
 # generated types
 .astro/
 

@@ -7,7 +7,7 @@ interface Props {
 }
 
 const { activeSlug } = Astro.props;
-const pages = docPages();
+const pages = await docPages();
 
 const sections = [
   { id: "top", label: "home", text: "Home", active: true },

@@ -14,7 +14,7 @@ const docs = defineCollection({
     pattern: "*.md",
     base: wikiDir,
     // keep the exact filename (minus .md) as id: "Home", "01_Installation",
-    // so lib/docs.ts page keys match.
+    // so lib/docs.ts slugFor() can derive route slugs from it.
     generateId: ({ entry }) => entry.replace(/\.md$/, "")
   }),
   schema: z.object({
@@ -22,4 +22,15 @@ const docs = defineCollection({
   })
 });
 
-export const collections = { docs };
+// CHANGELOG.txt is mirrored to src/content/changelog.md by
+// scripts/ensure-wiki.mjs; scope a collection to that single file.
+const changelog = defineCollection({
+  loader: glob({
+    pattern: "changelog.md",
+    base: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "content"),
+    generateId: () => "changelog"
+  }),
+  schema: z.object({})
+});
+
+export const collections = { docs, changelog };

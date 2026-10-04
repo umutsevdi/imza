@@ -1,12 +1,16 @@
 ---
-import fs from "node:fs";
-import { renderMarkdown } from "../lib/markdown";
+import { getEntry, render } from "astro:content";
 import DocsLayout from "../layouts/DocsLayout.astro";
 
-const raw = fs.readFileSync("../CHANGELOG.txt", "utf8");
-const changelog = await renderMarkdown(raw);
+const entry = await getEntry("changelog", "changelog");
+if (!entry) {
+  return new Response(null, { status: 404 });
+}
+const { Content } = await render(entry);
 ---
 
 <DocsLayout slug="changelog" title="Changelog">
-  <div class="wiki-doc" set:html={changelog} />
+  <div class="wiki-doc">
+    <Content />
+  </div>
 </DocsLayout>

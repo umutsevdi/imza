@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { copyFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -11,6 +11,13 @@ const wwwRoot = path.resolve(
   ".."
 );
 const wiki = path.join(wwwRoot, "src", "content", "wiki");
+
+// CHANGELOG.txt is repo-root canon (the app reads it from there); mirror it
+// as a markdown entry so the site renders it through the content pipeline.
+copyFileSync(
+  path.join(wwwRoot, "..", "CHANGELOG.txt"),
+  path.join(wwwRoot, "src", "content", "changelog.md")
+);
 
 if (existsSync(path.join(wiki, "Home.md"))) {
   process.exit(0);

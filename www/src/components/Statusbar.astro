@@ -1,11 +1,10 @@
 ---
 import { VERSION } from "../version";
-import { withBase } from "../lib/docs";
+import { stripBase, withBase } from "../lib/docs";
 
 // status bar mimics the app's cwd prompt: ~/, ~/docs/, ~/changelog/ ...
 // pathname carries the base (e.g. /imza) — display paths site-root-relative
-const baseRx = new RegExp("^" + import.meta.env.BASE_URL.replace(/\/$/, ""));
-const dir = "~" + Astro.url.pathname.replace(baseRx, "");
+const dir = "~" + stripBase(Astro.url.pathname);
 ---
 
 <footer class="statusbar-bar" role="contentinfo">

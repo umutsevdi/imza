@@ -5,7 +5,7 @@ import DocsContent from "../../components/DocsContent.astro";
 
 const entry = await getEntry("docs", "Home");
 if (!entry) {
-  return Astro.redirect("/404");
+  return new Response(null, { status: 404 });
 }
 ---
 
