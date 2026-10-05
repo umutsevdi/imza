@@ -26,12 +26,14 @@ namespace {
         if (post) {
             return post;
         }
-        return
-            [](const std::string& url, const std::vector<std::string>& headers,
-                const std::string& payload, long timeout, std::string& body,
-                long* code) {
-                return http_post(url, headers, payload, timeout, body, code, 0);
-            };
+        return [](const std::string& url,
+                   const std::vector<std::string>& headers,
+                   const std::string& payload, long timeout, std::string& body,
+                   long* code) {
+            HttpPostOptions opts { };
+            opts.max_redirs = 0;
+            return http_post(url, headers, payload, timeout, body, code, opts);
+        };
     }
 
     SubscriptionResult failure(Status status, std::string body)

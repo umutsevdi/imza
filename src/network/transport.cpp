@@ -66,6 +66,21 @@ namespace {
         return n;
     }
 
+    size_t capture_headers(char* ptr, size_t size, size_t nmemb, void* userdata)
+    {
+        auto* out          = static_cast<std::vector<std::string>*>(userdata);
+        const size_t total = size * nmemb;
+        std::string line(ptr, total);
+        while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) {
+            line.pop_back();
+        }
+        // Status lines (one per redirect hop) are not headers.
+        if (!line.empty() && !line.starts_with("HTTP/")) {
+            out->push_back(std::move(line));
+        }
+        return total;
+    }
+
     struct CurlHandle {
         CURL* value = curl_easy_init();
 
@@ -106,7 +121,8 @@ namespace {
     Status perform(const std::string& url,
         const std::vector<std::string>& headers, const std::string& payload,
         bool post, long timeout_secs, long max_redirs, std::string& body,
-        std::size_t max_bytes, long* http_code, bool* truncated)
+        std::size_t max_bytes, long* http_code, bool* truncated,
+        std::vector<std::string>* response_headers = nullptr, bool del = false)
     {
         CURL* handle = reuse_handle();
         if (!handle) {
@@ -131,11 +147,17 @@ namespace {
             curl_easy_setopt(handle, CURLOPT_POSTFIELDS, payload.c_str());
             curl_easy_setopt(handle, CURLOPT_POSTFIELDSIZE,
                 static_cast<long>(payload.size()));
+        } else if (del) {
+            curl_easy_setopt(handle, CURLOPT_CUSTOMREQUEST, "DELETE");
         } else {
             curl_easy_setopt(handle, CURLOPT_HTTPGET, 1L);
         }
         curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, append_body);
         curl_easy_setopt(handle, CURLOPT_WRITEDATA, &sink);
+        if (response_headers != nullptr) {
+            curl_easy_setopt(handle, CURLOPT_HEADERFUNCTION, capture_headers);
+            curl_easy_setopt(handle, CURLOPT_HEADERDATA, response_headers);
+        }
 
         const CURLcode res = curl_easy_perform(handle);
 
@@ -168,10 +190,19 @@ Status http_get(const std::string& url, const std::vector<std::string>& headers,
 
 Status http_post(const std::string& url,
     const std::vector<std::string>& headers, const std::string& payload,
-    long timeout_secs, std::string& body, long* http_code, long max_redirs)
+    long timeout_secs, std::string& body, long* http_code,
+    const HttpPostOptions& opts)
 {
-    return perform(url, headers, payload, true, timeout_secs, max_redirs, body,
-        0, http_code, nullptr);
+    return perform(url, headers, payload, true, timeout_secs, opts.max_redirs,
+        body, 0, http_code, nullptr, opts.response_headers);
+}
+
+Status http_delete(const std::string& url,
+    const std::vector<std::string>& headers, long timeout_secs, long* http_code)
+{
+    std::string body;
+    return perform(url, headers, { }, false, timeout_secs, 0, body, 0,
+        http_code, nullptr, nullptr, true);
 }
 
 extern const Provider openai_provider;

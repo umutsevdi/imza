@@ -22,8 +22,4 @@ std::string html_to_text(const std::string& html);
 
 Status web_search(const std::string& query, int num_results, std::string& text);
 
-// Extracts the first non-empty text block from a JSON-RPC MCP response body
-// (plain JSON or SSE "data:" lines); returns "" when none is found.
-std::string mcp_search_text(const std::string& response);
-
 } // namespace imza

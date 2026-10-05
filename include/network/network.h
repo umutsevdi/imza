@@ -69,13 +69,26 @@ struct HttpGetOptions {
     long max_redirs       = 5;
 };
 
+struct HttpPostOptions {
+    long max_redirs = 5;
+    // Raw response header lines ("Name: value") when non-null; HTTP/1.x
+    // status lines are excluded.
+    std::vector<std::string>* response_headers = nullptr;
+};
+
 Status http_get(const std::string& url, const std::vector<std::string>& headers,
     long timeout_secs, std::string& body, long* http_code,
     const HttpGetOptions& opts = { });
 
 Status http_post(const std::string& url,
     const std::vector<std::string>& headers, const std::string& payload,
-    long timeout_secs, std::string& body, long* http_code, long max_redirs = 5);
+    long timeout_secs, std::string& body, long* http_code,
+    const HttpPostOptions& opts = { });
+
+// Best-effort DELETE; the response body is discarded.
+Status http_delete(const std::string& url,
+    const std::vector<std::string>& headers, long timeout_secs,
+    long* http_code);
 
 inline bool http_ok(long code) { return code >= 200 && code < 300; }
 

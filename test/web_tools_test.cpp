@@ -85,24 +85,3 @@ TEST_CASE("html_to_text handles markup, entities, and text")
     CHECK(imza::html_to_text("&#xD7FF;") != "&#xD7FF;");
     CHECK(imza::html_to_text("<p>&#xD800; ok</p>") == "&#xD800; ok");
 }
-
-TEST_CASE("mcp_search_text reads JSON and SSE responses")
-{
-    const std::string json_response
-        = R"({"jsonrpc":"2.0","id":1,"result":)"
-          R"({"content":[{"type":"text","text":"1. Example Result"}]}})";
-    CHECK(imza::mcp_search_text(json_response) == "1. Example Result");
-
-    const std::string sse_response
-        = "event: message\n"
-          "data: {\"result\":{\"content\":[{\"type\":\"text\","
-          "\"text\":\"sse text\"}]}}\n\n";
-    CHECK(imza::mcp_search_text(sse_response) == "sse text");
-
-    CHECK(imza::mcp_search_text(
-              R"({"jsonrpc":"2.0","id":1,"error":{"code":-32000}})")
-        == "");
-    CHECK(
-        imza::mcp_search_text(R"({"result":{"content":[{"text":""}]}})") == "");
-    CHECK(imza::mcp_search_text("totally not json") == "");
-}

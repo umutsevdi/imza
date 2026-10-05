@@ -212,6 +212,7 @@ add_library(imza_network
     src/network/json_io.cpp
     src/network/stream_event.cpp
     src/network/transport.cpp
+    src/network/mcp.cpp
     src/network/openai_provider.cpp
     src/network/openai_responses_provider.cpp
     src/network/anthropic_provider.cpp
@@ -225,6 +226,8 @@ target_link_libraries(imza_network PRIVATE
     glaze::glaze
     CURL::libcurl
 )
+set_source_files_properties(src/network/mcp.cpp PROPERTIES
+    COMPILE_DEFINITIONS IMZA_VERSION="${PROJECT_VERSION}")
 
 # Platform services and stateless domain support (no ftxui, no cmark)
 add_library(imza_foundation

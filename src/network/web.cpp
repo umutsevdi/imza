@@ -2,6 +2,7 @@
 
 #include "common/util.h"
 #include "network/json.h"
+#include "network/mcp.h"
 #include "network/network.h"
 
 #include <cctype>
@@ -146,50 +147,6 @@ namespace {
         }
         return out;
     }
-
-    struct McpContentItem {
-        std::optional<std::string> text;
-    };
-
-    struct McpResult {
-        std::optional<std::vector<McpContentItem>> content;
-    };
-
-    struct McpResponse {
-        std::optional<McpResult> result;
-    };
-
-    std::string text_from_json(const McpResponse& root)
-    {
-        if (!root.result || !root.result->content) {
-            return "";
-        }
-        for (auto& item : *root.result->content) {
-            if (item.text && !trim(*item.text).empty()) {
-                return std::move(*item.text);
-            }
-        }
-        return "";
-    }
-
-    struct McpSearchArgs {
-        std::string query;
-        double numResults = 0;
-        std::string type;
-        std::string livecrawl;
-    };
-
-    struct McpToolParams {
-        std::string name;
-        McpSearchArgs arguments;
-    };
-
-    struct McpRequest {
-        std::string jsonrpc = "2.0";
-        double id           = 1.0;
-        std::string method  = "tools/call";
-        McpToolParams params;
-    };
 
 } // namespace
 
@@ -346,34 +303,6 @@ std::string html_to_text(const std::string& html)
     return std::string(trim(collapse_blank_lines(out)));
 }
 
-std::string mcp_search_text(const std::string& response)
-{
-    McpResponse root;
-    if (!json_parse_checked(response, root)) {
-        if (std::string text = text_from_json(root); !text.empty()) {
-            return text;
-        }
-    }
-    for (const auto& line : split_lines(response)) {
-        std::string_view v = trim(line);
-        if (!v.starts_with("data:")) {
-            continue;
-        }
-        v.remove_prefix(5);
-        if (!v.empty() && v.front() == ' ') {
-            v.remove_prefix(1);
-        }
-        McpResponse item;
-        if (json_parse_checked(v, item)) {
-            continue;
-        }
-        if (std::string text = text_from_json(item); !text.empty()) {
-            return text;
-        }
-    }
-    return "";
-}
-
 Status web_search(const std::string& query, int num_results, std::string& text)
 {
     std::string url = "https://mcp.exa.ai/mcp";
@@ -381,26 +310,30 @@ Status web_search(const std::string& query, int num_results, std::string& text)
         url += "?exaApiKey=" + percent_encode(key);
     }
 
-    McpRequest body;
-    body.params.name = "web_search_exa";
-    body.params.arguments
-        = { query, static_cast<double>(num_results), "auto", "fallback" };
+    McpEndpoint endpoint;
+    endpoint.url          = std::move(url);
+    endpoint.timeout_secs = SEARCH_TIMEOUT_SECS;
+    McpSession session { std::move(endpoint) };
 
-    long code = 0;
-    std::string response;
-    const std::vector<std::string> headers = {
-        "Content-Type: application/json",
-        "Accept: application/json, text/event-stream",
-    };
-    if (http_post(url, headers, json_dump(body), SEARCH_TIMEOUT_SECS, response,
-            &code, 0)
-        != Status::OK) {
-        return Status::NETWORK_ERROR;
+    std::string detail;
+    if (const Status st = mcp_initialize(session, detail); st != Status::OK) {
+        return st;
     }
-    if (!http_ok(code)) {
-        return Status::API_ERROR;
+
+    JsonValue arguments;
+    arguments["query"]      = query;
+    arguments["numResults"] = static_cast<double>(num_results);
+    arguments["type"]       = "auto";
+    arguments["livecrawl"]  = "fallback";
+
+    McpToolCallResult result;
+    const Status st
+        = mcp_call_tool(session, "web_search_exa", arguments, result, detail);
+    mcp_end_session(session);
+    if (st != Status::OK) {
+        return st;
     }
-    text = mcp_search_text(response);
+    text = mcp_first_text(result);
     return Status::OK;
 }
 
