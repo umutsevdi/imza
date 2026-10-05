@@ -119,19 +119,6 @@ ftxui::Component make_model_pick_filter(ModelPickList& pick)
         }));
 }
 
-bool model_pick_move(ModelPickList& pick, const ftxui::Event& event)
-{
-    if (event == ftxui::Event::ArrowDown) {
-        pick.move(1);
-        return true;
-    }
-    if (event == ftxui::Event::ArrowUp) {
-        pick.move(-1);
-        return true;
-    }
-    return false;
-}
-
 void append_model_pick_rows(const ModelPickList& pick, ftxui::Elements& rows)
 {
     for (int i = 0; i < static_cast<int>(pick.visible.size()); ++i) {
@@ -144,7 +131,12 @@ void append_model_pick_rows(const ModelPickList& pick, ftxui::Elements& rows)
 bool handle_model_pick_event(ModelPickList& pick, ftxui::Component container,
     const ftxui::Event& event, std::function<void()> on_submit)
 {
-    if (model_pick_move(pick, event)) {
+    if (event == ftxui::Event::ArrowDown) {
+        pick.move(1);
+        return true;
+    }
+    if (event == ftxui::Event::ArrowUp) {
+        pick.move(-1);
         return true;
     }
     if (event == ftxui::Event::Return) {
@@ -670,14 +662,6 @@ Component inline_link_button(std::function<Element()> render,
     return space_activates(Button(std::move(option)), std::move(on_click));
 }
 
-Component inline_link_button(std::string label, std::function<void()> on_click,
-    const Color& inactive_color)
-{
-    auto shared_label = std::make_shared<const std::string>(std::move(label));
-    return inline_link_button([shared_label] { return text(*shared_label); },
-        std::move(on_click), inactive_color);
-}
-
 Component split_inline_link_button(std::string primary, std::string secondary,
     std::function<void()> on_click, const Color& primary_color)
 {
@@ -746,6 +730,43 @@ Color diff_background(bool added)
 int diff_side_width(int width) { return std::max(20, (width - 3) / 2); }
 
 int diff_content_width(int width) { return std::max(1, width - 14); }
+
+Elements diff_line_rows(int number_width, bool dual_numbers,
+    std::optional<std::size_t> old_no, std::optional<std::size_t> new_no,
+    std::string_view marker, const Elements& content_rows)
+{
+    const auto number = [&](const std::optional<std::size_t>& value) {
+        return text(std::format("{:>{}}",
+                   value ? std::to_string(*value) : std::string(),
+                   number_width))
+            | color(PANEL_FG_DIM);
+    };
+    const std::string blank_gutter = dual_numbers
+        ? std::string(static_cast<std::size_t>(2 * number_width + 4), ' ')
+        : std::string(static_cast<std::size_t>(number_width + 3), ' ');
+    Elements rows;
+    rows.reserve(content_rows.size());
+    for (std::size_t i = 0; i < content_rows.size(); ++i) {
+        Elements parts;
+        if (i == 0) {
+            if (dual_numbers) {
+                parts.push_back(number(old_no));
+                parts.push_back(text(" "));
+                parts.push_back(number(new_no));
+                parts.push_back(text(" "));
+            } else {
+                parts.push_back(number(new_no ? new_no : old_no));
+                parts.push_back(text(" "));
+            }
+            parts.push_back(text(std::string(marker) + " "));
+        } else {
+            parts.push_back(text(blank_gutter));
+        }
+        parts.push_back(content_rows[i]);
+        rows.push_back(hbox(std::move(parts)));
+    }
+    return rows;
+}
 
 int review_content_width(const LayoutCtx& ctx)
 {
@@ -1073,13 +1094,6 @@ Element diff_split(const DiffView& diff, int available_width)
         }
     }
     const std::size_t number_width = digit_width(max_line);
-    const auto line_number = [number_width](
-                                 const std::optional<std::size_t>& value) {
-        const std::string number
-            = value ? std::to_string(*value) : std::string();
-        return text(std::string(number_width - number.size(), ' ') + number)
-            | color(PANEL_FG_DIM);
-    };
     const auto is_skip
         = [](const DiffRow& row) { return row.kind == DiffRow::Kind::SKIP; };
 
@@ -1087,39 +1101,27 @@ Element diff_split(const DiffView& diff, int available_width)
     if (available_width < 100) {
         const int content_width = std::max(
             1, available_width - static_cast<int>(2 * number_width + 6));
-        const std::string blank_gutter(2 * number_width + 4, ' ');
         for (const DiffRow& row : diff.rows) {
             if (is_skip(row)) {
                 rows.push_back(hbox(
                     { text("  " + row.left) | color(PANEL_FG_DIM), filler() }));
                 continue;
             }
-            const auto append
-                = [&](const std::optional<std::size_t>& old_no,
-                      const std::optional<std::size_t>& new_no,
-                      std::string marker, const std::string& content,
-                      std::optional<Color> background) {
-                      const Elements content_rows = highlighted_rows(
-                          content, syntax, content_width, PANEL_FG);
-                      for (std::size_t i = 0; i < content_rows.size(); ++i) {
-                          Elements parts;
-                          if (i == 0) {
-                              parts.push_back(line_number(old_no));
-                              parts.push_back(text(" "));
-                              parts.push_back(line_number(new_no));
-                              parts.push_back(text(" "));
-                              parts.push_back(text(std::move(marker) + " "));
-                          } else {
-                              parts.push_back(text(blank_gutter));
-                          }
-                          parts.push_back(content_rows[i]);
-                          Element line = hbox(std::move(parts));
-                          if (background) {
-                              line = std::move(line) | bgcolor(*background);
-                          }
-                          rows.push_back(std::move(line));
-                      }
-                  };
+            const auto append = [&](const std::optional<std::size_t>& old_no,
+                                    const std::optional<std::size_t>& new_no,
+                                    std::string marker,
+                                    const std::string& content,
+                                    std::optional<Color> background) {
+                Elements line_rows = diff_line_rows(
+                    static_cast<int>(number_width), true, old_no, new_no,
+                    marker,
+                    highlighted_rows(content, syntax, content_width, PANEL_FG));
+                for (Element& line : line_rows) {
+                    rows.push_back(background
+                            ? std::move(line) | bgcolor(*background)
+                            : std::move(line));
+                }
+            };
             if (diff_row_left_changed(row)) {
                 append(row.left_no, std::nullopt, diff_marker(false), row.left,
                     diff_background(false));
@@ -1138,31 +1140,19 @@ Element diff_split(const DiffView& diff, int available_width)
     const int side_width = diff_side_width(available_width);
     const int side_content_width
         = std::max(1, side_width - static_cast<int>(number_width) - 5);
-    const std::string blank_gutter(number_width + 3, ' ');
-    const auto side = [&](const std::optional<std::size_t>& number,
-                          std::string marker, const std::string& content,
-                          std::optional<Color> background) {
-        const Elements content_rows
-            = highlighted_rows(content, syntax, side_content_width, PANEL_FG);
-        Elements visual;
-        for (std::size_t i = 0; i < content_rows.size(); ++i) {
-            Elements parts;
-            if (i == 0) {
-                parts.push_back(line_number(number));
-                parts.push_back(text(" "));
-                parts.push_back(text(std::move(marker) + " "));
-            } else {
-                parts.push_back(text(blank_gutter));
-            }
-            parts.push_back(content_rows[i]);
-            visual.push_back(hbox(std::move(parts)));
-        }
-        Element line = vbox(std::move(visual)) | size(WIDTH, EQUAL, side_width);
-        if (background) {
-            line = std::move(line) | bgcolor(*background);
-        }
-        return line;
-    };
+    const auto side
+        = [&](const std::optional<std::size_t>& number, std::string marker,
+              const std::string& content, std::optional<Color> background) {
+              Element line = vbox(diff_line_rows(static_cast<int>(number_width),
+                                 false, number, std::nullopt, std::move(marker),
+                                 highlighted_rows(content, syntax,
+                                     side_content_width, PANEL_FG)))
+                  | size(WIDTH, EQUAL, side_width);
+              if (background) {
+                  line = std::move(line) | bgcolor(*background);
+              }
+              return line;
+          };
     for (const DiffRow& row : diff.rows) {
         if (is_skip(row)) {
             rows.push_back(hbox(

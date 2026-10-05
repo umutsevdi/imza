@@ -106,6 +106,17 @@ namespace {
             ModelList list;
         };
 
+        // Inputs _rebuild_manage depends on; a change in any triggers a
+        // rebuild.
+        struct ManageSnap {
+            std::string status;
+            std::uint64_t serial                           = 0;
+            bool confirming                                = false;
+            bool base_visible                              = false;
+            bool has_provider                              = false;
+            bool operator==(const ManageSnap& other) const = default;
+        };
+
         bool _handle_pick_event(const Event& event)
         {
             if (event == Event::F5 || event == Event::CtrlR) {
@@ -137,10 +148,7 @@ namespace {
                 return _container ? _container->OnEvent(event) : false;
             }
 
-            bool confirming = false;
-            for (const auto& entry : _confirm) {
-                confirming = confirming || entry.second;
-            }
+            bool confirming = _confirming();
             if (confirming) {
                 if (event == Event::Character('y')) {
                     _confirm_remove(_row_selected);
@@ -320,21 +328,25 @@ namespace {
         void _maybe_rebuild_manage()
         {
             const Session& st = *_session;
-            bool confirming   = false;
-            for (const auto& entry : _confirm) {
-                confirming = confirming || entry.second;
-            }
-            const bool base_visible = _selected_provider == CUSTOM_PROVIDER_ID;
-            const std::uint64_t status_key
-                = std::hash<std::string> { }(st.connect_status()) << 32;
-            const std::uint64_t key = status_key + st.modal_serial() * 16ULL
-                + (confirming ? 4ULL : 0ULL) + (base_visible ? 2ULL : 0ULL)
-                + (_selected_provider.empty() ? 0ULL : 1ULL);
-            if (key == _manage_key) {
+            const ManageSnap snap { st.connect_status(), st.modal_serial(),
+                _confirming(), _selected_provider == CUSTOM_PROVIDER_ID,
+                !_selected_provider.empty() };
+            if (_manage_built && snap == _manage_snap) {
                 return;
             }
-            _manage_key = key;
+            _manage_built = true;
+            _manage_snap  = snap;
             _rebuild_manage();
+        }
+
+        bool _confirming() const
+        {
+            for (const auto& entry : _confirm) {
+                if (entry.second) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         void _rebuild_manage()
@@ -680,30 +692,41 @@ namespace {
 
         void _maybe_rebuild_pick()
         {
-            const Session& st = *_session;
-            const Config cfg  = _provider_store.config();
-            std::uint64_t key = st.modal_serial() * 1000003ULL;
-            key += std::hash<std::string> { }(cfg.last_used
-                    ? cfg.last_used->provider + " " + cfg.last_used->model
-                    : std::string { });
+            const Session& st           = *_session;
+            const Config cfg            = _provider_store.config();
+            const std::string last_used = cfg.last_used
+                ? cfg.last_used->provider + " " + cfg.last_used->model
+                : std::string { };
+            const auto views            = _views();
+            if (_pick_built && _pick_serial == st.modal_serial()
+                && _pick_last_used == last_used
+                && views.size() == _pick_snapshot.size()) {
+                // The rows only depend on each provider's id, fetch
+                // state, and model count.
+                bool same = true;
+                for (std::size_t i = 0; same && i < views.size(); ++i) {
+                    const ModelList list
+                        = _provider_store.models_for(views[i].id);
+                    same = _pick_snapshot[i].view.id == views[i].id
+                        && _pick_snapshot[i].list.state == list.state
+                        && _pick_snapshot[i].list.models.size()
+                            == list.models.size();
+                }
+                if (same) {
+                    return;
+                }
+            }
             std::vector<PickSnap> snapshot;
-            for (const auto& view : _views()) {
+            for (const auto& view : views) {
                 PickSnap snap;
                 snap.view = view;
                 snap.list = _provider_store.models_for(view.id);
-                key += std::hash<std::string> { }(view.id)
-                        * (static_cast<std::uint64_t>(
-                               static_cast<int>(snap.list.state))
-                            + 7ULL)
-                    + snap.list.models.size() * 101ULL;
                 snapshot.push_back(std::move(snap));
             }
-            key += snapshot.size() * 7919ULL;
-            if (key == _pick_key) {
-                return;
-            }
-            _pick_key      = key;
-            _pick_snapshot = std::move(snapshot);
+            _pick_built     = true;
+            _pick_serial    = st.modal_serial();
+            _pick_last_used = last_used;
+            _pick_snapshot  = std::move(snapshot);
             _rebuild_pick();
         }
 
@@ -790,8 +813,11 @@ namespace {
         Component _rows_container;
         Component _add_container;
         std::vector<Component> _row_buttons;
-        std::uint64_t _manage_key = 0;
-        std::uint64_t _pick_key   = 0;
+        ManageSnap _manage_snap;
+        bool _manage_built         = false;
+        std::uint64_t _pick_serial = 0;
+        std::string _pick_last_used;
+        bool _pick_built = false;
 
         std::vector<std::pair<std::string, std::string>> _providers;
         std::string _selected_provider;

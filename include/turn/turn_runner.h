@@ -25,8 +25,7 @@ struct PermissionEvaluation;
 struct TurnSettings {
     std::string model;
     std::string reasoning_effort;
-    Session::Mode mode  = Session::Mode::PLAN;
-    ApiStandard dialect = ApiStandard::OPENAI;
+    Session::Mode mode = Session::Mode::PLAN;
     std::string connection_id;
     Route route;
 };
@@ -98,13 +97,11 @@ private:
     void _run_compaction(TurnSettings settings, bool report_nothing);
     void _begin_compaction_job(TurnSettings settings, bool report_nothing);
     void _drain_pending_asks(std::vector<Message>& history,
-        std::string& reply_buffer, const std::string& assistant_text,
-        ApiStandard dialect, Session::Mode mode);
+        const std::string& assistant_text, ApiStandard dialect,
+        Session::Mode mode);
     void _apply_tool_result(const PermissionEvaluation& evaluation,
         const ModalResult& res, Session::Mode mode,
         std::vector<Message>& tool_msgs);
-    void _apply_question_result(
-        const ModalResult& res, std::string& reply_buffer);
     void _reject_tool(const ToolCallRequest& req, std::string reason,
         std::vector<Message>& tool_msgs);
     void _finish_tool(const ToolCallRequest& req, ToolCall::Result::Kind kind,

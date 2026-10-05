@@ -137,7 +137,6 @@ namespace {
 
     struct ModelLimitView {
         std::optional<std::uint64_t> context;
-        std::optional<std::uint64_t> output;
     };
 
     struct ModelModalitiesView {
@@ -174,7 +173,6 @@ namespace {
         }
         if (view.limit) {
             model.context = view.limit->context;
-            model.output  = view.limit->output;
         }
         model.tool_call    = view.tool_call;
         model.reasoning    = view.reasoning;
@@ -201,33 +199,17 @@ namespace {
         return provider;
     }
 
-    // File shape of the cached catalog. Optional members omit when empty;
-    // cost/limit objects appear only when they carry a value. Stored at
-    // namespace scope: Glaze reflection rejects local types.
-    struct StoredModel {
-        std::optional<std::string> name;
-        std::optional<ModelCostView> cost;
-        std::optional<ModelLimitView> limit;
-        std::optional<bool> tool_call;
-        std::optional<bool> reasoning;
-        std::optional<ModelModalitiesView> modalities;
-    };
-
-    struct StoredProvider {
-        std::optional<std::string> name;
-        std::optional<std::string> api;
-        std::optional<std::string> npm;
-        std::map<std::string, StoredModel> models;
-    };
-
+    // File shape of the cached catalog, reusing the models.dev view
+    // structs since the wire formats coincide. Optional members omit when
+    // empty; cost/limit objects appear only when they carry a value.
     struct StoredCatalog {
         std::optional<std::int64_t> fetched_at;
-        std::map<std::string, StoredProvider> providers;
+        std::map<std::string, ProviderView> providers;
     };
 
-    StoredModel to_stored(const CachedModel& model)
+    ProviderModelView to_stored(const CachedModel& model)
     {
-        StoredModel stored;
+        ProviderModelView stored;
         if (!model.name.empty()) {
             stored.name = model.name;
         }
@@ -236,8 +218,8 @@ namespace {
             stored.cost = ModelCostView { model.cost_input, model.cost_output,
                 model.cost_cache_read, model.cost_cache_write };
         }
-        if (model.context || model.output) {
-            stored.limit = ModelLimitView { model.context, model.output };
+        if (model.context) {
+            stored.limit = ModelLimitView { model.context };
         }
         stored.tool_call = model.tool_call;
         stored.reasoning = model.reasoning;
@@ -315,47 +297,16 @@ Status load_catalog(const std::filesystem::path& path, Catalog& out)
     }
     out.fetched_at = stored.fetched_at.value_or(0);
     for (const auto& [id, provider] : stored.providers) {
-        CachedProvider entry;
-        if (provider.name) {
-            entry.name = *provider.name;
-        }
-        if (provider.api) {
-            entry.api = *provider.api;
-        }
-        if (provider.npm) {
-            entry.npm = *provider.npm;
-        }
-        for (const auto& [model_id, model] : provider.models) {
-            CachedModel cached;
-            if (model.name) {
-                cached.name = *model.name;
-            }
-            if (model.cost) {
-                cached.cost_input       = model.cost->input;
-                cached.cost_output      = model.cost->output;
-                cached.cost_cache_read  = model.cost->cache_read;
-                cached.cost_cache_write = model.cost->cache_write;
-            }
-            if (model.limit) {
-                cached.context = model.limit->context;
-                cached.output  = model.limit->output;
-            }
-            cached.tool_call    = model.tool_call;
-            cached.reasoning    = model.reasoning;
-            cached.capabilities = capabilities_from_modalities(
-                model.modalities ? model.modalities->input : std::nullopt);
-            entry.models[model_id] = std::move(cached);
-        }
-        out.providers[id] = std::move(entry);
+        out.providers[id] = to_provider(provider);
     }
     return Status::OK;
 }
 
 Status save_catalog(const std::filesystem::path& path, const Catalog& catalog)
 {
-    std::map<std::string, StoredProvider> providers;
+    std::map<std::string, ProviderView> providers;
     for (const auto& [id, provider] : catalog.providers) {
-        StoredProvider stored;
+        ProviderView stored;
         stored.name = provider.name;
         if (!provider.api.empty()) {
             stored.api = provider.api;

@@ -224,16 +224,6 @@ std::shared_ptr<ApplicationState> make_application_state(
         std::move(stream_fn), { }, runtime_flags, true);
 }
 
-std::shared_ptr<ApplicationState> make_application_state_with_tools(PostFn post,
-    Config config, std::vector<Tool> tools, StreamFn stream_fn,
-    RuntimeFlag runtime_flags, SubagentToolSlot subagent_slot)
-{
-    std::shared_ptr<ApplicationState> state(new ApplicationState());
-    state->subagent_slot = std::move(subagent_slot);
-    return initialize_root(std::move(state), std::move(post), std::move(config),
-        std::move(stream_fn), std::move(tools), runtime_flags, false);
-}
-
 std::shared_ptr<ApplicationState> make_child_application_state(
     const ApplicationState& parent, PostFn post, StreamFn stream_fn,
     ModalRequestFn parent_routing, std::string agent_label)

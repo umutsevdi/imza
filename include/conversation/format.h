@@ -24,10 +24,6 @@ inline std::string code_fence(std::string_view body)
     return std::string(fenced_width(body), '`');
 }
 
-// Conversation-transcript text shared by the agent and the UI.
-std::string question_form_markdown(const QuestionForm& form);
-std::string modal_answer_markdown(const ModalAnswer& answer);
-
 // Lua tool return values render the same way for the model transcript and
 // the UI report: scalars and scalar lists print as plain markdown, record
 // lists as markdown tables, other values as pretty JSON that needs a code

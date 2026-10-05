@@ -997,26 +997,6 @@ TEST_CASE("ts bindings raise on bad paths and unknown grammars")
     CHECK(nogrammar.text.find("no grammar") != std::string::npos);
 }
 
-TEST_CASE("imza.tree._lib.ts_query runs captures and rejects invalid queries")
-{
-    imza::test::TempDir dir;
-    imza::test::write_file(dir.file("q.c"), "int main() { return 0; }\n");
-    const std::string path = dir.file("q.c").string();
-
-    const imza::ToolOutput out
-        = run_script("local rows = imza.tree._lib.ts_query([[" + path
-            + "]], '(function_definition declarator: (function_declarator "
-              "declarator: (identifier) @name))')\n"
-              "print(#rows, rows[1].capture, rows[1].line, rows[1].text)");
-    CHECK(out.text.find("1    name    1    main\n") != std::string::npos);
-
-    const imza::ToolOutput bad
-        = run_script("print(select(2, pcall(imza.tree._lib.ts_query, [[" + path
-            + "]], '(function_definition')))");
-    CHECK(bad.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(bad.text.find("invalid query") != std::string::npos);
-}
-
 TEST_CASE("filesystem bindings record a dispatch log with targets")
 {
     imza::test::TempDir dir;

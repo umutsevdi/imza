@@ -113,16 +113,8 @@ namespace {
         auto flush_results = [&]() {
             if (!tool_results.empty()) {
                 RequestMessage message = plain_message("user", "");
-                message.content.str.clear();
-                message.content.str += "[";
-                for (std::size_t i = 0; i < tool_results.size(); ++i) {
-                    if (i != 0) {
-                        message.content.str += ",";
-                    }
-                    auto block = glz::write<JSON_WRITE>(tool_results[i]);
-                    message.content.str += block.value_or("null");
-                }
-                message.content.str += "]";
+                message.content
+                    = glz::raw_json { json_dump_array(tool_results) };
                 body.messages.push_back(std::move(message));
                 tool_results.clear();
             }
@@ -165,18 +157,9 @@ namespace {
                 }
                 // Serialize the block array once and embed it raw; content
                 // is either a quoted string or an array on the wire.
-                std::string content = "[";
-                for (std::size_t i = 0; i < blocks.size(); ++i) {
-                    if (i != 0) {
-                        content += ",";
-                    }
-                    content
-                        += glz::write<JSON_WRITE>(blocks[i]).value_or("null");
-                }
-                content += "]";
                 RequestMessage message;
                 message.role    = role;
-                message.content = glz::raw_json { std::move(content) };
+                message.content = glz::raw_json { json_dump_array(blocks) };
                 body.messages.push_back(std::move(message));
             } else {
                 body.messages.push_back(plain_message(role, m.content));
@@ -349,6 +332,6 @@ namespace {
 
 } // namespace
 
-extern const Provider anthropic_provider = { build, stream_headers, parse };
+extern const Provider anthropic_provider = { build, parse };
 
 } // namespace imza

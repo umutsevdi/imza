@@ -54,163 +54,12 @@ namespace {
         return doc;
     }
 
-    // Single cmark walk driving a compile-time sink. The sink receives block /
+    class FtxuiSink;
+
+    // Single cmark walk driving the sink. The sink receives block /
     // inline events; table structure is buffered by the walker and delivered as
     // begin / cell / row / end calls so sinks never touch cmark themselves.
-    template <typename Sink> void walk_markdown(cmark_node* doc, Sink& s)
-    {
-        cmark_iter* iter = cmark_iter_new(doc);
-
-        int table_depth    = 0;
-        bool row_is_header = false;
-        TableSpec spec;
-
-        std::vector<int> lists; // 1 = ordered, 0 = bullet; depth via size
-        int item_index = 0;
-
-        Style st;
-
-        // Table node types are runtime values (cmark-gfm extension), so plain
-        // comparisons instead of switch labels.
-        auto is_block = [](cmark_node_type t) {
-            return t == CMARK_NODE_PARAGRAPH || t == CMARK_NODE_HEADING
-                || t == CMARK_NODE_LIST || t == CMARK_NODE_ITEM
-                || t == CMARK_NODE_CODE_BLOCK || t == CMARK_NODE_BLOCK_QUOTE
-                || t == CMARK_NODE_THEMATIC_BREAK || t == CMARK_NODE_HTML_BLOCK
-                || t == CMARK_NODE_TABLE;
-        };
-
-        cmark_event_type ev;
-        while ((ev = cmark_iter_next(iter)) != CMARK_EVENT_DONE) {
-            cmark_node* node        = cmark_iter_get_node(iter);
-            const cmark_node_type t = cmark_node_get_type(node);
-            const bool enter        = ev == CMARK_EVENT_ENTER;
-
-            // Inside a table only the table structure and inline content flow
-            // through; block-level nodes are dropped (cells hold inlines only).
-            if (table_depth > 0 && t != CMARK_NODE_TABLE
-                && t != CMARK_NODE_TABLE_ROW && t != CMARK_NODE_TABLE_CELL
-                && is_block(t)) {
-                continue;
-            }
-
-            if (t == CMARK_NODE_TABLE) {
-                if (enter) {
-                    spec.cols = cmark_gfm_extensions_get_table_columns(node);
-                    spec.aligns.clear();
-                    const uint8_t* al
-                        = cmark_gfm_extensions_get_table_alignments(node);
-                    for (uint16_t i = 0; al && i < spec.cols; ++i) {
-                        spec.aligns.push_back(al[i]);
-                    }
-                    s.table_begin(spec);
-                    table_depth = 1;
-                } else {
-                    s.table_end();
-                    table_depth = 0;
-                }
-                continue;
-            }
-            if (t == CMARK_NODE_TABLE_ROW) {
-                if (enter) {
-                    row_is_header
-                        = cmark_gfm_extensions_get_table_row_is_header(node)
-                        != 0;
-                    s.row_begin();
-                } else {
-                    s.row_end(row_is_header);
-                }
-                continue;
-            }
-            if (t == CMARK_NODE_TABLE_CELL) {
-                if (enter) {
-                    s.cell_begin();
-                } else {
-                    s.cell_end();
-                }
-                continue;
-            }
-
-            if (enter) {
-                switch (t) {
-                case CMARK_NODE_PARAGRAPH:
-                    s.paragraph_begin(lists.empty());
-                    break;
-                case CMARK_NODE_HEADING:
-                    s.heading_begin(cmark_node_get_heading_level(node));
-                    break;
-                case CMARK_NODE_CODE_BLOCK:
-                    s.code_block(cmark_node_get_literal(node),
-                        cmark_node_get_fence_info(node));
-                    break;
-                case CMARK_NODE_BLOCK_QUOTE: s.quote_begin(); break;
-                case CMARK_NODE_LIST:
-                    lists.push_back(
-                        cmark_node_get_list_type(node) == CMARK_ORDERED_LIST
-                            ? 1
-                            : 0);
-                    // Restart numbering per list so a bullet list does
-                    // not skew the next ordered list's first marker;
-                    // start honors the source's first number.
-                    item_index = cmark_node_get_list_start(node) - 1;
-                    s.list_begin(lists.back() == 1);
-                    break;
-                case CMARK_NODE_ITEM: {
-                    std::string prefix;
-                    if (!lists.empty() && lists.back() == 1) {
-                        ++item_index;
-                        prefix = std::to_string(item_index) + ". ";
-                    } else {
-                        prefix = "- ";
-                    }
-                    s.item_begin(prefix);
-                    break;
-                }
-                case CMARK_NODE_THEMATIC_BREAK: s.thematic_break(); break;
-                case CMARK_NODE_TEXT:
-                    s.text(cmark_node_get_literal(node), st);
-                    break;
-                case CMARK_NODE_CODE:
-                    st.code = true;
-                    s.text(cmark_node_get_literal(node), st);
-                    st.code = false;
-                    break;
-                case CMARK_NODE_SOFTBREAK: s.softbreak(); break;
-                case CMARK_NODE_LINEBREAK: s.linebreak(); break;
-                case CMARK_NODE_STRONG: st.bold = true; break;
-                case CMARK_NODE_EMPH: st.emph = true; break;
-                case CMARK_NODE_LINK:
-                    st.link = true;
-                    st.url  = cmark_node_get_url(node);
-                    break;
-                default: // HTML_BLOCK / HTML_INLINE / IMAGE / ...
-                    break;
-                }
-            } else {
-                switch (t) {
-                case CMARK_NODE_PARAGRAPH: s.paragraph_end(); break;
-                case CMARK_NODE_HEADING: s.heading_end(); break;
-                case CMARK_NODE_BLOCK_QUOTE: s.quote_end(); break;
-                case CMARK_NODE_LIST:
-                    s.list_end();
-                    if (!lists.empty()) {
-                        lists.pop_back();
-                    }
-                    break;
-                case CMARK_NODE_ITEM: s.item_end(); break;
-                case CMARK_NODE_STRONG: st.bold = false; break;
-                case CMARK_NODE_EMPH: st.emph = false; break;
-                case CMARK_NODE_LINK:
-                    st.link = false;
-                    st.url.clear();
-                    break;
-                default: break;
-                }
-            }
-        }
-
-        cmark_iter_free(iter);
-    }
+    void walk_markdown(cmark_node* doc, FtxuiSink& s);
 
     class FtxuiSink {
     public:
@@ -264,7 +113,7 @@ namespace {
         // them as soft breaks.
         void linebreak() { softbreak(); }
 
-        void paragraph_begin(bool)
+        void paragraph_begin()
         {
             _in_paragraph = true;
             _words.clear();
@@ -522,6 +371,159 @@ namespace {
         std::vector<bool> _header_flags;
         std::vector<uint8_t> _aligns;
     };
+
+    void walk_markdown(cmark_node* doc, FtxuiSink& s)
+    {
+        cmark_iter* iter = cmark_iter_new(doc);
+
+        int table_depth    = 0;
+        bool row_is_header = false;
+        TableSpec spec;
+
+        std::vector<int> lists; // 1 = ordered, 0 = bullet; depth via size
+        int item_index = 0;
+
+        Style st;
+
+        // Table node types are runtime values (cmark-gfm extension), so plain
+        // comparisons instead of switch labels.
+        auto is_block = [](cmark_node_type t) {
+            return t == CMARK_NODE_PARAGRAPH || t == CMARK_NODE_HEADING
+                || t == CMARK_NODE_LIST || t == CMARK_NODE_ITEM
+                || t == CMARK_NODE_CODE_BLOCK || t == CMARK_NODE_BLOCK_QUOTE
+                || t == CMARK_NODE_THEMATIC_BREAK || t == CMARK_NODE_HTML_BLOCK
+                || t == CMARK_NODE_TABLE;
+        };
+
+        cmark_event_type ev;
+        while ((ev = cmark_iter_next(iter)) != CMARK_EVENT_DONE) {
+            cmark_node* node        = cmark_iter_get_node(iter);
+            const cmark_node_type t = cmark_node_get_type(node);
+            const bool enter        = ev == CMARK_EVENT_ENTER;
+
+            // Inside a table only the table structure and inline content flow
+            // through; block-level nodes are dropped (cells hold inlines only).
+            if (table_depth > 0 && t != CMARK_NODE_TABLE
+                && t != CMARK_NODE_TABLE_ROW && t != CMARK_NODE_TABLE_CELL
+                && is_block(t)) {
+                continue;
+            }
+
+            if (t == CMARK_NODE_TABLE) {
+                if (enter) {
+                    spec.cols = cmark_gfm_extensions_get_table_columns(node);
+                    spec.aligns.clear();
+                    const uint8_t* al
+                        = cmark_gfm_extensions_get_table_alignments(node);
+                    for (uint16_t i = 0; al && i < spec.cols; ++i) {
+                        spec.aligns.push_back(al[i]);
+                    }
+                    s.table_begin(spec);
+                    table_depth = 1;
+                } else {
+                    s.table_end();
+                    table_depth = 0;
+                }
+                continue;
+            }
+            if (t == CMARK_NODE_TABLE_ROW) {
+                if (enter) {
+                    row_is_header
+                        = cmark_gfm_extensions_get_table_row_is_header(node)
+                        != 0;
+                    s.row_begin();
+                } else {
+                    s.row_end(row_is_header);
+                }
+                continue;
+            }
+            if (t == CMARK_NODE_TABLE_CELL) {
+                if (enter) {
+                    s.cell_begin();
+                } else {
+                    s.cell_end();
+                }
+                continue;
+            }
+
+            if (enter) {
+                switch (t) {
+                case CMARK_NODE_PARAGRAPH: s.paragraph_begin(); break;
+                case CMARK_NODE_HEADING:
+                    s.heading_begin(cmark_node_get_heading_level(node));
+                    break;
+                case CMARK_NODE_CODE_BLOCK:
+                    s.code_block(cmark_node_get_literal(node),
+                        cmark_node_get_fence_info(node));
+                    break;
+                case CMARK_NODE_BLOCK_QUOTE: s.quote_begin(); break;
+                case CMARK_NODE_LIST:
+                    lists.push_back(
+                        cmark_node_get_list_type(node) == CMARK_ORDERED_LIST
+                            ? 1
+                            : 0);
+                    // Restart numbering per list so a bullet list does
+                    // not skew the next ordered list's first marker;
+                    // start honors the source's first number.
+                    item_index = cmark_node_get_list_start(node) - 1;
+                    s.list_begin(lists.back() == 1);
+                    break;
+                case CMARK_NODE_ITEM: {
+                    std::string prefix;
+                    if (!lists.empty() && lists.back() == 1) {
+                        ++item_index;
+                        prefix = std::to_string(item_index) + ". ";
+                    } else {
+                        prefix = "- ";
+                    }
+                    s.item_begin(prefix);
+                    break;
+                }
+                case CMARK_NODE_THEMATIC_BREAK: s.thematic_break(); break;
+                case CMARK_NODE_TEXT:
+                    s.text(cmark_node_get_literal(node), st);
+                    break;
+                case CMARK_NODE_CODE:
+                    st.code = true;
+                    s.text(cmark_node_get_literal(node), st);
+                    st.code = false;
+                    break;
+                case CMARK_NODE_SOFTBREAK: s.softbreak(); break;
+                case CMARK_NODE_LINEBREAK: s.linebreak(); break;
+                case CMARK_NODE_STRONG: st.bold = true; break;
+                case CMARK_NODE_EMPH: st.emph = true; break;
+                case CMARK_NODE_LINK:
+                    st.link = true;
+                    st.url  = cmark_node_get_url(node);
+                    break;
+                default: // HTML_BLOCK / HTML_INLINE / IMAGE / ...
+                    break;
+                }
+            } else {
+                switch (t) {
+                case CMARK_NODE_PARAGRAPH: s.paragraph_end(); break;
+                case CMARK_NODE_HEADING: s.heading_end(); break;
+                case CMARK_NODE_BLOCK_QUOTE: s.quote_end(); break;
+                case CMARK_NODE_LIST:
+                    s.list_end();
+                    if (!lists.empty()) {
+                        lists.pop_back();
+                    }
+                    break;
+                case CMARK_NODE_ITEM: s.item_end(); break;
+                case CMARK_NODE_STRONG: st.bold = false; break;
+                case CMARK_NODE_EMPH: st.emph = false; break;
+                case CMARK_NODE_LINK:
+                    st.link = false;
+                    st.url.clear();
+                    break;
+                default: break;
+                }
+            }
+        }
+
+        cmark_iter_free(iter);
+    }
 
 } // namespace
 

@@ -122,47 +122,6 @@ TEST_CASE("render_todo wraps long items instead of clipping")
     CHECK(out.find("test") != std::string::npos);
 }
 
-TEST_CASE("render_changed_files renders colored symbols and readable paths")
-{
-    using Kind = imza::ChangedFile::Kind;
-    const imza::RepositoryState repository {
-        .branch = "main",
-        .changed_files = {
-            { "modified.cpp", Kind::MODIFIED },
-            { "added.cpp", Kind::ADDED },
-            { "untracked.cpp", Kind::UNTRACKED },
-            { "deleted.cpp", Kind::DELETED },
-            { "old.cpp -> renamed.cpp", Kind::RENAMED },
-            { "source.cpp -> copied.cpp", Kind::COPIED },
-            { "conflicted.cpp", Kind::CONFLICTED },
-            { "unknown.cpp", Kind::UNKNOWN },
-        },
-        .changes = { 12, 4, 1 },
-    };
-    auto screen           = to_screen(imza::render_changed_files(
-        repository, { imza::LayoutCtx::Kind::WIDE, 30 }));
-    const std::string out = screen.ToString();
-
-    CHECK(out.find("●") != std::string::npos);
-    CHECK(out.find("modified.cpp") != std::string::npos);
-    CHECK(out.find("+") != std::string::npos);
-    CHECK(out.find("added.cpp") != std::string::npos);
-    CHECK(out.find("?") != std::string::npos);
-    CHECK(out.find("untracked.cpp") != std::string::npos);
-    CHECK(out.find("−") != std::string::npos);
-    CHECK(out.find("deleted.cpp") != std::string::npos);
-    CHECK(out.find("→") != std::string::npos);
-    CHECK(out.find("old.cpp -> renamed.cpp") != std::string::npos);
-    CHECK(out.find("⧉") != std::string::npos);
-    CHECK(out.find("source.cpp -> copied.cpp") != std::string::npos);
-    CHECK(out.find("!") != std::string::npos);
-    CHECK(out.find("conflicted.cpp") != std::string::npos);
-    CHECK(out.find("•") != std::string::npos);
-    CHECK(out.find("unknown.cpp") != std::string::npos);
-    CHECK(out.find("+12") != std::string::npos);
-    CHECK(out.find("−4") != std::string::npos);
-}
-
 TEST_CASE("render_context_box lists attachment basenames under files")
 {
     const std::string out = to_text(imza::render_context_box(

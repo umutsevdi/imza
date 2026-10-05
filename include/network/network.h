@@ -8,7 +8,6 @@
 #include <string_view>
 #include <vector>
 
-#include "common/modal.h"
 #include "common/tool_call.h"
 #include "common/types.h"
 #include "network/chat.h"
@@ -20,7 +19,6 @@ struct StreamEvent {
         CONTENT_DELTA,
         TOOL_CALL_START,
         TOOL_CALL,
-        QUESTION,
         DONE,
         ERROR,
         USAGE,
@@ -31,7 +29,6 @@ struct StreamEvent {
     std::string text;
     Status error = Status::OK;
     ToolCallRequest tool_call;
-    QuestionForm question;
     Usage usage { };
     std::string thinking_signature;
 };
@@ -39,7 +36,6 @@ struct StreamEvent {
 StreamEvent make_delta_event(std::string text);
 StreamEvent make_tool_call_start_event(ToolCallRequest request);
 StreamEvent make_tool_call_event(ToolCallRequest request);
-StreamEvent make_question_event(QuestionForm form);
 StreamEvent make_done_event();
 StreamEvent make_error_event(Status error, std::string message = "");
 StreamEvent make_usage_event(Usage usage);

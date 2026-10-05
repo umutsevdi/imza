@@ -20,7 +20,6 @@ struct CachedModel {
     std::optional<double> cost_cache_read;
     std::optional<double> cost_cache_write;
     std::optional<std::uint64_t> context;
-    std::optional<std::uint64_t> output;
     std::optional<bool> tool_call;
     std::optional<bool> reasoning;
     std::optional<Capabilities> capabilities;

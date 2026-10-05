@@ -111,24 +111,9 @@ namespace {
             });
         std::string catalog;
         for (const Skill& skill : skills) {
-            SkillPolicy policy = SkillPolicy::ASK;
-            if (config != nullptr) {
-                if (skill.scope == Skill::Scope::GLOBAL) {
-                    if (auto it = config->global_skills.find(skill.name);
-                        it != config->global_skills.end()) {
-                        policy = it->second;
-                    }
-                } else if (skill.project_root) {
-                    auto project = config->project_skills.find(
-                        skill.project_root->string());
-                    if (project != config->project_skills.end()) {
-                        if (auto it = project->second.find(skill.name);
-                            it != project->second.end()) {
-                            policy = it->second;
-                        }
-                    }
-                }
-            }
+            const SkillPolicy policy = config == nullptr
+                ? SkillPolicy::ASK
+                : skill_policy(*config, skill);
             if (policy == SkillPolicy::DENY) {
                 continue;
             }

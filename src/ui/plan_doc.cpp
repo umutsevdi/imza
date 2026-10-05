@@ -135,18 +135,11 @@ namespace {
                 return false;
             }
             if (_editor.is_open()) {
-                if (event == Event::Escape) {
-                    _editor.close();
-                    return true;
-                }
-                if (is_alt_enter(event)) {
-                    _editor.newline();
-                    animation::RequestAnimationFrame();
-                    return true;
-                }
-                if (event == Event::Return) {
-                    _save_note();
-                    return true;
+                switch (_editor.handle_event(event)) {
+                case AnnotationAction::CANCEL: _editor.close(); return true;
+                case AnnotationAction::SAVE: _save_note(); return true;
+                case AnnotationAction::HANDLED: return true;
+                case AnnotationAction::NONE: break;
                 }
                 return _editor.input()->OnEvent(event);
             }

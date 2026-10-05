@@ -98,9 +98,6 @@ namespace {
                     transcript
                         += "```text\n" + tool->result->text + "\n```\n\n";
                 }
-            } else if (const auto* answer = std::get_if<ModalAnswer>(&item)) {
-                transcript += "## Answer\n\n" + modal_answer_markdown(*answer)
-                    + "\n\n";
             }
         }
         return transcript;
@@ -382,8 +379,8 @@ void Delegation::spawn_title(std::string input, TurnSettings settings)
             req.temperature = 0.2;
             req.interrupted = [stop] { return stop.stop_requested(); };
             req.messages    = { { Message::Type::USER, prompt } };
-            apply_reasoning(req, settings.dialect, settings.reasoning_effort,
-                *_state->providers);
+            apply_reasoning(req, settings.route.dialect,
+                settings.reasoning_effort, *_state->providers);
             std::string title;
             const StreamCallback cb = [&](const StreamEvent& event) {
                 if (event.kind == StreamEvent::Kind::CONTENT_DELTA
@@ -392,7 +389,7 @@ void Delegation::spawn_title(std::string input, TurnSettings settings)
                 }
             };
             const Route route = _state->providers->authenticated_route_for(
-                settings.connection_id, settings.dialect,
+                settings.connection_id, settings.route.dialect,
                 _state->session->session_id());
             const Status status = stream(route, req, cb, nullptr);
             if (status != Status::OK) {

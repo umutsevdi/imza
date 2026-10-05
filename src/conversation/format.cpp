@@ -272,45 +272,4 @@ std::string tool_result_text(const ToolCall& call)
     return call.result.has_value() ? tool_result_text(*call.result) : "";
 }
 
-std::string question_form_markdown(const QuestionForm& form)
-{
-    std::string md;
-    for (const auto& c : form) {
-        if (!md.empty()) {
-            md += "\n\n";
-        }
-        md += "Question: \"" + c.prompt + "\"";
-        for (const auto& opt : c.options) {
-            md += "\n- " + opt;
-        }
-    }
-    return md;
-}
-
-std::string modal_answer_markdown(const ModalAnswer& answer)
-{
-    std::string md = "User answered:";
-    for (const auto& card : answer.cards) {
-        md += "\n";
-        if (!card.prompt.empty()) {
-            md += "- **" + card.prompt + "**\n";
-            std::string body;
-            if (!card.free_text.empty()) {
-                body = card.free_text;
-            } else if (!card.selected.empty()) {
-                body = join(card.selected, ", ");
-            }
-            md += "  " + (body.empty() ? "-" : body);
-        } else {
-            for (const auto& sel : card.selected) {
-                md += "\n> " + sel;
-            }
-            if (!card.free_text.empty()) {
-                md += "\n> " + card.free_text;
-            }
-        }
-    }
-    return md;
-}
-
 } // namespace imza

@@ -249,12 +249,8 @@ namespace {
     std::string render_method_description(
         std::string_view module, const LuaMethod& method)
     {
-        std::string out    = "imza." + method_path(module, method.name);
-        const auto newline = method.description.find('\n');
-        out += method.description.substr(0, newline);
-        if (newline != std::string_view::npos) {
-            out += method.description.substr(newline);
-        }
+        std::string out = "imza." + method_path(module, method.name);
+        out += method.description;
         return out;
     }
 

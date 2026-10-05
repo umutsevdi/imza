@@ -8,6 +8,15 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
+0.5.3 - 2026-10-3
+-------------------------------------------------------------------------------
+<https://github.com/umutsevdi/imza/releases/tag/v0.5.3>
+
+Changes:
+  - Startup memory usage reduced by replacing the JSON library with one
+    that does not leave its parsing scratch space in memory.
+
+-------------------------------------------------------------------------------
 0.5.2 - 2026-10-4
 -------------------------------------------------------------------------------
 <https://github.com/umutsevdi/imza/releases/tag/v0.5.2>

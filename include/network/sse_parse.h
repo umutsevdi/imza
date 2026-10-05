@@ -43,7 +43,6 @@ struct Provider {
     // Serializes the full request body once; dialects build a reflected
     // struct and write it with the shared Glaze options.
     std::string (*build)(const ChatRequest& req);
-    std::vector<std::string> (*headers)();
     void (*parse)(ParseState& state, std::string_view event,
         std::string_view data, std::vector<StreamEvent>& outs);
 };

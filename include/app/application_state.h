@@ -80,9 +80,6 @@ private:
     ApplicationState() = default;
     friend std::shared_ptr<ApplicationState> make_application_state(
         PostFn, Config, StreamFn, RuntimeFlag);
-    friend std::shared_ptr<ApplicationState> make_application_state_with_tools(
-        PostFn, Config, std::vector<Tool>, StreamFn, RuntimeFlag,
-        SubagentToolSlot);
     friend std::shared_ptr<ApplicationState> make_child_application_state(
         const ApplicationState&, PostFn, StreamFn, ModalRequestFn, std::string);
     friend std::shared_ptr<ApplicationState> make_sidechat_application_state(
@@ -92,10 +89,6 @@ private:
 std::shared_ptr<ApplicationState> make_application_state(PostFn post,
     Config config, StreamFn stream_fn = { },
     RuntimeFlag runtime_flags = interactive_runtime_flags());
-std::shared_ptr<ApplicationState> make_application_state_with_tools(PostFn post,
-    Config config, std::vector<Tool> tools, StreamFn stream_fn = { },
-    RuntimeFlag runtime_flags      = interactive_runtime_flags(),
-    SubagentToolSlot subagent_slot = nullptr);
 
 std::shared_ptr<ApplicationState> make_child_application_state(
     const ApplicationState& parent, PostFn post, StreamFn stream_fn = { },

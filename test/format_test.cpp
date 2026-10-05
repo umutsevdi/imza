@@ -5,24 +5,6 @@
 #include "ui/tool_format.h"
 #include <doctest/doctest.h>
 
-TEST_CASE("question_form_markdown renders prompt and options")
-{
-    imza::QuestionForm form { { "model?", { "gpt-4o", "claude" }, false,
-        false } };
-    const std::string md = imza::question_form_markdown(form);
-    CHECK(md.find("Question: \"model?\"") != std::string::npos);
-    CHECK(md.find("- gpt-4o") != std::string::npos);
-    CHECK(md.find("- claude") != std::string::npos);
-}
-
-TEST_CASE("modal_answer_markdown renders selected then free text")
-{
-    imza::ModalAnswer ans { { { { "Option 3" }, "extra note" } } };
-    const std::string md = imza::modal_answer_markdown(ans);
-    CHECK(md.find("User answered:") == 0);
-    CHECK(md.find("> Option 3\n> extra note") != std::string::npos);
-}
-
 TEST_CASE("lua dispatch log formats as counts and grouped summary")
 {
     imza::ToolCall call;
@@ -218,25 +200,6 @@ TEST_CASE("format_lua_return renders record lists as markdown tables")
     // Nested values demote the list to JSON.
     const imza::JsonValue nested = imza::parse_json(R"json([{"a":[1]}])json");
     CHECK(imza::format_lua_return(nested).find("|") == std::string::npos);
-}
-
-TEST_CASE("modal_answer_markdown renders Q/A pairs with prompt")
-{
-    imza::ModalAnswer ans;
-    ans.cards.push_back(
-        imza::QuestionAnswer { { "PostgreSQL" }, "", "storage backend?" });
-    ans.cards.push_back(
-        imza::QuestionAnswer { { "Auth", "Billing" }, "", "features?" });
-    ans.cards.push_back(
-        imza::QuestionAnswer { { }, "my own region", "region?" });
-    ans.cards.push_back(imza::QuestionAnswer { { }, "", "anything else?" });
-    const std::string md = imza::modal_answer_markdown(ans);
-    CHECK(md.find("**storage backend?**") != std::string::npos);
-    CHECK(md.find("PostgreSQL") != std::string::npos);
-    CHECK(md.find("Auth, Billing") != std::string::npos);
-    CHECK(md.find("my own region") != std::string::npos);
-    CHECK(md.find("anything else?**") != std::string::npos);
-    CHECK(md.find("-") != std::string::npos);
 }
 
 TEST_CASE("tool_args_summary formats object and non-object args")

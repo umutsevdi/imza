@@ -218,9 +218,6 @@ namespace {
                 return text("");
             }
             _ensure_built(st);
-            // AppleClang fails to emit member-template instantiations
-            // referenced only from a visit lambda; dispatch with
-            // holds_alternative instead.
             if (std::holds_alternative<PermissionPrompt>(st.modal())) {
                 return _tool_body(std::get<PermissionPrompt>(st.modal()));
             }
@@ -531,7 +528,7 @@ namespace {
             });
         }
 
-        template <typename Request> Element _tool_body(const Request& req)
+        Element _tool_body(const PermissionPrompt& req)
         {
             Elements rows { _header_line(tool_display_name(req.name)) };
             rows.push_back(

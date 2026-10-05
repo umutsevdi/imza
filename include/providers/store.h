@@ -119,6 +119,10 @@ private:
     const Connection* _find_locked(std::string_view id) const;
     Route _route_locked(const Connection& connection, ApiStandard dialect,
         std::string_view opencode_session = { }) const;
+    // Dialect override for `model` on this connection, plus the selection
+    // built from it; callers hold the store mutex.
+    ProviderSelection _selection_locked(const Connection& connection,
+        const std::string& model, std::string variant) const;
     void _start_fetch_locked(const std::string& connection_id);
     Status _commit_connection_locked(const ConnectResult& result,
         const std::vector<ModelInfo>& models, bool& first);

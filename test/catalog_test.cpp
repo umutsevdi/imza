@@ -68,8 +68,6 @@ TEST_CASE("load_catalog prunes models.dev fields")
     CHECK_FALSE(model.cost_cache_write.has_value());
     REQUIRE(model.context.has_value());
     CHECK(*model.context == 272000);
-    REQUIRE(model.output.has_value());
-    CHECK(*model.output == 128000);
     REQUIRE(model.tool_call.has_value());
     CHECK(*model.tool_call);
     REQUIRE(model.capabilities.has_value());

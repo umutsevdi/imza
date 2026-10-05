@@ -385,16 +385,6 @@ Element render_todo(const TodoList& todo, const LayoutCtx&)
     return titled_section("Tasks", std::move(body));
 }
 
-Element render_changed_files(
-    const RepositoryState& repository, const LayoutCtx&)
-{
-    Elements rows;
-    for (const ChangedFile& file : repository.changed_files) {
-        rows.push_back(changed_file_item(file));
-    }
-    return changed_files_panel(std::move(rows), repository.changes);
-}
-
 Element render_context_box(const std::optional<std::string>& rules,
     const std::vector<std::string>& attachments, SkillCounts project_skills,
     SkillCounts global_skills)

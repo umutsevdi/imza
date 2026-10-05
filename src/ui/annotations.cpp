@@ -3,28 +3,32 @@
 #include "ui/ui.h"
 #include "workspace/review.h"
 
+#include <ftxui/component/animation.hpp>
+
 #include <algorithm>
 #include <string_view>
 #include <utility>
 
 namespace imza {
 
-ftxui::Element annotation_card(ftxui::Element body, int height)
-{
-    std::vector<ftxui::Element> rail;
-    rail.reserve(static_cast<std::size_t>(std::max(1, height)));
-    for (int row = 0; row < height; ++row) {
-        rail.push_back(ftxui::text(" ") | ftxui::bgcolor(HL_CYAN));
-    }
-    ftxui::Element card
-        = ftxui::hbox({ ftxui::vbox(std::move(rail)), ftxui::text(" "),
-              std::move(body) | ftxui::xflex, ftxui::filler() })
-        | ftxui::color(PANEL_FG) | ftxui::bgcolor(PANEL_COLOR_FOCUS);
-    return ftxui::hbox(
-        { ftxui::text("             "), std::move(card) | ftxui::xflex });
-}
-
 namespace {
+
+    // Review-style annotation card: cyan rail, focused background, body
+    // rows.
+    ftxui::Element annotation_card(ftxui::Element body, int height)
+    {
+        std::vector<ftxui::Element> rail;
+        rail.reserve(static_cast<std::size_t>(std::max(1, height)));
+        for (int row = 0; row < height; ++row) {
+            rail.push_back(ftxui::text(" ") | ftxui::bgcolor(HL_CYAN));
+        }
+        ftxui::Element card
+            = ftxui::hbox({ ftxui::vbox(std::move(rail)), ftxui::text(" "),
+                  std::move(body) | ftxui::xflex, ftxui::filler() })
+            | ftxui::color(PANEL_FG) | ftxui::bgcolor(PANEL_COLOR_FOCUS);
+        return ftxui::hbox(
+            { ftxui::text("             "), std::move(card) | ftxui::xflex });
+    }
 
     int wrapped_height(std::string_view body, int width)
     {
@@ -63,6 +67,24 @@ ftxui::Element annotation_editor_card(std::string_view draft, int width,
 template <typename Anchor> void AnnotationEditor<Anchor>::newline()
 {
     insert_newline_at(_draft, _draft_cursor);
+}
+
+template <typename Anchor>
+AnnotationAction AnnotationEditor<Anchor>::handle_event(
+    const ftxui::Event& event)
+{
+    if (event == ftxui::Event::Escape) {
+        return AnnotationAction::CANCEL;
+    }
+    if (is_alt_enter(event)) {
+        newline();
+        ftxui::animation::RequestAnimationFrame();
+        return AnnotationAction::HANDLED;
+    }
+    if (event == ftxui::Event::Return) {
+        return AnnotationAction::SAVE;
+    }
+    return AnnotationAction::NONE;
 }
 
 template class AnnotationEditor<int>;

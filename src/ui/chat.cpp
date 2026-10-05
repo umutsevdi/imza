@@ -114,6 +114,19 @@ namespace {
         return hbox(std::move(blocks));
     }
 
+    // Spinner row shown while the agent works: spinner, then a status
+    // label or button; the interrupt hint trails everything but the
+    // subagent row, which renders alone.
+    Element busy_row(int frame, Element middle, bool interrupt_hint = true)
+    {
+        Elements parts { dim_spinner(frame), std::move(middle) };
+        if (interrupt_hint) {
+            parts.push_back(filler());
+            parts.push_back(text(INTERRUPT_HINT) | dim);
+        }
+        return hbox(std::move(parts));
+    }
+
     Decorator block_cursor()
     {
         class Impl : public Node {
@@ -139,6 +152,13 @@ namespace {
         return [](Element child) {
             return std::make_shared<Impl>(std::move(child));
         };
+    }
+
+    // Pending long-running tools whose card animates per frame.
+    bool is_running_tool(const ToolCall& tc)
+    {
+        return (tc.name == "shell" || tc.name == "subagent" || tc.name == "lua")
+            && !tc.result.has_value();
     }
 
     std::size_t item_version(const ConversationItem& it)
@@ -182,12 +202,6 @@ namespace {
     Element assistant_item(const AssistantTurn& t, int width)
     {
         return assistant_item(std::string_view(t.markdown), width);
-    }
-
-    Element modal_answer_item(const ModalAnswer& ans, int width)
-    {
-        return card(render_markdown_element(modal_answer_markdown(ans), width),
-            PANEL_COLOR, false);
     }
 
     // Interaction maps store either a bare Component or a struct wrapping
@@ -261,18 +275,9 @@ namespace {
             const Session& st   = *_session;
             const LayoutCtx ctx = _layout();
 
-            const bool streaming    = st.phase() == Session::Phase::STREAMING;
-            const bool connecting   = st.phase() == Session::Phase::CONNECTING;
-            const bool busy         = streaming || connecting;
-            const bool tool_running = busy
-                && std::any_of(st.items().begin(), st.items().end(),
-                    [](const ConversationItem& item) {
-                        const auto* tc = std::get_if<ToolCall>(&item);
-                        return tc != nullptr
-                            && (tc->name == "shell" || tc->name == "subagent"
-                                || tc->name == "lua")
-                            && !tc->result.has_value();
-                    });
+            const bool streaming  = st.phase() == Session::Phase::STREAMING;
+            const bool connecting = st.phase() == Session::Phase::CONNECTING;
+            const bool busy       = streaming || connecting;
             const std::uint64_t content_serial = st.content_serial();
             const std::vector<ConversationItem>& conversation = st.items();
             const std::size_t item_count = conversation.size();
@@ -349,10 +354,8 @@ namespace {
                         || std::holds_alternative<UserTurn>(
                             conversation[item_index + 1]));
                 std::size_t eff_version = version;
-                if (const auto* tc = std::get_if<ToolCall>(&it); tc != nullptr
-                    && (tc->name == "shell" || tc->name == "subagent"
-                        || tc->name == "lua")
-                    && !tc->result.has_value()) {
+                if (const auto* tc = std::get_if<ToolCall>(&it);
+                    tc != nullptr && is_running_tool(*tc)) {
                     eff_version = static_cast<std::size_t>(_frame);
                     if (tc->phase == ToolCall::Phase::EXECUTING) {
                         eff_version ^= std::size_t { 1 } << 60;
@@ -457,12 +460,12 @@ namespace {
                                 break;
                             }
                             case ToolCall::Result::Kind::ERROR:
-                                _item_cache[item_index]
-                                    = _render_tool_error(tc);
+                                _item_cache[item_index] = _render_tool_flagged(
+                                    tc, "Error: ", HL_RED);
                                 break;
                             case ToolCall::Result::Kind::REJECT:
-                                _item_cache[item_index]
-                                    = _render_tool_reject(tc);
+                                _item_cache[item_index] = _render_tool_flagged(
+                                    tc, "Rejected: ", HL_YELLOW);
                                 break;
                             case ToolCall::Result::Kind::CANCEL:
                                 _item_cache[item_index]
@@ -491,15 +494,11 @@ namespace {
                             = connecting ? " Connecting…" : " Thinking…";
                         status += elapsed_suffix(st);
                         el = vbox({
-                            hbox({
-                                dim_spinner(_frame),
+                            busy_row(_frame,
                                 _make_reasoning_button(item_index,
                                     std::move(status), at.reasoning,
                                     assistant_metadata(at))
-                                    ->Render(),
-                                filler(),
-                                text(INTERRUPT_HINT) | dim,
-                            }),
+                                    ->Render()),
                             el,
                         });
                     }
@@ -990,30 +989,13 @@ namespace {
             });
         }
 
-        std::string _viewer_header_detail(
-            const ToolCall& tc, std::size_t count, std::string_view unit)
+        Element _render_viewer_header(const ToolCall& tc, std::size_t count)
         {
             std::string label = tool_header_args(tc);
             label += label.empty() ? "(" : " (";
-            label += std::to_string(count) + " ";
-            if (count == 1) {
-                label += unit;
-            } else if (unit == "entry") {
-                label += "entries";
-            } else if (unit == "match") {
-                label += "matches";
-            } else {
-                label += std::string(unit) + "s";
-            }
-            label += ")";
-            return label;
-        }
-
-        Element _render_viewer_header(
-            const ToolCall& tc, std::size_t count, std::string_view unit)
-        {
-            Component button = _make_viewer_header_button(
-                tc, _viewer_header_detail(tc, count, unit));
+            label += std::to_string(count);
+            label += count == 1 ? " line)" : " lines)";
+            Component button = _make_viewer_header_button(tc, std::move(label));
             Elements parts { button->Render() };
             if (tc.result->shell_status.has_value()) {
                 const std::string status
@@ -1058,9 +1040,9 @@ namespace {
         // viewer instead of spilling its text into the timeline.
         Element _render_generic_tool(const ToolCall& tc)
         {
-            return vbox({ _render_viewer_header(
-                              tc, count_lines(tc.result->text), "line"),
-                separatorEmpty() });
+            return vbox(
+                { _render_viewer_header(tc, count_lines(tc.result->text)),
+                    separatorEmpty() });
         }
 
         Element _render_lua_item(const ToolCall& tc)
@@ -1113,22 +1095,15 @@ namespace {
             return vbox(std::move(rows));
         }
 
-        Element _render_tool_error(const ToolCall& tc)
-        {
-            // Keep the lua card shape: the status header would echo
-            // the whole script into the chat.
-            if (tc.name == "lua") {
-                return _render_lua_item(tc);
-            }
-            return _render_tool_status(tc, "Error: ", HL_RED);
-        }
-
-        Element _render_tool_reject(const ToolCall& tc)
+        // Flagged results keep the lua card shape: the status header
+        // would echo the whole script into the chat.
+        Element _render_tool_flagged(
+            const ToolCall& tc, std::string marker, ftxui::Color tone)
         {
             if (tc.name == "lua") {
                 return _render_lua_item(tc);
             }
-            return _render_tool_status(tc, "Rejected: ", HL_YELLOW);
+            return _render_tool_status(tc, std::move(marker), tone);
         }
 
         Element _render_tool_pending(const ToolCall& tc)
@@ -1138,21 +1113,16 @@ namespace {
                 // Arguments are still streaming, so there is nothing to
                 // inspect yet; show a plain status row.
                 return vbox({
-                    hbox({
-                        dim_spinner(_frame),
-                        text(" Planning…" + elapsed_suffix(*_session)) | dim,
-                        filler(),
-                        text(INTERRUPT_HINT) | dim,
-                    }),
+                    busy_row(_frame,
+                        text(" Planning…" + elapsed_suffix(*_session)) | dim),
                     separatorEmpty(),
                 });
             }
             if (tc.name == "subagent") {
                 Elements rows {
-                    hbox({
-                        dim_spinner(_frame),
+                    busy_row(_frame,
                         text(" Delegating…" + elapsed_suffix(*_session)) | dim,
-                    }),
+                        false),
                 };
                 for (std::size_t index = 0; index < tc.subagent_ids.size();
                     ++index) {
@@ -1167,11 +1137,10 @@ namespace {
             }
             if (tc.name == "lua") {
                 return vbox({
-                    hbox({
-                        dim_spinner(_frame),
-                        text(" "),
-                        _make_lua_pending_button(tc)->Render(),
-                    }),
+                    busy_row(_frame,
+                        hbox({ text(" "),
+                            _make_lua_pending_button(tc)->Render() }),
+                        false),
                     separatorEmpty(),
                 });
             }
@@ -1197,21 +1166,32 @@ namespace {
             return vbox(std::move(rows));
         }
 
-        template <typename Key>
-        Component _memoized_label_button(std::map<Key, Component>& cache,
-            Key key, std::string label, std::function<void()> on_click)
+        // Find-or-create a component cached per key, attached to the
+        // container so its focus state survives across frames.
+        template <typename Key, typename Make>
+        Component _memoized_button(
+            std::map<Key, Component>& cache, Key key, Make&& make)
         {
             if (const auto found = cache.find(key); found != cache.end()) {
                 return found->second;
             }
-            auto shared_label
-                = std::make_shared<const std::string>(std::move(label));
-            Component btn = inline_link_button(
-                [shared_label] { return text(*shared_label); },
-                std::move(on_click), PANEL_FG_DIM);
-            cache.emplace(std::move(key), btn);
-            _container->Add(btn);
-            return btn;
+            Component button = make();
+            cache.emplace(std::move(key), button);
+            _container->Add(button);
+            return button;
+        }
+
+        template <typename Key>
+        Component _memoized_label_button(std::map<Key, Component>& cache,
+            Key key, std::string label, std::function<void()> on_click)
+        {
+            return _memoized_button(cache, std::move(key), [&] {
+                auto shared_label
+                    = std::make_shared<const std::string>(std::move(label));
+                return inline_link_button(
+                    [shared_label] { return text(*shared_label); },
+                    std::move(on_click), PANEL_FG_DIM);
+            });
         }
 
         Component _make_subagent_viewer_button(
@@ -1265,54 +1245,45 @@ namespace {
         Component _make_lua_viewer_button(
             const ToolCall& tc, bool failed, const std::string& counts)
         {
-            if (const auto found = _read_buttons.find(tc.id);
-                found != _read_buttons.end()) {
-                return found->second;
-            }
-            std::string label = failed ? "Execution Failed" : "Executed";
-            if (!counts.empty()) {
-                label += " · " + counts;
-            }
-            auto shared_label
-                = std::make_shared<const std::string>(std::move(label));
-            const std::size_t id = tc.id;
-            Component button     = inline_link_button(
-                [failed, shared_label] {
-                    return failed ? text(*shared_label) | strikethrough
-                                  : text(*shared_label) | bold;
-                },
-                [this, id] {
-                    if (const auto* call = _find_tool_call(id);
-                        call != nullptr) {
-                        _open_viewer_for(*call);
-                    }
-                },
-                failed ? PANEL_FG_DIM : HL_GREEN);
-            _read_buttons.emplace(id, button);
-            _container->Add(button);
-            return button;
+            return _memoized_button(_read_buttons, tc.id, [&] {
+                std::string label = failed ? "Execution Failed" : "Executed";
+                if (!counts.empty()) {
+                    label += " · " + counts;
+                }
+                auto shared_label
+                    = std::make_shared<const std::string>(std::move(label));
+                const std::size_t id = tc.id;
+                return inline_link_button(
+                    [failed, shared_label] {
+                        return failed ? text(*shared_label) | strikethrough
+                                      : text(*shared_label) | bold;
+                    },
+                    [this, id] {
+                        if (const auto* call = _find_tool_call(id);
+                            call != nullptr) {
+                            _open_viewer_for(*call);
+                        }
+                    },
+                    failed ? PANEL_FG_DIM : HL_GREEN);
+            });
         }
 
         Component _make_viewer_header_button(
             const ToolCall& tc, std::string detail)
         {
-            if (const auto found = _read_buttons.find(tc.id);
-                found != _read_buttons.end()) {
-                return found->second;
-            }
-            std::string name     = tc.name == "skill" ? "Load Skill"
-                                                      : tool_display_name(tc.name);
-            const std::size_t id = tc.id;
-            Component button     = split_inline_link_button(
-                std::move(name), std::move(detail), [this, id] {
-                    if (const auto* call = _find_tool_call(id);
-                        call != nullptr) {
-                        _open_viewer_for(*call);
-                    }
-                });
-            _read_buttons.emplace(id, button);
-            _container->Add(button);
-            return button;
+            return _memoized_button(_read_buttons, tc.id, [&] {
+                std::string name     = tc.name == "skill"
+                    ? "Load Skill"
+                    : tool_display_name(tc.name);
+                const std::size_t id = tc.id;
+                return split_inline_link_button(
+                    std::move(name), std::move(detail), [this, id] {
+                        if (const auto* call = _find_tool_call(id);
+                            call != nullptr) {
+                            _open_viewer_for(*call);
+                        }
+                    });
+            });
         }
 
         bool _reasoning_enabled(const AssistantTurn& turn) const
@@ -1345,10 +1316,8 @@ namespace {
                 Component btn = _make_reasoning_button(index, label,
                     placeholder ? std::string() : t.reasoning,
                     assistant_metadata(t));
-                Element row   = done
-                    ? btn->Render()
-                    : hbox({ dim_spinner(_frame), btn->Render(), filler(),
-                          text(INTERRUPT_HINT) | dim });
+                Element row
+                    = done ? btn->Render() : busy_row(_frame, btn->Render());
                 parts.push_back(row);
             }
             if (!t.markdown.empty()) {
@@ -1422,14 +1391,8 @@ ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx)
             if constexpr (std::is_same_v<T, UserTurn>) {
                 return user_item(
                     v, std::max(20, review_content_width(ctx) - 4));
-            } else if constexpr (std::is_same_v<T, AssistantTurn>) {
-                return assistant_item(
-                    v, std::max(20, review_content_width(ctx) - 4));
             } else if constexpr (std::is_same_v<T, TodoList>) {
                 return render_todo(v, ctx);
-            } else if constexpr (std::is_same_v<T, ModalAnswer>) {
-                return modal_answer_item(
-                    v, std::max(20, review_content_width(ctx) - 4));
             } else if constexpr (std::is_same_v<T, CompactionEvent>) {
                 if (v.status == CompactionEvent::Status::COMPLETED) {
                     return text("✓ Session compacted") | dim;

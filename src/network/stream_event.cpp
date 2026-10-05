@@ -27,14 +27,6 @@ StreamEvent make_tool_call_event(ToolCallRequest request)
     return ev;
 }
 
-StreamEvent make_question_event(QuestionForm form)
-{
-    StreamEvent ev;
-    ev.kind     = StreamEvent::Kind::QUESTION;
-    ev.question = std::move(form);
-    return ev;
-}
-
 StreamEvent make_done_event()
 {
     StreamEvent ev;

@@ -28,9 +28,8 @@ namespace imza {
 
 namespace {
 
-    constexpr std::size_t MAX_SYMBOLS    = 50;
-    constexpr std::size_t MAX_NODES      = 500;
-    constexpr std::size_t MAX_QUERY_ROWS = 500;
+    constexpr std::size_t MAX_SYMBOLS = 50;
+    constexpr std::size_t MAX_NODES   = 500;
     // Per-node text cap: enough to identify a declaration without
     // shipping whole translation units back to the model.
     constexpr std::size_t MAX_NODE_TEXT = 400;
@@ -41,20 +40,9 @@ namespace {
     struct TreeDeleter {
         void operator()(TSTree* tree) const { ts_tree_delete(tree); }
     };
-    struct QueryDeleter {
-        void operator()(TSQuery* query) const { ts_query_delete(query); }
-    };
-    struct CursorDeleter {
-        void operator()(TSQueryCursor* cursor) const
-        {
-            ts_query_cursor_delete(cursor);
-        }
-    };
 
     using ParserPtr = std::unique_ptr<TSParser, ParserDeleter>;
     using TreePtr   = std::unique_ptr<TSTree, TreeDeleter>;
-    using QueryPtr  = std::unique_ptr<TSQuery, QueryDeleter>;
-    using CursorPtr = std::unique_ptr<TSQueryCursor, CursorDeleter>;
 
     // Grammar entry point for the file's filename or lowercased
     // extension; nullptr when no registered grammar claims the path.
@@ -266,61 +254,6 @@ namespace {
         return Parsed { target, std::move(code), std::move(tree) };
     }
 
-    int binding_ts_query(lua_State* L)
-    {
-        const auto parsed = parse_file(L, 1);
-        if (!parsed) {
-            return 2;
-        }
-        std::size_t query_size = 0;
-        const char* query_raw  = luaL_checklstring(L, 2, &query_size);
-
-        const TSLanguage* language = language_for_path(parsed->target);
-        uint32_t error_offset      = 0;
-        TSQueryError error_type    = TSQueryErrorNone;
-        QueryPtr query(ts_query_new(language, query_raw,
-            static_cast<uint32_t>(query_size), &error_offset, &error_type));
-        if (query == nullptr) {
-            return binding_error(L,
-                "query: invalid query at byte " + std::to_string(error_offset));
-        }
-        CursorPtr cursor(ts_query_cursor_new());
-        if (cursor == nullptr) {
-            return binding_error(L, "query: cannot create cursor");
-        }
-        ts_query_cursor_exec(
-            cursor.get(), query.get(), ts_tree_root_node(parsed->tree.get()));
-
-        lua_newtable(L);
-        int row = 0;
-        TSQueryMatch match { };
-        while (ts_query_cursor_next_match(cursor.get(), &match)) {
-            if (static_cast<std::size_t>(row) >= MAX_QUERY_ROWS) {
-                break;
-            }
-            for (uint16_t i = 0; i < match.capture_count
-                && static_cast<std::size_t>(row) < MAX_QUERY_ROWS;
-                ++i) {
-                const TSQueryCapture& capture = match.captures[i];
-                uint32_t name_size            = 0;
-                const char* name              = ts_query_capture_name_for_id(
-                    query.get(), capture.index, &name_size);
-                const uint32_t begin = ts_node_start_byte(capture.node);
-                const uint32_t end   = ts_node_end_byte(capture.node);
-                lua_newtable(L);
-                lua_pushlstring(L, name, name_size);
-                lua_setfield(L, -2, "capture");
-                lua_pushinteger(L, ts_node_start_point(capture.node).row + 1);
-                lua_setfield(L, -2, "line");
-                lua_pushlstring(L, parsed->code.data() + begin,
-                    std::min<std::size_t>(end - begin, MAX_NODE_TEXT));
-                lua_setfield(L, -2, "text");
-                lua_rawseti(L, -2, ++row);
-            }
-        }
-        return 1;
-    }
-
     // Children are visited whether or not the parent matches: grammars nest
     // declarations inside translation units, classes, and namespaces.
     void walk_tree(const Parsed& parsed, std::size_t cap,
@@ -494,18 +427,6 @@ namespace {
     }
 
     constexpr LuaMethod BINDINGS[] = {
-        {
-            "_lib.ts_query",
-            binding_ts_query,
-            R"desc((path: string, query: string) returns { capture, line, text }[], throws
-#private: Execute an arbitrary tree-sitter query (S-expression pattern with
-@captures) over the file, one row per capture.
-Throws on an invalid query, naming the byte offset of the syntax error.
-Capped at 500 rows.)desc",
-            LuaCapability::NONE,
-            "",
-            true,
-        },
         {
             "index",
             binding_ts_index,

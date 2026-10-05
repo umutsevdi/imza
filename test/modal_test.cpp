@@ -30,12 +30,6 @@ bool showing_tool_ask(const imza::Session& st)
         && st.phase() == imza::Session::Phase::AWAITING;
 }
 
-bool showing_question(const imza::Session& st)
-{
-    return std::holds_alternative<imza::QuestionForm>(st.modal())
-        && st.phase() == imza::Session::Phase::AWAITING;
-}
-
 } // namespace
 
 TEST_CASE("plan requests omit edit and write tools")
@@ -80,36 +74,6 @@ TEST_CASE("attended root turn notifies once after completion")
 
     imza::on_turn_finished(*env.state, "");
     CHECK(notifications.size() == 1);
-}
-
-TEST_CASE("agent question notifies when input is required")
-{
-    AgentEnv env;
-    std::vector<imza::AgentNotification> notifications;
-    env.state->notify_user = [&notifications](imza::AgentNotification event) {
-        notifications.push_back(event);
-    };
-    auto round = std::make_shared<int>(0);
-    env.stream = [round](const imza::ChatRequest&,
-                     const imza::StreamCallback& callback) {
-        if ((*round)++ == 0) {
-            callback(imza::make_question_event(
-                { { "Continue?", { "yes" }, false, false } }));
-        }
-        callback(imza::make_done_event());
-        return imza::Status::OK;
-    };
-
-    imza::submit(*env.state, "inspect");
-    REQUIRE(env.pump.wait_for([&] { return showing_question(*env.session); }));
-    REQUIRE(notifications.size() == 1);
-    CHECK(notifications.front() == imza::AgentNotification::INPUT_REQUIRED);
-
-    imza::resolve_modal(*env.state,
-        imza::ModalResult { imza::ModalAnswer { { { { "yes" }, "", "" } } } });
-    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
-    REQUIRE(notifications.size() == 2);
-    CHECK(notifications.back() == imza::AgentNotification::TURN_FINISHED);
 }
 
 TEST_CASE("agent shell approval notifies when input is required")
@@ -443,68 +407,6 @@ TEST_CASE("subagent tool rejects build tasks while main agent is planning")
     CHECK(env.state->queue.size() == 0);
 }
 
-TEST_CASE(
-    "question round-trip: AWAITING while pending, reply folded, ask stable")
-{
-    AgentEnv env;
-    auto round = std::make_shared<int>(0);
-    env.stream = [&env, round](const imza::ChatRequest& req,
-                     const imza::StreamCallback& cb) {
-        env.requests.push_back(req);
-        if ((*round)++ == 0) {
-            cb(imza::make_delta_event("I need input.\n"));
-            cb(imza::make_question_event(
-                { { "Which one?", { "A", "B" }, false, false } }));
-        } else {
-            cb(imza::make_delta_event("thanks"));
-        }
-        cb(imza::make_done_event());
-        return imza::Status::OK;
-    };
-
-    imza::submit(*env.state, "go");
-    REQUIRE(env.pump.wait_for([&] { return showing_question(*env.session); }));
-    CHECK(env.state->queue.size() == 1);
-
-    const std::string ask_md = imza::question_form_markdown(
-        { { "Which one?", { "A", "B" }, false, false } });
-    auto assistant_corpus = [&] {
-        std::string all;
-        for (const auto& it : env.session->items()) {
-            if (const auto* a = std::get_if<imza::AssistantTurn>(&it)) {
-                all += a->markdown + "\n";
-            }
-        }
-        return all;
-    };
-    const std::string snapshot = assistant_corpus();
-    CHECK(snapshot.find(ask_md) != std::string::npos);
-
-    imza::resolve_modal(*env.state,
-        imza::ModalResult { imza::ModalAnswer { { { { "B" }, "", "" } } } });
-
-    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
-    CHECK(env.state->queue.size() == 0);
-
-    const std::string after = assistant_corpus();
-    CHECK(after.find(ask_md) != std::string::npos);
-    CHECK(after.find(ask_md) == after.rfind(ask_md));
-
-    size_t answers = 0;
-    for (const auto& it : env.session->items()) {
-        if (std::holds_alternative<imza::ModalAnswer>(it)) {
-            ++answers;
-        }
-    }
-    REQUIRE(answers == 1);
-    CHECK(env.user_turn_count() == 1);
-    CHECK(env.last_request().messages.back().type == imza::Message::Type::USER);
-    CHECK(env.last_request().messages.back().content.find("User answered:")
-        != std::string::npos);
-    CHECK(env.last_request().messages.back().content.find("> B")
-        != std::string::npos);
-}
-
 TEST_CASE("tool accept: output fills result, request half byte-stable")
 {
     AgentEnv env;
@@ -625,90 +527,6 @@ TEST_CASE("esc on tool injects generic denial, appends nothing to transcript")
     CHECK(env.state->queue.size() == 0);
 }
 
-TEST_CASE("esc on question skips form, appends nothing, no exception")
-{
-    AgentEnv env;
-    env.stream
-        = [&env](const imza::ChatRequest& req, const imza::StreamCallback& cb) {
-              env.requests.push_back(req);
-              cb(imza::make_question_event(
-                  { { "Pick", { "x", "y" }, false, false } }));
-              cb(imza::make_done_event());
-              return imza::Status::OK;
-          };
-
-    imza::submit(*env.state, "go");
-    REQUIRE(env.pump.wait_for([&] { return showing_question(*env.session); }));
-
-    imza::close_modal(*env.state);
-
-    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
-    CHECK(env.user_turn_count() == 1);
-    size_t answers = 0;
-    for (const auto& it : env.session->items()) {
-        if (std::holds_alternative<imza::ModalAnswer>(it)) {
-            ++answers;
-        }
-    }
-    CHECK(answers == 0);
-}
-
-TEST_CASE("one drain cycle folds question answer and tool output correctly")
-{
-    AgentEnv env;
-    auto round = std::make_shared<int>(0);
-    env.stream = [&env, round](const imza::ChatRequest& req,
-                     const imza::StreamCallback& cb) {
-        env.requests.push_back(req);
-        if ((*round)++ == 0) {
-            cb(imza::make_question_event(
-                { { "Backend?", { "pg", "sqlite" }, false, false } }));
-            cb(imza::make_tool_call_event({ "lua",
-                R"json({"script":"local out, code = imza.shell('whoami') print(out) print('whoami-complete')"})json",
-                "" }));
-        }
-        cb(imza::make_done_event());
-        return imza::Status::OK;
-    };
-
-    imza::submit(*env.state, "go");
-
-    REQUIRE(env.pump.wait_for([&] { return showing_question(*env.session); }));
-    CHECK(env.state->queue.size() == 1);
-    imza::resolve_modal(*env.state,
-        imza::ModalResult { imza::ModalAnswer { { { { "pg" }, "", "" } } } });
-
-    REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
-    imza::resolve_modal(*env.state,
-        imza::ModalResult {
-            imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" } });
-
-    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
-
-    CHECK(env.user_turn_count() == 1);
-    const auto& msgs = env.last_request().messages;
-    int reply_idx    = -1;
-    int tool_idx     = -1;
-    for (size_t i = 0; i < msgs.size(); ++i) {
-        if (msgs[i].content.find("User answered:") != std::string::npos) {
-            reply_idx = static_cast<int>(i);
-        }
-        if (msgs[i].content.find("whoami-complete") != std::string::npos
-            && msgs[i].type == imza::Message::Type::TOOL) {
-            tool_idx = static_cast<int>(i);
-        }
-    }
-    REQUIRE(reply_idx >= 0);
-    REQUIRE(tool_idx >= 0);
-    CHECK(tool_idx < reply_idx);
-    CHECK(msgs[tool_idx].type == imza::Message::Type::TOOL);
-    const auto& prev = msgs[tool_idx - 1];
-    CHECK(prev.type == imza::Message::Type::ASSISTANT);
-    REQUIRE(prev.tool_calls.size() == 1);
-    CHECK(prev.tool_calls[0].name == "lua");
-    CHECK(prev.tool_calls[0].args.find("whoami-complete") != std::string::npos);
-}
-
 TEST_CASE("FIFO order preserved and queue_size counts overlays")
 {
     AgentEnv env;
@@ -716,8 +534,7 @@ TEST_CASE("FIFO order preserved and queue_size counts overlays")
     env.stream = [&env, round](const imza::ChatRequest& req,
                      const imza::StreamCallback& cb) {
         env.requests.push_back(req);
-        if ((*round)++ == 0) {
-            cb(imza::make_question_event({ { "Q1", { "a" }, false, false } }));
+        if ((*round)++ < 2) {
             cb(imza::make_tool_call_event({ "lua",
                 R"json({"script":"local out, code = imza.shell('cmake --build build') print(code)"})json",
                 "" }));
@@ -727,7 +544,7 @@ TEST_CASE("FIFO order preserved and queue_size counts overlays")
     };
 
     imza::submit(*env.state, "go");
-    REQUIRE(env.pump.wait_for([&] { return showing_question(*env.session); }));
+    REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
 
     imza::enqueue_user_modal(
         *env.state, imza::ViewerModal { "Queued", "content" });
@@ -735,7 +552,8 @@ TEST_CASE("FIFO order preserved and queue_size counts overlays")
     CHECK(env.state->queue.size() == 2);
 
     imza::resolve_modal(*env.state,
-        imza::ModalResult { imza::ModalAnswer { { { { "a" }, "", "" } } } });
+        imza::ModalResult {
+            imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" } });
     REQUIRE(env.pump.wait_for([&] {
         return std::holds_alternative<imza::ViewerModal>(env.session->modal())
             && env.state->queue.size() == 2;

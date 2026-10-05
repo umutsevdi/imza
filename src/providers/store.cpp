@@ -205,6 +205,18 @@ ProviderStore::provider_options() const
     return options;
 }
 
+ProviderSelection ProviderStore::_selection_locked(const Connection& connection,
+    const std::string& model, std::string variant) const
+{
+    ApiStandard dialect = default_dialect(connection, _catalog);
+    if (const auto it = connection.dialects.find(model);
+        it != connection.dialects.end()) {
+        dialect = it->second;
+    }
+    return ProviderSelection { model, std::move(variant),
+        connection_key(connection), _route_locked(connection, dialect) };
+}
+
 std::optional<ProviderSelection> ProviderStore::active_selection() const
 {
     std::lock_guard lock(_mutex);
@@ -215,14 +227,8 @@ std::optional<ProviderSelection> ProviderStore::active_selection() const
     if (connection == nullptr) {
         return std::nullopt;
     }
-    ApiStandard dialect = default_dialect(*connection, _catalog);
-    if (const auto it = connection->dialects.find(_config.last_used->model);
-        it != connection->dialects.end()) {
-        dialect = it->second;
-    }
-    return ProviderSelection { _config.last_used->model,
-        _config.reasoning_effort.value_or("off"), connection_key(*connection),
-        _route_locked(*connection, dialect) };
+    return _selection_locked(*connection, _config.last_used->model,
+        _config.reasoning_effort.value_or("off"));
 }
 
 std::optional<ProviderSelection> ProviderStore::subagent_selection(
@@ -244,16 +250,11 @@ std::optional<ProviderSelection> ProviderStore::subagent_selection(
     if (connection == nullptr) {
         return std::nullopt;
     }
-    ApiStandard dialect = default_dialect(*connection, _catalog);
-    if (const auto found = connection->dialects.find(model);
-        found != connection->dialects.end()) {
-        dialect = found->second;
-    }
-    const std::string variant = subagent_variant_or_default(
-        configured != _config.subagents.end() ? &configured->second : nullptr,
-        role);
-    return ProviderSelection { model, variant, connection_key(*connection),
-        _route_locked(*connection, dialect) };
+    return _selection_locked(*connection, model,
+        subagent_variant_or_default(configured != _config.subagents.end()
+                ? &configured->second
+                : nullptr,
+            role));
 }
 
 Route ProviderStore::route_for(

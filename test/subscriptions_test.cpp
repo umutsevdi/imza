@@ -17,12 +17,10 @@ std::string token_with_claims()
 TEST_CASE("OpenAI token claims provide account identity and expiry")
 {
     std::string account;
-    std::string label;
     std::int64_t expires = 0;
-    REQUIRE(imza::parse_openai_token_claims(
-        token_with_claims(), account, label, expires));
+    REQUIRE(
+        imza::parse_openai_token_claims(token_with_claims(), account, expires));
     CHECK(account == "account-1");
-    CHECK(label == "user@example.com");
     CHECK(expires == 1756390000);
 }
 

@@ -23,7 +23,6 @@ struct SubscriptionCredentials {
     std::string refresh_token;
     std::int64_t expires_at = 0;
     std::string account_id;
-    std::string label;
 };
 
 struct SubscriptionResult {
@@ -53,7 +52,7 @@ SubscriptionResult await_openai_device_code(const OpenAIDeviceCode& code,
 SubscriptionResult refresh_subscription(std::string_view connection_id,
     std::string_view refresh_token, std::string_view account_id = { },
     SubscriptionHttpPost post = { });
-bool parse_openai_token_claims(std::string_view token, std::string& account_id,
-    std::string& label, std::int64_t& expires_at);
+bool parse_openai_token_claims(
+    std::string_view token, std::string& account_id, std::int64_t& expires_at);
 
 } // namespace imza

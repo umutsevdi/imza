@@ -495,19 +495,29 @@ CompactionEvent* Session::_find_compaction_locked(std::size_t id)
     return nullptr;
 }
 
+bool Session::_complete_compaction_locked(
+    std::size_t id, CompactionEvent::Status status)
+{
+    CompactionEvent* event = _find_compaction_locked(id);
+    if (event == nullptr) {
+        return false;
+    }
+    event->status = status;
+    _dirty        = true;
+    --_running_compactions;
+    _compaction_changed.publish();
+    return true;
+}
+
 void Session::finish_compaction(std::size_t id, std::string summary,
     std::size_t compacted_item_count, bool success)
 {
     std::lock_guard lock(_mutex);
-    CompactionEvent* event = _find_compaction_locked(id);
-    if (event == nullptr) {
+    if (!_complete_compaction_locked(id,
+            success ? CompactionEvent::Status::COMPLETED
+                    : CompactionEvent::Status::FAILED)) {
         return;
     }
-    event->status = success ? CompactionEvent::Status::COMPLETED
-                            : CompactionEvent::Status::FAILED;
-    _dirty        = true;
-    --_running_compactions;
-    _compaction_changed.publish();
     if (success) {
         _compacted_summary    = std::move(summary);
         _compacted_item_count = compacted_item_count;
@@ -518,14 +528,9 @@ void Session::complete_manual_compaction(
     std::size_t id, std::string summary, std::size_t absorbed_items)
 {
     std::lock_guard lock(_mutex);
-    CompactionEvent* event = _find_compaction_locked(id);
-    if (event == nullptr) {
+    if (!_complete_compaction_locked(id, CompactionEvent::Status::COMPLETED)) {
         return;
     }
-    event->status = CompactionEvent::Status::COMPLETED;
-    _dirty        = true;
-    --_running_compactions;
-    _compaction_changed.publish();
     if (!_compacted_summary.empty()) {
         summary.insert(0, _compacted_summary + "\n\n<earlier-compactions>\n");
         summary += "\n</earlier-compactions>";
@@ -840,17 +845,6 @@ void Session::apply(const StreamEvent& ev, const ModelPricing& pricing)
                 ev.tool_call.name, ev.tool_call.args, { }, { }, std::nullopt });
         }
         _dirty = true;
-        break;
-    case StreamEvent::Kind::QUESTION:
-        if (!_items.empty()) {
-            if (auto* a = std::get_if<AssistantTurn>(&_items.back())) {
-                if (!a->markdown.empty()) {
-                    a->markdown += "\n\n";
-                }
-                a->markdown += question_form_markdown(ev.question);
-                _dirty = true;
-            }
-        }
         break;
     case StreamEvent::Kind::DONE:
         if (auto* a = _last_assistant_locked()) {

@@ -125,16 +125,7 @@ namespace {
                                 media.path, media_data_url(media) } });
                     }
                 }
-                std::string content = "[";
-                for (std::size_t i = 0; i < parts.size(); ++i) {
-                    if (i != 0) {
-                        content += ",";
-                    }
-                    content
-                        += glz::write<JSON_WRITE>(parts[i]).value_or("null");
-                }
-                content += "]";
-                message.content = glz::raw_json { std::move(content) };
+                message.content = glz::raw_json { json_dump_array(parts) };
             } else {
                 message.content = glz::raw_json(
                     glz::write<JSON_WRITE>(m.content).value_or("null"));
@@ -303,6 +294,6 @@ namespace {
 
 } // namespace
 
-extern const Provider openai_provider = { build, stream_headers, parse };
+extern const Provider openai_provider = { build, parse };
 
 } // namespace imza

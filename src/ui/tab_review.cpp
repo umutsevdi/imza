@@ -250,18 +250,11 @@ namespace {
                 _state->session->clear_error();
             }
             if (_editor.is_open()) {
-                if (event == Event::Escape) {
-                    _close_editor();
-                    return true;
-                }
-                if (is_alt_enter(event)) {
-                    _editor.newline();
-                    animation::RequestAnimationFrame();
-                    return true;
-                }
-                if (event == Event::Return) {
-                    _save_editor();
-                    return true;
+                switch (_editor.handle_event(event)) {
+                case AnnotationAction::CANCEL: _close_editor(); return true;
+                case AnnotationAction::SAVE: _save_editor(); return true;
+                case AnnotationAction::HANDLED: return true;
+                case AnnotationAction::NONE: break;
                 }
                 return _editor.input()->OnEvent(event);
             }
@@ -672,10 +665,6 @@ namespace {
             const ReviewState::Snapshot& snapshot, std::size_t file_index,
             const std::string& path, const ReviewLine& line, int review_width)
         {
-            const auto number = [](const std::optional<std::size_t>& value) {
-                return value ? std::format("{:>5}", *value)
-                             : std::string(5, ' ');
-            };
             std::string marker = " ";
             std::optional<Color> background;
             if (line.kind == ReviewLine::Kind::ADDITION) {
@@ -692,42 +681,30 @@ namespace {
                 = _selected == static_cast<int>(_visible.size());
             _push(
                 rows,
-                [this, &line, marker = std::move(marker), background, number,
-                    segments, selected] {
+                [this, &line, marker = std::move(marker), background, segments,
+                    selected] {
                     const bool old_side
                         = line.kind == ReviewLine::Kind::DELETION;
-                    const Elements highlighted
-                        = line.kind == ReviewLine::Kind::META
-                        ? Elements { }
-                        : _highlighted_rows(line, old_side, segments);
-                    const std::string blank_gutter(14, ' ');
-                    Elements visual;
-                    visual.reserve(segments.size());
-                    for (std::size_t i = 0; i < segments.size(); ++i) {
-                        Elements parts;
-                        if (i == 0) {
-                            parts.push_back(text(number(line.old_line))
-                                | color(PANEL_FG_DIM));
-                            parts.push_back(text(" "));
-                            parts.push_back(text(number(line.new_line))
-                                | color(PANEL_FG_DIM));
-                            parts.push_back(text(" "));
-                            parts.push_back(text(marker + " "));
-                        } else {
-                            parts.push_back(text(blank_gutter));
+                    Elements content_rows;
+                    if (line.kind == ReviewLine::Kind::META) {
+                        for (const std::string& segment : segments) {
+                            content_rows.push_back(
+                                text(segment) | color(PANEL_FG_DIM));
                         }
-                        if (line.kind == ReviewLine::Kind::META) {
-                            parts.push_back(
-                                text(segments[i]) | color(PANEL_FG_DIM));
-                        } else {
-                            parts.push_back(i < highlighted.size()
+                    } else {
+                        const Elements highlighted
+                            = _highlighted_rows(line, old_side, segments);
+                        for (std::size_t i = 0; i < segments.size(); ++i) {
+                            content_rows.push_back(i < highlighted.size()
                                     ? highlighted[i]
                                     : text(segments[i]) | color(PANEL_FG));
                         }
-                        visual.push_back(hbox(std::move(parts)));
                     }
                     return review_line_background(
-                        vbox(std::move(visual)), background, selected);
+                        vbox(diff_line_rows(5, true, line.old_line,
+                            line.new_line, std::move(marker),
+                            std::move(content_rows))),
+                        background, selected);
                 },
                 VisibleRow { VisibleRow::Kind::LINE, file_index, &line,
                     std::nullopt, 0 },
@@ -763,23 +740,15 @@ namespace {
                 line->content, review_side_content_width(side_width));
             const Elements highlighted
                 = _highlighted_rows(*line, old_side, segments);
-            const std::string blank_gutter(8, ' ');
-            Elements visual;
-            visual.reserve(segments.size());
+            Elements content_rows;
+            content_rows.reserve(segments.size());
             for (std::size_t i = 0; i < segments.size(); ++i) {
-                Elements parts;
-                if (i == 0) {
-                    parts.push_back(text(number_text) | color(PANEL_FG_DIM));
-                    parts.push_back(text(" "));
-                    parts.push_back(text(marker + " "));
-                } else {
-                    parts.push_back(text(blank_gutter));
-                }
-                parts.push_back(i < highlighted.size()
+                content_rows.push_back(i < highlighted.size()
                         ? highlighted[i]
                         : text(segments[i]) | color(PANEL_FG));
-                visual.push_back(hbox(std::move(parts)));
             }
+            Elements visual = diff_line_rows(5, false, number, std::nullopt,
+                std::move(marker), std::move(content_rows));
             while (visual.size() < static_cast<std::size_t>(height)) {
                 visual.push_back(text(""));
             }

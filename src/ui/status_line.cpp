@@ -15,7 +15,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
-#include <vector>]
+#include <vector>
 
 namespace imza {
 using namespace ftxui;
@@ -112,8 +112,7 @@ namespace {
                 bar.push_back(text(" · " + tags) | color(PANEL_FG_DIM));
             }
             bar.push_back(filler());
-            const bool any_task = append_background_tasks(bar, wide);
-            if (any_task) {
+            if (append_background_tasks(&bar, wide)) {
                 animation::RequestAnimationFrame();
             }
             if (wide) {
@@ -132,7 +131,7 @@ namespace {
 
         void OnAnimation(animation::Params&) override
         {
-            if (any_background_task()) {
+            if (append_background_tasks(nullptr, false)) {
                 ++_frame;
                 animation::RequestAnimationFrame();
             }
@@ -144,47 +143,19 @@ namespace {
             bool active;
         };
 
-        std::size_t running_agents() const
+        // Spinner plus the active labels; returns true when anything is
+        // shown, so the caller keeps the frame loop alive. Pass nullptr
+        // to only ask.
+        bool append_background_tasks(Elements* bar, bool wide) const
         {
-            return _state->subagents->running_count(false);
-        }
-
-        BackgroundTask agents_task() const
-        {
-            const std::size_t count = running_agents();
-            return { std::to_string(count)
-                    + (count == 1 ? " agent" : " agents"),
-                count > 0 };
-        }
-
-        // Every long-running background job the bar advertises, in
-        // display order. One row per task keeps render, label and the
-        // animation keep-alive in step.
-        std::vector<BackgroundTask> background_tasks() const
-        {
-            return {
+            const std::size_t agents = _state->subagents->running_count(false);
+            const BackgroundTask tasks[] = {
                 { "Caching…", !_state->environment->ready() },
                 { "Compacting…", _state->session->compaction_running() },
-                agents_task(),
+                { std::to_string(agents) + (agents == 1 ? " agent" : " agents"),
+                    agents > 0 },
             };
-        }
-
-        bool any_background_task() const
-        {
-            for (const BackgroundTask& task : background_tasks()) {
-                if (task.active) {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        // Spinner plus the active labels; returns true when anything is
-        // shown, so the caller keeps the frame loop alive.
-        bool append_background_tasks(Elements& bar, bool wide) const
-        {
-            const auto tasks = background_tasks();
-            bool any         = false;
+            bool any = false;
             std::string label;
             for (const BackgroundTask& task : tasks) {
                 if (!task.active) {
@@ -196,15 +167,14 @@ namespace {
                 label += task.label;
                 any = true;
             }
-            if (!any) {
-                return false;
+            if (!any || bar == nullptr) {
+                return any;
             }
-            animation::RequestAnimationFrame();
-            bar.push_back(dim_spinner(_frame));
+            bar->push_back(dim_spinner(_frame));
             if (wide) {
-                bar.push_back(text(" " + label) | color(PANEL_FG_DIM));
+                bar->push_back(text(" " + label) | color(PANEL_FG_DIM));
             }
-            bar.push_back(text("  "));
+            bar->push_back(text("  "));
             return true;
         }
 

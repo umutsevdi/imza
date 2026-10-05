@@ -17,6 +17,20 @@ namespace {
         return run->host->plan_frozen && run->host->plan_frozen();
     }
 
+    // Shared guard of plan.create and plan.edit: reject when a build
+    // stint holds the doc as its contract, then when the host context
+    // lacks the mutating callback. Failures raise; 0 means proceed.
+    int plan_guard(lua_State* L, const std::string& binding, bool available)
+    {
+        if (plan_frozen(L)) {
+            return binding_error(L, binding + ": unavailable in Build mode");
+        }
+        if (!available) {
+            return binding_error(L, binding + ": unavailable in this context");
+        }
+        return 0;
+    }
+
     int binding_plan_get(lua_State* L)
     {
         LuaRunContext* run = run_of(L);
@@ -34,11 +48,10 @@ namespace {
     {
         const std::string doc = luaL_checkstring(L, 1);
         LuaRunContext* run    = run_of(L);
-        if (plan_frozen(L)) {
-            return binding_error(L, "plan.create: unavailable in Build mode");
-        }
-        if (!run->host->create_plan) {
-            return binding_error(L, "plan.create: unavailable in this context");
+        const int guard
+            = plan_guard(L, "plan.create", run->host->create_plan != nullptr);
+        if (guard != 0) {
+            return guard;
         }
         if (const std::string error = run->host->create_plan(doc);
             !error.empty()) {
@@ -64,11 +77,10 @@ namespace {
             return binding_error(L, "plan.edit: old must be non-empty");
         }
         LuaRunContext* run = run_of(L);
-        if (plan_frozen(L)) {
-            return binding_error(L, "plan.edit: unavailable in Build mode");
-        }
-        if (!run->host->edit_plan) {
-            return binding_error(L, "plan.edit: unavailable in this context");
+        const int guard
+            = plan_guard(L, "plan.edit", run->host->edit_plan != nullptr);
+        if (guard != 0) {
+            return guard;
         }
         if (const std::string error = run->host->edit_plan(old, fresh, count);
             !error.empty()) {

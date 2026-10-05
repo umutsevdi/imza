@@ -89,6 +89,22 @@ namespace {
         return false;
     }
 
+    // Shared tail of the canvas bindings: report the parse error, enforce
+    // the per-run cap, then store and log the chart. Returns the Lua
+    // return count.
+    int finish_canvas(lua_State* L, const std::string& binding,
+        const std::string& error, CanvasView view)
+    {
+        if (!error.empty()) {
+            return binding_error(L, binding + ": " + error);
+        }
+        if (!canvas_room(L, binding)) {
+            return 2;
+        }
+        emit_canvas(L, binding, std::move(view));
+        return 0;
+    }
+
     int binding_canvas_line(lua_State* L)
     {
         const std::string binding = "canvas.line";
@@ -149,14 +165,7 @@ namespace {
             }
         }
         lua_pop(L, 1);
-        if (!error.empty()) {
-            return binding_error(L, binding + ": " + error);
-        }
-        if (!canvas_room(L, binding)) {
-            return 2;
-        }
-        emit_canvas(L, binding, std::move(view));
-        return 0;
+        return finish_canvas(L, binding, error, std::move(view));
     }
 
     // Shared bar/pie parsing: data is a list of {label, value} points.
@@ -210,14 +219,7 @@ namespace {
             }
             lua_pop(L, 1);
         }
-        if (!error.empty()) {
-            return binding_error(L, binding + ": " + error);
-        }
-        if (!canvas_room(L, binding)) {
-            return 2;
-        }
-        emit_canvas(L, binding, std::move(view));
-        return 0;
+        return finish_canvas(L, binding, error, std::move(view));
     }
 
     int binding_canvas_bar(lua_State* L)
@@ -279,14 +281,7 @@ namespace {
             }
             lua_pop(L, 1);
         }
-        if (!error.empty()) {
-            return binding_error(L, binding + ": " + error);
-        }
-        if (!canvas_room(L, binding)) {
-            return 2;
-        }
-        emit_canvas(L, binding, std::move(view));
-        return 0;
+        return finish_canvas(L, binding, error, std::move(view));
     }
 
     constexpr LuaMethod BINDINGS[] = {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ftxui/component/component.hpp>
+#include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
 
 #include <ftxui/component/component_options.hpp>
@@ -14,9 +15,6 @@ namespace imza {
 ftxui::InputOption multiline_field_option(std::string* content, int* cursor,
     std::string placeholder, std::function<void()> on_change);
 
-// Review-style annotation card: cyan rail, focused background, body rows.
-ftxui::Element annotation_card(ftxui::Element body, int height);
-
 // Note card over `body` wrapped to `width`; *height receives the wrapped
 // row count for the host's row bookkeeping.
 ftxui::Element annotation_note_card(
@@ -25,6 +23,14 @@ ftxui::Element annotation_note_card(
 // `placeholder`; *height as above.
 ftxui::Element annotation_editor_card(std::string_view draft, int width,
     std::string_view placeholder, int* height);
+
+// What a host pane should do after the open editor handled a key.
+enum class AnnotationAction {
+    NONE,    // key not consumed; the host forwards it to input()
+    HANDLED, // consumed; the host just returns true
+    SAVE,
+    CANCEL,
+};
 
 // Inline draft editor for annotation cards: the multiline input, the draft
 // buffer, and the new-versus-edit state. The host pane decides when to
@@ -82,6 +88,11 @@ public:
     }
 
     void newline();
+
+    // Shared open-editor keys: Esc cancels, Alt+Enter inserts a newline,
+    // Return saves. NONE means the key was not consumed and the host
+    // forwards it to input().
+    AnnotationAction handle_event(const ftxui::Event& event);
 
 private:
     std::string _draft;

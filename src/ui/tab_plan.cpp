@@ -30,8 +30,6 @@ namespace {
             Add(_doc);
         }
 
-        Component chat() { return _chat; }
-
         Element OnRender() override
         {
             const LayoutCtx ctx = _layout();

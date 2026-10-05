@@ -11,6 +11,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <type_traits>
 #include <utility>
 
 namespace imza {
@@ -74,12 +75,6 @@ namespace {
         std::string transcript;
     };
 
-    struct StoredCard {
-        std::string prompt;
-        std::string free_text;
-        std::vector<std::string> selected;
-    };
-
     struct StoredDispatch {
         std::string binding;
         std::string target;
@@ -113,11 +108,9 @@ namespace {
         std::optional<std::vector<StoredDispatch>> dispatch_log;
         std::optional<std::vector<StoredTodoItem>> items;
         std::optional<int> status;
-        std::optional<std::vector<StoredCard>> cards;
     };
 
     struct StoredSessionDoc {
-        double version = 1.0;
         std::string title;
         std::string saved_at;
         std::optional<std::vector<StoredTodoItem>> todo;
@@ -128,6 +121,23 @@ namespace {
         std::optional<std::string> workspace;
         std::optional<std::vector<StoredItem>> items;
     };
+
+    // Project one vector through `map`; nullopt when empty so optional
+    // item members stay unset instead of serializing an empty array.
+    template <typename In, typename Map>
+    auto map_all(const std::vector<In>& items, Map map)
+        -> std::optional<std::vector<std::invoke_result_t<Map&, const In&>>>
+    {
+        if (items.empty()) {
+            return std::nullopt;
+        }
+        std::vector<std::invoke_result_t<Map&, const In&>> mapped;
+        mapped.reserve(items.size());
+        for (const auto& item : items) {
+            mapped.push_back(map(item));
+        }
+        return mapped;
+    }
 
     StoredAttachment to_stored(const Attachment& attachment)
     {
@@ -219,14 +229,10 @@ namespace {
         if (const auto* user = std::get_if<UserTurn>(&item)) {
             stored.type = "user";
             stored.text = user->text;
-            std::vector<StoredAttachment> attachments;
-            attachments.reserve(user->attachments.size());
-            for (const auto& attachment : user->attachments) {
-                attachments.push_back(to_stored(attachment));
-            }
-            if (!attachments.empty()) {
-                stored.attachments = std::move(attachments);
-            }
+            stored.attachments
+                = map_all(user->attachments, [](const Attachment& attachment) {
+                      return to_stored(attachment);
+                  });
         } else if (const auto* assistant = std::get_if<AssistantTurn>(&item)) {
             stored.type                = "assistant";
             stored.markdown            = assistant->markdown;
@@ -243,27 +249,17 @@ namespace {
             stored.call_id = tool->call_id;
             stored.name    = tool->name;
             stored.args    = tool->args;
-            if (!tool->subagent_chats.empty()) {
-                std::vector<StoredChat> chats;
-                chats.reserve(tool->subagent_chats.size());
-                for (const auto& chat : tool->subagent_chats) {
-                    chats.push_back({ chat.title, chat.transcript });
-                }
-                stored.subagent_chats = std::move(chats);
-            }
+            stored.subagent_chats
+                = map_all(tool->subagent_chats, [](const SubagentChat& chat) {
+                      return StoredChat { chat.title, chat.transcript };
+                  });
             if (tool->result) {
                 stored.result = tool->result->text;
                 if (tool->result->return_value) {
                     stored.return_value = *tool->result->return_value;
                 }
-                if (!tool->result->diffs.empty()) {
-                    std::vector<StoredDiff> diffs;
-                    diffs.reserve(tool->result->diffs.size());
-                    for (const auto& diff : tool->result->diffs) {
-                        diffs.push_back(to_stored(diff));
-                    }
-                    stored.diffs = std::move(diffs);
-                }
+                stored.diffs = map_all(tool->result->diffs,
+                    [](const DiffView& diff) { return to_stored(diff); });
                 if (!tool->result->canvases.empty()) {
                     std::vector<StoredCanvas> canvases;
                     canvases.reserve(tool->result->canvases.size());
@@ -289,38 +285,24 @@ namespace {
                         },
                         *tool->result->shell_status);
                 }
-                if (!tool->result->dispatch_log.empty()) {
-                    std::vector<StoredDispatch> log;
-                    log.reserve(tool->result->dispatch_log.size());
-                    for (const auto& call : tool->result->dispatch_log) {
-                        log.push_back({ call.binding, call.target, call.ok });
-                    }
-                    stored.dispatch_log = std::move(log);
-                }
+                stored.dispatch_log = map_all(
+                    tool->result->dispatch_log, [](const LuaBindingCall& call) {
+                        return StoredDispatch { call.binding, call.target,
+                            call.ok };
+                    });
                 // result_kind is the presence marker for the result fields.
                 stored.result_kind = static_cast<int>(tool->result->kind);
             }
         } else if (const auto* todo = std::get_if<TodoList>(&item)) {
-            stored.type = "todo";
-            std::vector<StoredTodoItem> items;
-            items.reserve(todo->items.size());
-            for (const auto& todo_item : todo->items) {
-                items.push_back(
-                    { todo_item.content, static_cast<int>(todo_item.status) });
-            }
-            stored.items = std::move(items);
+            stored.type  = "todo";
+            stored.items = map_all(todo->items, [](const TodoItem& todo_item) {
+                return StoredTodoItem { todo_item.content,
+                    static_cast<int>(todo_item.status) };
+            });
         } else if (const auto* event = std::get_if<CompactionEvent>(&item)) {
             stored.type   = "compaction";
             stored.id     = static_cast<std::int64_t>(event->id);
             stored.status = static_cast<int>(event->status);
-        } else if (const auto* answer = std::get_if<ModalAnswer>(&item)) {
-            stored.type = "modal_answer";
-            std::vector<StoredCard> cards;
-            cards.reserve(answer->cards.size());
-            for (const auto& card : answer->cards) {
-                cards.push_back({ card.prompt, card.free_text, card.selected });
-            }
-            stored.cards = std::move(cards);
         } else {
             return std::nullopt;
         }
@@ -445,16 +427,6 @@ namespace {
                 ? static_cast<CompactionEvent::Status>(status)
                 : CompactionEvent::Status::COMPLETED;
             return event;
-        }
-        if (stored.type == "modal_answer") {
-            ModalAnswer answer;
-            if (stored.cards) {
-                for (const auto& card : *stored.cards) {
-                    answer.cards.push_back(
-                        { card.selected, card.free_text, card.prompt });
-                }
-            }
-            return answer;
         }
         // Unknown item types cannot render; skip them so older or foreign
         // sessions still load.
@@ -654,7 +626,6 @@ Status save_session(Session& session)
         return Status::CONFIG_ERROR;
     }
     StoredSessionDoc doc;
-    doc.version  = 1.0;
     doc.title    = snapshot.title.empty() ? std::string { UNTITLED_TITLE }
                                           : snapshot.title;
     doc.saved_at = format_local_time("%Y-%m-%d %H:%M:%S");

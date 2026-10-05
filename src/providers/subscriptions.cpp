@@ -117,9 +117,8 @@ namespace {
                 + *root.expires_in;
         }
         std::string account;
-        std::string label;
         std::int64_t expires = 0;
-        parse_openai_token_claims(access_token, account, label, expires);
+        parse_openai_token_claims(access_token, account, expires);
         return expires;
     }
 
@@ -142,8 +141,7 @@ namespace {
             token = *root.id_token;
         }
         std::int64_t ignored = 0;
-        parse_openai_token_claims(
-            token, credentials.account_id, credentials.label, ignored);
+        parse_openai_token_claims(token, credentials.account_id, ignored);
         if (credentials.refresh_token.empty()
             || credentials.account_id.empty()) {
             return failure(Status::JSON_ERROR, body);
@@ -184,8 +182,8 @@ namespace {
 
 } // namespace
 
-bool parse_openai_token_claims(std::string_view token, std::string& account_id,
-    std::string& label, std::int64_t& expires_at)
+bool parse_openai_token_claims(
+    std::string_view token, std::string& account_id, std::int64_t& expires_at)
 {
     const std::size_t first  = token.find('.');
     const std::size_t second = first == std::string_view::npos
@@ -206,14 +204,6 @@ bool parse_openai_token_claims(std::string_view token, std::string& account_id,
         if (const JsonValue* id = find_member(*auth, "chatgpt_account_id");
             id != nullptr && id->is_string()) {
             account_id = id->as<std::string>();
-        }
-        if (const JsonValue* email = find_member(*auth, "user_email");
-            email != nullptr && email->is_string()) {
-            label = email->as<std::string>();
-        } else if (const JsonValue* plan
-            = find_member(*auth, "chatgpt_plan_type");
-            plan != nullptr && plan->is_string()) {
-            label = plan->as<std::string>();
         }
     }
     if (const JsonValue* exp = find_member(root, "exp");

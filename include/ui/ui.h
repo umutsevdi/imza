@@ -113,8 +113,6 @@ ftxui::Component space_activates(
 ftxui::InputOption field_option(std::string* content, int* cursor,
     std::string placeholder, std::function<void()> on_change = { },
     std::function<void()> on_enter = { });
-ftxui::InputOption multiline_field_option(std::string* content, int* cursor,
-    std::string placeholder, std::function<void()> on_change = { });
 ftxui::InputOption password_option(std::string* content, int* cursor,
     std::string placeholder, std::function<void()> on_change = { });
 ftxui::Component action_button(std::string label,
@@ -125,9 +123,6 @@ ftxui::Component action_button(const std::string* label,
     std::function<void()> on_click, const ftxui::Color& color = PANEL_BORDER,
     const ftxui::Color& color_focussed = PANEL_COLOR_FOCUS);
 ftxui::Component inline_link_button(std::function<ftxui::Element()> render,
-    std::function<void()> on_click,
-    const ftxui::Color& inactive_color = PANEL_FG_DIM);
-ftxui::Component inline_link_button(std::string label,
     std::function<void()> on_click,
     const ftxui::Color& inactive_color = PANEL_FG_DIM);
 ftxui::Component split_inline_link_button(std::string primary,
@@ -225,8 +220,6 @@ struct ModelPickList {
 // The picker's filter input, wired to refill the visible rows; `pick` must
 // outlive the returned component.
 ftxui::Component make_model_pick_filter(ModelPickList& pick);
-// Arrow keys move the picker selection; false for other events.
-bool model_pick_move(ModelPickList& pick, const ftxui::Event& event);
 // Shared picker event flow: arrows move the selection, Return calls
 // `on_submit`, other events reach `container`. Modal-specific keys
 // (refresh, cancel) are handled by the caller before this.
@@ -350,6 +343,13 @@ std::string diff_marker(bool added);
 ftxui::Color diff_background(bool added);
 int diff_side_width(int width);
 int diff_content_width(int width);
+// Rows of one rendered diff line: line-number gutter (blank on wrapped
+// continuation rows), marker, then the given content rows. `dual_numbers`
+// selects the unified old+new gutter; the single-number gutter shows
+// `new_no` when set, else `old_no`.
+ftxui::Elements diff_line_rows(int number_width, bool dual_numbers,
+    std::optional<std::size_t> old_no, std::optional<std::size_t> new_no,
+    std::string_view marker, const ftxui::Elements& content_rows);
 // Text width of one diff side after the gutter; the highlight cache and
 // the row renderer must agree on it.
 inline int review_side_content_width(int side_width)
@@ -365,8 +365,6 @@ ftxui::Element session_error_element(const Session& session);
 
 ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx);
 ftxui::Element render_todo(const TodoList& todo, const LayoutCtx& ctx);
-ftxui::Element render_changed_files(
-    const RepositoryState& repository, const LayoutCtx& ctx);
 ftxui::Element render_context_box(const std::optional<std::string>& rules,
     const std::vector<std::string>& attachments, SkillCounts project_skills,
     SkillCounts global_skills);

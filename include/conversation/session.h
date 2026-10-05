@@ -73,7 +73,7 @@ struct CompactionEvent {
 };
 
 using ConversationItem = std::variant<UserTurn, AssistantTurn, ToolCall,
-    TodoList, ModalAnswer, CompactionEvent>;
+    TodoList, CompactionEvent>;
 
 // 0-based index of the final UserTurn in `items`, or nullopt when there
 // is none; shared by the compaction boundary scans.
@@ -90,8 +90,6 @@ using SessionPersistence = std::variant<UnsavedSession, PersistedSession>;
 
 struct PlanDoc {
     std::string content;
-
-    bool operator==(const PlanDoc&) const = default;
 };
 
 // One user annotation on the plan document, pinned to a 1-based document
@@ -99,8 +97,6 @@ struct PlanDoc {
 struct PlanNote {
     std::size_t line = 0;
     std::string body;
-
-    bool operator==(const PlanNote&) const = default;
 };
 
 // Hard cap on one plan document, applied to both the stored object and
@@ -256,6 +252,10 @@ private:
     const AssistantTurn* _last_assistant_locked() const;
     SessionSnapshot _build_snapshot() const;
     CompactionEvent* _find_compaction_locked(std::size_t id);
+    // Marks the compaction `id` complete/failed, decrements the running
+    // count, and publishes; false when no event carries the id.
+    bool _complete_compaction_locked(
+        std::size_t id, CompactionEvent::Status status);
     ToolCall* _find_tool_locked(
         const ToolCallRequest& req, bool unfinished_only);
     ToolCall* _find_planning_tool_locked(const ToolCallRequest& req);

@@ -90,6 +90,24 @@ template <typename T>
     return std::move(out.value());
 }
 
+// Serialize a range of reflected values as a compact JSON array string,
+// mirroring json_dump's infallible convention: a failed item write
+// degrades to `null`.
+template <typename Range> std::string json_dump_array(const Range& items)
+{
+    std::string out = "[";
+    bool first      = true;
+    for (const auto& item : items) {
+        if (!first) {
+            out += ',';
+        }
+        first = false;
+        out += glz::write<JSON_WRITE>(item).value_or("null");
+    }
+    out += ']';
+    return out;
+}
+
 // Dynamic DOM for genuinely dynamic payloads: Lua return values, model-
 // supplied tool args in display code, vendor error bodies, JWT claims.
 using JsonValue = glz::json_t;

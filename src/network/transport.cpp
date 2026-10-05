@@ -364,7 +364,7 @@ Status stream(const Route& route, const ChatRequest& req, StreamCallback cb,
     const std::string& url   = route.endpoint;
 
     std::vector<std::string> header_strs
-        = request_headers(route, provider.headers());
+        = request_headers(route, stream_headers());
     if (!route.opencode_session.empty()) {
         header_strs.push_back("x-opencode-session: " + route.opencode_session);
     }

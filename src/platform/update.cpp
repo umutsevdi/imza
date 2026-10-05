@@ -66,12 +66,7 @@ namespace {
         return cache.last_checked_at + ONE_DAY_SECS <= now_unix_secs;
     }
 
-    // Wire shapes of update.json and the GitHub release payload.
-    struct StoredUpdateCache {
-        std::int64_t last_checked_at = 0;
-        std::string version;
-    };
-
+    // GitHub release payload wire shape.
     struct StoredAsset {
         std::optional<std::string> name;
         std::optional<std::string> browser_download_url;
@@ -90,18 +85,17 @@ namespace {
         if (!text) {
             return { };
         }
-        StoredUpdateCache stored;
-        if (json_parse_checked(*text, stored)) {
+        UpdateCache cache;
+        if (json_parse_checked(*text, cache)) {
             return { };
         }
-        return { stored.last_checked_at, stored.version };
+        return cache;
     }
 
     Status save_update_cache(
         const std::filesystem::path& path, const UpdateCache& cache)
     {
-        const StoredUpdateCache stored { cache.last_checked_at, cache.version };
-        auto serialized = json_dump_checked(stored);
+        auto serialized = json_dump_checked(cache);
         if (!serialized) {
             return Status::JSON_ERROR;
         }
