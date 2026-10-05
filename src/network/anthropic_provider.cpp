@@ -5,10 +5,7 @@
 
 namespace imza {
 
-namespace {
-
-    // Wire structs: Glaze writes members in declaration order; optionals
-    // are omitted when empty (JSON_WRITE skips null members).
+namespace anthropic {
     struct TextBlock {
         std::string type = "text";
         std::string text;
@@ -330,8 +327,9 @@ namespace {
         }
     }
 
-} // namespace
+} // namespace anthropic
 
-extern const Provider anthropic_provider = { build, parse };
+extern const Provider anthropic_provider
+    = { anthropic::build, anthropic::parse };
 
 } // namespace imza

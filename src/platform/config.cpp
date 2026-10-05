@@ -140,48 +140,49 @@ namespace {
         return enum_str(SKILL_POLICY_NAMES, policy, "ask");
     }
 
-    // Wire-shaped mirrors of the config document: enums stay strings on
-    // the wire, so the stored structs carry the names and validation maps
-    // them after the parse (keeps per-field error messages).
-    struct StoredConnection {
-        std::optional<std::string> id;
-        // Legacy key superseded by "id"; used only when "id" is absent.
-        std::optional<std::string> provider_id;
-        std::optional<std::string> endpoint;
-        std::optional<std::string> api_key;
-        std::optional<std::string> refresh_token;
-        std::optional<std::int64_t> expires_at;
-        std::optional<std::string> account_id;
-        std::optional<std::string> label;
-        std::optional<std::map<std::string, std::string>> dialects;
-    };
-
-    struct StoredModelChoice {
-        std::optional<std::string> provider;
-        std::optional<std::string> model;
-        std::optional<std::string> reasoning_effort;
-    };
-
-    struct StoredModels {
-        std::optional<StoredModelChoice> main;
-        std::optional<StoredModelChoice> builder;
-        std::optional<StoredModelChoice> researcher;
-        std::optional<StoredModelChoice> basic;
-    };
-
-    struct StoredSkills {
-        std::optional<std::map<std::string, std::string>> global;
-        std::optional<std::map<std::string, std::map<std::string, std::string>>>
-            projects;
-    };
-
-    struct StoredConfig {
-        std::optional<std::vector<StoredConnection>> providers;
-        std::optional<StoredModels> models;
-        std::optional<StoredSkills> skills;
-    };
-
 } // namespace
+
+// Glaze-reflected: must have external linkage (Clang/MSVC requirement).
+// Wire-shaped mirrors of the config document: enums stay strings on
+// the wire, so the stored structs carry the names and validation maps
+// them after the parse (keeps per-field error messages).
+struct StoredConnection {
+    std::optional<std::string> id;
+    // Legacy key superseded by "id"; used only when "id" is absent.
+    std::optional<std::string> provider_id;
+    std::optional<std::string> endpoint;
+    std::optional<std::string> api_key;
+    std::optional<std::string> refresh_token;
+    std::optional<std::int64_t> expires_at;
+    std::optional<std::string> account_id;
+    std::optional<std::string> label;
+    std::optional<std::map<std::string, std::string>> dialects;
+};
+
+struct StoredModelChoice {
+    std::optional<std::string> provider;
+    std::optional<std::string> model;
+    std::optional<std::string> reasoning_effort;
+};
+
+struct StoredModels {
+    std::optional<StoredModelChoice> main;
+    std::optional<StoredModelChoice> builder;
+    std::optional<StoredModelChoice> researcher;
+    std::optional<StoredModelChoice> basic;
+};
+
+struct StoredSkills {
+    std::optional<std::map<std::string, std::string>> global;
+    std::optional<std::map<std::string, std::map<std::string, std::string>>>
+        projects;
+};
+
+struct StoredConfig {
+    std::optional<std::vector<StoredConnection>> providers;
+    std::optional<StoredModels> models;
+    std::optional<StoredSkills> skills;
+};
 
 Status load_config(
     const std::filesystem::path& path, Config& out, std::string* error)
