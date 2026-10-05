@@ -16,111 +16,100 @@
 
 namespace imza {
 
+constexpr std::string_view INDEX_FILENAME = ".index.json";
+
+std::filesystem::path index_path() { return sessions_dir() / INDEX_FILENAME; }
+
+struct StoredAttachment {
+    std::string path;
+    std::optional<std::string> type;
+    std::optional<std::string> media_type;
+    std::string content;
+};
+
+struct StoredTodoItem {
+    std::string content;
+    int status = 0;
+};
+
+struct StoredDiffRow {
+    int kind = 0;
+    std::optional<std::uint64_t> left_no;
+    std::optional<std::uint64_t> right_no;
+    std::string left;
+    std::string right;
+};
+
+struct StoredDiff {
+    std::string file;
+    std::vector<StoredDiffRow> rows;
+};
+
+struct StoredSeries {
+    std::string label;
+    std::vector<double> values;
+};
+
+struct StoredCanvas {
+    int kind = -1;
+    std::string title;
+    std::vector<StoredSeries> series;
+    std::vector<std::vector<double>> grid;
+};
+
+struct StoredChat {
+    std::string title;
+    std::string transcript;
+};
+
+struct StoredDispatch {
+    std::string binding;
+    std::string target;
+    std::optional<bool> ok;
+};
+
+struct StoredItem {
+    std::string type;
+    std::optional<std::string> text;
+    std::optional<std::vector<StoredAttachment>> attachments;
+    std::optional<std::string> markdown;
+    std::optional<std::string> reasoning;
+    std::optional<std::string> reasoning_signature;
+    std::optional<std::int64_t> reasoning_ms;
+    std::optional<std::string> model;
+    std::optional<std::string> reasoning_effort;
+    std::optional<std::int64_t> id;
+    std::optional<std::string> call_id;
+    std::optional<std::string> name;
+    std::optional<std::string> args;
+    std::optional<int> result_kind;
+    std::optional<std::vector<StoredChat>> subagent_chats;
+    // Flatten the result object: the wire stores result fields at the
+    // item level, so mirror them directly.
+    std::optional<std::string> result;
+    std::optional<JsonValue> return_value;
+    std::optional<std::vector<StoredDiff>> diffs;
+    std::optional<std::vector<StoredCanvas>> canvases;
+    std::optional<int> shell_exit;
+    std::optional<int> shell_timeout;
+    std::optional<std::vector<StoredDispatch>> dispatch_log;
+    std::optional<std::vector<StoredTodoItem>> items;
+    std::optional<int> status;
+};
+
+struct StoredSessionDoc {
+    std::string title;
+    std::string saved_at;
+    std::optional<std::vector<StoredTodoItem>> todo;
+    std::optional<std::vector<std::string>> plans;
+    std::optional<std::string> compacted_summary;
+    std::optional<std::int64_t> compacted_item_count;
+    std::optional<std::string> mode;
+    std::optional<std::string> workspace;
+    std::optional<std::vector<StoredItem>> items;
+};
+
 namespace {
-
-    constexpr std::string_view INDEX_FILENAME = ".index.json";
-
-    std::filesystem::path index_path()
-    {
-        return sessions_dir() / INDEX_FILENAME;
-    }
-
-    // --- Wire-shaped transcript structs ---------------------------------
-    // One StoredItem struct is the union of all item kinds: the "type"
-    // discriminator picks the members that matter. Optional members give
-    // old-transcript tolerance (missing fields default) while glaze
-    // handles the parse/serialize mechanically. Numeric enum values are
-    // range-checked after the parse so foreign or future values degrade
-    // gracefully instead of failing the load.
-
-    struct StoredAttachment {
-        std::string path;
-        std::optional<std::string> type;
-        std::optional<std::string> media_type;
-        std::string content;
-    };
-
-    struct StoredTodoItem {
-        std::string content;
-        int status = 0;
-    };
-
-    struct StoredDiffRow {
-        int kind = 0;
-        std::optional<std::uint64_t> left_no;
-        std::optional<std::uint64_t> right_no;
-        std::string left;
-        std::string right;
-    };
-
-    struct StoredDiff {
-        std::string file;
-        std::vector<StoredDiffRow> rows;
-    };
-
-    struct StoredSeries {
-        std::string label;
-        std::vector<double> values;
-    };
-
-    struct StoredCanvas {
-        int kind = -1;
-        std::string title;
-        std::vector<StoredSeries> series;
-        std::vector<std::vector<double>> grid;
-    };
-
-    struct StoredChat {
-        std::string title;
-        std::string transcript;
-    };
-
-    struct StoredDispatch {
-        std::string binding;
-        std::string target;
-        std::optional<bool> ok;
-    };
-
-    struct StoredItem {
-        std::string type;
-        std::optional<std::string> text;
-        std::optional<std::vector<StoredAttachment>> attachments;
-        std::optional<std::string> markdown;
-        std::optional<std::string> reasoning;
-        std::optional<std::string> reasoning_signature;
-        std::optional<std::int64_t> reasoning_ms;
-        std::optional<std::string> model;
-        std::optional<std::string> reasoning_effort;
-        std::optional<std::int64_t> id;
-        std::optional<std::string> call_id;
-        std::optional<std::string> name;
-        std::optional<std::string> args;
-        std::optional<int> result_kind;
-        std::optional<std::vector<StoredChat>> subagent_chats;
-        // Flatten the result object: the wire stores result fields at the
-        // item level, so mirror them directly.
-        std::optional<std::string> result;
-        std::optional<JsonValue> return_value;
-        std::optional<std::vector<StoredDiff>> diffs;
-        std::optional<std::vector<StoredCanvas>> canvases;
-        std::optional<int> shell_exit;
-        std::optional<int> shell_timeout;
-        std::optional<std::vector<StoredDispatch>> dispatch_log;
-        std::optional<std::vector<StoredTodoItem>> items;
-        std::optional<int> status;
-    };
-
-    struct StoredSessionDoc {
-        std::string title;
-        std::string saved_at;
-        std::optional<std::vector<StoredTodoItem>> todo;
-        std::optional<std::vector<std::string>> plans;
-        std::optional<std::string> compacted_summary;
-        std::optional<std::int64_t> compacted_item_count;
-        std::optional<std::string> mode;
-        std::optional<std::string> workspace;
-        std::optional<std::vector<StoredItem>> items;
-    };
 
     // Project one vector through `map`; nullopt when empty so optional
     // item members stay unset instead of serializing an empty array.
@@ -442,16 +431,20 @@ namespace {
             });
     }
 
-    struct StoredIndexEntry {
-        std::string file;
-        std::string title;
-        std::string saved_at;
-    };
+} // namespace
 
-    struct StoredIndex {
-        double version = 0.0;
-        std::vector<StoredIndexEntry> sessions;
-    };
+struct StoredIndexEntry {
+    std::string file;
+    std::string title;
+    std::string saved_at;
+};
+
+struct StoredIndex {
+    double version = 0.0;
+    std::vector<StoredIndexEntry> sessions;
+};
+
+namespace {
 
     std::optional<std::vector<SavedSession>> read_index()
     {

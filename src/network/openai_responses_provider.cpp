@@ -6,7 +6,7 @@
 
 namespace imza {
 
-namespace {
+namespace openai_responses {
 
     // --- Request wire structs -------------------------------------------
     struct ToolWire {
@@ -319,8 +319,9 @@ namespace {
         }
     }
 
-} // namespace
+} // namespace openai_responses
 
-extern const Provider openai_responses_provider = { build, parse };
+extern const Provider openai_responses_provider
+    = { openai_responses::build, openai_responses::parse };
 
 } // namespace imza

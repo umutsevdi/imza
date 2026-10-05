@@ -6,7 +6,7 @@
 
 namespace imza {
 
-namespace {
+namespace openai {
 
     // --- Request wire structs -------------------------------------------
     struct FunctionSpec {
@@ -292,8 +292,8 @@ namespace {
         }
     }
 
-} // namespace
+} // namespace openai
 
-extern const Provider openai_provider = { build, parse };
+extern const Provider openai_provider = { openai::build, openai::parse };
 
 } // namespace imza
