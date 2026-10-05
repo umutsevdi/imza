@@ -15,6 +15,7 @@ CHANGELOG
 Changes:
   - Startup memory usage reduced by replacing the JSON library with one
     that does not leave its parsing scratch space in memory.
+  - Reduced idle CPU and memory usage of the side panel.
 
 -------------------------------------------------------------------------------
 0.5.2 - 2026-10-4

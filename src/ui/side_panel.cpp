@@ -182,7 +182,7 @@ private:
     // ones stay dim; each row opens the plan in the viewer modal.
     void _append_plans(Elements& parts)
     {
-        const std::vector<PlanDoc> plans = _state->session->snapshot().plans;
+        const std::vector<PlanDoc>& plans = _state->session->plans();
         if (plans.empty()) {
             _plan_links.clear();
             return;
