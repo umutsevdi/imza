@@ -1,7 +1,7 @@
 #include "app/flows.h"
 #include "common/util.h"
 #include "conversation/format.h"
-#include "network/json_io.h"
+#include "tools/tool_args.h"
 #include "turn/delegation.h"
 #include "ui/autocomplete.h"
 #include "ui/tool_format.h"
@@ -108,7 +108,8 @@ namespace {
         Elements blocks;
         for (int i = 0; i < PROCESS_TRACK_BLOCKS; ++i) {
             const bool filled = i >= begin && i < begin + width;
-            blocks.push_back(text("─") | color(filled ? HL_GREEN : PANEL_FG_DIM));
+            blocks.push_back(
+                text("─") | color(filled ? HL_GREEN : PANEL_FG_DIM));
         }
         return hbox(std::move(blocks));
     }
@@ -1254,10 +1255,10 @@ namespace {
                         _open_viewer_for(*call);
                         return;
                     }
-                    const std::string script
-                        = json_string(parse_json(call->args), "script");
+                    LuaToolArgs parsed;
+                    (void)json_parse_checked(call->args, parsed);
                     imza::enqueue_user_modal(*_state,
-                        ViewerModal { "Lua script", script, "lua", 1 });
+                        ViewerModal { "Lua script", parsed.script, "lua", 1 });
                 });
         }
 

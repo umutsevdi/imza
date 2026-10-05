@@ -1,6 +1,6 @@
 #include "tools/tool.h"
 #include "common/util.h"
-#include "network/json_io.h"
+#include "network/json.h"
 #include "tools/bindings.h"
 #include "tools/skills.h"
 
@@ -40,7 +40,7 @@ ToolOutput dispatch_tool(
     if (tool == nullptr) {
         return tool_error(UNKNOWN_TOOL_PREFIX + req.name);
     }
-    return tool->run(req, parse_json(req.args));
+    return tool->run(req);
 }
 
 std::vector<Tool> default_tools(LuaHost lua_host, SkillToolDeps skill_deps,
@@ -55,52 +55,24 @@ std::vector<Tool> default_tools(LuaHost lua_host, SkillToolDeps skill_deps,
 }
 
 std::optional<std::string> validate_subagent_tool_arguments(
-    const Json::Value& arguments, bool allow_build)
+    const SubagentToolArgs& arguments, bool allow_build)
 {
-    if (!arguments.isObject() || !arguments["tasks"].isArray()
-        || arguments["tasks"].empty() || arguments["tasks"].size() > 5) {
+    if (arguments.tasks.empty() || arguments.tasks.size() > 5) {
         return "subagent: expected one to five tasks";
     }
-    // Keeps the validator in sync with the schema's additionalProperties.
-    for (const std::string& member : arguments.getMemberNames()) {
-        if (member != "tasks") {
-            return "subagent: unknown property '" + member + "'";
-        }
-    }
-    for (const Json::Value& value : arguments["tasks"]) {
-        if (!value.isObject() || !value["mode"].isString()
-            || !value["prompt"].isString()
-            || trim(value["prompt"].asString()).empty()) {
+    for (const auto& task : arguments.tasks) {
+        if (task.prompt.empty() || trim(task.prompt).empty()) {
             return "subagent: every task requires a mode and prompt";
         }
-        for (const std::string& member : value.getMemberNames()) {
-            if (member != "mode" && member != "prompt") {
-                return "subagent: unknown task property '" + member + "'";
-            }
-        }
-        const std::string mode = to_lower(value["mode"].asString());
-        if (mode != "research" && mode != "build") {
+        const std::string resolved = to_lower(task.mode);
+        if (resolved != "research" && resolved != "build") {
             return "subagent: mode must be research or build";
         }
-        if (mode == "build" && !allow_build) {
+        if (resolved == "build" && !allow_build) {
             return "subagent: build agents require main-agent build mode";
         }
     }
     return std::nullopt;
-}
-
-std::string json_string(const Json::Value& value, const char* key)
-{
-    return value.isObject() && value[key].isString() ? value[key].asString()
-                                                     : std::string { };
-}
-
-std::optional<std::int64_t> json_int(const Json::Value& value, const char* key)
-{
-    if (!value.isObject() || !value[key].isIntegral()) {
-        return std::nullopt;
-    }
-    return value[key].asInt64();
 }
 
 Tool make_skill_tool(SkillToolDeps deps)
@@ -109,13 +81,16 @@ Tool make_skill_tool(SkillToolDeps deps)
     spec.name        = "skill";
     spec.description = "Load the instructions for a discovered skill by name. "
                        "Optionally specify scope as project or global.";
-    spec.parameters  = parse_json(
-        R"json({"type":"object","properties":{"name":{"type":"string"},"scope":{"type":"string","enum":["project","global"]}},"required":["name"]})json");
+    spec.parameters
+        = R"json({"type":"object","properties":{"name":{"type":"string"},"scope":{"type":"string","enum":["project","global"]}},"required":["name"]})json";
     // Policy, path, and size are the gate's job; _run_tool re-evaluates
     // before dispatch, so the handler only resolves, reads, and records.
     return { std::move(spec),
-        [deps = std::move(deps)](
-            const ToolCallRequest&, const Json::Value& args) -> ToolOutput {
+        [deps = std::move(deps)](const ToolCallRequest& req) -> ToolOutput {
+            SkillToolArgs args;
+            if (json_parse_checked(req.args, args)) {
+                return tool_error("skill: expected a name");
+            }
             const std::vector<Skill> catalog
                 = deps.catalog ? deps.catalog() : std::vector<Skill> { };
             const std::optional<Skill> skill = resolve_skill(catalog, args);
@@ -146,28 +121,29 @@ Tool make_load_tool(LuaState& state)
                        "Returns the module's TYPES and METHODS reference; "
                        "call it before first use of any module listed under "
                        "<modules> in the lua tool description.";
-    spec.parameters  = parse_json(
-        R"json({"type":"object","properties":{"name":{"type":"string"}},"required":["name"]})json");
-    return { std::move(spec),
-        [&state](const ToolCallRequest&, const Json::Value& args) {
-            const std::string name = json_string(args, "name");
-            if (name.empty()) {
-                return tool_error("load: expected a module name");
-            }
-            for (const LuaModule& module : state.modules()) {
-                if (module.name == name) {
-                    return tool_output(render_module_documentation(module));
+    spec.parameters
+        = R"json({"type":"object","properties":{"name":{"type":"string"}},"required":["name"]})json";
+    return { std::move(spec), [&state](const ToolCallRequest& req) {
+                LoadToolArgs args;
+                if (json_parse_checked(req.args, args) || args.name.empty()) {
+                    return tool_error("load: expected a module name");
                 }
-            }
-            std::string available;
-            for (const LuaModule& module : state.modules()) {
-                if (!available.empty()) {
-                    available += ", ";
+                const std::string name = args.name;
+                for (const LuaModule& module : state.modules()) {
+                    if (module.name == name) {
+                        return tool_output(render_module_documentation(module));
+                    }
                 }
-                available += module.name;
-            }
-            return tool_error("load: unknown module, available: " + available);
-        } };
+                std::string available;
+                for (const LuaModule& module : state.modules()) {
+                    if (!available.empty()) {
+                        available += ", ";
+                    }
+                    available += module.name;
+                }
+                return tool_error(
+                    "load: unknown module, available: " + available);
+            } };
 }
 
 Tool make_subagent_tool(SubagentToolSlot delegate)
@@ -178,18 +154,22 @@ Tool make_subagent_tool(SubagentToolSlot delegate)
         = "Delegate one to five independent tasks to concurrent research or "
           "build agents and wait for their reports. Build agents are only "
           "available while the main agent is in build mode.";
-    spec.parameters = parse_json(
-        R"json({"type":"object","properties":{"tasks":{"type":"array","minItems":1,"maxItems":5,"items":{"type":"object","properties":{"mode":{"type":"string","enum":["research","build"]},"prompt":{"type":"string","minLength":1}},"required":["mode","prompt"],"additionalProperties":false}}},"required":["tasks"],"additionalProperties":false})json");
+    spec.parameters
+        = R"json({"type":"object","properties":{"tasks":{"type":"array","minItems":1,"maxItems":5,"items":{"type":"object","properties":{"mode":{"type":"string","enum":["research","build"]},"prompt":{"type":"string","minLength":1}},"required":["mode","prompt"],"additionalProperties":false}}},"required":["tasks"],"additionalProperties":false})json";
     if (!delegate) {
         delegate = std::make_shared<SubagentToolFn>();
     }
     return { std::move(spec),
         [delegate = std::move(delegate)](
-            const ToolCallRequest& req, const Json::Value& args) -> ToolOutput {
+            const ToolCallRequest& req) -> ToolOutput {
+            SubagentToolArgs args;
+            if (json_parse_checked(req.args, args)) {
+                return tool_error("subagent: expected one to five tasks");
+            }
             if (!*delegate) {
                 return tool_error("subagent: delegation is unavailable");
             }
-            return (*delegate)(req, args);
+            return (*delegate)(req);
         } };
 }
 

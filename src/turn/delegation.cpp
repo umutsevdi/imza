@@ -3,7 +3,7 @@
 #include "common/types.h"
 #include "common/util.h"
 #include "conversation/format.h"
-#include "network/json_io.h"
+#include "network/json.h"
 #include "tools/skills.h"
 #include "turn/prompt.h"
 
@@ -24,22 +24,27 @@ namespace {
     };
 
     std::optional<std::vector<DelegatedTask>> parse_tasks(
-        const Json::Value& args, Session::Mode main_mode, std::string& error)
+        const ToolCallRequest& req, Session::Mode main_mode, std::string& error)
     {
+        SubagentToolArgs args;
+        if (json_parse_checked(req.args, args)) {
+            error = "subagent: expected one to five tasks";
+            return std::nullopt;
+        }
         if (const auto validation = validate_subagent_tool_arguments(
                 args, main_mode == Session::Mode::BUILD)) {
             error = *validation;
             return std::nullopt;
         }
         std::vector<DelegatedTask> tasks;
-        tasks.reserve(args["tasks"].size());
-        for (const Json::Value& value : args["tasks"]) {
-            const std::string mode = to_lower(value["mode"].asString());
+        tasks.reserve(args.tasks.size());
+        for (const auto& task : args.tasks) {
+            const std::string mode = to_lower(task.mode);
             tasks.push_back(DelegatedTask {
                 mode == "build" ? Session::Mode::BUILD : Session::Mode::PLAN,
                 mode == "build" ? SubagentRole::BUILDER
                                 : SubagentRole::RESEARCH,
-                mode, value["prompt"].asString() });
+                mode, task.prompt });
         }
         return tasks;
     }
@@ -152,13 +157,12 @@ void Delegation::submit_delegated(
     _runner.spawn(std::move(history), std::move(settings));
 }
 
-ToolOutput Delegation::run_subagents(
-    const ToolCallRequest& req, const Json::Value& args)
+ToolOutput Delegation::run_subagents(const ToolCallRequest& req)
 {
     _state->subagents->prune_completed();
     std::string validation_error;
     const auto parsed
-        = parse_tasks(args, _state->session->mode(), validation_error);
+        = parse_tasks(req, _state->session->mode(), validation_error);
     if (!parsed) {
         return tool_error(validation_error);
     }
@@ -255,14 +259,11 @@ SubagentChat Delegation::subagent_chat(
     if (index < call.subagent_chats.size()) {
         return call.subagent_chats[index];
     }
-    const Json::Value args = parse_json(call.args);
-    std::string title      = "Agent " + std::to_string(index + 1);
-    if (args["tasks"].isArray() && index < args["tasks"].size()) {
-        const Json::Value& mode
-            = args["tasks"][static_cast<Json::ArrayIndex>(index)]["mode"];
-        if (mode.isString()) {
-            title = agent_label(index, mode.asString());
-        }
+    SubagentToolArgs args;
+    (void)json_parse_checked(call.args, args);
+    std::string title = "Agent " + std::to_string(index + 1);
+    if (index < args.tasks.size() && !args.tasks[index].mode.empty()) {
+        title = agent_label(index, args.tasks[index].mode);
     }
     if (index >= call.subagent_ids.size()) {
         return { std::move(title), "No delegated-agent history is available." };

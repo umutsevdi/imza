@@ -44,6 +44,10 @@ message("Build Tests: ${IMZA_BUILD_TESTS}")
 message("Package: ${IMZA_PACKAGE}")
 message("Build Type: ${CMAKE_BUILD_TYPE}")
 
+# Static build: the vendored precompiled deps (CLI11 PCH, lua) are not
+# built with -fPIC.
+set(BUILD_SHARED_LIBS OFF)
+
 include(FetchContent)
 if(WIN32)
     set(BUILD_CURL_EXE OFF CACHE BOOL "" FORCE)
@@ -97,15 +101,11 @@ FetchContent_Declare(
     EXCLUDE_FROM_ALL
 )
 
-# jsoncpp
-set(JSONCPP_WITH_TESTS OFF)
-set(JSONCPP_WITH_POST_BUILD_UNITTEST OFF)
-set(BUILD_STATIC_LIBS ON)
-set(BUILD_SHARED_LIBS OFF)
+# Glaze (header-only JSON, reflection-based, zero-copy read)
 FetchContent_Declare(
-    jsoncpp
-    GIT_REPOSITORY https://github.com/open-source-parsers/jsoncpp.git
-    GIT_TAG        1.9.6
+    glaze
+    GIT_REPOSITORY https://github.com/stephenberry/glaze.git
+    GIT_TAG        v5.7.1
     EXCLUDE_FROM_ALL
 )
 
@@ -135,7 +135,7 @@ FetchContent_Declare(
     GIT_TAG 0.29.0.gfm.13
     EXCLUDE_FROM_ALL
 )
-FetchContent_MakeAvailable(jsoncpp cmarkgfm cli11)
+FetchContent_MakeAvailable(glaze cmarkgfm cli11)
 FetchContent_MakeAvailable(lua)
 if(IMZA_BUILD_TESTS)
     FetchContent_MakeAvailable(doctest)
@@ -220,10 +220,9 @@ add_library(imza_network
 )
 target_include_directories(imza_network PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${jsoncpp_SOURCE_DIR}/include
 )
 target_link_libraries(imza_network PRIVATE
-    jsoncpp_static
+    glaze::glaze
     CURL::libcurl
 )
 
@@ -242,11 +241,10 @@ add_library(imza_foundation
 )
 target_include_directories(imza_foundation PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${jsoncpp_SOURCE_DIR}/include
 )
 target_link_libraries(imza_foundation PUBLIC
     imza_network
-    jsoncpp_static
+    glaze::glaze
 )
 
 set_source_files_properties(src/providers/catalog.cpp PROPERTIES
@@ -277,12 +275,10 @@ add_library(imza_runtime
 )
 target_include_directories(imza_runtime PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${jsoncpp_SOURCE_DIR}/include
 )
 target_link_libraries(imza_runtime PUBLIC
     imza_foundation
     imza_network
-    jsoncpp_static
 )
 
 # Application composition, turns, and tools (ftxui-free)
@@ -313,7 +309,6 @@ add_library(imza_execution
 )
 target_include_directories(imza_execution PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${jsoncpp_SOURCE_DIR}/include
     ${PROMPTS_GENERATED_DIR}
     ${TREE_SITTER_GENERATED_DIR}
 )
@@ -332,7 +327,6 @@ target_link_libraries(imza_execution PUBLIC
     imza_runtime
     imza_lua
     imza_tree_sitter_grammars
-    jsoncpp_static
 )
 
 # UI: ftxui components + renderers
@@ -367,7 +361,6 @@ target_include_directories(imza_ui PRIVATE
     ${cmarkgfm_SOURCE_DIR}/src
     ${cmarkgfm_BINARY_DIR}/src
     ${cmarkgfm_SOURCE_DIR}/extensions
-    ${jsoncpp_SOURCE_DIR}/include
     ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
 target_compile_definitions(imza_ui PRIVATE
@@ -379,7 +372,6 @@ target_link_libraries(imza_ui PUBLIC
     ftxui::ftxui
     libcmark-gfm-extensions_static
     libcmark-gfm_static
-    jsoncpp_static
     imza_tree_sitter_grammars
 )
 
@@ -404,8 +396,7 @@ if (IMZA_BUILD_TESTS)
         ${cmarkgfm_SOURCE_DIR}/src
         ${cmarkgfm_BINARY_DIR}/src
         ${cmarkgfm_SOURCE_DIR}/extensions
-        ${jsoncpp_SOURCE_DIR}/include
-    )
+        )
     target_compile_definitions(imza_tests PRIVATE
         CMARK_GFM_STATIC_DEFINE
         CMARK_GFM_EXTENSIONS_STATIC_DEFINE

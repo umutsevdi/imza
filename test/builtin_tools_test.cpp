@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include <filesystem>
+#include <string>
 
 #include "network/json_io.h"
 #include "test_fs.h"
@@ -14,11 +15,11 @@ TEST_CASE("builtin tools expose the current tool set")
 
     const auto* skill = find_tool(tools, "skill");
     REQUIRE(skill != nullptr);
-    CHECK(skill->spec.parameters["properties"].isMember("name"));
+    CHECK(skill->spec.parameters.find("\"name\"") != std::string::npos);
 
     const auto* subagent = find_tool(tools, "subagent");
     REQUIRE(subagent != nullptr);
-    CHECK(subagent->spec.parameters["properties"].isMember("tasks"));
+    CHECK(subagent->spec.parameters.find("\"tasks\"") != std::string::npos);
 
     REQUIRE(find_tool(tools, "lua") != nullptr);
     REQUIRE(find_tool(tools, "load") != nullptr);
@@ -60,15 +61,15 @@ TEST_CASE("the skill tool handler reads instructions and records the load")
     deps.store   = [store] -> imza::SkillStore& { return *store; };
 
     const auto tool = imza::make_skill_tool(std::move(deps));
-    const auto out  = tool.run({ "skill", "", "", "" },
-        imza::parse_json(R"json({"name":"docs"})json"));
+    const auto out
+        = tool.run({ "skill", R"json({"name":"docs"})json", "", "" });
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(out.text.find("documented workflow") != std::string::npos);
     // Loading through the tool records the skill so the gate stops asking.
     CHECK(store->is_loaded(path));
 
-    const auto missing = tool.run({ "skill", "", "", "" },
-        imza::parse_json(R"json({"name":"absent"})json"));
+    const auto missing
+        = tool.run({ "skill", R"json({"name":"absent"})json", "", "" });
     CHECK(missing.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(missing.text == "skill: unknown or unavailable skill");
 }
@@ -83,7 +84,7 @@ TEST_CASE("the skill tool records nothing without a store but still reads")
     imza::SkillToolDeps deps;
     deps.catalog    = [skill] { return std::vector<imza::Skill> { skill }; };
     const auto tool = imza::make_skill_tool(std::move(deps));
-    const auto out  = tool.run({ "skill", "", "", "" },
-        imza::parse_json(R"json({"name":"docs"})json"));
+    const auto out
+        = tool.run({ "skill", R"json({"name":"docs"})json", "", "" });
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
 }

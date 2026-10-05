@@ -1,10 +1,8 @@
 #include "network/web.h"
 
 #include "common/util.h"
-#include "network/json_io.h"
+#include "network/json.h"
 #include "network/network.h"
-
-#include <json/json.h>
 
 #include <cctype>
 #include <cstdlib>
@@ -149,29 +147,49 @@ namespace {
         return out;
     }
 
-    std::string text_from_json(const Json::Value& root)
+    struct McpContentItem {
+        std::optional<std::string> text;
+    };
+
+    struct McpResult {
+        std::optional<std::vector<McpContentItem>> content;
+    };
+
+    struct McpResponse {
+        std::optional<McpResult> result;
+    };
+
+    std::string text_from_json(const McpResponse& root)
     {
-        static const Json::Value empty;
-        if (!root.isObject()) {
+        if (!root.result || !root.result->content) {
             return "";
         }
-        const Json::Value& result
-            = root["result"].isObject() ? root["result"] : empty;
-        const Json::Value& content = result["content"];
-        if (!content.isArray()) {
-            return "";
-        }
-        for (const auto& item : content) {
-            if (!item.isObject() || !item["text"].isString()) {
-                continue;
-            }
-            std::string text = item["text"].asString();
-            if (!trim(text).empty()) {
-                return text;
+        for (auto& item : *root.result->content) {
+            if (item.text && !trim(*item.text).empty()) {
+                return std::move(*item.text);
             }
         }
         return "";
     }
+
+    struct McpSearchArgs {
+        std::string query;
+        double numResults = 0;
+        std::string type;
+        std::string livecrawl;
+    };
+
+    struct McpToolParams {
+        std::string name;
+        McpSearchArgs arguments;
+    };
+
+    struct McpRequest {
+        std::string jsonrpc = "2.0";
+        double id           = 1.0;
+        std::string method  = "tools/call";
+        McpToolParams params;
+    };
 
 } // namespace
 
@@ -330,8 +348,8 @@ std::string html_to_text(const std::string& html)
 
 std::string mcp_search_text(const std::string& response)
 {
-    const Json::Value root = parse_json(response);
-    if (!root.isNull()) {
+    McpResponse root;
+    if (!json_parse_checked(response, root)) {
         if (std::string text = text_from_json(root); !text.empty()) {
             return text;
         }
@@ -345,8 +363,8 @@ std::string mcp_search_text(const std::string& response)
         if (!v.empty() && v.front() == ' ') {
             v.remove_prefix(1);
         }
-        const Json::Value item = parse_json(v);
-        if (item.isNull()) {
+        McpResponse item;
+        if (json_parse_checked(v, item)) {
             continue;
         }
         if (std::string text = text_from_json(item); !text.empty()) {
@@ -363,19 +381,10 @@ Status web_search(const std::string& query, int num_results, std::string& text)
         url += "?exaApiKey=" + percent_encode(key);
     }
 
-    Json::Value arguments;
-    arguments["query"]      = query;
-    arguments["numResults"] = num_results;
-    arguments["type"]       = "auto";
-    arguments["livecrawl"]  = "fallback";
-    Json::Value params;
-    params["name"]      = "web_search_exa";
-    params["arguments"] = std::move(arguments);
-    Json::Value body;
-    body["jsonrpc"] = "2.0";
-    body["id"]      = 1;
-    body["method"]  = "tools/call";
-    body["params"]  = std::move(params);
+    McpRequest body;
+    body.params.name = "web_search_exa";
+    body.params.arguments
+        = { query, static_cast<double>(num_results), "auto", "fallback" };
 
     long code = 0;
     std::string response;
@@ -383,7 +392,7 @@ Status web_search(const std::string& query, int num_results, std::string& text)
         "Content-Type: application/json",
         "Accept: application/json, text/event-stream",
     };
-    if (http_post(url, headers, write_json(body), SEARCH_TIMEOUT_SECS, response,
+    if (http_post(url, headers, json_dump(body), SEARCH_TIMEOUT_SECS, response,
             &code, 0)
         != Status::OK) {
         return Status::NETWORK_ERROR;

@@ -1,6 +1,7 @@
 #include "ui/tool_format.h"
 #include "common/util.h"
 #include "conversation/format.h"
+#include "network/json.h"
 #include "network/json_io.h"
 #include "tools/tool.h"
 
@@ -13,20 +14,23 @@ namespace {
 
     std::string subagent_args(const ToolCall& call)
     {
-        const Json::Value parsed = parse_json(call.args);
-        if (!parsed.isObject() || !parsed["tasks"].isArray()) {
+        const JsonValue parsed = parse_json(call.args);
+        const JsonValue* tasks = find_member(parsed, "tasks");
+        if (!parsed.is_object() || tasks == nullptr || !tasks->is_array()) {
             return call.args;
         }
         int research_count = 0;
         int build_count    = 0;
-        for (const Json::Value& task : parsed["tasks"]) {
-            if (!task.isObject() || !task["mode"].isString()) {
+        for (const JsonValue& task : tasks->get<JsonValue::array_t>()) {
+            const JsonValue* mode = find_member(task, "mode");
+            if (!task.is_object() || mode == nullptr || !mode->is_string()) {
                 continue;
             }
-            if (task["mode"].asString() == "research") {
+            const std::string value = mode->as<std::string>();
+            if (value == "research") {
                 ++research_count;
             }
-            if (task["mode"].asString() == "build") {
+            if (value == "build") {
                 ++build_count;
             }
         }
@@ -76,23 +80,22 @@ std::string tool_display_name(const std::string& name)
 
 std::string tool_args_summary(const std::string& args)
 {
-    const Json::Value parsed = parse_json(args);
-    if (!parsed.isObject() || parsed.empty()) {
+    const JsonValue parsed = parse_json(args);
+    if (!parsed.is_object() || parsed.get<JsonValue::object_t>().empty()) {
         return args;
     }
     std::string out;
-    for (const auto& key : parsed.getMemberNames()) {
+    for (const auto& [key, value] : parsed.get<JsonValue::object_t>()) {
         if (!out.empty()) {
             out += ' ';
         }
         out += key + "=";
-        const Json::Value& value = parsed[key];
-        if (value.isString()) {
-            out += value.asString();
-        } else if (value.isNull()) {
+        if (value.is_string()) {
+            out += value.as<std::string>();
+        } else if (value.is_null()) {
             out += "null";
         } else {
-            out += write_json(value);
+            out += imza::json_dump(value);
         }
     }
     return out;
@@ -101,9 +104,9 @@ std::string tool_args_summary(const std::string& args)
 std::string tool_call_head(const ToolCall& call)
 {
     if (call.name == "skill") {
-        const Json::Value parsed = parse_json(call.args);
-        const std::string name   = json_string(parsed, "name");
-        return name.empty() ? "Load Skill" : "Load Skill " + name;
+        SkillToolArgs parsed;
+        (void)json_parse_checked(call.args, parsed);
+        return parsed.name.empty() ? "Load Skill" : "Load Skill " + parsed.name;
     }
     if (call.name == "subagent") {
         return tool_display_name(call.name);
@@ -123,7 +126,9 @@ std::string tool_call_head(const ToolCall& call)
 std::string tool_header_args(const ToolCall& call)
 {
     if (call.name == "skill") {
-        return json_string(parse_json(call.args), "name");
+        SkillToolArgs parsed;
+        (void)json_parse_checked(call.args, parsed);
+        return parsed.name;
     }
     if (call.name == "subagent") {
         return subagent_args(call);
@@ -195,8 +200,10 @@ ToolReport make_tool_report(const ToolCall& call)
     ToolReport report;
     report.summary = lua_dispatch_summary(call);
     report.detail  = lua_dispatch_counts(call);
+    LuaToolArgs parsed;
+    (void)json_parse_checked(call.args, parsed);
     report.sections.push_back(
-        ToolReportCode { "lua", json_string(parse_json(call.args), "script") });
+        ToolReportCode { "lua", std::move(parsed.script) });
     if (!call.result.has_value()) {
         return report;
     }
@@ -213,7 +220,7 @@ ToolReport make_tool_report(const ToolCall& call)
         // renderer, numbers/bools are safe as bare text.
         if (kind == LuaReturnKind::JSON
             || (kind == LuaReturnKind::SCALAR
-                && call.result->return_value->isString())) {
+                && call.result->return_value->is_string())) {
             report.sections.push_back(
                 ToolReportCode { kind == LuaReturnKind::JSON ? "json" : "txt",
                     format_lua_return(*call.result->return_value) });

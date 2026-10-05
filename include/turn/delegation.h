@@ -35,8 +35,7 @@ public:
         SubagentCompleteFn complete = { });
     void submit_delegated(std::string text, const ProviderSelection& selection,
         Session::Mode mode);
-    ToolOutput run_subagents(
-        const ToolCallRequest& req, const Json::Value& args);
+    ToolOutput run_subagents(const ToolCallRequest& req);
     void spawn_title(std::string input, TurnSettings settings);
     SubagentChat subagent_chat(std::size_t id, std::string title) const;
     SubagentChat subagent_chat(const ToolCall& call, std::size_t index) const;

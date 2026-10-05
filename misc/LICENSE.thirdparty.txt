@@ -10,6 +10,7 @@ MIT-LICENSED PROJECTS
 
 FTXUI - Copyright (c) 2019 Arthur Sonzogni.
 doctest - Copyright (c) 2016-2023 Viktor Kirilov
+Glaze - Copyright (c) 2019 - present, Stephen Berry
 Tree-sitter runtime - Copyright (c) 2018 Max Brunsfeld
 
 Treesitter Grammers:
@@ -57,27 +58,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-===============================================================================
-JSONCPP
-===============================================================================
-
-The JsonCpp library's source code, including accompanying documentation,
-tests and demonstration applications, are licensed under the following
-conditions.
-
-Baptiste Lepilleur and The JsonCpp Authors explicitly disclaim copyright in
-all jurisdictions which recognize such a disclaimer. In such jurisdictions,
-this software is released into the Public Domain.
-
-In jurisdictions which do not recognize Public Domain property, this software
-is Copyright (c) 2007-2010 by Baptiste Lepilleur and The JsonCpp Authors, and
-is released under the terms of the MIT License reproduced above.
-
-In jurisdictions which recognize Public Domain property, the user of this
-software may choose to accept it either as Public Domain, under the conditions
-of the MIT License, or under the dual Public Domain/MIT License conditions
-described here.
 
 ===============================================================================
 CMARK-GFM

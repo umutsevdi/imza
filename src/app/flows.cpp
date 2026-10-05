@@ -2,7 +2,6 @@
 #include "app/slash_commands.h"
 #include "common/util.h"
 #include "conversation/persistence.h"
-#include "network/json_io.h"
 #include "permissions/evaluator.h"
 #include "permissions/store.h"
 #include "platform/config.h"
@@ -71,11 +70,11 @@ namespace {
 
     ToolCallRequest skill_request(const Skill& skill)
     {
-        Json::Value args(Json::objectValue);
-        args["name"] = skill.name;
-        args["scope"]
+        SkillToolArgs args;
+        args.name = skill.name;
+        args.scope
             = skill.scope == Skill::Scope::PROJECT ? "project" : "global";
-        return { "skill", write_json(args), "Load skill " + skill.name,
+        return { "skill", json_dump(args), "Load skill " + skill.name,
             "manual-skill" };
     }
 
@@ -83,11 +82,11 @@ namespace {
     ToolCallRequest authorized_request(const PermissionPrompt& prompt)
     {
         const auto& details = std::get<SkillRequest>(prompt.request);
-        Json::Value args(Json::objectValue);
-        args["name"]  = details.name;
-        args["scope"] = details.scope;
-        args["path"]  = details.path;
-        return { "skill", write_json(args), prompt.description, prompt.id };
+        SkillToolArgs args;
+        args.name  = details.name;
+        args.scope = details.scope;
+        args.path  = details.path;
+        return { "skill", json_dump(args), prompt.description, prompt.id };
     }
 
     PermissionEvaluation evaluate_permission(ApplicationState& state,

@@ -4,7 +4,7 @@
 #include "tools/tool.h"
 
 #include "common/util.h"
-#include "network/json_io.h"
+#include "network/json.h"
 #include "tools/file_ops.h"
 
 #include <algorithm>
@@ -328,7 +328,7 @@ TYPES)desc";
         return out;
     }
 
-    bool lua_value_json(lua_State* L, int index, Json::Value& out,
+    bool lua_value_json(lua_State* L, int index, JsonValue& out,
         std::size_t depth, std::size_t& nodes,
         std::unordered_set<const void*>& tables, std::string& error)
     {
@@ -344,16 +344,18 @@ TYPES)desc";
 
         index = lua_absindex(L, index);
         switch (lua_type(L, index)) {
-        case LUA_TNIL: out = Json::Value::null; return true;
-        case LUA_TBOOLEAN: out = lua_toboolean(L, index) != 0; return true;
+        case LUA_TNIL: out = JsonValue(nullptr); return true;
+        case LUA_TBOOLEAN:
+            out = JsonValue(lua_toboolean(L, index) != 0);
+            return true;
         case LUA_TNUMBER:
             if (lua_isinteger(L, index)) {
-                out = static_cast<Json::Int64>(lua_tointeger(L, index));
+                out = JsonValue(static_cast<double>(lua_tointeger(L, index)));
                 return true;
             }
             if (const lua_Number value = lua_tonumber(L, index);
                 std::isfinite(value)) {
-                out = static_cast<double>(value);
+                out = JsonValue(static_cast<double>(value));
                 return true;
             }
             error = "numbers must be finite";
@@ -361,7 +363,7 @@ TYPES)desc";
         case LUA_TSTRING: {
             std::size_t size  = 0;
             const char* value = lua_tolstring(L, index, &size);
-            out               = std::string(value, size);
+            out               = JsonValue(std::string(value, size));
             return true;
         }
         case LUA_TTABLE: break;
@@ -381,7 +383,7 @@ TYPES)desc";
         TableKind kind          = TableKind::EMPTY;
         std::size_t entries     = 0;
         lua_Integer largest_key = 0;
-        Json::Value value(Json::objectValue);
+        JsonValue value         = JsonValue::object_t { };
         lua_pushnil(L);
         while (lua_next(L, index) != 0) {
             if (++entries > MAX_RETURN_TABLE_ENTRIES) {
@@ -391,7 +393,7 @@ TYPES)desc";
                 return false;
             }
 
-            Json::Value child;
+            JsonValue child;
             if (!lua_value_json(
                     L, -1, child, depth + 1, nodes, tables, error)) {
                 lua_pop(L, 2);
@@ -413,11 +415,14 @@ TYPES)desc";
                     return false;
                 }
                 kind = TableKind::ARRAY;
-                if (!value.isArray()) {
-                    value = Json::Value(Json::arrayValue);
+                if (!value.is_array()) {
+                    value = JsonValue::array_t { };
                 }
-                value[static_cast<Json::ArrayIndex>(key - 1)]
-                    = std::move(child);
+                auto& array = value.get<JsonValue::array_t>();
+                if (static_cast<std::size_t>(key) > array.size()) {
+                    array.resize(static_cast<std::size_t>(key));
+                }
+                array[static_cast<std::size_t>(key - 1)] = std::move(child);
                 largest_key = std::max(largest_key, key);
             } else if (lua_type(L, -2) == LUA_TSTRING) {
                 if (kind == TableKind::ARRAY) {
@@ -425,10 +430,11 @@ TYPES)desc";
                     error = "tables cannot mix array and object keys";
                     return false;
                 }
-                std::size_t size              = 0;
-                const char* key               = lua_tolstring(L, -2, &size);
-                kind                          = TableKind::OBJECT;
-                value[std::string(key, size)] = std::move(child);
+                std::size_t size = 0;
+                const char* key  = lua_tolstring(L, -2, &size);
+                kind             = TableKind::OBJECT;
+                value.get<JsonValue::object_t>()[std::string(key, size)]
+                    = std::move(child);
             } else {
                 lua_pop(L, 2);
                 error = "table keys must be strings or positive integers";
@@ -445,7 +451,7 @@ TYPES)desc";
         return true;
     }
 
-    std::optional<Json::Value> lua_return_value(
+    std::optional<JsonValue> lua_return_value(
         lua_State* L, int first, std::string& error)
     {
         const int count = lua_gettop(L) - first + 1;
@@ -455,39 +461,41 @@ TYPES)desc";
 
         std::size_t nodes = 0;
         std::unordered_set<const void*> tables;
-        Json::Value value;
+        JsonValue value;
         if (count == 1) {
             if (!lua_value_json(L, first, value, 0, nodes, tables, error)) {
                 return std::nullopt;
             }
         } else {
-            value = Json::Value(Json::arrayValue);
+            value       = JsonValue::array_t { };
+            auto& array = value.get<JsonValue::array_t>();
             for (int i = 0; i < count; ++i) {
-                Json::Value entry;
+                JsonValue entry;
                 if (!lua_value_json(
                         L, first + i, entry, 0, nodes, tables, error)) {
                     return std::nullopt;
                 }
-                value.append(std::move(entry));
+                array.push_back(std::move(entry));
             }
         }
-        if (write_json(value).size() > MAX_OUTPUT_BYTES) {
+        if (imza::json_dump(value).size() > MAX_OUTPUT_BYTES) {
             error = "encoded value exceeds 64 KiB";
             return std::nullopt;
         }
         return value;
     }
 
-    ToolOutput lua_run(const Json::Value& args, const LuaHost& host,
+    ToolOutput lua_run(const ToolCallRequest& req, const LuaHost& host,
         std::span<const LuaModule> modules)
     {
-        const std::string script = json_string(args, "script");
-        if (script.empty()) {
+        LuaToolArgs args;
+        if (json_parse_checked(req.args, args) || args.script.empty()) {
             return tool_error("lua: expected a non-empty 'script' string");
         }
-        long timeout = 10;
-        if (const auto value = json_int(args, "timeout")) {
-            timeout = std::clamp(static_cast<long>(*value), 1L, 120L);
+        const std::string script = args.script;
+        long timeout             = 10;
+        if (args.timeout) {
+            timeout = std::clamp(static_cast<long>(*args.timeout), 1L, 120L);
         }
 
         LuaRunContext run;
@@ -531,7 +539,7 @@ TYPES)desc";
         }
 
         std::string return_error;
-        std::optional<Json::Value> return_value
+        std::optional<JsonValue> return_value
             = lua_return_value(L, first_result, return_error);
         if (!return_error.empty()) {
             return finish(tool_error("lua: return value: " + return_error));
@@ -562,12 +570,11 @@ Tool make_lua_tool(LuaState& state, LuaHost host)
     ToolSpec spec;
     spec.name        = "lua";
     spec.description = render_description(state.modules());
-    spec.parameters  = parse_json(
-        R"json({"type":"object","properties":{"script":{"type":"string","description":"Lua source code to execute"},"timeout":{"type":"integer","description":"maximum script execution time in seconds, excluding pauses for permission prompts (default 10, max 120)"}},"required":["script"]})json");
+    spec.parameters
+        = R"json({"type":"object","properties":{"script":{"type":"string","description":"Lua source code to execute"},"timeout":{"type":"integer","description":"maximum script execution time in seconds, excluding pauses for permission prompts (default 10, max 120)"}},"required":["script"]})json";
     return { std::move(spec),
-        [&state, host = std::move(host)](
-            const ToolCallRequest&, const Json::Value& args) {
-            return lua_run(args, host, state.modules());
+        [&state, host = std::move(host)](const ToolCallRequest& req) {
+            return lua_run(req, host, state.modules());
         } };
 }
 

@@ -1,5 +1,4 @@
 #include <doctest/doctest.h>
-#include <json/json.h>
 #include <ftxui/component/event.hpp>
 #include <ftxui/component/mouse.hpp>
 #include <ftxui/screen/screen.hpp>
@@ -7,7 +6,6 @@
 #include "app/flows.h"
 #include "common/util.h"
 #include "conversation/format.h"
-#include "network/json_io.h"
 #include "test_fs.h"
 #include "test_helpers.h"
 #include "test_state.h"
@@ -180,11 +178,11 @@ TEST_CASE("plan mode rejects mutating file operations at the gate")
     env.stream = [out_path, round](
                      const imza::ChatRequest&, const imza::StreamCallback& cb) {
         if ((*round)++ == 0) {
-            Json::Value arguments(Json::objectValue);
+            imza::JsonValue arguments = imza::JsonValue::object_t { };
             arguments["script"]
                 = "imza.fs.write([[" + out_path.string() + "]], 'no')";
             cb(imza::make_tool_call_event(
-                { "lua", imza::write_json(arguments), "", "lua-call" }));
+                { "lua", imza::json_dump(arguments), "", "lua-call" }));
         }
         cb(imza::make_done_event());
         return imza::Status::OK;
@@ -834,11 +832,11 @@ TEST_CASE("filesystem session approval installs an exact reusable grant")
     env.stream = [path, round](
                      const imza::ChatRequest&, const imza::StreamCallback& cb) {
         if ((*round)++ < 2) {
-            Json::Value arguments(Json::objectValue);
+            imza::JsonValue arguments = imza::JsonValue::object_t { };
             arguments["script"] = "assert(not imza.fs.write([[" + path.string()
                 + "]], 'approved'))";
             cb(imza::make_tool_call_event(
-                { "lua", imza::write_json(arguments), "", "lua-call" }));
+                { "lua", imza::json_dump(arguments), "", "lua-call" }));
         }
         cb(imza::make_done_event());
         return imza::Status::OK;

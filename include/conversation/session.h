@@ -1,7 +1,5 @@
 #pragma once
 
-#include <json/json.h>
-
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -20,6 +18,7 @@
 #include "common/types.h"
 #include "common/util.h"
 #include "network/chat.h"
+#include "network/json.h"
 #include "network/network.h"
 #include "providers/pricing.h"
 #include "workspace/attachments.h"
@@ -51,7 +50,7 @@ struct ToolCall {
         enum class Kind { OUTPUT, ERROR, REJECT, CANCEL };
         Kind kind;
         std::string text;
-        std::optional<Json::Value> return_value;
+        std::optional<JsonValue> return_value;
         std::vector<DiffView> diffs;
         std::vector<CanvasView> canvases;
         std::optional<ShellStatus> shell_status;

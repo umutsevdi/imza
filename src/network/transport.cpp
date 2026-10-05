@@ -1,5 +1,6 @@
 #define NOMINMAX
 #include "common/util.h"
+#include "network/json.h"
 #include "network/json_io.h"
 #include "network/network.h"
 #include "network/sse_parse.h"
@@ -359,7 +360,7 @@ Status stream(const Route& route, const ChatRequest& req, StreamCallback cb,
         return route.error;
     }
     const Provider& provider = get_provider(route);
-    const std::string body   = write_json(provider.build(req));
+    const std::string body   = provider.build(req);
     const std::string& url   = route.endpoint;
 
     std::vector<std::string> header_strs
@@ -509,27 +510,29 @@ const char* role_str(Message::Type type)
 Status parse_api_error(std::string_view body, std::string& message)
 {
     message.clear();
-    const Json::Value root = parse_json(body);
-    if (root.isNull()) {
+    // The "error" member is polymorphic on the wire (object, string, or
+    // absent), which reflection can't express in one struct; keep the
+    // dynamic read for this genuinely variant payload.
+    const JsonValue root = parse_json(body);
+    if (!root.is_object()) {
         return Status::OK;
     }
     std::string msg;
     std::string kind;
-    const Json::Value& err = root["error"];
-    if (err.isObject()) {
-        if (err["message"].isString()) {
-            msg = err["message"].asString();
+    const JsonValue* err = find_member(root, "error");
+    const auto text_of   = [](const JsonValue* v) -> std::string {
+        return v != nullptr && v->is_string() ? v->as<std::string>() : "";
+    };
+    if (err != nullptr && err->is_object()) {
+        msg  = text_of(find_member(*err, "message"));
+        kind = text_of(find_member(*err, "type"));
+        if (kind.empty()) {
+            kind = text_of(find_member(*err, "code"));
         }
-        if (err["type"].isString()) {
-            kind = err["type"].asString();
-        }
-        if (err["code"].isString() && kind.empty()) {
-            kind = err["code"].asString();
-        }
-    } else if (err.isString()) {
-        msg = err.asString();
-    } else if (root["message"].isString()) {
-        msg = root["message"].asString();
+    } else if (err != nullptr && err->is_string()) {
+        msg = err->as<std::string>();
+    } else {
+        msg = text_of(find_member(root, "message"));
     }
     if (msg.empty() && kind.empty()) {
         return Status::OK;

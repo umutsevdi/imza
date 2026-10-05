@@ -1,7 +1,5 @@
 #pragma once
 
-#include <json/json.h>
-
 #include <functional>
 #include <memory>
 #include <optional>
@@ -12,7 +10,9 @@
 
 #include "common/tool_call.h"
 #include "common/types.h"
+#include "network/json.h"
 #include "tools/lua.h"
+#include "tools/tool_args.h"
 
 namespace imza {
 
@@ -26,7 +26,7 @@ struct ToolOutput {
     enum class Kind { OUTPUT, ERROR };
     Kind kind;
     std::string text;
-    std::optional<Json::Value> return_value = std::nullopt;
+    std::optional<JsonValue> return_value = std::nullopt;
     // Net per-file diffs a lua script produced through imza.fs.*;
     // multiple mutations of one file collapse into a single before/after.
     std::vector<DiffView> diffs { };
@@ -46,10 +46,10 @@ inline ToolOutput tool_output(std::string text)
     return { ToolOutput::Kind::OUTPUT, std::move(text) };
 }
 
-// Handlers get the request alongside its parsed args: side-channel
-// results (subagent chats, skill loads) must be matched to its call id.
-using ToolHandler = std::function<ToolOutput(
-    const ToolCallRequest&, const Json::Value& args)>;
+// Handlers get the request alone and parse their typed args struct from
+// req.args: side-channel results (subagent chats, skill loads) must be
+// matched to its call id.
+using ToolHandler = std::function<ToolOutput(const ToolCallRequest&)>;
 
 struct Tool {
     ToolSpec spec;
@@ -61,12 +61,8 @@ std::vector<ToolSpec> tool_specs(std::span<const Tool> tools);
 ToolOutput dispatch_tool(
     std::span<const Tool> tools, const ToolCallRequest& req);
 
-// Argument accessors: "" / nullopt unless `value[key]` holds that type.
-std::string json_string(const Json::Value& value, const char* key);
-std::optional<std::int64_t> json_int(const Json::Value& value, const char* key);
-
 std::optional<std::string> validate_subagent_tool_arguments(
-    const Json::Value& arguments, bool allow_build);
+    const SubagentToolArgs& arguments, bool allow_build);
 
 // Lazy accessors, like LuaHost: the roster is built before the
 // environment and store are wired. Skill policy is gated once upstream.
@@ -80,8 +76,7 @@ Tool make_load_tool(LuaState& state);
 
 // Slot indirection breaks the TurnRunner/Delegation cycle: the tool
 // captures it empty, wire() fills it once both exist.
-using SubagentToolFn
-    = std::function<ToolOutput(const ToolCallRequest&, const Json::Value&)>;
+using SubagentToolFn   = std::function<ToolOutput(const ToolCallRequest&)>;
 using SubagentToolSlot = std::shared_ptr<SubagentToolFn>;
 
 Tool make_subagent_tool(SubagentToolSlot delegate = { });

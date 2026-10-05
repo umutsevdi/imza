@@ -1,9 +1,10 @@
 #include "conversation/format.h"
 
 #include "common/util.h"
-#include "network/json_io.h"
+#include "network/json.h"
 
 #include <algorithm>
+#include <set>
 #include <string>
 #include <type_traits>
 
@@ -71,49 +72,53 @@ Message assistant_message(
 
 namespace {
 
-    LuaReturnKind classify_return(const Json::Value& value)
+    LuaReturnKind classify_return(const JsonValue& value)
     {
-        if (!value.isArray()) {
-            return value.isObject() ? LuaReturnKind::JSON
-                                    : LuaReturnKind::SCALAR;
+        if (!value.is_array()) {
+            return value.is_object() ? LuaReturnKind::JSON
+                                     : LuaReturnKind::SCALAR;
         }
-        if (value.empty()) {
+        const auto& array = value.get<JsonValue::array_t>();
+        if (array.empty()) {
             return LuaReturnKind::JSON;
         }
         const bool all_scalars = std::all_of(
-            value.begin(), value.end(), [](const Json::Value& entry) {
-                return !entry.isObject() && !entry.isArray();
+            array.begin(), array.end(), [](const JsonValue& entry) {
+                return !entry.is_object() && !entry.is_array();
             });
         if (all_scalars) {
             return LuaReturnKind::SCALAR_LIST;
         }
-        const bool all_objects = std::all_of(value.begin(), value.end(),
-            [](const Json::Value& entry) { return entry.isObject(); });
+        const bool all_objects = std::all_of(array.begin(), array.end(),
+            [](const JsonValue& entry) { return entry.is_object(); });
         return all_objects ? LuaReturnKind::TABLE : LuaReturnKind::JSON;
     }
 
 } // namespace
 
-LuaReturnKind lua_return_kind(const Json::Value& value)
+LuaReturnKind lua_return_kind(const JsonValue& value)
 {
     return classify_return(value);
 }
 
 namespace {
 
-    std::string render_lua_return(
-        const Json::Value& value, LuaReturnKind& render)
+    std::string render_lua_return(const JsonValue& value, LuaReturnKind& render)
     {
         render = classify_return(value);
         switch (render) {
-        case LuaReturnKind::SCALAR: return value.asString();
-        case LuaReturnKind::JSON: return write_pretty_json(value);
+        case LuaReturnKind::SCALAR:
+            return value.is_string() ? value.as<std::string>()
+                                     : json_dump(value);
+        case LuaReturnKind::JSON: return json_dump_pretty(value);
         default: break;
         }
+        const auto& array = value.get<JsonValue::array_t>();
         if (render == LuaReturnKind::SCALAR_LIST) {
             std::string out;
-            for (const Json::Value& entry : value) {
-                out += entry.asString();
+            for (const JsonValue& entry : array) {
+                out += entry.is_string() ? entry.as<std::string>()
+                                         : json_dump(entry);
                 out += '\n';
             }
             return out;
@@ -121,29 +126,29 @@ namespace {
         // A formal table: list of objects. Columns are the union of keys in
         // first-seen order; missing fields render as empty cells. A nested
         // value anywhere demotes the whole list back to JSON.
-        for (const Json::Value& entry : value) {
-            for (const auto& key : entry.getMemberNames()) {
-                if (entry[key].isObject() || entry[key].isArray()) {
-                    render = LuaReturnKind::JSON;
-                    return write_pretty_json(value);
-                }
+        std::vector<std::string> columns;
+        std::set<std::string> seen;
+        for (const JsonValue& entry : array) {
+            if (!entry.is_object()) {
+                continue;
             }
-        }
-        Json::Value columns(Json::arrayValue);
-        Json::Value seen(Json::objectValue);
-        for (const Json::Value& entry : value) {
-            for (const auto& key : entry.getMemberNames()) {
-                if (!seen.isMember(key)) {
-                    seen[key] = true;
-                    columns.append(key);
+            for (const auto& [key, member] : entry.get<JsonValue::object_t>()) {
+                if (member.is_object() || member.is_array()) {
+                    render = LuaReturnKind::JSON;
+                    return json_dump_pretty(value);
+                }
+                if (seen.insert(key).second) {
+                    columns.push_back(key);
                 }
             }
         }
         // Markdown tables do not support multi-line or pipe-bearing cells;
         // soften the break and escape the separator. Very wide cells are
         // capped so one long field cannot flatten the table.
-        const auto cell = [](const Json::Value& value) {
-            const std::string text = value.isNull() ? "" : value.asString();
+        const auto cell = [](const JsonValue* value) {
+            const std::string text = value == nullptr || value->is_null() ? ""
+                : value->is_string() ? value->as<std::string>()
+                                     : json_dump(*value);
             std::size_t width      = 0;
             std::string out;
             for (const char c : text) {
@@ -164,10 +169,23 @@ namespace {
             }
             return out;
         };
+        const auto escape = [](const std::string& text) {
+            std::string out;
+            for (const char c : text) {
+                if (c == '\n') {
+                    out += "<br>";
+                } else if (c == '|') {
+                    out += "\\|";
+                } else {
+                    out += c;
+                }
+            }
+            return out;
+        };
         std::string out;
         out += '|';
-        for (const Json::Value& key : columns) {
-            out += cell(key);
+        for (const std::string& key : columns) {
+            out += escape(key);
             out += '|';
         }
         out += "\n|";
@@ -175,16 +193,16 @@ namespace {
             out += "---|";
         }
         out += '\n';
-        for (const Json::Value& entry : value) {
+        for (const JsonValue& entry : array) {
             out += '|';
-            for (const Json::Value& key : columns) {
-                out += cell(entry[key.asString()]);
+            for (const std::string& key : columns) {
+                out += cell(find_member(entry, key));
                 out += '|';
             }
             out += '\n';
             if (out.size() > MAX_OUTPUT_BYTES) {
                 render = LuaReturnKind::JSON;
-                return write_pretty_json(value);
+                return json_dump_pretty(value);
             }
         }
         return out;
@@ -192,14 +210,14 @@ namespace {
 
 } // namespace
 
-std::string format_lua_return(const Json::Value& value)
+std::string format_lua_return(const JsonValue& value)
 {
     LuaReturnKind render = LuaReturnKind::JSON;
     return render_lua_return(value, render);
 }
 
 std::string format_lua_result(
-    std::string text, const std::optional<Json::Value>& return_value)
+    std::string text, const std::optional<JsonValue>& return_value)
 {
     if (!return_value.has_value()) {
         return text;
@@ -218,7 +236,7 @@ std::string format_lua_result(
         return text;
     }
     if (render == LuaReturnKind::SCALAR) {
-        if (return_value->isString()) {
+        if (return_value->is_string()) {
             // Free-form output must not be interpreted as markdown.
             const std::string open = code_fence(body);
             text += open + "\n" + body + "\n" + open;

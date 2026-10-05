@@ -7,8 +7,6 @@
 #include <string>
 #include <string_view>
 
-#include <json/json.h>
-
 #include "common/types.h"
 #include "network/network.h"
 #include "platform/config.h"

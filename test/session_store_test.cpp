@@ -16,6 +16,7 @@
 #include "conversation/persistence.h"
 #include "conversation/session.h"
 #include "conversation/session_store.h"
+#include "network/json.h"
 #include "network/json_io.h"
 #include "platform/config.h"
 #include "platform/file_lock.h"
@@ -24,6 +25,8 @@
 #include "test_state.h"
 
 namespace {
+
+using JsonValue = imza::JsonValue;
 
 imza::Status load_session(const std::filesystem::path& path,
     imza::Session& session, std::filesystem::path* workspace = nullptr)
@@ -315,10 +318,19 @@ TEST_CASE("lua return value survives session persistence")
     const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
     REQUIRE(call.result.has_value());
     REQUIRE(call.result->return_value.has_value());
-    CHECK((*call.result->return_value)["a"].asInt() == 1);
-    REQUIRE((*call.result->return_value)["b"].isArray());
-    CHECK((*call.result->return_value)["b"][0].asBool());
-    CHECK((*call.result->return_value)["b"][1].isNull());
+    const imza::JsonValue& returned = *call.result->return_value;
+    const imza::JsonValue* a        = imza::find_member(returned, "a");
+    REQUIRE(a != nullptr);
+    const int a_value = a->as<int>();
+    CHECK(a_value == 1);
+    const imza::JsonValue* b = imza::find_member(returned, "b");
+    REQUIRE(b != nullptr);
+    REQUIRE(b->is_array());
+    const auto& b_array = b->get<JsonValue::array_t>();
+    REQUIRE(b_array.size() == 2);
+    REQUIRE(b_array[0].is_boolean());
+    CHECK(b_array[0].get<bool>());
+    CHECK(b_array[1].is_null());
 }
 
 TEST_CASE("legacy lua result without a return value still loads")
@@ -783,17 +795,29 @@ TEST_CASE("native and legacy attachments survive session persistence")
     std::ifstream file(saved.front().path, std::ios::binary);
     std::stringstream buffer;
     buffer << file.rdbuf();
-    const Json::Value root         = imza::parse_json(buffer.str());
-    const Json::Value& attachments = root["items"][0]["attachments"];
-    REQUIRE(attachments.size() == 3);
-    CHECK(attachments[0]["type"].asString() == "text");
-    CHECK(attachments[0]["content"].asString() == "plain text");
-    CHECK(attachments[1]["type"].asString() == "image");
-    CHECK(attachments[1]["media_type"].asString() == "image/png");
-    CHECK(attachments[1].isMember("content"));
-    CHECK(attachments[1]["content"].asString() != image_bytes);
-    CHECK(attachments[2]["type"].asString() == "pdf");
-    CHECK(attachments[2]["media_type"].asString() == "application/pdf");
+    const imza::JsonValue root   = imza::parse_json(buffer.str());
+    const imza::JsonValue* items = imza::find_member(root, "items");
+    REQUIRE(items != nullptr);
+    REQUIRE(items->is_array());
+    const auto& item_list = items->get<JsonValue::array_t>();
+    REQUIRE(item_list.size() >= 1);
+    const imza::JsonValue* attachments
+        = imza::find_member(item_list[0], "attachments");
+    REQUIRE(attachments != nullptr);
+    REQUIRE(attachments->is_array());
+    const auto& list = attachments->get<JsonValue::array_t>();
+    REQUIRE(list.size() == 3);
+    const auto str = [](const imza::JsonValue* v) {
+        return v != nullptr && v->is_string() ? v->as<std::string>() : "";
+    };
+    CHECK(str(imza::find_member(list[0], "type")) == "text");
+    CHECK(str(imza::find_member(list[0], "content")) == "plain text");
+    CHECK(str(imza::find_member(list[1], "type")) == "image");
+    CHECK(str(imza::find_member(list[1], "media_type")) == "image/png");
+    CHECK(imza::find_member(list[1], "content") != nullptr);
+    CHECK(str(imza::find_member(list[1], "content")) != image_bytes);
+    CHECK(str(imza::find_member(list[2], "type")) == "pdf");
+    CHECK(str(imza::find_member(list[2], "media_type")) == "application/pdf");
 
     imza::Session loaded;
     REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
@@ -966,4 +990,52 @@ TEST_CASE("plan changes publish the plan signal")
     REQUIRE(
         session.edit_plan("# Requirements\nx", "# Requirements\ny", 1).empty());
     CHECK(published == 2);
+}
+
+TEST_CASE("pre-Glaze transcript with unknown members still loads")
+{
+    DataHome home;
+    CurrentDirectory directory;
+    std::filesystem::create_directories(home.root());
+    const std::filesystem::path legacy = home.root() / "legacy.json";
+    {
+        std::ofstream file(legacy, std::ios::binary);
+        // Shaped like a jsoncpp-era transcript: key order differs, an
+        // unknown member ("future_field") is present, and the tool result
+        // carries the pre-canvas member set.
+        file << R"({
+  "items": [
+    {"future_field": true, "type": "user", "text": "hello",
+     "attachments": []},
+    {"type": "assistant", "markdown": "answer", "reasoning": "",
+     "reasoning_signature": "", "model": "m", "reasoning_effort": "off"},
+    {"type": "tool", "id": 0, "call_id": "c1", "name": "lua",
+     "args": "{}", "result_kind": 0, "result": "out"}
+  ],
+  "version": 1,
+  "title": "legacy",
+  "todo": [{"content": "task", "status": 1}],
+  "plans": [],
+  "compacted_summary": "",
+  "compacted_item_count": 0,
+  "mode": "build"
+})";
+    }
+
+    imza::LoadedSession loaded;
+    REQUIRE(imza::read_session(legacy, loaded) == imza::Status::OK);
+    REQUIRE(loaded.snapshot.items.size() == 3);
+    const auto* user = std::get_if<imza::UserTurn>(&loaded.snapshot.items[0]);
+    REQUIRE(user != nullptr);
+    CHECK(user->text == "hello");
+    const auto* assistant
+        = std::get_if<imza::AssistantTurn>(&loaded.snapshot.items[1]);
+    REQUIRE(assistant != nullptr);
+    CHECK(assistant->markdown == "answer");
+    const auto* tool = std::get_if<imza::ToolCall>(&loaded.snapshot.items[2]);
+    REQUIRE(tool != nullptr);
+    REQUIRE(tool->result.has_value());
+    CHECK(tool->result->text == "out");
+    CHECK(loaded.snapshot.todo.items.size() == 1);
+    CHECK(loaded.snapshot.todo.items[0].content == "task");
 }

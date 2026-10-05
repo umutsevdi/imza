@@ -1,16 +1,22 @@
 #include <doctest/doctest.h>
 
-#include <json/json.h>
-
 #include <filesystem>
 #include <string>
 #include <vector>
 
+#include "network/json.h"
 #include "platform/json_file.h"
 #include "platform/update.h"
 #include "test_fs.h"
 
 namespace {
+
+using JsonValue = imza::JsonValue;
+const imza::JsonValue* find_member(
+    const imza::JsonValue& v, std::string_view key)
+{
+    return imza::find_member(v, key);
+}
 
 TEST_CASE("compare_versions orders semantic versions")
 {
@@ -58,10 +64,14 @@ TEST_CASE("cached_update reads the update.json state file")
 
     CHECK_FALSE(imza::cached_update("0.2.2").has_value());
 
-    Json::Value root(Json::objectValue);
-    root["last_checked_at"] = static_cast<Json::Int64>(1);
-    root["version"]         = "9.9.9";
-    REQUIRE(imza::write_json_file(home.imza_dir() / "update.json", root, "")
+    imza::JsonValue root = JsonValue::object_t { };
+    {
+        auto& object              = root.get<JsonValue::object_t>();
+        object["last_checked_at"] = JsonValue(1.0);
+        object["version"]         = JsonValue("9.9.9");
+    }
+    REQUIRE(imza::write_json_file(
+                home.imza_dir() / "update.json", imza::json_dump(root))
         == imza::Status::OK);
     const std::optional<std::string> version = imza::cached_update("0.2.2");
     REQUIRE(version.has_value());

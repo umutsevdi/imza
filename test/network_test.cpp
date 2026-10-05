@@ -1,8 +1,8 @@
 #include <doctest/doctest.h>
-#include <json/json.h>
 
 #include "common/types.h"
 #include "common/util.h"
+#include "network/json.h"
 #include "network/json_io.h"
 #include "network/network.h"
 #include "network/sse_parse.h"
@@ -22,6 +22,79 @@ std::vector<imza::StreamEvent> parse_all(const imza::Provider& p,
     return all;
 }
 
+// Accessor helpers over the dynamic JSON value: pointer chase without
+// json_t::operator[]'s missing-key throw.
+const imza::JsonValue* at(const imza::JsonValue& v, std::string_view key)
+{
+    return imza::find_member(v, key);
+}
+
+const imza::JsonValue& idx(const imza::JsonValue& v, std::size_t i)
+{
+    return v.get<imza::JsonValue::array_t>().at(i);
+}
+
+// Dialect build() returns the serialized body; parse it for DOM checks.
+const imza::JsonValue wire(const std::string& body)
+{
+    return imza::parse_json(body);
+}
+
+std::string str(const imza::JsonValue* v)
+{
+    return v != nullptr && v->is_string() ? v->as<std::string>() : "";
+}
+
+std::string str(const imza::JsonValue& v)
+{
+    return v.is_string() ? v.as<std::string>() : "";
+}
+
+double num(const imza::JsonValue& v)
+{
+    return v.is_number() ? v.as<double>() : -1;
+}
+
+bool truthy(const imza::JsonValue& v)
+{
+    return v.is_boolean() && v.get<bool>();
+}
+
+double num(const imza::JsonValue* v)
+{
+    return v != nullptr && v->is_number() ? v->as<double>() : -1;
+}
+
+bool truthy(const imza::JsonValue* v)
+{
+    return v != nullptr && v->is_boolean() && v->get<bool>();
+}
+
+bool has(const imza::JsonValue& v, std::string_view key)
+{
+    return at(v, key) != nullptr;
+}
+
+std::size_t len(const imza::JsonValue* v)
+{
+    if (v == nullptr) {
+        return 0;
+    }
+    if (v->is_array()) {
+        return v->get<imza::JsonValue::array_t>().size();
+    }
+    if (v->is_object()) {
+        return v->get<imza::JsonValue::object_t>().size();
+    }
+    return 0;
+}
+
+struct JsonTestPayload {
+    std::string name;
+    int count = 0;
+    std::optional<int> note;
+};
+
 } // namespace
 
 TEST_CASE("OpenAI request shape via factory")
@@ -33,14 +106,14 @@ TEST_CASE("OpenAI request shape via factory")
     req.messages.push_back({ imza::Message::Type::SYSTEM, "sys" });
     req.messages.push_back({ imza::Message::Type::USER, "hi" });
 
-    const Json::Value v = p.build(req);
-    CHECK(v["model"].asString() == "gpt-4o");
-    CHECK(v["stream"].asBool() == true);
-    CHECK(v["messages"].size() == 2);
-    CHECK(v["messages"][0]["role"].asString() == "system");
-    CHECK(v["messages"][1]["role"].asString() == "user");
-    CHECK(v["messages"][1]["content"].asString() == "hi");
-    CHECK_FALSE(v.isMember("tools"));
+    const imza::JsonValue v = wire(p.build(req));
+    CHECK(str(at(v, "model")) == "gpt-4o");
+    CHECK(truthy(at(v, "stream")));
+    CHECK(len(at(v, "messages")) == 2);
+    CHECK(str(at(idx(*at(v, "messages"), 0), "role")) == "system");
+    CHECK(str(at(idx(*at(v, "messages"), 1), "role")) == "user");
+    CHECK(str(at(idx(*at(v, "messages"), 1), "content")) == "hi");
+    CHECK_FALSE(has(v, "tools"));
 }
 
 TEST_CASE("Anthropic request shape via factory")
@@ -54,14 +127,14 @@ TEST_CASE("Anthropic request shape via factory")
     req.messages.push_back({ imza::Message::Type::SYSTEM, "sys" });
     req.messages.push_back({ imza::Message::Type::USER, "hi" });
 
-    const Json::Value v = p.build(req);
-    CHECK(v["model"].asString() == "claude");
-    CHECK(v["system"].size() == 1);
-    CHECK(v["system"][0].asString() == "sys");
-    CHECK(v["messages"].size() == 1);
-    CHECK(v["messages"][0]["role"].asString() == "user");
-    CHECK(v.isMember("max_tokens"));
-    CHECK_FALSE(v.isMember("tools"));
+    const imza::JsonValue v = wire(p.build(req));
+    CHECK(str(at(v, "model")) == "claude");
+    CHECK(len(at(v, "system")) == 1);
+    CHECK(str(idx(*at(v, "system"), 0)) == "sys");
+    CHECK(len(at(v, "messages")) == 1);
+    CHECK(str(at(idx(*at(v, "messages"), 0), "role")) == "user");
+    CHECK(has(v, "max_tokens"));
+    CHECK_FALSE(has(v, "tools"));
 }
 
 TEST_CASE("OpenAI Responses request shape via factory")
@@ -73,7 +146,7 @@ TEST_CASE("OpenAI Responses request shape via factory")
     imza::ToolSpec spec;
     spec.name        = "read";
     spec.description = "read a file";
-    spec.parameters  = imza::parse_json(R"({"type":"object"})");
+    spec.parameters  = R"({"type":"object"})";
 
     imza::ChatRequest req;
     req.model             = "gpt-5";
@@ -89,31 +162,36 @@ TEST_CASE("OpenAI Responses request shape via factory")
     req.messages.push_back(
         { imza::Message::Type::TOOL, "file body", { }, "call_1" });
 
-    const Json::Value value = provider.build(req);
-    CHECK(value["model"].asString() == "gpt-5");
-    CHECK(value["stream"].asBool());
-    CHECK_FALSE(value["store"].asBool());
-    CHECK(value["include"][0].asString() == "reasoning.encrypted_content");
-    CHECK(value["reasoning"]["effort"].asString() == "high");
-    CHECK(value["reasoning"]["summary"].asString() == "auto");
-    CHECK(value["max_output_tokens"].asUInt64() == 2048);
-    REQUIRE(value["tools"].size() == 1);
-    CHECK(value["tools"][0]["name"].asString() == "read");
-    CHECK_FALSE(value["tools"][0].isMember("function"));
+    const imza::JsonValue value = wire(provider.build(req));
+    CHECK(str(at(value, "model")) == "gpt-5");
+    CHECK(truthy(at(value, "stream")));
+    const imza::JsonValue* store = at(value, "store");
+    REQUIRE(store != nullptr);
+    REQUIRE(store->is_boolean());
+    CHECK_FALSE(store->get<bool>());
+    CHECK(str(idx(*at(value, "include"), 0)) == "reasoning.encrypted_content");
+    CHECK(str(at(*at(value, "reasoning"), "effort")) == "high");
+    CHECK(str(at(*at(value, "reasoning"), "summary")) == "auto");
+    CHECK(num(at(value, "max_output_tokens")) == 2048);
+    REQUIRE(len(at(value, "tools")) == 1);
+    CHECK(str(at(idx(*at(value, "tools"), 0), "name")) == "read");
+    CHECK_FALSE(has(idx(*at(value, "tools"), 0), "function"));
 
-    REQUIRE(value["input"].size() == 6);
-    CHECK(value["input"][0]["role"].asString() == "system");
-    CHECK(value["input"][1]["role"].asString() == "user");
-    CHECK(value["input"][2]["type"].asString() == "reasoning");
-    CHECK(value["input"][2]["encrypted_content"].asString() == "encrypted");
-    REQUIRE(value["input"][2]["summary"].size() == 1);
-    CHECK(value["input"][2]["summary"][0]["type"].asString() == "summary_text");
-    CHECK(value["input"][2]["summary"][0]["text"].asString() == "summary");
-    CHECK(value["input"][3]["role"].asString() == "assistant");
-    CHECK(value["input"][4]["type"].asString() == "function_call");
-    CHECK(value["input"][4]["call_id"].asString() == "call_1");
-    CHECK(value["input"][5]["type"].asString() == "function_call_output");
-    CHECK(value["input"][5]["output"].asString() == "file body");
+    REQUIRE(len(at(value, "input")) == 6);
+    const auto input
+        = [&value](std::size_t i) { return idx(*at(value, "input"), i); };
+    CHECK(str(at(input(0), "role")) == "system");
+    CHECK(str(at(input(1), "role")) == "user");
+    CHECK(str(at(input(2), "type")) == "reasoning");
+    CHECK(str(at(input(2), "encrypted_content")) == "encrypted");
+    REQUIRE(len(at(input(2), "summary")) == 1);
+    CHECK(str(at(idx(*at(input(2), "summary"), 0), "type")) == "summary_text");
+    CHECK(str(at(idx(*at(input(2), "summary"), 0), "text")) == "summary");
+    CHECK(str(at(input(3), "role")) == "assistant");
+    CHECK(str(at(input(4), "type")) == "function_call");
+    CHECK(str(at(input(4), "call_id")) == "call_1");
+    CHECK(str(at(input(5), "type")) == "function_call_output");
+    CHECK(str(at(input(5), "output")) == "file body");
 }
 
 TEST_CASE("OpenAI Responses reasoning input includes an empty summary array")
@@ -128,11 +206,14 @@ TEST_CASE("OpenAI Responses reasoning input includes an empty summary array")
     assistant.thinking.push_back({ "", "encrypted" });
     req.messages.push_back(std::move(assistant));
 
-    const Json::Value value = provider.build(req);
-    REQUIRE(value["input"].size() == 2);
-    CHECK(value["input"][0]["type"].asString() == "reasoning");
-    CHECK(value["input"][0]["summary"].isArray());
-    CHECK(value["input"][0]["summary"].empty());
+    const imza::JsonValue value = wire(provider.build(req));
+    REQUIRE(len(at(value, "input")) == 2);
+    const imza::JsonValue& first = idx(*at(value, "input"), 0);
+    CHECK(str(at(first, "type")) == "reasoning");
+    const imza::JsonValue* summary = at(first, "summary");
+    REQUIRE(summary != nullptr);
+    REQUIRE(summary->is_array());
+    CHECK(summary->get<imza::JsonValue::array_t>().empty());
 }
 
 TEST_CASE("providers cap requested output tokens")
@@ -140,14 +221,14 @@ TEST_CASE("providers cap requested output tokens")
     imza::ChatRequest openai_request;
     openai_request.model             = "gpt-4o";
     openai_request.max_output_tokens = 2048;
-    Json::Value openai
-        = imza::get_provider(imza::Route { }).build(openai_request);
-    CHECK(openai["max_tokens"].asUInt64() == 2048);
+    imza::JsonValue openai
+        = wire(imza::get_provider(imza::Route { }).build(openai_request));
+    CHECK(num(at(openai, "max_tokens")) == 2048);
 
     openai_request.reasoning_effort = "low";
-    openai = imza::get_provider(imza::Route { }).build(openai_request);
-    CHECK_FALSE(openai.isMember("max_tokens"));
-    CHECK(openai["max_completion_tokens"].asUInt64() == 2048);
+    openai = wire(imza::get_provider(imza::Route { }).build(openai_request));
+    CHECK_FALSE(has(openai, "max_tokens"));
+    CHECK(num(at(openai, "max_completion_tokens")) == 2048);
 
     imza::Route route;
     route.dialect = imza::ApiStandard::ANTHROPIC;
@@ -155,9 +236,9 @@ TEST_CASE("providers cap requested output tokens")
     anthropic_request.model             = "claude";
     anthropic_request.thinking_budget   = 2000;
     anthropic_request.max_output_tokens = 2048;
-    const Json::Value anthropic
-        = imza::get_provider(route).build(anthropic_request);
-    CHECK(anthropic["max_tokens"].asUInt64() == 4048);
+    const imza::JsonValue anthropic
+        = wire(imza::get_provider(route).build(anthropic_request));
+    CHECK(num(at(anthropic, "max_tokens")) == 4048);
 }
 
 TEST_CASE("OpenAI serializes tool specs and tool messages")
@@ -167,8 +248,8 @@ TEST_CASE("OpenAI serializes tool specs and tool messages")
     imza::ToolSpec spec;
     spec.name        = "read";
     spec.description = "read a file";
-    spec.parameters  = imza::parse_json(
-        R"({"type":"object","properties":{"path":{"type":"string"}}})");
+    spec.parameters
+        = R"({"type":"object","properties":{"path":{"type":"string"}}})";
 
     imza::ChatRequest req;
     req.model = "gpt-4o";
@@ -179,27 +260,30 @@ TEST_CASE("OpenAI serializes tool specs and tool messages")
     req.messages.push_back(
         { imza::Message::Type::TOOL, "file body", { }, "call_1" });
 
-    const Json::Value v = p.build(req);
-    REQUIRE(v["tools"].size() == 1);
-    CHECK(v["tools"][0]["type"].asString() == "function");
-    CHECK(v["tools"][0]["function"]["name"].asString() == "read");
-    CHECK(v["tools"][0]["function"]["description"].asString() == "read a file");
-    CHECK(
-        v["tools"][0]["function"]["parameters"]["properties"].isMember("path"));
-    CHECK(v["tool_choice"].asString() == "auto");
+    const imza::JsonValue v = wire(p.build(req));
+    REQUIRE(len(at(v, "tools")) == 1);
+    const imza::JsonValue& tool_spec = idx(*at(v, "tools"), 0);
+    CHECK(str(at(tool_spec, "type")) == "function");
+    CHECK(str(at(*at(tool_spec, "function"), "name")) == "read");
+    CHECK(str(at(*at(tool_spec, "function"), "description")) == "read a file");
+    const imza::JsonValue* parameters
+        = at(*at(tool_spec, "function"), "parameters");
+    REQUIRE(parameters != nullptr);
+    CHECK(has(*at(*parameters, "properties"), "path"));
+    CHECK(str(at(v, "tool_choice")) == "auto");
 
-    const Json::Value& asst = v["messages"][0];
-    CHECK(asst["role"].asString() == "assistant");
-    REQUIRE(asst["tool_calls"].size() == 1);
-    CHECK(asst["tool_calls"][0]["id"].asString() == "call_1");
-    CHECK(asst["tool_calls"][0]["function"]["name"].asString() == "read");
-    CHECK(asst["tool_calls"][0]["function"]["arguments"].asString()
-        == R"({"path":"a"})");
+    const imza::JsonValue& asst = idx(*at(v, "messages"), 0);
+    CHECK(str(at(asst, "role")) == "assistant");
+    REQUIRE(len(at(asst, "tool_calls")) == 1);
+    const imza::JsonValue& call = idx(*at(asst, "tool_calls"), 0);
+    CHECK(str(at(call, "id")) == "call_1");
+    CHECK(str(at(*at(call, "function"), "name")) == "read");
+    CHECK(str(at(*at(call, "function"), "arguments")) == R"({"path":"a"})");
 
-    const Json::Value& tool = v["messages"][1];
-    CHECK(tool["role"].asString() == "tool");
-    CHECK(tool["content"].asString() == "file body");
-    CHECK(tool["tool_call_id"].asString() == "call_1");
+    const imza::JsonValue& tool = idx(*at(v, "messages"), 1);
+    CHECK(str(at(tool, "role")) == "tool");
+    CHECK(str(at(tool, "content")) == "file body");
+    CHECK(str(at(tool, "tool_call_id")) == "call_1");
 }
 
 TEST_CASE("Anthropic serializes tool specs and tool_result blocks")
@@ -211,8 +295,8 @@ TEST_CASE("Anthropic serializes tool specs and tool_result blocks")
     imza::ToolSpec spec;
     spec.name        = "grep";
     spec.description = "search files";
-    spec.parameters  = imza::parse_json(
-        R"({"type":"object","properties":{"pattern":{"type":"string"}}})");
+    spec.parameters
+        = R"({"type":"object","properties":{"pattern":{"type":"string"}}})";
 
     imza::ChatRequest req;
     req.model = "claude";
@@ -223,25 +307,36 @@ TEST_CASE("Anthropic serializes tool specs and tool_result blocks")
     req.messages.push_back(
         { imza::Message::Type::TOOL, "2 matches", { }, "tu_1" });
 
-    const Json::Value v = p.build(req);
-    REQUIRE(v["tools"].size() == 1);
-    CHECK(v["tools"][0]["name"].asString() == "grep");
-    CHECK(v["tools"][0]["input_schema"]["properties"].isMember("pattern"));
+    const imza::JsonValue v = wire(p.build(req));
+    REQUIRE(len(at(v, "tools")) == 1);
+    const imza::JsonValue& tool_spec = idx(*at(v, "tools"), 0);
+    CHECK(str(at(tool_spec, "name")) == "grep");
+    const imza::JsonValue* schema = at(tool_spec, "input_schema");
+    REQUIRE(schema != nullptr);
+    CHECK(has(*at(*schema, "properties"), "pattern"));
 
-    const Json::Value& asst = v["messages"][0];
-    REQUIRE(asst["content"].isArray());
-    CHECK(asst["content"][0]["type"].asString() == "text");
-    CHECK(asst["content"][0]["text"].asString() == "looking");
-    CHECK(asst["content"][1]["type"].asString() == "tool_use");
-    CHECK(asst["content"][1]["id"].asString() == "tu_1");
-    CHECK(asst["content"][1]["input"]["pattern"].asString() == "foo");
+    const imza::JsonValue& asst          = idx(*at(v, "messages"), 0);
+    const imza::JsonValue* content_value = at(asst, "content");
+    REQUIRE(content_value != nullptr);
+    REQUIRE(content_value->is_array());
+    const auto& content = content_value->get<imza::JsonValue::array_t>();
+    REQUIRE(content.size() == 2);
+    CHECK(str(at(content[0], "type")) == "text");
+    CHECK(str(at(content[0], "text")) == "looking");
+    CHECK(str(at(content[1], "type")) == "tool_use");
+    CHECK(str(at(content[1], "id")) == "tu_1");
+    CHECK(str(at(*at(content[1], "input"), "pattern")) == "foo");
 
-    const Json::Value& result = v["messages"][1];
-    CHECK(result["role"].asString() == "user");
-    REQUIRE(result["content"].isArray());
-    CHECK(result["content"][0]["type"].asString() == "tool_result");
-    CHECK(result["content"][0]["tool_use_id"].asString() == "tu_1");
-    CHECK(result["content"][0]["content"].asString() == "2 matches");
+    const imza::JsonValue& result = idx(*at(v, "messages"), 1);
+    CHECK(str(at(result, "role")) == "user");
+    const imza::JsonValue* result_content = at(result, "content");
+    REQUIRE(result_content != nullptr);
+    REQUIRE(result_content->is_array());
+    const auto& blocks = result_content->get<imza::JsonValue::array_t>();
+    REQUIRE(blocks.size() == 1);
+    CHECK(str(at(blocks[0], "type")) == "tool_result");
+    CHECK(str(at(blocks[0], "tool_use_id")) == "tu_1");
+    CHECK(str(at(blocks[0], "content")) == "2 matches");
 }
 
 TEST_CASE("OpenAI Responses streams text reasoning tools and usage")
@@ -363,8 +458,9 @@ TEST_CASE("OpenAI requests include_usage and emits a single usage event")
 {
     const auto p = imza::get_provider(imza::Route { });
 
-    const Json::Value built = p.build(imza::ChatRequest { "gpt-4o", { }, { } });
-    CHECK(built["stream_options"]["include_usage"].asBool() == true);
+    const imza::JsonValue built
+        = wire(p.build(imza::ChatRequest { "gpt-4o", { }, { } }));
+    CHECK(truthy(at(*at(built, "stream_options"), "include_usage")));
 
     imza::ParseState state;
     const auto outs = parse_all(p, state,
@@ -508,17 +604,21 @@ TEST_CASE("OpenAI Chat serializes user images and PDFs")
         imza::Attachment::Type::PDF, "application/pdf" });
     request.messages.push_back(std::move(user));
 
-    const Json::Value value    = provider.build(request);
-    const Json::Value& content = value["messages"][0]["content"];
-    REQUIRE(content.size() == 3);
-    CHECK(content[0]["type"].asString() == "text");
-    CHECK(content[0]["text"].asString() == "inspect");
-    CHECK(content[1]["type"].asString() == "image_url");
-    CHECK(content[1]["image_url"]["url"].asString()
+    const imza::JsonValue value = wire(provider.build(request));
+    const imza::JsonValue* content
+        = at(idx(*at(value, "messages"), 0), "content");
+    REQUIRE(content != nullptr);
+    REQUIRE(content->is_array());
+    const auto& blocks = content->get<imza::JsonValue::array_t>();
+    REQUIRE(blocks.size() == 3);
+    CHECK(str(at(blocks[0], "type")) == "text");
+    CHECK(str(at(blocks[0], "text")) == "inspect");
+    CHECK(str(at(blocks[1], "type")) == "image_url");
+    CHECK(str(at(*at(blocks[1], "image_url"), "url"))
         == "data:image/png;base64,Y2F0");
-    CHECK(content[2]["type"].asString() == "file");
-    CHECK(content[2]["file"]["filename"].asString() == "report.pdf");
-    CHECK(content[2]["file"]["file_data"].asString()
+    CHECK(str(at(blocks[2], "type")) == "file");
+    CHECK(str(at(*at(blocks[2], "file"), "filename")) == "report.pdf");
+    CHECK(str(at(*at(blocks[2], "file"), "file_data"))
         == "data:application/pdf;base64,/wA=");
 }
 
@@ -536,17 +636,20 @@ TEST_CASE("OpenAI Responses serializes user images and PDFs")
         imza::Attachment::Type::PDF, "application/pdf" });
     request.messages.push_back(std::move(user));
 
-    const Json::Value value    = provider.build(request);
-    const Json::Value& content = value["input"][0]["content"];
-    REQUIRE(content.size() == 3);
-    CHECK(content[0]["type"].asString() == "input_text");
-    CHECK(content[0]["text"].asString() == "inspect");
-    CHECK(content[1]["type"].asString() == "input_image");
-    CHECK(content[1]["image_url"].asString() == "data:image/png;base64,Y2F0");
-    CHECK(content[2]["type"].asString() == "input_file");
-    CHECK(content[2]["filename"].asString() == "report.pdf");
-    CHECK(content[2]["file_data"].asString()
-        == "data:application/pdf;base64,/wA=");
+    const imza::JsonValue value    = wire(provider.build(request));
+    const imza::JsonValue* content = at(idx(*at(value, "input"), 0), "content");
+    REQUIRE(content != nullptr);
+    REQUIRE(content->is_array());
+    const auto& blocks = content->get<imza::JsonValue::array_t>();
+    REQUIRE(blocks.size() == 3);
+    CHECK(str(at(blocks[0], "type")) == "input_text");
+    CHECK(str(at(blocks[0], "text")) == "inspect");
+    CHECK(str(at(blocks[1], "type")) == "input_image");
+    CHECK(str(at(blocks[1], "image_url")) == "data:image/png;base64,Y2F0");
+    CHECK(str(at(blocks[2], "type")) == "input_file");
+    CHECK(str(at(blocks[2], "filename")) == "report.pdf");
+    CHECK(
+        str(at(blocks[2], "file_data")) == "data:application/pdf;base64,/wA=");
 }
 
 TEST_CASE("Anthropic serializes user images and PDFs")
@@ -563,19 +666,23 @@ TEST_CASE("Anthropic serializes user images and PDFs")
         imza::Attachment::Type::PDF, "application/pdf" });
     request.messages.push_back(std::move(user));
 
-    const Json::Value value    = provider.build(request);
-    const Json::Value& content = value["messages"][0]["content"];
-    REQUIRE(content.size() == 3);
-    CHECK(content[0]["type"].asString() == "text");
-    CHECK(content[0]["text"].asString() == "inspect");
-    CHECK(content[1]["type"].asString() == "image");
-    CHECK(content[1]["source"]["type"].asString() == "base64");
-    CHECK(content[1]["source"]["media_type"].asString() == "image/png");
-    CHECK(content[1]["source"]["data"].asString() == "Y2F0");
-    CHECK(content[2]["type"].asString() == "document");
-    CHECK(content[2]["source"]["type"].asString() == "base64");
-    CHECK(content[2]["source"]["media_type"].asString() == "application/pdf");
-    CHECK(content[2]["source"]["data"].asString() == "/wA=");
+    const imza::JsonValue value = wire(provider.build(request));
+    const imza::JsonValue* content
+        = at(idx(*at(value, "messages"), 0), "content");
+    REQUIRE(content != nullptr);
+    REQUIRE(content->is_array());
+    const auto& blocks = content->get<imza::JsonValue::array_t>();
+    REQUIRE(blocks.size() == 3);
+    CHECK(str(at(blocks[0], "type")) == "text");
+    CHECK(str(at(blocks[0], "text")) == "inspect");
+    CHECK(str(at(blocks[1], "type")) == "image");
+    CHECK(str(at(*at(blocks[1], "source"), "type")) == "base64");
+    CHECK(str(at(*at(blocks[1], "source"), "media_type")) == "image/png");
+    CHECK(str(at(*at(blocks[1], "source"), "data")) == "Y2F0");
+    CHECK(str(at(blocks[2], "type")) == "document");
+    CHECK(str(at(*at(blocks[2], "source"), "type")) == "base64");
+    CHECK(str(at(*at(blocks[2], "source"), "media_type")) == "application/pdf");
+    CHECK(str(at(*at(blocks[2], "source"), "data")) == "/wA=");
 }
 
 TEST_CASE(
@@ -588,21 +695,92 @@ TEST_CASE(
         { "ignored.png", "cat", imza::Attachment::Type::IMAGE, "image/png" });
     request.messages.push_back(std::move(assistant));
 
-    const Json::Value chat = imza::get_provider(imza::Route { }).build(request);
-    CHECK(chat["messages"][0]["content"].isString());
-    CHECK(chat["messages"][0]["content"].asString() == "answer");
+    const imza::JsonValue chat
+        = wire(imza::get_provider(imza::Route { }).build(request));
+    CHECK(at(idx(*at(chat, "messages"), 0), "content")->is_string());
+    CHECK(str(at(idx(*at(chat, "messages"), 0), "content")) == "answer");
 
     imza::Route responses_route;
     responses_route.dialect = imza::ApiStandard::OPENAI_RESPONSES;
-    const Json::Value responses
-        = imza::get_provider(responses_route).build(request);
-    CHECK(responses["input"][0]["content"].isString());
-    CHECK(responses["input"][0]["content"].asString() == "answer");
+    const imza::JsonValue responses
+        = wire(imza::get_provider(responses_route).build(request));
+    CHECK(at(idx(*at(responses, "input"), 0), "content")->is_string());
+    CHECK(str(at(idx(*at(responses, "input"), 0), "content")) == "answer");
 
     imza::Route anthropic_route;
     anthropic_route.dialect = imza::ApiStandard::ANTHROPIC;
-    const Json::Value anthropic
-        = imza::get_provider(anthropic_route).build(request);
-    CHECK(anthropic["messages"][0]["content"].isString());
-    CHECK(anthropic["messages"][0]["content"].asString() == "answer");
+    const imza::JsonValue anthropic
+        = wire(imza::get_provider(anthropic_route).build(request));
+    CHECK(at(idx(*at(anthropic, "messages"), 0), "content")->is_string());
+    CHECK(str(at(idx(*at(anthropic, "messages"), 0), "content")) == "answer");
+}
+
+TEST_CASE("json_parse_checked reports errors and succeeds cleanly")
+{
+    JsonTestPayload payload;
+    const glz::error_ctx ok
+        = imza::json_parse_checked(R"({"name":"a","count":2})", payload);
+    CHECK(!ok);
+    CHECK(payload.name == "a");
+    CHECK(payload.count == 2);
+
+    const std::string_view broken = R"({"name":)";
+    const glz::error_ctx bad      = imza::json_parse_checked(broken, payload);
+    CHECK(bad);
+    const std::string diagnostic = imza::json_parse_error(broken, bad);
+    CHECK(!diagnostic.empty());
+}
+
+TEST_CASE("json_parse rejects type mismatches for reflected structs")
+{
+    JsonTestPayload payload;
+    payload.count = 5;
+    CHECK(!imza::json_parse(R"({"count":"x"})", payload));
+    CHECK(imza::json_parse(R"({"count":4})", payload));
+    CHECK(payload.count == 4);
+}
+
+TEST_CASE("json_dump_checked round-trips")
+{
+    const JsonTestPayload value { "a", 3, 7 };
+    const std::string text = imza::json_dump(value);
+    CHECK(text == R"({"name":"a","count":3,"note":7})");
+
+    const JsonTestPayload bare { "b", 1, std::nullopt };
+    CHECK(imza::json_dump(bare) == R"({"name":"b","count":1})");
+
+    const std::optional<std::string> pretty
+        = imza::json_dump_pretty_checked(bare);
+    REQUIRE(pretty.has_value());
+    CHECK(pretty->find("\n  ") != std::string::npos);
+}
+
+TEST_CASE("tool schemas embed verbatim without re-validation")
+{
+    const auto p = imza::get_provider(imza::Route { });
+    imza::ToolSpec spec;
+    spec.name        = "weird";
+    spec.description = "schema is not validated by imza";
+    // Not schema-valid JSON, but imza forwards it untouched either way.
+    spec.parameters = R"({"type":"weird","x":1})";
+
+    imza::ChatRequest req;
+    req.model = "gpt-4o";
+    req.tools = { spec };
+
+    const imza::JsonValue v = wire(p.build(req));
+    const imza::JsonValue& parameters
+        = *at(*at(idx(*at(v, "tools"), 0), "function"), "parameters");
+    // Embedded as an object, not a JSON string of the schema.
+    CHECK(parameters.is_object());
+    CHECK(str(at(parameters, "type")) == "weird");
+
+    imza::Route route;
+    route.dialect = imza::ApiStandard::ANTHROPIC;
+    const imza::JsonValue anthropic
+        = wire(imza::get_provider(route).build(req));
+    const imza::JsonValue& input_schema
+        = *at(idx(*at(anthropic, "tools"), 0), "input_schema");
+    CHECK(input_schema.is_object());
+    CHECK(str(at(input_schema, "type")) == "weird");
 }

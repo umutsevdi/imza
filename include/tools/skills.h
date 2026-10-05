@@ -13,11 +13,9 @@
 
 #include "common/tool_call.h"
 #include "common/types.h"
+#include "network/json.h"
+#include "tools/tool_args.h"
 #include "workspace/attachments.h"
-
-namespace Json {
-class Value;
-}
 
 namespace imza {
 
@@ -54,7 +52,7 @@ std::optional<std::filesystem::path> canonical_skill_path(const Skill& skill);
 std::optional<std::filesystem::path> authorized_skill_path(
     const Skill& skill, const ToolCallRequest& request);
 std::optional<Skill> resolve_skill(
-    const std::vector<Skill>& catalog, const Json::Value& args);
+    const std::vector<Skill>& catalog, const SkillToolArgs& args);
 SkillPolicy skill_policy(const Config& config, const Skill& skill);
 std::vector<Skill> mentioned_skills(
     const std::vector<Skill>& catalog, std::string_view text);

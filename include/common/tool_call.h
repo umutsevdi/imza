@@ -1,7 +1,5 @@
 #pragma once
 
-#include <json/json.h>
-
 #include <chrono>
 #include <cstddef>
 #include <optional>
@@ -73,7 +71,9 @@ struct LuaBindingCall {
 struct ToolSpec {
     std::string name;
     std::string description;
-    Json::Value parameters;
+    // JSON schema as written by the tool author; forwarded verbatim to the
+    // provider. Never parsed on the imza side.
+    std::string parameters;
 };
 
 struct ToolCallEntry {

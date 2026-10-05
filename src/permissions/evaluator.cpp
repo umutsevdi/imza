@@ -1,6 +1,6 @@
 #include "permissions/evaluator.h"
 
-#include "network/json_io.h"
+#include "network/json.h"
 #include "permissions/shell.h"
 #include "permissions/shell_analysis.h"
 #include "platform/config.h"
@@ -73,7 +73,10 @@ namespace {
         const PermissionContext& context, const Config& config,
         const std::vector<Skill>& skills, const SkillStore& loaded_skills)
     {
-        Json::Value arguments            = parse_json(original.args);
+        SkillToolArgs arguments;
+        if (json_parse_checked(original.args, arguments)) {
+            return reject(original, "skill: unknown or unavailable skill");
+        }
         const std::optional<Skill> skill = resolve_skill(skills, arguments);
         if (!skill) {
             return reject(original, "skill: unknown or unavailable skill");
@@ -87,12 +90,12 @@ namespace {
             return reject(original, "skill: cannot normalize instructions");
         }
         ToolCallRequest request = original;
-        Json::Value normalized(Json::objectValue);
-        normalized["name"] = skill->name;
-        normalized["scope"]
+        SkillToolArgs normalized;
+        normalized.name = skill->name;
+        normalized.scope
             = skill->scope == Skill::Scope::PROJECT ? "project" : "global";
-        normalized["path"] = path->string();
-        request.args       = write_json(normalized);
+        normalized.path = path->string();
+        request.args    = json_dump(normalized);
 
         const SkillGrant grant { *path };
         if (loaded_skills.is_loaded(skill->path)
@@ -189,29 +192,38 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
             "tool has no permission policy: " + original.name);
     }
 
-    const Json::Value arguments = parse_json(original.args);
     switch (*tool) {
     case RosterTool::SKILL:
         return evaluate_skill(original, context, config, skills, loaded_skills);
-    case RosterTool::SUBAGENT:
+    case RosterTool::SUBAGENT: {
+        SubagentToolArgs arguments;
+        if (json_parse_checked(original.args, arguments)) {
+            return reject(
+                std::move(request), "subagent: expected one to five tasks");
+        }
         if (const auto error = validate_subagent_tool_arguments(
                 arguments, context.mode == SessionMode::BUILD)) {
             return reject(std::move(request), *error);
         }
         return accept(std::move(request));
-    case RosterTool::LUA:
-        if (!arguments["script"].isString()
-            || arguments["script"].asString().empty()) {
+    }
+    case RosterTool::LUA: {
+        LuaToolArgs arguments;
+        if (json_parse_checked(original.args, arguments)
+            || arguments.script.empty()) {
             return reject(std::move(request),
                 "lua: expected a non-empty 'script' string");
         }
         return accept(std::move(request));
-    case RosterTool::LOAD:
-        if (!arguments["name"].isString()
-            || arguments["name"].asString().empty()) {
+    }
+    case RosterTool::LOAD: {
+        LoadToolArgs arguments;
+        if (json_parse_checked(original.args, arguments)
+            || arguments.name.empty()) {
             return reject(std::move(request), "load: expected a module name");
         }
         return accept(std::move(request));
+    }
     }
     return reject(
         std::move(request), "tool has no permission policy: " + original.name);

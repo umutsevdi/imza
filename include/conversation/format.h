@@ -33,10 +33,10 @@ std::string modal_answer_markdown(const ModalAnswer& answer);
 // lists as markdown tables, other values as pretty JSON that needs a code
 // fence.
 enum class LuaReturnKind { SCALAR, SCALAR_LIST, TABLE, JSON };
-LuaReturnKind lua_return_kind(const Json::Value& return_value);
-std::string format_lua_return(const Json::Value& return_value);
+LuaReturnKind lua_return_kind(const JsonValue& return_value);
+std::string format_lua_return(const JsonValue& return_value);
 std::string format_lua_result(
-    std::string text, const std::optional<Json::Value>& return_value);
+    std::string text, const std::optional<JsonValue>& return_value);
 std::string tool_result_text(const ToolCall::Result& result);
 std::string tool_result_text(const ToolCall& call);
 std::string denial_text(const std::string& reason);

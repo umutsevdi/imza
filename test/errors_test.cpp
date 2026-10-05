@@ -1,6 +1,3 @@
-#include <doctest/doctest.h>
-#include <json/json.h>
-
 #include "app/flows.h"
 #include "common/types.h"
 #include "network/network.h"
@@ -8,6 +5,7 @@
 #include "test_state.h"
 #include "tools/skills.h"
 #include "workspace/review.h"
+#include <doctest/doctest.h>
 
 #include <arpa/inet.h>
 #include <netinet/in.h>

@@ -1,5 +1,4 @@
 #include <doctest/doctest.h>
-#include <json/json.h>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -7,7 +6,6 @@
 
 #include "common/util.h"
 #include "conversation/session.h"
-#include "network/json_io.h"
 #include "permissions/store.h"
 #include "test_fs.h"
 #include "test_helpers.h"
@@ -23,10 +21,10 @@ imza::ToolOutput run_script(const std::string& script, imza::LuaHost host = { })
     auto state            = imza::make_lua_state();
     const imza::Tool tool = imza::make_lua_tool(*state, std::move(host));
     imza::ToolCallRequest req;
-    req.name = "lua";
-    Json::Value args;
-    args["script"] = script;
-    req.args       = imza::write_json(args);
+    req.name             = "lua";
+    imza::JsonValue args = imza::JsonValue::object_t { };
+    args.get<imza::JsonValue::object_t>()["script"] = imza::JsonValue(script);
+    req.args                                        = imza::json_dump(args);
     return imza::dispatch_tool({ &tool, 1 }, req);
 }
 
@@ -188,31 +186,46 @@ TEST_CASE("lua tool captures top-level return values as JSON")
     CHECK(object.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(object.text == "log\n");
     REQUIRE(object.return_value.has_value());
-    CHECK((*object.return_value)["file"].asString() == "a.cpp");
-    CHECK((*object.return_value)["changed"].asBool());
-    CHECK((*object.return_value)["lines"].size() == 2);
-    CHECK((*object.return_value)["lines"][1].asInt() == 11);
+    const imza::JsonValue* file
+        = imza::find_member(*object.return_value, "file");
+    REQUIRE(file != nullptr);
+    CHECK(file->as<std::string>() == "a.cpp");
+    const imza::JsonValue* changed
+        = imza::find_member(*object.return_value, "changed");
+    REQUIRE(changed != nullptr);
+    REQUIRE(changed->is_boolean());
+    CHECK(changed->get<bool>());
+    const imza::JsonValue* lines
+        = imza::find_member(*object.return_value, "lines");
+    REQUIRE(lines != nullptr);
+    REQUIRE(lines->is_array());
+    const auto& line_values = lines->get<imza::JsonValue::array_t>();
+    CHECK(line_values.size() == 2);
+    CHECK(line_values[1].as<int>() == 11);
 
     const imza::ToolOutput scalars = run_script("return 42");
     CHECK(scalars.return_value.has_value());
-    CHECK(scalars.return_value->asInt() == 42);
+    CHECK(scalars.return_value->as<int>() == 42);
 
     const imza::ToolOutput null = run_script("return nil");
     CHECK(null.return_value.has_value());
-    CHECK(null.return_value->isNull());
+    CHECK(null.return_value->is_null());
 
     const imza::ToolOutput multi = run_script("return 'a', 2, false");
     REQUIRE(multi.return_value.has_value());
-    REQUIRE(multi.return_value->isArray());
-    CHECK(multi.return_value->size() == 3);
-    CHECK((*multi.return_value)[0].asString() == "a");
-    CHECK((*multi.return_value)[1].asInt() == 2);
-    CHECK_FALSE((*multi.return_value)[2].asBool());
+    const imza::JsonValue& multi_value = *multi.return_value;
+    REQUIRE(multi_value.is_array());
+    const auto& multi_array = multi_value.get<imza::JsonValue::array_t>();
+    CHECK(multi_array.size() == 3);
+    CHECK(multi_array[0].as<std::string>() == "a");
+    CHECK(multi_array[1].as<int>() == 2);
+    REQUIRE(multi_array[2].is_boolean());
+    CHECK_FALSE(multi_array[2].get<bool>());
 
     const imza::ToolOutput empty = run_script("return {}");
     REQUIRE(empty.return_value.has_value());
-    CHECK(empty.return_value->isObject());
-    CHECK(empty.return_value->empty());
+    CHECK(empty.return_value->is_object());
+    CHECK(empty.return_value->get<imza::JsonValue::object_t>().empty());
 }
 
 TEST_CASE("lua tool rejects unconvertible return values")
@@ -286,17 +299,17 @@ TEST_CASE("imza.fs.read returns 1-based windows and empty for empty files")
     const imza::ToolOutput full = run_script(
         "return imza.fs.read([[" + dir.file("lines.txt").string() + "]])");
     REQUIRE(full.return_value.has_value());
-    CHECK(full.return_value->asString() == "alpha\nbeta\ngamma\n");
+    CHECK(full.return_value->as<std::string>() == "alpha\nbeta\ngamma\n");
 
     const imza::ToolOutput window = run_script("return imza.fs.read([["
         + dir.file("lines.txt").string() + "]], 2, 3)");
     REQUIRE(window.return_value.has_value());
-    CHECK(window.return_value->asString() == "beta\ngamma\n");
+    CHECK(window.return_value->as<std::string>() == "beta\ngamma\n");
 
     const imza::ToolOutput empty = run_script(
         "return imza.fs.read([[" + dir.file("empty.txt").string() + "]])");
     REQUIRE(empty.return_value.has_value());
-    CHECK(empty.return_value->asString().empty());
+    CHECK(empty.return_value->as<std::string>().empty());
 
     const imza::ToolOutput bad_range = run_script(
         "imza.fs.read([[" + dir.file("lines.txt").string() + "]], 0)");
@@ -1289,7 +1302,7 @@ TEST_CASE("pcall around a failed fs.edit recovers")
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(imza::test::read_all(dir.file("a.txt")) == "ONE\n");
     REQUIRE(out.return_value.has_value());
-    CHECK(out.return_value->asString() == "ONE\n");
+    CHECK(out.return_value->as<std::string>() == "ONE\n");
 }
 
 TEST_CASE("a denied write aborts and the dispatch log records the denial")

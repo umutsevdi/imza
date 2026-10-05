@@ -4,39 +4,19 @@
 
 namespace imza {
 
-std::string write_json(const Json::Value& value)
+JsonValue parse_json(std::string_view text)
 {
-    Json::StreamWriterBuilder builder;
-    builder["indentation"] = "";
-    return Json::writeString(builder, value);
+    JsonValue value;
+    if (text.empty() || json_parse_checked(text, value)) {
+        return JsonValue { };
+    }
+    return value;
 }
 
 std::string media_data_url(const Attachment& media)
 {
     return "data:" + media.media_type + ";base64,"
         + base64_encode(media.content);
-}
-
-std::string write_pretty_json(const Json::Value& value)
-{
-    Json::StreamWriterBuilder builder;
-    builder["indentation"] = "  ";
-    return Json::writeString(builder, value);
-}
-
-Json::Value parse_json(std::string_view text)
-{
-    static thread_local Json::CharReaderBuilder builder;
-    static thread_local std::unique_ptr<Json::CharReader> reader(
-        builder.newCharReader());
-    Json::Value value;
-    std::string err;
-    if (text.empty()
-        || !reader->parse(
-            text.data(), text.data() + text.size(), &value, &err)) {
-        return Json::Value::null;
-    }
-    return value;
 }
 
 } // namespace imza

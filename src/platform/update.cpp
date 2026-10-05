@@ -1,12 +1,10 @@
 #include "platform/update.h"
 
-#include "network/json_io.h"
+#include "network/json.h"
 #include "network/network.h"
 #include "platform/command_runner.h"
 #include "platform/config.h"
 #include "platform/json_file.h"
-
-#include <json/json.h>
 
 #include <algorithm>
 #include <ctime>
@@ -68,28 +66,46 @@ namespace {
         return cache.last_checked_at + ONE_DAY_SECS <= now_unix_secs;
     }
 
+    // Wire shapes of update.json and the GitHub release payload.
+    struct StoredUpdateCache {
+        std::int64_t last_checked_at = 0;
+        std::string version;
+    };
+
+    struct StoredAsset {
+        std::optional<std::string> name;
+        std::optional<std::string> browser_download_url;
+    };
+
+    struct StoredRelease {
+        std::optional<std::string> tag_name;
+        std::optional<bool> draft;
+        std::optional<bool> prerelease;
+        std::vector<StoredAsset> assets;
+    };
+
     UpdateCache load_update_cache(const std::filesystem::path& path)
     {
-        const std::optional<Json::Value> root = read_json_file(path);
-        if (!root || !root->isObject()) {
+        const std::optional<std::string> text = read_text_file(path);
+        if (!text) {
             return { };
         }
-        UpdateCache cache;
-        cache.last_checked_at = root->get("last_checked_at", 0).asInt64();
-        if ((*root)["version"].isString()) {
-            cache.version = (*root)["version"].asString();
+        StoredUpdateCache stored;
+        if (json_parse_checked(*text, stored)) {
+            return { };
         }
-        return cache;
+        return { stored.last_checked_at, stored.version };
     }
 
     Status save_update_cache(
         const std::filesystem::path& path, const UpdateCache& cache)
     {
-        Json::Value root(Json::objectValue);
-        root["last_checked_at"]
-            = static_cast<Json::Int64>(cache.last_checked_at);
-        root["version"] = cache.version;
-        return write_json_file(path, root, "");
+        const StoredUpdateCache stored { cache.last_checked_at, cache.version };
+        auto serialized = json_dump_checked(stored);
+        if (!serialized) {
+            return Status::JSON_ERROR;
+        }
+        return write_json_file(path, *serialized);
     }
 
     std::optional<std::string> cached_version(
@@ -106,16 +122,15 @@ namespace {
         const std::vector<std::string>& package_managers,
         std::string_view current_version)
     {
-        const Json::Value root = parse_json(json_body);
-        if (!root.isObject() || !root["tag_name"].isString()
-            || !root["assets"].isArray()) {
+        StoredRelease release;
+        if (json_parse_checked(json_body, release) || !release.tag_name) {
             return std::nullopt;
         }
-        if (root.get("draft", false).asBool()
-            || root.get("prerelease", false).asBool()) {
+        if (release.draft.value_or(false)
+            || release.prerelease.value_or(false)) {
             return std::nullopt;
         }
-        std::string version = root["tag_name"].asString();
+        std::string version = *release.tag_name;
         if (version.starts_with('v')) {
             version.erase(0, 1);
         }
@@ -127,14 +142,11 @@ namespace {
         if (asset.empty()) {
             return std::nullopt;
         }
-        for (const Json::Value& entry : root["assets"]) {
-            if (!entry.isObject() || !entry["name"].isString()
-                || entry["name"].asString() != asset
-                || !entry["browser_download_url"].isString()) {
-                continue;
+        for (const auto& entry : release.assets) {
+            if (entry.name && *entry.name == asset
+                && entry.browser_download_url) {
+                return UpdateInfo { version, *entry.browser_download_url };
             }
-            return UpdateInfo { version,
-                entry["browser_download_url"].asString() };
         }
         return std::nullopt;
     }

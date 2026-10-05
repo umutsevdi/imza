@@ -1,4 +1,5 @@
 #include "common/util.h"
+#include "network/json.h"
 #include "network/json_io.h"
 #include "network/network.h"
 #include "network/sse_parse.h"
@@ -7,32 +8,86 @@ namespace imza {
 
 namespace {
 
-    void append_tools(Json::Value& root, const ChatRequest& req)
-    {
-        if (req.tools.empty()) {
-            return;
-        }
-        Json::Value tools(Json::arrayValue);
-        for (const auto& tool : req.tools) {
-            Json::Value spec;
-            spec["type"]        = "function";
-            spec["name"]        = tool.name;
-            spec["description"] = tool.description;
-            spec["parameters"]  = tool.parameters;
-            tools.append(spec);
-        }
-        root["tools"]       = std::move(tools);
-        root["tool_choice"] = "auto";
-    }
+    // --- Request wire structs -------------------------------------------
+    struct ToolWire {
+        std::string type = "function";
+        std::string name;
+        std::string description;
+        // Schema forwarded verbatim from the tool author.
+        glz::raw_json parameters;
+    };
 
-    void append_message(Json::Value& input, const Message& message)
+    struct CallOutput {
+        std::string type = "function_call_output";
+        std::string call_id;
+        std::string output;
+    };
+
+    struct SummaryEntry {
+        std::string type = "summary_text";
+        std::string text;
+    };
+
+    struct ReasoningItem {
+        std::string type = "reasoning";
+        std::string encrypted_content;
+        std::vector<SummaryEntry> summary;
+    };
+
+    struct TextPart {
+        std::string type = "input_text";
+        std::string text;
+    };
+
+    struct MediaPart {
+        std::string type;
+        std::optional<std::string> image_url;
+        std::optional<std::string> filename;
+        std::optional<std::string> file_data;
+    };
+
+    using InputContent = std::variant<TextPart, MediaPart>;
+
+    // Message content is a string when plain, typed parts when media is
+    // attached; pre-serialized and embedded raw for the single "content" key.
+    struct InputMessage {
+        std::string role;
+        glz::raw_json content;
+    };
+
+    struct CallItem {
+        std::string type = "function_call";
+        std::string call_id;
+        std::string name;
+        // Historical args cross back verbatim; the API wants a string.
+        std::string arguments;
+    };
+
+    using InputItem
+        = std::variant<CallOutput, ReasoningItem, InputMessage, CallItem>;
+
+    struct ReasoningConfig {
+        std::string effort;
+        std::string summary = "auto";
+    };
+
+    struct RequestBody {
+        std::string model;
+        bool stream = true;
+        bool store  = false;
+        std::vector<std::string> include { "reasoning.encrypted_content" };
+        std::optional<ReasoningConfig> reasoning;
+        std::optional<std::uint64_t> max_output_tokens;
+        std::optional<std::vector<ToolWire>> tools;
+        std::optional<std::string> tool_choice;
+        std::vector<InputItem> input;
+    };
+
+    void append_message(std::vector<InputItem>& input, const Message& message)
     {
         if (message.type == Message::Type::TOOL) {
-            Json::Value output;
-            output["type"]    = "function_call_output";
-            output["call_id"] = message.tool_call_id;
-            output["output"]  = message.content;
-            input.append(std::move(output));
+            input.push_back(CallOutput { "function_call_output",
+                message.tool_call_id, message.content });
             return;
         }
 
@@ -40,105 +95,146 @@ namespace {
             if (thinking.signature.empty()) {
                 continue;
             }
-            Json::Value item;
-            item["type"]              = "reasoning";
-            item["encrypted_content"] = thinking.signature;
-            item["summary"]           = Json::Value(Json::arrayValue);
+            ReasoningItem item { "reasoning", thinking.signature, { } };
             if (!thinking.text.empty()) {
-                Json::Value summary;
-                summary["type"] = "summary_text";
-                summary["text"] = thinking.text;
-                item["summary"].append(std::move(summary));
+                item.summary.push_back(
+                    SummaryEntry { "summary_text", thinking.text });
             }
-            input.append(std::move(item));
+            input.push_back(std::move(item));
         }
 
         if (!message.content.empty() || message.tool_calls.empty()
             || (message.type == Message::Type::USER
                 && !message.media.empty())) {
-            Json::Value item;
-            item["role"] = role_str(message.type);
+            InputMessage item;
+            item.role = role_str(message.type);
             if (message.type == Message::Type::USER && !message.media.empty()) {
-                Json::Value content(Json::arrayValue);
+                std::vector<InputContent> parts;
                 if (!message.content.empty()) {
-                    Json::Value text;
-                    text["type"] = "input_text";
-                    text["text"] = message.content;
-                    content.append(std::move(text));
+                    parts.push_back(TextPart { "input_text", message.content });
                 }
                 for (const Attachment& media : message.media) {
-                    Json::Value block;
                     if (media.type == Attachment::Type::IMAGE) {
-                        block["type"]      = "input_image";
-                        block["image_url"] = media_data_url(media);
+                        parts.push_back(
+                            MediaPart { "input_image", media_data_url(media),
+                                std::nullopt, std::nullopt });
                     } else {
-                        block["type"]      = "input_file";
-                        block["filename"]  = media.path;
-                        block["file_data"] = media_data_url(media);
+                        parts.push_back(MediaPart { "input_file", std::nullopt,
+                            media.path, media_data_url(media) });
                     }
-                    content.append(std::move(block));
                 }
-                item["content"] = std::move(content);
+                std::string content = "[";
+                for (std::size_t i = 0; i < parts.size(); ++i) {
+                    if (i != 0) {
+                        content += ",";
+                    }
+                    content
+                        += glz::write<JSON_WRITE>(parts[i]).value_or("null");
+                }
+                content += "]";
+                item.content = glz::raw_json { std::move(content) };
             } else {
-                item["content"] = message.content;
+                item.content = glz::raw_json(
+                    glz::write<JSON_WRITE>(message.content).value_or("null"));
             }
-            input.append(std::move(item));
+            input.push_back(std::move(item));
         }
         for (const ToolCallEntry& call : message.tool_calls) {
-            Json::Value item;
-            item["type"]      = "function_call";
-            item["call_id"]   = call.id;
-            item["name"]      = call.name;
-            item["arguments"] = call.args;
-            input.append(std::move(item));
+            input.push_back(
+                CallItem { "function_call", call.id, call.name, call.args });
         }
     }
 
-    Json::Value build(const ChatRequest& req)
+    std::string build(const ChatRequest& req)
     {
-        Json::Value root;
-        root["model"]  = req.model;
-        root["stream"] = true;
-        root["store"]  = false;
-        root["include"].append("reasoning.encrypted_content");
+        RequestBody body;
+        body.model  = req.model;
+        body.stream = true;
+        body.store  = false;
         if (req.reasoning_effort) {
-            root["reasoning"]["effort"]  = *req.reasoning_effort;
-            root["reasoning"]["summary"] = "auto";
+            body.reasoning = ReasoningConfig { *req.reasoning_effort, "auto" };
         }
-        if (req.max_output_tokens) {
-            root["max_output_tokens"]
-                = static_cast<Json::UInt64>(*req.max_output_tokens);
+        body.max_output_tokens = req.max_output_tokens;
+        if (!req.tools.empty()) {
+            std::vector<ToolWire> tools;
+            tools.reserve(req.tools.size());
+            for (const auto& tool : req.tools) {
+                tools.push_back({ "function", tool.name, tool.description,
+                    glz::raw_json { tool.parameters } });
+            }
+            body.tools       = std::move(tools);
+            body.tool_choice = "auto";
         }
-        append_tools(root, req);
-
-        Json::Value input(Json::arrayValue);
         for (const Message& message : req.messages) {
-            append_message(input, message);
+            append_message(body.input, message);
         }
-        root["input"] = std::move(input);
-        return root;
+        auto out = glz::write<JSON_WRITE>(body);
+        return out ? std::move(out.value()) : std::string { };
     }
 
-    Usage read_usage(const Json::Value& response)
+    // --- SSE parsing: typed payload views -------------------------------
+    struct UsageDetails {
+        std::uint64_t cached_tokens      = 0;
+        std::uint64_t cache_write_tokens = 0;
+    };
+
+    struct UsageWire {
+        std::uint64_t input_tokens  = 0;
+        std::uint64_t output_tokens = 0;
+        std::uint64_t total_tokens  = 0;
+        std::optional<UsageDetails> input_tokens_details;
+    };
+
+    Usage to_usage(const UsageWire& wire)
     {
         Usage usage;
-        const Json::Value& value = response["usage"];
-        if (!value.isObject()) {
-            return usage;
-        }
-        usage.prompt               = value.get("input_tokens", 0).asUInt64();
-        usage.completion           = value.get("output_tokens", 0).asUInt64();
-        usage.total                = value.get("total_tokens", 0).asUInt64();
-        const Json::Value& details = value["input_tokens_details"];
-        if (details.isObject()) {
-            usage.cached_read = details.get("cached_tokens", 0).asUInt64();
-            usage.cached_write
-                = details.get("cache_write_tokens", 0).asUInt64();
+        usage.prompt     = wire.input_tokens;
+        usage.completion = wire.output_tokens;
+        usage.total      = wire.total_tokens;
+        if (wire.input_tokens_details) {
+            usage.cached_read  = wire.input_tokens_details->cached_tokens;
+            usage.cached_write = wire.input_tokens_details->cache_write_tokens;
         }
         return usage;
     }
 
-    void finish_response(ParseState& state, const Json::Value& response,
+    struct ResponseItem {
+        std::string type;
+        std::optional<std::string> call_id;
+        std::optional<std::string> id;
+        std::optional<std::string> name;
+        std::optional<std::string> arguments;
+        std::optional<std::string> encrypted_content;
+    };
+
+    // Event envelope: every event carries type/delta/output_index; only
+    // the completion/failed family carries response.
+    struct Event {
+        std::string type;
+        std::optional<std::string> delta;
+        std::optional<int> output_index;
+        std::optional<ResponseItem> item;
+        std::optional<UsageWire> usage;
+        struct Response {
+            std::optional<UsageWire> usage;
+            struct Error {
+                std::optional<std::string> message;
+            };
+            std::optional<Error> error;
+        };
+        std::optional<Response> response;
+        std::optional<std::string> message;
+    };
+
+    Usage read_usage(const Event::Response& response)
+    {
+        if (response.usage) {
+            return to_usage(*response.usage);
+        }
+        return Usage { };
+    }
+
+    void finish_response(ParseState& state, const Event::Response& response,
         std::vector<StreamEvent>& outs)
     {
         emit_usage_once(state, read_usage(response), outs);
@@ -150,71 +246,85 @@ namespace {
     void parse(ParseState& state, std::string_view event, std::string_view data,
         std::vector<StreamEvent>& outs)
     {
-        const Json::Value root = parse_json(data);
-        if (root.isNull()) {
+        Event ev;
+        if (json_parse_checked(data, ev)) {
             outs.push_back(make_error_event(Status::JSON_ERROR));
             return;
         }
-        const std::string type
-            = root.get("type", std::string(event)).asString();
+        std::string type = ev.type.empty() ? std::string(event) : ev.type;
         if (type == "response.output_text.delta"
             || type == "response.refusal.delta") {
-            outs.push_back(make_delta_event(root.get("delta", "").asString()));
+            outs.push_back(make_delta_event(ev.delta.value_or("")));
             return;
         }
         if (type == "response.reasoning_summary_text.delta"
             || type == "response.reasoning_text.delta") {
-            outs.push_back(
-                make_reasoning_event(root.get("delta", "").asString()));
+            outs.push_back(make_reasoning_event(ev.delta.value_or("")));
             return;
         }
         if (type == "response.output_item.added") {
-            const Json::Value& item = root["item"];
-            if (item.get("type", "").asString() == "function_call") {
-                ToolAccum& acc
-                    = state.tool_accums[root.get("output_index", 0).asInt()];
-                acc.id   = item.get("call_id", item.get("id", "")).asString();
-                acc.name = item.get("name", "").asString();
-                acc.args = item.get("arguments", "").asString();
+            if (ev.item && ev.item->type == "function_call") {
+                ToolAccum& acc = state.tool_accums[ev.output_index.value_or(0)];
+                acc.id   = ev.item->call_id.value_or(ev.item->id.value_or(""));
+                acc.name = ev.item->name.value_or("");
+                acc.args = ev.item->arguments.value_or("");
                 emit_ready_tool_start(acc, outs);
             }
             return;
         }
         if (type == "response.function_call_arguments.delta") {
-            state.tool_accums[root.get("output_index", 0).asInt()].args
-                += root.get("delta", "").asString();
+            state.tool_accums[ev.output_index.value_or(0)].args
+                += ev.delta.value_or("");
             return;
         }
         if (type == "response.output_item.done") {
-            const int index             = root.get("output_index", 0).asInt();
-            const Json::Value& item     = root["item"];
-            const std::string item_type = item.get("type", "").asString();
-            if (item_type == "function_call") {
+            const int index = ev.output_index.value_or(0);
+            if (ev.item && ev.item->type == "function_call") {
                 ToolAccum& acc = state.tool_accums[index];
-                acc.id = item.get("call_id", item.get("id", acc.id)).asString();
-                acc.name = item.get("name", acc.name).asString();
-                if (item["arguments"].isString()) {
-                    acc.args = item["arguments"].asString();
+                if (ev.item->call_id && !ev.item->call_id->empty()) {
+                    acc.id = *ev.item->call_id;
+                }
+                if (ev.item->name && !ev.item->name->empty()) {
+                    acc.name = *ev.item->name;
+                }
+                if (ev.item->arguments) {
+                    acc.args = *ev.item->arguments;
                 }
                 outs.push_back(make_tool_call_event(finish_accum(acc)));
                 state.tool_accums.erase(index);
-            } else if (item_type == "reasoning"
-                && item["encrypted_content"].isString()) {
-                outs.push_back(make_reasoning_event(
-                    "", item["encrypted_content"].asString()));
+            } else if (ev.item && ev.item->type == "reasoning") {
+                if (ev.item->encrypted_content
+                    && !ev.item->encrypted_content->empty()) {
+                    outs.push_back(
+                        make_reasoning_event("", *ev.item->encrypted_content));
+                }
             }
             return;
         }
         if (type == "response.completed" || type == "response.incomplete") {
-            finish_response(state, root["response"], outs);
+            if (ev.response) {
+                finish_response(state, *ev.response, outs);
+            } else {
+                // Completed payloads nest usage under response; a bare
+                // usage field is tolerated for robustness.
+                Event::Response bare;
+                bare.usage = std::move(ev.usage);
+                finish_response(state, bare, outs);
+            }
             return;
         }
         if (type == "response.failed" || type == "error") {
             state.terminal = true;
-            const Json::Value& error
-                = type == "response.failed" ? root["response"]["error"] : root;
-            outs.push_back(make_error_event(
-                Status::API_ERROR, error.get("message", "").asString()));
+            std::string message;
+            if (type == "response.failed") {
+                if (ev.response && ev.response->error
+                    && ev.response->error->message) {
+                    message = *ev.response->error->message;
+                }
+            } else if (ev.message) {
+                message = *ev.message;
+            }
+            outs.push_back(make_error_event(Status::API_ERROR, message));
         }
     }
 

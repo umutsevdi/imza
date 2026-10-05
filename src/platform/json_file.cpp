@@ -3,7 +3,6 @@
 #include "platform/file_lock.h"
 
 #include <fstream>
-#include <memory>
 #include <sstream>
 #include <variant>
 
@@ -27,41 +26,38 @@ std::optional<std::string> read_text_file(const std::filesystem::path& path)
     return buffer.str();
 }
 
-std::optional<Json::Value> read_json_file(const std::filesystem::path& path)
+std::optional<JsonValue> read_json_file(const std::filesystem::path& path)
 {
     const std::optional<std::string> text = read_text_file(path);
     if (!text) {
         return std::nullopt;
     }
-    Json::CharReaderBuilder reader;
-    Json::Value root;
-    std::string error;
-    std::istringstream stream { *text };
-    if (!Json::parseFromStream(reader, stream, &root, &error)) {
+    JsonValue root;
+    if (glz::read<JSON_READ>(root, *text)) {
         return std::nullopt;
     }
     return root;
 }
 
 Status mutate_json_file(const std::filesystem::path& path,
-    const std::function<bool(Json::Value&)>& mutate)
+    const std::function<bool(JsonValue&)>& mutate)
 {
     auto lock = acquire_file_lock(lock_path_for(path));
     if (!std::holds_alternative<FileLock>(lock)) {
         return Status::CONFIG_ERROR;
     }
-    Json::Value root(Json::objectValue);
+    JsonValue root = JsonValue::object_t { };
     if (auto stored = read_json_file(path)) {
         root = std::move(*stored);
     }
     if (!mutate(root)) {
         return Status::OK;
     }
-    return write_json_file(path, root, "");
+    return write_json_file(path, json_dump(root));
 }
 
-Status write_json_file(const std::filesystem::path& path,
-    const Json::Value& root, std::string_view indentation)
+Status write_json_file(
+    const std::filesystem::path& path, std::string_view serialized)
 {
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);
@@ -75,13 +71,7 @@ Status write_json_file(const std::filesystem::path& path,
         if (!file) {
             return Status::CONFIG_ERROR;
         }
-        Json::StreamWriterBuilder builder;
-        builder["indentation"] = std::string(indentation);
-        std::unique_ptr<Json::StreamWriter> writer(builder.newStreamWriter());
-        if (!writer || writer->write(root, &file) != 0) {
-            return Status::CONFIG_ERROR;
-        }
-        file << '\n';
+        file << serialized << '\n';
         if (!file) {
             return Status::CONFIG_ERROR;
         }

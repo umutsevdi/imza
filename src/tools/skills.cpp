@@ -3,10 +3,8 @@
 #include <algorithm>
 #include <cctype>
 
-#include <json/json.h>
-
 #include "common/util.h"
-#include "network/json_io.h"
+#include "network/json.h"
 #include "platform/config.h"
 #include "platform/json_file.h"
 
@@ -92,23 +90,21 @@ std::optional<std::filesystem::path> authorized_skill_path(
 {
     const std::optional<std::filesystem::path> path
         = canonical_skill_path(skill);
-    const Json::Value arguments = parse_json(request.args);
-    if (!path || !arguments.isObject() || !arguments["path"].isString()
-        || arguments["path"].asString() != path->string()) {
+    SkillToolArgs arguments;
+    if (json_parse_checked(request.args, arguments)) {
+        return std::nullopt;
+    }
+    if (!path || !arguments.path || *arguments.path != path->string()) {
         return std::nullopt;
     }
     return path;
 }
 
 std::optional<Skill> resolve_skill(
-    const std::vector<Skill>& catalog, const Json::Value& args)
+    const std::vector<Skill>& catalog, const SkillToolArgs& args)
 {
-    if (!args.isObject() || !args["name"].isString()) {
-        return std::nullopt;
-    }
-    const std::string name = args["name"].asString();
-    const std::string scope
-        = args["scope"].isString() ? args["scope"].asString() : "";
+    const std::string name  = args.name;
+    const std::string scope = args.scope.value_or("");
     std::optional<Skill> global;
     for (const Skill& skill : catalog) {
         if (skill.name != name) {
@@ -154,8 +150,8 @@ std::vector<Skill> mentioned_skills(
     std::vector<Skill> out;
     std::set<std::string> paths;
     for (const std::string& name : skill_mention_names(text)) {
-        Json::Value args(Json::objectValue);
-        args["name"] = name;
+        SkillToolArgs args;
+        args.name = name;
         if (const auto skill = resolve_skill(catalog, args);
             skill && paths.insert(skill->path.string()).second) {
             out.push_back(*skill);

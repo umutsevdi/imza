@@ -8,6 +8,7 @@
 #include "app/application_state.h"
 #include "app/flows.h"
 #include "conversation/persistence.h"
+#include "network/json.h"
 #include "network/json_io.h"
 #include "permissions/evaluator.h"
 #include "permissions/filesystem.h"
@@ -75,12 +76,13 @@ namespace {
     void write_session_file(const std::filesystem::path& path,
         const std::filesystem::path& workspace, std::string_view title)
     {
-        Json::Value root(Json::objectValue);
-        root["workspace"] = workspace.string();
-        root["title"]     = std::string(title);
-        root["items"]     = Json::Value(Json::arrayValue);
+        imza::JsonValue root = JsonValue::object_t { };
+        auto& object         = root.get<JsonValue::object_t>();
+        object["workspace"]  = JsonValue(workspace.string());
+        object["title"]      = JsonValue(std::string(title));
+        object["items"]      = JsonValue(JsonValue::array_t { });
         std::ofstream file(path);
-        file << write_json(root);
+        file << imza::json_dump(root);
     }
 
     FilesystemRequest read_request(const std::filesystem::path& path)
@@ -731,20 +733,27 @@ TEST_CASE("authorized_skill_path accepts only the canonical target")
         Skill::Scope::GLOBAL, std::nullopt };
     const std::string canonical = canonical_skill_path(skill)->string();
 
-    Json::Value bound(Json::objectValue);
-    bound["name"]  = "docs";
-    bound["scope"] = "global";
-    bound["path"]  = canonical;
-    CHECK(authorized_skill_path(skill, { "skill", write_json(bound), "", "" })
+    imza::JsonValue bound = imza::JsonValue::object_t { };
+    {
+        auto& object    = bound.get<imza::JsonValue::object_t>();
+        object["name"]  = imza::JsonValue("docs");
+        object["scope"] = imza::JsonValue("global");
+        object["path"]  = imza::JsonValue(canonical);
+    }
+    CHECK(authorized_skill_path(
+              skill, { "skill", imza::json_dump(bound), "", "" })
         == canonical_skill_path(skill));
 
     // A request aimed at a different file must not authorize this skill.
-    Json::Value other(Json::objectValue);
-    other["name"]  = "docs";
-    other["scope"] = "global";
-    other["path"]  = (fixture.outside / "elsewhere.md").string();
-    CHECK_FALSE(
-        authorized_skill_path(skill, { "skill", write_json(other), "", "" }));
+    imza::JsonValue other = imza::JsonValue::object_t { };
+    {
+        auto& object    = other.get<imza::JsonValue::object_t>();
+        object["name"]  = imza::JsonValue("docs");
+        object["scope"] = imza::JsonValue("global");
+        object["path"] = JsonValue((fixture.outside / "elsewhere.md").string());
+    }
+    CHECK_FALSE(authorized_skill_path(
+        skill, { "skill", imza::json_dump(other), "", "" }));
 
     // Nor one that omits the path, as an unnormalized model call does.
     CHECK_FALSE(authorized_skill_path(
@@ -779,8 +788,11 @@ TEST_CASE("skill evaluation binds approval to the canonical instruction path")
     const PermissionEvaluation approved = evaluate_tool_request(
         request, fixture.context(Session::Mode::PLAN), config, skills, loaded);
     REQUIRE(approved.decision.kind == PermissionDecision::Kind::ASK);
-    CHECK(
-        parse_json(approved.request.args)["path"].asString() == first.string());
+    const imza::JsonValue parsed_args = imza::parse_json(approved.request.args);
+    const imza::JsonValue* bound_path = imza::find_member(parsed_args, "path");
+    REQUIRE(bound_path != nullptr);
+    REQUIRE(bound_path->is_string());
+    CHECK(bound_path->as<std::string>() == first.string());
 
     std::filesystem::remove(link);
     std::filesystem::create_symlink(second, link);
@@ -789,8 +801,13 @@ TEST_CASE("skill evaluation binds approval to the canonical instruction path")
 
     REQUIRE(current.decision.kind == PermissionDecision::Kind::ASK);
     CHECK(current.request.args != approved.request.args);
-    CHECK(
-        parse_json(current.request.args)["path"].asString() == second.string());
+    const imza::JsonValue parsed_current
+        = imza::parse_json(current.request.args);
+    const imza::JsonValue* current_path
+        = imza::find_member(parsed_current, "path");
+    REQUIRE(current_path != nullptr);
+    REQUIRE(current_path->is_string());
+    CHECK(current_path->as<std::string>() == second.string());
 }
 
 } // namespace imza

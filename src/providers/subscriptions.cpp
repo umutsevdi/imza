@@ -1,11 +1,9 @@
 #include "providers/subscriptions.h"
 
 #include "common/util.h"
-#include "network/json_io.h"
+#include "network/json.h"
 #include "network/network.h"
 #include "providers/catalog.h"
-
-#include <json/json.h>
 
 #include <algorithm>
 #include <array>
@@ -78,12 +76,45 @@ namespace {
         return !changed.wait_for(lock, stop, duration, [] { return false; });
     }
 
+    // OAuth request/response wire shapes. File scope: Glaze reflection
+    // rejects function-local types.
+    struct ClientIdRequest {
+        std::string client_id;
+    };
+
+    struct DeviceTokenRequest {
+        std::string device_auth_id;
+        std::string user_code;
+    };
+
+    struct RefreshRequest {
+        std::string grant_type = "refresh_token";
+        std::string refresh_token;
+        std::string client_id;
+    };
+
+    // OAuth response wire shapes.
+    struct StoredTokenResponse {
+        std::optional<std::string> access_token;
+        std::optional<std::string> refresh_token;
+        std::optional<std::string> id_token;
+        std::optional<std::int64_t> expires_in;
+    };
+
+    struct StoredDeviceCodeResponse {
+        std::optional<std::string> device_auth_id;
+        std::optional<std::string> user_code;
+        std::optional<std::string> interval;
+        std::optional<std::string> verification_uri;
+        std::optional<std::string> verification_uri_complete;
+    };
+
     std::int64_t expires_from(
-        const Json::Value& root, std::string_view access_token)
+        const StoredTokenResponse& root, std::string_view access_token)
     {
-        if (root["expires_in"].isInt64()) {
+        if (root.expires_in) {
             return static_cast<std::int64_t>(std::time(nullptr))
-                + root["expires_in"].asInt64();
+                + *root.expires_in;
         }
         std::string account;
         std::string label;
@@ -95,22 +126,22 @@ namespace {
     SubscriptionResult parse_token_response(const std::string& body,
         std::string_view old_refresh = { }, std::string_view old_account = { })
     {
-        const Json::Value root = parse_json(body);
-        if (!root.isObject() || !root["access_token"].isString()
-            || root["access_token"].asString().empty()) {
+        StoredTokenResponse root;
+        if (json_parse_checked(body, root) || !root.access_token
+            || root.access_token->empty()) {
             return failure(Status::JSON_ERROR, body);
         }
         SubscriptionCredentials credentials;
-        credentials.access_token  = root["access_token"].asString();
-        credentials.refresh_token = root["refresh_token"].isString()
-            ? root["refresh_token"].asString()
-            : std::string(old_refresh);
-        credentials.expires_at  = expires_from(root, credentials.access_token);
-        credentials.account_id  = std::string(old_account);
-        const std::string token = root["id_token"].isString()
-            ? root["id_token"].asString()
-            : credentials.access_token;
-        std::int64_t ignored    = 0;
+        credentials.access_token = *root.access_token;
+        credentials.refresh_token
+            = root.refresh_token.value_or(std::string(old_refresh));
+        credentials.expires_at = expires_from(root, credentials.access_token);
+        credentials.account_id = std::string(old_account);
+        std::string token      = credentials.access_token;
+        if (root.id_token) {
+            token = *root.id_token;
+        }
+        std::int64_t ignored = 0;
         parse_openai_token_claims(
             token, credentials.account_id, credentials.label, ignored);
         if (credentials.refresh_token.empty()
@@ -120,20 +151,23 @@ namespace {
         return { Status::OK, std::move(credentials), { } };
     }
 
-    SubscriptionResult exchange_openai(
-        const Json::Value& authorization, const SubscriptionHttpPost& post)
+    struct StoredAuthorization {
+        std::optional<std::string> authorization_code;
+        std::optional<std::string> code_verifier;
+    };
+
+    SubscriptionResult exchange_openai(const StoredAuthorization& authorization,
+        const SubscriptionHttpPost& post)
     {
-        if (!authorization["authorization_code"].isString()
-            || !authorization["code_verifier"].isString()) {
-            return failure(Status::JSON_ERROR, authorization.toStyledString());
+        if (!authorization.authorization_code || !authorization.code_verifier) {
+            return failure(Status::JSON_ERROR, json_dump(authorization));
         }
         const std::string payload = "grant_type=authorization_code&code="
-            + percent_encode(authorization["authorization_code"].asString())
+            + percent_encode(*authorization.authorization_code)
             + "&redirect_uri="
             + percent_encode("https://auth.openai.com/deviceauth/callback")
             + "&client_id=" + percent_encode(OPENAI_CLIENT_ID)
-            + "&code_verifier="
-            + percent_encode(authorization["code_verifier"].asString());
+            + "&code_verifier=" + percent_encode(*authorization.code_verifier);
         std::string body;
         long code           = 0;
         const Status status = post("https://auth.openai.com/oauth/token",
@@ -160,25 +194,31 @@ bool parse_openai_token_claims(std::string_view token, std::string& account_id,
     if (first == std::string_view::npos || second == std::string_view::npos) {
         return false;
     }
-    const Json::Value root = parse_json(
-        decode_base64url(token.substr(first + 1, second - first - 1)));
-    if (!root.isObject()) {
+    JsonValue root;
+    if (!json_parse(
+            decode_base64url(token.substr(first + 1, second - first - 1)), root)
+        || !root.is_object()) {
         return false;
     }
     constexpr std::string_view claim = "https://api.openai.com/auth";
-    const Json::Value& auth          = root[std::string(claim)];
-    if (auth.isObject()) {
-        if (auth["chatgpt_account_id"].isString()) {
-            account_id = auth["chatgpt_account_id"].asString();
+    if (const JsonValue* auth = find_member(root, claim);
+        auth != nullptr && auth->is_object()) {
+        if (const JsonValue* id = find_member(*auth, "chatgpt_account_id");
+            id != nullptr && id->is_string()) {
+            account_id = id->as<std::string>();
         }
-        if (auth["user_email"].isString()) {
-            label = auth["user_email"].asString();
-        } else if (auth["chatgpt_plan_type"].isString()) {
-            label = auth["chatgpt_plan_type"].asString();
+        if (const JsonValue* email = find_member(*auth, "user_email");
+            email != nullptr && email->is_string()) {
+            label = email->as<std::string>();
+        } else if (const JsonValue* plan
+            = find_member(*auth, "chatgpt_plan_type");
+            plan != nullptr && plan->is_string()) {
+            label = plan->as<std::string>();
         }
     }
-    if (root["exp"].isInt64()) {
-        expires_at = root["exp"].asInt64();
+    if (const JsonValue* exp = find_member(root, "exp");
+        exp != nullptr && exp->is_number()) {
+        expires_at = exp->as<std::int64_t>();
     }
     return !account_id.empty();
 }
@@ -186,13 +226,12 @@ bool parse_openai_token_claims(std::string_view token, std::string& account_id,
 OpenAIDeviceCodeResult request_openai_device_code(SubscriptionHttpPost post)
 {
     post = http_post_fn(std::move(post));
-    Json::Value request(Json::objectValue);
-    request["client_id"] = std::string(OPENAI_CLIENT_ID);
+    const ClientIdRequest request { std::string(OPENAI_CLIENT_ID) };
     std::string body;
     long code = 0;
     const Status status
         = post("https://auth.openai.com/api/accounts/deviceauth/usercode",
-            { "Content-Type: application/json" }, write_json(request), 30, body,
+            { "Content-Type: application/json" }, json_dump(request), 30, body,
             &code);
     if (status != Status::OK) {
         return { status, { }, body.empty() ? error_text(status) : body };
@@ -200,22 +239,20 @@ OpenAIDeviceCodeResult request_openai_device_code(SubscriptionHttpPost post)
     if (!http_ok(code)) {
         return { Status::API_ERROR, { }, body };
     }
-    const Json::Value root = parse_json(body);
-    if (!root.isObject() || !root["device_auth_id"].isString()
-        || !root["user_code"].isString()) {
+    StoredDeviceCodeResponse root;
+    if (!json_parse_checked(body, root) || !root.device_auth_id
+        || !root.user_code) {
         return { Status::JSON_ERROR, { }, body };
     }
+    // The interval arrives either as a number or a numeric string.
     long interval = 5;
-    if (root["interval"].isString()) {
-        const std::string interval_text = root["interval"].asString();
-        std::from_chars(interval_text.data(),
-            interval_text.data() + interval_text.size(), interval);
-    } else if (root["interval"].isInt()) {
-        interval = root["interval"].asInt();
+    if (root.interval) {
+        std::from_chars(root.interval->data(),
+            root.interval->data() + root.interval->size(), interval);
     }
     interval = std::clamp(interval, 1L, 60L);
     return { Status::OK,
-        { root["device_auth_id"].asString(), root["user_code"].asString(),
+        { *root.device_auth_id, *root.user_code,
             "https://auth.openai.com/codex/device",
             std::chrono::seconds(interval) },
         { } };
@@ -228,22 +265,24 @@ SubscriptionResult await_openai_device_code(const OpenAIDeviceCode& code,
     if (!wait) {
         wait = wait_default;
     }
-    Json::Value request(Json::objectValue);
-    request["device_auth_id"] = code.device_auth_id;
-    request["user_code"]      = code.user_code;
+    const DeviceTokenRequest request { code.device_auth_id, code.user_code };
     std::chrono::seconds elapsed { 0 };
     while (!stop.stop_requested() && elapsed < std::chrono::minutes(15)) {
         std::string body;
         long http_code = 0;
         const Status status
             = post("https://auth.openai.com/api/accounts/deviceauth/token",
-                { "Content-Type: application/json" }, write_json(request), 30,
+                { "Content-Type: application/json" }, json_dump(request), 30,
                 body, &http_code);
         if (status != Status::OK) {
             return failure(status, body);
         }
         if (http_ok(http_code)) {
-            return exchange_openai(parse_json(body), post);
+            StoredAuthorization payload;
+            if (json_parse_checked(body, payload)) {
+                return failure(Status::JSON_ERROR, body);
+            }
+            return exchange_openai(payload, post);
         }
         if (http_code != 403 && http_code != 404) {
             return failure(Status::API_ERROR, body);
@@ -261,18 +300,16 @@ SubscriptionResult refresh_subscription(std::string_view connection_id,
     std::string_view refresh_token, std::string_view account_id,
     SubscriptionHttpPost post)
 {
-    Json::Value request(Json::objectValue);
-    request["grant_type"]    = "refresh_token";
-    request["refresh_token"] = std::string(refresh_token);
     if (connection_id != OPENAI_SUBSCRIPTION_ID) {
         return failure(Status::API_ERROR, "Not a subscription connection.");
     }
-    request["client_id"] = std::string(OPENAI_CLIENT_ID);
+    const RefreshRequest request { { }, std::string(refresh_token),
+        std::string(OPENAI_CLIENT_ID) };
     std::string body;
     long http_code      = 0;
     post                = http_post_fn(std::move(post));
     const Status status = post("https://auth.openai.com/oauth/token",
-        { "Content-Type: application/json" }, write_json(request), 30, body,
+        { "Content-Type: application/json" }, json_dump(request), 30, body,
         &http_code);
     if (status != Status::OK) {
         return failure(status, body);

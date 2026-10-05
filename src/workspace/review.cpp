@@ -1,10 +1,8 @@
 #include "workspace/review.h"
 #include "common/util.h"
+#include "network/json.h"
 #include "platform/command_runner.h"
 
-#include <json/reader.h>
-#include <json/value.h>
-#include <json/writer.h>
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -216,27 +214,29 @@ std::string format_review_plan_prompt(
 std::string format_ai_review_prompt(std::string_view instructions,
     const RepositoryReview& review, const std::vector<ReviewComment>& comments)
 {
-    Json::Value input(Json::objectValue);
-    input["diff"] = format_review_patch(review);
-    Json::Value existing(Json::arrayValue);
+    JsonValue input      = JsonValue::object_t { };
+    auto& object         = input.get<JsonValue::object_t>();
+    object["diff"]       = JsonValue(format_review_patch(review));
+    JsonValue existing   = JsonValue::array_t { };
+    auto& existing_array = existing.get<JsonValue::array_t>();
     for (const ReviewComment& comment : comments) {
-        Json::Value value(Json::objectValue);
-        value["file"] = comment.anchor.file;
+        JsonValue value = JsonValue::object_t { };
+        auto& entry     = value.get<JsonValue::object_t>();
+        entry["file"]   = JsonValue(comment.anchor.file);
         if (comment.anchor.new_line) {
-            value["side"] = "new";
-            value["line"] = static_cast<Json::UInt64>(*comment.anchor.new_line);
+            entry["side"] = JsonValue("new");
+            entry["line"]
+                = JsonValue(static_cast<double>(*comment.anchor.new_line));
         } else if (comment.anchor.old_line) {
-            value["side"] = "old";
-            value["line"] = static_cast<Json::UInt64>(*comment.anchor.old_line);
+            entry["side"] = JsonValue("old");
+            entry["line"]
+                = JsonValue(static_cast<double>(*comment.anchor.old_line));
         }
-        value["body"] = comment.body;
-        existing.append(std::move(value));
+        entry["body"] = JsonValue(comment.body);
+        existing_array.push_back(std::move(value));
     }
-    input["existing_comments"] = std::move(existing);
-    Json::StreamWriterBuilder writer;
-    writer["indentation"] = "";
-    return std::string(instructions) + "\n\nInput JSON:\n"
-        + Json::writeString(writer, input);
+    object["existing_comments"] = std::move(existing);
+    return std::string(instructions) + "\n\nInput JSON:\n" + json_dump(input);
 }
 
 AiReviewParseResult parse_ai_review_response(
@@ -249,29 +249,38 @@ AiReviewParseResult parse_ai_review_response(
         return "AI review returned invalid JSON.";
     }
     const std::string json(response.substr(begin, end - begin + 1));
-    Json::CharReaderBuilder reader;
-    Json::Value root;
-    std::string errors;
-    std::istringstream stream(json);
-    if (!Json::parseFromStream(reader, stream, &root, &errors)
-        || !root.isObject() || !root["findings"].isArray()) {
+    JsonValue root;
+    if (!json_parse(json, root) || !root.is_object()) {
+        return "AI review returned an invalid findings document.";
+    }
+    const JsonValue* findings = find_member(root, "findings");
+    if (findings == nullptr || !findings->is_array()) {
         return "AI review returned an invalid findings document.";
     }
 
     std::vector<ReviewCommentDraft> comments;
     bool rejected = false;
-    for (const Json::Value& finding : root["findings"]) {
-        if (!finding.isObject() || !finding["file"].isString()
-            || !finding["side"].isString() || !finding["line"].isUInt64()
-            || !finding["severity"].isString() || !finding["body"].isString()) {
+    for (const JsonValue& finding : findings->get<JsonValue::array_t>()) {
+        const JsonValue* file_value     = find_member(finding, "file");
+        const JsonValue* side_value     = find_member(finding, "side");
+        const JsonValue* line_value     = find_member(finding, "line");
+        const JsonValue* severity_value = find_member(finding, "severity");
+        const JsonValue* body_value     = find_member(finding, "body");
+        if (!finding.is_object() || file_value == nullptr
+            || !file_value->is_string() || side_value == nullptr
+            || !side_value->is_string() || line_value == nullptr
+            || !line_value->is_number() || severity_value == nullptr
+            || !severity_value->is_string() || body_value == nullptr
+            || !body_value->is_string()) {
             rejected = true;
             continue;
         }
-        const std::string file     = finding["file"].asString();
-        const std::string side     = finding["side"].asString();
-        const std::string severity = finding["severity"].asString();
-        const std::string body     = finding["body"].asString();
-        const Json::UInt64 line    = finding["line"].asUInt64();
+        const std::string file     = file_value->as<std::string>();
+        const std::string side     = side_value->as<std::string>();
+        const std::string severity = severity_value->as<std::string>();
+        const std::string body     = body_value->as<std::string>();
+        const std::uint64_t line
+            = static_cast<std::uint64_t>(line_value->as<double>());
         if ((side != "old" && side != "new")
             || (severity != "P0" && severity != "P1" && severity != "P2"
                 && severity != "P3")
@@ -294,7 +303,8 @@ AiReviewParseResult parse_ai_review_response(
             comments.push_back(std::move(comment));
         }
     }
-    if (comments.empty() && rejected && !root["findings"].empty()) {
+    if (comments.empty() && rejected
+        && !findings->get<JsonValue::array_t>().empty()) {
         return "AI review did not reference any valid changed lines.";
     }
     return comments;

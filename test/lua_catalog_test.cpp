@@ -2,7 +2,7 @@
 
 #include <string>
 
-#include "network/json_io.h"
+#include "network/json.h"
 #include "tools/bindings.h"
 #include "tools/lua.h"
 #include "tools/tool.h"
@@ -16,9 +16,10 @@ namespace {
     {
         auto state      = make_lua_state();
         const Tool tool = make_lua_tool(*state);
-        Json::Value args(Json::objectValue);
-        args["script"] = script;
-        return tool.run({ "lua", "", "", "" }, args).text;
+        return tool
+            .run({ "lua", imza::json_dump(imza::LuaToolArgs { script, { } }),
+                "", "" })
+            .text;
     }
 
 } // namespace
@@ -121,16 +122,17 @@ TEST_CASE("core description embeds autoload docs, lists others by name")
 
 TEST_CASE("load returns tree documentation while bindings are always present")
 {
-    auto state      = make_lua_state();
-    const Tool lua  = make_lua_tool(*state);
-    const Tool load = make_load_tool(*state);
-    Json::Value script(Json::objectValue);
-    script["script"]          = "return type(imza.tree.index)";
-    const ToolOutput callable = lua.run({ "lua", "", "", "" }, script);
-    CHECK(callable.return_value->asString() == "function");
+    auto state                = make_lua_state();
+    const Tool lua            = make_lua_tool(*state);
+    const Tool load           = make_load_tool(*state);
+    const ToolOutput callable = lua.run({ "lua",
+        imza::json_dump(
+            imza::LuaToolArgs { "return type(imza.tree.index)", { } }),
+        "", "" });
+    CHECK(callable.return_value->as<std::string>() == "function");
 
-    const ToolOutput documentation = load.run(
-        { "load", "", "", "" }, parse_json(R"json({"name":"tree"})json"));
+    const ToolOutput documentation
+        = load.run({ "load", R"json({"name":"tree"})json", "", "" });
     CHECK(documentation.kind == ToolOutput::Kind::OUTPUT);
     CHECK(documentation.text.find("TYPES") != std::string::npos);
     CHECK(documentation.text.find("METHODS") != std::string::npos);
@@ -143,8 +145,8 @@ TEST_CASE("load returns tree documentation while bindings are always present")
             != std::string::npos);
     }
 
-    const ToolOutput canvas = load.run(
-        { "load", "", "", "" }, parse_json(R"json({"name":"canvas"})json"));
+    const ToolOutput canvas
+        = load.run({ "load", R"json({"name":"canvas"})json", "", "" });
     CHECK(canvas.kind == ToolOutput::Kind::OUTPUT);
     for (const LuaMethod& method : canvas_lua_methods()) {
         CHECK(canvas.text.find(
@@ -152,8 +154,8 @@ TEST_CASE("load returns tree documentation while bindings are always present")
             != std::string::npos);
     }
 
-    const ToolOutput unknown = load.run(
-        { "load", "", "", "" }, parse_json(R"json({"name":"unknown"})json"));
+    const ToolOutput unknown
+        = load.run({ "load", R"json({"name":"unknown"})json", "", "" });
     CHECK(unknown.kind == ToolOutput::Kind::ERROR);
     CHECK(unknown.text.find("load: unknown module") != std::string::npos);
 }

@@ -1,5 +1,4 @@
 #include <doctest/doctest.h>
-#include <json/json.h>
 
 #include <unistd.h>
 
@@ -10,6 +9,8 @@
 #include <thread>
 #include <vector>
 
+#include "network/json.h"
+#include "network/json_io.h"
 #include "platform/config.h"
 #include "test_fs.h"
 
@@ -114,28 +115,44 @@ TEST_CASE("config roundtrip preserves connections and last_used")
     CHECK(loaded.last_used->provider == "openrouter");
     CHECK(loaded.last_used->model.empty());
     CHECK(loaded.reasoning_effort == "high");
-    Json::Value written;
-    Json::CharReaderBuilder reader;
-    std::string errors;
-    std::istringstream stream(imza::test::read_all(path));
-    REQUIRE(Json::parseFromStream(reader, stream, &written, &errors));
-    CHECK(written["providers"][0]["id"] == "openrouter");
-    CHECK_FALSE(written["providers"][0].isMember("active"));
-    CHECK_FALSE(written["providers"][0].isMember("provider_id"));
-    CHECK_FALSE(written["providers"][0].isMember("endpoint"));
-    CHECK_FALSE(written["providers"][0].isMember("label"));
-    CHECK_FALSE(written["providers"][0].isMember("dialects"));
-    CHECK_FALSE(written["providers"][1].isMember("api_key"));
-    CHECK_FALSE(written["providers"][1].isMember("refresh_token"));
-    CHECK_FALSE(written["providers"][1].isMember("expires_at"));
-    CHECK_FALSE(written["providers"][1].isMember("account_id"));
-    CHECK(written["providers"][1]["label"] == "my Ollama");
-    CHECK(written["providers"][1]["dialects"]["gpt-responses"]
+    const imza::JsonValue written
+        = imza::parse_json(imza::test::read_all(path));
+    REQUIRE(written.is_object());
+    const auto str = [](const imza::JsonValue* v) {
+        return v != nullptr && v->is_string() ? v->as<std::string>() : "";
+    };
+    const auto has = [](const imza::JsonValue& v, std::string_view key) {
+        return imza::find_member(v, key) != nullptr;
+    };
+    const imza::JsonValue* providers = imza::find_member(written, "providers");
+    REQUIRE(providers != nullptr);
+    REQUIRE(providers->is_array());
+    const auto& provider_list = providers->get<imza::JsonValue::array_t>();
+    REQUIRE(provider_list.size() == 2);
+    CHECK(str(imza::find_member(provider_list[0], "id")) == "openrouter");
+    CHECK_FALSE(has(provider_list[0], "active"));
+    CHECK_FALSE(has(provider_list[0], "provider_id"));
+    CHECK_FALSE(has(provider_list[0], "endpoint"));
+    CHECK_FALSE(has(provider_list[0], "label"));
+    CHECK_FALSE(has(provider_list[0], "dialects"));
+    CHECK_FALSE(has(provider_list[1], "api_key"));
+    CHECK_FALSE(has(provider_list[1], "refresh_token"));
+    CHECK_FALSE(has(provider_list[1], "expires_at"));
+    CHECK_FALSE(has(provider_list[1], "account_id"));
+    CHECK(str(imza::find_member(provider_list[1], "label")) == "my Ollama");
+    const imza::JsonValue* dialects
+        = imza::find_member(provider_list[1], "dialects");
+    REQUIRE(dialects != nullptr);
+    CHECK(str(imza::find_member(*dialects, "gpt-responses"))
         == "openai-responses");
-    CHECK(written["models"]["main"]["provider"] == "openrouter");
-    CHECK(written["models"]["main"]["reasoning_effort"] == "high");
-    CHECK_FALSE(written.isMember("last_used"));
-    CHECK_FALSE(written.isMember("reasoning_effort"));
+    const imza::JsonValue* models = imza::find_member(written, "models");
+    REQUIRE(models != nullptr);
+    const imza::JsonValue* main = imza::find_member(*models, "main");
+    REQUIRE(main != nullptr);
+    CHECK(str(imza::find_member(*main, "provider")) == "openrouter");
+    CHECK(str(imza::find_member(*main, "reasoning_effort")) == "high");
+    CHECK_FALSE(has(written, "last_used"));
+    CHECK_FALSE(has(written, "reasoning_effort"));
 }
 
 TEST_CASE("load_config rejects providers without id")
@@ -261,22 +278,46 @@ TEST_CASE("empty config writes every editable option")
     const auto path = temp_file("complete-defaults.json");
     REQUIRE(imza::save_config(path, imza::Config { }) == imza::Status::OK);
 
-    Json::Value written;
-    Json::CharReaderBuilder reader;
-    std::string errors;
-    std::istringstream stream(imza::test::read_all(path));
-    REQUIRE(Json::parseFromStream(reader, stream, &written, &errors));
-    CHECK(written["providers"].isArray());
-    CHECK_FALSE(written["models"]["main"].isMember("provider"));
-    CHECK_FALSE(written["models"]["main"].isMember("model"));
-    CHECK(written["models"]["main"]["reasoning_effort"] == "off");
-    CHECK_FALSE(written["models"]["builder"].isMember("provider"));
-    CHECK_FALSE(written["models"]["builder"].isMember("model"));
-    CHECK(written["models"]["builder"]["reasoning_effort"] == "default");
-    CHECK(written["models"]["researcher"]["reasoning_effort"] == "low");
-    CHECK(written["models"]["basic"]["reasoning_effort"] == "off");
-    CHECK(written["skills"]["global"].isObject());
-    CHECK(written["skills"]["projects"].isObject());
+    const imza::JsonValue written
+        = imza::parse_json(imza::test::read_all(path));
+    REQUIRE(written.is_object());
+    const auto str = [](const imza::JsonValue* v) {
+        return v != nullptr && v->is_string() ? v->as<std::string>() : "";
+    };
+    const auto has = [](const imza::JsonValue& v, std::string_view key) {
+        return imza::find_member(v, key) != nullptr;
+    };
+    const imza::JsonValue* providers = imza::find_member(written, "providers");
+    REQUIRE(providers != nullptr);
+    REQUIRE(providers->is_array());
+    const imza::JsonValue* models = imza::find_member(written, "models");
+    REQUIRE(models != nullptr);
+    const auto check_effort = [models, &str](std::string_view key,
+                                  std::string_view expected) {
+        const imza::JsonValue* section = imza::find_member(*models, key);
+        REQUIRE(section != nullptr);
+        CHECK(str(imza::find_member(*section, "reasoning_effort")) == expected);
+    };
+    const imza::JsonValue* main = imza::find_member(*models, "main");
+    REQUIRE(main != nullptr);
+    CHECK_FALSE(has(*main, "provider"));
+    CHECK_FALSE(has(*main, "model"));
+    CHECK(str(imza::find_member(*main, "reasoning_effort")) == "off");
+    const imza::JsonValue* builder = imza::find_member(*models, "builder");
+    REQUIRE(builder != nullptr);
+    CHECK_FALSE(has(*builder, "provider"));
+    CHECK_FALSE(has(*builder, "model"));
+    check_effort("builder", "default");
+    check_effort("researcher", "low");
+    check_effort("basic", "off");
+    const imza::JsonValue* skills = imza::find_member(written, "skills");
+    REQUIRE(skills != nullptr);
+    const imza::JsonValue* global = imza::find_member(*skills, "global");
+    REQUIRE(global != nullptr);
+    CHECK(global->is_object());
+    const imza::JsonValue* projects = imza::find_member(*skills, "projects");
+    REQUIRE(projects != nullptr);
+    CHECK(projects->is_object());
 }
 
 TEST_CASE("save_config leaves no temporary or lock file behind")

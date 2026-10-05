@@ -1,8 +1,7 @@
 #include "conversation/input_history.h"
 
+#include "network/json.h"
 #include "platform/json_file.h"
-
-#include <json/json.h>
 
 #include <utility>
 
@@ -10,31 +9,36 @@ namespace imza {
 
 namespace {
 
-    std::vector<std::string> parse_entries(const Json::Value& root)
+    std::vector<std::string> parse_entries(const JsonValue& root)
     {
-        if (!root.isObject() || root.get("version", 0).asInt() != 1
-            || !root["entries"].isArray()) {
+        const JsonValue* version = find_member(root, "version");
+        const JsonValue* entries = find_member(root, "entries");
+        if (version == nullptr || !version->is_number()
+            || version->as<int>() != 1 || entries == nullptr
+            || !entries->is_array()) {
             return { };
         }
-        std::vector<std::string> entries;
-        for (const Json::Value& entry : root["entries"]) {
-            if (!entry.isString()) {
+        std::vector<std::string> parsed;
+        for (const JsonValue& entry : entries->get<JsonValue::array_t>()) {
+            if (!entry.is_string()) {
                 return { };
             }
-            entries.push_back(entry.asString());
+            parsed.push_back(entry.as<std::string>());
         }
-        return entries;
+        return parsed;
     }
 
-    Json::Value encode_entries(const std::vector<std::string>& entries)
+    JsonValue encode_entries(const std::vector<std::string>& entries)
     {
-        Json::Value root(Json::objectValue);
-        root["version"] = 1;
-        Json::Value values(Json::arrayValue);
+        JsonValue root    = JsonValue::object_t { };
+        auto& object      = root.get<JsonValue::object_t>();
+        object["version"] = JsonValue(1.0);
+        JsonValue values  = JsonValue::array_t { };
+        auto& array       = values.get<JsonValue::array_t>();
         for (const std::string& entry : entries) {
-            values.append(entry);
+            array.emplace_back(entry);
         }
-        root["entries"] = std::move(values);
+        object["entries"] = std::move(values);
         return root;
     }
 
@@ -64,7 +68,7 @@ Status InputHistoryStore::record(std::string text)
 {
     std::lock_guard lock(_mutex);
     std::vector<std::string> entries;
-    const Status status = mutate_json_file(_path, [&](Json::Value& root) {
+    const Status status = mutate_json_file(_path, [&](JsonValue& root) {
         entries = parse_entries(root);
         if (entries.empty() || entries.back() != text) {
             entries.push_back(std::move(text));

@@ -1,5 +1,5 @@
 #include "providers/catalog.h"
-#include "network/json_io.h"
+#include "network/json.h"
 #include "platform/json_file.h"
 
 #include <algorithm>
@@ -97,43 +97,161 @@ namespace {
             { { "xai", ApiStandard::OPENAI }, "https://api.x.ai/v1" },
         };
 
-    std::optional<double> cost_field(const Json::Value& cost, const char* key)
+    // One input modality from models.dev's modalities.input array. Only
+    // image/pdf are meaningful today; unknown entries are ignored.
+    std::optional<Capabilities> modality_capability(std::string_view name)
     {
-        const Json::Value& v = cost[key];
-        if (!v.isNumeric()) {
-            return std::nullopt;
+        if (name == "image") {
+            return Capabilities::IMAGE;
         }
-        return v.asDouble();
+        if (name == "pdf") {
+            return Capabilities::PDF;
+        }
+        return std::nullopt;
     }
 
-    std::optional<std::uint64_t> limit_field(
-        const Json::Value& limit, const char* key)
+    Capabilities capabilities_from_modalities(
+        const std::optional<std::vector<std::string>>& input)
     {
-        const Json::Value& v = limit[key];
-        if (!v.isUInt64()) {
-            return std::nullopt;
-        }
-        return v.asUInt64();
-    }
-
-    std::optional<Capabilities> input_capabilities(const Json::Value& entry)
-    {
-        const Json::Value& input = entry["modalities"]["input"];
-        if (!input.isArray()) {
-            return std::nullopt;
-        }
         Capabilities capabilities = Capabilities::NONE;
-        for (const Json::Value& modality : input) {
-            if (!modality.isString()) {
-                continue;
-            }
-            if (modality.asString() == "image") {
-                capabilities = capabilities | Capabilities::IMAGE;
-            } else if (modality.asString() == "pdf") {
-                capabilities = capabilities | Capabilities::PDF;
+        if (!input) {
+            return capabilities;
+        }
+        for (const std::string& modality : *input) {
+            if (const auto flag = modality_capability(modality)) {
+                capabilities = capabilities | *flag;
             }
         }
         return capabilities;
+    }
+
+    // models.dev entries carry many more fields than imza keeps; the view
+    // structs name only the ones that survive into the catalog. Glaze's
+    // unknown-key skipping handles the rest.
+    struct ModelCostView {
+        std::optional<double> input;
+        std::optional<double> output;
+        std::optional<double> cache_read;
+        std::optional<double> cache_write;
+    };
+
+    struct ModelLimitView {
+        std::optional<std::uint64_t> context;
+        std::optional<std::uint64_t> output;
+    };
+
+    struct ModelModalitiesView {
+        std::optional<std::vector<std::string>> input;
+    };
+
+    struct ProviderModelView {
+        std::optional<std::string> name;
+        std::optional<ModelCostView> cost;
+        std::optional<ModelLimitView> limit;
+        std::optional<bool> tool_call;
+        std::optional<bool> reasoning;
+        std::optional<ModelModalitiesView> modalities;
+    };
+
+    struct ProviderView {
+        std::optional<std::string> name;
+        std::optional<std::string> api;
+        std::optional<std::string> npm;
+        std::map<std::string, ProviderModelView> models;
+    };
+
+    CachedModel to_model(const ProviderModelView& view)
+    {
+        CachedModel model;
+        if (view.name) {
+            model.name = *view.name;
+        }
+        if (view.cost) {
+            model.cost_input       = view.cost->input;
+            model.cost_output      = view.cost->output;
+            model.cost_cache_read  = view.cost->cache_read;
+            model.cost_cache_write = view.cost->cache_write;
+        }
+        if (view.limit) {
+            model.context = view.limit->context;
+            model.output  = view.limit->output;
+        }
+        model.tool_call    = view.tool_call;
+        model.reasoning    = view.reasoning;
+        model.capabilities = capabilities_from_modalities(
+            view.modalities ? view.modalities->input : std::nullopt);
+        return model;
+    }
+
+    CachedProvider to_provider(const ProviderView& view)
+    {
+        CachedProvider provider;
+        if (view.name) {
+            provider.name = *view.name;
+        }
+        if (view.api) {
+            provider.api = *view.api;
+        }
+        if (view.npm) {
+            provider.npm = *view.npm;
+        }
+        for (const auto& [id, model] : view.models) {
+            provider.models[id] = to_model(model);
+        }
+        return provider;
+    }
+
+    // File shape of the cached catalog. Optional members omit when empty;
+    // cost/limit objects appear only when they carry a value. Stored at
+    // namespace scope: Glaze reflection rejects local types.
+    struct StoredModel {
+        std::optional<std::string> name;
+        std::optional<ModelCostView> cost;
+        std::optional<ModelLimitView> limit;
+        std::optional<bool> tool_call;
+        std::optional<bool> reasoning;
+        std::optional<ModelModalitiesView> modalities;
+    };
+
+    struct StoredProvider {
+        std::optional<std::string> name;
+        std::optional<std::string> api;
+        std::optional<std::string> npm;
+        std::map<std::string, StoredModel> models;
+    };
+
+    struct StoredCatalog {
+        std::optional<std::int64_t> fetched_at;
+        std::map<std::string, StoredProvider> providers;
+    };
+
+    StoredModel to_stored(const CachedModel& model)
+    {
+        StoredModel stored;
+        if (!model.name.empty()) {
+            stored.name = model.name;
+        }
+        if (model.cost_input || model.cost_output || model.cost_cache_read
+            || model.cost_cache_write) {
+            stored.cost = ModelCostView { model.cost_input, model.cost_output,
+                model.cost_cache_read, model.cost_cache_write };
+        }
+        if (model.context || model.output) {
+            stored.limit = ModelLimitView { model.context, model.output };
+        }
+        stored.tool_call = model.tool_call;
+        stored.reasoning = model.reasoning;
+        if (model.capabilities) {
+            std::vector<std::string> input;
+            if (has_capability(*model.capabilities, Capabilities::IMAGE)) {
+                input.push_back("image");
+            }
+            if (has_capability(*model.capabilities, Capabilities::PDF)) {
+                input.push_back("pdf");
+            }
+            stored.modalities = ModelModalitiesView { std::move(input) };
+        }
+        return stored;
     }
 
     bool endpoint_backed(const Connection& conn)
@@ -165,60 +283,6 @@ namespace {
             != WHITELIST.end();
     }
 
-    Status trim_provider(const Json::Value& src, CachedProvider& out)
-    {
-        if (!src.isObject()) {
-            return Status::JSON_ERROR;
-        }
-        if (src["name"].isString()) {
-            out.name = src["name"].asString();
-        }
-        if (src["api"].isString()) {
-            out.api = src["api"].asString();
-        }
-        if (src["npm"].isString()) {
-            out.npm = src["npm"].asString();
-        }
-        const Json::Value& models = src["models"];
-        if (models.isNull()) {
-            return Status::OK;
-        }
-        if (!models.isObject()) {
-            return Status::JSON_ERROR;
-        }
-        for (const std::string& id : models.getMemberNames()) {
-            const Json::Value& entry = models[id];
-            if (!entry.isObject()) {
-                continue;
-            }
-            CachedModel model;
-            if (entry["name"].isString()) {
-                model.name = entry["name"].asString();
-            }
-            const Json::Value& cost = entry["cost"];
-            if (cost.isObject()) {
-                model.cost_input       = cost_field(cost, "input");
-                model.cost_output      = cost_field(cost, "output");
-                model.cost_cache_read  = cost_field(cost, "cache_read");
-                model.cost_cache_write = cost_field(cost, "cache_write");
-            }
-            const Json::Value& limit = entry["limit"];
-            if (limit.isObject()) {
-                model.context = limit_field(limit, "context");
-                model.output  = limit_field(limit, "output");
-            }
-            if (entry["tool_call"].isBool()) {
-                model.tool_call = entry["tool_call"].asBool();
-            }
-            if (entry["reasoning"].isBool()) {
-                model.reasoning = entry["reasoning"].asBool();
-            }
-            model.capabilities = input_capabilities(entry);
-            out.models[id]     = std::move(model);
-        }
-        return Status::OK;
-    }
-
 } // namespace
 
 bool catalog_stale(const Catalog& catalog)
@@ -238,106 +302,78 @@ Status load_catalog(const std::filesystem::path& path, Catalog& out)
     if (!std::filesystem::exists(path, ec) || ec) {
         return Status::OK;
     }
-    const std::optional<Json::Value> stored = read_json_file(path);
-    if (!stored || !stored->isObject()) {
+    const std::optional<std::string> text = read_text_file(path);
+    if (!text) {
         return Status::JSON_ERROR;
     }
-    const Json::Value& root = *stored;
-    if (root["fetched_at"].isInt64()) {
-        out.fetched_at = root["fetched_at"].asInt64();
-    }
-    const Json::Value& providers = root["providers"];
-    if (providers.isNull()) {
-        return Status::OK;
-    }
-    if (!providers.isObject()) {
+
+    // Stored shape mirrors the file exactly; unknown keys keep files
+    // written by other versions readable.
+    StoredCatalog stored;
+    if (!json_parse(*text, stored)) {
         return Status::JSON_ERROR;
     }
-    for (const std::string& id : providers.getMemberNames()) {
-        CachedProvider provider;
-        const Status st = trim_provider(providers[id], provider);
-        if (st != Status::OK) {
-            return st;
+    out.fetched_at = stored.fetched_at.value_or(0);
+    for (const auto& [id, provider] : stored.providers) {
+        CachedProvider entry;
+        if (provider.name) {
+            entry.name = *provider.name;
         }
-        out.providers[id] = std::move(provider);
+        if (provider.api) {
+            entry.api = *provider.api;
+        }
+        if (provider.npm) {
+            entry.npm = *provider.npm;
+        }
+        for (const auto& [model_id, model] : provider.models) {
+            CachedModel cached;
+            if (model.name) {
+                cached.name = *model.name;
+            }
+            if (model.cost) {
+                cached.cost_input       = model.cost->input;
+                cached.cost_output      = model.cost->output;
+                cached.cost_cache_read  = model.cost->cache_read;
+                cached.cost_cache_write = model.cost->cache_write;
+            }
+            if (model.limit) {
+                cached.context = model.limit->context;
+                cached.output  = model.limit->output;
+            }
+            cached.tool_call    = model.tool_call;
+            cached.reasoning    = model.reasoning;
+            cached.capabilities = capabilities_from_modalities(
+                model.modalities ? model.modalities->input : std::nullopt);
+            entry.models[model_id] = std::move(cached);
+        }
+        out.providers[id] = std::move(entry);
     }
     return Status::OK;
 }
 
 Status save_catalog(const std::filesystem::path& path, const Catalog& catalog)
 {
-    Json::Value root(Json::objectValue);
-    root["fetched_at"] = catalog.fetched_at;
-
-    Json::Value providers(Json::objectValue);
+    std::map<std::string, StoredProvider> providers;
     for (const auto& [id, provider] : catalog.providers) {
-        Json::Value entry(Json::objectValue);
-        entry["name"] = provider.name;
+        StoredProvider stored;
+        stored.name = provider.name;
         if (!provider.api.empty()) {
-            entry["api"] = provider.api;
+            stored.api = provider.api;
         }
         if (!provider.npm.empty()) {
-            entry["npm"] = provider.npm;
+            stored.npm = provider.npm;
         }
-        Json::Value models(Json::objectValue);
-        for (const auto& [id, model] : provider.models) {
-            Json::Value entry(Json::objectValue);
-            if (!model.name.empty()) {
-                entry["name"] = model.name;
-            }
-            if (model.cost_input || model.cost_output || model.cost_cache_read
-                || model.cost_cache_write) {
-                Json::Value cost(Json::objectValue);
-                if (model.cost_input) {
-                    cost["input"] = *model.cost_input;
-                }
-                if (model.cost_output) {
-                    cost["output"] = *model.cost_output;
-                }
-                if (model.cost_cache_read) {
-                    cost["cache_read"] = *model.cost_cache_read;
-                }
-                if (model.cost_cache_write) {
-                    cost["cache_write"] = *model.cost_cache_write;
-                }
-                entry["cost"] = cost;
-            }
-            if (model.context || model.output) {
-                Json::Value limit(Json::objectValue);
-                if (model.context) {
-                    limit["context"] = *model.context;
-                }
-                if (model.output) {
-                    limit["output"] = *model.output;
-                }
-                entry["limit"] = limit;
-            }
-            if (model.tool_call) {
-                entry["tool_call"] = *model.tool_call;
-            }
-            if (model.reasoning) {
-                entry["reasoning"] = *model.reasoning;
-            }
-            if (model.capabilities) {
-                Json::Value input(Json::arrayValue);
-                if (has_capability(*model.capabilities, Capabilities::IMAGE)) {
-                    input.append("image");
-                }
-                if (has_capability(*model.capabilities, Capabilities::PDF)) {
-                    input.append("pdf");
-                }
-                Json::Value modalities(Json::objectValue);
-                modalities["input"] = std::move(input);
-                entry["modalities"] = std::move(modalities);
-            }
-            models[id] = entry;
+        for (const auto& [model_id, model] : provider.models) {
+            stored.models[model_id] = to_stored(model);
         }
-        entry["models"] = models;
-        providers[id]   = entry;
+        providers[id] = std::move(stored);
     }
-    root["providers"] = providers;
-
-    return write_json_file(path, root, "  ");
+    const StoredCatalog root { catalog.fetched_at, std::move(providers) };
+    auto serialized = json_dump_pretty_checked(root);
+    if (!serialized) {
+        return Status::JSON_ERROR;
+    }
+    return write_json_file(path, *serialized);
 }
 
 Status fetch_catalog(Catalog& out)
@@ -353,22 +389,16 @@ Status fetch_catalog(Catalog& out)
         return Status::API_ERROR;
     }
 
-    const Json::Value root = parse_json(body);
-    if (root.isNull() || !root.isObject()) {
+    std::map<std::string, ProviderView> parsed;
+    if (!json_parse(body, parsed)) {
         return Status::JSON_ERROR;
     }
-
     Catalog catalog;
-    for (const std::string& id : root.getMemberNames()) {
+    for (const auto& [id, view] : parsed) {
         if (!whitelisted_provider(id)) {
             continue;
         }
-        CachedProvider provider;
-        const Status st = trim_provider(root[id], provider);
-        if (st != Status::OK) {
-            continue;
-        }
-        catalog.providers[id] = std::move(provider);
+        catalog.providers[id] = to_provider(view);
     }
     backfill_catalog_urls(catalog);
     catalog.fetched_at = static_cast<std::int64_t>(std::time(nullptr));

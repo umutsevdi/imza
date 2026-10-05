@@ -1,7 +1,5 @@
 #pragma once
 
-#include <json/json.h>
-
 #include <map>
 #include <string>
 #include <string_view>
@@ -42,7 +40,9 @@ void emit_usage_once(
     ParseState& state, const Usage& usage, std::vector<StreamEvent>& outs);
 
 struct Provider {
-    Json::Value (*build)(const ChatRequest& req);
+    // Serializes the full request body once; dialects build a reflected
+    // struct and write it with the shared Glaze options.
+    std::string (*build)(const ChatRequest& req);
     std::vector<std::string> (*headers)();
     void (*parse)(ParseState& state, std::string_view event,
         std::string_view data, std::vector<StreamEvent>& outs);

@@ -1,11 +1,9 @@
 #include <string>
 
-#include <doctest/doctest.h>
-#include <json/json.h>
-
 #include "conversation/format.h"
 #include "network/json_io.h"
 #include "ui/tool_format.h"
+#include <doctest/doctest.h>
 
 TEST_CASE("question_form_markdown renders prompt and options")
 {
@@ -68,7 +66,7 @@ TEST_CASE("lua viewer appends a rendered return-value block")
     CHECK(report.find("```lua\nreturn {a = 1}\n```") != std::string::npos);
     CHECK(report.find("```txt\nlog\n\n```") != std::string::npos);
     // JSON returns are fenced with the json language for highlighting.
-    CHECK(report.find("```json\n{\n  \"a\" : 1\n}\n```") != std::string::npos);
+    CHECK(report.find("```json\n{\n  \"a\": 1\n}\n```") != std::string::npos);
 
     // The return-value block is the last section.
     const std::size_t json_at = report.find("```json");
@@ -155,58 +153,58 @@ TEST_CASE("format_lua_result appends returned values to the transcript")
     CHECK(imza::format_lua_result("done\n", std::nullopt) == "done\n");
 
     // Non-array objects fall back to fenced JSON.
-    const Json::Value value = imza::parse_json(R"json({"a":1})json");
-    const std::string with  = imza::format_lua_result("done\n", value);
+    const imza::JsonValue value = imza::parse_json(R"json({"a":1})json");
+    const std::string with      = imza::format_lua_result("done\n", value);
     CHECK(with.find("done\n") == 0);
-    CHECK(with.find("```json\n{\n  \"a\" : 1\n}\n```") != std::string::npos);
+    CHECK(with.find("```json\n{\n  \"a\": 1\n}\n```") != std::string::npos);
 
     // No printed output: the JSON block starts the result.
     const std::string only = imza::format_lua_result("", value);
     CHECK(only.find("```json") == 0);
 
     // A returned JSON fallback containing backticks gets a larger fence.
-    const Json::Value tricky = imza::parse_json(R"json({"a":"```"})json");
-    const std::string fenced = imza::format_lua_result("", tricky);
+    const imza::JsonValue tricky = imza::parse_json(R"json({"a":"```"})json");
+    const std::string fenced     = imza::format_lua_result("", tricky);
     CHECK(fenced.find("````json") != std::string::npos);
 }
 
 TEST_CASE("format_lua_result prints scalars and scalar lists directly")
 {
-    const Json::Value number = imza::parse_json("42");
+    const imza::JsonValue number = imza::parse_json("42");
     CHECK(imza::format_lua_result("", number) == "42");
 
     // Strings are free-form: fenced so markdown does not eat them.
-    const Json::Value text = imza::parse_json(R"json("hello world")json");
+    const imza::JsonValue text = imza::parse_json(R"json("hello world")json");
     CHECK(imza::format_lua_result("log\n", text)
         == "log\n\n```\nhello world\n```");
 
-    const Json::Value flag = imza::parse_json("true");
+    const imza::JsonValue flag = imza::parse_json("true");
     CHECK(imza::format_lua_result("", flag) == "true");
 
-    const Json::Value list = imza::parse_json(R"json([1,2,3])json");
+    const imza::JsonValue list = imza::parse_json(R"json([1,2,3])json");
     CHECK(imza::format_lua_result("", list) == "1\n2\n3");
 
-    const Json::Value mixed
+    const imza::JsonValue mixed
         = imza::parse_json(R"json([{"path":"src"},"done"])json");
     const std::string mixed_result = imza::format_lua_result("", mixed);
     CHECK(mixed_result.find("```json\n[") == 0);
     CHECK(mixed_result.find("\"done\"") != std::string::npos);
 
     // A scalar string that merely starts with "[" must not be JSON-fenced.
-    const Json::Value bracketed = imza::parse_json(R"json("[a]")json");
+    const imza::JsonValue bracketed = imza::parse_json(R"json("[a]")json");
     CHECK(imza::format_lua_result("", bracketed) == "```\n[a]\n```");
 }
 
 TEST_CASE("format_lua_return renders record lists as markdown tables")
 {
-    const Json::Value records = imza::parse_json(
+    const imza::JsonValue records = imza::parse_json(
         R"json([
             {"path":"src/a.cpp","type":"file","size":"1.2 KB"},
             {"path":"src","type":"dir"},
             {"path":"note|a\nb","type":"file","size":"3 KB"}
         ])json");
     const std::string table = imza::format_lua_return(records);
-    // jsoncpp stores object keys sorted, so columns follow that order.
+    // json_t objects are key-sorted maps, so columns follow that order.
     const std::vector<std::string> lines
         = { "|path|size|type|", "|---|---|---|", "|src/a.cpp|1.2 KB|file|",
               "|src||dir|", "|note\\|a<br>b|3 KB|file|" };
@@ -218,7 +216,7 @@ TEST_CASE("format_lua_return renders record lists as markdown tables")
     }
 
     // Nested values demote the list to JSON.
-    const Json::Value nested = imza::parse_json(R"json([{"a":[1]}])json");
+    const imza::JsonValue nested = imza::parse_json(R"json([{"a":[1]}])json");
     CHECK(imza::format_lua_return(nested).find("|") == std::string::npos);
 }
 

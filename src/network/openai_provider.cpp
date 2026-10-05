@@ -1,4 +1,5 @@
 #include "common/util.h"
+#include "network/json.h"
 #include "network/json_io.h"
 #include "network/network.h"
 #include "network/sse_parse.h"
@@ -7,143 +8,228 @@ namespace imza {
 
 namespace {
 
-    void append_tools(Json::Value& root, const ChatRequest& req)
-    {
-        if (req.tools.empty()) {
-            return;
-        }
-        Json::Value tools(Json::arrayValue);
-        for (const auto& t : req.tools) {
-            Json::Value fn;
-            fn["type"]                    = "function";
-            fn["function"]                = Json::Value(Json::objectValue);
-            fn["function"]["name"]        = t.name;
-            fn["function"]["description"] = t.description;
-            fn["function"]["parameters"]  = t.parameters;
-            tools.append(fn);
-        }
-        root["tools"]       = tools;
-        root["tool_choice"] = "auto";
-    }
+    // --- Request wire structs -------------------------------------------
+    struct FunctionSpec {
+        std::string name;
+        std::string description;
+        // Schema forwarded verbatim from the tool author.
+        glz::raw_json parameters;
+    };
 
-    Json::Value build(const ChatRequest& req)
+    struct ToolWire {
+        std::string type = "function";
+        FunctionSpec function;
+    };
+
+    struct ImageUrl {
+        std::string url;
+    };
+
+    struct FileContent {
+        std::string filename;
+        std::string file_data;
+    };
+
+    struct TextPart {
+        std::string type = "text";
+        std::string text;
+    };
+
+    struct MediaPart {
+        std::string type;
+        std::optional<ImageUrl> image_url;
+        std::optional<FileContent> file;
+    };
+
+    using ContentPart = std::variant<TextPart, MediaPart>;
+
+    struct CallFunction {
+        std::string name;
+        // Historical args cross back verbatim; OpenAI wants a string here.
+        std::string arguments;
+    };
+
+    struct ToolCallWire {
+        std::string id;
+        std::string type = "function";
+        CallFunction function;
+    };
+
+    // Message content is a string when plain, a part array when the user
+    // message carries media; pre-serialized and embedded raw so the wire
+    // keeps the single "content" key.
+    struct RequestMessage {
+        std::string role;
+        glz::raw_json content;
+        std::optional<std::vector<ToolCallWire>> tool_calls;
+        std::optional<std::string> tool_call_id;
+    };
+
+    struct StreamOptions {
+        bool include_usage = true;
+    };
+
+    struct RequestBody {
+        std::string model;
+        bool stream        = true;
+        double temperature = 0.7;
+        StreamOptions stream_options;
+        std::optional<std::string> reasoning_effort;
+        // OpenAI renamed the cap when reasoning is active.
+        std::optional<std::uint64_t> max_completion_tokens;
+        std::optional<std::uint64_t> max_tokens;
+        std::optional<std::vector<ToolWire>> tools;
+        std::optional<std::string> tool_choice;
+        std::vector<RequestMessage> messages;
+    };
+
+    std::string build(const ChatRequest& req)
     {
-        Json::Value root;
-        root["model"]                           = req.model;
-        root["stream"]                          = true;
-        root["temperature"]                     = req.temperature;
-        root["stream_options"]["include_usage"] = true;
+        RequestBody body;
+        body.model       = req.model;
+        body.stream      = true;
+        body.temperature = req.temperature;
         if (req.reasoning_effort) {
-            root["reasoning_effort"] = *req.reasoning_effort;
+            body.reasoning_effort      = *req.reasoning_effort;
+            body.max_completion_tokens = req.max_output_tokens;
+        } else {
+            body.max_tokens = req.max_output_tokens;
         }
-        if (req.max_output_tokens) {
-            root[req.reasoning_effort ? "max_completion_tokens" : "max_tokens"]
-                = static_cast<Json::UInt64>(*req.max_output_tokens);
+        if (!req.tools.empty()) {
+            std::vector<ToolWire> tools;
+            tools.reserve(req.tools.size());
+            for (const auto& t : req.tools) {
+                tools.push_back({ "function",
+                    { t.name, t.description,
+                        glz::raw_json { t.parameters } } });
+            }
+            body.tools       = std::move(tools);
+            body.tool_choice = "auto";
         }
-        append_tools(root, req);
 
-        Json::Value messages(Json::arrayValue);
         for (const auto& m : req.messages) {
-            Json::Value o;
-            o["role"] = role_str(m.type);
+            RequestMessage message;
+            message.role = role_str(m.type);
             if (m.type == Message::Type::USER && !m.media.empty()) {
-                Json::Value content(Json::arrayValue);
+                std::vector<ContentPart> parts;
                 if (!m.content.empty()) {
-                    Json::Value text;
-                    text["type"] = "text";
-                    text["text"] = m.content;
-                    content.append(std::move(text));
+                    parts.push_back(TextPart { "text", m.content });
                 }
                 for (const Attachment& media : m.media) {
-                    Json::Value block;
                     if (media.type == Attachment::Type::IMAGE) {
-                        block["type"]             = "image_url";
-                        block["image_url"]["url"] = media_data_url(media);
+                        parts.push_back(MediaPart { "image_url",
+                            ImageUrl { media_data_url(media) }, std::nullopt });
                     } else {
-                        block["type"]              = "file";
-                        block["file"]["filename"]  = media.path;
-                        block["file"]["file_data"] = media_data_url(media);
+                        parts.push_back(MediaPart { "file", std::nullopt,
+                            FileContent {
+                                media.path, media_data_url(media) } });
                     }
-                    content.append(std::move(block));
                 }
-                o["content"] = std::move(content);
+                std::string content = "[";
+                for (std::size_t i = 0; i < parts.size(); ++i) {
+                    if (i != 0) {
+                        content += ",";
+                    }
+                    content
+                        += glz::write<JSON_WRITE>(parts[i]).value_or("null");
+                }
+                content += "]";
+                message.content = glz::raw_json { std::move(content) };
             } else {
-                o["content"] = m.content;
+                message.content = glz::raw_json(
+                    glz::write<JSON_WRITE>(m.content).value_or("null"));
             }
             if (!m.tool_calls.empty()) {
-                Json::Value calls(Json::arrayValue);
+                std::vector<ToolCallWire> calls;
+                calls.reserve(m.tool_calls.size());
                 for (const auto& tc : m.tool_calls) {
-                    Json::Value c;
-                    c["id"]                    = tc.id;
-                    c["type"]                  = "function";
-                    c["function"]              = Json::Value(Json::objectValue);
-                    c["function"]["name"]      = tc.name;
-                    c["function"]["arguments"] = tc.args;
-                    calls.append(c);
+                    calls.push_back(
+                        { tc.id, "function", { tc.name, tc.args } });
                 }
-                o["tool_calls"] = calls;
+                message.tool_calls = std::move(calls);
             }
             if (m.type == Message::Type::TOOL) {
-                o["tool_call_id"] = m.tool_call_id;
+                message.tool_call_id = m.tool_call_id;
             }
-            messages.append(o);
+            body.messages.push_back(std::move(message));
         }
-        root["messages"] = messages;
-        return root;
+        auto out = glz::write<JSON_WRITE>(body);
+        return out ? std::move(out.value()) : std::string { };
     }
 
-    void take_delta(const Json::Value& delta, ParseState& state,
-        std::vector<StreamEvent>& outs)
-    {
-        const Json::Value& tcs = delta["tool_calls"];
-        if (!tcs.isArray()) {
-            return;
-        }
-        for (const auto& tc : tcs) {
-            ToolAccum& acc = state.tool_accums[tc.get("index", 0).asInt()];
-            if (tc["id"].isString()) {
-                acc.id = tc["id"].asString();
-            }
-            const Json::Value& fn = tc["function"];
-            if (fn.isObject()) {
-                if (fn["name"].isString() && !fn["name"].asString().empty()) {
-                    acc.name = fn["name"].asString();
-                }
-                if (fn["arguments"].isString()) {
-                    acc.args += fn["arguments"].asString();
-                }
-            }
-            emit_ready_tool_start(acc, outs);
-        }
-    }
+    // --- SSE parsing: typed payload views -------------------------------
+    struct ToolCallDelta {
+        std::optional<int> index;
+        std::optional<std::string> id;
+        struct Function {
+            std::optional<std::string> name;
+            std::optional<std::string> arguments;
+        };
+        std::optional<Function> function;
+    };
 
-    Usage read_usage_fields(const Json::Value& u)
+    struct ChunkDelta {
+        std::optional<std::string> content;
+        std::optional<std::string> reasoning;
+        std::optional<std::string> reasoning_content;
+        std::optional<std::vector<ToolCallDelta>> tool_calls;
+    };
+
+    struct UsageDetails {
+        std::uint64_t cached_tokens = 0;
+    };
+
+    struct UsageWire {
+        std::uint64_t prompt_tokens     = 0;
+        std::uint64_t completion_tokens = 0;
+        std::uint64_t total_tokens      = 0;
+        std::optional<UsageDetails> prompt_tokens_details;
+    };
+
+    struct Choice {
+        std::optional<ChunkDelta> delta;
+        std::optional<std::string> finish_reason;
+        std::optional<UsageWire> usage;
+    };
+
+    struct Chunk {
+        std::optional<UsageWire> usage;
+        std::vector<Choice> choices;
+        // Error payloads carry an error object instead of choices.
+        struct Error {
+            std::optional<std::string> message;
+        };
+        std::optional<Error> error;
+    };
+
+    Usage to_usage(const UsageWire& u)
     {
         Usage out;
-        out.prompt                 = u.get("prompt_tokens", 0).asUInt64();
-        out.completion             = u.get("completion_tokens", 0).asUInt64();
-        out.total                  = u.get("total_tokens", 0).asUInt64();
-        const Json::Value& details = u["prompt_tokens_details"];
-        if (details.isObject()) {
-            out.cached_read = details.get("cached_tokens", 0).asUInt64();
+        out.prompt     = u.prompt_tokens;
+        out.completion = u.completion_tokens;
+        out.total      = u.total_tokens;
+        if (u.prompt_tokens_details) {
+            out.cached_read = u.prompt_tokens_details->cached_tokens;
         }
         return out;
     }
 
-    Usage read_usage(const Json::Value& root)
+    void take_delta(const ToolCallDelta& tc, ParseState& state,
+        std::vector<StreamEvent>& outs)
     {
-        const Json::Value& top = root["usage"];
-        if (top.isObject()) {
-            return read_usage_fields(top);
+        ToolAccum& acc = state.tool_accums[tc.index.value_or(0)];
+        if (tc.id) {
+            acc.id = *tc.id;
         }
-        const Json::Value& choices = root["choices"];
-        if (choices.isArray() && choices.size() > 0) {
-            const Json::Value& cu = choices[0]["usage"];
-            if (cu.isObject()) {
-                return read_usage_fields(cu);
+        if (tc.function) {
+            if (tc.function->name && !tc.function->name->empty()) {
+                acc.name = *tc.function->name;
+            }
+            if (tc.function->arguments) {
+                acc.args += *tc.function->arguments;
             }
         }
-        return Usage { };
+        emit_ready_tool_start(acc, outs);
     }
 
     void parse(ParseState& state, std::string_view, std::string_view data,
@@ -155,45 +241,59 @@ namespace {
             outs.push_back(make_done_event());
             return;
         }
-        const Json::Value root = parse_json(data);
-        if (root.isNull()) {
+        Chunk chunk;
+        if (json_parse_checked(data, chunk)) {
             outs.push_back(make_error_event(Status::JSON_ERROR));
             return;
         }
-        if (root.isMember("error")) {
+        if (chunk.choices.empty() && chunk.error) {
             std::string msg;
             Status status = parse_api_error(data, msg);
             if (status == Status::OK) {
                 status = Status::API_ERROR;
             }
-            outs.push_back(make_error_event(status, msg));
+            outs.push_back(
+                make_error_event(status, chunk.error->message.value_or("")));
             return;
         }
-        const Usage u              = read_usage(root);
-        const Json::Value& choices = root["choices"];
-        bool done                  = false;
-        if (choices.isArray() && choices.size() > 0) {
-            const Json::Value& delta = choices[0]["delta"];
-            if (delta.isObject()) {
-                if (delta["content"].isString()) {
-                    outs.push_back(
-                        make_delta_event(delta["content"].asString()));
+        std::optional<Usage> u;
+        if (chunk.usage) {
+            u = to_usage(*chunk.usage);
+        }
+        bool done = false;
+        if (!chunk.choices.empty()) {
+            const Choice& first = chunk.choices.front();
+            if (first.delta) {
+                const ChunkDelta& delta = *first.delta;
+                if (delta.content) {
+                    outs.push_back(make_delta_event(*delta.content));
                 }
-                if (delta["reasoning"].isString()) {
+                if (delta.reasoning && !delta.reasoning->empty()) {
+                    outs.push_back(make_reasoning_event(*delta.reasoning));
+                } else if (delta.reasoning_content
+                    && !delta.reasoning_content->empty()) {
                     outs.push_back(
-                        make_reasoning_event(delta["reasoning"].asString()));
-                } else if (delta["reasoning_content"].isString()) {
-                    outs.push_back(make_reasoning_event(
-                        delta["reasoning_content"].asString()));
+                        make_reasoning_event(*delta.reasoning_content));
                 }
-                take_delta(delta, state, outs);
+                if (delta.tool_calls) {
+                    for (const auto& tc : *delta.tool_calls) {
+                        take_delta(tc, state, outs);
+                    }
+                }
             }
-            if (choices[0]["finish_reason"].isString()) {
+            if (first.finish_reason) {
                 flush_tool_accums(state, outs);
                 done = true;
             }
+            if (first.usage) {
+                u = to_usage(*first.usage);
+            }
         }
-        emit_usage_once(state, u, outs);
+        if (u) {
+            emit_usage_once(state, *u, outs);
+        } else {
+            emit_usage_once(state, Usage { }, outs);
+        }
         if (done) {
             outs.push_back(make_done_event());
         } else if (outs.empty()) {

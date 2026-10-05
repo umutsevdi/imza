@@ -1,4 +1,5 @@
 #include "common/util.h"
+#include "network/json.h"
 #include "network/json_io.h"
 #include "network/network.h"
 
@@ -28,33 +29,42 @@ namespace {
 
 Status parse_models_response(std::string_view body, std::vector<ModelInfo>& out)
 {
-    const Json::Value root = parse_json(body);
-    if (root.isNull() || !root.isObject()) {
+    // The "data" array mixes objects with arbitrary entries (strings,
+    // nulls) across vendors, so the array stays dynamic and entries that
+    // are not objects are skipped rather than failing the parse.
+    const JsonValue root = parse_json(body);
+    if (!root.is_object()) {
         return Status::JSON_ERROR;
     }
-    const Json::Value& data = root["data"];
-    if (!data.isArray()) {
+    const JsonValue* data = find_member(root, "data");
+    if (data == nullptr || !data->is_array()) {
         return Status::JSON_ERROR;
     }
 
     out.clear();
-    out.reserve(static_cast<std::size_t>(data.size()));
-    for (const Json::Value& entry : data) {
-        if (!entry.isObject() || !entry["id"].isString()) {
+    const auto& array = data->get<JsonValue::array_t>();
+    out.reserve(array.size());
+    for (const JsonValue& entry : array) {
+        if (!entry.is_object()) {
             continue;
         }
-        const std::string id = entry["id"].asString();
-        if (id.empty() || denied(id)) {
+        const JsonValue* id = find_member(entry, "id");
+        if (id == nullptr || !id->is_string()) {
+            continue;
+        }
+        const std::string model_id = id->as<std::string>();
+        if (model_id.empty() || denied(model_id)) {
             continue;
         }
         ModelInfo info;
-        info.id = id;
-        if (entry["name"].isString()) {
-            info.name = entry["name"].asString();
+        info.id = model_id;
+        if (const JsonValue* name = find_member(entry, "name");
+            name != nullptr && name->is_string()) {
+            info.name = name->as<std::string>();
         }
-        const Json::Value& ctx = entry["context_length"];
-        if (ctx.isUInt64()) {
-            info.context_length = ctx.asUInt64();
+        if (const JsonValue* ctx = find_member(entry, "context_length");
+            ctx != nullptr && ctx->is_number()) {
+            info.context_length = static_cast<std::uint64_t>(ctx->as<double>());
         }
         out.push_back(std::move(info));
     }

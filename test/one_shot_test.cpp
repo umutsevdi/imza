@@ -1,6 +1,6 @@
 #include "app/application_state.h"
 #include "app/flows.h"
-#include "network/json_io.h"
+#include "network/json.h"
 #include "runtime/main_thread_queue.h"
 #include "test_state.h"
 
@@ -144,11 +144,12 @@ TEST_CASE("one-shot reports unattended permission blocks without a modal")
         [path](const imza::ChatRequest& request,
             const imza::StreamCallback& callback) {
             if (request.messages.back().type == imza::Message::Type::USER) {
-                Json::Value arguments(Json::objectValue);
-                arguments["script"] = "assert(not imza.fs.write([["
-                    + path.string() + "]], 'no'))";
+                imza::JsonValue arguments = imza::JsonValue::object_t { };
+                arguments.get<imza::JsonValue::object_t>()["script"]
+                    = imza::JsonValue("assert(not imza.fs.write([["
+                        + path.string() + "]], 'no'))");
                 callback(imza::make_tool_call_event(
-                    { "lua", imza::write_json(arguments), "", "call" }));
+                    { "lua", imza::json_dump(arguments), "", "call" }));
             } else {
                 callback(imza::make_delta_event("permission required"));
             }

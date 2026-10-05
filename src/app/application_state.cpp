@@ -108,10 +108,9 @@ namespace {
                 return request_modal(*raw, std::move(payload));
             },
             *state->runner);
-        *state->subagent_slot
-            = [raw](const ToolCallRequest& req, const Json::Value& args) {
-                  return raw->delegation->run_subagents(req, args);
-              };
+        *state->subagent_slot = [raw](const ToolCallRequest& req) {
+            return raw->delegation->run_subagents(req);
+        };
         state->runner->set_on_finish([raw](std::string error) {
             on_turn_finished(*raw, std::move(error));
         });

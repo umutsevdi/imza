@@ -1,5 +1,5 @@
 #include "common/util.h"
-#include "network/json_io.h"
+#include "network/json.h"
 #include "network/network.h"
 #include "network/sse_parse.h"
 
@@ -7,201 +7,330 @@ namespace imza {
 
 namespace {
 
-    Json::Value build(const ChatRequest& req)
+    // Wire structs: Glaze writes members in declaration order; optionals
+    // are omitted when empty (JSON_WRITE skips null members).
+    struct TextBlock {
+        std::string type = "text";
+        std::string text;
+    };
+
+    struct ThinkingBlockWire {
+        std::string type = "thinking";
+        std::string thinking;
+        std::string signature;
+    };
+
+    struct SourceBlock {
+        std::string type = "base64";
+        std::string media_type;
+        std::string data;
+    };
+
+    struct MediaBlock {
+        std::string type;
+        SourceBlock source;
+    };
+
+    struct ToolUseBlock {
+        std::string type = "tool_use";
+        std::string id;
+        std::string name;
+        // Historical args cross back to the provider verbatim; raw_json
+        // avoids a parse/serialize round-trip per tool call per request.
+        glz::raw_json input;
+    };
+
+    struct ToolResultBlock {
+        std::string type = "tool_result";
+        std::string tool_use_id;
+        std::string content;
+    };
+
+    using ContentBlock = std::variant<TextBlock, ThinkingBlockWire, MediaBlock,
+        ToolUseBlock, ToolResultBlock>;
+
+    // Message content is a string when plain text, a block array when the
+    // message carries thinking/media/tool calls; pre-serialized and
+    // embedded raw so the wire keeps the single "content" key.
+    struct RequestMessage {
+        std::string role;
+        glz::raw_json content;
+    };
+
+    RequestMessage string_message(std::string role, std::string content)
     {
-        Json::Value root;
-        root["model"]       = req.model;
-        root["stream"]      = true;
-        root["temperature"] = req.temperature;
+        // A plain JSON string serializes with quotes/escapes already; use
+        // it as the raw content.
+        auto quoted = glz::write<JSON_WRITE>(content);
+        return { std::move(role), glz::raw_json(quoted.value_or("null")) };
+    }
+
+    struct ToolSpecWire {
+        std::string name;
+        std::string description;
+        // Schema forwarded verbatim from the tool author.
+        glz::raw_json input_schema;
+    };
+
+    struct ThinkingConfig {
+        std::string type            = "enabled";
+        std::uint64_t budget_tokens = 0;
+    };
+
+    struct RequestBody {
+        std::string model;
+        bool stream              = true;
+        double temperature       = 0.7;
+        std::uint64_t max_tokens = 0;
+        std::optional<ThinkingConfig> thinking;
+        std::optional<std::vector<std::string>> system;
+        std::vector<RequestMessage> messages;
+        std::optional<std::vector<ToolSpecWire>> tools;
+    };
+
+    RequestMessage plain_message(std::string role, std::string content)
+    {
+        return string_message(std::move(role), std::move(content));
+    }
+
+    std::string build(const ChatRequest& req)
+    {
+        RequestBody body;
+        body.model       = req.model;
+        body.stream      = true;
+        body.temperature = req.temperature;
         const std::uint64_t output_tokens
             = req.max_output_tokens.value_or(4096);
+        body.max_tokens = req.thinking_budget
+            ? *req.thinking_budget + output_tokens
+            : output_tokens;
         if (req.thinking_budget) {
-            root["max_tokens"] = static_cast<Json::UInt64>(
-                *req.thinking_budget + output_tokens);
-            Json::Value thinking(Json::objectValue);
-            thinking["type"] = "enabled";
-            thinking["budget_tokens"]
-                = static_cast<Json::UInt64>(*req.thinking_budget);
-            root["thinking"] = thinking;
-        } else {
-            root["max_tokens"] = static_cast<Json::UInt64>(output_tokens);
+            body.thinking = ThinkingConfig { "enabled", *req.thinking_budget };
         }
 
-        Json::Value messages(Json::arrayValue);
-        Json::Value system(Json::arrayValue);
-        Json::Value tool_results(Json::arrayValue);
-
+        std::vector<std::string> system;
+        std::vector<ToolResultBlock> tool_results;
         auto flush_results = [&]() {
-            if (tool_results.size() > 0) {
-                Json::Value o;
-                o["role"]    = "user";
-                o["content"] = tool_results;
-                messages.append(o);
-                tool_results = Json::Value(Json::arrayValue);
+            if (!tool_results.empty()) {
+                RequestMessage message = plain_message("user", "");
+                message.content.str.clear();
+                message.content.str += "[";
+                for (std::size_t i = 0; i < tool_results.size(); ++i) {
+                    if (i != 0) {
+                        message.content.str += ",";
+                    }
+                    auto block = glz::write<JSON_WRITE>(tool_results[i]);
+                    message.content.str += block.value_or("null");
+                }
+                message.content.str += "]";
+                body.messages.push_back(std::move(message));
+                tool_results.clear();
             }
         };
 
         for (const auto& m : req.messages) {
             if (m.type == Message::Type::SYSTEM) {
-                system.append(m.content);
+                system.push_back(m.content);
                 continue;
             }
             if (m.type == Message::Type::TOOL) {
-                Json::Value block;
-                block["type"]        = "tool_result";
-                block["tool_use_id"] = m.tool_call_id;
-                block["content"]     = m.content;
-                tool_results.append(block);
+                tool_results.push_back(
+                    { "tool_result", m.tool_call_id, m.content });
                 continue;
             }
             flush_results();
-            Json::Value o;
-            o["role"] = role_str(m.type);
+            const std::string role = role_str(m.type);
             if (!m.tool_calls.empty() || !m.thinking.empty()
                 || (m.type == Message::Type::USER && !m.media.empty())) {
-                Json::Value content(Json::arrayValue);
+                std::vector<ContentBlock> blocks;
                 for (const auto& tb : m.thinking) {
-                    Json::Value block;
-                    block["type"]      = "thinking";
-                    block["thinking"]  = tb.text;
-                    block["signature"] = tb.signature;
-                    content.append(block);
+                    blocks.push_back(ThinkingBlockWire {
+                        "thinking", tb.text, tb.signature });
                 }
                 if (!m.content.empty()) {
-                    Json::Value text;
-                    text["type"] = "text";
-                    text["text"] = m.content;
-                    content.append(text);
+                    blocks.push_back(TextBlock { "text", m.content });
                 }
                 if (m.type == Message::Type::USER) {
                     for (const Attachment& media : m.media) {
-                        Json::Value block;
-                        block["type"] = media.type == Attachment::Type::IMAGE
-                            ? "image"
-                            : "document";
-                        block["source"]["type"]       = "base64";
-                        block["source"]["media_type"] = media.media_type;
-                        block["source"]["data"] = base64_encode(media.content);
-                        content.append(std::move(block));
+                        blocks.push_back(MediaBlock {
+                            media.type == Attachment::Type::IMAGE ? "image"
+                                                                  : "document",
+                            { "base64", media.media_type,
+                                base64_encode(media.content) } });
                     }
                 }
                 for (const auto& tc : m.tool_calls) {
-                    Json::Value use;
-                    use["type"]  = "tool_use";
-                    use["id"]    = tc.id;
-                    use["name"]  = tc.name;
-                    use["input"] = parse_json(tc.args);
-                    content.append(use);
+                    blocks.push_back(ToolUseBlock { "tool_use", tc.id, tc.name,
+                        glz::raw_json { tc.args } });
                 }
-                o["content"] = content;
+                // Serialize the block array once and embed it raw; content
+                // is either a quoted string or an array on the wire.
+                std::string content = "[";
+                for (std::size_t i = 0; i < blocks.size(); ++i) {
+                    if (i != 0) {
+                        content += ",";
+                    }
+                    content
+                        += glz::write<JSON_WRITE>(blocks[i]).value_or("null");
+                }
+                content += "]";
+                RequestMessage message;
+                message.role    = role;
+                message.content = glz::raw_json { std::move(content) };
+                body.messages.push_back(std::move(message));
             } else {
-                o["content"] = m.content;
+                body.messages.push_back(plain_message(role, m.content));
             }
-            messages.append(o);
         }
         flush_results();
         if (!system.empty()) {
-            root["system"] = system;
+            body.system = std::move(system);
         }
         if (!req.tools.empty()) {
-            Json::Value tools(Json::arrayValue);
+            std::vector<ToolSpecWire> tools;
+            tools.reserve(req.tools.size());
             for (const auto& t : req.tools) {
-                Json::Value spec;
-                spec["name"]         = t.name;
-                spec["description"]  = t.description;
-                spec["input_schema"] = t.parameters;
-                tools.append(spec);
+                tools.push_back(
+                    { t.name, t.description, glz::raw_json { t.parameters } });
             }
-            root["tools"] = tools;
+            body.tools = std::move(tools);
         }
-        root["messages"] = messages;
-        return root;
+        auto out = glz::write<JSON_WRITE>(body);
+        return out ? std::move(out.value()) : std::string { };
     }
+
+    // --- SSE parsing: typed payload views -------------------------------
+    // Only the members the parse switch consumes; optionals tolerate
+    // provider drift and absent fields default harmlessly.
+
+    struct ContentBlockStart {
+        struct Block {
+            std::string type;
+            std::string id;
+            std::string name;
+            std::optional<std::string> thinking;
+        };
+        Block content_block;
+        int index = 0;
+    };
+
+    struct MessageStart {
+        struct Usage {
+            std::uint64_t input_tokens                = 0;
+            std::uint64_t cache_read_input_tokens     = 0;
+            std::uint64_t cache_creation_input_tokens = 0;
+        };
+        struct Message {
+            std::optional<Usage> usage;
+        };
+        Message message;
+    };
+
+    struct MessageDelta {
+        struct Usage {
+            std::uint64_t output_tokens = 0;
+        };
+        std::optional<Usage> usage;
+    };
+
+    struct BlockDelta {
+        struct Delta {
+            std::string type;
+            std::string text;
+            std::string thinking;
+            std::string signature;
+            std::string partial_json;
+        };
+        Delta delta;
+        int index = 0;
+    };
+
+    struct BlockStop {
+        int index = 0;
+    };
 
     void parse(ParseState& state, std::string_view event, std::string_view data,
         std::vector<StreamEvent>& outs)
     {
         if (event == "content_block_start") {
-            const Json::Value root   = parse_json(data);
-            const Json::Value& block = root["content_block"];
-            const std::string type   = block.get("type", "").asString();
-            if (type == "tool_use") {
-                ToolAccum& acc
-                    = state.tool_accums[root.get("index", 0).asInt()];
-                acc.id   = block.get("id", "").asString();
-                acc.name = block.get("name", "").asString();
+            ContentBlockStart payload;
+            if (json_parse_checked(data, payload)) {
+                return;
+            }
+            if (payload.content_block.type == "tool_use") {
+                ToolAccum& acc = state.tool_accums[payload.index];
+                acc.id         = payload.content_block.id;
+                acc.name       = payload.content_block.name;
                 emit_ready_tool_start(acc, outs);
-            } else if (type == "thinking") {
-                ThinkingAccum& acc
-                    = state.thinking_accums[root.get("index", 0).asInt()];
-                acc.text = block.get("thinking", "").asString();
+            } else if (payload.content_block.type == "thinking") {
+                state.thinking_accums[payload.index].text
+                    = payload.content_block.thinking.value_or("");
             }
             return;
         }
         if (event == "message_start") {
-            const Json::Value root = parse_json(data);
-            const Json::Value& msg = root["message"];
-            if (msg.isObject()) {
-                const Json::Value& usage = msg["usage"];
-                if (usage.isObject()) {
-                    state.usage.cached_read
-                        = usage.get("cache_read_input_tokens", 0).asUInt64();
-                    state.usage.cached_write
-                        = usage.get("cache_creation_input_tokens", 0)
-                              .asUInt64();
-                    state.usage.prompt = usage.get("input_tokens", 0).asUInt64()
-                        + state.usage.cached_read + state.usage.cached_write;
-                    state.usage.total = state.usage.prompt;
-                }
+            MessageStart payload;
+            if (json_parse_checked(data, payload)) {
+                return;
+            }
+            if (payload.message.usage) {
+                const auto& usage        = *payload.message.usage;
+                state.usage.cached_read  = usage.cache_read_input_tokens;
+                state.usage.cached_write = usage.cache_creation_input_tokens;
+                state.usage.prompt       = usage.input_tokens
+                    + usage.cache_read_input_tokens
+                    + usage.cache_creation_input_tokens;
+                state.usage.total = state.usage.prompt;
             }
             return;
         }
         if (event == "message_delta") {
-            const Json::Value root   = parse_json(data);
-            const Json::Value& usage = root["usage"];
-            if (usage.isObject()) {
-                state.usage.completion
-                    = usage.get("output_tokens", 0).asUInt64();
+            MessageDelta payload;
+            if (json_parse_checked(data, payload)) {
+                return;
+            }
+            if (payload.usage) {
+                state.usage.completion = payload.usage->output_tokens;
                 state.usage.total = state.usage.prompt + state.usage.completion;
             }
             return;
         }
         if (event == "content_block_delta") {
-            const Json::Value root   = parse_json(data);
-            const Json::Value& delta = root["delta"];
-            const std::string type   = delta.get("type", "").asString();
-            if (type == "text_delta") {
-                outs.push_back(
-                    make_delta_event(delta.get("text", "").asString()));
-            } else if (type == "input_json_delta") {
-                auto it = state.tool_accums.find(root.get("index", 0).asInt());
+            BlockDelta payload;
+            if (json_parse_checked(data, payload)) {
+                return;
+            }
+            const auto& delta = payload.delta;
+            if (delta.type == "text_delta") {
+                outs.push_back(make_delta_event(delta.text));
+            } else if (delta.type == "input_json_delta") {
+                auto it = state.tool_accums.find(payload.index);
                 if (it != state.tool_accums.end()) {
-                    it->second.args += delta.get("partial_json", "").asString();
+                    it->second.args += delta.partial_json;
                 }
-            } else if (type == "thinking_delta") {
-                const std::string text = delta.get("thinking", "").asString();
-                const int index        = root.get("index", 0).asInt();
-                ThinkingAccum& acc     = state.thinking_accums[index];
-                acc.text += text;
-                outs.push_back(make_reasoning_event(text));
-            } else if (type == "signature_delta") {
-                const int index    = root.get("index", 0).asInt();
-                ThinkingAccum& acc = state.thinking_accums[index];
-                acc.signature += delta.get("signature", "").asString();
+            } else if (delta.type == "thinking_delta") {
+                ThinkingAccum& acc = state.thinking_accums[payload.index];
+                acc.text += delta.thinking;
+                outs.push_back(make_reasoning_event(delta.thinking));
+            } else if (delta.type == "signature_delta") {
+                ThinkingAccum& acc = state.thinking_accums[payload.index];
+                acc.signature += delta.signature;
             }
             return;
         }
         if (event == "content_block_stop") {
-            const Json::Value root = parse_json(data);
-            const int index        = root.get("index", 0).asInt();
-            auto it                = state.tool_accums.find(index);
+            BlockStop payload;
+            if (json_parse_checked(data, payload)) {
+                return;
+            }
+            auto it = state.tool_accums.find(payload.index);
             if (it != state.tool_accums.end()) {
                 const ToolCallRequest req = finish_accum(it->second);
                 state.tool_accums.erase(it);
                 outs.push_back(make_tool_call_event(req));
                 return;
             }
-            auto think_it = state.thinking_accums.find(index);
+            auto think_it = state.thinking_accums.find(payload.index);
             if (think_it != state.thinking_accums.end()) {
                 outs.push_back(
                     make_reasoning_event("", think_it->second.signature));
