@@ -71,12 +71,12 @@ TEST_CASE("plan doc updates live and labels agent revisions")
     CHECK(rendered.find("extra note from the agent") != std::string::npos);
 }
 
-TEST_CASE("note editor opens on c and saves on Enter")
+TEST_CASE("note editor opens and saves on Enter")
 {
     auto fx = make_focused_doc(imza::test::make_test_state(), true, skeleton);
     (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
-    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
     const std::string editor = imza::test::to_text(fx.doc->Render(), 100, 40);
     CHECK(editor.find("Leave a note") != std::string::npos);
 
@@ -98,7 +98,7 @@ TEST_CASE("note card renders under the annotated block")
     for (int i = 0; i < 4; ++i) {
         REQUIRE(fx.doc->OnEvent(ftxui::Event::ArrowDown));
     }
-    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
     imza::test::require_type(fx.doc, "split this step");
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
 
@@ -123,7 +123,7 @@ TEST_CASE("revise submits one turn with section and line locators")
     for (int i = 0; i < 4; ++i) {
         REQUIRE(fx.doc->OnEvent(ftxui::Event::ArrowDown));
     }
-    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
     imza::test::require_type(fx.doc, "reorder these");
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("s")));
@@ -146,7 +146,7 @@ TEST_CASE("unfocused pane ignores annotator keys and opens no editor")
     auto fx = make_focused_doc(imza::test::make_test_state(), false, skeleton);
     (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
-    CHECK_FALSE(fx.doc->OnEvent(ftxui::Event::Character("c")));
+    CHECK_FALSE(fx.doc->OnEvent(ftxui::Event::Return));
     CHECK_FALSE(fx.doc->OnEvent(ftxui::Event::Character("s")));
     const std::string rendered = imza::test::to_text(fx.doc->Render(), 100, 40);
     CHECK(rendered.find("Leave a note") == std::string::npos);
@@ -158,7 +158,7 @@ TEST_CASE("e and d edit and delete the selected note")
     auto fx = make_focused_doc(imza::test::make_test_state(), true, skeleton);
     (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
-    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
     imza::test::require_type(fx.doc, "first draft");
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
 
@@ -189,7 +189,7 @@ TEST_CASE("section jumps with brackets and a heading note anchors the section")
     // ] jumps to the next section heading (Approach); a note on the
     // heading row anchors the whole section without a block excerpt.
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("]")));
-    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
     imza::test::require_type(fx.doc, "too detailed");
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("s")));
@@ -388,7 +388,7 @@ TEST_CASE("revise button click submits the notes")
         true, skeleton);
     (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
-    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
     imza::test::require_type(fx.doc, "tighten scope");
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
     (void)imza::test::to_text(fx.doc->Render(), 100, 40);
@@ -410,7 +410,7 @@ TEST_CASE("revise works repeatedly without a plan change in between")
 
     // First revise via the keyboard.
     (void)imza::test::to_text(fx.doc->Render(), 100, 40);
-    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
     imza::test::require_type(fx.doc, "first pass");
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
     (void)imza::test::to_text(fx.doc->Render(), 100, 40);
@@ -421,7 +421,7 @@ TEST_CASE("revise works repeatedly without a plan change in between")
     // button must still submit (no revise latch). The pane re-renders
     // between keystrokes in the app, so mirror that here.
     (void)imza::test::to_text(fx.doc->Render(), 100, 40);
-    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
     imza::test::require_type(fx.doc, "second pass");
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
     (void)imza::test::to_text(fx.doc->Render(), 100, 40);
@@ -502,7 +502,7 @@ TEST_CASE("a second revise works after the agent updates the plan")
 
     // First revise.
     (void)imza::test::to_text(fx.doc->Render(), 100, 40);
-    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
     imza::test::require_type(fx.doc, "first pass");
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
     (void)imza::test::to_text(fx.doc->Render(), 100, 40);
@@ -516,7 +516,7 @@ TEST_CASE("a second revise works after the agent updates the plan")
     (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
     // Second revise starts a fresh turn.
-    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("c")));
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
     imza::test::require_type(fx.doc, "second pass");
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
     (void)imza::test::to_text(fx.doc->Render(), 100, 40);

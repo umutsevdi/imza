@@ -7,6 +7,7 @@
 #include "test_helpers.h"
 #include "test_state.h"
 #include "ui/ui.h"
+#include "workspace/review.h"
 
 namespace {
 
@@ -169,7 +170,7 @@ TEST_CASE("plan tab moves focus to the doc pane on click")
     REQUIRE(imza::test::click_label(plan, "Initial Plan"));
     const std::string doc_focused
         = imza::test::to_text(plan->Render(), 100, 40);
-    CHECK(doc_focused.find("c note") != std::string::npos);
+    CHECK(doc_focused.find("Enter note") != std::string::npos);
 }
 TEST_CASE("plan tab moves focus back to the chat pane on click")
 {
@@ -186,7 +187,7 @@ TEST_CASE("plan tab moves focus back to the chat pane on click")
     plan->TakeFocus();
 
     REQUIRE(imza::test::click_label(plan, "Initial Plan"));
-    CHECK(imza::test::to_text(plan->Render(), 100, 40).find("c note")
+    CHECK(imza::test::to_text(plan->Render(), 100, 40).find("Enter note")
         != std::string::npos);
 
     // Click the chat pane (an ASCII row, so the label offset matches the
@@ -263,4 +264,40 @@ TEST_CASE("chat focused: annotator keys land in the chat input")
     const std::string rendered = imza::test::to_text(plan->Render(), 100, 40);
     CHECK(rendered.find("c[]") != std::string::npos);
     CHECK(rendered.find("Leave a note") == std::string::npos);
+}
+TEST_CASE("review pane shortcuts: p sends to plan, r refuses without a diff")
+{
+    auto state = imza::test::make_test_state(
+        imza::test::run_immediately, imza::test::test_config());
+    auto review = imza::make_review(
+        state, [] { return imza::test::wide_layout(); },
+        [](imza::WorkflowPhase) { });
+    (void)imza::test::to_text(review->Render(), 100, 40);
+
+    // No comments yet: p refuses instead of sending.
+    REQUIRE(review->OnEvent(ftxui::Event::Character("p")));
+    CHECK(state->session->error().find("Add a review comment")
+        != std::string::npos);
+    CHECK(state->session->items().empty());
+
+    // r without a loaded diff refuses.
+    state->session->clear_error();
+    REQUIRE(review->OnEvent(ftxui::Event::Character("r")));
+    CHECK(state->session->error().find("no changes to review")
+        != std::string::npos);
+
+    // With a comment, p submits a plan turn and clears the comments.
+    state->session->clear_error();
+    REQUIRE(
+        state->review->add_comment({ "file.cpp", 2, 3, "line" }, "note") != 0);
+    REQUIRE(review->OnEvent(ftxui::Event::Character("p")));
+    bool found = false;
+    for (const auto& item : state->session->items()) {
+        if (const auto* user = std::get_if<imza::UserTurn>(&item);
+            user != nullptr && user->text.find("note") != std::string::npos) {
+            found = true;
+        }
+    }
+    CHECK(found);
+    CHECK(state->review->comments().empty());
 }

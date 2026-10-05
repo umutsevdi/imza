@@ -171,8 +171,7 @@ namespace {
             if (event == Event::Character("]")) {
                 return _jump_section(1);
             }
-            if (event == Event::Return || event == Event::Character(" ")
-                || event == Event::Character("c")) {
+            if (event == Event::Return || event == Event::Character(" ")) {
                 return _open_note();
             }
             if (event == Event::Character("e")) {
@@ -228,7 +227,7 @@ namespace {
                     return "↑↓ navigate · e edit · d delete · s revise";
                 }
             }
-            return "↑↓ navigate · [] sections · c note · s revise";
+            return "↑↓ navigate · [] sections · Enter note · s revise";
         }
 
         // Reload from the session when a plan change was signaled. The

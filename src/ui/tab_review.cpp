@@ -209,9 +209,10 @@ namespace {
                 | flex;
             const std::string hint = _editor.is_open()
                 ? "Enter save · Alt+Enter new line · Esc cancel"
-                : _selected_comment
-                ? "↑↓ navigate · e edit · d delete"
-                : "↑↓ navigate · [] files · Enter collapse · c comment  ";
+                : _selected_comment ? "↑↓ navigate · e edit · d delete"
+                                    : "↑↓ navigate · [] files · Enter comment "
+                                      "· c collapse · p Send to Plan · "
+                                      "r AI Review";
             // Advertise the Sidechat toggle while no pane is on screen.
             const std::string hint_sidechat
                 = _state->sidechat_open ? "" : " · Ctrl+S Sidechat";
@@ -229,13 +230,21 @@ namespace {
                 plan_action   = std::move(plan_action) | dim;
                 review_action = std::move(review_action) | dim;
             }
+            _plan_box      = Box { };
+            _review_ai_box = Box { };
+            plan_action    = std::move(plan_action) | reflect(_plan_box);
+            review_action  = std::move(review_action) | reflect(_review_ai_box);
             Elements actions { std::move(plan_action), text(" "),
                 std::move(review_action) };
             if (review_running) {
+                _viewer_box = Box { };
+                _cancel_box = Box { };
                 actions.push_back(text(" "));
-                actions.push_back(_review_viewer_button->Render());
+                actions.push_back(
+                    _review_viewer_button->Render() | reflect(_viewer_box));
                 actions.push_back(text(" · "));
-                actions.push_back(_review_cancel_button->Render());
+                actions.push_back(
+                    _review_cancel_button->Render() | reflect(_cancel_box));
             }
             actions.push_back(filler());
             actions.push_back(text(hint_line) | dim);
@@ -258,18 +267,6 @@ namespace {
                 }
                 return _editor.input()->OnEvent(event);
             }
-            if (_plan_button->OnEvent(event)
-                || _ai_review_button->OnEvent(event)) {
-                return true;
-            }
-            if (_review_running->load()
-                && _review_viewer_button->OnEvent(event)) {
-                return true;
-            }
-            if (_review_running->load()
-                && _review_cancel_button->OnEvent(event)) {
-                return true;
-            }
             if (event.is_mouse()) {
                 const Mouse& mouse = event.mouse();
                 if (mouse.button == Mouse::WheelUp) {
@@ -280,6 +277,9 @@ namespace {
                 }
                 if (mouse.button == Mouse::Left
                     && mouse.motion == Mouse::Pressed) {
+                    if (_button_press(mouse)) {
+                        return true;
+                    }
                     for (std::size_t i = 0; i < _boxes.size(); ++i) {
                         if (_boxes[i].Contain(mouse.x, mouse.y)) {
                             _selected = _box_rows[i];
@@ -316,17 +316,28 @@ namespace {
             if (event == Event::Character("]")) {
                 return _jump_file(1);
             }
-            if (event == Event::Return || event == Event::Character(" ")) {
+            if (event == Event::Return) {
+                return _activate(false, true);
+            }
+            if (event == Event::Character(" ")) {
                 return _activate(false);
             }
             if (event == Event::Character("c")) {
-                return _open_editor();
+                return _collapse_selected();
             }
             if (event == Event::Character("e")) {
                 return _edit_comment();
             }
             if (event == Event::Character("d")) {
                 return _delete_comment();
+            }
+            if (event == Event::Character("p")) {
+                _send_to_plan();
+                return true;
+            }
+            if (event == Event::Character("r")) {
+                _provide_review();
+                return true;
             }
             return false;
         }
@@ -866,7 +877,7 @@ namespace {
             return true;
         }
 
-        bool _activate(bool mouse)
+        bool _activate(bool mouse, bool open_editor = false)
         {
             if (_visible.empty()) {
                 return false;
@@ -874,19 +885,65 @@ namespace {
             VisibleRow& row   = _visible[_selected];
             _selected_comment = row.comment_id;
             if (row.kind == VisibleRow::Kind::FILE) {
-                const std::string& path = _path(row.file_index);
-                if (_collapsed.contains(path)) {
-                    _collapsed.erase(path);
-                } else {
-                    _collapsed.insert(path);
-                }
-                animation::RequestAnimationFrame();
-                return true;
+                return _collapse_selected();
             }
-            if (mouse && row.kind == VisibleRow::Kind::LINE) {
+            if ((mouse || open_editor) && row.kind == VisibleRow::Kind::LINE) {
                 return _open_editor();
             }
             return row.kind == VisibleRow::Kind::COMMENT;
+        }
+
+        bool _collapse_selected()
+        {
+            if (_visible.empty()) {
+                return false;
+            }
+            const VisibleRow& row = _visible[_selected];
+            _selected_comment     = row.comment_id;
+            if (row.kind != VisibleRow::Kind::FILE) {
+                return false;
+            }
+            const std::string& path = _path(row.file_index);
+            if (_collapsed.contains(path)) {
+                _collapsed.erase(path);
+            } else {
+                _collapsed.insert(path);
+            }
+            animation::RequestAnimationFrame();
+            return true;
+        }
+
+        bool _button_press(const Mouse& mouse)
+        {
+            if (_plan_box.Contain(mouse.x, mouse.y)) {
+                return _forward_press(_plan_button, mouse)
+                    || (_send_to_plan(), true);
+            }
+            if (_review_ai_box.Contain(mouse.x, mouse.y)) {
+                return _forward_press(_ai_review_button, mouse)
+                    || (_provide_review(), true);
+            }
+            if (_review_running->load()) {
+                if (_viewer_box.Contain(mouse.x, mouse.y)) {
+                    return _forward_press(_review_viewer_button, mouse)
+                        || (_open_review_viewer(), true);
+                }
+                if (_cancel_box.Contain(mouse.x, mouse.y)) {
+                    return _forward_press(_review_cancel_button, mouse)
+                        || (_cancel_review(), true);
+                }
+            }
+            return false;
+        }
+
+        static bool _forward_press(Component& button, const Mouse& mouse)
+        {
+            Mouse press;
+            press.button = Mouse::Left;
+            press.motion = Mouse::Pressed;
+            press.x      = mouse.x;
+            press.y      = mouse.y;
+            return button->OnEvent(Event::Mouse("", press));
         }
 
         bool _open_editor()
@@ -1047,6 +1104,10 @@ namespace {
         const RepositoryReview* _highlighted_review = nullptr;
         std::deque<Box> _boxes;
         std::vector<int> _box_rows;
+        Box _plan_box;
+        Box _review_ai_box;
+        Box _viewer_box;
+        Box _cancel_box;
         int _selected                  = 0;
         int _rendered_y                = 0;
         int _skipped_height            = 0;
