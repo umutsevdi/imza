@@ -7,6 +7,8 @@
 #include <string>
 #include <string_view>
 
+#include "common/util.h"
+
 namespace imza {
 
 struct ApplicationComponent { };
@@ -18,6 +20,14 @@ struct Attachment {
     std::string content;
     Type type = Type::TEXT;
     std::string media_type;
+    std::string encoded;
+    std::string encoded_or_compute() const
+    {
+        if (type == Type::TEXT) {
+            return { };
+        }
+        return encoded.empty() ? base64_encode(content) : encoded;
+    }
 
     const char* type_name() const
     {

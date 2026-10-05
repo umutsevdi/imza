@@ -149,7 +149,7 @@ namespace {
             : std::optional<std::string>(attachment.media_type);
         stored.content    = attachment.type == Attachment::Type::TEXT
             ? attachment.content
-            : base64_encode(attachment.content);
+            : attachment.encoded_or_compute();
         return stored;
     }
 
@@ -334,6 +334,7 @@ namespace {
                         }
                         attachment.content    = *content;
                         attachment.media_type = entry.media_type.value_or("");
+                        attachment.encoded    = entry.content;
                     }
                     user.attachments.push_back(std::move(attachment));
                 }

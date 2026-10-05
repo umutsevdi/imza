@@ -592,6 +592,16 @@ TEST_CASE("base64 round-trips every byte value")
         imza::base64_decode(imza::base64_encode(bytes)).value_or("?") == bytes);
 }
 
+TEST_CASE("media data url reuses the cached base64 payload")
+{
+    imza::Attachment media { "photo.png", "cat", imza::Attachment::Type::IMAGE,
+        "image/png" };
+    CHECK(imza::media_data_url(media) == "data:image/png;base64,Y2F0");
+
+    media.encoded = "TUVET0NLRUQ=";
+    CHECK(imza::media_data_url(media) == "data:image/png;base64,TUVET0NLRUQ=");
+}
+
 TEST_CASE("OpenAI Chat serializes user images and PDFs")
 {
     const auto provider = imza::get_provider(imza::Route { });

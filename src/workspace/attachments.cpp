@@ -210,8 +210,13 @@ AttachmentResult load_attachment(
     }
     const std::string display
         = utf8_from_path(std::filesystem::relative(path, canonical_root, ec));
+    std::string encoded;
+    if (type != Attachment::Type::TEXT) {
+        encoded = base64_encode(content);
+    }
     return { Status::OK,
-        Attachment { display, std::move(content), type, std::move(media_type) },
+        Attachment { display, std::move(content), type, std::move(media_type),
+            std::move(encoded) },
         "" };
 }
 

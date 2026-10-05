@@ -148,7 +148,7 @@ namespace {
                             media.type == Attachment::Type::IMAGE ? "image"
                                                                   : "document",
                             { "base64", media.media_type,
-                                base64_encode(media.content) } });
+                                media.encoded_or_compute() } });
                     }
                 }
                 for (const auto& tc : m.tool_calls) {

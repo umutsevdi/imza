@@ -15,8 +15,7 @@ JsonValue parse_json(std::string_view text)
 
 std::string media_data_url(const Attachment& media)
 {
-    return "data:" + media.media_type + ";base64,"
-        + base64_encode(media.content);
+    return "data:" + media.media_type + ";base64," + media.encoded_or_compute();
 }
 
 } // namespace imza

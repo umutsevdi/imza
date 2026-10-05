@@ -69,6 +69,7 @@ TEST_CASE("attachments are classified by signatures instead of extensions")
         CHECK(loaded.attachment->type == type);
         CHECK(loaded.attachment->media_type == media_type);
         CHECK(loaded.attachment->content == content);
+        CHECK(loaded.attachment->encoded == imza::base64_encode(content));
     }
 
     imza::test::write_file(tmp.file("text.png"), "not actually an image");
@@ -76,6 +77,7 @@ TEST_CASE("attachments are classified by signatures instead of extensions")
     REQUIRE(text.attachment);
     CHECK(text.attachment->type == imza::Attachment::Type::TEXT);
     CHECK(text.attachment->media_type.empty());
+    CHECK(text.attachment->encoded.empty());
 }
 
 TEST_CASE("native attachments are not inserted into prompt text")
