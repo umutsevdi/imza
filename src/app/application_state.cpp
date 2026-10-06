@@ -4,6 +4,7 @@
 #include "permissions/evaluator.h"
 #include "permissions/filesystem.h"
 #include "permissions/store.h"
+#include "tools/mcp_manager.h"
 #include "tools/skills.h"
 #include "turn/delegation.h"
 #include "turn/prompt.h"
@@ -144,14 +145,17 @@ namespace {
         state->sessions  = std::make_shared<SessionStore>();
         state->input_history
             = std::make_shared<InputHistoryStore>(input_history_path());
-        state->providers   = std::make_shared<ProviderStore>(std::move(config));
-        state->subagents   = std::make_shared<SubagentManager>();
-        state->environment = std::make_shared<Environment>();
-        state->review      = std::make_shared<ReviewState>();
-        state->skills      = std::make_shared<SkillStore>();
-        state->permissions = std::make_shared<PermissionStore>();
-        state->post        = guarded_post(state.get(), std::move(post));
-        state->on_exit     = [] { };
+        std::map<std::string, McpServerConfig> mcp_servers
+            = std::move(config.mcp_servers);
+        state->providers = std::make_shared<ProviderStore>(std::move(config));
+        state->mcp       = std::make_shared<McpManager>(std::move(mcp_servers));
+        state->subagents = std::make_shared<SubagentManager>();
+        state->environment   = std::make_shared<Environment>();
+        state->review        = std::make_shared<ReviewState>();
+        state->skills        = std::make_shared<SkillStore>();
+        state->permissions   = std::make_shared<PermissionStore>();
+        state->post          = guarded_post(state.get(), std::move(post));
+        state->on_exit       = [] { };
         state->runtime_flags = runtime_flags;
         if (!state->subagent_slot) {
             state->subagent_slot = std::make_shared<SubagentToolFn>();
@@ -174,6 +178,7 @@ namespace {
         state->sessions       = parent.sessions;
         state->input_history  = parent.input_history;
         state->providers      = parent.providers;
+        state->mcp            = parent.mcp;
         state->subagents      = std::make_shared<SubagentManager>();
         state->environment    = parent.environment;
         state->review         = std::make_shared<ReviewState>();

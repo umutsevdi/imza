@@ -28,6 +28,7 @@ class TurnRunner;
 class Delegation;
 class PermissionStore;
 class PromptStore;
+class McpManager;
 
 enum class AgentNotification { TURN_FINISHED, INPUT_REQUIRED };
 
@@ -41,6 +42,7 @@ struct ApplicationState {
     std::shared_ptr<SessionStore> sessions;
     std::shared_ptr<InputHistoryStore> input_history;
     std::shared_ptr<ProviderStore> providers;
+    std::shared_ptr<McpManager> mcp;
     std::shared_ptr<SubagentManager> subagents;
     std::shared_ptr<Environment> environment;
     std::shared_ptr<ReviewState> review;

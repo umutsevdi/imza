@@ -16,6 +16,43 @@
 
 namespace imza {
 
+// Glaze-reflected: must have external linkage (Clang/MSVC requirement).
+// OAuth request/response wire shapes.
+struct ClientIdRequest {
+    std::string client_id;
+};
+
+struct DeviceTokenRequest {
+    std::string device_auth_id;
+    std::string user_code;
+};
+
+struct RefreshRequest {
+    std::string grant_type = "refresh_token";
+    std::string refresh_token;
+    std::string client_id;
+};
+
+struct StoredTokenResponse {
+    std::optional<std::string> access_token;
+    std::optional<std::string> refresh_token;
+    std::optional<std::string> id_token;
+    std::optional<std::int64_t> expires_in;
+};
+
+struct StoredDeviceCodeResponse {
+    std::optional<std::string> device_auth_id;
+    std::optional<std::string> user_code;
+    std::optional<std::string> interval;
+    std::optional<std::string> verification_uri;
+    std::optional<std::string> verification_uri_complete;
+};
+
+struct StoredAuthorization {
+    std::optional<std::string> authorization_code;
+    std::optional<std::string> code_verifier;
+};
+
 namespace {
 
     constexpr std::string_view OPENAI_CLIENT_ID
@@ -78,39 +115,6 @@ namespace {
         return !changed.wait_for(lock, stop, duration, [] { return false; });
     }
 
-    // OAuth request/response wire shapes. File scope: Glaze reflection
-    // rejects function-local types.
-    struct ClientIdRequest {
-        std::string client_id;
-    };
-
-    struct DeviceTokenRequest {
-        std::string device_auth_id;
-        std::string user_code;
-    };
-
-    struct RefreshRequest {
-        std::string grant_type = "refresh_token";
-        std::string refresh_token;
-        std::string client_id;
-    };
-
-    // OAuth response wire shapes.
-    struct StoredTokenResponse {
-        std::optional<std::string> access_token;
-        std::optional<std::string> refresh_token;
-        std::optional<std::string> id_token;
-        std::optional<std::int64_t> expires_in;
-    };
-
-    struct StoredDeviceCodeResponse {
-        std::optional<std::string> device_auth_id;
-        std::optional<std::string> user_code;
-        std::optional<std::string> interval;
-        std::optional<std::string> verification_uri;
-        std::optional<std::string> verification_uri_complete;
-    };
-
     std::int64_t expires_from(
         const StoredTokenResponse& root, std::string_view access_token)
     {
@@ -150,11 +154,6 @@ namespace {
         }
         return { Status::OK, std::move(credentials), { } };
     }
-
-    struct StoredAuthorization {
-        std::optional<std::string> authorization_code;
-        std::optional<std::string> code_verifier;
-    };
 
     SubscriptionResult exchange_openai(const StoredAuthorization& authorization,
         const SubscriptionHttpPost& post)

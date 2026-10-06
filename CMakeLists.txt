@@ -268,6 +268,7 @@ add_library(imza_runtime
     src/conversation/session.cpp
     src/conversation/session_store.cpp
     src/providers/store.cpp
+    src/tools/mcp_manager.cpp
     src/workspace/review.cpp
     src/runtime/main_thread_queue.cpp
     src/runtime/modal_queue.cpp

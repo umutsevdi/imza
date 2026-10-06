@@ -17,6 +17,25 @@
 
 namespace imza {
 
+// Glaze-reflected: must have external linkage (Clang/MSVC requirement).
+struct UpdateCache {
+    std::int64_t last_checked_at = 0;
+    std::string version;
+};
+
+// GitHub release payload wire shape.
+struct StoredAsset {
+    std::optional<std::string> name;
+    std::optional<std::string> browser_download_url;
+};
+
+struct StoredRelease {
+    std::optional<std::string> tag_name;
+    std::optional<bool> draft;
+    std::optional<bool> prerelease;
+    std::vector<StoredAsset> assets;
+};
+
 namespace {
 
     constexpr const char* RELEASES_URL
@@ -24,11 +43,6 @@ namespace {
     constexpr long FETCH_TIMEOUT_SECS    = 30;
     constexpr long DOWNLOAD_TIMEOUT_SECS = 600;
     constexpr std::int64_t ONE_DAY_SECS  = 86400;
-
-    struct UpdateCache {
-        std::int64_t last_checked_at = 0;
-        std::string version;
-    };
 
     std::string_view version_core(std::string_view version)
     {
@@ -65,19 +79,6 @@ namespace {
         }
         return cache.last_checked_at + ONE_DAY_SECS <= now_unix_secs;
     }
-
-    // GitHub release payload wire shape.
-    struct StoredAsset {
-        std::optional<std::string> name;
-        std::optional<std::string> browser_download_url;
-    };
-
-    struct StoredRelease {
-        std::optional<std::string> tag_name;
-        std::optional<bool> draft;
-        std::optional<bool> prerelease;
-        std::vector<StoredAsset> assets;
-    };
 
     UpdateCache load_update_cache(const std::filesystem::path& path)
     {

@@ -46,6 +46,18 @@ struct McpToolCallResult {
     std::optional<JsonValue> structured_content; // "structuredContent"
 };
 
+struct McpToolDefinition {
+    std::string name;
+    std::optional<std::string> title;
+    std::optional<std::string> description;
+    std::optional<JsonValue> input_schema; // "inputSchema", verbatim
+};
+
+struct McpListToolsResult {
+    std::optional<std::vector<McpToolDefinition>> tools;
+    std::optional<std::string> next_cursor; // "nextCursor"
+};
+
 struct McpRpcError {
     std::int64_t code = 0;
     std::string message;
@@ -95,6 +107,10 @@ Status mcp_initialize(McpSession& session, std::string& detail);
 Status mcp_call_tool(McpSession& session, const std::string& name,
     const JsonValue& arguments, McpToolCallResult& out, std::string& detail);
 
+// tools/list with full cursor pagination; appends to `out`.
+Status mcp_list_tools(McpSession& session, std::vector<McpToolDefinition>& out,
+    std::string& detail);
+
 // Best-effort DELETE of the remote session; always clears session state.
 void mcp_end_session(McpSession& session);
 
@@ -116,4 +132,17 @@ template <> struct glz::meta<imza::McpToolCallResult> {
     using T                     = imza::McpToolCallResult;
     static constexpr auto value = glz::object("content", &T::content, "isError",
         &T::is_error, "structuredContent", &T::structured_content);
+};
+
+template <> struct glz::meta<imza::McpToolDefinition> {
+    using T = imza::McpToolDefinition;
+    static constexpr auto value
+        = glz::object("name", &T::name, "title", &T::title, "description",
+            &T::description, "inputSchema", &T::input_schema);
+};
+
+template <> struct glz::meta<imza::McpListToolsResult> {
+    using T = imza::McpListToolsResult;
+    static constexpr auto value
+        = glz::object("tools", &T::tools, "nextCursor", &T::next_cursor);
 };

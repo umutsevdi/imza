@@ -1,5 +1,6 @@
 #include "platform/config.h"
 
+#include "network/web.h"
 #include "platform/file_lock.h"
 #include "platform/json_file.h"
 
@@ -178,10 +179,20 @@ struct StoredSkills {
         projects;
 };
 
+struct StoredMcpServer {
+    std::optional<std::string> label;
+    std::optional<std::string> description;
+    std::optional<std::string> url;
+    std::optional<std::map<std::string, std::string>> headers;
+    std::optional<std::string> bearer_token;
+    std::optional<bool> enabled;
+};
+
 struct StoredConfig {
     std::optional<std::vector<StoredConnection>> providers;
     std::optional<StoredModels> models;
     std::optional<StoredSkills> skills;
+    std::optional<std::map<std::string, StoredMcpServer>> mcp_servers;
 };
 
 Status load_config(
@@ -343,6 +354,34 @@ Status load_config(
         }
     }
 
+    if (stored.mcp_servers) {
+        for (auto& [id, entry] : *stored.mcp_servers) {
+            McpServerConfig server;
+            server.id           = id;
+            server.label        = entry.label.value_or("");
+            server.description  = entry.description.value_or("");
+            server.bearer_token = entry.bearer_token.value_or("");
+            server.enabled      = entry.enabled.value_or(true);
+            if (entry.headers) {
+                for (const auto& [name, value] : *entry.headers) {
+                    if (name.empty() || name.contains(':')) {
+                        return fail(Status::CONFIG_ERROR,
+                            "mcp server '" + id + "': invalid header name '"
+                                + name + "'");
+                    }
+                    server.headers[name] = value;
+                }
+            }
+            std::string url;
+            if (normalize_web_url(entry.url.value_or(""), url) != Status::OK) {
+                return fail(Status::CONFIG_ERROR,
+                    "mcp server '" + id + "' requires an http(s) url");
+            }
+            server.url          = std::move(url);
+            out.mcp_servers[id] = std::move(server);
+        }
+    }
+
     return Status::OK;
 }
 
@@ -440,6 +479,31 @@ namespace {
         }
         skills.projects = std::move(projects);
         stored.skills   = std::move(skills);
+
+        if (!cfg.mcp_servers.empty()) {
+            std::map<std::string, StoredMcpServer> servers;
+            for (const auto& [id, server] : cfg.mcp_servers) {
+                StoredMcpServer entry;
+                if (!server.label.empty()) {
+                    entry.label = server.label;
+                }
+                if (!server.description.empty()) {
+                    entry.description = server.description;
+                }
+                entry.url = server.url;
+                if (!server.headers.empty()) {
+                    entry.headers = server.headers;
+                }
+                if (!server.bearer_token.empty()) {
+                    entry.bearer_token = server.bearer_token;
+                }
+                if (!server.enabled) {
+                    entry.enabled = server.enabled;
+                }
+                servers[id] = std::move(entry);
+            }
+            stored.mcp_servers = std::move(servers);
+        }
 
         auto serialized = json_dump_pretty_checked(stored);
         if (!serialized) {

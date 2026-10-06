@@ -462,3 +462,64 @@ TEST_CASE("load_config rejects invalid nested configuration values")
         CHECK(imza::load_config(path, cfg) == imza::Status::CONFIG_ERROR);
     }
 }
+
+TEST_CASE("config roundtrip preserves mcp servers")
+{
+    const auto path = temp_file("mcp-roundtrip.json");
+    imza::Config cfg;
+    imza::McpServerConfig server;
+    server.label                = "Exa";
+    server.description          = "Web search";
+    server.url                  = "https://mcp.exa.ai/mcp";
+    server.headers["x-api-key"] = "secret";
+    server.bearer_token         = "tok";
+    cfg.mcp_servers["exa"]      = server;
+
+    REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
+
+    imza::Config loaded;
+    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
+    REQUIRE(loaded.mcp_servers.size() == 1);
+    const imza::McpServerConfig& back = loaded.mcp_servers.at("exa");
+    CHECK(back.id == "exa");
+    CHECK(back.label == "Exa");
+    CHECK(back.description == "Web search");
+    CHECK(back.url == "https://mcp.exa.ai/mcp");
+    CHECK(back.headers.at("x-api-key") == "secret");
+    CHECK(back.bearer_token == "tok");
+    CHECK(back.enabled);
+}
+
+TEST_CASE("load_config validates mcp server entries")
+{
+    imza::Config cfg;
+    std::string error;
+
+    const auto bad_url = temp_file("mcp-bad-url.json");
+    {
+        std::ofstream out(bad_url);
+        out << R"({"mcp_servers":{"exa":{"url":"ftp://x"}}})";
+    }
+    CHECK(
+        imza::load_config(bad_url, cfg, &error) == imza::Status::CONFIG_ERROR);
+    CHECK(error.find("http(s) url") != std::string::npos);
+
+    const auto bad_header = temp_file("mcp-bad-header.json");
+    {
+        std::ofstream out(bad_header);
+        out << R"({"mcp_servers":{"exa":{"url":"https://x",)"
+            << R"("headers":{"Bad:Name":"v"}}}})";
+    }
+    CHECK(imza::load_config(bad_header, cfg, &error)
+        == imza::Status::CONFIG_ERROR);
+    CHECK(error.find("invalid header name") != std::string::npos);
+
+    const auto upgrade = temp_file("mcp-http-upgrade.json");
+    {
+        std::ofstream out(upgrade);
+        out << R"({"mcp_servers":{"exa":{"url":"http://mcp.exa.ai/mcp"}}})";
+    }
+    REQUIRE(imza::load_config(upgrade, cfg) == imza::Status::OK);
+    CHECK(cfg.mcp_servers.at("exa").url == "https://mcp.exa.ai/mcp");
+    CHECK(cfg.mcp_servers.at("exa").enabled);
+}

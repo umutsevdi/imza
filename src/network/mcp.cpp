@@ -9,22 +9,28 @@
 
 namespace imza {
 
+// Glaze-reflected: must have external linkage (Clang/MSVC requirement).
+struct McpInitializeResponse {
+    std::optional<McpInitializeResult> result;
+    std::optional<McpRpcError> error;
+};
+
+struct McpCallToolResponse {
+    std::optional<McpToolCallResult> result;
+    std::optional<McpRpcError> error;
+};
+
+struct McpListToolsResponse {
+    std::optional<McpListToolsResult> result;
+    std::optional<McpRpcError> error;
+};
+
 namespace {
 
     // Versions this client can speak; MCP_PROTOCOL_VERSION is proposed and
     // the server's counter-offer must land in this set.
     constexpr std::string_view KNOWN_VERSIONS[]
         = { "2025-03-26", "2025-06-18", "2025-11-25" };
-
-    struct McpInitializeResponse {
-        std::optional<McpInitializeResult> result;
-        std::optional<McpRpcError> error;
-    };
-
-    struct McpCallToolResponse {
-        std::optional<McpToolCallResult> result;
-        std::optional<McpRpcError> error;
-    };
 
     bool is_rpc_message(const JsonValue& value)
     {
@@ -77,6 +83,61 @@ namespace {
     std::string http_status_detail(long code, std::string_view phase)
     {
         return "HTTP " + std::to_string(code) + " " + std::string(phase);
+    }
+
+    // One sessioned RPC exchange with the 404 session-expiry retry. The
+    // envelope needs optional `result` and optional<McpRpcError> `error`.
+    template <typename Response>
+    Status mcp_sessioned_rpc(McpSession& session, std::string_view method,
+        const JsonValue& params, Response& response, std::string& detail)
+    {
+        for (int attempt = 0; attempt < 2; ++attempt) {
+            long code = 0;
+            std::string body;
+            if (post(session,
+                    mcp_rpc_request(++session.next_id, method, params), true,
+                    code, body, nullptr)
+                != Status::OK) {
+                detail = std::string(method) + " request failed";
+                return Status::NETWORK_ERROR;
+            }
+            // Spec: HTTP 404 on a sessioned request means the server
+            // dropped the session; start a new one and retry once.
+            if (code == 404 && attempt == 0 && !session.session_id.empty()) {
+                const Status reinit = mcp_initialize(session, detail);
+                if (reinit != Status::OK) {
+                    return reinit;
+                }
+                continue;
+            }
+            if (!http_ok(code)) {
+                detail = http_status_detail(code, method);
+                return Status::API_ERROR;
+            }
+            std::string message;
+            if (!mcp_find_rpc_response(body, message)) {
+                detail = std::string(method)
+                    + " response carried no JSON-RPC message";
+                return Status::JSON_ERROR;
+            }
+            if (const glz::error_ctx error
+                = json_parse_checked(message, response)) {
+                detail = json_parse_error(message, error);
+                return Status::JSON_ERROR;
+            }
+            if (response.error) {
+                detail = "rpc error " + std::to_string(response.error->code)
+                    + ": " + response.error->message;
+                return Status::API_ERROR;
+            }
+            if (!response.result) {
+                detail = std::string(method) + " returned no result";
+                return Status::JSON_ERROR;
+            }
+            return Status::OK;
+        }
+        detail = "session expired twice";
+        return Status::API_ERROR;
     }
 
 } // namespace
@@ -232,58 +293,53 @@ Status mcp_call_tool(McpSession& session, const std::string& name,
         detail = "session not initialized";
         return Status::CONFIG_ERROR;
     }
-    for (int attempt = 0; attempt < 2; ++attempt) {
-        JsonValue params;
-        params["name"]      = name;
-        params["arguments"] = arguments;
+    JsonValue params;
+    params["name"]      = name;
+    params["arguments"] = arguments;
 
-        long code = 0;
-        std::string body;
-        if (post(session,
-                mcp_rpc_request(++session.next_id, "tools/call", params), true,
-                code, body, nullptr)
-            != Status::OK) {
-            detail = "tool call request failed";
-            return Status::NETWORK_ERROR;
-        }
-        // Spec: HTTP 404 on a sessioned request means the server dropped
-        // the session; start a new one and retry the call once.
-        if (code == 404 && attempt == 0 && !session.session_id.empty()) {
-            const Status reinit = mcp_initialize(session, detail);
-            if (reinit != Status::OK) {
-                return reinit;
-            }
-            continue;
-        }
-        if (!http_ok(code)) {
-            detail = http_status_detail(code, "for tool call");
-            return Status::API_ERROR;
-        }
-
-        std::string message;
-        if (!mcp_find_rpc_response(body, message)) {
-            detail = "tool call response carried no JSON-RPC message";
-            return Status::JSON_ERROR;
-        }
-        McpCallToolResponse response;
-        if (const glz::error_ctx error
-            = json_parse_checked(message, response)) {
-            detail = json_parse_error(message, error);
-            return Status::JSON_ERROR;
-        }
-        if (response.error) {
-            detail = "rpc error " + std::to_string(response.error->code) + ": "
-                + response.error->message;
-            return Status::API_ERROR;
-        }
-        if (!response.result) {
-            detail = "malformed tool result";
-            return Status::JSON_ERROR;
-        }
-        out = std::move(*response.result);
-        return Status::OK;
+    McpCallToolResponse response;
+    const Status st
+        = mcp_sessioned_rpc(session, "tools/call", params, response, detail);
+    if (st != Status::OK) {
+        return st;
     }
-    detail = "session expired twice";
+    out = std::move(*response.result);
+    return Status::OK;
+}
+
+Status mcp_list_tools(McpSession& session, std::vector<McpToolDefinition>& out,
+    std::string& detail)
+{
+    if (!session.initialized) {
+        detail = "session not initialized";
+        return Status::CONFIG_ERROR;
+    }
+    std::optional<std::string> cursor;
+    // Upper bound on pages: a server that keeps returning cursors must not
+    // spin this client forever.
+    for (int page = 0; page < 100; ++page) {
+        JsonValue params;
+        if (cursor) {
+            params["cursor"] = *cursor;
+        }
+        McpListToolsResponse response;
+        const Status st = mcp_sessioned_rpc(
+            session, "tools/list", params, response, detail);
+        if (st != Status::OK) {
+            return st;
+        }
+        if (response.result->tools) {
+            for (McpToolDefinition& tool : *response.result->tools) {
+                out.push_back(std::move(tool));
+            }
+        }
+        if (!response.result->next_cursor
+            || response.result->next_cursor->empty()) {
+            return Status::OK;
+        }
+        cursor = std::move(*response.result->next_cursor);
+    }
+    detail = "tools/list did not terminate after 100 pages";
     return Status::API_ERROR;
 }
 

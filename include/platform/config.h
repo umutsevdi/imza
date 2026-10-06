@@ -53,6 +53,18 @@ struct LastUsed {
     std::string model;
 };
 
+// One user-configured MCP server. stdio transport and OAuth credentials
+// will extend this record later; the url is stored normalized (https).
+struct McpServerConfig {
+    std::string id;
+    std::string label;
+    std::string description;
+    std::string url;
+    std::map<std::string, std::string> headers;
+    std::string bearer_token;
+    bool enabled = true;
+};
+
 enum class SubagentRole { BUILDER, RESEARCH, BASIC };
 
 struct SubagentModelConfig {
@@ -68,6 +80,7 @@ struct Config {
     std::map<SubagentRole, SubagentModelConfig> subagents;
     std::map<std::string, SkillPolicy> global_skills;
     std::map<std::string, std::map<std::string, SkillPolicy>> project_skills;
+    std::map<std::string, McpServerConfig> mcp_servers;
 };
 
 enum class ConfigUpdateResult { UPDATED, UNCHANGED, FAILURE };
