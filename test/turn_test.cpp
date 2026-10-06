@@ -68,6 +68,36 @@ TEST_CASE("system prompt embeds workspace instructions when present")
     CHECK(prompt.find("</instructions>") != std::string::npos);
 }
 
+TEST_CASE("system prompt appends configured instructions in order")
+{
+    SystemEnvironment sys;
+    sys.os_name       = "Linux";
+    sys.default_shell = "/bin/bash";
+    sys.today         = "Fri Aug 28 2026";
+    WorkspaceEnvironment ws;
+    ws.working_directory = std::filesystem::temp_directory_path();
+    ws.instruction       = InstructionFile { "AGENTS.md", "base rules" };
+    ws.extra_instructions.push_back(
+        InstructionFile { "docs/style.md", "first extra" });
+    ws.extra_instructions.push_back(
+        InstructionFile { "/home/me/rules.md", "second extra" });
+
+    const PromptStore prompts;
+    const std::string prompt = build_system_prompt(prompts, &sys, &ws);
+    const std::size_t base   = prompt.find("base rules");
+    const std::size_t first  = prompt.find("first extra");
+    const std::size_t second = prompt.find("second extra");
+    REQUIRE(base != std::string::npos);
+    REQUIRE(first != std::string::npos);
+    REQUIRE(second != std::string::npos);
+    CHECK(base < first);
+    CHECK(first < second);
+    CHECK(prompt.find("<instructions source=\"docs/style.md\">")
+        != std::string::npos);
+    CHECK(prompt.find("<instructions source=\"/home/me/rules.md\">")
+        != std::string::npos);
+}
+
 TEST_CASE("system prompt omits the instructions block when absent")
 {
     SystemEnvironment sys;

@@ -245,4 +245,68 @@ TEST_CASE("load_agent_file truncates oversized content")
     CHECK(found->content.size() < 64 * 1024);
 }
 
+TEST_CASE("load_instruction_file resolves relative paths against the root")
+{
+    const imza::test::TempDir dir;
+    imza::test::write_file(dir.file("docs/guide.md"), "guide rules");
+
+    const auto found = imza::load_instruction_file(dir.path, "docs/guide.md");
+    REQUIRE(found.has_value());
+    CHECK(found->path == (dir.path / "docs" / "guide.md").string());
+    CHECK(found->content == "guide rules");
+}
+
+TEST_CASE("load_instruction_file skips missing files and honors absolutes")
+{
+    const imza::test::TempDir dir;
+    CHECK_FALSE(imza::load_instruction_file(dir.path, "nope.md").has_value());
+
+    imza::test::write_file(dir.file("outside.md"), "outside rules");
+    const auto found = imza::load_instruction_file(
+        dir.path / "elsewhere", dir.file("outside.md"));
+    REQUIRE(found.has_value());
+    CHECK(found->content == "outside rules");
+}
+
+TEST_CASE("load_instruction_file truncates oversized content")
+{
+    const imza::test::TempDir dir;
+    imza::test::write_file(dir.file("big.md"), std::string(64 * 1024, 'x'));
+
+    const auto found = imza::load_instruction_file(dir.path, "big.md");
+    REQUIRE(found.has_value());
+    CHECK(found->content.find("[truncated]") != std::string::npos);
+    CHECK(found->content.size() < 64 * 1024);
+}
+
+TEST_CASE("workspace scan loads configured instructions in order")
+{
+    const imza::test::TempDir root_dir;
+    const auto root = root_dir.path;
+    std::error_code error;
+    REQUIRE(std::filesystem::create_directories(root / ".git", error));
+    imza::test::write_file(root / "AGENTS.md", "agents rules");
+    imza::test::write_file(root / "docs" / "one.md", "one rules");
+    imza::test::write_file(root / "two.md", "two rules");
+
+    const auto workspace
+        = imza::scan_workspace(root, { "docs/one.md", "two.md", "missing.md" });
+    REQUIRE(workspace.instruction.has_value());
+    CHECK(workspace.instruction->content == "agents rules");
+    REQUIRE(workspace.extra_instructions.size() == 2);
+    CHECK(workspace.extra_instructions[0].content == "one rules");
+    CHECK(workspace.extra_instructions[1].content == "two rules");
+}
+
+TEST_CASE("configured instructions load outside a project root")
+{
+    const imza::test::TempDir root_dir;
+    imza::test::write_file(root_dir.file("notes.md"), "loose notes");
+
+    const auto workspace = imza::scan_workspace(root_dir.path, { "notes.md" });
+    CHECK_FALSE(workspace.project_root.has_value());
+    REQUIRE(workspace.extra_instructions.size() == 1);
+    CHECK(workspace.extra_instructions[0].content == "loose notes");
+}
+
 } // namespace

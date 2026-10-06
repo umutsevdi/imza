@@ -11,6 +11,7 @@
 
 #include "network/json.h"
 #include "network/json_io.h"
+#include "permissions/store.h"
 #include "platform/config.h"
 #include "test_fs.h"
 
@@ -554,4 +555,136 @@ TEST_CASE("mcp config accepts catalogue references without urls")
     CHECK(
         imza::load_config(neither, bad, &error) == imza::Status::CONFIG_ERROR);
     CHECK(error.find("url or a catalog id") != std::string::npos);
+}
+TEST_CASE("config roundtrip preserves the allow list and instructions")
+{
+    const auto path = temp_file("allow-roundtrip.json");
+    imza::Config cfg;
+    cfg.allow.directories.emplace_back("/work/project");
+    cfg.allow.commands.push_back(imza::ShellCommandGrant { "git", "push" });
+    cfg.allow.commands.push_back(
+        imza::ShellCommandGrant { "rg", std::nullopt });
+    cfg.instructions.push_back("docs/guide.md");
+
+    REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
+
+    imza::Config loaded;
+    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
+    REQUIRE(loaded.allow.directories.size() == 1);
+    CHECK(
+        loaded.allow.directories[0] == std::filesystem::path("/work/project"));
+    REQUIRE(loaded.allow.commands.size() == 2);
+    CHECK(loaded.allow.commands[0].program == "git");
+    CHECK(loaded.allow.commands[0].subcommand == "push");
+    CHECK(loaded.allow.commands[1].program == "rg");
+    CHECK_FALSE(loaded.allow.commands[1].subcommand.has_value());
+    REQUIRE(loaded.instructions.size() == 1);
+    CHECK(loaded.instructions[0] == "docs/guide.md");
+}
+
+TEST_CASE("allow grants skip directories that no longer exist")
+{
+    const imza::test::TempDir dir;
+    imza::AllowConfig allow;
+    allow.directories.emplace_back(dir.path);
+    allow.directories.emplace_back(dir.path / "gone");
+    allow.commands.push_back(imza::ShellCommandGrant { "git", "push" });
+
+    const imza::PermissionStore::Grants grants = imza::allow_grants(allow);
+    REQUIRE(grants.size() == 2);
+    CHECK(std::holds_alternative<imza::ExternalGrant>(grants[0]));
+    CHECK(std::get<imza::ExternalGrant>(grants[0])
+        == std::filesystem::weakly_canonical(dir.path));
+    const imza::ShellCommandGrant& command
+        = std::get<imza::ShellCommandGrant>(grants[1]);
+    CHECK(command.program == "git");
+    CHECK(command.subcommand == "push");
+}
+
+TEST_CASE("allow grants resolve relative directories against the cwd")
+{
+    const imza::test::CurrentDirectory cwd;
+    const imza::test::TempDir base;
+    REQUIRE(std::filesystem::create_directories(base.path / "sub"));
+    std::error_code error;
+    std::filesystem::current_path(base.path, error);
+    REQUIRE_FALSE(error);
+
+    imza::AllowConfig allow;
+    allow.directories.emplace_back("sub");
+    const imza::PermissionStore::Grants grants = imza::allow_grants(allow);
+    REQUIRE(grants.size() == 1);
+    CHECK(std::get<imza::ExternalGrant>(grants[0])
+        == std::filesystem::weakly_canonical(base.path / "sub"));
+}
+
+TEST_CASE("configured allow grants install into the permission store")
+{
+    const imza::test::TempDir dir;
+    imza::Config cfg;
+    cfg.allow.directories.emplace_back(dir.path);
+    cfg.allow.commands.push_back(imza::ShellCommandGrant { "git", "push" });
+
+    imza::PermissionStore store;
+    REQUIRE(store.install(imza::allow_grants(cfg.allow)));
+    const imza::PermissionStore::Snapshot grants = store.snapshot();
+    CHECK(
+        imza::grants_cover(grants, imza::ShellCommandGrant { "git", "push" }));
+    CHECK(
+        imza::grants_cover(grants, imza::ShellCommandGrant { "git", "status" })
+        == false);
+    CHECK(imza::grants_cover(
+        grants, std::filesystem::weakly_canonical(dir.path / "inner")));
+}
+
+TEST_CASE("load_config validates allow list and instruction entries")
+{
+    struct InvalidConfigCase {
+        const char* name;
+        const char* filename;
+        const char* json;
+    };
+    const std::array cases {
+        InvalidConfigCase { "command without program", "allow-no-program.json",
+            R"({"allow":{"commands":[{"subcommand":"push"}]}})" },
+        InvalidConfigCase { "command with empty program",
+            "allow-empty-program.json",
+            R"({"allow":{"commands":[{"program":""}]}})" },
+        InvalidConfigCase { "command with empty subcommand",
+            "allow-empty-subcommand.json",
+            R"({"allow":{"commands":[{"program":"git","subcommand":""}]}})" },
+        InvalidConfigCase { "empty directory", "allow-empty-dir.json",
+            R"({"allow":{"directories":[""]}})" },
+        InvalidConfigCase { "empty instruction", "empty-instruction.json",
+            R"({"instructions":["docs/a.md",""]})" },
+    };
+
+    for (const auto& invalid : cases) {
+        CAPTURE(invalid.name);
+        const auto path = temp_file(invalid.filename);
+        {
+            std::ofstream out(path);
+            out << invalid.json;
+        }
+        imza::Config cfg;
+        std::string error;
+        CHECK(
+            imza::load_config(path, cfg, &error) == imza::Status::CONFIG_ERROR);
+        CHECK_FALSE(error.empty());
+    }
+}
+
+TEST_CASE("allow and instructions are absent from a minimal config")
+{
+    const auto path = temp_file("no-allow.json");
+    REQUIRE(imza::save_config(path, imza::Config { }) == imza::Status::OK);
+    const std::string json = imza::test::read_all(path);
+    CHECK(json.find("\"allow\"") == std::string::npos);
+    CHECK(json.find("\"instructions\"") == std::string::npos);
+
+    imza::Config loaded;
+    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
+    CHECK(loaded.allow.directories.empty());
+    CHECK(loaded.allow.commands.empty());
+    CHECK(loaded.instructions.empty());
 }

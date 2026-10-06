@@ -38,10 +38,18 @@ struct InstructionFile {
 std::optional<InstructionFile> load_agent_file(
     const std::filesystem::path& root);
 
+// Reads one instruction file, relative to `root` unless absolute. Empty
+// when the file is missing or unreadable.
+std::optional<InstructionFile> load_instruction_file(
+    const std::filesystem::path& root, const std::filesystem::path& entry);
+
 struct WorkspaceEnvironment {
     std::filesystem::path working_directory;
     std::optional<std::filesystem::path> project_root;
     std::optional<InstructionFile> instruction;
+    // Extra instruction files configured through `config.instructions`,
+    // loaded after the agent file and rendered in the same order.
+    std::vector<InstructionFile> extra_instructions;
     std::unordered_map<std::string, Skill> project_skills;
 };
 
@@ -49,13 +57,17 @@ SystemEnvironment detect_system_environment();
 void detect_package_managers(std::vector<std::string>& package_managers);
 std::filesystem::path prepare_imza_temporary_directory(
     const std::filesystem::path& base);
-WorkspaceEnvironment scan_workspace(const std::filesystem::path& directory);
+// `instructions` are extra files to load alongside the agent file: paths
+// are project-root-relative unless absolute, and missing files are
+// skipped rather than failing the scan.
+WorkspaceEnvironment scan_workspace(const std::filesystem::path& directory,
+    const std::vector<std::string>& instructions = { });
 
 class Environment final : public ApplicationComponent {
 public:
     enum class ChdirResult { CHANGED, UNCHANGED, FAILED };
 
-    explicit Environment();
+    explicit Environment(std::vector<std::string> instructions = { });
     std::shared_ptr<const SystemEnvironment> system() const { return _system; }
     std::shared_ptr<const WorkspaceEnvironment> workspace() const
     {
@@ -92,6 +104,7 @@ public:
 private:
     void _publish_workspace(std::shared_ptr<const WorkspaceEnvironment> ws,
         std::uint64_t generation);
+    const std::vector<std::string> _instructions;
     void _publish_repository(std::shared_ptr<const RepositoryState> repository,
         const std::shared_ptr<const WorkspaceEnvironment>& workspace);
     std::shared_ptr<const SystemEnvironment> _system;

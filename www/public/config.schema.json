@@ -1,0 +1,205 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://umutsevdi.github.io/imza/config.schema.json",
+  "title": "Imza configuration",
+  "description": "User configuration for Imza, read from and written back to <data-dir>/config.json (see `imza --config`). Unknown keys are ignored on read; every key here is optional.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "providers": {
+      "type": "array",
+      "description": "Provider connections. Two entries sharing an id are disambiguated by label, whose identity becomes `id/label`.",
+      "items": { "$ref": "#/definitions/connection" }
+    },
+    "models": {
+      "type": "object",
+      "description": "Model selection for the main conversation and for each subagent role.",
+      "additionalProperties": false,
+      "properties": {
+        "main": {
+          "$ref": "#/definitions/modelChoice",
+          "description": "Active model. `model` requires a `provider` that resolves to a connection."
+        },
+        "builder": { "$ref": "#/definitions/modelChoice" },
+        "researcher": { "$ref": "#/definitions/modelChoice" },
+        "basic": { "$ref": "#/definitions/modelChoice" }
+      }
+    },
+    "skills": {
+      "type": "object",
+      "description": "Per-skill authorization policies.",
+      "additionalProperties": false,
+      "properties": {
+        "global": {
+          "type": "object",
+          "description": "Skill name to policy, for globally discovered skills.",
+          "additionalProperties": { "$ref": "#/definitions/skillPolicy" }
+        },
+        "projects": {
+          "type": "object",
+          "description": "Project root path to its own skill policy map.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": { "$ref": "#/definitions/skillPolicy" }
+          }
+        }
+      }
+    },
+    "mcp_servers": {
+      "type": "object",
+      "description": "MCP servers keyed by id. Each entry needs either an http(s) `url` or a `catalog_id` referring to the bundled catalogue; an explicit `url` wins.",
+      "additionalProperties": { "$ref": "#/definitions/mcpServer" }
+    },
+    "allow": {
+      "type": "object",
+      "description": "Permissions granted automatically at startup, in addition to `--allow-dir` and `--allow-cmd`. A grant here still subjects every request to Imza's normal evaluation.",
+      "additionalProperties": false,
+      "properties": {
+        "directories": {
+          "type": "array",
+          "description": "Directories whose files and subdirectories the agent may read and edit without asking. Absolute paths, or relative to the working directory at startup. Entries that are missing or not a directory are skipped, so a stale entry never blocks startup.",
+          "items": { "type": "string", "minLength": 1 },
+          "examples": ["/home/me/Source/work", "scratch"]
+        },
+        "commands": {
+          "type": "array",
+          "description": "Shell programs the agent may run without asking. Omitting `subcommand` approves every subcommand of that program; naming one approves only that pair.",
+          "items": { "$ref": "#/definitions/commandGrant" },
+          "examples": [
+            [{ "program": "rg" }],
+            [{ "program": "git", "subcommand": "status" }]
+          ]
+        }
+      }
+    },
+    "instructions": {
+      "type": "array",
+      "description": "Extra instruction files appended to the system prompt after AGENTS.md, CLAUDE.md, or GEMINI.md. Paths are relative to the project root, or to the working directory when there is no root; absolute paths are used as given. Missing files are skipped. Each file is capped at 32 KiB.",
+      "items": { "type": "string", "minLength": 1 },
+      "examples": [["CONTRIBUTING.md", "docs/style.md", "/home/me/rules.md"]]
+    }
+  },
+  "definitions": {
+    "connection": {
+      "type": "object",
+      "additionalProperties": false,
+      "anyOf": [
+        { "required": ["id"] },
+        { "required": ["provider_id"] }
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Provider identity, required and non-empty. Combined with `label` into the connection key `id/label`.",
+          "minLength": 1
+        },
+        "provider_id": {
+          "type": "string",
+          "description": "Deprecated alias for `id`, used only when `id` is absent.",
+          "deprecated": true
+        },
+        "endpoint": {
+          "type": "string",
+          "description": "Custom base URL, e.g. a local Ollama endpoint. Empty for hosted providers."
+        },
+        "api_key": { "type": "string", "description": "API key credential." },
+        "refresh_token": {
+          "type": "string",
+          "description": "OAuth refresh token for subscription providers."
+        },
+        "expires_at": {
+          "type": "integer",
+          "description": "Token expiry, Unix epoch seconds."
+        },
+        "account_id": {
+          "type": "string",
+          "description": "Subscription account identifier."
+        },
+        "label": {
+          "type": "string",
+          "description": "Disambiguates several connections sharing an id. Duplicates are relabelled deterministically on load."
+        },
+        "dialects": {
+          "type": "object",
+          "description": "Per-model wire protocol override.",
+          "additionalProperties": {
+            "enum": ["openai", "openai-responses", "anthropic"]
+          }
+        }
+      }
+    },
+    "modelChoice": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "Connection key that serves this model."
+        },
+        "model": { "type": "string", "description": "Model identifier." },
+        "reasoning_effort": {
+          "$ref": "#/definitions/reasoningEffort",
+          "description": "Reasoning effort. Defaults per role: builder `medium` (stored as `default`), researcher `low`, basic `off`."
+        }
+      }
+    },
+    "reasoningEffort": {
+      "type": "string",
+      "enum": ["off", "low", "default", "medium", "high"]
+    },
+    "skillPolicy": {
+      "type": "string",
+      "description": "Whether a skill loads silently, asks each time, or is refused.",
+      "enum": ["allow", "ask", "deny"]
+    },
+    "commandGrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["program"],
+      "properties": {
+        "program": {
+          "type": "string",
+          "description": "Executable name, required and non-empty.",
+          "minLength": 1
+        },
+        "subcommand": {
+          "type": "string",
+          "description": "Restricts the grant to this subcommand. Absent approves all of them; an empty string is a configuration error.",
+          "minLength": 1
+        }
+      }
+    },
+    "mcpServer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string", "description": "Display name." },
+        "description": { "type": "string", "description": "Description." },
+        "catalog_id": {
+          "type": "string",
+          "description": "Reference to a bundled catalogue server whose url and label resolve at use time."
+        },
+        "url": {
+          "type": "string",
+          "description": "Custom endpoint. Must be http(s); plain http is upgraded to https.",
+          "pattern": "^https?://"
+        },
+        "headers": {
+          "type": "object",
+          "description": "Extra HTTP headers. Names must be non-empty and contain no colon.",
+          "additionalProperties": { "type": "string" }
+        },
+        "bearer_token": { "type": "string", "description": "Bearer token." },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether the server loads. Defaults to true."
+        },
+        "timeout_secs": {
+          "type": "integer",
+          "description": "Per-request timeout override. 0 uses the client default of 25 seconds; negative values are rejected.",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

@@ -40,13 +40,15 @@ int main(int argc, char** argv)
 
     const imza::RuntimeFlag runtime = imza::runtime_flags_for(cli);
     imza::MainThreadQueue main_thread;
+    // Read before the config is moved into the application state.
+    imza::PermissionStore::Grants startup_grants
+        = imza::allow_grants(cfg.allow);
+    startup_grants.reserve(startup_grants.size()
+        + cli.allowed_directories.size() + cli.allowed_commands.size());
     auto state = imza::make_application_state(
         [&main_thread](
             std::function<void()> task) { main_thread.post(std::move(task)); },
         std::move(cfg), imza::StreamFn { }, runtime);
-    imza::PermissionStore::Grants startup_grants;
-    startup_grants.reserve(
-        cli.allowed_directories.size() + cli.allowed_commands.size());
     for (const std::filesystem::path& directory : cli.allowed_directories) {
         startup_grants.emplace_back(directory);
     }

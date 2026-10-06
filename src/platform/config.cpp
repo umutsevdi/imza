@@ -1,6 +1,7 @@
 #include "platform/config.h"
 
 #include "network/web.h"
+#include "permissions/store.h"
 #include "platform/file_lock.h"
 #include "platform/json_file.h"
 
@@ -190,11 +191,23 @@ struct StoredMcpServer {
     std::optional<long> timeout_secs;
 };
 
+struct StoredCommandGrant {
+    std::optional<std::string> program;
+    std::optional<std::string> subcommand;
+};
+
+struct StoredAllow {
+    std::optional<std::vector<std::string>> directories;
+    std::optional<std::vector<StoredCommandGrant>> commands;
+};
+
 struct StoredConfig {
     std::optional<std::vector<StoredConnection>> providers;
     std::optional<StoredModels> models;
     std::optional<StoredSkills> skills;
     std::optional<std::map<std::string, StoredMcpServer>> mcp_servers;
+    std::optional<StoredAllow> allow;
+    std::optional<std::vector<std::string>> instructions;
 };
 
 Status load_config(
@@ -399,7 +412,70 @@ Status load_config(
         }
     }
 
+    if (stored.allow) {
+        if (stored.allow->directories) {
+            for (const std::string& entry : *stored.allow->directories) {
+                if (entry.empty()) {
+                    return fail(Status::CONFIG_ERROR,
+                        "'allow.directories' entry must not be empty");
+                }
+                out.allow.directories.emplace_back(entry);
+            }
+        }
+        if (stored.allow->commands) {
+            for (const StoredCommandGrant& entry : *stored.allow->commands) {
+                ShellCommandGrant grant;
+                grant.program = entry.program.value_or("");
+                if (grant.program.empty()) {
+                    return fail(Status::CONFIG_ERROR,
+                        "'allow.commands' entry requires a non-empty"
+                        " 'program'");
+                }
+                if (entry.subcommand.has_value()) {
+                    if (entry.subcommand->empty()) {
+                        return fail(Status::CONFIG_ERROR,
+                            "'allow.commands' entry for '" + grant.program
+                                + "' has an empty 'subcommand'");
+                    }
+                    grant.subcommand = entry.subcommand;
+                }
+                out.allow.commands.push_back(std::move(grant));
+            }
+        }
+    }
+
+    if (stored.instructions) {
+        for (const std::string& entry : *stored.instructions) {
+            if (entry.empty()) {
+                return fail(Status::CONFIG_ERROR,
+                    "'instructions' entry must not be empty");
+            }
+            out.instructions.push_back(entry);
+        }
+    }
+
     return Status::OK;
+}
+
+PermissionStore::Grants allow_grants(const AllowConfig& allow)
+{
+    PermissionStore::Grants grants;
+    grants.reserve(allow.directories.size() + allow.commands.size());
+    std::error_code ec;
+    for (const std::filesystem::path& entry : allow.directories) {
+        const std::filesystem::path resolved = entry.is_absolute()
+            ? entry
+            : std::filesystem::weakly_canonical(
+                  std::filesystem::current_path() / entry, ec);
+        if (ec || !std::filesystem::is_directory(resolved, ec) || ec) {
+            continue;
+        }
+        grants.emplace_back(resolved);
+    }
+    for (const ShellCommandGrant& command : allow.commands) {
+        grants.emplace_back(command);
+    }
+    return grants;
 }
 
 void apply_skill_policies(Config& config, const SkillPolicyChanges& changes)
@@ -528,6 +604,35 @@ namespace {
                 servers[id] = std::move(entry);
             }
             stored.mcp_servers = std::move(servers);
+        }
+
+        if (!cfg.allow.directories.empty() || !cfg.allow.commands.empty()) {
+            StoredAllow allow;
+            if (!cfg.allow.directories.empty()) {
+                std::vector<std::string> directories;
+                for (const std::filesystem::path& entry :
+                    cfg.allow.directories) {
+                    directories.push_back(entry.string());
+                }
+                allow.directories = std::move(directories);
+            }
+            if (!cfg.allow.commands.empty()) {
+                std::vector<StoredCommandGrant> commands;
+                for (const ShellCommandGrant& entry : cfg.allow.commands) {
+                    StoredCommandGrant command;
+                    command.program = entry.program;
+                    if (entry.subcommand) {
+                        command.subcommand = entry.subcommand;
+                    }
+                    commands.push_back(std::move(command));
+                }
+                allow.commands = std::move(commands);
+            }
+            stored.allow = std::move(allow);
+        }
+
+        if (!cfg.instructions.empty()) {
+            stored.instructions = cfg.instructions;
         }
 
         auto serialized = json_dump_pretty_checked(stored);

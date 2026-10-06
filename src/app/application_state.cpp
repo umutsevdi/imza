@@ -157,10 +157,13 @@ namespace {
             = std::make_shared<InputHistoryStore>(input_history_path());
         std::map<std::string, McpServerConfig> mcp_servers
             = std::move(config.mcp_servers);
+        // Taken before the config moves into the provider store.
+        std::vector<std::string> instructions = std::move(config.instructions);
         state->providers = std::make_shared<ProviderStore>(std::move(config));
         state->mcp       = std::make_shared<McpManager>(std::move(mcp_servers));
         state->subagents = std::make_shared<SubagentManager>();
-        state->environment   = std::make_shared<Environment>();
+        state->environment
+            = std::make_shared<Environment>(std::move(instructions));
         state->review        = std::make_shared<ReviewState>();
         state->skills        = std::make_shared<SkillStore>();
         state->permissions   = std::make_shared<PermissionStore>();

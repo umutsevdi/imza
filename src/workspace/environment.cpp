@@ -248,6 +248,24 @@ std::optional<InstructionFile> load_agent_file(
     return std::nullopt;
 }
 
+std::optional<InstructionFile> load_instruction_file(
+    const std::filesystem::path& root, const std::filesystem::path& entry)
+{
+    constexpr std::size_t max_bytes = 32 * 1024;
+    const std::filesystem::path path
+        = entry.is_absolute() ? entry : (root / entry);
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(path, ec) || ec) {
+        return std::nullopt;
+    }
+    std::optional<std::string> content = read_text_file(path);
+    if (!content || content->empty()) {
+        return std::nullopt;
+    }
+    *content = truncate_marked(std::move(*content), max_bytes);
+    return InstructionFile { path.string(), std::move(*content) };
+}
+
 std::filesystem::path prepare_imza_temporary_directory(
     const std::filesystem::path& base)
 {
@@ -302,7 +320,8 @@ SystemEnvironment detect_system_environment()
     return environment;
 }
 
-WorkspaceEnvironment scan_workspace(const std::filesystem::path& directory)
+WorkspaceEnvironment scan_workspace(const std::filesystem::path& directory,
+    const std::vector<std::string>& instructions)
 {
     WorkspaceEnvironment environment;
     environment.working_directory = directory;
@@ -320,6 +339,15 @@ WorkspaceEnvironment scan_workspace(const std::filesystem::path& directory)
         }
         path = path.parent_path();
     }
+    // Every instruction entry resolves against the working directory: a
+    // relative path stays meaningful even outside a git project root.
+    const std::filesystem::path base
+        = environment.project_root.value_or(directory);
+    for (const std::string& entry : instructions) {
+        if (auto file = load_instruction_file(base, entry)) {
+            environment.extra_instructions.push_back(std::move(*file));
+        }
+    }
     if (environment.project_root.has_value()) {
         environment.instruction
             = load_agent_file(environment.project_root.value());
@@ -329,8 +357,9 @@ WorkspaceEnvironment scan_workspace(const std::filesystem::path& directory)
     return environment;
 }
 
-Environment::Environment()
-    : _system(std::make_shared<const SystemEnvironment>(
+Environment::Environment(std::vector<std::string> instructions)
+    : _instructions(std::move(instructions))
+    , _system(std::make_shared<const SystemEnvironment>(
           detect_system_environment()))
 {
     std::error_code initial_error;
@@ -349,7 +378,7 @@ Environment::Environment()
     }
     _worker = std::jthread([this, working_directory] {
         auto workspace = std::make_shared<WorkspaceEnvironment>(
-            scan_workspace(working_directory));
+            scan_workspace(working_directory, _instructions));
         _publish_workspace(std::move(workspace), 0);
     });
 
@@ -466,8 +495,8 @@ Environment::ChdirResult Environment::chdir(const std::filesystem::path& dir)
         }
         generation = ++_workspace_generation;
     }
-    auto workspace
-        = std::make_shared<WorkspaceEnvironment>(scan_workspace(canonical));
+    auto workspace = std::make_shared<WorkspaceEnvironment>(
+        scan_workspace(canonical, _instructions));
     _publish_workspace(std::move(workspace), generation);
     return ChdirResult::CHANGED;
 }

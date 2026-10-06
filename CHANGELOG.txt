@@ -27,6 +27,8 @@ Changes:
     that does not leave its parsing scratch space in memory.
   - Reduced idle CPU and memory usage of the side panel.
   - Performance improvement on attachment encoding.
+  - The config file can now pre-approve directories and shell commands, and
+    list extra instruction files to follow alongside AGENTS.md.
 
 -------------------------------------------------------------------------------
 0.5.2 - 2026-10-04

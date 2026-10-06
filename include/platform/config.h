@@ -11,6 +11,7 @@
 
 #include "common/modal.h"
 #include "common/types.h"
+#include "permissions/store.h"
 
 namespace imza {
 
@@ -79,6 +80,12 @@ struct SubagentModelConfig {
     std::string variant;
 };
 
+// Default permission grants installed at startup, before any CLI grants.
+struct AllowConfig {
+    std::vector<std::filesystem::path> directories;
+    std::vector<ShellCommandGrant> commands;
+};
+
 struct Config {
     std::vector<Connection> providers;
     std::optional<LastUsed> last_used;
@@ -87,6 +94,10 @@ struct Config {
     std::map<std::string, SkillPolicy> global_skills;
     std::map<std::string, std::map<std::string, SkillPolicy>> project_skills;
     std::map<std::string, McpServerConfig> mcp_servers;
+    AllowConfig allow;
+    // Extra instruction files loaded after the workspace agent file;
+    // absolute or project-root-relative paths.
+    std::vector<std::string> instructions;
 };
 
 enum class ConfigUpdateResult { UPDATED, UNCHANGED, FAILURE };
@@ -109,6 +120,11 @@ ConfigUpdateResult update_config(const std::filesystem::path& path,
     const Config& initial, const ConfigMutator& mutate,
     Config* result = nullptr);
 void apply_skill_policies(Config& config, const SkillPolicyChanges& changes);
+
+// Grants declared by `config.allow`, ready for PermissionStore::install.
+// Directories that no longer exist are dropped rather than failing the
+// batch: a stale allowlist entry must not block startup.
+PermissionStore::Grants allow_grants(const AllowConfig& allow);
 
 // Imza's own persisted-state root: config, sessions, history, caches.
 std::filesystem::path data_dir(void);

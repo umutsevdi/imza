@@ -94,6 +94,12 @@ namespace {
             out += "\n\n";
             out += instructions_block(*ws->instruction);
         }
+        if (ws != nullptr) {
+            for (const InstructionFile& file : ws->extra_instructions) {
+                out += "\n\n";
+                out += instructions_block(file);
+            }
+        }
         std::vector<Skill> skills;
         for (const auto& [name, skill] : sys->global_skills) {
             skills.push_back(skill);
