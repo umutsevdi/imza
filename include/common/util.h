@@ -107,6 +107,38 @@ inline std::string format_local_time(const char* fmt)
     return out.str();
 }
 
+// Expands ${VAR} and ${VAR:-default} from the environment; unmatched
+// references expand to empty. Text outside references is copied verbatim.
+inline std::string expand_env_vars(const std::string& text)
+{
+    static constexpr std::string_view DEFAULT_SEP = ":-";
+    std::string out;
+    out.reserve(text.size());
+    std::size_t pos = 0;
+    while (true) {
+        const std::size_t begin = text.find("${", pos);
+        if (begin == std::string::npos) {
+            out += text.substr(pos);
+            return out;
+        }
+        const std::size_t end = text.find('}', begin + 2);
+        if (end == std::string::npos) {
+            out += text.substr(pos);
+            return out;
+        }
+        out += text.substr(pos, begin - pos);
+        const std::string_view ref(text.data() + begin + 2, end - begin - 2);
+        const std::size_t sep = ref.find(DEFAULT_SEP);
+        const std::string name(ref.substr(0, sep));
+        const std::string fallback = sep == std::string_view::npos
+            ? std::string { }
+            : std::string(ref.substr(sep + DEFAULT_SEP.size()));
+        const std::string value    = env_or_empty(name.c_str());
+        out += value.empty() ? fallback : value;
+        pos = end + 1;
+    }
+}
+
 inline std::string_view trim(std::string_view s)
 {
     size_t b = 0;

@@ -3,7 +3,7 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 project(
     imza
-    VERSION 0.5.3
+    VERSION 0.6.0
     HOMEPAGE_URL "https://umutsevdi.github.io/imza"
     LANGUAGES C CXX
 )
@@ -173,16 +173,19 @@ include("${TREE_SITTER_GENERATED_DIR}/tree_sitter_sources.cmake")
 set(PROMPTS_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(GLOB IMZA_PROMPT_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/misc/prompts/*.md")
 set(IMZA_BANNER_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/misc/banner.txt")
+set(IMZA_MCP_CATALOG_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/misc/mcp_catalog.json")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_prompts.py"
     ${IMZA_PROMPT_SOURCES}
-    "${IMZA_BANNER_SOURCE}")
+    "${IMZA_BANNER_SOURCE}"
+    "${IMZA_MCP_CATALOG_SOURCE}")
 execute_process(
     COMMAND
         "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_prompts.py"
         --source "${CMAKE_CURRENT_SOURCE_DIR}/misc/prompts"
         --banner "${IMZA_BANNER_SOURCE}"
+        --catalog "${IMZA_MCP_CATALOG_SOURCE}"
         --output "${PROMPTS_GENERATED_DIR}"
     COMMAND_ERROR_IS_FATAL ANY
 )
@@ -268,6 +271,7 @@ add_library(imza_runtime
     src/conversation/session.cpp
     src/conversation/session_store.cpp
     src/providers/store.cpp
+    src/tools/mcp_catalog.cpp
     src/tools/mcp_manager.cpp
     src/workspace/review.cpp
     src/runtime/main_thread_queue.cpp
@@ -279,6 +283,7 @@ add_library(imza_runtime
 )
 target_include_directories(imza_runtime PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${PROMPTS_GENERATED_DIR}
 )
 target_link_libraries(imza_runtime PUBLIC
     imza_foundation

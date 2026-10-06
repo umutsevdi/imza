@@ -5,6 +5,7 @@
 #include "network/mcp.h"
 #include "platform/config.h"
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -77,7 +78,11 @@ private:
         McpServerConfig config;
         std::mutex io; // serializes session I/O (handshake, calls, reset)
         mutable std::mutex state_mutex; // guards the snapshot fields below
-        McpServerState state = McpServerState::OFFLINE;
+        std::atomic_bool stream_cancel {
+            false
+        }; // aborts the in-flight notification stream
+        McpServerState state   = McpServerState::OFFLINE;
+        int reconnect_attempts = 0;
         std::string detail;
         McpSession session;
         std::vector<McpToolDefinition> tools;
@@ -86,7 +91,10 @@ private:
     std::shared_ptr<ServerEntry> find(const std::string& id) const;
     void spawn(std::function<void()> work);
     void run_handshake(std::shared_ptr<ServerEntry> entry);
+    void run_listener(std::shared_ptr<ServerEntry> entry);
+    bool wait_interruptible(long ms) const;
 
+    std::atomic_bool _stopping { false };
     mutable std::mutex _map_mutex;
     std::map<std::string, std::shared_ptr<ServerEntry>> _servers;
     std::vector<std::thread> _workers;

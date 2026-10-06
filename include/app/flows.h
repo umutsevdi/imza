@@ -59,6 +59,14 @@ void submit(ApplicationState& state, std::string text,
 void resolve_modal(ApplicationState& state, ModalResult result);
 void close_modal(ApplicationState& state);
 void enqueue_user_modal(ApplicationState& state, ModalPayload payload);
+
+// MCP server persistence: validate-then-commit through the locked config
+// read-modify-write, then apply to the live manager (reload, and connect
+// for a newly added server).
+void mcp_add_server(ApplicationState& state, const McpServerConfig& server);
+void mcp_remove_server(ApplicationState& state, const std::string& id);
+void mcp_set_server_enabled(
+    ApplicationState& state, const std::string& id, bool enabled);
 std::future<ModalResult> request_modal(
     ApplicationState& state, ModalPayload payload);
 void present_front(ApplicationState& state);

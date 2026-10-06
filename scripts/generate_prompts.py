@@ -47,6 +47,21 @@ def _render(prompts: dict[str, str]) -> str:
     return "\n".join(lines)
 
 
+def _render_catalog(path: Path) -> str:
+    value = _normalize(path.read_text(encoding="utf-8"))
+    return "\n".join([
+        "#include <string_view>",
+        "",
+        "namespace imza {",
+        "",
+        f"inline constexpr std::string_view EMBEDDED_MCP_CATALOG "
+        f"= {_raw_cpp_string(value)};",
+        "",
+        "} // namespace imza",
+        "",
+    ])
+
+
 def _render_banner(path: Path) -> str:
     banner = _normalize(path.read_text(encoding="utf-8"))
     return "\n".join([
@@ -72,6 +87,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--banner", type=Path, required=True)
+    parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
@@ -84,6 +100,8 @@ def main() -> int:
     _write_if_changed(args.output / "prompt_defaults.inc", _render(prompts))
 
     _write_if_changed(args.output / "banner.inc", _render_banner(args.banner))
+    _write_if_changed(
+        args.output / "mcp_catalog.inc", _render_catalog(args.catalog))
     return 0
 
 

@@ -182,10 +182,12 @@ struct StoredSkills {
 struct StoredMcpServer {
     std::optional<std::string> label;
     std::optional<std::string> description;
+    std::optional<std::string> catalog_id;
     std::optional<std::string> url;
     std::optional<std::map<std::string, std::string>> headers;
     std::optional<std::string> bearer_token;
     std::optional<bool> enabled;
+    std::optional<long> timeout_secs;
 };
 
 struct StoredConfig {
@@ -362,6 +364,11 @@ Status load_config(
             server.description  = entry.description.value_or("");
             server.bearer_token = entry.bearer_token.value_or("");
             server.enabled      = entry.enabled.value_or(true);
+            server.timeout_secs = entry.timeout_secs.value_or(0);
+            if (server.timeout_secs < 0) {
+                return fail(Status::CONFIG_ERROR,
+                    "mcp server '" + id + "': negative timeout");
+            }
             if (entry.headers) {
                 for (const auto& [name, value] : *entry.headers) {
                     if (name.empty() || name.contains(':')) {
@@ -372,12 +379,22 @@ Status load_config(
                     server.headers[name] = value;
                 }
             }
-            std::string url;
-            if (normalize_web_url(entry.url.value_or(""), url) != Status::OK) {
+            // A catalogue reference or an explicit url; both absent is
+            // unusable. An explicit url wins over the reference.
+            server.catalog_id         = entry.catalog_id.value_or("");
+            const std::string raw_url = entry.url.value_or("");
+            if (!raw_url.empty()) {
+                std::string url;
+                if (normalize_web_url(raw_url, url) != Status::OK) {
+                    return fail(Status::CONFIG_ERROR,
+                        "mcp server '" + id + "' requires an http(s) url");
+                }
+                server.url = std::move(url);
+            } else if (server.catalog_id.empty()) {
                 return fail(Status::CONFIG_ERROR,
-                    "mcp server '" + id + "' requires an http(s) url");
+                    "mcp server '" + id
+                        + "' requires an http(s) url or a catalog id");
             }
-            server.url          = std::move(url);
             out.mcp_servers[id] = std::move(server);
         }
     }
@@ -490,7 +507,12 @@ namespace {
                 if (!server.description.empty()) {
                     entry.description = server.description;
                 }
-                entry.url = server.url;
+                if (!server.catalog_id.empty()) {
+                    entry.catalog_id = server.catalog_id;
+                }
+                if (!server.url.empty()) {
+                    entry.url = server.url;
+                }
                 if (!server.headers.empty()) {
                     entry.headers = server.headers;
                 }
@@ -499,6 +521,9 @@ namespace {
                 }
                 if (!server.enabled) {
                     entry.enabled = server.enabled;
+                }
+                if (server.timeout_secs > 0) {
+                    entry.timeout_secs = server.timeout_secs;
                 }
                 servers[id] = std::move(entry);
             }

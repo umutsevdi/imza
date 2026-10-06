@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -88,6 +89,28 @@ Status http_post(const std::string& url,
 // Best-effort DELETE; the response body is discarded.
 Status http_delete(const std::string& url,
     const std::vector<std::string>& headers, long timeout_secs,
+    long* http_code);
+
+// One parsed Server-Sent Event from a streaming GET. Views into transport
+// buffers valid only during the callback.
+struct SseEvent {
+    std::string_view event; // "message" when the server omits it
+    std::string_view data;  // accumulated data lines, \n-joined
+    std::string_view id;    // empty when the event carried none
+    long retry_ms  = 0;     // set when the event carried a retry field
+    bool has_retry = false;
+};
+
+// Long-lived streaming GET (Server-Sent Events) for MCP notification
+// streams. Returns when the server closes the stream, `stop` becomes true
+// (Status::CANCELLED), or the transfer fails. Uses a dedicated curl
+// handle, so callbacks may run nested HTTP calls. Stall detection aborts
+// streams that stay silent for 5 minutes; `http_code` reports the
+// response status (405 = no server-initiated stream).
+using SseEventCallback = std::function<void(const SseEvent&)>;
+Status http_sse_get(const std::string& url,
+    const std::vector<std::string>& headers, const std::atomic_bool& stop,
+    const SseEventCallback& on_event, const std::string& last_event_id,
     long* http_code);
 
 inline bool http_ok(long code) { return code >= 200 && code < 300; }

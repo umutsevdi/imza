@@ -343,6 +343,25 @@ Status mcp_list_tools(McpSession& session, std::vector<McpToolDefinition>& out,
     return Status::API_ERROR;
 }
 
+Status mcp_send_result(
+    McpSession& session, const JsonValue& id, const JsonValue& result)
+{
+    if (!session.initialized) {
+        return Status::CONFIG_ERROR;
+    }
+    JsonValue response;
+    response["jsonrpc"] = "2.0";
+    response["id"]      = id;
+    response["result"]  = result;
+    long code           = 0;
+    std::string body;
+    if (post(session, json_dump(response), true, code, body, nullptr)
+        != Status::OK) {
+        return Status::NETWORK_ERROR;
+    }
+    return http_ok(code) ? Status::OK : Status::API_ERROR;
+}
+
 void mcp_end_session(McpSession& session)
 {
     if (!session.session_id.empty()) {

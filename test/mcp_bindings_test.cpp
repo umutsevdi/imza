@@ -44,7 +44,7 @@ struct McpFixture {
             std::map<std::string, imza::McpServerConfig> { { "exa", config } });
         manager->connect("exa");
         // The handshake runs on a manager worker; wait for the inventory.
-        for (int i = 0; i < 500; ++i) {
+        for (int i = 0; i < 1000; ++i) {
             if (manager->tools("exa").has_value()) {
                 return true;
             }

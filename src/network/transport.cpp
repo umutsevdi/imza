@@ -92,6 +92,11 @@ namespace {
         }
     };
 
+    constexpr long CONNECT_TIMEOUT_SECS    = 10;
+    constexpr long STALL_LIMIT_BYTES_PER_S = 1;
+    // 5 minutes of silence aborts idle notification streams.
+    constexpr long STALL_WINDOW_SECS = 300;
+
     struct SlistGuard {
         curl_slist* value = nullptr;
 
@@ -203,6 +208,190 @@ Status http_delete(const std::string& url,
     std::string body;
     return perform(url, headers, { }, false, timeout_secs, 0, body, 0,
         http_code, nullptr, nullptr, true);
+}
+
+namespace {
+
+    // Incremental SSE parser for the notification stream: event/data/id/
+    // retry fields accumulate until a blank line dispatches the event.
+    struct SseStreamCtx {
+        const std::atomic_bool* stop     = nullptr;
+        const SseEventCallback* on_event = nullptr;
+        long http_status                 = 0;
+        std::string buf;
+        std::string event;
+        std::string data;
+        std::string id;
+        long retry_ms  = 0;
+        bool has_retry = false;
+    };
+
+    size_t sse_header_callback(
+        char* ptr, size_t size, size_t nmemb, void* userdata)
+    {
+        auto* ctx          = static_cast<SseStreamCtx*>(userdata);
+        const size_t total = size * nmemb;
+        std::string_view line(ptr, total);
+        while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) {
+            line.remove_suffix(1);
+        }
+        if (line.starts_with("HTTP/")) {
+            const auto sp = line.find(' ');
+            if (sp != std::string_view::npos) {
+                std::string_view v = line.substr(sp + 1);
+                std::from_chars(
+                    v.data(), v.data() + v.size(), ctx->http_status);
+            }
+        }
+        return total;
+    }
+
+    void sse_dispatch(SseStreamCtx& ctx)
+    {
+        if (ctx.event.empty() && ctx.data.empty()) {
+            return;
+        }
+        const SseEvent event { ctx.event.empty() ? std::string_view("message")
+                                                 : std::string_view(ctx.event),
+            ctx.data, ctx.id, ctx.retry_ms, ctx.has_retry };
+        if (ctx.on_event != nullptr) {
+            (*ctx.on_event)(event);
+        }
+        ctx.event.clear();
+        ctx.data.clear();
+        ctx.id.clear();
+        ctx.retry_ms  = 0;
+        ctx.has_retry = false;
+    }
+
+    void sse_process_line(SseStreamCtx& ctx, std::string_view line)
+    {
+        if (line.empty()) {
+            sse_dispatch(ctx);
+            return;
+        }
+        if (line.starts_with("data:")) {
+            std::string_view d = line.substr(5);
+            if (!d.empty() && d.front() == ' ') {
+                d = d.substr(1);
+            }
+            if (!ctx.data.empty()) {
+                ctx.data += "\n";
+            }
+            ctx.data.append(d);
+        } else if (line.starts_with("event:")) {
+            std::string_view e = line.substr(6);
+            if (!e.empty() && e.front() == ' ') {
+                e = e.substr(1);
+            }
+            ctx.event.assign(e);
+        } else if (line.starts_with("id:")) {
+            std::string_view i = line.substr(3);
+            if (!i.empty() && i.front() == ' ') {
+                i = i.substr(1);
+            }
+            ctx.id.assign(i);
+        } else if (line.starts_with("retry:")) {
+            std::string_view r = line.substr(6);
+            if (!r.empty() && r.front() == ' ') {
+                r = r.substr(1);
+            }
+            long value = 0;
+            if (std::from_chars(r.data(), r.data() + r.size(), value).ec
+                == std::errc { }) {
+                ctx.retry_ms  = value;
+                ctx.has_retry = true;
+            }
+        }
+        // Comment (":...") and unknown fields are ignored per the SSE spec.
+    }
+
+    size_t sse_write_callback(char* ptr, size_t, size_t n, void* userdata)
+    {
+        auto* ctx = static_cast<SseStreamCtx*>(userdata);
+        ctx->buf.append(ptr, n);
+        size_t pos = 0;
+        while (true) {
+            const size_t nl = ctx->buf.find('\n', pos);
+            if (nl == std::string::npos) {
+                break;
+            }
+            std::string_view line(ctx->buf.data() + pos, nl - pos);
+            if (!line.empty() && line.back() == '\r') {
+                line.remove_suffix(1);
+            }
+            sse_process_line(*ctx, line);
+            pos = nl + 1;
+        }
+        ctx->buf.erase(0, pos);
+        return n;
+    }
+
+    int sse_progress_callback(
+        void* userdata, curl_off_t, curl_off_t, curl_off_t, curl_off_t)
+    {
+        const auto* ctx = static_cast<const SseStreamCtx*>(userdata);
+        return ctx->stop != nullptr && ctx->stop->load() ? 1 : 0;
+    }
+
+} // namespace
+
+Status http_sse_get(const std::string& url,
+    const std::vector<std::string>& headers, const std::atomic_bool& stop,
+    const SseEventCallback& on_event, const std::string& last_event_id,
+    long* http_code)
+{
+    // Dedicated handle: event callbacks may run nested HTTP calls (e.g.
+    // answering a server ping) and must not re-enter reuse_handle().
+    CURL* curl = curl_easy_init();
+    if (curl == nullptr) {
+        return Status::NETWORK_ERROR;
+    }
+    CurlHandle guard { curl };
+
+    std::vector<std::string> header_strs = headers;
+    if (!last_event_id.empty()) {
+        header_strs.push_back("Last-Event-ID: " + last_event_id);
+    }
+    const SlistGuard list { build_header_list(header_strs) };
+    SseStreamCtx ctx;
+    ctx.stop     = &stop;
+    ctx.on_event = &on_event;
+
+    curl_easy_reset(curl);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, CONNECT_TIMEOUT_SECS);
+    // Streams sit idle between server messages; stall (5 min of silence)
+    // instead of a hard total timeout.
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, STALL_LIMIT_BYTES_PER_S);
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, STALL_WINDOW_SECS);
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, list.value);
+    curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, sse_write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &ctx);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, sse_header_callback);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &ctx);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, sse_progress_callback);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &ctx);
+
+    const CURLcode res = curl_easy_perform(curl);
+    long code          = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code);
+    if (http_code != nullptr) {
+        *http_code = code;
+    }
+    if (res == CURLE_ABORTED_BY_CALLBACK) {
+        return Status::CANCELLED;
+    }
+    if (res != CURLE_OK) {
+        // Stall aborts surface as CURLE_OPERATION_TIMEDOUT; the caller
+        // treats both like a closed stream and reconnects.
+        return res == CURLE_OPERATION_TIMEDOUT ? Status::TIMEOUT
+                                               : Status::NETWORK_ERROR;
+    }
+    return Status::OK;
 }
 
 extern const Provider openai_provider;
@@ -377,9 +566,6 @@ namespace {
     // A stream that moves less than this for the window is stalled. Slow
     // providers legitimately think for minutes before the first token, so
     // the window is deliberately generous; retries cover the rest.
-    constexpr long CONNECT_TIMEOUT_SECS    = 10;
-    constexpr long STALL_LIMIT_BYTES_PER_S = 1;
-    constexpr long STALL_WINDOW_SECS       = 300;
 
 } // namespace
 

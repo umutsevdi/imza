@@ -133,9 +133,8 @@ namespace {
         }
     }
 
-    // Ambient directory of configured MCP servers: one line per server so
-    // the model knows what exists when planning; tool descriptions stay
-    // behind load_mcp. Rendered only when servers are configured.
+    // One line per configured server; tool descriptions stay behind
+    // load_mcp. Rendered only when servers are configured.
     std::string mcp_block(const McpManager* mcp)
     {
         if (mcp == nullptr) {

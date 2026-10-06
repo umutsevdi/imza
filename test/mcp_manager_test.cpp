@@ -2,6 +2,7 @@
 
 #include "loopback_mcp_server.h"
 #include "network/mcp.h"
+#include "tools/mcp_catalog.h"
 #include "tools/mcp_manager.h"
 
 #include <atomic>
@@ -25,7 +26,7 @@ imza::McpServerConfig server_config(
 bool wait_state(
     imza::McpManager& manager, const std::string& id, imza::McpServerState want)
 {
-    for (int i = 0; i < 500; ++i) {
+    for (int i = 0; i < 1000; ++i) {
         for (const auto& server : manager.snapshot()) {
             if (server.id == id && server.state == want) {
                 return true;
@@ -38,7 +39,7 @@ bool wait_state(
 
 template <typename Predicate> bool wait_for(Predicate predicate)
 {
-    for (int i = 0; i < 500; ++i) {
+    for (int i = 0; i < 1000; ++i) {
         if (predicate()) {
             return true;
         }
@@ -184,4 +185,163 @@ TEST_CASE("mcp manager serializes concurrent calls on one session")
     CHECK(ok == 20);
 
     server.stop();
+}
+
+TEST_CASE("expand_env_vars resolves references with defaults")
+{
+    ::setenv("IMZA_TEST_TOKEN", "s3cret", 1);
+    CHECK(imza::expand_env_vars("${IMZA_TEST_TOKEN}") == "s3cret");
+    CHECK(imza::expand_env_vars("Bearer ${IMZA_TEST_TOKEN}!")
+        == "Bearer s3cret!");
+    CHECK(
+        imza::expand_env_vars("${IMZA_TEST_MISSING:-fallback}") == "fallback");
+    CHECK(imza::expand_env_vars("https://${IMZA_TEST_MISSING}/x")
+        == "https:///x");
+    CHECK(imza::expand_env_vars("plain") == "plain");
+    CHECK(imza::expand_env_vars("unterminated ${VAR") == "unterminated ${VAR");
+}
+
+TEST_CASE("mcp manager retries failed handshakes with backoff")
+{
+    imza::test::allow_loopback_direct();
+    imza::test::LoopbackMcpServer server;
+    server.fail_handshakes = 1;
+    REQUIRE(server.start());
+
+    imza::McpManager manager({ { "exa", server_config("exa", server.url()) } });
+    manager.connect("exa");
+    // First handshake answers 500; the retry lands after the 2 s backoff.
+    REQUIRE(wait_state(manager, "exa", imza::McpServerState::CONNECTED));
+
+    imza::McpToolCallResult result;
+    std::string detail;
+    REQUIRE(
+        manager.call("exa", "echo", { }, result, detail) == imza::Status::OK);
+
+    server.stop();
+}
+
+TEST_CASE("mcp manager refreshes tools on notifications/tools/list_changed")
+{
+    imza::test::allow_loopback_direct();
+    imza::test::LoopbackMcpServer server;
+    server.push_list_changed = true;
+    REQUIRE(server.start());
+
+    imza::McpManager manager({ { "exa", server_config("exa", server.url()) } });
+    manager.connect("exa");
+    REQUIRE(wait_state(manager, "exa", imza::McpServerState::CONNECTED));
+    // The notification may land before this check runs: the inventory is
+    // either the initial roster or the already-refreshed one.
+    CHECK(manager.tools("exa").has_value());
+
+    // The notification listener re-lists; the fixture answers with the
+    // updated one-tool roster.
+    REQUIRE(wait_for([&] {
+        const auto tools = manager.tools("exa");
+        return tools.has_value() && tools->size() == 1
+            && (*tools)[0].name == "changed-tool";
+    }));
+
+    server.stop();
+}
+
+TEST_CASE("mcp listener exits quietly when the server has no stream")
+{
+    imza::test::allow_loopback_direct();
+    imza::test::LoopbackMcpServer server;
+    server.get_returns_405 = true;
+    REQUIRE(server.start());
+
+    imza::McpManager manager({ { "exa", server_config("exa", server.url()) } });
+    manager.connect("exa");
+    REQUIRE(wait_state(manager, "exa", imza::McpServerState::CONNECTED));
+    REQUIRE(wait_for([&] { return server.saw_get.load(); }));
+
+    // Still connected, listener gone; calls keep working.
+    imza::McpToolCallResult result;
+    std::string detail;
+    CHECK(manager.call("exa", "echo", { }, result, detail) == imza::Status::OK);
+    CHECK(manager.snapshot()[0].state == imza::McpServerState::CONNECTED);
+
+    server.stop();
+}
+
+TEST_CASE("mcp manager reload drops removed servers and applies toggles")
+{
+    imza::test::allow_loopback_direct();
+    imza::test::LoopbackMcpServer server;
+    REQUIRE(server.start());
+
+    imza::McpManager manager({ { "exa", server_config("exa", server.url()) } });
+    manager.connect("exa");
+    REQUIRE(wait_state(manager, "exa", imza::McpServerState::CONNECTED));
+
+    imza::McpServerConfig toggled = server_config("exa", server.url());
+    toggled.enabled               = false;
+    manager.reload({ { "exa", toggled } });
+    REQUIRE(wait_state(manager, "exa", imza::McpServerState::DISABLED));
+
+    imza::McpServerConfig fresh = server_config("exa", server.url());
+    manager.reload({ { "exa", fresh } });
+    REQUIRE(wait_state(manager, "exa", imza::McpServerState::OFFLINE));
+    CHECK_FALSE(manager.tools("exa").has_value());
+
+    manager.reload({ { "other", server_config("other", server.url()) } });
+    CHECK(manager.snapshot().size() == 1);
+    CHECK(manager.snapshot()[0].id == "other");
+
+    server.stop();
+}
+
+TEST_CASE("the bundled mcp catalogue parses with usable entries")
+{
+    const auto catalog = imza::load_mcp_catalog();
+    REQUIRE_FALSE(catalog.empty());
+    bool has_https = false;
+    for (const auto& entry : catalog) {
+        CHECK_FALSE(entry.id.empty());
+        CHECK_FALSE(entry.label.empty());
+        CHECK(entry.url.rfind("https://", 0) == 0);
+        const bool known_auth = entry.auth_kind == "none"
+            || entry.auth_kind == "token" || entry.auth_kind == "oauth";
+        CHECK(known_auth);
+        if (entry.id == "github") {
+            has_https = true;
+        }
+    }
+    CHECK(has_https);
+}
+
+TEST_CASE("mcp manager fails catalogue references offline when dangling")
+{
+    imza::McpServerConfig config;
+    config.id         = "gone";
+    config.catalog_id = "no-such-entry";
+    imza::McpManager manager(
+        std::map<std::string, imza::McpServerConfig> { { "gone", config } });
+
+    manager.connect("gone");
+    const auto snapshot = manager.snapshot();
+    REQUIRE(snapshot.size() == 1);
+    CHECK(snapshot[0].state == imza::McpServerState::FAILED);
+    CHECK(snapshot[0].detail.find("no longer exists") != std::string::npos);
+
+    // Calls explain the failure without touching the network.
+    imza::McpToolCallResult result;
+    std::string detail;
+    CHECK(manager.call("gone", "echo", { }, result, detail)
+        == imza::Status::CONFIG_ERROR);
+}
+
+TEST_CASE("mcp manager resolves catalogue labels and urls from the bundle")
+{
+    imza::McpServerConfig config;
+    config.id         = "docs";
+    config.catalog_id = "github";
+    imza::McpManager manager(
+        std::map<std::string, imza::McpServerConfig> { { "docs", config } });
+
+    // Label falls back to the catalogue entry's label, not the id.
+    CHECK(manager.snapshot()[0].label == "GitHub");
 }

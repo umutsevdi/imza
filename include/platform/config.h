@@ -53,16 +53,22 @@ struct LastUsed {
     std::string model;
 };
 
-// One user-configured MCP server. stdio transport and OAuth credentials
-// will extend this record later; the url is stored normalized (https).
+// One user-configured MCP server. A catalogue server stores only
+// catalog_id and resolves url/label from the bundled catalogue at use
+// time (the models.dev pattern); a custom server stores url directly.
+// stdio transport and OAuth credentials will extend this record later;
+// the url is stored normalized (https).
 struct McpServerConfig {
     std::string id;
     std::string label;
     std::string description;
+    std::string catalog_id;
     std::string url;
     std::map<std::string, std::string> headers;
     std::string bearer_token;
     bool enabled = true;
+    // Per-request timeout override; 0 = the client default (25 s).
+    long timeout_secs = 0;
 };
 
 enum class SubagentRole { BUILDER, RESEARCH, BASIC };

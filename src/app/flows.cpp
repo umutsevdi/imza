@@ -1,10 +1,12 @@
 #include "app/flows.h"
+
 #include "app/slash_commands.h"
 #include "common/util.h"
 #include "conversation/persistence.h"
 #include "permissions/evaluator.h"
 #include "permissions/store.h"
 #include "platform/config.h"
+#include "tools/mcp_manager.h"
 #include "tools/skills.h"
 #include "turn/delegation.h"
 #include "turn/prompt.h"
@@ -353,6 +355,58 @@ void enqueue_user_modal(ApplicationState& state, ModalPayload payload)
             || state.session->phase() == Session::Phase::CONNECTING
             || state.session->phase() == Session::Phase::STREAMING)) {
         present_front(state);
+    }
+}
+
+void mcp_add_server(ApplicationState& state, const McpServerConfig& server)
+{
+    Config initial = state.providers->config();
+    Config result;
+    const ConfigUpdateResult updated = update_config(
+        config_path(), initial,
+        [&server](Config& cfg) {
+            return cfg.mcp_servers.insert_or_assign(server.id, server).second;
+        },
+        &result);
+    if (updated != ConfigUpdateResult::UPDATED) {
+        return;
+    }
+    if (state.mcp) {
+        state.mcp->reload(std::move(result.mcp_servers));
+        state.mcp->connect(server.id);
+    }
+}
+
+void mcp_remove_server(ApplicationState& state, const std::string& id)
+{
+    Config initial = state.providers->config();
+    Config result;
+    const ConfigUpdateResult updated = update_config(
+        config_path(), initial,
+        [&id](Config& cfg) { return cfg.mcp_servers.erase(id) != 0; }, &result);
+    if (updated == ConfigUpdateResult::UPDATED && state.mcp) {
+        state.mcp->reload(std::move(result.mcp_servers));
+    }
+}
+
+void mcp_set_server_enabled(
+    ApplicationState& state, const std::string& id, bool enabled)
+{
+    Config initial = state.providers->config();
+    Config result;
+    const ConfigUpdateResult updated = update_config(
+        config_path(), initial,
+        [&id, enabled](Config& cfg) {
+            const auto found = cfg.mcp_servers.find(id);
+            if (found == cfg.mcp_servers.end()) {
+                return false;
+            }
+            found->second.enabled = enabled;
+            return true;
+        },
+        &result);
+    if (updated == ConfigUpdateResult::UPDATED && state.mcp) {
+        state.mcp->reload(std::move(result.mcp_servers));
     }
 }
 

@@ -1,26 +1,56 @@
 #include "tools/mcp_manager.h"
 
+#include "network/json_io.h"
+#include "tools/mcp_catalog.h"
+
 #include <utility>
 
 namespace imza {
 
 namespace {
 
+    constexpr long DEFAULT_TIMEOUT_SECS = 25;
+    // Reconnect backoff after a failed handshake; 5 attempts then the
+    // server stays FAILED until a manual connect resets the count.
+    constexpr int MAX_RECONNECT_ATTEMPTS = 5;
+    constexpr long RETRY_DELAYS_SECS[]   = { 2, 5, 10, 30, 60 };
+
+    // Effective URL: the explicit one (custom servers) or the bundled
+    // catalogue's (reference servers). Empty when a reference no longer
+    // resolves; callers surface that as a connection failure.
+    std::string resolved_url(const McpServerConfig& config)
+    {
+        if (!config.url.empty() || config.catalog_id.empty()) {
+            return expand_env_vars(config.url);
+        }
+        const auto entry = find_mcp_catalog_entry(config.catalog_id);
+        return entry ? expand_env_vars(entry->url) : std::string { };
+    }
+
+    std::string dangling_catalog_detail(const McpServerConfig& config)
+    {
+        return "catalogue entry '" + config.catalog_id + "' no longer exists";
+    }
+
     McpSession make_session(const McpServerConfig& config)
     {
         McpEndpoint endpoint;
-        endpoint.url          = config.url;
-        endpoint.bearer_token = config.bearer_token;
+        endpoint.url          = expand_env_vars(config.url);
+        endpoint.bearer_token = expand_env_vars(config.bearer_token);
         for (const auto& [name, value] : config.headers) {
-            endpoint.headers.push_back(name + ": " + value);
+            endpoint.headers.push_back(
+                expand_env_vars(name) + ": " + expand_env_vars(value));
         }
+        endpoint.timeout_secs = config.timeout_secs > 0 ? config.timeout_secs
+                                                        : DEFAULT_TIMEOUT_SECS;
         return McpSession { std::move(endpoint) };
     }
 
     bool connection_fields_changed(
         const McpServerConfig& old, const McpServerConfig& fresh)
     {
-        return old.url != fresh.url || old.bearer_token != fresh.bearer_token
+        return old.url != fresh.url || old.catalog_id != fresh.catalog_id
+            || old.bearer_token != fresh.bearer_token
             || old.headers != fresh.headers || old.enabled != fresh.enabled;
     }
 
@@ -33,8 +63,12 @@ McpManager::McpManager(std::map<std::string, McpServerConfig> servers)
 
 McpManager::~McpManager()
 {
-    // Workers reference this through the signal and their entries; join
-    // before any member dies. Bounded by the per-server timeouts.
+    // Workers reference this through the signal and their entries; stop
+    // streams and retries, then join before any member dies.
+    _stopping.store(true);
+    for (auto& [id, entry] : _servers) {
+        entry->stream_cancel.store(true);
+    }
     for (std::thread& worker : _workers) {
         if (worker.joinable()) {
             worker.join();
@@ -54,6 +88,12 @@ void McpManager::reload(std::map<std::string, McpServerConfig> servers)
         std::lock_guard map_lock(_map_mutex);
         for (auto& [id, config] : servers) {
             config.id = id;
+            if (config.label.empty() && !config.catalog_id.empty()) {
+                if (const auto entry
+                    = find_mcp_catalog_entry(config.catalog_id)) {
+                    config.label = entry->label;
+                }
+            }
             if (config.label.empty()) {
                 config.label = id;
             }
@@ -82,7 +122,6 @@ void McpManager::reload(std::map<std::string, McpServerConfig> servers)
                 changed       = true;
             } else {
                 std::lock_guard state_lock(entry->state_mutex);
-                // Presentation-only fields update in place.
                 entry->config.label       = config.label;
                 entry->config.description = config.description;
             }
@@ -116,6 +155,8 @@ void McpManager::run_handshake(std::shared_ptr<ServerEntry> entry)
     McpSession session = make_session(entry->config);
     std::vector<McpToolDefinition> tools;
     std::string detail;
+    bool failed = false;
+    int attempt = 0;
     {
         std::lock_guard io_lock(entry->io);
         Status st = mcp_initialize(session, detail);
@@ -124,10 +165,15 @@ void McpManager::run_handshake(std::shared_ptr<ServerEntry> entry)
         }
         std::lock_guard state_lock(entry->state_mutex);
         if (st == Status::OK) {
-            entry->session = std::move(session);
-            entry->tools   = std::move(tools);
-            entry->state   = McpServerState::CONNECTED;
+            entry->session            = std::move(session);
+            entry->tools              = std::move(tools);
+            entry->state              = McpServerState::CONNECTED;
+            entry->reconnect_attempts = 0;
         } else {
+            failed                    = true;
+            entry->reconnect_attempts = std::min(
+                entry->reconnect_attempts + 1, MAX_RECONNECT_ATTEMPTS);
+            attempt        = entry->reconnect_attempts;
             entry->session = McpSession { };
             entry->tools.clear();
             entry->state  = McpServerState::FAILED;
@@ -135,6 +181,126 @@ void McpManager::run_handshake(std::shared_ptr<ServerEntry> entry)
         }
     }
     _changed.publish();
+    if (failed) {
+        if (attempt < MAX_RECONNECT_ATTEMPTS) {
+            const long delay
+                = RETRY_DELAYS_SECS[static_cast<std::size_t>(attempt - 1)];
+            spawn([this, entry, delay] {
+                if (wait_interruptible(delay * 1000)) {
+                    return;
+                }
+                run_handshake(entry);
+            });
+        }
+        return;
+    }
+    spawn([this, entry] { run_listener(entry); });
+}
+
+bool McpManager::wait_interruptible(long ms) const
+{
+    for (long waited = 0; waited < ms && !_stopping.load(); waited += 200) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+    return _stopping.load();
+}
+
+void McpManager::run_listener(std::shared_ptr<ServerEntry> entry)
+{
+    std::string last_event_id;
+    long retry_delay_ms = 3000;
+    while (!_stopping.load()) {
+        {
+            std::lock_guard state_lock(entry->state_mutex);
+            if (entry->state != McpServerState::CONNECTED
+                || entry->session.session_id.empty()) {
+                return;
+            }
+        }
+        entry->stream_cancel.store(false);
+        std::string stream_url;
+        std::vector<std::string> headers;
+        {
+            // Snapshot the session identity; the GET itself must not hold
+            // the I/O mutex (calls and re-lists acquire it in callbacks).
+            std::lock_guard io_lock(entry->io);
+            stream_url = resolved_url(entry->config);
+            headers    = {
+                "Accept: text/event-stream",
+                "MCP-Session-Id: " + entry->session.session_id,
+                "MCP-Protocol-Version: " + entry->session.protocol_version,
+            };
+            if (!entry->config.bearer_token.empty()) {
+                headers.push_back("Authorization: Bearer "
+                    + expand_env_vars(entry->config.bearer_token));
+            }
+            for (const auto& [name, value] : entry->config.headers) {
+                headers.push_back(
+                    expand_env_vars(name) + ": " + expand_env_vars(value));
+            }
+        }
+
+        long http_code = 0;
+        http_sse_get(
+            stream_url, headers, entry->stream_cancel,
+            [this, &entry, &last_event_id](const SseEvent& event) {
+                if (!event.id.empty()) {
+                    last_event_id = std::string(event.id);
+                }
+                const JsonValue message = parse_json(event.data);
+                if (!message.is_object()) {
+                    return;
+                }
+                const JsonValue* method = find_member(message, "method");
+                const JsonValue* id     = find_member(message, "id");
+                if (method == nullptr || !method->is_string()) {
+                    return; // not a request/notification we act on
+                }
+                const std::string name = method->as<std::string>();
+                if (name == "notifications/tools/list_changed"
+                    && id == nullptr) {
+                    std::vector<McpToolDefinition> tools;
+                    std::string detail;
+                    {
+                        std::lock_guard io_lock(entry->io);
+                        const Status st
+                            = mcp_list_tools(entry->session, tools, detail);
+                        if (st != Status::OK) {
+                            return;
+                        }
+                        std::lock_guard state_lock(entry->state_mutex);
+                        entry->tools = std::move(tools);
+                    }
+                    _changed.publish();
+                    return;
+                }
+                if (name == "ping" && id != nullptr) {
+                    std::lock_guard io_lock(entry->io);
+                    mcp_send_result(entry->session, *id, JsonValue { });
+                }
+                // Other server requests are out of scope; leave them
+                // unanswered rather than guessing at their semantics.
+            },
+            last_event_id, &http_code);
+
+        if (_stopping.load()) {
+            return;
+        }
+        if (http_code == 405) {
+            // This server offers no server-initiated stream; done for this
+            // session (the next handshake tries again).
+            return;
+        }
+        if (http_code == 404) {
+            // Session expired: rebuild it here, then keep listening.
+            std::lock_guard io_lock(entry->io);
+            run_handshake(entry);
+            continue;
+        }
+        if (wait_interruptible(retry_delay_ms / 1000 + 1)) {
+            return;
+        }
+    }
 }
 
 void McpManager::connect(const std::string& id)
@@ -147,6 +313,14 @@ void McpManager::connect(const std::string& id)
         std::lock_guard state_lock(entry->state_mutex);
         if (!entry->config.enabled || entry->state == McpServerState::CONNECTING
             || entry->state == McpServerState::CONNECTED) {
+            return;
+        }
+        // A dangling catalogue reference fails immediately, offline; it
+        // may resolve again after the next app update.
+        if (entry->config.url.empty() && resolved_url(entry->config).empty()) {
+            entry->state  = McpServerState::FAILED;
+            entry->detail = dangling_catalog_detail(entry->config);
+            _changed.publish();
             return;
         }
         entry->state  = McpServerState::CONNECTING;

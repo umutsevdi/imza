@@ -1,0 +1,308 @@
+{
+  "servers": [
+    {
+      "id": "github",
+      "label": "GitHub",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "description": "Repositories, issues, pull requests, and files.",
+      "auth_kind": "token",
+      "auth_hint": "a GitHub personal access token, sent as the bearer"
+    },
+    {
+      "id": "gitlab",
+      "label": "GitLab",
+      "url": "https://gitlab.com/api/v4/mcp",
+      "description": "Repositories, merge requests, and issues.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "linear",
+      "label": "Linear",
+      "url": "https://mcp.linear.app/mcp",
+      "description": "Issues, projects, cycles, and teams.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "atlassian",
+      "label": "Atlassian",
+      "url": "https://mcp.atlassian.com/v1/mcp",
+      "description": "Jira issues and Confluence pages.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "asana",
+      "label": "Asana",
+      "url": "https://mcp.asana.com/mcp",
+      "description": "Projects, tasks, and timelines.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "clickup",
+      "label": "ClickUp",
+      "url": "https://mcp.clickup.com/mcp",
+      "description": "Tasks, docs, and project tracking.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "monday",
+      "label": "monday.com",
+      "url": "https://mcp.monday.com/mcp",
+      "description": "Boards, items, and project management.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "todoist",
+      "label": "Todoist",
+      "url": "https://ai.todoist.net/mcp",
+      "description": "Personal tasks and projects.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "slack",
+      "label": "Slack",
+      "url": "https://mcp.slack.com/mcp",
+      "description": "Channels, messages, and workspace search.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "cal",
+      "label": "Cal.com",
+      "url": "https://mcp.cal.com/mcp",
+      "description": "Scheduling and event booking.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "granola",
+      "label": "Granola",
+      "url": "https://mcp.granola.ai/mcp",
+      "description": "Meeting notes and transcripts.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "zapier",
+      "label": "Zapier",
+      "url": "https://mcp.zapier.com/api/mcp/mcp",
+      "description": "Trigger workflows across 7,000+ app integrations.",
+      "auth_kind": "token",
+      "auth_hint": "a Zapier MCP connection secret, sent as the bearer"
+    },
+    {
+      "id": "cloudflare",
+      "label": "Cloudflare",
+      "url": "https://mcp.cloudflare.com/mcp",
+      "description": "Workers, KV, R2 storage, and DNS.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "vercel",
+      "label": "Vercel",
+      "url": "https://mcp.vercel.com",
+      "description": "Projects, deployments, and logs.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "netlify",
+      "label": "Netlify",
+      "url": "https://netlify-mcp.netlify.app/mcp",
+      "description": "Sites, deployments, and forms.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "railway",
+      "label": "Railway",
+      "url": "https://mcp.railway.app/mcp",
+      "description": "Projects, environments, and service deploys.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "buildkite",
+      "label": "Buildkite",
+      "url": "https://mcp.buildkite.com/mcp",
+      "description": "CI/CD pipelines and builds.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "bigquery",
+      "label": "Google BigQuery",
+      "url": "https://bigquery.googleapis.com/mcp",
+      "description": "Warehouse queries and datasets.",
+      "auth_kind": "token",
+      "auth_hint": "a Google Cloud API key, sent as the bearer"
+    },
+    {
+      "id": "gce",
+      "label": "Google Compute Engine",
+      "url": "https://compute.googleapis.com/mcp",
+      "description": "VM instances and compute resources.",
+      "auth_kind": "token",
+      "auth_hint": "a Google Cloud API key, sent as the bearer"
+    },
+    {
+      "id": "gke",
+      "label": "Google Kubernetes Engine",
+      "url": "https://container.googleapis.com/mcp",
+      "description": "Clusters, workloads, and node pools.",
+      "auth_kind": "token",
+      "auth_hint": "a Google Cloud API key, sent as the bearer"
+    },
+    {
+      "id": "supabase",
+      "label": "Supabase",
+      "url": "https://mcp.supabase.com/mcp",
+      "description": "Postgres databases, auth, storage, and projects.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "neon",
+      "label": "Neon",
+      "url": "https://mcp.neon.tech/mcp",
+      "description": "Serverless Postgres projects and branches.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "stripe",
+      "label": "Stripe",
+      "url": "https://mcp.stripe.com",
+      "description": "Payments, customers, and subscriptions.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "notion",
+      "label": "Notion",
+      "url": "https://mcp.notion.com/mcp",
+      "description": "Pages, databases, and search in your workspace.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "airtable",
+      "label": "Airtable",
+      "url": "https://mcp.airtable.com/mcp",
+      "description": "Bases, tables, and records.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "box",
+      "label": "Box",
+      "url": "https://mcp.box.com",
+      "description": "Enterprise file storage and sharing.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "hubspot",
+      "label": "HubSpot",
+      "url": "https://mcp.hubspot.com/mcp",
+      "description": "CRM contacts, deals, and pipelines.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "figma",
+      "label": "Figma",
+      "url": "https://mcp.figma.com/mcp",
+      "description": "Design files, frames, and code handoff.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "canva",
+      "label": "Canva",
+      "url": "https://mcp.canva.com/mcp",
+      "description": "Design creation, editing, and brand assets.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "miro",
+      "label": "Miro",
+      "url": "https://mcp.miro.com/",
+      "description": "Boards, diagrams, and workshops.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "webflow",
+      "label": "Webflow",
+      "url": "https://mcp.webflow.com/mcp",
+      "description": "Sites, CMS collections, and publishing.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "wix",
+      "label": "Wix",
+      "url": "https://mcp.wix.com/mcp",
+      "description": "Sites, pages, and publishing.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "sentry",
+      "label": "Sentry",
+      "url": "https://mcp.sentry.dev/mcp",
+      "description": "Errors, issues, and releases from Sentry.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "globalping",
+      "label": "Globalping",
+      "url": "https://mcp.globalping.dev/mcp",
+      "description": "Network diagnostics: ping, traceroute, DNS from probes worldwide.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "stackoverflow",
+      "label": "Stack Overflow",
+      "url": "https://mcp.stackoverflow.com",
+      "description": "Search and read Stack Overflow questions and answers.",
+      "auth_kind": "oauth",
+      "auth_hint": ""
+    },
+    {
+      "id": "browserbase",
+      "label": "Browserbase",
+      "url": "https://mcp.browserbase.com/mcp",
+      "description": "Cloud browser automation and scraping.",
+      "auth_kind": "token",
+      "auth_hint": "a Browserbase API key, sent as the bearer"
+    },
+    {
+      "id": "huggingface",
+      "label": "Hugging Face",
+      "url": "https://hf.co/mcp",
+      "description": "Models, datasets, and Spaces on Hugging Face.",
+      "auth_kind": "none",
+      "auth_hint": ""
+    },
+    {
+      "id": "wolfram",
+      "label": "Wolfram Alpha",
+      "url": "https://agenttools.wolfram.com/mcp",
+      "description": "Math, science, and factual computation.",
+      "auth_kind": "none",
+      "auth_hint": ""
+    }
+  ]
+}

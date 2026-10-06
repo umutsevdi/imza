@@ -523,3 +523,35 @@ TEST_CASE("load_config validates mcp server entries")
     CHECK(cfg.mcp_servers.at("exa").url == "https://mcp.exa.ai/mcp");
     CHECK(cfg.mcp_servers.at("exa").enabled);
 }
+
+TEST_CASE("mcp config accepts catalogue references without urls")
+{
+    const auto path = temp_file("mcp-catalog-ref.json");
+    {
+        std::ofstream out(path);
+        out << R"({"mcp_servers":{"ctx":{"catalog_id":"context7",)"
+            << R"("bearer_token":"tok"}}})";
+    }
+    imza::Config cfg;
+    REQUIRE(imza::load_config(path, cfg) == imza::Status::OK);
+    const auto& server = cfg.mcp_servers.at("ctx");
+    CHECK(server.catalog_id == "context7");
+    CHECK(server.url.empty());
+
+    REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
+    imza::Config loaded;
+    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
+    CHECK(loaded.mcp_servers.at("ctx").catalog_id == "context7");
+    CHECK(loaded.mcp_servers.at("ctx").url.empty());
+
+    const auto neither = temp_file("mcp-neither.json");
+    {
+        std::ofstream out(neither);
+        out << R"({"mcp_servers":{"broken":{"label":"x"}}})";
+    }
+    imza::Config bad;
+    std::string error;
+    CHECK(
+        imza::load_config(neither, bad, &error) == imza::Status::CONFIG_ERROR);
+    CHECK(error.find("url or a catalog id") != std::string::npos);
+}

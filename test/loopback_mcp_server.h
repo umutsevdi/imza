@@ -15,6 +15,7 @@
 
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cstdlib>
 #include <initializer_list>
 #include <string>
@@ -30,10 +31,14 @@ public:
     bool rpc_error_on_call   = false;
     bool call_is_error       = false;
     bool call_structured     = false;
+    int fail_handshakes      = 0;     // first N initialize requests answer 500
+    bool get_returns_405     = false; // GET answers 405 (no server stream)
+    bool push_list_changed   = false; // first GET pushes tools/list_changed
 
     std::atomic<bool> session_echo_ok { false };
     std::atomic<bool> protocol_header_ok { false };
     std::atomic<bool> saw_delete { false };
+    std::atomic<bool> saw_get { false };
 
     ~LoopbackMcpServer() { stop(); }
 
@@ -162,8 +167,34 @@ private:
             respond(fd, "HTTP/1.1 200 OK", { }, "");
             return;
         }
+        if (request.method == "GET") {
+            saw_get = true;
+            if (get_returns_405) {
+                respond(fd, "HTTP/1.1 405 Method Not Allowed", { }, "");
+                return;
+            }
+            if (push_list_changed && !pushed_) {
+                pushed_ = true;
+                respond(fd, "HTTP/1.1 200 OK",
+                    { "Content-Type: text/event-stream" },
+                    "id: 1\nevent: message\ndata: "
+                    "{\"jsonrpc\":\"2.0\",\"method\":"
+                    "\"notifications/tools/list_changed\"}\n\n");
+                return;
+            }
+            // Park the stream briefly, then close: the client reconnects.
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            respond(fd, "HTTP/1.1 200 OK",
+                { "Content-Type: text/event-stream" }, "");
+            return;
+        }
         if (request.body.find("\"method\":\"initialize\"")
             != std::string::npos) {
+            if (failed_count_ < fail_handshakes) {
+                ++failed_count_;
+                respond(fd, "HTTP/1.1 500 Server Error", { }, "");
+                return;
+            }
             ++init_count_;
             last_session_ = init_count_ == 1 ? "sess-a" : "sess-b";
             const std::string body
@@ -184,6 +215,15 @@ private:
         }
         if (request.body.find("\"method\":\"tools/list\"")
             != std::string::npos) {
+            // After a pushed tools/list_changed the roster is the new set.
+            if (pushed_) {
+                respond(fd, "HTTP/1.1 200 OK",
+                    { "Content-Type: application/json" },
+                    R"({"jsonrpc":"2.0","id":7,"result":{"tools":[)"
+                    R"({"name":"changed-tool","description":"Updated"})"
+                    R"(]}})");
+                return;
+            }
             // Two pages: two tools + cursor, then one tool without.
             const bool first_page = list_count_ == 0;
             ++list_count_;
@@ -269,6 +309,8 @@ private:
     std::string last_session_ = "sess-a";
     int init_count_           = 0;
     int list_count_           = 0;
+    int failed_count_         = 0;
+    bool pushed_              = false;
     bool expired_             = false;
 };
 

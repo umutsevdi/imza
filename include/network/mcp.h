@@ -64,9 +64,9 @@ struct McpRpcError {
 };
 
 struct McpEndpoint {
-    std::string url;                  // MCP endpoint URL (Streamable HTTP)
+    std::string url;
     std::string bearer_token;         // optional "Authorization: Bearer" value
-    std::vector<std::string> headers; // static extra headers
+    std::vector<std::string> headers; // static extra request headers
     long timeout_secs = 25;
 };
 
@@ -80,11 +80,9 @@ struct McpSession {
     bool initialized             = false;
 };
 
-// Serializes {"jsonrpc":"2.0","id":id,"method":method,"params":params}.
 std::string mcp_rpc_request(
     std::uint64_t id, std::string_view method, const JsonValue& params);
 
-// True when the client can speak a server-proposed protocol version.
 bool mcp_version_supported(std::string_view version);
 
 // Extracts the JSON-RPC response message from a POST body: a top-level
@@ -110,6 +108,10 @@ Status mcp_call_tool(McpSession& session, const std::string& name,
 // tools/list with full cursor pagination; appends to `out`.
 Status mcp_list_tools(McpSession& session, std::vector<McpToolDefinition>& out,
     std::string& detail);
+
+// Answers a server-initiated request (e.g. ping) over the session.
+Status mcp_send_result(
+    McpSession& session, const JsonValue& id, const JsonValue& result);
 
 // Best-effort DELETE of the remote session; always clears session state.
 void mcp_end_session(McpSession& session);
