@@ -10,6 +10,7 @@
 
 #include "common/modal.h"
 #include "common/tool_call.h"
+#include "network/json.h"
 #include "permissions/filesystem.h"
 #include "tools/lua.h"
 
@@ -109,6 +110,13 @@ std::optional<std::string> opt_string(lua_State* L, int index);
 std::optional<lua_Integer> opt_integer(lua_State* L, int index);
 std::optional<bool> opt_boolean(lua_State* L, int index);
 
+// Converts the Lua value at `index` into JSON: scalars directly, tables
+// as arrays (1-based contiguous integer keys) or objects (string keys).
+// Bounded depth/size; false with `error` on unsupported values, cycles,
+// or mixed-key tables.
+bool lua_value_to_json(
+    lua_State* L, int index, JsonValue& out, std::string& error);
+
 // On denial raises the binding error and returns the binding return count
 // (unreachable past the raise); otherwise fills `target` with the
 // canonical path.
@@ -122,6 +130,7 @@ std::span<const LuaMethod> web_lua_methods();
 std::span<const LuaMethod> tree_lua_methods();
 std::span<const LuaMethod> canvas_lua_methods();
 std::span<const LuaMethod> plan_lua_methods();
+std::span<const LuaMethod> mcp_lua_methods();
 
 void register_core(LuaState& state);
 void register_fs(LuaState& state);
@@ -129,5 +138,6 @@ void register_web(LuaState& state);
 void register_tree(LuaState& state);
 void register_canvas(LuaState& state);
 void register_plan(LuaState& state);
+void register_mcp(LuaState& state);
 
 } // namespace imza

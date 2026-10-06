@@ -367,7 +367,7 @@ ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx);
 ftxui::Element render_todo(const TodoList& todo, const LayoutCtx& ctx);
 ftxui::Element render_context_box(const std::optional<std::string>& rules,
     const std::vector<std::string>& attachments, SkillCounts project_skills,
-    SkillCounts global_skills);
+    SkillCounts global_skills, const std::vector<std::string>& mcp_servers);
 
 struct PermissionView {
     bool web_disabled      = false;
@@ -422,6 +422,7 @@ ftxui::Component make_side_panel(std::shared_ptr<ApplicationState> state,
 ftxui::Component make_status_line(std::shared_ptr<ApplicationState> state,
     LayoutFn layout, WorkflowFn workflow);
 ftxui::Component make_connect(std::shared_ptr<ApplicationState> state);
+ftxui::Component make_mcp(std::shared_ptr<ApplicationState> state);
 ftxui::Component make_subscription_signin(
     std::shared_ptr<ApplicationState> state, std::string connection_id,
     std::function<std::string()> label = { });

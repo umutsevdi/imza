@@ -21,6 +21,10 @@ struct LoadToolArgs {
     std::string name;
 };
 
+struct LoadMcpToolArgs {
+    std::string server;
+};
+
 struct SubagentTaskArgs {
     std::string mode;
     std::string prompt;

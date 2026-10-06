@@ -306,6 +306,7 @@ add_library(imza_execution
     src/tools/bindings/plan.cpp
     src/tools/bindings/tree.cpp
     src/tools/bindings/web.cpp
+    src/tools/bindings/mcp.cpp
     src/turn/delegation.cpp
     src/turn/prompt.cpp
     src/turn/stream_updates.cpp
@@ -341,6 +342,7 @@ add_library(imza_ui
     src/ui/components.cpp
     src/ui/markdown.cpp
     src/ui/modals/connect.cpp
+    src/ui/modals/mcp.cpp
     src/ui/modals/signin.cpp
     src/ui/modals/sessions.cpp
     src/ui/modals/skills.cpp

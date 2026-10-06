@@ -426,6 +426,8 @@ namespace {
 
         void _build(const SkillsModal&) { _body = make_skills(_state); }
 
+        void _build(const McpModal&) { _body = make_mcp(_state); }
+
         void _build(const ViewerModal& payload)
         {
             _reset_static_scroll();

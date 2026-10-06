@@ -533,6 +533,9 @@ void run_slash(ApplicationState& state, std::string_view command)
     case SlashCommand::Action::CONNECT:
         enqueue_user_modal(state, ConnectModal { ConnectModal::Entry::MANAGE });
         break;
+    case SlashCommand::Action::MCP:
+        enqueue_user_modal(state, McpModal { });
+        break;
     case SlashCommand::Action::MODEL:
         if (state.providers->connections().empty()) {
             state.session->set_error("No connections - run /connect first.");

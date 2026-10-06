@@ -167,6 +167,7 @@ namespace {
         switch (capability) {
         case LuaCapability::SHELL: return host.shell_enabled;
         case LuaCapability::WEB: return host.web_enabled;
+        case LuaCapability::MCP: return host.mcp_enabled;
         case LuaCapability::NONE: return true;
         }
         return true;
@@ -595,7 +596,16 @@ std::unique_ptr<LuaState> make_lua_state()
     register_tree(*state);
     register_canvas(*state);
     register_plan(*state);
+    register_mcp(*state);
     return state;
+}
+
+bool lua_value_to_json(
+    lua_State* L, int index, JsonValue& out, std::string& error)
+{
+    std::size_t nodes = 0;
+    std::unordered_set<const void*> tables;
+    return lua_value_json(L, index, out, 0, nodes, tables, error);
 }
 
 } // namespace imza

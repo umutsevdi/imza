@@ -72,10 +72,13 @@ namespace {
                 [state](PermissionStore::Grants grants) {
                     return state->permissions->install(std::move(grants));
                 },
+            .mcp = [state] -> McpManager* { return state->mcp.get(); },
             .web_enabled
             = (state->runtime_flags & RuntimeFlag::WEB) != RuntimeFlag::NONE,
             .shell_enabled
             = (state->runtime_flags & RuntimeFlag::SHELL) != RuntimeFlag::NONE,
+            .mcp_enabled
+            = (state->runtime_flags & RuntimeFlag::MCP) != RuntimeFlag::NONE,
             .skip_permissions
             = (state->runtime_flags & RuntimeFlag::SKIP_PERMISSIONS)
                 != RuntimeFlag::NONE,
@@ -90,6 +93,13 @@ namespace {
         return SkillToolDeps {
             [state] { return state->environment->skills(); },
             [state] -> SkillStore& { return *state->skills; },
+        };
+    }
+
+    McpToolDocsDeps mcp_docs(ApplicationState* state)
+    {
+        return McpToolDocsDeps {
+            [state] -> McpManager* { return state->mcp.get(); },
         };
     }
 
@@ -163,7 +173,7 @@ namespace {
         if (use_default_tools) {
             ApplicationState* captured = state.get();
             tools = default_tools(lua_host(captured), skill_deps(captured),
-                state->subagent_slot, *state->lua_state);
+                state->subagent_slot, *state->lua_state, mcp_docs(captured));
         }
         wire(state, std::move(stream_fn), std::move(tools));
         return state;
@@ -200,8 +210,8 @@ namespace {
     std::vector<Tool> sidechat_roster(
         ApplicationState& parent, ApplicationState& child)
     {
-        std::vector<Tool> tools = default_tools(
-            lua_host(&parent), skill_deps(&child), { }, *child.lua_state);
+        std::vector<Tool> tools = default_tools(lua_host(&parent),
+            skill_deps(&child), { }, *child.lua_state, mcp_docs(&parent));
         // The sidechat is a regular chat: it keeps the lua sandbox (and its
         // file bindings) but must not spawn its own subagents.
         std::erase_if(tools,

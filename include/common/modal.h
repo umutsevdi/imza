@@ -84,6 +84,8 @@ struct VariantModal {
 
 struct SessionsModal { };
 
+struct McpModal { };
+
 struct SkillsModal {
     struct Entry {
         std::string name;
@@ -94,8 +96,9 @@ struct SkillsModal {
     std::vector<Entry> entries;
 };
 
-using ModalPayload = std::variant<std::monostate, ViewerModal, PermissionPrompt,
-    QuestionForm, ConnectModal, VariantModal, SessionsModal, SkillsModal>;
+using ModalPayload
+    = std::variant<std::monostate, ViewerModal, PermissionPrompt, QuestionForm,
+        ConnectModal, VariantModal, SessionsModal, SkillsModal, McpModal>;
 
 using ModalResult
     = std::variant<std::monostate, ToolVerdict, ModalAnswer, ConnectResult,

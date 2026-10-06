@@ -71,8 +71,15 @@ struct SkillToolDeps {
     std::function<SkillStore&()> store;
 };
 
+// Docs source for load_mcp: the accessor is empty when MCP is
+// unavailable in this run. Filled in wire().
+struct McpToolDocsDeps {
+    std::function<McpManager*()> mcp;
+};
+
 Tool make_skill_tool(SkillToolDeps deps = { });
 Tool make_load_tool(LuaState& state);
+Tool make_load_mcp_tool(McpToolDocsDeps deps = { });
 
 // Slot indirection breaks the TurnRunner/Delegation cycle: the tool
 // captures it empty, wire() fills it once both exist.
@@ -81,9 +88,10 @@ using SubagentToolSlot = std::shared_ptr<SubagentToolFn>;
 
 Tool make_subagent_tool(SubagentToolSlot delegate = { });
 
-// Builds the model-facing roster: skill, subagent, and the lua sandbox
-// (see tools/lua.h for the LuaHost the lua tool is wired with).
+// Builds the model-facing roster: skill, load_mcp, subagent, and the lua
+// sandbox (see tools/lua.h for the LuaHost the lua tool is wired with).
 std::vector<Tool> default_tools(LuaHost lua_host, SkillToolDeps skill_deps,
-    SubagentToolSlot subagent, LuaState& lua_state);
+    SubagentToolSlot subagent, LuaState& lua_state,
+    McpToolDocsDeps mcp_docs = { });
 
 } // namespace imza

@@ -68,11 +68,12 @@ enum RuntimeFlag : std::uint8_t {
     SHELL            = 1U << 1,
     ATTENDED         = 1U << 2,
     SKIP_PERMISSIONS = 1U << 3,
+    MCP              = 1U << 4,
 };
 
 constexpr RuntimeFlag interactive_runtime_flags()
 {
-    return static_cast<RuntimeFlag>(WEB | SHELL | ATTENDED);
+    return static_cast<RuntimeFlag>(WEB | SHELL | MCP | ATTENDED);
 }
 
 inline constexpr const char* NO_MODEL_SELECTED

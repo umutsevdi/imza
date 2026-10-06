@@ -48,6 +48,7 @@ TEST_CASE("slash_commands includes built-ins")
             || c.action == SlashCommand::Action::SUBAGENTS
             || c.action == SlashCommand::Action::SESSIONS
             || c.action == SlashCommand::Action::SKILLS
+            || c.action == SlashCommand::Action::MCP
             || c.action == SlashCommand::Action::COMPACT
             || c.action == SlashCommand::Action::MAKE_SKILL;
         CHECK(known);

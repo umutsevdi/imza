@@ -1,6 +1,7 @@
 #include "app/application_state.h"
 #include "app/flows.h"
 #include "permissions/store.h"
+#include "tools/mcp_manager.h"
 #include "ui/ui.h"
 
 #include "tools/skills.h"
@@ -118,8 +119,24 @@ public:
             }
             const auto [project, global]
                 = _state->skills->counts(_state->environment->skills());
-            parts.push_back(render_context_box(
-                env->agent_rules_path(), _attachment_names, project, global));
+            std::vector<std::string> mcp_servers;
+            if (_state->mcp != nullptr) {
+                for (const auto& server : _state->mcp->snapshot()) {
+                    if (server.state == McpServerState::DISABLED) {
+                        continue;
+                    }
+                    std::string line = server.id;
+                    if (server.state == McpServerState::CONNECTED) {
+                        line += " · " + std::to_string(server.tool_count)
+                            + " tools";
+                    } else if (server.state == McpServerState::FAILED) {
+                        line += " ✗";
+                    }
+                    mcp_servers.push_back(std::move(line));
+                }
+            }
+            parts.push_back(render_context_box(env->agent_rules_path(),
+                _attachment_names, project, global, mcp_servers));
             const PermissionStore::Snapshot grants
                 = _state->permissions->snapshot();
             PermissionView permissions
@@ -387,7 +404,7 @@ Element render_todo(const TodoList& todo, const LayoutCtx&)
 
 Element render_context_box(const std::optional<std::string>& rules,
     const std::vector<std::string>& attachments, SkillCounts project_skills,
-    SkillCounts global_skills)
+    SkillCounts global_skills, const std::vector<std::string>& mcp_servers)
 {
     Elements context_box;
     if (rules || !attachments.empty()) {
@@ -417,6 +434,12 @@ Element render_context_box(const std::optional<std::string>& rules,
             text(
                 std::format("{}/{}", global_skills.active, global_skills.total))
                 | color(PANEL_FG) | dim,
+        }));
+    }
+    if (!mcp_servers.empty()) {
+        context_box.push_back(hbox({
+            text("MCP") | bold | color(PANEL_FG) | xflex,
+            text(join(mcp_servers, ", ")) | color(PANEL_FG) | dim,
         }));
     }
     if (!context_box.empty()) {

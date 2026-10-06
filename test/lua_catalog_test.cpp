@@ -33,6 +33,7 @@ local paths = {
   "plan.get", "plan.create", "plan.edit",
   "shell",
   "web.fetch", "web.search",
+  "mcp.call",
   "fs.insert", "fs.edit", "fs.write",
   "tree.index", "tree.nodes", "tree.symbols", "tree.references",
   "canvas.line", "canvas.bar", "canvas.pie", "canvas.surface",

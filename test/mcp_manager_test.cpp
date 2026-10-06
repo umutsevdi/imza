@@ -5,6 +5,7 @@
 #include "tools/mcp_manager.h"
 
 #include <atomic>
+#include <chrono>
 #include <string>
 #include <thread>
 #include <vector>
@@ -18,6 +19,32 @@ imza::McpServerConfig server_config(
     config.id  = id;
     config.url = url;
     return config;
+}
+
+// Connect/disconnect run on manager workers; poll for the transition.
+bool wait_state(
+    imza::McpManager& manager, const std::string& id, imza::McpServerState want)
+{
+    for (int i = 0; i < 500; ++i) {
+        for (const auto& server : manager.snapshot()) {
+            if (server.id == id && server.state == want) {
+                return true;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return false;
+}
+
+template <typename Predicate> bool wait_for(Predicate predicate)
+{
+    for (int i = 0; i < 500; ++i) {
+        if (predicate()) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return false;
 }
 
 } // namespace
@@ -40,6 +67,7 @@ TEST_CASE("mcp manager connects, caches tools, and calls through the session")
     CHECK(snapshot[0].state == imza::McpServerState::OFFLINE);
 
     manager.connect("exa");
+    REQUIRE(wait_state(manager, "exa", imza::McpServerState::CONNECTED));
     snapshot = manager.snapshot();
     REQUIRE(snapshot.size() == 1);
     CHECK(snapshot[0].state == imza::McpServerState::CONNECTED);
@@ -66,8 +94,8 @@ TEST_CASE("mcp manager connects, caches tools, and calls through the session")
     CHECK(snapshot[0].tool_count == 0);
     CHECK_FALSE(manager.tools("exa").has_value());
 
+    CHECK(wait_for([&] { return server.saw_delete.load(); }));
     server.stop();
-    CHECK(server.saw_delete.load());
     CHECK(server.session_echo_ok.load());
     CHECK(server.protocol_header_ok.load());
 }
@@ -79,6 +107,7 @@ TEST_CASE("mcp manager reports connection failures and gates calls")
         { { "dead", server_config("dead", "http://127.0.0.1:1/mcp") } });
 
     manager.connect("dead");
+    REQUIRE(wait_state(manager, "dead", imza::McpServerState::FAILED));
     const auto snapshot = manager.snapshot();
     CHECK(snapshot[0].state == imza::McpServerState::FAILED);
     CHECK_FALSE(snapshot[0].detail.empty());

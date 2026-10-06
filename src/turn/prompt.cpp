@@ -3,6 +3,7 @@
 #include "common/util.h"
 #include "conversation/session.h"
 #include "platform/json_file.h"
+#include "tools/mcp_manager.h"
 #include "tools/skills.h"
 
 #include <algorithm>
@@ -132,6 +133,46 @@ namespace {
         }
     }
 
+    // Ambient directory of configured MCP servers: one line per server so
+    // the model knows what exists when planning; tool descriptions stay
+    // behind load_mcp. Rendered only when servers are configured.
+    std::string mcp_block(const McpManager* mcp)
+    {
+        if (mcp == nullptr) {
+            return "";
+        }
+        std::string catalog;
+        for (const McpServerSnapshot& server : mcp->snapshot()) {
+            catalog += "- " + server.id;
+            if (!server.label.empty() && server.label != server.id) {
+                catalog += " (" + server.label + ")";
+            }
+            switch (server.state) {
+            case McpServerState::CONNECTED:
+                catalog += " [connected, " + std::to_string(server.tool_count)
+                    + " tools]";
+                break;
+            case McpServerState::CONNECTING: catalog += " [connecting]"; break;
+            case McpServerState::FAILED: catalog += " [failed]"; break;
+            case McpServerState::DISABLED: catalog += " [disabled]"; break;
+            case McpServerState::OFFLINE: catalog += " [offline]"; break;
+            }
+            if (!server.description.empty()) {
+                catalog += ": " + server.description;
+            }
+            catalog += "\n";
+        }
+        if (catalog.empty()) {
+            return "";
+        }
+        std::string out = "<mcps>\n";
+        out += catalog;
+        out += "load_mcp(\"<id>\") returns a server's tool reference; ";
+        out += "call tools with imza.mcp.call(\"<id>\", \"<tool>\", {args}).\n";
+        out += "</mcps>";
+        return out;
+    }
+
 } // namespace
 
 PromptStore::PromptStore(const std::filesystem::path& overrides)
@@ -165,7 +206,7 @@ std::string build_system_prompt(const PromptStore& prompts,
 
 std::string build_subagent_system_prompt(const PromptStore& prompts,
     const SystemEnvironment* sys, const WorkspaceEnvironment* ws,
-    SubagentRole role, const Config* config)
+    SubagentRole role, const Config* config, const McpManager* mcp)
 {
     if (role == SubagentRole::BASIC) {
         return { };
@@ -175,6 +216,10 @@ std::string build_subagent_system_prompt(const PromptStore& prompts,
     out += role == SubagentRole::RESEARCH ? prompts.subagent_research()
                                           : prompts.subagent_build();
     append_context(out, sys, ws, config);
+    const std::string mcps = mcp_block(mcp);
+    if (!mcps.empty()) {
+        out += "\n\n" + mcps;
+    }
     return out;
 }
 
@@ -199,6 +244,10 @@ std::string full_system_prompt(
     const Config config                    = state.providers->config();
     std::string prompt                     = build_system_prompt(
         *state.prompts, env->system().get(), env->workspace().get(), &config);
+    const std::string mcps = mcp_block(state.mcp.get());
+    if (!mcps.empty()) {
+        prompt += "\n\n" + mcps;
+    }
     prompt += state.skills->prompt_suffix();
     if (mode) {
         prompt += "\n\n";

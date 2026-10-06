@@ -148,7 +148,7 @@ void Delegation::submit_delegated(
     std::vector<Message> history {
         { Message::Type::SYSTEM,
             build_subagent_system_prompt(*_state->prompts, env->system().get(),
-                env->workspace().get(), role, &config) },
+                env->workspace().get(), role, &config, _state->mcp.get()) },
         { Message::Type::USER, task },
     };
     _runner.spawn(std::move(history), std::move(settings));

@@ -16,6 +16,7 @@ MCP Release
 Changes:
   - Web search now connects to its provider through the standard MCP
     protocol.
+  - MCP servers can be added with /mcp and called by the agent.
 
 -------------------------------------------------------------------------------
 0.5.3 - 2026-10-05

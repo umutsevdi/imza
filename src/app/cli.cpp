@@ -359,7 +359,7 @@ CliResult run_cli(int argc, char** argv)
 RuntimeFlag runtime_flags_for(const CliResult& result)
 {
     int flags = result.one_shot.has_value()
-        ? RuntimeFlag::WEB | RuntimeFlag::SHELL
+        ? RuntimeFlag::WEB | RuntimeFlag::SHELL | RuntimeFlag::MCP
         : interactive_runtime_flags();
     if (!result.web.value_or(true)) {
         flags &= ~RuntimeFlag::WEB;

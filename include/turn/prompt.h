@@ -13,6 +13,7 @@
 namespace imza {
 
 struct ApplicationState;
+class McpManager;
 
 class PromptStore final : public ApplicationComponent {
 public:
@@ -47,7 +48,8 @@ std::string build_system_prompt(const PromptStore& prompts,
     const Config* config = nullptr);
 std::string build_subagent_system_prompt(const PromptStore& prompts,
     const SystemEnvironment* sys, const WorkspaceEnvironment* ws,
-    SubagentRole role, const Config* config = nullptr);
+    SubagentRole role, const Config* config = nullptr,
+    const McpManager* mcp = nullptr);
 std::string title_prompt(const PromptStore& prompts, std::string_view request);
 std::string current_mode_prompt(Session::Mode mode);
 std::string full_system_prompt(const ApplicationState& state,

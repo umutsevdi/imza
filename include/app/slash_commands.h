@@ -17,6 +17,7 @@ struct SlashCommand {
         SUBAGENTS,
         SESSIONS,
         SKILLS,
+        MCP,
         COMPACT,
         MAKE_SKILL
     };

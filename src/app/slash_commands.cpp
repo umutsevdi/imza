@@ -11,6 +11,7 @@ std::span<const SlashCommand> slash_commands()
         { "/exit", "quit imza", SlashCommand::Action::EXIT },
         { "/connect", "manage provider connections",
             SlashCommand::Action::CONNECT },
+        { "/mcp", "manage MCP servers", SlashCommand::Action::MCP },
         { "/model", "pick the active model", SlashCommand::Action::MODEL },
         { "/variant", "pick reasoning effort", SlashCommand::Action::VARIANT },
         { "/subagents", "configure subagent models",

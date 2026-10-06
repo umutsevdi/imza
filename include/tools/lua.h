@@ -18,7 +18,7 @@ extern "C" {
 
 namespace imza {
 
-enum class LuaCapability { NONE, SHELL, WEB };
+enum class LuaCapability { NONE, SHELL, WEB, MCP };
 
 struct LuaMethod {
     std::string_view name;
@@ -38,6 +38,7 @@ struct LuaModule {
 };
 
 struct Tool; // defined in tools/tool.h; returned by value from make_lua_tool
+class McpManager;
 
 class LuaState final : public ApplicationComponent {
 public:
@@ -74,8 +75,12 @@ struct LuaHost {
     std::function<void()> mark_plan_seen;
     std::function<bool()> plan_frozen;
     std::function<bool(PermissionStore::Grants)> install_grants;
+    // MCP server sessions; empty accessor means the bindings are
+    // unavailable (no manager in this run).
+    std::function<McpManager*()> mcp;
     bool web_enabled      = false;
     bool shell_enabled    = false;
+    bool mcp_enabled      = false;
     bool skip_permissions = false;
     bool unattended       = false;
 };

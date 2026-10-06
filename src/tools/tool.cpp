@@ -2,6 +2,7 @@
 #include "common/util.h"
 #include "network/json.h"
 #include "tools/bindings.h"
+#include "tools/mcp_manager.h"
 #include "tools/skills.h"
 
 #include <cstdint>
@@ -43,12 +44,92 @@ ToolOutput dispatch_tool(
     return tool->run(req);
 }
 
+Tool make_load_mcp_tool(McpToolDocsDeps deps)
+{
+    ToolSpec spec;
+    spec.name        = "load_mcp";
+    spec.description = "Load the tool reference for one MCP server from the "
+                       "<mcps> block: tool names, descriptions, and argument "
+                       "schemas. Call tools with imza.mcp.call.";
+    spec.parameters
+        = R"json({"type":"object","properties":{"server":{"type":"string","description":"MCP server id from the <mcps> block"}},"required":["server"]})json";
+    return { std::move(spec),
+        [deps = std::move(deps)](const ToolCallRequest& req) -> ToolOutput {
+            LoadMcpToolArgs args;
+            if (json_parse_checked(req.args, args) || args.server.empty()) {
+                return tool_error("load_mcp: expected a server id");
+            }
+            McpManager* manager = deps.mcp ? deps.mcp() : nullptr;
+            if (manager == nullptr) {
+                return tool_error("load_mcp: MCP is not available in this run");
+            }
+            std::optional<McpServerSnapshot> found;
+            for (const McpServerSnapshot& server : manager->snapshot()) {
+                if (server.id == args.server) {
+                    found = server;
+                    break;
+                }
+            }
+            if (!found) {
+                return tool_error(
+                    "load_mcp: unknown server '" + args.server + "'");
+            }
+            if (found->state != McpServerState::CONNECTED) {
+                return tool_error("load_mcp: server '" + args.server
+                    + "' is not connected (state: "
+                    + (found->detail.empty() ? std::string("offline")
+                                             : found->detail)
+                    + "); connect it with /mcp");
+            }
+            const auto tools = manager->tools(args.server);
+            if (!tools || tools->empty()) {
+                return tool_error(
+                    "load_mcp: server '" + args.server + "' exposes no tools");
+            }
+
+            std::string out;
+            if (found->label != found->id) {
+                out += "MCP server '" + found->id + "' (" + found->label + ")";
+            } else {
+                out += "MCP server '" + found->id + "'";
+            }
+            if (!found->description.empty()) {
+                out += ": " + found->description;
+            }
+            out += "\nCall with imza.mcp.call(\"" + found->id
+                + "\", \"<tool>\", {args}).\n\n";
+            for (const McpToolDefinition& tool : *tools) {
+                out += "- " + tool.name;
+                if (tool.title) {
+                    out += " (" + *tool.title + ")";
+                }
+                out += "\n";
+                if (tool.description) {
+                    out += "  " + *tool.description + "\n";
+                }
+                out += "  arguments: ";
+                out += tool.input_schema ? json_dump(*tool.input_schema)
+                                         : std::string("none");
+                out += "\n";
+            }
+            // A big registry server can exceed the useful context size.
+            constexpr std::size_t MAX_DOCS_CHARS = 40000;
+            if (out.size() > MAX_DOCS_CHARS) {
+                out = std::string(truncate_utf8(out, MAX_DOCS_CHARS));
+                out += "\n[truncated: showing first "
+                    + std::to_string(out.size()) + " of the content]";
+            }
+            return tool_output(std::move(out));
+        } };
+}
+
 std::vector<Tool> default_tools(LuaHost lua_host, SkillToolDeps skill_deps,
-    SubagentToolSlot subagent, LuaState& lua_state)
+    SubagentToolSlot subagent, LuaState& lua_state, McpToolDocsDeps mcp_docs)
 {
     std::vector<Tool> tools;
     tools.push_back(make_skill_tool(std::move(skill_deps)));
     tools.push_back(make_load_tool(lua_state));
+    tools.push_back(make_load_mcp_tool(std::move(mcp_docs)));
     tools.push_back(make_subagent_tool(std::move(subagent)));
     tools.push_back(make_lua_tool(lua_state, std::move(lua_host)));
     return tools;
