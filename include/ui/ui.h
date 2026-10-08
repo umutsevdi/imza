@@ -85,9 +85,15 @@ inline constexpr auto TRAILING_MARKDOWN_INTERVAL
 // readable code; every other modal keeps MODAL_MAX_WIDTH.
 inline constexpr int DIFF_VIEWER_MODAL_MAX_WIDTH = 160;
 
-inline constexpr int PROCESS_TRACK_BLOCKS  = 10;
-inline constexpr int PROCESS_MAX_BLOCKS    = 5;
-inline constexpr int PROCESS_PERIOD_FRAMES = 30;
+// Indicator pacing is wall-clock based so animation speed does not follow
+// the render loop's frame rate: one processing-indicator tick per
+// PROCESS_TICK_MS of accumulated animation time, one sweep per
+// PROCESS_PERIOD_TICKS ticks, one spinner step per SPINNER_FRAME_MS.
+inline constexpr int PROCESS_TRACK_BLOCKS = 10;
+inline constexpr int PROCESS_MAX_BLOCKS   = 5;
+inline constexpr int PROCESS_PERIOD_TICKS = 30;
+inline constexpr int PROCESS_TICK_MS      = 30;
+inline constexpr int SPINNER_FRAME_MS     = 60;
 
 int modal_max_width(const ModalPayload& modal);
 

@@ -83,7 +83,7 @@ namespace {
 
     Element queued_indicator(int frame)
     {
-        constexpr int period = PROCESS_PERIOD_FRAMES;
+        constexpr int period = PROCESS_PERIOD_TICKS;
         const auto triangle  = [](int t, int p) {
             t %= 2 * p;
             if (t < 0) {
@@ -489,7 +489,7 @@ namespace {
                             = connecting ? " Connecting…" : " Thinking…";
                         status += elapsed_suffix(st);
                         el = vbox({
-                            busy_row(_frame,
+                            busy_row(_spinner_step(),
                                 _make_reasoning_button(item_index,
                                     std::move(status), at.reasoning,
                                     assistant_metadata(at))
@@ -572,8 +572,8 @@ namespace {
                 : _hints.phase_line;
             if (!phase_line.empty()) {
                 if (busy) {
-                    hints.push_back(hbox({ queued_indicator(_frame), filler(),
-                        text(phase_line) | dim }));
+                    hints.push_back(hbox({ queued_indicator(_indicator_tick()),
+                        filler(), text(phase_line) | dim }));
                 } else {
                     hints.push_back(hint_bar(phase_line));
                 }
@@ -699,11 +699,14 @@ namespace {
             return _input->OnEvent(event);
         }
 
-        void OnAnimation(animation::Params&) override
+        void OnAnimation(animation::Params& params) override
         {
             const auto phase = _session->phase();
             if (phase != Session::Phase::IDLE) {
                 ++_frame;
+                _animation_ms
+                    += std::chrono::duration_cast<std::chrono::milliseconds>(
+                        params.duration());
                 animation::RequestAnimationFrame();
                 return;
             }
@@ -711,6 +714,9 @@ namespace {
             // spinner alive while its event is still running.
             if (_session->compaction_running()) {
                 ++_frame;
+                _animation_ms
+                    += std::chrono::duration_cast<std::chrono::milliseconds>(
+                        params.duration());
                 animation::RequestAnimationFrame();
                 return;
             }
@@ -724,9 +730,24 @@ namespace {
                     &_session->items()[_playout_index]);
                 if (turn != nullptr && _playout_chars < turn->markdown.size()) {
                     ++_frame;
+                    _animation_ms += std::chrono::duration_cast<
+                        std::chrono::milliseconds>(params.duration());
                     animation::RequestAnimationFrame();
                 }
             }
+        }
+
+        // Animation steps are derived from accumulated animation time, not
+        // the per-callback frame counter, so their speed is independent of
+        // the render loop's frame rate.
+        int _spinner_step() const
+        {
+            return static_cast<int>(_animation_ms.count()) / SPINNER_FRAME_MS;
+        }
+
+        int _indicator_tick() const
+        {
+            return static_cast<int>(_animation_ms.count()) / PROCESS_TICK_MS;
         }
 
     private:
@@ -1108,14 +1129,14 @@ namespace {
                 // Arguments are still streaming, so there is nothing to
                 // inspect yet; show a plain status row.
                 return vbox({
-                    busy_row(_frame,
+                    busy_row(_spinner_step(),
                         text(" Planning…" + elapsed_suffix(*_session)) | dim),
                     separatorEmpty(),
                 });
             }
             if (tc.name == "subagent") {
                 Elements rows {
-                    busy_row(_frame,
+                    busy_row(_spinner_step(),
                         text(" Delegating…" + elapsed_suffix(*_session)) | dim,
                         false),
                 };
@@ -1132,7 +1153,7 @@ namespace {
             }
             if (tc.name == "lua") {
                 return vbox({
-                    busy_row(_frame,
+                    busy_row(_spinner_step(),
                         hbox({ text(" "),
                             _make_lua_pending_button(tc)->Render() }),
                         false),
@@ -1311,8 +1332,8 @@ namespace {
                 Component btn = _make_reasoning_button(index, label,
                     placeholder ? std::string() : t.reasoning,
                     assistant_metadata(t));
-                Element row
-                    = done ? btn->Render() : busy_row(_frame, btn->Render());
+                Element row   = done ? btn->Render()
+                                     : busy_row(_spinner_step(), btn->Render());
                 parts.push_back(row);
             }
             if (!t.markdown.empty()) {
@@ -1369,9 +1390,10 @@ namespace {
         bool _changing_history = false;
         bool _paste_mode       = false;
 
-        bool _follow                  = true;
-        bool _hover_dirty             = false;
-        int _frame                    = 0;
+        bool _follow      = true;
+        bool _hover_dirty = false;
+        int _frame        = 0;
+        std::chrono::milliseconds _animation_ms { };
         std::uint64_t _content_serial = 0;
         ScrollView _viewport { };
     };

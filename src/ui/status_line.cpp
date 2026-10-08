@@ -6,6 +6,7 @@
 #include "ui/ui.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <ftxui/component/component.hpp>
@@ -129,10 +130,15 @@ namespace {
                 | color(PANEL_FG) | xflex;
         }
 
-        void OnAnimation(animation::Params&) override
+        void OnAnimation(animation::Params& params) override
         {
             if (append_background_tasks(nullptr, false)) {
-                ++_frame;
+                // Spinner position derives from accumulated animation time,
+                // not the callback count, so its speed does not follow the
+                // render loop's frame rate.
+                _animation_ms
+                    += std::chrono::duration_cast<std::chrono::milliseconds>(
+                        params.duration());
                 animation::RequestAnimationFrame();
             }
         }
@@ -170,7 +176,8 @@ namespace {
             if (!any || bar == nullptr) {
                 return any;
             }
-            bar->push_back(dim_spinner(_frame));
+            bar->push_back(dim_spinner(
+                static_cast<int>(_animation_ms.count() / SPINNER_FRAME_MS)));
             if (wide) {
                 bar->push_back(text(" " + label) | color(PANEL_FG_DIM));
             }
@@ -181,7 +188,7 @@ namespace {
         std::shared_ptr<ApplicationState> _state;
         LayoutFn _layout;
         WorkflowFn _workflow;
-        int _frame = 0;
+        std::chrono::milliseconds _animation_ms { };
         std::string _last_model;
         ModelPricing _cached;
         Signal<>::Subscription _workspace_subscription;
