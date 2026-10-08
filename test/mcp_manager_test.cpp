@@ -272,6 +272,30 @@ TEST_CASE("mcp listener exits quietly when the server has no stream")
     server.stop();
 }
 
+TEST_CASE("mcp listener rebuilds the session after a stream 404")
+{
+    imza::test::allow_loopback_direct();
+    imza::test::LoopbackMcpServer server;
+    server.get_returns_404 = true;
+    REQUIRE(server.start());
+
+    imza::McpManager manager({ { "exa", server_config("exa", server.url()) } });
+    manager.connect("exa");
+    REQUIRE(wait_state(manager, "exa", imza::McpServerState::CONNECTED));
+    REQUIRE(wait_for([&] { return server.saw_get.load(); }));
+
+    // The expired session must be rebuilt (second initialize) and the
+    // entry must keep answering calls; the rebuild path must not hold the
+    // entry I/O lock or the call below deadlocks.
+    REQUIRE(wait_for([&] { return server.initialize_count.load() >= 2; }));
+    imza::McpToolCallResult result;
+    std::string detail;
+    CHECK(manager.call("exa", "echo", { }, result, detail) == imza::Status::OK);
+    REQUIRE(wait_state(manager, "exa", imza::McpServerState::CONNECTED));
+
+    server.stop();
+}
+
 TEST_CASE("mcp manager reload drops removed servers and applies toggles")
 {
     imza::test::allow_loopback_direct();

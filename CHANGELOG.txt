@@ -29,6 +29,12 @@ Changes:
   - Performance improvement on attachment encoding.
   - The config file can now pre-approve directories and shell commands, and
     list extra instruction files to follow alongside AGENTS.md.
+  - Fixed sessions becoming unloadable when the transcript contained terminal
+    escape codes (colored command output); affected saved sessions load
+    again.
+  - Fixed MCP servers locking up after their session expired; they reconnect
+    and keep taking calls.
+  - Keystrokes are no longer lost or garbled while the agent runs commands.
 
 -------------------------------------------------------------------------------
 0.5.2 - 2026-10-04

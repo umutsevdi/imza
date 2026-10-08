@@ -58,8 +58,9 @@ namespace anthropic {
     {
         // A plain JSON string serializes with quotes/escapes already; use
         // it as the raw content.
-        auto quoted = glz::write<JSON_WRITE>(content);
-        return { std::move(role), glz::raw_json(quoted.value_or("null")) };
+        const std::string quoted = json_dump(content);
+        return { std::move(role),
+            glz::raw_json(quoted.empty() ? "null" : quoted) };
     }
 
     struct ToolSpecWire {

@@ -63,6 +63,17 @@ namespace {
             = !stdin_data.empty() && CreatePipe(&in_read, &in_write, &sa, 0);
         if (has_stdin) {
             SetHandleInformation(in_write, HANDLE_FLAG_INHERIT, 0);
+        } else {
+            // Children must not share the console input with the UI's
+            // reader; the two would race for the user's keystrokes.
+            in_read = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ, &sa,
+                OPEN_EXISTING, 0, nullptr);
+            if (in_read == INVALID_HANDLE_VALUE) {
+                CloseHandle(out_read);
+                CloseHandle(out_write);
+                in_read = nullptr;
+                return result;
+            }
         }
 
         STARTUPINFOW si { };
@@ -70,7 +81,7 @@ namespace {
         si.dwFlags    = STARTF_USESTDHANDLES;
         si.hStdOutput = out_write;
         si.hStdError  = out_write;
-        si.hStdInput  = has_stdin ? in_read : GetStdHandle(STD_INPUT_HANDLE);
+        si.hStdInput  = in_read;
 
         PROCESS_INFORMATION pi { };
         const std::wstring wide_directory = working_directory.empty()
@@ -82,16 +93,14 @@ namespace {
                 &pi)) {
             CloseHandle(out_read);
             CloseHandle(out_write);
+            CloseHandle(in_read);
             if (has_stdin) {
-                CloseHandle(in_read);
                 CloseHandle(in_write);
             }
             return result;
         }
         CloseHandle(out_write);
-        if (has_stdin) {
-            CloseHandle(in_read);
-        }
+        CloseHandle(in_read);
 
         std::string output;
         std::thread reader([&out_read, &output] {
@@ -207,6 +216,16 @@ namespace {
                 dup2(stdin_pipefd[0], STDIN_FILENO);
                 close(stdin_pipefd[0]);
                 close(stdin_pipefd[1]);
+            } else {
+                // The child must never share the terminal stdin with the
+                // UI's reader: the two would race for the user's
+                // keystrokes, splitting or swallowing escape sequences.
+                const int devnull = open("/dev/null", O_RDONLY);
+                if (devnull < 0) {
+                    _exit(126);
+                }
+                dup2(devnull, STDIN_FILENO);
+                close(devnull);
             }
             dup2(pipefd[1], STDOUT_FILENO);
             dup2(pipefd[1], STDERR_FILENO);

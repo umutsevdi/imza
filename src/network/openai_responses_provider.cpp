@@ -124,8 +124,8 @@ namespace openai_responses {
                 }
                 item.content = glz::raw_json { json_dump_array(parts) };
             } else {
-                item.content = glz::raw_json(
-                    glz::write<JSON_WRITE>(message.content).value_or("null"));
+                const std::string quoted = json_dump(message.content);
+                item.content = glz::raw_json(quoted.empty() ? "null" : quoted);
             }
             input.push_back(std::move(item));
         }

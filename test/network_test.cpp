@@ -730,6 +730,52 @@ TEST_CASE("json_parse rejects type mismatches for reflected structs")
     CHECK(payload.count == 4);
 }
 
+TEST_CASE("json dump stays parseable when strings hold control bytes")
+{
+    // Captured terminal output carries ANSI escapes; glaze's writer emits
+    // raw NULs for them, which no reader accepts.
+    JsonTestPayload value;
+    value.name             = "screen: \x1b[1mbold\x1b[0m plain\ttab\nline";
+    const std::string text = imza::json_dump(value);
+    JsonTestPayload back;
+    CHECK(!imza::json_parse_checked(text, back));
+    CHECK(back.name == "screen: [1mbold[0m plain\ttab\nline");
+
+    const std::optional<std::string> pretty
+        = imza::json_dump_pretty_checked(value);
+    REQUIRE(pretty.has_value());
+    CHECK(!imza::json_parse_checked(*pretty, back));
+}
+
+TEST_CASE("json parse repairs raw control bytes inside string literals")
+{
+    // The corruption glaze leaves behind in already-written files: an ESC
+    // became two NUL bytes mid-string. The raw array + length keeps the
+    // embedded NULs a plain string literal would truncate at.
+    const char raw[] = "{\"name\":\"a\0\0[1mb\0c\",\"count\":2}";
+    const std::string corrupt(raw, sizeof(raw) - 1);
+    JsonTestPayload payload;
+    CHECK(!imza::json_parse_checked(corrupt, payload));
+    CHECK(payload.name == "a[1mbc");
+    CHECK(payload.count == 2);
+
+    // Structural newlines from pretty output stay untouched.
+    const std::string pretty = "{\n  \"name\": \"x\",\n  \"count\": 1\n}";
+    CHECK(!imza::json_parse_checked(pretty, payload));
+    CHECK(payload.name == "x");
+}
+
+TEST_CASE("strip_string_control_bytes leaves clean json untouched")
+{
+    CHECK_FALSE(
+        imza::strip_string_control_bytes(R"({"a":"b","c":["\n","\u001b"]})")
+            .has_value());
+    const auto repaired
+        = imza::strip_string_control_bytes("{\"a\":\"x\x1b[0my\"}");
+    REQUIRE(repaired.has_value());
+    CHECK(*repaired == R"({"a":"x[0my"})");
+}
+
 TEST_CASE("json_dump_checked round-trips")
 {
     const JsonTestPayload value { "a", 3, 7 };

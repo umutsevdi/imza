@@ -33,12 +33,14 @@ public:
     bool call_structured     = false;
     int fail_handshakes      = 0;     // first N initialize requests answer 500
     bool get_returns_405     = false; // GET answers 405 (no server stream)
+    bool get_returns_404     = false; // GET answers 404 (session expired)
     bool push_list_changed   = false; // first GET pushes tools/list_changed
 
     std::atomic<bool> session_echo_ok { false };
     std::atomic<bool> protocol_header_ok { false };
     std::atomic<bool> saw_delete { false };
     std::atomic<bool> saw_get { false };
+    std::atomic<int> initialize_count { 0 };
 
     ~LoopbackMcpServer() { stop(); }
 
@@ -173,6 +175,10 @@ private:
                 respond(fd, "HTTP/1.1 405 Method Not Allowed", { }, "");
                 return;
             }
+            if (get_returns_404) {
+                respond(fd, "HTTP/1.1 404 Not Found", { }, "");
+                return;
+            }
             if (push_list_changed && !pushed_) {
                 pushed_ = true;
                 respond(fd, "HTTP/1.1 200 OK",
@@ -196,6 +202,7 @@ private:
                 return;
             }
             ++init_count_;
+            ++initialize_count;
             last_session_ = init_count_ == 1 ? "sess-a" : "sess-b";
             const std::string body
                 = R"({"jsonrpc":"2.0","id":1,"result":{"protocolVersion":")"

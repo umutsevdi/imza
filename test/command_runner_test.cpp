@@ -46,6 +46,29 @@ TEST_CASE("run_command rejects empty command without spawning")
     CHECK_FALSE(r.spawned);
 }
 
+TEST_CASE("run_command does not leak the parent stdin to the child")
+{
+    // Without an explicit redirect the child would share the terminal
+    // stdin with the UI's reader and race it for keystrokes; /dev/null is
+    // the observable stand-in for the redirect.
+#ifdef _WIN32
+    const auto r = run("cmd /c exit 0", 10s);
+    CHECK(r.spawned);
+    CHECK(r.exit_code == 0);
+#else
+    const auto r = run("readlink /proc/self/fd/0", 10s);
+    CHECK(r.spawned);
+    CHECK_FALSE(r.timed_out);
+    CHECK(r.exit_code == 0);
+    std::string target = r.output;
+    while (
+        !target.empty() && (target.back() == '\n' || target.back() == '\r')) {
+        target.pop_back();
+    }
+    CHECK(target == "/dev/null");
+#endif
+}
+
 TEST_CASE("run_command enforces the timeout")
 {
     const auto r = run("sleep 30", 1s);

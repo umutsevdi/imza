@@ -292,10 +292,12 @@ void McpManager::run_listener(std::shared_ptr<ServerEntry> entry)
             return;
         }
         if (http_code == 404) {
-            // Session expired: rebuild it here, then keep listening.
-            std::lock_guard io_lock(entry->io);
+            // Session expired: rebuild, and let the fresh handshake spawn
+            // the replacement listener. run_handshake takes the entry I/O
+            // lock itself; holding it here too would self-deadlock the
+            // non-recursive mutex and hang every later call on this entry.
             run_handshake(entry);
-            continue;
+            return;
         }
         if (wait_interruptible(retry_delay_ms / 1000 + 1)) {
             return;

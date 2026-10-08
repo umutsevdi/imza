@@ -33,11 +33,50 @@ inline constexpr glz::opts JSON_WRITE_PRETTY {
     .indentation_width = 2,
 };
 
+// Glaze's default writer has no escape for control characters without a
+// short form: an ESC becomes two raw NUL bytes, which its own reader (and
+// every JSON parser) rejects. Such bytes can only ever appear inside
+// string literals — valid JSON escapes them as text, and structural
+// whitespace lives between tokens — so stripping them there repairs both
+// directions. Clean input passes through untouched.
+inline std::optional<std::string> strip_string_control_bytes(
+    std::string_view json)
+{
+    std::optional<std::string> repaired;
+    std::size_t copied = 0; // bytes of `json` already appended to *repaired
+    bool in_string     = false;
+    bool escaped       = false;
+    for (std::size_t i = 0; i < json.size(); ++i) {
+        const unsigned char c = static_cast<unsigned char>(json[i]);
+        if (escaped) {
+            escaped = false;
+        } else if (in_string && c == '\\') {
+            escaped = true;
+        } else if (c == '"') {
+            in_string = !in_string;
+        } else if (in_string && c < 0x20) {
+            if (!repaired) {
+                repaired.emplace(json.substr(0, i));
+                copied = i;
+            }
+            repaired->append(json.substr(copied, i - copied));
+            copied = i + 1; // drop the control byte
+        }
+    }
+    if (repaired) {
+        repaired->append(json.substr(copied));
+    }
+    return repaired;
+}
+
 // Parse into a reflected struct, reporting the parse error. The output
 // is unspecified on failure.
 template <typename T>
 [[nodiscard]] glz::error_ctx json_parse_checked(std::string_view text, T& out)
 {
+    if (auto repaired = strip_string_control_bytes(text)) {
+        return glz::read<JSON_READ>(out, *repaired);
+    }
     return glz::read<JSON_READ>(out, text);
 }
 
@@ -61,12 +100,21 @@ template <typename T> bool json_parse(std::string_view text, T& out)
 // where a caller actually can react (persisted-file writes).
 template <typename T> std::string json_dump(const T& value)
 {
-    return glz::write<JSON_WRITE>(value).value_or(std::string { });
+    std::string out = glz::write<JSON_WRITE>(value).value_or(std::string { });
+    if (auto repaired = strip_string_control_bytes(out)) {
+        return std::move(*repaired);
+    }
+    return out;
 }
 
 template <typename T> std::string json_dump_pretty(const T& value)
 {
-    return glz::write<JSON_WRITE_PRETTY>(value).value_or(std::string { });
+    std::string out
+        = glz::write<JSON_WRITE_PRETTY>(value).value_or(std::string { });
+    if (auto repaired = strip_string_control_bytes(out)) {
+        return std::move(*repaired);
+    }
+    return out;
 }
 
 template <typename T>
@@ -75,6 +123,9 @@ template <typename T>
     auto out = glz::write<JSON_WRITE>(value);
     if (!out) {
         return std::nullopt;
+    }
+    if (auto repaired = strip_string_control_bytes(*out)) {
+        return std::move(*repaired);
     }
     return std::move(out.value());
 }
@@ -86,6 +137,9 @@ template <typename T>
     auto out = glz::write<JSON_WRITE_PRETTY>(value);
     if (!out) {
         return std::nullopt;
+    }
+    if (auto repaired = strip_string_control_bytes(*out)) {
+        return std::move(*repaired);
     }
     return std::move(out.value());
 }
@@ -102,7 +156,7 @@ template <typename Range> std::string json_dump_array(const Range& items)
             out += ',';
         }
         first = false;
-        out += glz::write<JSON_WRITE>(item).value_or("null");
+        out += json_dump(item);
     }
     out += ']';
     return out;
