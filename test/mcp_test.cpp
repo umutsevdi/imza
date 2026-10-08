@@ -5,6 +5,7 @@
 #include "network/json_io.h"
 #include "network/mcp.h"
 
+#include <deque>
 #include <string>
 
 TEST_CASE("mcp_rpc_request produces the JSON-RPC 2.0 envelope")
@@ -279,4 +280,153 @@ TEST_CASE("mcp tool results carry execution errors and structured content")
     CHECK(answer->as<double>() == doctest::Approx(42));
 
     fx.server.stop();
+}
+
+// A stdio session driven by injected line hooks: the network core speaks
+// newline JSON-RPC through them, so the protocol logic is tested without
+// spawning anything. `feed` queues server messages; `sent` records ours.
+namespace {
+
+struct FakeStdio {
+    std::deque<std::string> incoming;
+    std::vector<std::string> sent;
+    bool closed = false;
+
+    imza::McpStdioTransport transport()
+    {
+        imza::McpStdioTransport stdio;
+        stdio.write = [this](std::string_view line) {
+            if (closed) {
+                return imza::Status::NETWORK_ERROR;
+            }
+            sent.emplace_back(line);
+            return imza::Status::OK;
+        };
+        stdio.read = [this](std::string& line, long) {
+            if (incoming.empty()) {
+                return closed ? imza::Status::NETWORK_ERROR
+                              : imza::Status::TIMEOUT;
+            }
+            line = std::move(incoming.front());
+            incoming.pop_front();
+            return imza::Status::OK;
+        };
+        stdio.terminate = [this] { closed = true; };
+        return stdio;
+    }
+};
+
+std::string rpc_result(std::string_view id, std::string_view result)
+{
+    return "{\"jsonrpc\":\"2.0\",\"id\":" + std::string(id)
+        + ",\"result\":" + std::string(result) + "}";
+}
+
+// The initialize handshake the session expects, queued for the next read.
+void queue_initialize(FakeStdio& fake)
+{
+    fake.incoming.push_back(rpc_result("1",
+        R"({"protocolVersion":"2025-11-25","serverInfo":{"name":"fake"}})"));
+    // The initialized notification is fire-and-forget; nothing to queue.
+}
+
+} // namespace
+
+TEST_CASE("mcp stdio runs the handshake over injected line hooks")
+{
+    FakeStdio fake;
+    queue_initialize(fake);
+    imza::McpSession session;
+    session.endpoint.timeout_secs = 5;
+    session.stdio                 = fake.transport();
+
+    std::string detail;
+    REQUIRE(imza::mcp_initialize(session, detail) == imza::Status::OK);
+    CHECK(session.is_stdio());
+    CHECK(session.session_id.empty()); // stdio has no session id
+    CHECK(session.protocol_version == "2025-11-25");
+    // The handshake wrote initialize then notifications/initialized.
+    REQUIRE(fake.sent.size() == 2);
+    CHECK(fake.sent[0].find("\"method\":\"initialize\"") != std::string::npos);
+    CHECK(fake.sent[1].find("notifications/initialized") != std::string::npos);
+}
+
+TEST_CASE("mcp stdio answers server pings while awaiting a response")
+{
+    FakeStdio fake;
+    queue_initialize(fake);
+    imza::McpSession session;
+    session.endpoint.timeout_secs = 5;
+    session.stdio                 = fake.transport();
+    std::string detail;
+    REQUIRE(imza::mcp_initialize(session, detail) == imza::Status::OK);
+
+    // A ping arrives before the tools/call result; the session must answer
+    // it and keep reading for its own response.
+    fake.incoming.push_back(R"({"jsonrpc":"2.0","id":99,"method":"ping"})");
+    fake.incoming.push_back(
+        rpc_result("2", R"({"content":[{"type":"text","text":"pong"}]})"));
+
+    imza::McpToolCallResult result;
+    REQUIRE(imza::mcp_call_tool(
+                session, "echo", imza::JsonValue { }, result, detail)
+        == imza::Status::OK);
+    CHECK(imza::mcp_first_text(result) == "pong");
+    // The ping was answered with a result carrying the same id.
+    bool answered = false;
+    for (const std::string& line : fake.sent) {
+        if (line.find("\"id\":99") != std::string::npos
+            && line.find("\"result\"") != std::string::npos) {
+            answered = true;
+        }
+    }
+    CHECK(answered);
+}
+
+TEST_CASE("mcp stdio surfaces a tool execution error through the result")
+{
+    FakeStdio fake;
+    queue_initialize(fake);
+    imza::McpSession session;
+    session.endpoint.timeout_secs = 5;
+    session.stdio                 = fake.transport();
+    std::string detail;
+    REQUIRE(imza::mcp_initialize(session, detail) == imza::Status::OK);
+
+    fake.incoming.push_back(rpc_result(
+        "2", R"({"content":[{"type":"text","text":"boom"}],"isError":true})"));
+
+    imza::McpToolCallResult result;
+    REQUIRE(imza::mcp_call_tool(
+                session, "echo", imza::JsonValue { }, result, detail)
+        == imza::Status::OK);
+    CHECK(result.is_error.value_or(false));
+    CHECK(imza::mcp_first_text(result) == "boom");
+}
+
+TEST_CASE("mcp stdio reports a closed stream as a network error")
+{
+    FakeStdio fake;
+    imza::McpSession session;
+    session.endpoint.timeout_secs = 5;
+    session.stdio                 = fake.transport();
+    fake.closed                   = true;
+
+    std::string detail;
+    CHECK(imza::mcp_initialize(session, detail) == imza::Status::NETWORK_ERROR);
+}
+
+TEST_CASE("mcp stdio ends the session by terminating the transport")
+{
+    FakeStdio fake;
+    queue_initialize(fake);
+    imza::McpSession session;
+    session.endpoint.timeout_secs = 5;
+    session.stdio                 = fake.transport();
+    std::string detail;
+    REQUIRE(imza::mcp_initialize(session, detail) == imza::Status::OK);
+
+    imza::mcp_end_session(session);
+    CHECK(fake.closed);
+    CHECK_FALSE(session.initialized);
 }

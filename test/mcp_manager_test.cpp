@@ -374,3 +374,54 @@ TEST_CASE("mcp manager resolves catalogue labels and urls from the bundle")
     // Label falls back to the catalogue entry's label, not the id.
     CHECK(manager.snapshot()[0].label == "GitHub");
 }
+
+namespace {
+
+imza::McpServerConfig stdio_config(const std::string& id)
+{
+    imza::McpServerConfig config;
+    config.id      = id;
+    config.type    = "stdio";
+    config.command = "imza-no-such-program-xyz";
+    return config;
+}
+
+} // namespace
+
+TEST_CASE("mcp manager reports a stdio spawn failure as FAILED")
+{
+    imza::McpManager manager(std::map<std::string, imza::McpServerConfig> {
+        { "local", stdio_config("local") } });
+
+    manager.connect("local");
+    REQUIRE(wait_state(manager, "local", imza::McpServerState::FAILED));
+    CHECK(
+        manager.snapshot()[0].detail.find("spawn failed") != std::string::npos);
+
+    imza::McpToolCallResult result;
+    std::string detail;
+    CHECK(manager.call("local", "echo", { }, result, detail)
+        == imza::Status::CONFIG_ERROR);
+}
+
+TEST_CASE("mcp manager reload drops a stdio session when its command changes")
+{
+    imza::McpManager manager(std::map<std::string, imza::McpServerConfig> {
+        { "local", stdio_config("local") } });
+    // A stdio server is offline until connected; a field change must still
+    // reset the entry rather than keep a stale session.
+    manager.reload({ { "local", stdio_config("local") } });
+    CHECK(manager.snapshot()[0].state == imza::McpServerState::OFFLINE);
+
+    imza::McpServerConfig edited = stdio_config("local");
+    edited.args.push_back("--tool-error");
+    manager.reload({ { "local", edited } });
+    CHECK(manager.snapshot()[0].state == imza::McpServerState::OFFLINE);
+
+    // A presentation-only edit keeps the entry untouched.
+    imza::McpServerConfig relabeled = edited;
+    relabeled.label                 = "Local";
+    manager.reload({ { "local", relabeled } });
+    CHECK(manager.snapshot()[0].label == "Local");
+    CHECK(manager.snapshot()[0].state == imza::McpServerState::OFFLINE);
+}

@@ -57,19 +57,27 @@ struct LastUsed {
 // One user-configured MCP server. A catalogue server stores only
 // catalog_id and resolves url/label from the bundled catalogue at use
 // time (the models.dev pattern); a custom server stores url directly.
-// stdio transport and OAuth credentials will extend this record later;
-// the url is stored normalized (https).
+// The url is stored normalized (https).
 struct McpServerConfig {
     std::string id;
     std::string label;
     std::string description;
+    // "http" (default) or "stdio"; stdio stores command/args/env instead
+    // of url/catalog_id and is spawned as a child process.
+    std::string type = "http";
     std::string catalog_id;
     std::string url;
     std::map<std::string, std::string> headers;
     std::string bearer_token;
+    std::string command;
+    std::vector<std::string> args;
+    std::map<std::string, std::string> env;
+    std::string working_directory;
     bool enabled = true;
     // Per-request timeout override; 0 = the client default (25 s).
     long timeout_secs = 0;
+
+    bool is_stdio() const { return type == "stdio"; }
 };
 
 enum class SubagentRole { BUILDER, RESEARCH, BASIC };

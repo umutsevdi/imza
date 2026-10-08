@@ -14,15 +14,15 @@ CHANGELOG
 MCP Release
 
 Changes:
-  - Full Model Context Protocol (MCP) support: remote MCP servers connect
-    through the new /mcp dialog, which offers a curated catalogue of 38
-    popular services (GitHub, GitLab, Linear, Slack, Notion, Figma,
-    Stripe, and more) alongside a custom-endpoint option. The agent
-    discovers each server's tools on demand and calls them directly.
-    Connected servers appear in the sidebar with live tool counts, tool
-    rosters refresh automatically when servers change, failed connections
-    recover with retries, and every server carries its own credential and
-    timeout settings.
+  - Full Model Context Protocol (MCP) support: remote MCP servers or
+    local programs (stdio transport) connect through the new /mcp dialog,
+    which offers a curated catalogue of 38 popular services (GitHub, GitLab,
+    Linear, Slack, Notion, Figma, Stripe, and more) alongside a
+    custom-endpoint option. The agent discovers each server's tools on demand
+    and calls them directly. Connected servers appear in the sidebar with live
+    tool counts, tool rosters refresh automatically when servers change,
+    failed connections recover with retries, and every server carries its
+    own credential and timeout settings.
   - Startup memory usage reduced by replacing the JSON library with one
     that does not leave its parsing scratch space in memory.
   - Reduced idle CPU and memory usage of the side panel.

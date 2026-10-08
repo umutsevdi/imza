@@ -1,6 +1,7 @@
 #include "tools/mcp_manager.h"
 
 #include "network/json_io.h"
+#include "platform/process.h"
 #include "tools/mcp_catalog.h"
 
 #include <utility>
@@ -32,8 +33,41 @@ namespace {
         return "catalogue entry '" + config.catalog_id + "' no longer exists";
     }
 
-    McpSession make_session(const McpServerConfig& config)
+    // An HTTP endpoint, or a spawned stdio child wrapped in line hooks.
+    // nullopt with `detail` set when a stdio process cannot be spawned.
+    std::optional<McpSession> make_session(
+        const McpServerConfig& config, std::string& detail)
     {
+        const long timeout = config.timeout_secs > 0 ? config.timeout_secs
+                                                     : DEFAULT_TIMEOUT_SECS;
+        if (config.is_stdio()) {
+            ProcessOptions options;
+            options.argv.push_back(config.command);
+            for (const std::string& arg : config.args) {
+                options.argv.push_back(expand_env_vars(arg));
+            }
+            for (const auto& [name, value] : config.env) {
+                options.env[name] = expand_env_vars(value);
+            }
+            options.working_directory = config.working_directory;
+            std::string spawn_error;
+            std::shared_ptr<Process> process
+                = Process::spawn(options, spawn_error);
+            if (process == nullptr) {
+                detail = "spawn failed: " + spawn_error;
+                return std::nullopt;
+            }
+            McpSession session;
+            session.endpoint.timeout_secs = timeout;
+            session.stdio.write           = [process](std::string_view line) {
+                return process->write_line(line);
+            };
+            session.stdio.read = [process](std::string& line, long secs) {
+                return process->read_line(line, std::chrono::seconds(secs));
+            };
+            session.stdio.terminate = [process] { process->terminate(); };
+            return session;
+        }
         McpEndpoint endpoint;
         endpoint.url          = expand_env_vars(config.url);
         endpoint.bearer_token = expand_env_vars(config.bearer_token);
@@ -41,17 +75,22 @@ namespace {
             endpoint.headers.push_back(
                 expand_env_vars(name) + ": " + expand_env_vars(value));
         }
-        endpoint.timeout_secs = config.timeout_secs > 0 ? config.timeout_secs
-                                                        : DEFAULT_TIMEOUT_SECS;
-        return McpSession { std::move(endpoint) };
+        endpoint.timeout_secs = timeout;
+        McpSession session;
+        session.endpoint = std::move(endpoint);
+        return session;
     }
 
     bool connection_fields_changed(
         const McpServerConfig& old, const McpServerConfig& fresh)
     {
-        return old.url != fresh.url || old.catalog_id != fresh.catalog_id
+        return old.type != fresh.type || old.url != fresh.url
+            || old.catalog_id != fresh.catalog_id
             || old.bearer_token != fresh.bearer_token
-            || old.headers != fresh.headers || old.enabled != fresh.enabled;
+            || old.headers != fresh.headers || old.command != fresh.command
+            || old.args != fresh.args || old.env != fresh.env
+            || old.working_directory != fresh.working_directory
+            || old.enabled != fresh.enabled;
     }
 
 } // namespace
@@ -69,9 +108,20 @@ McpManager::~McpManager()
     for (auto& [id, entry] : _servers) {
         entry->stream_cancel.store(true);
     }
-    for (std::thread& worker : _workers) {
-        if (worker.joinable()) {
-            worker.join();
+    // Join in waves: a worker may append follow-up work while we join.
+    for (;;) {
+        std::vector<std::thread> workers;
+        {
+            std::lock_guard lock(_workers_mutex);
+            workers.swap(_workers);
+        }
+        if (workers.empty()) {
+            break;
+        }
+        for (std::thread& worker : workers) {
+            if (worker.joinable()) {
+                worker.join();
+            }
         }
     }
     for (auto& [id, entry] : _servers) {
@@ -147,25 +197,31 @@ std::shared_ptr<McpManager::ServerEntry> McpManager::find(
 
 void McpManager::spawn(std::function<void()> work)
 {
+    std::lock_guard lock(_workers_mutex);
     _workers.emplace_back(std::move(work));
 }
 
 void McpManager::run_handshake(std::shared_ptr<ServerEntry> entry)
 {
-    McpSession session = make_session(entry->config);
-    std::vector<McpToolDefinition> tools;
     std::string detail;
+    std::optional<McpSession> fresh = make_session(entry->config, detail);
+    std::vector<McpToolDefinition> tools;
     bool failed = false;
     int attempt = 0;
     {
         std::lock_guard io_lock(entry->io);
-        Status st = mcp_initialize(session, detail);
-        if (st == Status::OK) {
-            st = mcp_list_tools(session, tools, detail);
+        Status st = Status::OK;
+        if (!fresh) {
+            st = Status::CONFIG_ERROR;
+        } else {
+            st = mcp_initialize(*fresh, detail);
+            if (st == Status::OK) {
+                st = mcp_list_tools(*fresh, tools, detail);
+            }
         }
         std::lock_guard state_lock(entry->state_mutex);
         if (st == Status::OK) {
-            entry->session            = std::move(session);
+            entry->session            = std::move(*fresh);
             entry->tools              = std::move(tools);
             entry->state              = McpServerState::CONNECTED;
             entry->reconnect_attempts = 0;
@@ -173,7 +229,10 @@ void McpManager::run_handshake(std::shared_ptr<ServerEntry> entry)
             failed                    = true;
             entry->reconnect_attempts = std::min(
                 entry->reconnect_attempts + 1, MAX_RECONNECT_ATTEMPTS);
-            attempt        = entry->reconnect_attempts;
+            attempt = entry->reconnect_attempts;
+            if (fresh) {
+                mcp_end_session(*fresh); // a failed handshake leaves a child
+            }
             entry->session = McpSession { };
             entry->tools.clear();
             entry->state  = McpServerState::FAILED;
@@ -194,7 +253,15 @@ void McpManager::run_handshake(std::shared_ptr<ServerEntry> entry)
         }
         return;
     }
-    spawn([this, entry] { run_listener(entry); });
+    // stdio servers push nothing over a GET stream.
+    bool stdio = false;
+    {
+        std::lock_guard state_lock(entry->state_mutex);
+        stdio = entry->session.is_stdio();
+    }
+    if (!stdio) {
+        spawn([this, entry] { run_listener(entry); });
+    }
 }
 
 bool McpManager::wait_interruptible(long ms) const
@@ -319,7 +386,8 @@ void McpManager::connect(const std::string& id)
         }
         // A dangling catalogue reference fails immediately, offline; it
         // may resolve again after the next app update.
-        if (entry->config.url.empty() && resolved_url(entry->config).empty()) {
+        if (!entry->config.is_stdio() && entry->config.url.empty()
+            && resolved_url(entry->config).empty()) {
             entry->state  = McpServerState::FAILED;
             entry->detail = dangling_catalog_detail(entry->config);
             _changed.publish();

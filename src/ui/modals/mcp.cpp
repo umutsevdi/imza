@@ -26,8 +26,10 @@ namespace {
 
     using namespace ftxui;
 
-    constexpr int FORM_LABEL                    = 9;
-    constexpr int PICKER_ROWS                   = 8;
+    constexpr int FORM_LABEL                    = 10;
+    constexpr int COL_NAME                      = 24;
+    constexpr int COL_STATE                     = 2;
+    constexpr int COL_DETAIL                    = 20;
     constexpr std::string_view CUSTOM_SERVER_ID = "custom";
 
     // Server ids are Lua-callable paths: lowercase, [a-z0-9_-] only.
@@ -71,6 +73,40 @@ namespace {
         case McpServerState::OFFLINE: return "offline";
         }
         return "";
+    }
+
+    std::vector<std::string> split_ws(const std::string& text)
+    {
+        std::vector<std::string> out;
+        std::string current;
+        for (const char c : text) {
+            if (std::isspace(static_cast<unsigned char>(c)) != 0) {
+                if (!current.empty()) {
+                    out.push_back(std::move(current));
+                    current.clear();
+                }
+            } else {
+                current += c;
+            }
+        }
+        if (!current.empty()) {
+            out.push_back(std::move(current));
+        }
+        return out;
+    }
+
+    // Parses "KEY=VALUE KEY2=VALUE2"; false on a malformed token.
+    bool parse_env_pairs(
+        const std::string& text, std::map<std::string, std::string>& out)
+    {
+        for (const std::string& token : split_ws(text)) {
+            const std::size_t eq = token.find('=');
+            if (eq == std::string::npos || eq == 0) {
+                return false;
+            }
+            out[token.substr(0, eq)] = token.substr(eq + 1);
+        }
+        return true;
     }
 
     // Host part of an https URL, sanitized into a server id.
@@ -122,16 +158,67 @@ namespace {
 
         bool OnEvent(Event event) override
         {
-            if (event == Event::Escape) {
-                imza::close_modal(*_state);
-                return true;
-            }
-            if (event == Event::ArrowDown || event == Event::ArrowUp) {
-                if (move_list_cursor(event, _picker_selected,
-                        static_cast<int>(_picker_ids.size()))) {
-                    _clamp_picker_window();
+            if (_picker_open) {
+                if (event == Event::ArrowDown || event == Event::ArrowUp) {
+                    move_list_cursor(event, _picker_selected,
+                        static_cast<int>(_picker_ids.size()));
                     return true;
                 }
+                if (event == Event::Escape) {
+                    _close_picker();
+                    return true;
+                }
+                if (event == Event::Return) {
+                    _commit_picker();
+                    return true;
+                }
+                return _container ? _container->OnEvent(event) : false;
+            }
+
+            if (_confirming()) {
+                if (event == Event::Character('y')) {
+                    _confirm_remove(_row_selected);
+                    return true;
+                }
+                if (event == Event::Character('n') || event == Event::Escape) {
+                    _confirm.clear();
+                    _maybe_rebuild();
+                    return true;
+                }
+                return _container ? _container->OnEvent(event) : false;
+            }
+
+            const bool focus_in_add
+                = _add_container && _add_container->Focused();
+            if (!_in_add && !focus_in_add) {
+                if (event == Event::ArrowDown) {
+                    _row_move(1);
+                    return true;
+                }
+                if (event == Event::ArrowUp) {
+                    _row_move(-1);
+                    return true;
+                }
+                if (event == Event::Delete) {
+                    if (_row_selected >= 0
+                        && _row_selected
+                            < static_cast<int>(_servers().size())) {
+                        _confirm[_row_selected] = true;
+                        _maybe_rebuild();
+                    }
+                    return true;
+                }
+            } else if (event == Event::ArrowUp && _picker_input
+                && _picker_input->Focused()) {
+                _in_add        = false;
+                const auto all = _servers();
+                _row_selected
+                    = all.empty() ? 0 : static_cast<int>(all.size()) - 1;
+                if (_row_selected < static_cast<int>(_row_buttons.size())) {
+                    _row_buttons[static_cast<std::size_t>(_row_selected)]
+                        ->TakeFocus();
+                }
+                return true;
             }
             return _container ? _container->OnEvent(event) : false;
         }
@@ -171,11 +258,21 @@ namespace {
             return entry != nullptr && entry->auth_kind == "token";
         }
 
+        std::string _selected_name() const
+        {
+            if (_is_custom()) {
+                return "Custom server";
+            }
+            const McpCatalogEntry* entry = _selected_entry();
+            return entry != nullptr ? entry->label : std::string { };
+        }
+
         std::string _current_serial()
         {
             return std::to_string(_session->modal_serial()) + "/"
                 + std::to_string(_servers().size()) + "/" + _selected + "/"
-                + std::to_string(_confirming());
+                + std::to_string(_confirming()) + "/" + std::to_string(_stdio)
+                + "/" + std::to_string(_in_add);
         }
 
         bool _confirming() const
@@ -195,13 +292,32 @@ namespace {
             _rebuild();
         }
 
+        void _row_move(int delta)
+        {
+            const auto all         = _servers();
+            const bool at_last_row = delta > 0
+                && _row_selected >= static_cast<int>(all.size()) - 1;
+            if (all.empty() || at_last_row) {
+                _in_add = true;
+                if (_picker_input) {
+                    _picker_input->TakeFocus();
+                }
+                return;
+            }
+            _row_selected = std::clamp(
+                _row_selected + delta, 0, static_cast<int>(all.size()) - 1);
+            if (_row_selected < static_cast<int>(_row_buttons.size())) {
+                _row_buttons[static_cast<std::size_t>(_row_selected)]
+                    ->TakeFocus();
+            }
+        }
+
         void _refill_picker()
         {
             const std::string needle = to_lower(trim(_picker_buf));
             _picker_labels.clear();
             _picker_ids.clear();
             _picker_selected = 0;
-            _picker_begin    = 0;
             const auto add   = [&](std::string id, std::string label) {
                 if (!needle.empty()
                     && to_lower(label).find(needle) == std::string::npos
@@ -225,18 +341,26 @@ namespace {
 
         void _commit_picker()
         {
-            if (_picker_selected < 0
+            if (_picker_ids.empty()
                 || _picker_selected >= static_cast<int>(_picker_ids.size())) {
                 _close_picker();
                 return;
             }
             _selected = _picker_ids[static_cast<std::size_t>(_picker_selected)];
+            _picker_buf    = _selected_name();
+            _picker_cursor = static_cast<int>(_picker_buf.size());
+            _picker_open   = false;
             _row_error.clear();
+            if (!_is_custom()) {
+                _stdio = false;
+            }
             _maybe_rebuild();
-            if (_token_input) {
-                _token_input->TakeFocus();
+            if (_stdio && _command_input) {
+                _command_input->TakeFocus();
             } else if (_url_input) {
                 _url_input->TakeFocus();
+            } else if (_token_input) {
+                _token_input->TakeFocus();
             } else if (_label_input) {
                 _label_input->TakeFocus();
             }
@@ -244,54 +368,38 @@ namespace {
 
         void _close_picker()
         {
-            _picker_buf.clear();
-            _picker_cursor = 0;
-            _refill_picker();
-        }
-
-        // Keeps the selected row inside the visible window.
-        void _clamp_picker_window()
-        {
-            const int count = static_cast<int>(_picker_labels.size());
-            if (_picker_selected < _picker_begin) {
-                _picker_begin = _picker_selected;
-            }
-            if (_picker_selected >= _picker_begin + PICKER_ROWS) {
-                _picker_begin = _picker_selected - PICKER_ROWS + 1;
-            }
-            _picker_begin = std::clamp(
-                _picker_begin, 0, std::max(0, count - PICKER_ROWS));
+            _picker_buf    = _selected_name();
+            _picker_cursor = static_cast<int>(_picker_buf.size());
+            _picker_open   = false;
         }
 
         void _rebuild()
         {
-            Components rows;
-            _row_buttons.clear();
-            for (const auto& server : _servers()) {
-                rows.push_back(_make_row(server));
-            }
-            _rows_container = Container::Vertical(std::move(rows));
-
-            // Add-server form: the picker plus only the fields the
-            // selection needs (connect's custom-provider pattern).
             _refill_picker();
             _picker_input = Input(field_option(
                 &_picker_buf, &_picker_cursor, "type to search servers",
                 [this] {
                     _row_error.clear();
+                    if (!_picker_open) {
+                        _picker_open = true;
+                    }
                     _refill_picker();
-                    _clamp_picker_window();
                 },
-                [this] { _commit_picker(); }));
-
-            _label_input = Input(field_option(&_label_buf, &_label_cursor,
-                _is_custom() ? "label (optional, derived from the URL)"
-                             : "label (optional)",
-                [this] { _row_error.clear(); }));
+                [this] {
+                    if (_picker_open) {
+                        _commit_picker();
+                    }
+                }));
 
             const bool custom = _is_custom();
             const bool oauth  = _is_oauth();
-            if (custom) {
+            const bool stdio  = custom && _stdio;
+
+            _label_input = Input(field_option(&_label_buf, &_label_cursor,
+                custom ? "label (optional)" : "label (optional)",
+                [this] { _row_error.clear(); }));
+
+            if (custom && !stdio) {
                 _url_input     = Input(field_option(&_url_buf, &_url_cursor,
                     "URL, e.g. https://mcp.example.com/mcp",
                     [this] { _row_error.clear(); }));
@@ -302,7 +410,26 @@ namespace {
                 _url_input.reset();
                 _timeout_input.reset();
             }
-            if (_needs_token() && !oauth) {
+            if (stdio) {
+                _command_input
+                    = Input(field_option(&_command_buf, &_command_cursor,
+                        "command, e.g. npx", [this] { _row_error.clear(); }));
+                _args_input    = Input(field_option(&_args_buf, &_args_cursor,
+                    "arguments (space-separated, optional)",
+                    [this] { _row_error.clear(); }));
+                _env_input     = Input(field_option(&_env_buf, &_env_cursor,
+                    "env KEY=VALUE pairs (space-separated, optional)",
+                    [this] { _row_error.clear(); }));
+                _workdir_input = Input(field_option(&_workdir_buf,
+                    &_workdir_cursor, "working directory (optional)",
+                    [this] { _row_error.clear(); }));
+            } else {
+                _command_input.reset();
+                _args_input.reset();
+                _env_input.reset();
+                _workdir_input.reset();
+            }
+            if (_needs_token() && !oauth && !stdio) {
                 _token_input
                     = Input(password_option(&_token_buf, &_token_cursor,
                         custom ? "bearer token (optional)" : "API key",
@@ -315,13 +442,53 @@ namespace {
             } else {
                 _add_button.reset();
             }
+            if (custom) {
+                // The serial includes _stdio, so the next render rebuilds
+                // the form.
+                _transport_button = inline_link_button(
+                    [this] {
+                        Element http  = text("HTTP") | (_stdio ? dim : bold);
+                        Element stdio = text("stdio") | (_stdio ? bold : dim);
+                        return hbox({
+                            text(choice_marker(false, !_stdio)),
+                            std::move(http),
+                            text("   "),
+                            text(choice_marker(false, _stdio)),
+                            std::move(stdio),
+                        });
+                    },
+                    [this] {
+                        _stdio             = !_stdio;
+                        _in_add            = true;
+                        _refocus_transport = true;
+                        _row_error.clear();
+                    });
+            } else {
+                _transport_button.reset();
+            }
+
+            Components rows;
+            const auto all = _servers();
+            _row_buttons.clear();
+            for (int i = 0; i < static_cast<int>(all.size()); ++i) {
+                rows.push_back(_make_row(i));
+            }
+            _rows_container = Container::Vertical(std::move(rows));
 
             Components add_parts;
             add_parts.push_back(_picker_input);
-            if (_needs_token() && !oauth) {
+            if (custom) {
+                add_parts.push_back(_transport_button);
+            }
+            if (_needs_token() && !oauth && !stdio) {
                 add_parts.push_back(_token_input);
             }
-            if (custom) {
+            if (stdio) {
+                add_parts.push_back(_command_input);
+                add_parts.push_back(_args_input);
+                add_parts.push_back(_env_input);
+                add_parts.push_back(_workdir_input);
+            } else if (custom) {
                 add_parts.push_back(_url_input);
                 add_parts.push_back(_timeout_input);
             }
@@ -333,40 +500,70 @@ namespace {
 
             _container
                 = Container::Vertical({ _rows_container, _add_container });
+
+            if (_refocus_transport && _transport_button) {
+                // The toggle rebuilds the form; keep focus on it instead of
+                // dropping back to the rows at the top.
+                _refocus_transport = false;
+                _transport_button->TakeFocus();
+            } else if (_in_add) {
+                if (_picker_input) {
+                    _picker_input->TakeFocus();
+                }
+            } else if (!_row_buttons.empty()) {
+                _row_buttons[static_cast<std::size_t>(std::min(_row_selected,
+                                 static_cast<int>(_row_buttons.size()) - 1))]
+                    ->TakeFocus();
+            }
         }
 
-        Component _make_row(const McpServerSnapshot& server)
+        Component _make_row(int index)
         {
-            const int index = static_cast<int>(_row_buttons.size());
-            const bool confirming
+            const bool is_confirm
                 = _confirm.count(index) != 0 && _confirm.at(index);
 
-            Component label = Renderer([server] {
-                std::string name = server.id;
+            Component label = Renderer([this, index] {
+                const auto all = _servers();
+                if (index < 0 || index >= static_cast<int>(all.size())) {
+                    return text("");
+                }
+                const McpServerSnapshot& server
+                    = all[static_cast<std::size_t>(index)];
+                const bool highlighted = index == _row_selected && !_in_add;
+                std::string name       = server.id;
                 if (!server.label.empty() && server.label != server.id) {
                     name += " (" + server.label + ")";
                 }
+                Element name_el = text(fit(name, COL_NAME));
+                if (highlighted) {
+                    name_el = std::move(name_el) | bold;
+                }
+                Element state_el
+                    = state_glyph(server.state) | size(WIDTH, EQUAL, COL_STATE);
                 Element detail;
                 if (server.state == McpServerState::FAILED) {
-                    detail = status_text(fit(state_text(server), 44), false);
+                    detail = status_text(
+                        fit(state_text(server), COL_DETAIL), false);
                 } else {
-                    detail = text(fit(state_text(server), 12)) | dim;
+                    detail = text(fit(state_text(server), COL_DETAIL)) | dim;
                 }
-                return hbox({ text(name) | bold, filler(),
-                    state_glyph(server.state), text(" "), std::move(detail) });
+                return hbox({ std::move(name_el), std::move(state_el),
+                    text(" "), std::move(detail) });
             });
 
-            Component actions;
-            if (confirming) {
+            Component right;
+            if (is_confirm) {
                 Component yes = action_button(
                     "Yes", [this, index] { _confirm_remove(index); });
                 Component no = action_button("No", [this, index] {
                     _confirm.erase(index);
                     _maybe_rebuild();
                 });
-                actions      = Container::Horizontal(
+                right        = Container::Horizontal(
                     { yes, Renderer([] { return text(" "); }), no });
             } else {
+                const McpServerSnapshot server
+                    = _servers()[static_cast<std::size_t>(index)];
                 Components buttons;
                 if (server.state == McpServerState::CONNECTED
                     || server.state == McpServerState::FAILED) {
@@ -390,39 +587,41 @@ namespace {
                                                              : "Disable",
                     [this, id = server.id,
                         enable = server.state == McpServerState::DISABLED] {
-                        _toggle_enabled(id, enable);
+                        imza::mcp_set_server_enabled(*_state, id, enable);
                     }));
                 buttons.push_back(action_button("Remove", [this, index] {
                     _confirm[index] = true;
                     _maybe_rebuild();
                 }));
-                actions = Container::Horizontal(std::move(buttons));
+                right = Container::Horizontal(std::move(buttons));
             }
 
-            _row_buttons.push_back(actions);
-            Component row = Container::Horizontal({ label, actions });
-            row->SetActiveChild(actions);
-            return row;
-        }
-
-        void _toggle_enabled(const std::string& id, bool enable)
-        {
-            imza::mcp_set_server_enabled(*_state, id, enable);
+            Component row = Container::Horizontal({ label, right });
+            row->SetActiveChild(right);
+            _row_buttons.push_back(right);
+            return Renderer(row, [row, index, is_confirm, this] {
+                Element e = row->Render() | xflex;
+                if (is_confirm || (index == _row_selected && !_in_add)) {
+                    e |= bgcolor(PANEL_COLOR_FOCUS);
+                }
+                return e;
+            });
         }
 
         void _confirm_remove(int index)
         {
             _confirm.erase(index);
-            auto snapshot = _servers();
-            if (index < 0 || index >= static_cast<int>(snapshot.size())) {
+            const auto all = _servers();
+            if (index < 0 || index >= static_cast<int>(all.size())) {
                 return;
             }
-            const std::string id = snapshot[static_cast<std::size_t>(index)].id;
+            const std::string id = all[static_cast<std::size_t>(index)].id;
             if (imza::mcp_remove_server(*_state, id)) {
                 _row_error.clear();
             } else {
                 _row_error = "Could not save the configuration.";
             }
+            _row_selected = 0;
             _maybe_rebuild();
         }
 
@@ -434,6 +633,29 @@ namespace {
                 server.id         = entry->id;
                 server.catalog_id = entry->id;
                 server.label      = std::string(trim(_label_buf));
+            } else if (_is_custom() && _stdio) {
+                const std::string command = std::string(trim(_command_buf));
+                if (command.empty()) {
+                    _row_error = "Enter a command to run.";
+                    return;
+                }
+                server.type    = "stdio";
+                server.command = command;
+                server.args    = split_ws(_args_buf);
+                if (!parse_env_pairs(_env_buf, server.env)) {
+                    _row_error = "Env must be KEY=VALUE pairs.";
+                    return;
+                }
+                server.working_directory = std::string(trim(_workdir_buf));
+                server.label             = std::string(trim(_label_buf));
+                server.id = sanitize_id(std::string(trim(_label_buf)));
+                if (server.id.empty()) {
+                    server.id = sanitize_id(command);
+                }
+                if (server.id.empty()) {
+                    _row_error = "Enter a label for a custom server.";
+                    return;
+                }
             } else if (_is_custom()) {
                 std::string url;
                 if (normalize_web_url(std::string(trim(_url_buf)), url)
@@ -484,6 +706,11 @@ namespace {
             _url_buf.clear();
             _token_buf.clear();
             _timeout_buf.clear();
+            _command_buf.clear();
+            _args_buf.clear();
+            _env_buf.clear();
+            _workdir_buf.clear();
+            _stdio = false;
             _close_picker();
             _maybe_rebuild();
         }
@@ -493,30 +720,27 @@ namespace {
             const std::string pad(FORM_LABEL + 2, ' ');
             Elements rows;
             rows.push_back(_picker_input->Render() | xflex);
-            const int count = static_cast<int>(_picker_labels.size());
-            if (count == 0) {
-                rows.push_back(text(pad + "no matching servers") | dim);
-                return vbox(std::move(rows));
-            }
-            _clamp_picker_window();
-            const int shown = std::min(count, PICKER_ROWS);
-            const int end   = _picker_begin + shown;
-            if (count > shown) {
+            if (_picker_open) {
                 rows.push_back(
-                    text(pad + (_picker_begin > 0 ? "↑ " : "")
-                        + std::to_string(count) + " servers"
-                        + (end < count ? " · ↓ " + std::to_string(count - end)
-                                    + " more"
-                                       : ""))
+                    text(pad + std::to_string(_picker_ids.size()) + " server"
+                        + (_picker_ids.size() == 1 ? "" : "s"))
                     | dim);
-            }
-            for (int i = _picker_begin; i < end; ++i) {
-                const bool selected = i == _picker_selected;
-                Element e           = text(pad + (selected ? "› " : "  ")
-                    + _picker_labels[static_cast<std::size_t>(i)]);
-                e                   = std::move(e)
-                    | (selected ? color(PANEL_FG) | bold : color(PANEL_FG_DIM));
-                rows.push_back(std::move(e));
+                if (_picker_ids.empty()) {
+                    rows.push_back(text(pad + "no matching servers") | dim);
+                } else {
+                    for (int i = 0; i < static_cast<int>(_picker_labels.size());
+                        ++i) {
+                        const bool selected = i == _picker_selected;
+                        Element e = text(pad + (selected ? "› " : "  ")
+                            + _picker_labels[static_cast<std::size_t>(i)]);
+                        if (selected) {
+                            e = std::move(e) | bold | color(PANEL_FG);
+                        } else {
+                            e = std::move(e) | color(PANEL_FG_DIM);
+                        }
+                        rows.push_back(std::move(e));
+                    }
+                }
             }
             return vbox(std::move(rows));
         }
@@ -529,13 +753,21 @@ namespace {
             });
         }
 
+        Element _status_line_element()
+        {
+            if (!_row_error.empty()) {
+                return status_text(_row_error, false);
+            }
+            return text("");
+        }
+
         Element _render()
         {
             Elements rows = modal_header("MCP Servers");
 
             const auto servers = _servers();
             if (servers.empty()) {
-                rows.push_back(text("  (none yet - add one below)") | dim);
+                rows.push_back(text("  (none - add one below)") | dim);
             }
             if (_rows_container != nullptr) {
                 rows.push_back(_rows_container->Render() | yflex);
@@ -544,13 +776,13 @@ namespace {
             rows.push_back(separator() | color(PANEL_BORDER));
             rows.push_back(hbox({
                 section_title("Add Server"),
-                text("  pick a server, or Custom for any endpoint") | dim,
+                text("  pick a server, paste a token, then add") | dim,
             }));
             if (_add_container != nullptr) {
-                rows.push_back(
-                    hbox({ text("  " + std::string(fit("Server", FORM_LABEL)))
-                            | bold,
-                        _picker_area() | xflex }));
+                rows.push_back(hbox({
+                    text("  " + std::string(fit("Server", FORM_LABEL))) | bold,
+                    _picker_area() | xflex,
+                }));
                 if (_is_oauth()) {
                     const McpCatalogEntry* entry = _selected_entry();
                     rows.push_back(
@@ -562,6 +794,10 @@ namespace {
                                 | dim })
                         | xflex);
                 } else {
+                    if (_transport_button) {
+                        rows.push_back(
+                            _form_row("Transport", _transport_button));
+                    }
                     if (_token_input) {
                         rows.push_back(_form_row(
                             _is_custom() ? "Token" : "API Key", _token_input));
@@ -572,26 +808,34 @@ namespace {
                     if (_timeout_input) {
                         rows.push_back(_form_row("Timeout", _timeout_input));
                     }
+                    if (_command_input) {
+                        rows.push_back(_form_row("Command", _command_input));
+                    }
+                    if (_args_input) {
+                        rows.push_back(_form_row("Args", _args_input));
+                    }
+                    if (_env_input) {
+                        rows.push_back(_form_row("Env", _env_input));
+                    }
+                    if (_workdir_input) {
+                        rows.push_back(_form_row("Work dir", _workdir_input));
+                    }
                     rows.push_back(_form_row("Label", _label_input));
                     rows.push_back(hbox({
-                        text("  "),
+                        text(std::string(FORM_LABEL + 2, ' ')),
                         _add_button ? _add_button->Render() : text(""),
                         text("  "),
-                        _row_error.empty() ? text("")
-                                           : status_text(_row_error, false),
+                        _status_line_element(),
                     }));
                 }
             }
             rows.push_back(separatorEmpty());
-            std::string hint
-                = "type to filter · ↑↓ pick · Enter select · Esc close";
+            std::string hint = "↑↓ navigate · Enter/DEL remove · Esc close";
             if (!_confirm.empty()) {
                 hint = "y confirm · n cancel";
             }
             rows.push_back(hint_bar(hint));
-            // Skills-modal pattern: the frame follows focus, so rows and
-            // the form scroll when they exceed the modal height.
-            return vbox(std::move(rows)) | vscroll_indicator | frame | xflex;
+            return vbox(std::move(rows)) | xflex;
         }
 
         std::shared_ptr<ApplicationState> _state;
@@ -608,14 +852,18 @@ namespace {
         std::string _serial;
         bool _built = false;
 
+        bool _picker_open = false;
         std::string _selected;
-        int _picker_begin = 0; // first visible row of the windowed list
         std::string _picker_buf;
         int _picker_cursor = 0;
         std::vector<std::string> _picker_ids;
         std::vector<std::string> _picker_labels;
         int _picker_selected = 0;
         Component _picker_input;
+
+        int _row_selected       = 0;
+        bool _in_add            = false;
+        bool _refocus_transport = false;
 
         Component _label_input;
         Component _token_input;
@@ -630,6 +878,21 @@ namespace {
         int _url_cursor = 0;
         std::string _timeout_buf;
         int _timeout_cursor = 0;
+
+        bool _stdio = false; // custom-server transport choice
+        Component _transport_button;
+        Component _command_input;
+        Component _args_input;
+        Component _env_input;
+        Component _workdir_input;
+        std::string _command_buf;
+        int _command_cursor = 0;
+        std::string _args_buf;
+        int _args_cursor = 0;
+        std::string _env_buf;
+        int _env_cursor = 0;
+        std::string _workdir_buf;
+        int _workdir_cursor = 0;
     };
 
 } // namespace

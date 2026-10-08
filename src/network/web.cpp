@@ -313,7 +313,8 @@ Status web_search(const std::string& query, int num_results, std::string& text)
     McpEndpoint endpoint;
     endpoint.url          = std::move(url);
     endpoint.timeout_secs = SEARCH_TIMEOUT_SECS;
-    McpSession session { std::move(endpoint) };
+    McpSession session;
+    session.endpoint = std::move(endpoint);
 
     std::string detail;
     if (const Status st = mcp_initialize(session, detail); st != Status::OK) {

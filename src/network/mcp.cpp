@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <utility>
 
 namespace imza {
@@ -67,10 +68,59 @@ namespace {
         return headers;
     }
 
-    Status post(const McpSession& session, const std::string& payload,
+    // stdio exchange: write one line, then read until a JSON-RPC message
+    // carrying result/error arrives, answering pings and skipping
+    // notifications. http_code is 200 so callers' HTTP checks pass.
+    Status post_stdio(const McpSession& session, const std::string& payload,
+        std::string& body, long& http_code)
+    {
+        if (session.stdio.write(payload) != Status::OK) {
+            return Status::NETWORK_ERROR;
+        }
+        http_code           = 200;
+        const auto deadline = std::chrono::steady_clock::now()
+            + std::chrono::seconds(session.endpoint.timeout_secs);
+        while (std::chrono::steady_clock::now() < deadline) {
+            const auto remaining
+                = std::chrono::duration_cast<std::chrono::seconds>(
+                    deadline - std::chrono::steady_clock::now());
+            std::string line;
+            const Status read = session.stdio.read(
+                line, std::max<long>(1, remaining.count()));
+            if (read == Status::TIMEOUT) {
+                return Status::TIMEOUT;
+            }
+            if (read != Status::OK) {
+                return Status::NETWORK_ERROR;
+            }
+            if (is_rpc_message(parse_json(line))) {
+                body = std::move(line);
+                return Status::OK;
+            }
+            // A server request or notification: answer pings, ignore the
+            // rest, and keep reading for our response.
+            const JsonValue message = parse_json(line);
+            const JsonValue* method = find_member(message, "method");
+            const JsonValue* id     = find_member(message, "id");
+            if (method != nullptr && method->is_string() && id != nullptr
+                && method->as<std::string>() == "ping") {
+                JsonValue reply;
+                reply["jsonrpc"] = "2.0";
+                reply["id"]      = *id;
+                reply["result"]  = JsonValue(JsonValue::object_t { });
+                session.stdio.write(json_dump(reply));
+            }
+        }
+        return Status::TIMEOUT;
+    }
+
+    Status post(McpSession& session, const std::string& payload,
         bool negotiated, long& http_code, std::string& body,
         std::vector<std::string>* response_headers)
     {
+        if (session.is_stdio()) {
+            return post_stdio(session, payload, body, http_code);
+        }
         const HttpPostOptions opts {
             .max_redirs       = 0,
             .response_headers = response_headers,
@@ -78,6 +128,19 @@ namespace {
         return http_post(session.endpoint.url,
             post_headers(session, negotiated), payload,
             session.endpoint.timeout_secs, body, &http_code, opts);
+    }
+
+    // Fire-and-forget notification: stdio writes without waiting; HTTP
+    // needs the round trip.
+    Status notify(
+        McpSession& session, const std::string& payload, long& http_code)
+    {
+        if (session.is_stdio()) {
+            http_code = 200;
+            return session.stdio.write(payload);
+        }
+        std::string body;
+        return post(session, payload, true, http_code, body, nullptr);
     }
 
     std::string http_status_detail(long code, std::string_view phase)
@@ -239,7 +302,9 @@ Status mcp_initialize(McpSession& session, std::string& detail)
         detail = http_status_detail(code, "during initialize");
         return Status::API_ERROR;
     }
-    session.session_id = mcp_session_id(response_headers);
+    if (!session.is_stdio()) {
+        session.session_id = mcp_session_id(response_headers);
+    }
 
     std::string message;
     if (!mcp_find_rpc_response(body, message)) {
@@ -270,10 +335,7 @@ Status mcp_initialize(McpSession& session, std::string& detail)
     notification["jsonrpc"] = "2.0";
     notification["method"]  = "notifications/initialized";
     long notify_code        = 0;
-    std::string notify_body;
-    if (post(session, json_dump(notification), true, notify_code, notify_body,
-            nullptr)
-        != Status::OK) {
+    if (notify(session, json_dump(notification), notify_code) != Status::OK) {
         detail = "initialized notification request failed";
         return Status::NETWORK_ERROR;
     }
@@ -354,9 +416,7 @@ Status mcp_send_result(
     response["id"]      = id;
     response["result"]  = result;
     long code           = 0;
-    std::string body;
-    if (post(session, json_dump(response), true, code, body, nullptr)
-        != Status::OK) {
+    if (notify(session, json_dump(response), code) != Status::OK) {
         return Status::NETWORK_ERROR;
     }
     return http_ok(code) ? Status::OK : Status::API_ERROR;
@@ -364,6 +424,11 @@ Status mcp_send_result(
 
 void mcp_end_session(McpSession& session)
 {
+    if (session.is_stdio()) {
+        session.stdio.terminate();
+        session.initialized = false;
+        return;
+    }
     if (!session.session_id.empty()) {
         std::vector<std::string> headers = auth_and_static_headers(session);
         headers.push_back("MCP-Session-Id: " + session.session_id);

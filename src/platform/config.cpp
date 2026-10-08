@@ -183,10 +183,15 @@ struct StoredSkills {
 struct StoredMcpServer {
     std::optional<std::string> label;
     std::optional<std::string> description;
+    std::optional<std::string> type;
     std::optional<std::string> catalog_id;
     std::optional<std::string> url;
     std::optional<std::map<std::string, std::string>> headers;
     std::optional<std::string> bearer_token;
+    std::optional<std::string> command;
+    std::optional<std::vector<std::string>> args;
+    std::optional<std::map<std::string, std::string>> env;
+    std::optional<std::string> working_directory;
     std::optional<bool> enabled;
     std::optional<long> timeout_secs;
 };
@@ -378,6 +383,12 @@ Status load_config(
             server.bearer_token = entry.bearer_token.value_or("");
             server.enabled      = entry.enabled.value_or(true);
             server.timeout_secs = entry.timeout_secs.value_or(0);
+            server.type         = entry.type.value_or("http");
+            if (server.type != "http" && server.type != "stdio") {
+                return fail(Status::CONFIG_ERROR,
+                    "mcp server '" + id + "': unknown type '" + server.type
+                        + "'");
+            }
             if (server.timeout_secs < 0) {
                 return fail(Status::CONFIG_ERROR,
                     "mcp server '" + id + "': negative timeout");
@@ -391,6 +402,23 @@ Status load_config(
                     }
                     server.headers[name] = value;
                 }
+            }
+            if (server.is_stdio()) {
+                server.command = entry.command.value_or("");
+                if (server.command.empty()) {
+                    return fail(Status::CONFIG_ERROR,
+                        "mcp server '" + id
+                            + "' requires a command for the stdio transport");
+                }
+                if (entry.args) {
+                    server.args = *entry.args;
+                }
+                if (entry.env) {
+                    server.env = *entry.env;
+                }
+                server.working_directory = entry.working_directory.value_or("");
+                out.mcp_servers[id]      = std::move(server);
+                continue;
             }
             // A catalogue reference or an explicit url; both absent is
             // unusable. An explicit url wins over the reference.
@@ -583,6 +611,9 @@ namespace {
                 if (!server.description.empty()) {
                     entry.description = server.description;
                 }
+                if (server.type != "http") {
+                    entry.type = server.type;
+                }
                 if (!server.catalog_id.empty()) {
                     entry.catalog_id = server.catalog_id;
                 }
@@ -594,6 +625,18 @@ namespace {
                 }
                 if (!server.bearer_token.empty()) {
                     entry.bearer_token = server.bearer_token;
+                }
+                if (!server.command.empty()) {
+                    entry.command = server.command;
+                }
+                if (!server.args.empty()) {
+                    entry.args = server.args;
+                }
+                if (!server.env.empty()) {
+                    entry.env = server.env;
+                }
+                if (!server.working_directory.empty()) {
+                    entry.working_directory = server.working_directory;
                 }
                 if (!server.enabled) {
                     entry.enabled = server.enabled;

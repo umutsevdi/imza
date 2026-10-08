@@ -556,6 +556,68 @@ TEST_CASE("mcp config accepts catalogue references without urls")
         imza::load_config(neither, bad, &error) == imza::Status::CONFIG_ERROR);
     CHECK(error.find("url or a catalog id") != std::string::npos);
 }
+TEST_CASE("config roundtrips a stdio mcp server")
+{
+    const auto path = temp_file("mcp-stdio-roundtrip.json");
+    imza::Config cfg;
+    imza::McpServerConfig server;
+    server.id           = "local";
+    server.type         = "stdio";
+    server.command      = "npx";
+    server.args         = { "-y", "@modelcontextprotocol/server-filesystem" };
+    server.env["TOKEN"] = "abc";
+    server.working_directory = "/tmp";
+    cfg.mcp_servers["local"] = server;
+
+    REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
+    imza::Config loaded;
+    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
+    const imza::McpServerConfig& back = loaded.mcp_servers.at("local");
+    CHECK(back.type == "stdio");
+    CHECK(back.is_stdio());
+    CHECK(back.command == "npx");
+    REQUIRE(back.args.size() == 2);
+    CHECK(back.args[1] == "@modelcontextprotocol/server-filesystem");
+    CHECK(back.env.at("TOKEN") == "abc");
+    CHECK(back.working_directory == "/tmp");
+    CHECK(back.url.empty());
+}
+
+TEST_CASE("load_config validates stdio mcp server entries")
+{
+    const auto no_command = temp_file("mcp-stdio-no-command.json");
+    {
+        std::ofstream out(no_command);
+        out << R"({"mcp_servers":{"local":{"type":"stdio"}}})";
+    }
+    imza::Config cfg;
+    std::string error;
+    CHECK(imza::load_config(no_command, cfg, &error)
+        == imza::Status::CONFIG_ERROR);
+    CHECK(error.find("requires a command") != std::string::npos);
+
+    const auto bad_type = temp_file("mcp-bad-type.json");
+    {
+        std::ofstream out(bad_type);
+        out << R"({"mcp_servers":{"x":{"type":"carrier-pigeon",)"
+            << R"("url":"https://x"}}})";
+    }
+    imza::Config typed;
+    CHECK(imza::load_config(bad_type, typed, &error)
+        == imza::Status::CONFIG_ERROR);
+    CHECK(error.find("unknown type") != std::string::npos);
+
+    // An absent type defaults to http.
+    const auto defaulted = temp_file("mcp-default-type.json");
+    {
+        std::ofstream out(defaulted);
+        out << R"({"mcp_servers":{"x":{"url":"https://x"}}})";
+    }
+    imza::Config plain;
+    REQUIRE(imza::load_config(defaulted, plain) == imza::Status::OK);
+    CHECK(plain.mcp_servers.at("x").type == "http");
+    CHECK_FALSE(plain.mcp_servers.at("x").is_stdio());
+}
 TEST_CASE("config roundtrip preserves the allow list and instructions")
 {
     const auto path = temp_file("allow-roundtrip.json");

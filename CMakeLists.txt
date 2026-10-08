@@ -239,6 +239,7 @@ add_library(imza_foundation
     src/platform/config.cpp
     src/platform/file_lock.cpp
     src/platform/json_file.cpp
+    src/platform/process.cpp
     src/platform/update.cpp
     src/providers/catalog.cpp
     src/providers/pricing.cpp

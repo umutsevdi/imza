@@ -4,6 +4,7 @@
 #include "network/network.h"
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -70,14 +71,26 @@ struct McpEndpoint {
     long timeout_secs = 25;
 };
 
+// Newline-delimited JSON-RPC hooks for the stdio transport. Process
+// mechanics live in platform/process; the network core only speaks lines,
+// so it keeps no dependency on spawning. Empty for HTTP sessions.
+struct McpStdioTransport {
+    std::function<Status(std::string_view line)> write;
+    std::function<Status(std::string& line, long timeout_secs)> read;
+    std::function<void()> terminate;
+};
+
 // One conversation with one server. Not thread-safe; keep it on the
 // calling thread.
 struct McpSession {
     McpEndpoint endpoint;
-    std::string session_id; // "MCP-Session-Id", once the server assigns one
+    McpStdioTransport stdio; // non-empty selects the stdio transport
+    std::string session_id;  // "MCP-Session-Id", once the server assigns one
     std::string protocol_version = std::string(MCP_PROTOCOL_VERSION);
     std::uint64_t next_id        = 0;
     bool initialized             = false;
+
+    bool is_stdio() const { return static_cast<bool>(stdio.write); }
 };
 
 std::string mcp_rpc_request(
