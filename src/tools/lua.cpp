@@ -589,7 +589,7 @@ std::unique_ptr<LuaState> make_lua_state()
 {
     auto state = std::make_unique<LuaState>();
     for (const LuaModule& module : { core_module(), fs_module(), web_module(),
-             tree_module(), canvas_module(), plan_module(), mcp_module() }) {
+             canvas_module(), plan_module(), mcp_module() }) {
         state->register_module(module);
     }
     return state;

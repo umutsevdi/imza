@@ -130,7 +130,6 @@ int authorize_target(lua_State* L, const FilesystemRequest& request,
 const LuaModule& core_module();
 const LuaModule& fs_module();
 const LuaModule& web_module();
-const LuaModule& tree_module();
 const LuaModule& canvas_module();
 const LuaModule& plan_module();
 const LuaModule& mcp_module();

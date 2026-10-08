@@ -4,16 +4,24 @@
 #include "permissions/filesystem.h"
 #include "tools/file_ops.h"
 
+#include <tree_sitter/api.h>
+
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iomanip>
+#include <limits>
 #include <locale>
+#include <memory>
+#include <optional>
 #include <regex>
 #include <sstream>
 #include <string>
+#include <string_view>
 
 extern "C" {
 #include <lauxlib.h>
@@ -21,6 +29,9 @@ extern "C" {
 }
 
 namespace imza {
+
+#include "language_registry.inc"
+
 namespace {
 
     namespace fs = std::filesystem;
@@ -523,6 +534,470 @@ namespace {
         return 0;
     }
 
+    // Per-node text cap: enough to identify a node without shipping
+    // whole translation units back to the model.
+    constexpr std::size_t MAX_TS_NODE_TEXT = 400;
+    constexpr std::size_t MAX_TS_MATCHES   = 200;
+
+    struct ParserDeleter {
+        void operator()(TSParser* parser) const { ts_parser_delete(parser); }
+    };
+    struct TreeDeleter {
+        void operator()(TSTree* tree) const { ts_tree_delete(tree); }
+    };
+    struct QueryDeleter {
+        void operator()(TSQuery* query) const { ts_query_delete(query); }
+    };
+    struct QueryCursorDeleter {
+        void operator()(TSQueryCursor* cursor) const
+        {
+            ts_query_cursor_delete(cursor);
+        }
+    };
+
+    using ParserPtr      = std::unique_ptr<TSParser, ParserDeleter>;
+    using TreePtr        = std::unique_ptr<TSTree, TreeDeleter>;
+    using QueryPtr       = std::unique_ptr<TSQuery, QueryDeleter>;
+    using QueryCursorPtr = std::unique_ptr<TSQueryCursor, QueryCursorDeleter>;
+
+    const TSLanguage* language_for_path(std::string_view path)
+    {
+        const std::filesystem::path file(path);
+        const std::string filename = to_lower(file.filename().string());
+        for (const LanguageEntry& entry : LANGUAGE_ENTRIES) {
+            if (std::ranges::find(entry.filenames, filename)
+                != entry.filenames.end()) {
+                return entry.load_language();
+            }
+        }
+        std::string extension = to_lower(file.extension().string());
+        if (!extension.empty() && extension.front() == '.') {
+            extension.erase(0, 1);
+        }
+        for (const LanguageEntry& entry : LANGUAGE_ENTRIES) {
+            if (std::ranges::find(entry.extensions, extension)
+                != entry.extensions.end()) {
+                return entry.load_language();
+            }
+        }
+        return nullptr;
+    }
+
+    // One fresh parser per call: a script parses a handful of files, so
+    // the UI's cached-parser machinery is not worth its locking here.
+    ParserPtr make_parser(const TSLanguage* language)
+    {
+        ParserPtr parser(ts_parser_new());
+        if (parser == nullptr
+            || !ts_parser_set_language(parser.get(), language)) {
+            parser.reset();
+        }
+        return parser;
+    }
+
+    struct PredicateStep {
+        bool is_capture   = false;
+        uint32_t value_id = 0;
+    };
+
+    std::string_view ts_node_text(std::string_view code, const TSNode& node)
+    {
+        return code.substr(ts_node_start_byte(node),
+            ts_node_end_byte(node) - ts_node_start_byte(node));
+    }
+
+    struct Parsed {
+        std::string code;
+        TreePtr tree;
+    };
+
+    // Loads and parses `path`; the caller has already resolved the
+    // grammar. Nullopt only after the binding error has been raised.
+    std::optional<Parsed> parse_file(
+        lua_State* L, const TSLanguage* language, const std::string& path)
+    {
+        if (language == nullptr) {
+            binding_error(L, "ts_query: no grammar registered for: " + path);
+            return std::nullopt;
+        }
+        std::string err;
+        std::string code;
+        if (!load_text(path, code, err)) {
+            binding_error(L, "ts_query: " + err + " (looked for " + path + ")");
+            return std::nullopt;
+        }
+        if (code.size() > std::numeric_limits<std::uint32_t>::max()) {
+            binding_error(L, "ts_query: file too large: " + path);
+            return std::nullopt;
+        }
+        const ParserPtr parser = make_parser(language);
+        if (parser == nullptr) {
+            binding_error(L, "ts_query: cannot create parser for: " + path);
+            return std::nullopt;
+        }
+        TreePtr tree(ts_parser_parse_string(parser.get(), nullptr, code.data(),
+            static_cast<uint32_t>(code.size())));
+        if (tree == nullptr) {
+            binding_error(L, "ts_query: parse failed: " + path);
+            return std::nullopt;
+        }
+        return Parsed { std::move(code), std::move(tree) };
+    }
+
+    std::string query_error_message(
+        TSQueryError error, std::string_view query, uint32_t offset)
+    {
+        const char* kind = "syntax error";
+        switch (error) {
+        case TSQueryErrorSyntax: break;
+        case TSQueryErrorNodeType: kind = "unknown node type"; break;
+        case TSQueryErrorField: kind = "unknown field"; break;
+        case TSQueryErrorCapture: kind = "invalid capture"; break;
+        case TSQueryErrorStructure: kind = "pattern structure error"; break;
+        case TSQueryErrorLanguage: kind = "language error"; break;
+        case TSQueryErrorNone: break;
+        }
+        // The offset lands at or after the offending token; show the
+        // nearby tail of the query so the message identifies it.
+        const std::size_t begin = offset > 40 ? offset - 40 : 0;
+        std::string_view tail   = query.substr(begin, offset - begin);
+        return "ts_query: " + std::string(kind) + " at byte "
+            + std::to_string(offset) + " near \""
+            + std::string(tail.substr(
+                tail.find_first_not_of(" \\t\\n") == std::string::npos
+                    ? 0
+                    : tail.find_first_not_of(" \\t\\n")))
+            + "\"";
+    }
+
+    // Null only after the binding error has been raised.
+    QueryPtr compile_query(
+        lua_State* L, const TSLanguage* language, const std::string& query)
+    {
+        uint32_t offset   = 0;
+        TSQueryError type = TSQueryErrorNone;
+        QueryPtr compiled(ts_query_new(language, query.data(),
+            static_cast<uint32_t>(query.size()), &offset, &type));
+        if (compiled == nullptr) {
+            binding_error(L, query_error_message(type, query, offset));
+        }
+        return compiled;
+    }
+
+    // The text bound to a predicate argument: the capture's own text, or
+    // the text of the capture named by the ".suffix" form (e.g.
+    // @function.kind) as a field access on a child node.
+    std::string predicate_capture_text(const TSQuery* query,
+        const TSQueryMatch& match, std::string_view code,
+        const std::string& argument)
+    {
+        const std::size_t dot = argument.find('.');
+        const std::string name
+            = dot == std::string::npos ? argument : argument.substr(0, dot);
+        const uint32_t count = ts_query_capture_count(query);
+        for (uint32_t id = 0; id < count; ++id) {
+            uint32_t length = 0;
+            const char* capture
+                = ts_query_capture_name_for_id(query, id, &length);
+            if (std::string_view(capture, length) != name) {
+                continue;
+            }
+            for (uint16_t i = 0; i < match.capture_count; ++i) {
+                if (match.captures[i].index != id) {
+                    continue;
+                }
+                if (dot == std::string::npos) {
+                    return std::string(
+                        ts_node_text(code, match.captures[i].node));
+                }
+                const TSNode node       = match.captures[i].node;
+                const std::string field = argument.substr(dot + 1);
+                const uint32_t children = ts_node_child_count(node);
+                for (uint32_t child = 0; child < children; ++child) {
+                    const char* child_field
+                        = ts_node_field_name_for_child(node, child);
+                    if (child_field != nullptr && field == child_field) {
+                        const TSNode found = ts_node_child(node, child);
+                        if (!ts_node_is_null(found)) {
+                            return std::string(ts_node_text(code, found));
+                        }
+                    }
+                }
+                return { };
+            }
+        }
+        return { };
+    }
+
+    std::string predicate_string_value(const TSQuery* query, uint32_t value_id)
+    {
+        uint32_t length = 0;
+        const char* value
+            = ts_query_string_value_for_id(query, value_id, &length);
+        return std::string(value, length);
+    }
+
+    // Evaluates the portable predicate set (#eq?, #not-eq?, #match?,
+    // #not-match?, #any-of?, #not-any-of?) against capture text.
+    // Unknown predicates are ignored rather than fatal.
+    bool predicates_hold(
+        const TSQuery* query, const TSQueryMatch& match, std::string_view code)
+    {
+        uint32_t step_count               = 0;
+        const TSQueryPredicateStep* steps = ts_query_predicates_for_pattern(
+            query, match.pattern_index, &step_count);
+        std::vector<PredicateStep> predicate;
+        const auto argument_text = [&](const PredicateStep& step) {
+            if (!step.is_capture) {
+                return predicate_string_value(query, step.value_id);
+            }
+            uint32_t length = 0;
+            const char* name
+                = ts_query_capture_name_for_id(query, step.value_id, &length);
+            return predicate_capture_text(
+                query, match, code, std::string(name, length));
+        };
+        const auto evaluate = [&]() {
+            // The operator is always a string step; a leading capture
+            // step is malformed, not something to filter on.
+            if (predicate.size() < 2 || predicate[0].is_capture) {
+                return true;
+            }
+            const std::string op
+                = predicate_string_value(query, predicate[0].value_id);
+            if (op != "#eq?" && op != "#not-eq?" && op != "#match?"
+                && op != "#not-match?" && op != "#any-of?"
+                && op != "#not-any-of?") {
+                return true; // not ours to judge
+            }
+            if (predicate.size() < 3) {
+                return true;
+            }
+            const std::string left = argument_text(predicate[1]);
+            if (op == "#eq?" || op == "#not-eq?") {
+                if (predicate.size() != 3) {
+                    return true;
+                }
+                const bool equal = left == argument_text(predicate[2]);
+                return op == "#eq?" ? equal : !equal;
+            }
+            if (op == "#any-of?" || op == "#not-any-of?") {
+                bool any = false;
+                for (std::size_t i = 2; i < predicate.size(); ++i) {
+                    if (left == argument_text(predicate[i])) {
+                        any = true;
+                        break;
+                    }
+                }
+                return op == "#any-of?" ? any : !any;
+            }
+            // #match? / #not-match?: ECMAScript regex over capture text.
+            if (predicate.size() != 3 || predicate[2].is_capture) {
+                return true;
+            }
+            try {
+                const std::regex expression(argument_text(predicate[2]));
+                const bool hit = std::regex_search(left, expression);
+                return op == "#match?" ? hit : !hit;
+            } catch (const std::regex_error&) {
+                return true; // unusable pattern: do not silently drop rows
+            }
+        };
+        for (uint32_t i = 0; i < step_count; ++i) {
+            const TSQueryPredicateStep& step = steps[i];
+            if (step.type == TSQueryPredicateStepTypeDone) {
+                if (!evaluate()) {
+                    return false;
+                }
+                predicate.clear();
+                continue;
+            }
+            predicate.push_back({ step.type == TSQueryPredicateStepTypeCapture,
+                step.value_id });
+        }
+        return predicate.empty() || evaluate();
+    }
+
+    // One result row: { file, captures = { name = TsCapture } }.
+    void push_match_row(lua_State* L, const std::string& file,
+        const TSQuery* query, const TSQueryMatch& match, std::string_view code)
+    {
+        lua_newtable(L);
+        lua_pushlstring(L, file.data(), file.size());
+        lua_setfield(L, -2, "file");
+        lua_newtable(L);
+        for (uint16_t i = 0; i < match.capture_count; ++i) {
+            const TSNode node = match.captures[i].node;
+            uint32_t length   = 0;
+            const char* raw   = ts_query_capture_name_for_id(
+                query, match.captures[i].index, &length);
+            lua_pushlstring(L, raw, length);
+            lua_newtable(L);
+            const std::string_view kind(ts_node_type(node));
+            lua_pushlstring(L, kind.data(), kind.size());
+            lua_setfield(L, -2, "kind");
+            const std::string body
+                = truncate_marked(ts_node_text(code, node), MAX_TS_NODE_TEXT);
+            lua_pushlstring(L, body.data(), body.size());
+            lua_setfield(L, -2, "text");
+            lua_pushinteger(L, ts_node_start_point(node).row + 1);
+            lua_setfield(L, -2, "start_line");
+            lua_pushinteger(L, ts_node_end_point(node).row + 1);
+            lua_setfield(L, -2, "end_line");
+            lua_settable(L, -3);
+        }
+        lua_setfield(L, -2, "captures");
+    }
+
+    struct TsQueryState {
+        lua_State* lua;
+        std::size_t rows = 0;
+        bool truncated   = false;
+    };
+
+    // Appends one row per match; false once the match cap is hit.
+    bool ts_query_run_file(TsQueryState& state, const TSQuery* query,
+        const Parsed& parsed, const std::string& file)
+    {
+        lua_State* L = state.lua;
+        QueryCursorPtr cursor(ts_query_cursor_new());
+        if (cursor == nullptr) {
+            binding_error(L, "ts_query: cannot create query cursor");
+        }
+        ts_query_cursor_exec(
+            cursor.get(), query, ts_tree_root_node(parsed.tree.get()));
+
+        TSQueryMatch match;
+        while (ts_query_cursor_next_match(cursor.get(), &match)) {
+            if (!predicates_hold(query, match, parsed.code)) {
+                continue;
+            }
+            if (state.rows == MAX_TS_MATCHES) {
+                state.truncated = true;
+                return false;
+            }
+            ++state.rows;
+            push_match_row(L, file, query, match, parsed.code);
+            lua_rawseti(L, -2, static_cast<lua_Integer>(state.rows));
+        }
+        return true;
+    }
+
+    // Per-language compiled queries for a directory walk: grammars
+    // interleave, and a query is bound to one language.
+    struct QueryCache {
+        std::vector<std::pair<const TSLanguage*, QueryPtr>> entries;
+
+        const TSQuery* get_or_compile(
+            lua_State* L, const TSLanguage* language, const std::string& query)
+        {
+            for (const auto& [cached_language, cached] : entries) {
+                if (cached_language == language) {
+                    return cached.get();
+                }
+            }
+            QueryPtr compiled = compile_query(L, language, query);
+            entries.emplace_back(language, std::move(compiled));
+            return entries.back().second.get();
+        }
+    };
+
+    int binding_ts_query(lua_State* L)
+    {
+        const std::string path  = opt_string(L, 1).value_or(".");
+        const std::string query = luaL_checkstring(L, 2);
+        if (query.empty()) {
+            return binding_error(
+                L, "ts_query: query must be a non-empty string");
+        }
+
+        const FindFilesRequest request { path_from_utf8(path), query };
+        std::string target;
+        if (const int denied = authorize_target(L, request, path, target)) {
+            return denied;
+        }
+
+        std::error_code ec;
+        const fs::file_status status = fs::status(fs::path(target), ec);
+        if (ec) {
+            return binding_error(
+                L, "ts_query: cannot inspect target: " + target);
+        }
+
+        lua_newtable(L);
+        TsQueryState state { L };
+        if (fs::is_regular_file(status)) {
+            const TSLanguage* language = language_for_path(target);
+            if (language == nullptr) {
+                return binding_error(
+                    L, "ts_query: no grammar registered for: " + path);
+            }
+            // Compile first: an invalid pattern is a script bug and
+            // should not depend on the target being parseable.
+            const QueryPtr compiled = compile_query(L, language, query);
+            if (compiled == nullptr) {
+                return 2;
+            }
+            const auto parsed = parse_file(L, language, target);
+            if (!parsed) {
+                return 2;
+            }
+            ts_query_run_file(state, compiled.get(), *parsed, target);
+        } else if (fs::is_directory(status)) {
+            const LuaRunContext& run = *run_of(L);
+            QueryCache cache;
+            for (auto it = fs::recursive_directory_iterator(
+                     target, fs::directory_options::skip_permission_denied, ec);
+                it != fs::recursive_directory_iterator(); it.increment(ec)) {
+                if (ec) {
+                    ec.clear();
+                    continue;
+                }
+                if (state.rows == MAX_TS_MATCHES) {
+                    state.truncated = true;
+                    break;
+                }
+                if (std::chrono::steady_clock::now() > run.deadline) {
+                    return binding_error(L, "ts_query: search timed out");
+                }
+                std::error_code file_ec;
+                if (!it->is_regular_file(file_ec) || file_ec) {
+                    continue;
+                }
+                const std::string file     = utf8_from_path(it->path());
+                const TSLanguage* language = language_for_path(file);
+                if (language == nullptr) {
+                    continue; // unrecognized files are skipped, not errors
+                }
+                const auto parsed = parse_file(L, language, file);
+                if (!parsed) {
+                    return 2;
+                }
+                const TSQuery* compiled
+                    = cache.get_or_compile(L, language, query);
+                if (compiled == nullptr) {
+                    return 2;
+                }
+                if (!ts_query_run_file(state, compiled, *parsed, file)) {
+                    break;
+                }
+            }
+        } else {
+            return binding_error(
+                L, "ts_query: target is not a file or directory: " + path);
+        }
+
+        if (state.truncated) {
+            lua_newtable(L);
+            lua_pushboolean(L, 0);
+            lua_setfield(L, -2, "file");
+            lua_pushliteral(L, "[truncated]");
+            lua_setfield(L, -2, "text");
+            lua_rawseti(L, -2, static_cast<lua_Integer>(state.rows + 1));
+        }
+        return 1;
+    }
+
     constexpr LuaMethod BINDINGS[] = {
         {
             "read",
@@ -577,6 +1052,20 @@ Replaces the file's entire content, creating it (and missing parent
 directories) if absent.
 Prefer insert/edit for targeted changes; this discards everything else.)desc",
         },
+        {
+            "ts_query",
+            binding_ts_query,
+            R"desc((path: string, query: string) returns TsQueryMatch[], throws
+Run a tree-sitter query over a file, or over every grammar-recognized
+file under a directory. `query` is the standard tree-sitter S-expression
+pattern language: node types, fields, captures, quantifiers, alternations,
+and the portable predicates (#eq?, #not-eq?, #match?, #not-match?,
+#any-of?, #not-any-of?); captures are keyed by name.
+A single-file target with no registered grammar throws; a directory skips
+files without one. Directory walks also enforce the run's time budget.
+Capped at 200 matches, followed by a marker row whose text is
+"[truncated]".)desc",
+        },
     };
 
 } // namespace
@@ -587,6 +1076,9 @@ const LuaModule& fs_module()
         "FileEntry = { path: string, type: \\\"file\\\" | \\\"dir\\\", size?: "
         "string }",
         "GrepHit = { file: string, line: integer, text: string }",
+        "TsCapture = { kind: string, text: string, start_line: integer, "
+        "end_line: integer }",
+        "TsQueryMatch = { file: string, captures: { [name]: TsCapture } }",
     };
     static constexpr LuaModule MODULE { true, "fs",
         "Filesystem inspection and mutation.", types, BINDINGS };

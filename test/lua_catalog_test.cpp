@@ -24,14 +24,13 @@ TEST_CASE("binding catalog registers every path as a callable function")
 {
     const std::string script = R"lua(
 local paths = {
-  "fs.read", "fs.list", "fs.grep",
+  "fs.read", "fs.list", "fs.grep", "fs.ts_query",
   "todo.get", "todo.set", "ask",
   "plan.get", "plan.create", "plan.edit",
   "shell",
   "web.fetch", "web.search",
   "mcp.call",
   "fs.insert", "fs.edit", "fs.write",
-  "tree.index", "tree.nodes", "tree.symbols", "tree.references",
   "canvas.line", "canvas.bar", "canvas.pie", "canvas.surface",
 }
 for _, path in ipairs(paths) do
@@ -114,21 +113,10 @@ TEST_CASE("core description embeds autoload docs, lists others by name")
     CHECK(description.find("(raises)") == std::string::npos);
 }
 
-TEST_CASE("load returns tree documentation while bindings are always present")
+TEST_CASE("load returns canvas documentation while bindings are always present")
 {
     auto state      = make_lua_state();
     const Tool load = make_load_tool(*state);
-
-    const ToolOutput documentation
-        = load.run({ "load", R"json({"name":"tree"})json", "", "" });
-    CHECK(documentation.kind == ToolOutput::Kind::OUTPUT);
-    CHECK(documentation.text.find("TYPES") != std::string::npos);
-    CHECK(documentation.text.find("METHODS") != std::string::npos);
-    for (const LuaMethod& method : tree_module().methods) {
-        CHECK(documentation.text.find(
-                  std::string("imza.tree.") + std::string(method.name) + "(")
-            != std::string::npos);
-    }
 
     const ToolOutput canvas
         = load.run({ "load", R"json({"name":"canvas"})json", "", "" });

@@ -862,130 +862,119 @@ TEST_CASE("imza.sh accepts pre-installed grants and skip-permissions silently")
     CHECK(skipped.ask_calls == 0);
 }
 
-TEST_CASE("imza.tree.index lists declarations parsed by the grammar")
+TEST_CASE("imza.fs.ts_query returns captures with kind, text, lines")
 {
     imza::test::TempDir dir;
     imza::test::write_file(dir.file("sym.cpp"),
-        "// not a symbol\n"
+        "// not a match\n"
         "struct Alpha { int x; };\n"
-        "int beta(int v) { return v; }\n"
-        "class Gamma { };\n");
+        "int beta(int v) { return v; }\n");
 
     const imza::ToolOutput out = imza::test::run_lua(
-        "local rows = imza.tree.index([[" + dir.file("sym.cpp").string()
-        + "]])\n"
-          "for _, r in ipairs(rows) do print(r.kind, r.name, "
-          "r.start_line, r.end_line) end");
+        "local rows = imza.fs.ts_query([[" + dir.file("sym.cpp").string()
+        + "]], '[(struct_specifier name: (type_identifier) @type) "
+          "(function_definition declarator: (function_declarator "
+          "declarator: (identifier) @func))]')\n"
+          "for _, r in ipairs(rows) do "
+          "for name, c in pairs(r.captures) do "
+          "print(r.file, name, c.kind, c.text, c.start_line, c.end_line) "
+          "end end");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(out.text.find("struct_specifier    Alpha    2    2\n")
+    CHECK(out.text.find("type_identifier    Alpha    2    2\n")
         != std::string::npos);
-    CHECK(out.text.find("function_definition    beta    3    3\n")
-        != std::string::npos);
-    CHECK(out.text.find("class_specifier    Gamma    4    4\n")
-        != std::string::npos);
-    // The comment is not a declaration and appears nowhere.
-    CHECK(out.text.find("not a symbol") == std::string::npos);
+    CHECK(out.text.find("beta    3    3\n") != std::string::npos);
+    // Grammar-typed: the comment line matches nothing.
+    CHECK(out.text.find("not a match") == std::string::npos);
 }
 
-TEST_CASE("imza.tree.index caps results and reports node text")
+TEST_CASE("imza.fs.ts_query applies #eq? predicates")
+{
+    imza::test::TempDir dir;
+    imza::test::write_file(dir.file("calls.c"),
+        "int one(void) { return 0; }\n"
+        "int two(void) { return one(); }\n"
+        "int three(void) { return two(); }\n");
+
+    const imza::ToolOutput out = imza::test::run_lua(
+        "local rows = imza.fs.ts_query([[" + dir.file("calls.c").string()
+        + "]], '((call_expression function: (identifier) @callee) "
+          "(#eq? @callee \"one\"))')\n"
+          "print(#rows, rows[1].captures.callee.text, "
+          "rows[1].captures.callee.start_line)");
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(out.text == "2    one    2\n");
+}
+
+TEST_CASE("imza.fs.ts_query rejects invalid queries")
+{
+    imza::test::TempDir dir;
+    imza::test::write_file(dir.file("a.c"), "int main() { return 0; }\n");
+
+    const imza::ToolOutput unknown_type
+        = imza::test::run_lua("imza.fs.ts_query([[" + dir.file("a.c").string()
+            + "]], '(not_a_real_node)')\nprint('dead')");
+    CHECK(unknown_type.kind == imza::ToolOutput::Kind::ERROR);
+    CHECK(unknown_type.text.find("unknown node type") != std::string::npos);
+    CHECK(unknown_type.text.find("dead") == std::string::npos);
+
+    const imza::ToolOutput syntax
+        = imza::test::run_lua("imza.fs.ts_query([[" + dir.file("a.c").string()
+            + "]], '(function_definition')\nprint('dead')");
+    CHECK(syntax.kind == imza::ToolOutput::Kind::ERROR);
+    CHECK(syntax.text.find("syntax error") != std::string::npos);
+}
+
+TEST_CASE("imza.fs.ts_query walks directories, skipping foreign files")
+{
+    imza::test::TempDir dir;
+    imza::test::write_file(dir.file("a.c"), "int one(void) { return 0; }\n");
+    imza::test::write_file(dir.file("b.c"), "int two(void) { return 0; }\n");
+    imza::test::write_file(dir.file("note.txt"), "function_definition\n");
+
+    const imza::ToolOutput out = imza::test::run_lua(
+        "local rows = imza.fs.ts_query([[" + dir.path.string()
+        + "]], '(function_definition declarator: (function_declarator "
+          "declarator: (identifier) @fn))')\n"
+          "table.sort(rows, function(a, b) "
+          "return a.captures.fn.text < b.captures.fn.text end)\n"
+          "for _, r in ipairs(rows) do print(r.captures.fn.text) end");
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(out.text == "one\ntwo\n");
+}
+
+TEST_CASE("imza.fs.ts_query caps matches with a truncation marker")
 {
     imza::test::TempDir dir;
     std::string body;
-    for (int i = 1; i <= 60; ++i) {
-        body += "int fn" + std::to_string(i) + "() { return "
-            + std::to_string(i) + "; }\n";
+    for (int i = 1; i <= 210; ++i) {
+        body += "int fn" + std::to_string(i) + "() { return 0; }\n";
     }
-    imza::test::write_file(dir.file("many.cpp"), body);
+    imza::test::write_file(dir.file("many.c"), body);
 
     const imza::ToolOutput out = imza::test::run_lua(
-        "local rows = imza.tree.index([[" + dir.file("many.cpp").string()
-        + "]])\nprint(#rows, rows[1].text)");
+        "local rows = imza.fs.ts_query([[" + dir.file("many.c").string()
+        + "]], '(function_definition declarator: (function_declarator "
+          "declarator: (identifier) @fn))')\n"
+          "print(#rows, rows[#rows].text)");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(
-        out.text.find("50    int fn1() { return 1; }\n") != std::string::npos);
+    CHECK(out.text.find("201    [truncated]") != std::string::npos);
 }
 
-TEST_CASE("imza.tree.nodes matches an exact type and reports node text")
+TEST_CASE("ts_query bindings raise on bad paths and unknown grammars")
 {
     imza::test::TempDir dir;
-    imza::test::write_file(dir.file("nodes.c"), "int main() { return 0; }\n");
-
-    const imza::ToolOutput declared = imza::test::run_lua(
-        "local rows = imza.tree.nodes([[" + dir.file("nodes.c").string()
-        + "]], 'function_definition')\n"
-          "print(#rows, rows[1].kind, rows[1].name)");
-    CHECK(declared.text.find("1    function_definition    main\n")
-        != std::string::npos);
-}
-
-TEST_CASE("imza.tree.nodes rejects unknown exact types")
-{
-    imza::test::TempDir dir;
-    imza::test::write_file(dir.file("a.c"), "int main() { return 0; }\n");
-    const imza::ToolOutput out = imza::test::run_lua("imza.tree.nodes([["
-        + dir.file("a.c").string() + "]], 'not_a_real_node')\nprint('dead')");
-    CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
-    CHECK(out.text.find("unknown node type: not_a_real_node")
-        != std::string::npos);
-    CHECK(out.text.find("dead") == std::string::npos);
-}
-
-TEST_CASE("imza.tree.symbols lists identifier occurrences with lines")
-{
-    imza::test::TempDir dir;
-    imza::test::write_file(dir.file("use.c"),
-        "int cat;\n"
-        "int dog;\n"
-        "int use_cat() { return cat; }\n");
-
-    const imza::ToolOutput out = imza::test::run_lua(
-        "local rows = imza.tree.symbols([[" + dir.file("use.c").string()
-        + "]], 'cat')\n"
-          "for _, r in ipairs(rows) do print(r.file, r.line, r.text) end");
-    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    // Grammar-typed: the 'cat' inside 'use_cat' never matches.
-    CHECK(out.text.find("    1    int cat;\n") != std::string::npos);
-    // Grammar-typed: no row's line is exactly 'use_cat'; but its line 3
-    // row exists because it contains the standalone `cat` identifier.
-    CHECK(out.text.find("    3    int use_cat() { return cat; }\n")
-        != std::string::npos);
-}
-
-TEST_CASE("imza.tree.references lists call sites of a symbol")
-{
-    imza::test::TempDir dir;
-    imza::test::write_file(dir.file("use.c"),
-        "int cat;\n"
-        "int dog;\n"
-        "int use_cat() { return cat; }\n"
-        "int call_cat() { return cat(); }\n"
-        "// cat() in a comment\n");
-
-    const imza::ToolOutput out = imza::test::run_lua(
-        "local rows = imza.tree.references([[" + dir.file("use.c").string()
-        + "]], 'cat')\n"
-          "for _, r in ipairs(rows) do print(r.line, r.kind, r.text) end");
-    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    // Only the call site on line 4 matches; the variable uses and the
-    // comment are not identifier-in-call-node matches.
-    CHECK(out.text
-        == "4    call_expression    int call_cat() { return cat(); }\n");
-}
-TEST_CASE("ts bindings raise on bad paths and unknown grammars")
-{
-    imza::test::TempDir dir;
-    imza::test::write_file(dir.file("a.c"), "int main() { return 0; }\n");
     imza::test::write_file(dir.file("note.unknownext"), "hello\n");
 
+    // The find gate rejects a missing target before any parse: the
+    // canonical rejection, same class of error as grep on a bad path.
     const imza::ToolOutput missing = imza::test::run_lua(
-        "imza.tree.index('no-such-file.c')\nprint('dead')");
+        "imza.fs.ts_query('no-such-file.c', '(identifier)')\nprint('dead')");
     CHECK(missing.kind == imza::ToolOutput::Kind::ERROR);
-    CHECK(missing.text.find("no such file") != std::string::npos);
-    CHECK(missing.text.find("looked for ") != std::string::npos);
+    CHECK(missing.text.find("cannot inspect target") != std::string::npos);
     CHECK(missing.text.find("dead") == std::string::npos);
 
-    const imza::ToolOutput nogrammar = imza::test::run_lua(
-        "imza.tree.index([[" + dir.file("note.unknownext").string() + "]])");
+    const imza::ToolOutput nogrammar = imza::test::run_lua("imza.fs.ts_query([["
+        + dir.file("note.unknownext").string() + "]], '(identifier)')");
     CHECK(nogrammar.text.find("no grammar") != std::string::npos);
 }
 

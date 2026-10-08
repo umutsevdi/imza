@@ -581,7 +581,7 @@ TEST_CASE("central evaluator assigns explicit policies to built-in tools")
         == PermissionDecision::Kind::ACCEPT);
     CHECK(evaluate("lua", R"js({"script":""})js").decision.kind
         == PermissionDecision::Kind::REJECT);
-    CHECK(evaluate("load", R"({"name":"tree"})").decision.kind
+    CHECK(evaluate("load", R"({"name":"canvas"})").decision.kind
         == PermissionDecision::Kind::ACCEPT);
     CHECK(evaluate("load", R"({"name":""})").decision.kind
         == PermissionDecision::Kind::REJECT);
