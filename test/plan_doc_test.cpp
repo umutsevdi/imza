@@ -184,7 +184,7 @@ TEST_CASE("e and d edit and delete the selected note")
         != std::string::npos);
 
     // Delete it from the note row.
-    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("d")));
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Delete));
     CHECK(imza::test::to_text(fx.doc->Render(), 100, 40).find("first draft")
         == std::string::npos);
 }
@@ -376,7 +376,7 @@ TEST_CASE("click on a note card selects it for edit and delete")
     CHECK(rendered.find("annotate this more") != std::string::npos);
 
     REQUIRE(imza::test::click_label(fx.doc, "annotate this"));
-    REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("d")));
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Delete));
     CHECK(imza::test::to_text(fx.doc->Render(), 100, 40).find("annotate this")
         == std::string::npos);
 }

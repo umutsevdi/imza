@@ -91,9 +91,9 @@ inline constexpr int DIFF_VIEWER_MODAL_MAX_WIDTH = 160;
 // PROCESS_PERIOD_TICKS ticks, one spinner step per SPINNER_FRAME_MS.
 inline constexpr int PROCESS_TRACK_BLOCKS = 10;
 inline constexpr int PROCESS_MAX_BLOCKS   = 5;
-inline constexpr int PROCESS_PERIOD_TICKS = 30;
-inline constexpr int PROCESS_TICK_MS      = 30;
-inline constexpr int SPINNER_FRAME_MS     = 60;
+inline constexpr int PROCESS_PERIOD_TICKS = 24;
+inline constexpr int PROCESS_TICK_MS      = 24;
+inline constexpr int SPINNER_FRAME_MS     = 45;
 
 int modal_max_width(const ModalPayload& modal);
 

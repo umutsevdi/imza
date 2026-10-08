@@ -111,7 +111,7 @@ namespace {
 
         bool _handle_pick_event(const Event& event)
         {
-            if (event == Event::F5 || event == Event::CtrlR) {
+            if (event == Event::F5) {
                 for (const auto& view : _views()) {
                     _provider_store.refetch_models(view.id);
                 }

@@ -177,7 +177,7 @@ namespace {
             if (event == Event::Character("e")) {
                 return _edit_note();
             }
-            if (event == Event::Character("d")) {
+            if (event == Event::Delete) {
                 return _delete_note();
             }
             if (event == Event::Character("s")) {
@@ -224,7 +224,7 @@ namespace {
             if (!_rows.empty()) {
                 const Row& row = _rows[static_cast<std::size_t>(_selected)];
                 if (row.kind == Row::Kind::NOTE) {
-                    return "↑↓ navigate · e edit · d delete · s revise";
+                    return "↑↓ navigate · e edit · DEL delete · s revise";
                 }
             }
             return "↑↓ navigate · [] sections · Enter note · s revise";

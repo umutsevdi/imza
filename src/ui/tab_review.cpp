@@ -207,18 +207,14 @@ namespace {
             Element content      = vbox(std::move(rows))
                 | focusPosition(0, selected_y) | yframe | vscroll_indicator
                 | flex;
-            const std::string hint = _editor.is_open()
+            static constexpr std::string_view top_hint
+                = "p Send to Plan · r AI Review · Ctrl+S Sidechat";
+            const std::string hint_line = _editor.is_open()
                 ? "Enter save · Alt+Enter new line · Esc cancel"
-                : _selected_comment ? "↑↓ navigate · e edit · d delete"
+                : _selected_comment ? "↑↓ navigate · e edit · DEL delete"
                                     : "↑↓ navigate · [] files · Enter comment "
-                                      "· c collapse · p Send to Plan · "
-                                      "r AI Review";
-            // Advertise the Sidechat toggle while no pane is on screen.
-            const std::string hint_sidechat
-                = _state->sidechat_open ? "" : " · Ctrl+S Sidechat";
-            const std::string hint_line = hint + hint_sidechat;
+                                      "· c collapse";
             Elements bottom { };
-
             if (!_state->session->error().empty()
                 || _state->session->retry_countdown()) {
                 bottom.push_back(session_error_element(*_state->session));
@@ -248,6 +244,7 @@ namespace {
             }
             actions.push_back(filler());
             actions.push_back(text(hint_line) | dim);
+            bottom.push_back(hbox({ filler(), text(top_hint) | dim }));
             bottom.push_back(hbox(std::move(actions)));
             return vbox({ std::move(content), vbox(std::move(bottom)) }) | flex;
         }
@@ -328,7 +325,7 @@ namespace {
             if (event == Event::Character("e")) {
                 return _edit_comment();
             }
-            if (event == Event::Character("d")) {
+            if (event == Event::Delete) {
                 return _delete_comment();
             }
             if (event == Event::Character("p")) {

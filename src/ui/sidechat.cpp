@@ -20,7 +20,7 @@ namespace {
         ChatHints hints;
         hints.scroll_line.clear();
         hints.phase_line.clear();
-        hints.input_hint         = "  Ctrl+S hide · Ctrl+R clear";
+        hints.input_hint         = "  Ctrl+S hide · F5 clear";
         hints.empty_state_banner = false;
         return hints;
     }
@@ -85,7 +85,7 @@ public:
         if (_pane == nullptr) {
             return false;
         }
-        if (event == Event::CtrlR) {
+        if (event == Event::F5) {
             imza::refresh_sidechat(*_state);
             return true;
         }

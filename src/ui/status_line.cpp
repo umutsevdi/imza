@@ -80,7 +80,7 @@ namespace {
             if (!active_model.empty()) {
                 bar.push_back(text(" · " + active_model) | color(PANEL_FG_DIM));
                 if (!config.reasoning_effort.empty()
-                    && config.reasoning_effort != "off") {
+                    && config.reasoning_effort != "off" && wide) {
                     const std::string shown
                         = to_config_effort(config.reasoning_effort);
                     const Color effort_color
