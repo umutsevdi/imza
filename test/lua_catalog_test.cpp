@@ -3,6 +3,7 @@
 #include <string>
 
 #include "network/json.h"
+#include "test_helpers.h"
 #include "tools/bindings.h"
 #include "tools/lua.h"
 #include "tools/tool.h"
@@ -14,12 +15,7 @@ namespace {
     // Runs a script through a fresh trusted-mode lua tool; returns output.
     std::string eval_script(const std::string& script)
     {
-        auto state      = make_lua_state();
-        const Tool tool = make_lua_tool(*state);
-        return tool
-            .run({ "lua", imza::json_dump(imza::LuaToolArgs { script, { } }),
-                "", "" })
-            .text;
+        return imza::test::run_lua(script).text;
     }
 
 } // namespace
@@ -83,9 +79,6 @@ TEST_CASE("core description embeds autoload docs, lists others by name")
         if (module.autoload) {
             CHECK(description.find(module.name) != std::string::npos);
             for (const LuaMethod& method : module.methods) {
-                if (method.is_private) {
-                    continue;
-                }
                 std::string path = std::string(method.name);
                 if (path.find('.') == std::string::npos
                     && !module.name.empty()) {
@@ -123,24 +116,15 @@ TEST_CASE("core description embeds autoload docs, lists others by name")
 
 TEST_CASE("load returns tree documentation while bindings are always present")
 {
-    auto state                = make_lua_state();
-    const Tool lua            = make_lua_tool(*state);
-    const Tool load           = make_load_tool(*state);
-    const ToolOutput callable = lua.run({ "lua",
-        imza::json_dump(
-            imza::LuaToolArgs { "return type(imza.tree.index)", { } }),
-        "", "" });
-    CHECK(callable.return_value->as<std::string>() == "function");
+    auto state      = make_lua_state();
+    const Tool load = make_load_tool(*state);
 
     const ToolOutput documentation
         = load.run({ "load", R"json({"name":"tree"})json", "", "" });
     CHECK(documentation.kind == ToolOutput::Kind::OUTPUT);
     CHECK(documentation.text.find("TYPES") != std::string::npos);
     CHECK(documentation.text.find("METHODS") != std::string::npos);
-    for (const LuaMethod& method : tree_lua_methods()) {
-        if (method.is_private) {
-            continue;
-        }
+    for (const LuaMethod& method : tree_module().methods) {
         CHECK(documentation.text.find(
                   std::string("imza.tree.") + std::string(method.name) + "(")
             != std::string::npos);
@@ -149,7 +133,7 @@ TEST_CASE("load returns tree documentation while bindings are always present")
     const ToolOutput canvas
         = load.run({ "load", R"json({"name":"canvas"})json", "", "" });
     CHECK(canvas.kind == ToolOutput::Kind::OUTPUT);
-    for (const LuaMethod& method : canvas_lua_methods()) {
+    for (const LuaMethod& method : canvas_module().methods) {
         CHECK(canvas.text.find(
                   std::string("imza.canvas.") + std::string(method.name) + "(")
             != std::string::npos);

@@ -8,6 +8,16 @@
 #include <thread>
 #include <vector>
 
+// Worker that spins until cancelled, reporting `status`.
+imza::SubagentResult spin_until_stopped(
+    std::stop_token stop, imza::Status status = imza::Status::CANCELLED)
+{
+    while (!stop.stop_requested()) {
+        std::this_thread::yield();
+    }
+    return imza::SubagentResult { status, "cancelled" };
+}
+
 TEST_CASE("subagent manager publishes ordered lifecycle events")
 {
     imza::SubagentManager manager;
@@ -83,14 +93,8 @@ TEST_CASE("completed subagents can release retained task state")
 TEST_CASE("stopping subagents joins active workers")
 {
     imza::SubagentManager manager;
-    auto handle = manager.start(
-        "inspect", "model", "low", true, [](std::stop_token stop) {
-            while (!stop.stop_requested()) {
-                std::this_thread::yield();
-            }
-            return imza::SubagentResult { imza::Status::API_ERROR,
-                "cancelled" };
-        });
+    auto handle = manager.start("inspect", "model", "low", true,
+        [](std::stop_token stop) { return spin_until_stopped(stop); });
 
     manager.stop();
 
@@ -102,14 +106,8 @@ TEST_CASE("stopping subagents joins active workers")
 TEST_CASE("a single subagent can be cancelled")
 {
     imza::SubagentManager manager;
-    auto handle = manager.start(
-        "inspect", "model", "low", true, [](std::stop_token stop) {
-            while (!stop.stop_requested()) {
-                std::this_thread::yield();
-            }
-            return imza::SubagentResult { imza::Status::CANCELLED,
-                "cancelled" };
-        });
+    auto handle = manager.start("inspect", "model", "low", true,
+        [](std::stop_token stop) { return spin_until_stopped(stop); });
 
     CHECK(manager.cancel(handle.id));
     REQUIRE(handle.completion.wait_for(std::chrono::seconds(1))

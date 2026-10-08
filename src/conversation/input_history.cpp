@@ -42,6 +42,14 @@ namespace {
         return root;
     }
 
+    void trim_to_limit(std::vector<std::string>& entries, std::size_t limit)
+    {
+        if (entries.size() > limit) {
+            entries.erase(entries.begin(),
+                entries.end() - static_cast<std::ptrdiff_t>(limit));
+        }
+    }
+
 } // namespace
 
 InputHistoryStore::InputHistoryStore(
@@ -52,10 +60,7 @@ InputHistoryStore::InputHistoryStore(
     if (auto root = read_json_file(_path)) {
         _entries = parse_entries(*root);
     }
-    if (_entries.size() > _limit) {
-        _entries.erase(_entries.begin(),
-            _entries.end() - static_cast<std::ptrdiff_t>(_limit));
-    }
+    trim_to_limit(_entries, _limit);
 }
 
 std::vector<std::string> InputHistoryStore::entries() const
@@ -73,10 +78,7 @@ Status InputHistoryStore::record(std::string text)
         if (entries.empty() || entries.back() != text) {
             entries.push_back(std::move(text));
         }
-        if (entries.size() > _limit) {
-            entries.erase(entries.begin(),
-                entries.end() - static_cast<std::ptrdiff_t>(_limit));
-        }
+        trim_to_limit(entries, _limit);
         root = encode_entries(entries);
         return true;
     });

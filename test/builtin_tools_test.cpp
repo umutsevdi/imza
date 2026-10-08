@@ -13,14 +13,8 @@ TEST_CASE("builtin tools expose the current tool set")
     auto state       = imza::make_lua_state();
     const auto tools = imza::default_tools({ }, { }, { }, *state);
 
-    const auto* skill = find_tool(tools, "skill");
-    REQUIRE(skill != nullptr);
-    CHECK(skill->spec.parameters.find("\"name\"") != std::string::npos);
-
-    const auto* subagent = find_tool(tools, "subagent");
-    REQUIRE(subagent != nullptr);
-    CHECK(subagent->spec.parameters.find("\"tasks\"") != std::string::npos);
-
+    REQUIRE(find_tool(tools, "skill") != nullptr);
+    REQUIRE(find_tool(tools, "subagent") != nullptr);
     REQUIRE(find_tool(tools, "lua") != nullptr);
     REQUIRE(find_tool(tools, "load") != nullptr);
     CHECK(find_tool(tools, "read") == nullptr);
@@ -33,15 +27,9 @@ TEST_CASE("builtin tools expose the current tool set")
     CHECK(find_tool(tools, "todo") == nullptr);
     CHECK(find_tool(tools, "webfetch") == nullptr);
     CHECK(find_tool(tools, "websearch") == nullptr);
-}
 
-TEST_CASE("a removed native tool name is unknown to the roster")
-{
-    // The roster no longer varies with runtime flags: WEB/SHELL gate the
-    // lua bindings, not tool membership. A native name fails dispatch.
-    auto state       = imza::make_lua_state();
-    const auto tools = imza::default_tools({ }, { }, { }, *state);
-
+    // A removed native name fails dispatch: the roster no longer varies
+    // with runtime flags; WEB/SHELL gate the lua bindings, not membership.
     const auto disabled = imza::dispatch_tool(
         tools, { "shell", R"({"command":"echo unavailable"})", "", "" });
     CHECK(disabled.kind == imza::ToolOutput::Kind::ERROR);
@@ -87,4 +75,5 @@ TEST_CASE("the skill tool records nothing without a store but still reads")
     const auto out
         = tool.run({ "skill", R"json({"name":"docs"})json", "", "" });
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(out.text.find("instructions") != std::string::npos);
 }

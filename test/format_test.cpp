@@ -5,6 +5,21 @@
 #include "ui/tool_format.h"
 #include <doctest/doctest.h>
 
+namespace {
+
+imza::ToolCall lua_call(std::string_view script,
+    imza::ToolCall::Result::Kind kind = imza::ToolCall::Result::Kind::OUTPUT,
+    std::string text                  = "")
+{
+    imza::ToolCall call;
+    call.name   = "lua";
+    call.args   = "{\"script\":\"" + std::string(script) + "\"}";
+    call.result = imza::ToolCall::Result { kind, std::move(text) };
+    return call;
+}
+
+} // namespace
+
 TEST_CASE("lua dispatch log formats as counts and grouped summary")
 {
     imza::ToolCall call;
@@ -27,28 +42,23 @@ TEST_CASE("lua dispatch log formats as counts and grouped summary")
 
 TEST_CASE("lua viewer report fences script and output safely")
 {
-    imza::ToolCall call;
-    call.name   = "lua";
-    call.args   = R"json({"script":"print('```')"})json";
-    call.result = imza::ToolCall::Result { imza::ToolCall::Result::Kind::OUTPUT,
-        "ok\n" };
+    imza::ToolCall call = lua_call(
+        "print('```')", imza::ToolCall::Result::Kind::OUTPUT, "ok\n");
     const std::string report = imza::lua_viewer_content(call);
     CHECK(report.find("````lua\nprint('```')\n````") != std::string::npos);
     CHECK(report.find("````txt\nok\n\n````") != std::string::npos);
 }
 TEST_CASE("lua viewer appends a rendered return-value block")
 {
-    imza::ToolCall call;
-    call.name   = "lua";
-    call.args   = R"json({"script":"return {a = 1}"})json";
-    call.result = imza::ToolCall::Result { imza::ToolCall::Result::Kind::OUTPUT,
-        "log\n" };
+    imza::ToolCall call = lua_call(
+        "return {a = 1}", imza::ToolCall::Result::Kind::OUTPUT, "log\n");
     call.result->return_value = imza::parse_json(R"json({"a":1})json");
     const std::string report  = imza::lua_viewer_content(call);
     CHECK(report.find("```lua\nreturn {a = 1}\n```") != std::string::npos);
     CHECK(report.find("```txt\nlog\n\n```") != std::string::npos);
-    // JSON returns are fenced with the json language for highlighting.
-    CHECK(report.find("```json\n{\n  \"a\": 1\n}\n```") != std::string::npos);
+    // JSON returns are fenced with the json language for highlighting; the
+    // exact fence content is pinned by the format_lua_result tests.
+    CHECK(report.find("```json") != std::string::npos);
 
     // The return-value block is the last section.
     const std::size_t json_at = report.find("```json");
@@ -56,11 +66,7 @@ TEST_CASE("lua viewer appends a rendered return-value block")
     CHECK(json_at > txt_at);
 
     // A string return is fenced as plain text, not rendered as markdown.
-    imza::ToolCall string_call;
-    string_call.name = "lua";
-    string_call.args = R"json({"script":"return '## not a heading'"})json";
-    string_call.result
-        = imza::ToolCall::Result { imza::ToolCall::Result::Kind::OUTPUT, "" };
+    imza::ToolCall string_call = lua_call("return '## not a heading'");
     string_call.result->return_value
         = imza::parse_json(R"json("## not a heading")json");
     CHECK(imza::lua_viewer_content(string_call)
@@ -70,11 +76,8 @@ TEST_CASE("lua viewer appends a rendered return-value block")
 
 TEST_CASE("lua viewer appends a quoted error block after the return value")
 {
-    imza::ToolCall call;
-    call.name   = "lua";
-    call.args   = R"json({"script":"return 1"})json";
-    call.result = imza::ToolCall::Result { imza::ToolCall::Result::Kind::ERROR,
-        "script:1: boom\n" };
+    imza::ToolCall call = lua_call(
+        "return 1", imza::ToolCall::Result::Kind::ERROR, "script:1: boom\n");
     call.result->return_value = imza::parse_json(R"json({"a":1})json");
     const std::string report  = imza::lua_viewer_content(call);
     CHECK(report.find("**Error**") != std::string::npos);
@@ -91,11 +94,7 @@ TEST_CASE("lua viewer appends a quoted error block after the return value")
 
 TEST_CASE("lua viewer omits the return-value block when there is none")
 {
-    imza::ToolCall call;
-    call.name   = "lua";
-    call.args   = R"json({"script":"print('x')"})json";
-    call.result = imza::ToolCall::Result { imza::ToolCall::Result::Kind::OUTPUT,
-        "x\n" };
+    imza::ToolCall call      = lua_call("print('x')");
     const std::string report = imza::lua_viewer_content(call);
     CHECK(report.find("```json") == std::string::npos);
     CHECK(report.find("|path|") == std::string::npos);
@@ -103,11 +102,7 @@ TEST_CASE("lua viewer omits the return-value block when there is none")
 
 TEST_CASE("lua viewer skips the output block when nothing was printed")
 {
-    imza::ToolCall call;
-    call.name = "lua";
-    call.args = R"json({"script":"return 42"})json";
-    call.result
-        = imza::ToolCall::Result { imza::ToolCall::Result::Kind::OUTPUT, "" };
+    imza::ToolCall call       = lua_call("return 42");
     call.result->return_value = imza::parse_json("42");
     const std::string report  = imza::lua_viewer_content(call);
     CHECK(report.find("```txt") == std::string::npos);
@@ -117,11 +112,7 @@ TEST_CASE("lua viewer skips the output block when nothing was printed")
 
 TEST_CASE("lua viewer renders table returns as markdown, not JSON")
 {
-    imza::ToolCall call;
-    call.name = "lua";
-    call.args = R"json({"script":"return imza.fs.list()"})json";
-    call.result
-        = imza::ToolCall::Result { imza::ToolCall::Result::Kind::OUTPUT, "" };
+    imza::ToolCall call       = lua_call("return imza.fs.list()");
     call.result->return_value = imza::parse_json(
         R"json([{"path":"src/a.cpp","type":"file","size":"1.2 KB"}])json");
     const std::string report = imza::lua_viewer_content(call);

@@ -58,14 +58,6 @@ namespace {
         return id == OPENAI_SUBSCRIPTION_ID;
     }
 
-    Element status_element(const std::string& text_value, bool ok)
-    {
-        if (ok) {
-            return text(text_value) | color(HL_GREEN);
-        }
-        return text(text_value) | color(HL_RED);
-    }
-
     Element form_gutter(const std::string& label)
     {
         return hbox({ text("  "), text(fit(label, FORM_LABEL)) | bold });
@@ -227,16 +219,10 @@ namespace {
 
         void _row_move(int delta)
         {
-            const auto all = _views();
-            if (all.empty()) {
-                _in_add = true;
-                if (_picker_input) {
-                    _picker_input->TakeFocus();
-                }
-                return;
-            }
-            if (delta > 0
-                && _row_selected >= static_cast<int>(all.size()) - 1) {
+            const auto all         = _views();
+            const bool at_last_row = delta > 0
+                && _row_selected >= static_cast<int>(all.size()) - 1;
+            if (all.empty() || at_last_row) {
                 _in_add = true;
                 if (_picker_input) {
                     _picker_input->TakeFocus();
@@ -341,12 +327,8 @@ namespace {
 
         bool _confirming() const
         {
-            for (const auto& entry : _confirm) {
-                if (entry.second) {
-                    return true;
-                }
-            }
-            return false;
+            return std::ranges::any_of(
+                _confirm, [](const auto& entry) { return entry.second; });
         }
 
         void _rebuild_manage()
@@ -459,8 +441,7 @@ namespace {
                     }
                     Element models_el = text(fit(models, COL_MODELS));
                     if (view.state == ConnectionView::State::FAILED) {
-                        models_el
-                            = status_element(fit(models, COL_MODELS), false);
+                        models_el = status_text(fit(models, COL_MODELS), false);
                     } else {
                         models_el = std::move(models_el) | dim;
                     }
@@ -680,12 +661,12 @@ namespace {
         {
             const Session& st = *_session;
             if (!_row_error.empty()) {
-                return status_element(_row_error, false);
+                return status_text(_row_error, false);
             }
             const bool fresh = _tested_signature == _current_signature();
             if (fresh && !st.connect_status().empty()) {
                 const bool ok = st.connect_status().rfind("✓", 0) == 0;
-                return status_element(st.connect_status(), ok);
+                return status_text(st.connect_status(), ok);
             }
             return text("");
         }
@@ -791,8 +772,8 @@ namespace {
             Element empty_state;
             if (!any_fetching) {
                 empty_state = any_failed
-                    ? status_element("✗ Some providers failed - press "
-                                     "F5 to retry.",
+                    ? status_text("✗ Some providers failed - press "
+                                  "F5 to retry.",
                           false)
                     : text("no models") | dim;
             }

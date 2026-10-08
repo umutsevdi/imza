@@ -476,19 +476,18 @@ scope. Capped at 500 entries.)desc",
 
 } // namespace
 
-std::span<const LuaMethod> tree_lua_methods() { return BINDINGS; }
-
-void register_tree(LuaState& state)
+const LuaModule& tree_module()
 {
     static constexpr std::string_view types[] = {
         "TsSymbol = { kind: string, name: string, start_line: integer, "
         "end_line: integer, text: string }",
     };
-    state.register_module({ false, "tree",
+    static constexpr LuaModule MODULE { false, "tree",
         R"desc(Syntax tree inspection: list the symbols a file defines, find where
 an identifier appears, and enumerate call sites. Load for questions about
 code structure and references.)desc",
-        types, tree_lua_methods() });
+        types, BINDINGS };
+    return MODULE;
 }
 
 } // namespace imza

@@ -104,13 +104,14 @@ private:
         std::vector<Message>& tool_msgs);
     void _reject_tool(const ToolCallRequest& req, std::string reason,
         std::vector<Message>& tool_msgs);
-    void _finish_tool(const ToolCallRequest& req, ToolCall::Result::Kind kind,
-        const std::string& history_text, std::vector<Message>& tool_msgs);
-    void _finish_tool(const ToolCallRequest& req, ToolCall::Result::Kind kind,
-        std::string result_text, std::string history_text,
-        std::vector<Message>& tool_msgs);
+    // Posts the tool result into the session and appends the history
+    // message carrying `history_text`.
+    void _finish_tool(const ToolCallRequest& req, ToolCall::Result result,
+        std::string history_text, std::vector<Message>& tool_msgs);
     void _run_tool(const PermissionEvaluation& evaluation, Session::Mode mode,
         std::vector<Message>& tool_msgs);
+    // Ends the current run with no error text.
+    void _finish_idle();
     void _post(std::function<void()> f);
 
     ApplicationState* _state;

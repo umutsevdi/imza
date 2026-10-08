@@ -12,11 +12,6 @@
 namespace {
 
 using JsonValue = imza::JsonValue;
-const imza::JsonValue* find_member(
-    const imza::JsonValue& v, std::string_view key)
-{
-    return imza::find_member(v, key);
-}
 
 TEST_CASE("compare_versions orders semantic versions")
 {

@@ -107,6 +107,13 @@ private:
     const std::vector<std::string> _instructions;
     void _publish_repository(std::shared_ptr<const RepositoryState> repository,
         const std::shared_ptr<const WorkspaceEnvironment>& workspace);
+    // Subscribes under the workspace lock and fires `callback` immediately
+    // when `ready()` already holds. Readiness is evaluated under the same
+    // lock as the subscription, so a publish can never slip between the
+    // two: late subscribers never miss a state they would otherwise wait
+    // for.
+    Signal<>::Subscription _subscribe_when_ready(Signal<>& signal,
+        Signal<>::Callback callback, const std::function<bool()>& ready) const;
     std::shared_ptr<const SystemEnvironment> _system;
     mutable std::shared_mutex _workspace_mutex;
     std::shared_ptr<const WorkspaceEnvironment> _workspace;

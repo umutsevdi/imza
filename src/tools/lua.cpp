@@ -274,10 +274,8 @@ namespace {
         for (const LuaModule& module : modules) {
             if (!autoload_only || module.autoload) {
                 for (const LuaMethod& method : module.methods) {
-                    if (!method.is_private) {
-                        out += "\n";
-                        out += render_method_description(module.name, method);
-                    }
+                    out += "\n";
+                    out += render_method_description(module.name, method);
                 }
             }
         }
@@ -590,13 +588,10 @@ std::span<const LuaModule> LuaState::modules() const { return _modules; }
 std::unique_ptr<LuaState> make_lua_state()
 {
     auto state = std::make_unique<LuaState>();
-    register_core(*state);
-    register_fs(*state);
-    register_web(*state);
-    register_tree(*state);
-    register_canvas(*state);
-    register_plan(*state);
-    register_mcp(*state);
+    for (const LuaModule& module : { core_module(), fs_module(), web_module(),
+             tree_module(), canvas_module(), plan_module(), mcp_module() }) {
+        state->register_module(module);
+    }
     return state;
 }
 

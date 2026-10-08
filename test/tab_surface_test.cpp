@@ -11,6 +11,19 @@
 
 namespace {
 
+// A plan tab with its chat child attached at the wide layout; the shape
+// every plan-tab test starts from.
+ftxui::Component plan_tab_with_chat(
+    const std::shared_ptr<imza::ApplicationState>& state)
+{
+    auto chat
+        = imza::make_chat(state, [] { return imza::test::wide_layout(); });
+    auto plan = imza::make_plan_tab(
+        state, [] { return imza::test::wide_layout(); }, chat);
+    plan->Add(chat);
+    return plan;
+}
+
 TEST_CASE("sidechat and main chat fill the wide layout when open")
 {
     auto state = imza::test::make_test_state();
@@ -46,28 +59,11 @@ TEST_CASE("sidechat and main chat fill the wide layout when open")
             && clean.find_first_not_of(' ', 70) != std::string::npos) {
             sidechat_reaches_bottom = true;
         }
-        MESSAGE("[", clean, "]");
     }
     CHECK(sidechat_reaches_bottom);
 }
 
 } // namespace
-
-TEST_CASE("plan tab renders the chat")
-{
-    auto state = imza::test::make_test_state();
-    state->session->begin_send("plan this");
-
-    auto chat = imza::make_chat(state, [] {
-        return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100, 40 };
-    });
-    auto plan = imza::make_plan_tab(
-        state, [] { return imza::test::wide_layout(); }, chat);
-    plan->Add(chat);
-
-    const std::string rendered = imza::test::to_text(plan->Render(), 100, 40);
-    CHECK(rendered.find("plan this") != std::string::npos);
-}
 
 TEST_CASE("build tab renders the chat")
 {
@@ -75,9 +71,8 @@ TEST_CASE("build tab renders the chat")
     state->session->begin_send("build this");
 
     imza::SidechatStatus status;
-    auto chat     = imza::make_chat(state, [] {
-        return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100, 40 };
-    });
+    auto chat
+        = imza::make_chat(state, [] { return imza::test::wide_layout(); });
     auto sidechat = imza::make_sidechat_component(state, [] { }, status);
 
     auto build = imza::make_build_tab(
@@ -111,9 +106,7 @@ TEST_CASE("chat hints resolve the phase line provider per render")
 
     auto state = imza::test::make_test_state();
     auto chat  = imza::make_chat(
-        state,
-        [] { return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100, 40 }; },
-        hints);
+        state, [] { return imza::test::wide_layout(); }, hints);
 
     const std::string first = imza::test::to_text(chat->Render(), 100, 40);
     CHECK(first.find("no toggle here") != std::string::npos);
@@ -127,12 +120,7 @@ TEST_CASE("plan tab is chat-only until a plan exists")
     auto state = imza::test::make_test_state();
     state->session->begin_send("plan this");
 
-    auto chat = imza::make_chat(state, [] {
-        return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100, 40 };
-    });
-    auto plan = imza::make_plan_tab(
-        state, [] { return imza::test::wide_layout(); }, chat);
-    plan->Add(chat);
+    auto plan = plan_tab_with_chat(state);
 
     // Without a plan: chat only, no doc pane, no empty-state text.
     const std::string no_plan = imza::test::to_text(plan->Render(), 100, 40);
@@ -153,12 +141,7 @@ TEST_CASE("plan tab moves focus to the doc pane on click")
                 "# Verification\nx")
             .empty());
 
-    auto chat = imza::make_chat(state, [] {
-        return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100, 40 };
-    });
-    auto plan = imza::make_plan_tab(
-        state, [] { return imza::test::wide_layout(); }, chat);
-    plan->Add(chat);
+    auto plan = plan_tab_with_chat(state);
     plan->TakeFocus();
 
     // Chat focused: the annotator pane renders dim and ignores keys.
@@ -178,12 +161,7 @@ TEST_CASE("plan tab moves focus back to the chat pane on click")
     REQUIRE(state->session->create_plan(imza::test::PLAN_SKELETON).empty());
     state->session->begin_send("build this");
 
-    auto chat = imza::make_chat(state, [] {
-        return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100, 40 };
-    });
-    auto plan = imza::make_plan_tab(
-        state, [] { return imza::test::wide_layout(); }, chat);
-    plan->Add(chat);
+    auto plan = plan_tab_with_chat(state);
     plan->TakeFocus();
 
     REQUIRE(imza::test::click_label(plan, "Initial Plan"));
@@ -206,12 +184,7 @@ TEST_CASE("wide plan tab places the chat left of the doc pane")
                 "# Verification\nx")
             .empty());
 
-    auto chat = imza::make_chat(state, [] {
-        return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100, 40 };
-    });
-    auto plan = imza::make_plan_tab(
-        state, [] { return imza::test::wide_layout(); }, chat);
-    plan->Add(chat);
+    auto plan = plan_tab_with_chat(state);
     plan->TakeFocus();
 
     const std::string rendered = imza::test::to_text(plan->Render(), 100, 40);
@@ -247,12 +220,7 @@ TEST_CASE("chat focused: annotator keys land in the chat input")
                           "# Changes\nx\n# Verification\nx")
             .empty());
 
-    auto chat = imza::make_chat(state, [] {
-        return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100, 40 };
-    });
-    auto plan = imza::make_plan_tab(
-        state, [] { return imza::test::wide_layout(); }, chat);
-    plan->Add(chat);
+    auto plan = plan_tab_with_chat(state);
     plan->TakeFocus();
     (void)plan->Render();
 

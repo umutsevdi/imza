@@ -40,9 +40,8 @@ TEST_CASE("finished turn without reasoning content hides the thought row")
         .reasoning_ms     = std::chrono::milliseconds { 800 },
         .reasoning_effort = "high",
     });
-    auto chat = imza::make_chat(state, [] {
-        return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100, 40 };
-    });
+    auto chat
+        = imza::make_chat(state, [] { return imza::test::wide_layout(); });
 
     std::string rendered = to_text(chat->Render(), 100, 40);
     CHECK(rendered.find("Thought") == std::string::npos);
@@ -71,9 +70,8 @@ TEST_CASE("chat shows planning between thought and lua execution")
     const imza::ToolCallRequest request { "lua",
         R"json({"script":"return imza.fs.list('.')"})json", "", "call-1" };
     state->session->apply(imza::make_tool_call_start_event(request), { });
-    auto chat = imza::make_chat(state, [] {
-        return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100, 40 };
-    });
+    auto chat
+        = imza::make_chat(state, [] { return imza::test::wide_layout(); });
 
     std::string rendered          = to_text(chat->Render(), 100, 40);
     const std::size_t thought_at  = rendered.find("Thought 1.0s");
@@ -145,9 +143,8 @@ TEST_CASE("streaming tail plays out at a paced rate, then snaps")
     state->session->append_item(imza::AssistantTurn { });
     state->session->set_phase(imza::Session::Phase::STREAMING);
 
-    auto chat = imza::make_chat(state, [] {
-        return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100, 40 };
-    });
+    auto chat
+        = imza::make_chat(state, [] { return imza::test::wide_layout(); });
 
     const auto rendered = [&] {
         return imza::test::without_ansi(to_text(chat->Render(), 100, 40));
@@ -190,9 +187,8 @@ TEST_CASE("playout backlog beyond the hard cap snaps instead of animating")
     state->session->append_item(imza::AssistantTurn { });
     state->session->set_phase(imza::Session::Phase::STREAMING);
 
-    auto chat = imza::make_chat(state, [] {
-        return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100, 40 };
-    });
+    auto chat
+        = imza::make_chat(state, [] { return imza::test::wide_layout(); });
     (void)chat->Render();
 
     // One burst larger than PLAYOUT_HARD_CAP: the tail must render whole
@@ -213,9 +209,8 @@ TEST_CASE("interrupt snaps the playout instead of draining")
     state->session->append_item(imza::AssistantTurn { });
     state->session->set_phase(imza::Session::Phase::STREAMING);
 
-    auto chat = imza::make_chat(state, [] {
-        return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 100, 40 };
-    });
+    auto chat
+        = imza::make_chat(state, [] { return imza::test::wide_layout(); });
     (void)chat->Render();
 
     state->session->apply(

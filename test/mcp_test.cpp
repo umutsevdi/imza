@@ -102,15 +102,31 @@ TEST_CASE("mcp_first_text picks the first non-empty text block")
     CHECK(imza::mcp_first_text(result) == "");
 }
 
+// Loopback server plus the session scaffolding every protocol test
+// needs: allow loopback, start, connect, initialize. Server knobs are set
+// on `server` before calling start_initialized().
+struct LoopbackSession {
+    imza::test::LoopbackMcpServer server;
+    imza::McpSession session;
+    std::string detail;
+
+    bool start_initialized()
+    {
+        imza::test::allow_loopback_direct();
+        if (!server.start()) {
+            return false;
+        }
+        session = imza::test::session_for(server);
+        return imza::mcp_initialize(session, detail) == imza::Status::OK;
+    }
+};
+
 TEST_CASE("mcp session runs the full lifecycle against a loopback server")
 {
-    imza::test::allow_loopback_direct();
-    imza::test::LoopbackMcpServer server;
-    REQUIRE(server.start());
-
-    imza::McpSession session = imza::test::session_for(server);
-    std::string detail;
-    REQUIRE(imza::mcp_initialize(session, detail) == imza::Status::OK);
+    LoopbackSession fx;
+    REQUIRE(fx.start_initialized());
+    imza::McpSession& session = fx.session;
+    std::string& detail       = fx.detail;
     CHECK(detail.empty());
     CHECK(session.session_id == "sess-a");
     CHECK(session.protocol_version == "2025-11-25");
@@ -128,21 +144,18 @@ TEST_CASE("mcp session runs the full lifecycle against a loopback server")
     CHECK_FALSE(session.initialized);
     CHECK(session.session_id.empty());
 
-    server.stop();
-    CHECK(server.protocol_header_ok.load());
-    CHECK(server.session_echo_ok.load());
-    CHECK(server.saw_delete.load());
+    fx.server.stop();
+    CHECK(fx.server.protocol_header_ok.load());
+    CHECK(fx.server.session_echo_ok.load());
+    CHECK(fx.server.saw_delete.load());
 }
 
 TEST_CASE("mcp list tools paginates across cursor pages")
 {
-    imza::test::allow_loopback_direct();
-    imza::test::LoopbackMcpServer server;
-    REQUIRE(server.start());
-
-    imza::McpSession session = imza::test::session_for(server);
-    std::string detail;
-    REQUIRE(imza::mcp_initialize(session, detail) == imza::Status::OK);
+    LoopbackSession fx;
+    REQUIRE(fx.start_initialized());
+    imza::McpSession& session = fx.session;
+    std::string& detail       = fx.detail;
 
     std::vector<imza::McpToolDefinition> tools;
     REQUIRE(imza::mcp_list_tools(session, tools, detail) == imza::Status::OK);
@@ -156,7 +169,7 @@ TEST_CASE("mcp list tools paginates across cursor pages")
     CHECK(tools[2].title.value_or("") == "Third");
     CHECK_FALSE(tools[2].input_schema.has_value());
 
-    server.stop();
+    fx.server.stop();
 }
 
 TEST_CASE("mcp list tools refuses an uninitialized session")
@@ -171,15 +184,12 @@ TEST_CASE("mcp list tools refuses an uninitialized session")
 
 TEST_CASE("mcp call tool re-initializes once when the session expires")
 {
-    imza::test::allow_loopback_direct();
-    imza::test::LoopbackMcpServer server;
-    server.expire_first_call = true;
-    server.call_text         = "recovered";
-    REQUIRE(server.start());
-
-    imza::McpSession session = imza::test::session_for(server);
-    std::string detail;
-    REQUIRE(imza::mcp_initialize(session, detail) == imza::Status::OK);
+    LoopbackSession fx;
+    fx.server.expire_first_call = true;
+    fx.server.call_text         = "recovered";
+    REQUIRE(fx.start_initialized());
+    imza::McpSession& session = fx.session;
+    std::string& detail       = fx.detail;
 
     imza::JsonValue arguments;
     imza::McpToolCallResult result;
@@ -189,20 +199,17 @@ TEST_CASE("mcp call tool re-initializes once when the session expires")
     CHECK(imza::mcp_first_text(result) == "recovered");
     CHECK(session.session_id == "sess-b");
 
-    server.stop();
-    CHECK(server.session_echo_ok.load());
+    fx.server.stop();
+    CHECK(fx.server.session_echo_ok.load());
 }
 
 TEST_CASE("mcp initialize accepts a server counter-offered version")
 {
-    imza::test::allow_loopback_direct();
-    imza::test::LoopbackMcpServer server;
-    server.init_version = "2025-06-18";
-    REQUIRE(server.start());
-
-    imza::McpSession session = imza::test::session_for(server);
-    std::string detail;
-    REQUIRE(imza::mcp_initialize(session, detail) == imza::Status::OK);
+    LoopbackSession fx;
+    fx.server.init_version = "2025-06-18";
+    REQUIRE(fx.start_initialized());
+    imza::McpSession& session = fx.session;
+    std::string& detail       = fx.detail;
     CHECK(session.protocol_version == "2025-06-18");
 
     imza::JsonValue arguments;
@@ -210,8 +217,8 @@ TEST_CASE("mcp initialize accepts a server counter-offered version")
     REQUIRE(imza::mcp_call_tool(session, "echo", arguments, result, detail)
         == imza::Status::OK);
 
-    server.stop();
-    CHECK(server.protocol_header_ok.load());
+    fx.server.stop();
+    CHECK(fx.server.protocol_header_ok.load());
 }
 
 TEST_CASE("mcp initialize fails closed on an unsupported version")
@@ -232,14 +239,11 @@ TEST_CASE("mcp initialize fails closed on an unsupported version")
 
 TEST_CASE("mcp call tool reports rpc protocol errors through detail")
 {
-    imza::test::allow_loopback_direct();
-    imza::test::LoopbackMcpServer server;
-    server.rpc_error_on_call = true;
-    REQUIRE(server.start());
-
-    imza::McpSession session = imza::test::session_for(server);
-    std::string detail;
-    REQUIRE(imza::mcp_initialize(session, detail) == imza::Status::OK);
+    LoopbackSession fx;
+    fx.server.rpc_error_on_call = true;
+    REQUIRE(fx.start_initialized());
+    imza::McpSession& session = fx.session;
+    std::string& detail       = fx.detail;
 
     imza::JsonValue arguments;
     imza::McpToolCallResult result;
@@ -247,21 +251,18 @@ TEST_CASE("mcp call tool reports rpc protocol errors through detail")
         == imza::Status::API_ERROR);
     CHECK(detail.find("Unknown tool: echo") != std::string::npos);
 
-    server.stop();
+    fx.server.stop();
 }
 
 TEST_CASE("mcp tool results carry execution errors and structured content")
 {
-    imza::test::allow_loopback_direct();
-    imza::test::LoopbackMcpServer server;
-    server.call_text       = "boom";
-    server.call_is_error   = true;
-    server.call_structured = true;
-    REQUIRE(server.start());
-
-    imza::McpSession session = imza::test::session_for(server);
-    std::string detail;
-    REQUIRE(imza::mcp_initialize(session, detail) == imza::Status::OK);
+    LoopbackSession fx;
+    fx.server.call_text       = "boom";
+    fx.server.call_is_error   = true;
+    fx.server.call_structured = true;
+    REQUIRE(fx.start_initialized());
+    imza::McpSession& session = fx.session;
+    std::string& detail       = fx.detail;
 
     imza::JsonValue arguments;
     imza::McpToolCallResult result;
@@ -277,5 +278,5 @@ TEST_CASE("mcp tool results carry execution errors and structured content")
     REQUIRE(answer != nullptr);
     CHECK(answer->as<double>() == doctest::Approx(42));
 
-    server.stop();
+    fx.server.stop();
 }

@@ -123,21 +123,16 @@ bool lua_value_to_json(
 int authorize_target(lua_State* L, const FilesystemRequest& request,
     const std::string& path, std::string& target);
 
-// Module catalogs, one file per module under src/tools/bindings/.
-std::span<const LuaMethod> core_lua_methods();
-std::span<const LuaMethod> fs_lua_methods();
-std::span<const LuaMethod> web_lua_methods();
-std::span<const LuaMethod> tree_lua_methods();
-std::span<const LuaMethod> canvas_lua_methods();
-std::span<const LuaMethod> plan_lua_methods();
-std::span<const LuaMethod> mcp_lua_methods();
-
-void register_core(LuaState& state);
-void register_fs(LuaState& state);
-void register_web(LuaState& state);
-void register_tree(LuaState& state);
-void register_canvas(LuaState& state);
-void register_plan(LuaState& state);
-void register_mcp(LuaState& state);
+// One accessor per binding module (one file under src/tools/bindings/):
+// the module's complete registration metadata — autoload flag, catalog
+// name, model-facing description, type aliases, and method catalog —
+// owned by that module's implementation.
+const LuaModule& core_module();
+const LuaModule& fs_module();
+const LuaModule& web_module();
+const LuaModule& tree_module();
+const LuaModule& canvas_module();
+const LuaModule& plan_module();
+const LuaModule& mcp_module();
 
 } // namespace imza

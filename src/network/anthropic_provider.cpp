@@ -85,11 +85,6 @@ namespace anthropic {
         std::optional<std::vector<ToolSpecWire>> tools;
     };
 
-    RequestMessage plain_message(std::string role, std::string content)
-    {
-        return string_message(std::move(role), std::move(content));
-    }
-
     std::string build(const ChatRequest& req)
     {
         RequestBody body;
@@ -109,7 +104,7 @@ namespace anthropic {
         std::vector<ToolResultBlock> tool_results;
         auto flush_results = [&]() {
             if (!tool_results.empty()) {
-                RequestMessage message = plain_message("user", "");
+                RequestMessage message = string_message("user", "");
                 message.content
                     = glz::raw_json { json_dump_array(tool_results) };
                 body.messages.push_back(std::move(message));
@@ -159,7 +154,7 @@ namespace anthropic {
                 message.content = glz::raw_json { json_dump_array(blocks) };
                 body.messages.push_back(std::move(message));
             } else {
-                body.messages.push_back(plain_message(role, m.content));
+                body.messages.push_back(string_message(role, m.content));
             }
         }
         flush_results();
@@ -175,11 +170,9 @@ namespace anthropic {
             }
             body.tools = std::move(tools);
         }
-        auto out = glz::write<JSON_WRITE>(body);
-        return out ? std::move(out.value()) : std::string { };
+        return json_dump(body);
     }
 
-    // --- SSE parsing: typed payload views -------------------------------
     // Only the members the parse switch consumes; optionals tolerate
     // provider drift and absent fields default harmlessly.
 

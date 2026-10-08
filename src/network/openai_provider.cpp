@@ -8,7 +8,6 @@ namespace imza {
 
 namespace openai {
 
-    // --- Request wire structs -------------------------------------------
     struct FunctionSpec {
         std::string name;
         std::string description;
@@ -144,11 +143,9 @@ namespace openai {
             }
             body.messages.push_back(std::move(message));
         }
-        auto out = glz::write<JSON_WRITE>(body);
-        return out ? std::move(out.value()) : std::string { };
+        return json_dump(body);
     }
 
-    // --- SSE parsing: typed payload views -------------------------------
     struct ToolCallDelta {
         std::optional<int> index;
         std::optional<std::string> id;

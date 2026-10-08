@@ -70,14 +70,17 @@ inline std::string ensure_sentence_end(std::string text)
     return text;
 }
 
-inline std::string join_lines(const std::vector<std::string>& lines)
+template <typename Container>
+std::string join(const Container& items, std::string_view sep)
 {
     std::string out;
-    for (std::size_t i = 0; i < lines.size(); ++i) {
-        if (i != 0) {
-            out += '\n';
+    bool first = true;
+    for (const auto& item : items) {
+        if (!first) {
+            out += sep;
         }
-        out += lines[i];
+        first = false;
+        out += item;
     }
     return out;
 }
@@ -85,7 +88,7 @@ inline std::string join_lines(const std::vector<std::string>& lines)
 inline std::string join_lines(
     const std::vector<std::string>& lines, bool trailing_newline)
 {
-    std::string out = join_lines(lines);
+    std::string out = join(lines, "\n");
     if (!lines.empty() && trailing_newline) {
         out += '\n';
     }
@@ -181,6 +184,18 @@ inline std::string truncate_marked(std::string_view text, std::size_t cap,
     }
     std::string out { truncate_utf8(text, cap) };
     out += marker;
+    return out;
+}
+
+// Like truncate_marked, but the marker reports the kept size.
+inline std::string truncate_with_count(std::string_view text, std::size_t cap)
+{
+    if (text.size() <= cap) {
+        return std::string(text);
+    }
+    std::string out { truncate_utf8(text, cap) };
+    out += "\n[truncated: showing first " + std::to_string(out.size())
+        + " of the content]";
     return out;
 }
 
@@ -314,21 +329,6 @@ inline std::vector<std::string> split_lines(std::string_view text)
         lines.emplace_back(text.substr(start));
     }
     return lines;
-}
-
-template <typename Container>
-std::string join(const Container& items, std::string_view sep)
-{
-    std::string out;
-    bool first = true;
-    for (const auto& item : items) {
-        if (!first) {
-            out += sep;
-        }
-        first = false;
-        out += item;
-    }
-    return out;
 }
 
 inline std::string home_dir()

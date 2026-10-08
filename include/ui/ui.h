@@ -85,7 +85,6 @@ inline constexpr auto TRAILING_MARKDOWN_INTERVAL
 // readable code; every other modal keeps MODAL_MAX_WIDTH.
 inline constexpr int DIFF_VIEWER_MODAL_MAX_WIDTH = 160;
 
-// Processing indicator
 inline constexpr int PROCESS_TRACK_BLOCKS  = 10;
 inline constexpr int PROCESS_MAX_BLOCKS    = 5;
 inline constexpr int PROCESS_PERIOD_FRAMES = 30;
@@ -133,6 +132,10 @@ std::string compact_number(std::uint64_t n);
 ftxui::Element hint_bar(std::string hint);
 // The shared busy spinner, dimmed to the panel palette.
 ftxui::Element dim_spinner(int frame);
+// Empty element exactly `height` rows tall.
+ftxui::Element vertical_space(int height);
+// Status line colored by success/failure.
+ftxui::Element status_text(const std::string& text, bool ok);
 ftxui::Elements modal_header(std::string title, std::string subtitle = "");
 // Plan document #0 is the "Initial Plan"; later ones are "Revision N".
 std::string plan_revision_label(std::size_t index);

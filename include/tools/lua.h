@@ -26,7 +26,6 @@ struct LuaMethod {
     std::string_view description;
     LuaCapability capability           = LuaCapability::NONE;
     std::string_view capability_denied = "";
-    bool is_private                    = false;
 };
 
 struct LuaModule {

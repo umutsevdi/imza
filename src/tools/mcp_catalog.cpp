@@ -15,9 +15,7 @@ namespace {
         std::optional<std::string> id;
         std::optional<std::string> label;
         std::optional<std::string> url;
-        std::optional<std::string> description;
         std::optional<std::string> auth_kind;
-        std::optional<std::string> auth_hint;
     };
 
     struct StoredCatalog {
@@ -36,12 +34,10 @@ std::vector<McpCatalogEntry> load_mcp_catalog()
     out.reserve(stored.servers.size());
     for (auto& entry : stored.servers) {
         McpCatalogEntry parsed;
-        parsed.id          = entry.id.value_or("");
-        parsed.label       = entry.label.value_or("");
-        parsed.url         = entry.url.value_or("");
-        parsed.description = entry.description.value_or("");
-        parsed.auth_kind   = entry.auth_kind.value_or("none");
-        parsed.auth_hint   = entry.auth_hint.value_or("");
+        parsed.id        = entry.id.value_or("");
+        parsed.label     = entry.label.value_or("");
+        parsed.url       = entry.url.value_or("");
+        parsed.auth_kind = entry.auth_kind.value_or("none");
         if (parsed.id.empty() || parsed.url.empty()) {
             continue;
         }

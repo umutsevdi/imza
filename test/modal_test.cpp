@@ -579,11 +579,8 @@ TEST_CASE("markdown viewer renders markdown instead of source lines")
         return std::holds_alternative<imza::ViewerModal>(env.session->modal());
     }));
 
-    ftxui::Component modal = imza::make_modal(env.state);
-    auto screen            = ftxui::Screen::Create(
-        ftxui::Dimension::Fixed(60), ftxui::Dimension::Fixed(12));
-    ftxui::Render(screen, modal->Render());
-    const std::string rendered = screen.ToString();
+    ftxui::Component modal     = imza::make_modal(env.state);
+    const std::string rendered = imza::test::to_text(modal->Render(), 60, 12);
     CHECK(rendered.find("Heading") != std::string::npos);
     CHECK(rendered.find("# Heading") == std::string::npos);
 }
@@ -837,11 +834,9 @@ TEST_CASE("skill approval modal renders its canonical baseline")
     }));
 
     ftxui::Component modal = imza::make_modal(env.state);
-    auto screen            = ftxui::Screen::Create(
-        ftxui::Dimension::Fixed(60), ftxui::Dimension::Fixed(14));
-    ftxui::Render(screen, modal->Render());
     std::string rendered;
-    for (const std::string& line : imza::split_lines(screen.ToString())) {
+    for (const std::string& line :
+        imza::split_lines(imza::test::to_text(modal->Render(), 60, 14))) {
         const std::string trimmed
             = std::string(imza::trim(imza::test::without_ansi(line)));
         if (!trimmed.empty()) {
@@ -854,19 +849,7 @@ TEST_CASE("skill approval modal renders its canonical baseline")
     // dialog equivalent, not byte-identical to a terminal width.
     std::string flat;
     for (const std::string& line : imza::split_lines(rendered)) {
-        std::string collapsed;
-        bool space = false;
-        for (const char c : line) {
-            if (std::isspace(static_cast<unsigned char>(c))) {
-                space = true;
-                continue;
-            }
-            if (space && !collapsed.empty()) {
-                collapsed += ' ';
-            }
-            space = false;
-            collapsed += c;
-        }
+        const std::string collapsed = imza::test::collapse_whitespace(line);
         if (!collapsed.empty()) {
             flat += collapsed + "\n";
         }
@@ -940,9 +923,7 @@ TEST_CASE("closing a modal keeps keyboard focus on the chat")
     chat->TakeFocus();
     REQUIRE(root->OnEvent(ftxui::Event::Character("k")));
     (void)root->Render();
-    auto screen = ftxui::Screen::Create(
-        ftxui::Dimension::Fixed(100), ftxui::Dimension::Fixed(40));
-    ftxui::Render(screen, root->Render());
-    CHECK(imza::test::without_ansi(screen.ToString()).find("k")
+    CHECK(imza::test::without_ansi(imza::test::to_text(root->Render(), 100, 40))
+              .find("k")
         != std::string::npos);
 }

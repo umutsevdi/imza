@@ -114,11 +114,7 @@ Tool make_load_mcp_tool(McpToolDocsDeps deps)
             }
             // A big registry server can exceed the useful context size.
             constexpr std::size_t MAX_DOCS_CHARS = 40000;
-            if (out.size() > MAX_DOCS_CHARS) {
-                out = std::string(truncate_utf8(out, MAX_DOCS_CHARS));
-                out += "\n[truncated: showing first "
-                    + std::to_string(out.size()) + " of the content]";
-            }
+            out = truncate_with_count(std::move(out), MAX_DOCS_CHARS);
             return tool_output(std::move(out));
         } };
 }

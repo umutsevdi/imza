@@ -62,10 +62,11 @@ void enqueue_user_modal(ApplicationState& state, ModalPayload payload);
 
 // MCP server persistence: validate-then-commit through the locked config
 // read-modify-write, then apply to the live manager (reload, and connect
-// for a newly added server).
+// for a newly added server). The remove/enable forms return false when
+// nothing was committed (id missing, unchanged value).
 void mcp_add_server(ApplicationState& state, const McpServerConfig& server);
-void mcp_remove_server(ApplicationState& state, const std::string& id);
-void mcp_set_server_enabled(
+bool mcp_remove_server(ApplicationState& state, const std::string& id);
+bool mcp_set_server_enabled(
     ApplicationState& state, const std::string& id, bool enabled);
 std::future<ModalResult> request_modal(
     ApplicationState& state, ModalPayload payload);

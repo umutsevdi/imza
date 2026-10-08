@@ -190,6 +190,11 @@ void TurnRunner::_post(std::function<void()> f)
     }
 }
 
+void TurnRunner::_finish_idle()
+{
+    _post([this] { _on_finish(""); });
+}
+
 void TurnRunner::_authenticate_route(TurnSettings& settings)
 {
     if (_has_stream()) {
@@ -276,7 +281,7 @@ void TurnRunner::_run_compaction(TurnSettings settings, bool report_nothing)
         && !snapshot.compacted_summary.empty()) {
         const auto event_id = _state->session->begin_compaction().first;
         _state->session->finish_compaction(event_id, "", 0, true);
-        _post([this] { _on_finish(""); });
+        _finish_idle();
         return;
     }
 
@@ -296,7 +301,7 @@ void TurnRunner::_run_compaction(TurnSettings settings, bool report_nothing)
         = _summarize(history, begin, history.size(), settings);
     if (!summary) {
         _state->session->finish_compaction(event_id, "", prefix_size, false);
-        _post([this] { _on_finish(""); });
+        _finish_idle();
         return;
     }
 
@@ -479,7 +484,7 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
         history = std::move(req.messages);
 
         if (_state->session->interrupt_requested()) {
-            _post([this] { _on_finish(""); });
+            _finish_idle();
             return;
         }
 
@@ -508,7 +513,7 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
                 = std::chrono::steady_clock::now() + std::chrono::seconds(wait);
             while (std::chrono::steady_clock::now() < deadline) {
                 if (!_alive.load() || _state->session->interrupt_requested()) {
-                    _post([this] { _on_finish(""); });
+                    _finish_idle();
                     return;
                 }
                 std::this_thread::sleep_for(50ms);
@@ -544,12 +549,12 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
             return;
         }
         if (_state->session->interrupt_requested()) {
-            _post([this] { _on_finish(""); });
+            _finish_idle();
             return;
         }
 
         if (history.size() == history_before) {
-            _post([this] { _on_finish(""); });
+            _finish_idle();
             // Compact in the background: the next submission never waits
             // on a summarize round-trip, and the 80% trigger leaves
             // headroom for this turn's uncompacted history.
@@ -585,8 +590,8 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
         const ToolCallRequest& original = ev.tool_call;
         if (find_tool(_tools, original.name) == nullptr) {
             const std::string error = UNKNOWN_TOOL_PREFIX + original.name;
-            _finish_tool(
-                original, ToolCall::Result::Kind::ERROR, error, tool_msgs);
+            _finish_tool(original, { ToolCall::Result::Kind::ERROR, error },
+                error, tool_msgs);
             continue;
         }
 
@@ -651,13 +656,13 @@ void TurnRunner::_apply_tool_result(const PermissionEvaluation& evaluation,
     const ToolCallRequest& req = evaluation.request;
     const auto* verdict        = std::get_if<ToolVerdict>(&res);
     if (verdict == nullptr) {
-        _finish_tool(req, ToolCall::Result::Kind::CANCEL, "", denial_text(""),
-            tool_msgs);
+        _finish_tool(req, { ToolCall::Result::Kind::CANCEL, "" },
+            denial_text(""), tool_msgs);
         return;
     }
     if (verdict->decision == ToolDecision::REJECT) {
         std::string reason = verdict->reason;
-        _finish_tool(req, ToolCall::Result::Kind::REJECT, std::move(reason),
+        _finish_tool(req, { ToolCall::Result::Kind::REJECT, reason },
             denial_text(reason), tool_msgs);
         return;
     }
@@ -674,24 +679,16 @@ void TurnRunner::_apply_tool_result(const PermissionEvaluation& evaluation,
 void TurnRunner::_reject_tool(const ToolCallRequest& req, std::string reason,
     std::vector<Message>& tool_msgs)
 {
-    _finish_tool(req, ToolCall::Result::Kind::REJECT, std::move(reason),
+    _finish_tool(req, { ToolCall::Result::Kind::REJECT, reason },
         denial_text(reason), tool_msgs);
 }
 
 void TurnRunner::_finish_tool(const ToolCallRequest& req,
-    ToolCall::Result::Kind kind, const std::string& history_text,
+    ToolCall::Result result, std::string history_text,
     std::vector<Message>& tool_msgs)
 {
-    _finish_tool(req, kind, history_text, history_text, tool_msgs);
-}
-
-void TurnRunner::_finish_tool(const ToolCallRequest& req,
-    ToolCall::Result::Kind kind, std::string result_text,
-    std::string history_text, std::vector<Message>& tool_msgs)
-{
-    _post([this, req, kind, result_text = std::move(result_text)]() mutable {
-        _state->session->fill_tool_result(
-            req, ToolCall::Result { kind, std::move(result_text) });
+    _post([this, req, result = std::move(result)]() mutable {
+        _state->session->fill_tool_result(req, std::move(result));
     });
     tool_msgs.push_back(
         { Message::Type::TOOL, std::move(history_text), { }, req.id });
@@ -729,11 +726,7 @@ void TurnRunner::_run_tool(const PermissionEvaluation& evaluation,
     result.canvases                = std::move(out.canvases);
     result.dispatch_log            = std::move(out.dispatch_log);
     const std::string history_text = tool_result_text(result);
-    _post([this, req, result = std::move(result)]() mutable {
-        _state->session->fill_tool_result(req, std::move(result));
-    });
-    tool_msgs.push_back(
-        { Message::Type::TOOL, std::move(history_text), { }, req.id });
+    _finish_tool(req, std::move(result), history_text, tool_msgs);
 }
 
 } // namespace imza

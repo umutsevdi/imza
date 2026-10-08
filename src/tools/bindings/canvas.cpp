@@ -317,19 +317,18 @@ rectangular matrix of z values, row-major.)desc",
 
 } // namespace
 
-std::span<const LuaMethod> canvas_lua_methods() { return BINDINGS; }
-
-void register_canvas(LuaState& state)
+const LuaModule& canvas_module()
 {
     static constexpr std::string_view types[] = {
         "CanvasSeries = { label: string, values: number[] }",
         "CanvasPoint = { label: string, value: number }",
     };
-    state.register_module({ false, "canvas",
+    static constexpr LuaModule MODULE { false, "canvas",
         R"desc(Line, bar, pie, and wireframe-surface charts rendered in the chat.
 Use when presenting numeric data or explaining something to the user
 - trends, comparisons, distributions, or matrices.)desc",
-        types, canvas_lua_methods() });
+        types, BINDINGS };
+    return MODULE;
 }
 
 } // namespace imza

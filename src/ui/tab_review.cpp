@@ -519,7 +519,7 @@ namespace {
             if (_skipped_height == 0) {
                 return;
             }
-            rows.push_back(text("") | size(HEIGHT, EQUAL, _skipped_height));
+            rows.push_back(vertical_space(_skipped_height));
             _skipped_height = 0;
         }
 

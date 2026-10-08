@@ -603,8 +603,8 @@ void Session::set_todo(TodoList todo)
     _todo = std::move(todo);
 }
 
-// Appends a new document; the current plan is the vector back. Both
-// counters move together: the creating agent has seen exactly what it wrote.
+// The current plan is the vector back. Both counters move together: the
+// creating agent has seen exactly what it wrote.
 std::string Session::create_plan(std::string content)
 {
     std::lock_guard lock(_mutex);

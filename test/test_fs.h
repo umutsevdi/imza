@@ -8,7 +8,16 @@
 
 #include <unistd.h>
 
+#include "platform/file_lock.h"
+
 namespace imza::test {
+
+// Releases a held lock variant from acquire_file_lock by resetting it to
+// the error state.
+template <typename LockVariant> void release_lock(LockVariant& held)
+{
+    held = LockVariant { imza::FileLockError { } };
+}
 
 // RAII scratch directory: unique per instance under the system temp path,
 // created eagerly, removed with everything inside it on destruction —

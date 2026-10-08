@@ -45,6 +45,31 @@ FocusedDoc make_focused_doc(std::shared_ptr<imza::ApplicationState> state,
     return doc;
 }
 
+// Walks to the second list item (heading Requirements, first plan, heading
+// Approach, first item, second item) and saves `note` on it.
+void note_second_item(FocusedDoc& fx, std::string_view note)
+{
+    for (int i = 0; i < 4; ++i) {
+        REQUIRE(fx.doc->OnEvent(ftxui::Event::ArrowDown));
+    }
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
+    imza::test::require_type(fx.doc, note);
+    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
+}
+
+// Mimic PlanTab::OnRender: the pane is nested inside an hbox and the
+// element tree is rebuilt on every frame.
+std::string tab_frame(FocusedDoc& fx)
+{
+    return imza::test::to_text(
+        ftxui::hbox({
+            ftxui::text("chat") | ftxui::size(ftxui::WIDTH, ftxui::EQUAL, 30),
+            ftxui::separatorEmpty(),
+            fx.doc->Render() | ftxui::xflex,
+        }),
+        60, 9);
+}
+
 } // namespace
 
 TEST_CASE("plan doc renders the initial plan as block rows when unfocused")
@@ -93,14 +118,7 @@ TEST_CASE("note card renders under the annotated block")
     auto fx = make_focused_doc(imza::test::make_test_state(), true, skeleton);
     (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
-    // Walk to the second list item: heading Requirements, first plan,
-    // heading Approach, first item, second item.
-    for (int i = 0; i < 4; ++i) {
-        REQUIRE(fx.doc->OnEvent(ftxui::Event::ArrowDown));
-    }
-    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
-    imza::test::require_type(fx.doc, "split this step");
-    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
+    note_second_item(fx, "split this step");
 
     const std::string rendered = imza::test::to_text(fx.doc->Render(), 100, 40);
     const auto note_at         = rendered.find("split this step");
@@ -118,14 +136,7 @@ TEST_CASE("revise submits one turn with section and line locators")
         true, skeleton);
     (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
-    // Walk to the second list item: heading Requirements, first plan,
-    // heading Approach, first item, second item.
-    for (int i = 0; i < 4; ++i) {
-        REQUIRE(fx.doc->OnEvent(ftxui::Event::ArrowDown));
-    }
-    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
-    imza::test::require_type(fx.doc, "reorder these");
-    REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
+    note_second_item(fx, "reorder these");
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("s")));
 
     // The revise turn starts immediately (a provider is configured); the
@@ -308,12 +319,17 @@ TEST_CASE("moving with keys highlights the selected row")
     // The raw render carries background escapes; find which visible line
     // holds the panel-focus background and follow it as the cursor moves.
     // The editor card and note cards share the focus background, so filter
-    // to card-free rows by text: the block text itself.
+    // to card-free rows by text: the block text itself. The escape is
+    // derived from the palette constant so the pin survives FTXUI's
+    // terminal-dependent color downsampling.
+    const std::string focus_bg
+        = "\x1b[" + imza::PANEL_COLOR_FOCUS.Print(true) + "m";
     const auto highlight_at = [](const std::string& rendered,
-                                  const std::string& needle) {
+                                  const std::string& needle,
+                                  const std::string& background) {
         const std::vector<std::string> lines = imza::split_lines(rendered);
         for (std::size_t i = 0; i < lines.size(); ++i) {
-            if (lines[i].find("\x1b[48;2;") != std::string::npos
+            if (lines[i].find(background) != std::string::npos
                 && imza::test::without_ansi(lines[i]).find(needle)
                     != std::string::npos) {
                 return static_cast<int>(i);
@@ -323,8 +339,8 @@ TEST_CASE("moving with keys highlights the selected row")
     };
 
     // Row 0 is selected: the "Requirements" heading row is highlighted.
-    CHECK(highlight_at(
-              imza::test::to_text(fx.doc->Render(), 100, 40), "Requirements")
+    CHECK(highlight_at(imza::test::to_text(fx.doc->Render(), 100, 40),
+              "Requirements", focus_bg)
         != -1);
 
     // Move down twice: row 2 is the "Approach" heading; it is highlighted
@@ -332,8 +348,8 @@ TEST_CASE("moving with keys highlights the selected row")
     REQUIRE(fx.doc->OnEvent(ftxui::Event::ArrowDown));
     REQUIRE(fx.doc->OnEvent(ftxui::Event::ArrowDown));
     const std::string rendered = imza::test::to_text(fx.doc->Render(), 100, 40);
-    CHECK(highlight_at(rendered, "Approach") != -1);
-    CHECK(highlight_at(rendered, "Requirements") == -1);
+    CHECK(highlight_at(rendered, "Approach", focus_bg) != -1);
+    CHECK(highlight_at(rendered, "Requirements", focus_bg) == -1);
 }
 
 TEST_CASE("click on a note card selects it for edit and delete")
@@ -462,8 +478,11 @@ TEST_CASE("revise button highlights on click like review buttons")
     };
     const std::string rest
         = button_row(imza::test::to_text(fx.doc->Render(), 100, 40));
-    // Rest: calm background (not the focus panel), not bold.
-    CHECK(rest.find("\x1b[48;2;72;79;88m") != std::string::npos);
+    // Rest: calm background (not the focus panel), not bold. Escapes come
+    // from the palette constants so the pin survives FTXUI's
+    // terminal-dependent color downsampling.
+    CHECK(rest.find("\x1b[" + imza::PANEL_BORDER.Print(true) + "m")
+        != std::string::npos);
     CHECK(rest.find("\x1b[1m") == std::string::npos);
 
     // Clicking the button submits and switches it to the focus style.
@@ -471,7 +490,8 @@ TEST_CASE("revise button highlights on click like review buttons")
     const std::string clicked
         = button_row(imza::test::to_text(fx.doc->Render(), 100, 40));
     CHECK(clicked.find("\x1b[1m") != std::string::npos);
-    CHECK(clicked.find("\x1b[48;2;45;50;56m") != std::string::npos);
+    CHECK(clicked.find("\x1b[" + imza::PANEL_COLOR_FOCUS.Print(true) + "m")
+        != std::string::npos);
 }
 TEST_CASE("revise guards are visible in the pane header")
 {
@@ -534,19 +554,7 @@ TEST_CASE("a second revise works after the agent updates the plan")
 TEST_CASE("keyboard follow scrolls the window inside the tab layout")
 {
     auto fx = make_focused_doc(imza::test::make_test_state(), true, tall);
-
-    // Mimic PlanTab::OnRender: the pane is nested inside an hbox and
-    // the element tree is rebuilt on every frame.
-    const auto frame = [&] {
-        return imza::test::to_text(
-            ftxui::hbox({
-                ftxui::text("chat")
-                    | ftxui::size(ftxui::WIDTH, ftxui::EQUAL, 30),
-                ftxui::separatorEmpty(),
-                fx.doc->Render() | ftxui::xflex,
-            }),
-            60, 9);
-    };
+    const auto frame = [&] { return tab_frame(fx); };
 
     const std::string head = frame();
     (void)frame();
@@ -577,16 +585,7 @@ TEST_CASE("keyboard follow scrolls the window inside the tab layout")
 TEST_CASE("wheel scroll moves the selection like review")
 {
     auto fx = make_focused_doc(imza::test::make_test_state(), true, tall);
-    const auto frame = [&] {
-        return imza::test::to_text(
-            ftxui::hbox({
-                ftxui::text("chat")
-                    | ftxui::size(ftxui::WIDTH, ftxui::EQUAL, 30),
-                ftxui::separatorEmpty(),
-                fx.doc->Render() | ftxui::xflex,
-            }),
-            60, 9);
-    };
+    const auto frame = [&] { return tab_frame(fx); };
     const auto wheel = [](ftxui::Mouse::Button button) {
         ftxui::Mouse mouse;
         mouse.button = button;

@@ -24,8 +24,6 @@ using namespace ftxui;
 
 namespace {
 
-    using namespace ftxui;
-
     enum class ToolPhase { DECIDE, REASON };
 
     std::string shell_name(const SystemEnvironment& sys)

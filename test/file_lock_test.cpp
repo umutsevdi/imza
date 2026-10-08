@@ -41,9 +41,7 @@ TEST_CASE("acquired lock blocks a second holder until released")
     }
     CHECK_FALSE(acquired);
 
-    first = std::variant<imza::FileLock, imza::FileLockError> {
-        imza::FileLockError { }
-    };
+    imza::test::release_lock(first);
     second.join();
     CHECK(acquired);
 }
@@ -83,9 +81,7 @@ TEST_CASE("non-blocking request fails while another holder is live")
 
     CHECK(imza::file_lock_held(path));
 
-    first = std::variant<imza::FileLock, imza::FileLockError> {
-        imza::FileLockError { }
-    };
+    imza::test::release_lock(first);
     CHECK_FALSE(imza::file_lock_held(path));
 
     auto third = imza::acquire_file_lock(
@@ -113,12 +109,8 @@ TEST_CASE("shared locks coexist and yield to an exclusive holder")
         path, imza::FileLockRequest { imza::FileLockMode::EXCLUSIVE, false });
     CHECK(std::holds_alternative<imza::FileLockError>(exclusive));
 
-    first = std::variant<imza::FileLock, imza::FileLockError> {
-        imza::FileLockError { }
-    };
-    second = std::variant<imza::FileLock, imza::FileLockError> {
-        imza::FileLockError { }
-    };
+    imza::test::release_lock(first);
+    imza::test::release_lock(second);
     exclusive = imza::acquire_file_lock(
         path, imza::FileLockRequest { imza::FileLockMode::EXCLUSIVE, false });
     CHECK(std::holds_alternative<imza::FileLock>(exclusive));

@@ -581,17 +581,16 @@ Prefer insert/edit for targeted changes; this discards everything else.)desc",
 
 } // namespace
 
-std::span<const LuaMethod> fs_lua_methods() { return BINDINGS; }
-
-void register_fs(LuaState& state)
+const LuaModule& fs_module()
 {
     static constexpr std::string_view types[] = {
         "FileEntry = { path: string, type: \\\"file\\\" | \\\"dir\\\", size?: "
         "string }",
         "GrepHit = { file: string, line: integer, text: string }",
     };
-    state.register_module({ true, "fs", "Filesystem inspection and mutation.",
-        types, fs_lua_methods() });
+    static constexpr LuaModule MODULE { true, "fs",
+        "Filesystem inspection and mutation.", types, BINDINGS };
+    return MODULE;
 }
 
 } // namespace imza

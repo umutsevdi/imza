@@ -45,7 +45,7 @@ void summarize_untracked_files(const std::filesystem::path& root,
     const std::vector<ChangedFile>& files, ChangeSummary& summary);
 
 struct GitDiffOptions {
-    bool renames = false; // detect renames and copies
+    bool renames = false;
     bool numstat = false; // prepend added/deleted counts before the patch
 };
 

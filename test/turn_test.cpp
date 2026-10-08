@@ -252,8 +252,6 @@ TEST_CASE("automatic compaction runs in the background after the turn")
 
     // The first two turns run uncompacted: compaction needs enough
     // history and fires only after a completed turn.
-    // The first two turns run uncompacted: compaction needs enough
-    // history and fires only after a completed turn.
     imza::submit(*env.state, "first question");
     REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
     imza::submit(*env.state, "second question");

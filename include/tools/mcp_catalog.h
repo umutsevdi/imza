@@ -15,9 +15,7 @@ struct McpCatalogEntry {
     std::string id;
     std::string label;
     std::string url;
-    std::string description;
     std::string auth_kind; // "none" | "token" | "oauth"
-    std::string auth_hint;
 };
 
 // Parses the embedded catalogue JSON; an unreadable file yields an empty

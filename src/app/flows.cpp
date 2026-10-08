@@ -12,6 +12,7 @@
 #include "turn/prompt.h"
 #include "turn/turn_runner.h"
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -196,7 +197,7 @@ namespace {
             text, std::nullopt);
     }
 
-    SessionsModal sessions_modal(const ApplicationState&) { return { }; }
+    SessionsModal sessions_modal() { return { }; }
 
     SkillsModal skills_modal(const ApplicationState& state)
     {
@@ -358,56 +359,53 @@ void enqueue_user_modal(ApplicationState& state, ModalPayload payload)
     }
 }
 
-void mcp_add_server(ApplicationState& state, const McpServerConfig& server)
+// Applies `mutate` to the persisted config; on a committed change the MCP
+// manager reloads the resulting server map. False when nothing was written.
+bool mutate_mcp_config(
+    ApplicationState& state, const std::function<bool(Config&)>& mutate)
 {
     Config initial = state.providers->config();
     Config result;
-    const ConfigUpdateResult updated = update_config(
-        config_path(), initial,
-        [&server](Config& cfg) {
-            return cfg.mcp_servers.insert_or_assign(server.id, server).second;
-        },
-        &result);
+    const ConfigUpdateResult updated
+        = update_config(config_path(), initial, mutate, &result);
     if (updated != ConfigUpdateResult::UPDATED) {
-        return;
+        return false;
     }
     if (state.mcp) {
         state.mcp->reload(std::move(result.mcp_servers));
+    }
+    return true;
+}
+
+void mcp_add_server(ApplicationState& state, const McpServerConfig& server)
+{
+    if (!mutate_mcp_config(state, [&server](Config& cfg) {
+            return cfg.mcp_servers.insert_or_assign(server.id, server).second;
+        })) {
+        return;
+    }
+    if (state.mcp) {
         state.mcp->connect(server.id);
     }
 }
 
-void mcp_remove_server(ApplicationState& state, const std::string& id)
+bool mcp_remove_server(ApplicationState& state, const std::string& id)
 {
-    Config initial = state.providers->config();
-    Config result;
-    const ConfigUpdateResult updated = update_config(
-        config_path(), initial,
-        [&id](Config& cfg) { return cfg.mcp_servers.erase(id) != 0; }, &result);
-    if (updated == ConfigUpdateResult::UPDATED && state.mcp) {
-        state.mcp->reload(std::move(result.mcp_servers));
-    }
+    return mutate_mcp_config(
+        state, [&id](Config& cfg) { return cfg.mcp_servers.erase(id) != 0; });
 }
 
-void mcp_set_server_enabled(
+bool mcp_set_server_enabled(
     ApplicationState& state, const std::string& id, bool enabled)
 {
-    Config initial = state.providers->config();
-    Config result;
-    const ConfigUpdateResult updated = update_config(
-        config_path(), initial,
-        [&id, enabled](Config& cfg) {
-            const auto found = cfg.mcp_servers.find(id);
-            if (found == cfg.mcp_servers.end()) {
-                return false;
-            }
-            found->second.enabled = enabled;
-            return true;
-        },
-        &result);
-    if (updated == ConfigUpdateResult::UPDATED && state.mcp) {
-        state.mcp->reload(std::move(result.mcp_servers));
-    }
+    return mutate_mcp_config(state, [&id, enabled](Config& cfg) {
+        const auto found = cfg.mcp_servers.find(id);
+        if (found == cfg.mcp_servers.end()) {
+            return false;
+        }
+        found->second.enabled = enabled;
+        return true;
+    });
 }
 
 std::future<ModalResult> request_modal(
@@ -611,7 +609,7 @@ void run_slash(ApplicationState& state, std::string_view command)
             state, ConnectModal { ConnectModal::Entry::SUBAGENTS });
         break;
     case SlashCommand::Action::SESSIONS:
-        enqueue_user_modal(state, sessions_modal(state));
+        enqueue_user_modal(state, sessions_modal());
         break;
     case SlashCommand::Action::SKILLS:
         enqueue_user_modal(state, skills_modal(state));
@@ -713,7 +711,7 @@ void delete_saved_session(
         return;
     case DeleteSessionResult::OK: break;
     }
-    state.session->set_modal(sessions_modal(state));
+    state.session->set_modal(sessions_modal());
     state.session->bump_modal_serial();
 }
 

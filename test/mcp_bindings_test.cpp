@@ -14,18 +14,6 @@
 
 namespace {
 
-imza::ToolOutput run_script(const std::string& script, imza::LuaHost host = { })
-{
-    auto state            = imza::make_lua_state();
-    const imza::Tool tool = imza::make_lua_tool(*state, std::move(host));
-    imza::ToolCallRequest req;
-    req.name             = "lua";
-    imza::JsonValue args = imza::JsonValue::object_t { };
-    args.get<imza::JsonValue::object_t>()["script"] = imza::JsonValue(script);
-    req.args                                        = imza::json_dump(args);
-    return imza::dispatch_tool({ &tool, 1 }, req);
-}
-
 // A lua host wired to a manager connected to the loopback server.
 struct McpFixture {
     imza::test::LoopbackMcpServer server;
@@ -69,10 +57,10 @@ TEST_CASE("imza.mcp.call returns the tool's text through the manager")
     McpFixture fx;
     REQUIRE(fx.start());
 
-    const imza::ToolOutput out
-        = run_script("local out = imza.mcp.call('exa', 'echo', {query='hi'})\n"
-                     "print('got:' .. out)",
-            fx.host());
+    const imza::ToolOutput out = imza::test::run_lua(
+        "local out = imza.mcp.call('exa', 'echo', {query='hi'})\n"
+        "print('got:' .. out)",
+        fx.host());
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(out.text.find("got:loopback ok") != std::string::npos);
     // The call lands in the dispatch log under the model-facing path.
@@ -85,7 +73,7 @@ TEST_CASE("imza.mcp.call works without an args table")
     McpFixture fx;
     REQUIRE(fx.start());
 
-    const imza::ToolOutput out = run_script(
+    const imza::ToolOutput out = imza::test::run_lua(
         "print('got:' .. imza.mcp.call('exa', 'echo'))", fx.host());
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(out.text.find("got:loopback ok") != std::string::npos);
@@ -94,29 +82,19 @@ TEST_CASE("imza.mcp.call works without an args table")
 TEST_CASE("imza.mcp.call surfaces tool execution errors as aborts")
 {
     imza::test::allow_loopback_direct();
-    imza::test::LoopbackMcpServer server;
-    server.call_text     = "boom";
-    server.call_is_error = true;
-    REQUIRE(server.start());
-    imza::McpServerConfig config;
-    config.id  = "exa";
-    config.url = server.url();
-    imza::McpManager manager(
-        std::map<std::string, imza::McpServerConfig> { { "exa", config } });
-    manager.connect("exa");
+    McpFixture fx;
+    fx.server.call_text     = "boom";
+    fx.server.call_is_error = true;
+    REQUIRE(fx.start());
 
-    imza::LuaHost host;
-    host.mcp_enabled = true;
-    host.mcp         = [&] -> imza::McpManager* { return &manager; };
-
-    const imza::ToolOutput out
-        = run_script("imza.mcp.call('exa', 'echo')\nprint('dead')", host);
+    const imza::ToolOutput out = imza::test::run_lua(
+        "imza.mcp.call('exa', 'echo')\nprint('dead')", fx.host());
     CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(out.text.find("tool error from 'exa.echo'") != std::string::npos);
     CHECK(out.text.find("boom") != std::string::npos);
     CHECK(out.text.find("dead") == std::string::npos);
 
-    server.stop();
+    fx.server.stop();
 }
 
 TEST_CASE("imza.mcp.call fails closed without a manager or capability")
@@ -124,17 +102,17 @@ TEST_CASE("imza.mcp.call fails closed without a manager or capability")
     // Capability denied: the gate fires before the handler runs.
     McpFixture fx;
     REQUIRE(fx.start());
-    fx.enabled = false;
-    const imza::ToolOutput gated
-        = run_script("imza.mcp.call('exa', 'echo')\nprint('dead')", fx.host());
+    fx.enabled                   = false;
+    const imza::ToolOutput gated = imza::test::run_lua(
+        "imza.mcp.call('exa', 'echo')\nprint('dead')", fx.host());
     CHECK(gated.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(gated.text.find("MCP access is disabled") != std::string::npos);
 
     // Manager absent (empty accessor): the binding reports unavailability.
     imza::LuaHost host;
-    host.mcp_enabled = true;
-    const imza::ToolOutput unavailable
-        = run_script("imza.mcp.call('exa', 'echo')\nprint('dead')", host);
+    host.mcp_enabled                   = true;
+    const imza::ToolOutput unavailable = imza::test::run_lua(
+        "imza.mcp.call('exa', 'echo')\nprint('dead')", host);
     CHECK(unavailable.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(unavailable.text.find("not available") != std::string::npos);
 }

@@ -19,7 +19,7 @@ namespace {
 #ifdef _WIN32
     std::wstring mutex_name(const std::filesystem::path& path)
     {
-        std::uint64_t hash = 1469598103934665603ULL;
+        std::uint64_t hash = 14695981039346656037ULL;
         for (const wchar_t value : path.wstring()) {
             hash ^= static_cast<std::uint64_t>(value);
             hash *= 1099511628211ULL;

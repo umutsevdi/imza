@@ -295,9 +295,7 @@ Chains and pipelines are rejected. Compose results in Lua instead.
 
 } // namespace
 
-std::span<const LuaMethod> core_lua_methods() { return BINDINGS; }
-
-void register_core(LuaState& state)
+const LuaModule& core_module()
 {
     static constexpr std::string_view types[] = {
         "TodoStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'",
@@ -306,7 +304,8 @@ void register_core(LuaState& state)
         "free_text?: bool }",
         "AskAnswer = { question: string, answer: string }",
     };
-    state.register_module({ true, "", "", types, core_lua_methods() });
+    static constexpr LuaModule MODULE { true, "", "", types, BINDINGS };
+    return MODULE;
 }
 
 } // namespace imza

@@ -59,6 +59,11 @@ namespace {
         return version;
     }
 
+    std::string_view without_leading_v(std::string_view version)
+    {
+        return version.starts_with('v') ? version.substr(1) : version;
+    }
+
     long long component_value(std::string_view& text)
     {
         long long value = 0;
@@ -125,10 +130,7 @@ namespace {
             || release.prerelease.value_or(false)) {
             return std::nullopt;
         }
-        std::string version = *release.tag_name;
-        if (version.starts_with('v')) {
-            version.erase(0, 1);
-        }
+        const std::string version(without_leading_v(*release.tag_name));
         if (compare_versions(version, current_version) <= 0) {
             return std::nullopt;
         }
@@ -171,10 +173,7 @@ int compare_versions(std::string_view a, std::string_view b)
 std::string expected_asset_name(
     const std::vector<std::string>& package_managers, std::string_view version)
 {
-    std::string v(version);
-    if (v.starts_with('v')) {
-        v.erase(0, 1);
-    }
+    const std::string v(without_leading_v(version));
 #if defined(__x86_64__) || defined(__x86_64) || defined(_M_X64)
     const char* arch = "x64";
 #elif defined(__aarch64__) || defined(__aarch64) || defined(_M_ARM64)

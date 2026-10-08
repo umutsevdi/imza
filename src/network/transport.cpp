@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
+#include <optional>
 #include <string_view>
 
 namespace imza {
@@ -212,6 +213,61 @@ Status http_delete(const std::string& url,
 
 namespace {
 
+    // Strips trailing CRLF and parses "HTTP/x.y CODE" into `status`.
+    template <typename T>
+    void parse_status_line(std::string_view line, T& status)
+    {
+        while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) {
+            line.remove_suffix(1);
+        }
+        if (line.starts_with("HTTP/")) {
+            const auto sp = line.find(' ');
+            if (sp != std::string_view::npos) {
+                std::string_view v = line.substr(sp + 1);
+                std::from_chars(v.data(), v.data() + v.size(), status);
+            }
+        }
+    }
+
+    // Extracts complete lines (LF or CRLF) from `buf` and passes each to
+    // `consume`; returns the byte count consumed so the caller can erase.
+    // Stops early when `consume` returns false.
+    template <typename Consume>
+    std::size_t consume_sse_lines(const std::string& buf, Consume&& consume)
+    {
+        std::size_t pos = 0;
+        while (true) {
+            const std::size_t nl = buf.find('\n', pos);
+            if (nl == std::string::npos) {
+                break;
+            }
+            std::string_view line(buf.data() + pos, nl - pos);
+            if (!line.empty() && line.back() == '\r') {
+                line.remove_suffix(1);
+            }
+            if (!consume(line)) {
+                return nl + 1;
+            }
+            pos = nl + 1;
+        }
+        return pos;
+    }
+
+    // For "field: value" SSE lines: the value with one optional leading
+    // space stripped; nullopt when the line is a different field.
+    std::optional<std::string_view> sse_field_value(
+        std::string_view line, std::string_view prefix)
+    {
+        if (!line.starts_with(prefix)) {
+            return std::nullopt;
+        }
+        std::string_view v = line.substr(prefix.size());
+        if (!v.empty() && v.front() == ' ') {
+            v = v.substr(1);
+        }
+        return v;
+    }
+
     // Incremental SSE parser for the notification stream: event/data/id/
     // retry fields accumulate until a blank line dispatches the event.
     struct SseStreamCtx {
@@ -231,18 +287,7 @@ namespace {
     {
         auto* ctx          = static_cast<SseStreamCtx*>(userdata);
         const size_t total = size * nmemb;
-        std::string_view line(ptr, total);
-        while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) {
-            line.remove_suffix(1);
-        }
-        if (line.starts_with("HTTP/")) {
-            const auto sp = line.find(' ');
-            if (sp != std::string_view::npos) {
-                std::string_view v = line.substr(sp + 1);
-                std::from_chars(
-                    v.data(), v.data() + v.size(), ctx->http_status);
-            }
-        }
+        parse_status_line(std::string_view(ptr, total), ctx->http_status);
         return total;
     }
 
@@ -270,34 +315,18 @@ namespace {
             sse_dispatch(ctx);
             return;
         }
-        if (line.starts_with("data:")) {
-            std::string_view d = line.substr(5);
-            if (!d.empty() && d.front() == ' ') {
-                d = d.substr(1);
-            }
+        if (const auto d = sse_field_value(line, "data:")) {
             if (!ctx.data.empty()) {
                 ctx.data += "\n";
             }
-            ctx.data.append(d);
-        } else if (line.starts_with("event:")) {
-            std::string_view e = line.substr(6);
-            if (!e.empty() && e.front() == ' ') {
-                e = e.substr(1);
-            }
-            ctx.event.assign(e);
-        } else if (line.starts_with("id:")) {
-            std::string_view i = line.substr(3);
-            if (!i.empty() && i.front() == ' ') {
-                i = i.substr(1);
-            }
-            ctx.id.assign(i);
-        } else if (line.starts_with("retry:")) {
-            std::string_view r = line.substr(6);
-            if (!r.empty() && r.front() == ' ') {
-                r = r.substr(1);
-            }
+            ctx.data.append(*d);
+        } else if (const auto e = sse_field_value(line, "event:")) {
+            ctx.event.assign(*e);
+        } else if (const auto i = sse_field_value(line, "id:")) {
+            ctx.id.assign(*i);
+        } else if (const auto r = sse_field_value(line, "retry:")) {
             long value = 0;
-            if (std::from_chars(r.data(), r.data() + r.size(), value).ec
+            if (std::from_chars(r->data(), r->data() + r->size(), value).ec
                 == std::errc { }) {
                 ctx.retry_ms  = value;
                 ctx.has_retry = true;
@@ -310,20 +339,11 @@ namespace {
     {
         auto* ctx = static_cast<SseStreamCtx*>(userdata);
         ctx->buf.append(ptr, n);
-        size_t pos = 0;
-        while (true) {
-            const size_t nl = ctx->buf.find('\n', pos);
-            if (nl == std::string::npos) {
-                break;
-            }
-            std::string_view line(ctx->buf.data() + pos, nl - pos);
-            if (!line.empty() && line.back() == '\r') {
-                line.remove_suffix(1);
-            }
-            sse_process_line(*ctx, line);
-            pos = nl + 1;
-        }
-        ctx->buf.erase(0, pos);
+        ctx->buf.erase(
+            0, consume_sse_lines(ctx->buf, [ctx](std::string_view line) {
+                sse_process_line(*ctx, line);
+                return true;
+            }));
         return n;
     }
 
@@ -431,17 +451,7 @@ namespace {
         auto* ctx          = static_cast<StreamCtx*>(userdata);
         const size_t total = size * nmemb;
         std::string_view line(ptr, total);
-        while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) {
-            line.remove_suffix(1);
-        }
-        if (line.starts_with("HTTP/")) {
-            const auto sp = line.find(' ');
-            if (sp != std::string_view::npos) {
-                std::string_view v = line.substr(sp + 1);
-                std::from_chars(
-                    v.data(), v.data() + v.size(), ctx->http_status);
-            }
-        }
+        parse_status_line(line, ctx->http_status);
         constexpr std::string_view key = "retry-after:";
         if (line.size() > key.size()
             && std::equal(
@@ -479,21 +489,13 @@ namespace {
             dispatch_block(ctx);
             return;
         }
-        if (line.starts_with("data:")) {
-            std::string_view d = line.substr(5);
-            if (!d.empty() && d.front() == ' ') {
-                d = d.substr(1);
-            }
+        if (const auto d = sse_field_value(line, "data:")) {
             if (!ctx.data.empty()) {
                 ctx.data += "\n";
             }
-            ctx.data.append(d);
-        } else if (line.starts_with("event:")) {
-            std::string_view e = line.substr(6);
-            if (!e.empty() && e.front() == ' ') {
-                e = e.substr(1);
-            }
-            ctx.event.assign(e.data(), e.size());
+            ctx.data.append(*d);
+        } else if (const auto e = sse_field_value(line, "event:")) {
+            ctx.event.assign(*e);
         }
     }
 
@@ -508,24 +510,11 @@ namespace {
         }
         mark_connected(*ctx);
         ctx->buf.append(ptr, n);
-
-        size_t pos = 0;
-        while (true) {
-            const size_t nl = ctx->buf.find('\n', pos);
-            if (nl == std::string::npos) {
-                break;
-            }
-            std::string_view line(ctx->buf.data() + pos, nl - pos);
-            if (!line.empty() && line.back() == '\r') {
-                line.remove_suffix(1);
-            }
-            process_line(*ctx, line);
-            pos = nl + 1;
-            if (ctx->parse_state.terminal) {
-                break;
-            }
-        }
-        ctx->buf.erase(0, pos);
+        ctx->buf.erase(
+            0, consume_sse_lines(ctx->buf, [ctx](std::string_view line) {
+                process_line(*ctx, line);
+                return !ctx->parse_state.terminal;
+            }));
         return n;
     }
 
@@ -560,14 +549,6 @@ Status classify_failure(long code, const std::string& raw, std::string& message)
     }
     return st;
 }
-
-namespace {
-
-    // A stream that moves less than this for the window is stalled. Slow
-    // providers legitimately think for minutes before the first token, so
-    // the window is deliberately generous; retries cover the rest.
-
-} // namespace
 
 Status stream(const Route& route, const ChatRequest& req, StreamCallback cb,
     int* retry_after)

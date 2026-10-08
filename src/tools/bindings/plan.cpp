@@ -122,15 +122,14 @@ and retry. Throws when no plan exists.)desc",
 
 } // namespace
 
-std::span<const LuaMethod> plan_lua_methods() { return BINDINGS; }
-
-void register_plan(LuaState& state)
+const LuaModule& plan_module()
 {
-    state.register_module({ true, "plan",
+    static constexpr LuaModule MODULE { true, "plan",
         R"desc(The session plan document: the intent object a plan-mode turn
 produces. Create it with imza.plan.create when the turn concludes that
 files should change; patch it with imza.plan.edit.)desc",
-        { }, plan_lua_methods() });
+        { }, BINDINGS };
+    return MODULE;
 }
 
 } // namespace imza

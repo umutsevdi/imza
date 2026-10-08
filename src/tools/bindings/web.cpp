@@ -17,35 +17,17 @@ namespace {
 
     constexpr std::size_t MAX_WEB_CHARS = 40000;
 
-    // Cap at a UTF-8 boundary, then mark.
-    std::string truncate_web(std::string text)
-    {
-        if (text.size() <= MAX_WEB_CHARS) {
-            return text;
-        }
-        std::string out(truncate_utf8(text, MAX_WEB_CHARS));
-        out += "\n[truncated: showing first " + std::to_string(out.size())
-            + " of the content]";
-        return out;
-    }
-
     int binding_web_fetch(lua_State* L)
     {
         const std::string url = luaL_checkstring(L, 1);
         FetchedPage page;
         std::string detail;
         const Status st = fetch_url(url, page, detail);
-        if (st == Status::INVALID_URL) {
-            record_call(L, "web.fetch", url, false);
-            return binding_error(L, "web.fetch: " + detail + ": " + url);
-        }
-        if (st == Status::NETWORK_ERROR) {
-            record_call(L, "web.fetch", url, false);
-            return binding_error(L, "web.fetch: request failed: " + url);
-        }
         if (st != Status::OK) {
             record_call(L, "web.fetch", url, false);
-            return binding_error(L, "web.fetch: " + detail + ": " + url);
+            const std::string reason
+                = st == Status::NETWORK_ERROR ? "request failed" : detail;
+            return binding_error(L, "web.fetch: " + reason + ": " + url);
         }
         record_call(L, "web.fetch", url, true);
 
@@ -67,7 +49,8 @@ namespace {
             return binding_error(
                 L, "web.fetch: no readable content at " + page.url);
         }
-        const std::string out = truncate_web(std::move(text));
+        const std::string out
+            = truncate_with_count(std::move(text), MAX_WEB_CHARS);
         lua_pushlstring(L, out.data(), out.size());
         return 1;
     }
@@ -79,15 +62,13 @@ namespace {
             static_cast<int>(opt_integer(L, 2).value_or(5)), 1, 10);
         std::string text;
         const Status st = web_search(query, num_results, text);
-        if (st == Status::NETWORK_ERROR) {
-            record_call(L, "web.search", query, false);
-            return binding_error(
-                L, "web.search: request failed for '" + query + "'");
-        }
         if (st != Status::OK) {
             record_call(L, "web.search", query, false);
+            const std::string reason = st == Status::NETWORK_ERROR
+                ? "request failed"
+                : "search request rejected";
             return binding_error(
-                L, "web.search: search request rejected for '" + query + "'");
+                L, "web.search: " + reason + " for '" + query + "'");
         }
         record_call(L, "web.search", query, true);
         if (trim(text).empty()) {
@@ -95,7 +76,8 @@ namespace {
                 L, "No search results found. Try a different query.");
             return 1;
         }
-        const std::string out = truncate_web(std::move(text));
+        const std::string out
+            = truncate_with_count(std::move(text), MAX_WEB_CHARS);
         lua_pushlstring(L, out.data(), out.size());
         return 1;
     }
@@ -125,12 +107,11 @@ num_results is clamped to 1..10.)desc",
 
 } // namespace
 
-std::span<const LuaMethod> web_lua_methods() { return BINDINGS; }
-
-void register_web(LuaState& state)
+const LuaModule& web_module()
 {
-    state.register_module(
-        { true, "web", "HTTP fetching and search.", { }, web_lua_methods() });
+    static constexpr LuaModule MODULE { true, "web",
+        "HTTP fetching and search.", { }, BINDINGS };
+    return MODULE;
 }
 
 } // namespace imza

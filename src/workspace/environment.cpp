@@ -176,8 +176,8 @@ namespace {
         if (xdg && *xdg) {
             return std::filesystem::path(xdg);
         }
-        const char* home = std::getenv("HOME");
-        if (home && *home) {
+        const std::string home = home_dir();
+        if (!home.empty()) {
             return std::filesystem::path(home) / ".config";
         }
         return std::filesystem::path(".config");
@@ -501,15 +501,15 @@ Environment::ChdirResult Environment::chdir(const std::filesystem::path& dir)
     return ChdirResult::CHANGED;
 }
 
-Signal<>::Subscription Environment::subscribe_to_workspace_change(
-    Signal<>::Callback callback)
+Signal<>::Subscription Environment::_subscribe_when_ready(Signal<>& signal,
+    Signal<>::Callback callback, const std::function<bool()>& ready) const
 {
     Signal<>::Subscription subscription;
     bool notify_now;
     {
         std::unique_lock lock(_workspace_mutex);
-        subscription = _workspace_changed.subscribe(callback);
-        notify_now   = _ready.load();
+        subscription = signal.subscribe(callback);
+        notify_now   = ready();
     }
     if (notify_now) {
         callback();
@@ -517,20 +517,18 @@ Signal<>::Subscription Environment::subscribe_to_workspace_change(
     return subscription;
 }
 
+Signal<>::Subscription Environment::subscribe_to_workspace_change(
+    Signal<>::Callback callback)
+{
+    return _subscribe_when_ready(_workspace_changed, std::move(callback),
+        [this] { return _ready.load(); });
+}
+
 Signal<>::Subscription Environment::subscribe_to_repository_change(
     Signal<>::Callback callback)
 {
-    Signal<>::Subscription subscription;
-    bool notify_now;
-    {
-        std::unique_lock lock(_workspace_mutex);
-        subscription = _repository_changed.subscribe(callback);
-        notify_now   = _repository != nullptr;
-    }
-    if (notify_now) {
-        callback();
-    }
-    return subscription;
+    return _subscribe_when_ready(_repository_changed, std::move(callback),
+        [this] { return _repository != nullptr; });
 }
 
 Signal<>::Subscription Environment::subscribe_to_update_change(

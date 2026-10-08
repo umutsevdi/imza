@@ -50,16 +50,6 @@ std::string str(const imza::JsonValue& v)
     return v.is_string() ? v.as<std::string>() : "";
 }
 
-double num(const imza::JsonValue& v)
-{
-    return v.is_number() ? v.as<double>() : -1;
-}
-
-bool truthy(const imza::JsonValue& v)
-{
-    return v.is_boolean() && v.get<bool>();
-}
-
 double num(const imza::JsonValue* v)
 {
     return v != nullptr && v->is_number() ? v->as<double>() : -1;
@@ -602,19 +592,25 @@ TEST_CASE("media data url reuses the cached base64 payload")
     CHECK(imza::media_data_url(media) == "data:image/png;base64,TUVET0NLRUQ=");
 }
 
-TEST_CASE("OpenAI Chat serializes user images and PDFs")
+// A user message with one image and one PDF attachment.
+imza::ChatRequest media_request(std::string model)
 {
-    const auto provider = imza::get_provider(imza::Route { });
     imza::ChatRequest request;
-    request.model = "gpt-4o";
+    request.model = std::move(model);
     imza::Message user { imza::Message::Type::USER, "inspect" };
     user.media.push_back(
         { "photo.png", "cat", imza::Attachment::Type::IMAGE, "image/png" });
     user.media.push_back({ "report.pdf", std::string("\xff\0", 2),
         imza::Attachment::Type::PDF, "application/pdf" });
     request.messages.push_back(std::move(user));
+    return request;
+}
 
-    const imza::JsonValue value = wire(provider.build(request));
+TEST_CASE("OpenAI Chat serializes user images and PDFs")
+{
+    const auto provider = imza::get_provider(imza::Route { });
+
+    const imza::JsonValue value = wire(provider.build(media_request("gpt-4o")));
     const imza::JsonValue* content
         = at(idx(*at(value, "messages"), 0), "content");
     REQUIRE(content != nullptr);
@@ -637,16 +633,8 @@ TEST_CASE("OpenAI Responses serializes user images and PDFs")
     imza::Route route;
     route.dialect       = imza::ApiStandard::OPENAI_RESPONSES;
     const auto provider = imza::get_provider(route);
-    imza::ChatRequest request;
-    request.model = "gpt-5";
-    imza::Message user { imza::Message::Type::USER, "inspect" };
-    user.media.push_back(
-        { "photo.png", "cat", imza::Attachment::Type::IMAGE, "image/png" });
-    user.media.push_back({ "report.pdf", std::string("\xff\0", 2),
-        imza::Attachment::Type::PDF, "application/pdf" });
-    request.messages.push_back(std::move(user));
 
-    const imza::JsonValue value    = wire(provider.build(request));
+    const imza::JsonValue value = wire(provider.build(media_request("gpt-5")));
     const imza::JsonValue* content = at(idx(*at(value, "input"), 0), "content");
     REQUIRE(content != nullptr);
     REQUIRE(content->is_array());
@@ -667,16 +655,8 @@ TEST_CASE("Anthropic serializes user images and PDFs")
     imza::Route route;
     route.dialect       = imza::ApiStandard::ANTHROPIC;
     const auto provider = imza::get_provider(route);
-    imza::ChatRequest request;
-    request.model = "claude";
-    imza::Message user { imza::Message::Type::USER, "inspect" };
-    user.media.push_back(
-        { "photo.png", "cat", imza::Attachment::Type::IMAGE, "image/png" });
-    user.media.push_back({ "report.pdf", std::string("\xff\0", 2),
-        imza::Attachment::Type::PDF, "application/pdf" });
-    request.messages.push_back(std::move(user));
 
-    const imza::JsonValue value = wire(provider.build(request));
+    const imza::JsonValue value = wire(provider.build(media_request("claude")));
     const imza::JsonValue* content
         = at(idx(*at(value, "messages"), 0), "content");
     REQUIRE(content != nullptr);

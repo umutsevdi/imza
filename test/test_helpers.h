@@ -4,12 +4,16 @@
 #include <string_view>
 #include <vector>
 
+#include <cctype>
+
 #include <doctest/doctest.h>
 
 #include "common/util.h"
 #include "conversation/session.h"
 #include "network/network.h"
 #include "providers/pricing.h"
+#include "tools/lua.h"
+#include "tools/tool.h"
 #include "ui/ui.h"
 
 #include <ftxui/component/component.hpp>
@@ -47,6 +51,40 @@ inline void append_tool(
     imza::Session& session, const imza::ToolCallRequest& req)
 {
     session.apply(imza::make_tool_call_event(req), imza::ModelPricing { });
+}
+
+// Runs a script through a fresh lua tool with the given host.
+inline imza::ToolOutput run_lua(
+    const std::string& script, imza::LuaHost host = { })
+{
+    auto state            = imza::make_lua_state();
+    const imza::Tool tool = imza::make_lua_tool(*state, std::move(host));
+    imza::ToolCallRequest req;
+    req.name             = "lua";
+    imza::JsonValue args = imza::JsonValue::object_t { };
+    args.get<imza::JsonValue::object_t>()["script"] = imza::JsonValue(script);
+    req.args                                        = imza::json_dump(args);
+    return imza::dispatch_tool({ &tool, 1 }, req);
+}
+
+// Whitespace runs collapsed to single spaces, for comparing rendered text
+// without depending on wrapping.
+inline std::string collapse_whitespace(std::string_view input)
+{
+    std::string out;
+    bool space = false;
+    for (const char c : input) {
+        if (std::isspace(static_cast<unsigned char>(c))) {
+            space = true;
+            continue;
+        }
+        if (space && !out.empty()) {
+            out += ' ';
+        }
+        space = false;
+        out += c;
+    }
+    return out;
 }
 
 inline ftxui::Screen to_screen(

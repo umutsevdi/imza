@@ -57,11 +57,6 @@ struct StoredCanvas {
     std::vector<std::vector<double>> grid;
 };
 
-struct StoredChat {
-    std::string title;
-    std::string transcript;
-};
-
 struct StoredDispatch {
     std::string binding;
     std::string target;
@@ -83,7 +78,7 @@ struct StoredItem {
     std::optional<std::string> name;
     std::optional<std::string> args;
     std::optional<int> result_kind;
-    std::optional<std::vector<StoredChat>> subagent_chats;
+    std::optional<std::vector<SubagentChat>> subagent_chats;
     // Flatten the result object: the wire stores result fields at the
     // item level, so mirror them directly.
     std::optional<std::string> result;
@@ -126,6 +121,17 @@ namespace {
             mapped.push_back(map(item));
         }
         return mapped;
+    }
+
+    TodoItem stored_todo_item(const StoredTodoItem& entry)
+    {
+        TodoItem item;
+        item.content = entry.content;
+        // Status integers outside the enum range fall back to pending.
+        if (entry.status >= 0 && entry.status <= 3) {
+            item.status = static_cast<TodoItem::Status>(entry.status);
+        }
+        return item;
     }
 
     StoredAttachment to_stored(const Attachment& attachment)
@@ -238,10 +244,9 @@ namespace {
             stored.call_id = tool->call_id;
             stored.name    = tool->name;
             stored.args    = tool->args;
-            stored.subagent_chats
-                = map_all(tool->subagent_chats, [](const SubagentChat& chat) {
-                      return StoredChat { chat.title, chat.transcript };
-                  });
+            if (!tool->subagent_chats.empty()) {
+                stored.subagent_chats = tool->subagent_chats;
+            }
             if (tool->result) {
                 stored.result = tool->result->text;
                 if (tool->result->return_value) {
@@ -398,13 +403,7 @@ namespace {
             TodoList todo;
             if (stored.items) {
                 for (const auto& entry : *stored.items) {
-                    TodoItem item;
-                    item.content = entry.content;
-                    if (entry.status >= 0 && entry.status <= 3) {
-                        item.status
-                            = static_cast<TodoItem::Status>(entry.status);
-                    }
-                    todo.items.push_back(std::move(item));
+                    todo.items.push_back(stored_todo_item(entry));
                 }
             }
             return todo;
@@ -623,18 +622,11 @@ Status save_session(Session& session)
     doc.title    = snapshot.title.empty() ? std::string { UNTITLED_TITLE }
                                           : snapshot.title;
     doc.saved_at = format_local_time("%Y-%m-%d %H:%M:%S");
-    std::vector<StoredTodoItem> todo;
-    todo.reserve(snapshot.todo.items.size());
-    for (const auto& item : snapshot.todo.items) {
-        todo.push_back({ item.content, static_cast<int>(item.status) });
-    }
-    doc.todo = std::move(todo);
-    std::vector<std::string> plans;
-    plans.reserve(snapshot.plans.size());
-    for (const auto& plan : snapshot.plans) {
-        plans.push_back(plan.content);
-    }
-    doc.plans             = std::move(plans);
+    doc.todo     = map_all(snapshot.todo.items, [](const TodoItem& item) {
+        return StoredTodoItem { item.content, static_cast<int>(item.status) };
+    });
+    doc.plans    = map_all(
+        snapshot.plans, [](const PlanDoc& plan) { return plan.content; });
     doc.compacted_summary = snapshot.compacted_summary;
     doc.compacted_item_count
         = static_cast<std::int64_t>(snapshot.compacted_item_count);
@@ -719,12 +711,7 @@ Status read_session(const std::filesystem::path& path, LoadedSession& loaded)
     snapshot.title       = doc.title;
     if (doc.todo) {
         for (const auto& entry : *doc.todo) {
-            TodoItem item;
-            item.content = entry.content;
-            if (entry.status >= 0 && entry.status <= 3) {
-                item.status = static_cast<TodoItem::Status>(entry.status);
-            }
-            snapshot.todo.items.push_back(std::move(item));
+            snapshot.todo.items.push_back(stored_todo_item(entry));
         }
     }
     snapshot.compacted_summary = doc.compacted_summary.value_or("");

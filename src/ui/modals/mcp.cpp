@@ -30,11 +30,6 @@ namespace {
     constexpr int PICKER_ROWS                   = 8;
     constexpr std::string_view CUSTOM_SERVER_ID = "custom";
 
-    Element status_element(const std::string& text_value, bool ok)
-    {
-        return text(text_value) | (ok ? color(HL_GREEN) : color(HL_RED));
-    }
-
     // Server ids are Lua-callable paths: lowercase, [a-z0-9_-] only.
     std::string sanitize_id(const std::string& raw)
     {
@@ -185,12 +180,8 @@ namespace {
 
         bool _confirming() const
         {
-            for (const auto& entry : _confirm) {
-                if (entry.second) {
-                    return true;
-                }
-            }
-            return false;
+            return std::ranges::any_of(
+                _confirm, [](const auto& entry) { return entry.second; });
         }
 
         void _maybe_rebuild()
@@ -357,7 +348,7 @@ namespace {
                 }
                 Element detail;
                 if (server.state == McpServerState::FAILED) {
-                    detail = status_element(fit(state_text(server), 44), false);
+                    detail = status_text(fit(state_text(server), 44), false);
                 } else {
                     detail = text(fit(state_text(server), 12)) | dim;
                 }
@@ -416,22 +407,7 @@ namespace {
 
         void _toggle_enabled(const std::string& id, bool enable)
         {
-            Config initial = _state->providers->config();
-            Config result;
-            const ConfigUpdateResult updated = update_config(
-                config_path(), initial,
-                [&id, enable](Config& cfg) {
-                    const auto found = cfg.mcp_servers.find(id);
-                    if (found == cfg.mcp_servers.end()) {
-                        return false;
-                    }
-                    found->second.enabled = enable;
-                    return true;
-                },
-                &result);
-            if (updated == ConfigUpdateResult::UPDATED && _state->mcp) {
-                _state->mcp->reload(std::move(result.mcp_servers));
-            }
+            imza::mcp_set_server_enabled(*_state, id, enable);
         }
 
         void _confirm_remove(int index)
@@ -442,19 +418,10 @@ namespace {
                 return;
             }
             const std::string id = snapshot[static_cast<std::size_t>(index)].id;
-            Config initial       = _state->providers->config();
-            Config result;
-            const ConfigUpdateResult updated = update_config(
-                config_path(), initial,
-                [&id](Config& cfg) { return cfg.mcp_servers.erase(id) != 0; },
-                &result);
-            if (updated != ConfigUpdateResult::UPDATED) {
-                _row_error = "Could not save the configuration.";
-            } else {
+            if (imza::mcp_remove_server(*_state, id)) {
                 _row_error.clear();
-                if (_state->mcp) {
-                    _state->mcp->reload(std::move(result.mcp_servers));
-                }
+            } else {
+                _row_error = "Could not save the configuration.";
             }
             _maybe_rebuild();
         }
@@ -611,7 +578,7 @@ namespace {
                         _add_button ? _add_button->Render() : text(""),
                         text("  "),
                         _row_error.empty() ? text("")
-                                           : status_element(_row_error, false),
+                                           : status_text(_row_error, false),
                     }));
                 }
             }
@@ -642,7 +609,6 @@ namespace {
         bool _built = false;
 
         std::string _selected;
-        bool _picker_open = true;
         int _picker_begin = 0; // first visible row of the windowed list
         std::string _picker_buf;
         int _picker_cursor = 0;

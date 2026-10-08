@@ -22,21 +22,6 @@ imza::McpServerConfig server_config(
     return config;
 }
 
-// Connect/disconnect run on manager workers; poll for the transition.
-bool wait_state(
-    imza::McpManager& manager, const std::string& id, imza::McpServerState want)
-{
-    for (int i = 0; i < 1000; ++i) {
-        for (const auto& server : manager.snapshot()) {
-            if (server.id == id && server.state == want) {
-                return true;
-            }
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-    return false;
-}
-
 template <typename Predicate> bool wait_for(Predicate predicate)
 {
     for (int i = 0; i < 1000; ++i) {
@@ -46,6 +31,20 @@ template <typename Predicate> bool wait_for(Predicate predicate)
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     return false;
+}
+
+// Connect/disconnect run on manager workers; poll for the transition.
+bool wait_state(
+    imza::McpManager& manager, const std::string& id, imza::McpServerState want)
+{
+    return wait_for([&] {
+        for (const auto& server : manager.snapshot()) {
+            if (server.id == id && server.state == want) {
+                return true;
+            }
+        }
+        return false;
+    });
 }
 
 } // namespace
@@ -162,6 +161,12 @@ TEST_CASE("mcp manager serializes concurrent calls on one session")
 
     imza::McpManager manager({ { "exa", server_config("exa", server.url()) } });
     manager.connect("exa");
+    // The handshake runs on a manager worker; calls before it completes
+    // would fail, so wait for the inventory first.
+    for (int i = 0; i < 1000 && !manager.tools("exa").has_value(); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    REQUIRE(manager.tools("exa").has_value());
 
     std::atomic<int> ok = 0;
     std::vector<std::thread> workers;

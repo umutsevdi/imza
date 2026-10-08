@@ -11,12 +11,6 @@ namespace {
 using imza::test::TempDir;
 using JsonValue = imza::JsonValue;
 
-const imza::JsonValue* find_member(
-    const imza::JsonValue& v, std::string_view key)
-{
-    return imza::find_member(v, key);
-}
-
 } // namespace
 
 TEST_CASE("write then read_json_file round-trips a document")

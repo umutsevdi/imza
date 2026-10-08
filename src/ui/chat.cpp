@@ -43,11 +43,6 @@ namespace {
     constexpr int TIMELINE_OVERSCAN       = 20;
     constexpr const char* INTERRUPT_HINT  = "Esc interrupt";
 
-    Element vertical_space(int height)
-    {
-        return text("") | size(HEIGHT, EQUAL, std::max(0, height));
-    }
-
     Element empty_state_banner()
     {
         Elements lines;

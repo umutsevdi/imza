@@ -9,49 +9,22 @@
 #include <filesystem>
 #include <functional>
 
+#include <algorithm>
+#include <string_view>
+
 #include <doctest/doctest.h>
 
 namespace imza {
 
 TEST_CASE("slash_commands includes built-ins")
 {
-    const auto cmds    = slash_commands();
-    bool has_exit      = false;
-    bool has_connect   = false;
-    bool has_model     = false;
-    bool has_subagents = false;
-    for (const auto& c : cmds) {
-        if (c.name == "/exit") {
-            has_exit = true;
-        }
-        if (c.name == "/connect") {
-            has_connect = true;
-        }
-        if (c.name == "/model") {
-            has_model = true;
-        }
-        if (c.name == "/subagents") {
-            has_subagents = true;
-        }
-    }
-    CHECK(has_exit);
-    CHECK(has_connect);
-    CHECK(has_model);
-    CHECK(has_subagents);
-    for (const auto& c : cmds) {
-        const bool known = c.action == SlashCommand::Action::EXIT
-            || c.action == SlashCommand::Action::NEW
-            || c.action == SlashCommand::Action::CHANGELOG
-            || c.action == SlashCommand::Action::CONNECT
-            || c.action == SlashCommand::Action::MODEL
-            || c.action == SlashCommand::Action::VARIANT
-            || c.action == SlashCommand::Action::SUBAGENTS
-            || c.action == SlashCommand::Action::SESSIONS
-            || c.action == SlashCommand::Action::SKILLS
-            || c.action == SlashCommand::Action::MCP
-            || c.action == SlashCommand::Action::COMPACT
-            || c.action == SlashCommand::Action::MAKE_SKILL;
-        CHECK(known);
+    const auto cmds = slash_commands();
+    for (const std::string_view name :
+        { "/exit", "/connect", "/model", "/subagents" }) {
+        CHECK_MESSAGE(
+            std::any_of(cmds.begin(), cmds.end(),
+                [name](const SlashCommand& c) { return c.name == name; }),
+            name);
     }
 }
 

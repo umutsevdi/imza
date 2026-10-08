@@ -31,6 +31,12 @@ namespace {
         return vbox({ section_title(std::string(title)), std::move(body) });
     }
 
+    Element titled_box(std::string_view title, Elements rows)
+    {
+        return titled_section(
+            title, vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER));
+    }
+
     Element changed_file_item(const ChangedFile& file);
 
     Element changed_files_panel(Elements rows, const ChangeSummary& changes)
@@ -210,8 +216,7 @@ private:
             rows.push_back(
                 _plan_link(index, plans[index].content, latest)->Render());
         }
-        parts.push_back(titled_section("Plans",
-            vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER)));
+        parts.push_back(titled_box("Plans", std::move(rows)));
     }
 
     Element _render_changed_files(const RepositoryState& repository)
@@ -248,8 +253,7 @@ private:
                         | color(PANEL_FG_DIM) })
                 | xflex);
         }
-        parts.push_back(titled_section("Review Comments",
-            vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER)));
+        parts.push_back(titled_box("Review Comments", std::move(rows)));
     }
 
     Component _changed_file_link(const ChangedFile& file)

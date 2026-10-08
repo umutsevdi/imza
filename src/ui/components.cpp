@@ -205,6 +205,18 @@ ftxui::Element dim_spinner(int frame)
         | ftxui::color(PANEL_FG_DIM);
 }
 
+ftxui::Element vertical_space(int height)
+{
+    return ftxui::text("")
+        | ftxui::size(ftxui::HEIGHT, ftxui::EQUAL, std::max(0, height));
+}
+
+ftxui::Element status_text(const std::string& text, bool ok)
+{
+    return ftxui::text(text)
+        | (ok ? ftxui::color(HL_GREEN) : ftxui::color(HL_RED));
+}
+
 ftxui::Element choice_label(std::string label, bool selected, bool focused)
 {
     ftxui::Element e = ftxui::text(std::move(label));

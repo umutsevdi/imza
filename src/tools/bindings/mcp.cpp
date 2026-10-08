@@ -16,18 +16,6 @@ namespace {
 
     constexpr std::size_t MAX_MCP_CHARS = 40000;
 
-    // Cap at a UTF-8 boundary, then mark (mirrors the web bindings).
-    std::string cap_text(std::string text)
-    {
-        if (text.size() <= MAX_MCP_CHARS) {
-            return text;
-        }
-        std::string out(truncate_utf8(text, MAX_MCP_CHARS));
-        out += "\n[truncated: showing first " + std::to_string(out.size())
-            + " of the content]";
-        return out;
-    }
-
     // All non-empty text blocks joined; MCP tools may split one answer
     // across several blocks.
     std::string joined_text(const McpToolCallResult& result)
@@ -52,22 +40,23 @@ namespace {
         const std::string server = luaL_checkstring(L, 1);
         const std::string tool   = luaL_checkstring(L, 2);
         const std::string target = server + "." + tool;
+        const auto fail          = [&](const std::string& message) {
+            record_call(L, "mcp.call", target, false);
+            return binding_error(L, message);
+        };
 
         JsonValue arguments;
         if (!lua_isnoneornil(L, 3)) {
             std::string error;
             if (!lua_value_to_json(L, 3, arguments, error)) {
-                record_call(L, "mcp.call", target, false);
-                return binding_error(L, "mcp.call: " + error);
+                return fail("mcp.call: " + error);
             }
         }
 
         LuaRunContext* run  = run_of(L);
         McpManager* manager = run->host->mcp ? run->host->mcp() : nullptr;
         if (manager == nullptr) {
-            record_call(L, "mcp.call", target, false);
-            return binding_error(
-                L, "mcp.call: MCP is not available in this run");
+            return fail("mcp.call: MCP is not available in this run");
         }
 
         McpToolCallResult result;
@@ -75,8 +64,7 @@ namespace {
         const Status st
             = manager->call(server, tool, arguments, result, detail);
         if (st != Status::OK) {
-            record_call(L, "mcp.call", target, false);
-            return binding_error(L, "mcp.call: " + detail);
+            return fail("mcp.call: " + detail);
         }
         record_call(L, "mcp.call", target, true);
 
@@ -86,7 +74,9 @@ namespace {
             // server's message becomes the aborting error text.
             return binding_error(L,
                 "mcp.call: tool error from '" + target + "'"
-                    + (text.empty() ? std::string { } : ": " + cap_text(text)));
+                    + (text.empty()
+                            ? std::string { }
+                            : ": " + truncate_with_count(text, MAX_MCP_CHARS)));
         }
         lua_pushlstring(L, text.data(), text.size());
         return 1;
@@ -108,12 +98,11 @@ The args table becomes the tool's JSON arguments.)desc",
 
 } // namespace
 
-std::span<const LuaMethod> mcp_lua_methods() { return BINDINGS; }
-
-void register_mcp(LuaState& state)
+const LuaModule& mcp_module()
 {
-    state.register_module({ false, "mcp",
-        "Call tools on user-configured MCP servers.", { }, mcp_lua_methods() });
+    static constexpr LuaModule MODULE { false, "mcp",
+        "Call tools on user-configured MCP servers.", { }, BINDINGS };
+    return MODULE;
 }
 
 } // namespace imza

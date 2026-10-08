@@ -8,7 +8,6 @@ namespace imza {
 
 namespace openai_responses {
 
-    // --- Request wire structs -------------------------------------------
     struct ToolWire {
         std::string type = "function";
         std::string name;
@@ -159,11 +158,9 @@ namespace openai_responses {
         for (const Message& message : req.messages) {
             append_message(body.input, message);
         }
-        auto out = glz::write<JSON_WRITE>(body);
-        return out ? std::move(out.value()) : std::string { };
+        return json_dump(body);
     }
 
-    // --- SSE parsing: typed payload views -------------------------------
     struct UsageDetails {
         std::uint64_t cached_tokens      = 0;
         std::uint64_t cache_write_tokens = 0;

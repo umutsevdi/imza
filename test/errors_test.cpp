@@ -70,6 +70,19 @@ TEST_CASE("OpenAI parse turns mid-stream error blocks into ERROR events")
 
 using AgentEnv = imza::test::AgentEnv;
 
+// True when an assistant turn with exactly `markdown` is in the session.
+bool assistant_markdown_present(const AgentEnv& env, std::string_view markdown)
+{
+    for (const auto& it : env.session->items()) {
+        if (const auto* a = std::get_if<imza::AssistantTurn>(&it)) {
+            if (a->markdown == markdown) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 TEST_CASE("controller retries rate-limited requests and then completes")
 {
     AgentEnv env;
@@ -91,14 +104,7 @@ TEST_CASE("controller retries rate-limited requests and then completes")
     REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
     CHECK(env.requests.size() == 2);
     CHECK(env.session->error().empty());
-    const auto& items = env.session->items();
-    bool found        = false;
-    for (const auto& it : items) {
-        if (const auto* a = std::get_if<imza::AssistantTurn>(&it)) {
-            found = found || a->markdown == "recovered";
-        }
-    }
-    CHECK(found);
+    CHECK(assistant_markdown_present(env, "recovered"));
 }
 
 TEST_CASE("controller does not retry budget errors")
@@ -143,14 +149,7 @@ TEST_CASE("controller retries stalled connections before any data arrives")
     REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
     CHECK(env.requests.size() == 2);
     CHECK(env.session->error().empty());
-    const auto& items = env.session->items();
-    bool found        = false;
-    for (const auto& it : items) {
-        if (const auto* a = std::get_if<imza::AssistantTurn>(&it)) {
-            found = found || a->markdown == "recovered";
-        }
-    }
-    CHECK(found);
+    CHECK(assistant_markdown_present(env, "recovered"));
 }
 
 TEST_CASE("controller does not retry a stall after content arrived")

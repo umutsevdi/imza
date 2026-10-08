@@ -704,9 +704,7 @@ TEST_CASE("locked sessions block loads and deletion, then recover")
 
     // After the foreign lock is dropped the same probe succeeds and the
     // session can be activated; activating another path releases the first.
-    foreign = std::variant<imza::FileLock, imza::FileLockError> {
-        imza::FileLockError { }
-    };
+    imza::test::release_lock(foreign);
     CHECK_FALSE(store.is_locked(path));
     REQUIRE(store.activate(path));
     CHECK(store.is_locked(path));
@@ -760,9 +758,7 @@ TEST_CASE("switch_session locks the target and reports foreign locks")
     CHECK(state->session->session_id() == current_stem);
     CHECK(imza::saved_sessions().size() == 2);
 
-    foreign = std::variant<imza::FileLock, imza::FileLockError> {
-        imza::FileLockError { }
-    };
+    imza::test::release_lock(foreign);
     imza::switch_session(*state, target_path);
     CHECK(state->session->title() == "Target");
     CHECK(state->session->error().empty());
@@ -929,6 +925,8 @@ TEST_CASE("plan submission messages are emitted once per revision in build")
     const std::string& skeleton = imza::test::PLAN_SKELETON;
     REQUIRE(session.create_plan(skeleton).empty());
 
+    // No plan staged and PLAN mode both hold nothing back for build.
+    CHECK_FALSE(imza::Session { }.plan_submission_for_build().has_value());
     CHECK_FALSE(session.plan_submission_for_build().has_value());
 
     // First build turn of a stint: the plan rides as an approval message.
@@ -965,17 +963,6 @@ TEST_CASE("plan submission messages are emitted once per revision in build")
         CHECK(submitted->find("Plan approved for build: <plan>") == 0);
         CHECK_FALSE(loaded.plan_submission_for_build().has_value());
     }
-}
-
-TEST_CASE("plan submission requires build mode and a plan")
-{
-    imza::Session session;
-    CHECK_FALSE(session.plan_submission_for_build().has_value());
-
-    const std::string& skeleton = imza::test::PLAN_SKELETON;
-    REQUIRE(session.create_plan(skeleton).empty());
-    // PLAN mode with a plan still holds nothing back for build.
-    CHECK_FALSE(session.plan_submission_for_build().has_value());
 }
 
 TEST_CASE("plan changes publish the plan signal")
