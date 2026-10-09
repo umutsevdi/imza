@@ -395,15 +395,15 @@ bool mcp_remove_server(ApplicationState& state, const std::string& id)
         state, [&id](Config& cfg) { return cfg.mcp_servers.erase(id) != 0; });
 }
 
-bool mcp_set_server_enabled(
-    ApplicationState& state, const std::string& id, bool enabled)
+bool mcp_set_server_autoload(
+    ApplicationState& state, const std::string& id, bool autoload)
 {
-    return mutate_mcp_config(state, [&id, enabled](Config& cfg) {
+    return mutate_mcp_config(state, [&id, autoload](Config& cfg) {
         const auto found = cfg.mcp_servers.find(id);
         if (found == cfg.mcp_servers.end()) {
             return false;
         }
-        found->second.enabled = enabled;
+        found->second.autoload = autoload;
         return true;
     });
 }

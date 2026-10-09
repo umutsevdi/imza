@@ -57,7 +57,7 @@ namespace {
             return session;
         }
         McpEndpoint endpoint;
-        endpoint.url          = resolved_mcp_url(config);
+        endpoint.url = resolved_mcp_url(config);
         if (endpoint.url.empty()) {
             detail = dangling_catalog_detail(config);
             return std::nullopt;
@@ -144,7 +144,7 @@ void McpManager::reload(std::map<std::string, McpServerConfig> servers)
                 auto entry    = std::make_shared<ServerEntry>();
                 entry->config = std::move(config);
                 entry->state  = entry->config.enabled ? McpServerState::OFFLINE
-                                                      : McpServerState::DISABLED;
+                                                      : McpServerState::INACTIVE;
                 fresh.emplace(id, std::move(entry));
                 changed = true;
                 continue;
@@ -160,12 +160,13 @@ void McpManager::reload(std::map<std::string, McpServerConfig> servers)
                 entry->tools.clear();
                 entry->detail = "";
                 entry->state  = entry->config.enabled ? McpServerState::OFFLINE
-                                                      : McpServerState::DISABLED;
+                                                      : McpServerState::INACTIVE;
                 changed       = true;
             } else {
                 std::lock_guard state_lock(entry->state_mutex);
                 entry->config.label       = config.label;
                 entry->config.description = config.description;
+                entry->config.autoload    = config.autoload;
             }
             fresh.emplace(id, std::move(entry));
         }
@@ -392,6 +393,22 @@ void McpManager::connect(const std::string& id)
     spawn([this, entry] { run_handshake(entry); });
 }
 
+void McpManager::autoload()
+{
+    std::vector<std::string> ids;
+    {
+        std::lock_guard map_lock(_map_mutex);
+        for (const auto& [id, entry] : _servers) {
+            if (entry->config.autoload) {
+                ids.push_back(id);
+            }
+        }
+    }
+    for (const std::string& id : ids) {
+        connect(id);
+    }
+}
+
 void McpManager::disconnect(const std::string& id)
 {
     const std::shared_ptr<ServerEntry> entry = find(id);
@@ -427,8 +444,8 @@ Status McpManager::call(const std::string& id, const std::string& tool,
     {
         std::lock_guard state_lock(entry->state_mutex);
         if (entry->state != McpServerState::CONNECTED) {
-            detail = entry->state == McpServerState::DISABLED
-                ? "mcp server '" + id + "' is disabled"
+            detail = entry->state == McpServerState::INACTIVE
+                ? "mcp server '" + id + "' is inactive"
                 : "mcp server '" + id + "' is not connected";
             return Status::CONFIG_ERROR;
         }
@@ -449,7 +466,7 @@ std::vector<McpServerSnapshot> McpManager::snapshot() const
         std::lock_guard state_lock(entry->state_mutex);
         out.push_back(McpServerSnapshot { id, entry->config.label,
             entry->config.description, entry->detail, entry->state,
-            entry->tools.size() });
+            entry->tools.size(), entry->config.autoload });
     }
     return out;
 }

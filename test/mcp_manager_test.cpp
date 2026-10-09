@@ -125,7 +125,7 @@ TEST_CASE("mcp manager reports connection failures and gates calls")
     manager.connect("missing"); // unknown ids are ignored, not a crash
 }
 
-TEST_CASE("mcp manager keeps disabled servers off")
+TEST_CASE("mcp manager keeps inactive servers off")
 {
     imza::test::allow_loopback_direct();
     imza::test::LoopbackMcpServer server;
@@ -136,17 +136,17 @@ TEST_CASE("mcp manager keeps disabled servers off")
     imza::McpManager manager({ { "off", config } });
 
     auto snapshot = manager.snapshot();
-    CHECK(snapshot[0].state == imza::McpServerState::DISABLED);
+    CHECK(snapshot[0].state == imza::McpServerState::INACTIVE);
 
     manager.connect("off"); // no-op, not an error
     snapshot = manager.snapshot();
-    CHECK(snapshot[0].state == imza::McpServerState::DISABLED);
+    CHECK(snapshot[0].state == imza::McpServerState::INACTIVE);
 
     imza::McpToolCallResult result;
     std::string detail;
     CHECK(manager.call("off", "echo", { }, result, detail)
         == imza::Status::CONFIG_ERROR);
-    CHECK(detail.find("disabled") != std::string::npos);
+    CHECK(detail.find("inactive") != std::string::npos);
     CHECK_FALSE(manager.tools("off").has_value());
 
     server.stop();
@@ -309,7 +309,7 @@ TEST_CASE("mcp manager reload drops removed servers and applies toggles")
     imza::McpServerConfig toggled = server_config("exa", server.url());
     toggled.enabled               = false;
     manager.reload({ { "exa", toggled } });
-    REQUIRE(wait_state(manager, "exa", imza::McpServerState::DISABLED));
+    REQUIRE(wait_state(manager, "exa", imza::McpServerState::INACTIVE));
 
     imza::McpServerConfig fresh = server_config("exa", server.url());
     manager.reload({ { "exa", fresh } });
@@ -319,6 +319,43 @@ TEST_CASE("mcp manager reload drops removed servers and applies toggles")
     manager.reload({ { "other", server_config("other", server.url()) } });
     CHECK(manager.snapshot().size() == 1);
     CHECK(manager.snapshot()[0].id == "other");
+
+    server.stop();
+}
+
+TEST_CASE("mcp manager autoloads only servers flagged for autoload")
+{
+    imza::test::allow_loopback_direct();
+    imza::test::LoopbackMcpServer server;
+    REQUIRE(server.start());
+
+    imza::McpServerConfig eager = server_config("eager", server.url());
+    eager.autoload              = true;
+    imza::McpServerConfig lazy  = server_config("lazy", server.url());
+    imza::McpManager manager({ { "eager", eager }, { "lazy", lazy } });
+
+    for (const auto& entry : manager.snapshot()) {
+        CHECK(entry.state == imza::McpServerState::OFFLINE);
+    }
+
+    manager.autoload();
+    REQUIRE(wait_state(manager, "eager", imza::McpServerState::CONNECTED));
+    for (const auto& entry : manager.snapshot()) {
+        if (entry.id == "lazy") {
+            CHECK(entry.state == imza::McpServerState::OFFLINE);
+            CHECK_FALSE(entry.autoload);
+        }
+        if (entry.id == "eager") {
+            CHECK(entry.autoload);
+        }
+    }
+
+    imza::McpServerConfig off = server_config("off", server.url());
+    off.autoload              = true;
+    off.enabled               = false;
+    manager.reload({ { "eager", eager }, { "lazy", lazy }, { "off", off } });
+    manager.autoload();
+    REQUIRE(wait_state(manager, "off", imza::McpServerState::INACTIVE));
 
     server.stop();
 }

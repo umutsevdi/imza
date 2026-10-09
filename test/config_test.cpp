@@ -13,6 +13,7 @@
 #include "network/json_io.h"
 #include "permissions/store.h"
 #include "platform/config.h"
+#include "platform/json_file.h"
 #include "test_fs.h"
 
 namespace {
@@ -474,6 +475,7 @@ TEST_CASE("config roundtrip preserves mcp servers")
     server.url                  = "https://mcp.exa.ai/mcp";
     server.headers["x-api-key"] = "secret";
     server.bearer_token         = "tok";
+    server.autoload             = true;
     cfg.mcp_servers["exa"]      = server;
 
     REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
@@ -489,6 +491,24 @@ TEST_CASE("config roundtrip preserves mcp servers")
     CHECK(back.headers.at("x-api-key") == "secret");
     CHECK(back.bearer_token == "tok");
     CHECK(back.enabled);
+    CHECK(back.autoload);
+}
+
+TEST_CASE("saved config points at the published schema")
+{
+    const auto path = temp_file("mcp-schema.json");
+    imza::Config cfg;
+    REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
+
+    const std::optional<std::string> text = imza::read_text_file(path);
+    REQUIRE(text.has_value());
+    CHECK(text->find("\"$schema\"") != std::string::npos);
+    CHECK(
+        text->find(std::string(imza::CONFIG_SCHEMA_URL)) != std::string::npos);
+
+    // The key is ignored on read; the file still loads.
+    imza::Config loaded;
+    CHECK(imza::load_config(path, loaded) == imza::Status::OK);
 }
 
 TEST_CASE("load_config validates mcp server entries")
@@ -523,6 +543,16 @@ TEST_CASE("load_config validates mcp server entries")
     REQUIRE(imza::load_config(upgrade, cfg) == imza::Status::OK);
     CHECK(cfg.mcp_servers.at("exa").url == "https://mcp.exa.ai/mcp");
     CHECK(cfg.mcp_servers.at("exa").enabled);
+    CHECK_FALSE(cfg.mcp_servers.at("exa").autoload); // defaults off
+
+    const auto autoload = temp_file("mcp-autoload.json");
+    {
+        std::ofstream out(autoload);
+        out << R"({"mcp_servers":{"exa":{"url":"https://x",)"
+            << R"("autoload":true}}})";
+    }
+    REQUIRE(imza::load_config(autoload, cfg) == imza::Status::OK);
+    CHECK(cfg.mcp_servers.at("exa").autoload);
 }
 
 TEST_CASE("mcp config accepts catalogue references without urls")

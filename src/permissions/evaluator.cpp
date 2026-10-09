@@ -226,8 +226,7 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
         LoadMcpToolArgs arguments;
         if (json_parse_checked(original.args, arguments)
             || arguments.server.empty()) {
-            return reject(
-                std::move(request), std::string(LOAD_MCP_ARGS_ERROR));
+            return reject(std::move(request), std::string(LOAD_MCP_ARGS_ERROR));
         }
         return accept(std::move(request));
     }

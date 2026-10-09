@@ -159,7 +159,7 @@ namespace {
                 break;
             case McpServerState::CONNECTING: catalog += " [connecting]"; break;
             case McpServerState::FAILED: catalog += " [failed]"; break;
-            case McpServerState::DISABLED: catalog += " [disabled]"; break;
+            case McpServerState::INACTIVE: catalog += " [inactive]"; break;
             case McpServerState::OFFLINE: catalog += " [offline]"; break;
             }
             if (!server.description.empty()) {

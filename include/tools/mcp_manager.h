@@ -16,7 +16,7 @@
 
 namespace imza {
 
-enum class McpServerState { OFFLINE, CONNECTING, CONNECTED, FAILED, DISABLED };
+enum class McpServerState { OFFLINE, CONNECTING, CONNECTED, FAILED, INACTIVE };
 
 struct McpServerSnapshot {
     std::string id;
@@ -25,6 +25,7 @@ struct McpServerSnapshot {
     std::string detail; // failure reason when state == FAILED
     McpServerState state   = McpServerState::OFFLINE;
     std::size_t tool_count = 0;
+    bool autoload          = false;
 };
 
 // Owns one MCP session per configured server. Long-lived
@@ -47,9 +48,12 @@ public:
     // network I/O. Announces when anything moved.
     void reload(std::map<std::string, McpServerConfig> servers);
 
-    // Starts a handshake + tools/list on a worker; unknown, disabled,
+    // Starts a handshake + tools/list on a worker; unknown, inactive,
     // connecting and already-connected ids are no-ops.
     void connect(const std::string& id);
+
+    // Connects every enabled server flagged for autoload.
+    void autoload();
 
     // Marks the server offline immediately and ends the remote session on
     // a worker (best-effort DELETE; servers may refuse it).

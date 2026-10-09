@@ -129,17 +129,11 @@ public:
             std::vector<std::string> mcp_servers;
             if (_state->mcp != nullptr) {
                 for (const auto& server : _state->mcp->snapshot()) {
-                    if (server.state == McpServerState::DISABLED) {
+                    if (server.state != McpServerState::CONNECTED) {
                         continue;
                     }
-                    std::string line = server.id;
-                    if (server.state == McpServerState::CONNECTED) {
-                        line += " · " + std::to_string(server.tool_count)
-                            + " tools";
-                    } else if (server.state == McpServerState::FAILED) {
-                        line += " ✗";
-                    }
-                    mcp_servers.push_back(std::move(line));
+                    mcp_servers.push_back(server.id + " · "
+                        + std::to_string(server.tool_count) + " tools");
                 }
             }
             parts.push_back(render_context_box(env->agent_rules_path(),

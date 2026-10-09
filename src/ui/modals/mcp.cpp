@@ -69,7 +69,7 @@ namespace {
         case McpServerState::FAILED:
             return server.detail.empty() ? std::string("failed")
                                          : server.detail;
-        case McpServerState::DISABLED: return "disabled";
+        case McpServerState::INACTIVE: return "inactive";
         case McpServerState::OFFLINE: return "offline";
         }
         return "";
@@ -272,7 +272,8 @@ namespace {
             return std::to_string(_session->modal_serial()) + "/"
                 + std::to_string(_servers().size()) + "/" + _selected + "/"
                 + std::to_string(_confirming()) + "/" + std::to_string(_stdio)
-                + "/" + std::to_string(_in_add);
+                + "/" + std::to_string(_in_add) + "/"
+                + std::to_string(_autoload);
         }
 
         bool _confirming() const
@@ -466,6 +467,7 @@ namespace {
             } else {
                 _transport_button.reset();
             }
+            _autoload_button = Checkbox("autoload", &_autoload);
 
             Components rows;
             const auto all = _servers();
@@ -473,6 +475,11 @@ namespace {
             for (int i = 0; i < static_cast<int>(all.size()); ++i) {
                 rows.push_back(_make_row(i));
             }
+            std::erase_if(_row_autoload, [&all](const auto& entry) {
+                return std::ranges::none_of(all, [&entry](const auto& server) {
+                    return server.id == entry.first;
+                });
+            });
             _rows_container = Container::Vertical(std::move(rows));
 
             Components add_parts;
@@ -493,6 +500,7 @@ namespace {
                 add_parts.push_back(_timeout_input);
             }
             add_parts.push_back(_label_input);
+            add_parts.push_back(_autoload_button);
             if (!oauth) {
                 add_parts.push_back(_add_button);
             }
@@ -574,7 +582,7 @@ namespace {
                             }
                         }));
                 } else if (server.state != McpServerState::CONNECTING
-                    && server.state != McpServerState::DISABLED) {
+                    && server.state != McpServerState::INACTIVE) {
                     buttons.push_back(
                         action_button("Connect", [this, id = server.id] {
                             if (_state->mcp) {
@@ -582,18 +590,28 @@ namespace {
                             }
                         }));
                 }
-                buttons.push_back(action_button(
-                    server.state == McpServerState::DISABLED ? "Enable"
-                                                             : "Disable",
-                    [this, id = server.id,
-                        enable = server.state == McpServerState::DISABLED] {
-                        imza::mcp_set_server_enabled(*_state, id, enable);
-                    }));
                 buttons.push_back(action_button("Remove", [this, index] {
                     _confirm[index] = true;
                     _maybe_rebuild();
                 }));
-                right = Container::Horizontal(std::move(buttons));
+                bool& autoload = _row_autoload[server.id];
+                autoload       = server.autoload;
+                CheckboxOption autoload_option;
+                autoload_option.label   = "Autoload";
+                autoload_option.checked = &autoload;
+                autoload_option.on_change
+                    = [this, id = server.id, flag = &autoload] {
+                          imza::mcp_set_server_autoload(*_state, id, *flag);
+                      };
+                buttons.push_back(Checkbox(std::move(autoload_option)));
+                Components spaced;
+                for (std::size_t i = 0; i < buttons.size(); ++i) {
+                    if (i != 0) {
+                        spaced.push_back(Renderer([] { return text("  "); }));
+                    }
+                    spaced.push_back(std::move(buttons[i]));
+                }
+                right = Container::Horizontal(std::move(spaced));
             }
 
             Component row = Container::Horizontal({ label, right });
@@ -691,6 +709,7 @@ namespace {
             }
             server.bearer_token = std::string(trim(_token_buf));
             server.enabled      = true;
+            server.autoload     = _autoload;
 
             for (const auto& existing : _servers()) {
                 if (existing.id == server.id) {
@@ -710,7 +729,8 @@ namespace {
             _args_buf.clear();
             _env_buf.clear();
             _workdir_buf.clear();
-            _stdio = false;
+            _stdio    = false;
+            _autoload = false;
             _close_picker();
             _maybe_rebuild();
         }
@@ -879,8 +899,11 @@ namespace {
         std::string _timeout_buf;
         int _timeout_cursor = 0;
 
-        bool _stdio = false; // custom-server transport choice
+        bool _stdio    = false; // custom-server transport choice
+        bool _autoload = false; // add-form autoload choice
+        std::map<std::string, bool> _row_autoload;
         Component _transport_button;
+        Component _autoload_button;
         Component _command_input;
         Component _args_input;
         Component _env_input;

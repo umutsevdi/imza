@@ -161,6 +161,7 @@ namespace {
         std::vector<std::string> instructions = std::move(config.instructions);
         state->providers = std::make_shared<ProviderStore>(std::move(config));
         state->mcp       = std::make_shared<McpManager>(std::move(mcp_servers));
+        state->mcp->autoload();
         state->subagents = std::make_shared<SubagentManager>();
         state->environment
             = std::make_shared<Environment>(std::move(instructions));

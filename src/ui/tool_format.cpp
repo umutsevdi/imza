@@ -117,8 +117,7 @@ std::string tool_call_head(const ToolCall& call)
     if (call.name == "load_mcp") {
         LoadMcpToolArgs parsed;
         (void)json_parse_checked(call.args, parsed);
-        return parsed.server.empty() ? "Load MCP"
-                                     : "Load MCP " + parsed.server;
+        return parsed.server.empty() ? "Load MCP" : "Load MCP " + parsed.server;
     }
     if (call.name == "lua") {
         const std::string counts = lua_dispatch_counts(call);

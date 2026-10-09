@@ -73,7 +73,8 @@ struct McpServerConfig {
     std::vector<std::string> args;
     std::map<std::string, std::string> env;
     std::string working_directory;
-    bool enabled = true;
+    bool enabled  = true;
+    bool autoload = false;
     // Per-request timeout override; 0 = the client default (25 s).
     long timeout_secs = 0;
 
@@ -133,6 +134,11 @@ void apply_skill_policies(Config& config, const SkillPolicyChanges& changes);
 // Directories that no longer exist are dropped rather than failing the
 // batch: a stale allowlist entry must not block startup.
 PermissionStore::Grants allow_grants(const AllowConfig& allow);
+
+// Published JSON Schema for config.json, written into the file as
+// `$schema` so editors offer autocomplete while hand-editing.
+inline constexpr std::string_view CONFIG_SCHEMA_URL
+    = "https://umutsevdi.github.io/imza/config.schema.json";
 
 // Imza's own persisted-state root: config, sessions, history, caches.
 std::filesystem::path data_dir(void);

@@ -3,8 +3,10 @@
 
 #include <doctest/doctest.h>
 
+#include "loopback_mcp_server.h"
 #include "test_helpers.h"
 #include "test_state.h"
+#include "tools/mcp_manager.h"
 #include "ui/ui.h"
 #include "workspace/environment.h"
 
@@ -120,6 +122,46 @@ TEST_CASE("render_todo wraps long items instead of clipping")
     CHECK(out.find("flaky") != std::string::npos);
     CHECK(out.find("regression") != std::string::npos);
     CHECK(out.find("test") != std::string::npos);
+}
+
+TEST_CASE("side panel context box lists only reachable mcp servers")
+{
+    imza::test::allow_loopback_direct();
+    imza::test::LoopbackMcpServer server;
+    REQUIRE(server.start());
+
+    auto state = imza::test::make_test_state();
+    state->mcp->reload({ { "reachable",
+        imza::McpServerConfig { .id = "reachable", .url = server.url() } } });
+    state->mcp->connect("reachable");
+    imza::test::wait_until([&] {
+        for (const auto& entry : state->mcp->snapshot()) {
+            if (entry.id == "reachable"
+                && entry.state == imza::McpServerState::CONNECTED) {
+                return true;
+            }
+        }
+        return false;
+    });
+
+    auto panel = imza::make_side_panel(
+        state,
+        [] { return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 120, 40 }; },
+        [] { return imza::WorkflowPhase::PLAN; }, [](imza::WorkflowPhase) { });
+
+    const std::string connected = imza::test::to_text(panel->Render(), 120, 40);
+    CHECK(connected.find("MCP") != std::string::npos);
+    CHECK(connected.find("reachable") != std::string::npos);
+
+    state->mcp->reload({ { "reachable",
+                             imza::McpServerConfig {
+                                 .id = "reachable", .url = server.url() } },
+        { "dormant",
+            imza::McpServerConfig { .id = "dormant", .url = server.url() } } });
+    const std::string offline = imza::test::to_text(panel->Render(), 120, 40);
+    CHECK(offline.find("dormant") == std::string::npos);
+
+    server.stop();
 }
 
 TEST_CASE("render_context_box lists attachment basenames under files")

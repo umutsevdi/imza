@@ -22,7 +22,9 @@ Changes:
     and calls them directly. Connected servers appear in the sidebar with live
     tool counts, tool rosters refresh automatically when servers change,
     failed connections recover with retries, and every server carries its
-    own credential and timeout settings.
+    own credential and timeout settings. Servers can be flagged to connect
+    automatically at startup, the sidebar lists only the servers the agent
+    can actually reach, and inactive servers are shown as such.
   - Added the EVREN provider.
   - The config file can now pre-approve directories and shell commands, and
     list extra instruction files to follow alongside AGENTS.md.

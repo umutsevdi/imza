@@ -193,6 +193,7 @@ struct StoredMcpServer {
     std::optional<std::map<std::string, std::string>> env;
     std::optional<std::string> working_directory;
     std::optional<bool> enabled;
+    std::optional<bool> autoload;
     std::optional<long> timeout_secs;
 };
 
@@ -207,6 +208,7 @@ struct StoredAllow {
 };
 
 struct StoredConfig {
+    std::optional<std::string> schema_url;
     std::optional<std::vector<StoredConnection>> providers;
     std::optional<StoredModels> models;
     std::optional<StoredSkills> skills;
@@ -382,6 +384,7 @@ Status load_config(
             server.description  = entry.description.value_or("");
             server.bearer_token = entry.bearer_token.value_or("");
             server.enabled      = entry.enabled.value_or(true);
+            server.autoload     = entry.autoload.value_or(false);
             server.timeout_secs = entry.timeout_secs.value_or(0);
             server.type         = entry.type.value_or("http");
             if (server.type != "http" && server.type != "stdio") {
@@ -523,6 +526,7 @@ namespace {
         const std::filesystem::path& path, const Config& cfg)
     {
         StoredConfig stored;
+        stored.schema_url = std::string(CONFIG_SCHEMA_URL);
         std::vector<StoredConnection> providers;
         providers.reserve(cfg.providers.size());
         for (const Connection& conn : cfg.providers) {
@@ -641,6 +645,9 @@ namespace {
                 if (!server.enabled) {
                     entry.enabled = server.enabled;
                 }
+                if (server.autoload) {
+                    entry.autoload = server.autoload;
+                }
                 if (server.timeout_secs > 0) {
                     entry.timeout_secs = server.timeout_secs;
                 }
@@ -728,3 +735,11 @@ ConfigUpdateResult update_config(const std::filesystem::path& path,
 }
 
 } // namespace imza
+
+template <> struct glz::meta<imza::StoredConfig> {
+    using T                     = imza::StoredConfig;
+    static constexpr auto value = glz::object("$schema", &T::schema_url,
+        "providers", &T::providers, "models", &T::models, "skills", &T::skills,
+        "mcp_servers", &T::mcp_servers, "allow", &T::allow, "instructions",
+        &T::instructions);
+};
