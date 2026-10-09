@@ -222,6 +222,15 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
         }
         return accept(std::move(request));
     }
+    case RosterTool::LOAD_MCP: {
+        LoadMcpToolArgs arguments;
+        if (json_parse_checked(original.args, arguments)
+            || arguments.server.empty()) {
+            return reject(
+                std::move(request), std::string(LOAD_MCP_ARGS_ERROR));
+        }
+        return accept(std::move(request));
+    }
     }
     return reject(
         std::move(request), "tool has no permission policy: " + original.name);
@@ -240,6 +249,9 @@ std::optional<RosterTool> classify_roster_tool(std::string_view name)
     }
     if (name == "load") {
         return RosterTool::LOAD;
+    }
+    if (name == "load_mcp") {
+        return RosterTool::LOAD_MCP;
     }
     return std::nullopt;
 }

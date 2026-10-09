@@ -69,6 +69,9 @@ namespace {
 
 std::string tool_display_name(const std::string& name)
 {
+    if (name == "load_mcp") {
+        return "Load MCP";
+    }
     if (name.empty()) {
         return name;
     }
@@ -111,6 +114,12 @@ std::string tool_call_head(const ToolCall& call)
     if (call.name == "subagent") {
         return tool_display_name(call.name);
     }
+    if (call.name == "load_mcp") {
+        LoadMcpToolArgs parsed;
+        (void)json_parse_checked(call.args, parsed);
+        return parsed.server.empty() ? "Load MCP"
+                                     : "Load MCP " + parsed.server;
+    }
     if (call.name == "lua") {
         const std::string counts = lua_dispatch_counts(call);
         return counts.empty() ? "Lua execution" : "Lua · " + counts;
@@ -132,6 +141,11 @@ std::string tool_header_args(const ToolCall& call)
     }
     if (call.name == "subagent") {
         return subagent_args(call);
+    }
+    if (call.name == "load_mcp") {
+        LoadMcpToolArgs parsed;
+        (void)json_parse_checked(call.args, parsed);
+        return parsed.server;
     }
     if (call.name == "lua") {
         // The binding counts identify the run; echoing the script would

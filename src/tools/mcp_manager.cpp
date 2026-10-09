@@ -16,18 +16,6 @@ namespace {
     constexpr int MAX_RECONNECT_ATTEMPTS = 5;
     constexpr long RETRY_DELAYS_SECS[]   = { 2, 5, 10, 30, 60 };
 
-    // Effective URL: the explicit one (custom servers) or the bundled
-    // catalogue's (reference servers). Empty when a reference no longer
-    // resolves; callers surface that as a connection failure.
-    std::string resolved_url(const McpServerConfig& config)
-    {
-        if (!config.url.empty() || config.catalog_id.empty()) {
-            return expand_env_vars(config.url);
-        }
-        const auto entry = find_mcp_catalog_entry(config.catalog_id);
-        return entry ? expand_env_vars(entry->url) : std::string { };
-    }
-
     std::string dangling_catalog_detail(const McpServerConfig& config)
     {
         return "catalogue entry '" + config.catalog_id + "' no longer exists";
@@ -69,7 +57,11 @@ namespace {
             return session;
         }
         McpEndpoint endpoint;
-        endpoint.url          = expand_env_vars(config.url);
+        endpoint.url          = resolved_mcp_url(config);
+        if (endpoint.url.empty()) {
+            detail = dangling_catalog_detail(config);
+            return std::nullopt;
+        }
         endpoint.bearer_token = expand_env_vars(config.bearer_token);
         for (const auto& [name, value] : config.headers) {
             endpoint.headers.push_back(
@@ -291,7 +283,7 @@ void McpManager::run_listener(std::shared_ptr<ServerEntry> entry)
             // Snapshot the session identity; the GET itself must not hold
             // the I/O mutex (calls and re-lists acquire it in callbacks).
             std::lock_guard io_lock(entry->io);
-            stream_url = resolved_url(entry->config);
+            stream_url = resolved_mcp_url(entry->config);
             headers    = {
                 "Accept: text/event-stream",
                 "MCP-Session-Id: " + entry->session.session_id,
@@ -387,7 +379,7 @@ void McpManager::connect(const std::string& id)
         // A dangling catalogue reference fails immediately, offline; it
         // may resolve again after the next app update.
         if (!entry->config.is_stdio() && entry->config.url.empty()
-            && resolved_url(entry->config).empty()) {
+            && resolved_mcp_url(entry->config).empty()) {
             entry->state  = McpServerState::FAILED;
             entry->detail = dangling_catalog_detail(entry->config);
             _changed.publish();

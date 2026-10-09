@@ -58,4 +58,13 @@ std::optional<McpCatalogEntry> find_mcp_catalog_entry(std::string_view id)
     return std::nullopt;
 }
 
+std::string resolved_mcp_url(const McpServerConfig& config)
+{
+    if (!config.url.empty() || config.catalog_id.empty()) {
+        return expand_env_vars(config.url);
+    }
+    const auto entry = find_mcp_catalog_entry(config.catalog_id);
+    return entry ? expand_env_vars(entry->url) : std::string { };
+}
+
 } // namespace imza

@@ -5,6 +5,8 @@
 #include <string_view>
 #include <vector>
 
+#include "platform/config.h"
+
 namespace imza {
 
 // One curated entry of the bundled MCP server catalogue. The catalogue is
@@ -25,5 +27,11 @@ std::vector<McpCatalogEntry> load_mcp_catalog();
 // Catalogue entry by id; nullopt when the id is not in the catalogue
 // (removed/renamed entries resolve to nothing).
 std::optional<McpCatalogEntry> find_mcp_catalog_entry(std::string_view id);
+
+// Effective request URL for a server: the explicit url when set, otherwise
+// the bundled catalogue entry's url for a catalog_id reference. Empty when
+// neither resolves (a dangling reference), which callers surface as a
+// connection failure rather than issuing a malformed request.
+std::string resolved_mcp_url(const McpServerConfig& config);
 
 } // namespace imza

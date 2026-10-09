@@ -375,6 +375,28 @@ TEST_CASE("mcp manager resolves catalogue labels and urls from the bundle")
     CHECK(manager.snapshot()[0].label == "GitHub");
 }
 
+TEST_CASE("resolved_mcp_url picks the explicit url, the catalogue url, or none")
+{
+    // A catalogue reference carries no url of its own; the bundled entry's
+    // url is what the handshake must use.
+    imza::McpServerConfig reference;
+    reference.catalog_id = "github";
+    const auto entry     = imza::find_mcp_catalog_entry("github");
+    REQUIRE(entry.has_value());
+    CHECK(imza::resolved_mcp_url(reference) == entry->url);
+
+    // An explicit url wins over the reference.
+    imza::McpServerConfig custom;
+    custom.catalog_id = "github";
+    custom.url        = "http://127.0.0.1:9/custom";
+    CHECK(imza::resolved_mcp_url(custom) == "http://127.0.0.1:9/custom");
+
+    // A dangling reference resolves to nothing.
+    imza::McpServerConfig dangling;
+    dangling.catalog_id = "no-such-entry";
+    CHECK(imza::resolved_mcp_url(dangling).empty());
+}
+
 namespace {
 
 imza::McpServerConfig stdio_config(const std::string& id)

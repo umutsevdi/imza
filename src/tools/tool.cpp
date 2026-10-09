@@ -57,7 +57,7 @@ Tool make_load_mcp_tool(McpToolDocsDeps deps)
         [deps = std::move(deps)](const ToolCallRequest& req) -> ToolOutput {
             LoadMcpToolArgs args;
             if (json_parse_checked(req.args, args) || args.server.empty()) {
-                return tool_error("load_mcp: expected a server id");
+                return tool_error(std::string(LOAD_MCP_ARGS_ERROR));
             }
             McpManager* manager = deps.mcp ? deps.mcp() : nullptr;
             if (manager == nullptr) {
