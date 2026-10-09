@@ -1,0 +1,1074 @@
+---
+// The whole exchange in one picture, using a real script. The model writes one
+// Lua script; the sandbox evaluates it; each binding call crosses into a C++
+// host method and is authorized by the permission evaluator; the run returns a
+// small distilled value plus the diff. The script is the case from the
+// request: rename a symbol, rebuild, run the tests, report what failed.
+//
+// Motion is one orchestrated sequence gated behind
+// prefers-reduced-motion: no-preference; the base state is the finished
+// diagram, so it still teaches with motion off.
+const script = [
+  { n: 1, t: [["com", "-- rename a symbol, then prove it still builds"]] },
+  {
+    n: 2,
+    t: [
+      ["kw", "local "],
+      ["var", "hits"],
+      ["op", " = "],
+      ["fn", "imza.fs.grep"],
+      ["op", "("],
+      ["str", '"src"'],
+      ["op", ", "],
+      ["str", '"old_name"'],
+      ["op", ")"]
+    ],
+    call: "fs.grep",
+    verdict: "accept"
+  },
+  {
+    n: 3,
+    t: [
+      ["kw", "for "],
+      ["op", "_, h in "],
+      ["fn", "ipairs"],
+      ["op", "("],
+      ["var", "hits"],
+      ["op", ") "],
+      ["kw", "do"]
+    ]
+  },
+  {
+    n: 4,
+    t: [
+      ["op", "  "],
+      ["kw", "local "],
+      ["var", "src"],
+      ["op", " = "],
+      ["fn", "imza.fs.read"],
+      ["op", "("],
+      ["var", "h.file"],
+      ["op", ")"]
+    ],
+    call: "fs.read",
+    verdict: "accept"
+  },
+  {
+    n: 5,
+    t: [
+      ["op", "  "],
+      ["fn", "imza.fs.write"],
+      ["op", "("],
+      ["var", "h.file"],
+      ["op", ", "],
+      ["var", "src"],
+      ["op", ":gsub("],
+      ["str", '"old_name"'],
+      ["op", ", "],
+      ["str", '"new_name"'],
+      ["op", "))"]
+    ],
+    call: "fs.write",
+    verdict: "accept"
+  },
+  { n: 6, t: [["kw", "end"]] },
+  {
+    n: 7,
+    t: [
+      ["kw", "local "],
+      ["var", "out, code"],
+      ["op", " = "],
+      ["fn", "imza.shell"],
+      ["op", "("],
+      ["str", '"cmake --build build -j"'],
+      ["op", ")"]
+    ],
+    call: "shell",
+    verdict: "ask"
+  },
+  {
+    n: 8,
+    t: [
+      ["kw", "if "],
+      ["var", "code"],
+      ["op", " ~= 0 "],
+      ["kw", "then return "],
+      ["op", "{ step = "],
+      ["str", '"build"'],
+      ["op", ", output = out } "],
+      ["kw", "end"]
+    ]
+  },
+  {
+    n: 9,
+    t: [
+      ["kw", "local "],
+      ["var", "test, tcode"],
+      ["op", " = "],
+      ["fn", "imza.shell"],
+      ["op", "("],
+      ["str", '"ctest --test-dir build"'],
+      ["op", ")"]
+    ],
+    call: "shell",
+    verdict: "session"
+  },
+  {
+    n: 10,
+    t: [
+      ["kw", "return "],
+      ["op", "{ changed = "],
+      ["var", "#hits"],
+      ["op", ", tests = "],
+      ["var", "tcode"],
+      ["op", " == 0 "],
+      ["kw", "and "],
+      ["str", '"pass"'],
+      ["op", " "],
+      ["kw", "or "],
+      ["str", '"fail"'],
+      ["op", ", output = test }"]
+    ]
+  }
+];
+
+// The verdict for each host call lives with the line, not in a numbered list:
+// the script only marks the call site, and the badge appears as that line runs.
+// Rules from docs/03: trusted-root reads and edits are automatic in Build, the
+// first shell command asks and installs a session grant, the second reuses it.
+const verdictClass = {
+  accept: "v-accept",
+  ask: "v-ask",
+  session: "v-session"
+};
+
+// How a tool-per-call agent spends the same task. Every tool call is its own
+// model round-trip: the LLM is re-entered between calls, and each raw result
+// is appended to the context before the next call can be made. Sizes are the
+// analysis's median result size per tool call (5,452 B) versus imza's median
+// distilled return (316 B); figures from
+// github.com/umutsevdi/imza/discussions/1.
+const RAW_BYTES = 5452;
+const DISTILLED_BYTES = 316;
+const others = [
+  { tool: "read", note: "Raw file" },
+  { tool: "edit", note: "Raw file" },
+  { tool: "build", note: "Full log" },
+  { tool: "test", note: "Full log" }
+];
+
+// One side-by-side hunk, the way imza's review pane renders it: syntax
+// highlighted, old and new columns, add/del backgrounds.
+const hunkOld = [
+  {
+    n: "40",
+    sign: " ",
+    t: [
+      ["kw", "void "],
+      ["fn", "parse"],
+      ["op", "("],
+      ["ty", "Node"],
+      ["op", "* "],
+      ["var", "n"],
+      ["op", ")"],
+      ["op", " {"]
+    ]
+  },
+  {
+    n: "41",
+    sign: "−",
+    cls: "del",
+    t: [
+      ["fn", "call"],
+      ["op", "("],
+      ["str", "old_name"],
+      ["op", ", "],
+      ["var", "n"],
+      ["op", ");"]
+    ]
+  },
+  {
+    n: "42",
+    sign: " ",
+    t: [
+      ["kw", "return"],
+      ["op", ";"]
+    ]
+  }
+];
+const hunkNew = [
+  hunkOld[0],
+  {
+    n: "41",
+    sign: "+",
+    cls: "add",
+    t: [
+      ["fn", "call"],
+      ["op", "("],
+      ["str", "new_name"],
+      ["op", ", "],
+      ["var", "n"],
+      ["op", ");"]
+    ]
+  },
+  hunkOld[2]
+];
+
+interface Props {
+  /** Card title; pass null when the host already renders one. */
+  title?: string | null;
+  /** Lead paragraph; pass null when the host already renders one. */
+  brief?: string | null;
+}
+const {
+  title = "How imza flows differently",
+  brief = "Most coding agents hand the model a separate tool for every job, so each read, edit, or command is its own round-trip and its full output stays in the conversation. imza gives the model a single sandboxed Lua environment, where it can run many of those steps at once and only the result comes back. Nothing runs without passing a permission check, so you can still see every file touched and every command run. Fewer round-trips and less tool output mean the agent spends fewer tokens and finishes sooner."
+} = Astro.props;
+const analysis = "https://github.com/umutsevdi/imza/discussions/1";
+---
+
+<figure class="viz">
+  <div class="tui-panel">
+    <div class:list={["viz-head", { "viz-head-bare": !title }]}>
+      {title && <p class="viz-title">{title}</p>}
+      <button
+        class="viz-replay"
+        type="button"
+        aria-label="Replay the diagram animation"
+      >
+        replay
+      </button>
+    </div>
+
+    {
+      brief && (
+        <p class="viz-brief">
+          {brief} <a href={analysis}>Read the analysis</a>.
+        </p>
+      )
+    }
+
+    <div
+      class="system"
+      role="img"
+      aria-label="The model writes one Lua script; the script runs top to bottom, and as each host call runs its permission verdict appears beside it — reads and writes are accepted inside the trusted root, the first shell command asks and installs a session grant, the second reuses it. The run returns one small distilled result plus a side-by-side diff."
+    >
+      <div class="compare-side compare-imza">
+        <div class="node">
+          <span class="node-name">LLM</span>
+        </div>
+
+        <div class="vlink">
+          <i class="packet"></i>
+        </div>
+
+        <div class="engine">
+          <div class="script-panel">
+            <div class="box-head">
+              <span class="box-title">Lua VM</span>
+              <span class="box-meta">1–120 s · 256 MiB</span>
+            </div>
+
+            <div class="code">
+              {
+                script.map((l, i) => (
+                  <p class="line" style={`--i:${i}`}>
+                    <span class="ln">{l.n}</span>
+                    <span class="src">
+                      {l.t.map(([c, s]) => (
+                        <span class={c}>{s}</span>
+                      ))}
+                    </span>
+                  </p>
+                ))
+              }
+            </div>
+          </div>
+
+          <div class="runtime">
+            <div class="box-head">
+              <span class="box-title">Imza Runtime</span>
+              <span class="box-meta">C++</span>
+            </div>
+
+            <div class="rt-body">
+              {
+                script.map((l, i) => (
+                  <p class="rt-line" style={`--i:${i}`}>
+                    {l.verdict && (
+                      <>
+                        <span class="rt-call">{l.call}</span>
+                        <span class="rt-dots" />
+                        <span class:list={["verdict", verdictClass[l.verdict]]}>
+                          {l.verdict}
+                        </span>
+                      </>
+                    )}
+                  </p>
+                ))
+              }
+            </div>
+          </div>
+        </div>
+
+        <div class="return-row">
+          <div class="vlink vlink-return">
+            <i class="packet packet-return"></i>
+          </div>
+        </div>
+
+        <div class="out">
+          <div class="result">
+            <div class="box-head">
+              <span class="box-title">Returns</span>
+            </div>
+            <div class="result-body">
+              <div class="kv">
+                <span class="k">changed</span>
+                <span class="v">3</span>
+              </div>
+              <div class="kv">
+                <span class="k">tests</span>
+                <span class="v v-good">"pass"</span>
+              </div>
+              <div class="kv">
+                <span class="k">output</span>
+                <span class="v v-out">"100% tests passed, 0 tests failed…"</span
+                >
+              </div>
+            </div>
+          </div>
+
+          <div class="diff">
+            <div class="box-head">
+              <span class="box-title">src/parser.cpp</span>
+              <span class="d-stat">
+                <b>+1</b>
+                <i>−1</i>
+              </span>
+            </div>
+            <div class="diff-body">
+              <div class="dcol">
+                {
+                  hunkOld.map((r) => (
+                    <p class:list={["drow", r.cls]}>
+                      <span class="dl">{r.n}</span>
+                      <span class="dsign">{r.sign}</span>
+                      <span class="dcode">
+                        {r.t.map(([c, s]) => (
+                          <span class={c}>{s}</span>
+                        ))}
+                      </span>
+                    </p>
+                  ))
+                }
+              </div>
+              <div class="dcol dcol-new">
+                {
+                  hunkNew.map((r) => (
+                    <p class:list={["drow", r.cls]}>
+                      <span class="dl">{r.n}</span>
+                      <span class="dsign">{r.sign}</span>
+                      <span class="dcode">
+                        {r.t.map(([c, s]) => (
+                          <span class={c}>{s}</span>
+                        ))}
+                      </span>
+                    </p>
+                  ))
+                }
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ctx-panel">
+        <p class="ctx-lead">
+          What stays in the model's context after the same task
+        </p>
+        <div class="ctx-body">
+          {
+            others.map((o, i) => (
+              <div class="ctx-row" style={`--i:${i}`}>
+                <span class="ctx-tag">{o.tool}</span>
+                <span class="ctx-bar">
+                  <i
+                    class="ctx-fill"
+                    style={`--w:${(((i + 1) * RAW_BYTES) / (others.length * RAW_BYTES)) * 100}%`}
+                  />
+                </span>
+                <span class="ctx-bytes">
+                  {(((i + 1) * RAW_BYTES) / 1024).toFixed(1)} KB
+                </span>
+              </div>
+            ))
+          }
+          <div class="ctx-row ctx-row-imza" style={`--i:${others.length}`}>
+            <span class="ctx-tag ctx-tag-imza">imza</span>
+            <span class="ctx-bar">
+              <i
+                class="ctx-fill ctx-fill-imza"
+                style={`--w:${(DISTILLED_BYTES / (others.length * RAW_BYTES)) * 100}%`}
+              ></i>
+            </span>
+            <span class="ctx-bytes ctx-bytes-good">{DISTILLED_BYTES} B</span>
+          </div>
+        </div>
+        <div class="ctx-foot">
+          <span class="bf-bad">~21 KB kept vs 316 B</span>
+          <span class="bf-note">about 17x smaller per call</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</figure>
+
+<script>
+  // Mark each panel live when it scrolls into view, so the one orchestrated
+  // sequence waits for the reader instead of starting on page load. The
+  // animations are gated on .is-live and defined only under
+  // prefers-reduced-motion: no-preference, so with motion off the base state
+  // is the finished diagram and this is a no-op.
+  const panels = Array.from(
+    document.querySelectorAll<HTMLElement>(".viz .tui-panel")
+  );
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function reveal(panel: HTMLElement) {
+    panel.classList.add("is-live");
+  }
+
+  // Replay: rewind the panel, force a reflow so the browser commits the
+  // rewind, then replay the sequence.
+  function replay(panel: HTMLElement) {
+    if (reduced) return;
+    panel.classList.remove("is-live");
+    void panel.offsetWidth;
+    reveal(panel);
+  }
+
+  // A replay button may be rendered inside the panel (the standalone page)
+  // or by the host card beside its own title, so bind each button to the
+  // panel in its nearest containing block rather than assuming nesting.
+  for (const btn of document.querySelectorAll<HTMLButtonElement>(
+    ".viz-replay"
+  )) {
+    const scope = btn.closest("article, section, figure") ?? document.body;
+    const panel = scope.querySelector<HTMLElement>(".viz .tui-panel");
+    if (panel) btn.addEventListener("click", () => replay(panel));
+  }
+
+  if (!("IntersectionObserver" in window)) {
+    for (const p of panels) reveal(p);
+  } else {
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const en of entries) {
+          if (!en.isIntersecting) continue;
+          reveal(en.target as HTMLElement);
+          io.unobserve(en.target);
+        }
+      },
+      { rootMargin: "-15% 0px -15% 0px", threshold: 0.15 }
+    );
+    for (const p of panels) io.observe(p);
+  }
+</script>
+
+<style>
+  .viz {
+    margin: 0;
+  }
+  .tui-panel {
+    position: relative;
+    padding: 0;
+  }
+  .viz-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.7rem;
+    padding: 0.7rem 1.1rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--focus);
+  }
+  /* with no title there is nothing to head a row with, so the button floats
+     into the diagram's top-right instead of taking a row of its own */
+  .viz-head-bare {
+    position: absolute;
+    top: 0.7rem;
+    right: 1.1rem;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    z-index: 1;
+  }
+  .viz-title {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--fg);
+  }
+  .viz-brief {
+    margin: 0;
+    padding: 0.9rem 1.1rem;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: var(--fg-dim);
+  }
+  .viz-brief a {
+    white-space: nowrap;
+  }
+  /* replay control: re-runs the one orchestrated sequence. Hidden when motion
+     is off, where the base markup already shows the finished diagram. */
+  /* global: the replay button may be rendered by the host card, outside
+     this component's scope */
+  :global(.viz-replay) {
+    margin-left: auto;
+    align-self: center;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--fg-dim);
+    background: transparent;
+    border: 1px solid var(--border);
+    padding: 0.15rem 0.55rem;
+    cursor: pointer;
+    transition:
+      color 0.12s ease,
+      border-color 0.12s ease;
+  }
+  :global(.viz-replay:hover) {
+    color: var(--hl-cyan);
+    border-color: color-mix(in srgb, var(--hl-cyan) 50%, var(--border));
+  }
+  @media (prefers-reduced-motion: reduce) {
+    :global(.viz-replay) {
+      display: none;
+    }
+  }
+
+  /* vertical flow: LLM -> script -> output -> runtime -> others */
+  .system {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    padding: 1.2rem 1.1rem 1.2rem;
+  }
+  .node {
+    align-self: center;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    padding: 0.4rem 0.8rem;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    text-align: center;
+  }
+  .node-name {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--fg);
+    white-space: nowrap;
+  }
+
+  /* vertical connector with a travelling packet */
+  .vlink {
+    position: relative;
+    align-self: center;
+    width: 1px;
+    height: 1.5rem;
+    background: var(--border);
+  }
+  .vlink::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: -0.02rem;
+    transform: translateX(-50%);
+    border-left: 0.28rem solid transparent;
+    border-right: 0.28rem solid transparent;
+    border-top: 0.34rem solid var(--border);
+  }
+  /* arrows carry no label: the boxes they join are already named */
+
+  .packet {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    width: 0.42rem;
+    height: 0.42rem;
+    margin-left: -0.21rem;
+    background: var(--hl-cyan);
+    opacity: 0;
+  }
+  .packet-return {
+    background: var(--hl-green);
+  }
+  /* the return arrow points down into the result box, not the diff beside it */
+  .return-row {
+    display: flex;
+    justify-content: flex-start;
+    width: 14rem;
+    max-width: 100%;
+  }
+  .vlink-return {
+    align-self: stretch;
+  }
+
+  /* script and the runtime that checks it, side by side */
+  .engine {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+    gap: 0.7rem;
+    align-items: stretch;
+  }
+
+  /* one chrome for every box: script.lua, Imza Runtime, return value, diff */
+  .script-panel,
+  .runtime,
+  .result,
+  .diff {
+    border: 1px solid var(--border);
+    background: var(--canvas);
+    min-width: 0;
+  }
+  .box-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    height: 1.9rem;
+    padding: 0 0.7rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+  }
+  .box-title {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--fg);
+  }
+  .box-meta {
+    font-size: 0.8rem;
+    color: var(--fg-dim);
+  }
+  .code {
+    padding: 0.45rem 0;
+    overflow-x: auto;
+    font-size: 0.8rem;
+    line-height: 1.225rem;
+  }
+  .line {
+    display: flex;
+    align-items: baseline;
+    gap: 0.7rem;
+    margin: 0;
+    padding: 0 0.7rem;
+    white-space: pre;
+    height: 1.225rem;
+  }
+  .ln {
+    flex: 0 0 1.2rem;
+    text-align: right;
+    color: var(--border);
+    user-select: none;
+  }
+  .src {
+    flex: 0 0 auto;
+  }
+  .com {
+    color: var(--fg-dim);
+    font-style: italic;
+  }
+  .kw {
+    color: var(--hl-magenta);
+  }
+  .fn {
+    color: var(--hl-cyan);
+  }
+  .str {
+    color: var(--hl-green);
+  }
+  .var {
+    color: var(--fg);
+  }
+  .ty {
+    color: var(--hl-yellow);
+  }
+  .op {
+    color: var(--fg-dim);
+  }
+
+  /* verdict appears beside the line as it runs */
+  .verdict {
+    margin-left: auto;
+    flex: 0 0 auto;
+    font-size: 0.8rem;
+    padding: 0 0.35rem;
+    border: 1px solid var(--border);
+  }
+  .v-accept {
+    color: var(--hl-green);
+    border-color: color-mix(in srgb, var(--hl-green) 45%, var(--border));
+  }
+  .v-ask {
+    color: var(--hl-yellow);
+    border-color: color-mix(in srgb, var(--hl-yellow) 45%, var(--border));
+  }
+  .v-session {
+    color: var(--hl-cyan);
+    border-color: color-mix(in srgb, var(--hl-cyan) 45%, var(--border));
+  }
+
+  /* ---- output: result + side-by-side diff ---- */
+  .out {
+    display: flex;
+    gap: 0.7rem;
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+  .result {
+    flex: 0 0 14rem;
+    display: flex;
+    flex-direction: column;
+  }
+  .result-body {
+    padding: 0.5rem 0.7rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+  .kv {
+    display: flex;
+    gap: 0.6rem;
+    font-size: 0.8rem;
+    min-width: 0;
+  }
+  .k {
+    color: var(--fg-dim);
+    flex: 0 0 4.2rem;
+  }
+  .v {
+    color: var(--fg);
+  }
+  .v-good {
+    color: var(--hl-green);
+    font-weight: 700;
+  }
+  .v-out {
+    color: var(--fg-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+
+  .diff {
+    flex: 1 1 20rem;
+    overflow: hidden;
+  }
+  .d-stat {
+    display: flex;
+    gap: 0.4rem;
+    font-size: 0.8rem;
+  }
+  .d-stat b {
+    color: var(--hl-green);
+  }
+  .d-stat i {
+    color: var(--hl-red);
+    font-style: normal;
+  }
+  .diff-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .dcol {
+    padding: 0.3rem 0;
+    overflow-x: auto;
+  }
+  .dcol-new {
+    border-left: 1px solid var(--border);
+  }
+  .drow {
+    display: flex;
+    align-items: baseline;
+    gap: 0.35rem;
+    margin: 0;
+    padding: 0 0.5rem;
+    font-size: 0.8rem;
+    line-height: 1.7;
+    white-space: pre;
+  }
+  .drow.add {
+    background: var(--diff-add);
+  }
+  .drow.del {
+    background: var(--diff-del);
+  }
+  .dl {
+    flex: 0 0 1.3rem;
+    text-align: right;
+    color: var(--border);
+    user-select: none;
+  }
+  .dsign {
+    flex: 0 0 0.6rem;
+    text-align: center;
+    color: var(--fg-dim);
+  }
+  .dcode {
+    flex: 0 0 auto;
+  }
+
+  /* ---- runtime: the engine box beside the script ---- */
+  .runtime {
+    display: flex;
+    flex-direction: column;
+  }
+  /* one row per script line, so a verdict sits on the same line as its
+     call; empty rows keep the two columns aligned */
+  .rt-body {
+    padding: 0.45rem 0;
+    font-size: 0.8rem;
+    line-height: 1.225rem;
+  }
+  .rt-line {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    margin: 0;
+    padding: 0 0.7rem;
+    height: 1.225rem;
+  }
+  .rt-call {
+    color: var(--fg-dim);
+    white-space: nowrap;
+  }
+  .rt-dots {
+    flex: 1 1 auto;
+    border-bottom: 1px dotted var(--border);
+    margin-bottom: 0.2rem;
+    min-width: 0.4rem;
+  }
+  /* ---- comparison: two parallel alternatives, not two steps ---- */
+  .compare-side {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+    padding: 0.9rem 0 0.4rem;
+  }
+  .ctx-panel {
+    border: 1px solid var(--border);
+    background: var(--canvas);
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .ctx-lead {
+    margin: 0;
+    padding: 0.7rem 0.7rem 0;
+    font-size: 0.8rem;
+    color: var(--fg-dim);
+  }
+  .ctx-body {
+    padding: 0.55rem 0.7rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .ctx-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .ctx-tag {
+    flex: 0 0 3.4rem;
+    font-size: 0.8rem;
+    color: var(--fg-dim);
+  }
+  .ctx-bar {
+    flex: 1 1 auto;
+    height: 0.6rem;
+    border: 1px solid var(--border);
+    background: var(--canvas);
+    overflow: hidden;
+  }
+  .ctx-fill {
+    display: block;
+    height: 100%;
+    width: var(--w);
+    background: color-mix(in srgb, var(--hl-red) 55%, transparent);
+    transform-origin: left center;
+  }
+  /* the imza row: one distilled return against the four raw payloads above */
+  .ctx-row-imza {
+    margin-top: 0.15rem;
+    padding-top: 0.3rem;
+    border-top: 1px dashed var(--border);
+  }
+  .ctx-tag-imza {
+    color: var(--hl-green);
+  }
+  .ctx-fill-imza {
+    background: color-mix(in srgb, var(--hl-green) 70%, transparent);
+  }
+  .ctx-bytes {
+    flex: 0 0 4.2rem;
+    text-align: right;
+    font-size: 0.8rem;
+    color: var(--fg-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .ctx-bytes-good {
+    color: var(--hl-green);
+    font-weight: 700;
+  }
+  .ctx-foot {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    border-top: 1px dashed var(--border);
+    padding: 0.45rem 0.7rem;
+    margin-top: auto;
+  }
+  .bf-bad {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--hl-red);
+  }
+  .bf-note {
+    font-size: 0.8rem;
+    color: var(--fg-dim);
+  }
+
+  /* ---- orchestration: the whole sequence runs only once the panel is
+     marked live, so it waits for the reader instead of starting on load.
+     Everything is gated on .is-live; the base state is the finished diagram,
+     so it still teaches with motion off. ---- */
+  @media (prefers-reduced-motion: no-preference) {
+    .is-live .packet {
+      animation: viz-v 0.6s linear 0.15s both;
+    }
+    .is-live .line {
+      animation: viz-run 0.7s ease-out calc(0.4s + var(--i) * 0.13s) both;
+    }
+    .is-live .verdict {
+      animation: viz-pop 0.3s ease-out calc(0.6s + var(--i) * 0.13s) both;
+    }
+    .is-live .packet-return {
+      animation: viz-v 0.6s linear 2.1s both;
+    }
+    .is-live .result {
+      animation: viz-pop 0.4s ease-out 2.4s both;
+    }
+    .is-live .diff {
+      animation: viz-pop 0.4s ease-out 2.5s both;
+    }
+    .is-live .drow {
+      animation: viz-fade 0.3s ease-out both;
+    }
+    /* the runtime row for a call lights up on the same beat as the line it
+       belongs to, so the check reads as happening with the call */
+    .is-live .rt-line .verdict {
+      animation: viz-pop 0.3s ease-out calc(0.4s + var(--i) * 0.13s) both;
+    }
+    .is-live .rt-line .rt-call,
+    .is-live .rt-line .rt-dots {
+      animation: viz-fade 0.3s ease-out calc(0.4s + var(--i) * 0.13s) both;
+    }
+    /* the context panel fills after the imza run lands, so the comparison
+       reads as the payoff of the run above it */
+    .is-live .ctx-row {
+      animation: viz-slide 0.35s ease-out calc(2.7s + var(--i) * 0.18s) both;
+    }
+    .ctx-fill {
+      transform: scaleX(0);
+      transition: transform 0.5s cubic-bezier(0.2, 0.7, 0.2, 1)
+        calc(2.8s + var(--i) * 0.18s);
+    }
+    .is-live .ctx-fill {
+      transform: scaleX(1);
+    }
+  }
+
+  @keyframes viz-v {
+    0% {
+      top: 0;
+      opacity: 0;
+    }
+    15% {
+      opacity: 1;
+    }
+    85% {
+      opacity: 1;
+    }
+    100% {
+      top: calc(100% - 0.42rem);
+      opacity: 0;
+    }
+  }
+  @keyframes viz-run {
+    0%,
+    100% {
+      background: transparent;
+    }
+    30% {
+      background: color-mix(in srgb, var(--hl-cyan) 16%, transparent);
+    }
+  }
+  @keyframes viz-pop {
+    from {
+      opacity: 0;
+      transform: scale(0.6);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes viz-slide {
+    from {
+      opacity: 0;
+      transform: translateX(-0.4rem);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes viz-fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @media (max-width: 52rem) {
+    .engine {
+      grid-template-columns: 1fr;
+    }
+    .result {
+      flex: 1 1 auto;
+    }
+    .return-row {
+      width: 100%;
+      justify-content: center;
+    }
+  }
+  @media (max-width: 40rem) {
+    .diff-body {
+      grid-template-columns: 1fr;
+    }
+    .dcol-new {
+      border-left: 0;
+      border-top: 1px dashed var(--border);
+    }
+  }
+</style>

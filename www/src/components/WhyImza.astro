@@ -1,13 +1,16 @@
 ---
+import SystemFlow from "./viz/SystemFlow.astro";
+
 const cards = [
   {
     wide: true,
+    viz: true,
     key: "lua orchestration",
     title: "One sandbox instead of a tool bag",
-    body: "The agent doesn't juggle single-purpose tools: it writes sandboxed Lua scripts where reads, edits, searches, and shell compose into one operation. It works in bulk and discards data it doesn't need before it ever reaches your context. Measured on real sessions: mean 1.9 operations per round-trip, ~25-40% fewer context tokens per unit of work.",
+    body: "Most coding agents hand the model a separate tool for every job, so each read, edit, or command is its own round-trip and its full output stays in the conversation. imza gives the model a single sandboxed Lua environment, where it can run many of those steps at once and only the result comes back. Nothing runs without passing a permission check, so you can still see every file touched and every command run. Fewer round-trips and less tool output mean the agent spends fewer tokens and finishes sooner.",
     link: {
       href: "https://github.com/umutsevdi/imza/discussions/1",
-      text: "Read the numbers"
+      text: "Read the analysis"
     }
   },
   {
@@ -18,7 +21,7 @@ const cards = [
   {
     key: "subagents, skills & more",
     title: "Batteries included",
-    body: "Subagents, skills, project instruction files (AGENTS.md, CLAUDE.md, GEMINI.md), multimodal inputs, terminal notifications, and more."
+    body: "MCP, subagents, skills, project instruction files (AGENTS.md, CLAUDE.md, GEMINI.md), multimodal inputs, terminal notifications, and more."
   },
   {
     key: "50+ providers",
@@ -57,6 +60,11 @@ const cards = [
               {c.link.text} <span aria-hidden="true">&gt;</span>
             </a>
           )}
+          {c.viz && (
+            <div class="why-viz">
+              <SystemFlow title={null} brief={null} />
+            </div>
+          )}
         </article>
       ))
     }
@@ -84,6 +92,11 @@ const cards = [
   .why-card:hover {
     background: var(--focus);
   }
+  /* the wide card hosts the diagram; a hover wash would clash with its
+     panels, so it keeps its own background */
+  .why-card.is-wide:hover {
+    background: transparent;
+  }
   .why-card.is-wide {
     grid-column: 1 / -1;
   }
@@ -108,6 +121,17 @@ const cards = [
   .why-link {
     font-size: 0.88rem;
     align-self: start;
+  }
+  /* the embedded diagram bleeds to the card edges and drops the panel
+     chrome, since the card already provides the border */
+  .why-viz {
+    margin: 0.6rem -1.5rem -1.4rem;
+  }
+  .why-viz :global(.tui-panel) {
+    border: 0;
+    border-radius: 0;
+    border-top: 1px solid var(--border);
+    background: transparent;
   }
   @media (max-width: 47.5rem) {
     .why-grid {
