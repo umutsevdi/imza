@@ -215,7 +215,11 @@
         },
         "enabled": {
           "type": "boolean",
-          "description": "Whether the server loads. Defaults to true."
+          "description": "Whether the server is active. Defaults to true. An inactive server never connects and is reported as INACTIVE."
+        },
+        "autoload": {
+          "type": "boolean",
+          "description": "Connect this server automatically at startup. Defaults to false; only enabled servers are eligible."
         },
         "timeout_secs": {
           "type": "integer",

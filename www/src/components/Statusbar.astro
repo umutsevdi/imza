@@ -2,8 +2,6 @@
 import { VERSION } from "../version";
 import { stripBase, withBase } from "../lib/docs";
 
-// status bar mimics the app's cwd prompt: ~/, ~/docs/, ~/changelog/ ...
-// pathname carries the base (e.g. /imza) — display paths site-root-relative
 const dir = "~" + stripBase(Astro.url.pathname);
 ---
 
@@ -117,8 +115,6 @@ const dir = "~" + stripBase(Astro.url.pathname);
     min-width: 0;
     overflow: hidden;
   }
-  /* mode token: inverted like imza — colored bg + dark panel text, flush left.
-     Boots PLAN green like the app (status_line.cpp); scroll-spy recolors it. */
   .sb-mode {
     font-weight: bold;
     background: var(--hl-green);
