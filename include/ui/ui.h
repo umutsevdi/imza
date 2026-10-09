@@ -102,6 +102,11 @@ std::string fit(const std::string& text, int width);
 // `width` display columns. Breaks after spaces when one fits, else hard-wraps.
 std::vector<std::pair<std::size_t, std::size_t>> wrap_row_ranges(
     std::string_view line, int width);
+// Invokes `fn(begin, line)` for every logical line of `body`: the text
+// between newlines, with `begin` its byte offset. A trailing newline yields a
+// final empty line, matching the wrapping callers.
+void for_each_line(std::string_view body,
+    const std::function<void(std::size_t, std::string_view)>& fn);
 // Wraps every logical line of `body`; always returns at least one row.
 std::vector<std::string> wrap_text(std::string_view body, int width);
 ftxui::Element wrapped_input_element(std::string_view content,

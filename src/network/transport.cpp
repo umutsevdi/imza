@@ -268,18 +268,62 @@ namespace {
         return v;
     }
 
-    // Incremental SSE parser for the notification stream: event/data/id/
-    // retry fields accumulate until a blank line dispatches the event.
-    struct SseStreamCtx {
-        const std::atomic_bool* stop     = nullptr;
-        const SseEventCallback* on_event = nullptr;
-        long http_status                 = 0;
-        std::string buf;
+    // Shared SSE field accumulation: data/event/id/retry fields gather until
+    // a blank line completes the block. Both the notification stream and the
+    // provider stream feed lines through this.
+    struct SseLineState {
         std::string event;
         std::string data;
         std::string id;
         long retry_ms  = 0;
         bool has_retry = false;
+
+        bool empty() const { return event.empty() && data.empty(); }
+
+        // Returns true when the line completes a block (a blank line).
+        bool feed(std::string_view line)
+        {
+            if (line.empty()) {
+                return true;
+            }
+            if (const auto d = sse_field_value(line, "data:")) {
+                if (!data.empty()) {
+                    data += "\n";
+                }
+                data.append(*d);
+            } else if (const auto e = sse_field_value(line, "event:")) {
+                event.assign(*e);
+            } else if (const auto i = sse_field_value(line, "id:")) {
+                id.assign(*i);
+            } else if (const auto r = sse_field_value(line, "retry:")) {
+                long value = 0;
+                if (std::from_chars(r->data(), r->data() + r->size(), value).ec
+                    == std::errc { }) {
+                    retry_ms  = value;
+                    has_retry = true;
+                }
+            }
+            // Comment (":...") and unknown fields are ignored per the spec.
+            return false;
+        }
+
+        void reset()
+        {
+            event.clear();
+            data.clear();
+            id.clear();
+            retry_ms  = 0;
+            has_retry = false;
+        }
+    };
+
+    // Incremental SSE parser for the notification stream.
+    struct SseStreamCtx {
+        const std::atomic_bool* stop     = nullptr;
+        const SseEventCallback* on_event = nullptr;
+        long http_status                 = 0;
+        std::string buf;
+        SseLineState line;
     };
 
     size_t sse_header_callback(
@@ -293,46 +337,18 @@ namespace {
 
     void sse_dispatch(SseStreamCtx& ctx)
     {
-        if (ctx.event.empty() && ctx.data.empty()) {
+        SseLineState& line = ctx.line;
+        if (line.empty()) {
             return;
         }
-        const SseEvent event { ctx.event.empty() ? std::string_view("message")
-                                                 : std::string_view(ctx.event),
-            ctx.data, ctx.id, ctx.retry_ms, ctx.has_retry };
+        const SseEvent event { line.event.empty()
+                ? std::string_view("message")
+                : std::string_view(line.event),
+            line.data, line.id, line.retry_ms, line.has_retry };
         if (ctx.on_event != nullptr) {
             (*ctx.on_event)(event);
         }
-        ctx.event.clear();
-        ctx.data.clear();
-        ctx.id.clear();
-        ctx.retry_ms  = 0;
-        ctx.has_retry = false;
-    }
-
-    void sse_process_line(SseStreamCtx& ctx, std::string_view line)
-    {
-        if (line.empty()) {
-            sse_dispatch(ctx);
-            return;
-        }
-        if (const auto d = sse_field_value(line, "data:")) {
-            if (!ctx.data.empty()) {
-                ctx.data += "\n";
-            }
-            ctx.data.append(*d);
-        } else if (const auto e = sse_field_value(line, "event:")) {
-            ctx.event.assign(*e);
-        } else if (const auto i = sse_field_value(line, "id:")) {
-            ctx.id.assign(*i);
-        } else if (const auto r = sse_field_value(line, "retry:")) {
-            long value = 0;
-            if (std::from_chars(r->data(), r->data() + r->size(), value).ec
-                == std::errc { }) {
-                ctx.retry_ms  = value;
-                ctx.has_retry = true;
-            }
-        }
-        // Comment (":...") and unknown fields are ignored per the SSE spec.
+        line.reset();
     }
 
     size_t sse_write_callback(char* ptr, size_t, size_t n, void* userdata)
@@ -341,7 +357,9 @@ namespace {
         ctx->buf.append(ptr, n);
         ctx->buf.erase(
             0, consume_sse_lines(ctx->buf, [ctx](std::string_view line) {
-                sse_process_line(*ctx, line);
+                if (ctx->line.feed(line)) {
+                    sse_dispatch(*ctx);
+                }
                 return true;
             }));
         return n;
@@ -427,8 +445,7 @@ namespace {
         StreamCallback cb;
         ParseState parse_state;
         std::string buf;
-        std::string event;
-        std::string data;
+        SseLineState line;
         std::string raw;
         std::vector<StreamEvent> outs;
         const ChatRequest* req = nullptr;
@@ -471,32 +488,16 @@ namespace {
 
     void dispatch_block(StreamCtx& ctx)
     {
-        if (ctx.event.empty() && ctx.data.empty()) {
+        SseLineState& line = ctx.line;
+        if (line.empty()) {
             return;
         }
         ctx.outs.clear();
-        ctx.provider->parse(ctx.parse_state, ctx.event, ctx.data, ctx.outs);
+        ctx.provider->parse(ctx.parse_state, line.event, line.data, ctx.outs);
         for (auto& ev : ctx.outs) {
             ctx.cb(ev);
         }
-        ctx.event.clear();
-        ctx.data.clear();
-    }
-
-    void process_line(StreamCtx& ctx, std::string_view line)
-    {
-        if (line.empty()) {
-            dispatch_block(ctx);
-            return;
-        }
-        if (const auto d = sse_field_value(line, "data:")) {
-            if (!ctx.data.empty()) {
-                ctx.data += "\n";
-            }
-            ctx.data.append(*d);
-        } else if (const auto e = sse_field_value(line, "event:")) {
-            ctx.event.assign(*e);
-        }
+        line.reset();
     }
 
     size_t write_callback(char* ptr, size_t, size_t n, void* userdata)
@@ -512,7 +513,9 @@ namespace {
         ctx->buf.append(ptr, n);
         ctx->buf.erase(
             0, consume_sse_lines(ctx->buf, [ctx](std::string_view line) {
-                process_line(*ctx, line);
+                if (ctx->line.feed(line)) {
+                    dispatch_block(*ctx);
+                }
                 return !ctx->parse_state.terminal;
             }));
         return n;

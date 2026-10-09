@@ -294,12 +294,12 @@ namespace {
             } else {
                 _viewport.scroll_lines(0);
             }
-            const int _viewport_lines = std::max({ DEFAULT_VIEWPORT_LINES,
+            const int viewport_lines = std::max({ DEFAULT_VIEWPORT_LINES,
                 _viewport.viewport_lines(), ctx.height });
             const VirtualListWindow visible
-                = _timeline.window(_viewport.scroll, _viewport_lines, 0);
+                = _timeline.window(_viewport.scroll, viewport_lines, 0);
             const VirtualListWindow window = _timeline.window(
-                _viewport.scroll, _viewport_lines, TIMELINE_OVERSCAN);
+                _viewport.scroll, viewport_lines, TIMELINE_OVERSCAN);
             _anchor_index = visible.begin;
             if (reset_cache) {
                 if (item_count == 0) {
@@ -976,6 +976,20 @@ namespace {
             _cached_end   = window.end;
         }
 
+        // The shell status text shared by the tool header and the viewer
+        // header; nullopt when the result carries no shell exit/timeout.
+        static std::optional<std::string> _shell_status(const ToolCall& tc)
+        {
+            if (!tc.result.has_value()
+                || !tc.result->shell_status.has_value()) {
+                return std::nullopt;
+            }
+            std::string status = shell_status_text(*tc.result->shell_status);
+            return status.empty()
+                ? std::nullopt
+                : std::optional<std::string>(std::move(status));
+        }
+
         Element _tool_header_element(const ToolCall& tc)
         {
             Elements parts {
@@ -985,13 +999,9 @@ namespace {
                 text(" "),
                 text(tool_header_args(tc)) | color(PANEL_FG_DIM),
             };
-            if (tc.result.has_value() && tc.result->shell_status.has_value()) {
-                const std::string status
-                    = shell_status_text(*tc.result->shell_status);
-                if (!status.empty()) {
-                    parts.push_back(filler());
-                    parts.push_back(text(status) | color(HL_RED));
-                }
+            if (const auto status = _shell_status(tc)) {
+                parts.push_back(filler());
+                parts.push_back(text(*status) | color(HL_RED));
             }
             return hbox(std::move(parts));
         }
@@ -1013,12 +1023,8 @@ namespace {
             label += count == 1 ? " line)" : " lines)";
             Component button = _make_viewer_header_button(tc, std::move(label));
             Elements parts { button->Render() };
-            if (tc.result->shell_status.has_value()) {
-                const std::string status
-                    = shell_status_text(*tc.result->shell_status);
-                if (!status.empty()) {
-                    parts.push_back(text(status) | color(HL_RED));
-                }
+            if (const auto status = _shell_status(tc)) {
+                parts.push_back(text(*status) | color(HL_RED));
             }
             return hbox(std::move(parts));
         }
@@ -1034,6 +1040,7 @@ namespace {
             return nullptr;
         }
 
+        // A flagged result as a card: a colored marker plus the result text.
         Element _render_tool_status(
             const ToolCall& tc, std::string marker, ftxui::Color tone)
         {
@@ -1140,14 +1147,7 @@ namespace {
                         text(" Delegating…" + elapsed_suffix(*_session)) | dim,
                         false),
                 };
-                for (std::size_t index = 0; index < tc.subagent_ids.size();
-                    ++index) {
-                    const SubagentChat chat
-                        = _state->delegation->subagent_chat(tc, index);
-                    rows.push_back(_make_subagent_viewer_button(
-                        tc.id, index, "‹ View " + chat.title + " chat ›")
-                            ->Render());
-                }
+                _append_subagent_viewers(tc, tc.subagent_ids.size(), rows);
                 rows.push_back(separatorEmpty());
                 return vbox(std::move(rows));
             }
@@ -1166,11 +1166,11 @@ namespace {
             });
         }
 
-        Element _render_subagent_item(const ToolCall& tc)
+        // One "‹ View … chat ›" button per delegated subagent, appended to
+        // `rows`. Shared by the pending and finished subagent cards.
+        void _append_subagent_viewers(
+            const ToolCall& tc, std::size_t count, Elements& rows)
         {
-            Elements rows { _tool_header_element(tc) };
-            const std::size_t count
-                = std::max(tc.subagent_ids.size(), tc.subagent_chats.size());
             for (std::size_t index = 0; index < count; ++index) {
                 const SubagentChat chat
                     = _state->delegation->subagent_chat(tc, index);
@@ -1178,6 +1178,14 @@ namespace {
                     tc.id, index, "‹ View " + chat.title + " chat ›")
                         ->Render());
             }
+        }
+
+        Element _render_subagent_item(const ToolCall& tc)
+        {
+            Elements rows { _tool_header_element(tc) };
+            _append_subagent_viewers(tc,
+                std::max(tc.subagent_ids.size(), tc.subagent_chats.size()),
+                rows);
             rows.push_back(separatorEmpty());
             return vbox(std::move(rows));
         }

@@ -3,6 +3,7 @@
 #include "common/util.h"
 #include "conversation/format.h"
 #include "permissions/evaluator.h"
+#include "permissions/verdict.h"
 #include "providers/pricing.h"
 #include "providers/store.h"
 #include "tools/skills.h"
@@ -316,13 +317,9 @@ void TurnRunner::_run_compaction(TurnSettings settings, bool report_nothing)
     }
     // The automatic path replaces the compacted context wholesale, so
     // the previous summary rides along under the earlier-compactions tag.
-    std::string merged = *summary;
-    if (!snapshot.compacted_summary.empty()) {
-        merged += "\n\n<earlier-compactions>\n" + snapshot.compacted_summary
-            + "\n</earlier-compactions>";
-    }
-    _state->session->finish_compaction(
-        event_id, std::move(merged), prefix_size, true);
+    _state->session->finish_compaction(event_id,
+        fold_compaction_summary(snapshot.compacted_summary, *summary),
+        prefix_size, true);
 }
 
 void TurnRunner::_begin_compaction_job(
@@ -666,12 +663,13 @@ void TurnRunner::_apply_tool_result(const PermissionEvaluation& evaluation,
             denial_text(reason), tool_msgs);
         return;
     }
-    if (verdict->decision == ToolDecision::ACCEPT_FOR_SESSION) {
-        if (evaluation.session_grants.empty()
-            || !_state->permissions->install(evaluation.session_grants)) {
-            _reject_tool(req, "session approval is unavailable", tool_msgs);
-            return;
-        }
+    const SessionGrantOutcome granted = resolve_session_grant(*verdict,
+        evaluation.session_grants, [this](PermissionStore::Grants grants) {
+            return _state->permissions->install(std::move(grants));
+        });
+    if (!granted.ok) {
+        _reject_tool(req, granted.reason, tool_msgs);
+        return;
     }
     _run_tool(evaluation, mode, tool_msgs);
 }

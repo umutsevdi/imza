@@ -1,10 +1,10 @@
 #include "turn/delegation.h"
-#include "app/flows.h"
 #include "common/types.h"
 #include "common/util.h"
 #include "conversation/format.h"
 #include "network/json.h"
 #include "tools/skills.h"
+#include "tools/tool_args.h"
 #include "turn/prompt.h"
 
 #include <algorithm>
@@ -28,7 +28,7 @@ namespace {
     {
         SubagentToolArgs args;
         if (json_parse_checked(req.args, args)) {
-            error = "subagent: expected one to five tasks";
+            error = std::string(SUBAGENT_ARGS_ERROR);
             return std::nullopt;
         }
         if (const auto validation = validate_subagent_tool_arguments(
@@ -200,7 +200,7 @@ ToolOutput Delegation::run_subagents(const ToolCallRequest& req)
                 while (child_state->session->phase() != Session::Phase::IDLE) {
                     if (stop.stop_requested()
                         || _state->session->interrupt_requested()) {
-                        interrupt(*child_state);
+                        child_state->session->request_interrupt();
                     }
                     std::this_thread::sleep_for(20ms);
                 }

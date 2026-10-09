@@ -256,15 +256,16 @@ void Session::restore(SessionSnapshot snapshot)
 {
     {
         std::lock_guard lock(_mutex);
-        _title                = std::move(snapshot.title);
-        _items                = std::move(snapshot.items);
-        _todo                 = std::move(snapshot.todo);
-        _plans                = std::move(snapshot.plans);
-        _plan_version         = _plans.size();
-        _plan_seen_version    = _plan_version;
-        _compacted_summary    = std::move(snapshot.compacted_summary);
-        _compacted_item_count = snapshot.compacted_item_count;
-        _persistence          = std::move(snapshot.persistence);
+        _title                  = std::move(snapshot.title);
+        _items                  = std::move(snapshot.items);
+        _todo                   = std::move(snapshot.todo);
+        _plans                  = std::move(snapshot.plans);
+        _plan_version           = _plans.size();
+        _plan_seen_version      = _plan_version;
+        _plan_submitted_version = 0;
+        _compacted_summary      = std::move(snapshot.compacted_summary);
+        _compacted_item_count   = snapshot.compacted_item_count;
+        _persistence            = std::move(snapshot.persistence);
         // A loaded session continues its source file in place and adopts the
         // file stem as its id. Only fresh conversations (/new, brand-new
         // objects) rotate to a generated id so their first save gains a new
@@ -303,7 +304,6 @@ void Session::restore(SessionSnapshot snapshot)
         // Heal sessions saved mid-interrupt: dangling tool calls would
         // otherwise block compaction and switching forever.
         _cancel_dangling_tools_locked();
-        _dirty = false;
         ++_modal_serial;
         ++_content_serial;
     }
@@ -531,11 +531,8 @@ void Session::complete_manual_compaction(
     if (!_complete_compaction_locked(id, CompactionEvent::Status::COMPLETED)) {
         return;
     }
-    if (!_compacted_summary.empty()) {
-        summary.insert(0, _compacted_summary + "\n\n<earlier-compactions>\n");
-        summary += "\n</earlier-compactions>";
-    }
-    _compacted_summary = std::move(summary);
+    _compacted_summary = fold_compaction_summary(
+        std::move(_compacted_summary), std::move(summary));
     _compacted_item_count += absorbed_items;
 }
 

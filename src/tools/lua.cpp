@@ -170,7 +170,7 @@ namespace {
         case LuaCapability::MCP: return host.mcp_enabled;
         case LuaCapability::NONE: return true;
         }
-        return true;
+        std::unreachable();
     }
 
     // A method's namespace is always derived from its containing module.
@@ -485,7 +485,7 @@ TYPES)desc";
     {
         LuaToolArgs args;
         if (json_parse_checked(req.args, args) || args.script.empty()) {
-            return tool_error("lua: expected a non-empty 'script' string");
+            return tool_error(std::string(LUA_ARGS_ERROR));
         }
         const std::string script = args.script;
         long timeout             = 10;

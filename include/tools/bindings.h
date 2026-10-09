@@ -12,6 +12,7 @@
 #include "common/tool_call.h"
 #include "network/json.h"
 #include "permissions/filesystem.h"
+#include "permissions/prompt.h"
 #include "tools/lua.h"
 
 extern "C" {

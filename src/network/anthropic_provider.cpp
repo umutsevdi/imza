@@ -1,5 +1,6 @@
 #include "common/util.h"
 #include "network/json.h"
+#include "network/json_io.h"
 #include "network/network.h"
 #include "network/sse_parse.h"
 
@@ -56,11 +57,7 @@ namespace anthropic {
 
     RequestMessage string_message(std::string role, std::string content)
     {
-        // A plain JSON string serializes with quotes/escapes already; use
-        // it as the raw content.
-        const std::string quoted = json_dump(content);
-        return { std::move(role),
-            glz::raw_json(quoted.empty() ? "null" : quoted) };
+        return { std::move(role), raw_content(content) };
     }
 
     struct ToolSpecWire {

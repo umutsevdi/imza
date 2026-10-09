@@ -14,6 +14,7 @@
 #include <string_view>
 #include <vector>
 
+#include "common/language_match.h"
 #include "common/util.h"
 
 namespace imza {
@@ -154,26 +155,7 @@ namespace {
 
     const LanguageDefinition* language_for_path(std::string_view path)
     {
-        const std::filesystem::path file(path);
-        std::string extension = to_lower(file.extension().string());
-        if (!extension.empty() && extension.front() == '.') {
-            extension.erase(0, 1);
-        }
-        const std::string filename   = to_lower(file.filename().string());
-        const auto& registry         = languages();
-        const auto filename_language = std::ranges::find_if(
-            registry, [&filename](const auto& candidate) {
-                return contains(candidate.filenames, filename);
-            });
-        if (filename_language != registry.end()) {
-            return &*filename_language;
-        }
-        const auto extension_language = std::ranges::find_if(
-            registry, [&extension](const auto& candidate) {
-                return contains(candidate.extensions, extension);
-            });
-        return extension_language == registry.end() ? nullptr
-                                                    : &*extension_language;
+        return match_language_entry<LanguageDefinition>(languages(), path);
     }
 
     SyntaxStyle capture_style(std::string_view capture)
@@ -511,23 +493,14 @@ std::vector<std::vector<Element>> highlight_code_wrapped(
     }
 
     std::vector<std::vector<Element>> lines;
-    std::size_t begin = 0;
-    for (;;) {
-        const std::size_t newline = code.find('\n', begin);
-        const std::size_t end
-            = newline == std::string_view::npos ? code.size() : newline;
+    for_each_line(code, [&](std::size_t begin, std::string_view line) {
         std::vector<Element> rows;
-        for (const auto& [row_begin, row_end] :
-            wrap_row_ranges(code.substr(begin, end - begin), width)) {
+        for (const auto& [row_begin, row_end] : wrap_row_ranges(line, width)) {
             rows.push_back(
                 render_line(code, styles, begin + row_begin, begin + row_end));
         }
         lines.push_back(std::move(rows));
-        if (newline == std::string_view::npos) {
-            break;
-        }
-        begin = newline + 1;
-    }
+    });
     return lines;
 }
 

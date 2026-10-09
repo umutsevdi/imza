@@ -9,6 +9,7 @@
 
 #include "common/tool_call.h"
 #include "common/types.h"
+#include "permissions/prompt.h"
 
 namespace imza {
 

@@ -1,5 +1,6 @@
 #include "tools/bindings.h"
 
+#include "common/language_match.h"
 #include "common/util.h"
 #include "permissions/filesystem.h"
 #include "tools/file_ops.h"
@@ -562,25 +563,9 @@ namespace {
 
     const TSLanguage* language_for_path(std::string_view path)
     {
-        const std::filesystem::path file(path);
-        const std::string filename = to_lower(file.filename().string());
-        for (const LanguageEntry& entry : LANGUAGE_ENTRIES) {
-            if (std::ranges::find(entry.filenames, filename)
-                != entry.filenames.end()) {
-                return entry.load_language();
-            }
-        }
-        std::string extension = to_lower(file.extension().string());
-        if (!extension.empty() && extension.front() == '.') {
-            extension.erase(0, 1);
-        }
-        for (const LanguageEntry& entry : LANGUAGE_ENTRIES) {
-            if (std::ranges::find(entry.extensions, extension)
-                != entry.extensions.end()) {
-                return entry.load_language();
-            }
-        }
-        return nullptr;
+        const LanguageEntry* entry
+            = match_language_entry<LanguageEntry>(LANGUAGE_ENTRIES, path);
+        return entry == nullptr ? nullptr : entry->load_language();
     }
 
     // One fresh parser per call: a script parses a handful of files, so
@@ -942,6 +927,7 @@ namespace {
             if (!parsed) {
                 return 2;
             }
+
             ts_query_run_file(state, compiled.get(), *parsed, target);
         } else if (fs::is_directory(status)) {
             const LuaRunContext& run = *run_of(L);

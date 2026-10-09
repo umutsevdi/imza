@@ -39,4 +39,13 @@ struct LuaToolArgs {
     std::optional<std::int64_t> timeout;
 };
 
+// Stable model-facing validation messages, shared by the permission gate and
+// the tool handlers so both reject with identical wording.
+inline constexpr std::string_view LUA_ARGS_ERROR
+    = "lua: expected a non-empty 'script' string";
+inline constexpr std::string_view LOAD_ARGS_ERROR
+    = "load: expected a module name";
+inline constexpr std::string_view SUBAGENT_ARGS_ERROR
+    = "subagent: expected one to five tasks";
+
 } // namespace imza

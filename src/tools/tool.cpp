@@ -113,8 +113,7 @@ Tool make_load_mcp_tool(McpToolDocsDeps deps)
                 out += "\n";
             }
             // A big registry server can exceed the useful context size.
-            constexpr std::size_t MAX_DOCS_CHARS = 40000;
-            out = truncate_with_count(std::move(out), MAX_DOCS_CHARS);
+            out = truncate_with_count(std::move(out), MAX_TOOL_TEXT);
             return tool_output(std::move(out));
         } };
 }
@@ -135,7 +134,7 @@ std::optional<std::string> validate_subagent_tool_arguments(
     const SubagentToolArgs& arguments, bool allow_build)
 {
     if (arguments.tasks.empty() || arguments.tasks.size() > 5) {
-        return "subagent: expected one to five tasks";
+        return std::string(SUBAGENT_ARGS_ERROR);
     }
     for (const auto& task : arguments.tasks) {
         if (task.prompt.empty() || trim(task.prompt).empty()) {
@@ -203,7 +202,7 @@ Tool make_load_tool(LuaState& state)
     return { std::move(spec), [&state](const ToolCallRequest& req) {
                 LoadToolArgs args;
                 if (json_parse_checked(req.args, args) || args.name.empty()) {
-                    return tool_error("load: expected a module name");
+                    return tool_error(std::string(LOAD_ARGS_ERROR));
                 }
                 const std::string name = args.name;
                 for (const LuaModule& module : state.modules()) {
@@ -241,7 +240,7 @@ Tool make_subagent_tool(SubagentToolSlot delegate)
             const ToolCallRequest& req) -> ToolOutput {
             SubagentToolArgs args;
             if (json_parse_checked(req.args, args)) {
-                return tool_error("subagent: expected one to five tasks");
+                return tool_error(std::string(SUBAGENT_ARGS_ERROR));
             }
             if (!*delegate) {
                 return tool_error("subagent: delegation is unavailable");

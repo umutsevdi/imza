@@ -1,4 +1,5 @@
 #include "platform/command_runner.h"
+#include "platform/utf8_convert.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -26,19 +27,6 @@ namespace imza {
 namespace {
 
 #ifdef _WIN32
-
-    std::wstring to_wide(const std::string& s)
-    {
-        if (s.empty()) {
-            return L"";
-        }
-        const int needed = MultiByteToWideChar(
-            CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
-        std::wstring out(static_cast<size_t>(needed), L'\0');
-        MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()),
-            out.data(), needed);
-        return out;
-    }
 
     CommandResult run_windows(const std::string& command,
         std::chrono::seconds timeout, CommandResult result,

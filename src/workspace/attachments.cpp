@@ -12,9 +12,10 @@ namespace imza {
 
 namespace {
 
-    constexpr std::uintmax_t MAX_ATTACHMENT_BYTES = 1024 * 1024;
-    constexpr std::size_t MAX_ATTACHMENTS         = 20;
-    constexpr std::size_t MAX_TOTAL_BYTES         = 4 * 1024 * 1024;
+    constexpr std::uintmax_t MAX_ATTACHMENT_BYTES        = 1024 * 1024;
+    constexpr std::uintmax_t MAX_BINARY_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+    constexpr std::size_t MAX_ATTACHMENTS                = 20;
+    constexpr std::size_t MAX_TOTAL_BYTES                = 4 * 1024 * 1024;
 
     bool ignored_directory(std::string_view name)
     {
@@ -181,13 +182,13 @@ AttachmentResult load_attachment(
     file.read(signature, sizeof signature);
     const auto native = native_type(
         std::string_view(signature, static_cast<std::size_t>(file.gcount())));
-    if (!native) {
-        const std::uintmax_t size = std::filesystem::file_size(path, ec);
-        if (ec || size > MAX_ATTACHMENT_BYTES) {
-            return { Status::CONFIG_ERROR, std::nullopt,
-                "Attachment exceeds the 1 MiB limit: "
-                    + std::string(relative_path) + "." };
-        }
+    const std::uintmax_t size = std::filesystem::file_size(path, ec);
+    const std::uintmax_t limit
+        = native ? MAX_BINARY_ATTACHMENT_BYTES : MAX_ATTACHMENT_BYTES;
+    if (ec || size > limit) {
+        return { Status::CONFIG_ERROR, std::nullopt,
+            "Attachment exceeds the " + std::to_string(limit / (1024 * 1024))
+                + " MiB limit: " + std::string(relative_path) + "." };
     }
     file.clear();
     file.seekg(0);

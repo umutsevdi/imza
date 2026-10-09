@@ -273,8 +273,7 @@ std::shared_ptr<ApplicationState> make_sidechat_application_state(
                 abandoned.set_value(std::monostate { });
                 return abandoned.get_future();
             }
-            return request_modal(
-                const_cast<ApplicationState&>(parent), std::move(payload));
+            return request_modal(parent, std::move(payload));
         },
         "Sidechat", std::move(roster));
     return state;

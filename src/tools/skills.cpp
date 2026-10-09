@@ -36,43 +36,23 @@ namespace {
         return names;
     }
 
-    struct SkillRead {
-        enum class Kind { OK, READ_FAILED, TOO_LARGE };
-        Kind kind = Kind::OK;
-        std::string body;
-    };
-
-    SkillRead read_skill(const Skill& skill)
-    {
-        const std::optional<std::string> content = read_text_file(skill.path);
-        if (!content) {
-            return { SkillRead::Kind::READ_FAILED, "" };
-        }
-        if (content->size() > MAX_SKILL_BYTES) {
-            return { SkillRead::Kind::TOO_LARGE, "" };
-        }
-        return { SkillRead::Kind::OK,
-            "<skill name=\"" + skill.name + "\" directory=\""
-                + skill.path.parent_path().string() + "\">\n" + *content
-                + "\n</skill>" };
-    }
-
 } // namespace
 
 std::optional<std::string> load_skill_checked(
     const Skill& skill, std::string& reason)
 {
-    const SkillRead read = read_skill(skill);
-    if (read.kind == SkillRead::Kind::READ_FAILED) {
+    const std::optional<std::string> content = read_text_file(skill.path);
+    if (!content) {
         reason = "cannot read instructions";
         return std::nullopt;
     }
-    if (read.kind == SkillRead::Kind::TOO_LARGE) {
+    if (content->size() > MAX_SKILL_BYTES) {
         reason = "instructions exceed " + std::to_string(MAX_SKILL_BYTES / 1024)
             + " KiB";
         return std::nullopt;
     }
-    return read.body;
+    return "<skill name=\"" + skill.name + "\" directory=\""
+        + skill.path.parent_path().string() + "\">\n" + *content + "\n</skill>";
 }
 
 std::optional<std::filesystem::path> canonical_skill_path(const Skill& skill)

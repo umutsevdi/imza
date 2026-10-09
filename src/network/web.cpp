@@ -90,7 +90,7 @@ namespace {
             { "yen", "\u00A5" }, { "cent", "\u00A2" }, { "sect", "\u00A7" },
             { "para", "\u00B6" }, { "szlig", "\u00DF" }, { "auml", "\u00E4" },
             { "ouml", "\u00F6" }, { "uuml", "\u00FC" }, { "Auml", "\u00C4" },
-            { "Ouml", "\u00D6" }, { "Uuml", "\u00DC" }, { "sz", "\u00DF" }
+            { "Ouml", "\u00D6" }, { "Uuml", "\u00DC" }
         };
         return map;
     }

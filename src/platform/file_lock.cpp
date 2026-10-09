@@ -133,7 +133,7 @@ std::variant<FileLock, FileLockError> acquire_file_lock(
         struct stat handle_info { };
         struct stat path_info { };
         if (fstat(handle, &handle_info) != 0) {
-            flock(handle, flock_operation({ }));
+            flock(handle, LOCK_UN);
             close(handle);
             return FileLockError { };
         }
@@ -145,7 +145,7 @@ std::variant<FileLock, FileLockError> acquire_file_lock(
         }
         // The file was replaced between open and flock; retry with the fresh
         // inode so the lock guards the path's current identity.
-        flock(handle, flock_operation({ }));
+        flock(handle, LOCK_UN);
         close(handle);
     }
 #endif

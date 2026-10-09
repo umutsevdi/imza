@@ -48,7 +48,9 @@ std::vector<McpCatalogEntry> load_mcp_catalog()
 
 std::optional<McpCatalogEntry> find_mcp_catalog_entry(std::string_view id)
 {
-    for (const McpCatalogEntry& entry : load_mcp_catalog()) {
+    // The catalogue is a compile-time constant; parse it once.
+    static const std::vector<McpCatalogEntry> catalog = load_mcp_catalog();
+    for (const McpCatalogEntry& entry : catalog) {
         if (entry.id == id) {
             return entry;
         }

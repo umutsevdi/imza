@@ -152,12 +152,17 @@ TEST_CASE("attachments outside the workspace and binary files are rejected")
     CHECK_FALSE(imza::load_attachment(tmp.path, "binary.dat").attachment);
 }
 
-TEST_CASE("byte limits apply to text but not native media")
+TEST_CASE("byte limits apply to text and a larger cap to native media")
 {
     TempDir tmp;
     const std::string big_text(1024 * 1024 + 1, 'x');
     imza::test::write_file(tmp.file("big.txt"), big_text);
     CHECK_FALSE(imza::load_attachment(tmp.path, "big.txt").attachment);
+
+    const std::string huge_png = std::string("\x89PNG\r\n\x1a\n", 8)
+        + std::string(8 * 1024 * 1024, '\0');
+    imza::test::write_file(tmp.file("huge.png"), huge_png);
+    CHECK_FALSE(imza::load_attachment(tmp.path, "huge.png").attachment);
 
     const std::string big_png
         = std::string("\x89PNG\r\n\x1a\n", 8) + std::string(1200 * 1024, '\0');

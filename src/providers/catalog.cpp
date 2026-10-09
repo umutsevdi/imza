@@ -248,7 +248,8 @@ namespace {
     std::string normalize_base(std::string_view base)
     {
         std::string out = strip_slash(base);
-        for (std::string_view suffix : { CHAT_SUFFIX, RESPONSES_SUFFIX }) {
+        for (std::string_view suffix :
+            { CHAT_SUFFIX, RESPONSES_SUFFIX, MESSAGES_SUFFIX }) {
             if (out.size() > suffix.size()
                 && std::string_view(out).substr(out.size() - suffix.size())
                     == suffix) {

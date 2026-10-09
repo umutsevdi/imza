@@ -25,6 +25,19 @@
 
 namespace imza {
 
+// A compaction summary absorbs the prior context; the previous summary
+// rides along under the earlier-compactions tag so nothing is lost.
+inline std::string fold_compaction_summary(
+    std::string previous, std::string summary)
+{
+    if (previous.empty()) {
+        return summary;
+    }
+    summary.insert(0, previous + "\n\n<earlier-compactions>\n");
+    summary += "\n</earlier-compactions>";
+    return summary;
+}
+
 struct UserTurn {
     std::string text;
     std::vector<Attachment> attachments;

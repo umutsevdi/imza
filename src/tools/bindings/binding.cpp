@@ -1,5 +1,7 @@
 #include "tools/bindings.h"
 
+#include "permissions/verdict.h"
+
 #include "permissions/filesystem.h"
 #include "permissions/shell.h"
 
@@ -148,16 +150,18 @@ bool resolve_ask(LuaRunContext& run, const std::string& label,
         return deny(label + ": "
             + (verdict->reason.empty() ? "rejected" : verdict->reason));
     }
-    if (verdict->decision == ToolDecision::ACCEPT_FOR_SESSION) {
-        if (session_grants.empty() || !run.host->install_grants
-            || !run.host->install_grants(std::move(session_grants))) {
-            return deny(label + ": session approval is unavailable");
-        }
+    const SessionGrantOutcome granted
+        = resolve_session_grant(*verdict, std::move(session_grants),
+            run.host->install_grants
+                ? run.host->install_grants
+                : std::function<bool(PermissionStore::Grants)> { });
+    if (!granted.ok) {
+        return deny(label + ": " + granted.reason);
+    }
+    if (verdict->decision == ToolDecision::ACCEPT_FOR_SESSION && !recheck()) {
         // The installed grant may turn the request into an auto-accept;
         // execution only continues on the re-evaluated verdict.
-        if (!recheck()) {
-            return deny(label + ": permission target changed before execution");
-        }
+        return deny(label + ": permission target changed before execution");
     }
     return true;
 }

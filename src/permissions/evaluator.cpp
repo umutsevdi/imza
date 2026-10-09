@@ -198,8 +198,7 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
     case RosterTool::SUBAGENT: {
         SubagentToolArgs arguments;
         if (json_parse_checked(original.args, arguments)) {
-            return reject(
-                std::move(request), "subagent: expected one to five tasks");
+            return reject(std::move(request), std::string(SUBAGENT_ARGS_ERROR));
         }
         if (const auto error = validate_subagent_tool_arguments(
                 arguments, context.mode == SessionMode::BUILD)) {
@@ -211,8 +210,7 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
         LuaToolArgs arguments;
         if (json_parse_checked(original.args, arguments)
             || arguments.script.empty()) {
-            return reject(std::move(request),
-                "lua: expected a non-empty 'script' string");
+            return reject(std::move(request), std::string(LUA_ARGS_ERROR));
         }
         return accept(std::move(request));
     }
@@ -220,7 +218,7 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
         LoadToolArgs arguments;
         if (json_parse_checked(original.args, arguments)
             || arguments.name.empty()) {
-            return reject(std::move(request), "load: expected a module name");
+            return reject(std::move(request), std::string(LOAD_ARGS_ERROR));
         }
         return accept(std::move(request));
     }

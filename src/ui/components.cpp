@@ -308,24 +308,30 @@ std::vector<std::pair<std::size_t, std::size_t>> wrap_row_ranges(
     rows.emplace_back(row_begin, line.size());
     return rows;
 }
-std::vector<std::string> wrap_text(std::string_view body, int width)
+void for_each_line(std::string_view body,
+    const std::function<void(std::size_t, std::string_view)>& fn)
 {
-    std::vector<std::string> out;
     std::size_t line_begin = 0;
     while (line_begin <= body.size()) {
         const std::size_t newline = body.find('\n', line_begin);
         const std::size_t line_end
             = newline == std::string_view::npos ? body.size() : newline;
-        const std::string_view line
-            = body.substr(line_begin, line_end - line_begin);
-        for (const auto& [begin, end] : wrap_row_ranges(line, width)) {
-            out.emplace_back(line.substr(begin, end - begin));
-        }
+        fn(line_begin, body.substr(line_begin, line_end - line_begin));
         if (newline == std::string_view::npos) {
             break;
         }
         line_begin = newline + 1;
     }
+}
+
+std::vector<std::string> wrap_text(std::string_view body, int width)
+{
+    std::vector<std::string> out;
+    for_each_line(body, [&](std::size_t, std::string_view line) {
+        for (const auto& [begin, end] : wrap_row_ranges(line, width)) {
+            out.emplace_back(line.substr(begin, end - begin));
+        }
+    });
     return out;
 }
 
@@ -340,13 +346,7 @@ ftxui::Element wrapped_input_element(std::string_view content,
 
     cursor = std::min(cursor, content.size());
     Elements rows;
-    std::size_t line_begin = 0;
-    while (line_begin <= content.size()) {
-        const std::size_t newline = content.find('\n', line_begin);
-        const std::size_t line_end
-            = newline == std::string_view::npos ? content.size() : newline;
-        const std::string_view line
-            = content.substr(line_begin, line_end - line_begin);
+    for_each_line(content, [&](std::size_t line_begin, std::string_view line) {
         for (const auto& [begin, end] : wrap_row_ranges(line, width)) {
             const std::size_t row_begin = line_begin + begin;
             const std::size_t row_end   = line_begin + end;
@@ -376,11 +376,7 @@ ftxui::Element wrapped_input_element(std::string_view content,
             rows.push_back(hbox({ text(before), std::move(cursor_cell),
                 text(line.substr(glyph_end, end - glyph_end)) }));
         }
-        if (newline == std::string_view::npos) {
-            break;
-        }
-        line_begin = newline + 1;
-    }
+    });
     return vbox(std::move(rows));
 }
 

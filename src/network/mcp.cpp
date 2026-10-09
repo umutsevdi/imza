@@ -93,13 +93,13 @@ namespace {
             if (read != Status::OK) {
                 return Status::NETWORK_ERROR;
             }
-            if (is_rpc_message(parse_json(line))) {
+            const JsonValue message = parse_json(line);
+            if (is_rpc_message(message)) {
                 body = std::move(line);
                 return Status::OK;
             }
             // A server request or notification: answer pings, ignore the
             // rest, and keep reading for our response.
-            const JsonValue message = parse_json(line);
             const JsonValue* method = find_member(message, "method");
             const JsonValue* id     = find_member(message, "id");
             if (method != nullptr && method->is_string() && id != nullptr

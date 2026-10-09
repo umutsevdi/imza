@@ -173,6 +173,9 @@ inline std::string_view truncate_utf8(
 // Cap shared by tool outputs; enforced with truncate_marked.
 inline constexpr std::size_t MAX_OUTPUT_BYTES = 64 * 1024;
 
+// Cap for tool text that feeds the model directly (web, mcp, docs).
+inline constexpr std::size_t MAX_TOOL_TEXT = 40000;
+
 inline constexpr std::string_view TRUNCATION_MARKER = "\n[truncated]";
 
 // Cut at a UTF-8 boundary and mark when over `cap`.

@@ -135,6 +135,31 @@ inline std::string error_text(Status st)
 
 enum class ApiStandard { OPENAI, OPENAI_RESPONSES, ANTHROPIC };
 
+// One tool call the model requested: the wire name, raw JSON args, and the
+// id that pairs it with its result. Neutral value type shared by transport,
+// tools, and the transcript.
+struct ToolCallRequest {
+    std::string name;
+    std::string args;
+    std::string description;
+    std::string id;
+};
+
+// A tool call as carried in a provider message.
+struct ToolCallEntry {
+    std::string id;
+    std::string name;
+    std::string args;
+};
+
+struct ToolSpec {
+    std::string name;
+    std::string description;
+    // JSON schema as written by the tool author; forwarded verbatim to the
+    // provider. Never parsed on the imza side.
+    std::string parameters;
+};
+
 // Session interaction mode: PLAN reads and analyzes, BUILD may mutate.
 enum class SessionMode { PLAN, BUILD };
 

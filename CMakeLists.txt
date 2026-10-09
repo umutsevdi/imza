@@ -302,6 +302,7 @@ add_library(imza_execution
     src/permissions/store.cpp
     src/permissions/filesystem.cpp
     src/permissions/shell_analysis.cpp
+    src/permissions/verdict.cpp
     src/tools/tool.cpp
     src/tools/file_ops.cpp
     src/tools/lua.cpp

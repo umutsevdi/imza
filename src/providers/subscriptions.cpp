@@ -81,15 +81,18 @@ namespace {
 
     std::string decode_base64url(std::string_view input)
     {
-        std::array<int, 256> values;
-        values.fill(-1);
-        constexpr std::string_view alphabet
-            = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-"
-              "_";
-        for (std::size_t i = 0; i < alphabet.size(); ++i) {
-            values[static_cast<unsigned char>(alphabet[i])]
-                = static_cast<int>(i);
-        }
+        static const std::array<int, 256> values = [] {
+            std::array<int, 256> table;
+            table.fill(-1);
+            constexpr std::string_view alphabet
+                = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+                  "0123456789-_";
+            for (std::size_t i = 0; i < alphabet.size(); ++i) {
+                table[static_cast<unsigned char>(alphabet[i])]
+                    = static_cast<int>(i);
+            }
+            return table;
+        }();
         std::string out;
         std::uint32_t value = 0;
         int bits            = -8;
@@ -294,8 +297,9 @@ SubscriptionResult refresh_subscription(std::string_view connection_id,
     if (connection_id != OPENAI_SUBSCRIPTION_ID) {
         return failure(Status::API_ERROR, "Not a subscription connection.");
     }
-    const RefreshRequest request { { }, std::string(refresh_token),
-        std::string(OPENAI_CLIENT_ID) };
+    RefreshRequest request;
+    request.refresh_token = std::string(refresh_token);
+    request.client_id     = std::string(OPENAI_CLIENT_ID);
     std::string body;
     long http_code      = 0;
     post                = http_post_fn(std::move(post));

@@ -58,6 +58,24 @@ namespace {
         return old_range + " → " + new_range;
     }
 
+    // The gutter marker and background for one review line: additions and
+    // deletions tint, everything else stays plain.
+    struct LineChangeStyle {
+        std::string marker = " ";
+        std::optional<Color> background;
+    };
+
+    LineChangeStyle line_change_style(ReviewLine::Kind kind)
+    {
+        if (kind == ReviewLine::Kind::ADDITION) {
+            return { diff_marker(true), diff_background(true) };
+        }
+        if (kind == ReviewLine::Kind::DELETION) {
+            return { diff_marker(false), diff_background(false) };
+        }
+        return { };
+    }
+
     class Review : public ComponentBase {
     public:
         Review(std::shared_ptr<ApplicationState> state, LayoutFn layout,
@@ -673,16 +691,10 @@ namespace {
             const ReviewState::Snapshot& snapshot, std::size_t file_index,
             const std::string& path, const ReviewLine& line, int review_width)
         {
-            std::string marker = " ";
-            std::optional<Color> background;
-            if (line.kind == ReviewLine::Kind::ADDITION) {
-                marker     = diff_marker(true);
-                background = diff_background(true);
-            } else if (line.kind == ReviewLine::Kind::DELETION) {
-                marker     = diff_marker(false);
-                background = diff_background(false);
-            }
-            const int content_width = diff_content_width(review_width);
+            const LineChangeStyle style     = line_change_style(line.kind);
+            std::string marker              = style.marker;
+            std::optional<Color> background = style.background;
+            const int content_width         = diff_content_width(review_width);
             const std::vector<std::string> segments
                 = wrap_text(line.content, content_width);
             const bool selected
@@ -735,15 +747,9 @@ namespace {
                 return hbox({ text(number_text), text("  "), filler() })
                     | size(WIDTH, EQUAL, side_width);
             }
-            std::string marker = " ";
-            std::optional<Color> background;
-            if (line->kind == ReviewLine::Kind::DELETION) {
-                marker     = diff_marker(false);
-                background = diff_background(false);
-            } else if (line->kind == ReviewLine::Kind::ADDITION) {
-                marker     = diff_marker(true);
-                background = diff_background(true);
-            }
+            const LineChangeStyle style     = line_change_style(line->kind);
+            std::string marker              = style.marker;
+            std::optional<Color> background = style.background;
             const std::vector<std::string> segments = wrap_text(
                 line->content, review_side_content_width(side_width));
             const Elements highlighted

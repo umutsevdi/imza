@@ -499,6 +499,9 @@ void resolve_modal(ApplicationState& state, ModalResult result)
         switch_session(state, *path);
     }
     if (auto* connect = std::get_if<ConnectResult>(&result)) {
+        // Unlike other results the connect modal stays open: begin_connect
+        // morphs it to PICK_MODEL/MANAGE once the async connect completes, so
+        // the entry must not be popped or cleared here.
         begin_connect(state, *connect);
         return;
     }
@@ -650,8 +653,11 @@ void run_slash(ApplicationState& state, std::string_view command)
             state.session->set_error("Changelog file not found.");
             break;
         }
-        enqueue_user_modal(
-            state, ViewerModal { "Changelog", *changelog, "md", 1, false, "" });
+        enqueue_user_modal(state,
+            ViewerModal { .title = "Changelog",
+                .content         = *changelog,
+                .lang            = "md",
+                .line_numbers    = false });
         break;
     }
     }

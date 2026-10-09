@@ -1,4 +1,5 @@
 #include "platform/process.h"
+#include "platform/utf8_convert.h"
 
 #include <algorithm>
 #include <atomic>
@@ -42,7 +43,8 @@ struct Process::Impl {
     std::string stdout_buffer;
     bool stdout_closed = false;
     std::string stderr_tail;
-    std::size_t stderr_cap = 8192;
+    std::size_t stderr_cap  = 8192;
+    long terminate_grace_ms = 2000;
     std::atomic_bool running { false };
     std::atomic_bool reaped { false };
     std::thread stdout_reader;
@@ -331,6 +333,8 @@ std::unique_ptr<Process> Process::spawn(
     impl.stdout_fd      = out_pipe[0];
     impl.stderr_fd      = err_pipe[0];
     impl.stderr_cap     = options.stderr_cap;
+    impl.terminate_grace_ms
+        = static_cast<long>(options.terminate_grace.count());
     impl.running.store(true);
 
     Process::Impl* raw = &impl;
@@ -388,7 +392,7 @@ void Process::terminate()
         ::close(impl.stdin_fd);
         impl.stdin_fd = -1;
     }
-    const long grace = 2000;
+    const long grace = impl.terminate_grace_ms;
     int status       = 0;
     if (!wait_for_exit(impl.pid, grace, &status)) {
         killpg(impl.pid, SIGTERM);
@@ -415,32 +419,6 @@ void Process::terminate()
 #else // _WIN32
 
 namespace {
-
-    std::wstring to_wide(const std::string& s)
-    {
-        if (s.empty()) {
-            return L"";
-        }
-        const int needed = MultiByteToWideChar(
-            CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
-        std::wstring out(static_cast<size_t>(needed), L'\0');
-        MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()),
-            out.data(), needed);
-        return out;
-    }
-
-    std::string to_utf8(const std::wstring& s)
-    {
-        if (s.empty()) {
-            return "";
-        }
-        const int needed = WideCharToMultiByte(CP_UTF8, 0, s.data(),
-            static_cast<int>(s.size()), nullptr, 0, nullptr, nullptr);
-        std::string out(static_cast<size_t>(needed), '\0');
-        WideCharToMultiByte(CP_UTF8, 0, s.data(), static_cast<int>(s.size()),
-            out.data(), needed, nullptr, nullptr);
-        return out;
-    }
 
     std::string quote_arg(const std::string& arg)
     {
@@ -568,6 +546,8 @@ std::unique_ptr<Process> Process::spawn(
     impl.stdout_r       = out_r;
     impl.stderr_r       = err_r;
     impl.stderr_cap     = options.stderr_cap;
+    impl.terminate_grace_ms
+        = static_cast<long>(options.terminate_grace.count());
     impl.running.store(true);
 
     Process::Impl* raw = &impl;
@@ -627,10 +607,11 @@ void Process::terminate()
         CloseHandle(impl.stdin_w);
         impl.stdin_w = nullptr;
     }
+    const DWORD grace = static_cast<DWORD>(impl.terminate_grace_ms);
     if (impl.process != nullptr) {
-        if (WaitForSingleObject(impl.process, 2000) == WAIT_TIMEOUT) {
+        if (WaitForSingleObject(impl.process, grace) == WAIT_TIMEOUT) {
             TerminateProcess(impl.process, 1);
-            WaitForSingleObject(impl.process, 2000);
+            WaitForSingleObject(impl.process, grace);
         }
     }
     impl.running.store(false);

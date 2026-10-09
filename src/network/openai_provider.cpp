@@ -126,9 +126,7 @@ namespace openai {
                 }
                 message.content = glz::raw_json { json_dump_array(parts) };
             } else {
-                const std::string quoted = json_dump(m.content);
-                message.content
-                    = glz::raw_json(quoted.empty() ? "null" : quoted);
+                message.content = raw_content(m.content);
             }
             if (!m.tool_calls.empty()) {
                 std::vector<ToolCallWire> calls;
@@ -280,8 +278,6 @@ namespace openai {
         }
         if (u) {
             emit_usage_once(state, *u, outs);
-        } else {
-            emit_usage_once(state, Usage { }, outs);
         }
         if (done) {
             outs.push_back(make_done_event());

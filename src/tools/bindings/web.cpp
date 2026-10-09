@@ -15,8 +15,6 @@ extern "C" {
 namespace imza {
 namespace {
 
-    constexpr std::size_t MAX_WEB_CHARS = 40000;
-
     int binding_web_fetch(lua_State* L)
     {
         const std::string url = luaL_checkstring(L, 1);
@@ -50,7 +48,7 @@ namespace {
                 L, "web.fetch: no readable content at " + page.url);
         }
         const std::string out
-            = truncate_with_count(std::move(text), MAX_WEB_CHARS);
+            = truncate_with_count(std::move(text), MAX_TOOL_TEXT);
         lua_pushlstring(L, out.data(), out.size());
         return 1;
     }
@@ -77,7 +75,7 @@ namespace {
             return 1;
         }
         const std::string out
-            = truncate_with_count(std::move(text), MAX_WEB_CHARS);
+            = truncate_with_count(std::move(text), MAX_TOOL_TEXT);
         lua_pushlstring(L, out.data(), out.size());
         return 1;
     }

@@ -963,6 +963,20 @@ TEST_CASE("plan submission messages are emitted once per revision in build")
         CHECK(submitted->find("Plan approved for build: <plan>") == 0);
         CHECK_FALSE(loaded.plan_submission_for_build().has_value());
     }
+
+    SUBCASE("restoring into a reused session re-submits its plan once")
+    {
+        // /new reuses the Session object, so the submission watermark must
+        // reset alongside the plan version or the restored plan is silently
+        // suppressed.
+        // The plan was submitted earlier in this test, so the watermark is
+        // non-zero; restore() must clear it or the restored plan is silently
+        // suppressed.
+        session.restore(session.snapshot());
+        const auto resubmitted = session.plan_submission_for_build();
+        REQUIRE(resubmitted.has_value());
+        CHECK_FALSE(session.plan_submission_for_build().has_value());
+    }
 }
 
 TEST_CASE("plan changes publish the plan signal")

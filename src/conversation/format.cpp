@@ -145,11 +145,9 @@ namespace {
         // Markdown tables do not support multi-line or pipe-bearing cells;
         // soften the break and escape the separator. Very wide cells are
         // capped so one long field cannot flatten the table.
-        const auto cell = [](const JsonValue* value) {
-            const std::string text = value == nullptr || value->is_null() ? ""
-                : value->is_string() ? value->as<std::string>()
-                                     : json_dump(*value);
-            std::size_t width      = 0;
+        // A width of 0 means no cap; the escaped token is never split.
+        const auto escape = [](std::string_view text, std::size_t max_width) {
+            std::size_t width = 0;
             std::string out;
             for (const char c : text) {
                 if (c == '\n') {
@@ -162,30 +160,23 @@ namespace {
                     out += c;
                     width += 1;
                 }
-                if (width >= 80) {
+                if (max_width > 0 && width >= max_width) {
                     out += "\u2026";
                     break;
                 }
             }
             return out;
         };
-        const auto escape = [](const std::string& text) {
-            std::string out;
-            for (const char c : text) {
-                if (c == '\n') {
-                    out += "<br>";
-                } else if (c == '|') {
-                    out += "\\|";
-                } else {
-                    out += c;
-                }
-            }
-            return out;
+        const auto cell = [&escape](const JsonValue* value) {
+            const std::string text = value == nullptr || value->is_null() ? ""
+                : value->is_string() ? value->as<std::string>()
+                                     : json_dump(*value);
+            return escape(text, 80);
         };
         std::string out;
         out += '|';
         for (const std::string& key : columns) {
-            out += escape(key);
+            out += escape(key, 0);
             out += '|';
         }
         out += "\n|";

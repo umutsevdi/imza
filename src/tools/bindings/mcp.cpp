@@ -14,8 +14,6 @@ extern "C" {
 namespace imza {
 namespace {
 
-    constexpr std::size_t MAX_MCP_CHARS = 40000;
-
     // All non-empty text blocks joined; MCP tools may split one answer
     // across several blocks.
     std::string joined_text(const McpToolCallResult& result)
@@ -76,7 +74,7 @@ namespace {
                 "mcp.call: tool error from '" + target + "'"
                     + (text.empty()
                             ? std::string { }
-                            : ": " + truncate_with_count(text, MAX_MCP_CHARS)));
+                            : ": " + truncate_with_count(text, MAX_TOOL_TEXT)));
         }
         lua_pushlstring(L, text.data(), text.size());
         return 1;

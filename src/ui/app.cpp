@@ -195,7 +195,8 @@ namespace {
             if (selected.empty()) {
                 return false;
             }
-            copy_to_clipboard(*state.environment->system(), selected);
+            copy_to_clipboard(
+                state.environment->system()->clipboard_tool, selected);
             return true;
         }
 
@@ -270,10 +271,7 @@ namespace {
             _selected = static_cast<int>(_phase);
             _attach_chat();
             _review_available_cached = _review_available();
-            _tab_names               = { "Plan", "Build" };
-            if (_review_available_cached) {
-                _tab_names.emplace_back("Review");
-            }
+            _rebuild_tab_names();
             _tabs = CatchEvent(
                 Menu(&_tab_names, &_selected, MenuOption::HorizontalAnimated()),
                 [](const Event& event) {
@@ -459,13 +457,17 @@ namespace {
                 return;
             }
             _review_available_cached = available;
-            _tab_names               = { "Plan", "Build" };
-            if (_review_available_cached) {
-                _tab_names.push_back("Review");
-                return;
-            }
-            if (_phase == WorkflowPhase::REVIEW) {
+            _rebuild_tab_names();
+            if (!available && _phase == WorkflowPhase::REVIEW) {
                 _set_phase(WorkflowPhase::PLAN);
+            }
+        }
+
+        void _rebuild_tab_names()
+        {
+            _tab_names = { "Plan", "Build" };
+            if (_review_available_cached) {
+                _tab_names.emplace_back("Review");
             }
         }
 
