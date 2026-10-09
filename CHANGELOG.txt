@@ -36,6 +36,8 @@ Changes:
     and keep taking calls.
   - Added the EVREN provider.
   - Keystrokes are no longer lost or garbled while the agent runs commands.
+  - Fixed sessions becoming unusable after a tool result contained invalid
+    text; affected saved sessions load again.
 
 -------------------------------------------------------------------------------
 0.5.2 - 2026-10-04

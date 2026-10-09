@@ -7,6 +7,8 @@
 #include <string>
 #include <string_view>
 
+#include "common/util.h"
+
 // JSON policy: known wire shapes use reflected structs with the shared
 // options below; glz::json_t (JsonValue) is reserved for genuinely
 // dynamic payloads (Lua return values, model-supplied pass-through,
@@ -33,34 +35,47 @@ inline constexpr glz::opts JSON_WRITE_PRETTY {
     .indentation_width = 2,
 };
 
-// Glaze's default writer has no escape for control characters without a
-// short form: an ESC becomes two raw NUL bytes, which its own reader (and
-// every JSON parser) rejects. Such bytes can only ever appear inside
-// string literals — valid JSON escapes them as text, and structural
-// whitespace lives between tokens — so stripping them there repairs both
-// directions. Clean input passes through untouched.
-inline std::optional<std::string> strip_string_control_bytes(
+// Glaze's writer emits raw NULs for control characters without a short
+// escape, and tool output sliced on a byte boundary can end mid-character;
+// both are invalid inside a JSON string literal. Dropping them here repairs
+// reads and writes alike. Clean input passes through untouched.
+inline std::optional<std::string> repair_json_string_bytes(
     std::string_view json)
 {
     std::optional<std::string> repaired;
     std::size_t copied = 0; // bytes of `json` already appended to *repaired
     bool in_string     = false;
     bool escaped       = false;
-    for (std::size_t i = 0; i < json.size(); ++i) {
+    const auto drop    = [&](std::size_t i) {
+        if (!repaired) {
+            repaired.emplace(json.substr(0, i));
+            copied = i;
+        }
+        repaired->append(json.substr(copied, i - copied));
+        copied = i + 1;
+    };
+    for (std::size_t i = 0; i < json.size();) {
         const unsigned char c = static_cast<unsigned char>(json[i]);
         if (escaped) {
             escaped = false;
+            ++i;
         } else if (in_string && c == '\\') {
             escaped = true;
+            ++i;
         } else if (c == '"') {
             in_string = !in_string;
+            ++i;
         } else if (in_string && c < 0x20) {
-            if (!repaired) {
-                repaired.emplace(json.substr(0, i));
-                copied = i;
+            drop(i);
+            ++i;
+        } else if (in_string && c >= 0x80) {
+            const std::size_t length = utf8_valid_sequence_length(json, i);
+            if (length == 0) {
+                drop(i); // truncated or malformed sequence byte
             }
-            repaired->append(json.substr(copied, i - copied));
-            copied = i + 1; // drop the control byte
+            i += length == 0 ? 1 : length;
+        } else {
+            ++i;
         }
     }
     if (repaired) {
@@ -74,7 +89,7 @@ inline std::optional<std::string> strip_string_control_bytes(
 template <typename T>
 [[nodiscard]] glz::error_ctx json_parse_checked(std::string_view text, T& out)
 {
-    if (auto repaired = strip_string_control_bytes(text)) {
+    if (auto repaired = repair_json_string_bytes(text)) {
         return glz::read<JSON_READ>(out, *repaired);
     }
     return glz::read<JSON_READ>(out, text);
@@ -101,7 +116,7 @@ template <typename T> bool json_parse(std::string_view text, T& out)
 template <typename T> std::string json_dump(const T& value)
 {
     std::string out = glz::write<JSON_WRITE>(value).value_or(std::string { });
-    if (auto repaired = strip_string_control_bytes(out)) {
+    if (auto repaired = repair_json_string_bytes(out)) {
         return std::move(*repaired);
     }
     return out;
@@ -111,7 +126,7 @@ template <typename T> std::string json_dump_pretty(const T& value)
 {
     std::string out
         = glz::write<JSON_WRITE_PRETTY>(value).value_or(std::string { });
-    if (auto repaired = strip_string_control_bytes(out)) {
+    if (auto repaired = repair_json_string_bytes(out)) {
         return std::move(*repaired);
     }
     return out;
@@ -124,7 +139,7 @@ template <typename T>
     if (!out) {
         return std::nullopt;
     }
-    if (auto repaired = strip_string_control_bytes(*out)) {
+    if (auto repaired = repair_json_string_bytes(*out)) {
         return std::move(*repaired);
     }
     return std::move(out.value());
@@ -138,7 +153,7 @@ template <typename T>
     if (!out) {
         return std::nullopt;
     }
-    if (auto repaired = strip_string_control_bytes(*out)) {
+    if (auto repaired = repair_json_string_bytes(*out)) {
         return std::move(*repaired);
     }
     return std::move(out.value());

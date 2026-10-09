@@ -149,17 +149,23 @@ namespace {
         const auto escape = [](std::string_view text, std::size_t max_width) {
             std::size_t width = 0;
             std::string out;
-            for (const char c : text) {
-                if (c == '\n') {
+            std::size_t i = 0;
+            while (i < text.size()) {
+                const std::size_t length
+                    = utf8_sequence_length(static_cast<unsigned char>(text[i]));
+                if (text[i] == '\n') {
                     out += "<br>";
                     width += 3;
-                } else if (c == '|') {
+                } else if (text[i] == '|') {
                     out += "\\|";
                     width += 1;
                 } else {
-                    out += c;
+                    // Copy the whole sequence so the cap never splits a
+                    // multi-byte character.
+                    out.append(text.substr(i, length));
                     width += 1;
                 }
+                i += length;
                 if (max_width > 0 && width >= max_width) {
                     out += "\u2026";
                     break;

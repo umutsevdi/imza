@@ -333,6 +333,36 @@ TEST_CASE("lua return value survives session persistence")
     CHECK(b_array[1].is_null());
 }
 
+TEST_CASE("a tool result with invalid utf-8 still loads and replays clean")
+{
+#ifdef _WIN32
+    SKIP_ON_WIN32()
+#endif
+    DataHome home;
+    // A truncated three-byte sequence, as a byte-sliced tool result leaves.
+    const char raw[] = "table: \xe2\x9c";
+    imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT,
+        std::string(raw, sizeof(raw) - 1) };
+
+    imza::Session source;
+    make_tool_session(
+        { "lua", R"json({"script":"print(1)"})json", "", "call-1" },
+        std::move(result), source);
+    imza::Session loaded;
+    roundtrip(source, loaded);
+
+    const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
+    REQUIRE(call.result.has_value());
+    CHECK_FALSE(imza::strip_invalid_utf8(call.result->text).has_value());
+
+    // The replayed history carries no invalid byte either.
+    const std::vector<imza::Message> history
+        = loaded.build_history("system prompt");
+    for (const imza::Message& message : history) {
+        CHECK_FALSE(imza::strip_invalid_utf8(message.content).has_value());
+    }
+}
+
 TEST_CASE("legacy lua result without a return value still loads")
 {
 #ifdef _WIN32

@@ -295,6 +295,14 @@ TEST_CASE("lua print truncation respects the hard output cap")
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(out.text.size() <= 64 * 1024);
     CHECK(out.text.find("[truncated]") != std::string::npos);
+
+    // A payload of three-byte characters makes the cap land mid-character;
+    // the cut must stay on a boundary.
+    const imza::ToolOutput wide
+        = imza::test::run_lua("print(string.rep('\\u{2713}', 30000))");
+    CHECK(wide.text.size() <= 64 * 1024);
+    CHECK(wide.text.find("[truncated]") != std::string::npos);
+    CHECK_FALSE(imza::strip_invalid_utf8(wide.text).has_value());
 }
 
 TEST_CASE("imza.fs.read returns 1-based windows and empty for empty files")

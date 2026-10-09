@@ -64,7 +64,9 @@ namespace {
             = MAX_OUTPUT_BYTES - TRUNCATION_MARKER.size();
         const auto append = [&](std::string_view text) {
             const std::size_t available = payload_limit - run->output.size();
-            run->output.append(text.substr(0, available));
+            // Cut on a UTF-8 boundary so a capped print never leaves a
+            // truncated sequence in the transcript.
+            run->output.append(truncate_utf8(text, available));
             if (text.size() > available) {
                 run->truncated = true;
             }

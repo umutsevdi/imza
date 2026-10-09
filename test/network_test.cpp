@@ -765,13 +765,36 @@ TEST_CASE("json parse repairs raw control bytes inside string literals")
     CHECK(payload.name == "x");
 }
 
-TEST_CASE("strip_string_control_bytes leaves clean json untouched")
+TEST_CASE("json boundary drops invalid utf-8 and keeps valid text")
+{
+    // A string sliced mid-character (a truncated three-byte sequence) heals
+    // on parse; the raw bytes keep the sequence a plain literal would carry.
+    const char raw[] = "{\"name\":\"table: \xe2\x9c\",\"count\":2}";
+    JsonTestPayload payload;
+    CHECK(
+        !imza::json_parse_checked(std::string(raw, sizeof(raw) - 1), payload));
+    CHECK(payload.name == "table: ");
+    CHECK(payload.count == 2);
+
+    // The same string serializes back to valid JSON.
+    const std::string dumped = imza::json_dump(payload);
+    JsonTestPayload back;
+    CHECK(!imza::json_parse_checked(dumped, back));
+    CHECK(back.name == "table: ");
+
+    // Valid multi-byte text survives both directions untouched.
+    JsonTestPayload clean { "caf\xc3\xa9 \xe2\x9c\x93", 1 };
+    CHECK(imza::json_dump(clean)
+        == "{\"name\":\"caf\xc3\xa9 \xe2\x9c\x93\",\"count\":1}");
+}
+
+TEST_CASE("repair_json_string_bytes leaves clean json untouched")
 {
     CHECK_FALSE(
-        imza::strip_string_control_bytes(R"({"a":"b","c":["\n","\u001b"]})")
+        imza::repair_json_string_bytes(R"({"a":"b","c":["\n","\u001b"]})")
             .has_value());
     const auto repaired
-        = imza::strip_string_control_bytes("{\"a\":\"x\x1b[0my\"}");
+        = imza::repair_json_string_bytes("{\"a\":\"x\x1b[0my\"}");
     REQUIRE(repaired.has_value());
     CHECK(*repaired == R"({"a":"x[0my"})");
 }

@@ -274,6 +274,79 @@ inline std::size_t utf8_sequence_length(unsigned char lead)
     return 1;
 }
 
+// Byte length of the valid UTF-8 sequence starting at `i`, or 0 when the
+// bytes there are not one. Validates rather than classifying the lead byte.
+inline std::size_t utf8_valid_sequence_length(
+    std::string_view text, std::size_t i)
+{
+    const unsigned char lead = static_cast<unsigned char>(text[i]);
+    std::size_t length       = 0;
+    unsigned int code_point  = 0;
+    if (lead < 0x80) {
+        return 1;
+    }
+    if ((lead & 0xE0) == 0xC0) {
+        length     = 2;
+        code_point = lead & 0x1F;
+    } else if ((lead & 0xF0) == 0xE0) {
+        length     = 3;
+        code_point = lead & 0x0F;
+    } else if ((lead & 0xF8) == 0xF0) {
+        length     = 4;
+        code_point = lead & 0x07;
+    } else {
+        return 0;
+    }
+    if (i + length > text.size()) {
+        return 0;
+    }
+    for (std::size_t k = 1; k < length; ++k) {
+        const unsigned char c = static_cast<unsigned char>(text[i + k]);
+        if ((c & 0xC0) != 0x80) {
+            return 0;
+        }
+        code_point = (code_point << 6) | (c & 0x3F);
+    }
+    if ((length == 2 && code_point < 0x80)
+        || (length == 3 && code_point < 0x800)
+        || (length == 4 && code_point < 0x10000) || code_point > 0x10FFFF
+        || (code_point >= 0xD800 && code_point <= 0xDFFF)) {
+        return 0;
+    }
+    return length;
+}
+
+// Drops bytes that are not part of any valid UTF-8 sequence. Returns
+// nullopt when the input is already valid.
+inline std::optional<std::string> strip_invalid_utf8(std::string_view text)
+{
+    std::optional<std::string> repaired;
+    std::size_t copied = 0; // bytes of `text` already appended to *repaired
+    for (std::size_t i = 0; i < text.size();) {
+        const unsigned char c = static_cast<unsigned char>(text[i]);
+        if (c < 0x80) {
+            ++i;
+            continue;
+        }
+        const std::size_t length = utf8_valid_sequence_length(text, i);
+        if (length != 0) {
+            i += length;
+            continue;
+        }
+        if (!repaired) {
+            repaired.emplace(text.substr(0, i));
+            copied = i;
+        }
+        repaired->append(text.substr(copied, i - copied));
+        copied = i + 1; // drop the invalid byte
+        ++i;
+    }
+    if (repaired) {
+        repaired->append(text.substr(copied));
+    }
+    return repaired;
+}
+
 // Number of display columns: one per UTF-8 sequence.
 inline std::size_t utf8_width(std::string_view s)
 {
