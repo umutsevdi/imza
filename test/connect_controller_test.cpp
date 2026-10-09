@@ -539,6 +539,6 @@ TEST_CASE("send guard blocks messages without an active model")
     pump.pump();
 
     submit(*state, "hello");
-    CHECK(session->items().empty());
+    CHECK(session->items()->empty());
     CHECK(session->error() == "No model selected - run /model.");
 }

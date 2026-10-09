@@ -274,10 +274,13 @@ namespace {
             const bool connecting = st.phase() == Session::Phase::CONNECTING;
             const bool busy       = streaming || connecting;
             const std::uint64_t content_serial = st.content_serial();
-            const std::vector<ConversationItem>& conversation = st.items();
-            const std::size_t item_count = conversation.size();
-            const std::size_t queued_n   = st.queued().size();
-            const bool content_changed   = _content_serial != content_serial;
+            const std::shared_ptr<const std::vector<ConversationItem>>
+                conversation             = st.items();
+            const std::size_t item_count = conversation->size();
+            const std::shared_ptr<const std::vector<QueuedMessage>> queued
+                = st.queued();
+            const std::size_t queued_n = queued->size();
+            const bool content_changed = _content_serial != content_serial;
             const bool layout_changed
                 = _cache_kind != ctx.kind || _cache_width != ctx.width;
             const bool reset_cache = content_changed || layout_changed
@@ -328,7 +331,7 @@ namespace {
                     _item_versions[previous_size - 1] = INVALID_VERSION;
                 }
             }
-            _evict_outside(window, conversation);
+            _evict_outside(window, *conversation);
             if (std::exchange(_hover_dirty, false)) {
                 std::fill(_item_versions.begin() + window.begin,
                     _item_versions.begin() + window.end, INVALID_VERSION);
@@ -339,7 +342,7 @@ namespace {
             }
             for (std::size_t item_index = window.begin; item_index < window.end;
                 ++item_index) {
-                const ConversationItem& it = conversation[item_index];
+                const ConversationItem& it = (*conversation)[item_index];
                 const std::size_t version  = item_version(it);
                 const bool is_trailing     = item_index + 1 == item_count;
                 const bool active          = is_trailing && streaming
@@ -347,7 +350,7 @@ namespace {
                 const bool final_segment = !(is_trailing && busy)
                     && (is_trailing
                         || std::holds_alternative<UserTurn>(
-                            conversation[item_index + 1]));
+                            (*conversation)[item_index + 1]));
                 std::size_t eff_version = version;
                 if (const auto* tc = std::get_if<ToolCall>(&it);
                     tc != nullptr && is_running_tool(*tc)) {
@@ -517,7 +520,7 @@ namespace {
                 items.push_back(vertical_space(window.after));
             }
             for (size_t i = 0; i < queued_n; ++i) {
-                const auto& q = st.queued()[i];
+                const auto& q = (*queued)[i];
                 Elements row {
                     text("[QUEUED] ") | bold | color(HL_GREEN),
                 };
@@ -530,7 +533,7 @@ namespace {
             }
 
             Element content = items.empty()
-                ? (_hints.empty_state_banner && st.items().empty()
+                ? (_hints.empty_state_banner && conversation->empty()
                           ? empty_state_banner()
                           : text(""))
                 : vbox(std::move(items))
@@ -630,8 +633,9 @@ namespace {
                     _autocomplete.clear();
                     return true;
                 }
-                if (!_session->queued().empty()) {
-                    _session->cancel_queued(_session->queued().back().id);
+                const auto queued = _session->queued();
+                if (!queued->empty()) {
+                    _session->cancel_queued(queued->back().id);
                     return true;
                 }
                 if (_session->phase() != Session::Phase::IDLE) {
@@ -723,11 +727,12 @@ namespace {
             // The playout drain outlives the turn: keep the frame loop
             // alive until the queued tail has fully released, or the
             // response freezes a few characters short.
+            const auto items = _session->items();
             if (_playout_index != ~std::size_t { 0 }
                 && !_session->interrupt_requested()
-                && _playout_index < _session->items().size()) {
-                const auto* turn = std::get_if<AssistantTurn>(
-                    &_session->items()[_playout_index]);
+                && _playout_index < items->size()) {
+                const auto* turn
+                    = std::get_if<AssistantTurn>(&(*items)[_playout_index]);
                 if (turn != nullptr && _playout_chars < turn->markdown.size()) {
                     ++_frame;
                     _animation_ms += std::chrono::duration_cast<
@@ -1029,9 +1034,10 @@ namespace {
             return hbox(std::move(parts));
         }
 
-        const ToolCall* _find_tool_call(std::size_t id) const
+        static const ToolCall* _find_tool_call(
+            const std::vector<ConversationItem>& items, std::size_t id)
         {
-            for (const ConversationItem& item : _session->items()) {
+            for (const ConversationItem& item : items) {
                 if (const auto* call = std::get_if<ToolCall>(&item);
                     call != nullptr && call->id == id) {
                     return call;
@@ -1223,7 +1229,8 @@ namespace {
         {
             return _memoized_label_button(_subagent_buttons,
                 std::pair { id, index }, std::move(label), [this, id, index] {
-                    if (const auto* call = _find_tool_call(id);
+                    const auto items = _session->items();
+                    if (const auto* call = _find_tool_call(*items, id);
                         call != nullptr) {
                         _open_subagent_viewer(*call, index);
                     }
@@ -1235,7 +1242,8 @@ namespace {
         {
             return _memoized_label_button(_diff_buttons,
                 std::pair { id, index }, std::move(label), [this, id, index] {
-                    const auto* call = _find_tool_call(id);
+                    const auto items = _session->items();
+                    const auto* call = _find_tool_call(*items, id);
                     if (call == nullptr || !call->result.has_value()
                         || index >= call->result->diffs.size()) {
                         return;
@@ -1251,7 +1259,8 @@ namespace {
         {
             return _memoized_label_button(
                 _pending_lua_buttons, tc.id, "Executing…", [this, id = tc.id] {
-                    const auto* call = _find_tool_call(id);
+                    const auto items = _session->items();
+                    const auto* call = _find_tool_call(*items, id);
                     if (call == nullptr) {
                         return;
                     }
@@ -1283,7 +1292,8 @@ namespace {
                                       : text(*shared_label) | bold;
                     },
                     [this, id] {
-                        if (const auto* call = _find_tool_call(id);
+                        const auto items = _session->items();
+                        if (const auto* call = _find_tool_call(*items, id);
                             call != nullptr) {
                             _open_viewer_for(*call);
                         }
@@ -1302,7 +1312,8 @@ namespace {
                 const std::size_t id = tc.id;
                 return split_inline_link_button(
                     std::move(name), std::move(detail), [this, id] {
-                        if (const auto* call = _find_tool_call(id);
+                        const auto items = _session->items();
+                        if (const auto* call = _find_tool_call(*items, id);
                             call != nullptr) {
                             _open_viewer_for(*call);
                         }

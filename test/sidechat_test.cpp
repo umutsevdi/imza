@@ -54,7 +54,7 @@ TEST_CASE("sidechat toggle hides and reopens without discarding the session")
 
     sidechat->session->append_item(UserTurn { "sidechat question", { } });
     enqueue_user_modal(*sidechat, ConnectModal { ConnectModal::Entry::MANAGE });
-    REQUIRE(sidechat->session->items().size() == 1);
+    REQUIRE(sidechat->session->items()->size() == 1);
     CHECK(std::holds_alternative<ConnectModal>(sidechat->session->modal()));
 
     close_sidechat(*state);

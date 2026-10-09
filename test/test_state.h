@@ -145,8 +145,9 @@ struct AgentEnv {
 
     std::size_t user_turn_count() const
     {
+        const auto items  = session->items();
         std::size_t count = 0;
-        for (const auto& item : session->items()) {
+        for (const auto& item : *items) {
             if (std::holds_alternative<imza::UserTurn>(item)) {
                 ++count;
             }
@@ -156,14 +157,18 @@ struct AgentEnv {
 
     const imza::ToolCall* pending_tool() const
     {
-        for (auto it = session->items().rbegin(); it != session->items().rend();
-            ++it) {
+        _items_view = session->items();
+        for (auto it = _items_view->rbegin(); it != _items_view->rend(); ++it) {
             if (const auto* call = std::get_if<imza::ToolCall>(&*it)) {
                 return call;
             }
         }
         return nullptr;
     }
+
+private:
+    mutable std::shared_ptr<const std::vector<imza::ConversationItem>>
+        _items_view;
 };
 
 } // namespace imza::test

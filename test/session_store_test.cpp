@@ -130,8 +130,10 @@ TEST_CASE("saved sessions continue in place and rewrite the same file")
     // A resumed session adopts the source file stem and saves back into the
     // same file once dirtied.
     CHECK(loaded.session_id() == saved_path.stem().string());
-    CHECK(std::get<imza::UserTurn>(loaded.items()[0]).text == "hello");
-    CHECK(std::get<imza::AssistantTurn>(loaded.items()[1]).markdown == "world");
+    const auto loaded_items = loaded.items();
+    CHECK(std::get<imza::UserTurn>((*loaded_items)[0]).text == "hello");
+    CHECK(
+        std::get<imza::AssistantTurn>((*loaded_items)[1]).markdown == "world");
 
     CHECK(loaded.snapshot_for_save() == std::nullopt);
     loaded.begin_send("parallel continuation");
@@ -264,8 +266,9 @@ TEST_CASE("saved sessions retain delegated-agent chat transcripts")
 
     imza::Session loaded;
     roundtrip(source, loaded);
-    REQUIRE(loaded.items().size() == 3);
-    const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
+    const auto loaded_items = loaded.items();
+    REQUIRE(loaded_items->size() == 3);
+    const auto& call = std::get<imza::ToolCall>((*loaded_items)[2]);
     REQUIRE(call.subagent_chats.size() == 1);
     CHECK(call.subagent_chats[0].title == "Agent 1 (research)");
     CHECK(
@@ -289,8 +292,9 @@ TEST_CASE("lua dispatch log survives session persistence")
     make_tool_session(request, std::move(result), source);
     imza::Session loaded;
     roundtrip(source, loaded);
-    REQUIRE(loaded.items().size() == 3);
-    const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
+    const auto loaded_items = loaded.items();
+    REQUIRE(loaded_items->size() == 3);
+    const auto& call = std::get<imza::ToolCall>((*loaded_items)[2]);
     REQUIRE(call.result.has_value());
     REQUIRE(call.result->dispatch_log.size() == 2);
     const imza::LuaBindingCall read { "read", "/tmp/a", true };
@@ -315,7 +319,8 @@ TEST_CASE("lua return value survives session persistence")
     make_tool_session(request, std::move(result), source);
     imza::Session loaded;
     roundtrip(source, loaded);
-    const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
+    const auto loaded_items = loaded.items();
+    const auto& call        = std::get<imza::ToolCall>((*loaded_items)[2]);
     REQUIRE(call.result.has_value());
     REQUIRE(call.result->return_value.has_value());
     const imza::JsonValue& returned = *call.result->return_value;
@@ -351,7 +356,8 @@ TEST_CASE("a tool result with invalid utf-8 still loads and replays clean")
     imza::Session loaded;
     roundtrip(source, loaded);
 
-    const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
+    const auto loaded_items = loaded.items();
+    const auto& call        = std::get<imza::ToolCall>((*loaded_items)[2]);
     REQUIRE(call.result.has_value());
     CHECK_FALSE(imza::strip_invalid_utf8(call.result->text).has_value());
 
@@ -378,7 +384,8 @@ TEST_CASE("legacy lua result without a return value still loads")
     make_tool_session(request, std::move(result), source);
     imza::Session loaded;
     roundtrip(source, loaded);
-    const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
+    const auto loaded_items = loaded.items();
+    const auto& call        = std::get<imza::ToolCall>((*loaded_items)[2]);
     REQUIRE(call.result.has_value());
     CHECK_FALSE(call.result->return_value.has_value());
     CHECK(call.result->text == "1\n");
@@ -404,7 +411,8 @@ TEST_CASE("lua aggregate diffs survive session persistence")
     make_tool_session(request, std::move(result), source);
     imza::Session loaded;
     roundtrip(source, loaded);
-    const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
+    const auto loaded_items = loaded.items();
+    const auto& call        = std::get<imza::ToolCall>((*loaded_items)[2]);
     REQUIRE(call.result.has_value());
     REQUIRE(call.result->diffs.size() == 1);
     CHECK(call.result->diffs[0].file == "/tmp/a.txt");
@@ -437,7 +445,8 @@ TEST_CASE("canvas charts survive session persistence")
     make_tool_session(request, std::move(result), source);
     imza::Session loaded;
     roundtrip(source, loaded);
-    const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
+    const auto loaded_items = loaded.items();
+    const auto& call        = std::get<imza::ToolCall>((*loaded_items)[2]);
     REQUIRE(call.result.has_value());
     REQUIRE(call.result->canvases.size() == 2);
     CHECK(call.result->canvases[0].kind == imza::CanvasView::Kind::PIE);
@@ -472,7 +481,8 @@ TEST_CASE("lua aggregate diffs round-trip SKIP and clamp unknown kinds")
     std::filesystem::path saved_path;
     imza::Session loaded;
     roundtrip(source, loaded, &saved_path);
-    const auto& call = std::get<imza::ToolCall>(loaded.items()[2]);
+    const auto loaded_items = loaded.items();
+    const auto& call        = std::get<imza::ToolCall>((*loaded_items)[2]);
     REQUIRE(call.result.has_value());
     REQUIRE(call.result->diffs.size() == 1);
     REQUIRE(call.result->diffs[0].rows.size() == 4);
@@ -495,7 +505,8 @@ TEST_CASE("lua aggregate diffs round-trip SKIP and clamp unknown kinds")
     }
     imza::Session clamped;
     REQUIRE(load_session(saved_path, clamped) == imza::Status::OK);
-    const auto& clamped_call = std::get<imza::ToolCall>(clamped.items()[2]);
+    const auto clamped_items = clamped.items();
+    const auto& clamped_call = std::get<imza::ToolCall>((*clamped_items)[2]);
     REQUIRE(clamped_call.result.has_value());
     REQUIRE(clamped_call.result->diffs[0].rows.size() == 4);
     CHECK(clamped_call.result->diffs[0].rows[1].kind
@@ -847,8 +858,9 @@ TEST_CASE("native and legacy attachments survive session persistence")
 
     imza::Session loaded;
     REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
+    const auto loaded_items = loaded.items();
     const auto& current
-        = std::get<imza::UserTurn>(loaded.items().front()).attachments;
+        = std::get<imza::UserTurn>(loaded_items->front()).attachments;
     REQUIRE(current.size() == 3);
     CHECK(current[0].type == imza::Attachment::Type::TEXT);
     CHECK(current[0].content == "plain text");
@@ -903,9 +915,10 @@ TEST_CASE("plan document persists across save and restore")
 
     imza::Session loaded;
     REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
-    CHECK(loaded.plans().size() == 2);
+    const auto loaded_plans = loaded.plans();
+    CHECK(loaded_plans->size() == 2);
     CHECK(loaded.plan_doc() == second);
-    CHECK(loaded.plans().front().content
+    CHECK(loaded_plans->front().content
         == "# Requirements\nauth tokens\n\n# Approach\nx\n# Changes\nx\n"
            "# Verification\nx");
 

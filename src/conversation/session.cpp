@@ -118,6 +118,60 @@ std::optional<std::size_t> last_user_turn_index(
     return std::nullopt;
 }
 
+void Session::_ensure_unique(
+    std::shared_ptr<std::vector<ConversationItem>>& items)
+{
+    if (items.use_count() > 1) {
+        items = std::make_shared<std::vector<ConversationItem>>(*items);
+    }
+}
+
+void Session::_ensure_unique(std::shared_ptr<TodoList>& todo)
+{
+    if (todo.use_count() > 1) {
+        todo = std::make_shared<TodoList>(*todo);
+    }
+}
+
+void Session::_ensure_unique(
+    std::shared_ptr<std::vector<QueuedMessage>>& queued)
+{
+    if (queued.use_count() > 1) {
+        queued = std::make_shared<std::vector<QueuedMessage>>(*queued);
+    }
+}
+
+void Session::_ensure_unique(std::shared_ptr<std::vector<PlanDoc>>& plans)
+{
+    if (plans.use_count() > 1) {
+        plans = std::make_shared<std::vector<PlanDoc>>(*plans);
+    }
+}
+
+std::shared_ptr<const std::vector<ConversationItem>> Session::items() const
+{
+    std::lock_guard lock(_mutex);
+    return _items;
+}
+
+std::shared_ptr<const TodoList> Session::todo() const
+{
+    std::lock_guard lock(_mutex);
+    return _todo;
+}
+
+std::shared_ptr<const std::vector<QueuedMessage>> Session::queued() const
+{
+    std::lock_guard lock(_mutex);
+    return _queued;
+}
+
+std::shared_ptr<const std::vector<PlanDoc>> Session::plans() const
+{
+    std::lock_guard lock(_mutex);
+    return _plans;
+}
+
 ModalPayload Session::modal() const
 {
     std::lock_guard lock(_mutex);
@@ -197,17 +251,17 @@ Session::StatusView Session::status_view() const
 bool Session::has_items() const
 {
     std::lock_guard lock(_mutex);
-    return !_items.empty();
+    return !_items->empty();
 }
 
 bool Session::has_pending_work() const
 {
     std::lock_guard lock(_mutex);
-    if (_phase != Phase::IDLE || !_queued.empty()) {
+    if (_phase != Phase::IDLE || !_queued->empty()) {
         return true;
     }
     return std::any_of(
-        _items.begin(), _items.end(), [](const ConversationItem& item) {
+        _items->begin(), _items->end(), [](const ConversationItem& item) {
             const auto* tool = std::get_if<ToolCall>(&item);
             return tool != nullptr && !tool->result.has_value();
         });
@@ -228,12 +282,12 @@ Signal<>::Subscription Session::subscribe_to_compaction_change(
 std::string Session::plan_doc() const
 {
     std::lock_guard lock(_mutex);
-    return _plans.empty() ? std::string { } : _plans.back().content;
+    return _plans->empty() ? std::string { } : _plans->back().content;
 }
 
 SessionSnapshot Session::_build_snapshot() const
 {
-    return { _title, _items, _todo, _plans, _compacted_summary,
+    return { _title, *_items, *_todo, *_plans, _compacted_summary,
         _compacted_item_count, _mode == Mode::PLAN, _persistence };
 }
 
@@ -246,7 +300,7 @@ SessionSnapshot Session::snapshot() const
 std::optional<SessionSnapshot> Session::snapshot_for_save() const
 {
     std::lock_guard lock(_mutex);
-    if (_items.empty() || !_dirty) {
+    if (_items->empty() || !_dirty) {
         return std::nullopt;
     }
     return _build_snapshot();
@@ -256,11 +310,13 @@ void Session::restore(SessionSnapshot snapshot)
 {
     {
         std::lock_guard lock(_mutex);
-        _title                  = std::move(snapshot.title);
-        _items                  = std::move(snapshot.items);
-        _todo                   = std::move(snapshot.todo);
-        _plans                  = std::move(snapshot.plans);
-        _plan_version           = _plans.size();
+        _title = std::move(snapshot.title);
+        _items = std::make_shared<std::vector<ConversationItem>>(
+            std::move(snapshot.items));
+        _todo = std::make_shared<TodoList>(std::move(snapshot.todo));
+        _plans
+            = std::make_shared<std::vector<PlanDoc>>(std::move(snapshot.plans));
+        _plan_version           = _plans->size();
         _plan_seen_version      = _plan_version;
         _plan_submitted_version = 0;
         _compacted_summary      = std::move(snapshot.compacted_summary);
@@ -275,10 +331,10 @@ void Session::restore(SessionSnapshot snapshot)
         } else {
             _session_id = unique_session_id();
         }
-        _dirty = false;
-        _mode  = snapshot.plan_mode ? Mode::PLAN : Mode::BUILD;
-        _modal = std::monostate { };
-        std::vector<QueuedMessage>().swap(_queued);
+        _dirty  = false;
+        _mode   = snapshot.plan_mode ? Mode::PLAN : Mode::BUILD;
+        _modal  = std::monostate { };
+        _queued = std::make_shared<std::vector<QueuedMessage>>();
         _error.clear();
         _retry_countdown.reset();
         _reasoning_start.reset();
@@ -292,7 +348,7 @@ void Session::restore(SessionSnapshot snapshot)
         _next_tool_id        = 1;
         _next_compaction_id  = 1;
         _running_compactions = 0;
-        for (const auto& item : _items) {
+        for (const auto& item : *_items) {
             if (const auto* tool = std::get_if<ToolCall>(&item)) {
                 _next_tool_id = std::max(_next_tool_id, tool->id + 1);
             } else if (const auto* event
@@ -360,7 +416,7 @@ std::vector<std::string> Session::attachment_names() const
 {
     std::lock_guard lock(_mutex);
     std::vector<std::string> names;
-    for (const ConversationItem& item : _items) {
+    for (const ConversationItem& item : *_items) {
         const auto* user = std::get_if<UserTurn>(&item);
         if (user == nullptr) {
             continue;
@@ -380,7 +436,7 @@ std::vector<std::string> Session::attachment_names() const
 bool Session::claim_title_generation()
 {
     std::lock_guard lock(_mutex);
-    if (_title_generation_claimed || !_items.empty()) {
+    if (_title_generation_claimed || !_items->empty()) {
         return false;
     }
     _title_generation_claimed = true;
@@ -402,9 +458,10 @@ void Session::set_title(std::string title)
 void Session::cancel_queued(std::size_t id)
 {
     std::lock_guard lock(_mutex);
-    for (auto it = _queued.begin(); it != _queued.end(); ++it) {
+    _ensure_unique(_queued);
+    for (auto it = _queued->begin(); it != _queued->end(); ++it) {
         if (it->id == id) {
-            _queued.erase(it);
+            _queued->erase(it);
             return;
         }
     }
@@ -414,18 +471,20 @@ void Session::enqueue_message(
     std::string text, std::vector<Attachment> attachments)
 {
     std::lock_guard lock(_mutex);
-    _queued.push_back(QueuedMessage {
+    _ensure_unique(_queued);
+    _queued->push_back(QueuedMessage {
         _next_queued_id++, std::move(text), std::move(attachments) });
 }
 
 std::optional<QueuedMessage> Session::pop_queued()
 {
     std::lock_guard lock(_mutex);
-    if (_queued.empty()) {
+    if (_queued->empty()) {
         return std::nullopt;
     }
-    QueuedMessage next = std::move(_queued.front());
-    _queued.erase(_queued.begin());
+    _ensure_unique(_queued);
+    QueuedMessage next = std::move(_queued->front());
+    _queued->erase(_queued->begin());
     return next;
 }
 
@@ -436,7 +495,8 @@ void Session::begin_send(std::string text, std::vector<Attachment> attachments)
         std::lock_guard lock(_mutex);
         _persistence = UnsavedSession { };
         _dirty       = true;
-        _items.emplace_back(
+        _ensure_unique(_items);
+        _items->emplace_back(
             UserTurn { std::move(text), std::move(attachments) });
         _error.clear();
         _phase        = Phase::CONNECTING;
@@ -451,14 +511,16 @@ void Session::append_assistant(std::string model, std::string reasoning_effort)
 {
     std::lock_guard lock(_mutex);
     _dirty = true;
-    _items.emplace_back(AssistantTurn { .model = std::move(model),
-        .reasoning_effort                      = std::move(reasoning_effort) });
+    _ensure_unique(_items);
+    _items->emplace_back(AssistantTurn { .model = std::move(model),
+        .reasoning_effort = std::move(reasoning_effort) });
 }
 
 void Session::set_last_assistant_metadata(
     std::string model, std::string reasoning_effort)
 {
     std::lock_guard lock(_mutex);
+    _ensure_unique(_items);
     if (AssistantTurn* assistant = _last_assistant_locked()) {
         assistant->model            = std::move(model);
         assistant->reasoning_effort = std::move(reasoning_effort);
@@ -469,15 +531,17 @@ void Session::append_item(ConversationItem item)
 {
     std::lock_guard lock(_mutex);
     _dirty = true;
-    _items.push_back(std::move(item));
+    _ensure_unique(_items);
+    _items->push_back(std::move(item));
 }
 
 std::pair<std::size_t, std::size_t> Session::begin_compaction()
 {
     std::lock_guard lock(_mutex);
     const std::size_t id     = _next_compaction_id++;
-    const std::size_t prefix = last_user_turn_index(_items).value_or(0);
-    _items.emplace_back(
+    const std::size_t prefix = last_user_turn_index(*_items).value_or(0);
+    _ensure_unique(_items);
+    _items->emplace_back(
         CompactionEvent { id, CompactionEvent::Status::RUNNING });
     ++_running_compactions;
     _compaction_changed.publish();
@@ -486,7 +550,7 @@ std::pair<std::size_t, std::size_t> Session::begin_compaction()
 
 CompactionEvent* Session::_find_compaction_locked(std::size_t id)
 {
-    for (auto& item : _items) {
+    for (auto& item : *_items) {
         auto* event = std::get_if<CompactionEvent>(&item);
         if (event != nullptr && event->id == id) {
             return event;
@@ -513,6 +577,7 @@ void Session::finish_compaction(std::size_t id, std::string summary,
     std::size_t compacted_item_count, bool success)
 {
     std::lock_guard lock(_mutex);
+    _ensure_unique(_items);
     if (!_complete_compaction_locked(id,
             success ? CompactionEvent::Status::COMPLETED
                     : CompactionEvent::Status::FAILED)) {
@@ -528,6 +593,7 @@ void Session::complete_manual_compaction(
     std::size_t id, std::string summary, std::size_t absorbed_items)
 {
     std::lock_guard lock(_mutex);
+    _ensure_unique(_items);
     if (!_complete_compaction_locked(id, CompactionEvent::Status::COMPLETED)) {
         return;
     }
@@ -540,7 +606,7 @@ ToolCall* Session::_find_tool_locked(
     const ToolCallRequest& req, const bool unfinished_only)
 {
     return find_call_locked(
-        _items, req,
+        *_items, req,
         [unfinished_only](const ToolCall& call) {
             return unfinished_only && call.result.has_value();
         },
@@ -552,7 +618,7 @@ ToolCall* Session::_find_tool_locked(
 ToolCall* Session::_find_planning_tool_locked(const ToolCallRequest& req)
 {
     return find_call_locked(
-        _items, req,
+        *_items, req,
         [](const ToolCall& call) {
             return call.phase != ToolCall::Phase::PLANNING;
         },
@@ -565,6 +631,7 @@ void Session::set_tool_subagent_chats(
     const ToolCallRequest& req, std::vector<SubagentChat> chats)
 {
     std::lock_guard lock(_mutex);
+    _ensure_unique(_items);
     if (auto* call = _find_tool_locked(req, false)) {
         call->subagent_chats = std::move(chats);
         ++_content_serial;
@@ -575,6 +642,7 @@ void Session::set_tool_subagents(
     const ToolCallRequest& req, std::vector<std::size_t> ids)
 {
     std::lock_guard lock(_mutex);
+    _ensure_unique(_items);
     if (auto* call = _find_tool_locked(req, true)) {
         call->subagent_ids = std::move(ids);
         ++_content_serial;
@@ -585,6 +653,7 @@ void Session::fill_tool_result(
     const ToolCallRequest& req, ToolCall::Result result)
 {
     std::lock_guard lock(_mutex);
+    _ensure_unique(_items);
     if (auto* call = _find_tool_locked(req, true)) {
         call->result = std::move(result);
         _dirty       = true;
@@ -594,10 +663,10 @@ void Session::fill_tool_result(
 void Session::set_todo(TodoList todo)
 {
     std::lock_guard lock(_mutex);
-    if (todo != _todo) {
+    if (todo != *_todo) {
         _dirty = true;
     }
-    _todo = std::move(todo);
+    _todo = std::make_shared<TodoList>(std::move(todo));
 }
 
 // The current plan is the vector back. Both counters move together: the
@@ -609,7 +678,8 @@ std::string Session::create_plan(std::string content)
         !error.empty()) {
         return error;
     }
-    _plans.push_back(PlanDoc { std::move(content) });
+    _ensure_unique(_plans);
+    _plans->push_back(PlanDoc { std::move(content) });
     ++_plan_version;
     _plan_seen_version = _plan_version;
     _dirty             = true;
@@ -621,7 +691,7 @@ std::string Session::edit_plan(
     const std::string& old, const std::string& fresh, std::size_t count)
 {
     std::lock_guard lock(_mutex);
-    if (_plans.empty()) {
+    if (_plans->empty()) {
         return "no plan exists; create one with imza.plan.create";
     }
     if (_plan_seen_version != _plan_version) {
@@ -630,11 +700,12 @@ std::string Session::edit_plan(
     }
     std::string error;
     std::optional<std::string> patched
-        = replace_text(_plans.back().content, old, fresh, count, error);
+        = replace_text(_plans->back().content, old, fresh, count, error);
     if (!patched) {
         return "imza.plan.edit: " + error;
     }
-    _plans.back().content = std::move(*patched);
+    _ensure_unique(_plans);
+    _plans->back().content = std::move(*patched);
     ++_plan_version;
     _plan_seen_version = _plan_version;
     _dirty             = true;
@@ -651,13 +722,13 @@ void Session::mark_plan_seen()
 std::optional<std::string> Session::plan_submission_for_build()
 {
     std::lock_guard lock(_mutex);
-    if (_plans.empty() || _mode != Mode::BUILD) {
+    if (_plans->empty() || _mode != Mode::BUILD) {
         return std::nullopt;
     }
     if (_plan_submitted_version == _plan_version) {
         return std::nullopt;
     }
-    std::string content = _plans.back().content;
+    std::string content = _plans->back().content;
     if (content.size() > MAX_PLAN_BYTES) {
         content.resize(MAX_PLAN_BYTES);
     }
@@ -755,9 +826,9 @@ std::vector<Message> Session::build_history(
             "<session-summary>\n" + _compacted_summary
                 + "\n</session-summary>" });
     }
-    const std::size_t begin = std::min(_compacted_item_count, _items.size());
-    for (std::size_t index = begin; index < _items.size(); ++index) {
-        const auto& item = _items[index];
+    const std::size_t begin = std::min(_compacted_item_count, _items->size());
+    for (std::size_t index = begin; index < _items->size(); ++index) {
+        const auto& item = (*_items)[index];
         if (const auto* u = std::get_if<UserTurn>(&item)) {
             Message user { Message::Type::USER,
                 message_with_attachments(u->text, u->attachments) };
@@ -790,11 +861,12 @@ std::vector<Message> Session::build_history(
 void Session::apply(const StreamEvent& ev, const ModelPricing& pricing)
 {
     std::lock_guard lock(_mutex);
+    _ensure_unique(_items);
     switch (ev.kind) {
     case StreamEvent::Kind::CONTENT_DELTA:
         assert(_phase != Phase::AWAITING);
-        if (!_items.empty()) {
-            if (auto* a = std::get_if<AssistantTurn>(&_items.back())) {
+        if (!_items->empty()) {
+            if (auto* a = std::get_if<AssistantTurn>(&_items->back())) {
                 if (!ev.text.empty()) {
                     _finalize_reasoning(*a);
                     _dirty = true;
@@ -804,8 +876,8 @@ void Session::apply(const StreamEvent& ev, const ModelPricing& pricing)
         }
         break;
     case StreamEvent::Kind::REASONING:
-        if (!_items.empty()) {
-            if (auto* a = std::get_if<AssistantTurn>(&_items.back())) {
+        if (!_items->empty()) {
+            if (auto* a = std::get_if<AssistantTurn>(&_items->back())) {
                 if (a->reasoning.empty() && !_reasoning_start.has_value()) {
                     _reasoning_start = std::chrono::steady_clock::now();
                 }
@@ -825,7 +897,7 @@ void Session::apply(const StreamEvent& ev, const ModelPricing& pricing)
         }
         // Transient: arguments are still streaming, so the item is not
         // marked dirty and is never persisted or sent back as history.
-        _items.emplace_back(
+        _items->emplace_back(
             ToolCall { _next_tool_id++, ev.tool_call.id, ev.tool_call.name, "",
                 { }, { }, std::nullopt, ToolCall::Phase::PLANNING });
         break;
@@ -838,7 +910,7 @@ void Session::apply(const StreamEvent& ev, const ModelPricing& pricing)
             planned->args  = ev.tool_call.args;
             planned->phase = ToolCall::Phase::EXECUTING;
         } else {
-            _items.emplace_back(ToolCall { _next_tool_id++, ev.tool_call.id,
+            _items->emplace_back(ToolCall { _next_tool_id++, ev.tool_call.id,
                 ev.tool_call.name, ev.tool_call.args, { }, { }, std::nullopt });
         }
         _dirty = true;
@@ -870,7 +942,7 @@ AssistantTurn* Session::_last_assistant_locked()
 
 const AssistantTurn* Session::_last_assistant_locked() const
 {
-    for (auto it = _items.rbegin(); it != _items.rend(); ++it) {
+    for (auto it = _items->rbegin(); it != _items->rend(); ++it) {
         if (const auto* a = std::get_if<AssistantTurn>(&*it)) {
             return a;
         }
@@ -893,11 +965,12 @@ void Session::_finish_session_locked(const std::string& error)
     if (_phase == Phase::IDLE) {
         return;
     }
+    _ensure_unique(_items);
     if (auto* a = _last_assistant_locked()) {
         _finalize_reasoning(*a);
     }
     _retry_countdown.reset();
-    std::erase_if(_items, [](const ConversationItem& item) {
+    std::erase_if(*_items, [](const ConversationItem& item) {
         const auto* tool = std::get_if<ToolCall>(&item);
         return tool != nullptr && tool->phase == ToolCall::Phase::PLANNING;
     });
@@ -910,7 +983,8 @@ void Session::_finish_session_locked(const std::string& error)
 
 void Session::_cancel_dangling_tools_locked()
 {
-    for (auto& item : _items) {
+    _ensure_unique(_items);
+    for (auto& item : *_items) {
         auto* tool = std::get_if<ToolCall>(&item);
         if (tool != nullptr && !tool->result.has_value()) {
             tool->result = ToolCall::Result { ToolCall::Result::Kind::CANCEL,

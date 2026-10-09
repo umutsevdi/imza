@@ -624,7 +624,8 @@ TEST_CASE("one-time shell approval does not authorize later calls")
     REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
 
     std::vector<imza::ToolCall::Result> results;
-    for (const auto& it : env.session->items()) {
+    const auto items = env.session->items();
+    for (const auto& it : *items) {
         if (const auto* tc = std::get_if<imza::ToolCall>(&it)) {
             REQUIRE(tc->result.has_value());
             results.push_back(*tc->result);
@@ -669,7 +670,8 @@ TEST_CASE("filesystem session approval installs an exact reusable grant")
     REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
     CHECK(env.state->queue.size() == 0);
     CHECK(env.state->permissions->snapshot()->size() == 1);
-    for (const auto& item : env.session->items()) {
+    const auto lua_items = env.session->items();
+    for (const auto& item : *lua_items) {
         if (const auto* call = std::get_if<imza::ToolCall>(&item);
             call != nullptr && call->name == "lua" && call->result) {
             CHECK(call->result->kind == imza::ToolCall::Result::Kind::OUTPUT);

@@ -73,7 +73,8 @@ using AgentEnv = imza::test::AgentEnv;
 // True when an assistant turn with exactly `markdown` is in the session.
 bool assistant_markdown_present(const AgentEnv& env, std::string_view markdown)
 {
-    for (const auto& it : env.session->items()) {
+    const auto items = env.session->items();
+    for (const auto& it : *items) {
         if (const auto* a = std::get_if<imza::AssistantTurn>(&it)) {
             if (a->markdown == markdown) {
                 return true;

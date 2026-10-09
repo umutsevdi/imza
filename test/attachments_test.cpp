@@ -272,7 +272,7 @@ TEST_CASE("session compaction replaces only old model history")
     const auto [id, prefix] = session.begin_compaction();
     session.finish_compaction(id, "preserved summary", prefix, true);
 
-    CHECK(session.items().size() == 5);
+    CHECK(session.items()->size() == 5);
     const auto history = session.build_history("system");
     REQUIRE(history.size() == 4);
     CHECK(history[1].content.find("preserved summary") != std::string::npos);
@@ -319,8 +319,9 @@ TEST_CASE("streamed tool call starts planning then executes in place")
 
     // The start event creates a single planning item with no arguments yet.
     session.apply(imza::make_tool_call_start_event(request), { });
-    REQUIRE(session.items().size() == 3);
-    const auto* planning = std::get_if<imza::ToolCall>(&session.items()[2]);
+    const auto planning_items = session.items();
+    REQUIRE(planning_items->size() == 3);
+    const auto* planning = std::get_if<imza::ToolCall>(&(*planning_items)[2]);
     REQUIRE(planning != nullptr);
     CHECK(planning->phase == imza::ToolCall::Phase::PLANNING);
     CHECK(planning->args.empty());
@@ -329,8 +330,9 @@ TEST_CASE("streamed tool call starts planning then executes in place")
 
     // The complete call updates that same item rather than appending a new one.
     session.apply(imza::make_tool_call_event(request), { });
-    REQUIRE(session.items().size() == 3);
-    const auto* executing = std::get_if<imza::ToolCall>(&session.items()[2]);
+    const auto executing_items = session.items();
+    REQUIRE(executing_items->size() == 3);
+    const auto* executing = std::get_if<imza::ToolCall>(&(*executing_items)[2]);
     REQUIRE(executing != nullptr);
     CHECK(executing->phase == imza::ToolCall::Phase::EXECUTING);
     CHECK(executing->args == request.args);
@@ -346,8 +348,9 @@ TEST_CASE("streamed tool call starts planning then executes in place")
     interrupted.append_assistant();
     interrupted.apply(imza::make_tool_call_start_event(request), { });
     REQUIRE(interrupted.finish_session(""));
-    REQUIRE(interrupted.items().size() == 2);
-    CHECK(std::holds_alternative<imza::AssistantTurn>(interrupted.items()[1]));
+    const auto interrupted_items = interrupted.items();
+    REQUIRE(interrupted_items->size() == 2);
+    CHECK(std::holds_alternative<imza::AssistantTurn>((*interrupted_items)[1]));
 }
 
 TEST_CASE("removing a selected mention detaches its snapshot")

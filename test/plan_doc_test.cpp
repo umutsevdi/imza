@@ -141,9 +141,9 @@ TEST_CASE("revise submits one turn with section and line locators")
 
     // The revise turn starts immediately (a provider is configured); the
     // user turn carries the derived locators and the note body.
-    REQUIRE(fx.state->session->items().size() >= 1);
-    const auto* user
-        = std::get_if<imza::UserTurn>(&fx.state->session->items().front());
+    const auto items = fx.state->session->items();
+    REQUIRE(items->size() >= 1);
+    const auto* user = std::get_if<imza::UserTurn>(&items->front());
     REQUIRE(user != nullptr);
     CHECK(user->text.find("Approach > 2. second step") != std::string::npos);
     CHECK(user->text.find("reorder these") != std::string::npos);
@@ -205,9 +205,9 @@ TEST_CASE("section jumps with brackets and a heading note anchors the section")
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("s")));
 
-    REQUIRE(fx.state->session->items().size() >= 1);
-    const auto* user
-        = std::get_if<imza::UserTurn>(&fx.state->session->items().front());
+    const auto items = fx.state->session->items();
+    REQUIRE(items->size() >= 1);
+    const auto* user = std::get_if<imza::UserTurn>(&items->front());
     REQUIRE(user != nullptr);
     // The heading note pins the heading line; the locator cites the
     // section with the heading line itself as the edit anchor.
@@ -393,7 +393,7 @@ TEST_CASE("space opens a note instead of triggering revise")
     const std::string rendered = imza::test::to_text(fx.doc->Render(), 100, 40);
     CHECK(rendered.find("Leave a note") != std::string::npos);
     // No revise turn was submitted.
-    CHECK(fx.state->session->items().empty());
+    CHECK(fx.state->session->items()->empty());
 }
 
 TEST_CASE("revise button click submits the notes")
@@ -410,9 +410,9 @@ TEST_CASE("revise button click submits the notes")
     (void)imza::test::to_text(fx.doc->Render(), 100, 40);
 
     REQUIRE(imza::test::click_label(fx.doc, "Revise Plan"));
-    REQUIRE(fx.state->session->items().size() >= 1);
-    const auto* user
-        = std::get_if<imza::UserTurn>(&fx.state->session->items().front());
+    const auto items = fx.state->session->items();
+    REQUIRE(items->size() >= 1);
+    const auto* user = std::get_if<imza::UserTurn>(&items->front());
     REQUIRE(user != nullptr);
     CHECK(user->text.find("tighten scope") != std::string::npos);
 }
@@ -431,7 +431,7 @@ TEST_CASE("revise works repeatedly without a plan change in between")
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
     (void)imza::test::to_text(fx.doc->Render(), 100, 40);
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("s")));
-    REQUIRE(fx.state->session->items().size() >= 1);
+    REQUIRE(fx.state->session->items()->size() >= 1);
 
     // The agent answers without touching the plan; a second note and the
     // button must still submit (no revise latch). The pane re-renders
@@ -442,8 +442,9 @@ TEST_CASE("revise works repeatedly without a plan change in between")
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
     (void)imza::test::to_text(fx.doc->Render(), 100, 40);
     REQUIRE(imza::test::click_label(fx.doc, "Revise Plan"));
-    bool found = false;
-    for (const auto& item : fx.state->session->items()) {
+    bool found       = false;
+    const auto items = fx.state->session->items();
+    for (const auto& item : *items) {
         const auto* user = std::get_if<imza::UserTurn>(&item);
         if (user != nullptr
             && user->text.find("second pass") != std::string::npos) {
@@ -451,7 +452,8 @@ TEST_CASE("revise works repeatedly without a plan change in between")
         }
     }
     // A busy session queues the revise instead of dropping it.
-    for (const auto& queued : fx.state->session->queued()) {
+    const auto queued_items = fx.state->session->queued();
+    for (const auto& queued : *queued_items) {
         if (queued.text.find("second pass") != std::string::npos) {
             found = true;
         }
@@ -505,7 +507,7 @@ TEST_CASE("revise guards are visible in the pane header")
     CHECK(fx.state->session->error().find("note") != std::string::npos);
     const std::string rendered = imza::test::to_text(fx.doc->Render(), 100, 40);
     CHECK(rendered.find("Add a note before sending.") != std::string::npos);
-    CHECK(fx.state->session->items().empty());
+    CHECK(fx.state->session->items()->empty());
 }
 
 TEST_CASE("a second revise works after the agent updates the plan")
@@ -541,8 +543,9 @@ TEST_CASE("a second revise works after the agent updates the plan")
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Return));
     (void)imza::test::to_text(fx.doc->Render(), 100, 40);
     REQUIRE(fx.doc->OnEvent(ftxui::Event::Character("s")));
-    bool found = false;
-    for (const auto& item : fx.state->session->items()) {
+    bool found       = false;
+    const auto items = fx.state->session->items();
+    for (const auto& item : *items) {
         const auto* user = std::get_if<imza::UserTurn>(&item);
         if (user != nullptr
             && user->text.find("second pass") != std::string::npos) {

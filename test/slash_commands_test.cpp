@@ -333,7 +333,8 @@ TEST_CASE("run_slash /compact folds a forced summary into the session")
     run_slash(*state, "/compact");
     // The worker terminalizes the compaction event when it commits.
     REQUIRE(imza::test::wait_until([&] {
-        for (const auto& item : state->session->items()) {
+        const auto items = state->session->items();
+        for (const auto& item : *items) {
             if (const auto* event = std::get_if<imza::CompactionEvent>(&item)) {
                 return event->status != imza::CompactionEvent::Status::RUNNING;
             }

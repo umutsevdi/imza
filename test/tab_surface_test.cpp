@@ -246,7 +246,7 @@ TEST_CASE("review pane shortcuts: p sends to plan, r refuses without a diff")
     REQUIRE(review->OnEvent(ftxui::Event::Character("p")));
     CHECK(state->session->error().find("Add a review comment")
         != std::string::npos);
-    CHECK(state->session->items().empty());
+    CHECK(state->session->items()->empty());
 
     // r without a loaded diff refuses.
     state->session->clear_error();
@@ -259,8 +259,9 @@ TEST_CASE("review pane shortcuts: p sends to plan, r refuses without a diff")
     REQUIRE(
         state->review->add_comment({ "file.cpp", 2, 3, "line" }, "note") != 0);
     REQUIRE(review->OnEvent(ftxui::Event::Character("p")));
-    bool found = false;
-    for (const auto& item : state->session->items()) {
+    bool found       = false;
+    const auto items = state->session->items();
+    for (const auto& item : *items) {
         if (const auto* user = std::get_if<imza::UserTurn>(&item);
             user != nullptr && user->text.find("note") != std::string::npos) {
             found = true;

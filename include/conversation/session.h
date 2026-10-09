@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -155,7 +156,11 @@ public:
 
     Session() = default;
 
-    const std::vector<ConversationItem>& items() const { return _items; }
+    // Snapshots: safe to read without the session lock.
+    std::shared_ptr<const std::vector<ConversationItem>> items() const;
+    std::shared_ptr<const TodoList> todo() const;
+    std::shared_ptr<const std::vector<QueuedMessage>> queued() const;
+    std::shared_ptr<const std::vector<PlanDoc>> plans() const;
     ModalPayload modal() const;
     std::uint64_t modal_serial() const;
     std::uint64_t content_serial() const;
@@ -166,9 +171,6 @@ public:
     std::string connect_status() const;
     std::string title() const;
     std::vector<std::string> attachment_names() const;
-    const TodoList& todo() const { return _todo; }
-    const std::vector<QueuedMessage>& queued() const { return _queued; }
-    const std::vector<PlanDoc>& plans() const { return _plans; }
     std::string plan_doc() const;
     std::optional<Countdown> retry_countdown() const;
     Usage last() const;
@@ -280,10 +282,18 @@ private:
     void _update_usage(
         const StreamEvent& usage_event, const ModelPricing& pricing);
     void _notify_title_change();
+    // Copy-on-write: detach when a snapshot still holds the container.
+    static void _ensure_unique(
+        std::shared_ptr<std::vector<ConversationItem>>& items);
+    static void _ensure_unique(std::shared_ptr<TodoList>& todo);
+    static void _ensure_unique(
+        std::shared_ptr<std::vector<QueuedMessage>>& queued);
+    static void _ensure_unique(std::shared_ptr<std::vector<PlanDoc>>& plans);
 
     mutable std::mutex _mutex;
 
-    std::vector<ConversationItem> _items;
+    std::shared_ptr<std::vector<ConversationItem>> _items
+        = std::make_shared<std::vector<ConversationItem>>();
     ModalPayload _modal           = std::monostate { };
     std::uint64_t _modal_serial   = 0;
     std::uint64_t _content_serial = 0;
@@ -294,8 +304,9 @@ private:
     std::string _title;
     bool _title_generation_claimed = false;
 
-    TodoList _todo;
-    std::vector<PlanDoc> _plans;
+    std::shared_ptr<TodoList> _todo = std::make_shared<TodoList>();
+    std::shared_ptr<std::vector<PlanDoc>> _plans
+        = std::make_shared<std::vector<PlanDoc>>();
     // Bumped on every plan mutation; _plan_seen_version is the version the
     // agent last read. A mismatch rejects imza.plan.edit so the agent
     // cannot patch content it has not seen.
@@ -304,7 +315,8 @@ private:
     // Version of the plan the build context last received as a submission
     // message; 0 means the plan was never submitted.
     std::size_t _plan_submitted_version = 0;
-    std::vector<QueuedMessage> _queued;
+    std::shared_ptr<std::vector<QueuedMessage>> _queued
+        = std::make_shared<std::vector<QueuedMessage>>();
 
     std::optional<Countdown> _retry_countdown;
 

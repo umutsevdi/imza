@@ -593,7 +593,7 @@ TEST_CASE("plan bindings validate skeleton and cap through the session")
     CHECK(missing.text.find("approach") != std::string::npos);
     CHECK(missing.text.find("changes") != std::string::npos);
     CHECK(missing.text.find("dead") == std::string::npos);
-    CHECK(session.plans().empty());
+    CHECK(session.plans()->empty());
 
     std::string big = skeleton + "\n";
     big.resize(imza::MAX_PLAN_BYTES + 1, 'x');
@@ -609,7 +609,7 @@ TEST_CASE("plan bindings validate skeleton and cap through the session")
             std::move(host));
     CHECK(created.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(created.text == "true\n");
-    REQUIRE(session.plans().size() == 1);
+    REQUIRE(session.plans()->size() == 1);
     CHECK(session.plan_doc() == skeleton);
 }
 

@@ -141,8 +141,9 @@ TEST_CASE("chat records slash commands and queued prompts")
 
     CHECK(state->input_history->entries()
         == std::vector<std::string> { "/new", "queued prompt" });
-    REQUIRE(state->session->queued().size() == 1);
-    CHECK(state->session->queued().front().text == "queued prompt");
+    const auto queued = state->session->queued();
+    REQUIRE(queued->size() == 1);
+    CHECK(queued->front().text == "queued prompt");
 }
 TEST_CASE("bracketed multiline paste is submitted as one history entry")
 {

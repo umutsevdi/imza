@@ -8,7 +8,7 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
-0.6.0 - 2026-10-08
+0.6.0 - 2026-10-10
 -------------------------------------------------------------------------------
 <https://github.com/umutsevdi/imza/releases/tag/v0.6.0>
 MCP Release
@@ -23,21 +23,23 @@ Changes:
     tool counts, tool rosters refresh automatically when servers change,
     failed connections recover with retries, and every server carries its
     own credential and timeout settings.
+  - Added the EVREN provider.
+  - The config file can now pre-approve directories and shell commands, and
+    list extra instruction files to follow alongside AGENTS.md.
   - Startup memory usage reduced by replacing the JSON library with one
     that does not leave its parsing scratch space in memory.
   - Reduced idle CPU and memory usage of the side panel.
   - Performance improvement on attachment encoding.
-  - The config file can now pre-approve directories and shell commands, and
-    list extra instruction files to follow alongside AGENTS.md.
   - Fixed sessions becoming unloadable when the transcript contained terminal
     escape codes (colored command output); affected saved sessions load
     again.
   - Fixed MCP servers locking up after their session expired; they reconnect
     and keep taking calls.
-  - Added the EVREN provider.
   - Keystrokes are no longer lost or garbled while the agent runs commands.
   - Fixed sessions becoming unusable after a tool result contained invalid
     text; affected saved sessions load again.
+  - Fixed a rare crash when the task list updated while the sidebar was
+    redrawing.
 
 -------------------------------------------------------------------------------
 0.5.2 - 2026-10-04

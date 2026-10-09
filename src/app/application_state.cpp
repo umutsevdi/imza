@@ -49,7 +49,7 @@ namespace {
                 }
                 return request_modal(*state, std::move(payload));
             },
-            .todo = [state] { return state->session->todo(); },
+            .todo = [state] { return *state->session->todo(); },
             .set_todo
             = [state](
                   TodoList todo) { state->session->set_todo(std::move(todo)); },
@@ -130,7 +130,7 @@ namespace {
                   raw->post([raw] {
                       present_front(*raw);
                       if (raw->session->phase() == Session::Phase::IDLE
-                          && !raw->session->queued().empty()) {
+                          && !raw->session->queued()->empty()) {
                           drain_queued(*raw);
                       }
                   });

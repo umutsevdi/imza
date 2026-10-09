@@ -111,8 +111,9 @@ public:
         Elements parts;
         _append_plans(parts);
         _append_review_comments(parts);
-        if (_state->session->todo().items.size()) {
-            parts.push_back(render_todo(_state->session->todo(), ctx) | yflex);
+        const auto todo = _state->session->todo();
+        if (!todo->items.empty()) {
+            parts.push_back(render_todo(*todo, ctx) | yflex);
         }
         if (!narrow) {
             const auto& env       = _state->environment;
@@ -205,16 +206,16 @@ private:
     // ones stay dim; each row opens the plan in the viewer modal.
     void _append_plans(Elements& parts)
     {
-        const std::vector<PlanDoc>& plans = _state->session->plans();
-        if (plans.empty()) {
+        const auto plans = _state->session->plans();
+        if (plans->empty()) {
             _plan_links.clear();
             return;
         }
         Elements rows;
-        for (std::size_t index = 0; index < plans.size(); ++index) {
-            const bool latest = index + 1 == plans.size();
+        for (std::size_t index = 0; index < plans->size(); ++index) {
+            const bool latest = index + 1 == plans->size();
             rows.push_back(
-                _plan_link(index, plans[index].content, latest)->Render());
+                _plan_link(index, (*plans)[index].content, latest)->Render());
         }
         parts.push_back(titled_box("Plans", std::move(rows)));
     }
