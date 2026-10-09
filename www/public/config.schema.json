@@ -47,7 +47,7 @@
     },
     "mcp_servers": {
       "type": "object",
-      "description": "MCP servers keyed by id. Each entry needs either an http(s) `url` or a `catalog_id` referring to the bundled catalogue; an explicit `url` wins.",
+      "description": "MCP servers keyed by id. An http entry needs either an http(s) `url` or a `catalog_id` referring to the bundled catalogue (an explicit `url` wins); a stdio entry needs a `command`.",
       "additionalProperties": { "$ref": "#/definitions/mcpServer" }
     },
     "allow": {
@@ -175,6 +175,11 @@
       "properties": {
         "label": { "type": "string", "description": "Display name." },
         "description": { "type": "string", "description": "Description." },
+        "type": {
+          "type": "string",
+          "enum": ["http", "stdio"],
+          "description": "Transport. Defaults to \"http\". A stdio server runs `command` as a local child process instead of connecting to a url."
+        },
         "catalog_id": {
           "type": "string",
           "description": "Reference to a bundled catalogue server whose url and label resolve at use time."
@@ -190,6 +195,24 @@
           "additionalProperties": { "type": "string" }
         },
         "bearer_token": { "type": "string", "description": "Bearer token." },
+        "command": {
+          "type": "string",
+          "description": "Program to run for a stdio server. Passed verbatim (no shell); looked up on PATH. Required when `type` is \"stdio\"."
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Arguments for a stdio server's command."
+        },
+        "env": {
+          "type": "object",
+          "description": "Environment variables for a stdio server, merged over the inherited environment.",
+          "additionalProperties": { "type": "string" }
+        },
+        "working_directory": {
+          "type": "string",
+          "description": "Working directory for a stdio server's process."
+        },
         "enabled": {
           "type": "boolean",
           "description": "Whether the server loads. Defaults to true."

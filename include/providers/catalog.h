@@ -37,7 +37,9 @@ struct Catalog {
     std::map<std::string, CachedProvider> providers;
 };
 
-inline constexpr std::string_view CUSTOM_PROVIDER_ID = "custom";
+inline constexpr std::string_view CUSTOM_PROVIDER_ID  = "custom";
+inline constexpr std::string_view EVREN_PROVIDER_ID   = "evren";
+inline constexpr std::string_view EVREN_PROVIDER_NAME = "EVREN";
 inline constexpr std::string_view OPENAI_SUBSCRIPTION_ID
     = "openai-subscription";
 inline constexpr std::string_view OPENAI_SUBSCRIPTION_NAME
@@ -49,6 +51,8 @@ Status save_catalog(const std::filesystem::path& path, const Catalog& catalog);
 Status fetch_catalog(Catalog& out);
 void backfill_catalog_urls(Catalog& catalog);
 void inject_subscription_providers(Catalog& catalog);
+// Injects providers that models.dev does not list (subscriptions and EVREN).
+void inject_local_providers(Catalog& catalog);
 
 AuthType auth_from_npm(std::string_view npm);
 ApiStandard dialect_from_npm(std::string_view npm);

@@ -161,6 +161,20 @@ TEST_CASE("backfill_catalog_urls patches only matching empty provider URLs")
     CHECK(catalog.providers.at("openai-subscription").name
         == "Open AI Subscription");
     CHECK_FALSE(catalog.providers.contains("anthropic-subscription"));
+
+    // Locally injected providers that models.dev does not list.
+    const auto& evren = catalog.providers.at("evren");
+    CHECK(evren.name == "EVREN");
+    CHECK(evren.api == "https://evren-llmapi.ssyz.org.tr/v1");
+
+    imza::Connection connection;
+    connection.id      = "evren";
+    connection.api_key = "evren_llm_secret";
+    const imza::Route route
+        = imza::resolve_route(connection, catalog, imza::ApiStandard::OPENAI);
+    CHECK(route.endpoint
+        == "https://evren-llmapi.ssyz.org.tr/v1/chat/completions");
+    CHECK(route.auth == imza::AuthType::BEARER);
 }
 
 TEST_CASE("catalog_base uses only the catalog URL")

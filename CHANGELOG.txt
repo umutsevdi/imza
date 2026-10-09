@@ -34,6 +34,7 @@ Changes:
     again.
   - Fixed MCP servers locking up after their session expired; they reconnect
     and keep taking calls.
+  - Added the EVREN provider.
   - Keystrokes are no longer lost or garbled while the agent runs commands.
 
 -------------------------------------------------------------------------------

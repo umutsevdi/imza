@@ -1,11 +1,13 @@
 #include "providers/store.h"
 
 #include "common/util.h"
+#include "network/json.h"
 #include "providers/pricing.h"
 #include "providers/subscriptions.h"
 
 #include <algorithm>
 #include <ctime>
+#include <string>
 #include <utility>
 
 namespace imza {
@@ -52,6 +54,88 @@ namespace {
         return models;
     }
 
+    // EVREN gates its API behind a one-time terms acceptance: read the
+    // current version, then post it. Repeated acceptance is harmless, so
+    // this always runs before the connect probe. The terms endpoints
+    // authenticate with X-API-Key, unlike the route's Bearer auth.
+    constexpr std::string_view TERMS_STATUS_SUFFIX = "/terms/status";
+    constexpr std::string_view TERMS_ACCEPT_SUFFIX = "/terms/accept";
+    constexpr long TERMS_TIMEOUT_SECS              = 15;
+
+    bool provider_requires_terms(std::string_view provider_id)
+    {
+        return provider_id == EVREN_PROVIDER_ID;
+    }
+
+    std::vector<std::string> terms_headers(
+        const Route& route, std::string_view content_type)
+    {
+        std::vector<std::string> headers { std::string(content_type) };
+        if (!route.api_key.empty()) {
+            headers.push_back("X-API-Key: " + route.api_key);
+        }
+        return headers;
+    }
+
+    // current_version arrives either as a number or a numeric string.
+    bool parse_current_version(std::string_view body, std::string& out)
+    {
+        JsonValue root;
+        if (!json_parse(body, root) || !root.is_object()) {
+            return false;
+        }
+        const JsonValue* version = find_member(root, "current_version");
+        if (version == nullptr) {
+            return false;
+        }
+        if (version->is_number()) {
+            out = std::to_string(version->as<std::int64_t>());
+            return true;
+        }
+        if (version->is_string()) {
+            out = version->as<std::string>();
+            return !out.empty();
+        }
+        return false;
+    }
+
+    Status accept_terms(const Route& route)
+    {
+        if (route.api.empty()) {
+            return Status::INVALID_URL;
+        }
+        const std::vector<std::string> auth
+            = terms_headers(route, "Accept: application/json");
+
+        std::string status_body;
+        long status_code = 0;
+        const Status fetched
+            = http_get(route.api + std::string(TERMS_STATUS_SUFFIX), auth,
+                TERMS_TIMEOUT_SECS, status_body, &status_code);
+        if (fetched != Status::OK) {
+            return fetched;
+        }
+        if (!http_ok(status_code)) {
+            return Status::API_ERROR;
+        }
+        std::string version;
+        if (!parse_current_version(status_body, version)) {
+            return Status::JSON_ERROR;
+        }
+
+        std::string accept_body;
+        long accept_code = 0;
+        const Status accepted
+            = http_post(route.api + std::string(TERMS_ACCEPT_SUFFIX),
+                terms_headers(route, "Content-Type: application/json"),
+                "{\"version\":" + version + "}", TERMS_TIMEOUT_SECS,
+                accept_body, &accept_code);
+        if (accepted != Status::OK) {
+            return accepted;
+        }
+        return http_ok(accept_code) ? Status::OK : Status::API_ERROR;
+    }
+
 } // namespace
 
 std::string subagent_variant_or_default(
@@ -62,17 +146,22 @@ std::string subagent_variant_or_default(
         : std::string(subagent_default_variant(role));
 }
 
-ProviderStore::ProviderStore(Config config, ModelsFn models_fn)
+ProviderStore::ProviderStore(
+    Config config, ModelsFn models_fn, TermsFn terms_fn)
     : _config(std::move(config))
     , _models_fn(std::move(models_fn))
+    , _terms_fn(std::move(terms_fn))
 {
     load_catalog(presets_path(), _catalog);
-    inject_subscription_providers(_catalog);
+    inject_local_providers(_catalog);
     _pricing = pricing_table_from(_catalog);
     if (!_models_fn) {
         _models_fn = [](const Route& route, std::vector<ModelInfo>& models) {
             return fetch_models(route, models);
         };
+    }
+    if (!_terms_fn) {
+        _terms_fn = [](const Route& route) { return accept_terms(route); };
     }
 }
 
@@ -419,9 +508,16 @@ void ProviderStore::connect(ConnectResult result, ConnectCompleteFn complete)
             subscription_models = std::move(subscription_models),
             complete            = std::move(complete)] {
             std::vector<ModelInfo> models = subscription_models;
-            const Status fetched          = subscription_connection(result.id)
-                ? Status::OK
-                : _models_fn(route, models);
+            Status fetched                = Status::OK;
+            if (!subscription_connection(result.id)) {
+                // Terms must be accepted before the key can probe models.
+                if (provider_requires_terms(result.id)) {
+                    fetched = _terms_fn(route);
+                }
+                if (fetched == Status::OK) {
+                    fetched = _models_fn(route, models);
+                }
+            }
             if (!_alive.load()) {
                 return;
             }

@@ -67,6 +67,22 @@ imza::ModelsFn fake_models_fail()
     };
 }
 
+// Records whether (and how often) the terms step ran before the probe.
+struct TermsRecorder {
+    int calls           = 0;
+    imza::Status result = imza::Status::OK;
+    std::string last_api_key;
+
+    imza::TermsFn fn()
+    {
+        return [this](const imza::Route& route) {
+            ++calls;
+            last_api_key = route.api_key;
+            return result;
+        };
+    }
+};
+
 } // namespace
 
 TEST_CASE("connect commits a connection and lands models in the catalog")
@@ -181,6 +197,41 @@ TEST_CASE("subscription connect stores credentials without model discovery")
     CHECK(saved.providers[0].refresh_token == "refresh");
     CHECK(saved.providers[0].expires_at == 1756390000);
     CHECK(saved.providers[0].account_id == "account");
+}
+
+TEST_CASE("connect accepts EVREN terms before probing models")
+{
+    CatalogHome home;
+    imza::test::PostPump pump;
+    TermsRecorder terms;
+    int probes     = 0;
+    auto providers = std::make_shared<imza::ProviderStore>(
+        imza::Config { },
+        [&](const imza::Route&, std::vector<imza::ModelInfo>&) {
+            ++probes;
+            return imza::Status::OK;
+        },
+        terms.fn());
+    auto state
+        = make_state(std::make_shared<imza::Session>(), providers, pump.fn());
+    pump.pump();
+
+    resolve_modal(*state,
+        imza::ModalResult {
+            imza::ConnectResult { "evren", "", "evren_llm_k", "", true } });
+    REQUIRE(pump.wait_for([&] { return terms.calls == 1; }));
+    CHECK(terms.last_api_key == "evren_llm_k");
+    CHECK(probes == 1);
+    CHECK(providers->connections().size() == 1);
+
+    // A rejected terms call blocks the connection before the probe runs.
+    terms.result = imza::Status::API_ERROR;
+    resolve_modal(*state,
+        imza::ModalResult { imza::ConnectResult {
+            "evren", "", "evren_llm_k", "second", true } });
+    REQUIRE(pump.wait_for([&] { return terms.calls == 2; }));
+    CHECK(probes == 1);
+    CHECK(providers->connections().size() == 1);
 }
 
 TEST_CASE("connecting a labeled custom endpoint stores the label")

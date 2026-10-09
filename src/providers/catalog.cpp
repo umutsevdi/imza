@@ -369,7 +369,17 @@ void backfill_catalog_urls(Catalog& catalog)
             provider.api = url->second;
         }
     }
+    inject_local_providers(catalog);
+}
+
+void inject_local_providers(Catalog& catalog)
+{
     inject_subscription_providers(catalog);
+    CachedProvider evren;
+    evren.name = std::string(EVREN_PROVIDER_NAME);
+    evren.api  = "https://evren-llmapi.ssyz.org.tr/v1";
+    evren.npm  = "@ai-sdk/openai-compatible";
+    catalog.providers[std::string(EVREN_PROVIDER_ID)] = std::move(evren);
 }
 
 void inject_subscription_providers(Catalog& catalog)

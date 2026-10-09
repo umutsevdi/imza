@@ -26,6 +26,9 @@ std::string subagent_variant_or_default(
     const SubagentModelConfig* configured, SubagentRole role);
 
 using ModelsFn = std::function<Status(const Route&, std::vector<ModelInfo>&)>;
+// Accepts a provider's terms of service before its connect probe; only
+// providers that require it are passed through here.
+using TermsFn           = std::function<Status(const Route&)>;
 using ProviderChangedFn = std::function<void()>;
 
 struct ConnectionView {
@@ -69,7 +72,8 @@ using ConnectCompleteFn = std::function<void(ConnectOutcome)>;
 
 class ProviderStore final : public ApplicationComponent {
 public:
-    explicit ProviderStore(Config config, ModelsFn models_fn = { });
+    explicit ProviderStore(
+        Config config, ModelsFn models_fn = { }, TermsFn terms_fn = { });
     ~ProviderStore();
 
     ProviderStore(const ProviderStore&)            = delete;
@@ -134,6 +138,7 @@ private:
     Catalog _catalog;
     std::map<std::string, ModelPricing> _pricing;
     ModelsFn _models_fn;
+    TermsFn _terms_fn;
 
     std::map<std::string, CatalogEntry> _model_catalog;
     std::map<std::string, int> _generations;
