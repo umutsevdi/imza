@@ -65,7 +65,7 @@ const dir = "~" + stripBase(Astro.url.pathname);
           // imza phase colors: PLAN=green, BUILD=red, REVIEW=cyan
           let phaseColor = "#68D8E8";
           if (best.id === "top" || best.id === "loop") phaseColor = "#7EE787";
-          else if (["why"].includes(best.id)) phaseColor = "#F77272";
+          else if (["highlights"].includes(best.id)) phaseColor = "#F77272";
           sbMode.style.background = phaseColor;
           sbMode.style.color = "#2D3238";
         }

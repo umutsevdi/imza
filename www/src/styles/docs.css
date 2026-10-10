@@ -28,10 +28,15 @@
   letter-spacing: -0.01em;
 }
 .docs-body h2 {
-  font-size: 1.35rem;
-  margin: 2.2rem 0 0.9rem;
-  padding-top: 1.2rem;
-  border-top: 1px solid var(--border);
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--fg);
+  margin: 2.4rem 0 1.4rem;
+}
+/* same "# heading" treatment as the homepage section labels */
+.docs-body h2:not(.file-heading)::before {
+  content: "# ";
+  color: var(--hl-green);
 }
 .docs-body h3 {
   font-size: 1.1rem;

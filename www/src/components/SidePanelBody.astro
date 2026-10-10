@@ -12,7 +12,7 @@ const pages = await docPages();
 const sections = [
   { id: "top", label: "home", text: "Home", active: true },
   { id: "loop", label: "the loop", text: "The Loop", active: false },
-  { id: "why", label: "why imza", text: "Why Imza", active: false },
+  { id: "highlights", label: "highlights", text: "Highlights", active: false },
   { id: "headless", label: "headless", text: "Headless", active: false },
   {
     id: "get-started",
@@ -23,21 +23,18 @@ const sections = [
 ];
 
 const links = [
-  {
-    href: "https://github.com/umutsevdi/imza",
-    text: "Source Code"
-  },
+  { href: withBase("/docs/why-imza"), text: "Why Imza" },
+  { href: withBase("/docs/"), text: "Wiki" },
+  { href: withBase("/changelog/"), text: "Changelog" },
+  { href: withBase("/license/"), text: "License" },
   {
     href: withBase("/#get-started"),
     text: "Download"
   },
   {
-    href: "https://github.com/umutsevdi/imza#building-from-source",
-    text: "Build"
+    href: "https://github.com/umutsevdi/imza",
+    text: "Source Code"
   },
-  { href: withBase("/docs/"), text: "Wiki" },
-  { href: withBase("/changelog/"), text: "Changelog" },
-  { href: withBase("/license/"), text: "License" }
 ];
 ---
 
