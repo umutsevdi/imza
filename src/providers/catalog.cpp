@@ -46,6 +46,15 @@ struct ProviderView {
     std::map<std::string, ProviderModelView> models;
 };
 
+// Glaze-reflected: must have external linkage (Clang/MSVC requirement).
+// File shape of the cached catalog, reusing the models.dev view structs
+// since the wire formats coincide. Optional members omit when empty;
+// cost/limit objects appear only when they carry a value.
+struct StoredCatalog {
+    std::optional<std::int64_t> fetched_at;
+    std::map<std::string, ProviderView> providers;
+};
+
 namespace {
 
     constexpr std::string_view CATALOG_URL  = "https://models.dev/api.json";
@@ -199,14 +208,6 @@ namespace {
         }
         return provider;
     }
-
-    // File shape of the cached catalog, reusing the models.dev view
-    // structs since the wire formats coincide. Optional members omit when
-    // empty; cost/limit objects appear only when they carry a value.
-    struct StoredCatalog {
-        std::optional<std::int64_t> fetched_at;
-        std::map<std::string, ProviderView> providers;
-    };
 
     ProviderModelView to_stored(const CachedModel& model)
     {
