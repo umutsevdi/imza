@@ -1,5 +1,5 @@
 ---
-import { docPages, hrefFor, withBase } from "../lib/docs";
+import { docPages, hrefFor } from "../lib/docs";
 import { VERSION } from "../version";
 
 interface Props {
@@ -23,18 +23,18 @@ const sections = [
 ];
 
 const links = [
-  { href: withBase("/docs/why-imza"), text: "Why Imza" },
-  { href: withBase("/docs/"), text: "Wiki" },
-  { href: withBase("/changelog/"), text: "Changelog" },
-  { href: withBase("/license/"), text: "License" },
+  { href: "/docs/why-imza", text: "Why Imza" },
+  { href: "/docs/", text: "Wiki" },
+  { href: "/changelog/", text: "Changelog" },
+  { href: "/license/", text: "License" },
   {
-    href: withBase("/#get-started"),
+    href: "/#get-started",
     text: "Download"
   },
   {
     href: "https://github.com/umutsevdi/imza",
     text: "Source Code"
-  },
+  }
 ];
 ---
 
@@ -92,13 +92,13 @@ const links = [
     <p class="meta-line"><span class="meta-key">Language</span> C++</p>
     <p class="meta-line">
       <span class="meta-key">License</span>
-      <a class="nav-link" href={withBase("/license/")}>
+      <a class="nav-link" href="/license/">
         <span class="nav-text">GPL</span>
       </a>
     </p>
     <p class="meta-line">
       <span class="meta-key">Version</span>
-      <a class="nav-link" href={withBase("/changelog/")}>
+      <a class="nav-link" href="/changelog/">
         <span class="nav-text">{VERSION}</span>
       </a>
     </p>

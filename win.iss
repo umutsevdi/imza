@@ -24,7 +24,7 @@
 #define imzaVersion "0.6.0"
 #endif
 #define imzaAuthor "Umut Sevdi"
-#define imzaURL "https://umutsevdi.github.io/imza"
+#define imzaURL "https://imza.run"
 #define imzaExe "imza.exe"
 #define imzaAssoc imzaName + " File"
 #define imzaCopyright "Copyright (C) 2026 Umut Sevdi"

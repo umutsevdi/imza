@@ -1,6 +1,5 @@
 ---
 import { VERSION } from "../version";
-import { withBase } from "../lib/docs";
 
 // Download links resolve at build time from the tagged GitHub release; the
 // release pipeline runs this build after attaching assets, passing
@@ -133,9 +132,8 @@ const tagName = pinned ? VERSION : undefined;
     }
   </div>
   <p class="gs-next">
-    New here? Check out the <a href={withBase("/docs/")}>wiki</a>. Prefer to
-    build from source? Check out the <a
-      href={withBase("/docs/installation/#building-from-source")}
+    New here? Check out the <a href="/docs/">wiki</a>. Prefer to build from
+    source? Check out the <a href="/docs/installation/#building-from-source"
       >build instructions</a
     >.
   </p>

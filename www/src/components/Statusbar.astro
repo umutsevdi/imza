@@ -1,8 +1,7 @@
 ---
 import { VERSION } from "../version";
-import { stripBase, withBase } from "../lib/docs";
 
-const dir = "~" + stripBase(Astro.url.pathname);
+const dir = "~" + Astro.url.pathname;
 ---
 
 <footer class="statusbar-bar" role="contentinfo">
@@ -12,7 +11,7 @@ const dir = "~" + stripBase(Astro.url.pathname);
       <span class="sb-sep">·</span>
       <a href="https://github.com/umutsevdi/imza">repository</a>
       <span class="sb-sep">·</span>
-      <a href={withBase("/docs/")}>wiki</a>
+      <a href="/docs/">wiki</a>
       <span class="sb-sep">·</span>
       <a href="https://github.com/umutsevdi/imza/releases">releases</a>
     </div>

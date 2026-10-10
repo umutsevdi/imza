@@ -1,6 +1,6 @@
 ```
 AUTHOR:           Umut Sevdi <mail@umutsevdi.com>
-WEBSITE:          <https://umutsevdi.github.io/imza>
+WEBSITE:          <https://imza.run>
 SOURCE CODE:      <https://github.com/umutsevdi/imza>
 RELEASES:         <https://github.com/umutsevdi/imza/releases>
 ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>

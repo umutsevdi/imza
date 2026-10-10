@@ -15,7 +15,7 @@ https://github.com/user-attachments/assets/a0096f0d-8337-4e6b-aabe-f9debe273594
 Download the [latest release](https://github.com/umutsevdi/imza/releases/latest).
 
 Browse the [wiki](https://github.com/umutsevdi/imza/wiki) or the
-[website](https://umutsevdi.github.io/imza/).
+[website](https://imza.run/).
 
 ## Why Imza?
 

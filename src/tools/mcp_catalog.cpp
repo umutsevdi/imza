@@ -21,13 +21,13 @@ struct StoredCatalogEntry {
     std::optional<std::string> auth_kind;
 };
 
-struct StoredCatalog {
+struct StoredMcpCatalog {
     std::vector<StoredCatalogEntry> servers;
 };
 
 std::vector<McpCatalogEntry> load_mcp_catalog()
 {
-    StoredCatalog stored;
+    StoredMcpCatalog stored;
     if (json_parse_checked(EMBEDDED_MCP_CATALOG, stored)) {
         return { };
     }

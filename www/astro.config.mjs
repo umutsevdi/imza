@@ -5,17 +5,13 @@ import sitemap from "@astrojs/sitemap";
 import { unified } from "@astrojs/markdown-remark";
 import { remarkDocsLinks } from "./src/scripts/docs-links.ts";
 
-
 // https://astro.build/config
-const BASE = "/imza/";
-
 export default defineConfig({
-    site: "https://umutsevdi.github.io/imza",
-    base: BASE,
+    site: "https://imza.run",
     integrations: [mdx(), sitemap()],
     markdown: {
         processor: unified({
-            remarkPlugins: [[remarkDocsLinks, { base: BASE }]]
+            remarkPlugins: [remarkDocsLinks]
         }),
         shikiConfig: {
             theme: "github-dark-default"

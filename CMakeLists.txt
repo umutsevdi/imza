@@ -4,7 +4,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 project(
     imza
     VERSION 0.6.0
-    HOMEPAGE_URL "https://umutsevdi.github.io/imza"
+    HOMEPAGE_URL "https://imza.run"
     LANGUAGES C CXX
 )
 include(GNUInstallDirs)

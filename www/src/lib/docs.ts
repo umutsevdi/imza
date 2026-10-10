@@ -39,20 +39,8 @@ function h1Of(body?: string): string | undefined {
   return m ? m[1].trim() : undefined;
 }
 
-const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
-
-/** Prefix a site-absolute path with the configured base (GitHub Pages subpath). */
-export function withBase(path: string): string {
-  return BASE + path;
-}
-
-/** Strip the configured base from a pathname ("~/docs/" style display paths). */
-export function stripBase(pathname: string): string {
-  return pathname.startsWith(BASE) ? pathname.slice(BASE.length) : pathname;
-}
-
 export function hrefFor(slug: string): string {
-  return withBase(slug === "" ? "/docs/" : `/docs/${slug}`);
+  return slug === "" ? "/docs/" : `/docs/${slug}`;
 }
 
 export async function docNeighbors(slug: string): Promise<{

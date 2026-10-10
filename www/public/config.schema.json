@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://umutsevdi.github.io/imza/config.schema.json",
+  "$id": "https://imza.run/config.schema.json",
   "title": "Imza configuration",
   "description": "User configuration for Imza, read from and written back to <data-dir>/config.json (see `imza --config`). Unknown keys are ignored on read; every key here is optional.",
   "type": "object",

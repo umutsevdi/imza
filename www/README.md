@@ -47,6 +47,10 @@ Consequences:
   share those same files, so no asset exists twice in `dist/`.
 - When a deploy pipeline is added, the same prebuild hook covers CI —
   no extra clone step needed in the workflow.
+- The site is served from the apex domain `https://imza.run/` at the
+  root path, so all internal links and assets are plain root-relative
+  paths (`/docs/`, `/_astro/...`). `public/CNAME` pins the custom
+  domain for the GitHub Pages deploy.
 
 ## Development
 

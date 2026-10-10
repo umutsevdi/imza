@@ -1,6 +1,5 @@
 ---
 import "../styles/global.css";
-import { withBase } from "../lib/docs";
 
 interface Props {
   title: string;
@@ -8,7 +7,7 @@ interface Props {
   image?: string;
 }
 
-const { title, description, image = withBase("/card.webp") } = Astro.props;
+const { title, description, image = "/card.webp" } = Astro.props;
 ---
 
 <!doctype html>
@@ -18,7 +17,7 @@ const { title, description, image = withBase("/card.webp") } = Astro.props;
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
-    <link rel="icon" type="image/png" href={withBase("/favicon.ico")} />
+    <link rel="icon" type="image/png" href="/favicon.ico" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <meta name="generator" content={Astro.generator} />

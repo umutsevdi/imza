@@ -4,12 +4,7 @@ import { visit } from "unist-util-visit";
 import { slugFor } from "../lib/wiki-slugs";
 
 // imza.wiki pages link with bare filenames (04_Sessions, Home); rewrite
-// them to site routes before rendering. The base comes from the astro
-// config so the plugin stays portable across deploy targets.
-interface Options {
-  base: string;
-}
-
+// them to site routes before rendering.
 function pageSlugs(): Record<string, string> {
   // The wiki clone is materialized at src/content/wiki by
   // scripts/ensure-wiki.mjs before the build starts.
@@ -22,7 +17,7 @@ function pageSlugs(): Record<string, string> {
   return map;
 }
 
-export function remarkDocsLinks({ base }: Options) {
+export function remarkDocsLinks() {
   const PAGE_SLUGS = pageSlugs();
   return (tree: Root) => {
     visit(tree, "link", (node) => {
@@ -35,7 +30,7 @@ export function remarkDocsLinks({ base }: Options) {
       const hash = hashIdx >= 0 ? url.slice(hashIdx + 1) : undefined;
       const slug = PAGE_SLUGS[target];
       if (slug !== undefined) {
-        node.url = slug === "" ? `${base}docs/` : `${base}docs/${slug}`;
+        node.url = slug === "" ? "/docs/" : `/docs/${slug}`;
         if (hash) {
           node.url += `#${hash}`;
         }
