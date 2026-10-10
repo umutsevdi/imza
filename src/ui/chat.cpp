@@ -4,6 +4,7 @@
 #include "tools/tool_args.h"
 #include "turn/delegation.h"
 #include "ui/autocomplete.h"
+#include "ui/greeting.h"
 #include "ui/tool_format.h"
 #include "ui/ui.h"
 #include "workspace/attachments.h"
@@ -20,6 +21,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <ctime>
 #include <functional>
 #include <map>
 #include <optional>
@@ -59,6 +61,9 @@ namespace {
             }
             start = end + 1;
         }
+        lines.push_back(text(""));
+        lines.push_back(
+            paragraphAlignCenter(greeting_line_for(std::time(nullptr))) | dim);
         return vbox(std::move(lines)) | center;
     }
 

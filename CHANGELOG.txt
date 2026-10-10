@@ -8,6 +8,14 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
+Unreleased
+-------------------------------------------------------------------------------
+
+Changes:
+  - The startup banner now shows a rotating line: a useful tip during the
+    day, and a gentler note after 22:00.
+
+-------------------------------------------------------------------------------
 0.6.0 - 2026-10-10
 -------------------------------------------------------------------------------
 <https://github.com/umutsevdi/imza/releases/tag/v0.6.0>
