@@ -44,6 +44,8 @@ Changes:
     text; affected saved sessions load again.
   - Fixed a rare crash when the task list updated while the sidebar was
     redrawing.
+  - Expanded the set of shell commands that run without asking, and removed
+    a few that could not be approved safely.
 
 -------------------------------------------------------------------------------
 0.5.2 - 2026-10-04

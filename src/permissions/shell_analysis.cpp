@@ -243,16 +243,25 @@ ShellAnalysis analyze_shell(std::string_view command)
 bool shell_builtin_allowed(std::string_view program)
 {
 #ifdef _WIN32
-    static constexpr std::array<std::string_view, 21> allowed { "cd", "chdir",
+    static constexpr std::array<std::string_view, 23> allowed { "cd", "chdir",
         "cls", "dir", "driverquery", "echo", "fc", "find", "findstr", "help",
-        "hostname", "more", "popd", "pushd", "systeminfo", "tasklist", "tree",
-        "type", "ver", "vol", "whoami" };
+        "hostname", "more", "netstat", "popd", "pushd", "systeminfo",
+        "tasklist", "tree", "type", "ver", "vol", "where", "whoami" };
 #else
-    static constexpr std::array<std::string_view, 31> allowed { "basename",
-        "cat", "cd", "cmp", "cut", "dirname", "echo", "false", "file", "grep",
-        "groups", "head", "id", "ls", "md5sum", "popd", "printenv", "printf",
-        "pushd", "pwd", "readlink", "realpath", "sha256sum", "shasum", "stat",
-        "strings", "tail", "tr", "true", "uname", "wc" };
+    // Whole-program read-only commands: no flag or operand can mutate the
+    // filesystem, spawn a program, or change remote/privileged state. Safe
+    // even as a program-level grant.
+    static constexpr std::array<std::string_view, 75> allowed { "arch",
+        "base64", "basename", "cat", "cd", "cksum", "cmp", "comm", "cut", "df",
+        "diff", "dirname", "du", "echo", "expr", "false", "file", "fold",
+        "free", "getent", "grep", "groups", "head", "id", "jq", "join", "last",
+        "logname", "ls", "lsblk", "lscpu", "lsof", "md5sum", "netstat", "nl",
+        "nm", "nproc", "objdump", "od", "paste", "pgrep", "popd", "printenv",
+        "printf", "ps", "pushd", "pwd", "readelf", "readlink", "realpath",
+        "rev", "seq", "sha1sum", "sha256sum", "sha512sum", "shasum", "sleep",
+        "ss", "stat", "strings", "tac", "tail", "tr", "true", "tty", "type",
+        "uname", "uniq", "uptime", "w", "wc", "whereis", "which", "who",
+        "whoami" };
 #endif
     for (const std::string_view candidate : allowed) {
         if (program == candidate) {
@@ -292,44 +301,36 @@ bool shell_readonly_allowed(const ShellInvocation& invocation)
             });
     };
 #ifdef _WIN32
-    static constexpr std::array<ReadOnlyCommand, 12> platform_only {
-        { { "tasklist", std::nullopt, "/v /fo /fi /nh" },
-            { "driverquery", std::nullopt, "/v /fo /si" },
-            { "where", std::nullopt, "/r /f /t /q" },
-            { "systeminfo", std::nullopt, "/fo /nh" },
-            { "ipconfig", std::nullopt, "/all /displaydns" },
-            { "netstat", std::nullopt, "-a -n -o -r -s" },
-            { "tree", std::nullopt, "/f /a" },
-            { "fc", std::nullopt, "/n /c /l /a" },
-            { "findstr", std::nullopt, "/i /v /n /s /r /l" },
-            { "wmic", std::nullopt, "/format" }, { "ver", std::nullopt, "" },
-            { "whoami", std::nullopt, "/all /groups /priv" } }
-    };
+    // Windows commands keyed on /flag syntax cannot be catalogued: the
+    // analyzer only treats '-' as a flag prefix, so '/v' lands in the
+    // subcommand slot. Windows relies on the builtin list instead.
+    static constexpr std::array<ReadOnlyCommand, 0> platform_only { };
 #else
-    static constexpr std::array<ReadOnlyCommand, 18> platform_only {
+    static constexpr std::array<ReadOnlyCommand, 25> platform_only {
         { { "top", std::nullopt, "-b -n -p -u -d" },
-            { "ps", std::nullopt, "aux -ef -e -f -u -p --sort" },
-            { "df", std::nullopt, "-h -T -i -k -m --output" },
-            { "du", std::nullopt, "-s -h -k -m --max-depth" },
-            { "free", std::nullopt, "-h -m -g -b -t -w" },
-            { "lsof", std::nullopt, "-i -p -u -t -n -P" },
             { "systemctl", "status", "-l --no-pager" },
             { "systemctl", "list-units", "--type --state --all" },
             { "systemctl", "list-timers", "--all" },
+            { "systemctl", "is-active", "" }, { "systemctl", "is-enabled", "" },
+            { "systemctl", "is-failed", "" }, { "systemctl", "show", "" },
+            { "systemctl", "cat", "" },
+            { "systemctl", "list-dependencies", "" },
+            { "systemctl", "get-default", "" },
             { "dnf", "list",
                 "--installed --available --updates "
                 "--obsoletes --recent --all" },
             { "dnf", "info", "--installed --available --updates --all" },
-            { "whois", "domain", "" },
+            { "dnf", "repolist", "" }, { "dnf", "search", "" },
+            { "dnf", "provides", "" }, { "dnf", "check-update", "" },
             { "cargo", "tree", "-i --invert -e --edges -d --duplicates" },
-            { "terraform", "plan", "-no-color -input=false -refresh=false" },
+            { "cargo", "metadata", "--no-deps --format-version" },
+            { "cargo", "locate-project", "--workspace --message-format" },
             { "gem", "list", "-a --all -l --local -r --remote -d" },
-            { "uname", std::nullopt, "-a -r -s -n -v -m -o -p" },
-            { "date", std::nullopt, "-u -R -I" },
-            { "uptime", std::nullopt, "-p -s" } }
+            { "gem", "which", "" }, { "gem", "environment", "" },
+            { "gem", "contents", "" }, { "date", std::nullopt, "-u -R -I" } }
     };
 #endif
-    static constexpr std::array<ReadOnlyCommand, 26> shared {
+    static constexpr std::array<ReadOnlyCommand, 45> shared {
         { { "git", "status",
               "-s -b -v --short --branch --porcelain -u "
               "--untracked-files" },
@@ -356,18 +357,28 @@ bool shell_readonly_allowed(const ShellInvocation& invocation)
             { "docker", "ps", "-a -q -s --all --quiet --size" },
             { "docker", "images", "-a -q --all --quiet" },
             { "docker", "logs", "-f -t --follow --timestamps --tail" },
-            { "docker", "inspect", "" },
+            { "docker", "inspect", "" }, { "docker", "version", "" },
+            { "docker", "info", "" }, { "docker", "top", "" },
+            { "docker", "port", "" }, { "docker", "stats", "" },
+            { "docker", "history", "" }, { "docker", "diff", "" },
+            { "docker", "search", "" },
             { "kubectl", "get",
                 "-o --output -A --all-namespaces -n "
                 "--namespace --watch" },
             { "kubectl", "describe", "-n --namespace" },
             { "kubectl", "logs", "-f --tail -n --namespace --previous" },
-            { "make", std::nullopt, "-n --dry-run" },
-            { "which", std::nullopt, "-a" },
+            { "kubectl", "api-resources", "" },
+            { "kubectl", "api-versions", "" },
+            { "kubectl", "cluster-info", "" }, { "kubectl", "explain", "" },
+            { "kubectl", "version", "" },
             { "npm", "ls", "-g --global --depth" },
             { "npm", "outdated", "-g --global" }, { "npm", "view", "" },
+            { "npm", "why", "" }, { "npm", "root", "" },
+            { "npm", "prefix", "" },
             { "pip", "list", "-o --outdated --format" },
-            { "pip", "show", "-f --files" }, { "go", "version", "-m" } }
+            { "pip", "show", "-f --files" }, { "pip", "freeze", "" },
+            { "pip", "check", "" }, { "go", "version", "-m" },
+            { "go", "env", "" }, { "go", "list", "" }, { "go", "doc", "" } }
     };
     return std::any_of(platform_only.begin(), platform_only.end(),
                [&](const ReadOnlyCommand& entry) {

@@ -234,17 +234,79 @@ TEST_CASE("read-only command pair catalog is platform specific")
     CHECK_FALSE(shell_readonly_allowed(invocation("curl status")));
     CHECK_FALSE(shell_readonly_allowed(invocation("git diff --output=x.txt")));
     CHECK(shell_readonly_allowed(invocation("git diff --stat")));
-    CHECK(shell_readonly_allowed(invocation("make -n")));
-    CHECK(shell_readonly_allowed(invocation("which -a ls")));
+    // Removed: make -n runs $(shell ...) even in dry-run mode.
+    CHECK_FALSE(shell_readonly_allowed(invocation("make -n")));
+    // Removed: whois has no literal "domain" subcommand; the domain is the
+    // operand and lands in the subcommand slot.
+    CHECK_FALSE(shell_readonly_allowed(invocation("whois example.com")));
+    // Removed: terraform plan writes state and runs data sources.
+    CHECK_FALSE(shell_readonly_allowed(invocation("terraform plan")));
 #ifdef _WIN32
-    CHECK(shell_readonly_allowed(invocation("tasklist /v")));
-    CHECK_FALSE(shell_readonly_allowed(invocation("tasklist /kill")));
+    // Windows /flag rows are not catalogued; the builtin list covers them.
+    CHECK(shell_builtin_allowed("where"));
+    CHECK(shell_builtin_allowed("netstat"));
     CHECK_FALSE(shell_readonly_allowed(invocation("systemctl status")));
 #else
     CHECK(shell_readonly_allowed(invocation("systemctl status")));
     CHECK_FALSE(shell_readonly_allowed(invocation("systemctl start foo")));
     CHECK_FALSE(shell_readonly_allowed(invocation("tasklist /v")));
 #endif
+}
+
+TEST_CASE("read-only subcommand catalog rows match their intended commands")
+{
+    const auto invocation = [](std::string_view command) {
+        return analyze_shell(command).invocations.front();
+    };
+#ifndef _WIN32
+    for (std::string_view command :
+        { "systemctl is-active", "systemctl is-enabled", "systemctl is-failed",
+            "systemctl show", "systemctl cat", "systemctl list-dependencies",
+            "systemctl get-default", "dnf repolist", "dnf search foo",
+            "dnf provides foo", "dnf check-update", "cargo metadata",
+            "cargo locate-project", "gem which rake", "gem environment",
+            "gem contents rake" }) {
+        CHECK(shell_readonly_allowed(invocation(command)));
+    }
+#endif
+    for (std::string_view command : { "docker version", "docker info",
+             "docker top", "docker port", "docker stats", "docker history",
+             "docker diff", "docker search redis", "kubectl api-resources",
+             "kubectl api-versions", "kubectl cluster-info",
+             "kubectl explain pod", "kubectl version", "npm why left-pad",
+             "npm root", "npm prefix", "pip freeze", "pip check", "go env",
+             "go list", "go doc fmt" }) {
+        CHECK(shell_readonly_allowed(invocation(command)));
+    }
+    // Mutating siblings of the added subcommands must stay out.
+    CHECK_FALSE(shell_readonly_allowed(invocation("docker run alpine")));
+    CHECK_FALSE(shell_readonly_allowed(invocation("kubectl apply -f x.yaml")));
+    CHECK_FALSE(shell_readonly_allowed(invocation("pip install requests")));
+    CHECK_FALSE(shell_readonly_allowed(invocation("go build ./...")));
+    CHECK_FALSE(shell_readonly_allowed(invocation("npm install")));
+}
+
+TEST_CASE("whole-program read-only commands are safe with any operand")
+{
+    for (std::string_view program :
+        { "whoami", "logname", "tty", "arch", "nproc", "diff", "uniq", "comm",
+            "join", "paste", "fold", "nl", "rev", "tac", "od", "base64", "jq",
+            "sha1sum", "sha512sum", "cksum", "which", "type", "whereis", "df",
+            "du", "free", "ps", "pgrep", "lsof", "ss", "netstat", "uptime",
+            "who", "w", "last", "getent", "lsblk", "lscpu", "objdump",
+            "readelf", "nm", "seq", "expr", "sleep" }) {
+        CHECK(shell_builtin_allowed(program));
+    }
+    // Commands with a mutating flag or operand must stay out.
+    for (std::string_view program : { "xxd", "iconv", "sort", "date", "dmesg",
+             "env", "rg", "tree", "ip", "ldd" }) {
+        CHECK_FALSE(shell_builtin_allowed(program));
+    }
+    // Promoted commands are accepted with an operand, which the flag
+    // catalog could not match.
+    const ShellAnalysis with_operand = analyze_shell("du -sh node_modules");
+    CHECK(shell_builtin_allowed(with_operand.invocations.front().program));
+    CHECK_FALSE(shell_readonly_allowed(with_operand.invocations.front()));
 }
 
 TEST_CASE("application state shares grants with children")
