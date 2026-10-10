@@ -54,6 +54,26 @@ struct LastUsed {
     std::string model;
 };
 
+// OAuth credentials captured by a browser sign-in (network/mcp_oauth):
+// the registered client, the discovered authorization-server endpoints,
+// and the current tokens. Plain configuration data, like every other
+// credential; the live access token is used as the request bearer.
+struct McpOauthCredentials {
+    std::string client_id;
+    std::string client_secret; // empty for public clients
+    std::string issuer;
+    std::string authorization_endpoint;
+    std::string token_endpoint;
+    std::string registration_endpoint;
+    std::string scopes;
+    std::string access_token;
+    std::string refresh_token;   // empty when the server issued none
+    std::int64_t expires_at = 0; // unix seconds, 0 unknown
+
+    bool has_tokens() const { return !access_token.empty(); }
+    bool operator==(const McpOauthCredentials&) const = default;
+};
+
 // One user-configured MCP server. A catalogue server stores only
 // catalog_id and resolves url/label from the bundled catalogue at use
 // time (the models.dev pattern); a custom server stores url directly.
@@ -69,6 +89,9 @@ struct McpServerConfig {
     std::string url;
     std::map<std::string, std::string> headers;
     std::string bearer_token;
+    // OAuth sign-in state for http servers; empty until the first
+    // successful browser sign-in.
+    McpOauthCredentials oauth;
     std::string command;
     std::vector<std::string> args;
     std::map<std::string, std::string> env;

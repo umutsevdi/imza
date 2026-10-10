@@ -494,6 +494,90 @@ TEST_CASE("config roundtrip preserves mcp servers")
     CHECK(back.autoload);
 }
 
+TEST_CASE("config roundtrip preserves mcp oauth credentials")
+{
+    const auto path = temp_file("mcp-oauth-roundtrip.json");
+    imza::Config cfg;
+    imza::McpServerConfig server;
+    server.label               = "Linear";
+    server.catalog_id          = "linear";
+    server.oauth.client_id     = "cid";
+    server.oauth.client_secret = "csecret";
+    server.oauth.issuer        = "https://auth.linear.app";
+    server.oauth.authorization_endpoint
+        = "https://auth.linear.app/oauth/authorize";
+    server.oauth.token_endpoint = "https://auth.linear.app/oauth/token";
+    server.oauth.registration_endpoint
+        = "https://auth.linear.app/oauth/register";
+    server.oauth.scopes        = "read write";
+    server.oauth.access_token  = "tok-1";
+    server.oauth.refresh_token = "refresh-1";
+    server.oauth.expires_at    = 1900000000;
+    cfg.mcp_servers["linear"]  = server;
+
+    REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
+
+    imza::Config loaded;
+    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
+    REQUIRE(loaded.mcp_servers.size() == 1);
+    const imza::McpOauthCredentials& back
+        = loaded.mcp_servers.at("linear").oauth;
+    CHECK(back == server.oauth);
+
+    // Only the signed-in state persists; an unsigned entry stays minimal.
+    const std::optional<std::string> text = imza::read_text_file(path);
+    REQUIRE(text.has_value());
+    CHECK(text->find("\"oauth\"") != std::string::npos);
+    imza::Config bare;
+    bare.mcp_servers["plain"]     = imza::McpServerConfig { };
+    bare.mcp_servers["plain"].url = "https://mcp.example.com/mcp";
+    const auto bare_path          = temp_file("mcp-oauth-absent.json");
+    REQUIRE(imza::save_config(bare_path, bare) == imza::Status::OK);
+    const std::optional<std::string> bare_text
+        = imza::read_text_file(bare_path);
+    REQUIRE(bare_text.has_value());
+    CHECK(bare_text->find("\"oauth\"") == std::string::npos);
+}
+
+TEST_CASE("load_config validates mcp oauth entries")
+{
+    imza::Config cfg;
+    std::string error;
+
+    const auto plain_http = temp_file("mcp-oauth-http.json");
+    {
+        std::ofstream out(plain_http);
+        out << R"({"mcp_servers":{"linear":{"catalog_id":"linear",)"
+               R"("oauth":{"client_id":"cid","token_endpoint":)"
+               R"("http://auth.linear.app/token"}}}})";
+    }
+    CHECK(imza::load_config(plain_http, cfg, &error)
+        == imza::Status::CONFIG_ERROR);
+    CHECK(
+        error.find("oauth token_endpoint must be https") != std::string::npos);
+
+    // Loopback authorization servers stay valid (local servers/tests).
+    const auto loopback = temp_file("mcp-oauth-loopback.json");
+    {
+        std::ofstream out(loopback);
+        out << R"({"mcp_servers":{"local":{"url":"https://mcp.example.com",)"
+               R"("oauth":{"client_id":"cid","token_endpoint":)"
+               R"("http://127.0.0.1:8080/token","expires_at":99}}}})";
+    }
+    CHECK(imza::load_config(loopback, cfg, &error) == imza::Status::OK);
+    CHECK(cfg.mcp_servers.at("local").oauth.expires_at == 99);
+
+    const auto stdio = temp_file("mcp-oauth-stdio.json");
+    {
+        std::ofstream out(stdio);
+        out << R"({"mcp_servers":{"local":{"type":"stdio","command":"x",)"
+               R"("oauth":{"client_id":"cid"}}}})";
+    }
+    CHECK(imza::load_config(stdio, cfg, &error) == imza::Status::CONFIG_ERROR);
+    CHECK(error.find("oauth is only valid for http servers")
+        != std::string::npos);
+}
+
 TEST_CASE("saved config points at the published schema")
 {
     const auto path = temp_file("mcp-schema.json");

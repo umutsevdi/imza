@@ -1,9 +1,11 @@
 #include "tools/mcp_manager.h"
 
 #include "network/json_io.h"
+#include "network/mcp_oauth.h"
 #include "platform/process.h"
 #include "tools/mcp_catalog.h"
 
+#include <ctime>
 #include <utility>
 
 namespace imza {
@@ -15,10 +17,42 @@ namespace {
     // server stays FAILED until a manual connect resets the count.
     constexpr int MAX_RECONNECT_ATTEMPTS = 5;
     constexpr long RETRY_DELAYS_SECS[]   = { 2, 5, 10, 30, 60 };
+    // Refresh the access token this many seconds before it expires.
+    constexpr std::int64_t TOKEN_REFRESH_MARGIN_SECS = 300;
 
     std::string dangling_catalog_detail(const McpServerConfig& config)
     {
         return "catalogue entry '" + config.catalog_id + "' no longer exists";
+    }
+
+    // True when the entry holds everything a refresh needs.
+    bool refreshable(const McpServerConfig& config)
+    {
+        return config.oauth.has_tokens() && !config.oauth.token_endpoint.empty()
+            && !config.oauth.refresh_token.empty();
+    }
+
+    bool entry_is_oauth(const McpServerConfig& config)
+    {
+        if (config.oauth.has_tokens() || !config.oauth.client_id.empty()) {
+            return true;
+        }
+        if (config.catalog_id.empty()) {
+            return false;
+        }
+        const std::optional<McpCatalogEntry> entry
+            = find_mcp_catalog_entry(config.catalog_id);
+        return entry.has_value() && entry->auth_kind == "oauth";
+    }
+
+    // The bearer the request paths use: the OAuth access token when a
+    // sign-in happened, the static configured token otherwise.
+    std::string bearer_for(const McpServerConfig& config)
+    {
+        const std::string& token = !config.oauth.access_token.empty()
+            ? config.oauth.access_token
+            : config.bearer_token;
+        return expand_env_vars(token);
     }
 
     // An HTTP endpoint, or a spawned stdio child wrapped in line hooks.
@@ -62,7 +96,7 @@ namespace {
             detail = dangling_catalog_detail(config);
             return std::nullopt;
         }
-        endpoint.bearer_token = expand_env_vars(config.bearer_token);
+        endpoint.bearer_token = bearer_for(config);
         for (const auto& [name, value] : config.headers) {
             endpoint.headers.push_back(
                 expand_env_vars(name) + ": " + expand_env_vars(value));
@@ -79,15 +113,18 @@ namespace {
         return old.type != fresh.type || old.url != fresh.url
             || old.catalog_id != fresh.catalog_id
             || old.bearer_token != fresh.bearer_token
-            || old.headers != fresh.headers || old.command != fresh.command
-            || old.args != fresh.args || old.env != fresh.env
+            || old.oauth != fresh.oauth || old.headers != fresh.headers
+            || old.command != fresh.command || old.args != fresh.args
+            || old.env != fresh.env
             || old.working_directory != fresh.working_directory
             || old.enabled != fresh.enabled;
     }
 
 } // namespace
 
-McpManager::McpManager(std::map<std::string, McpServerConfig> servers)
+McpManager::McpManager(
+    std::map<std::string, McpServerConfig> servers, McpManagerHooks hooks)
+    : _hooks(std::move(hooks))
 {
     reload(std::move(servers));
 }
@@ -194,8 +231,32 @@ void McpManager::spawn(std::function<void()> work)
     _workers.emplace_back(std::move(work));
 }
 
-void McpManager::run_handshake(std::shared_ptr<ServerEntry> entry)
+void McpManager::run_handshake(
+    std::shared_ptr<ServerEntry> entry, bool force_token_refresh)
 {
+    // Renew an expiring OAuth token before building the session; a failed
+    // refresh needs a fresh sign-in, so retrying the handshake would only
+    // hammer the token endpoint.
+    bool needs_refresh = false;
+    {
+        std::lock_guard state_lock(entry->state_mutex);
+        needs_refresh = refreshable(entry->config);
+    }
+    if (needs_refresh) {
+        std::string refresh_detail;
+        if (!refresh_entry_tokens(entry, force_token_refresh, refresh_detail)) {
+            {
+                std::lock_guard state_lock(entry->state_mutex);
+                entry->session = McpSession { };
+                entry->tools.clear();
+                entry->state  = McpServerState::FAILED;
+                entry->detail = refresh_detail;
+            }
+            _changed.publish();
+            return;
+        }
+    }
+
     std::string detail;
     std::optional<McpSession> fresh = make_session(entry->config, detail);
     std::vector<McpToolDefinition> tools;
@@ -290,9 +351,9 @@ void McpManager::run_listener(std::shared_ptr<ServerEntry> entry)
                 "MCP-Session-Id: " + entry->session.session_id,
                 "MCP-Protocol-Version: " + entry->session.protocol_version,
             };
-            if (!entry->config.bearer_token.empty()) {
-                headers.push_back("Authorization: Bearer "
-                    + expand_env_vars(entry->config.bearer_token));
+            const std::string bearer = bearer_for(entry->config);
+            if (!bearer.empty()) {
+                headers.push_back("Authorization: Bearer " + bearer);
             }
             for (const auto& [name, value] : entry->config.headers) {
                 headers.push_back(
@@ -351,12 +412,13 @@ void McpManager::run_listener(std::shared_ptr<ServerEntry> entry)
             // session (the next handshake tries again).
             return;
         }
-        if (http_code == 404) {
-            // Session expired: rebuild, and let the fresh handshake spawn
-            // the replacement listener. run_handshake takes the entry I/O
+        if (http_code == 404 || http_code == 401) {
+            // Session expired, or the access token was rejected: rebuild.
+            // 401 forces a token refresh so the fresh handshake does not
+            // reuse the stale bearer. run_handshake takes the entry I/O
             // lock itself; holding it here too would self-deadlock the
             // non-recursive mutex and hang every later call on this entry.
-            run_handshake(entry);
+            run_handshake(entry, http_code == 401);
             return;
         }
         if (wait_interruptible(retry_delay_ms / 1000 + 1)) {
@@ -432,6 +494,189 @@ void McpManager::disconnect(const std::string& id)
     });
 }
 
+void McpManager::sign_in(const std::string& id)
+{
+    const std::shared_ptr<ServerEntry> entry = find(id);
+    if (entry == nullptr) {
+        return;
+    }
+    {
+        std::lock_guard state_lock(entry->state_mutex);
+        if (entry->config.is_stdio()
+            || entry->sign_in == McpSignInStatus::RUNNING) {
+            return;
+        }
+        entry->sign_in            = McpSignInStatus::RUNNING;
+        entry->sign_in_detail     = "starting";
+        entry->reconnect_attempts = 0;
+    }
+    entry->sign_in_cancel.store(false);
+    _changed.publish();
+    spawn([this, entry] { run_sign_in(entry); });
+}
+
+void McpManager::cancel_sign_in(const std::string& id)
+{
+    const std::shared_ptr<ServerEntry> entry = find(id);
+    if (entry == nullptr) {
+        return;
+    }
+    entry->sign_in_cancel.store(true);
+}
+
+void McpManager::run_sign_in(std::shared_ptr<ServerEntry> entry)
+{
+    const std::string id = [&entry] {
+        std::lock_guard state_lock(entry->state_mutex);
+        return entry->config.id;
+    }();
+
+    McpSignInHooks hooks;
+    hooks.open_browser = [this](const std::string& url) {
+        return _hooks.open_browser && _hooks.open_browser(url);
+    };
+    hooks.progress = [this, &entry](std::string_view phase) {
+        {
+            std::lock_guard state_lock(entry->state_mutex);
+            entry->sign_in_detail = std::string(phase);
+        }
+        _changed.publish();
+    };
+
+    std::string url;
+    bool has_client = false;
+    McpOauthClient existing;
+    {
+        std::lock_guard state_lock(entry->state_mutex);
+        url = resolved_mcp_url(entry->config);
+        if (!entry->config.oauth.client_id.empty()) {
+            existing.client_id     = entry->config.oauth.client_id;
+            existing.client_secret = entry->config.oauth.client_secret;
+            has_client             = true;
+        }
+    }
+
+    const McpSignInOutcome outcome = url.empty()
+        ? McpSignInOutcome { .status = Status::CONFIG_ERROR,
+              .detail                = dangling_catalog_detail(entry->config) }
+        : mcp_oauth_sign_in(url, has_client ? &existing : nullptr, hooks,
+              entry->sign_in_cancel);
+
+    bool succeeded = outcome.status == Status::OK;
+    {
+        std::lock_guard state_lock(entry->state_mutex);
+        if (succeeded) {
+            McpOauthCredentials& oauth   = entry->config.oauth;
+            oauth.client_id              = outcome.client.client_id;
+            oauth.client_secret          = outcome.client.client_secret;
+            oauth.issuer                 = outcome.as.issuer.value_or("");
+            oauth.authorization_endpoint = outcome.as.authorization_endpoint;
+            oauth.token_endpoint         = outcome.as.token_endpoint;
+            oauth.registration_endpoint
+                = outcome.as.registration_endpoint.value_or("");
+            std::string scopes;
+            if (outcome.as.scopes_supported) {
+                for (const std::string& scope : *outcome.as.scopes_supported) {
+                    if (!scopes.empty()) {
+                        scopes += ' ';
+                    }
+                    scopes += scope;
+                }
+            }
+            oauth.scopes          = std::move(scopes);
+            oauth.access_token    = outcome.tokens.access_token;
+            oauth.refresh_token   = outcome.tokens.refresh_token;
+            oauth.expires_at      = outcome.tokens.expires_at;
+            entry->config.enabled = true;
+            entry->sign_in        = McpSignInStatus::NONE;
+            entry->sign_in_detail.clear();
+        } else {
+            entry->sign_in        = McpSignInStatus::FAILED;
+            entry->sign_in_detail = outcome.detail;
+            // A timeout means the browser never came back: surface the
+            // authorize URL so the user can open it by hand.
+            if (outcome.status == Status::TIMEOUT
+                && !outcome.authorize_url.empty()) {
+                entry->sign_in_detail
+                    += "\nopen by hand: " + outcome.authorize_url;
+            }
+        }
+    }
+    _changed.publish();
+    if (!succeeded || _stopping.load()) {
+        return;
+    }
+    // Persist only while the entry is still configured: a removal that
+    // raced the sign-in must not resurrect the server in config.json.
+    if (!still_tracked(id, entry)) {
+        return;
+    }
+    if (_hooks.persist_server) {
+        McpServerConfig persisted;
+        {
+            std::lock_guard state_lock(entry->state_mutex);
+            persisted = entry->config;
+        }
+        _hooks.persist_server(persisted);
+    }
+    {
+        std::lock_guard state_lock(entry->state_mutex);
+        entry->state  = McpServerState::CONNECTING;
+        entry->detail = "";
+    }
+    _changed.publish();
+    run_handshake(entry);
+}
+
+bool McpManager::still_tracked(
+    const std::string& id, const std::shared_ptr<ServerEntry>& entry) const
+{
+    std::lock_guard map_lock(_map_mutex);
+    const auto found = _servers.find(id);
+    return found != _servers.end() && found->second == entry;
+}
+
+bool McpManager::refresh_entry_tokens(
+    const std::shared_ptr<ServerEntry>& entry, bool forced, std::string& detail)
+{
+    McpOauthCredentials oauth;
+    {
+        std::lock_guard state_lock(entry->state_mutex);
+        oauth = entry->config.oauth;
+    }
+    if (!forced
+        && (oauth.expires_at <= 0
+            || oauth.expires_at
+                > std::time(nullptr) + TOKEN_REFRESH_MARGIN_SECS)) {
+        return true; // still inside its validity window
+    }
+    if (oauth.token_endpoint.empty() || oauth.refresh_token.empty()) {
+        detail = "the access token was rejected and cannot be renewed";
+        return false;
+    }
+    const McpOauthClient client { oauth.client_id, oauth.client_secret };
+    McpOauthTokens tokens;
+    const Status status = mcp_refresh_tokens(
+        oauth.token_endpoint, client, oauth.refresh_token, { }, tokens, detail);
+    if (status != Status::OK) {
+        detail = "sign-in needed again: " + detail;
+        return false;
+    }
+    {
+        std::lock_guard state_lock(entry->state_mutex);
+        entry->config.oauth.access_token = tokens.access_token;
+        if (!tokens.refresh_token.empty()) {
+            entry->config.oauth.refresh_token = tokens.refresh_token;
+        }
+        entry->config.oauth.expires_at = tokens.expires_at;
+    }
+    if (_hooks.persist_server && !_stopping.load()
+        && still_tracked(entry->config.id, entry)) {
+        _hooks.persist_server(entry->config);
+    }
+    return true;
+}
+
 Status McpManager::call(const std::string& id, const std::string& tool,
     const JsonValue& arguments, McpToolCallResult& out, std::string& detail)
 {
@@ -450,7 +695,33 @@ Status McpManager::call(const std::string& id, const std::string& tool,
             return Status::CONFIG_ERROR;
         }
     }
-    return mcp_call_tool(entry->session, tool, arguments, out, detail);
+    const Status status
+        = mcp_call_tool(entry->session, tool, arguments, out, detail);
+    // A rejected OAuth access token gets one refresh-and-retry; the entry
+    // I/O lock already serializes refreshes on this server. Static-token
+    // servers surface the plain 401.
+    bool can_refresh = false;
+    {
+        std::lock_guard state_lock(entry->state_mutex);
+        can_refresh = refreshable(entry->config);
+    }
+    if (status == Status::API_ERROR && can_refresh
+        && entry->session.last_http_status == 401) {
+        std::string refresh_detail;
+        if (refresh_entry_tokens(entry, /*forced=*/true, refresh_detail)) {
+            std::string bearer;
+            {
+                std::lock_guard state_lock(entry->state_mutex);
+                bearer = entry->config.oauth.access_token;
+            }
+            entry->session.endpoint.bearer_token = bearer;
+            detail.clear();
+            return mcp_call_tool(entry->session, tool, arguments, out, detail);
+        }
+        detail = refresh_detail;
+        return Status::API_ERROR;
+    }
+    return status;
 }
 
 std::vector<McpServerSnapshot> McpManager::snapshot() const
@@ -464,9 +735,13 @@ std::vector<McpServerSnapshot> McpManager::snapshot() const
     out.reserve(entries.size());
     for (const auto& [id, entry] : entries) {
         std::lock_guard state_lock(entry->state_mutex);
-        out.push_back(McpServerSnapshot { id, entry->config.label,
+        McpServerSnapshot snapshot { id, entry->config.label,
             entry->config.description, entry->detail, entry->state,
-            entry->tools.size(), entry->config.autoload });
+            entry->tools.size(), entry->config.autoload };
+        snapshot.oauth          = entry_is_oauth(entry->config);
+        snapshot.sign_in        = entry->sign_in;
+        snapshot.sign_in_detail = entry->sign_in_detail;
+        out.push_back(std::move(snapshot));
     }
     return out;
 }

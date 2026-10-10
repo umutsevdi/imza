@@ -18,6 +18,8 @@ namespace imza {
 
 enum class McpServerState { OFFLINE, CONNECTING, CONNECTED, FAILED, INACTIVE };
 
+enum class McpSignInStatus { NONE, RUNNING, FAILED };
+
 struct McpServerSnapshot {
     std::string id;
     std::string label;
@@ -26,6 +28,21 @@ struct McpServerSnapshot {
     McpServerState state   = McpServerState::OFFLINE;
     std::size_t tool_count = 0;
     bool autoload          = false;
+    // The server authenticates through browser sign-in (stored OAuth
+    // credentials, or a catalogue entry that requires them).
+    bool oauth = false;
+    // Browser sign-in progress; RUNNING carries the phase in
+    // sign_in_detail, FAILED the reason.
+    McpSignInStatus sign_in = McpSignInStatus::NONE;
+    std::string sign_in_detail;
+};
+
+// Effects injected at the composition boundary: persisting refreshed or
+// signed-in credentials (without a manager reload), and opening the
+// user's browser. Defaults make both no-ops so tests stay hermetic.
+struct McpManagerHooks {
+    std::function<void(const McpServerConfig& server)> persist_server;
+    std::function<bool(const std::string& url)> open_browser;
 };
 
 // Owns one MCP session per configured server. Long-lived
@@ -36,7 +53,8 @@ struct McpServerSnapshot {
 // (abandoned sessions are cleaned up server-side).
 class McpManager final : public ApplicationComponent {
 public:
-    explicit McpManager(std::map<std::string, McpServerConfig> servers);
+    explicit McpManager(std::map<std::string, McpServerConfig> servers,
+        McpManagerHooks hooks = { });
     ~McpManager();
 
     McpManager(const McpManager&)            = delete;
@@ -58,6 +76,15 @@ public:
     // Marks the server offline immediately and ends the remote session on
     // a worker (best-effort DELETE; servers may refuse it).
     void disconnect(const std::string& id);
+
+    // Starts the browser OAuth flow (network/mcp_oauth) on a worker;
+    // stdio, unknown, and already-running ids are no-ops. On success the
+    // entry is enabled, credentials are persisted through the hook, and
+    // the handshake starts.
+    void sign_in(const std::string& id);
+
+    // Aborts a running sign-in (the worker observes the flag).
+    void cancel_sign_in(const std::string& id);
 
     // Requires a connected server; tool execution errors (isError) come
     // back through `out` with Status::OK.
@@ -85,17 +112,30 @@ private:
         std::atomic_bool stream_cancel {
             false
         }; // aborts the in-flight notification stream
+        std::atomic_bool sign_in_cancel {
+            false
+        }; // aborts the in-flight browser sign-in
         McpServerState state   = McpServerState::OFFLINE;
         int reconnect_attempts = 0;
         std::string detail;
+        McpSignInStatus sign_in = McpSignInStatus::NONE;
+        std::string sign_in_detail;
         McpSession session;
         std::vector<McpToolDefinition> tools;
     };
 
     std::shared_ptr<ServerEntry> find(const std::string& id) const;
+    bool still_tracked(
+        const std::string& id, const std::shared_ptr<ServerEntry>& entry) const;
     void spawn(std::function<void()> work);
-    void run_handshake(std::shared_ptr<ServerEntry> entry);
+    void run_handshake(
+        std::shared_ptr<ServerEntry> entry, bool force_token_refresh = false);
     void run_listener(std::shared_ptr<ServerEntry> entry);
+    void run_sign_in(std::shared_ptr<ServerEntry> entry);
+    // Refreshes the stored OAuth access token when it is missing its
+    // window (or `forced`), updating and persisting the entry config.
+    bool refresh_entry_tokens(const std::shared_ptr<ServerEntry>& entry,
+        bool forced, std::string& detail);
     bool wait_interruptible(long ms) const;
 
     std::atomic_bool _stopping { false };
@@ -105,6 +145,7 @@ private:
     // from their own threads, so appends race the destructor's join.
     std::mutex _workers_mutex;
     std::vector<std::thread> _workers;
+    McpManagerHooks _hooks;
     Signal<> _changed;
 };
 

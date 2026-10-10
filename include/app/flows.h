@@ -68,6 +68,11 @@ void mcp_add_server(ApplicationState& state, const McpServerConfig& server);
 bool mcp_remove_server(ApplicationState& state, const std::string& id);
 bool mcp_set_server_autoload(
     ApplicationState& state, const std::string& id, bool autoload);
+// Adds a browser sign-in server (disabled; the flow enables it on
+// success) and starts the manager's OAuth flow. False when the entry
+// could not be committed.
+bool mcp_begin_server_sign_in(
+    ApplicationState& state, const McpServerConfig& server);
 std::future<ModalResult> request_modal(
     ApplicationState& state, ModalPayload payload);
 void present_front(ApplicationState& state);

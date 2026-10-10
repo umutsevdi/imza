@@ -398,7 +398,7 @@ bool mcp_remove_server(ApplicationState& state, const std::string& id)
 bool mcp_set_server_autoload(
     ApplicationState& state, const std::string& id, bool autoload)
 {
-    return mutate_mcp_config(state, [&id, autoload](Config& cfg) {
+    return mutate_mcp_config(state, [id, autoload](Config& cfg) {
         const auto found = cfg.mcp_servers.find(id);
         if (found == cfg.mcp_servers.end()) {
             return false;
@@ -406,6 +406,22 @@ bool mcp_set_server_autoload(
         found->second.autoload = autoload;
         return true;
     });
+}
+
+bool mcp_begin_server_sign_in(
+    ApplicationState& state, const McpServerConfig& server)
+{
+    // Added disabled: connect() no-ops until the flow enables the entry,
+    // and a cancelled first sign-in leaves a removable, retryable row.
+    if (!mutate_mcp_config(state, [&server](Config& cfg) {
+            return cfg.mcp_servers.insert_or_assign(server.id, server).second;
+        })) {
+        return false;
+    }
+    if (state.mcp) {
+        state.mcp->sign_in(server.id);
+    }
+    return true;
 }
 
 std::future<ModalResult> request_modal(

@@ -4,6 +4,7 @@
 #include "permissions/evaluator.h"
 #include "permissions/filesystem.h"
 #include "permissions/store.h"
+#include "platform/command_runner.h"
 #include "tools/mcp_manager.h"
 #include "tools/skills.h"
 #include "turn/delegation.h"
@@ -160,7 +161,25 @@ namespace {
         // Taken before the config moves into the provider store.
         std::vector<std::string> instructions = std::move(config.instructions);
         state->providers = std::make_shared<ProviderStore>(std::move(config));
-        state->mcp       = std::make_shared<McpManager>(std::move(mcp_servers));
+        McpManagerHooks mcp_hooks;
+        // Sign-ins and background token refreshes write straight through
+        // the locked config RMW; no manager reload follows because the
+        // manager already applied the same values to its entry.
+        mcp_hooks.persist_server = [](const McpServerConfig& server) {
+            Config initial;
+            load_config(config_path(), initial);
+            update_config(
+                config_path(), initial,
+                [&server](Config& cfg) {
+                    cfg.mcp_servers.insert_or_assign(server.id, server);
+                    return true;
+                },
+                nullptr);
+        };
+        mcp_hooks.open_browser
+            = [](const std::string& url) { return open_browser(url); };
+        state->mcp = std::make_shared<McpManager>(
+            std::move(mcp_servers), std::move(mcp_hooks));
         state->mcp->autoload();
         state->subagents = std::make_shared<SubagentManager>();
         state->environment

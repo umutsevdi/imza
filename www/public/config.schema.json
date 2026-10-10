@@ -195,6 +195,23 @@
           "additionalProperties": { "type": "string" }
         },
         "bearer_token": { "type": "string", "description": "Bearer token." },
+        "oauth": {
+          "type": "object",
+          "description": "Browser sign-in state; written by Imza after a successful OAuth sign-in.",
+          "additionalProperties": false,
+          "properties": {
+            "client_id": { "type": "string" },
+            "client_secret": { "type": "string" },
+            "issuer": { "type": "string" },
+            "authorization_endpoint": { "type": "string" },
+            "token_endpoint": { "type": "string" },
+            "registration_endpoint": { "type": "string" },
+            "scopes": { "type": "string" },
+            "access_token": { "type": "string" },
+            "refresh_token": { "type": "string" },
+            "expires_at": { "type": "integer", "description": "Unix seconds; 0 unknown." }
+          }
+        },
         "command": {
           "type": "string",
           "description": "Program to run for a stdio server. Passed verbatim (no shell); looked up on PATH. Required when `type` is \"stdio\"."

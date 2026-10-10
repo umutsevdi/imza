@@ -88,7 +88,10 @@ struct McpSession {
     std::string session_id;  // "MCP-Session-Id", once the server assigns one
     std::string protocol_version = std::string(MCP_PROTOCOL_VERSION);
     std::uint64_t next_id        = 0;
-    bool initialized             = false;
+    // Status of the last HTTP exchange (200 for the stdio transport);
+    // lets callers detect 401 without parsing detail strings.
+    long last_http_status = 0;
+    bool initialized      = false;
 
     bool is_stdio() const { return static_cast<bool>(stdio.write); }
 };

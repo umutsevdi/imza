@@ -180,6 +180,19 @@ struct StoredSkills {
         projects;
 };
 
+struct StoredMcpOauth {
+    std::optional<std::string> client_id;
+    std::optional<std::string> client_secret;
+    std::optional<std::string> issuer;
+    std::optional<std::string> authorization_endpoint;
+    std::optional<std::string> token_endpoint;
+    std::optional<std::string> registration_endpoint;
+    std::optional<std::string> scopes;
+    std::optional<std::string> access_token;
+    std::optional<std::string> refresh_token;
+    std::optional<std::int64_t> expires_at;
+};
+
 struct StoredMcpServer {
     std::optional<std::string> label;
     std::optional<std::string> description;
@@ -188,6 +201,7 @@ struct StoredMcpServer {
     std::optional<std::string> url;
     std::optional<std::map<std::string, std::string>> headers;
     std::optional<std::string> bearer_token;
+    std::optional<StoredMcpOauth> oauth;
     std::optional<std::string> command;
     std::optional<std::vector<std::string>> args;
     std::optional<std::map<std::string, std::string>> env;
@@ -404,6 +418,43 @@ Status load_config(
                                 + name + "'");
                     }
                     server.headers[name] = value;
+                }
+            }
+            if (entry.oauth) {
+                if (server.is_stdio()) {
+                    return fail(Status::CONFIG_ERROR,
+                        "mcp server '" + id
+                            + "': oauth is only valid for http servers");
+                }
+                McpOauthCredentials& oauth = server.oauth;
+                oauth.client_id     = entry.oauth->client_id.value_or("");
+                oauth.client_secret = entry.oauth->client_secret.value_or("");
+                oauth.issuer        = entry.oauth->issuer.value_or("");
+                oauth.authorization_endpoint
+                    = entry.oauth->authorization_endpoint.value_or("");
+                oauth.token_endpoint = entry.oauth->token_endpoint.value_or("");
+                oauth.registration_endpoint
+                    = entry.oauth->registration_endpoint.value_or("");
+                oauth.scopes        = entry.oauth->scopes.value_or("");
+                oauth.access_token  = entry.oauth->access_token.value_or("");
+                oauth.refresh_token = entry.oauth->refresh_token.value_or("");
+                oauth.expires_at    = entry.oauth->expires_at.value_or(0);
+                const char* endpoints[] = { "issuer", "authorization_endpoint",
+                    "token_endpoint", "registration_endpoint" };
+                const std::string values[]
+                    = { oauth.issuer, oauth.authorization_endpoint,
+                          oauth.token_endpoint, oauth.registration_endpoint };
+                for (std::size_t at = 0; at < 4; ++at) {
+                    const std::string& url = values[at];
+                    const bool ok = url.empty() || url.starts_with("https://")
+                        || url.starts_with("http://127.0.0.1")
+                        || url.starts_with("http://localhost")
+                        || url.starts_with("http://[::1]");
+                    if (!ok) {
+                        return fail(Status::CONFIG_ERROR,
+                            "mcp server '" + id + "': oauth " + endpoints[at]
+                                + " must be https");
+                    }
                 }
             }
             if (server.is_stdio()) {
@@ -629,6 +680,43 @@ namespace {
                 }
                 if (!server.bearer_token.empty()) {
                     entry.bearer_token = server.bearer_token;
+                }
+                if (server.oauth.has_tokens()
+                    || !server.oauth.client_id.empty()) {
+                    StoredMcpOauth oauth;
+                    if (!server.oauth.client_id.empty()) {
+                        oauth.client_id = server.oauth.client_id;
+                    }
+                    if (!server.oauth.client_secret.empty()) {
+                        oauth.client_secret = server.oauth.client_secret;
+                    }
+                    if (!server.oauth.issuer.empty()) {
+                        oauth.issuer = server.oauth.issuer;
+                    }
+                    if (!server.oauth.authorization_endpoint.empty()) {
+                        oauth.authorization_endpoint
+                            = server.oauth.authorization_endpoint;
+                    }
+                    if (!server.oauth.token_endpoint.empty()) {
+                        oauth.token_endpoint = server.oauth.token_endpoint;
+                    }
+                    if (!server.oauth.registration_endpoint.empty()) {
+                        oauth.registration_endpoint
+                            = server.oauth.registration_endpoint;
+                    }
+                    if (!server.oauth.scopes.empty()) {
+                        oauth.scopes = server.oauth.scopes;
+                    }
+                    if (!server.oauth.access_token.empty()) {
+                        oauth.access_token = server.oauth.access_token;
+                    }
+                    if (!server.oauth.refresh_token.empty()) {
+                        oauth.refresh_token = server.oauth.refresh_token;
+                    }
+                    if (server.oauth.expires_at > 0) {
+                        oauth.expires_at = server.oauth.expires_at;
+                    }
+                    entry.oauth = std::move(oauth);
                 }
                 if (!server.command.empty()) {
                     entry.command = server.command;

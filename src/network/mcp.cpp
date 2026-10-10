@@ -118,16 +118,20 @@ namespace {
         bool negotiated, long& http_code, std::string& body,
         std::vector<std::string>* response_headers)
     {
+        Status status;
         if (session.is_stdio()) {
-            return post_stdio(session, payload, body, http_code);
+            status = post_stdio(session, payload, body, http_code);
+        } else {
+            const HttpPostOptions opts {
+                .max_redirs       = 0,
+                .response_headers = response_headers,
+            };
+            status = http_post(session.endpoint.url,
+                post_headers(session, negotiated), payload,
+                session.endpoint.timeout_secs, body, &http_code, opts);
         }
-        const HttpPostOptions opts {
-            .max_redirs       = 0,
-            .response_headers = response_headers,
-        };
-        return http_post(session.endpoint.url,
-            post_headers(session, negotiated), payload,
-            session.endpoint.timeout_secs, body, &http_code, opts);
+        session.last_http_status = http_code;
+        return status;
     }
 
     // Fire-and-forget notification: stdio writes without waiting; HTTP

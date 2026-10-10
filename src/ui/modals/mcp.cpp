@@ -62,6 +62,15 @@ namespace {
 
     std::string state_text(const McpServerSnapshot& server)
     {
+        if (server.sign_in == McpSignInStatus::RUNNING) {
+            return server.sign_in_detail.empty()
+                ? std::string("waiting for browser…")
+                : server.sign_in_detail;
+        }
+        if (server.sign_in == McpSignInStatus::FAILED) {
+            return server.sign_in_detail.empty() ? std::string("sign-in failed")
+                                                 : server.sign_in_detail;
+        }
         switch (server.state) {
         case McpServerState::CONNECTED:
             return std::to_string(server.tool_count) + " tools";
@@ -269,11 +278,19 @@ namespace {
 
         std::string _current_serial()
         {
-            return std::to_string(_session->modal_serial()) + "/"
+            std::string serial = std::to_string(_session->modal_serial()) + "/"
                 + std::to_string(_servers().size()) + "/" + _selected + "/"
                 + std::to_string(_confirming()) + "/" + std::to_string(_stdio)
                 + "/" + std::to_string(_in_add) + "/"
                 + std::to_string(_autoload);
+            // Sign-in transitions and phase text re-render the rows.
+            for (const McpServerSnapshot& server : _servers()) {
+                serial += "/" + server.id + ":"
+                    + std::to_string(static_cast<int>(server.sign_in)) + ":"
+                    + std::to_string(server.sign_in_detail.size()) + ":"
+                    + std::to_string(static_cast<int>(server.state));
+            }
+            return serial;
         }
 
         bool _confirming() const
@@ -440,8 +457,11 @@ namespace {
             }
             if (!oauth) {
                 _add_button = action_button("Add", [this] { _add_server(); });
+                _signin_button.reset();
             } else {
                 _add_button.reset();
+                _signin_button
+                    = action_button("Sign in", [this] { _start_sign_in(); });
             }
             if (custom) {
                 // The serial includes _stdio, so the next render rebuilds
@@ -503,6 +523,8 @@ namespace {
             add_parts.push_back(_autoload_button);
             if (!oauth) {
                 add_parts.push_back(_add_button);
+            } else {
+                add_parts.push_back(_signin_button);
             }
             _add_container = Container::Vertical(std::move(add_parts));
 
@@ -549,7 +571,8 @@ namespace {
                 Element state_el
                     = state_glyph(server.state) | size(WIDTH, EQUAL, COL_STATE);
                 Element detail;
-                if (server.state == McpServerState::FAILED) {
+                if (server.state == McpServerState::FAILED
+                    || server.sign_in == McpSignInStatus::FAILED) {
                     detail = status_text(
                         fit(state_text(server), COL_DETAIL), false);
                 } else {
@@ -573,6 +596,23 @@ namespace {
                 const McpServerSnapshot server
                     = _servers()[static_cast<std::size_t>(index)];
                 Components buttons;
+                if (server.sign_in == McpSignInStatus::RUNNING) {
+                    buttons.push_back(
+                        action_button("Cancel", [this, id = server.id] {
+                            if (_state->mcp) {
+                                _state->mcp->cancel_sign_in(id);
+                            }
+                        }));
+                } else if (server.oauth
+                    && (server.state == McpServerState::INACTIVE
+                        || server.state == McpServerState::FAILED)) {
+                    buttons.push_back(
+                        action_button("Sign in", [this, id = server.id] {
+                            if (_state->mcp) {
+                                _state->mcp->sign_in(id);
+                            }
+                        }));
+                }
                 if (server.state == McpServerState::CONNECTED
                     || server.state == McpServerState::FAILED) {
                     buttons.push_back(
@@ -735,6 +775,53 @@ namespace {
             _maybe_rebuild();
         }
 
+        void _start_sign_in()
+        {
+            const McpCatalogEntry* entry = _selected_entry();
+            if (entry == nullptr) {
+                _row_error = "Pick a server first.";
+                return;
+            }
+            McpServerConfig server;
+            server.id         = entry->id;
+            server.catalog_id = entry->id;
+            server.label      = std::string(trim(_label_buf));
+            // Added disabled; the flow enables it once the browser
+            // sign-in completes.
+            server.enabled  = false;
+            server.autoload = _autoload;
+            for (const auto& existing : _servers()) {
+                if (existing.id == server.id) {
+                    _row_error = "Id already in use.";
+                    return;
+                }
+            }
+            if (!imza::mcp_begin_server_sign_in(*_state, server)) {
+                _row_error = "Could not save the configuration.";
+                return;
+            }
+            _row_error.clear();
+            const std::string added_id = server.id;
+            _selected.clear();
+            _label_buf.clear();
+            _autoload = false;
+            _close_picker();
+            // Watch the sign-in progress on the new row.
+            _in_add        = false;
+            const auto all = _servers();
+            for (int i = 0; i < static_cast<int>(all.size()); ++i) {
+                if (all[static_cast<std::size_t>(i)].id == added_id) {
+                    _row_selected = i;
+                    break;
+                }
+            }
+            _maybe_rebuild();
+            if (_row_selected < static_cast<int>(_row_buttons.size())) {
+                _row_buttons[static_cast<std::size_t>(_row_selected)]
+                    ->TakeFocus();
+            }
+        }
+
         Element _picker_area()
         {
             const std::string pad(FORM_LABEL + 2, ' ');
@@ -796,7 +883,7 @@ namespace {
             rows.push_back(separator() | color(PANEL_BORDER));
             rows.push_back(hbox({
                 section_title("Add Server"),
-                text("  pick a server, paste a token, then add") | dim,
+                text("  pick a server, then Add or Sign in") | dim,
             }));
             if (_add_container != nullptr) {
                 rows.push_back(hbox({
@@ -804,15 +891,13 @@ namespace {
                     _picker_area() | xflex,
                 }));
                 if (_is_oauth()) {
-                    const McpCatalogEntry* entry = _selected_entry();
-                    rows.push_back(
-                        hbox({ text("  "),
-                            text("browser sign-in for "
-                                + (entry ? entry->label
-                                         : std::string("this server"))
-                                + " is not supported yet")
-                                | dim })
-                        | xflex);
+                    rows.push_back(_form_row("Label", _label_input));
+                    rows.push_back(hbox({
+                        text(std::string(FORM_LABEL + 2, ' ')),
+                        _signin_button ? _signin_button->Render() : text(""),
+                        text("  "),
+                        _status_line_element(),
+                    }));
                 } else {
                     if (_transport_button) {
                         rows.push_back(
@@ -890,6 +975,7 @@ namespace {
         Component _url_input;
         Component _timeout_input;
         Component _add_button;
+        Component _signin_button;
         std::string _label_buf;
         int _label_cursor = 0;
         std::string _token_buf;

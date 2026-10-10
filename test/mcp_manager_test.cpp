@@ -1,12 +1,16 @@
 #include <doctest/doctest.h>
 
 #include "loopback_mcp_server.h"
+#include "loopback_oauth_server.h"
 #include "network/mcp.h"
 #include "tools/mcp_catalog.h"
 #include "tools/mcp_manager.h"
 
 #include <atomic>
 #include <chrono>
+#include <ctime>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -483,4 +487,310 @@ TEST_CASE("mcp manager reload drops a stdio session when its command changes")
     manager.reload({ { "local", relabeled } });
     CHECK(manager.snapshot()[0].label == "Local");
     CHECK(manager.snapshot()[0].state == imza::McpServerState::OFFLINE);
+}
+
+// ---- OAuth sign-in and token refresh --------------------------------------
+
+namespace {
+
+// Acts as the user's browser: opens the authorize URL, follows the
+// redirect into the manager's loopback callback listener.
+bool oauth_fake_browser(const std::string& url)
+{
+    std::vector<std::string> response_headers;
+    std::string body;
+    long code = 0;
+    imza::HttpPostOptions post_opts { };
+    post_opts.max_redirs       = 0;
+    post_opts.response_headers = &response_headers;
+    if (imza::http_post(url, { }, "", 5, body, &code, post_opts)
+            != imza::Status::OK
+        || code != 302) {
+        return false;
+    }
+    std::string location;
+    for (const std::string& line : response_headers) {
+        if (line.rfind("Location: ", 0) == 0) {
+            location = imza::trim(std::string_view(line).substr(10));
+            break;
+        }
+    }
+    if (location.empty()) {
+        return false;
+    }
+    imza::HttpGetOptions get_opts { };
+    get_opts.max_redirs = 0;
+    long get_code       = 0;
+    return imza::http_get(location, { }, 5, body, &get_code, get_opts)
+        == imza::Status::OK;
+}
+
+struct RecordedConfig {
+    mutable std::mutex mutex;
+    std::vector<imza::McpServerConfig> saved;
+
+    void record(const imza::McpServerConfig& server)
+    {
+        std::lock_guard lock(mutex);
+        saved.push_back(server);
+    }
+
+    std::optional<imza::McpServerConfig> last() const
+    {
+        std::lock_guard lock(mutex);
+        if (saved.empty()) {
+            return std::nullopt;
+        }
+        return saved.back();
+    }
+};
+
+imza::McpServerConfig oauth_config(
+    const std::string& id, const std::string& url)
+{
+    imza::McpServerConfig config = server_config(id, url);
+    config.oauth.client_id       = "client-test";
+    config.oauth.token_endpoint  = url.substr(0, url.find("/mcp")) + "/token";
+    config.oauth.refresh_token   = "refresh-ok";
+    return config;
+}
+
+} // namespace
+
+TEST_CASE("mcp manager sign-in connects through the browser flow")
+{
+    imza::test::allow_loopback_direct();
+    imza::test::LoopbackOauthServer server;
+    REQUIRE(server.start());
+
+    RecordedConfig recorded;
+    imza::McpManagerHooks hooks;
+    hooks.open_browser
+        = [](const std::string& url) { return oauth_fake_browser(url); };
+    hooks.persist_server = [&recorded](const imza::McpServerConfig& server) {
+        recorded.record(server);
+    };
+
+    imza::McpServerConfig config = server_config("linear", server.mcp_url());
+    config.enabled               = false;
+    imza::McpManager manager({ { "linear", config } }, hooks);
+
+    auto snapshot = manager.snapshot();
+    REQUIRE(snapshot.size() == 1);
+    CHECK(snapshot[0].state == imza::McpServerState::INACTIVE);
+    CHECK(!snapshot[0].oauth); // custom url, no credentials yet
+
+    manager.sign_in("linear");
+    REQUIRE(wait_state(manager, "linear", imza::McpServerState::CONNECTED));
+    snapshot = manager.snapshot();
+    CHECK(snapshot[0].oauth);
+    CHECK(snapshot[0].tool_count == 1);
+    CHECK(snapshot[0].sign_in == imza::McpSignInStatus::NONE);
+
+    const std::optional<imza::McpServerConfig> persisted = recorded.last();
+    REQUIRE(persisted.has_value());
+    CHECK(persisted->id == "linear");
+    CHECK(persisted->enabled);
+    CHECK(persisted->oauth.access_token == "tok-1");
+    CHECK(persisted->oauth.refresh_token == "refresh-ok");
+    CHECK(!persisted->oauth.token_endpoint.empty());
+
+    imza::McpToolCallResult out;
+    std::string detail;
+    REQUIRE(manager.call("linear", "echo",
+                imza::JsonValue(imza::JsonValue::object_t { }), out, detail)
+        == imza::Status::OK);
+    CHECK(imza::mcp_first_text(out) == "oauth ok");
+}
+
+TEST_CASE("mcp manager sign-in can be cancelled and leaves the row intact")
+{
+    imza::test::allow_loopback_direct();
+    imza::test::LoopbackOauthServer server;
+    REQUIRE(server.start());
+
+    RecordedConfig recorded;
+    imza::McpManagerHooks hooks;
+    hooks.open_browser   = [](const std::string&) { return false; };
+    hooks.persist_server = [&recorded](const imza::McpServerConfig& server) {
+        recorded.record(server);
+    };
+
+    imza::McpServerConfig config = server_config("linear", server.mcp_url());
+    config.enabled               = false;
+    imza::McpManager manager({ { "linear", config } }, hooks);
+
+    manager.sign_in("linear");
+    REQUIRE(wait_for([&] {
+        const auto snapshot = manager.snapshot();
+        return !snapshot.empty()
+            && snapshot[0].sign_in == imza::McpSignInStatus::RUNNING;
+    }));
+    manager.cancel_sign_in("linear");
+    REQUIRE(wait_for([&] {
+        const auto snapshot = manager.snapshot();
+        return !snapshot.empty()
+            && snapshot[0].sign_in == imza::McpSignInStatus::FAILED;
+    }));
+    const auto snapshot = manager.snapshot();
+    CHECK(snapshot[0].state == imza::McpServerState::INACTIVE);
+    CHECK(snapshot[0].sign_in_detail.find("cancelled") != std::string::npos);
+    CHECK_FALSE(recorded.last().has_value());
+}
+
+TEST_CASE("a server removed mid-sign-in is not resurrected in config")
+{
+    imza::test::allow_loopback_direct();
+    imza::test::LoopbackOauthServer server;
+    REQUIRE(server.start());
+
+    std::atomic<bool> release { false };
+    RecordedConfig recorded;
+    imza::McpManagerHooks hooks;
+    hooks.open_browser = [&release](const std::string& url) {
+        wait_for([&] { return release.load(); });
+        return oauth_fake_browser(url);
+    };
+    hooks.persist_server = [&recorded](const imza::McpServerConfig& server) {
+        recorded.record(server);
+    };
+
+    imza::McpServerConfig config = server_config("linear", server.mcp_url());
+    config.enabled               = false;
+    imza::McpManager manager({ { "linear", config } }, hooks);
+
+    manager.sign_in("linear");
+    REQUIRE(wait_for([&] {
+        const auto snapshot = manager.snapshot();
+        return !snapshot.empty()
+            && snapshot[0].sign_in == imza::McpSignInStatus::RUNNING;
+    }));
+    // Remove the server while the browser phase blocks; the flow finishes
+    // (the code is exchanged) but nothing may be written back.
+    manager.reload({ });
+    release.store(true);
+    REQUIRE(wait_for([&] { return server.exchange_count.load() >= 1; }));
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    CHECK_FALSE(recorded.last().has_value());
+    CHECK(manager.snapshot().empty());
+}
+
+TEST_CASE("handshakes refresh an expiring oauth token before connecting")
+{
+    imza::test::allow_loopback_direct();
+    imza::test::LoopbackOauthServer server;
+    REQUIRE(server.start());
+
+    RecordedConfig recorded;
+    imza::McpManagerHooks hooks;
+    hooks.persist_server = [&recorded](const imza::McpServerConfig& server) {
+        recorded.record(server);
+    };
+
+    // The stored token expires inside the refresh margin.
+    imza::McpServerConfig config = oauth_config("exa", server.mcp_url());
+    config.oauth.access_token    = "tok-0";
+    config.oauth.expires_at      = std::time(nullptr) + 60;
+    imza::McpManager manager({ { "exa", config } }, hooks);
+
+    manager.connect("exa");
+    REQUIRE(wait_state(manager, "exa", imza::McpServerState::CONNECTED));
+    CHECK(server.refresh_count.load() == 1);
+    const std::optional<imza::McpServerConfig> persisted = recorded.last();
+    REQUIRE(persisted.has_value());
+    CHECK(persisted->oauth.access_token == "tok-1");
+
+    // Far from expiry: the stored token is used as-is, no refresh.
+    imza::test::LoopbackOauthServer fresh;
+    fresh.revoke_access_token(); // only tok-1 is accepted now
+    REQUIRE(fresh.start());
+
+    imza::McpServerConfig current = oauth_config("exa", fresh.mcp_url());
+    current.oauth.access_token    = "tok-1";
+    current.oauth.expires_at      = std::time(nullptr) + 3600;
+    imza::McpManager quiet({ { "exa", current } });
+    quiet.connect("exa");
+    REQUIRE(wait_state(quiet, "exa", imza::McpServerState::CONNECTED));
+    CHECK(fresh.refresh_count.load() == 0);
+}
+
+TEST_CASE("a rejected access token is refreshed and the call retried")
+{
+    imza::test::allow_loopback_direct();
+    imza::test::LoopbackOauthServer server;
+    server.revoke_access_token(); // tok-1 is the accepted token
+    REQUIRE(server.start());
+
+    RecordedConfig recorded;
+    imza::McpManagerHooks hooks;
+    hooks.persist_server = [&recorded](const imza::McpServerConfig& server) {
+        recorded.record(server);
+    };
+
+    imza::McpServerConfig config = oauth_config("exa", server.mcp_url());
+    config.oauth.access_token    = "tok-1";
+    config.oauth.expires_at      = std::time(nullptr) + 3600;
+    imza::McpManager manager({ { "exa", config } }, hooks);
+
+    manager.connect("exa");
+    REQUIRE(wait_state(manager, "exa", imza::McpServerState::CONNECTED));
+    CHECK(server.refresh_count.load() == 0);
+
+    server.revoke_access_token(); // tok-1 is now stale
+    imza::McpToolCallResult out;
+    std::string detail;
+    REQUIRE(manager.call("exa", "echo",
+                imza::JsonValue(imza::JsonValue::object_t { }), out, detail)
+        == imza::Status::OK);
+    CHECK(imza::mcp_first_text(out) == "oauth ok");
+    CHECK(server.refresh_count.load() == 1);
+    const std::optional<imza::McpServerConfig> persisted = recorded.last();
+    REQUIRE(persisted.has_value());
+    CHECK(persisted->oauth.access_token == "tok-3");
+}
+
+TEST_CASE("a failing refresh marks the server failed without retry storms")
+{
+    imza::test::allow_loopback_direct();
+    imza::test::LoopbackOauthServer server;
+    REQUIRE(server.start());
+
+    imza::McpServerConfig config = oauth_config("exa", server.mcp_url());
+    config.oauth.refresh_token   = "refresh-bad";
+    config.oauth.access_token    = "tok-0";
+    config.oauth.expires_at      = std::time(nullptr) + 60;
+    imza::McpManager manager({ { "exa", config } });
+
+    manager.connect("exa");
+    REQUIRE(wait_state(manager, "exa", imza::McpServerState::FAILED));
+    const auto snapshot = manager.snapshot();
+    REQUIRE(snapshot.size() == 1);
+    CHECK(snapshot[0].detail.find("sign-in needed again") != std::string::npos);
+    CHECK(snapshot[0].sign_in == imza::McpSignInStatus::NONE);
+    CHECK(snapshot[0].oauth);
+
+    // Refresh failures need a fresh sign-in; the retry ladder stays off.
+    CHECK(server.refresh_count.load() == 1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    CHECK(server.refresh_count.load() == 1);
+}
+
+TEST_CASE("snapshots flag catalogue oauth servers before any sign-in")
+{
+    imza::McpServerConfig linear;
+    linear.catalog_id = "linear";
+    imza::McpServerConfig github;
+    github.catalog_id = "github";
+
+    imza::McpManager manager({ { "linear", linear }, { "github", github } });
+    const auto snapshot = manager.snapshot();
+    REQUIRE(snapshot.size() == 2);
+    bool linear_oauth = false;
+    bool github_oauth = false;
+    for (const auto& server : snapshot) {
+        linear_oauth = linear_oauth || (server.id == "linear" && server.oauth);
+        github_oauth = github_oauth || (server.id == "github" && !server.oauth);
+    }
+    CHECK(linear_oauth);
+    CHECK(github_oauth);
 }
