@@ -40,7 +40,11 @@ public:
     std::atomic<bool> protocol_header_ok { false };
     std::atomic<bool> saw_delete { false };
     std::atomic<bool> saw_get { false };
+    std::atomic<bool> rejected_null_params { false };
     std::atomic<int> initialize_count { 0 };
+    // tools/list answers 400 with a JSON-RPC error body (error-detail
+    // extraction coverage).
+    bool fail_tools_list = false;
 
     ~LoopbackMcpServer() { stop(); }
 
@@ -222,6 +226,24 @@ private:
         }
         if (request.body.find("\"method\":\"tools/list\"")
             != std::string::npos) {
+            // Strict like real gateways (Cloudflare rejects the envelope
+            // outright): "params":null is not a valid JSON-RPC message.
+            if (request.body.find("\"params\":null") != std::string::npos) {
+                rejected_null_params = true;
+                respond(fd, "HTTP/1.1 400 Bad Request",
+                    { "Content-Type: application/json" },
+                    R"({"jsonrpc":"2.0","error":{"code":-32600,)"
+                    R"("message":"Bad Request: the request body is not a)"
+                    R"( valid JSON-RPC message"},"id":0})");
+                return;
+            }
+            if (fail_tools_list) {
+                respond(fd, "HTTP/1.1 400 Bad Request",
+                    { "Content-Type: application/json" },
+                    R"({"jsonrpc":"2.0","id":5,"error":{"code":-32000,)"
+                    R"("message":"listing unavailable"}})");
+                return;
+            }
             // After a pushed tools/list_changed the roster is the new set.
             if (pushed_) {
                 respond(fd, "HTTP/1.1 200 OK",

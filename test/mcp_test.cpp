@@ -39,6 +39,16 @@ TEST_CASE("mcp_rpc_request produces the JSON-RPC 2.0 envelope")
     CHECK(capabilities->is_object());
 }
 
+TEST_CASE("mcp_rpc_request never serializes null params")
+{
+    // A default json_t is null; strict gateways (Cloudflare) reject
+    // "params":null as an invalid JSON-RPC message with HTTP 400.
+    const std::string wire
+        = imza::mcp_rpc_request(2, "tools/list", imza::JsonValue { });
+    CHECK(wire.find("\"params\":{}") != std::string::npos);
+    CHECK(wire.find("\"params\":null") == std::string::npos);
+}
+
 TEST_CASE("mcp_version_supported accepts exactly the known versions")
 {
     CHECK(imza::mcp_version_supported("2025-03-26"));
@@ -170,6 +180,36 @@ TEST_CASE("mcp list tools paginates across cursor pages")
     CHECK(tools[2].title.value_or("") == "Third");
     CHECK_FALSE(tools[2].input_schema.has_value());
 
+    fx.server.stop();
+}
+
+TEST_CASE("mcp list tools passes the strict json-rpc gateway check")
+{
+    // The fixture rejects "params":null exactly like Cloudflare's
+    // gateway; a successful listing proves the envelope is well-formed.
+    LoopbackSession fx;
+    REQUIRE(fx.start_initialized());
+    std::vector<imza::McpToolDefinition> tools;
+    std::string detail;
+    REQUIRE(
+        imza::mcp_list_tools(fx.session, tools, detail) == imza::Status::OK);
+    CHECK(tools.size() == 3);
+
+    fx.server.stop();
+    CHECK_FALSE(fx.server.rejected_null_params.load());
+}
+
+TEST_CASE("mcp http failures carry the server's json-rpc error message")
+{
+    LoopbackSession fx;
+    fx.server.fail_tools_list = true;
+    REQUIRE(fx.start_initialized());
+    std::vector<imza::McpToolDefinition> tools;
+    std::string detail;
+    CHECK(imza::mcp_list_tools(fx.session, tools, detail)
+        == imza::Status::API_ERROR);
+    CHECK(detail.find("HTTP 400 tools/list") != std::string::npos);
+    CHECK(detail.find("listing unavailable") != std::string::npos);
     fx.server.stop();
 }
 

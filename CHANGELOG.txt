@@ -18,13 +18,15 @@ Changes:
     local programs (stdio transport) connect through the new /mcp dialog,
     which offers a curated catalogue of 38 popular services (GitHub, GitLab,
     Linear, Slack, Notion, Figma, Stripe, and more) alongside a
-    custom-endpoint option. The agent discovers each server's tools on demand
-    and calls them directly. Connected servers appear in the sidebar with live
-    tool counts, tool rosters refresh automatically when servers change,
-    failed connections recover with retries, and every server carries its
-    own credential and timeout settings. Servers can be flagged to connect
-    automatically at startup, the sidebar lists only the servers the agent
-    can actually reach, and inactive servers are shown as such.
+    custom-endpoint option. Services that use browser sign-in (like
+    Cloudflare and Linear) authorize with one press, and their access
+    renews in the background. The agent discovers each server's tools on
+    demand and calls them directly. Connected servers appear in the sidebar
+    with live tool counts, tool rosters refresh automatically when servers
+    change, failed connections recover with retries, and every server
+    carries its own credential and timeout settings. Servers can be flagged
+    to connect automatically at startup, the sidebar lists only the servers
+    the agent can actually reach, and inactive servers are shown as such.
   - Added the EVREN provider.
   - The config file can now pre-approve directories and shell commands, and
     list extra instruction files to follow alongside AGENTS.md.

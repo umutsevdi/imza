@@ -16,6 +16,10 @@ struct McpInitializeResponse {
     std::optional<McpRpcError> error;
 };
 
+struct McpErrorEnvelope {
+    std::optional<McpRpcError> error;
+};
+
 struct McpCallToolResponse {
     std::optional<McpToolCallResult> result;
     std::optional<McpRpcError> error;
@@ -136,20 +140,47 @@ namespace {
 
     // Fire-and-forget notification: stdio writes without waiting; HTTP
     // needs the round trip.
-    Status notify(
-        McpSession& session, const std::string& payload, long& http_code)
+    Status notify(McpSession& session, const std::string& payload,
+        long& http_code, std::string& body)
     {
         if (session.is_stdio()) {
             http_code = 200;
             return session.stdio.write(payload);
         }
-        std::string body;
         return post(session, payload, true, http_code, body, nullptr);
     }
 
     std::string http_status_detail(long code, std::string_view phase)
     {
         return "HTTP " + std::to_string(code) + " " + std::string(phase);
+    }
+
+    // A rejected request's body usually says why: a JSON-RPC error
+    // message when present, otherwise a short body snippet.
+    std::string http_error_detail(
+        long code, std::string_view phase, const std::string& body)
+    {
+        std::string detail = http_status_detail(code, phase);
+        std::string message;
+        if (mcp_find_rpc_response(body, message)) {
+            McpErrorEnvelope envelope;
+            if (!json_parse_checked(message, envelope) && envelope.error) {
+                detail += ": " + envelope.error->message;
+                return detail;
+            }
+        }
+        std::string snippet(trim(body));
+        const auto newline = snippet.find('\n');
+        if (newline != std::string::npos) {
+            snippet.resize(newline);
+        }
+        if (snippet.size() > 120) {
+            snippet.resize(120);
+        }
+        if (!snippet.empty()) {
+            detail += ": " + snippet;
+        }
+        return detail;
     }
 
     // One sessioned RPC exchange with the 404 session-expiry retry. The
@@ -178,7 +209,7 @@ namespace {
                 continue;
             }
             if (!http_ok(code)) {
-                detail = http_status_detail(code, method);
+                detail = http_error_detail(code, method, body);
                 return Status::API_ERROR;
             }
             std::string message;
@@ -212,11 +243,15 @@ namespace {
 std::string mcp_rpc_request(
     std::uint64_t id, std::string_view method, const JsonValue& params)
 {
+    // A default-constructed json_t is null; strict servers (Cloudflare's
+    // gateway) reject "params":null as an invalid JSON-RPC message, so
+    // requests always carry an object.
     JsonValue request;
     request["jsonrpc"] = "2.0";
     request["id"]      = static_cast<double>(id);
     request["method"]  = method;
-    request["params"]  = params;
+    request["params"]
+        = params.is_null() ? JsonValue(JsonValue::object_t { }) : params;
     return json_dump(request);
 }
 
@@ -303,7 +338,7 @@ Status mcp_initialize(McpSession& session, std::string& detail)
         return Status::NETWORK_ERROR;
     }
     if (!http_ok(code)) {
-        detail = http_status_detail(code, "during initialize");
+        detail = http_error_detail(code, "during initialize", body);
         return Status::API_ERROR;
     }
     if (!session.is_stdio()) {
@@ -339,13 +374,15 @@ Status mcp_initialize(McpSession& session, std::string& detail)
     notification["jsonrpc"] = "2.0";
     notification["method"]  = "notifications/initialized";
     long notify_code        = 0;
-    if (notify(session, json_dump(notification), notify_code) != Status::OK) {
+    std::string notify_body;
+    if (notify(session, json_dump(notification), notify_code, notify_body)
+        != Status::OK) {
         detail = "initialized notification request failed";
         return Status::NETWORK_ERROR;
     }
     if (!http_ok(notify_code)) {
-        detail = http_status_detail(
-            notify_code, "for the initialized notification");
+        detail = http_error_detail(
+            notify_code, "for the initialized notification", notify_body);
         return Status::API_ERROR;
     }
     session.initialized = true;
@@ -420,7 +457,8 @@ Status mcp_send_result(
     response["id"]      = id;
     response["result"]  = result;
     long code           = 0;
-    if (notify(session, json_dump(response), code) != Status::OK) {
+    std::string body;
+    if (notify(session, json_dump(response), code, body) != Status::OK) {
         return Status::NETWORK_ERROR;
     }
     return http_ok(code) ? Status::OK : Status::API_ERROR;
