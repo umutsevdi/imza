@@ -16,10 +16,6 @@ struct McpInitializeResponse {
     std::optional<McpRpcError> error;
 };
 
-struct McpErrorEnvelope {
-    std::optional<McpRpcError> error;
-};
-
 struct McpCallToolResponse {
     std::optional<McpToolCallResult> result;
     std::optional<McpRpcError> error;
@@ -155,30 +151,30 @@ namespace {
         return "HTTP " + std::to_string(code) + " " + std::string(phase);
     }
 
-    // A rejected request's body usually says why: a JSON-RPC error
-    // message when present, otherwise a short body snippet.
+    // A rejected request's body usually says why; parse_api_error pulls
+    // the polymorphic error message, anything else falls back to a short
+    // snippet of the body.
     std::string http_error_detail(
         long code, std::string_view phase, const std::string& body)
     {
         std::string detail = http_status_detail(code, phase);
         std::string message;
-        if (mcp_find_rpc_response(body, message)) {
-            McpErrorEnvelope envelope;
-            if (!json_parse_checked(message, envelope) && envelope.error) {
-                detail += ": " + envelope.error->message;
-                return detail;
+        std::string snippet;
+        if (mcp_find_rpc_response(body, snippet)) {
+            parse_api_error(snippet, message);
+        } else {
+            snippet            = trim(body);
+            const auto newline = snippet.find('\n');
+            if (newline != std::string::npos) {
+                snippet.resize(newline);
             }
+            if (snippet.size() > 120) {
+                snippet.resize(120);
+            }
+            message = std::move(snippet);
         }
-        std::string snippet(trim(body));
-        const auto newline = snippet.find('\n');
-        if (newline != std::string::npos) {
-            snippet.resize(newline);
-        }
-        if (snippet.size() > 120) {
-            snippet.resize(120);
-        }
-        if (!snippet.empty()) {
-            detail += ": " + snippet;
+        if (!message.empty()) {
+            detail += ": " + message;
         }
         return detail;
     }

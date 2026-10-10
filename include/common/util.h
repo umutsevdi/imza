@@ -514,4 +514,100 @@ inline std::optional<std::string> base64_decode(std::string_view input)
     return out;
 }
 
+// URL-safe alphabet ('-','_'), no padding: JWT segments, PKCE challenges.
+inline std::string base64url_encode(std::string_view data)
+{
+    constexpr std::string_view ALPHABET
+        = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    std::string encoded;
+    encoded.reserve((data.size() + 2) / 3 * 4);
+    for (std::size_t offset = 0; offset < data.size(); offset += 3) {
+        const auto first         = static_cast<unsigned char>(data[offset]);
+        const auto second        = offset + 1 < data.size()
+            ? static_cast<unsigned char>(data[offset + 1])
+            : 0;
+        const auto third         = offset + 2 < data.size()
+            ? static_cast<unsigned char>(data[offset + 2])
+            : 0;
+        const unsigned int value = (static_cast<unsigned int>(first) << 16)
+            | (static_cast<unsigned int>(second) << 8)
+            | static_cast<unsigned int>(third);
+        encoded.push_back(ALPHABET[(value >> 18) & 0x3f]);
+        encoded.push_back(ALPHABET[(value >> 12) & 0x3f]);
+        if (offset + 1 < data.size()) {
+            encoded.push_back(ALPHABET[(value >> 6) & 0x3f]);
+        }
+        if (offset + 2 < data.size()) {
+            encoded.push_back(ALPHABET[value & 0x3f]);
+        }
+    }
+    return encoded;
+}
+
+// Lenient inverse of base64url_encode: unpadded input, "" on any invalid
+// character (callers treat that as an undecodable segment).
+inline std::string base64url_decode(std::string_view input)
+{
+    static const std::array<int, 256> values = [] {
+        std::array<int, 256> table;
+        table.fill(-1);
+        constexpr std::string_view alphabet
+            = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+              "0123456789-_";
+        for (std::size_t i = 0; i < alphabet.size(); ++i) {
+            table[static_cast<unsigned char>(alphabet[i])]
+                = static_cast<int>(i);
+        }
+        return table;
+    }();
+    std::string out;
+    std::uint32_t value = 0;
+    int bits            = -8;
+    for (const unsigned char c : input) {
+        if (values[c] < 0) {
+            return { };
+        }
+        value = (value << 6) | static_cast<std::uint32_t>(values[c]);
+        bits += 6;
+        if (bits >= 0) {
+            out.push_back(static_cast<char>((value >> bits) & 0xff));
+            bits -= 8;
+        }
+    }
+    return out;
+}
+
+// Inverse of percent_encode for query-component values; malformed escapes
+// pass through unchanged.
+inline std::string percent_decode(std::string_view value)
+{
+    const auto hex = [](char c) -> int {
+        if (c >= '0' && c <= '9') {
+            return c - '0';
+        }
+        if (c >= 'a' && c <= 'f') {
+            return c - 'a' + 10;
+        }
+        if (c >= 'A' && c <= 'F') {
+            return c - 'A' + 10;
+        }
+        return -1;
+    };
+    std::string out;
+    out.reserve(value.size());
+    for (std::size_t i = 0; i < value.size(); ++i) {
+        if (value[i] == '%' && i + 2 < value.size()) {
+            const int high = hex(value[i + 1]);
+            const int low  = hex(value[i + 2]);
+            if (high >= 0 && low >= 0) {
+                out.push_back(static_cast<char>(high * 16 + low));
+                i += 2;
+                continue;
+            }
+        }
+        out.push_back(value[i]);
+    }
+    return out;
+}
+
 } // namespace imza

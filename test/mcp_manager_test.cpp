@@ -493,38 +493,6 @@ TEST_CASE("mcp manager reload drops a stdio session when its command changes")
 
 namespace {
 
-// Acts as the user's browser: opens the authorize URL, follows the
-// redirect into the manager's loopback callback listener.
-bool oauth_fake_browser(const std::string& url)
-{
-    std::vector<std::string> response_headers;
-    std::string body;
-    long code = 0;
-    imza::HttpPostOptions post_opts { };
-    post_opts.max_redirs       = 0;
-    post_opts.response_headers = &response_headers;
-    if (imza::http_post(url, { }, "", 5, body, &code, post_opts)
-            != imza::Status::OK
-        || code != 302) {
-        return false;
-    }
-    std::string location;
-    for (const std::string& line : response_headers) {
-        if (line.rfind("Location: ", 0) == 0) {
-            location = imza::trim(std::string_view(line).substr(10));
-            break;
-        }
-    }
-    if (location.empty()) {
-        return false;
-    }
-    imza::HttpGetOptions get_opts { };
-    get_opts.max_redirs = 0;
-    long get_code       = 0;
-    return imza::http_get(location, { }, 5, body, &get_code, get_opts)
-        == imza::Status::OK;
-}
-
 struct RecordedConfig {
     mutable std::mutex mutex;
     std::vector<imza::McpServerConfig> saved;
@@ -565,8 +533,9 @@ TEST_CASE("mcp manager sign-in connects through the browser flow")
 
     RecordedConfig recorded;
     imza::McpManagerHooks hooks;
-    hooks.open_browser
-        = [](const std::string& url) { return oauth_fake_browser(url); };
+    hooks.open_browser = [](const std::string& url) {
+        return imza::test::oauth_fake_browser(url);
+    };
     hooks.persist_server = [&recorded](const imza::McpServerConfig& server) {
         recorded.record(server);
     };
@@ -649,7 +618,7 @@ TEST_CASE("a server removed mid-sign-in is not resurrected in config")
     imza::McpManagerHooks hooks;
     hooks.open_browser = [&release](const std::string& url) {
         wait_for([&] { return release.load(); });
-        return oauth_fake_browser(url);
+        return imza::test::oauth_fake_browser(url);
     };
     hooks.persist_server = [&recorded](const imza::McpServerConfig& server) {
         recorded.record(server);

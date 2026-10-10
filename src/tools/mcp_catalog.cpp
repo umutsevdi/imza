@@ -11,18 +11,19 @@ namespace {
 
     // Wire-shaped mirror of the bundled catalogue document; unknown
     // members are tolerated so entries can grow metadata.
-    struct StoredCatalogEntry {
-        std::optional<std::string> id;
-        std::optional<std::string> label;
-        std::optional<std::string> url;
-        std::optional<std::string> auth_kind;
-    };
-
-    struct StoredCatalog {
-        std::vector<StoredCatalogEntry> servers;
-    };
-
 } // namespace
+
+// Glaze-reflected: must have external linkage (Clang/MSVC requirement).
+struct StoredCatalogEntry {
+    std::optional<std::string> id;
+    std::optional<std::string> label;
+    std::optional<std::string> url;
+    std::optional<std::string> auth_kind;
+};
+
+struct StoredCatalog {
+    std::vector<StoredCatalogEntry> servers;
+};
 
 std::vector<McpCatalogEntry> load_mcp_catalog()
 {

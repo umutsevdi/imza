@@ -15,40 +15,11 @@ using namespace imza::test;
 
 namespace {
 
-// Acts as the user's browser: opens the authorize URL, follows the
-// redirect to the loopback callback, and reports whether that succeeded.
-bool fake_browser(const std::string& url)
-{
-    std::vector<std::string> response_headers;
-    std::string body;
-    long code = 0;
-    HttpPostOptions post_opts { };
-    post_opts.max_redirs       = 0;
-    post_opts.response_headers = &response_headers;
-    if (http_post(url, { }, "", 5, body, &code, post_opts) != Status::OK
-        || code != 302) {
-        return false;
-    }
-    std::string location;
-    for (const std::string& line : response_headers) {
-        if (line.rfind("Location: ", 0) == 0) {
-            location = trim(std::string_view(line).substr(10));
-            break;
-        }
-    }
-    if (location.empty()) {
-        return false;
-    }
-    HttpGetOptions get_opts { };
-    get_opts.max_redirs = 0;
-    return http_get(location, { }, 5, body, &code, get_opts) == Status::OK;
-}
-
 McpSignInHooks browser_hooks()
 {
     McpSignInHooks hooks;
     hooks.open_browser
-        = [](const std::string& url) { return fake_browser(url); };
+        = [](const std::string& url) { return oauth_fake_browser(url); };
     hooks.browser_timeout_secs = 10;
     return hooks;
 }
@@ -198,7 +169,7 @@ TEST_CASE("exchange and refresh post the RFC 6749 form shape")
     CHECK(posted_body.find("client_id=cid") != std::string::npos);
 }
 
-TEST_CASE("loopback listener accepts the matching callback")
+TEST_CASE("loopback listener accepts, skips, and gives up")
 {
     allow_loopback_direct();
     McpLoopbackListener listener;
@@ -206,63 +177,35 @@ TEST_CASE("loopback listener accepts the matching callback")
     CHECK(listener.redirect_uri().rfind("http://127.0.0.1:", 0) == 0);
     CHECK(listener.redirect_uri().find("/callback") != std::string::npos);
 
-    std::thread opener([&listener] {
-        std::string body;
-        long code = 0;
-        HttpGetOptions opts { };
-        opts.max_redirs = 0;
-        http_get(listener.redirect_uri() + "?code=abc&state=good", { }, 5, body,
-            &code, opts);
-    });
+    std::atomic_bool cancel { false };
     McpLoopbackListener::Callback callback;
     std::string detail;
-    std::atomic_bool cancel { false };
-    CHECK(listener.wait_for_callback("good", 5, cancel, callback, detail)
-        == Status::OK);
-    CHECK(callback.code == "abc");
-    CHECK(callback.state == "good");
-    opener.join();
-}
-
-TEST_CASE("loopback listener skips mismatched state and keeps waiting")
-{
-    allow_loopback_direct();
-    McpLoopbackListener listener;
-    REQUIRE(listener.start());
 
     std::thread opener([&listener] {
         std::string body;
         long code = 0;
         HttpGetOptions opts { };
         opts.max_redirs = 0;
-        // A request with someone else's state: answered, then ignored.
+        // A request with someone else's state is answered, then ignored.
         http_get(listener.redirect_uri() + "?code=first&state=wrong", { }, 5,
             body, &code, opts);
         http_get(listener.redirect_uri() + "?code=second&state=good", { }, 5,
             body, &code, opts);
     });
-    McpLoopbackListener::Callback callback;
-    std::string detail;
-    std::atomic_bool cancel { false };
-    CHECK(listener.wait_for_callback("good", 5, cancel, callback, detail)
+    REQUIRE(listener.wait_for_callback("good", 5, cancel, callback, detail)
         == Status::OK);
     CHECK(callback.code == "second");
+    CHECK(callback.state == "good");
     opener.join();
-}
 
-TEST_CASE("loopback listener honours the deadline and cancellation")
-{
-    allow_loopback_direct();
-    McpLoopbackListener listener;
-    REQUIRE(listener.start());
-    McpLoopbackListener::Callback callback;
-    std::string detail;
-    std::atomic_bool cancel { false };
-    CHECK(listener.wait_for_callback("s", 1, cancel, callback, detail)
+    // A second listener with no incoming connection hits its deadline.
+    McpLoopbackListener quiet;
+    REQUIRE(quiet.start());
+    CHECK(quiet.wait_for_callback("s", 1, cancel, callback, detail)
         == Status::TIMEOUT);
 
     cancel.store(true);
-    CHECK(listener.wait_for_callback("s", 60, cancel, callback, detail)
+    CHECK(quiet.wait_for_callback("s", 60, cancel, callback, detail)
         == Status::CANCELLED);
 }
 

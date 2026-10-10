@@ -81,6 +81,10 @@ Status mcp_fetch_protected_resource(const std::string& url,
     const McpOauthGet& get, McpProtectedResourceMetadata& out,
     std::string& detail);
 
+// True for https endpoints and http on loopback hosts; the config
+// validation shares this policy.
+bool mcp_oauth_endpoint_allowed(std::string_view url);
+
 Status mcp_fetch_authorization_server(const std::string& issuer,
     const McpOauthGet& get, McpAuthorizationServerMetadata& out,
     std::string& detail);

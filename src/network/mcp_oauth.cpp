@@ -1,3 +1,5 @@
+#define NOMINMAX
+
 #include "network/mcp_oauth.h"
 
 #include "common/util.h"
@@ -54,8 +56,6 @@ namespace {
     constexpr long METADATA_TIMEOUT_SECS             = 15;
     constexpr long TOKEN_TIMEOUT_SECS                = 30;
     constexpr std::size_t MAX_CALLBACK_REQUEST_BYTES = 8192;
-
-    // ---- sockets ---------------------------------------------------------
 
 #ifdef _WIN32
     void winsock_once()
@@ -121,8 +121,6 @@ namespace {
 #endif
     }
 
-    // ---- encoding, hashing, randomness -----------------------------------
-
     // RFC 7636 verifier alphabet; the challenge is base64url of the SHA-256
     // digest without padding.
     constexpr std::string_view PKCE_CHARS
@@ -137,34 +135,6 @@ namespace {
         out.reserve(length);
         for (std::size_t i = 0; i < length; ++i) {
             out.push_back(PKCE_CHARS[pick(engine)]);
-        }
-        return out;
-    }
-
-    std::string base64url_encode(const std::uint8_t* data, std::size_t size)
-    {
-        constexpr std::string_view ALPHABET
-            = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-              "0123456789-_";
-        std::string out;
-        out.reserve((size + 2) / 3 * 4);
-        for (std::size_t offset = 0; offset < size; offset += 3) {
-            const unsigned int value
-                = (static_cast<unsigned int>(data[offset]) << 16)
-                | (offset + 1 < size
-                        ? static_cast<unsigned int>(data[offset + 1]) << 8
-                        : 0)
-                | (offset + 2 < size
-                        ? static_cast<unsigned int>(data[offset + 2])
-                        : 0);
-            out.push_back(ALPHABET[(value >> 18) & 0x3f]);
-            out.push_back(ALPHABET[(value >> 12) & 0x3f]);
-            if (offset + 1 < size) {
-                out.push_back(ALPHABET[(value >> 6) & 0x3f]);
-            }
-            if (offset + 2 < size) {
-                out.push_back(ALPHABET[value & 0x3f]);
-            }
         }
         return out;
     }
@@ -315,8 +285,6 @@ namespace {
         return digest;
     }
 
-    // ---- URLs ------------------------------------------------------------
-
     std::string_view url_scheme(std::string_view url)
     {
         const auto separator = url.find("://");
@@ -351,46 +319,17 @@ namespace {
         return false;
     }
 
-    // OAuth endpoints must be https; loopback is the exception the tests
-    // (and any local authorization server) rely on.
-    bool secure_endpoint(std::string_view url)
-    {
-        return url_scheme(url) == "https" || loopback_host(url);
-    }
+} // namespace
 
-    std::string percent_decode(std::string_view value)
-    {
-        std::string out;
-        out.reserve(value.size());
-        for (std::size_t i = 0; i < value.size(); ++i) {
-            if (value[i] == '%' && i + 2 < value.size()) {
-                const auto hex = [&](char c) -> int {
-                    if (c >= '0' && c <= '9') {
-                        return c - '0';
-                    }
-                    if (c >= 'a' && c <= 'f') {
-                        return c - 'a' + 10;
-                    }
-                    if (c >= 'A' && c <= 'F') {
-                        return c - 'A' + 10;
-                    }
-                    return -1;
-                };
-                const int high = hex(value[i + 1]);
-                const int low  = hex(value[i + 2]);
-                if (high >= 0 && low >= 0) {
-                    out.push_back(static_cast<char>(high * 16 + low));
-                    i += 2;
-                    continue;
-                }
-            }
-            out.push_back(value[i]);
-        }
-        return out;
-    }
+// OAuth endpoints must be https; loopback is the exception local
+// authorization servers (and the tests) rely on. Shared with the config
+// validation so the policy lives once.
+bool mcp_oauth_endpoint_allowed(std::string_view url)
+{
+    return url_scheme(url) == "https" || loopback_host(url);
+}
 
-    // ---- transport defaults ----------------------------------------------
-
+namespace {
     Status default_get(const std::string& url,
         const std::vector<std::string>& headers, long timeout_secs,
         std::string& body, long* http_code)
@@ -421,8 +360,6 @@ namespace {
     {
         return post ? post : McpOauthPost { default_post };
     }
-
-    // ---- token responses -------------------------------------------------
 
     // Parses a token-endpoint body; a refresh response may omit the
     // refresh token (the stored one stays valid), hence `old_refresh`.
@@ -466,7 +403,6 @@ namespace {
         return fallback;
     }
 
-    // Appends a form pair when the value is non-empty.
     void append_form_pair(
         std::string& form, const char* key, std::string_view value)
     {
@@ -486,7 +422,8 @@ namespace {
 std::string mcp_pkce_challenge(std::string_view verifier)
 {
     const std::array<std::uint8_t, 32> digest = sha256(verifier);
-    return base64url_encode(digest.data(), digest.size());
+    return base64url_encode(std::string_view(
+        reinterpret_cast<const char*>(digest.data()), digest.size()));
 }
 
 McpPkcePair mcp_pkce_generate()
@@ -625,8 +562,8 @@ Status mcp_fetch_authorization_server(const std::string& issuer,
         detail = "authorization-server metadata is missing an endpoint";
         return Status::JSON_ERROR;
     }
-    if (!secure_endpoint(out.authorization_endpoint)
-        || !secure_endpoint(out.token_endpoint)) {
+    if (!mcp_oauth_endpoint_allowed(out.authorization_endpoint)
+        || !mcp_oauth_endpoint_allowed(out.token_endpoint)) {
         detail = "authorization-server endpoints must be https";
         return Status::CONFIG_ERROR;
     }
@@ -764,8 +701,6 @@ Status mcp_refresh_tokens(const std::string& token_endpoint,
         = parse_token_response(body, refresh_token, out, detail);
     return parsed;
 }
-
-// ---- loopback listener ---------------------------------------------------
 
 McpLoopbackListener::~McpLoopbackListener() { close(); }
 
@@ -960,8 +895,6 @@ Status McpLoopbackListener::wait_for_callback(const std::string& state,
         close_socket(fd);
     }
 }
-
-// ---- sign-in driver ------------------------------------------------------
 
 McpSignInOutcome mcp_oauth_sign_in(std::string_view server_url,
     const McpOauthClient* existing, const McpSignInHooks& hooks,

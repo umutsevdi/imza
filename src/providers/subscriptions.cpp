@@ -6,7 +6,6 @@
 #include "providers/catalog.h"
 
 #include <algorithm>
-#include <array>
 #include <charconv>
 #include <chrono>
 #include <condition_variable>
@@ -77,37 +76,6 @@ namespace {
     {
         return { status, { },
             body.empty() ? error_text(status) : std::move(body) };
-    }
-
-    std::string decode_base64url(std::string_view input)
-    {
-        static const std::array<int, 256> values = [] {
-            std::array<int, 256> table;
-            table.fill(-1);
-            constexpr std::string_view alphabet
-                = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-                  "0123456789-_";
-            for (std::size_t i = 0; i < alphabet.size(); ++i) {
-                table[static_cast<unsigned char>(alphabet[i])]
-                    = static_cast<int>(i);
-            }
-            return table;
-        }();
-        std::string out;
-        std::uint32_t value = 0;
-        int bits            = -8;
-        for (const unsigned char c : input) {
-            if (values[c] < 0) {
-                return { };
-            }
-            value = (value << 6) | static_cast<std::uint32_t>(values[c]);
-            bits += 6;
-            if (bits >= 0) {
-                out.push_back(static_cast<char>((value >> bits) & 0xff));
-                bits -= 8;
-            }
-        }
-        return out;
     }
 
     bool wait_default(std::stop_token stop, std::chrono::seconds duration)
@@ -198,7 +166,7 @@ bool parse_openai_token_claims(
     }
     JsonValue root;
     if (!json_parse(
-            decode_base64url(token.substr(first + 1, second - first - 1)), root)
+            base64url_decode(token.substr(first + 1, second - first - 1)), root)
         || !root.is_object()) {
         return false;
     }

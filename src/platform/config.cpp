@@ -1,5 +1,6 @@
 #include "platform/config.h"
 
+#include "network/mcp_oauth.h"
 #include "network/web.h"
 #include "permissions/store.h"
 #include "platform/file_lock.h"
@@ -439,22 +440,19 @@ Status load_config(
                 oauth.access_token  = entry.oauth->access_token.value_or("");
                 oauth.refresh_token = entry.oauth->refresh_token.value_or("");
                 oauth.expires_at    = entry.oauth->expires_at.value_or(0);
-                const char* endpoints[] = { "issuer", "authorization_endpoint",
-                    "token_endpoint", "registration_endpoint" };
-                const std::string values[]
-                    = { oauth.issuer, oauth.authorization_endpoint,
-                          oauth.token_endpoint, oauth.registration_endpoint };
-                for (std::size_t at = 0; at < 4; ++at) {
-                    const std::string& url = values[at];
-                    const bool ok = url.empty() || url.starts_with("https://")
-                        || url.starts_with("http://127.0.0.1")
-                        || url.starts_with("http://localhost")
-                        || url.starts_with("http://[::1]");
-                    if (!ok) {
-                        return fail(Status::CONFIG_ERROR,
-                            "mcp server '" + id + "': oauth " + endpoints[at]
-                                + " must be https");
+                const std::pair<const char*, std::string> checks[] = {
+                    { "issuer", oauth.issuer },
+                    { "authorization_endpoint", oauth.authorization_endpoint },
+                    { "token_endpoint", oauth.token_endpoint },
+                    { "registration_endpoint", oauth.registration_endpoint }
+                };
+                for (const auto& [name, url] : checks) {
+                    if (url.empty() || mcp_oauth_endpoint_allowed(url)) {
+                        continue;
                     }
+                    return fail(Status::CONFIG_ERROR,
+                        "mcp server '" + id + "': oauth " + name
+                            + " must be https");
                 }
             }
             if (server.is_stdio()) {

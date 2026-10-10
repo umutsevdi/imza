@@ -806,7 +806,6 @@ namespace {
             _label_buf.clear();
             _autoload = false;
             _close_picker();
-            // Watch the sign-in progress on the new row.
             _in_add        = false;
             const auto all = _servers();
             for (int i = 0; i < static_cast<int>(all.size()); ++i) {

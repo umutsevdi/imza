@@ -11,6 +11,41 @@
 
 namespace imza {
 
+// Glaze-reflected: must have external linkage (Clang/MSVC requirement).
+// models.dev entries carry many more fields than imza keeps; the view
+// structs name only the ones that survive into the catalog. Glaze's
+// unknown-key skipping handles the rest.
+struct ModelCostView {
+    std::optional<double> input;
+    std::optional<double> output;
+    std::optional<double> cache_read;
+    std::optional<double> cache_write;
+};
+
+struct ModelLimitView {
+    std::optional<std::uint64_t> context;
+};
+
+struct ModelModalitiesView {
+    std::optional<std::vector<std::string>> input;
+};
+
+struct ProviderModelView {
+    std::optional<std::string> name;
+    std::optional<ModelCostView> cost;
+    std::optional<ModelLimitView> limit;
+    std::optional<bool> tool_call;
+    std::optional<bool> reasoning;
+    std::optional<ModelModalitiesView> modalities;
+};
+
+struct ProviderView {
+    std::optional<std::string> name;
+    std::optional<std::string> api;
+    std::optional<std::string> npm;
+    std::map<std::string, ProviderModelView> models;
+};
+
 namespace {
 
     constexpr std::string_view CATALOG_URL  = "https://models.dev/api.json";
@@ -124,40 +159,6 @@ namespace {
         }
         return capabilities;
     }
-
-    // models.dev entries carry many more fields than imza keeps; the view
-    // structs name only the ones that survive into the catalog. Glaze's
-    // unknown-key skipping handles the rest.
-    struct ModelCostView {
-        std::optional<double> input;
-        std::optional<double> output;
-        std::optional<double> cache_read;
-        std::optional<double> cache_write;
-    };
-
-    struct ModelLimitView {
-        std::optional<std::uint64_t> context;
-    };
-
-    struct ModelModalitiesView {
-        std::optional<std::vector<std::string>> input;
-    };
-
-    struct ProviderModelView {
-        std::optional<std::string> name;
-        std::optional<ModelCostView> cost;
-        std::optional<ModelLimitView> limit;
-        std::optional<bool> tool_call;
-        std::optional<bool> reasoning;
-        std::optional<ModelModalitiesView> modalities;
-    };
-
-    struct ProviderView {
-        std::optional<std::string> name;
-        std::optional<std::string> api;
-        std::optional<std::string> npm;
-        std::map<std::string, ProviderModelView> models;
-    };
 
     CachedModel to_model(const ProviderModelView& view)
     {
