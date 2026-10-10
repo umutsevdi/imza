@@ -86,7 +86,7 @@ namespace {
                     deadline - std::chrono::steady_clock::now());
             std::string line;
             const Status read = session.stdio.read(
-                line, std::max<long>(1, remaining.count()));
+                line, std::max<long>(1, static_cast<long>(remaining.count())));
             if (read == Status::TIMEOUT) {
                 return Status::TIMEOUT;
             }
