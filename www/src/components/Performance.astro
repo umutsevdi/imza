@@ -1,0 +1,291 @@
+---
+// All figures are medians of 10 passes from scripts/agent_bench.py on the
+// maintainer's machine (Fedora 44, x86-64, all agents logged in and idle).
+// Re-measure before changing them; the script is the source of truth.
+//
+// Stored as raw numbers so the best value per column can be derived rather
+// than hardcoded. Ordered by memory once idle, which is the metric that
+// decides whether a tool can sit open all day.
+const agents = [
+  { name: "imza", frame: 45, pssFirst: 8.8, rssFirst: 18.5, pssIdle: 12.3, rssIdle: 26.5, disk: 32 },
+  { name: "codex", frame: 76, pssFirst: 52.6, rssFirst: 56.1, pssIdle: 348.1, rssIdle: 527.8, disk: 281 },
+  { name: "claude", frame: 155, pssFirst: 186.5, rssFirst: 192.8, pssIdle: 186.5, rssIdle: 192.6, disk: 245 },
+  { name: "pi", frame: 452, pssFirst: 85.7, rssFirst: 124.7, pssIdle: 104.2, rssIdle: 129.5, disk: 118 },
+  { name: "opencode", frame: 712, pssFirst: 261.5, rssFirst: 272.3, pssIdle: 759.5, rssIdle: 767.1, disk: 177 },
+  { name: "crush", frame: 790, pssFirst: 87.8, rssFirst: 91.0, pssIdle: 88.6, rssIdle: 91.9, disk: 87 },
+  { name: "cline", frame: 1126, pssFirst: 271.1, rssFirst: 306.3, pssIdle: 397.9, rssIdle: 479.0, disk: 432 },
+  { name: "gemini", frame: 1463, pssFirst: 334.5, rssFirst: 419.8, pssIdle: 363.5, rssIdle: 423.0, disk: 98 }
+];
+
+// Lower is better for every column, so the minimum wins.
+const best = {
+  frame: Math.min(...agents.map((a) => a.frame)),
+  pssFirst: Math.min(...agents.map((a) => a.pssFirst)),
+  rssFirst: Math.min(...agents.map((a) => a.rssFirst)),
+  pssIdle: Math.min(...agents.map((a) => a.pssIdle)),
+  rssIdle: Math.min(...agents.map((a) => a.rssIdle)),
+  disk: Math.min(...agents.map((a) => a.disk))
+};
+
+const fmt = (v, unit) =>
+  unit === "ms"
+    ? `${v} ms`
+    : unit === "mb0"
+      ? `${Math.round(v)} MB`
+      : `${v.toFixed(1)} MB`;
+---
+
+<section class="perf" id="performance" aria-labelledby="perf-h">
+  <p class="section-label" id="perf-h">Performance</p>
+  <p class="block-intro">
+    Imza's startup time and memory use, measured against similar terminal coding
+    agents on the same machine.
+  </p>
+
+  <div class="tui-panel perf-panel">
+    <table class="perf-table">
+      <caption class="sr-only">
+        Startup and memory cost of terminal coding agents
+      </caption>
+      <thead>
+        <tr>
+          <th scope="col">Agent</th>
+          <th scope="col">First frame</th>
+          <th scope="col">Startup memory<br />(PSS / RSS)</th>
+          <th scope="col">Idle memory<br />(PSS / RSS)</th>
+          <th scope="col">Storage</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          agents.map((a) => (
+            <tr>
+              <th scope="row">{a.name}</th>
+              <td class:list={{ "is-best": a.frame === best.frame }}>
+                {fmt(a.frame, "ms")}
+              </td>
+              <td>
+                <span class:list={{ "is-best": a.pssFirst === best.pssFirst }}>
+                  {fmt(a.pssFirst)}
+                </span>
+                <span class="perf-sep">/</span>
+                <span class:list={{ "is-best": a.rssFirst === best.rssFirst }}>
+                  {fmt(a.rssFirst)}
+                </span>
+              </td>
+              <td>
+                <span class:list={{ "is-best": a.pssIdle === best.pssIdle }}>
+                  {fmt(a.pssIdle)}
+                </span>
+                <span class="perf-sep">/</span>
+                <span class:list={{ "is-best": a.rssIdle === best.rssIdle }}>
+                  {fmt(a.rssIdle)}
+                </span>
+              </td>
+              <td class:list={{ "is-best": a.disk === best.disk }}>
+                {fmt(a.disk, "mb0")}
+              </td>
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <details class="perf-method">
+    <summary>How these were measured</summary>
+    <div class="perf-method-body">
+      <p>
+        Each agent is started the same way, in the same conditions, and every
+        figure is the median of ten passes.
+      </p>
+
+      <h4>The environment</h4>
+      <p>
+        Every agent runs inside its own private PID namespace (<code>bwrap</code
+        >), with a read-only view of the filesystem, a writable home, a fresh <code
+          >/tmp</code
+        >, and the same empty working directory. The namespace is what makes the
+        numbers comparable: several agents hand work to a background daemon that
+        re-parents to init and outlives the launcher, so without containment the
+        daemon is invisible to measurement and the next run attaches to it warm
+        instead of starting cold. Measured that way Codex appeared to use
+        51&nbsp;MB and Cline 21&nbsp;MB; counted properly they use 73&nbsp;MB
+        and 399&nbsp;MB. Memory is summed over the agent's whole process tree
+        for the same reason.
+      </p>
+      <p>
+        The empty directory matters too: a tool that scans the workspace at
+        startup would otherwise be charged for a repository the others never
+        saw.
+      </p>
+
+      <h4>The fields</h4>
+      <ul>
+        <li>
+          <strong>First frame</strong>: process start to the first byte drawn.
+          When the screen first changes, not necessarily when the tool is ready
+          to accept a prompt.
+        </li>
+        <li>
+          <strong>Startup memory</strong>: memory the moment the first frame
+          appears. What a tool costs to show you something.
+        </li>
+        <li>
+          <strong>Idle memory</strong>: memory once it has stopped growing,
+          sampled until it plateaus so a tool that lazy-loads after drawing is
+          charged for what it eventually uses. What a tool costs to keep
+          running.
+        </li>
+        <li>
+          <strong>Storage</strong>: on-disk footprint: the executable, or for a
+          script agent the package directory it cannot run without.
+        </li>
+      </ul>
+      <p>
+        Both memory fields report <strong>PSS</strong> and
+        <strong> RSS</strong>. RSS counts every page a process maps; PSS divides
+        shared pages among the processes using them, so a tool is not charged
+        whole for a library the system already had loaded. PSS is the fairer
+        figure; RSS is what <code>top</code> shows, which is why it reads higher.
+      </p>
+
+      <h4>What this does not measure</h4>
+      <p>
+        Model latency, which belongs to the provider rather than the tool, and
+        behaviour on a large repository, which this empty directory cannot show.
+      </p>
+
+      <p class="perf-repro">
+        Reproduce with <code
+          >python3 scripts/agent_bench.py --runs 10 --all</code
+        >.
+      </p>
+    </div>
+  </details>
+</section>
+
+<style>
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .perf-panel {
+    overflow-x: auto;
+  }
+  .perf-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--mono);
+    font-size: 0.95rem;
+  }
+  .perf-table th,
+  .perf-table td {
+    padding: 0.75rem 1.1rem;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .perf-table thead th {
+    color: var(--fg-dim);
+    font-weight: 400;
+    font-size: 0.85rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: bottom;
+  }
+  /* The first column holds row labels, so its heading aligns with them. */
+  .perf-table thead th:first-child {
+    text-align: left;
+  }
+  .perf-table tbody th {
+    text-align: left;
+    font-weight: 700;
+    color: var(--fg);
+  }
+  .perf-table tbody td {
+    color: var(--fg-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .perf-table tbody tr {
+    border-bottom: 1px solid var(--border);
+  }
+  .perf-table tbody tr:last-child {
+    border-bottom: 0;
+  }
+  /* The winning value in each column. Single-value cells mark the td; a
+     combined PSS / RSS cell marks each span on its own, so the two can
+     differ. */
+  .perf-table tbody td.is-best,
+  .perf-table tbody span.is-best {
+    color: var(--hl-green);
+    font-weight: 700;
+  }
+  .perf-table .perf-sep {
+    color: var(--border);
+    padding: 0 0.15em;
+  }
+
+  .perf-method {
+    margin-top: 1.2rem;
+    border: 1px solid var(--border);
+    border-radius: 0.25rem;
+  }
+  .perf-method summary {
+    cursor: pointer;
+    padding: 0.7rem 1.1rem;
+    color: var(--fg-dim);
+    font-size: 0.92rem;
+  }
+  .perf-method summary:hover {
+    color: var(--fg);
+  }
+  .perf-method-body {
+    padding: 0 1.1rem 1.1rem;
+    max-width: var(--measure);
+    color: var(--fg-dim);
+    font-size: 0.92rem;
+    line-height: 1.6;
+  }
+  .perf-method-body h4 {
+    margin: 1.3rem 0 0.5rem;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fg);
+  }
+  .perf-method-body p {
+    margin: 0 0 0.7rem;
+  }
+  .perf-method-body ul {
+    margin: 0.8rem 0;
+    padding-left: 1.2rem;
+  }
+  .perf-method-body li {
+    margin-bottom: 0.5rem;
+  }
+  .perf-method-body strong {
+    color: var(--fg);
+  }
+  .perf-method-body code,
+  .perf-repro code {
+    background: var(--focus);
+    padding: 0.05em 0.35em;
+    border-radius: 0.125rem;
+    color: var(--fg);
+  }
+  .perf-repro {
+    margin-bottom: 0;
+  }
+  @media (max-width: 40rem) {
+    .perf-table th,
+    .perf-table td {
+      padding: 0.6rem 0.7rem;
+      font-size: 0.85rem;
+    }
+  }
+</style>
