@@ -33,12 +33,14 @@ AAAAAAAAAAAAAAAA            0Iw         AAAAAA
   </div>
   <div class="banner-group">
     <h1 class="hero-name">imza</h1>
-    <p class="hero-support">
-      A terminal coding agent that doesn't hide what it does. Plan it together,
-      build it together, review it together. imza efficiently speeds up
+    <p class="hero-support-begin">
+      A terminal coding agent that keeps you in the loop.
+      Agents write code faster than you can read it. imza speeds up
       development without leaving you behind.
     </p>
-    <p class="hero-support">Don't lose control over your codebase</p>
+    <p class="hero-support-center">Plan together,
+      Build together, Review together</p>
+    <p class="hero-support-end">Open source ·  Efficient · No telemetry · No account</p>
   </div>
   <div class="hero-actions">
     <a class="btn btn-ghost" href="https://github.com/umutsevdi/imza">
@@ -90,16 +92,22 @@ AAAAAAAAAAAAAAAA            0Iw         AAAAAA
     color: var(--fg);
     animation: blink 1.1s steps(1) infinite;
   }
-  .hero-support {
+  .hero-support-begin, hero-support-center, hero-support-end {
     max-width: var(--measure);
-    color: var(--fg-dim);
     font-size: clamp(1rem, 0.95rem + 0.3vw, 1.2rem);
     margin: 0 0 1.6rem;
   }
-  .hero-support + .hero-support {
+  .hero-support-begin {
+    color: var(--fg-dim);
+  }
+  .hero-support-center {
     margin-top: -0.8rem;
     color: var(--fg);
     font-weight: 700;
+  }
+  .hero-support-end{
+    margin-top: -0.8rem;
+    color: var(--fg-dim);
   }
   @keyframes blink {
     50% {

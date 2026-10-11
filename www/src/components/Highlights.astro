@@ -5,43 +5,36 @@ const cards = [
   {
     wide: true,
     viz: true,
-    key: "lua orchestration",
-    title: "One sandbox instead of a tool bag",
-    body: "Most coding agents hand the model a separate tool for every job, so each read, edit, or command is its own round-trip and its full output stays in the conversation. imza gives the model a single sandboxed Lua environment, where it can run many of those steps at once and only the result comes back. Nothing runs without passing a permission check, so you can still see every file touched and every command run. Fewer round-trips and less tool output mean the agent spends fewer tokens and finishes sooner.",
+    title: "The Sandbox",
+    body: "Most agents give the model a bunch of single-purpose tools; every call costs an extra round-trip and more context. imza gives it a single sandboxed Lua environment instead, where it can run many of those steps at once and only the result comes back. Every action still passes the permission gate, so you see each file touched and every command run.",
     link: {
       href: "https://github.com/umutsevdi/imza/discussions/1",
       text: "Read the analysis"
     }
   },
   {
-    key: "performance",
-    title: "Fast and small, yet it does it all",
-    body: "A ~20 MB C++ binary that idles at 5-8 MB of RAM. No JavaScript runtime, no Electron. Starts instantly, runs smoothly."
+    title: "Fast and Small",
+    body: "A ~20 MB native binary, 5–8 MB RAM at startup, 20-40MB during regular tasks. No JavaScript runtime, no Electron, instant startup time."
   },
   {
-    key: "subagents, skills & more",
-    title: "Batteries included",
-    body: "MCP, subagents, skills, project instruction files (AGENTS.md, CLAUDE.md, GEMINI.md), multimodal inputs, terminal notifications, and more."
+    title: "Batteries Included",
+    body: "MCP, subagents, skills, project instruction files, multimodal inputs, terminal notifications, and more."
   },
   {
-    key: "50+ providers",
-    title: "Bring the model you already pay for",
-    body: "Any OpenAI-compatible endpoint or the Anthropic API: hosted, subscription-backed, or running on your own machine. Connect the same provider twice under different labels and easily switch between accounts."
+    title: "Bring the Model You Already Pay For",
+    body: "Imza supports 50+ providers out of the box. Bring any OpenAI-compatible or Anthropic endpoint: local, API, or subscription."
   },
   {
-    key: "sane permissions",
-    title: "Permissions that respect the workspace",
-    body: "Most harnesses either push you toward dangerous full-access modes or ask about every single command. imza monitors the model's behaviour and only asks when an action can mutate the workspace. Runtime flags can remove entire tool families before the session even starts."
+    title: "Permissions that Respect the Workspace",
+    body: "Most harnesses push you toward full-access modes or ask about every single command. imza watches what the model is doing and asks only when an action can actually mutate the workspace."
   },
   {
-    key: "configuration without obscurity",
-    title: "Configure everything from the TUI",
-    body: "Every setting has an interface: swap models with /model, reasoning effort with /variant, give each subagent role its own model with /subagents. No environment magic, no hand-rolled config files; and when you do want the file, it's plain JSON."
+    title: "Configuration Without Obscurity",
+    body: "Every setting has an interface: /model, /variant, /subagents, and more. No environment magic, no hand-rolled config files. When you do want the file, it's plain JSON."
   },
   {
-    key: "context engineering",
-    title: "The prompts are yours",
-    body: "Every built-in prompt fragment (system, subagents, compaction, AI review, plan revision) can be overridden with your own Markdown in a prompts/ directory. Defaults ship in the repo, so you diff against them instead of guessing."
+    title: "The Prompts Are Yours",
+    body: "Every built-in prompt fragment(system, subagents, compaction, AI review) can be replaced with your own Markdown. "
   }
 ];
 ---
@@ -52,7 +45,6 @@ const cards = [
     {
       cards.map((c) => (
         <article class="why-card" class:list={{ "is-wide": c.wide }}>
-          <p class="why-key">{c.key}</p>
           <h3 class="why-title">{c.title}</h3>
           <p class="why-body">{c.body}</p>
           {c.link && (
@@ -99,12 +91,6 @@ const cards = [
   }
   .why-card.is-wide {
     grid-column: 1 / -1;
-  }
-  .why-key {
-    margin: 0;
-    font-family: var(--mono);
-    font-size: 0.8rem;
-    color: var(--hl-yellow);
   }
   .why-title {
     margin: 0;
