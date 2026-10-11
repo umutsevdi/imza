@@ -10,7 +10,7 @@ development without leaving you behind.
 **~20 MB binary · ~5-8 MB RAM at startup · ~20-40 MB during typical agentic
 work[^1]**
 
-https://github.com/user-attachments/assets/a0096f0d-8337-4e6b-aabe-f9debe273594
+https://github.com/user-attachments/assets/b0ea58dd-2ff2-411d-96e4-c0ba3254a209
 
 Download the [latest release](https://github.com/umutsevdi/imza/releases/latest).
 
