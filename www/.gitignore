@@ -1,5 +1,7 @@
 # build output
 dist/
+# raw video exports (pre-transcode source)
+.video-source/
 src/content/wiki/
 src/content/changelog.md
 # generated types

@@ -72,6 +72,41 @@
         }
       }
     },
+    "sidebar": {
+      "type": "object",
+      "description": "Per-widget visibility for the sidebar. Every widget is shown unless its flag is false; the setting is read once at startup.",
+      "additionalProperties": false,
+      "properties": {
+        "plans": {
+          "type": "boolean",
+          "description": "Show the plans widget listing every plan revision. Defaults to true."
+        },
+        "review_comments": {
+          "type": "boolean",
+          "description": "Show the review comments widget during a review. Defaults to true."
+        },
+        "tasks": {
+          "type": "boolean",
+          "description": "Show the task list widget. Defaults to true."
+        },
+        "changed_files": {
+          "type": "boolean",
+          "description": "Show the changed files widget in wide layouts. Defaults to true."
+        },
+        "context": {
+          "type": "boolean",
+          "description": "Show the context widget (files, skills, MCP servers) in wide layouts. Defaults to true."
+        },
+        "permissions": {
+          "type": "boolean",
+          "description": "Show the permissions widget when custom permissions are active. Defaults to true."
+        },
+        "update": {
+          "type": "boolean",
+          "description": "Show the update-available banner. Defaults to true."
+        }
+      }
+    },
     "instructions": {
       "type": "array",
       "description": "Extra instruction files appended to the system prompt after AGENTS.md, CLAUDE.md, or GEMINI.md. Paths are relative to the project root, or to the working directory when there is no root; absolute paths are used as given. Missing files are skipped. Each file is capped at 32 KiB.",

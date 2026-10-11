@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>imza — end card</title>
+<style>
+  @font-face {
+    font-family: "CommitMono";
+    font-style: normal;
+    font-weight: 400 700;
+    font-display: block;
+    src: url("../src/fonts/CommitMono VariableFont.woff2") format("woff2");
+  }
+
+  :root {
+    --canvas: #000000;
+    --bg: #212428;
+    --fg: #e4e7eb;
+    --fg-dim: #9298a0;
+    --hl-green: #7ee787;
+    --hl-cyan: #68d8e8;
+    --mono: "CommitMono", ui-monospace, SFMono-Regular, Menlo, Consolas,
+      monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--canvas);
+    color: var(--fg);
+    font-family: var(--mono);
+    overflow: hidden;
+  }
+
+  /* 16:9 stage, letterboxed into the viewport */
+  .stage {
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    width: min(100vw, calc(100vh * 16 / 9));
+    height: min(100vh, calc(100vw * 9 / 16));
+    background: var(--canvas);
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+  }
+
+  .card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  .mark {
+    height: clamp(6.5rem, 25vmin, 17rem);
+    width: auto;
+    image-rendering: pixelated;
+    margin: 0 0 1.6rem;
+  }
+
+  .wordmark {
+    display: flex;
+    align-items: baseline;
+    font-size: clamp(3.2rem, 9.5vmin, 7.5rem);
+    line-height: 1;
+    letter-spacing: -0.02em;
+    margin: 0 0 1.1rem;
+  }
+
+  .name {
+    display: inline-block;
+    overflow: hidden;
+    white-space: nowrap;
+    width: 4ch; /* resting width; animation grows from 0 */
+  }
+
+  .cursor {
+    display: inline-block;
+    color: var(--fg);
+    margin-left: 0.06ch;
+  }
+
+  .tagline {
+    margin: 0 0 2.2rem;
+    font-size: clamp(1rem, 2.4vmin, 1.65rem);
+    color: var(--fg-dim);
+    letter-spacing: 0.01em;
+  }
+
+  /* CTA line: colored to break the monochrome */
+  .cta {
+    display: flex;
+    align-items: center;
+    gap: 0.9ch;
+    font-size: clamp(0.9rem, 2vmin, 1.3rem);
+  }
+  .cta .ver { color: var(--fg); }
+  .cta .is-out { color: var(--fg-dim); font-size: 0.8em; }
+  .cta .dot { color: var(--fg-dim); opacity: 0.5; }
+  .cta .url { color: var(--hl-green); }
+
+  /* ---- animation, gated on .playing so replay works ---- */
+  .mark,
+  .name,
+  .tagline,
+  .cta,
+  .cursor {
+    opacity: 0;
+  }
+
+  .playing .mark {
+    animation: pop 0.5s ease-out 0.15s both;
+  }
+  .playing .name {
+    animation: type 0.5s steps(4) 0.5s both;
+  }
+  .playing .cursor {
+    opacity: 1;
+    animation: blink 1.1s steps(1) 1s infinite;
+  }
+  .playing .tagline {
+    animation: rise 0.55s ease-out 1.3s both;
+  }
+  .playing .cta {
+    animation: rise 0.55s ease-out 1.85s both;
+  }
+
+  @keyframes type {
+    from { width: 0; opacity: 1; }
+    to   { width: 4ch; opacity: 1; }
+  }
+  @keyframes blink {
+    50% { opacity: 0; }
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(0.5rem); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes pop {
+    from { opacity: 0; transform: scale(0.85); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+
+  /* ---- controls (hidden while recording) ---- */
+  .controls {
+    position: fixed;
+    left: 50%;
+    bottom: 1.2rem;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 0.6rem;
+    font-size: 0.8rem;
+    z-index: 10;
+  }
+  .controls button {
+    font: inherit;
+    color: var(--fg);
+    background: #2d3238;
+    border: 1px solid #484f58;
+    border-radius: 6px;
+    padding: 0.45em 0.9em;
+    cursor: pointer;
+  }
+  .controls button:hover { background: #363b42; }
+  .hud { opacity: 0.55; align-self: center; }
+
+  body.recording .controls { display: none; }
+  body.recording .stage { width: 100vw; height: 100vh; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .playing .mark,
+    .playing .name,
+    .playing .cursor,
+    .playing .tagline,
+    .playing .cta {
+      animation-duration: 0.001s;
+      animation-delay: 0s;
+    }
+  }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="card">
+      <img class="mark" src="./icon.png" alt="imza" />
+      <div class="wordmark">
+        <span class="name">imza</span><span class="cursor">_</span>
+      </div>
+      <p class="tagline">keep the human in the loop</p>
+      <div class="cta">
+        <span class="ver">v0.6.0</span>
+        <span class="is-out">is out</span>
+        <span class="dot">&middot;</span>
+        <span class="url">imza.run</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button id="replay" type="button">Replay (R)</button>
+    <button id="rec" type="button">Record mode (H)</button>
+    <span class="hud">space = replay</span>
+  </div>
+
+<script>
+  const card = document.querySelector(".card");
+
+  function play() {
+    card.classList.remove("playing");
+    void card.offsetWidth; // force reflow so the animation restarts
+    card.classList.add("playing");
+  }
+
+  document.getElementById("replay").addEventListener("click", play);
+  document.getElementById("rec").addEventListener("click", () => {
+    document.body.classList.toggle("recording");
+  });
+
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "r" || e.key === " ") { e.preventDefault(); play(); }
+    if (e.key === "h") { document.body.classList.toggle("recording"); }
+  });
+
+  play();
+</script>
+</body>
+</html>

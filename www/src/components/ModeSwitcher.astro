@@ -1,9 +1,4 @@
 ---
-import { Image } from "astro:assets";
-import shotPlan from "../assets/shots/plan-document.png";
-import shotBuild from "../assets/shots/build.png";
-import shotReview from "../assets/shots/review.png";
-
 const modes = [
   {
     id: "plan",
@@ -11,7 +6,6 @@ const modes = [
     cls: "plan",
     line: "Build a flawless spec, together",
     dim: "Describe the outcome and the agent explores your codebase, then drafts a plan beside the chat. You edit it together until it's ready; every revision is kept, and no code changes until you switch to Build.",
-    shot: shotPlan,
     alt: "imza Plan tab: a co-editable plan document beside the chat, codebase read-only."
   },
   {
@@ -20,7 +14,6 @@ const modes = [
     cls: "build",
     line: "Watch the work happen, not a summary",
     dim: "The agent implements the plan with file edits, shell commands, and subagents, streaming every change as a diff the moment it's written. imza gives the model efficient tools to discover and edit code, saving both time and tokens. Permissions only interrupt when it's genuinely unsure.",
-    shot: shotBuild,
     alt: "imza Build tab: live diffs appearing as the agent edits files and runs commands."
   },
   {
@@ -29,7 +22,6 @@ const modes = [
     cls: "review",
     line: "Read one diff, not a hundred files",
     dim: "The whole change lands in a smooth code review tool. Leave comments where it matters, and AI review checks the diff against your project's guidelines to catch the boring parts for you. One click sends every finding back as a new plan revision.",
-    shot: shotReview,
     alt: "imza Review tab: the resulting Git diff with findings you can add and send back into the next plan."
   }
 ];
@@ -67,14 +59,21 @@ const modes = [
             hidden={idx !== 0}
           >
             <p class="tp-line">{m.line}</p>
-            <Image
+            <video
               class="mode-shot"
-              src={m.shot}
-              alt={m.alt}
-              loading="lazy"
-              width={900}
-              height={560}
-            />
+              data-mode={m.id}
+              poster={`/videos/${m.id}-mode-poster.jpg`}
+              muted
+              loop
+              playsinline
+              preload="none"
+              width={1280}
+              height={720}
+              aria-label={m.alt}
+            >
+              <source src={`/videos/${m.id}-mode.webm`} type="video/webm" />
+              <source src={`/videos/${m.id}-mode.mp4`} type="video/mp4" />
+            </video>
             <p class="tp-line tp-dim">{m.dim}</p>
           </div>
         ))
@@ -87,6 +86,22 @@ const modes = [
   const cells = Array.from(
     document.querySelectorAll<HTMLButtonElement>(".mode-cell")
   );
+  const reduceMotion = window.matchMedia(
+    "(prefers-reduced-motion: reduce)"
+  ).matches;
+
+  // A clip only runs while it is the active tab AND the panel is on screen,
+  // so it never advances to a mid-loop frame while the user is elsewhere.
+  let sectionVisible = false;
+
+  function syncPlayback() {
+    for (const p of document.querySelectorAll<HTMLElement>(".tui-tabpanel")) {
+      const vid = p.querySelector("video");
+      if (!vid) continue;
+      if (p.hidden || !sectionVisible || reduceMotion) vid.pause();
+      else vid.play().catch(() => {});
+    }
+  }
 
   function activate(cell: HTMLButtonElement) {
     for (const c of cells) {
@@ -100,7 +115,24 @@ const modes = [
         p.getAttribute("aria-labelledby") ?? ""
       );
       p.hidden = tab !== cell;
+      // Rewind the clip being left so the next visit starts at frame 0.
+      if (p.hidden) {
+        const vid = p.querySelector("video");
+        if (vid) vid.currentTime = 0;
+      }
     }
+    syncPlayback();
+  }
+
+  const section = document.getElementById("loop");
+  if (section) {
+    new IntersectionObserver(
+      ([entry]) => {
+        sectionVisible = entry.isIntersecting;
+        syncPlayback();
+      },
+      { threshold: 0.25 }
+    ).observe(section);
   }
 
   cells.forEach((cell, idx) => {
@@ -177,15 +209,13 @@ const modes = [
   }
   .mode-shot {
     display: block;
-    width: auto;
-    max-width: 100%;
+    width: 100%;
+    max-width: 56.25rem;
     height: auto;
+    aspect-ratio: 16 / 9;
     margin: 1rem auto 0;
     border-radius: 0.25rem;
-  }
-  .mode-shot[alt] {
-    font-family: var(--mono);
-    font-size: 0.85rem;
+    background: var(--bg);
   }
   .tui-tabpanel[hidden] {
     display: none;
