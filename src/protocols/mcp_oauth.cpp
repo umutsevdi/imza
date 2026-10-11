@@ -1,11 +1,11 @@
 #define NOMINMAX
 
-#include "network/mcp_oauth.h"
+#include "protocols/mcp_oauth.h"
 
 #include "common/util.h"
 #include "network/json.h"
 #include "network/json_io.h"
-#include "network/mcp.h"
+#include "protocols/mcp.h"
 
 #include <algorithm>
 #include <array>

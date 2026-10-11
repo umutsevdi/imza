@@ -23,23 +23,17 @@ namespace {
         "Ready when you are.",
         "What's the plan?",
         "Let's build something worth reviewing.",
-        "Give each subagent role its own model with /subagents — a strong one "
-        "for build, a cheaper one for review.",
-        "Subagents share your permission grants and run under the same "
-        "boundaries, so delegating never widens access.",
-        "Context compacts automatically near 80% of the model's limit; models "
-        "with no known limit are never compacted.",
+        "Give each subagent role its own model with /subagents.",
+        "Subagents share your permission grants.",
+        "Context compacts automatically near 80% of the model's limit.",
         "Type /make-skill to draft a skill from a workflow description.",
-        "Flag MCP servers to autoload so they connect at startup instead of "
-        "opening /mcp each time.",
+        "Flag MCP servers to autoload so they connect at startup.",
         "Jump straight into a saved session with imza -s <session-id>.",
-        "Add the same provider under two labels and switch when one is rate "
+        "You can add the same provider twice and switch when one is rate "
         "limited.",
         "Keep up to date with imza --update.",
-        "Name extra instruction files in your config to load house rules "
-        "alongside AGENTS.md.",
-        "Pre-approve directories and commands in your config so trusted work "
-        "never asks.",
+        "Name extra instruction files in your config to load house rules.",
+        "You can pre-approve directories and commands in your config.",
     };
 
     // FNV-1a over the seed bytes and bucket, so the pick is stable and

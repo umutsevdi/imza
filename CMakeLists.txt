@@ -215,8 +215,6 @@ add_library(imza_network
     src/network/json_io.cpp
     src/network/stream_event.cpp
     src/network/transport.cpp
-    src/network/mcp.cpp
-    src/network/mcp_oauth.cpp
     src/network/openai_provider.cpp
     src/network/openai_responses_provider.cpp
     src/network/anthropic_provider.cpp
@@ -230,7 +228,20 @@ target_link_libraries(imza_network PRIVATE
     glaze::glaze
     CURL::libcurl
 )
-set_source_files_properties(src/network/mcp.cpp PROPERTIES
+
+# External protocol adapters (no ftxui, no cmark)
+add_library(imza_protocols
+    src/protocols/mcp.cpp
+    src/protocols/mcp_oauth.cpp
+)
+target_include_directories(imza_protocols PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(imza_protocols PUBLIC
+    imza_network
+    glaze::glaze
+)
+set_source_files_properties(src/protocols/mcp.cpp PROPERTIES
     COMPILE_DEFINITIONS IMZA_VERSION="${PROJECT_VERSION}")
 
 # Platform services and stateless domain support (no ftxui, no cmark)
@@ -252,6 +263,7 @@ target_include_directories(imza_foundation PRIVATE
 )
 target_link_libraries(imza_foundation PUBLIC
     imza_network
+    imza_protocols
     glaze::glaze
 )
 
@@ -275,6 +287,7 @@ add_library(imza_runtime
     src/providers/store.cpp
     src/tools/mcp_catalog.cpp
     src/tools/mcp_manager.cpp
+    src/tools/web.cpp
     src/workspace/review.cpp
     src/runtime/main_thread_queue.cpp
     src/runtime/modal_queue.cpp
@@ -290,6 +303,7 @@ target_include_directories(imza_runtime PRIVATE
 target_link_libraries(imza_runtime PUBLIC
     imza_foundation
     imza_network
+    imza_protocols
 )
 
 # Application composition, turns, and tools (ftxui-free)

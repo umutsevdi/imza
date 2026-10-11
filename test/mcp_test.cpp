@@ -3,7 +3,7 @@
 #include "loopback_mcp_server.h"
 #include "network/json.h"
 #include "network/json_io.h"
-#include "network/mcp.h"
+#include "protocols/mcp.h"
 
 #include <deque>
 #include <string>

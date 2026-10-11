@@ -2,8 +2,8 @@
 
 #include "common/imza_signal.h"
 #include "common/types.h"
-#include "network/mcp.h"
 #include "platform/config.h"
+#include "protocols/mcp.h"
 
 #include <atomic>
 #include <map>
@@ -77,7 +77,7 @@ public:
     // a worker (best-effort DELETE; servers may refuse it).
     void disconnect(const std::string& id);
 
-    // Starts the browser OAuth flow (network/mcp_oauth) on a worker;
+    // Starts the browser OAuth flow (protocols/mcp_oauth) on a worker;
     // stdio, unknown, and already-running ids are no-ops. On success the
     // entry is enabled, credentials are persisted through the hook, and
     // the handshake starts.

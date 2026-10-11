@@ -20,6 +20,4 @@ Status fetch_url(
 
 std::string html_to_text(const std::string& html);
 
-Status web_search(const std::string& query, int num_results, std::string& text);
-
 } // namespace imza

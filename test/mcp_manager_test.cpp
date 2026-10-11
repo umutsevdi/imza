@@ -2,7 +2,7 @@
 
 #include "loopback_mcp_server.h"
 #include "loopback_oauth_server.h"
-#include "network/mcp.h"
+#include "protocols/mcp.h"
 #include "tools/mcp_catalog.h"
 #include "tools/mcp_manager.h"
 

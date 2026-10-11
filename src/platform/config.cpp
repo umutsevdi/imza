@@ -1,10 +1,10 @@
 #include "platform/config.h"
 
-#include "network/mcp_oauth.h"
 #include "network/web.h"
 #include "permissions/store.h"
 #include "platform/file_lock.h"
 #include "platform/json_file.h"
+#include "protocols/mcp_oauth.h"
 
 #include <algorithm>
 #include <array>

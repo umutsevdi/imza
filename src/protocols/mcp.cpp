@@ -1,4 +1,4 @@
-#include "network/mcp.h"
+#include "protocols/mcp.h"
 
 #include "common/util.h"
 #include "network/json_io.h"

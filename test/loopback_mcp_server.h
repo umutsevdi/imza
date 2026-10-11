@@ -6,7 +6,7 @@
 // stop().
 
 #include "loopback_http.h"
-#include "network/mcp.h"
+#include "protocols/mcp.h"
 
 #include <atomic>
 #include <chrono>

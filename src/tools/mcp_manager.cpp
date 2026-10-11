@@ -1,8 +1,8 @@
 #include "tools/mcp_manager.h"
 
 #include "network/json_io.h"
-#include "network/mcp_oauth.h"
 #include "platform/process.h"
+#include "protocols/mcp_oauth.h"
 #include "tools/mcp_catalog.h"
 
 #include <ctime>

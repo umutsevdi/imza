@@ -2,7 +2,7 @@
 
 #include "loopback_mcp_server.h"
 #include "loopback_oauth_server.h"
-#include "network/mcp_oauth.h"
+#include "protocols/mcp_oauth.h"
 
 #include <atomic>
 #include <ctime>

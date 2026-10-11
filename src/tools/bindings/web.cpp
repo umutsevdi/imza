@@ -2,6 +2,7 @@
 
 #include "common/util.h"
 #include "network/web.h"
+#include "tools/web.h"
 
 #include <cctype>
 #include <string>

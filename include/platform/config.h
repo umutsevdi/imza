@@ -54,7 +54,7 @@ struct LastUsed {
     std::string model;
 };
 
-// OAuth credentials captured by a browser sign-in (network/mcp_oauth):
+// OAuth credentials captured by a browser sign-in (protocols/mcp_oauth):
 // the registered client, the discovered authorization-server endpoints,
 // and the current tokens. Plain configuration data, like every other
 // credential; the live access token is used as the request bearer.
