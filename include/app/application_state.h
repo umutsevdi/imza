@@ -69,6 +69,9 @@ struct ApplicationState {
     ModalRequestFn parent_routing;
     std::string agent_label;
     RuntimeFlag runtime_flags = interactive_runtime_flags();
+    // Sidebar widget visibility, captured from the config at startup and
+    // inherited by children; presentation state, not a provider concern.
+    SidebarConfig sidebar;
     std::atomic<bool> alive { true };
     Signal<>::Subscription env_subscription;
     Signal<>::Subscription provider_subscription;

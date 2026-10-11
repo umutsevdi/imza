@@ -222,6 +222,16 @@ struct StoredAllow {
     std::optional<std::vector<StoredCommandGrant>> commands;
 };
 
+struct StoredSidebar {
+    std::optional<bool> plans;
+    std::optional<bool> review_comments;
+    std::optional<bool> tasks;
+    std::optional<bool> changed_files;
+    std::optional<bool> context;
+    std::optional<bool> permissions;
+    std::optional<bool> update;
+};
+
 struct StoredConfig {
     std::optional<std::string> schema_url;
     std::optional<std::vector<StoredConnection>> providers;
@@ -229,6 +239,7 @@ struct StoredConfig {
     std::optional<StoredSkills> skills;
     std::optional<std::map<std::string, StoredMcpServer>> mcp_servers;
     std::optional<StoredAllow> allow;
+    std::optional<StoredSidebar> sidebar;
     std::optional<std::vector<std::string>> instructions;
 };
 
@@ -524,6 +535,21 @@ Status load_config(
         }
     }
 
+    if (stored.sidebar) {
+        const StoredSidebar& stored_sidebar = *stored.sidebar;
+        out.sidebar.plans = stored_sidebar.plans.value_or(out.sidebar.plans);
+        out.sidebar.review_comments = stored_sidebar.review_comments.value_or(
+            out.sidebar.review_comments);
+        out.sidebar.tasks = stored_sidebar.tasks.value_or(out.sidebar.tasks);
+        out.sidebar.changed_files
+            = stored_sidebar.changed_files.value_or(out.sidebar.changed_files);
+        out.sidebar.context
+            = stored_sidebar.context.value_or(out.sidebar.context);
+        out.sidebar.permissions
+            = stored_sidebar.permissions.value_or(out.sidebar.permissions);
+        out.sidebar.update = stored_sidebar.update.value_or(out.sidebar.update);
+    }
+
     if (stored.instructions) {
         for (const std::string& entry : *stored.instructions) {
             if (entry.empty()) {
@@ -767,6 +793,35 @@ namespace {
             stored.allow = std::move(allow);
         }
 
+        StoredSidebar sidebar;
+        const SidebarConfig& defaults = SidebarConfig { };
+        if (cfg.sidebar.plans != defaults.plans) {
+            sidebar.plans = cfg.sidebar.plans;
+        }
+        if (cfg.sidebar.review_comments != defaults.review_comments) {
+            sidebar.review_comments = cfg.sidebar.review_comments;
+        }
+        if (cfg.sidebar.tasks != defaults.tasks) {
+            sidebar.tasks = cfg.sidebar.tasks;
+        }
+        if (cfg.sidebar.changed_files != defaults.changed_files) {
+            sidebar.changed_files = cfg.sidebar.changed_files;
+        }
+        if (cfg.sidebar.context != defaults.context) {
+            sidebar.context = cfg.sidebar.context;
+        }
+        if (cfg.sidebar.permissions != defaults.permissions) {
+            sidebar.permissions = cfg.sidebar.permissions;
+        }
+        if (cfg.sidebar.update != defaults.update) {
+            sidebar.update = cfg.sidebar.update;
+        }
+        if (sidebar.plans || sidebar.review_comments || sidebar.tasks
+            || sidebar.changed_files || sidebar.context || sidebar.permissions
+            || sidebar.update) {
+            stored.sidebar = std::move(sidebar);
+        }
+
         if (!cfg.instructions.empty()) {
             stored.instructions = cfg.instructions;
         }
@@ -826,6 +881,6 @@ template <> struct glz::meta<imza::StoredConfig> {
     using T                     = imza::StoredConfig;
     static constexpr auto value = glz::object("$schema", &T::schema_url,
         "providers", &T::providers, "models", &T::models, "skills", &T::skills,
-        "mcp_servers", &T::mcp_servers, "allow", &T::allow, "instructions",
-        &T::instructions);
+        "mcp_servers", &T::mcp_servers, "allow", &T::allow, "sidebar",
+        &T::sidebar, "instructions", &T::instructions);
 };

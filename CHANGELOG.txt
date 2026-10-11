@@ -12,6 +12,8 @@ Unreleased
 -------------------------------------------------------------------------------
 
 Changes:
+  - The sidebar widgets can be hidden individually through the new `sidebar`
+    object in config.json.
   - The startup banner now shows a rotating line: a useful tip during the
     day, and a gentler note after 22:00.
 

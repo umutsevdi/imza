@@ -93,6 +93,30 @@ TEST_CASE("clicking a plan opens it in the viewer modal")
     CHECK(viewer->content == imza::test::PLAN_SKELETON);
 }
 
+TEST_CASE("side panel hides widgets disabled in the sidebar config")
+{
+    imza::Config config  = imza::test::test_config();
+    config.sidebar.plans = false;
+    config.sidebar.tasks = false;
+    auto state
+        = imza::test::make_test_state(imza::test::run_immediately, config);
+
+    REQUIRE(state->session->create_plan(imza::test::PLAN_SKELETON).empty());
+    state->session->set_todo(imza::TodoList {
+        { { "hidden task", imza::TodoItem::Status::PENDING } } });
+
+    auto panel = imza::make_side_panel(
+        state,
+        [] { return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 120, 40 }; },
+        [] { return imza::WorkflowPhase::PLAN; }, [](imza::WorkflowPhase) { });
+
+    const std::string out = imza::test::to_text(panel->Render(), 120, 40);
+    CHECK(out.find("Plans") == std::string::npos);
+    CHECK(out.find("Initial Plan") == std::string::npos);
+    CHECK(out.find("Tasks") == std::string::npos);
+    CHECK(out.find("hidden task") == std::string::npos);
+}
+
 TEST_CASE("render_todo renders status marks")
 {
     using Status = imza::TodoItem::Status;

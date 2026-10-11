@@ -69,6 +69,7 @@ public:
         , _layout(std::move(layout))
         , _workflow(std::move(workflow))
         , _navigate(std::move(navigate))
+        , _sidebar(_state->sidebar)
         , _workspace_subscription(
               _state->environment->subscribe_to_workspace_change(
                   [] { animation::RequestAnimationFrame(); }))
@@ -109,46 +110,59 @@ public:
         const bool narrow   = ctx.kind == LayoutCtx::Kind::NARROW;
         _active_links.clear();
         Elements parts;
-        _append_plans(parts);
-        _append_review_comments(parts);
+        if (_sidebar.plans) {
+            _append_plans(parts);
+        } else {
+            _plan_links.clear();
+        }
+        if (_sidebar.review_comments) {
+            _append_review_comments(parts);
+        }
         const auto todo = _state->session->todo();
-        if (!todo->items.empty()) {
+        if (_sidebar.tasks && !todo->items.empty()) {
             parts.push_back(render_todo(*todo, ctx) | yflex);
         }
         if (!narrow) {
             const auto& env       = _state->environment;
             const auto repository = env->repository();
-            if (repository && !repository->changed_files.empty()) {
+            if (_sidebar.changed_files && repository
+                && !repository->changed_files.empty()) {
                 parts.push_back(_render_changed_files(*repository) | yflex);
             }
             if (_attachments_dirty.exchange(false)) {
                 _attachment_names = _state->session->attachment_names();
             }
-            const auto [project, global]
-                = _state->skills->counts(_state->environment->skills());
-            std::vector<std::string> mcp_servers;
-            if (_state->mcp != nullptr) {
-                for (const auto& server : _state->mcp->snapshot()) {
-                    if (server.state != McpServerState::CONNECTED) {
-                        continue;
+            if (_sidebar.context) {
+                const auto [project, global]
+                    = _state->skills->counts(_state->environment->skills());
+                std::vector<std::string> mcp_servers;
+                if (_state->mcp != nullptr) {
+                    for (const auto& server : _state->mcp->snapshot()) {
+                        if (server.state != McpServerState::CONNECTED) {
+                            continue;
+                        }
+                        mcp_servers.push_back(server.id + " · "
+                            + std::to_string(server.tool_count) + " tools");
                     }
-                    mcp_servers.push_back(server.id + " · "
-                        + std::to_string(server.tool_count) + " tools");
+                }
+                parts.push_back(render_context_box(env->agent_rules_path(),
+                    _attachment_names, project, global, mcp_servers));
+            }
+            if (_sidebar.permissions) {
+                const PermissionStore::Snapshot grants
+                    = _state->permissions->snapshot();
+                PermissionView permissions
+                    = make_permission_view(_state->runtime_flags, *grants);
+                if (has_custom_permissions(permissions)) {
+                    parts.push_back(render_permissions_box(permissions));
                 }
             }
-            parts.push_back(render_context_box(env->agent_rules_path(),
-                _attachment_names, project, global, mcp_servers));
-            const PermissionStore::Snapshot grants
-                = _state->permissions->snapshot();
-            PermissionView permissions
-                = make_permission_view(_state->runtime_flags, *grants);
-            if (has_custom_permissions(permissions)) {
-                parts.push_back(render_permissions_box(permissions));
-            }
         }
-        if (const std::optional<std::string> update
-            = _state->environment->update_available()) {
-            parts.push_back(render_update_available(*update));
+        if (_sidebar.update) {
+            if (const std::optional<std::string> update
+                = _state->environment->update_available()) {
+                parts.push_back(render_update_available(*update));
+            }
         }
         Element body = vbox(std::move(parts));
         if (narrow) {
@@ -305,6 +319,7 @@ private:
     LayoutFn _layout;
     WorkflowFn _workflow;
     WorkflowNavigateFn _navigate;
+    SidebarConfig _sidebar;
     Signal<>::Subscription _workspace_subscription;
     Signal<>::Subscription _repository_subscription;
     std::atomic<bool> _attachments_dirty { true };

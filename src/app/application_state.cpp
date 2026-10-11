@@ -160,6 +160,7 @@ namespace {
             = std::move(config.mcp_servers);
         // Taken before the config moves into the provider store.
         std::vector<std::string> instructions = std::move(config.instructions);
+        state->sidebar                        = config.sidebar;
         state->providers = std::make_shared<ProviderStore>(std::move(config));
         McpManagerHooks mcp_hooks;
         // Sign-ins and background token refreshes write straight through
@@ -223,6 +224,7 @@ namespace {
         state->parent_routing = std::move(parent_routing);
         state->agent_label    = std::move(agent_label);
         state->runtime_flags  = parent.runtime_flags;
+        state->sidebar        = parent.sidebar;
         if (!state->subagent_slot) {
             state->subagent_slot = std::make_shared<SubagentToolFn>();
         }
