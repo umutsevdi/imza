@@ -62,6 +62,8 @@ inline const ftxui::Color HL_BLUE           = ftxui::Color::RGB(121, 192, 255);
 inline const ftxui::Color HL_MAGENTA        = ftxui::Color::RGB(210, 168, 255);
 inline const ftxui::Color HL_CYAN           = ftxui::Color::RGB(104, 216, 232);
 inline constexpr int MODAL_MAX_WIDTH        = 100;
+// The exit confirmation is a compact dialog, not a content modal.
+inline constexpr int EXIT_CONFIRM_WIDTH = 52;
 // Streaming tail playout: the view releases queued characters at a paced
 // rate instead of materializing each arrival burst at once. The release
 // budget rises with the backlog but never past the display ceiling, so the

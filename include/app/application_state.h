@@ -74,6 +74,7 @@ struct ApplicationState {
     SidebarConfig sidebar;
     std::atomic<bool> alive { true };
     Signal<>::Subscription env_subscription;
+    Signal<>::Subscription system_subscription;
     Signal<>::Subscription provider_subscription;
 
     ~ApplicationState();

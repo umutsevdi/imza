@@ -95,19 +95,42 @@ bool wait_until_ready(const imza::Environment& env, int timeout_ms = 5000)
     return env.ready();
 }
 
-TEST_CASE("system environment populates the core fields synchronously")
+TEST_CASE("system environment placeholders immediately, populates async")
 {
     imza::Environment env;
+    // Available from construction, before detection finishes: permission
+    // checks need the temporary directory from the start.
+    const auto placeholder = env.system();
+    REQUIRE(placeholder != nullptr);
+    CHECK(std::filesystem::is_directory(placeholder->temporary_directory));
+    CHECK(placeholder->temporary_directory.filename() == "imza");
+    CHECK_FALSE(env.ready());
+
+    REQUIRE(wait_until_ready(env));
     const auto sys = env.system();
     REQUIRE(sys != nullptr);
     CHECK_FALSE(sys->os_name.empty());
     CHECK_FALSE(sys->default_shell.empty());
     CHECK_FALSE(sys->today.empty());
     CHECK(std::filesystem::is_directory(sys->temporary_directory));
-    CHECK(sys->temporary_directory.filename() == "imza");
     CHECK(sys->today.size() == 10);
     CHECK(sys->today[4] == '-');
     CHECK(sys->today[7] == '-');
+}
+
+TEST_CASE("system detection announces its arrival")
+{
+    imza::Environment env;
+    bool announced          = false;
+    const auto subscription = env.subscribe_to_system_change(
+        [&] { announced = env.system() && !env.system()->os_name.empty(); });
+    REQUIRE(wait_until_ready(env));
+    CHECK(announced);
+    // Late subscribers see the published state immediately.
+    bool late = false;
+    const auto late_subscription
+        = env.subscribe_to_system_change([&] { late = true; });
+    CHECK(late);
 }
 
 TEST_CASE("Imza temporary directory is reusable and canonical")

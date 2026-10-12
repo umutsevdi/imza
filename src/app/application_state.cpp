@@ -126,16 +126,20 @@ namespace {
         state->runner->set_on_finish([raw](std::string error) {
             on_turn_finished(*raw, std::move(error));
         });
+        const auto resume_when_ready = [raw] {
+            raw->post([raw] {
+                present_front(*raw);
+                if (raw->session->phase() == Session::Phase::IDLE
+                    && !raw->session->queued()->empty()) {
+                    drain_queued(*raw);
+                }
+            });
+        };
         state->env_subscription
-            = state->environment->subscribe_to_workspace_change([raw] {
-                  raw->post([raw] {
-                      present_front(*raw);
-                      if (raw->session->phase() == Session::Phase::IDLE
-                          && !raw->session->queued()->empty()) {
-                          drain_queued(*raw);
-                      }
-                  });
-              });
+            = state->environment->subscribe_to_workspace_change(
+                resume_when_ready);
+        state->system_subscription
+            = state->environment->subscribe_to_system_change(resume_when_ready);
         state->provider_subscription = state->providers->subscribe(
             [raw] { raw->post([raw] { raw->session->bump_modal_serial(); }); });
         state->post([raw] { raw->providers->start_model_fetches(); });
@@ -252,6 +256,7 @@ ApplicationState::~ApplicationState()
     queue.abandon();
     provider_subscription.disconnect();
     env_subscription.disconnect();
+    system_subscription.disconnect();
     subagents->stop();
     runner->stop();
 }

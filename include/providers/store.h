@@ -123,8 +123,9 @@ private:
     const Connection* _find_locked(std::string_view id) const;
     Route _route_locked(const Connection& connection, ApiStandard dialect,
         std::string_view opencode_session = { }) const;
-    // Dialect override for `model` on this connection, plus the selection
-    // built from it; callers hold the store mutex.
+    void _load_catalog();
+    void _maybe_start_catalog_refresh();
+    void _wait_catalog_locked(std::unique_lock<std::mutex>& lock) const;
     ProviderSelection _selection_locked(const Connection& connection,
         const std::string& model, std::string variant) const;
     void _start_fetch_locked(const std::string& connection_id);
@@ -142,7 +143,11 @@ private:
 
     std::map<std::string, CatalogEntry> _model_catalog;
     std::map<std::string, int> _generations;
-    bool _catalog_syncing = false;
+    bool _catalog_syncing         = false;
+    mutable bool _catalog_loaded  = false;
+    bool _catalog_refresh_pending = false;
+    mutable std::condition_variable _catalog_cv;
+    std::optional<std::jthread> _catalog_loader;
     mutable std::mutex _mutex;
     std::condition_variable _refresh_changed;
     std::set<std::string> _refreshing;

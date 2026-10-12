@@ -34,6 +34,7 @@ struct FocusedDoc {
 FocusedDoc make_focused_doc(std::shared_ptr<imza::ApplicationState> state,
     bool focused, const std::string& plan = { })
 {
+    imza::test::wait_for_environment(*state);
     if (!plan.empty()) {
         REQUIRE(state->session->create_plan(plan).empty());
     }

@@ -359,8 +359,20 @@ WorkspaceEnvironment scan_workspace(const std::filesystem::path& directory,
 
 Environment::Environment(std::vector<std::string> instructions)
     : _instructions(std::move(instructions))
-    , _system(std::make_shared<const SystemEnvironment>(
-          detect_system_environment()))
+    , _system(
+          std::make_shared<const SystemEnvironment>([]() -> SystemEnvironment {
+              SystemEnvironment placeholder;
+              std::error_code error;
+              const std::filesystem::path temporary_directory
+                  = std::filesystem::temp_directory_path(error);
+              if (error) {
+                  throw std::filesystem::filesystem_error(
+                      "cannot resolve temporary directory", error);
+              }
+              placeholder.temporary_directory
+                  = prepare_imza_temporary_directory(temporary_directory);
+              return placeholder;
+          }()))
 {
     std::error_code initial_error;
     const std::filesystem::path initial_directory
@@ -376,72 +388,84 @@ Environment::Environment(std::vector<std::string> instructions)
             "cannot canonicalize working directory", initial_directory,
             initial_error);
     }
-    _worker = std::jthread([this, working_directory] {
+    _worker        = std::jthread([this, working_directory] {
         auto workspace = std::make_shared<WorkspaceEnvironment>(
             scan_workspace(working_directory, _instructions));
         _publish_workspace(std::move(workspace), 0);
     });
+    _system_worker = std::jthread([this](std::stop_token stop) {
+        auto system = std::make_shared<const SystemEnvironment>(
+            detect_system_environment());
+        if (stop.stop_requested()) {
+            return;
+        }
+        const bool has_git = system->has_git;
+        _publish_system(std::move(system));
+        if (has_git) {
+            _start_git_worker();
+        }
+    });
+}
 
-    if (_system->has_git) {
-        _git_worker = std::jthread([this](const std::stop_token& stop) {
-            std::mutex poll_mutex;
-            std::condition_variable_any poll_cv;
-            const auto wait_for_next_poll = [&] {
-                std::unique_lock lock(poll_mutex);
-                poll_cv.wait_for(lock, stop, std::chrono::milliseconds { 2500 },
-                    [] { return false; });
-            };
-            {
-                std::unique_lock lock(_workspace_mutex);
-                if (!_workspace_ready_cv.wait(
-                        lock, stop, [this] { return _ready.load(); })) {
-                    return;
-                }
+void Environment::_start_git_worker()
+{
+    _git_worker = std::jthread([this](const std::stop_token& stop) {
+        std::mutex poll_mutex;
+        std::condition_variable_any poll_cv;
+        const auto wait_for_next_poll = [&] {
+            std::unique_lock lock(poll_mutex);
+            poll_cv.wait_for(lock, stop, std::chrono::milliseconds { 2500 },
+                [] { return false; });
+        };
+        {
+            std::unique_lock lock(_workspace_mutex);
+            if (!_workspace_ready_cv.wait(
+                    lock, stop, [this] { return _workspace_ready.load(); })) {
+                return;
             }
-            while (!stop.stop_requested()) {
-                const auto observed_workspace = workspace();
-                if (observed_workspace == nullptr
-                    || !observed_workspace->project_root) {
+        }
+        while (!stop.stop_requested()) {
+            const auto observed_workspace = workspace();
+            if (observed_workspace == nullptr
+                || !observed_workspace->project_root) {
+                wait_for_next_poll();
+                continue;
+            }
+            const CommandResult status
+                = run_command("git status --porcelain=v1 --untracked-files=all",
+                    std::chrono::seconds { 1 });
+            const CommandResult branch = run_command(
+                "git branch --show-current", std::chrono::seconds { 1 });
+            const std::optional<std::string> diff
+                = git_working_diff(observed_workspace->project_root.value(),
+                    { .renames = true, .numstat = true });
+            if (command_ok(status) && command_ok(branch) && diff.has_value()) {
+                std::vector<ChangedFile> changed_files
+                    = parse_git_status(status.output);
+                const std::string branch_name
+                    = normalize_git_branch(branch.output);
+                ChangeSummary changes = summarize_git_diff(*diff);
+                summarize_untracked_files(
+                    observed_workspace->project_root.value(), changed_files,
+                    changes);
+                const auto current = repository();
+                if (current && changed_files == current->changed_files
+                    && branch_name == current->branch
+                    && changes == current->changes) {
                     wait_for_next_poll();
                     continue;
                 }
-                const CommandResult status = run_command(
-                    "git status --porcelain=v1 --untracked-files=all",
-                    std::chrono::seconds { 1 });
-                const CommandResult branch = run_command(
-                    "git branch --show-current", std::chrono::seconds { 1 });
-                const std::optional<std::string> diff
-                    = git_working_diff(observed_workspace->project_root.value(),
-                        { .renames = true, .numstat = true });
-                if (command_ok(status) && command_ok(branch)
-                    && diff.has_value()) {
-                    std::vector<ChangedFile> changed_files
-                        = parse_git_status(status.output);
-                    const std::string branch_name
-                        = normalize_git_branch(branch.output);
-                    ChangeSummary changes = summarize_git_diff(*diff);
-                    summarize_untracked_files(
-                        observed_workspace->project_root.value(), changed_files,
-                        changes);
-                    const auto current = repository();
-                    if (current && changed_files == current->changed_files
-                        && branch_name == current->branch
-                        && changes == current->changes) {
-                        wait_for_next_poll();
-                        continue;
-                    }
-                    RepositoryState next;
-                    next.changed_files = std::move(changed_files);
-                    next.branch        = branch_name;
-                    next.changes       = changes;
-                    _publish_repository(
-                        std::make_shared<RepositoryState>(std::move(next)),
-                        observed_workspace);
-                }
-                wait_for_next_poll();
+                RepositoryState next;
+                next.changed_files = std::move(changed_files);
+                next.branch        = branch_name;
+                next.changes       = std::move(changes);
+                _publish_repository(
+                    std::make_shared<RepositoryState>(std::move(next)),
+                    observed_workspace);
             }
-        });
-    }
+            wait_for_next_poll();
+        }
+    });
 }
 
 void Environment::_publish_workspace(
@@ -454,11 +478,23 @@ void Environment::_publish_workspace(
         }
         _workspace  = std::move(ws);
         _repository = std::make_shared<const RepositoryState>();
-        _ready.store(true);
+        _workspace_ready.store(true);
     }
     _workspace_ready_cv.notify_all();
     _workspace_changed.publish();
     _repository_changed.publish();
+}
+
+void Environment::_publish_system(
+    std::shared_ptr<const SystemEnvironment> system)
+{
+    {
+        std::unique_lock lock(_workspace_mutex);
+        _system = std::move(system);
+        _system_ready.store(true);
+    }
+    _system_ready_cv.notify_all();
+    _system_changed.publish();
 }
 
 void Environment::_publish_repository(
@@ -521,7 +557,14 @@ Signal<>::Subscription Environment::subscribe_to_workspace_change(
     Signal<>::Callback callback)
 {
     return _subscribe_when_ready(_workspace_changed, std::move(callback),
-        [this] { return _ready.load(); });
+        [this] { return _workspace_ready.load(); });
+}
+
+Signal<>::Subscription Environment::subscribe_to_system_change(
+    Signal<>::Callback callback)
+{
+    return _subscribe_when_ready(_system_changed, std::move(callback),
+        [this] { return _system_ready.load(); });
 }
 
 Signal<>::Subscription Environment::subscribe_to_repository_change(
@@ -549,9 +592,18 @@ void Environment::check_for_updates(std::string binary_version)
         return;
     }
     _update_worker = std::jthread(
-        [this, version = std::move(binary_version)](std::stop_token) {
+        [this, version = std::move(binary_version)](std::stop_token stop) {
+            std::vector<std::string> package_managers;
+            {
+                std::unique_lock lock(_workspace_mutex);
+                if (!_system_ready_cv.wait(
+                        lock, stop, [this] { return _system_ready.load(); })) {
+                    return;
+                }
+                package_managers = _system->package_managers;
+            }
             std::optional<std::string> available
-                = check_for_update(_system->package_managers, version);
+                = check_for_update(package_managers, version);
             {
                 std::lock_guard lock(_update_mutex);
                 _update_version = std::move(available);
@@ -572,8 +624,10 @@ std::optional<std::string> Environment::agent_rules_path() const
 std::vector<Skill> Environment::skills() const
 {
     std::vector<Skill> out;
-    for (const auto& [name, skill] : _system->global_skills) {
-        out.push_back(skill);
+    if (const auto system = this->system()) {
+        for (const auto& [name, skill] : system->global_skills) {
+            out.push_back(skill);
+        }
     }
     const auto ws = workspace();
     if (ws) {

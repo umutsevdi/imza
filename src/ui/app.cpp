@@ -248,6 +248,9 @@ namespace {
             _workspace_subscription
                 = _state->environment->subscribe_to_workspace_change(
                     [] { animation::RequestAnimationFrame(); });
+            _system_subscription
+                = _state->environment->subscribe_to_system_change(
+                    [] { animation::RequestAnimationFrame(); });
             _title_subscription = _state->session->subscribe_to_title_change(
                 [] { animation::RequestAnimationFrame(); });
             // Flows can flip the session mode directly (/make-skill seeds
@@ -340,7 +343,10 @@ namespace {
 
             Component popup_source = nullptr;
             std::shared_ptr<Session> modal_session;
-            if (_state->session->modal().index() != 0) {
+            if (_state->session->exit_confirm()) {
+                popup_source  = _modal;
+                modal_session = _state->session;
+            } else if (_state->session->modal().index() != 0) {
                 popup_source  = _modal;
                 modal_session = _state->session;
             } else if (_sidechat_status.has_modal
@@ -350,9 +356,10 @@ namespace {
                                                  : _state->session;
             }
             if (popup_source) {
-                const int h = terminal_size.dimy;
-                const int mw
-                    = std::min(w - 4, modal_max_width(modal_session->modal()));
+                const int h   = terminal_size.dimy;
+                const int mw  = _state->session->exit_confirm()
+                    ? std::min(w - 4, EXIT_CONFIRM_WIDTH)
+                    : std::min(w - 4, modal_max_width(modal_session->modal()));
                 const int mh  = std::max(10, h - 4);
                 Element popup = popup_source->Render()
                     | borderStyled(ROUNDED, PANEL_BORDER) | bgcolor(PANEL_COLOR)
@@ -366,13 +373,21 @@ namespace {
         bool OnEvent(Event event) override
         {
             if (event == Event::CtrlC || event == Event::CtrlD) {
-                _state->on_exit();
+                // A stray Ctrl+C must not throw the user out of a live
+                // conversation: confirm first. Empty sessions have nothing
+                // to lose and exit directly.
+                if (_state->session->has_items()) {
+                    _state->session->set_exit_confirm(true);
+                } else {
+                    _state->on_exit();
+                }
                 return true;
             }
             if (_selection.handle(event, *_state)) {
                 return true;
             }
-            if (_state->session->modal().index() != 0) {
+            if (_state->session->exit_confirm()
+                || _state->session->modal().index() != 0) {
                 return _modal->OnEvent(event);
             }
             if (_sidechat_status.has_modal && _sidechat_status.has_modal()) {
@@ -503,7 +518,8 @@ namespace {
         // the main tree reports unfocused and keystrokes die.
         void _restore_focus_after_modal()
         {
-            const bool open = _state->session->modal().index() != 0;
+            const bool open = _state->session->exit_confirm()
+                || _state->session->modal().index() != 0;
             if (_modal_was_open && !open) {
                 if (_phase == WorkflowPhase::PLAN) {
                     _plan_tab->TakeFocus();
@@ -539,6 +555,7 @@ namespace {
         Component _tabs_content;
         Component _tabs;
         Signal<>::Subscription _workspace_subscription;
+        Signal<>::Subscription _system_subscription;
         Signal<>::Subscription _title_subscription;
         Signal<>::Subscription _mode_subscription;
         LayoutCtx _layout = layout_context(0);

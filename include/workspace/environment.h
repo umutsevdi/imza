@@ -68,7 +68,11 @@ public:
     enum class ChdirResult { CHANGED, UNCHANGED, FAILED };
 
     explicit Environment(std::vector<std::string> instructions = { });
-    std::shared_ptr<const SystemEnvironment> system() const { return _system; }
+    std::shared_ptr<const SystemEnvironment> system() const
+    {
+        std::shared_lock lock(_workspace_mutex);
+        return _system;
+    }
     std::shared_ptr<const WorkspaceEnvironment> workspace() const
     {
         std::shared_lock lock(_workspace_mutex);
@@ -80,14 +84,17 @@ public:
         return _repository;
     }
 
-    // True once the workspace scan has finished, whether or not a project
-    // root was found.
-    bool ready() const { return _ready.load(); }
+    bool ready() const
+    {
+        return _workspace_ready.load() && _system_ready.load();
+    }
 
     std::optional<std::string> agent_rules_path() const;
     std::vector<Skill> skills() const;
     ChdirResult chdir(const std::filesystem::path& dir);
     [[nodiscard]] Signal<>::Subscription subscribe_to_workspace_change(
+        Signal<>::Callback callback);
+    [[nodiscard]] Signal<>::Subscription subscribe_to_system_change(
         Signal<>::Callback callback);
     [[nodiscard]] Signal<>::Subscription subscribe_to_repository_change(
         Signal<>::Callback callback);
@@ -104,6 +111,8 @@ public:
 private:
     void _publish_workspace(std::shared_ptr<const WorkspaceEnvironment> ws,
         std::uint64_t generation);
+    void _publish_system(std::shared_ptr<const SystemEnvironment> system);
+    void _start_git_worker();
     const std::vector<std::string> _instructions;
     void _publish_repository(std::shared_ptr<const RepositoryState> repository,
         const std::shared_ptr<const WorkspaceEnvironment>& workspace);
@@ -119,18 +128,21 @@ private:
     std::shared_ptr<const WorkspaceEnvironment> _workspace;
     std::shared_ptr<const RepositoryState> _repository;
     Signal<> _workspace_changed;
+    Signal<> _system_changed;
     Signal<> _repository_changed;
     Signal<> _update_changed;
     mutable std::mutex _update_mutex;
     std::optional<std::string> _update_version;
     std::atomic<bool> _update_checked { false };
     std::uint64_t _workspace_generation { 0 };
-    std::atomic<bool> _ready { false };
+    std::atomic<bool> _workspace_ready { false };
+    std::atomic<bool> _system_ready { false };
     std::condition_variable_any _workspace_ready_cv;
+    std::condition_variable_any _system_ready_cv;
     std::jthread _worker;
-    std::jthread _update_worker;
-
     std::jthread _git_worker;
+    std::jthread _system_worker;
+    std::jthread _update_worker;
 };
 
 } // namespace imza

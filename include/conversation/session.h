@@ -236,6 +236,10 @@ public:
     void clear_modal();
     void bump_modal_serial();
     void present_modal(ModalPayload payload);
+    // Exit confirmation overlay: a full-screen dialog that supersedes any
+    // presented modal without disturbing it. Presentation state only.
+    bool exit_confirm() const;
+    void set_exit_confirm(bool open);
     void set_phase(Phase phase);
     void mark_retry(int wait_seconds, bool stalled = false);
 
@@ -295,6 +299,7 @@ private:
     std::shared_ptr<std::vector<ConversationItem>> _items
         = std::make_shared<std::vector<ConversationItem>>();
     ModalPayload _modal           = std::monostate { };
+    bool _exit_confirm            = false;
     std::uint64_t _modal_serial   = 0;
     std::uint64_t _content_serial = 0;
     Phase _phase                  = Phase::IDLE;

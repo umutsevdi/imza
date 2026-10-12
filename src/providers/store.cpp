@@ -152,9 +152,6 @@ ProviderStore::ProviderStore(
     , _models_fn(std::move(models_fn))
     , _terms_fn(std::move(terms_fn))
 {
-    load_catalog(presets_path(), _catalog);
-    inject_local_providers(_catalog);
-    _pricing = pricing_table_from(_catalog);
     if (!_models_fn) {
         _models_fn = [](const Route& route, std::vector<ModelInfo>& models) {
             return fetch_models(route, models);
@@ -163,13 +160,70 @@ ProviderStore::ProviderStore(
     if (!_terms_fn) {
         _terms_fn = [](const Route& route) { return accept_terms(route); };
     }
+    _catalog_loader.emplace([this] { _load_catalog(); });
 }
 
 ProviderStore::~ProviderStore()
 {
     _alive.store(false);
+    _catalog_loader.reset();
     _catalog_worker.reset();
     _workers.clear();
+}
+
+void ProviderStore::_load_catalog()
+{
+    Catalog catalog;
+    load_catalog(presets_path(), catalog);
+    inject_local_providers(catalog);
+    bool refresh_pending = false;
+    {
+        std::lock_guard lock(_mutex);
+        _catalog        = std::move(catalog);
+        _pricing        = pricing_table_from(_catalog);
+        _catalog_loaded = true;
+        refresh_pending = std::exchange(_catalog_refresh_pending, false);
+        _catalog_cv.notify_all();
+    }
+    _notify_changed();
+    if (refresh_pending) {
+        _maybe_start_catalog_refresh();
+    }
+}
+
+void ProviderStore::_maybe_start_catalog_refresh()
+{
+    {
+        std::lock_guard lock(_mutex);
+        if (!_catalog_loaded || _catalog_syncing || !catalog_stale(_catalog)) {
+            return;
+        }
+        _catalog_syncing = true;
+    }
+    _catalog_worker.emplace([this] {
+        Catalog catalog;
+        const Status status = fetch_catalog(catalog);
+        if (!_alive.load()) {
+            return;
+        }
+        {
+            std::lock_guard lock(_mutex);
+            _catalog_syncing = false;
+            if (status != Status::OK) {
+                return;
+            }
+            _catalog = catalog;
+            save_catalog(presets_path(), _catalog);
+            _pricing = pricing_table_from(_catalog);
+        }
+        _notify_changed();
+    });
+}
+
+void ProviderStore::_wait_catalog_locked(
+    std::unique_lock<std::mutex>& lock) const
+{
+    _catalog_cv.wait(lock, [this] { return _catalog_loaded; });
 }
 
 Signal<>::Subscription ProviderStore::subscribe(ProviderChangedFn callback)
@@ -192,7 +246,8 @@ StatusConfigView ProviderStore::status() const
 
 std::vector<ConnectionView> ProviderStore::connections() const
 {
-    std::lock_guard lock(_mutex);
+    std::unique_lock lock(_mutex);
+    _wait_catalog_locked(lock);
     std::vector<ConnectionView> views;
     views.reserve(_config.providers.size());
     for (const Connection& connection : _config.providers) {
@@ -233,7 +288,8 @@ std::vector<ConnectionView> ProviderStore::connections() const
 
 ModelList ProviderStore::models_for(std::string_view connection_id) const
 {
-    std::lock_guard lock(_mutex);
+    std::unique_lock lock(_mutex);
+    _wait_catalog_locked(lock);
     ModelList list;
     const Connection* connection = _find_locked(connection_id);
     if (connection == nullptr) {
@@ -278,7 +334,8 @@ ModelList ProviderStore::models_for(std::string_view connection_id) const
 std::vector<std::pair<std::string, std::string>>
 ProviderStore::provider_options() const
 {
-    std::lock_guard lock(_mutex);
+    std::unique_lock lock(_mutex);
+    _wait_catalog_locked(lock);
     std::vector<std::pair<std::string, std::string>> options;
     options.reserve(_catalog.providers.size() + 1);
     options.emplace_back(std::string(OPENAI_SUBSCRIPTION_ID),
@@ -308,7 +365,8 @@ ProviderSelection ProviderStore::_selection_locked(const Connection& connection,
 
 std::optional<ProviderSelection> ProviderStore::active_selection() const
 {
-    std::lock_guard lock(_mutex);
+    std::unique_lock lock(_mutex);
+    _wait_catalog_locked(lock);
     if (!_config.last_used || _config.last_used->model.empty()) {
         return std::nullopt;
     }
@@ -323,7 +381,8 @@ std::optional<ProviderSelection> ProviderStore::active_selection() const
 std::optional<ProviderSelection> ProviderStore::subagent_selection(
     SubagentRole role) const
 {
-    std::lock_guard lock(_mutex);
+    std::unique_lock lock(_mutex);
+    _wait_catalog_locked(lock);
     const auto configured  = _config.subagents.find(role);
     const bool use_default = configured == _config.subagents.end()
         || configured->second.provider.empty();
@@ -349,7 +408,8 @@ std::optional<ProviderSelection> ProviderStore::subagent_selection(
 Route ProviderStore::route_for(
     std::string_view connection_id, ApiStandard dialect) const
 {
-    std::lock_guard lock(_mutex);
+    std::unique_lock lock(_mutex);
+    _wait_catalog_locked(lock);
     const Connection* connection = _find_locked(connection_id);
     return connection == nullptr ? Route { }
                                  : _route_locked(*connection, dialect);
@@ -363,6 +423,7 @@ Route ProviderStore::authenticated_route_for(std::string_view connection_id,
     {
         std::unique_lock lock(_mutex);
         _refresh_changed.wait(lock, [&] { return !_refreshing.contains(id); });
+        _wait_catalog_locked(lock);
         const Connection* connection = _find_locked(id);
         if (connection == nullptr) {
             return { };
@@ -429,7 +490,8 @@ bool ProviderStore::model_reasons(std::string_view model) const
     if (model.empty()) {
         return false;
     }
-    std::lock_guard lock(_mutex);
+    std::unique_lock lock(_mutex);
+    _wait_catalog_locked(lock);
     for (const auto& [provider_id, provider] : _catalog.providers) {
         const auto it = provider.models.find(std::string(model));
         if (it != provider.models.end() && it->second.reasoning == true) {
@@ -445,7 +507,8 @@ ModelPricing ProviderStore::pricing_for(std::string_view model) const
     if (key.empty()) {
         return { };
     }
-    std::lock_guard lock(_mutex);
+    std::unique_lock lock(_mutex);
+    _wait_catalog_locked(lock);
     const auto exact = _pricing.find(key);
     if (exact != _pricing.end()) {
         return exact->second;
@@ -461,7 +524,8 @@ ModelPricing ProviderStore::pricing_for(std::string_view model) const
 void ProviderStore::start_model_fetches()
 {
     {
-        std::lock_guard lock(_mutex);
+        std::unique_lock lock(_mutex);
+        _wait_catalog_locked(lock);
         for (const Connection& connection : _config.providers) {
             _start_fetch_locked(connection_key(connection));
         }
@@ -472,7 +536,8 @@ void ProviderStore::start_model_fetches()
 void ProviderStore::refetch_models(std::string_view connection_id)
 {
     {
-        std::lock_guard lock(_mutex);
+        std::unique_lock lock(_mutex);
+        _wait_catalog_locked(lock);
         _start_fetch_locked(std::string(connection_id));
     }
     _notify_changed();
@@ -483,7 +548,8 @@ void ProviderStore::connect(ConnectResult result, ConnectCompleteFn complete)
     Route route;
     std::vector<ModelInfo> subscription_models;
     {
-        std::lock_guard lock(_mutex);
+        std::unique_lock lock(_mutex);
+        _wait_catalog_locked(lock);
         const bool known = result.id == CUSTOM_PROVIDER_ID
             || _catalog.providers.contains(result.id);
         if (known) {
@@ -634,29 +700,14 @@ void ProviderStore::ensure_catalog_fresh()
 {
     {
         std::lock_guard lock(_mutex);
-        if (_catalog_syncing || !catalog_stale(_catalog)) {
+        if (!_catalog_loaded) {
+            // The loader runs the staleness check once the file parse
+            // commits, so this stays safe to call before the first frame.
+            _catalog_refresh_pending = true;
             return;
         }
-        _catalog_syncing = true;
     }
-    _catalog_worker.emplace([this] {
-        Catalog catalog;
-        const Status status = fetch_catalog(catalog);
-        if (!_alive.load()) {
-            return;
-        }
-        {
-            std::lock_guard lock(_mutex);
-            _catalog_syncing = false;
-            if (status != Status::OK) {
-                return;
-            }
-            _catalog = catalog;
-            save_catalog(presets_path(), _catalog);
-            _pricing = pricing_table_from(_catalog);
-        }
-        _notify_changed();
-    });
+    _maybe_start_catalog_refresh();
 }
 
 bool ProviderStore::_update_config(

@@ -757,6 +757,22 @@ void Session::bump_modal_serial()
     ++_modal_serial;
 }
 
+bool Session::exit_confirm() const
+{
+    std::lock_guard lock(_mutex);
+    return _exit_confirm;
+}
+
+void Session::set_exit_confirm(bool open)
+{
+    std::lock_guard lock(_mutex);
+    if (_exit_confirm == open) {
+        return;
+    }
+    _exit_confirm = open;
+    ++_modal_serial;
+}
+
 void Session::present_modal(ModalPayload payload)
 {
     std::lock_guard lock(_mutex);

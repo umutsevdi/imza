@@ -43,11 +43,16 @@ namespace {
             , _compaction_subscription(
                   _state->session->subscribe_to_compaction_change(
                       [] { animation::RequestAnimationFrame(); }))
+            , _provider_subscription(_state->providers->subscribe([this] {
+                _provider_dirty.store(true);
+                animation::RequestAnimationFrame();
+            }))
         {
         }
 
         Element OnRender() override
         {
+            _sync_provider_caches();
             const StatusConfigView config     = _state->providers->status();
             const Session::StatusView session = _state->session->status_view();
             const LayoutCtx ctx               = _layout();
@@ -108,7 +113,7 @@ namespace {
                 bar.push_back(text(" · " + _money_text(session.total_cost))
                     | color(PANEL_FG_DIM));
             }
-            const std::string tags = capability_tags(_active_capabilities());
+            const std::string tags = capability_tags(_capabilities);
             if (!tags.empty()) {
                 bar.push_back(text(" · " + tags) | color(PANEL_FG_DIM));
             }
@@ -191,10 +196,26 @@ namespace {
         std::chrono::milliseconds _animation_ms { };
         std::string _last_model;
         ModelPricing _cached;
+        std::optional<Capabilities> _capabilities;
+        bool _capabilities_valid = false;
+        std::atomic<bool> _provider_dirty { false };
         Signal<>::Subscription _workspace_subscription;
         Signal<>::Subscription _repository_subscription;
         Signal<const SubagentEvent&>::Subscription _subagent_subscription;
         Signal<>::Subscription _compaction_subscription;
+        Signal<>::Subscription _provider_subscription;
+
+        void _sync_provider_caches()
+        {
+            if (_provider_dirty.exchange(false)) {
+                _last_model.clear();
+                _capabilities_valid = false;
+            }
+            if (!_capabilities_valid) {
+                _capabilities       = _compute_active_capabilities();
+                _capabilities_valid = true;
+            }
+        }
 
         ModelPricing _cached_pricing(const std::string& model)
         {
@@ -205,7 +226,7 @@ namespace {
             return _cached;
         }
 
-        std::optional<Capabilities> _active_capabilities()
+        std::optional<Capabilities> _compute_active_capabilities()
         {
             const auto selection = _state->providers->active_selection();
             if (!selection) {

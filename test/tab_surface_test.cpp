@@ -237,6 +237,7 @@ TEST_CASE("review pane shortcuts: p sends to plan, r refuses without a diff")
 {
     auto state = imza::test::make_test_state(
         imza::test::run_immediately, imza::test::test_config());
+    imza::test::wait_for_environment(*state);
     auto review = imza::make_review(
         state, [] { return imza::test::wide_layout(); },
         [](imza::WorkflowPhase) { });

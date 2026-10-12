@@ -73,6 +73,8 @@ public:
         , _workspace_subscription(
               _state->environment->subscribe_to_workspace_change(
                   [] { animation::RequestAnimationFrame(); }))
+        , _system_subscription(_state->environment->subscribe_to_system_change(
+              [] { animation::RequestAnimationFrame(); }))
         , _repository_subscription(
               _state->environment->subscribe_to_repository_change(
                   [] { animation::RequestAnimationFrame(); }))
@@ -321,6 +323,7 @@ private:
     WorkflowNavigateFn _navigate;
     SidebarConfig _sidebar;
     Signal<>::Subscription _workspace_subscription;
+    Signal<>::Subscription _system_subscription;
     Signal<>::Subscription _repository_subscription;
     std::atomic<bool> _attachments_dirty { true };
     std::vector<std::string> _attachment_names;

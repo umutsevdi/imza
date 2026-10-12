@@ -112,6 +112,17 @@ inline std::shared_ptr<imza::ApplicationState> make_test_state()
     return make_test_state(run_immediately);
 }
 
+inline void wait_for_environment(const imza::ApplicationState& state)
+{
+    const auto deadline
+        = std::chrono::steady_clock::now() + std::chrono::seconds { 5 };
+    while (!state.environment->ready()
+        && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds { 1 });
+    }
+    REQUIRE(state.environment->ready());
+}
+
 // Turn finished and nothing awaits a modal.
 inline bool idle(const imza::Session& session)
 {

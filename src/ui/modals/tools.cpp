@@ -208,6 +208,10 @@ namespace {
         Element OnRender() override
         {
             const Session& st = *_session;
+            if (st.exit_confirm()) {
+                _ensure_exit_confirm();
+                return _exit_confirm_body();
+            }
             if (st.modal().index() == 0) {
                 if (_built) {
                     _clear_built_content();
@@ -231,6 +235,14 @@ namespace {
         bool OnEvent(Event event) override
         {
             const Session& st = *_session;
+            if (st.exit_confirm()) {
+                _ensure_exit_confirm();
+                if (event == Event::Escape) {
+                    _state->session->set_exit_confirm(false);
+                    return true;
+                }
+                return _exit_buttons->OnEvent(event);
+            }
             if (st.modal().index() == 0) {
                 return false;
             }
@@ -279,6 +291,37 @@ namespace {
             Component selector;
             Component input;
         };
+
+        void _ensure_exit_confirm()
+        {
+            if (_exit_buttons) {
+                return;
+            }
+            _exit_yes = action_button("Exit", [this] { _state->on_exit(); });
+            _exit_no  = action_button(
+                "Cancel", [this] { _state->session->set_exit_confirm(false); });
+            _exit_buttons = Container::Horizontal({ _exit_yes, _exit_no });
+            _exit_yes->TakeFocus();
+        }
+
+        Element _exit_confirm_body()
+        {
+            return vbox({
+                       text("Are you sure you want to exit?") | bold,
+                       separatorEmpty(),
+                       paragraph(
+                           "The conversation will be saved. You can continue "
+                           "it later with /session.")
+                           | color(PANEL_FG_DIM),
+                       separatorEmpty(),
+                       hbox({ _exit_yes->Render(), text("  "),
+                           _exit_no->Render() })
+                           | center,
+                       separatorEmpty(),
+                       hint_bar("Enter exit · Esc cancel"),
+                   })
+                | xflex;
+        }
 
         void _ensure_built(const Session& st)
         {
@@ -460,6 +503,9 @@ namespace {
             _reject.reset();
             _confirm_reject_button.reset();
             _back.reset();
+            _exit_yes.reset();
+            _exit_no.reset();
+            _exit_buttons.reset();
         }
 
         Component _make_option_row(
@@ -633,6 +679,9 @@ namespace {
         Component _back;
         Element _viewer_content;
 
+        Component _exit_yes;
+        Component _exit_no;
+        Component _exit_buttons;
         Component _body;
     };
 

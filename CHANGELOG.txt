@@ -8,15 +8,20 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
-Unreleased
+0.6.1 - 2026-10-12
 -------------------------------------------------------------------------------
+<https://github.com/umutsevdi/imza/releases/tag/v0.6.1>
 
 Changes:
+  - Imza opens faster: system detection and the provider catalog load in the
+    background while the first frame renders.
   - Delete and directory creation actions are now monitored by Imza's runtime.
   - The sidebar widgets can be hidden individually through the new `sidebar`
     object in config.json.
   - The startup banner now shows a rotating line: a useful tip during the
     day, and a gentler note after 22:00.
+  - Ctrl+C and Ctrl+D now ask for confirmation before closing a session that
+    has a conversation, so a mistyped key no longer ends your work.
 
 -------------------------------------------------------------------------------
 0.6.0 - 2026-10-10
