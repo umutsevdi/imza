@@ -97,9 +97,9 @@ namespace {
             binding_plan_get,
             R"desc(() returns string, throws
 Returns the current plan document: markdown with a required skeleton
-(Requirements / Approach / Changes / Verification), or an empty
-string when none exists. Marks the plan as read; imza.plan.edit compares
-against this.)desc",
+(Requirements / Approach / Changes / Verification, plus an optional
+Problem opener), or an empty string when none exists. Marks the plan as
+read; imza.plan.edit compares against this.)desc",
         },
         {
             "create",
@@ -107,7 +107,12 @@ against this.)desc",
             R"desc((doc: string) throws
 Creates a new plan document as the current plan; the previous one is
 kept in the session but superseded. Validates the skeleton and the
-16 KiB cap. Never mutates an existing document.)desc",
+16 KiB cap. Never mutates an existing document.
+Shape the document short (aim for well under ~60 lines): an optional
+`# Problem` (one to three lines naming what is wrong today),
+`# Requirements` as small observable bullets, `# Approach` as a short
+summary, `# Changes` as one bullet per affected file, and
+`# Verification`.)desc",
         },
         {
             "edit",
@@ -127,7 +132,9 @@ const LuaModule& plan_module()
     static constexpr LuaModule MODULE { true, "plan",
         R"desc(The session plan document: the intent object a plan-mode turn
 produces. Create it with imza.plan.create when the turn concludes that
-files should change; patch it with imza.plan.edit.)desc",
+files should change; patch it with imza.plan.edit. Required sections are
+Requirements / Approach / Changes / Verification, with an optional Problem
+opener; keep the document short and each section in its intended shape.)desc",
         { }, BINDINGS };
     return MODULE;
 }
