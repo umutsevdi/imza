@@ -535,6 +535,36 @@ namespace {
         return 0;
     }
 
+    int binding_mkdir(lua_State* L)
+    {
+        const std::string path = luaL_checkstring(L, 1);
+        const MakeDirectoryRequest request { path };
+        std::string target;
+        if (const int denied = authorize_target(L, request, path, target)) {
+            return denied;
+        }
+        std::string err;
+        if (!make_directories(target, err)) {
+            return binding_error(L, "fs.mkdir: " + err);
+        }
+        return 0;
+    }
+
+    int binding_remove(lua_State* L)
+    {
+        const std::string path = luaL_checkstring(L, 1);
+        const RemoveRequest request { path };
+        std::string target;
+        if (const int denied = authorize_target(L, request, path, target)) {
+            return denied;
+        }
+        std::string err;
+        if (!remove_path(target, err)) {
+            return binding_error(L, "fs.remove: " + err);
+        }
+        return 0;
+    }
+
     // Per-node text cap: enough to identify a node without shipping
     // whole translation units back to the model.
     constexpr std::size_t MAX_TS_NODE_TEXT = 400;
@@ -1037,6 +1067,26 @@ expected.)desc",
 Replaces the file's entire content, creating it (and missing parent
 directories) if absent.
 Prefer insert/edit for targeted changes; this discards everything else.)desc",
+        },
+        {
+            "mkdir",
+            binding_mkdir,
+            R"desc((path: string) throws
+Creates the directory at `path` and every missing parent. Relative paths
+resolve against the session working directory.
+Write-class: automatic inside trusted roots in Build mode, asking outside
+them, rejected in Plan mode. Throws when a non-directory file occupies the
+path or the nearest existing parent is not a directory.)desc",
+        },
+        {
+            "remove",
+            binding_remove,
+            R"desc((path: string) throws
+Removes a file, or a directory only when it is empty.
+Always asks for approval — inside the workspace included — unless a session
+grant already covers the path; rejected in Plan mode. Throws when the target
+is missing, when the directory is not empty, or when the path is the working
+directory, the project root, or an ancestor of either.)desc",
         },
         {
             "ts_query",

@@ -12,6 +12,7 @@ Unreleased
 -------------------------------------------------------------------------------
 
 Changes:
+  - Delete and directory creation actions are now monitored by Imza's runtime.
   - The sidebar widgets can be hidden individually through the new `sidebar`
     object in config.json.
   - The startup banner now shows a rotating line: a useful tip during the

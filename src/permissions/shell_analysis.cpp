@@ -271,6 +271,20 @@ bool shell_builtin_allowed(std::string_view program)
     return false;
 }
 
+bool shell_deletion_denied(std::string_view program)
+{
+    // The replacement binding is imza.fs.remove; the evaluator turns this
+    // into the model-facing guidance.
+    static constexpr std::array<std::string_view, 6> denied { "rm", "rmdir",
+        "del", "erase", "unlink", "shred" };
+    for (const std::string_view candidate : denied) {
+        if (program == candidate) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool shell_readonly_allowed(const ShellInvocation& invocation)
 {
     if (invocation.program.empty()) {

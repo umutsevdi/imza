@@ -1438,6 +1438,113 @@ TEST_CASE("canvas surface takes a rectangular z grid")
     CHECK(out.canvases[0].grid[1][2] == doctest::Approx(6.0));
 }
 
+TEST_CASE("imza.fs.mkdir creates nested directories")
+{
+    WorkspaceFixture fx;
+    const std::string path = fx.dir.file("a/b/c").string();
+    const imza::ToolOutput out
+        = imza::test::run_lua("imza.fs.mkdir([[" + path + "]])", fx.host());
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(fs::is_directory(fx.dir.file("a/b/c")));
+    REQUIRE(out.dispatch_log.size() == 1);
+    CHECK(out.dispatch_log[0].binding == "fs.mkdir");
+}
+
+TEST_CASE("imza.fs.mkdir rejects a file occupying the path")
+{
+    WorkspaceFixture fx;
+    imza::test::write_file(fx.dir.file("blocker"), "x\n");
+    const imza::ToolOutput out = imza::test::run_lua("imza.fs.mkdir([["
+            + fx.dir.file("blocker").string() + "]])\nprint('dead')",
+        fx.host());
+    CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
+    CHECK(out.text.find("not a directory") != std::string::npos);
+    CHECK(out.text.find("dead") == std::string::npos);
+}
+
+// Approves once, asserting the modal carries the removal request.
+imza::LuaHost approving_host(WorkspaceFixture& fx)
+{
+    imza::LuaHost host = fx.host();
+    host.ask           = [](imza::ModalPayload payload) {
+        const auto& prompt = std::get<imza::PermissionPrompt>(payload);
+        CHECK(prompt.name == "remove");
+        CHECK(std::holds_alternative<imza::RemoveRequest>(
+            std::get<imza::FilesystemRequest>(prompt.request)));
+        std::promise<imza::ModalResult> promise;
+        promise.set_value(imza::ModalResult {
+            imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" } });
+        return promise.get_future();
+    };
+    return host;
+}
+
+TEST_CASE(
+    "imza.fs.remove deletes a file and an empty directory, not a full one")
+{
+    WorkspaceFixture fx;
+    imza::test::write_file(fx.dir.file("gone.txt"), "one\n");
+    fs::create_directories(fx.dir.file("empty"));
+    fs::create_directories(fx.dir.file("full"));
+    imza::test::write_file(fx.dir.file("full/child.txt"), "x\n");
+
+    const imza::ToolOutput file = imza::test::run_lua(
+        "imza.fs.remove([[" + fx.dir.file("gone.txt").string() + "]])",
+        approving_host(fx));
+    REQUIRE(file.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK_FALSE(fs::exists(fx.dir.file("gone.txt")));
+    REQUIRE(file.dispatch_log.size() == 1);
+    CHECK(file.dispatch_log[0].binding == "fs.remove");
+    CHECK(file.dispatch_log[0].ok);
+
+    const imza::ToolOutput empty = imza::test::run_lua(
+        "imza.fs.remove([[" + fx.dir.file("empty").string() + "]])",
+        approving_host(fx));
+    REQUIRE(empty.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK_FALSE(fs::exists(fx.dir.file("empty")));
+
+    const imza::ToolOutput full = imza::test::run_lua("imza.fs.remove([["
+            + fx.dir.file("full").string() + "]])\nprint('dead')",
+        fx.host());
+    CHECK(full.kind == imza::ToolOutput::Kind::ERROR);
+    CHECK(full.text.find("not empty") != std::string::npos);
+    CHECK(fs::exists(fx.dir.file("full")));
+}
+
+TEST_CASE("imza.fs.remove fails closed unattended")
+{
+    WorkspaceFixture fx;
+    imza::test::write_file(fx.dir.file("keep.txt"), "keep\n");
+    const std::string path = fx.dir.file("keep.txt").string();
+
+    // No ask callback: the always-ask removal fails closed.
+    const imza::ToolOutput out = imza::test::run_lua(
+        "imza.fs.remove([[" + path + "]])\nprint('dead')", fx.host());
+    CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
+    CHECK(out.text.find("denied") != std::string::npos);
+    CHECK(fs::exists(fx.dir.file("keep.txt")));
+}
+
+TEST_CASE("imza.shell refuses deletion programs with binding guidance")
+{
+    ShellFixture fx;
+    const imza::ToolOutput out = imza::test::run_lua(
+        "imza.shell('rm -rf build')\nprint('dead')", fx.host());
+    CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
+    CHECK(out.text.find("'rm' is not permitted") != std::string::npos);
+    CHECK(out.text.find("imza.fs.remove") != std::string::npos);
+    CHECK(out.text.find("dead") == std::string::npos);
+    CHECK(fx.ask_calls == 0);
+
+    // A session grant for the program does not re-enable it.
+    ShellFixture granted;
+    CHECK(granted.install({ imza::ShellCommandGrant { "rm", std::nullopt } }));
+    const imza::ToolOutput still_denied = imza::test::run_lua(
+        "imza.shell('rm file')\nprint('dead')", granted.host());
+    CHECK(still_denied.kind == imza::ToolOutput::Kind::ERROR);
+    CHECK(still_denied.text.find("imza.fs.remove") != std::string::npos);
+}
+
 TEST_CASE("canvas caps charts per run and fails closed")
 {
     const imza::ToolOutput out = imza::test::run_lua(R"lua(

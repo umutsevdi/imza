@@ -395,6 +395,39 @@ bool save_text(
     return true;
 }
 
+bool make_directories(const std::string& path, std::string& err)
+{
+    std::error_code ec;
+    std::filesystem::create_directories(std::filesystem::path(path), ec);
+    if (ec) {
+        err = "cannot create directory: " + path;
+        return false;
+    }
+    return true;
+}
+
+bool remove_path(const std::string& path, std::string& err)
+{
+    std::error_code ec;
+    const std::filesystem::path target(path);
+    if (std::filesystem::is_directory(target, ec) && !ec) {
+        // rmdir semantics: only an empty directory can be removed.
+        if (!std::filesystem::is_empty(target, ec)) {
+            err = ec ? "cannot inspect directory: " + path
+                     : "directory is not empty: " + path;
+            return false;
+        }
+        std::filesystem::remove(target, ec);
+    } else {
+        std::filesystem::remove(target, ec);
+    }
+    if (ec) {
+        err = "cannot remove: " + path;
+        return false;
+    }
+    return true;
+}
+
 std::optional<std::string> insert_text(const std::string& content,
     const std::string& text, std::size_t line, std::string& err)
 {

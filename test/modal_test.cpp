@@ -465,7 +465,8 @@ TEST_CASE("reject with reason reaches transcript and injected result")
         env.requests.push_back(req);
         if ((*round)++ == 0) {
             cb(imza::make_tool_call_event({ "lua",
-                R"json({"script":"imza.shell('rm -rf /')"})json", "danger" }));
+                R"json({"script":"imza.shell('git push origin main')"})json",
+                "danger" }));
         }
         cb(imza::make_done_event());
         return imza::Status::OK;

@@ -278,6 +278,12 @@ CliResult run_cli(int argc, char** argv)
             return finished(2);
         }
         const ShellInvocation& invocation = analysis.invocations.front();
+        if (shell_deletion_denied(invocation.program)) {
+            std::println(stderr,
+                "cannot allow '{}': deletion runs through imza.fs.remove",
+                invocation.program);
+            return finished(2);
+        }
         command_grants.push_back({ invocation.program, invocation.subcommand });
     }
 

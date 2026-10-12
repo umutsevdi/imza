@@ -64,6 +64,16 @@ namespace {
         return std::holds_alternative<WriteFileRequest>(request);
     }
 
+    bool is_mkdir(const FilesystemRequest& request)
+    {
+        return std::holds_alternative<MakeDirectoryRequest>(request);
+    }
+
+    bool is_remove(const FilesystemRequest& request)
+    {
+        return std::holds_alternative<RemoveRequest>(request);
+    }
+
     void set_target(FilesystemRequest& request, std::filesystem::path target)
     {
         std::visit(
@@ -103,6 +113,10 @@ std::string_view filesystem_request_name(const FilesystemRequest& request)
                 return "insert";
             } else if constexpr (std::is_same_v<T, EditFileRequest>) {
                 return "edit";
+            } else if constexpr (std::is_same_v<T, MakeDirectoryRequest>) {
+                return "mkdir";
+            } else if constexpr (std::is_same_v<T, RemoveRequest>) {
+                return "remove";
             } else {
                 return "write";
             }
@@ -117,7 +131,8 @@ FilesystemEvaluation evaluate_filesystem_request(
         return reject("filesystem environment is not ready");
     }
     if (context.mode == SessionMode::PLAN
-        && (is_edit(request) || is_write(request))) {
+        && (is_edit(request) || is_write(request) || is_mkdir(request)
+            || is_remove(request))) {
         return reject("unavailable in Plan mode");
     }
 
@@ -183,6 +198,42 @@ FilesystemEvaluation evaluate_filesystem_request(
             }
         }
     }
+    if (is_mkdir(request)) {
+        // make_directories creates every missing parent; a non-directory
+        // ancestor is reported by the effect itself.
+        if (exists && !std::filesystem::is_directory(target, error)) {
+            return reject("target is not a directory");
+        }
+    }
+    if (is_remove(request)) {
+        // The working directory, the project root, and any ancestor of
+        // either are never removable: deleting them would destroy the
+        // session's own ground. Checked first so it wins over the
+        // emptiness rule for a non-empty root.
+        const std::filesystem::path& root = context.workspace->project_root
+            ? *context.workspace->project_root
+            : working_directory;
+        if (path_within(target, working_directory)
+            || path_within(target, root)) {
+            return reject("refusing to remove a session root directory");
+        }
+        if (!exists) {
+            return reject("target does not exist");
+        }
+        const bool directory = std::filesystem::is_directory(target, error);
+        if (error) {
+            return reject(CANNOT_INSPECT_TARGET);
+        }
+        if (!directory && !std::filesystem::is_regular_file(target, error)) {
+            return reject("target is not a file or directory");
+        }
+        if (directory && !std::filesystem::is_empty(target, error)) {
+            if (error) {
+                return reject(CANNOT_INSPECT_TARGET);
+            }
+            return reject("directory is not empty");
+        }
+    }
     if (error) {
         return reject(CANNOT_INSPECT_TARGET);
     }
@@ -192,7 +243,19 @@ FilesystemEvaluation evaluate_filesystem_request(
         return { { PermissionDecision::Kind::ACCEPT, "" }, request };
     }
 
-    const bool write   = is_edit(request) || is_write(request);
+    // Removal is its own class: it always asks, inside the workspace
+    // included, unless a session grant already covers the target.
+    if (is_remove(request)) {
+        if (matches_path(*context.grants, target)) {
+            return { { PermissionDecision::Kind::ACCEPT, "" }, request };
+        }
+        return { { PermissionDecision::Kind::ASK,
+                     "removing files requires approval" },
+            request };
+    }
+
+    const bool write
+        = is_edit(request) || is_write(request) || is_mkdir(request);
     const bool granted = matches_path(*context.grants, target);
     const std::filesystem::path& project_root = context.workspace->project_root
         ? *context.workspace->project_root

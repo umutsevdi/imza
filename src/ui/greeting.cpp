@@ -13,7 +13,7 @@ namespace {
 
     constexpr std::array<std::string_view, 5> NIGHT_LINES = {
         "It's getting late — remember to take care of yourself.",
-        "The code will still be here tomorrow; so should a well-rested you.",
+        "The code will still be here tomorrow; so should\na well-rested you.",
         "Consider calling it a night.",
         "Rest is part of the loop too.",
         "Ship when it's right, not when it's late.",
@@ -25,15 +25,15 @@ namespace {
         "Let's build something worth reviewing.",
         "Give each subagent role its own model with /subagents.",
         "Subagents share your permission grants.",
-        "Context compacts automatically near 80% of the model's limit.",
-        "Type /make-skill to draft a skill from a workflow description.",
-        "Flag MCP servers to autoload so they connect at startup.",
-        "Jump straight into a saved session with imza -s <session-id>.",
-        "You can add the same provider twice and switch when one is rate "
+        "Context compacts automatically near 80% of the model's\nlimit.",
+        "Type /make-skill to draft a skill from a workflow\ndescription.",
+        "Flag MCP servers to autoload so they connect at\nstartup.",
+        "Jump straight into a saved session\nwith imza -s <session-id>.",
+        "You can add the same provider twice and switch \nwhen one is rate "
         "limited.",
         "Keep up to date with imza --update.",
-        "Name extra instruction files in your config to load house rules.",
-        "You can pre-approve directories and commands in your config.",
+        "Name extra instruction files in your config to \nload house rules.",
+        "You can pre-approve directories and commands in\nyour config.",
     };
 
     // FNV-1a over the seed bytes and bucket, so the pick is stable and

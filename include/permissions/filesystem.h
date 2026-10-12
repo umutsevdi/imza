@@ -79,8 +79,25 @@ struct WriteFileRequest {
     bool operator==(const WriteFileRequest&) const = default;
 };
 
+// Creates `target` and every missing parent. Write-class: trusted roots
+// accept it in Build, external targets ask like any other write.
+struct MakeDirectoryRequest {
+    std::filesystem::path target;
+
+    bool operator==(const MakeDirectoryRequest&) const = default;
+};
+
+// Removes a file, or a directory only when it is empty. Its own policy
+// class: it always asks, inside the workspace included.
+struct RemoveRequest {
+    std::filesystem::path target;
+
+    bool operator==(const RemoveRequest&) const = default;
+};
+
 using FilesystemRequest = std::variant<ReadFileRequest, ListDirectoryRequest,
-    FindFilesRequest, InsertFileRequest, EditFileRequest, WriteFileRequest>;
+    FindFilesRequest, InsertFileRequest, EditFileRequest, WriteFileRequest,
+    MakeDirectoryRequest, RemoveRequest>;
 
 struct FilesystemEvaluation {
     PermissionDecision decision;

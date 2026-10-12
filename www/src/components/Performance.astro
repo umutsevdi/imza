@@ -7,14 +7,14 @@
 // than hardcoded. Ordered by memory once idle, which is the metric that
 // decides whether a tool can sit open all day.
 const agents = [
-  { name: "imza", frame: 45, pssFirst: 8.8, rssFirst: 18.5, pssIdle: 12.3, rssIdle: 26.5, disk: 32 },
-  { name: "codex", frame: 76, pssFirst: 52.6, rssFirst: 56.1, pssIdle: 348.1, rssIdle: 527.8, disk: 281 },
-  { name: "claude", frame: 155, pssFirst: 186.5, rssFirst: 192.8, pssIdle: 186.5, rssIdle: 192.6, disk: 245 },
-  { name: "pi", frame: 452, pssFirst: 85.7, rssFirst: 124.7, pssIdle: 104.2, rssIdle: 129.5, disk: 118 },
-  { name: "opencode", frame: 712, pssFirst: 261.5, rssFirst: 272.3, pssIdle: 759.5, rssIdle: 767.1, disk: 177 },
-  { name: "crush", frame: 790, pssFirst: 87.8, rssFirst: 91.0, pssIdle: 88.6, rssIdle: 91.9, disk: 87 },
-  { name: "cline", frame: 1126, pssFirst: 271.1, rssFirst: 306.3, pssIdle: 397.9, rssIdle: 479.0, disk: 432 },
-  { name: "gemini", frame: 1463, pssFirst: 334.5, rssFirst: 419.8, pssIdle: 363.5, rssIdle: 423.0, disk: 98 }
+  { name: "imza", frame: 50, pssFirst: 8.4, rssFirst: 18.0, pssIdle: 12.4, rssIdle: 26.0, disk: 32 },
+  { name: "codex", frame: 17, pssFirst: 48.4, rssFirst: 51.9, pssIdle: 229.6, rssIdle: 290.7, disk: 281 },
+  { name: "claude", frame: 166, pssFirst: 193.4, rssFirst: 199.6, pssIdle: 193.4, rssIdle: 190.5, disk: 245 },
+  { name: "pi", frame: 392, pssFirst: 113.5, rssFirst: 124.1, pssIdle: 132.7, rssIdle: 129.2, disk: 118 },
+  { name: "opencode", frame: 623, pssFirst: 266.4, rssFirst: 278.9, pssIdle: 756.0, rssIdle: 764.0, disk: 177 },
+  { name: "gemini", frame: 1319, pssFirst: 357.1, rssFirst: 419.9, pssIdle: 387.6, rssIdle: 422.1, disk: 98 },
+  { name: "cline", frame: 1935, pssFirst: 279.0, rssFirst: 302.4, pssIdle: 419.8, rssIdle: 477.6, disk: 432 },
+  { name: "crush", frame: 2062, pssFirst: 90.5, rssFirst: 94.0, pssIdle: 91.5, rssIdle: 94.8, disk: 87 },
 ];
 
 // Lower is better for every column, so the minimum wins.
@@ -27,7 +27,7 @@ const best = {
   disk: Math.min(...agents.map((a) => a.disk))
 };
 
-const fmt = (v, unit) =>
+const fmt = (v: any, unit: any) =>
   unit === "ms"
     ? `${v} ms`
     : unit === "mb0"
@@ -158,7 +158,7 @@ const fmt = (v, unit) =>
 
       <p class="perf-repro">
         Reproduce with <code
-          >python3 scripts/agent_bench.py --runs 10 --all</code
+          >python3 scripts/agent_bench.py --runs 15 --all</code
         >.
       </p>
     </div>

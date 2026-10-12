@@ -111,6 +111,16 @@ namespace {
         return WriteFileRequest { path, "updated" };
     }
 
+    FilesystemRequest mkdir_request(const std::filesystem::path& path)
+    {
+        return MakeDirectoryRequest { path };
+    }
+
+    FilesystemRequest remove_request(const std::filesystem::path& path)
+    {
+        return RemoveRequest { path };
+    }
+
     ShellEvaluation shell_policy(std::string command,
         const PermissionContext& context,
         std::chrono::seconds timeout = std::chrono::seconds(10))
@@ -820,6 +830,106 @@ TEST_CASE("authorized_skill_path accepts only the canonical target")
     // Nor one that omits the path, as an unnormalized model call does.
     CHECK_FALSE(authorized_skill_path(
         skill, { "skill", R"({"name":"docs"})", "", "" }));
+}
+
+TEST_CASE("mkdir follows the write policy, remove always asks")
+{
+    PermissionFixture fixture;
+
+    // mkdir is write-class: rejected in Plan, automatic inside the
+    // workspace in Build, asking outside.
+    const auto planned = evaluate_filesystem_request(
+        mkdir_request(fixture.workspace / "new-dir"),
+        fixture.context(Session::Mode::PLAN));
+    CHECK(planned.decision.kind == PermissionDecision::Kind::REJECT);
+
+    const auto built = evaluate_filesystem_request(
+        mkdir_request(fixture.workspace / "new-dir"),
+        fixture.context(Session::Mode::BUILD));
+    CHECK(built.decision.kind == PermissionDecision::Kind::ACCEPT);
+    REQUIRE(built.request.has_value());
+    CHECK(filesystem_target(*built.request) == fixture.workspace / "new-dir");
+
+    const auto outside = evaluate_filesystem_request(
+        mkdir_request(fixture.outside / "new-dir"),
+        fixture.context(Session::Mode::BUILD));
+    CHECK(outside.decision.kind == PermissionDecision::Kind::ASK);
+
+    // remove always asks, even inside the trusted workspace in Build.
+    const auto inside_remove = evaluate_filesystem_request(
+        remove_request(fixture.workspace / "inside.txt"),
+        fixture.context(Session::Mode::BUILD));
+    CHECK(inside_remove.decision.kind == PermissionDecision::Kind::ASK);
+    CHECK(inside_remove.decision.reason.find("removing") != std::string::npos);
+
+    // A directory grant suppresses the ask; a removal is then accepted.
+    const PermissionGrant directory = ExternalGrant { fixture.workspace };
+    const auto granted              = evaluate_filesystem_request(
+        remove_request(fixture.workspace / "inside.txt"),
+        fixture.context(Session::Mode::BUILD, { directory }));
+    CHECK(granted.decision.kind == PermissionDecision::Kind::ACCEPT);
+}
+
+TEST_CASE("remove rejects non-empty directories and session roots")
+{
+    PermissionFixture fixture;
+    std::filesystem::create_directories(fixture.workspace / "full");
+    std::filesystem::create_directories(fixture.workspace / "empty");
+    imza::test::write_file(fixture.workspace / "full" / "child.txt", "x\n");
+
+    const auto non_empty = evaluate_filesystem_request(
+        remove_request(fixture.workspace / "full"),
+        fixture.context(Session::Mode::BUILD));
+    CHECK(non_empty.decision.kind == PermissionDecision::Kind::REJECT);
+    CHECK(non_empty.decision.reason.find("not empty") != std::string::npos);
+
+    const auto empty = evaluate_filesystem_request(
+        remove_request(fixture.workspace / "empty"),
+        fixture.context(Session::Mode::BUILD));
+    CHECK(empty.decision.kind == PermissionDecision::Kind::ASK);
+
+    // The working directory, the project root, and any ancestor of either
+    // are never removable, even with a grant covering them.
+    const PermissionGrant grant = ExternalGrant { fixture.root() };
+    for (const auto& target : { fixture.workspace, fixture.root() }) {
+        const auto result = evaluate_filesystem_request(remove_request(target),
+            fixture.context(Session::Mode::BUILD, { grant }));
+        CHECK(result.decision.kind == PermissionDecision::Kind::REJECT);
+        CHECK(result.decision.reason.find("session root") != std::string::npos);
+    }
+
+    const auto missing = evaluate_filesystem_request(
+        remove_request(fixture.workspace / "absent.txt"),
+        fixture.context(Session::Mode::BUILD));
+    CHECK(missing.decision.kind == PermissionDecision::Kind::REJECT);
+    CHECK(missing.decision.reason.find("does not exist") != std::string::npos);
+}
+
+TEST_CASE("shell deletion programs are rejected with binding guidance")
+{
+    PermissionFixture fixture;
+    // Even a whole-program session grant cannot re-enable a deletion.
+    const PermissionStore::Grants grants { PermissionGrant {
+        ShellCommandGrant { "rm", std::nullopt } } };
+    const ShellEvaluation denied = shell_policy(
+        "rm -rf build", fixture.context(Session::Mode::BUILD, grants));
+    CHECK(denied.decision.kind == PermissionDecision::Kind::REJECT);
+    CHECK(denied.decision.reason.find("'rm' is not permitted")
+        != std::string::npos);
+    CHECK(denied.decision.reason.find("imza.fs.remove") != std::string::npos);
+
+    for (std::string_view program :
+        { "rmdir", "del", "erase", "unlink", "shred" }) {
+        CHECK(shell_deletion_denied(program));
+        const ShellEvaluation result
+            = shell_policy(std::string(program) + " target",
+                fixture.context(Session::Mode::BUILD, grants));
+        CHECK(result.decision.kind == PermissionDecision::Kind::REJECT);
+        CHECK(
+            result.decision.reason.find("imza.fs.remove") != std::string::npos);
+    }
+    CHECK_FALSE(shell_deletion_denied("ls"));
+    CHECK_FALSE(shell_deletion_denied("git"));
 }
 
 TEST_CASE("skill evaluation binds approval to the canonical instruction path")

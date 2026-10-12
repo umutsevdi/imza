@@ -16,6 +16,14 @@ bool load_text(const std::string& path, std::string& out, std::string& err);
 bool save_text(
     const std::string& path, const std::string& content, std::string& err);
 
+// Creates `path` and every missing parent. Reached only after permission
+// authorization.
+bool make_directories(const std::string& path, std::string& err);
+
+// Removes a file, or a directory only when it is empty. Reached only after
+// permission authorization.
+bool remove_path(const std::string& path, std::string& err);
+
 // Pure content transforms. Each returns the new content or an error;
 // the caller decides whether to persist. Semantics match the lua
 // imza.fs.* bindings:

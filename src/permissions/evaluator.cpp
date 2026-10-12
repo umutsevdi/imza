@@ -135,6 +135,18 @@ ShellEvaluation evaluate_shell_request(
             std::move(request), { } };
     }
     const ShellAnalysis analysis = analyze_shell(request.command);
+    // Deletion programs are rejected outright, before grants: deletion
+    // goes through imza.fs.remove so it stays behind the filesystem gate.
+    for (const ShellInvocation& invocation : analysis.invocations) {
+        if (!shell_deletion_denied(invocation.program)) {
+            continue;
+        }
+        std::string guidance = "'" + invocation.program
+            + "' is not permitted; use imza.fs.remove(path) to delete a file "
+              "or an empty directory";
+        return { { PermissionDecision::Kind::REJECT, std::move(guidance) },
+            std::move(request), { } };
+    }
     if (analysis.reuse == ShellAnalysis::Reuse::ONCE) {
         return { { PermissionDecision::Kind::ASK,
                      "shell syntax requires approval for each execution" },

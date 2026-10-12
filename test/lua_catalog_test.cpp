@@ -30,7 +30,7 @@ local paths = {
   "shell",
   "web.fetch", "web.search",
   "mcp.call",
-  "fs.insert", "fs.edit", "fs.write",
+  "fs.insert", "fs.edit", "fs.write", "fs.mkdir", "fs.remove",
   "canvas.line", "canvas.bar", "canvas.pie", "canvas.surface",
 }
 for _, path in ipairs(paths) do
