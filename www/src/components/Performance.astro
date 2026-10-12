@@ -7,14 +7,14 @@
 // than hardcoded. Ordered by memory once idle, which is the metric that
 // decides whether a tool can sit open all day.
 const agents = [
-  { name: "imza", frame: 50, pssFirst: 8.4, rssFirst: 18.0, pssIdle: 12.4, rssIdle: 26.0, disk: 32 },
-  { name: "codex", frame: 17, pssFirst: 48.4, rssFirst: 51.9, pssIdle: 229.6, rssIdle: 290.7, disk: 281 },
-  { name: "claude", frame: 166, pssFirst: 193.4, rssFirst: 199.6, pssIdle: 193.4, rssIdle: 190.5, disk: 245 },
-  { name: "pi", frame: 392, pssFirst: 113.5, rssFirst: 124.1, pssIdle: 132.7, rssIdle: 129.2, disk: 118 },
-  { name: "opencode", frame: 623, pssFirst: 266.4, rssFirst: 278.9, pssIdle: 756.0, rssIdle: 764.0, disk: 177 },
-  { name: "gemini", frame: 1319, pssFirst: 357.1, rssFirst: 419.9, pssIdle: 387.6, rssIdle: 422.1, disk: 98 },
-  { name: "cline", frame: 1935, pssFirst: 279.0, rssFirst: 302.4, pssIdle: 419.8, rssIdle: 477.6, disk: 432 },
-  { name: "crush", frame: 2062, pssFirst: 90.5, rssFirst: 94.0, pssIdle: 91.5, rssIdle: 94.8, disk: 87 },
+  { name: "imza", frame: 11, pssFirst: 9.1, rssFirst: 19.0, pssIdle: 13.0, rssIdle: 26.9, disk: 32 },
+  { name: "codex", frame: 31, pssFirst: 49.3, rssFirst: 52.7, pssIdle: 49.3, rssIdle: 52.7, disk: 281 },
+  { name: "claude", frame: 152, pssFirst: 187.4, rssFirst: 193.9, pssIdle: 187.5, rssIdle: 185.0, disk: 245 },
+  { name: "pi", frame: 410, pssFirst: 93.2, rssFirst: 124.1, pssIdle: 111.6, rssIdle: 129.2, disk: 118 },
+  { name: "crush", frame: 814, pssFirst: 91.4, rssFirst: 94.7, pssIdle: 92.8, rssIdle: 95.7, disk: 87 },
+  { name: "opencode", frame: 1175, pssFirst: 270.4, rssFirst: 278.2, pssIdle: 872.6, rssIdle: 869.3, disk: 177 },
+  { name: "gemini", frame: 1830, pssFirst: 357.1, rssFirst: 419.9, pssIdle: 387.6, rssIdle: 422.1, disk: 98 },
+  { name: "cline", frame: 1935, pssFirst: 279.0, rssFirst: 302.4, pssIdle: 279.8, rssIdle: 306.6, disk: 432 },
 ];
 
 // Lower is better for every column, so the minimum wins.
@@ -109,10 +109,7 @@ const fmt = (v: any, unit: any) =>
         numbers comparable: several agents hand work to a background daemon that
         re-parents to init and outlives the launcher, so without containment the
         daemon is invisible to measurement and the next run attaches to it warm
-        instead of starting cold. Measured that way Codex appeared to use
-        51&nbsp;MB and Cline 21&nbsp;MB; counted properly they use 73&nbsp;MB
-        and 399&nbsp;MB. Memory is summed over the agent's whole process tree
-        for the same reason.
+        instead of starting cold. Memory is summed over the agent's whole process tree.
       </p>
       <p>
         The empty directory matters too: a tool that scans the workspace at

@@ -33,6 +33,11 @@ and cline like 21 MB; counted properly they are 76 MB and 419 MB. Without
 bwrap installed the script still runs, but daemon-spawning agents are
 undercounted.
 
+Agents launch with the flags in AGENT_ARGS so none is measured parked on a
+first-run gate (folder-trust prompts, onboarding): the bench never sends
+keystrokes, so a tool waiting on one would have its post-gate loading go
+uncounted.
+
 Usage:
     scripts/agent_bench.py                        # imza, if built
     scripts/agent_bench.py --all                  # every known agent on PATH
@@ -56,7 +61,7 @@ import sys
 import time
 
 # Names discovered by --all, in the order they are reported.
-KNOWN_AGENTS = ("imza", "claude", "codex", "crush", "opencode",
+KNOWN_AGENTS = ("build-release/release/imza", "claude", "codex", "crush", "opencode",
                 "gemini", "cline", "pi")
 
 DEFAULT_BINARY = "build-release/release/imza"
@@ -184,6 +189,21 @@ def resolve(command: str) -> str:
     return shutil.which(command) or command
 
 
+# Startup flags that put an agent in its normal working state. Without
+# --skip-trust gemini parks on its folder-trust gate in the fresh bench
+# workspace (nothing answers the prompt, so trust is never recorded) and
+# never loads the rest of itself, undercounting idle memory. Keyed by the
+# resolved executable name.
+AGENT_ARGS = {
+    "gemini": ["--skip-trust"],
+}
+
+
+def agent_command(command: str) -> list[str]:
+    """The agent invocation with benchmark-state flags folded in."""
+    return [command, *AGENT_ARGS.get(os.path.basename(command), [])]
+
+
 def sandboxed(command: str, workdir: str) -> list[str]:
     """Wrap the agent so nothing it spawns outlives the measurement.
 
@@ -205,7 +225,7 @@ def sandboxed(command: str, workdir: str) -> list[str]:
     the caveat that daemon-spawning agents will then be undercounted.
     """
     if not shutil.which("bwrap"):
-        return [command]
+        return agent_command(command)
     home = os.path.expanduser("~")
     return [
         "bwrap",
@@ -224,7 +244,7 @@ def sandboxed(command: str, workdir: str) -> list[str]:
         "--setenv", "HOME", home,
         "--setenv", "TERM", "xterm-256color",
         "--chdir", workdir,
-        command,
+        *agent_command(command),
     ]
 
 
