@@ -31,6 +31,9 @@ struct ParseState {
     Usage usage;
     bool usage_emitted = false;
     bool terminal      = false;
+    // Anthropic carries its stop reason on message_delta before
+    // message_stop; empty for other dialects.
+    std::string stop_reason;
 };
 
 std::vector<std::string> stream_headers();

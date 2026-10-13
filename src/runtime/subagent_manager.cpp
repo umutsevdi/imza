@@ -92,8 +92,13 @@ void SubagentManager::prune_completed()
             completed_ids.insert(task.id);
             return true;
         });
+        // A completion callback may prune from the finishing subagent's own
+        // worker; reaping that jthread would join the calling thread. Leave
+        // it for a later prune (or stop()) from another thread.
+        const std::thread::id caller = std::this_thread::get_id();
         for (auto it = _workers.begin(); it != _workers.end();) {
-            if (!completed_ids.contains(it->first)) {
+            if (!completed_ids.contains(it->first)
+                || it->second.get_id() == caller) {
                 ++it;
                 continue;
             }

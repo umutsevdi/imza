@@ -269,6 +269,15 @@ namespace openai {
                 }
             }
             if (first.finish_reason) {
+                if (*first.finish_reason == "length") {
+                    flush_tool_accums(state, outs);
+                    emit_usage_once(state, u.value_or(Usage { }), outs);
+                    outs.push_back(make_error_event(Status::TRUNCATED,
+                        "response cut off at the output "
+                        "token limit"));
+                    outs.push_back(make_done_event());
+                    return;
+                }
                 flush_tool_accums(state, outs);
                 done = true;
             }

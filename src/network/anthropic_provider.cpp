@@ -201,7 +201,11 @@ namespace anthropic {
         struct Usage {
             std::uint64_t output_tokens = 0;
         };
+        struct Delta {
+            std::optional<std::string> stop_reason;
+        };
         std::optional<Usage> usage;
+        std::optional<Delta> delta;
     };
 
     struct BlockDelta {
@@ -264,6 +268,9 @@ namespace anthropic {
                 state.usage.completion = payload.usage->output_tokens;
                 state.usage.total = state.usage.prompt + state.usage.completion;
             }
+            if (payload.delta && payload.delta->stop_reason) {
+                state.stop_reason = *payload.delta->stop_reason;
+            }
             return;
         }
         if (event == "content_block_delta") {
@@ -313,6 +320,10 @@ namespace anthropic {
             state.terminal = true;
             flush_tool_accums(state, outs);
             emit_usage_once(state, state.usage, outs);
+            if (state.stop_reason == "max_tokens") {
+                outs.push_back(make_error_event(Status::TRUNCATED,
+                    "response cut off at the output token limit"));
+            }
             outs.push_back(make_done_event());
             return;
         }

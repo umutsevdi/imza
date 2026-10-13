@@ -18,7 +18,7 @@ using namespace ftxui;
 
 namespace {
 
-    constexpr int SUBAGENT_ROLES = 3;
+    constexpr int SUBAGENT_ROLES = 4;
 
     SubagentRole role_at(int index)
     {
@@ -27,6 +27,9 @@ namespace {
         }
         if (index == 1) {
             return SubagentRole::RESEARCH;
+        }
+        if (index == 2) {
+            return SubagentRole::REVIEWER;
         }
         return SubagentRole::BASIC;
     }
@@ -39,6 +42,9 @@ namespace {
         if (role == SubagentRole::RESEARCH) {
             return "Research";
         }
+        if (role == SubagentRole::REVIEWER) {
+            return "Reviewer";
+        }
         return "Basic";
     }
 
@@ -49,6 +55,9 @@ namespace {
         }
         if (role == SubagentRole::RESEARCH) {
             return "read-only discovery and code review";
+        }
+        if (role == SubagentRole::REVIEWER) {
+            return "runs AI Review and Handoff passes";
         }
         return "small UI tasks such as session titles";
     }

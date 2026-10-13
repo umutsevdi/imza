@@ -173,6 +173,8 @@ struct StoredModels {
     std::optional<StoredModelChoice> builder;
     std::optional<StoredModelChoice> researcher;
     std::optional<StoredModelChoice> basic;
+    // Older files predate the reviewer role; absent keeps the default.
+    std::optional<StoredModelChoice> reviewer;
 };
 
 struct StoredSkills {
@@ -367,7 +369,8 @@ Status load_config(
         };
         if (!parse_model(stored.models->builder, SubagentRole::BUILDER)
             || !parse_model(stored.models->researcher, SubagentRole::RESEARCH)
-            || !parse_model(stored.models->basic, SubagentRole::BASIC)) {
+            || !parse_model(stored.models->basic, SubagentRole::BASIC)
+            || !parse_model(stored.models->reviewer, SubagentRole::REVIEWER)) {
             return fail(Status::CONFIG_ERROR, "invalid models configuration");
         }
     }
@@ -663,6 +666,7 @@ namespace {
         models.builder    = write_subagent(SubagentRole::BUILDER);
         models.researcher = write_subagent(SubagentRole::RESEARCH);
         models.basic      = write_subagent(SubagentRole::BASIC);
+        models.reviewer   = write_subagent(SubagentRole::REVIEWER);
         stored.models     = std::move(models);
 
         StoredSkills skills;

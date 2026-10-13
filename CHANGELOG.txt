@@ -8,7 +8,7 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
-0.6.2 - UNRELEASED
+0.6.2 - 2026-10-13
 -------------------------------------------------------------------------------
 <https://github.com/umutsevdi/imza/releases/tag/v0.6.2>
 
@@ -23,6 +23,8 @@ Changes:
     ones you already have.
   - On Windows the multi-line shortcut is now shown as Alt+Shift+Enter, since
     terminals reserve Alt+Enter for the full-screen toggle.
+  - The reviewer now has its own model: configure it under Reviewer in
+    `/subagents`, or leave it on Default to follow the main chat model.
 
 -------------------------------------------------------------------------------
 0.6.1 - 2026-10-12

@@ -456,13 +456,18 @@ TEST_CASE("subagent defaults follow the active chat model")
     const auto research
         = providers.subagent_selection(imza::SubagentRole::RESEARCH);
     const auto basic = providers.subagent_selection(imza::SubagentRole::BASIC);
+    const auto reviewer
+        = providers.subagent_selection(imza::SubagentRole::REVIEWER);
     REQUIRE(builder.has_value());
     REQUIRE(research.has_value());
     REQUIRE(basic.has_value());
+    REQUIRE(reviewer.has_value());
     CHECK(builder->model == "chat-model");
     CHECK(builder->reasoning_effort == "medium");
     CHECK(research->reasoning_effort == "low");
     CHECK(basic->reasoning_effort == "off");
+    CHECK(reviewer->model == "chat-model");
+    CHECK(reviewer->reasoning_effort == "low");
 }
 
 TEST_CASE("subagent configuration does not change main model reasoning")

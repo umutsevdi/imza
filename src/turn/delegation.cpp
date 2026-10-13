@@ -303,6 +303,7 @@ SubagentHandle Delegation::run_subagent(std::string prompt, std::string model,
         variant = selection->reasoning_effort;
     }
     const std::string task_prompt = prompt;
+    const Config config           = _state->providers->config();
     if (options.transcript) {
         options.transcript->begin_send(task_prompt);
         options.transcript->append_assistant(model, variant);
@@ -314,7 +315,7 @@ SubagentHandle Delegation::run_subagent(std::string prompt, std::string model,
     return _state->subagents->start(
         std::move(prompt), model, variant, options.visible,
         [this, task_prompt, model, variant, route = std::move(route),
-            connection_id, transcript, deadline,
+            connection_id, transcript, deadline, config,
             max_output_tokens = options.max_output_tokens](
             const std::stop_token& stop) mutable {
             if (!connection_id.empty()) {
@@ -337,20 +338,37 @@ SubagentHandle Delegation::run_subagent(std::string prompt, std::string model,
                     || (deadline
                         && std::chrono::steady_clock::now() >= *deadline);
             };
-            req.messages
-                = { { Message::Type::SYSTEM, full_system_prompt(*_state) },
-                      { Message::Type::USER, task_prompt } };
+            // Review-style passes answer in structured JSON with no
+            // tools; the lean research prompt avoids inviting interactive
+            // prose that would break the shape parsers.
+            req.messages = { { Message::Type::SYSTEM,
+                                 build_subagent_system_prompt(*_state->prompts,
+                                     _state->environment->system().get(),
+                                     _state->environment->workspace().get(),
+                                     SubagentRole::RESEARCH, &config) },
+                { Message::Type::USER, task_prompt } };
             apply_reasoning(req, route.dialect, variant, *_state->providers);
             std::string output;
+            // The stream reports terminal failures (truncation, provider
+            // errors) through the callback, not the return status; capture
+            // them so a cut-off reply is not parsed as a valid document.
+            Status stream_error           = Status::OK;
             const StreamCallback callback = [&](const StreamEvent& event) {
                 if (transcript) {
                     transcript->apply(event, ModelPricing { });
+                }
+                if (event.kind == StreamEvent::Kind::ERROR) {
+                    stream_error = event.error;
+                    return;
                 }
                 if (event.kind == StreamEvent::Kind::CONTENT_DELTA) {
                     output += event.text;
                 }
             };
             Status status = _runner.run_stream(req, route, callback);
+            if (status == Status::OK && stream_error != Status::OK) {
+                status = stream_error;
+            }
             if (stop.stop_requested()) {
                 status = Status::CANCELLED;
             } else if (deadline

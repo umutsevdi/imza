@@ -115,3 +115,31 @@ TEST_CASE("a single subagent can be cancelled")
     CHECK(handle.completion.get().status == imza::Status::CANCELLED);
     CHECK_FALSE(manager.cancel(handle.id + 1));
 }
+
+// A completion callback runs on the finishing subagent's worker; pruning
+// there must not reap (and join) that same thread.
+TEST_CASE("pruning from a completion callback does not join the caller")
+{
+    imza::SubagentManager manager;
+    std::promise<void> pruned;
+    std::atomic<bool> callback_ran { false };
+    auto handle = manager.start(
+        "inspect", "model", "low", true,
+        [](std::stop_token) {
+            return imza::SubagentResult { imza::Status::OK, "report" };
+        },
+        [&](const imza::SubagentResult&) {
+            manager.prune_completed();
+            callback_ran.store(true);
+            pruned.set_value();
+        });
+
+    CHECK(pruned.get_future().wait_for(std::chrono::seconds(3))
+        == std::future_status::ready);
+    CHECK(callback_ran.load());
+    // The caller's own worker survives the in-callback prune and is reaped
+    // by a later prune from this thread.
+    manager.prune_completed();
+    CHECK(manager.tasks().empty());
+    CHECK(handle.completion.get().output == "report");
+}

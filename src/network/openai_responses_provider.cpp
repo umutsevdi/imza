@@ -289,6 +289,10 @@ namespace openai_responses {
             return;
         }
         if (type == "response.completed" || type == "response.incomplete") {
+            if (type == "response.incomplete") {
+                outs.push_back(make_error_event(
+                    Status::TRUNCATED, "response cut off before completion"));
+            }
             if (ev.response) {
                 finish_response(state, *ev.response, outs);
             } else {

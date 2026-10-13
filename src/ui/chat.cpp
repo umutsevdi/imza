@@ -779,6 +779,7 @@ namespace {
                 tc.name == "skill" ? "markdown" : "", 1, tc.name != "lua" };
             if (tc.name == "lua") {
                 vm.content   = lua_viewer_content(tc);
+                vm.lang      = "markdown";
                 vm.save_name = "lua-execution";
             } else {
                 vm.save_name = tc.name + "-output";

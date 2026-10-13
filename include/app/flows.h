@@ -85,13 +85,17 @@ void run_slash(ApplicationState& state, std::string_view command);
 // the handoff report. The caller supplies the prompt and consumes the raw
 // reply; everything else — model selection, the loaded-review and size
 // guards, the subagent options, the transcript, the running state — is
-// shared. `complete` runs on the subagent worker with the reply. Returns
-// the task id, or nullopt when the pass was rejected (`error` explains).
+// shared. `complete` runs on the subagent worker with the reply and
+// returns "" when the reply had the expected shape, or a parse error
+// otherwise; a non-empty result reruns the pass once with reasoning off
+// before the error surfaces (unless `retry` is false). Returns the task
+// id, or nullopt when the pass was rejected (`error` explains).
 struct ReviewPassRequest {
     ReviewPass pass = ReviewPass::FINDINGS;
     std::string prompt;
     std::string label;
-    std::function<void(std::string output)> complete;
+    std::function<std::string(std::string output)> complete;
+    bool retry = true;
 };
 
 std::optional<std::size_t> run_review_pass(

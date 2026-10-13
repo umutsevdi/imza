@@ -548,6 +548,79 @@ TEST_CASE("Anthropic emits usage and content across the message lifecycle")
     CHECK(state.terminal);
 }
 
+TEST_CASE("OpenAI reports a length finish reason as truncation")
+{
+    const auto p = imza::get_provider(imza::Route { });
+
+    imza::ParseState state;
+    const auto outs = parse_all(p, state,
+        { { "",
+            R"({"choices":[{"delta":{"content":"{\"find"},"finish_reason":"length"}]})" } });
+
+    REQUIRE(outs.size() == 3);
+    CHECK(outs[0].kind == imza::StreamEvent::Kind::CONTENT_DELTA);
+    CHECK(outs[1].kind == imza::StreamEvent::Kind::ERROR);
+    CHECK(outs[1].error == imza::Status::TRUNCATED);
+    CHECK(outs[2].kind == imza::StreamEvent::Kind::DONE);
+}
+
+TEST_CASE("Anthropic reports max_tokens stop reason as truncation")
+{
+    imza::Route route;
+    route.dialect = imza::ApiStandard::ANTHROPIC;
+    const auto p  = imza::get_provider(route);
+
+    imza::ParseState state;
+    const auto outs = parse_all(p, state,
+        { { "content_block_delta",
+              R"({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}})" },
+            { "message_delta",
+                R"({"type":"message_delta","delta":{"stop_reason":"max_tokens"},"usage":{"output_tokens":4096}})" },
+            { "message_stop", R"({"type":"message_stop"})" } });
+
+    REQUIRE(outs.size() == 4);
+    CHECK(outs[0].kind == imza::StreamEvent::Kind::CONTENT_DELTA);
+    CHECK(outs[1].kind == imza::StreamEvent::Kind::USAGE);
+    CHECK(outs[2].kind == imza::StreamEvent::Kind::ERROR);
+    CHECK(outs[2].error == imza::Status::TRUNCATED);
+    CHECK(outs[3].kind == imza::StreamEvent::Kind::DONE);
+}
+
+TEST_CASE("Anthropic end_turn is not reported as truncation")
+{
+    imza::Route route;
+    route.dialect = imza::ApiStandard::ANTHROPIC;
+    const auto p  = imza::get_provider(route);
+
+    imza::ParseState state;
+    const auto outs = parse_all(p, state,
+        { { "message_delta",
+              R"({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}})" },
+            { "message_stop", R"({"type":"message_stop"})" } });
+
+    for (const imza::StreamEvent& ev : outs) {
+        CHECK(ev.kind != imza::StreamEvent::Kind::ERROR);
+    }
+}
+
+TEST_CASE("OpenAI Responses reports an incomplete response as truncation")
+{
+    imza::Route route;
+    route.dialect       = imza::ApiStandard::OPENAI_RESPONSES;
+    const auto provider = imza::get_provider(route);
+
+    imza::ParseState state;
+    const auto outs = parse_all(provider, state,
+        { { "response.incomplete",
+            R"({"type":"response.incomplete","response":{"usage":{"input_tokens":10,"output_tokens":20,"total_tokens":30}}})" } });
+
+    REQUIRE(outs.size() == 3);
+    CHECK(outs[0].kind == imza::StreamEvent::Kind::ERROR);
+    CHECK(outs[0].error == imza::Status::TRUNCATED);
+    CHECK(outs[1].kind == imza::StreamEvent::Kind::USAGE);
+    CHECK(outs[2].kind == imza::StreamEvent::Kind::DONE);
+}
+
 TEST_CASE("base64 encodes raw bytes with standard padding")
 {
     CHECK(imza::base64_encode("").empty());

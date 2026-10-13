@@ -406,6 +406,39 @@ TEST_CASE("config roundtrip preserves subagent models")
     CHECK(json.find("\"subagents\"") == std::string::npos);
 }
 
+TEST_CASE("config roundtrip preserves the reviewer subagent model")
+{
+    const auto path = temp_file("reviewer.json");
+    imza::Config cfg;
+    imza::Connection connection;
+    connection.id = "openai";
+    cfg.providers.push_back(std::move(connection));
+    cfg.subagents[imza::SubagentRole::REVIEWER]
+        = { "openai", "gpt-reviewer", "high" };
+
+    REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
+    imza::Config loaded;
+    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
+    const auto& reviewer = loaded.subagents.at(imza::SubagentRole::REVIEWER);
+    CHECK(reviewer.provider == "openai");
+    CHECK(reviewer.model == "gpt-reviewer");
+    CHECK(reviewer.variant == "high");
+    CHECK(imza::test::read_all(path).find("\"reviewer\"") != std::string::npos);
+}
+
+TEST_CASE("config without a reviewer key keeps loading")
+{
+    const auto path = temp_file("legacy-subagents.json");
+    {
+        std::ofstream out(path);
+        out << R"({"providers": [{"id": "p"}], "models": {"basic":
+            {"provider": "p", "model": "small", "reasoning_effort": "low"}}})";
+    }
+    imza::Config loaded;
+    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
+    CHECK(loaded.subagents.count(imza::SubagentRole::REVIEWER) == 0);
+}
+
 TEST_CASE("config preserves main reasoning before a model is selected")
 {
     const auto path = temp_file("reasoning-only.json");

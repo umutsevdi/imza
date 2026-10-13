@@ -400,20 +400,19 @@ namespace {
                             const ReviewState::Snapshot current
                                 = state->review->snapshot();
                             if (!current.review) {
-                                return;
+                                return std::string { };
                             }
                             AiReviewParseResult parsed
                                 = parse_ai_review_response(
                                     output, *current.review);
                             if (auto* parse_error
                                 = std::get_if<std::string>(&parsed)) {
-                                state->session->set_error(
-                                    std::move(*parse_error));
-                                return;
+                                return std::move(*parse_error);
                             }
                             state->review->add_comments(std::move(
                                 std::get<std::vector<ReviewCommentDraft>>(
                                     parsed)));
+                            return std::string { };
                         } },
                 error);
             if (!error.empty()) {

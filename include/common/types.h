@@ -111,7 +111,8 @@ enum class Status {
     SERVER_ERROR,
     CANCELLED,
     TIMEOUT,
-    CONFIG_ERROR
+    CONFIG_ERROR,
+    TRUNCATED
 };
 
 inline std::string error_text(Status st)
@@ -129,6 +130,7 @@ inline std::string error_text(Status st)
     case Status::CANCELLED: return "Cancelled.";
     case Status::TIMEOUT: return "Timed out.";
     case Status::CONFIG_ERROR: return "Configuration error.";
+    case Status::TRUNCATED: return "Response truncated before completion.";
     }
     return "Unknown error.";
 }

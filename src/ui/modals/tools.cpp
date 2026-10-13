@@ -685,18 +685,18 @@ namespace {
         Element _viewer_body(const ViewerModal& payload)
         {
             Elements rows { _header_line(payload.title), separatorEmpty(),
-                _static_viewport(_viewer_content, payload.metadata) };
+                _static_viewport(
+                    _viewer_content, payload.metadata, _viewer_export->Render()) };
             if (!_viewer_export_status.empty()) {
                 rows.push_back(separatorEmpty());
                 rows.push_back(
                     status_text(_viewer_export_status, _viewer_export_ok));
             }
-            rows.push_back(separatorEmpty());
-            rows.push_back(hbox({ _viewer_export->Render(), filler() }));
             return vbox(std::move(rows)) | xflex;
         }
 
-        Element _static_viewport(Element content, const std::string& metadata)
+        Element _static_viewport(
+            Element content, const std::string& metadata, Element trailing)
         {
             Element viewport
                 = scroll_viewport(std::move(content), _static_view);
@@ -704,7 +704,8 @@ namespace {
             if (!metadata.empty()) {
                 rows.push_back(hint_bar(metadata));
             }
-            rows.push_back(hint_bar("↑/↓ scroll · e export · Esc close"));
+            rows.push_back(hbox({ std::move(trailing), filler(),
+                text("↑/↓ scroll · e export · Esc close") | dim }));
             return vbox(std::move(rows)) | xflex | yflex;
         }
 

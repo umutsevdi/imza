@@ -678,7 +678,43 @@ void run_slash(ApplicationState& state, std::string_view command)
 
 namespace {
 
-    constexpr std::size_t MAX_REVIEW_PASS_PROMPT_BYTES = 200 * 1024;
+    // Review-pass budget: the input cap and output token reserve come
+    // from the model's catalog context window, falling back to the old
+    // byte cap when the window is unknown.
+    constexpr std::size_t FALLBACK_REVIEW_PASS_PROMPT_BYTES = 200 * 1024;
+    constexpr std::uint64_t MIN_REVIEW_CONTEXT_LIMIT        = 16384;
+    constexpr std::uint64_t MAX_REVIEW_OUTPUT_TOKENS        = 16384;
+    constexpr std::uint64_t OPENAI_REASONING_RESERVE        = 16000;
+    // Bytes-per-token over-provision: the guard rejects early, the model
+    // is the true limit.
+    constexpr std::size_t BYTES_PER_TOKEN = 3;
+
+    std::uint64_t review_output_budget(const ProviderStore& providers,
+        const ProviderSelection& selection, std::string_view effort)
+    {
+        const std::uint64_t window
+            = providers.pricing_for(selection.model).context_limit;
+        if (window == 0) {
+            return 4096;
+        }
+        const std::uint64_t reasoning_reserve
+            = effort != "off" ? OPENAI_REASONING_RESERVE : 0;
+        const std::uint64_t share = window / 8;
+        return std::min(MAX_REVIEW_OUTPUT_TOKENS,
+            share > reasoning_reserve ? share - reasoning_reserve : 4096);
+    }
+
+    std::size_t review_input_limit(
+        const ProviderStore& providers, const ProviderSelection& selection)
+    {
+        const std::uint64_t window
+            = providers.pricing_for(selection.model).context_limit;
+        if (window < MIN_REVIEW_CONTEXT_LIMIT) {
+            return FALLBACK_REVIEW_PASS_PROMPT_BYTES;
+        }
+        // Half the window for input, the rest for output and overhead.
+        return static_cast<std::size_t>(window / 2 * BYTES_PER_TOKEN);
+    }
 
     // A filename-safe suffix of a viewer title: lowercase, runs of
     // non-alphanumerics collapsed to one dash, bounded; "" when the title
@@ -735,39 +771,94 @@ std::optional<std::size_t> run_review_pass(
         error = "There are no changes to review.";
         return std::nullopt;
     }
-    const auto selection = state.providers->active_selection();
+    // The configured Reviewer role; <Default> follows the main chat
+    // model so behavior before any configuration is unchanged.
+    auto selection
+        = state.providers->subagent_selection(SubagentRole::REVIEWER);
+    if (!selection) {
+        selection = state.providers->active_selection();
+    }
     if (!selection) {
         error = NO_MODEL_SELECTED;
         return std::nullopt;
     }
-    if (request.prompt.size() > MAX_REVIEW_PASS_PROMPT_BYTES) {
-        error = request.label + " is too large (limit: "
-            + std::to_string(MAX_REVIEW_PASS_PROMPT_BYTES / 1024)
+    const std::size_t input_limit
+        = review_input_limit(*state.providers, *selection);
+    if (request.prompt.size() > input_limit) {
+        error = request.label
+            + " is too large (limit: " + std::to_string(input_limit / 1024)
             + " KiB). Reduce the diff or review it in smaller commits.";
         return std::nullopt;
     }
     auto transcript = std::make_shared<Session>();
-    const SubagentHandle handle
-        = state.delegation->run_subagent(std::move(request.prompt),
-            selection->model, selection->reasoning_effort,
-            SubagentOptions { .visible = false,
-                .timeout               = std::chrono::minutes { 5 },
-                .max_output_tokens     = 4096,
-                .transcript            = std::move(transcript) },
-            [state_ptr = &state, pass = request.pass, label = request.label,
-                complete = std::move(request.complete)](
-                const SubagentResult& result) {
-                state_ptr->review->set_pass_task(pass, std::nullopt);
-                if (result.status == Status::CANCELLED) {
+    // Kept for the one-shot retry below; the pass itself consumes a copy.
+    std::string retry_prompt = request.prompt;
+    // A retry (retry == false) runs deterministic: reasoning off, so the
+    // output budget cannot be consumed by hidden thinking tokens.
+    const std::string effort
+        = request.retry ? selection->reasoning_effort : std::string("off");
+    const SubagentHandle handle = state.delegation->run_subagent(
+        std::move(request.prompt), selection->model, effort,
+        SubagentOptions { .visible = false,
+            .timeout               = std::chrono::minutes { 5 },
+            .max_output_tokens
+            = review_output_budget(*state.providers, *selection, effort),
+            .transcript = std::move(transcript) },
+        [state_ptr = &state, pass = request.pass, label = request.label,
+            prompt = std::move(retry_prompt), retry = request.retry,
+            complete = std::move(request.complete)](
+            const SubagentResult& result) mutable {
+            state_ptr->review->set_pass_task(pass, std::nullopt);
+            if (result.status == Status::CANCELLED) {
+                return;
+            }
+            // A truncated reply is the one failure worth retrying: the
+            // JSON envelope is cut off, so it parses as malformed even
+            // though the model was on track. Any other non-OK status is
+            // terminal.
+            const bool truncated = result.status == Status::TRUNCATED;
+            if (result.status != Status::OK && !truncated) {
+                state_ptr->session->set_error(
+                    label + " failed: " + error_text(result.status));
+                return;
+            }
+            std::string parse_error;
+            if (!truncated) {
+                parse_error = complete(result.output);
+                if (parse_error.empty()) {
                     return;
                 }
-                if (result.status != Status::OK) {
+            }
+            if (!retry) {
+                state_ptr->session->set_error(
+                    truncated ? error_text(Status::TRUNCATED) : parse_error);
+                return;
+            }
+            // One deterministic rerun without reasoning recovers both a
+            // truncated reply and a shape failure the budget caused. It
+            // must start on the main thread: this callback runs on the
+            // finishing subagent's own worker, and run_review_pass prunes
+            // completed workers — joining the thread it is running on.
+            const std::string failure_message
+                = truncated ? error_text(Status::TRUNCATED) : parse_error;
+            state_ptr->post([state_ptr, pass, label, prompt,
+                                complete = std::move(complete),
+                                failure_message]() mutable {
+                std::string retry_error;
+                const std::optional<std::size_t> rerun
+                    = run_review_pass(*state_ptr,
+                        ReviewPassRequest { .pass = pass,
+                            .prompt               = prompt,
+                            .label                = label,
+                            .complete             = std::move(complete),
+                            .retry                = false },
+                        retry_error);
+                if (!rerun) {
                     state_ptr->session->set_error(
-                        label + " failed: " + error_text(result.status));
-                    return;
+                        retry_error.empty() ? failure_message : retry_error);
                 }
-                complete(result.output);
             });
+        });
     state.review->set_pass_task(request.pass, handle.id);
     return handle.id;
 }
@@ -798,17 +889,18 @@ void run_handoff(ApplicationState& state)
         ReviewPassRequest { .pass = ReviewPass::HANDOFF,
             .prompt               = std::move(prompt),
             .label                = "Handoff report",
-            .complete =
-                [state_ptr = &state](std::string output) {
-                    std::string report { trim(std::move(output)) };
-                    if (report.empty()) {
-                        state_ptr->session->set_error(
-                            "The handoff document came back empty.");
-                        return;
-                    }
-                    report += "\n";
-                    state_ptr->session->set_handoff_report(std::move(report));
-                } },
+            .complete
+            = [state_ptr = &state](std::string output) -> std::string {
+                std::string report { trim(std::move(output)) };
+                if (report.empty()) {
+                    // An empty reply is a shape failure worth one retry.
+                    return std::string("The handoff document came back "
+                                       "empty.");
+                }
+                report += "\n";
+                state_ptr->session->set_handoff_report(std::move(report));
+                return std::string { };
+            } },
         error);
     if (!error.empty()) {
         state.session->set_error(std::move(error));
