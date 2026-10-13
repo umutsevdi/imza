@@ -102,7 +102,14 @@ struct PersistedSession {
 
 using SessionPersistence = std::variant<UnsavedSession, PersistedSession>;
 
-struct PlanDoc {
+// One entry in the session's ordered document sequence: a plan revision
+// (the intent object Plan mode produces) or a build log (decisions the
+// agent recorded while implementing). Plan accessors operate on the last
+// PLAN entry; build decisions append to the last BUILD entry or start a
+// new one.
+struct SessionDoc {
+    enum class Kind { PLAN, BUILD };
+    Kind kind = Kind::PLAN;
     std::string content;
 };
 
@@ -121,7 +128,7 @@ struct SessionSnapshot {
     std::string title;
     std::vector<ConversationItem> items;
     TodoList todo;
-    std::vector<PlanDoc> plans;
+    std::vector<SessionDoc> documents;
     std::string compacted_summary;
     std::size_t compacted_item_count = 0;
     bool plan_mode                   = true;
@@ -160,7 +167,7 @@ public:
     std::shared_ptr<const std::vector<ConversationItem>> items() const;
     std::shared_ptr<const TodoList> todo() const;
     std::shared_ptr<const std::vector<QueuedMessage>> queued() const;
-    std::shared_ptr<const std::vector<PlanDoc>> plans() const;
+    std::shared_ptr<const std::vector<SessionDoc>> documents() const;
     ModalPayload modal() const;
     std::uint64_t modal_serial() const;
     std::uint64_t content_serial() const;
@@ -226,6 +233,11 @@ public:
     std::string create_plan(std::string content);
     std::string edit_plan(
         const std::string& old, const std::string& fresh, std::size_t count);
+    // Append one markdown entry to the current build log, starting a new
+    // build document when the last document is a plan revision. Never
+    // errors; the returned string is always empty (mirrors create_plan's
+    // shape so the binding can report failures uniformly).
+    std::string append_build_decision(std::string entry);
     void mark_plan_seen();
     // Returns the size-capped plan submission message for the first build
     // turn of a stint (or after a plan revision) and consumes the pending
@@ -261,7 +273,7 @@ public:
         Signal<>::Callback callback);
     [[nodiscard]] Signal<>::Subscription subscribe_to_attachments_change(
         Signal<>::Callback callback);
-    [[nodiscard]] Signal<>::Subscription subscribe_to_plan_change(
+    [[nodiscard]] Signal<>::Subscription subscribe_to_documents_change(
         Signal<>::Callback callback);
     [[nodiscard]] Signal<>::Subscription subscribe_to_compaction_change(
         Signal<>::Callback callback);
@@ -292,7 +304,8 @@ private:
     static void _ensure_unique(std::shared_ptr<TodoList>& todo);
     static void _ensure_unique(
         std::shared_ptr<std::vector<QueuedMessage>>& queued);
-    static void _ensure_unique(std::shared_ptr<std::vector<PlanDoc>>& plans);
+    static void _ensure_unique(
+        std::shared_ptr<std::vector<SessionDoc>>& documents);
 
     mutable std::mutex _mutex;
 
@@ -310,8 +323,8 @@ private:
     bool _title_generation_claimed = false;
 
     std::shared_ptr<TodoList> _todo = std::make_shared<TodoList>();
-    std::shared_ptr<std::vector<PlanDoc>> _plans
-        = std::make_shared<std::vector<PlanDoc>>();
+    std::shared_ptr<std::vector<SessionDoc>> _documents
+        = std::make_shared<std::vector<SessionDoc>>();
     // Bumped on every plan mutation; _plan_seen_version is the version the
     // agent last read. A mismatch rejects imza.plan.edit so the agent
     // cannot patch content it has not seen.
@@ -346,7 +359,7 @@ private:
     Signal<> _mode_changed;
     Signal<> _title_changed;
     Signal<> _attachments_changed;
-    Signal<> _plan_changed;
+    Signal<> _documents_changed;
     Signal<> _compaction_changed;
 };
 

@@ -141,10 +141,11 @@ void Session::_ensure_unique(
     }
 }
 
-void Session::_ensure_unique(std::shared_ptr<std::vector<PlanDoc>>& plans)
+void Session::_ensure_unique(
+    std::shared_ptr<std::vector<SessionDoc>>& documents)
 {
-    if (plans.use_count() > 1) {
-        plans = std::make_shared<std::vector<PlanDoc>>(*plans);
+    if (documents.use_count() > 1) {
+        documents = std::make_shared<std::vector<SessionDoc>>(*documents);
     }
 }
 
@@ -166,10 +167,10 @@ std::shared_ptr<const std::vector<QueuedMessage>> Session::queued() const
     return _queued;
 }
 
-std::shared_ptr<const std::vector<PlanDoc>> Session::plans() const
+std::shared_ptr<const std::vector<SessionDoc>> Session::documents() const
 {
     std::lock_guard lock(_mutex);
-    return _plans;
+    return _documents;
 }
 
 ModalPayload Session::modal() const
@@ -267,10 +268,10 @@ bool Session::has_pending_work() const
         });
 }
 
-Signal<>::Subscription Session::subscribe_to_plan_change(
+Signal<>::Subscription Session::subscribe_to_documents_change(
     Signal<>::Callback callback)
 {
-    return _plan_changed.subscribe(std::move(callback));
+    return _documents_changed.subscribe(std::move(callback));
 }
 
 Signal<>::Subscription Session::subscribe_to_compaction_change(
@@ -282,12 +283,17 @@ Signal<>::Subscription Session::subscribe_to_compaction_change(
 std::string Session::plan_doc() const
 {
     std::lock_guard lock(_mutex);
-    return _plans->empty() ? std::string { } : _plans->back().content;
+    for (auto it = _documents->rbegin(); it != _documents->rend(); ++it) {
+        if (it->kind == SessionDoc::Kind::PLAN) {
+            return it->content;
+        }
+    }
+    return { };
 }
 
 SessionSnapshot Session::_build_snapshot() const
 {
-    return { _title, *_items, *_todo, *_plans, _compacted_summary,
+    return { _title, *_items, *_todo, *_documents, _compacted_summary,
         _compacted_item_count, _mode == Mode::PLAN, _persistence };
 }
 
@@ -313,10 +319,10 @@ void Session::restore(SessionSnapshot snapshot)
         _title = std::move(snapshot.title);
         _items = std::make_shared<std::vector<ConversationItem>>(
             std::move(snapshot.items));
-        _todo = std::make_shared<TodoList>(std::move(snapshot.todo));
-        _plans
-            = std::make_shared<std::vector<PlanDoc>>(std::move(snapshot.plans));
-        _plan_version           = _plans->size();
+        _todo      = std::make_shared<TodoList>(std::move(snapshot.todo));
+        _documents = std::make_shared<std::vector<SessionDoc>>(
+            std::move(snapshot.documents));
+        _plan_version           = _documents->size();
         _plan_seen_version      = _plan_version;
         _plan_submitted_version = 0;
         _compacted_summary      = std::move(snapshot.compacted_summary);
@@ -669,8 +675,9 @@ void Session::set_todo(TodoList todo)
     _todo = std::make_shared<TodoList>(std::move(todo));
 }
 
-// The current plan is the vector back. Both counters move together: the
-// creating agent has seen exactly what it wrote.
+// The current plan is the last PLAN document in the sequence; build logs
+// interleave with it but never become the plan. Both counters move
+// together: the creating agent has seen exactly what it wrote.
 std::string Session::create_plan(std::string content)
 {
     std::lock_guard lock(_mutex);
@@ -678,12 +685,13 @@ std::string Session::create_plan(std::string content)
         !error.empty()) {
         return error;
     }
-    _ensure_unique(_plans);
-    _plans->push_back(PlanDoc { std::move(content) });
+    _ensure_unique(_documents);
+    _documents->push_back(
+        SessionDoc { SessionDoc::Kind::PLAN, std::move(content) });
     ++_plan_version;
     _plan_seen_version = _plan_version;
     _dirty             = true;
-    _plan_changed.publish();
+    _documents_changed.publish();
     return "";
 }
 
@@ -691,7 +699,14 @@ std::string Session::edit_plan(
     const std::string& old, const std::string& fresh, std::size_t count)
 {
     std::lock_guard lock(_mutex);
-    if (_plans->empty()) {
+    SessionDoc* plan = nullptr;
+    for (auto it = _documents->rbegin(); it != _documents->rend(); ++it) {
+        if (it->kind == SessionDoc::Kind::PLAN) {
+            plan = &*it;
+            break;
+        }
+    }
+    if (plan == nullptr) {
         return "no plan exists; create one with imza.plan.create";
     }
     if (_plan_seen_version != _plan_version) {
@@ -700,16 +715,40 @@ std::string Session::edit_plan(
     }
     std::string error;
     std::optional<std::string> patched
-        = replace_text(_plans->back().content, old, fresh, count, error);
+        = replace_text(plan->content, old, fresh, count, error);
     if (!patched) {
         return "imza.plan.edit: " + error;
     }
-    _ensure_unique(_plans);
-    _plans->back().content = std::move(*patched);
+    _ensure_unique(_documents);
+    // Re-resolve after the copy-on-write detach.
+    for (auto it = _documents->rbegin(); it != _documents->rend(); ++it) {
+        if (it->kind == SessionDoc::Kind::PLAN) {
+            it->content = std::move(*patched);
+            break;
+        }
+    }
     ++_plan_version;
     _plan_seen_version = _plan_version;
     _dirty             = true;
-    _plan_changed.publish();
+    _documents_changed.publish();
+    return "";
+}
+
+std::string Session::append_build_decision(std::string entry)
+{
+    std::lock_guard lock(_mutex);
+    _ensure_unique(_documents);
+    if (_documents->empty()
+        || _documents->back().kind != SessionDoc::Kind::BUILD) {
+        _documents->push_back(SessionDoc { SessionDoc::Kind::BUILD, { } });
+    }
+    std::string& content = _documents->back().content;
+    if (!content.empty()) {
+        content += "\n\n";
+    }
+    content += entry;
+    _dirty = true;
+    _documents_changed.publish();
     return "";
 }
 
@@ -722,13 +761,24 @@ void Session::mark_plan_seen()
 std::optional<std::string> Session::plan_submission_for_build()
 {
     std::lock_guard lock(_mutex);
-    if (_plans->empty() || _mode != Mode::BUILD) {
+    if (_mode != Mode::BUILD) {
+        return std::nullopt;
+    }
+    // Inline the last-PLAN lookup: plan_doc() takes the same lock.
+    const SessionDoc* plan = nullptr;
+    for (auto it = _documents->rbegin(); it != _documents->rend(); ++it) {
+        if (it->kind == SessionDoc::Kind::PLAN) {
+            plan = &*it;
+            break;
+        }
+    }
+    if (plan == nullptr) {
         return std::nullopt;
     }
     if (_plan_submitted_version == _plan_version) {
         return std::nullopt;
     }
-    std::string content = _plans->back().content;
+    std::string content = plan->content;
     if (content.size() > MAX_PLAN_BYTES) {
         content.resize(MAX_PLAN_BYTES);
     }

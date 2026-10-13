@@ -327,6 +327,7 @@ add_library(imza_execution
     src/tools/bindings/core.cpp
     src/tools/bindings/fs.cpp
     src/tools/bindings/plan.cpp
+    src/tools/bindings/build.cpp
     src/tools/bindings/web.cpp
     src/tools/bindings/mcp.cpp
     src/turn/delegation.cpp

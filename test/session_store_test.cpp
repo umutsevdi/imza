@@ -915,15 +915,75 @@ TEST_CASE("plan document persists across save and restore")
 
     imza::Session loaded;
     REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
-    const auto loaded_plans = loaded.plans();
-    CHECK(loaded_plans->size() == 2);
+    const auto loaded_documents = loaded.documents();
+    CHECK(loaded_documents->size() == 2);
     CHECK(loaded.plan_doc() == second);
-    CHECK(loaded_plans->front().content
+    CHECK(loaded_documents->front().content
         == "# Requirements\nauth tokens\n\n# Approach\nx\n# Changes\nx\n"
            "# Verification\nx");
 
     // Validation still applies to a restored session.
     CHECK_FALSE(source.create_plan("no headings").empty());
+}
+
+TEST_CASE("build decisions persist interleaved with plan revisions")
+{
+#ifdef _WIN32
+    SKIP_ON_WIN32()
+#endif
+    DataHome home;
+    imza::Session source;
+    source.begin_send("build this");
+
+    REQUIRE(source.create_plan(imza::test::PLAN_SKELETON).empty());
+    REQUIRE(source.append_build_decision("chose A over B").empty());
+    REQUIRE(source.append_build_decision("added dependency Z").empty());
+    REQUIRE(source.create_plan(imza::test::PLAN_SKELETON + "\nmore").empty());
+    REQUIRE(source.append_build_decision("second stint").empty());
+
+    REQUIRE(imza::save_session(source) == imza::Status::OK);
+    const auto saved = imza::saved_sessions();
+    REQUIRE(saved.size() == 1);
+
+    imza::Session loaded;
+    REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
+    const auto documents = loaded.documents();
+    REQUIRE(documents->size() == 4);
+    CHECK(documents->at(0).kind == imza::SessionDoc::Kind::PLAN);
+    CHECK(documents->at(1).kind == imza::SessionDoc::Kind::BUILD);
+    CHECK(documents->at(1).content == "chose A over B\n\nadded dependency Z");
+    CHECK(documents->at(2).kind == imza::SessionDoc::Kind::PLAN);
+    CHECK(documents->at(3).kind == imza::SessionDoc::Kind::BUILD);
+    CHECK(documents->at(3).content == "second stint");
+    // The plan accessor still resolves to the last plan revision.
+    CHECK(loaded.plan_doc() == imza::test::PLAN_SKELETON + "\nmore");
+}
+
+TEST_CASE("legacy plans-only transcript loads as plan documents")
+{
+#ifdef _WIN32
+    SKIP_ON_WIN32()
+#endif
+    DataHome home;
+    CurrentDirectory directory;
+    std::filesystem::create_directories(home.root());
+    const std::filesystem::path legacy = home.root() / "legacy-plans.json";
+    {
+        std::ofstream file(legacy, std::ios::binary);
+        file << R"({
+  "title": "old",
+  "plans": ["# Requirements\nx\n# Approach\nx\n# Changes\nx\n# Verification\nx"],
+  "mode": "plan"
+})";
+    }
+
+    imza::LoadedSession loaded;
+    REQUIRE(imza::read_session(legacy, loaded) == imza::Status::OK);
+    REQUIRE(loaded.snapshot.documents.size() == 1);
+    CHECK(
+        loaded.snapshot.documents.front().kind == imza::SessionDoc::Kind::PLAN);
+    CHECK(loaded.snapshot.documents.front().content.find("# Requirements")
+        != std::string::npos);
 }
 
 TEST_CASE("plan document history is not replayed into model context")
@@ -1027,7 +1087,7 @@ TEST_CASE("plan changes publish the plan signal")
     imza::Session session;
     int published = 0;
     const auto subscription
-        = session.subscribe_to_plan_change([&published] { ++published; });
+        = session.subscribe_to_documents_change([&published] { ++published; });
 
     const std::string& skeleton = imza::test::PLAN_SKELETON;
     REQUIRE(session.create_plan(skeleton).empty());

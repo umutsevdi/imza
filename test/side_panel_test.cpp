@@ -13,7 +13,7 @@
 using imza::test::to_screen;
 using imza::test::to_text;
 
-TEST_CASE("side panel plans widget hides when empty and lists plans")
+TEST_CASE("side panel documents widget hides when empty and lists plans")
 {
     auto state    = imza::test::make_test_state();
     int navigated = 0;
@@ -24,16 +24,48 @@ TEST_CASE("side panel plans widget hides when empty and lists plans")
         [&navigated](imza::WorkflowPhase) { ++navigated; });
 
     const std::string empty = imza::test::to_text(panel->Render(), 120, 40);
-    CHECK(empty.find("Plans") == std::string::npos);
+    CHECK(empty.find("Documents") == std::string::npos);
 
     REQUIRE(state->session->create_plan(imza::test::PLAN_SKELETON).empty());
     REQUIRE(state->session->create_plan(imza::test::PLAN_SKELETON + "\nmore")
             .empty());
 
     const std::string out = imza::test::to_text(panel->Render(), 120, 40);
-    CHECK(out.find("Plans") != std::string::npos);
+    CHECK(out.find("Documents") != std::string::npos);
     CHECK(out.find("Initial Plan") != std::string::npos);
     CHECK(out.find("Revision 1") != std::string::npos);
+}
+
+TEST_CASE("documents widget interleaves build logs with plan revisions")
+{
+    auto state = imza::test::make_test_state();
+    REQUIRE(state->session->create_plan(imza::test::PLAN_SKELETON).empty());
+    REQUIRE(state->session->append_build_decision("chose A over B").empty());
+    REQUIRE(
+        state->session->append_build_decision("added dependency Z").empty());
+    REQUIRE(state->session->create_plan(imza::test::PLAN_SKELETON + "\nmore")
+            .empty());
+    REQUIRE(state->session->append_build_decision("second stint").empty());
+
+    auto panel = imza::make_side_panel(
+        state,
+        [] { return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 120, 40 }; },
+        [] { return imza::WorkflowPhase::PLAN; }, [](imza::WorkflowPhase) { });
+
+    const std::string out = imza::test::to_text(panel->Render(), 120, 40);
+    CHECK(out.find("Initial Plan") != std::string::npos);
+    CHECK(out.find("Build 1") != std::string::npos);
+    CHECK(out.find("Revision 1") != std::string::npos);
+    CHECK(out.find("Build 2") != std::string::npos);
+
+    // Clicking a build row opens its log in the viewer.
+    REQUIRE(imza::test::click_label(panel, "Build 1", 120, 40));
+    const imza::ModalPayload payload = state->session->modal();
+    const auto* viewer               = std::get_if<imza::ViewerModal>(&payload);
+    REQUIRE(viewer != nullptr);
+    CHECK(viewer->title == "Build 1");
+    CHECK(viewer->content.find("chose A over B") != std::string::npos);
+    CHECK(viewer->content.find("added dependency Z") != std::string::npos);
 }
 
 TEST_CASE("only the latest plan renders bright, older ones stay dim")
@@ -95,9 +127,9 @@ TEST_CASE("clicking a plan opens it in the viewer modal")
 
 TEST_CASE("side panel hides widgets disabled in the sidebar config")
 {
-    imza::Config config  = imza::test::test_config();
-    config.sidebar.plans = false;
-    config.sidebar.tasks = false;
+    imza::Config config      = imza::test::test_config();
+    config.sidebar.documents = false;
+    config.sidebar.tasks     = false;
     auto state
         = imza::test::make_test_state(imza::test::run_immediately, config);
 
@@ -111,7 +143,7 @@ TEST_CASE("side panel hides widgets disabled in the sidebar config")
         [] { return imza::WorkflowPhase::PLAN; }, [](imza::WorkflowPhase) { });
 
     const std::string out = imza::test::to_text(panel->Render(), 120, 40);
-    CHECK(out.find("Plans") == std::string::npos);
+    CHECK(out.find("Documents") == std::string::npos);
     CHECK(out.find("Initial Plan") == std::string::npos);
     CHECK(out.find("Tasks") == std::string::npos);
     CHECK(out.find("hidden task") == std::string::npos);

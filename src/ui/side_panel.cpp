@@ -101,6 +101,14 @@ public:
                       current->post([] { animation::RequestAnimationFrame(); });
                   }
               }))
+        , _documents_subscription(
+              _state->session->subscribe_to_documents_change(
+                  [state = std::weak_ptr<ApplicationState>(_state)] {
+                      if (const auto current = state.lock()) {
+                          current->post(
+                              [] { animation::RequestAnimationFrame(); });
+                      }
+                  }))
     {
         _links_container = Container::Vertical({ });
         Add(_links_container);
@@ -112,10 +120,10 @@ public:
         const bool narrow   = ctx.kind == LayoutCtx::Kind::NARROW;
         _active_links.clear();
         Elements parts;
-        if (_sidebar.plans) {
-            _append_plans(parts);
+        if (_sidebar.documents) {
+            _append_documents(parts);
         } else {
-            _plan_links.clear();
+            _document_links.clear();
         }
         if (_sidebar.review_comments) {
             _append_review_comments(parts);
@@ -212,22 +220,25 @@ private:
         return found->second.component;
     }
 
-    // Plans widget: the newest plan carries the live marker, superseded
-    // ones stay dim; each row opens the plan in the viewer modal.
-    void _append_plans(Elements& parts)
+    // Documents widget: plan revisions and build logs in session order.
+    // The newest document carries the live marker, superseded ones stay
+    // dim; each row opens the document in the viewer modal.
+    void _append_documents(Elements& parts)
     {
-        const auto plans = _state->session->plans();
-        if (plans->empty()) {
-            _plan_links.clear();
+        const auto documents = _state->session->documents();
+        if (documents->empty()) {
+            _document_links.clear();
             return;
         }
+        const std::vector<std::string> labels = document_labels(*documents);
         Elements rows;
-        for (std::size_t index = 0; index < plans->size(); ++index) {
-            const bool latest = index + 1 == plans->size();
-            rows.push_back(
-                _plan_link(index, (*plans)[index].content, latest)->Render());
+        for (std::size_t index = 0; index < documents->size(); ++index) {
+            const bool latest = index + 1 == documents->size();
+            rows.push_back(_document_link(
+                index, labels[index], (*documents)[index].content, latest)
+                    ->Render());
         }
-        parts.push_back(titled_box("Plans", std::move(rows)));
+        parts.push_back(titled_box("Documents", std::move(rows)));
     }
 
     Element _render_changed_files(const RepositoryState& repository)
@@ -281,27 +292,26 @@ private:
             [&file](ChangedFile& existing) { existing = file; });
     }
 
-    Component _plan_link(
-        std::size_t index, const std::string& content, bool latest)
+    Component _document_link(std::size_t index, std::string label,
+        const std::string& content, bool latest)
     {
         auto payload = std::make_shared<std::string>(content);
         return _memoized_link(
-            _plan_links, index, payload,
-            [index, latest](const std::string&) {
+            _document_links, index, payload,
+            [label, latest](const std::string&) {
                 // Explicit colors are only needed on the latest row: the
                 // link wrapper already paints inactive rows dim-colored,
                 // and | dim keeps them greyed on limited palettes.
                 Element row = hbox({
                     text("●") | color(latest ? HL_GREEN : PANEL_FG_DIM),
                     text(" "),
-                    paragraph(plan_revision_label(index))
-                        | color(latest ? PANEL_FG : PANEL_FG_DIM) | xflex,
+                    paragraph(label) | color(latest ? PANEL_FG : PANEL_FG_DIM)
+                        | xflex,
                 });
                 return latest ? row : row | dim;
             },
-            [this, index, payload] {
-                ViewerModal vm { plan_revision_label(index), *payload, "md",
-                    1 };
+            [this, label, payload] {
+                ViewerModal vm { label, *payload, "md", 1 };
                 vm.line_numbers = false;
                 enqueue_user_modal(*_state, vm);
             },
@@ -331,9 +341,10 @@ private:
     Signal<>::Subscription _review_subscription;
     Signal<>::Subscription _permission_subscription;
     Signal<>::Subscription _update_subscription;
+    Signal<>::Subscription _documents_subscription;
     Component _links_container;
     std::map<std::string, Link<ChangedFile>> _file_links;
-    std::map<std::size_t, Link<std::string>> _plan_links;
+    std::map<std::size_t, Link<std::string>> _document_links;
     std::map<std::size_t, Link<std::string>> _comment_links;
     std::vector<Component> _active_links;
 };

@@ -27,6 +27,7 @@ local paths = {
   "fs.read", "fs.list", "fs.grep", "fs.ts_query",
   "todo.get", "todo.set", "ask",
   "plan.get", "plan.create", "plan.edit",
+  "build.decision",
   "shell",
   "web.fetch", "web.search",
   "mcp.call",

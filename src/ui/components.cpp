@@ -164,10 +164,31 @@ ftxui::Element render_model_pick(const std::string& title,
     return ftxui::vbox(std::move(rows)) | ftxui::xflex;
 }
 
-std::string plan_revision_label(std::size_t index)
+std::string document_label(
+    SessionDoc::Kind kind, std::size_t plan_index, std::size_t build_index)
 {
-    return index == 0 ? std::string("Initial Plan")
-                      : "Revision " + std::to_string(index);
+    if (kind == SessionDoc::Kind::BUILD) {
+        return "Build " + std::to_string(build_index);
+    }
+    return plan_index == 0 ? std::string("Initial Plan")
+                           : "Revision " + std::to_string(plan_index);
+}
+
+std::vector<std::string> document_labels(
+    const std::vector<SessionDoc>& documents)
+{
+    std::vector<std::string> labels;
+    labels.reserve(documents.size());
+    std::size_t plans  = 0;
+    std::size_t builds = 0;
+    for (const SessionDoc& doc : documents) {
+        if (doc.kind == SessionDoc::Kind::BUILD) {
+            labels.push_back(document_label(doc.kind, 0, ++builds));
+        } else {
+            labels.push_back(document_label(doc.kind, plans++, 0));
+        }
+    }
+    return labels;
 }
 
 std::string compact_number(std::uint64_t n)

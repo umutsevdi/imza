@@ -593,7 +593,7 @@ TEST_CASE("plan bindings validate skeleton and cap through the session")
     CHECK(missing.text.find("approach") != std::string::npos);
     CHECK(missing.text.find("changes") != std::string::npos);
     CHECK(missing.text.find("dead") == std::string::npos);
-    CHECK(session.plans()->empty());
+    CHECK(session.documents()->empty());
 
     std::string big = skeleton + "\n";
     big.resize(imza::MAX_PLAN_BYTES + 1, 'x');
@@ -609,7 +609,7 @@ TEST_CASE("plan bindings validate skeleton and cap through the session")
             std::move(host));
     CHECK(created.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(created.text == "true\n");
-    REQUIRE(session.plans()->size() == 1);
+    REQUIRE(session.documents()->size() == 1);
     CHECK(session.plan_doc() == skeleton);
 }
 
@@ -672,6 +672,67 @@ TEST_CASE("plan bindings are unavailable without host callbacks")
     const imza::ToolOutput edit
         = imza::test::run_lua("imza.plan.edit('a', 'b')", imza::LuaHost { });
     CHECK(edit.text.find("plan.edit: unavailable in this context")
+        != std::string::npos);
+}
+
+TEST_CASE("build decision appends to the current build log")
+{
+    imza::Session session;
+    imza::LuaHost host         = plan_session_host(session);
+    host.append_build_decision = [&](std::string entry) {
+        return session.append_build_decision(std::move(entry));
+    };
+    host.build_mode = [] { return true; };
+
+    // No plan yet: the first decision starts the first build log.
+    REQUIRE(
+        imza::test::run_lua("imza.build.decision('chose A over B')", host).kind
+        == imza::ToolOutput::Kind::OUTPUT);
+    REQUIRE(
+        imza::test::run_lua("imza.build.decision('added dependency Z')", host)
+            .kind
+        == imza::ToolOutput::Kind::OUTPUT);
+    REQUIRE(session.documents()->size() == 1);
+    CHECK(session.documents()->back().kind == imza::SessionDoc::Kind::BUILD);
+    CHECK(session.documents()->back().content
+        == "chose A over B\n\nadded dependency Z");
+
+    // A plan revision after the log: the next decision starts a new log.
+    REQUIRE(session.create_plan(imza::test::PLAN_SKELETON).empty());
+    REQUIRE(
+        imza::test::run_lua("imza.build.decision('second stint')", host).kind
+        == imza::ToolOutput::Kind::OUTPUT);
+    REQUIRE(session.documents()->size() == 3);
+    CHECK(session.documents()->back().kind == imza::SessionDoc::Kind::BUILD);
+    CHECK(session.documents()->back().content == "second stint");
+    // The plan is still the plan.
+    CHECK(session.plan_doc() == imza::test::PLAN_SKELETON);
+}
+
+TEST_CASE("build decision is rejected outside Build mode")
+{
+    imza::Session session;
+    imza::LuaHost host         = plan_session_host(session);
+    host.append_build_decision = [&](std::string entry) {
+        return session.append_build_decision(std::move(entry));
+    };
+    host.build_mode = [] { return false; };
+
+    const imza::ToolOutput out = imza::test::run_lua(
+        "imza.build.decision('nope')\nprint('dead')", host);
+    CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
+    CHECK(out.text.find("build.decision: only available in Build mode")
+        != std::string::npos);
+    CHECK(out.text.find("dead") == std::string::npos);
+    CHECK(session.documents()->empty());
+}
+
+TEST_CASE("build decision is unavailable without a host callback")
+{
+    const imza::ToolOutput out = imza::test::run_lua(
+        "imza.build.decision('nope')\nprint('dead')", imza::LuaHost { });
+    CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
+    CHECK(out.text.find("build.decision: unavailable in this context")
         != std::string::npos);
 }
 

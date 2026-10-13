@@ -73,6 +73,11 @@ struct LuaHost {
         edit_plan;
     std::function<void()> mark_plan_seen;
     std::function<bool()> plan_frozen;
+    // Appends one markdown entry to the session's current build log;
+    // empty means the binding is unavailable in this context.
+    std::function<std::string(std::string)> append_build_decision;
+    // True when the session is in Build mode; gates imza.build.decision.
+    std::function<bool()> build_mode;
     std::function<bool(PermissionStore::Grants)> install_grants;
     // MCP server sessions; empty accessor means the bindings are
     // unavailable (no manager in this run).

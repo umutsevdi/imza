@@ -92,10 +92,18 @@ struct StoredItem {
     std::optional<int> status;
 };
 
+// One entry of the ordered document sequence: kind is "plan" or
+// "build". Legacy files carry only `plans` (all PLAN documents).
+struct StoredDocument {
+    std::string kind;
+    std::string content;
+};
+
 struct StoredSessionDoc {
     std::string title;
     std::string saved_at;
     std::optional<std::vector<StoredTodoItem>> todo;
+    std::optional<std::vector<StoredDocument>> documents;
     std::optional<std::vector<std::string>> plans;
     std::optional<std::string> compacted_summary;
     std::optional<std::int64_t> compacted_item_count;
@@ -619,14 +627,18 @@ Status save_session(Session& session)
         return Status::CONFIG_ERROR;
     }
     StoredSessionDoc doc;
-    doc.title    = snapshot.title.empty() ? std::string { UNTITLED_TITLE }
-                                          : snapshot.title;
-    doc.saved_at = format_local_time("%Y-%m-%d %H:%M:%S");
-    doc.todo     = map_all(snapshot.todo.items, [](const TodoItem& item) {
+    doc.title     = snapshot.title.empty() ? std::string { UNTITLED_TITLE }
+                                           : snapshot.title;
+    doc.saved_at  = format_local_time("%Y-%m-%d %H:%M:%S");
+    doc.todo      = map_all(snapshot.todo.items, [](const TodoItem& item) {
         return StoredTodoItem { item.content, static_cast<int>(item.status) };
     });
-    doc.plans    = map_all(
-        snapshot.plans, [](const PlanDoc& plan) { return plan.content; });
+    doc.documents = map_all(snapshot.documents, [](const SessionDoc& entry) {
+        return StoredDocument {
+            entry.kind == SessionDoc::Kind::BUILD ? "build" : "plan",
+            entry.content,
+        };
+    });
     doc.compacted_summary = snapshot.compacted_summary;
     doc.compacted_item_count
         = static_cast<std::int64_t>(snapshot.compacted_item_count);
@@ -718,9 +730,19 @@ Status read_session(const std::filesystem::path& path, LoadedSession& loaded)
     snapshot.compacted_item_count
         = static_cast<std::size_t>(doc.compacted_item_count.value_or(0));
     snapshot.plan_mode = doc.mode.value_or("") != "build";
-    if (doc.plans) {
+    if (doc.documents) {
+        for (const auto& entry : *doc.documents) {
+            snapshot.documents.push_back(SessionDoc {
+                entry.kind == "build" ? SessionDoc::Kind::BUILD
+                                      : SessionDoc::Kind::PLAN,
+                entry.content,
+            });
+        }
+    } else if (doc.plans) {
+        // Legacy files stored plan revisions only.
         for (const auto& plan : *doc.plans) {
-            snapshot.plans.push_back(PlanDoc { plan });
+            snapshot.documents.push_back(
+                SessionDoc { SessionDoc::Kind::PLAN, plan });
         }
     }
     if (doc.items) {

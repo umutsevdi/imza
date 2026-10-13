@@ -133,6 +133,7 @@ const LuaModule& fs_module();
 const LuaModule& web_module();
 const LuaModule& canvas_module();
 const LuaModule& plan_module();
+const LuaModule& build_module();
 const LuaModule& mcp_module();
 
 } // namespace imza

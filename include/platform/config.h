@@ -121,7 +121,7 @@ struct AllowConfig {
 // Per-widget visibility for the sidebar. Every widget is shown by default;
 // a false flag hides it for the whole session (read once at startup).
 struct SidebarConfig {
-    bool plans           = true;
+    bool documents       = true;
     bool review_comments = true;
     bool tasks           = true;
     bool changed_files   = true;

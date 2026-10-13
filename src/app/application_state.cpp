@@ -70,6 +70,15 @@ namespace {
                 [state] {
                     return state->session->mode() == Session::Mode::BUILD;
                 },
+            .append_build_decision =
+                [state](std::string entry) {
+                    return state->session->append_build_decision(
+                        std::move(entry));
+                },
+            .build_mode =
+                [state] {
+                    return state->session->mode() == Session::Mode::BUILD;
+                },
             .install_grants =
                 [state](PermissionStore::Grants grants) {
                     return state->permissions->install(std::move(grants));

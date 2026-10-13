@@ -150,8 +150,14 @@ ftxui::Element vertical_space(int height);
 // Status line colored by success/failure.
 ftxui::Element status_text(const std::string& text, bool ok);
 ftxui::Elements modal_header(std::string title, std::string subtitle = "");
-// Plan document #0 is the "Initial Plan"; later ones are "Revision N".
-std::string plan_revision_label(std::size_t index);
+// Label for one document of the session sequence: plan revision #0 is
+// the "Initial Plan", later ones "Revision N"; build logs are "Build N".
+std::string document_label(
+    SessionDoc::Kind kind, std::size_t plan_index, std::size_t build_index);
+// Per-entry labels for the whole sequence, counting plans and builds
+// independently (they interleave).
+std::vector<std::string> document_labels(
+    const std::vector<SessionDoc>& documents);
 
 // ◉/○ for single choice, ▣/☐ for multi choice.
 std::string choice_marker(bool multi, bool selected);

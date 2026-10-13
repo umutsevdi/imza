@@ -13,11 +13,10 @@ CHANGELOG
 <https://github.com/umutsevdi/imza/releases/tag/v0.6.2>
 
 Changes:
+  - The agent now records the decisions it makes while building for transparency.
   - Discover and install skills without leaving Imza: `/skills` now has a
     Search tab backed by skills.sh, showing install counts and marking the
     ones you already have.
-  - Skill permission changes now take effect immediately when you pick them;
-    the broken Save button is gone.
 
 -------------------------------------------------------------------------------
 0.6.1 - 2026-10-12

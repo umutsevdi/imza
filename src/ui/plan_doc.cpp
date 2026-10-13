@@ -36,7 +36,7 @@ namespace {
             , _layout(std::move(layout))
             , _focused(focused)
             , _plan_subscription(
-                  _state->session->subscribe_to_plan_change([this] {
+                  _state->session->subscribe_to_documents_change([this] {
                       _on_plan_changed.store(true);
                       animation::RequestAnimationFrame();
                   }))
@@ -203,8 +203,9 @@ namespace {
 
         Element _header()
         {
-            const std::string label
-                = _has_plan ? plan_revision_label(_revision - 1) : "No plan";
+            const std::string label = _has_plan
+                ? document_label(SessionDoc::Kind::PLAN, _revision - 1, 0)
+                : "No plan";
             Elements parts {
                 text("Plan") | bold | color(PANEL_FG),
                 text(" · " + label) | color(PANEL_FG_DIM),
@@ -242,9 +243,14 @@ namespace {
                 return;
             }
             const SessionSnapshot snap = _state->session->snapshot();
-            _has_plan                  = !snap.plans.empty();
-            _revision                  = snap.plans.size();
-            _current                   = session_doc;
+            _revision                  = 0;
+            for (const SessionDoc& doc : snap.documents) {
+                if (doc.kind == SessionDoc::Kind::PLAN) {
+                    ++_revision;
+                }
+            }
+            _has_plan = _revision > 0;
+            _current  = session_doc;
         }
 
         void _build_rows(Elements& rows, int width)

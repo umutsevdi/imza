@@ -864,7 +864,7 @@ TEST_CASE("allow and instructions are absent from a minimal config")
     CHECK(loaded.allow.directories.empty());
     CHECK(loaded.allow.commands.empty());
     CHECK(loaded.instructions.empty());
-    CHECK(loaded.sidebar.plans);
+    CHECK(loaded.sidebar.documents);
     CHECK(loaded.sidebar.context);
 }
 
@@ -872,7 +872,7 @@ TEST_CASE("config roundtrip preserves hidden sidebar widgets")
 {
     const auto path = temp_file("sidebar-roundtrip.json");
     imza::Config cfg;
-    cfg.sidebar.plans         = false;
+    cfg.sidebar.documents     = false;
     cfg.sidebar.changed_files = false;
     cfg.sidebar.update        = false;
 
@@ -880,7 +880,7 @@ TEST_CASE("config roundtrip preserves hidden sidebar widgets")
 
     // Only the flags that differ from the default are written.
     const std::string json = imza::test::read_all(path);
-    CHECK(json.find("\"plans\"") != std::string::npos);
+    CHECK(json.find("\"documents\"") != std::string::npos);
     CHECK(json.find("\"changed_files\"") != std::string::npos);
     CHECK(json.find("\"update\"") != std::string::npos);
     CHECK(json.find("\"tasks\"") == std::string::npos);
@@ -888,7 +888,7 @@ TEST_CASE("config roundtrip preserves hidden sidebar widgets")
 
     imza::Config loaded;
     REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
-    CHECK_FALSE(loaded.sidebar.plans);
+    CHECK_FALSE(loaded.sidebar.documents);
     CHECK_FALSE(loaded.sidebar.changed_files);
     CHECK_FALSE(loaded.sidebar.update);
     CHECK(loaded.sidebar.review_comments);

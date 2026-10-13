@@ -223,6 +223,7 @@ struct StoredAllow {
 };
 
 struct StoredSidebar {
+    std::optional<bool> documents;
     std::optional<bool> plans;
     std::optional<bool> review_comments;
     std::optional<bool> tasks;
@@ -537,7 +538,8 @@ Status load_config(
 
     if (stored.sidebar) {
         const StoredSidebar& stored_sidebar = *stored.sidebar;
-        out.sidebar.plans = stored_sidebar.plans.value_or(out.sidebar.plans);
+        out.sidebar.documents               = stored_sidebar.documents.value_or(
+            stored_sidebar.plans.value_or(out.sidebar.documents));
         out.sidebar.review_comments = stored_sidebar.review_comments.value_or(
             out.sidebar.review_comments);
         out.sidebar.tasks = stored_sidebar.tasks.value_or(out.sidebar.tasks);
@@ -795,8 +797,8 @@ namespace {
 
         StoredSidebar sidebar;
         const SidebarConfig& defaults = SidebarConfig { };
-        if (cfg.sidebar.plans != defaults.plans) {
-            sidebar.plans = cfg.sidebar.plans;
+        if (cfg.sidebar.documents != defaults.documents) {
+            sidebar.documents = cfg.sidebar.documents;
         }
         if (cfg.sidebar.review_comments != defaults.review_comments) {
             sidebar.review_comments = cfg.sidebar.review_comments;
@@ -816,7 +818,7 @@ namespace {
         if (cfg.sidebar.update != defaults.update) {
             sidebar.update = cfg.sidebar.update;
         }
-        if (sidebar.plans || sidebar.review_comments || sidebar.tasks
+        if (sidebar.documents || sidebar.review_comments || sidebar.tasks
             || sidebar.changed_files || sidebar.context || sidebar.permissions
             || sidebar.update) {
             stored.sidebar = std::move(sidebar);

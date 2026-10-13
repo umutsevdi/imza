@@ -108,6 +108,7 @@ TEST_CASE("system prompt carries the plan artifact contract")
     CHECK(system.find("ready for build") != std::string::npos);
     CHECK(system.find("contract for future workspace mutation")
         != std::string::npos);
+    CHECK(system.find("imza.build.decision") != std::string::npos);
 }
 
 TEST_CASE("plan annotations prompt derives section and line anchors")
