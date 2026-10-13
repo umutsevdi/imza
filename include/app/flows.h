@@ -7,8 +7,10 @@
 #include <vector>
 
 #include "app/application_state.h"
+#include "common/modal.h"
 #include "permissions/store.h"
 #include "turn/turn_runner.h"
+#include "workspace/review.h"
 
 namespace imza {
 
@@ -79,6 +81,32 @@ void present_front(ApplicationState& state);
 void drain_queued(ApplicationState& state);
 void on_turn_finished(ApplicationState& state, std::string error);
 void run_slash(ApplicationState& state, std::string_view command);
+// A hidden, cancellable review pass over the loaded diff: AI findings or
+// the handoff report. The caller supplies the prompt and consumes the raw
+// reply; everything else — model selection, the loaded-review and size
+// guards, the subagent options, the transcript, the running state — is
+// shared. `complete` runs on the subagent worker with the reply. Returns
+// the task id, or nullopt when the pass was rejected (`error` explains).
+struct ReviewPassRequest {
+    ReviewPass pass = ReviewPass::FINDINGS;
+    std::string prompt;
+    std::string label;
+    std::function<void(std::string output)> complete;
+};
+
+std::optional<std::size_t> run_review_pass(
+    ApplicationState& state, ReviewPassRequest request, std::string& error);
+// Cancels a running pass. False when nothing was running.
+bool cancel_review_pass(ApplicationState& state, ReviewPass pass);
+// Generate the handoff report: reconcile the plan, the user's messages, the
+// build log, and the final diff into one document stored on the session.
+// Reachable from any workflow phase; a no-op while one is already running.
+void run_handoff(ApplicationState& state);
+// Write a viewer's content to <workspace-root>/.imza/<timestamp>-<name>.md
+// and open it with the platform file opener. Returns the path, or an empty
+// string with `error` set when the export was refused or failed.
+std::string export_viewer_content(
+    ApplicationState& state, const ViewerModal& payload, std::string& error);
 void compact_session(ApplicationState& state, TurnSettings settings);
 void interrupt(ApplicationState& state);
 void delete_saved_session(

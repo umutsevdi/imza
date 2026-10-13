@@ -25,6 +25,10 @@ CommandResult run_command(const std::string& command,
     const std::filesystem::path& working_directory = { },
     std::string_view stdin_data                    = { });
 CommandResult run_attached_command(const std::string& command);
+// Launches `command` detached: returns as soon as the child is spawned, so
+// the caller keeps its terminal. Used to hand a file to the user's editor
+// from inside the TUI.
+bool spawn_detached_command(const std::string& command);
 bool open_browser(std::string_view url);
 
 } // namespace imza

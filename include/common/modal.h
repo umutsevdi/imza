@@ -76,6 +76,8 @@ struct ViewerModal {
     std::string metadata;
     // When set, renders the side-by-side diff view instead of the text.
     std::optional<DiffView> diff;
+    // Slug for the exported filename; falls back to the title when empty.
+    std::string save_name;
 };
 
 struct VariantModal {

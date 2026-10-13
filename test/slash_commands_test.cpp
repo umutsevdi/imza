@@ -44,6 +44,7 @@ TEST_CASE("find_command matches case-insensitively")
         find_command("/changelog")->action == SlashCommand::Action::CHANGELOG);
     CHECK(find_command("/split") == nullptr);
     CHECK(find_command("/refresh") == nullptr);
+    CHECK(find_command("/handoff") == nullptr);
     CHECK(find_command("/foo") == nullptr);
 }
 

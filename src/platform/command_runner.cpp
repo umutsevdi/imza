@@ -381,6 +381,55 @@ CommandResult run_attached_command(const std::string& command)
 #endif
 }
 
+bool spawn_detached_command(const std::string& command)
+{
+    if (command.empty()) {
+        return false;
+    }
+#ifdef _WIN32
+    std::wstring cmdline = to_wide(command);
+    STARTUPINFOW startup { };
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process { };
+    if (!CreateProcessW(nullptr, cmdline.data(), nullptr, nullptr, TRUE,
+            DETACHED_PROCESS, nullptr, nullptr, &startup, &process)) {
+        return false;
+    }
+    CloseHandle(process.hProcess);
+    CloseHandle(process.hThread);
+    return true;
+#else
+    const pid_t pid = fork();
+    if (pid < 0) {
+        return false;
+    }
+    if (pid == 0) {
+        setsid();
+        // The child must not hold imza's terminal: an editor drawing on
+        // the inherited fds would fight the TUI for the screen and input.
+        // Point them at /dev/null; interactivity is expected to come from
+        // a GUI window the opener creates.
+        const int null_fd = open("/dev/null", O_RDWR);
+        if (null_fd >= 0) {
+            dup2(null_fd, 0);
+            dup2(null_fd, 1);
+            dup2(null_fd, 2);
+            if (null_fd > 2) {
+                close(null_fd);
+            }
+        }
+        execl("/bin/sh", "sh", "-c", command.c_str(),
+            static_cast<char*>(nullptr));
+        _exit(127);
+    }
+    std::thread([pid] {
+        int status = 0;
+        while (waitpid(pid, &status, 0) < 0 && errno == EINTR) { }
+    }).detach();
+    return true;
+#endif
+}
+
 bool open_browser(std::string_view url)
 {
     if (url.empty()) {

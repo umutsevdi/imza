@@ -60,46 +60,49 @@ namespace {
         return file.new_path.empty() ? file.old_path : file.new_path;
     }
 
-    std::string format_review_patch(const RepositoryReview& review)
-    {
-        std::string patch;
-        for (const ReviewFile& file : review.files) {
-            const std::string old_path
-                = file.old_path.empty() ? file.new_path : file.old_path;
-            const std::string new_path
-                = file.new_path.empty() ? file.old_path : file.new_path;
-            patch += "diff --git a/" + old_path + " b/" + new_path + "\n";
-            if (file.kind == ReviewFile::Kind::BINARY) {
-                patch += "Binary files a/" + old_path + " and b/" + new_path
-                    + " differ\n";
-                continue;
-            }
-            patch += "--- "
-                + (file.kind == ReviewFile::Kind::ADDED
-                            || file.kind == ReviewFile::Kind::UNTRACKED
-                        ? std::string("/dev/null")
-                        : "a/" + old_path)
-                + "\n";
-            patch += "+++ "
-                + (file.kind == ReviewFile::Kind::DELETED
-                        ? std::string("/dev/null")
-                        : "b/" + new_path)
-                + "\n";
-            for (const ReviewHunk& hunk : file.hunks) {
-                patch += hunk.header + "\n";
-                for (const ReviewLine& line : hunk.lines) {
-                    switch (line.kind) {
-                    case ReviewLine::Kind::CONTEXT: patch += ' '; break;
-                    case ReviewLine::Kind::ADDITION: patch += '+'; break;
-                    case ReviewLine::Kind::DELETION: patch += '-'; break;
-                    case ReviewLine::Kind::META: break;
-                    }
-                    patch += line.content + "\n";
+} // namespace
+
+std::string format_review_patch(const RepositoryReview& review)
+{
+    std::string patch;
+    for (const ReviewFile& file : review.files) {
+        const std::string old_path
+            = file.old_path.empty() ? file.new_path : file.old_path;
+        const std::string new_path
+            = file.new_path.empty() ? file.old_path : file.new_path;
+        patch += "diff --git a/" + old_path + " b/" + new_path + "\n";
+        if (file.kind == ReviewFile::Kind::BINARY) {
+            patch += "Binary files a/" + old_path + " and b/" + new_path
+                + " differ\n";
+            continue;
+        }
+        patch += "--- "
+            + (file.kind == ReviewFile::Kind::ADDED
+                        || file.kind == ReviewFile::Kind::UNTRACKED
+                    ? std::string("/dev/null")
+                    : "a/" + old_path)
+            + "\n";
+        patch += "+++ "
+            + (file.kind == ReviewFile::Kind::DELETED ? std::string("/dev/null")
+                                                      : "b/" + new_path)
+            + "\n";
+        for (const ReviewHunk& hunk : file.hunks) {
+            patch += hunk.header + "\n";
+            for (const ReviewLine& line : hunk.lines) {
+                switch (line.kind) {
+                case ReviewLine::Kind::CONTEXT: patch += ' '; break;
+                case ReviewLine::Kind::ADDITION: patch += '+'; break;
+                case ReviewLine::Kind::DELETION: patch += '-'; break;
+                case ReviewLine::Kind::META: break;
                 }
+                patch += line.content + "\n";
             }
         }
-        return patch;
     }
+    return patch;
+}
+
+namespace {
 
     std::string normalized_comment_body(std::string_view body)
     {
@@ -480,6 +483,17 @@ void ReviewState::clear_file_jump()
 {
     std::lock_guard lock(_mutex);
     _state.jump_file.reset();
+}
+
+void ReviewState::set_pass_task(
+    ReviewPass pass, std::optional<std::size_t> task_id)
+{
+    {
+        std::lock_guard lock(_mutex);
+        (pass == ReviewPass::HANDOFF ? _state.handoff : _state.findings).task_id
+            = task_id;
+    }
+    _publish();
 }
 
 void ReviewState::clear_comments()

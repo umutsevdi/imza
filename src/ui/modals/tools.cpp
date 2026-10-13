@@ -289,6 +289,14 @@ namespace {
                     imza::close_modal(*_state);
                     return true;
                 }
+                if (event == Event::Character("e")) {
+                    _export();
+                    return true;
+                }
+                if (event.is_mouse() && _viewer_export
+                    && _viewer_export->OnEvent(event)) {
+                    return true;
+                }
                 return _scroll_static(event);
             }
             if (_body) {
@@ -489,6 +497,11 @@ namespace {
         void _build(const ViewerModal& payload)
         {
             _reset_static_scroll();
+            _viewer_export_status.clear();
+            _viewer_export_ok = true;
+            if (!_viewer_export) {
+                _viewer_export = action_button("Export", [this] { _export(); });
+            }
             const int content_width = modal_content_width(_session->modal());
             if (payload.diff.has_value()) {
                 _viewer_content = diff_split(*payload.diff, content_width);
@@ -509,6 +522,8 @@ namespace {
         void _clear_built_content()
         {
             _viewer_content.reset();
+            _viewer_export.reset();
+            _viewer_export_status.clear();
             _body.reset();
             _form.clear();
             _cards.clear();
@@ -648,11 +663,37 @@ namespace {
             return vbox(std::move(rows)) | xflex;
         }
 
+        void _export()
+        {
+            const ModalPayload modal   = _session->modal();
+            const ViewerModal* payload = std::get_if<ViewerModal>(&modal);
+            if (payload == nullptr) {
+                return;
+            }
+            std::string error;
+            const std::string path
+                = export_viewer_content(*_state, *payload, error);
+            if (!error.empty()) {
+                _viewer_export_status = std::move(error);
+                _viewer_export_ok     = false;
+                return;
+            }
+            _viewer_export_status = "Exported to " + path;
+            _viewer_export_ok     = true;
+        }
+
         Element _viewer_body(const ViewerModal& payload)
         {
-            return vbox({ _header_line(payload.title), separatorEmpty(),
-                       _static_viewport(_viewer_content, payload.metadata) })
-                | xflex;
+            Elements rows { _header_line(payload.title), separatorEmpty(),
+                _static_viewport(_viewer_content, payload.metadata) };
+            if (!_viewer_export_status.empty()) {
+                rows.push_back(separatorEmpty());
+                rows.push_back(
+                    status_text(_viewer_export_status, _viewer_export_ok));
+            }
+            rows.push_back(separatorEmpty());
+            rows.push_back(hbox({ _viewer_export->Render(), filler() }));
+            return vbox(std::move(rows)) | xflex;
         }
 
         Element _static_viewport(Element content, const std::string& metadata)
@@ -663,7 +704,7 @@ namespace {
             if (!metadata.empty()) {
                 rows.push_back(hint_bar(metadata));
             }
-            rows.push_back(hint_bar("↑/↓ scroll · Esc close"));
+            rows.push_back(hint_bar("↑/↓ scroll · e export · Esc close"));
             return vbox(std::move(rows)) | xflex | yflex;
         }
 
@@ -695,6 +736,10 @@ namespace {
         Component _confirm_reject_button;
         Component _back;
         Element _viewer_content;
+
+        Component _viewer_export;
+        std::string _viewer_export_status;
+        bool _viewer_export_ok = true;
 
         Component _exit_yes;
         Component _exit_no;

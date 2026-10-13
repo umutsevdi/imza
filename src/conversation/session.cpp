@@ -752,6 +752,25 @@ std::string Session::append_build_decision(std::string entry)
     return "";
 }
 
+std::string Session::set_handoff_report(std::string content)
+{
+    std::lock_guard lock(_mutex);
+    _ensure_unique(_documents);
+    for (auto it = _documents->rbegin(); it != _documents->rend(); ++it) {
+        if (it->kind == SessionDoc::Kind::HANDOFF) {
+            it->content = std::move(content);
+            _dirty      = true;
+            _documents_changed.publish();
+            return "";
+        }
+    }
+    _documents->push_back(
+        SessionDoc { SessionDoc::Kind::HANDOFF, std::move(content) });
+    _dirty = true;
+    _documents_changed.publish();
+    return "";
+}
+
 void Session::mark_plan_seen()
 {
     std::lock_guard lock(_mutex);

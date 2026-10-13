@@ -45,6 +45,15 @@ TEST_CASE("wrap_text wraps every logical line")
     CHECK(imza::wrap_text("", 8) == std::vector<std::string> { "" });
 }
 
+TEST_CASE("multiline shortcut label matches the platform")
+{
+#ifdef _WIN32
+    CHECK(imza::MULTILINE_KEY == "Alt+Shift+Enter");
+#else
+    CHECK(imza::MULTILINE_KEY == "Alt+Enter");
+#endif
+}
+
 TEST_CASE("wrapped input keeps long draft text visible")
 {
     const std::string draft = "one two three four";

@@ -103,7 +103,8 @@ namespace {
                     filler(), text(_hint_line()) | color(PANEL_FG_DIM) }));
             if (_editor.is_open()) {
                 bottom.push_back(
-                    text("Enter save · Alt+Enter new line · Esc cancel")
+                    text("Enter save · " + std::string(MULTILINE_KEY)
+                        + " new line · Esc cancel")
                     | color(PANEL_FG_DIM));
             }
             Element pane = vbox({ _header(), separatorLight(),

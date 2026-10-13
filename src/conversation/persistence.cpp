@@ -92,8 +92,8 @@ struct StoredItem {
     std::optional<int> status;
 };
 
-// One entry of the ordered document sequence: kind is "plan" or
-// "build". Legacy files carry only `plans` (all PLAN documents).
+// One entry of the ordered document sequence: kind is "plan", "build",
+// or "handoff". Legacy files carry only `plans`.
 struct StoredDocument {
     std::string kind;
     std::string content;
@@ -635,7 +635,9 @@ Status save_session(Session& session)
     });
     doc.documents = map_all(snapshot.documents, [](const SessionDoc& entry) {
         return StoredDocument {
-            entry.kind == SessionDoc::Kind::BUILD ? "build" : "plan",
+            entry.kind == SessionDoc::Kind::BUILD         ? "build"
+                : entry.kind == SessionDoc::Kind::HANDOFF ? "handoff"
+                                                          : "plan",
             entry.content,
         };
     });
@@ -733,8 +735,9 @@ Status read_session(const std::filesystem::path& path, LoadedSession& loaded)
     if (doc.documents) {
         for (const auto& entry : *doc.documents) {
             snapshot.documents.push_back(SessionDoc {
-                entry.kind == "build" ? SessionDoc::Kind::BUILD
-                                      : SessionDoc::Kind::PLAN,
+                entry.kind == "build"         ? SessionDoc::Kind::BUILD
+                    : entry.kind == "handoff" ? SessionDoc::Kind::HANDOFF
+                                              : SessionDoc::Kind::PLAN,
                 entry.content,
             });
         }

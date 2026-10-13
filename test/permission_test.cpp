@@ -592,10 +592,18 @@ TEST_CASE("filesystem normalization resolves traversal and missing writes")
     CHECK(filesystem_target(*missing.request)
         == fixture.workspace / "nested" / "new.txt");
 
+    // Deep missing parents are fine: save_text creates every missing
+    // level, so only a non-directory ancestor can block the write.
     const auto missing_parent = evaluate_filesystem_request(
         write_request(fixture.workspace / "absent" / "new.txt"),
         fixture.context(Session::Mode::BUILD));
-    CHECK(missing_parent.decision.kind == PermissionDecision::Kind::REJECT);
+    CHECK(missing_parent.decision.kind == PermissionDecision::Kind::ACCEPT);
+    REQUIRE(missing_parent.request.has_value());
+
+    const auto file_parent = evaluate_filesystem_request(
+        write_request(fixture.workspace / "inside.txt" / "new.txt"),
+        fixture.context(Session::Mode::BUILD));
+    CHECK(file_parent.decision.kind == PermissionDecision::Kind::REJECT);
 }
 
 TEST_CASE("filesystem normalization follows symlinked targets and parents")

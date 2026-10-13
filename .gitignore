@@ -91,3 +91,6 @@ CMakeUserPresets.json
 
 AGENTS.md
 /docs/
+
+# Exported viewer content
+.imza/

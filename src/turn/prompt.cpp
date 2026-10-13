@@ -2,9 +2,11 @@
 #include "app/application_state.h"
 #include "common/util.h"
 #include "conversation/session.h"
+#include "network/json.h"
 #include "platform/json_file.h"
 #include "tools/mcp_manager.h"
 #include "tools/skills.h"
+#include "workspace/review.h"
 
 #include <algorithm>
 #include <optional>
@@ -197,6 +199,7 @@ PromptStore::PromptStore(const std::filesystem::path& overrides)
           load_prompt(overrides, "review_plan.md", prompts_detail::REVIEW_PLAN))
     , _plan_annotations(load_prompt(
           overrides, "plan_annotations.md", prompts_detail::PLAN_ANNOTATIONS))
+    , _handoff(load_prompt(overrides, "handoff.md", prompts_detail::HANDOFF))
 {
 }
 
@@ -321,6 +324,54 @@ std::string format_plan_annotations_prompt(std::string_view instructions,
         }
     }
     return prompt;
+}
+
+std::string format_handoff_prompt(std::string_view instructions,
+    const SessionSnapshot& snapshot, const RepositoryReview& review)
+{
+    JsonValue input = JsonValue::object_t { };
+    auto& object    = input.get<JsonValue::object_t>();
+    object["diff"]  = JsonValue(format_review_patch(review));
+
+    std::string plan;
+    std::vector<std::string> revisions;
+    std::string build_log;
+    for (const SessionDoc& doc : snapshot.documents) {
+        switch (doc.kind) {
+        case SessionDoc::Kind::PLAN: revisions.push_back(doc.content); break;
+        case SessionDoc::Kind::BUILD:
+            if (!build_log.empty()) {
+                build_log += "\n\n";
+            }
+            build_log += doc.content;
+            break;
+        case SessionDoc::Kind::HANDOFF: break;
+        }
+    }
+    // The latest revision is the plan under judgement; the rest are the
+    // history that explains how it got there.
+    if (!revisions.empty()) {
+        plan = revisions.back();
+        revisions.pop_back();
+    }
+    object["plan"]           = JsonValue(plan);
+    JsonValue revision_array = JsonValue::array_t { };
+    for (std::string& revision : revisions) {
+        revision_array.get<JsonValue::array_t>().push_back(
+            JsonValue(std::move(revision)));
+    }
+    object["plan_revisions"] = std::move(revision_array);
+    object["build_log"]      = JsonValue(build_log);
+
+    JsonValue messages  = JsonValue::array_t { };
+    auto& message_array = messages.get<JsonValue::array_t>();
+    for (const ConversationItem& item : snapshot.items) {
+        if (const auto* user = std::get_if<UserTurn>(&item)) {
+            message_array.push_back(JsonValue(user->text));
+        }
+    }
+    object["user_messages"] = std::move(messages);
+    return std::string(instructions) + "\n\nInput JSON:\n" + json_dump(input);
 }
 
 } // namespace imza

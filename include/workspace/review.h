@@ -43,11 +43,22 @@ using AiReviewParseResult
 
 std::string format_review_plan_prompt(
     std::string_view instructions, const std::vector<ReviewComment>& comments);
+// The repository review rendered as a unified patch; shared by the AI
+// review and handoff prompts.
+std::string format_review_patch(const RepositoryReview& review);
 std::string format_ai_review_prompt(std::string_view instructions,
     const RepositoryReview& review, const std::vector<ReviewComment>& comments);
 AiReviewParseResult parse_ai_review_response(
     std::string_view response, const RepositoryReview& review);
 ReviewLoadResult load_repository_review(const std::filesystem::path& root);
+
+// A hidden review-pass subagent: AI findings on the diff, or the handoff
+// report. Both run the same way, so their running state shares one shape.
+enum class ReviewPass { FINDINGS, HANDOFF };
+
+struct ReviewPassState {
+    std::optional<std::size_t> task_id;
+};
 
 class ReviewState final : public ApplicationComponent {
 public:
@@ -63,6 +74,11 @@ public:
         std::optional<std::size_t> jump_comment;
         std::optional<std::string> jump_file;
         std::uint64_t generation = 0;
+        // Review passes run off the UI thread and are reachable from any
+        // workflow phase, so their progress lives here rather than in the
+        // Review component.
+        ReviewPassState findings;
+        ReviewPassState handoff;
     };
 
     Snapshot snapshot() const;
@@ -78,6 +94,7 @@ public:
     void request_file_jump(std::string path);
     void clear_file_jump();
     void clear_comments();
+    void set_pass_task(ReviewPass pass, std::optional<std::size_t> task_id);
     [[nodiscard]] Signal<>::Subscription subscribe(Signal<>::Callback callback);
 
 private:

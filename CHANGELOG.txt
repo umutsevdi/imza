@@ -14,9 +14,15 @@ CHANGELOG
 
 Changes:
   - The agent now records the decisions it makes while building for transparency.
+  - Imza can generate a handoff document based on what was planned, how it was
+    implemented, and what changed along the way. Run it from Review.
+  - Any viewer can now be exported: press e to save its content under
+    .imza/ and open it in your editor.
   - Discover and install skills without leaving Imza: `/skills` now has a
     Search tab backed by skills.sh, showing install counts and marking the
     ones you already have.
+  - On Windows the multi-line shortcut is now shown as Alt+Shift+Enter, since
+    terminals reserve Alt+Enter for the full-screen toggle.
 
 -------------------------------------------------------------------------------
 0.6.1 - 2026-10-12

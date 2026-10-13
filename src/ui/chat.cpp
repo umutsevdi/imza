@@ -250,6 +250,10 @@ namespace {
             , _layout(std::move(layout))
             , _hints(std::move(hints))
         {
+            if (_hints.input_hint.empty()) {
+                _hints.input_hint = "  " + std::string(MULTILINE_KEY)
+                    + " add line · @ attach file · $ use skill ";
+            }
             _input_options.content         = &_input_buf;
             _input_options.placeholder     = _hints.placeholder.c_str();
             _input_options.multiline       = true;
@@ -771,26 +775,24 @@ namespace {
 
         void _open_viewer_for(const ToolCall& tc)
         {
-            if (tc.name == "skill") {
-                imza::enqueue_user_modal(*_state,
-                    ViewerModal { tool_call_head(tc), tc.result->text,
-                        "markdown", 1, true });
-            } else if (tc.name == "lua") {
-                imza::enqueue_user_modal(*_state,
-                    ViewerModal { "Lua execution", lua_viewer_content(tc),
-                        "markdown", 1, false });
+            ViewerModal vm { tool_call_head(tc), tc.result->text,
+                tc.name == "skill" ? "markdown" : "", 1, tc.name != "lua" };
+            if (tc.name == "lua") {
+                vm.content   = lua_viewer_content(tc);
+                vm.save_name = "lua-execution";
             } else {
-                imza::enqueue_user_modal(*_state,
-                    ViewerModal { tool_call_head(tc), tc.result->text, "", 1 });
+                vm.save_name = tc.name + "-output";
             }
+            imza::enqueue_user_modal(*_state, std::move(vm));
         }
 
         void _open_subagent_viewer(const ToolCall& tc, std::size_t index)
         {
             SubagentChat chat = _state->delegation->subagent_chat(tc, index);
-            imza::enqueue_user_modal(*_state,
-                ViewerModal { std::move(chat.title), std::move(chat.transcript),
-                    "markdown", 1, true, "" });
+            ViewerModal vm { std::move(chat.title), std::move(chat.transcript),
+                "markdown", 1, true };
+            vm.save_name = "subagent";
+            imza::enqueue_user_modal(*_state, std::move(vm));
         }
 
         void _on_input_changed()

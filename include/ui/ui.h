@@ -289,6 +289,15 @@ std::vector<std::vector<ftxui::Element>> highlight_code_wrapped(
 ftxui::Elements highlighted_rows(std::string_view code, std::string_view syntax,
     int width, ftxui::Color fallback_fg);
 
+// Label for the multi-line shortcut in hint text. Windows terminals reserve
+// Alt+Enter for the full-screen toggle, so the newline key there is
+// Alt+Shift+Enter.
+#ifdef _WIN32
+inline constexpr std::string_view MULTILINE_KEY = "Alt+Shift+Enter";
+#else
+inline constexpr std::string_view MULTILINE_KEY = "Alt+Enter";
+#endif
+
 // Alt+Enter (both legacy encodings) inserts a newline in multi-line inputs.
 inline bool is_alt_enter(const ftxui::Event& event)
 {
@@ -420,8 +429,9 @@ struct ChatHints {
     // phase-accurate hints without being re-created).
     std::function<std::string()> phase_line_fn;
     std::string placeholder = "Ask anything - type / for commands";
-    std::string input_hint
-        = "  Alt+Enter add line · @ attach file · $ use skill ";
+    // Empty selects the default built from MULTILINE_KEY in make_chat;
+    // hosts that own the footer (the sidechat) set their own text.
+    std::string input_hint;
     // Rendered while the session has no items; off for the sidechat.
     bool empty_state_banner = true;
 };

@@ -174,23 +174,30 @@ FilesystemEvaluation evaluate_filesystem_request(
         }
         // save_text creates missing parent directories, so the check is
         // on the nearest existing ancestor: it must be a directory, else
-        // the parents can never come into existence.
+        // the parents can never come into existence. A missing ancestor
+        // is expected here (status reports not_found); only a stat that
+        // cannot be interpreted is fatal.
         if (!exists) {
             std::filesystem::path parent = target.parent_path();
             bool parent_ok               = false;
+            bool parent_error            = false;
             while (!parent.empty()) {
+                std::error_code walk_error;
                 const std::filesystem::file_status status
-                    = std::filesystem::status(parent, error);
-                if (error) {
+                    = std::filesystem::status(parent, walk_error);
+                if (status.type() == std::filesystem::file_type::not_found) {
+                    parent = parent.parent_path();
+                    continue;
+                }
+                if (walk_error
+                    || status.type() == std::filesystem::file_type::none) {
+                    parent_error = true;
                     break;
                 }
-                if (std::filesystem::exists(status)) {
-                    parent_ok = std::filesystem::is_directory(status);
-                    break;
-                }
-                parent = parent.parent_path();
+                parent_ok = std::filesystem::is_directory(status);
+                break;
             }
-            if (error) {
+            if (parent_error) {
                 return reject(CANNOT_INSPECT_TARGET);
             }
             if (!parent_ok) {

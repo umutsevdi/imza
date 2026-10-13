@@ -101,44 +101,22 @@ namespace {
         {
             _plan_button
                 = action_button("Send to Plan", [this] { _send_to_plan(); });
-            _ai_review_button
+            // Each pass owns one slot: the action button when idle, Cancel
+            // in place while it runs, so the row never grows or reorders.
+            _review_action_button
                 = action_button("AI Review", [this] { _provide_review(); });
-            ButtonOption viewer_option;
-            viewer_option.label     = "Reviewing…";
-            viewer_option.on_click  = [this] { _open_review_viewer(); };
-            viewer_option.transform = [this](const EntryState& entry) {
-                Element label = text(entry.label);
-                if (entry.focused) {
-                    label = std::move(label) | bold | underlined
-                        | color(PANEL_FG);
-                } else {
-                    label = std::move(label) | color(PANEL_FG_DIM);
-                }
-                return label;
-            };
-            _review_viewer_button = space_activates(
-                Button(viewer_option), viewer_option.on_click);
-            ButtonOption cancel_option;
-            cancel_option.label     = "cancel";
-            cancel_option.on_click  = [this] { _cancel_review(); };
-            cancel_option.transform = [this](const EntryState& entry) {
-                Element label = text(
-                    _review_cancelling->load() ? "cancelling…" : entry.label);
-                if (entry.focused) {
-                    label = std::move(label) | bold | underlined
-                        | color(PANEL_FG);
-                } else {
-                    label = std::move(label) | color(PANEL_FG_DIM);
-                }
-                return label;
-            };
-            _review_cancel_button = space_activates(
-                Button(cancel_option), cancel_option.on_click);
+            _review_cancel_button
+                = action_button("Cancel", [this] { _cancel_review(); });
+            _handoff_action_button = action_button(
+                "Handoff", [this] { imza::run_handoff(*_state); });
+            _handoff_cancel_button
+                = action_button("Cancel", [this] { _cancel_handoff(); });
             Add(_editor.input());
             Add(_plan_button);
-            Add(_ai_review_button);
-            Add(_review_viewer_button);
+            Add(_review_action_button);
             Add(_review_cancel_button);
+            Add(_handoff_action_button);
+            Add(_handoff_cancel_button);
         }
 
         ~Review() override { _load_generation->fetch_add(1); }
@@ -226,40 +204,39 @@ namespace {
                 | focusPosition(0, selected_y) | yframe | vscroll_indicator
                 | flex;
             static constexpr std::string_view top_hint
-                = "p Send to Plan · r AI Review · Ctrl+S Sidechat";
-            const std::string hint_line = _editor.is_open()
-                ? "Enter save · Alt+Enter new line · Esc cancel"
+                = "p Send to Plan · r AI Review · h Handoff · Ctrl+S Sidechat";
+            const std::string hint_line = _editor.is_open() ? "Enter save · "
+                    + std::string(MULTILINE_KEY) + " new line · Esc cancel"
                 : _selected_comment ? "↑↓ navigate · e edit · DEL delete"
                                     : "↑↓ navigate · [] files · Enter comment "
                                       "· c collapse";
+            const ReviewState::Snapshot review_snapshot
+                = _state->review->snapshot();
             Elements bottom { };
             if (!_state->session->error().empty()
                 || _state->session->retry_countdown()) {
                 bottom.push_back(session_error_element(*_state->session));
             }
-            const bool review_running = _review_running->load();
-            Element plan_action       = _plan_button->Render();
-            Element review_action     = _ai_review_button->Render();
-            if (review_running) {
-                plan_action   = std::move(plan_action) | dim;
-                review_action = std::move(review_action) | dim;
-            }
-            _plan_box      = Box { };
-            _review_ai_box = Box { };
-            plan_action    = std::move(plan_action) | reflect(_plan_box);
-            review_action  = std::move(review_action) | reflect(_review_ai_box);
-            Elements actions { std::move(plan_action), text(" "),
-                std::move(review_action) };
-            if (review_running) {
-                _viewer_box = Box { };
-                _cancel_box = Box { };
-                actions.push_back(text(" "));
-                actions.push_back(
-                    _review_viewer_button->Render() | reflect(_viewer_box));
-                actions.push_back(text(" · "));
-                actions.push_back(
-                    _review_cancel_button->Render() | reflect(_cancel_box));
-            }
+            const bool review_running
+                = review_snapshot.findings.task_id.has_value();
+            const bool handoff_running
+                = review_snapshot.handoff.task_id.has_value();
+            // One slot per pass, in fixed order; a running pass swaps its
+            // action button for Cancel in place.
+            _plan_box         = Box { };
+            _review_slot_box  = Box { };
+            _handoff_slot_box = Box { };
+            Elements actions {
+                _plan_button->Render() | reflect(_plan_box),
+                text(" "),
+                (review_running ? _review_cancel_button->Render()
+                                : _review_action_button->Render())
+                    | reflect(_review_slot_box),
+                text(" "),
+                (handoff_running ? _handoff_cancel_button->Render()
+                                 : _handoff_action_button->Render())
+                    | reflect(_handoff_slot_box),
+            };
             actions.push_back(filler());
             actions.push_back(text(hint_line) | dim);
             bottom.push_back(hbox({ filler(), text(top_hint) | dim }));
@@ -269,8 +246,8 @@ namespace {
 
         bool OnEvent(Event event) override
         {
-            if (!_state->session->error().empty()
-                && _is_user_interaction(event)) {
+            if (_is_user_interaction(event)
+                && !_state->session->error().empty()) {
                 _state->session->clear_error();
             }
             if (_editor.is_open()) {
@@ -354,6 +331,10 @@ namespace {
                 _provide_review();
                 return true;
             }
+            if (event == Event::Character("h")) {
+                imza::run_handoff(*_state);
+                return true;
+            }
             return false;
         }
 
@@ -376,7 +357,7 @@ namespace {
 
         void _send_to_plan()
         {
-            if (_review_running->load()) {
+            if (_state->review->snapshot().findings.task_id) {
                 return;
             }
             const std::vector<ReviewComment> comments
@@ -401,87 +382,53 @@ namespace {
 
         void _provide_review()
         {
-            if (_review_running->exchange(true)) {
-                return;
-            }
-            _review_cancelling->store(false);
-            const auto selection = _state->providers->active_selection();
-            if (!selection) {
-                _review_running->store(false);
-                _state->session->set_error(NO_MODEL_SELECTED);
-                return;
-            }
             const ReviewState::Snapshot snapshot = _state->review->snapshot();
             if (snapshot.status != ReviewState::LoadStatus::LOADED
                 || snapshot.review->files.empty()) {
-                _review_running->store(false);
                 _state->session->set_error("There are no changes to review.");
                 return;
             }
             std::string prompt = format_ai_review_prompt(
                 _state->prompts->review(), *snapshot.review, snapshot.comments);
-            constexpr std::size_t MAX_REVIEW_PROMPT_BYTES = 200 * 1024;
-            if (prompt.size() > MAX_REVIEW_PROMPT_BYTES) {
-                _review_running->store(false);
-                _state->session->set_error(
-                    "AI review is too large (limit: 200 KiB). Reduce the diff "
-                    "or review it in smaller commits.");
-                return;
+            std::string error;
+            (void)run_review_pass(*_state,
+                ReviewPassRequest { .pass = ReviewPass::FINDINGS,
+                    .prompt               = std::move(prompt),
+                    .label                = "AI review",
+                    .complete =
+                        [state = _state](std::string output) {
+                            const ReviewState::Snapshot current
+                                = state->review->snapshot();
+                            if (!current.review) {
+                                return;
+                            }
+                            AiReviewParseResult parsed
+                                = parse_ai_review_response(
+                                    output, *current.review);
+                            if (auto* parse_error
+                                = std::get_if<std::string>(&parsed)) {
+                                state->session->set_error(
+                                    std::move(*parse_error));
+                                return;
+                            }
+                            state->review->add_comments(std::move(
+                                std::get<std::vector<ReviewCommentDraft>>(
+                                    parsed)));
+                        } },
+                error);
+            if (!error.empty()) {
+                _state->session->set_error(std::move(error));
             }
-            auto transcript = std::make_shared<Session>();
-            const SubagentHandle handle
-                = _state->delegation->run_subagent(std::move(prompt),
-                    selection->model, selection->reasoning_effort,
-                    SubagentOptions { .visible = false,
-                        .timeout               = std::chrono::minutes { 5 },
-                        .max_output_tokens     = 4096,
-                        .transcript            = std::move(transcript) },
-                    [state = _state, running = _review_running](
-                        const SubagentResult& result) {
-                        running->store(false);
-                        animation::RequestAnimationFrame();
-                        if (result.status == Status::CANCELLED) {
-                            return;
-                        }
-                        if (result.status != Status::OK) {
-                            state->session->set_error("AI review failed: "
-                                + error_text(result.status));
-                            return;
-                        }
-                        const ReviewState::Snapshot current
-                            = state->review->snapshot();
-                        AiReviewParseResult parsed = parse_ai_review_response(
-                            result.output, *current.review);
-                        if (auto* error = std::get_if<std::string>(&parsed)) {
-                            state->session->set_error(std::move(*error));
-                            return;
-                        }
-                        state->review->add_comments(std::move(
-                            std::get<std::vector<ReviewCommentDraft>>(parsed)));
-                    });
-            _review_task_id = handle.id;
         }
 
         void _cancel_review()
         {
-            if (!_review_task_id || _review_cancelling->exchange(true)) {
-                return;
-            }
-            if (!_state->subagents->cancel(*_review_task_id)) {
-                _review_cancelling->store(false);
-            }
+            (void)cancel_review_pass(*_state, ReviewPass::FINDINGS);
         }
 
-        void _open_review_viewer()
+        void _cancel_handoff()
         {
-            if (!_review_task_id) {
-                return;
-            }
-            SubagentChat chat = _state->delegation->subagent_chat(
-                *_review_task_id, "AI Review");
-            imza::enqueue_user_modal(*_state,
-                ViewerModal { std::move(chat.title), std::move(chat.transcript),
-                    "markdown", 1, true, "" });
+            (void)cancel_review_pass(*_state, ReviewPass::HANDOFF);
         }
 
         struct VisibleRow {
@@ -922,19 +869,22 @@ namespace {
                 return _forward_press(_plan_button, mouse)
                     || (_send_to_plan(), true);
             }
-            if (_review_ai_box.Contain(mouse.x, mouse.y)) {
-                return _forward_press(_ai_review_button, mouse)
-                    || (_provide_review(), true);
-            }
-            if (_review_running->load()) {
-                if (_viewer_box.Contain(mouse.x, mouse.y)) {
-                    return _forward_press(_review_viewer_button, mouse)
-                        || (_open_review_viewer(), true);
-                }
-                if (_cancel_box.Contain(mouse.x, mouse.y)) {
+            const ReviewState::Snapshot snapshot = _state->review->snapshot();
+            if (_review_slot_box.Contain(mouse.x, mouse.y)) {
+                if (snapshot.findings.task_id) {
                     return _forward_press(_review_cancel_button, mouse)
                         || (_cancel_review(), true);
                 }
+                return _forward_press(_review_action_button, mouse)
+                    || (_provide_review(), true);
+            }
+            if (_handoff_slot_box.Contain(mouse.x, mouse.y)) {
+                if (snapshot.handoff.task_id) {
+                    return _forward_press(_handoff_cancel_button, mouse)
+                        || (_cancel_handoff(), true);
+                }
+                return _forward_press(_handoff_action_button, mouse)
+                    || (imza::run_handoff(*_state), true);
             }
             return false;
         }
@@ -1087,9 +1037,10 @@ namespace {
             }).detach();
         }
         Component _plan_button;
-        Component _ai_review_button;
-        Component _review_viewer_button;
+        Component _review_action_button;
         Component _review_cancel_button;
+        Component _handoff_action_button;
+        Component _handoff_cancel_button;
 
         std::shared_ptr<ApplicationState> _state;
         LayoutFn _layout;
@@ -1098,7 +1049,6 @@ namespace {
         std::optional<std::size_t> _editing_comment;
         std::optional<std::size_t> _selected_comment;
         std::optional<std::size_t> _pending_jump;
-        std::optional<std::size_t> _review_task_id;
         std::optional<std::string> _pending_file_jump;
         std::set<std::string> _collapsed;
         std::vector<VisibleRow> _visible;
@@ -1108,9 +1058,8 @@ namespace {
         std::deque<Box> _boxes;
         std::vector<int> _box_rows;
         Box _plan_box;
-        Box _review_ai_box;
-        Box _viewer_box;
-        Box _cancel_box;
+        Box _review_slot_box;
+        Box _handoff_slot_box;
         int _selected                  = 0;
         int _rendered_y                = 0;
         int _skipped_height            = 0;
@@ -1120,10 +1069,6 @@ namespace {
         std::shared_ptr<std::atomic<std::uint64_t>> _load_generation
             = std::make_shared<std::atomic<std::uint64_t>>(0);
         std::shared_ptr<std::atomic<bool>> _load_running
-            = std::make_shared<std::atomic<bool>>(false);
-        std::shared_ptr<std::atomic<bool>> _review_running
-            = std::make_shared<std::atomic<bool>>(false);
-        std::shared_ptr<std::atomic<bool>> _review_cancelling
             = std::make_shared<std::atomic<bool>>(false);
         std::atomic<bool> _reload_pending { true };
         Signal<>::Subscription _repository_subscription;

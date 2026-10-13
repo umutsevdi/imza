@@ -170,6 +170,9 @@ std::string document_label(
     if (kind == SessionDoc::Kind::BUILD) {
         return "Build " + std::to_string(build_index);
     }
+    if (kind == SessionDoc::Kind::HANDOFF) {
+        return "Handoff Report";
+    }
     return plan_index == 0 ? std::string("Initial Plan")
                            : "Revision " + std::to_string(plan_index);
 }
@@ -184,6 +187,8 @@ std::vector<std::string> document_labels(
     for (const SessionDoc& doc : documents) {
         if (doc.kind == SessionDoc::Kind::BUILD) {
             labels.push_back(document_label(doc.kind, 0, ++builds));
+        } else if (doc.kind == SessionDoc::Kind::HANDOFF) {
+            labels.push_back(document_label(doc.kind, 0, 0));
         } else {
             labels.push_back(document_label(doc.kind, plans++, 0));
         }

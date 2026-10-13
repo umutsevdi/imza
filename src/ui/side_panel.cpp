@@ -313,6 +313,7 @@ private:
             [this, label, payload] {
                 ViewerModal vm { label, *payload, "md", 1 };
                 vm.line_numbers = false;
+                vm.save_name    = label;
                 enqueue_user_modal(*_state, vm);
             },
             [content](std::string& existing) { existing = content; });

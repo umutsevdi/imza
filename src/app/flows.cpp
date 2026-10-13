@@ -5,12 +5,15 @@
 #include "conversation/persistence.h"
 #include "permissions/evaluator.h"
 #include "permissions/store.h"
+#include "platform/command_runner.h"
 #include "platform/config.h"
+#include "tools/file_ops.h"
 #include "tools/mcp_manager.h"
 #include "tools/skills.h"
 #include "turn/delegation.h"
 #include "turn/prompt.h"
 #include "turn/turn_runner.h"
+#include "workspace/review.h"
 
 #include <functional>
 #include <memory>
@@ -671,6 +674,183 @@ void run_slash(ApplicationState& state, std::string_view command)
         break;
     }
     }
+}
+
+namespace {
+
+    constexpr std::size_t MAX_REVIEW_PASS_PROMPT_BYTES = 200 * 1024;
+
+    // A filename-safe suffix of a viewer title: lowercase, runs of
+    // non-alphanumerics collapsed to one dash, bounded; "" when the title
+    // has no alphanumerics.
+    std::string export_slug(std::string_view title)
+    {
+        std::string slug;
+        bool pending_dash = false;
+        for (const unsigned char ch : title) {
+            if (!std::isalnum(ch)) {
+                pending_dash = !slug.empty();
+                continue;
+            }
+            if (pending_dash) {
+                slug += '-';
+                pending_dash = false;
+            }
+            slug += static_cast<char>(std::tolower(ch));
+            if (slug.size() >= 60) {
+                break;
+            }
+        }
+        return slug;
+    }
+
+    // The platform file opener, not VISUAL/EDITOR: the viewer runs
+    // inside the TUI, so a terminal editor (vim, nano) cannot take over
+    // the screen. xdg-open / open -t / notepad open their own window and
+    // leave imza's terminal untouched.
+    std::string editor_command(const std::filesystem::path& path)
+    {
+#if defined(_WIN32)
+        return "cmd /c start \"\" " + shell_quote(path);
+#elif defined(__APPLE__)
+        return "open -t " + shell_quote(path);
+#else
+        return "xdg-open " + shell_quote(path);
+#endif
+    }
+
+} // namespace
+
+std::optional<std::size_t> run_review_pass(
+    ApplicationState& state, ReviewPassRequest request, std::string& error)
+{
+    const ReviewState::Snapshot snapshot = state.review->snapshot();
+    // One pass at a time: the action row swaps the running slot for a
+    // single Cancel, so two concurrent passes would be indistinguishable.
+    if (snapshot.findings.task_id || snapshot.handoff.task_id) {
+        return std::nullopt;
+    }
+    if (snapshot.status != ReviewState::LoadStatus::LOADED || !snapshot.review
+        || snapshot.review->files.empty()) {
+        error = "There are no changes to review.";
+        return std::nullopt;
+    }
+    const auto selection = state.providers->active_selection();
+    if (!selection) {
+        error = NO_MODEL_SELECTED;
+        return std::nullopt;
+    }
+    if (request.prompt.size() > MAX_REVIEW_PASS_PROMPT_BYTES) {
+        error = request.label + " is too large (limit: "
+            + std::to_string(MAX_REVIEW_PASS_PROMPT_BYTES / 1024)
+            + " KiB). Reduce the diff or review it in smaller commits.";
+        return std::nullopt;
+    }
+    auto transcript = std::make_shared<Session>();
+    const SubagentHandle handle
+        = state.delegation->run_subagent(std::move(request.prompt),
+            selection->model, selection->reasoning_effort,
+            SubagentOptions { .visible = false,
+                .timeout               = std::chrono::minutes { 5 },
+                .max_output_tokens     = 4096,
+                .transcript            = std::move(transcript) },
+            [state_ptr = &state, pass = request.pass, label = request.label,
+                complete = std::move(request.complete)](
+                const SubagentResult& result) {
+                state_ptr->review->set_pass_task(pass, std::nullopt);
+                if (result.status == Status::CANCELLED) {
+                    return;
+                }
+                if (result.status != Status::OK) {
+                    state_ptr->session->set_error(
+                        label + " failed: " + error_text(result.status));
+                    return;
+                }
+                complete(result.output);
+            });
+    state.review->set_pass_task(request.pass, handle.id);
+    return handle.id;
+}
+
+bool cancel_review_pass(ApplicationState& state, ReviewPass pass)
+{
+    const ReviewState::Snapshot snapshot = state.review->snapshot();
+    const ReviewPassState& current
+        = pass == ReviewPass::HANDOFF ? snapshot.handoff : snapshot.findings;
+    if (!current.task_id) {
+        return false;
+    }
+    return state.subagents->cancel(*current.task_id);
+}
+
+void run_handoff(ApplicationState& state)
+{
+    const ReviewState::Snapshot snapshot = state.review->snapshot();
+    if (!snapshot.review) {
+        state.session->set_error("There are no changes to report on.");
+        return;
+    }
+    const SessionSnapshot session = state.session->snapshot();
+    const std::string prompt      = format_handoff_prompt(
+        state.prompts->handoff(), session, *snapshot.review);
+    std::string error;
+    (void)run_review_pass(state,
+        ReviewPassRequest { .pass = ReviewPass::HANDOFF,
+            .prompt               = std::move(prompt),
+            .label                = "Handoff report",
+            .complete =
+                [state_ptr = &state](std::string output) {
+                    std::string report { trim(std::move(output)) };
+                    if (report.empty()) {
+                        state_ptr->session->set_error(
+                            "The handoff document came back empty.");
+                        return;
+                    }
+                    report += "\n";
+                    state_ptr->session->set_handoff_report(std::move(report));
+                } },
+        error);
+    if (!error.empty()) {
+        state.session->set_error(std::move(error));
+    }
+}
+
+std::string export_viewer_content(
+    ApplicationState& state, const ViewerModal& payload, std::string& error)
+{
+    const auto workspace = state.environment->workspace();
+    if (!workspace) {
+        error = "The workspace is not ready.";
+        return { };
+    }
+    const std::filesystem::path root
+        = workspace->project_root.value_or(workspace->working_directory);
+    const std::string name = format_local_time("%Y%m%d-%H%M%S") + "-"
+        + export_slug(
+            payload.save_name.empty() ? payload.title : payload.save_name);
+    const std::string path = (root / ".imza" / (name + ".md")).string();
+    const WriteFileRequest request { path, payload.content };
+    // User-initiated and always inside the trusted root, so it is
+    // evaluated as a Build-mode write: the Plan-mode ban guards agent
+    // mutation, not an explicit export.
+    const FilesystemEvaluation evaluation = evaluate_filesystem_request(request,
+        make_permission_context(
+            *state.environment, *state.permissions, SessionMode::BUILD));
+    if (evaluation.decision.kind != PermissionDecision::Kind::ACCEPT) {
+        error = "Cannot export: " + evaluation.decision.reason;
+        return { };
+    }
+    std::string write_error;
+    if (!save_text(filesystem_target(request).string(), payload.content,
+            write_error)) {
+        error = "Could not export: " + write_error;
+        return { };
+    }
+    if (!spawn_detached_command(editor_command(path))) {
+        error = "Exported to " + path + " but the editor could not start.";
+        return { };
+    }
+    return path;
 }
 
 void interrupt(ApplicationState& state)
