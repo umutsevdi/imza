@@ -93,6 +93,8 @@ struct SkillsModal {
         std::string description;
         std::string project_root;
         SkillPolicy policy = SkillPolicy::ASK;
+
+        bool operator==(const Entry&) const = default;
     };
     std::vector<Entry> entries;
 };
@@ -101,8 +103,7 @@ using ModalPayload
     = std::variant<std::monostate, ViewerModal, PermissionPrompt, QuestionForm,
         ConnectModal, VariantModal, SessionsModal, SkillsModal, McpModal>;
 
-using ModalResult
-    = std::variant<std::monostate, ToolVerdict, ModalAnswer, ConnectResult,
-        ModelChoice, VariantChoice, SkillPolicyChanges, std::filesystem::path>;
+using ModalResult = std::variant<std::monostate, ToolVerdict, ModalAnswer,
+    ConnectResult, ModelChoice, VariantChoice, std::filesystem::path>;
 
 } // namespace imza

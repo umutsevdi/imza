@@ -192,9 +192,8 @@ namespace {
             auto p = home / skill_path / "skills";
             add_skills(p, Skill::Scope::GLOBAL, std::nullopt, global_skills);
         }
-        auto skills_generic_cfg = agent_config_base_dir() / "agents" / "skills";
-        add_skills(skills_generic_cfg, Skill::Scope::GLOBAL, std::nullopt,
-            global_skills);
+        add_skills(global_skills_directory(), Skill::Scope::GLOBAL,
+            std::nullopt, global_skills);
     }
 
     void detect_project_skills(const std::filesystem::path& root,
@@ -207,6 +206,11 @@ namespace {
     }
 
 } // namespace
+
+std::filesystem::path global_skills_directory()
+{
+    return agent_config_base_dir() / "agents" / "skills";
+}
 
 void detect_package_managers(std::vector<std::string>& package_managers)
 {
@@ -619,6 +623,22 @@ std::optional<std::string> Environment::agent_rules_path() const
         return std::nullopt;
     }
     return ws->instruction->path;
+}
+
+void Environment::rescan_skills()
+{
+    std::shared_ptr<const SystemEnvironment> current;
+    {
+        std::shared_lock lock(_workspace_mutex);
+        if (!_system) {
+            return;
+        }
+        current = _system;
+    }
+    auto refreshed = std::make_shared<SystemEnvironment>(*current);
+    refreshed->global_skills.clear();
+    detect_global_skills(refreshed->global_skills);
+    _publish_system(std::move(refreshed));
 }
 
 std::vector<Skill> Environment::skills() const

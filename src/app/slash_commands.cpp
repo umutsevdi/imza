@@ -18,7 +18,7 @@ std::span<const SlashCommand> slash_commands()
             SlashCommand::Action::SUBAGENTS },
         { "/sessions", "load or delete saved sessions",
             SlashCommand::Action::SESSIONS },
-        { "/skills", "manage discovered skills", SlashCommand::Action::SKILLS },
+        { "/skills", "manage or browse skills", SlashCommand::Action::SKILLS },
         { "/changelog", "show the version history",
             SlashCommand::Action::CHANGELOG },
         { "/compact", "summarize and compact the conversation",

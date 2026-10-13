@@ -54,6 +54,10 @@ struct WorkspaceEnvironment {
 };
 
 SystemEnvironment detect_system_environment();
+// The generic cross-agent skills directory Imza reads and installs into:
+// `<config-dir>/agents/skills`, where `<config-dir>` is XDG_CONFIG_HOME
+// (or ~/.config), APPDATA on Windows, Application Support on macOS.
+std::filesystem::path global_skills_directory();
 void detect_package_managers(std::vector<std::string>& package_managers);
 std::filesystem::path prepare_imza_temporary_directory(
     const std::filesystem::path& base);
@@ -91,6 +95,9 @@ public:
 
     std::optional<std::string> agent_rules_path() const;
     std::vector<Skill> skills() const;
+    // Re-detects global skills after an install or removal and republishes
+    // the system snapshot, so the catalogue updates without a restart.
+    void rescan_skills();
     ChdirResult chdir(const std::filesystem::path& dir);
     [[nodiscard]] Signal<>::Subscription subscribe_to_workspace_change(
         Signal<>::Callback callback);

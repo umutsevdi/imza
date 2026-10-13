@@ -528,12 +528,6 @@ void resolve_modal(ApplicationState& state, ModalResult result)
         state.providers->set_reasoning_effort(variant->effort);
         state.session->bump_modal_serial();
     }
-    if (auto* skills = std::get_if<SkillPolicyChanges>(&result)) {
-        if (!state.providers->set_skill_policies(*skills)) {
-            state.session->set_error("Failed to save skill policies.");
-            return;
-        }
-    }
     {
         auto entry = state.queue.try_pop();
         if (entry && entry->promise) {

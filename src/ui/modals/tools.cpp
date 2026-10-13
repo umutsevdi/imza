@@ -3,6 +3,7 @@
 #include "ui/ui.h"
 #include "workspace/environment.h"
 
+#include <ftxui/component/animation.hpp>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_base.hpp>
 #include <ftxui/component/event.hpp>
@@ -232,6 +233,16 @@ namespace {
             return _body->Render();
         }
 
+        // The modal body is rendered directly rather than attached as a
+        // child, so animation frames (menu underlines, spinners) must be
+        // forwarded by hand or they never advance.
+        void OnAnimation(animation::Params& params) override
+        {
+            if (_body) {
+                _body->OnAnimation(params);
+            }
+        }
+
         bool OnEvent(Event event) override
         {
             const Session& st = *_session;
@@ -256,6 +267,12 @@ namespace {
                     return true;
                 }
                 if (std::holds_alternative<SessionsModal>(st.modal()) && _body
+                    && _body->OnEvent(event)) {
+                    return true;
+                }
+                // The skills view uses Escape to close an open policy list
+                // or cancel a removal before the modal itself closes.
+                if (std::holds_alternative<SkillsModal>(st.modal()) && _body
                     && _body->OnEvent(event)) {
                     return true;
                 }

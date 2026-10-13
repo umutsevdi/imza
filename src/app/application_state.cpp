@@ -6,6 +6,7 @@
 #include "permissions/store.h"
 #include "platform/command_runner.h"
 #include "tools/mcp_manager.h"
+#include "tools/skill_registry.h"
 #include "tools/skills.h"
 #include "turn/delegation.h"
 #include "turn/prompt.h"
@@ -189,9 +190,23 @@ namespace {
         state->subagents = std::make_shared<SubagentManager>();
         state->environment
             = std::make_shared<Environment>(std::move(instructions));
-        state->review        = std::make_shared<ReviewState>();
-        state->skills        = std::make_shared<SkillStore>();
-        state->permissions   = std::make_shared<PermissionStore>();
+        state->review      = std::make_shared<ReviewState>();
+        state->skills      = std::make_shared<SkillStore>();
+        state->permissions = std::make_shared<PermissionStore>();
+        SkillRegistryHooks registry_hooks;
+        registry_hooks.install_root = global_skills_directory();
+        // Self-hosted mirrors and tests override the skills.sh endpoint.
+        if (const std::string url = env_or_empty("IMZA_SKILLS_URL");
+            !url.empty()) {
+            registry_hooks.base_url = url;
+        }
+        // Installs and removals land outside the workspace scan; refresh
+        // the catalogue so the new skill appears without a restart.
+        registry_hooks.on_mutated = [environment = state->environment] {
+            environment->rescan_skills();
+        };
+        state->skill_registry
+            = std::make_shared<SkillRegistry>(std::move(registry_hooks));
         state->post          = guarded_post(state.get(), std::move(post));
         state->on_exit       = [] { };
         state->runtime_flags = runtime_flags;
@@ -221,6 +236,7 @@ namespace {
         state->environment    = parent.environment;
         state->review         = std::make_shared<ReviewState>();
         state->skills         = std::make_shared<SkillStore>();
+        state->skill_registry = parent.skill_registry;
         state->permissions    = parent.permissions;
         state->prompts        = parent.prompts;
         state->post           = guarded_post(state.get(), std::move(post));

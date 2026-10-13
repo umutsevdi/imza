@@ -17,6 +17,7 @@
 #include "runtime/modal_queue.h"
 #include "runtime/subagent_manager.h"
 #include "tools/lua.h"
+#include "tools/skill_registry.h"
 #include "tools/tool.h"
 #include "workspace/environment.h"
 
@@ -29,6 +30,7 @@ class Delegation;
 class PermissionStore;
 class PromptStore;
 class McpManager;
+class SkillRegistry;
 
 enum class AgentNotification { TURN_FINISHED, INPUT_REQUIRED };
 
@@ -47,6 +49,7 @@ struct ApplicationState {
     std::shared_ptr<Environment> environment;
     std::shared_ptr<ReviewState> review;
     std::shared_ptr<SkillStore> skills;
+    std::shared_ptr<SkillRegistry> skill_registry;
     std::shared_ptr<PermissionStore> permissions;
     std::shared_ptr<PromptStore> prompts;
 

@@ -128,4 +128,49 @@ inline std::string read_all(const std::filesystem::path& path)
         std::istreambuf_iterator<char>() };
 }
 
+// RAII isolation of the config home: a fresh TempDir is exported as
+// XDG_CONFIG_HOME and the previous value is restored on destruction. Imza
+// discovers global skills under `<config-home>/agents/skills`.
+class IsolatedConfigHome {
+public:
+    IsolatedConfigHome()
+    {
+        if (const char* value = std::getenv("XDG_CONFIG_HOME")) {
+            _previous     = value;
+            _had_previous = true;
+        }
+        setenv("XDG_CONFIG_HOME", _root.path.string().c_str(), 1);
+    }
+
+    ~IsolatedConfigHome()
+    {
+        if (_had_previous) {
+            setenv("XDG_CONFIG_HOME", _previous.c_str(), 1);
+        } else {
+            unsetenv("XDG_CONFIG_HOME");
+        }
+    }
+
+    IsolatedConfigHome(const IsolatedConfigHome&)            = delete;
+    IsolatedConfigHome& operator=(const IsolatedConfigHome&) = delete;
+
+    std::filesystem::path root() const { return _root.path; }
+
+    // Creates `<root>/agents/skills/<name>/SKILL.md` with a description.
+    std::filesystem::path add_skill(
+        const std::string& name, const std::string& description) const
+    {
+        const std::filesystem::path skill
+            = _root.path / "agents" / "skills" / name;
+        write_file(skill / "SKILL.md",
+            "---\ndescription: " + description + "\n---\n\nBody.\n");
+        return skill / "SKILL.md";
+    }
+
+private:
+    TempDir _root;
+    std::string _previous;
+    bool _had_previous = false;
+};
+
 } // namespace imza::test

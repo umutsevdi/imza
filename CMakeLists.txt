@@ -293,6 +293,7 @@ add_library(imza_runtime
     src/runtime/modal_queue.cpp
     src/runtime/subagent_manager.cpp
     src/tools/skills.cpp
+    src/tools/skill_registry.cpp
     src/workspace/attachments.cpp
     src/workspace/environment.cpp
 )

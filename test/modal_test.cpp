@@ -868,6 +868,140 @@ allow lasts until directory or session changes
 Esc reject
 )");
 }
+TEST_CASE("skills modal manages real skills and switches tabs")
+{
+    imza::test::IsolatedDataHome data_home; // policy commits hit the store
+    imza::test::IsolatedConfigHome config_home;
+    config_home.add_skill("docs", "Write documentation");
+    config_home.add_skill("deploy", "Ship it");
+
+    AgentEnv env;
+    imza::enqueue_user_modal(*env.state, imza::SkillsModal { });
+    REQUIRE(env.pump.wait_for([&] {
+        return std::holds_alternative<imza::SkillsModal>(env.session->modal());
+    }));
+
+    ftxui::Component modal   = imza::make_modal(env.state);
+    const std::string manage = imza::test::to_text(modal->Render(), 80, 20);
+    CHECK(manage.find("Manage") != std::string::npos);
+    CHECK(manage.find("Search") != std::string::npos);
+    CHECK(manage.find("docs") != std::string::npos);
+    CHECK(manage.find("Write documentation") != std::string::npos);
+    CHECK(manage.find("deploy") != std::string::npos);
+    CHECK(manage.find("Global") != std::string::npos);
+    CHECK(manage.find("Ask") != std::string::npos); // default policy
+    CHECK(manage.find("Remove") != std::string::npos);
+
+    // Enter activates the focused control, which is the policy chip on a
+    // freshly selected row: the list opens below the row.
+    REQUIRE(modal->OnEvent(ftxui::Event::Return));
+    const std::string opened = imza::test::to_text(modal->Render(), 80, 24);
+    CHECK(opened.find("Deny") != std::string::npos);
+    CHECK(opened.find("Remove") != std::string::npos);
+
+    // ArrowDown highlights Deny; Space commits it, same as Enter.
+    REQUIRE(modal->OnEvent(ftxui::Event::ArrowDown));
+    REQUIRE(modal->OnEvent(ftxui::Event::Character(' ')));
+    const std::string committed = imza::test::to_text(modal->Render(), 80, 24);
+    CHECK(committed.find("Deny ▾") != std::string::npos);
+
+    // There is no Save button: committing a policy persists it immediately.
+    // Rows are sorted by name, so the committed row is "deploy".
+    CHECK(committed.find("Save") == std::string::npos);
+    CHECK(env.pump.wait_for([&] {
+        return env.state->providers->config().global_skills.at("deploy")
+            == imza::SkillPolicy::DENY;
+    }));
+    CHECK(env.state->providers->config().global_skills.at("docs")
+        == imza::SkillPolicy::ASK);
+
+    // Tab switches to the search tab, which shows the query prompt.
+    REQUIRE(modal->OnEvent(ftxui::Event::Tab));
+    const std::string search = imza::test::to_text(modal->Render(), 80, 20);
+    CHECK(search.find("search skills.sh") != std::string::npos);
+    imza::close_modal(*env.state);
+}
+
+TEST_CASE("skills modal picks up a skill installed after it opened")
+{
+    imza::test::IsolatedConfigHome config_home;
+    config_home.add_skill("docs", "Write documentation");
+
+    AgentEnv env;
+    imza::enqueue_user_modal(*env.state, imza::SkillsModal { });
+    REQUIRE(env.pump.wait_for([&] {
+        return std::holds_alternative<imza::SkillsModal>(env.session->modal());
+    }));
+
+    ftxui::Component modal = imza::make_modal(env.state);
+    CHECK(imza::test::to_text(modal->Render(), 80, 20).find("docs")
+        != std::string::npos);
+    CHECK(imza::test::to_text(modal->Render(), 80, 20).find("fresh")
+        == std::string::npos);
+
+    // A skill installed while the modal is open (the search tab's install
+    // path) must appear in Manage without reopening it.
+    config_home.add_skill("fresh", "Just installed");
+    env.state->environment->rescan_skills();
+    REQUIRE(env.pump.wait_for([&] {
+        return imza::test::to_text(modal->Render(), 80, 20).find("fresh")
+            != std::string::npos;
+    }));
+    imza::close_modal(*env.state);
+}
+TEST_CASE("skills modal keys are consistent across the policy chip and Remove")
+{
+    imza::test::IsolatedConfigHome config_home;
+    config_home.add_skill("docs", "Write documentation");
+
+    AgentEnv env;
+    imza::enqueue_user_modal(*env.state, imza::SkillsModal { });
+    REQUIRE(env.pump.wait_for([&] {
+        return std::holds_alternative<imza::SkillsModal>(env.session->modal());
+    }));
+
+    ftxui::Component modal = imza::make_modal(env.state);
+    (void)modal->Render();
+
+    // Space on the focused policy chip opens the list, exactly like Enter.
+    REQUIRE(modal->OnEvent(ftxui::Event::Character(' ')));
+    CHECK(imza::test::to_text(modal->Render(), 80, 24).find("Deny")
+        != std::string::npos);
+    REQUIRE(modal->OnEvent(ftxui::Event::Escape)); // close the list
+
+    // Right moves focus from the chip to Remove; Enter then arms the
+    // confirmation, like Space does on a button.
+    REQUIRE(modal->OnEvent(ftxui::Event::ArrowRight));
+    REQUIRE(modal->OnEvent(ftxui::Event::Return));
+    CHECK(imza::test::to_text(modal->Render(), 80, 24).find("Yes")
+        != std::string::npos);
+    imza::close_modal(*env.state);
+}
+
+TEST_CASE("skills modal tab bar does not invert the selected tab")
+{
+    imza::test::IsolatedConfigHome config_home;
+    AgentEnv env;
+    imza::enqueue_user_modal(*env.state, imza::SkillsModal { });
+    REQUIRE(env.pump.wait_for([&] {
+        return std::holds_alternative<imza::SkillsModal>(env.session->modal());
+    }));
+
+    ftxui::Component modal = imza::make_modal(env.state);
+    // The tab row carries no inverse-video escape: the bar is rendered
+    // directly, so it must not report itself focused and highlight the
+    // selected tab with a background.
+    const std::string raw = imza::test::to_text(modal->Render(), 80, 20);
+    for (const std::string& line : imza::split_lines(raw)) {
+        if (imza::test::without_ansi(line).find("Manage")
+            != std::string::npos) {
+            CHECK(line.find("\x1b[7m") == std::string::npos);
+            break;
+        }
+    }
+    imza::close_modal(*env.state);
+}
+
 TEST_CASE("closing a modal keeps keyboard focus on the chat")
 {
     AgentEnv env;
