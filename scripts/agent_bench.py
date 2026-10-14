@@ -61,7 +61,7 @@ import sys
 import time
 
 # Names discovered by --all, in the order they are reported.
-KNOWN_AGENTS = ("build-release/release/imza", "claude", "codex", "crush", "opencode",
+KNOWN_AGENTS = ("imza", "claude", "codex", "crush", "opencode",
                 "gemini", "cline", "pi")
 
 DEFAULT_BINARY = "build-release/release/imza"
