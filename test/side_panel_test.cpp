@@ -33,7 +33,7 @@ TEST_CASE("side panel documents widget hides when empty and lists plans")
     const std::string out = imza::test::to_text(panel->Render(), 120, 40);
     CHECK(out.find("Documents") != std::string::npos);
     CHECK(out.find("Initial Plan") != std::string::npos);
-    CHECK(out.find("Revision 1") != std::string::npos);
+    CHECK(out.find("Plan Revision - 1") != std::string::npos);
 }
 
 TEST_CASE("documents widget interleaves build logs with plan revisions")
@@ -54,16 +54,16 @@ TEST_CASE("documents widget interleaves build logs with plan revisions")
 
     const std::string out = imza::test::to_text(panel->Render(), 120, 40);
     CHECK(out.find("Initial Plan") != std::string::npos);
-    CHECK(out.find("Build 1") != std::string::npos);
-    CHECK(out.find("Revision 1") != std::string::npos);
-    CHECK(out.find("Build 2") != std::string::npos);
+    CHECK(out.find("Build Notes - 1") != std::string::npos);
+    CHECK(out.find("Plan Revision - 1") != std::string::npos);
+    CHECK(out.find("Build Notes - 2") != std::string::npos);
 
     // Clicking a build row opens its log in the viewer.
-    REQUIRE(imza::test::click_label(panel, "Build 1", 120, 40));
+    REQUIRE(imza::test::click_label(panel, "Build Notes - 1", 120, 40));
     const imza::ModalPayload payload = state->session->modal();
     const auto* viewer               = std::get_if<imza::ViewerModal>(&payload);
     REQUIRE(viewer != nullptr);
-    CHECK(viewer->title == "Build 1");
+    CHECK(viewer->title == "Build Notes - 1");
     CHECK(viewer->content.find("chose A over B") != std::string::npos);
     CHECK(viewer->content.find("added dependency Z") != std::string::npos);
 }

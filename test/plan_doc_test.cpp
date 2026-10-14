@@ -93,7 +93,7 @@ TEST_CASE("plan doc updates live and labels agent revisions")
         fx.state->session->create_plan(skeleton + "\nextra note from the agent")
             .empty());
     const std::string rendered = imza::test::to_text(fx.doc->Render(), 100, 40);
-    CHECK(rendered.find("Revision 1") != std::string::npos);
+    CHECK(rendered.find("Plan Revision - 1") != std::string::npos);
     CHECK(rendered.find("extra note from the agent") != std::string::npos);
 }
 

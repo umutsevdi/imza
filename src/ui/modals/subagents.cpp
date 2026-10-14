@@ -7,6 +7,7 @@
 #include <ftxui/component/component_base.hpp>
 #include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
+#include <ftxui/screen/string.hpp>
 
 #include <algorithm>
 #include <string>
@@ -18,7 +19,7 @@ using namespace ftxui;
 
 namespace {
 
-    constexpr int SUBAGENT_ROLES = 4;
+    constexpr int SUBAGENT_ROLES = 3;
 
     SubagentRole role_at(int index)
     {
@@ -27,9 +28,6 @@ namespace {
         }
         if (index == 1) {
             return SubagentRole::RESEARCH;
-        }
-        if (index == 2) {
-            return SubagentRole::REVIEWER;
         }
         return SubagentRole::BASIC;
     }
@@ -42,9 +40,6 @@ namespace {
         if (role == SubagentRole::RESEARCH) {
             return "Research";
         }
-        if (role == SubagentRole::REVIEWER) {
-            return "Reviewer";
-        }
         return "Basic";
     }
 
@@ -56,10 +51,13 @@ namespace {
         if (role == SubagentRole::RESEARCH) {
             return "read-only discovery and code review";
         }
-        if (role == SubagentRole::REVIEWER) {
-            return "runs AI Review and Handoff passes";
-        }
-        return "small UI tasks such as session titles";
+        return "one-shot passes: titles, AI Review, Handoff";
+    }
+
+    // Basic runs its passes with reasoning off.
+    bool role_has_variant(SubagentRole role)
+    {
+        return role != SubagentRole::BASIC;
     }
 
     class SubagentsView : public ComponentBase {
@@ -151,6 +149,9 @@ namespace {
         void _change_variant(int delta)
         {
             const SubagentRole role = role_at(_selected);
+            if (!role_has_variant(role)) {
+                return;
+            }
             static const std::vector<std::string> variants { "off", "low",
                 "medium", "high" };
             const Config config = _provider_store.config();
@@ -211,6 +212,14 @@ namespace {
             Elements rows       = modal_header("Subagent Models",
                 "Tune subagent tasks. Choose <Default> to follow the main "
                 "chat model.");
+
+            // The model and variant cells are fixed-width columns so both
+            // line up across rows. The filler absorbs the slack, anchoring
+            // the pair to the right edge; the name and description may
+            // differ in length without moving them.
+            std::vector<std::string> variants(SUBAGENT_ROLES);
+            int model_w   = 0;
+            int variant_w = 0;
             for (int index = 0; index < SUBAGENT_ROLES; ++index) {
                 const SubagentRole role = role_at(index);
                 const auto found        = config.subagents.find(role);
@@ -219,10 +228,33 @@ namespace {
                     && !found->second.model.empty()) {
                     model = found->second.model;
                 }
-                Element row = hbox({ text(role_name(role) + " Subagent"),
-                    text("  " + role_description(role)) | dim, filler(),
-                    text(model),
-                    text("  < " + _subagent_variant(role) + " >") | dim });
+                model_w = std::max(model_w, string_width(model));
+                if (role_has_variant(role)) {
+                    variants[static_cast<std::size_t>(index)]
+                        = "  < " + _subagent_variant(role) + " >";
+                    variant_w = std::max(variant_w,
+                        string_width(
+                            variants[static_cast<std::size_t>(index)]));
+                }
+            }
+
+            for (int index = 0; index < SUBAGENT_ROLES; ++index) {
+                const SubagentRole role = role_at(index);
+                const auto found        = config.subagents.find(role);
+                std::string model       = "<Default>";
+                if (found != config.subagents.end()
+                    && !found->second.model.empty()) {
+                    model = found->second.model;
+                }
+                Element row = hbox({
+                    text(role_name(role) + " Subagent"),
+                    text("  " + role_description(role)) | dim,
+                    filler(),
+                    text(model) | size(WIDTH, EQUAL, model_w) | align_right,
+                    text(fit(
+                        variants[static_cast<std::size_t>(index)], variant_w))
+                        | dim,
+                });
                 if (index == _selected) {
                     row |= bgcolor(PANEL_COLOR_FOCUS);
                     row |= bold;

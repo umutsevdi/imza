@@ -24,7 +24,7 @@ imza::RepositoryReview sample_review()
 
 } // namespace
 
-TEST_CASE("handoff prompt carries plan, revisions, messages, and diff")
+TEST_CASE("handoff prompt carries plan, revisions, messages, and file stat")
 {
     imza::Session session;
     session.begin_send("first ask");
@@ -38,30 +38,38 @@ TEST_CASE("handoff prompt carries plan, revisions, messages, and diff")
     CHECK(prompt.find("more") != std::string::npos);
     CHECK(prompt.find("chose A over B") != std::string::npos);
     CHECK(prompt.find("first ask") != std::string::npos);
+    CHECK(prompt.find("changed_files") != std::string::npos);
     CHECK(prompt.find("src/foo.cpp") != std::string::npos);
+    CHECK(prompt.find("@@ -1,2 +1,3 @@") == std::string::npos);
 }
 
-TEST_CASE("handoff report replaces the previous one and leaves the plan alone")
+TEST_CASE("handoff reports accumulate and leave the plan alone")
 {
     imza::Session session;
     session.begin_send("do the work");
     REQUIRE(session.create_plan(imza::test::PLAN_SKELETON).empty());
-    REQUIRE(session.set_handoff_report("first report").empty());
-    REQUIRE(session.set_handoff_report("second report").empty());
+    REQUIRE(session.append_handoff_report("first report").empty());
+    REQUIRE(session.create_plan(imza::test::PLAN_SKELETON + "\nmore").empty());
+    REQUIRE(session.append_handoff_report("second report").empty());
 
     const auto documents = session.documents();
-    std::size_t handoffs = 0;
+    std::vector<std::string> reports;
     for (const imza::SessionDoc& doc : *documents) {
         if (doc.kind == imza::SessionDoc::Kind::HANDOFF) {
-            ++handoffs;
-            CHECK(doc.content == "second report");
+            reports.push_back(doc.content);
         }
     }
-    CHECK(handoffs == 1);
-    CHECK(session.plan_doc() == imza::test::PLAN_SKELETON);
+    // A second report appends after the later plan rather than replacing
+    // the first, so the newest report reflects the latest stint.
+    REQUIRE(reports.size() == 2);
+    CHECK(reports[0] == "first report");
+    CHECK(reports[1] == "second report");
+    CHECK(session.plan_doc() == imza::test::PLAN_SKELETON + "\nmore");
 
     const std::vector<std::string> labels = imza::document_labels(*documents);
-    REQUIRE(labels.size() == 2);
+    REQUIRE(labels.size() == 4);
     CHECK(labels[0] == "Initial Plan");
-    CHECK(labels[1] == "Handoff Report");
+    CHECK(labels[1] == "Handoff Report - 1");
+    CHECK(labels[2] == "Plan Revision - 1");
+    CHECK(labels[3] == "Handoff Report - 2");
 }

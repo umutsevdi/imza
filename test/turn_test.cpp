@@ -233,7 +233,8 @@ TEST_CASE("automatic compaction runs in the background after the turn")
 {
     CompactionHome home;
     imza::test::AgentEnv env;
-    REQUIRE(env.state->providers->pricing_for("m").context_limit == 1000);
+    REQUIRE(
+        env.state->providers->pricing_for("m", "test").context_limit == 1000);
     imza::test::AgentEnv* ep = &env;
     env.stream = [ep](const imza::ChatRequest& req,
                      const imza::StreamCallback& cb) -> imza::Status {
@@ -271,6 +272,47 @@ TEST_CASE("automatic compaction runs in the background after the turn")
     const auto& next = env.requests[before];
     REQUIRE(next.messages.size() > 1);
     CHECK(next.messages[1].content.find("bg summary") != std::string::npos);
+}
+
+TEST_CASE("an unknown context window still triggers compaction")
+{
+    // A model with no reported window (local server, injected provider)
+    // would otherwise never compact; a conservative fallback window keeps
+    // it working.
+    CompactionHome home;
+    imza::test::AgentEnv env;
+    imza::test::AgentEnv* ep = &env;
+    env.stream = [ep](const imza::ChatRequest& req,
+                     const imza::StreamCallback& cb) -> imza::Status {
+        ep->requests.push_back(req);
+        if (summarize_requests({ req }) == 1) {
+            cb(imza::make_delta_event("bg summary"));
+            cb(imza::make_done_event());
+            return imza::Status::OK;
+        }
+        cb(imza::make_connected_event());
+        cb(imza::make_delta_event("reply"));
+        // Above the fallback window's 80% trigger.
+        cb(usage(14000));
+        cb(imza::make_done_event());
+        return imza::Status::OK;
+    };
+
+    // Point the active model at one the catalog does not carry.
+    REQUIRE(env.state->providers->select_model(
+        imza::ModelChoice { "test", "unknown-window-model" }));
+    REQUIRE(
+        env.state->providers->context_limit_for("unknown-window-model", "test")
+        == 0);
+
+    imza::submit(*env.state, "first question");
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
+    imza::submit(*env.state, "second question");
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
+
+    REQUIRE(env.pump.wait_for(
+        [&] { return !env.session->snapshot().compacted_summary.empty(); }));
+    CHECK(env.session->snapshot().compacted_summary == "bg summary");
 }
 
 TEST_CASE("a later compaction summarizes only post-boundary messages")

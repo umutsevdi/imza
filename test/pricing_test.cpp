@@ -67,7 +67,7 @@ struct CatalogHome : imza::test::IsolatedDataHome {
 
 } // namespace
 
-TEST_CASE("pricing_table_from builds expected entries")
+TEST_CASE("pricing_table_from keys only by provider-qualified id")
 {
     struct Scenario {
         const char* name;
@@ -75,15 +75,12 @@ TEST_CASE("pricing_table_from builds expected entries")
         imza::ModelPricing expected;
     };
     const std::vector<Scenario> scenarios {
-        { "bare OpenAI id", "gpt-4o-mini",
+        { "OpenAI id", "openai/gpt-4o-mini",
             { 0.00015, 0.00060, 0.000075, 0.0, 128000 } },
-        { "provider-qualified OpenAI id", "openai/gpt-4o-mini",
-            { 0.00015, 0.00060, 0.000075, 0.0, 128000 } },
-        { "bare Anthropic id", "claude-sonnet-4",
+        { "Anthropic id", "anthropic/claude-sonnet-4",
             { 0.003, 0.015, 0.00030, 0.00375, 200000 } },
-        { "provider-qualified Anthropic id", "anthropic/claude-sonnet-4",
-            { 0.003, 0.015, 0.00030, 0.00375, 200000 } },
-        { "zero-cost model", "glm-5-flash", { 0.0, 0.0, 0.0, 0.0, 128000 } },
+        { "zero-cost model", "zai/glm-5-flash",
+            { 0.0, 0.0, 0.0, 0.0, 128000 } },
     };
     const auto table = imza::pricing_table_from(test_catalog());
 
@@ -101,28 +98,37 @@ TEST_CASE("pricing_table_from builds expected entries")
             == doctest::Approx(scenario.expected.cache_write_per_1k));
         CHECK(actual.context_limit == scenario.expected.context_limit);
     }
+    // A bare id is ambiguous, so it is never indexed.
+    CHECK(table.count("gpt-4o-mini") == 0);
+    CHECK(table.count("claude-sonnet-4") == 0);
     CHECK(table.count("costless-model") == 0);
+    CHECK(table.count("openai/costless-model") == 0);
 }
 
-TEST_CASE("pricing_for matches provider-qualified ids and is case-insensitive")
+TEST_CASE(
+    "pricing_for is connection-scoped, case-insensitive, and never borrows")
 {
     CatalogHome home;
     imza::ProviderStore store { imza::Config { } };
 
-    const auto qualified = store.pricing_for("anthropic/claude-sonnet-4");
-    const auto bare      = store.pricing_for("Claude-Sonnet-4");
-    CHECK(qualified.input_per_1k == doctest::Approx(0.003));
-    CHECK(bare.input_per_1k == doctest::Approx(0.003));
-    CHECK(bare.cache_write_per_1k == doctest::Approx(0.00375));
-}
+    // Case-insensitive within the owning connection.
+    const auto sonnet = store.pricing_for("Claude-Sonnet-4", "anthropic");
+    CHECK(sonnet.input_per_1k == doctest::Approx(0.003));
+    CHECK(sonnet.cache_write_per_1k == doctest::Approx(0.00375));
 
-TEST_CASE("pricing_for matches by substring")
-{
-    CatalogHome home;
-    imza::ProviderStore store { imza::Config { } };
+    // A decorated id resolves to its base row.
+    const auto decorated
+        = store.pricing_for("gpt-4o-mini-2024-07-18", "openai");
+    CHECK(decorated.input_per_1k == doctest::Approx(0.00015));
 
-    const auto p = store.pricing_for("openai/gpt-4o-mini-2024-07-18");
-    CHECK(p.input_per_1k == doctest::Approx(0.00015));
+    // The model exists under openai, not anthropic: a lookup scoped to
+    // anthropic must not resolve to openai's price.
+    const auto borrowed = store.pricing_for("gpt-4o-mini", "anthropic");
+    CHECK(borrowed.input_per_1k == 0.0);
+    CHECK(borrowed.context_limit == 0);
+
+    const auto own = store.pricing_for("gpt-4o-mini", "openai");
+    CHECK(own.input_per_1k == doctest::Approx(0.00015));
 }
 
 TEST_CASE("pricing_for keeps zero-cost models and rejects unknown ones")
@@ -130,17 +136,17 @@ TEST_CASE("pricing_for keeps zero-cost models and rejects unknown ones")
     CatalogHome home;
     imza::ProviderStore store { imza::Config { } };
 
-    const auto free = store.pricing_for("zai/glm-5-flash");
+    const auto free = store.pricing_for("glm-5-flash", "zai");
     CHECK(free.input_per_1k == 0.0);
     CHECK(free.output_per_1k == 0.0);
     CHECK(free.context_limit == 128000);
 
-    const auto unknown = store.pricing_for("some-unknown-model");
+    const auto unknown = store.pricing_for("some-unknown-model", "zai");
     CHECK(unknown.input_per_1k == 0.0);
     CHECK(unknown.output_per_1k == 0.0);
     CHECK(unknown.context_limit == 0);
 
-    const auto empty = store.pricing_for("");
+    const auto empty = store.pricing_for("", "zai");
     CHECK(empty.context_limit == 0);
 }
 

@@ -78,11 +78,19 @@ namespace {
         return out;
     }
 
-    bool compaction_due(const ModelPricing& pricing,
+    // A model with no reported window (a local server, an injected
+    // provider) would otherwise never compact. Assume a conservative window
+    // so it still does: over-compacting wastes context, but overflowing the
+    // real window fails the turn.
+    constexpr std::uint64_t FALLBACK_CONTEXT_LIMIT = 16384;
+
+    bool compaction_due(std::uint64_t context_limit,
         std::uint64_t prompt_tokens, std::size_t history_size)
     {
-        return pricing.context_limit > 0 && prompt_tokens > 0
-            && prompt_tokens * 100 >= pricing.context_limit * COMPACTION_PERCENT
+        const std::uint64_t window
+            = context_limit > 0 ? context_limit : FALLBACK_CONTEXT_LIMIT;
+        return prompt_tokens > 0
+            && prompt_tokens * 100 >= window * COMPACTION_PERCENT
             && history_size >= 4;
     }
 
@@ -116,13 +124,14 @@ std::string conversation_transcript(
 }
 
 void apply_reasoning(ChatRequest& req, ApiStandard dialect,
-    std::string_view effort, const ProviderStore& providers)
+    std::string_view effort, const ProviderStore& providers,
+    std::string_view connection_id)
 {
     req.reasoning_effort.reset();
     req.thinking_budget.reset();
     const std::string configured = to_config_effort(effort);
     if (configured == "off" || req.model.empty()
-        || !providers.model_reasons(req.model)) {
+        || !providers.model_reasons(req.model, connection_id)) {
         return;
     }
     if (dialect == ApiStandard::ANTHROPIC) {
@@ -368,40 +377,41 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
             [this](std::function<void()> f) { _post(std::move(f)); },
             _state->session);
 
-        StreamCallback cb = [this, model = req.model, &text_buffer, &error_msg,
-                                &error_status, &saw_stream, &received_data,
-                                &request_prompt_tokens,
-                                &stream_updates](const StreamEvent& ev) {
-            if (ev.kind == StreamEvent::Kind::ERROR) {
-                error_status = ev.error;
-                error_msg    = ev.text;
-                return;
-            }
-            if (ev.kind == StreamEvent::Kind::TOOL_CALL) {
-                _stream_events.push_back(ev);
-            }
-            if (ev.kind == StreamEvent::Kind::CONTENT_DELTA
-                || ev.kind == StreamEvent::Kind::CONNECTED) {
-                saw_stream = true;
-            }
-            if (ev.kind == StreamEvent::Kind::CONTENT_DELTA
-                || ev.kind == StreamEvent::Kind::REASONING
-                || ev.kind == StreamEvent::Kind::TOOL_CALL_START
-                || ev.kind == StreamEvent::Kind::TOOL_CALL
-                || ev.kind == StreamEvent::Kind::USAGE) {
-                received_data = true;
-            }
-            if (ev.kind == StreamEvent::Kind::CONTENT_DELTA) {
-                text_buffer += ev.text;
-            }
-            if (ev.kind == StreamEvent::Kind::USAGE) {
-                request_prompt_tokens = ev.usage.prompt;
-            }
-            const ModelPricing pricing = ev.kind == StreamEvent::Kind::USAGE
-                ? _state->providers->pricing_for(model)
-                : ModelPricing { };
-            stream_updates.push(ev, pricing);
-        };
+        StreamCallback cb =
+            [this, model = req.model, connection_id = settings.connection_id,
+                &text_buffer, &error_msg, &error_status, &saw_stream,
+                &received_data, &request_prompt_tokens,
+                &stream_updates](const StreamEvent& ev) {
+                if (ev.kind == StreamEvent::Kind::ERROR) {
+                    error_status = ev.error;
+                    error_msg    = ev.text;
+                    return;
+                }
+                if (ev.kind == StreamEvent::Kind::TOOL_CALL) {
+                    _stream_events.push_back(ev);
+                }
+                if (ev.kind == StreamEvent::Kind::CONTENT_DELTA
+                    || ev.kind == StreamEvent::Kind::CONNECTED) {
+                    saw_stream = true;
+                }
+                if (ev.kind == StreamEvent::Kind::CONTENT_DELTA
+                    || ev.kind == StreamEvent::Kind::REASONING
+                    || ev.kind == StreamEvent::Kind::TOOL_CALL_START
+                    || ev.kind == StreamEvent::Kind::TOOL_CALL
+                    || ev.kind == StreamEvent::Kind::USAGE) {
+                    received_data = true;
+                }
+                if (ev.kind == StreamEvent::Kind::CONTENT_DELTA) {
+                    text_buffer += ev.text;
+                }
+                if (ev.kind == StreamEvent::Kind::USAGE) {
+                    request_prompt_tokens = ev.usage.prompt;
+                }
+                const ModelPricing pricing = ev.kind == StreamEvent::Kind::USAGE
+                    ? _state->providers->pricing_for(model, connection_id)
+                    : ModelPricing { };
+                stream_updates.push(ev, pricing);
+            };
 
         const StreamFn& fn = _stream_fn;
         _retry_after_secs  = 0;
@@ -427,7 +437,8 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
                 error_status      = Status::OK;
                 error_msg.clear();
                 apply_reasoning(req, candidate.dialect,
-                    settings.reasoning_effort, *_state->providers);
+                    settings.reasoning_effort, *_state->providers,
+                    settings.connection_id);
                 active_dialect = candidate.dialect;
                 current_effort = req.reasoning_effort.has_value()
                         || req.thinking_budget.has_value()
@@ -555,9 +566,9 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
             // Compact in the background: the next submission never waits
             // on a summarize round-trip, and the 80% trigger leaves
             // headroom for this turn's uncompacted history.
-            const ModelPricing pricing
-                = _state->providers->pricing_for(settings.model);
-            if (compaction_due(pricing, prompt_tokens, history.size())) {
+            const std::uint64_t window = _state->providers->context_limit_for(
+                settings.model, settings.connection_id);
+            if (compaction_due(window, prompt_tokens, history.size())) {
                 _begin_compaction_job(settings, false);
             }
             return;

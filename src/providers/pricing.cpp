@@ -41,6 +41,9 @@ namespace {
 std::map<std::string, ModelPricing> pricing_table_from(const Catalog& catalog)
 {
     std::map<std::string, ModelPricing> table;
+    // Keys are qualified by provider only: a bare model id is ambiguous
+    // (many providers serve the same model at different prices), so it is
+    // never indexed and can never resolve to an arbitrary provider's row.
     for (const auto& [provider_id, provider] : catalog.providers) {
         for (const auto& [model_id, model] : provider.models) {
             const std::optional<ModelPricing> pricing
@@ -48,7 +51,6 @@ std::map<std::string, ModelPricing> pricing_table_from(const Catalog& catalog)
             if (!pricing) {
                 continue;
             }
-            insert_pricing(table, model_id, *pricing);
             insert_pricing(table, provider_id + "/" + model_id, *pricing);
         }
     }

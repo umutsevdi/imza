@@ -151,10 +151,12 @@ ftxui::Element vertical_space(int height);
 ftxui::Element status_text(const std::string& text, bool ok);
 ftxui::Elements modal_header(std::string title, std::string subtitle = "");
 // Label for one document of the session sequence: plan revision #0 is
-// the "Initial Plan", later ones "Revision N"; build logs are "Build N".
-std::string document_label(
-    SessionDoc::Kind kind, std::size_t plan_index, std::size_t build_index);
-// Per-entry labels for the whole sequence, counting plans and builds
+// the "Initial Plan", later ones "Plan Revision - N"; build logs are
+// "Build Notes - N"; handoff reports are "Handoff Report - N". Each kind
+// numbers independently from 1.
+std::string document_label(SessionDoc::Kind kind, std::size_t plan_index,
+    std::size_t build_index, std::size_t handoff_index);
+// Per-entry labels for the whole sequence, counting each kind
 // independently (they interleave).
 std::vector<std::string> document_labels(
     const std::vector<SessionDoc>& documents);

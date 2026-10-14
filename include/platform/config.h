@@ -104,7 +104,7 @@ struct McpServerConfig {
     bool is_stdio() const { return type == "stdio"; }
 };
 
-enum class SubagentRole { BUILDER, RESEARCH, BASIC, REVIEWER };
+enum class SubagentRole { BUILDER, RESEARCH, BASIC };
 
 struct SubagentModelConfig {
     std::string provider;
@@ -153,7 +153,7 @@ constexpr std::string_view subagent_default_variant(SubagentRole role)
     if (role == SubagentRole::BUILDER) {
         return "medium";
     }
-    if (role == SubagentRole::RESEARCH || role == SubagentRole::REVIEWER) {
+    if (role == SubagentRole::RESEARCH) {
         return "low";
     }
     return "off";

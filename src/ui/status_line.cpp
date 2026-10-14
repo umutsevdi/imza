@@ -95,14 +95,14 @@ namespace {
                 }
             }
             if (session.last.prompt > 0 || session.totals.total > 0) {
-                const ModelPricing pricing = _cached_pricing(active_model);
-                const std::uint64_t used   = session.last.prompt;
-                if (pricing.context_limit > 0) {
-                    const std::uint64_t pct
-                        = used * 100 / pricing.context_limit;
+                const std::uint64_t used = session.last.prompt;
+                const std::uint64_t window
+                    = _active_context_limit(active_model);
+                if (window > 0) {
+                    const std::uint64_t pct = used * 100 / window;
                     bar.push_back(text(" · " + compact_number(used) + "/"
-                                      + compact_number(pricing.context_limit)
-                                      + " (" + std::to_string(pct) + "%)")
+                                      + compact_number(window) + " ("
+                                      + std::to_string(pct) + "%)")
                         | color(PANEL_FG_DIM));
                 } else {
                     bar.push_back(text(" · " + compact_number(used) + " tok")
@@ -217,11 +217,22 @@ namespace {
             }
         }
 
+        std::uint64_t _active_context_limit(const std::string& model)
+        {
+            const auto selection = _state->providers->active_selection();
+            return selection ? _state->providers->context_limit_for(
+                                   model, selection->connection_id)
+                             : 0;
+        }
+
         ModelPricing _cached_pricing(const std::string& model)
         {
             if (_last_model != model) {
-                _last_model = model;
-                _cached     = _state->providers->pricing_for(model);
+                _last_model          = model;
+                const auto selection = _state->providers->active_selection();
+                _cached = selection ? _state->providers->pricing_for(
+                                          model, selection->connection_id)
+                                    : ModelPricing { };
             }
             return _cached;
         }
@@ -232,17 +243,9 @@ namespace {
             if (!selection) {
                 return std::nullopt;
             }
-            const ModelList models
-                = _state->providers->models_for(selection->connection_id);
-            if (models.state != ModelList::State::READY) {
-                return std::nullopt;
-            }
-            const auto model = std::find_if(models.models.begin(),
-                models.models.end(), [&](const ModelInfo& info) {
-                    return info.id == selection->model;
-                });
-            return model == models.models.end() ? std::nullopt
-                                                : model->capabilities;
+            return _state->providers
+                ->model_metadata_for(selection->model, selection->connection_id)
+                .capabilities;
         }
 
         std::string _money_text(double cost)

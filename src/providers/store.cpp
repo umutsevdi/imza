@@ -136,6 +136,51 @@ namespace {
         return http_ok(accept_code) ? Status::OK : Status::API_ERROR;
     }
 
+    // Exact id match first, else the longest prefix match: a decorated id
+    // (a fine-tune, a dated snapshot) resolves to its base row, while a
+    // short id cannot match an unrelated model. Returns nullptr when
+    // nothing matches.
+    template <typename Item, typename KeyFn>
+    const Item* resolve_model(
+        const std::vector<Item>& items, std::string_view key, KeyFn key_of)
+    {
+        for (const Item& item : items) {
+            if (to_lower(key_of(item)) == key) {
+                return &item;
+            }
+        }
+        const Item* best     = nullptr;
+        std::size_t best_len = 0;
+        for (const Item& item : items) {
+            const std::string id = to_lower(key_of(item));
+            if (id.size() > best_len && key.starts_with(id)) {
+                best     = &item;
+                best_len = id.size();
+            }
+        }
+        return best;
+    }
+
+    template <typename Item>
+    const Item* resolve_model(
+        const std::map<std::string, Item>& items, std::string_view key)
+    {
+        const auto exact = items.find(std::string(key));
+        if (exact != items.end()) {
+            return &exact->second;
+        }
+        const Item* best     = nullptr;
+        std::size_t best_len = 0;
+        for (const auto& [id, item] : items) {
+            const std::string lowered = to_lower(id);
+            if (lowered.size() > best_len && key.starts_with(lowered)) {
+                best     = &item;
+                best_len = lowered.size();
+            }
+        }
+        return best;
+    }
+
 } // namespace
 
 std::string subagent_variant_or_default(
@@ -485,23 +530,60 @@ Route ProviderStore::authenticated_route_for(std::string_view connection_id,
     return route;
 }
 
-bool ProviderStore::model_reasons(std::string_view model) const
+ModelMetadata ProviderStore::model_metadata_for(
+    std::string_view model, std::string_view connection_id) const
 {
-    if (model.empty()) {
-        return false;
+    ModelMetadata metadata;
+    const std::string key = to_lower(model);
+    if (key.empty()) {
+        return metadata;
     }
     std::unique_lock lock(_mutex);
     _wait_catalog_locked(lock);
-    for (const auto& [provider_id, provider] : _catalog.providers) {
-        const auto it = provider.models.find(std::string(model));
-        if (it != provider.models.end() && it->second.reasoning == true) {
-            return true;
+    const auto live = _model_catalog.find(std::string(connection_id));
+    if (live != _model_catalog.end()) {
+        if (const auto* ready
+            = std::get_if<CatalogEntry::Ready>(&live->second.state)) {
+            if (const ModelInfo* match = resolve_model(ready->models, key,
+                    [](const ModelInfo& i) { return i.id; })) {
+                metadata.context_limit = match->context_length.value_or(0);
+                metadata.capabilities  = match->capabilities;
+            }
         }
     }
-    return false;
+    // The catalog fills only the gaps, from this connection's own row.
+    const Connection* connection = _find_locked(connection_id);
+    const auto provider          = _catalog.providers.find(
+        connection != nullptr ? connection->id : std::string(connection_id));
+    if (provider != _catalog.providers.end()) {
+        if (const CachedModel* match
+            = resolve_model(provider->second.models, key)) {
+            if (metadata.context_limit == 0 && match->context) {
+                metadata.context_limit = *match->context;
+            }
+            if (!metadata.capabilities && match->capabilities) {
+                metadata.capabilities = match->capabilities;
+            }
+            metadata.reasoning = match->reasoning.value_or(false);
+        }
+    }
+    return metadata;
 }
 
-ModelPricing ProviderStore::pricing_for(std::string_view model) const
+std::uint64_t ProviderStore::context_limit_for(
+    std::string_view model, std::string_view connection_id) const
+{
+    return model_metadata_for(model, connection_id).context_limit;
+}
+
+bool ProviderStore::model_reasons(
+    std::string_view model, std::string_view connection_id) const
+{
+    return model_metadata_for(model, connection_id).reasoning;
+}
+
+ModelPricing ProviderStore::pricing_for(
+    std::string_view model, std::string_view connection_id) const
 {
     const std::string key = to_lower(model);
     if (key.empty()) {
@@ -509,16 +591,14 @@ ModelPricing ProviderStore::pricing_for(std::string_view model) const
     }
     std::unique_lock lock(_mutex);
     _wait_catalog_locked(lock);
-    const auto exact = _pricing.find(key);
-    if (exact != _pricing.end()) {
-        return exact->second;
-    }
-    for (const auto& [name, row] : _pricing) {
-        if (key.find(name) != std::string::npos) {
-            return row;
-        }
-    }
-    return { };
+    const Connection* connection  = _find_locked(connection_id);
+    const std::string provider_id = to_lower(
+        connection != nullptr ? connection->id : std::string(connection_id));
+    // Keys are qualified (`provider/model`), so the lookup can only match
+    // this provider's rows — a bare id can never borrow a sibling's.
+    const std::string qualified = provider_id + "/" + key;
+    const ModelPricing* match   = resolve_model(_pricing, qualified);
+    return match != nullptr ? *match : ModelPricing { };
 }
 
 void ProviderStore::start_model_fetches()

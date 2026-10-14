@@ -685,8 +685,8 @@ namespace {
         Element _viewer_body(const ViewerModal& payload)
         {
             Elements rows { _header_line(payload.title), separatorEmpty(),
-                _static_viewport(
-                    _viewer_content, payload.metadata, _viewer_export->Render()) };
+                _static_viewport(_viewer_content, payload.metadata,
+                    _viewer_export->Render()) };
             if (!_viewer_export_status.empty()) {
                 rows.push_back(separatorEmpty());
                 rows.push_back(

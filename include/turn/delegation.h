@@ -17,6 +17,9 @@ struct ProviderSelection;
 
 struct SubagentOptions {
     bool visible = true;
+    // Send only the user message, with no system prompt: one-shot passes
+    // whose instructions are self-contained.
+    bool bare_system = false;
     std::chrono::seconds timeout { 0 };
     std::optional<std::uint64_t> max_output_tokens;
     std::shared_ptr<Session> transcript;

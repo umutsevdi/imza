@@ -1,6 +1,6 @@
 Write the handoff document for this work: what was planned, and how it was implemented.
 
-You are given the latest plan document, every earlier plan revision, the user's messages, the build log (the decisions the agent recorded while implementing), and the final diff.
+You are given the latest plan document, every earlier plan revision, the user's messages, the build log (the decisions the agent recorded while implementing), and a stat of the files that changed (path, change kind, and line counts).
 
 Write the document directly in markdown, structured like a handoff a human engineer would leave for the next person:
 

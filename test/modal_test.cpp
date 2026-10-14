@@ -1002,6 +1002,47 @@ TEST_CASE("skills modal tab bar does not invert the selected tab")
     imza::close_modal(*env.state);
 }
 
+TEST_CASE("subagents modal aligns the model and variant columns")
+{
+    AgentEnv env;
+    imza::enqueue_user_modal(*env.state,
+        imza::ConnectModal { imza::ConnectModal::Entry::SUBAGENTS });
+    REQUIRE(env.pump.wait_for([&] {
+        return std::holds_alternative<imza::ConnectModal>(env.session->modal());
+    }));
+
+    ftxui::Component modal = imza::make_modal(env.state);
+    const std::string text = imza::test::without_ansi(
+        imza::test::to_text(modal->Render(), 100, 20));
+
+    // The role rows carry the model column; every one must begin at the
+    // same offset or the list reads as ragged.
+    std::vector<std::size_t> model_columns;
+    std::vector<std::size_t> variant_columns;
+    for (const std::string& line : imza::split_lines(text)) {
+        if (line.find("Subagent  ") == std::string::npos) {
+            continue;
+        }
+        const std::size_t model = line.find("<Default>");
+        REQUIRE(model != std::string::npos);
+        model_columns.push_back(model);
+        // Basic runs with reasoning off, so it has no variant cell; the
+        // blank reservation still keeps its model column aligned.
+        const std::size_t variant = line.find("< ", model);
+        if (variant != std::string::npos) {
+            variant_columns.push_back(variant);
+        }
+    }
+    REQUIRE(model_columns.size() == 3);
+    CHECK(model_columns[0] == model_columns[1]);
+    CHECK(model_columns[1] == model_columns[2]);
+
+    REQUIRE(variant_columns.size() == 2);
+    CHECK(variant_columns[0] == variant_columns[1]);
+
+    imza::close_modal(*env.state);
+}
+
 TEST_CASE("closing a modal keeps keyboard focus on the chat")
 {
     AgentEnv env;

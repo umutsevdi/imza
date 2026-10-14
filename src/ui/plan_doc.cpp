@@ -205,7 +205,7 @@ namespace {
         Element _header()
         {
             const std::string label = _has_plan
-                ? document_label(SessionDoc::Kind::PLAN, _revision - 1, 0)
+                ? document_label(SessionDoc::Kind::PLAN, _revision - 1, 0, 0)
                 : "No plan";
             Elements parts {
                 text("Plan") | bold | color(PANEL_FG),

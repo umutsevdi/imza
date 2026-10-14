@@ -316,7 +316,8 @@ SubagentHandle Delegation::run_subagent(std::string prompt, std::string model,
         std::move(prompt), model, variant, options.visible,
         [this, task_prompt, model, variant, route = std::move(route),
             connection_id, transcript, deadline, config,
-            max_output_tokens = options.max_output_tokens](
+            max_output_tokens = options.max_output_tokens,
+            bare_system       = options.bare_system](
             const std::stop_token& stop) mutable {
             if (!connection_id.empty()) {
                 route
@@ -338,16 +339,21 @@ SubagentHandle Delegation::run_subagent(std::string prompt, std::string model,
                     || (deadline
                         && std::chrono::steady_clock::now() >= *deadline);
             };
-            // Review-style passes answer in structured JSON with no
-            // tools; the lean research prompt avoids inviting interactive
-            // prose that would break the shape parsers.
-            req.messages = { { Message::Type::SYSTEM,
-                                 build_subagent_system_prompt(*_state->prompts,
-                                     _state->environment->system().get(),
-                                     _state->environment->workspace().get(),
-                                     SubagentRole::RESEARCH, &config) },
-                { Message::Type::USER, task_prompt } };
-            apply_reasoning(req, route.dialect, variant, *_state->providers);
+            // A bare pass carries its own instructions; the workspace
+            // context in the full subagent prompt would be dead weight.
+            if (bare_system) {
+                req.messages = { { Message::Type::USER, task_prompt } };
+            } else {
+                req.messages
+                    = { { Message::Type::SYSTEM,
+                            build_subagent_system_prompt(*_state->prompts,
+                                _state->environment->system().get(),
+                                _state->environment->workspace().get(),
+                                SubagentRole::RESEARCH, &config) },
+                          { Message::Type::USER, task_prompt } };
+            }
+            apply_reasoning(
+                req, route.dialect, variant, *_state->providers, connection_id);
             std::string output;
             // The stream reports terminal failures (truncation, provider
             // errors) through the callback, not the return status; capture
@@ -397,8 +403,9 @@ void Delegation::spawn_title(std::string input, TurnSettings settings)
             req.temperature = 0.2;
             req.interrupted = [stop] { return stop.stop_requested(); };
             req.messages    = { { Message::Type::USER, prompt } };
-            apply_reasoning(req, settings.route.dialect,
-                settings.reasoning_effort, *_state->providers);
+            // A 3-7 word title needs no hidden thinking tokens.
+            apply_reasoning(req, settings.route.dialect, "off",
+                *_state->providers, settings.connection_id);
             std::string title;
             const StreamCallback cb = [&](const StreamEvent& event) {
                 if (event.kind == StreamEvent::Kind::CONTENT_DELTA

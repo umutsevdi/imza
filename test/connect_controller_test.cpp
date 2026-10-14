@@ -150,6 +150,44 @@ TEST_CASE("provider store overlays catalog capabilities on discovered models")
     FAIL("model fetch did not complete");
 }
 
+TEST_CASE("model metadata resolves live-first, scoped to the connection")
+{
+    CatalogHome home;
+    imza::Config config;
+    imza::Connection connection;
+    connection.id = "testprov";
+    config.providers.push_back(connection);
+    imza::ProviderStore providers(
+        config, [](const imza::Route&, std::vector<imza::ModelInfo>& out) {
+            imza::ModelInfo live;
+            live.id             = "m1";
+            live.context_length = 262144;
+            imza::ModelInfo other;
+            other.id             = "uncatalogued";
+            other.context_length = 131072;
+            out                  = { live, other };
+            return imza::Status::OK;
+        });
+
+    // Before the fetch lands, only the catalog row is known, and it is
+    // never borrowed across connections.
+    CHECK(providers.context_limit_for("m1", "testprov") == 123);
+    CHECK(providers.context_limit_for("m1", "other-provider") == 0);
+    CHECK(providers.context_limit_for("uncatalogued", "testprov") == 0);
+
+    providers.start_model_fetches();
+    for (int i = 0; i < 1000; ++i) {
+        if (providers.context_limit_for("uncatalogued", "testprov") != 0) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    // The provider's own value wins over the catalog.
+    CHECK(providers.context_limit_for("m1", "testprov") == 262144);
+    CHECK(providers.context_limit_for("uncatalogued", "testprov") == 131072);
+    CHECK(providers.context_limit_for("unknown-model", "testprov") == 0);
+}
+
 TEST_CASE("subscription connect stores credentials without model discovery")
 {
     CatalogHome home;
@@ -456,18 +494,14 @@ TEST_CASE("subagent defaults follow the active chat model")
     const auto research
         = providers.subagent_selection(imza::SubagentRole::RESEARCH);
     const auto basic = providers.subagent_selection(imza::SubagentRole::BASIC);
-    const auto reviewer
-        = providers.subagent_selection(imza::SubagentRole::REVIEWER);
     REQUIRE(builder.has_value());
     REQUIRE(research.has_value());
     REQUIRE(basic.has_value());
-    REQUIRE(reviewer.has_value());
     CHECK(builder->model == "chat-model");
     CHECK(builder->reasoning_effort == "medium");
     CHECK(research->reasoning_effort == "low");
+    CHECK(basic->model == "chat-model");
     CHECK(basic->reasoning_effort == "off");
-    CHECK(reviewer->model == "chat-model");
-    CHECK(reviewer->reasoning_effort == "low");
 }
 
 TEST_CASE("subagent configuration does not change main model reasoning")

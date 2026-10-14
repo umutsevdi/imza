@@ -678,37 +678,25 @@ void run_slash(ApplicationState& state, std::string_view command)
 
 namespace {
 
-    // Review-pass budget: the input cap and output token reserve come
-    // from the model's catalog context window, falling back to the old
-    // byte cap when the window is unknown.
+    // Review-pass budget: the input cap comes from the model's context
+    // window, falling back to the byte cap when the window is unknown. The
+    // pass sends no output cap, matching the main chat: a fixed cap cut
+    // valid replies off at the token limit.
     constexpr std::size_t FALLBACK_REVIEW_PASS_PROMPT_BYTES = 200 * 1024;
     constexpr std::uint64_t MIN_REVIEW_CONTEXT_LIMIT        = 16384;
-    constexpr std::uint64_t MAX_REVIEW_OUTPUT_TOKENS        = 16384;
-    constexpr std::uint64_t OPENAI_REASONING_RESERVE        = 16000;
     // Bytes-per-token over-provision: the guard rejects early, the model
     // is the true limit.
     constexpr std::size_t BYTES_PER_TOKEN = 3;
-
-    std::uint64_t review_output_budget(const ProviderStore& providers,
-        const ProviderSelection& selection, std::string_view effort)
-    {
-        const std::uint64_t window
-            = providers.pricing_for(selection.model).context_limit;
-        if (window == 0) {
-            return 4096;
-        }
-        const std::uint64_t reasoning_reserve
-            = effort != "off" ? OPENAI_REASONING_RESERVE : 0;
-        const std::uint64_t share = window / 8;
-        return std::min(MAX_REVIEW_OUTPUT_TOKENS,
-            share > reasoning_reserve ? share - reasoning_reserve : 4096);
-    }
+    // Pass deadline. The transport's own 5-minute stall window bounds a
+    // dead stream, so this only needs to cover a slow model; it must not
+    // be shorter than that or a working pass is cut off mid-flight.
+    constexpr std::chrono::seconds REVIEW_PASS_TIMEOUT { 300 };
 
     std::size_t review_input_limit(
         const ProviderStore& providers, const ProviderSelection& selection)
     {
-        const std::uint64_t window
-            = providers.pricing_for(selection.model).context_limit;
+        const std::uint64_t window = providers.context_limit_for(
+            selection.model, selection.connection_id);
         if (window < MIN_REVIEW_CONTEXT_LIMIT) {
             return FALLBACK_REVIEW_PASS_PROMPT_BYTES;
         }
@@ -761,9 +749,13 @@ std::optional<std::size_t> run_review_pass(
     ApplicationState& state, ReviewPassRequest request, std::string& error)
 {
     const ReviewState::Snapshot snapshot = state.review->snapshot();
-    // One pass at a time: the action row swaps the running slot for a
-    // single Cancel, so two concurrent passes would be indistinguishable.
-    if (snapshot.findings.task_id || snapshot.handoff.task_id) {
+    // Each pass owns its own slot and Cancel button, so the two may run
+    // together; only a repeat of the same pass is refused.
+    const bool running = request.pass == ReviewPass::HANDOFF
+        ? snapshot.handoff.task_id.has_value()
+        : snapshot.findings.task_id.has_value();
+    if (running) {
+        error = request.label + " is already running.";
         return std::nullopt;
     }
     if (snapshot.status != ReviewState::LoadStatus::LOADED || !snapshot.review
@@ -771,10 +763,9 @@ std::optional<std::size_t> run_review_pass(
         error = "There are no changes to review.";
         return std::nullopt;
     }
-    // The configured Reviewer role; <Default> follows the main chat
-    // model so behavior before any configuration is unchanged.
-    auto selection
-        = state.providers->subagent_selection(SubagentRole::REVIEWER);
+    // The one-shot Basic role, shared with session titles; <Default>
+    // follows the main chat model.
+    auto selection = state.providers->subagent_selection(SubagentRole::BASIC);
     if (!selection) {
         selection = state.providers->active_selection();
     }
@@ -793,22 +784,27 @@ std::optional<std::size_t> run_review_pass(
     auto transcript = std::make_shared<Session>();
     // Kept for the one-shot retry below; the pass itself consumes a copy.
     std::string retry_prompt = request.prompt;
-    // A retry (retry == false) runs deterministic: reasoning off, so the
-    // output budget cannot be consumed by hidden thinking tokens.
-    const std::string effort
-        = request.retry ? selection->reasoning_effort : std::string("off");
+    // Extraction, not open reasoning: hidden thinking tokens buy nothing
+    // and can consume the whole deadline before any output appears.
+    const std::string effort    = "off";
     const SubagentHandle handle = state.delegation->run_subagent(
         std::move(request.prompt), selection->model, effort,
         SubagentOptions { .visible = false,
-            .timeout               = std::chrono::minutes { 5 },
-            .max_output_tokens
-            = review_output_budget(*state.providers, *selection, effort),
-            .transcript = std::move(transcript) },
+            .bare_system           = true,
+            .timeout               = REVIEW_PASS_TIMEOUT,
+            .transcript            = std::move(transcript) },
         [state_ptr = &state, pass = request.pass, label = request.label,
             prompt = std::move(retry_prompt), retry = request.retry,
             complete = std::move(request.complete)](
             const SubagentResult& result) mutable {
-            state_ptr->review->set_pass_task(pass, std::nullopt);
+            // Clear through the queue, not directly: this callback runs on
+            // the finishing worker, which can complete before
+            // run_review_pass stores the task id below. Posting the clear
+            // makes it land after that store, so a fast pass cannot leave
+            // a stale id behind and block its own slot.
+            state_ptr->post([state_ptr, pass] {
+                state_ptr->review->set_pass_task(pass, std::nullopt);
+            });
             if (result.status == Status::CANCELLED) {
                 return;
             }
@@ -898,7 +894,7 @@ void run_handoff(ApplicationState& state)
                                        "empty.");
                 }
                 report += "\n";
-                state_ptr->session->set_handoff_report(std::move(report));
+                state_ptr->session->append_handoff_report(std::move(report));
                 return std::string { };
             } },
         error);

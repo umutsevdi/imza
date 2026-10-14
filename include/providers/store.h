@@ -61,6 +61,16 @@ struct ProviderSelection {
     Route route;
 };
 
+// One model's facts, resolved from the connection's live fetch first (a
+// provider may serve its own variant with different limits), then its
+// models.dev catalog row. Absent means unknown, never borrowed from another
+// provider.
+struct ModelMetadata {
+    std::uint64_t context_limit = 0;
+    std::optional<Capabilities> capabilities;
+    bool reasoning = false;
+};
+
 struct ConnectOutcome {
     Status status           = Status::OK;
     std::size_t model_count = 0;
@@ -92,8 +102,16 @@ public:
     Route route_for(std::string_view connection_id, ApiStandard dialect) const;
     Route authenticated_route_for(std::string_view connection_id,
         ApiStandard dialect, std::string_view opencode_session = { });
-    bool model_reasons(std::string_view model) const;
-    ModelPricing pricing_for(std::string_view model) const;
+    ModelMetadata model_metadata_for(
+        std::string_view model, std::string_view connection_id) const;
+    // The model's context window for a connection; 0 when unknown.
+    std::uint64_t context_limit_for(
+        std::string_view model, std::string_view connection_id) const;
+    bool model_reasons(
+        std::string_view model, std::string_view connection_id) const;
+    // Cost row for one connection's model; zero when it has no catalog row.
+    ModelPricing pricing_for(
+        std::string_view model, std::string_view connection_id) const;
 
     void start_model_fetches();
     void refetch_models(std::string_view connection_id);

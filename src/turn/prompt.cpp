@@ -326,12 +326,54 @@ std::string format_plan_annotations_prompt(std::string_view instructions,
     return prompt;
 }
 
+namespace {
+
+    std::string_view review_file_kind_name(ReviewFile::Kind kind)
+    {
+        switch (kind) {
+        case ReviewFile::Kind::MODIFIED: return "modified";
+        case ReviewFile::Kind::ADDED: return "added";
+        case ReviewFile::Kind::DELETED: return "deleted";
+        case ReviewFile::Kind::RENAMED: return "renamed";
+        case ReviewFile::Kind::COPIED: return "copied";
+        case ReviewFile::Kind::UNTRACKED: return "untracked";
+        case ReviewFile::Kind::BINARY: return "binary";
+        }
+        return "modified";
+    }
+
+    // The plan, build log, and messages already narrate the work; the full
+    // patch is redundant with them and dominates the prompt.
+    JsonValue changed_files_stat(const RepositoryReview& review)
+    {
+        JsonValue files = JsonValue::array_t { };
+        auto& array     = files.get<JsonValue::array_t>();
+        for (const ReviewFile& file : review.files) {
+            JsonValue entry = JsonValue::object_t { };
+            auto& object    = entry.get<JsonValue::object_t>();
+            object["path"]  = JsonValue(
+                file.new_path.empty() ? file.old_path : file.new_path);
+            object["change"]
+                = JsonValue(std::string(review_file_kind_name(file.kind)));
+            if (file.kind != ReviewFile::Kind::BINARY) {
+                object["additions"]
+                    = JsonValue(static_cast<double>(file.additions));
+                object["deletions"]
+                    = JsonValue(static_cast<double>(file.deletions));
+            }
+            array.push_back(std::move(entry));
+        }
+        return files;
+    }
+
+} // namespace
+
 std::string format_handoff_prompt(std::string_view instructions,
     const SessionSnapshot& snapshot, const RepositoryReview& review)
 {
-    JsonValue input = JsonValue::object_t { };
-    auto& object    = input.get<JsonValue::object_t>();
-    object["diff"]  = JsonValue(format_review_patch(review));
+    JsonValue input         = JsonValue::object_t { };
+    auto& object            = input.get<JsonValue::object_t>();
+    object["changed_files"] = changed_files_stat(review);
 
     std::string plan;
     std::vector<std::string> revisions;

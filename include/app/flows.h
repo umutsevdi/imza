@@ -85,11 +85,13 @@ void run_slash(ApplicationState& state, std::string_view command);
 // the handoff report. The caller supplies the prompt and consumes the raw
 // reply; everything else — model selection, the loaded-review and size
 // guards, the subagent options, the transcript, the running state — is
-// shared. `complete` runs on the subagent worker with the reply and
-// returns "" when the reply had the expected shape, or a parse error
-// otherwise; a non-empty result reruns the pass once with reasoning off
-// before the error surfaces (unless `retry` is false). Returns the task
-// id, or nullopt when the pass was rejected (`error` explains).
+// shared. Each pass owns its own running slot, so the two may run at the
+// same time; only a repeat of the same pass is refused. `complete` runs on
+// the subagent worker with the reply and returns "" when the reply had the
+// expected shape, or a parse error otherwise; a non-empty result reruns the
+// pass once with reasoning off before the error surfaces (unless `retry` is
+// false). Returns the task id, or nullopt when the pass was rejected
+// (`error` explains).
 struct ReviewPassRequest {
     ReviewPass pass = ReviewPass::FINDINGS;
     std::string prompt;
@@ -104,7 +106,8 @@ std::optional<std::size_t> run_review_pass(
 bool cancel_review_pass(ApplicationState& state, ReviewPass pass);
 // Generate the handoff report: reconcile the plan, the user's messages, the
 // build log, and the final diff into one document stored on the session.
-// Reachable from any workflow phase; a no-op while one is already running.
+// Reachable from any workflow phase; runs alongside an AI review pass, and
+// is refused (with `error` surfaced) only while another handoff runs.
 void run_handoff(ApplicationState& state);
 // Write a viewer's content to <workspace-root>/.imza/<timestamp>-<name>.md
 // and open it with the platform file opener. Returns the path, or an empty

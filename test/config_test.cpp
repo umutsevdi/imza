@@ -406,37 +406,36 @@ TEST_CASE("config roundtrip preserves subagent models")
     CHECK(json.find("\"subagents\"") == std::string::npos);
 }
 
-TEST_CASE("config roundtrip preserves the reviewer subagent model")
+TEST_CASE("legacy reviewer key folds into the basic role")
 {
-    const auto path = temp_file("reviewer.json");
-    imza::Config cfg;
-    imza::Connection connection;
-    connection.id = "openai";
-    cfg.providers.push_back(std::move(connection));
-    cfg.subagents[imza::SubagentRole::REVIEWER]
-        = { "openai", "gpt-reviewer", "high" };
-
-    REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
-    imza::Config loaded;
-    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
-    const auto& reviewer = loaded.subagents.at(imza::SubagentRole::REVIEWER);
-    CHECK(reviewer.provider == "openai");
-    CHECK(reviewer.model == "gpt-reviewer");
-    CHECK(reviewer.variant == "high");
-    CHECK(imza::test::read_all(path).find("\"reviewer\"") != std::string::npos);
-}
-
-TEST_CASE("config without a reviewer key keeps loading")
-{
-    const auto path = temp_file("legacy-subagents.json");
+    const auto path = temp_file("legacy-reviewer.json");
     {
         std::ofstream out(path);
-        out << R"({"providers": [{"id": "p"}], "models": {"basic":
-            {"provider": "p", "model": "small", "reasoning_effort": "low"}}})";
+        out << R"({"providers": [{"id": "p"}], "models": {"reviewer":
+            {"provider": "p", "model": "gpt-reviewer",
+             "reasoning_effort": "high"}}})";
     }
     imza::Config loaded;
     REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
-    CHECK(loaded.subagents.count(imza::SubagentRole::REVIEWER) == 0);
+    REQUIRE(loaded.subagents.contains(imza::SubagentRole::BASIC));
+    const auto& basic = loaded.subagents.at(imza::SubagentRole::BASIC);
+    CHECK(basic.provider == "p");
+    CHECK(basic.model == "gpt-reviewer");
+}
+
+TEST_CASE("an explicit basic key wins over the legacy reviewer key")
+{
+    const auto path = temp_file("both-basic-reviewer.json");
+    {
+        std::ofstream out(path);
+        out << R"({"providers": [{"id": "p"}], "models": {
+            "basic": {"provider": "p", "model": "small"},
+            "reviewer": {"provider": "p", "model": "gpt-reviewer"}}})";
+    }
+    imza::Config loaded;
+    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
+    const auto& basic = loaded.subagents.at(imza::SubagentRole::BASIC);
+    CHECK(basic.model == "small");
 }
 
 TEST_CASE("config preserves main reasoning before a model is selected")

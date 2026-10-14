@@ -164,17 +164,17 @@ ftxui::Element render_model_pick(const std::string& title,
     return ftxui::vbox(std::move(rows)) | ftxui::xflex;
 }
 
-std::string document_label(
-    SessionDoc::Kind kind, std::size_t plan_index, std::size_t build_index)
+std::string document_label(SessionDoc::Kind kind, std::size_t plan_index,
+    std::size_t build_index, std::size_t handoff_index)
 {
     if (kind == SessionDoc::Kind::BUILD) {
-        return "Build " + std::to_string(build_index);
+        return "Build Notes - " + std::to_string(build_index);
     }
     if (kind == SessionDoc::Kind::HANDOFF) {
-        return "Handoff Report";
+        return "Handoff Report - " + std::to_string(handoff_index);
     }
     return plan_index == 0 ? std::string("Initial Plan")
-                           : "Revision " + std::to_string(plan_index);
+                           : "Plan Revision - " + std::to_string(plan_index);
 }
 
 std::vector<std::string> document_labels(
@@ -182,15 +182,16 @@ std::vector<std::string> document_labels(
 {
     std::vector<std::string> labels;
     labels.reserve(documents.size());
-    std::size_t plans  = 0;
-    std::size_t builds = 0;
+    std::size_t plans    = 0;
+    std::size_t builds   = 0;
+    std::size_t handoffs = 0;
     for (const SessionDoc& doc : documents) {
         if (doc.kind == SessionDoc::Kind::BUILD) {
-            labels.push_back(document_label(doc.kind, 0, ++builds));
+            labels.push_back(document_label(doc.kind, 0, ++builds, 0));
         } else if (doc.kind == SessionDoc::Kind::HANDOFF) {
-            labels.push_back(document_label(doc.kind, 0, 0));
+            labels.push_back(document_label(doc.kind, 0, 0, ++handoffs));
         } else {
-            labels.push_back(document_label(doc.kind, plans++, 0));
+            labels.push_back(document_label(doc.kind, plans++, 0, 0));
         }
     }
     return labels;

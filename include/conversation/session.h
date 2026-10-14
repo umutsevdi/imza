@@ -103,9 +103,9 @@ struct PersistedSession {
 using SessionPersistence = std::variant<UnsavedSession, PersistedSession>;
 
 // One entry in the session's ordered document sequence: a plan revision,
-// a build log, or the handoff report. Plan accessors operate on the last
+// a build log, or a handoff report. Plan accessors operate on the last
 // PLAN entry; build decisions append to the last BUILD entry or start a new
-// one; a handoff report replaces the last HANDOFF entry or starts a new one.
+// one; each handoff report is appended as its own HANDOFF entry.
 struct SessionDoc {
     enum class Kind { PLAN, BUILD, HANDOFF };
     Kind kind = Kind::PLAN;
@@ -237,9 +237,10 @@ public:
     // errors; the returned string is always empty (mirrors create_plan's
     // shape so the binding can report failures uniformly).
     std::string append_build_decision(std::string entry);
-    // Store the handoff report, replacing the previous one so
-    // regeneration does not stack stale reports.
-    std::string set_handoff_report(std::string content);
+    // Append a handoff report as a new document, so reports accumulate in
+    // session order and a later one reflects the latest stint rather than
+    // overwriting an earlier one.
+    std::string append_handoff_report(std::string content);
     void mark_plan_seen();
     // Returns the size-capped plan submission message for the first build
     // turn of a stint (or after a plan revision) and consumes the pending

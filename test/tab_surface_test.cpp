@@ -337,6 +337,53 @@ TEST_CASE("review pass retries a truncated reply instead of failing")
         != std::string::npos);
 }
 
+TEST_CASE("an uncatalogued model sends no output cap on a review pass")
+{
+    // A model absent from the catalog has an unknown context window; the
+    // pass must send no max_output_tokens rather than a fixed guess, which
+    // truncated valid replies.
+    auto pump        = std::make_shared<imza::test::PostPump>();
+    auto saw_cap     = std::make_shared<std::atomic<bool>>(false);
+    auto saw_request = std::make_shared<std::atomic<bool>>(false);
+    imza::Config cfg;
+    imza::Connection conn;
+    conn.id       = "test";
+    conn.endpoint = "https://example.test/v1/chat/completions";
+    cfg.providers.push_back(conn);
+    cfg.last_used = imza::LastUsed { "test", "uncatalogued-model" };
+    auto state    = imza::test::make_test_state(
+        [pump](std::function<void()> task) { pump->fn()(std::move(task)); },
+        std::move(cfg),
+        [saw_cap, saw_request](
+            const imza::ChatRequest& req, const imza::StreamCallback& cb) {
+            saw_request->store(true);
+            saw_cap->store(req.max_output_tokens.has_value());
+            cb(imza::make_delta_event("{\"findings\":[]}"));
+            cb(imza::make_done_event());
+            return imza::Status::OK;
+        });
+    imza::test::wait_for_environment(*state);
+    state->review->set_result(
+        imza::parse_git_diff("diff --git a/file.cpp b/file.cpp\n"
+                             "--- a/file.cpp\n"
+                             "+++ b/file.cpp\n"
+                             "@@ -1,1 +1,2 @@\n"
+                             " same\n"
+                             "+added\n"));
+
+    std::string error;
+    (void)imza::run_review_pass(*state,
+        imza::ReviewPassRequest { .pass = imza::ReviewPass::FINDINGS,
+            .prompt                     = "review this",
+            .label                      = "AI review",
+            .complete
+            = [](std::string) -> std::string { return std::string { }; } },
+        error);
+
+    REQUIRE(pump->wait_for([&] { return saw_request->load(); }));
+    CHECK_FALSE(saw_cap->load());
+}
+
 TEST_CASE("a truncated review reply surfaces as truncation, not invalid JSON")
 {
     // retry disabled: the truncation must be reported as such, not parsed.
@@ -379,4 +426,47 @@ TEST_CASE("a truncated review reply surfaces as truncation, not invalid JSON")
     REQUIRE(pump->wait_for([&] { return !state->session->error().empty(); }));
     CHECK(state->session->error().find("truncated") != std::string::npos);
     CHECK(state->session->error().find("invalid JSON") == std::string::npos);
+}
+
+TEST_CASE("the two review passes run together but a repeat is refused")
+{
+    // Each pass owns its own slot and Cancel button, so AI Review and
+    // Handoff may run at once; only a second copy of the same pass is
+    // refused, and it says so rather than appearing to do nothing.
+    auto pump  = std::make_shared<imza::test::PostPump>();
+    auto state = imza::test::make_test_state(
+        [pump](std::function<void()> task) { pump->fn()(std::move(task)); },
+        imza::test::test_config(),
+        [](const imza::ChatRequest&, const imza::StreamCallback& cb) {
+            cb(imza::make_delta_event("{\"findings\":[]}"));
+            cb(imza::make_done_event());
+            return imza::Status::OK;
+        });
+    imza::test::wait_for_environment(*state);
+    state->review->set_result(
+        imza::parse_git_diff("diff --git a/file.cpp b/file.cpp\n"
+                             "--- a/file.cpp\n"
+                             "+++ b/file.cpp\n"
+                             "@@ -1,1 +1,2 @@\n"
+                             " same\n"
+                             "+added\n"));
+
+    // A running handoff does not block an AI review pass.
+    state->review->set_pass_task(imza::ReviewPass::HANDOFF, 1);
+    std::string error;
+    const auto review = imza::run_review_pass(*state,
+        imza::ReviewPassRequest { .pass = imza::ReviewPass::FINDINGS,
+            .prompt                     = "review this",
+            .label                      = "AI review",
+            .complete
+            = [](std::string) -> std::string { return std::string { }; } },
+        error);
+    CHECK(review.has_value());
+    CHECK(error.empty());
+    CHECK(state->review->snapshot().findings.task_id.has_value());
+    CHECK(state->review->snapshot().handoff.task_id.has_value());
+
+    // A second handoff is refused, and the reason is reported.
+    imza::run_handoff(*state);
+    CHECK(state->session->error().find("already running") != std::string::npos);
 }
