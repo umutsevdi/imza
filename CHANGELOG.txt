@@ -27,7 +27,7 @@ Changes:
     .imza/ and open it in your editor.
   - On Windows the multi-line shortcut is now shown as Alt+Shift+Enter, since
     terminals reserve Alt+Enter for the full-screen toggle.
-  - Fixed a regression that caused ChatGPT Subscription to fail.
+  - Fixed a regression that caused OpenAI Subscription to fail.
 
 -------------------------------------------------------------------------------
 0.6.1 - 2026-10-12

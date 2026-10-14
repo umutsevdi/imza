@@ -39,10 +39,13 @@ endif()
 # OPTIONS
 option(IMZA_BUILD_TESTS "Build and run tests" YES)
 option(IMZA_PACKAGE "Package the executable" YES)
+# Link the C++ runtime statically into the executable. 
+option(IMZA_STATIC_RUNTIME "Statically link the C++ runtime" OFF)
 message(STATUS "Started CMake for ${PROJECT_NAME} v${PROJECT_VERSION}...\n")
 message("Build Tests: ${IMZA_BUILD_TESTS}")
 message("Package: ${IMZA_PACKAGE}")
 message("Build Type: ${CMAKE_BUILD_TYPE}")
+message("Static Runtime: ${IMZA_STATIC_RUNTIME}")
 
 # Static build: the vendored precompiled deps (CLI11 PCH, lua) are not
 # built with -fPIC.
@@ -418,6 +421,12 @@ target_link_libraries(imza PRIVATE
     imza_foundation
     imza_ui
 )
+# Do not add -static-libgcc alongside this: GCC 12+ pulls _dl_find_object
+# (GLIBC_2.35) in through the static unwinder, which raises the glibc floor
+# above the build host.
+if(IMZA_STATIC_RUNTIME AND UNIX AND NOT APPLE)
+    target_link_options(imza PRIVATE -static-libstdc++)
+endif()
 
 if (IMZA_BUILD_TESTS)
     add_executable(imza_tests ${TEST_SOURCES})
