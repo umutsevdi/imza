@@ -143,6 +143,57 @@ std::string normalize_git_branch(std::string_view branch)
     return std::string(trim(branch));
 }
 
+std::optional<std::uint64_t> git_metadata_stamp(
+    const std::filesystem::path& root)
+{
+    std::error_code ec;
+    std::filesystem::path git_directory = root / ".git";
+    if (std::filesystem::is_regular_file(git_directory, ec)) {
+        std::ifstream pointer(git_directory);
+        std::string line;
+        if (!std::getline(pointer, line)) {
+            return std::nullopt;
+        }
+        std::string_view target(trim(line));
+        constexpr std::string_view prefix = "gitdir:";
+        if (!target.starts_with(prefix)) {
+            return std::nullopt;
+        }
+        target = trim(target.substr(prefix.size()));
+        if (target.empty()) {
+            return std::nullopt;
+        }
+        std::filesystem::path resolved(target);
+        if (resolved.is_relative()) {
+            resolved = root / resolved;
+        }
+        git_directory = std::move(resolved);
+    }
+
+    std::uint64_t stamp = FNV_OFFSET;
+    bool found          = false;
+    for (const char* name : { "index", "HEAD" }) {
+        const auto path = git_directory / name;
+        const auto size = std::filesystem::file_size(path, ec);
+        if (ec) {
+            ec.clear();
+            continue;
+        }
+        const auto written = std::filesystem::last_write_time(path, ec);
+        if (ec) {
+            ec.clear();
+            continue;
+        }
+        found = true;
+        hash_bytes(stamp, std::to_string(written.time_since_epoch().count()));
+        hash_bytes(stamp, std::to_string(size));
+    }
+    if (!found) {
+        return std::nullopt;
+    }
+    return stamp;
+}
+
 ChangeSummary summarize_git_diff(std::string_view diff)
 {
     ChangeSummary summary;

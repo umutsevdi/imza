@@ -277,10 +277,6 @@ namespace {
         {
             const std::vector<Skill> catalog = _state->environment->skills();
             const Config config              = _state->providers->config();
-            std::map<std::string, SkillPolicy> edited;
-            for (const auto& entry : _entries) {
-                edited[entry.project_root + "\n" + entry.name] = entry.policy;
-            }
             std::vector<SkillsModal::Entry> fresh;
             fresh.reserve(catalog.size());
             for (const Skill& skill : catalog) {
@@ -288,10 +284,8 @@ namespace {
                     = skill.scope == Skill::Scope::PROJECT && skill.project_root
                     ? skill.project_root->string()
                     : std::string { };
-                const auto found = edited.find(root + "\n" + skill.name);
                 fresh.push_back({ skill.name, skill.description, root,
-                    found != edited.end() ? found->second
-                                          : skill_policy(config, skill) });
+                    skill_policy(config, skill) });
             }
             if (fresh == _entries) {
                 return;

@@ -416,11 +416,11 @@ void Environment::_start_git_worker()
     _git_worker = std::jthread([this](const std::stop_token& stop) {
         std::mutex poll_mutex;
         std::condition_variable_any poll_cv;
-        const auto wait_for_next_poll = [&] {
-            std::unique_lock lock(poll_mutex);
-            poll_cv.wait_for(lock, stop, std::chrono::milliseconds { 2500 },
-                [] { return false; });
-        };
+        const auto wait_until =
+            [&](std::chrono::steady_clock::time_point deadline) {
+                std::unique_lock lock(poll_mutex);
+                poll_cv.wait_until(lock, stop, deadline, [] { return false; });
+            };
         {
             std::unique_lock lock(_workspace_mutex);
             if (!_workspace_ready_cv.wait(
@@ -428,11 +428,44 @@ void Environment::_start_git_worker()
                 return;
             }
         }
+        using clock                      = std::chrono::steady_clock;
+        constexpr auto metadata_interval = std::chrono::seconds { 2 };
+        constexpr auto refresh_interval  = std::chrono::seconds { 5 };
+        // The full command set is expensive, so it runs on its own 5 s
+        // cadence; a cheap stat of the git metadata (index/HEAD) pulls it
+        // forward when the user stages work or moves the branch.
+        std::optional<std::uint64_t> stamp;
+        if (const auto initial = workspace();
+            initial != nullptr && initial->project_root) {
+            stamp = git_metadata_stamp(initial->project_root.value());
+        }
+        auto metadata_deadline = clock::now() + metadata_interval;
+        auto refresh_deadline  = clock::now();
         while (!stop.stop_requested()) {
+            wait_until(std::min(metadata_deadline, refresh_deadline));
+            if (stop.stop_requested()) {
+                break;
+            }
+            const auto now                = clock::now();
             const auto observed_workspace = workspace();
-            if (observed_workspace == nullptr
-                || !observed_workspace->project_root) {
-                wait_for_next_poll();
+            const bool has_root           = observed_workspace != nullptr
+                && observed_workspace->project_root.has_value();
+            if (now >= metadata_deadline) {
+                metadata_deadline = now + metadata_interval;
+                const std::optional<std::uint64_t> next = has_root
+                    ? git_metadata_stamp(
+                          observed_workspace->project_root.value())
+                    : std::nullopt;
+                if (next != stamp) {
+                    stamp            = next;
+                    refresh_deadline = now;
+                }
+            }
+            if (now < refresh_deadline) {
+                continue;
+            }
+            refresh_deadline = clock::now() + refresh_interval;
+            if (!has_root) {
                 continue;
             }
             const CommandResult status
@@ -453,21 +486,18 @@ void Environment::_start_git_worker()
                     observed_workspace->project_root.value(), changed_files,
                     changes);
                 const auto current = repository();
-                if (current && changed_files == current->changed_files
-                    && branch_name == current->branch
-                    && changes == current->changes) {
-                    wait_for_next_poll();
-                    continue;
+                if (!current || changed_files != current->changed_files
+                    || branch_name != current->branch
+                    || changes != current->changes) {
+                    RepositoryState next;
+                    next.changed_files = std::move(changed_files);
+                    next.branch        = branch_name;
+                    next.changes       = std::move(changes);
+                    _publish_repository(
+                        std::make_shared<RepositoryState>(std::move(next)),
+                        observed_workspace);
                 }
-                RepositoryState next;
-                next.changed_files = std::move(changed_files);
-                next.branch        = branch_name;
-                next.changes       = std::move(changes);
-                _publish_repository(
-                    std::make_shared<RepositoryState>(std::move(next)),
-                    observed_workspace);
             }
-            wait_for_next_poll();
         }
     });
 }

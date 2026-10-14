@@ -32,6 +32,14 @@ struct ChangedFile {
 std::vector<ChangedFile> parse_git_status(std::string_view status);
 std::string normalize_git_branch(std::string_view branch);
 
+// Cheap fingerprint of the repository metadata that changes when the user
+// stages work or moves the branch: the `(mtime, size)` of the git directory's
+// `index` and `HEAD`. Resolves a `.git` pointer file (worktree, submodule) to
+// its real git directory. Nullopt when no repository or neither file exists;
+// the caller then falls back to a full refresh.
+std::optional<std::uint64_t> git_metadata_stamp(
+    const std::filesystem::path& root);
+
 struct ChangeSummary {
     std::size_t additions   = 0;
     std::size_t deletions   = 0;

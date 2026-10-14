@@ -82,6 +82,57 @@ TEST_CASE("git diff summary counts lines and fingerprints content")
     CHECK(first.signature != second.signature);
 }
 
+TEST_CASE("git metadata stamp tracks index and HEAD rewrites")
+{
+    const imza::test::TempDir root_dir;
+    const auto root = root_dir.path;
+    const auto git  = root / ".git";
+    REQUIRE(std::filesystem::create_directories(git));
+    CHECK_FALSE(imza::git_metadata_stamp(root).has_value());
+
+    imza::test::write_file(git / "HEAD", "ref: refs/heads/main\n");
+    imza::test::write_file(git / "index", "first");
+    const auto initial = imza::git_metadata_stamp(root);
+    REQUIRE(initial.has_value());
+
+    // An unrelated worktree edit leaves the metadata untouched.
+    imza::test::write_file(root / "tracked.cpp", "edited\n");
+    CHECK(imza::git_metadata_stamp(root) == initial);
+
+    // Staging rewrites the index, moving the branch rewrites HEAD.
+    imza::test::write_file(git / "index", "second-index-content");
+    const auto staged = imza::git_metadata_stamp(root);
+    REQUIRE(staged.has_value());
+    CHECK(staged != initial);
+
+    imza::test::write_file(git / "HEAD", "ref: refs/heads/feature\n");
+    const auto moved = imza::git_metadata_stamp(root);
+    REQUIRE(moved.has_value());
+    CHECK(moved != staged);
+}
+
+TEST_CASE("git metadata stamp resolves a .git pointer file")
+{
+    const imza::test::TempDir root_dir;
+    const auto root = root_dir.path;
+    const auto real = root_dir.file("real-git");
+    REQUIRE(std::filesystem::create_directories(real));
+    imza::test::write_file(real / "HEAD", "ref: refs/heads/main\n");
+    imza::test::write_file(real / "index", "data");
+    imza::test::write_file(root / ".git", "gitdir: " + real.string() + "\n");
+
+    const auto stamp = imza::git_metadata_stamp(root);
+    REQUIRE(stamp.has_value());
+
+    // The stamp follows the pointer into the real git directory.
+    imza::test::write_file(real / "index", "changed");
+    CHECK(imza::git_metadata_stamp(root) != stamp);
+
+    // A malformed pointer yields no stamp rather than a bogus one.
+    imza::test::write_file(root / ".git", "not a gitdir\n");
+    CHECK_FALSE(imza::git_metadata_stamp(root).has_value());
+}
+
 bool wait_until_ready(const imza::Environment& env, int timeout_ms = 5000)
 {
     const auto deadline = std::chrono::steady_clock::now()

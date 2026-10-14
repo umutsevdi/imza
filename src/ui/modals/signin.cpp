@@ -19,17 +19,46 @@
 
 namespace imza {
 
+ftxui::Element subscription_signin_element(const SubscriptionSigninView& view)
+{
+    using namespace ftxui;
+    Elements rows;
+    if (!view.code.empty()) {
+        rows.push_back(
+            hbox({ text("Device code  ") | bold, text(view.code) | bold }));
+    }
+    if (!view.url.empty()) {
+        // Shown in full so a remote (SSH) session can open it by hand; the
+        // hyperlink decorator makes it clickable where the terminal supports
+        // OSC 8.
+        rows.push_back(hbox({ text("Verification ") | bold,
+            text(view.url) | color(HL_CYAN) | underlined
+                | hyperlink(view.url) }));
+    }
+    switch (view.phase) {
+    case SubscriptionSigninView::Phase::STARTING:
+        rows.push_back(text("requesting sign-in code…") | dim);
+        break;
+    case SubscriptionSigninView::Phase::WAITING:
+        rows.push_back(text("waiting for browser authorization…") | dim);
+        break;
+    case SubscriptionSigninView::Phase::FAILED:
+        rows.push_back(text(view.error) | color(HL_RED));
+        break;
+    case SubscriptionSigninView::Phase::IDLE: break;
+    }
+    return vbox(std::move(rows));
+}
+
 namespace {
 
     using namespace ftxui;
 
+    using Phase = SubscriptionSigninView::Phase;
+
     struct SigninData {
-        enum class Phase { IDLE, STARTING, WAITING, FAILED };
         std::atomic<bool> active { true };
-        Phase phase = Phase::IDLE;
-        std::string code;
-        std::string url;
-        std::string error;
+        SubscriptionSigninView view;
     };
 
     ConnectResult connect_result(std::string id, const std::string& label,
@@ -68,46 +97,33 @@ namespace {
         {
             _sync_button();
             Elements rows;
-            if (!_data->code.empty()) {
-                rows.push_back(hbox({ text("Device code  ") | bold,
-                    text(_data->code) | bold }));
-            }
+            rows.push_back(subscription_signin_element(_data->view));
             rows.push_back(_button->Render());
-            if (_data->phase == SigninData::Phase::STARTING) {
-                rows.push_back(text("requesting sign-in code…") | dim);
-            } else if (_data->phase == SigninData::Phase::WAITING) {
-                rows.push_back(
-                    text("waiting for browser authorization…") | dim);
-            } else if (_data->phase == SigninData::Phase::FAILED) {
-                rows.push_back(text(_data->error) | color(HL_RED));
-            }
             return vbox(std::move(rows));
         }
 
     private:
         void _sync_button()
         {
-            switch (_data->phase) {
-            case SigninData::Phase::WAITING:
-                _button_label = "Open browser";
-                return;
-            case SigninData::Phase::FAILED: _button_label = "Retry"; return;
-            case SigninData::Phase::IDLE:
-            case SigninData::Phase::STARTING: _button_label = "Connect"; return;
+            switch (_data->view.phase) {
+            case Phase::WAITING: _button_label = "Open browser"; return;
+            case Phase::FAILED: _button_label = "Retry"; return;
+            case Phase::IDLE:
+            case Phase::STARTING: _button_label = "Connect"; return;
             }
         }
 
         void _primary()
         {
-            switch (_data->phase) {
-            case SigninData::Phase::WAITING:
-                if (!_data->url.empty()) {
-                    open_browser(_data->url);
+            switch (_data->view.phase) {
+            case Phase::WAITING:
+                if (!_data->view.url.empty()) {
+                    open_browser(_data->view.url);
                 }
                 return;
-            case SigninData::Phase::STARTING: return;
-            case SigninData::Phase::IDLE:
-            case SigninData::Phase::FAILED: _start(); return;
+            case Phase::STARTING: return;
+            case Phase::IDLE:
+            case Phase::FAILED: _start(); return;
             }
         }
 
@@ -122,15 +138,13 @@ namespace {
         void _start()
         {
             if (!_label_free()) {
-                _data->phase = SigninData::Phase::FAILED;
-                _data->error = "Set a label above first - this provider is "
-                               "already connected.";
+                _data->view.phase = Phase::FAILED;
+                _data->view.error = "Set a label above first - this provider "
+                                    "is already connected.";
                 return;
             }
-            _data->phase = SigninData::Phase::STARTING;
-            _data->code.clear();
-            _data->url.clear();
-            _data->error.clear();
+            _data->view       = SubscriptionSigninView { };
+            _data->view.phase = Phase::STARTING;
             _worker.reset();
             _start_openai();
         }
@@ -147,8 +161,8 @@ namespace {
                     return;
                 }
                 if (result.status != Status::OK) {
-                    data->phase = SigninData::Phase::FAILED;
-                    data->error = result.error;
+                    data->view.phase = Phase::FAILED;
+                    data->view.error = result.error;
                     return;
                 }
                 const std::string label = label_getter ? label_getter() : "";
@@ -157,8 +171,8 @@ namespace {
                 const bool exists
                     = find_connection(config.providers, key) != nullptr;
                 if (exists) {
-                    data->phase = SigninData::Phase::FAILED;
-                    data->error
+                    data->view.phase = Phase::FAILED;
+                    data->view.error
                         = "Already connected - set a different label above.";
                     return;
                 }
@@ -188,10 +202,10 @@ namespace {
                     if (!current || !current->active.load()) {
                         return;
                     }
-                    current->phase = SigninData::Phase::WAITING;
-                    current->code  = code.user_code;
-                    current->url   = code.verification_url;
-                    open_browser(current->url);
+                    current->view.phase = Phase::WAITING;
+                    current->view.code  = code.user_code;
+                    current->view.url   = code.verification_url;
+                    open_browser(current->view.url);
                 });
                 _post_result(await_openai_device_code(requested.code, stop));
             });

@@ -27,7 +27,12 @@ Changes:
     .imza/ and open it in your editor.
   - On Windows the multi-line shortcut is now shown as Alt+Shift+Enter, since
     terminals reserve Alt+Enter for the full-screen toggle.
+  - OpenAI Subscription sign-in now shows the device code and the full
+    verification URL, so it can be completed over SSH where no browser opens.
   - Fixed a regression that caused OpenAI Subscription to fail.
+  - Imza polls git less often: the Changes widget and Review now refresh on a
+    cheap index/HEAD check and a slower fallback, roughly halving background
+    git activity.
 
 -------------------------------------------------------------------------------
 0.6.1 - 2026-10-12
