@@ -8,7 +8,7 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
-0.6.2 - 2026-10-13
+0.6.2 - 2026-10-14
 -------------------------------------------------------------------------------
 <https://github.com/umutsevdi/imza/releases/tag/v0.6.2>
 
@@ -18,16 +18,16 @@ Changes:
     implemented, and what changed along the way. Run it from Review. Each run
     keeps its own report, so a session that goes through several stints keeps
     one per stint.
-  - The sidebar Documents list labels plan revisions, build notes, and handoff
-    reports consistently, numbered per kind.
-  - Any viewer can now be exported: press e to save its content under
-    .imza/ and open it in your editor.
   - Discover and install skills without leaving Imza: `/skills` now has a
     Search tab backed by skills.sh, showing install counts and marking the
     ones you already have.
+  - The sidebar Documents list now labels plan revisions, build logs, and
+    handoff reports consistently, numbered per kind.
+  - Any viewer can now be exported: press e to save its content under
+    .imza/ and open it in your editor.
   - On Windows the multi-line shortcut is now shown as Alt+Shift+Enter, since
     terminals reserve Alt+Enter for the full-screen toggle.
-  - The Subagent Models list lines up its model and reasoning columns again.
+  - Fixed a regression that caused ChatGPT Subscription to fail.
 
 -------------------------------------------------------------------------------
 0.6.1 - 2026-10-12

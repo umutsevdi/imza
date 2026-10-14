@@ -46,6 +46,39 @@ TEST_CASE("subscription refresh posts a refresh_token grant")
         != std::string::npos);
 }
 
+TEST_CASE("OpenAI device code request parses the usercode response")
+{
+    const auto post = [](const std::string& url,
+                         const std::vector<std::string>&, const std::string&,
+                         long, std::string& body, long* code) {
+        CHECK(url.ends_with("/deviceauth/usercode"));
+        *code = 200;
+        body  = R"({"device_auth_id":"device-1","user_code":"ABCD-1234",)"
+                R"("interval":"7","expires_at":"2026-10-14T15:20:55+00:00"})";
+        return imza::Status::OK;
+    };
+    const auto result = imza::request_openai_device_code(post);
+    REQUIRE(result.status == imza::Status::OK);
+    CHECK(result.code.device_auth_id == "device-1");
+    CHECK(result.code.user_code == "ABCD-1234");
+    CHECK(result.code.verification_url
+        == "https://auth.openai.com/codex/device");
+    CHECK(result.code.interval == std::chrono::seconds(7));
+}
+
+TEST_CASE("OpenAI device code request rejects a malformed body")
+{
+    const auto post = [](const std::string&, const std::vector<std::string>&,
+                          const std::string&, long, std::string& body,
+                          long* code) {
+        *code = 200;
+        body  = "{not json";
+        return imza::Status::OK;
+    };
+    const auto result = imza::request_openai_device_code(post);
+    CHECK(result.status == imza::Status::JSON_ERROR);
+}
+
 TEST_CASE("OpenAI device flow polls pending responses then exchanges tokens")
 {
     int calls       = 0;

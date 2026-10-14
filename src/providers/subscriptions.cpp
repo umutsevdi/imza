@@ -202,7 +202,7 @@ OpenAIDeviceCodeResult request_openai_device_code(SubscriptionHttpPost post)
         return { Status::API_ERROR, { }, body };
     }
     StoredDeviceCodeResponse root;
-    if (!json_parse_checked(body, root) || !root.device_auth_id
+    if (json_parse_checked(body, root) || !root.device_auth_id
         || !root.user_code) {
         return { Status::JSON_ERROR, { }, body };
     }
