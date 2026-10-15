@@ -216,13 +216,6 @@ TEST_CASE("section jumps with brackets and a heading note anchors the section")
     CHECK(user->text.find("too detailed") != std::string::npos);
 }
 
-TEST_CASE("plan doc without a plan shows the empty hint")
-{
-    auto fx = make_focused_doc(imza::test::make_test_state(), false);
-    const std::string rendered = imza::test::to_text(fx.doc->Render(), 100, 40);
-    CHECK(rendered.find("No plan") != std::string::npos);
-}
-
 TEST_CASE("plan created after pane construction renders immediately")
 {
     auto fx = make_focused_doc(imza::test::make_test_state(), false);

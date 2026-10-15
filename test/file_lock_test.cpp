@@ -114,10 +114,6 @@ TEST_CASE("shared locks coexist and yield to an exclusive holder")
     exclusive = imza::acquire_file_lock(
         path, imza::FileLockRequest { imza::FileLockMode::EXCLUSIVE, false });
     CHECK(std::holds_alternative<imza::FileLock>(exclusive));
-
-    auto shared = imza::acquire_file_lock(
-        path, imza::FileLockRequest { imza::FileLockMode::SHARED, false });
-    CHECK(std::holds_alternative<imza::FileLockError>(shared));
 }
 
 TEST_CASE("exclusive holder blocks a shared request")

@@ -34,12 +34,47 @@ namespace {
         return std::string(trim(result.output));
     }
 
+    // Resolve a command on PATH without spawning a shell: environment
+    // detection probes many candidates, and one fork per probe dominated
+    // startup. Equivalent to `command -v` for the external tools probed.
     bool find_in_path(const std::string& name)
     {
 #ifdef _WIN32
         return !read_command_output("where " + name + " 2>NUL").empty();
 #else
-        return !read_command_output("command -v " + name).empty();
+        if (name.empty()) {
+            return false;
+        }
+        const auto is_executable = [](const std::filesystem::path& path) {
+            std::error_code ec;
+            return std::filesystem::is_regular_file(path, ec) && !ec
+                && ::access(path.c_str(), X_OK) == 0;
+        };
+        if (name.find('/') != std::string::npos) {
+            return is_executable(name);
+        }
+        const char* path_env = std::getenv("PATH");
+        if (path_env == nullptr) {
+            return false;
+        }
+        const std::string_view path { path_env };
+        std::size_t start = 0;
+        while (start <= path.size()) {
+            const std::size_t colon    = path.find(':', start);
+            const std::string_view dir = colon == std::string_view::npos
+                ? path.substr(start)
+                : path.substr(start, colon - start);
+            if (!dir.empty()
+                && is_executable(
+                    std::filesystem::path(std::string(dir)) / name)) {
+                return true;
+            }
+            if (colon == std::string_view::npos) {
+                break;
+            }
+            start = colon + 1;
+        }
+        return false;
 #endif
     }
 
@@ -440,7 +475,10 @@ void Environment::_start_git_worker()
             stamp = git_metadata_stamp(initial->project_root.value());
         }
         auto metadata_deadline = clock::now() + metadata_interval;
-        auto refresh_deadline  = clock::now();
+        // The first full scan rides the first metadata poll rather than
+        // running at construction: a short-lived environment then never
+        // blocks its teardown on an expensive `git status`/`git diff`.
+        auto refresh_deadline = metadata_deadline;
         while (!stop.stop_requested()) {
             wait_until(std::min(metadata_deadline, refresh_deadline));
             if (stop.stop_requested()) {

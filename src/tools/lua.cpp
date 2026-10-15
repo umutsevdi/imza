@@ -89,8 +89,12 @@ namespace {
 
     void deadline_hook(lua_State* L, lua_Debug*)
     {
-        auto* run = *static_cast<LuaRunContext**>(lua_getextraspace(L));
-        if (std::chrono::steady_clock::now() > run->deadline) {
+        auto* run      = *static_cast<LuaRunContext**>(lua_getextraspace(L));
+        const auto now = std::chrono::steady_clock::now();
+        if (now > run->hard_deadline) {
+            luaL_error(L, "script exceeded its maximum wall-clock time");
+        }
+        if (now > run->deadline) {
             luaL_error(L, "execution time limit exceeded");
         }
     }
@@ -492,13 +496,15 @@ TYPES)desc";
         const std::string script = args.script;
         long timeout             = 10;
         if (args.timeout) {
-            timeout = std::clamp(static_cast<long>(*args.timeout), 1L, 120L);
+            timeout = std::clamp(
+                static_cast<long>(*args.timeout), 1L, MAX_SCRIPT_SECONDS);
         }
 
         LuaRunContext run;
-        run.deadline
-            = std::chrono::steady_clock::now() + std::chrono::seconds(timeout);
-        run.host = &host;
+        const auto started = std::chrono::steady_clock::now();
+        run.deadline       = started + std::chrono::seconds(timeout);
+        run.hard_deadline  = started + std::chrono::seconds(MAX_TASK_SECONDS);
+        run.host           = &host;
 
         lua_State* L = lua_newstate(lua_alloc, &run);
         if (L == nullptr) {
@@ -568,7 +574,7 @@ Tool make_lua_tool(LuaState& state, LuaHost host)
     spec.name        = "lua";
     spec.description = render_description(state.modules());
     spec.parameters
-        = R"json({"type":"object","properties":{"script":{"type":"string","description":"Lua source code to execute"},"timeout":{"type":"integer","description":"maximum script execution time in seconds, excluding pauses for permission prompts (default 10, max 120)"}},"required":["script"]})json";
+        = R"json({"type":"object","properties":{"script":{"type":"string","description":"Lua source code to execute"},"timeout":{"type":"integer","description":"maximum script execution time in seconds, excluding pauses for permission prompts and imza.sleep (default 10, max 240)"}},"required":["script"]})json";
     return { std::move(spec),
         [&state, host = std::move(host)](const ToolCallRequest& req) {
             return lua_run(req, host, state.modules());
@@ -590,8 +596,9 @@ std::span<const LuaModule> LuaState::modules() const { return _modules; }
 std::unique_ptr<LuaState> make_lua_state()
 {
     auto state = std::make_unique<LuaState>();
-    for (const LuaModule& module : { core_module(), fs_module(), web_module(),
-             canvas_module(), plan_module(), build_module(), mcp_module() }) {
+    for (const LuaModule& module :
+        { core_module(), fs_module(), web_module(), canvas_module(),
+            plan_module(), build_module(), mcp_module(), bg_module() }) {
         state->register_module(module);
     }
     return state;

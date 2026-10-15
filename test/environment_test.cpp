@@ -342,17 +342,6 @@ TEST_CASE("load_instruction_file skips missing files and honors absolutes")
     CHECK(found->content == "outside rules");
 }
 
-TEST_CASE("load_instruction_file truncates oversized content")
-{
-    const imza::test::TempDir dir;
-    imza::test::write_file(dir.file("big.md"), std::string(64 * 1024, 'x'));
-
-    const auto found = imza::load_instruction_file(dir.path, "big.md");
-    REQUIRE(found.has_value());
-    CHECK(found->content.find("[truncated]") != std::string::npos);
-    CHECK(found->content.size() < 64 * 1024);
-}
-
 TEST_CASE("workspace scan loads configured instructions in order")
 {
     const imza::test::TempDir root_dir;

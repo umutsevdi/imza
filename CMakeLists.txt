@@ -292,6 +292,7 @@ add_library(imza_runtime
     src/tools/mcp_manager.cpp
     src/tools/web.cpp
     src/workspace/review.cpp
+    src/runtime/bg_process_manager.cpp
     src/runtime/main_thread_queue.cpp
     src/runtime/modal_queue.cpp
     src/runtime/subagent_manager.cpp
@@ -325,6 +326,7 @@ add_library(imza_execution
     src/tools/tool.cpp
     src/tools/file_ops.cpp
     src/tools/lua.cpp
+    src/tools/bindings/bg.cpp
     src/tools/bindings/binding.cpp
     src/tools/bindings/canvas.cpp
     src/tools/bindings/core.cpp

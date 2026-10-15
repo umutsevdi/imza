@@ -66,17 +66,12 @@ TEST_CASE("imza.mcp.call returns the tool's text through the manager")
     // The call lands in the dispatch log under the model-facing path.
     CHECK(out.dispatch_log.size() == 1);
     CHECK(out.dispatch_log[0].binding == "mcp.call");
-}
 
-TEST_CASE("imza.mcp.call works without an args table")
-{
-    McpFixture fx;
-    REQUIRE(fx.start());
-
-    const imza::ToolOutput out = imza::test::run_lua(
+    // The args table is optional: the call still reaches the tool.
+    const imza::ToolOutput bare = imza::test::run_lua(
         "print('got:' .. imza.mcp.call('exa', 'echo'))", fx.host());
-    CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(out.text.find("got:loopback ok") != std::string::npos);
+    CHECK(bare.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(bare.text.find("got:loopback ok") != std::string::npos);
 }
 
 TEST_CASE("imza.mcp.call surfaces tool execution errors as aborts")

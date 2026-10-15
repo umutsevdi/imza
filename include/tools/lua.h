@@ -18,6 +18,16 @@ extern "C" {
 
 namespace imza {
 
+// Foreground script and shell timeout ceiling: the caller-selectable cap.
+inline constexpr long MAX_SCRIPT_SECONDS = 240;
+// One 10-minute ceiling for everything that may outlive a single call: the
+// hard wall-clock cap on a script run, the longest background command, and the
+// longest single imza.sleep. Blocking bindings (shell, sleep, ask) credit the
+// compute budget back but never this, so a park loop stays bounded.
+inline constexpr long MAX_TASK_SECONDS = 600;
+// Background command timeout default.
+inline constexpr long DEFAULT_BG_SECONDS = 120;
+
 enum class LuaCapability { NONE, SHELL, WEB, MCP };
 
 struct LuaMethod {
@@ -82,6 +92,15 @@ struct LuaHost {
     // MCP server sessions; empty accessor means the bindings are
     // unavailable (no manager in this run).
     std::function<McpManager*()> mcp;
+    // True when the run's session has an interrupt pending; imza.sleep
+    // bails out on it. Empty means never interrupted (tests).
+    std::function<bool()> interrupted;
+    // Starts a detached background command (stdio to /dev/null, killed on
+    // timeout or application teardown). Returns false when it could not be
+    // spawned; empty means imza.bg.shell is unavailable in this run.
+    std::function<bool(
+        const std::string&, std::chrono::seconds, const std::string&)>
+        spawn_bg;
     bool web_enabled      = false;
     bool shell_enabled    = false;
     bool mcp_enabled      = false;

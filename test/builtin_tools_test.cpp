@@ -62,7 +62,7 @@ TEST_CASE("the skill tool handler reads instructions and records the load")
     CHECK(missing.text == "skill: unknown or unavailable skill");
 }
 
-TEST_CASE("the skill tool records nothing without a store but still reads")
+TEST_CASE("the skill tool reads instructions without a store")
 {
     const imza::test::TempDir root;
     const auto path = root.file("SKILL.md");

@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstring>
 #include <future>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -145,6 +146,48 @@ namespace {
         result.spawned = true;
         result.output  = std::move(output);
         return result;
+    }
+
+    bool spawn_windows_background(const std::string& command,
+        std::chrono::seconds timeout,
+        const std::filesystem::path& working_directory, std::stop_token stop,
+        const std::function<void()>& on_spawned)
+    {
+        std::wstring cmdline = L"cmd.exe /c " + to_wide(command);
+        STARTUPINFOW startup { };
+        startup.cb = sizeof(startup);
+        PROCESS_INFORMATION process { };
+        const std::wstring wide_directory = working_directory.empty()
+            ? std::wstring { }
+            : working_directory.wstring();
+        if (!CreateProcessW(nullptr, cmdline.data(), nullptr, nullptr, FALSE,
+                CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS, nullptr,
+                wide_directory.empty() ? nullptr : wide_directory.c_str(),
+                &startup, &process)) {
+            return false;
+        }
+        const HANDLE job = process.hProcess;
+        CloseHandle(process.hThread);
+        if (on_spawned) {
+            on_spawned();
+        }
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        for (;;) {
+            if (stop.stop_requested()) {
+                TerminateProcess(job, 124);
+                break;
+            }
+            if (WaitForSingleObject(job, 100) == WAIT_OBJECT_0) {
+                break;
+            }
+            if (std::chrono::steady_clock::now() >= deadline) {
+                TerminateProcess(job, 124);
+                break;
+            }
+        }
+        WaitForSingleObject(job, INFINITE);
+        CloseHandle(job);
+        return true;
     }
 
     CommandResult run_windows_attached(
@@ -299,6 +342,59 @@ namespace {
         return result;
     }
 
+    bool spawn_posix_background(const std::string& command,
+        std::chrono::seconds timeout,
+        const std::filesystem::path& working_directory, std::stop_token stop,
+        const std::function<void()>& on_spawned)
+    {
+        const pid_t pid = fork();
+        if (pid < 0) {
+            return false;
+        }
+        if (pid == 0) {
+            setsid();
+            if (!working_directory.empty()
+                && chdir(working_directory.c_str()) != 0) {
+                _exit(126);
+            }
+            const int null_fd = open("/dev/null", O_RDWR);
+            if (null_fd >= 0) {
+                dup2(null_fd, 0);
+                dup2(null_fd, 1);
+                dup2(null_fd, 2);
+                if (null_fd > 2) {
+                    close(null_fd);
+                }
+            }
+            execl("/bin/sh", "sh", "-c", command.c_str(),
+                static_cast<char*>(nullptr));
+            _exit(127);
+        }
+        // setsid makes the child a group leader, so killpg(-pid) reaps the
+        // whole tree the command spawned (a dev server's children included).
+        if (on_spawned) {
+            on_spawned();
+        }
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        for (;;) {
+            int status         = 0;
+            const pid_t waited = waitpid(pid, &status, WNOHANG);
+            if (waited == pid) {
+                return true;
+            }
+            if (waited < 0 && errno != EINTR) {
+                return true;
+            }
+            if (stop.stop_requested()
+                || std::chrono::steady_clock::now() >= deadline) {
+                killpg(pid, SIGKILL);
+                while (waitpid(pid, &status, 0) < 0 && errno == EINTR) { }
+                return true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+
     CommandResult run_posix_attached(
         const std::string& command, CommandResult result)
     {
@@ -427,6 +523,23 @@ bool spawn_detached_command(const std::string& command)
         while (waitpid(pid, &status, 0) < 0 && errno == EINTR) { }
     }).detach();
     return true;
+#endif
+}
+
+bool spawn_background_command(const std::string& command,
+    std::chrono::seconds timeout,
+    const std::filesystem::path& working_directory, std::stop_token stop,
+    const std::function<void()>& on_spawned)
+{
+    if (command.empty()) {
+        return false;
+    }
+#ifdef _WIN32
+    return spawn_windows_background(
+        command, timeout, working_directory, stop, on_spawned);
+#else
+    return spawn_posix_background(
+        command, timeout, working_directory, stop, on_spawned);
 #endif
 }
 

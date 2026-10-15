@@ -84,6 +84,16 @@ namespace {
                     return state->permissions->install(std::move(grants));
                 },
             .mcp = [state] -> McpManager* { return state->mcp.get(); },
+            .interrupted
+            = [state] { return state->session->interrupt_requested(); },
+            .spawn_bg =
+                [state](const std::string& command,
+                    std::chrono::seconds timeout,
+                    const std::string& workspace) {
+                    return state->bg_processes != nullptr
+                        && state->bg_processes->start(
+                            command, timeout, workspace);
+                },
             .web_enabled
             = (state->runtime_flags & RuntimeFlag::WEB) != RuntimeFlag::NONE,
             .shell_enabled
@@ -196,7 +206,8 @@ namespace {
         state->mcp = std::make_shared<McpManager>(
             std::move(mcp_servers), std::move(mcp_hooks));
         state->mcp->autoload();
-        state->subagents = std::make_shared<SubagentManager>();
+        state->subagents    = std::make_shared<SubagentManager>();
+        state->bg_processes = std::make_shared<BgProcessManager>();
         state->environment
             = std::make_shared<Environment>(std::move(instructions));
         state->review      = std::make_shared<ReviewState>();
@@ -283,6 +294,9 @@ ApplicationState::~ApplicationState()
     env_subscription.disconnect();
     system_subscription.disconnect();
     subagents->stop();
+    if (bg_processes) {
+        bg_processes->stop();
+    }
     runner->stop();
 }
 

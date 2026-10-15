@@ -11,6 +11,7 @@
 #include <chrono>
 #include <filesystem>
 #include <string>
+#include <thread>
 #include <utility>
 
 extern "C" {
@@ -187,34 +188,15 @@ namespace {
     int binding_shell(lua_State* L)
     {
         const std::string command = luaL_checkstring(L, 1);
-        const long timeout
-            = std::clamp<long>(opt_integer(L, 2).value_or(10), 1, 120);
+        const long timeout        = std::clamp<long>(
+            opt_integer(L, 2).value_or(10), 1, MAX_SCRIPT_SECONDS);
 
         std::string workspace;
         if (const auto given = opt_string(L, 3)) {
-            const std::string raw = *given;
-            if (raw.empty()) {
-                return binding_error(L, "shell: workspace must not be empty");
+            if (const int failed = resolve_workspace(L, given, workspace);
+                failed != 0) {
+                return failed;
             }
-            fs::path dir(raw);
-            if (dir.is_relative()) {
-                // The session working directory lives in the workspace
-                // snapshot; the process cwd already tracks it (Environment
-                // chdirs the process), so this is plain path joining.
-                LuaRunContext* run              = run_of(L);
-                const PermissionContext context = run->host->permission_context
-                    ? run->host->permission_context()
-                    : PermissionContext { };
-                dir = (context.workspace ? context.workspace->working_directory
-                                         : fs::current_path())
-                    / dir;
-            }
-            std::error_code ec;
-            if (!fs::is_directory(dir, ec)) {
-                return binding_error(
-                    L, "shell: workspace is not a directory: " + raw);
-            }
-            workspace = dir.string();
         }
 
         const ShellAnalysis analysis = analyze_shell(command);
@@ -237,8 +219,14 @@ namespace {
         const std::string run_dir
             = gate.shell ? gate.shell->workspace.string() : workspace;
 
-        CommandResult r = run_command(
+        // The command blocks the VM in a C call, during which the
+        // instruction hook cannot fire; credit the elapsed wall clock back
+        // to the compute budget so a long command does not kill the script.
+        const auto started = std::chrono::steady_clock::now();
+        CommandResult r    = run_command(
             command, std::chrono::seconds(timeout), fs::path(run_dir));
+        credit_deadline(*run_of(L), std::chrono::steady_clock::now() - started);
+
         if (!r.spawned) {
             record_call(L, "shell", command, false);
             return binding_error(L, "shell: failed to execute command");
@@ -256,7 +244,56 @@ namespace {
         return 2;
     }
 
+    // Parks the VM thread in slices, crediting the paused time back to the
+    // compute budget so a poll loop survives past the script's timeout.
+    // Interrupt and the hard deadline end it; the hook cannot fire while
+    // this blocks in a C call, so both are checked here.
+    int binding_sleep(lua_State* L)
+    {
+        const long given = static_cast<long>(luaL_checkinteger(L, 1));
+        if (given < 0) {
+            return binding_error(L, "sleep: seconds must not be negative");
+        }
+        // Clamping keeps the seconds-to-millis conversion away from overflow.
+        const long requested = std::min(given, MAX_TASK_SECONDS);
+        LuaRunContext* run   = run_of(L);
+        const auto started   = std::chrono::steady_clock::now();
+        auto remaining       = std::chrono::milliseconds(requested * 1000);
+        // Sliced so the checks below stay responsive during a long park.
+        constexpr auto SLICE = std::chrono::milliseconds(25);
+        while (remaining > std::chrono::milliseconds::zero()) {
+            if (run->host->interrupted && run->host->interrupted()) {
+                credit_deadline(
+                    *run, std::chrono::steady_clock::now() - started);
+                record_call(L, "sleep", "", false);
+                return binding_error(L, "sleep: interrupted");
+            }
+            if (std::chrono::steady_clock::now() > run->hard_deadline) {
+                credit_deadline(
+                    *run, std::chrono::steady_clock::now() - started);
+                record_call(L, "sleep", "", false);
+                return binding_error(
+                    L, "sleep: script exceeded its maximum wall-clock time");
+            }
+            const auto slice = std::min(remaining, SLICE);
+            std::this_thread::sleep_for(slice);
+            remaining -= slice;
+        }
+        credit_deadline(*run, std::chrono::steady_clock::now() - started);
+        record_call(L, "sleep", "", true);
+        return 0;
+    }
+
     constexpr LuaMethod BINDINGS[] = {
+        {
+            "sleep",
+            binding_sleep,
+            R"desc((seconds: integer) throws
+Parks the script for `seconds` seconds without spending its execution
+budget, so a poll loop can wait past the script timeout. Wakes early and throws
+when the turn is interrupted or the script exceeds its maximum wall-clock
+time.)desc",
+        },
         {
             "todo.get",
             binding_todo_get,
@@ -285,7 +322,7 @@ Throws when dismissed by the user; unavailable in unattended runs.)desc",
 Runs a single external command, returning its captured output (capped at 64 KB)
 and exit status.
 A non-zero exit_code is a successful call, so test exit_code rather than nil.
-Throws when the command could not start, timed out (1..120 s) or was denied.
+Throws when the command could not start, timed out (1..240 s) or was denied.
 Chains and pipelines are rejected. Compose results in Lua instead.
 `workspace` is the directory the command runs in.)desc",
             LuaCapability::SHELL,

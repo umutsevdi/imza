@@ -39,6 +39,10 @@ struct LuaRunContext {
     std::string output;
     std::size_t memory_used = 0;
     std::chrono::steady_clock::time_point deadline;
+    // Hard wall-clock cap no binding credits: the instruction hook enforces
+    // it alongside the credited compute deadline, so a script cannot park
+    // (imza.sleep) its way past the run's total budget.
+    std::chrono::steady_clock::time_point hard_deadline;
     bool truncated = false;
     std::vector<LuaBindingCall> log;
     std::vector<FileMutation> mutations;
@@ -79,6 +83,19 @@ struct GateOutcome {
 // Blocks on the host's modal route and returns the verdict, crediting the
 // human think-time back to the run's wall-clock deadline.
 ModalResult ask_with_deadline_credit(LuaRunContext& run, ModalPayload payload);
+
+// Credits `paused` back to the run's compute deadline so a blocking binding
+// (shell, sleep, ask) does not consume the script's execution budget. The
+// hard deadline is never credited, so an unbounded park loop still dies.
+void credit_deadline(
+    LuaRunContext& run, std::chrono::steady_clock::duration paused);
+
+// Resolves an optional workspace argument against the session working
+// directory (the process cwd already tracks it). Returns 0 and fills
+// `workspace` (empty when absent) on success; raises the binding error and
+// returns the Lua return count on a bad directory.
+int resolve_workspace(lua_State* L, const std::optional<std::string>& given,
+    std::string& workspace);
 
 // The shared ASK -> grant -> re-evaluate pipeline both gates run after
 // their gate returned ASK: skip_permissions accepts, unattended fails
@@ -135,5 +152,6 @@ const LuaModule& canvas_module();
 const LuaModule& plan_module();
 const LuaModule& build_module();
 const LuaModule& mcp_module();
+const LuaModule& bg_module();
 
 } // namespace imza

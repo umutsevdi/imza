@@ -2,6 +2,8 @@
 
 #include <chrono>
 #include <filesystem>
+#include <functional>
+#include <stop_token>
 #include <string>
 #include <string_view>
 
@@ -29,6 +31,17 @@ CommandResult run_attached_command(const std::string& command);
 // the caller keeps its terminal. Used to hand a file to the user's editor
 // from inside the TUI.
 bool spawn_detached_command(const std::string& command);
+
+// Launches `command` detached in its own process group with stdio on
+// /dev/null: output must be redirected by the command itself. Blocks until
+// the process exits, `timeout` elapses, or `stop` is requested (then the
+// whole group is killed); returns false only when the child could not be
+// spawned. `on_spawned` fires right after a successful fork, so a caller
+// can report success without waiting for the process to finish.
+bool spawn_background_command(const std::string& command,
+    std::chrono::seconds timeout,
+    const std::filesystem::path& working_directory, std::stop_token stop = { },
+    const std::function<void()>& on_spawned = { });
 bool open_browser(std::string_view url);
 
 } // namespace imza

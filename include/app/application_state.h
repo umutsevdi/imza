@@ -14,6 +14,7 @@
 #include "network/network.h"
 #include "platform/config.h"
 #include "providers/store.h"
+#include "runtime/bg_process_manager.h"
 #include "runtime/modal_queue.h"
 #include "runtime/subagent_manager.h"
 #include "tools/lua.h"
@@ -46,6 +47,7 @@ struct ApplicationState {
     std::shared_ptr<ProviderStore> providers;
     std::shared_ptr<McpManager> mcp;
     std::shared_ptr<SubagentManager> subagents;
+    std::shared_ptr<BgProcessManager> bg_processes;
     std::shared_ptr<Environment> environment;
     std::shared_ptr<ReviewState> review;
     std::shared_ptr<SkillStore> skills;

@@ -4,8 +4,11 @@
 
 #include "permissions/filesystem.h"
 #include "permissions/shell.h"
+#include "workspace/environment.h"
 
 #include <chrono>
+#include <filesystem>
+#include <string>
 #include <utility>
 
 extern "C" {
@@ -92,15 +95,53 @@ int authorize_target(lua_State* L, const FilesystemRequest& request,
     return 0;
 }
 
+void credit_deadline(
+    LuaRunContext& run, std::chrono::steady_clock::duration paused)
+{
+    run.deadline += paused;
+}
+
 ModalResult ask_with_deadline_credit(LuaRunContext& run, ModalPayload payload)
 {
-    // Human think-time is free: shift the wall-clock deadline by the
-    // paused duration so a slow approval does not consume the script's
-    // execution budget.
+    // Human think-time is free: shift the compute deadline by the paused
+    // duration so a slow approval does not consume the script's budget.
     const auto paused_at     = std::chrono::steady_clock::now();
     const ModalResult result = run.host->ask(std::move(payload)).get();
-    run.deadline += std::chrono::steady_clock::now() - paused_at;
+    credit_deadline(run, std::chrono::steady_clock::now() - paused_at);
     return result;
+}
+
+int resolve_workspace(lua_State* L, const std::optional<std::string>& given,
+    std::string& workspace)
+{
+    if (!given.has_value()) {
+        return 0;
+    }
+    const std::string label = std::string(run_of(L)->current_binding);
+    const std::string raw   = *given;
+    if (raw.empty()) {
+        return binding_error(L, label + ": workspace must not be empty");
+    }
+    std::filesystem::path dir(raw);
+    if (dir.is_relative()) {
+        // The session working directory lives in the workspace snapshot;
+        // the process cwd already tracks it (Environment chdirs the
+        // process), so this is plain path joining.
+        LuaRunContext* run              = run_of(L);
+        const PermissionContext context = run->host->permission_context
+            ? run->host->permission_context()
+            : PermissionContext { };
+        dir = (context.workspace ? context.workspace->working_directory
+                                 : std::filesystem::current_path())
+            / dir;
+    }
+    std::error_code ec;
+    if (!std::filesystem::is_directory(dir, ec)) {
+        return binding_error(
+            L, label + ": workspace is not a directory: " + raw);
+    }
+    workspace = dir.string();
+    return 0;
 }
 
 namespace {
