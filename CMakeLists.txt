@@ -21,6 +21,11 @@ else()
         add_compile_options(-O3)
     endif()
 endif()
+# windows.h defines min/max as macros unless suppressed project-wide; they
+# break every std::min/std::max call that is not extra-parenthesized.
+if(WIN32)
+    add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Debug")
 endif()

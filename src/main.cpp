@@ -77,9 +77,13 @@ int main(int argc, char** argv)
     }
     // Resolve names the way the skill tool does: project wins over global.
     // The catalogue lands on an environment worker, so wait for it first.
-    for (int waited = 0; waited < 5000 && !state->environment->ready();
-        waited += 50) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Only --allow-skill reads it during startup; one-shot runs wait on
+    // their own in run_one_shot, so interactive startup never blocks here.
+    if (!cli.allowed_skills.empty()) {
+        for (int waited = 0; waited < 5000 && !state->environment->ready();
+            waited += 50) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
     }
     const std::vector<imza::Skill> catalog = state->environment->skills();
     for (const std::string& name : cli.allowed_skills) {

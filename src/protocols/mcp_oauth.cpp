@@ -1,5 +1,3 @@
-#define NOMINMAX
-
 #include "protocols/mcp_oauth.h"
 
 #include "common/util.h"

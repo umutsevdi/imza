@@ -1,4 +1,3 @@
-#define NOMINMAX
 #include "common/util.h"
 #include "network/json.h"
 #include "network/json_io.h"

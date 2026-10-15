@@ -3,6 +3,7 @@
 #include "runtime/main_thread_queue.h"
 #include "turn/turn_runner.h"
 
+#include <chrono>
 #include <optional>
 #include <string>
 
@@ -43,6 +44,14 @@ OneShotResult run_one_shot(ApplicationState& state,
     state.session->set_mode(request.mode == OneShotRequest::Mode::ASK
             ? Session::Mode::PLAN
             : Session::Mode::BUILD);
+    // Skill mentions resolve at submit time, so give the asynchronous
+    // workspace scan a chance to publish the catalogue first; an empty
+    // catalogue after the timeout still runs, degraded but functional.
+    for (int waited = 0; waited < 5000 && !state.environment->ready();
+        waited += 50) {
+        main_thread.wait_for_task(std::chrono::milliseconds(50));
+        main_thread.drain();
+    }
     submit(state, request.query);
     wait_for_completion(state, main_thread);
 
