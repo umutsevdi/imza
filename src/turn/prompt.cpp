@@ -65,6 +65,10 @@ namespace {
         out += "\n  Package managers: ";
         out += sys.package_managers.empty() ? std::string("none")
                                             : join(sys.package_managers, ", ");
+        out += "\n  Temporary Directory: ";
+        out += sys.temporary_directory.empty()
+            ? std::string("unknown")
+            : sys.temporary_directory.string();
         out += "\n  Today's date: ";
         out += sys.today;
         out += "\n</env>";

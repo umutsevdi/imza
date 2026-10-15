@@ -38,6 +38,11 @@ TEST_CASE("system prompt embeds the environment block")
     sys.default_shell    = "/bin/bash";
     sys.package_managers = { "apt", "snap" };
     sys.today            = "Fri Aug 28 2026";
+#ifdef _WIN32
+    sys.temporary_directory = "C:\\Users\\me\\AppData\\Local\\Temp\\imza";
+#else
+    sys.temporary_directory = "/tmp/imza";
+#endif
 
     const PromptStore prompts;
     const std::string prompt = build_system_prompt(prompts, &sys, nullptr);
@@ -46,6 +51,13 @@ TEST_CASE("system prompt embeds the environment block")
     CHECK(prompt.find("Operating System: Linux 6.8") != std::string::npos);
     CHECK(prompt.find("/bin/bash") != std::string::npos);
     CHECK(prompt.find("apt, snap") != std::string::npos);
+#ifdef _WIN32
+    CHECK(prompt.find("Temporary Directory: "
+                      "C:\\Users\\me\\AppData\\Local\\Temp\\imza")
+        != std::string::npos);
+#else
+    CHECK(prompt.find("Temporary Directory: /tmp/imza") != std::string::npos);
+#endif
     CHECK(prompt.find("Fri Aug 28 2026") != std::string::npos);
     CHECK(prompt.find("</env>") != std::string::npos);
 }
