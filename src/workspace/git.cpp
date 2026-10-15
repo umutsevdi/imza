@@ -187,7 +187,7 @@ std::optional<std::uint64_t> git_metadata_stamp(
         found = true;
         const auto modified
             = std::chrono::file_clock::to_sys(written).time_since_epoch();
-        hash_bytes(stamp, std::to_string(modified.count()));
+        hash_bytes(stamp, std::to_string(static_cast<long long>(modified.count())));
         hash_bytes(stamp, std::to_string(size));
     }
     if (!found) {
