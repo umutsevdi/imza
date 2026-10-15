@@ -75,7 +75,7 @@ with review findings fed back into planning as revisions
 * Headless execution for scripts, CI, and development tooling
 * Terminal notifications when an attended agent finishes or needs input
 
-[Features and roadmap in the wiki](https://github.com/umutsevdi/imza/wiki/11_Features-and-Roadmap)
+[Features and roadmap in the wiki](https://github.com/umutsevdi/imza/wiki/12_Features-and-Roadmap)
 
 ## Bring Your Own Model
 
