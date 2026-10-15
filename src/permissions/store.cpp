@@ -25,7 +25,9 @@ namespace {
                 } else if constexpr (std::is_same_v<T, ShellCommandGrant>) {
                     return !value.program.empty()
                         && (!value.subcommand || !value.subcommand->empty());
-                } else {
+                } else if constexpr (std::is_same_v<T, McpGrant>) {
+                    return !value.server_id.empty();
+                } else if constexpr (std::is_same_v<T, SkillGrant>) {
                     if (!value.path.is_absolute() || value.path.empty()) {
                         return false;
                     }
@@ -66,7 +68,11 @@ bool grant_covers(
             && (!command->subcommand
                 || command->subcommand == other.subcommand);
     }
-    return std::get<SkillGrant>(stored) == std::get<SkillGrant>(requested);
+    if (const auto* skill = std::get_if<SkillGrant>(&stored)) {
+        return *skill == std::get<SkillGrant>(requested);
+    }
+    return std::get<McpGrant>(stored).server_id
+        == std::get<McpGrant>(requested).server_id;
 }
 
 bool PermissionStore::install(Grants grants)

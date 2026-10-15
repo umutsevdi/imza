@@ -192,6 +192,19 @@ std::string SkillStore::prompt_suffix() const
     return out;
 }
 
+std::vector<std::filesystem::path> SkillStore::loaded_directories() const
+{
+    std::lock_guard lock(_mutex);
+    std::vector<std::filesystem::path> out;
+    out.reserve(_loaded.size());
+    for (const std::string& path : _loaded) {
+        out.push_back(std::filesystem::path(path).parent_path());
+    }
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
+}
+
 std::pair<SkillCounts, SkillCounts> SkillStore::counts(
     const std::vector<Skill>& catalog) const
 {

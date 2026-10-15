@@ -61,6 +61,9 @@ namespace {
         if (req.name == "list") {
             return "List a directory";
         }
+        if (req.name == "load_mcp") {
+            return "Connect to an MCP server";
+        }
         return "Allow this operation to run";
     }
 
@@ -194,6 +197,20 @@ namespace {
             return vbox({ detail_row("name", skill->name),
                 detail_row("path", skill->path),
                 detail_row("scope", skill->scope) });
+        }
+        if (const auto* mcp = std::get_if<McpRequest>(&req.request)) {
+            std::string detail = mcp->label != mcp->id && !mcp->label.empty()
+                ? mcp->label
+                : "";
+            if (!mcp->detail.empty()) {
+                if (!detail.empty()) {
+                    detail += " · ";
+                }
+                detail += mcp->detail;
+            }
+            return detail.empty()
+                ? detail_row("server", mcp->id)
+                : detail_row("server", mcp->id + "  " + detail);
         }
         return text("");
     }

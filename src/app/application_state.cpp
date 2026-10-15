@@ -38,7 +38,9 @@ namespace {
                 [state] {
                     return state->environment && state->permissions
                         ? make_permission_context(*state->environment,
-                              *state->permissions, state->session->mode())
+                              *state->permissions, state->session->mode(),
+                              state->skills->loaded_directories(),
+                              state->mcp.get())
                         : PermissionContext { };
                 },
             .ask = [state](ModalPayload payload) -> std::future<ModalResult> {

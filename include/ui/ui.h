@@ -408,6 +408,7 @@ struct PermissionView {
     bool approvals_skipped = false;
     std::vector<std::string> folders;
     std::vector<std::string> commands;
+    std::vector<std::string> mcp_servers;
 };
 
 PermissionView make_permission_view(

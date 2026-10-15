@@ -5,10 +5,12 @@
 #include "tools/mcp_manager.h"
 #include "tools/skills.h"
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -50,7 +52,9 @@ Tool make_load_mcp_tool(McpToolDocsDeps deps)
     spec.name        = "load_mcp";
     spec.description = "Load the tool reference for one MCP server from the "
                        "<mcps> block: tool names, descriptions, and argument "
-                       "schemas. Call tools with imza.mcp.call.";
+                       "schemas. Connecting a disconnected server asks the "
+                       "user for approval unless pre-approved with "
+                       "--allow-mcp. Call tools with imza.mcp.call.";
     spec.parameters
         = R"json({"type":"object","properties":{"server":{"type":"string","description":"MCP server id from the <mcps> block"}},"required":["server"]})json";
     return { std::move(spec),
@@ -74,12 +78,36 @@ Tool make_load_mcp_tool(McpToolDocsDeps deps)
                 return tool_error(
                     "load_mcp: unknown server '" + args.server + "'");
             }
+            if (found->state == McpServerState::OFFLINE
+                || found->state == McpServerState::CONNECTING) {
+                // The handshake runs on a manager worker, so wait for
+                // its terminal state before rendering the reference.
+                manager->connect(args.server);
+                constexpr int CONNECT_POLL_MS    = 200;
+                constexpr int CONNECT_TIMEOUT_MS = 30000;
+                for (int waited = 0; waited < CONNECT_TIMEOUT_MS;
+                    waited += CONNECT_POLL_MS) {
+                    std::this_thread::sleep_for(
+                        std::chrono::milliseconds(CONNECT_POLL_MS));
+                    for (const McpServerSnapshot& server :
+                        manager->snapshot()) {
+                        if (server.id != args.server) {
+                            continue;
+                        }
+                        found = server;
+                    }
+                    if (found->state != McpServerState::OFFLINE
+                        && found->state != McpServerState::CONNECTING) {
+                        break;
+                    }
+                }
+            }
             if (found->state != McpServerState::CONNECTED) {
                 return tool_error("load_mcp: server '" + args.server
-                    + "' is not connected (state: "
+                    + "' did not connect (state: "
                     + (found->detail.empty() ? std::string("offline")
                                              : found->detail)
-                    + "); connect it with /mcp");
+                    + ")");
             }
             const auto tools = manager->tools(args.server);
             if (!tools || tools->empty()) {

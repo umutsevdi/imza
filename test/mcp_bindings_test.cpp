@@ -148,6 +148,9 @@ TEST_CASE("the <mcps> block lists configured servers with state")
             imza::SubagentRole::RESEARCH, nullptr, fx.manager.get());
     CHECK(prompt.find("<mcps>") != std::string::npos);
     CHECK(prompt.find("- exa [connected, 3 tools]") != std::string::npos);
+    CHECK(prompt.find("[offline]") != std::string::npos);
+    CHECK(
+        prompt.find("connects servers marked [offline]") != std::string::npos);
     CHECK(prompt.find("load_mcp(\"<id>\")") != std::string::npos);
     CHECK(prompt.find("imza.mcp.call") != std::string::npos);
 
@@ -155,4 +158,45 @@ TEST_CASE("the <mcps> block lists configured servers with state")
     const std::string bare = imza::build_subagent_system_prompt(
         prompts, nullptr, nullptr, imza::SubagentRole::RESEARCH);
     CHECK(bare.find("<mcps>") == std::string::npos);
+}
+TEST_CASE(
+    "load_mcp connects an approved offline server and renders the reference")
+{
+    imza::test::allow_loopback_direct();
+    imza::test::LoopbackMcpServer server;
+    REQUIRE(server.start());
+
+    imza::McpServerConfig config;
+    config.id  = "exa";
+    config.url = server.url();
+    // No connect call: the tool itself must bring the server up.
+    imza::McpManager manager(
+        std::map<std::string, imza::McpServerConfig> { { "exa", config } });
+
+    imza::Tool tool = imza::make_load_mcp_tool(
+        { [&manager] -> imza::McpManager* { return &manager; } });
+    const imza::ToolOutput out
+        = tool.run({ "load_mcp", R"({"server":"exa"})", "", "" });
+    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(out.text.find("MCP server 'exa'") != std::string::npos);
+    CHECK(out.text.find("- echo") != std::string::npos);
+
+    server.stop();
+}
+
+TEST_CASE("load_mcp reports a failed connect instead of the reference")
+{
+    imza::test::allow_loopback_direct();
+    imza::McpServerConfig config;
+    config.id  = "dead";
+    config.url = "http://127.0.0.1:1/mcp";
+    imza::McpManager manager(
+        std::map<std::string, imza::McpServerConfig> { { "dead", config } });
+
+    imza::Tool tool = imza::make_load_mcp_tool(
+        { [&manager] -> imza::McpManager* { return &manager; } });
+    const imza::ToolOutput out
+        = tool.run({ "load_mcp", R"({"server":"dead"})", "", "" });
+    CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
+    CHECK(out.text.find("did not connect") != std::string::npos);
 }

@@ -99,10 +99,8 @@ namespace {
         const ToolCallRequest& request, Session::Mode mode)
     {
         return evaluate_tool_request(request,
-            make_permission_context(
-                *state.environment, *state.permissions, mode),
-            state.providers->config(), state.environment->skills(),
-            *state.skills);
+            permission_context_for(state, mode), state.providers->config(),
+            state.environment->skills(), *state.skills);
     }
 
     void submit_with_skills(ApplicationState& state, std::string text,
@@ -476,6 +474,13 @@ void on_turn_finished(ApplicationState& state, std::string error)
     notify_user(state, AgentNotification::TURN_FINISHED);
     present_front(state);
     drain_queued(state);
+}
+
+PermissionContext permission_context_for(
+    ApplicationState& state, Session::Mode mode)
+{
+    return make_permission_context(*state.environment, *state.permissions, mode,
+        state.skills->loaded_directories(), state.mcp.get());
 }
 
 void resolve_modal(ApplicationState& state, ModalResult result)
@@ -921,9 +926,8 @@ std::string export_viewer_content(
     // User-initiated and always inside the trusted root, so it is
     // evaluated as a Build-mode write: the Plan-mode ban guards agent
     // mutation, not an explicit export.
-    const FilesystemEvaluation evaluation = evaluate_filesystem_request(request,
-        make_permission_context(
-            *state.environment, *state.permissions, SessionMode::BUILD));
+    const FilesystemEvaluation evaluation = evaluate_filesystem_request(
+        request, permission_context_for(state, SessionMode::BUILD));
     if (evaluation.decision.kind != PermissionDecision::Kind::ACCEPT) {
         error = "Cannot export: " + evaluation.decision.reason;
         return { };

@@ -22,7 +22,12 @@
         },
         "builder": { "$ref": "#/definitions/modelChoice" },
         "researcher": { "$ref": "#/definitions/modelChoice" },
-        "basic": { "$ref": "#/definitions/modelChoice" }
+        "basic": { "$ref": "#/definitions/modelChoice" },
+        "reviewer": {
+          "$ref": "#/definitions/modelChoice",
+          "deprecated": true,
+          "description": "Deprecated name for `basic`; read only when `basic` is absent. Imza rewrites it to `basic` on the next save."
+        }
       }
     },
     "skills": {
@@ -77,9 +82,14 @@
       "description": "Per-widget visibility for the sidebar. Every widget is shown unless its flag is false; the setting is read once at startup.",
       "additionalProperties": false,
       "properties": {
-        "plans": {
+        "documents": {
           "type": "boolean",
           "description": "Show the plans widget listing every plan revision. Defaults to true."
+        },
+        "plans": {
+          "type": "boolean",
+          "deprecated": true,
+          "description": "Deprecated name for `documents`; read only when `documents` is absent. Imza rewrites it to `documents` on the next save."
         },
         "review_comments": {
           "type": "boolean",
@@ -174,12 +184,13 @@
         "model": { "type": "string", "description": "Model identifier." },
         "reasoning_effort": {
           "$ref": "#/definitions/reasoningEffort",
-          "description": "Reasoning effort. Defaults per role: builder `medium` (stored as `default`), researcher `low`, basic `off`."
+          "description": "Reasoning effort. Defaults per role: builder `default`, researcher `low`, basic `off`. A role with no `provider` falls back to the main model and keeps its own effort. For a subagent role an unrecognized value fails the whole config load; for `main` it is stored unchecked."
         }
       }
     },
     "reasoningEffort": {
       "type": "string",
+      "description": "Reasoning effort to request. `medium` is the wire spelling of `default`: both are accepted, Imza stores `default` and sends `medium`, so prefer `default`. The value is sent only for a model whose catalog row marks it as supporting reasoning; Anthropic requests receive a thinking budget instead.",
       "enum": ["off", "low", "default", "medium", "high"]
     },
     "skillPolicy": {
@@ -217,22 +228,25 @@
         },
         "catalog_id": {
           "type": "string",
-          "description": "Reference to a bundled catalogue server whose url and label resolve at use time."
+          "description": "Reference to a bundled catalogue server whose url and label resolve at use time, so the address follows app updates. Ignored when `url` is present. An http entry needs this or `url`."
         },
         "url": {
           "type": "string",
-          "description": "Custom endpoint. Must be http(s); plain http is upgraded to https.",
+          "description": "Custom endpoint. Must be http(s); plain http is upgraded to https. Supports ${NAME} and ${NAME:-fallback} environment references, expanded when the connection is made.",
           "pattern": "^https?://"
         },
         "headers": {
           "type": "object",
-          "description": "Extra HTTP headers. Names must be non-empty and contain no colon.",
+          "description": "Extra HTTP headers. Names must be non-empty and contain no colon. Names and values support ${NAME} and ${NAME:-fallback} environment references.",
           "additionalProperties": { "type": "string" }
         },
-        "bearer_token": { "type": "string", "description": "Bearer token." },
+        "bearer_token": {
+          "type": "string",
+          "description": "Bearer token. Ignored once an `oauth` sign-in supplies an access token. Supports ${NAME} and ${NAME:-fallback} environment references."
+        },
         "oauth": {
           "type": "object",
-          "description": "Browser sign-in state; written by Imza after a successful OAuth sign-in.",
+          "description": "Browser sign-in state: the registered client, the discovered authorization-server endpoints, and the current tokens. Written and refreshed by Imza after a successful OAuth sign-in rather than hand-edited. Valid only on an http server, and endpoint values must be https.",
           "additionalProperties": false,
           "properties": {
             "client_id": { "type": "string" },
@@ -254,11 +268,11 @@
         "args": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Arguments for a stdio server's command."
+          "description": "Arguments for a stdio server's command, passed verbatim without a shell. Values support ${NAME} and ${NAME:-fallback} environment references."
         },
         "env": {
           "type": "object",
-          "description": "Environment variables for a stdio server, merged over the inherited environment.",
+          "description": "Environment variables for a stdio server, merged over the inherited environment. Values support ${NAME} and ${NAME:-fallback} environment references.",
           "additionalProperties": { "type": "string" }
         },
         "working_directory": {
@@ -275,7 +289,7 @@
         },
         "timeout_secs": {
           "type": "integer",
-          "description": "Per-request timeout override. 0 uses the client default of 25 seconds; negative values are rejected.",
+          "description": "Per-request timeout in seconds, applied to HTTP requests and to reads from a stdio server's process. 0 uses the client default of 25 seconds; negative values are rejected. The /mcp form offers this field only for custom http servers.",
           "minimum": 0
         }
       }

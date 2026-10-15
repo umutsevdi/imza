@@ -204,6 +204,8 @@ CliResult run_cli(int argc, char** argv)
     std::string exec;
     std::vector<std::string> allowed_directories;
     std::vector<std::string> allowed_commands;
+    std::vector<std::string> allowed_mcp;
+    std::vector<std::string> allowed_skills;
     bool config_requested = false;
     bool skip_permissions = false;
     bool update_requested = false;
@@ -248,6 +250,12 @@ CliResult run_cli(int argc, char** argv)
     app.add_option("-C,--allow-cmd", allowed_commands,
            "Allow one or more shell commands for this session")
         ->type_name("<command>...");
+    app.add_option("--allow-mcp", allowed_mcp,
+           "Allow one or more MCP servers for this session")
+        ->type_name("<id>...");
+    app.add_option("--allow-skill", allowed_skills,
+           "Allow one or more skills for this session")
+        ->type_name("<name>...");
 
     try {
         app.parse(argc, argv);
@@ -294,6 +302,8 @@ CliResult run_cli(int argc, char** argv)
                 std::filesystem::absolute(directory).lexically_normal());
         }
         result.allowed_commands = command_grants;
+        result.allowed_mcp      = allowed_mcp;
+        result.allowed_skills   = allowed_skills;
         if (!working_directory.empty()) {
             result.working_directory = working_directory;
         }

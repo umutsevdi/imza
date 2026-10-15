@@ -65,6 +65,8 @@ public:
     bool load(const Skill& skill, std::string& error);
     void record_tool_load(const std::filesystem::path& path, std::string body);
     std::string prompt_suffix() const;
+    // The loaded skills' directories (SKILL.md parents), sorted.
+    std::vector<std::filesystem::path> loaded_directories() const;
     std::pair<SkillCounts, SkillCounts> counts(
         const std::vector<Skill>& catalog) const;
     void clear();

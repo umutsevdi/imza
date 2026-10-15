@@ -8,13 +8,17 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
-Unreleased
+0.6.3 - 2026-10-15
 -------------------------------------------------------------------------------
 Changes:
   - Added bindings for `imza.sleep` and `imza.bg.shell`.
   - Increased timeout limits for shell commands and lua bindings.
   - Startup no longer waits on the first git scan, so the window appears
     sooner; the Changes widget fills in a moment later.
+  - The agent can now ask to connect an MCP server it discovers; approval
+    is per connect, and `--allow-mcp`/`--allow-skill` pre-approve servers
+    and skills for one-shot runs. Loading a skill also grants read access
+    to its own folder, so skill scripts run without a second approval.
 
 -------------------------------------------------------------------------------
 0.6.2 - 2026-10-14

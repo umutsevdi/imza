@@ -496,6 +496,10 @@ PermissionView make_permission_view(
         if (std::holds_alternative<SkillGrant>(grant)) {
             continue;
         }
+        if (const auto* mcp = std::get_if<McpGrant>(&grant)) {
+            view.mcp_servers.push_back(mcp->server_id);
+            continue;
+        }
         const auto& command = std::get<ShellCommandGrant>(grant);
         std::string label
             = command.program + " " + command.subcommand.value_or("*");
@@ -507,13 +511,15 @@ PermissionView make_permission_view(
     };
     sort_unique(view.folders);
     sort_unique(view.commands);
+    sort_unique(view.mcp_servers);
     return view;
 }
 
 bool has_custom_permissions(const PermissionView& view)
 {
     return view.web_disabled || view.shell_disabled || view.approvals_skipped
-        || !view.folders.empty() || !view.commands.empty();
+        || !view.folders.empty() || !view.commands.empty()
+        || !view.mcp_servers.empty();
 }
 
 Element render_permissions_box(const PermissionView& view)
@@ -548,6 +554,7 @@ Element render_permissions_box(const PermissionView& view)
     }
     append_values("Folders", view.folders);
     append_values("Commands", view.commands);
+    append_values("MCP", view.mcp_servers);
     if (rows.empty()) {
         return vbox();
     }

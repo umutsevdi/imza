@@ -1,4 +1,5 @@
 #include "turn/turn_runner.h"
+#include "app/flows.h"
 #include "common/types.h"
 #include "common/util.h"
 #include "conversation/format.h"
@@ -604,10 +605,8 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
         }
 
         const PermissionEvaluation evaluation = evaluate_tool_request(original,
-            make_permission_context(
-                *_state->environment, *_state->permissions, mode),
-            _state->providers->config(), _state->environment->skills(),
-            *_skills);
+            permission_context_for(*_state, mode), _state->providers->config(),
+            _state->environment->skills(), *_skills);
         if (evaluation.decision.kind == PermissionDecision::Kind::REJECT) {
             _reject_tool(original, evaluation.decision.reason, tool_msgs);
             continue;
@@ -707,9 +706,7 @@ void TurnRunner::_run_tool(const PermissionEvaluation& evaluation,
     Session::Mode mode, std::vector<Message>& tool_msgs)
 {
     const PermissionEvaluation current = evaluate_tool_request(
-        evaluation.request,
-        make_permission_context(
-            *_state->environment, *_state->permissions, mode),
+        evaluation.request, permission_context_for(*_state, mode),
         _state->providers->config(), _state->environment->skills(), *_skills);
     if (current.decision.kind == PermissionDecision::Kind::REJECT
         || current.request.args != evaluation.request.args) {

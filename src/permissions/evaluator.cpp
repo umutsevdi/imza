@@ -4,6 +4,7 @@
 #include "permissions/shell.h"
 #include "permissions/shell_analysis.h"
 #include "platform/config.h"
+#include "tools/mcp_manager.h"
 #include "tools/skills.h"
 #include "tools/tool.h"
 
@@ -42,6 +43,11 @@ namespace {
             std::move(request), std::move(grants), std::move(prompt) };
     }
 
+    PermissionStore::Grants grants_of(const PermissionContext& context)
+    {
+        return context.grants ? *context.grants : PermissionStore::Grants { };
+    }
+
     bool has_shell_program(
         const PermissionStore::Grants& grants, std::string_view program)
     {
@@ -67,6 +73,56 @@ namespace {
             reason += shell->program + " " + shell->subcommand.value_or("*");
         }
         return reason;
+    }
+
+    // Connecting spawns a process or opens a network session, so an
+    // offline server asks. The ask carries no session grant on purpose:
+    // every disconnected load asks again, and only --allow-mcp spares it.
+    PermissionEvaluation evaluate_load_mcp(ToolCallRequest request,
+        const std::string& server, const PermissionContext& context,
+        PermissionStore::Grants grants)
+    {
+        const McpManager* manager = context.mcp;
+        std::optional<McpServerSnapshot> found;
+        if (manager != nullptr) {
+            for (const McpServerSnapshot& candidate : manager->snapshot()) {
+                if (candidate.id == server) {
+                    found = candidate;
+                    break;
+                }
+            }
+        }
+        // Nothing to approve: the handler reports unknown servers.
+        if (!found) {
+            return accept(std::move(request));
+        }
+        if (grants_cover(grants, McpGrant { server })) {
+            return accept(std::move(request));
+        }
+        switch (found->state) {
+        case McpServerState::CONNECTED:
+        case McpServerState::CONNECTING: return accept(std::move(request));
+        case McpServerState::INACTIVE:
+            return reject(std::move(request),
+                "load_mcp: server '" + server
+                    + "' is disabled; enable it with /mcp");
+        case McpServerState::FAILED:
+            return reject(std::move(request),
+                "load_mcp: server '" + server + "' failed: "
+                    + (found->detail.empty() ? std::string("connection error")
+                                             : found->detail));
+        case McpServerState::OFFLINE: break;
+        }
+        PermissionPrompt prompt;
+        prompt.name        = "load_mcp";
+        prompt.description = "Connect and load MCP server '" + server + "'";
+        prompt.reason      = "connecting to an MCP server requires approval";
+        prompt.target      = found->label != server ? found->label : "";
+        prompt.allow_for_session = false;
+        prompt.id                = request.id;
+        prompt.request = McpRequest { server, found->label, found->detail };
+        return { { PermissionDecision::Kind::ASK, prompt.reason },
+            std::move(request), { }, std::move(prompt) };
     }
 
     PermissionEvaluation evaluate_skill(const ToolCallRequest& original,
@@ -240,7 +296,8 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
             || arguments.server.empty()) {
             return reject(std::move(request), std::string(LOAD_MCP_ARGS_ERROR));
         }
-        return accept(std::move(request));
+        return evaluate_load_mcp(std::move(request), arguments.server, context,
+            std::move(grants_of(context)));
     }
     }
     return reject(

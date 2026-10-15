@@ -8,6 +8,7 @@
 #include "app/application_state.h"
 #include "app/flows.h"
 #include "conversation/persistence.h"
+#include "loopback_mcp_server.h"
 #include "network/json.h"
 #include "network/json_io.h"
 #include "permissions/evaluator.h"
@@ -19,6 +20,7 @@
 #include "test_fs.h"
 #include "test_helpers.h"
 #include "test_state.h"
+#include "tools/mcp_manager.h"
 #include "tools/skills.h"
 #include "tools/tool.h"
 #include "workspace/environment.h"
@@ -26,6 +28,30 @@
 namespace imza {
 
 namespace {
+
+    imza::McpServerConfig server_config(
+        const std::string& id, const std::string& url)
+    {
+        imza::McpServerConfig config;
+        config.id  = id;
+        config.url = url;
+        return config;
+    }
+
+    // Manager transitions run on worker threads; poll like the manager tests.
+    bool wait_state(imza::McpManager& manager, const std::string& id,
+        imza::McpServerState want)
+    {
+        for (int i = 0; i < 1000; ++i) {
+            for (const auto& server : manager.snapshot()) {
+                if (server.id == id && server.state == want) {
+                    return true;
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return false;
+    }
 
     class PermissionFixture {
     public:
@@ -56,6 +82,17 @@ namespace {
                 std::make_shared<const PermissionStore::Grants>(
                     std::move(grants)),
                 mode };
+        }
+
+        PermissionContext context(Session::Mode mode,
+            PermissionStore::Grants grants,
+            std::vector<std::filesystem::path> skill_directories,
+            const McpManager* mcp = nullptr) const
+        {
+            return { system, environment,
+                std::make_shared<const PermissionStore::Grants>(
+                    std::move(grants)),
+                mode, std::move(skill_directories), mcp };
         }
 
         std::filesystem::path workspace;
@@ -988,6 +1025,134 @@ TEST_CASE("skill evaluation binds approval to the canonical instruction path")
     REQUIRE(current_path != nullptr);
     REQUIRE(current_path->is_string());
     CHECK(current_path->as<std::string>() == second.string());
+}
+
+TEST_CASE("load_mcp policy: connected accepts, offline asks, disabled and "
+          "failed reject")
+{
+    PermissionFixture fixture;
+    imza::test::LoopbackMcpServer server;
+    REQUIRE(server.start());
+
+    imza::McpServerConfig disabled = server_config("idle", server.url());
+    disabled.enabled               = false;
+    imza::McpManager manager({ { "exa", server_config("exa", server.url()) },
+        { "offline", server_config("offline", "http://127.0.0.1:1/mcp") },
+        { "idle", disabled },
+        { "dead", server_config("dead", "http://127.0.0.1:1/mcp") } });
+    manager.connect("exa");
+    manager.connect("dead");
+    REQUIRE(wait_state(manager, "exa", imza::McpServerState::CONNECTED));
+    REQUIRE(wait_state(manager, "dead", imza::McpServerState::FAILED));
+
+    const Config config;
+    const std::vector<Skill> skills;
+    SkillStore loaded;
+    const auto evaluate
+        = [&](const std::string& id, PermissionStore::Grants grants = { }) {
+              return evaluate_tool_request(
+                  { "load_mcp", R"json({"server":")json" + id + R"json("})json",
+                      "", "" },
+                  fixture.context(
+                      Session::Mode::PLAN, std::move(grants), { }, &manager),
+                  config, skills, loaded);
+          };
+
+    CHECK(evaluate("exa").decision.kind == PermissionDecision::Kind::ACCEPT);
+
+    const auto offline = evaluate("offline");
+    REQUIRE(offline.decision.kind == PermissionDecision::Kind::ASK);
+    REQUIRE(offline.prompt.has_value());
+    CHECK(offline.prompt->allow_for_session == false);
+    CHECK(offline.session_grants.empty());
+    const auto* request
+        = std::get_if<imza::McpRequest>(&offline.prompt->request);
+    REQUIRE(request != nullptr);
+    CHECK(request->id == "offline");
+
+    // A startup --allow-mcp grant accepts without asking.
+    CHECK(evaluate("offline", { PermissionGrant { McpGrant { "offline" } } })
+              .decision.kind
+        == PermissionDecision::Kind::ACCEPT);
+
+    // Disabled and failed servers never ask.
+    CHECK(evaluate("idle").decision.kind == PermissionDecision::Kind::REJECT);
+    const auto failed = evaluate("dead");
+    CHECK(failed.decision.kind == PermissionDecision::Kind::REJECT);
+    CHECK(failed.decision.reason.find("failed") != std::string::npos);
+
+    // Unknown server and missing args: not gate material, handler reports.
+    CHECK(evaluate("nope").decision.kind == PermissionDecision::Kind::ACCEPT);
+    CHECK(evaluate_tool_request({ "load_mcp", R"({"server":""})", "", "" },
+              fixture.context(Session::Mode::PLAN), config, skills, loaded)
+              .decision.kind
+        == PermissionDecision::Kind::REJECT);
+
+    server.stop();
+}
+
+TEST_CASE("permission store covers McpGrant by exact id")
+{
+    PermissionStore store;
+    REQUIRE(store.install({ McpGrant { "exa" } }));
+    CHECK(grants_cover(store.snapshot(), McpGrant { "exa" }));
+    CHECK_FALSE(grants_cover(store.snapshot(), McpGrant { "other" }));
+    CHECK_FALSE(store.install({ McpGrant { "" } }));
+    // A second install of the same grant does not grow the store.
+    REQUIRE(store.install({ McpGrant { "exa" } }));
+    CHECK(store.snapshot()->size() == 1);
+}
+
+TEST_CASE("a loaded skill implies read-class access inside its directory")
+{
+    PermissionFixture fixture;
+    const auto skill_dir = fixture.root() / "skill-pack";
+    std::filesystem::create_directories(skill_dir / "scripts");
+    imza::test::write_file(skill_dir / "SKILL.md", "instructions");
+    imza::test::write_file(skill_dir / "scripts" / "helper.py", "# helper");
+
+    const auto read_decision
+        = [&](Session::Mode mode, const std::filesystem::path& target,
+              std::vector<std::filesystem::path> dirs) {
+              return evaluate_filesystem_request(
+                  ReadFileRequest { target }, fixture.context(mode, { }, dirs));
+          };
+
+    // Reads inside the skill directory auto-accept in both modes.
+    for (const Session::Mode mode :
+        { Session::Mode::PLAN, Session::Mode::BUILD }) {
+        CHECK(read_decision(mode, skill_dir / "SKILL.md", { skill_dir })
+                  .decision.kind
+            == PermissionDecision::Kind::ACCEPT);
+        CHECK(read_decision(
+                  mode, skill_dir / "scripts" / "helper.py", { skill_dir })
+                  .decision.kind
+            == PermissionDecision::Kind::ACCEPT);
+    }
+
+    // Without the loaded skill the same read asks (external directory).
+    CHECK(read_decision(Session::Mode::PLAN, skill_dir / "SKILL.md", { })
+              .decision.kind
+        == PermissionDecision::Kind::ASK);
+
+    // Unrelated directories stay gated.
+    CHECK(read_decision(Session::Mode::PLAN, fixture.outside / "outside.txt",
+              { skill_dir })
+              .decision.kind
+        == PermissionDecision::Kind::ASK);
+
+    // Mutation inside the skill directory still follows ordinary policy:
+    // writes and removes ask outside trusted roots even in Build mode.
+    const PermissionContext build
+        = fixture.context(Session::Mode::BUILD, { }, { skill_dir });
+    CHECK(evaluate_filesystem_request(
+              WriteFileRequest { skill_dir / "SKILL.md", "x" }, build)
+              .decision.kind
+        == PermissionDecision::Kind::ASK);
+    CHECK(evaluate_filesystem_request(
+              RemoveRequest { skill_dir / "SKILL.md" }, build)
+              .decision.kind
+        == PermissionDecision::Kind::ASK);
 }
 
 } // namespace imza

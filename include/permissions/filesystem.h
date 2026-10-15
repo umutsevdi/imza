@@ -15,6 +15,7 @@
 namespace imza {
 
 class Environment;
+class McpManager;
 struct SystemEnvironment;
 struct WorkspaceEnvironment;
 
@@ -23,6 +24,11 @@ struct PermissionContext {
     std::shared_ptr<const WorkspaceEnvironment> workspace;
     PermissionStore::Snapshot grants;
     SessionMode mode = SessionMode::PLAN;
+    // Loaded skills' directories: reading under one is implied by the
+    // skill's approval; writing there is not.
+    std::vector<std::filesystem::path> skill_directories;
+    // MCP inventory for the load_mcp gate; null when the run has no MCP.
+    const McpManager* mcp = nullptr;
 };
 
 struct PermissionDecision {
@@ -105,7 +111,9 @@ struct FilesystemEvaluation {
 };
 
 PermissionContext make_permission_context(const Environment& environment,
-    const PermissionStore& permissions, SessionMode mode);
+    const PermissionStore& permissions, SessionMode mode,
+    std::vector<std::filesystem::path> skill_directories = { },
+    const McpManager* mcp                                = nullptr);
 FilesystemEvaluation evaluate_filesystem_request(
     FilesystemRequest request, const PermissionContext& context);
 std::optional<ExternalGrant> filesystem_session_grant(

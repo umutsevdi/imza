@@ -28,8 +28,15 @@ struct SkillGrant {
     bool operator==(const SkillGrant&) const = default;
 };
 
+// Covers load_mcp and the connect it performs for one server id.
+struct McpGrant {
+    std::string server_id;
+
+    bool operator==(const McpGrant&) const = default;
+};
+
 using PermissionGrant
-    = std::variant<ExternalGrant, ShellCommandGrant, SkillGrant>;
+    = std::variant<ExternalGrant, ShellCommandGrant, SkillGrant, McpGrant>;
 
 class PermissionStore final : public ApplicationComponent {
 public:
@@ -52,7 +59,8 @@ private:
 
 // True when `stored` already authorizes everything `requested` covers:
 // a directory grant contains the requested directory, a program-level
-// shell grant covers any of its subcommands, skill grants match exactly.
+// shell grant covers any of its subcommands, skill and MCP grants match
+// exactly.
 bool grant_covers(
     const PermissionGrant& stored, const PermissionGrant& requested);
 bool grants_cover(

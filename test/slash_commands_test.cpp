@@ -381,4 +381,27 @@ TEST_CASE("run_slash emits application effects")
     CHECK(state->session->error() == "Unknown command: /missing.");
 }
 
+TEST_CASE("CLI accepts MCP and skill startup allow lists")
+{
+    char program[]      = "imza";
+    char mcp_option[]   = "--allow-mcp";
+    char mcp_first[]    = "cloudflare";
+    char mcp_second[]   = "github";
+    char skill_option[] = "--allow-skill";
+    char skill_first[]  = "review";
+    char skill_second[] = "anatomy";
+    char* argv[] = { program, mcp_option, mcp_first, mcp_second, skill_option,
+        skill_first, skill_second };
+
+    const CliResult result = run_cli(7, argv);
+
+    REQUIRE(result.continue_as_interactive);
+    REQUIRE(result.allowed_mcp.size() == 2);
+    CHECK(result.allowed_mcp[0] == "cloudflare");
+    CHECK(result.allowed_mcp[1] == "github");
+    REQUIRE(result.allowed_skills.size() == 2);
+    CHECK(result.allowed_skills[0] == "review");
+    CHECK(result.allowed_skills[1] == "anatomy");
+}
+
 } // namespace imza

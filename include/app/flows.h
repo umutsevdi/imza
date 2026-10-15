@@ -47,10 +47,18 @@ struct CliResult {
     std::optional<OneShotRequest> one_shot;
     std::vector<std::filesystem::path> allowed_directories;
     std::vector<ShellCommandGrant> allowed_commands;
+    // Ids and names, not grants: main.cpp resolves them once the manager
+    // and skill catalogue exist, and fails startup on an unknown one.
+    std::vector<std::string> allowed_mcp;
+    std::vector<std::string> allowed_skills;
     bool skip_permissions = false;
 };
 
 CliResult run_cli(int argc, char** argv);
+// One context for every agent-facing gate: grants, mode, skill
+// directories, MCP inventory.
+PermissionContext permission_context_for(
+    ApplicationState& state, Session::Mode mode);
 std::string format_session_list(const std::vector<SavedSession>& sessions);
 RuntimeFlag runtime_flags_for(const CliResult& result);
 OneShotResult run_one_shot(ApplicationState& state,

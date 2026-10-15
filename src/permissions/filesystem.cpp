@@ -83,10 +83,11 @@ namespace {
 } // namespace
 
 PermissionContext make_permission_context(const Environment& environment,
-    const PermissionStore& permissions, SessionMode mode)
+    const PermissionStore& permissions, SessionMode mode,
+    std::vector<std::filesystem::path> skill_directories, const McpManager* mcp)
 {
     return { environment.system(), environment.workspace(),
-        permissions.snapshot(), mode };
+        permissions.snapshot(), mode, std::move(skill_directories), mcp };
 }
 
 const std::filesystem::path& filesystem_target(const FilesystemRequest& request)
@@ -259,6 +260,18 @@ FilesystemEvaluation evaluate_filesystem_request(
         return { { PermissionDecision::Kind::ASK,
                      "removing files requires approval" },
             request };
+    }
+
+    // Approving a skill implies reading the files its instructions
+    // reference; mutation there still needs its own approval.
+    if (!is_edit(request) && !is_write(request) && !is_mkdir(request)
+        && !is_remove(request)) {
+        for (const std::filesystem::path& directory :
+            context.skill_directories) {
+            if (path_within(directory, target)) {
+                return { { PermissionDecision::Kind::ACCEPT, "" }, request };
+            }
+        }
     }
 
     const bool write

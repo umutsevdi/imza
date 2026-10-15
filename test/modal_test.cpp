@@ -1105,3 +1105,40 @@ TEST_CASE("closing a modal keeps keyboard focus on the chat")
               .find("k")
         != std::string::npos);
 }
+TEST_CASE(
+    "mcp connect approval modal renders its baseline without session approval")
+{
+    AgentEnv env;
+    imza::PermissionPrompt prompt;
+    prompt.name              = "load_mcp";
+    prompt.description       = "Connect and load MCP server 'cloudflare'";
+    prompt.reason            = "connecting to an MCP server requires approval";
+    prompt.allow_for_session = false;
+    prompt.id                = "call-1";
+    prompt.request = imza::McpRequest { "cloudflare", "Cloudflare", "" };
+
+    imza::enqueue_user_modal(*env.state, prompt);
+    REQUIRE(env.pump.wait_for([&] {
+        return std::holds_alternative<imza::PermissionPrompt>(
+            env.session->modal());
+    }));
+
+    ftxui::Component modal = imza::make_modal(env.state);
+    std::string flat;
+    for (const std::string& line :
+        imza::split_lines(imza::test::to_text(modal->Render(), 60, 14))) {
+        const std::string collapsed = imza::test::collapse_whitespace(
+            imza::trim(imza::test::without_ansi(line)));
+        if (!collapsed.empty()) {
+            flat += collapsed + "\n";
+        }
+    }
+    imza::close_modal(*env.state);
+    CHECK(flat == R"(Load MCP 1 remaining
+Connect and load MCP server 'cloudflare'
+connecting to an MCP server requires approval
+server cloudflare Cloudflare
+Allow once Reject
+Esc reject
+)");
+}

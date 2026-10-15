@@ -17,9 +17,19 @@ struct SkillRequest {
     bool operator==(const SkillRequest&) const = default;
 };
 
+// The MCP server a load_mcp prompt is about: the id, its display label,
+// and the manager's own failure/detail text when present.
+struct McpRequest {
+    std::string id;
+    std::string label;
+    std::string detail;
+
+    bool operator==(const McpRequest&) const = default;
+};
+
 // The gated call's own parameters, typed per family.
 using PermissionPromptRequest = std::variant<std::monostate, FilesystemRequest,
-    ShellRequest, SkillRequest>;
+    ShellRequest, SkillRequest, McpRequest>;
 
 // Approval modal payload for a gated call. `id` is the originating
 // tool-call id, or "manual-skill" for the /skill flow.

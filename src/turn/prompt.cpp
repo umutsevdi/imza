@@ -178,8 +178,10 @@ namespace {
         }
         std::string out = "<mcps>\n";
         out += catalog;
-        out += "load_mcp(\"<id>\") returns a server's tool reference; ";
-        out += "call tools with imza.mcp.call(\"<id>\", \"<tool>\", {args}).\n";
+        out += "load_mcp(\"<id>\") returns a server's tool reference and ";
+        out += "connects servers marked [offline] (user approval unless ";
+        out += "pre-approved with --allow-mcp); call tools with ";
+        out += "imza.mcp.call(\"<id>\", \"<tool>\", {args}).\n";
         out += "</mcps>";
         return out;
     }
