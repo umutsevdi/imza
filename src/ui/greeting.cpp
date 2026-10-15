@@ -1,5 +1,7 @@
 #include "ui/greeting.h"
 
+#include "common/util.h"
+
 #include <array>
 #include <cstdint>
 
@@ -57,13 +59,13 @@ namespace {
 TimeBucket time_bucket(int hour)
 {
     return (hour >= NIGHT_START_HOUR || hour < NIGHT_END_HOUR)
-        ? TimeBucket::Night
-        : TimeBucket::Day;
+        ? TimeBucket::NIGHT
+        : TimeBucket::DAY;
 }
 
 std::span<const std::string_view> greeting_pool(TimeBucket bucket)
 {
-    return bucket == TimeBucket::Night
+    return bucket == TimeBucket::NIGHT
         ? std::span<const std::string_view>(NIGHT_LINES)
         : std::span<const std::string_view>(DAY_LINES);
 }
@@ -76,12 +78,7 @@ std::string greeting_line(TimeBucket bucket, unsigned seed)
 
 std::string greeting_line_for(std::time_t now)
 {
-    std::tm local { };
-#ifdef _WIN32
-    localtime_s(&local, &now);
-#else
-    localtime_r(&now, &local);
-#endif
+    const std::tm local     = local_tm(now);
     const TimeBucket bucket = time_bucket(local.tm_hour);
     // Day-of-year plus year: a stable per-day seed that advances daily.
     const unsigned seed = static_cast<unsigned>(local.tm_yday)

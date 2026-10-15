@@ -4,18 +4,11 @@
 #include <filesystem>
 #include <vector>
 
+#include "common/permission_request.h"
 #include "permissions/filesystem.h"
 #include "permissions/store.h"
 
 namespace imza {
-
-struct ShellRequest {
-    std::string command;
-    std::chrono::seconds timeout { 10 };
-    std::filesystem::path workspace;
-
-    bool operator==(const ShellRequest&) const = default;
-};
 
 struct ShellEvaluation {
     PermissionDecision decision;

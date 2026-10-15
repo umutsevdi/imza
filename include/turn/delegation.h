@@ -6,13 +6,14 @@
 #include <optional>
 #include <string>
 
-#include "app/application_state.h"
 #include "conversation/session.h"
+#include "runtime/callbacks.h"
 #include "runtime/subagent_manager.h"
 #include "turn/turn_runner.h"
 
 namespace imza {
 
+struct ApplicationState;
 struct ProviderSelection;
 
 struct SubagentOptions {
@@ -25,7 +26,7 @@ struct SubagentOptions {
     std::shared_ptr<Session> transcript;
 };
 
-class Delegation final {
+class Delegation final : public ApplicationComponent {
 public:
     Delegation(ApplicationState& state, PostFn post,
         ModalRequestFn modal_request, TurnRunner& runner);

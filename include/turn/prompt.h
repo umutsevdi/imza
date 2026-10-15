@@ -13,8 +13,9 @@
 
 namespace imza {
 
-struct ApplicationState;
 class McpManager;
+class ProviderStore;
+class SkillStore;
 
 class PromptStore final : public ApplicationComponent {
 public:
@@ -55,7 +56,9 @@ std::string build_subagent_system_prompt(const PromptStore& prompts,
     const McpManager* mcp = nullptr);
 std::string title_prompt(const PromptStore& prompts, std::string_view request);
 std::string current_mode_prompt(Session::Mode mode);
-std::string full_system_prompt(const ApplicationState& state,
+std::string full_system_prompt(const PromptStore& prompts,
+    const Environment& environment, const ProviderStore& providers,
+    const McpManager* mcp, const SkillStore* skills,
     std::optional<Session::Mode> mode = std::nullopt);
 // One plan-mode revise turn for the annotator: `instructions` plus one
 // bullet per note, located by the nearest heading above the pinned line and

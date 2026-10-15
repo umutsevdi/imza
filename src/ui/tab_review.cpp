@@ -86,13 +86,13 @@ namespace {
             , _editor([this] { animation::RequestAnimationFrame(); })
             , _repository_subscription(
                   _state->environment->subscribe_to_repository_change([this] {
-                      _load_generation->fetch_add(1);
+                      _load_generation.fetch_add(1);
                       _reload_pending.store(true);
                       animation::RequestAnimationFrame();
                   }))
             , _workspace_subscription(
                   _state->environment->subscribe_to_workspace_change([this] {
-                      _load_generation->fetch_add(1);
+                      _load_generation.fetch_add(1);
                       _reload_pending.store(true);
                       animation::RequestAnimationFrame();
                   }))
@@ -119,11 +119,17 @@ namespace {
             Add(_handoff_cancel_button);
         }
 
-        ~Review() override { _load_generation->fetch_add(1); }
+        ~Review() override
+        {
+            _load_generation.fetch_add(1);
+            if (_load_thread.joinable()) {
+                _load_thread.join();
+            }
+        }
 
         Element OnRender() override
         {
-            if (_reload_pending.load() && !_load_running->load()) {
+            if (_reload_pending.load() && !_load_running.load()) {
                 _reload_pending.store(false);
                 _reload();
             }
@@ -1017,23 +1023,26 @@ namespace {
             if (!workspace || !workspace->project_root) {
                 return;
             }
-            if (_load_running->exchange(true)) {
+            if (_load_running.exchange(true)) {
                 _reload_pending.store(true);
                 return;
             }
+            // OnRender only starts a load after the previous loader stored
+            // false, so joining here waits at most for thread teardown.
+            if (_load_thread.joinable()) {
+                _load_thread.join();
+            }
             const std::filesystem::path root = *workspace->project_root;
             _state->review->set_loading();
-            const std::uint64_t generation = _load_generation->load();
-            std::thread([review             = _state->review, root,
-                            load_generation = _load_generation,
-                            load_running    = _load_running, generation] {
+            const std::uint64_t generation = _load_generation.load();
+            _load_thread = std::jthread([this, root, generation] {
                 ReviewLoadResult result = load_repository_review(root);
-                if (load_generation->load() == generation) {
-                    review->set_result(std::move(result));
+                if (_load_generation.load() == generation) {
+                    _state->review->set_result(std::move(result));
                 }
-                load_running->store(false);
+                _load_running.store(false);
                 animation::RequestAnimationFrame();
-            }).detach();
+            });
         }
         Component _plan_button;
         Component _review_action_button;
@@ -1065,11 +1074,12 @@ namespace {
         int _render_radius             = 120;
         int _highlighted_width         = 0;
         bool _highlighted_side_by_side = false;
-        std::shared_ptr<std::atomic<std::uint64_t>> _load_generation
-            = std::make_shared<std::atomic<std::uint64_t>>(0);
-        std::shared_ptr<std::atomic<bool>> _load_running
-            = std::make_shared<std::atomic<bool>>(false);
+        std::atomic<std::uint64_t> _load_generation { 0 };
+        std::atomic<bool> _load_running { false };
         std::atomic<bool> _reload_pending { true };
+        // Declared after the state it reads so member destruction joins the
+        // loader before anything it captures through `this` goes away.
+        std::jthread _load_thread;
         Signal<>::Subscription _repository_subscription;
         Signal<>::Subscription _workspace_subscription;
         Signal<>::Subscription _review_subscription;

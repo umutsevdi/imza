@@ -99,4 +99,29 @@ Status fetch_models(const Route& route, std::vector<ModelInfo>& out)
     return parse_models_response(body, out);
 }
 
+void apply_reasoning_dialect(
+    ChatRequest& request, ApiStandard dialect, std::string_view effort)
+{
+    if (dialect == ApiStandard::ANTHROPIC) {
+        request.reasoning_effort.reset();
+        request.thinking_budget = effort == "low" ? 2000
+            : effort == "high"                    ? 16000
+                                                  : 8000;
+    } else {
+        request.thinking_budget.reset();
+        request.reasoning_effort = to_wire_effort(effort);
+    }
+}
+
+const char* role_str(Message::Type type)
+{
+    switch (type) {
+    case Message::Type::SYSTEM: return "system";
+    case Message::Type::USER: return "user";
+    case Message::Type::ASSISTANT: return "assistant";
+    case Message::Type::TOOL: return "tool";
+    }
+    return "user";
+}
+
 } // namespace imza

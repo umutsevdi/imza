@@ -1,7 +1,6 @@
 #include "platform/config.h"
 
 #include "network/web.h"
-#include "permissions/store.h"
 #include "platform/file_lock.h"
 #include "platform/json_file.h"
 #include "protocols/mcp_oauth.h"
@@ -568,27 +567,6 @@ Status load_config(
     }
 
     return Status::OK;
-}
-
-PermissionStore::Grants allow_grants(const AllowConfig& allow)
-{
-    PermissionStore::Grants grants;
-    grants.reserve(allow.directories.size() + allow.commands.size());
-    std::error_code ec;
-    for (const std::filesystem::path& entry : allow.directories) {
-        const std::filesystem::path resolved = entry.is_absolute()
-            ? entry
-            : std::filesystem::weakly_canonical(
-                  std::filesystem::current_path() / entry, ec);
-        if (ec || !std::filesystem::is_directory(resolved, ec) || ec) {
-            continue;
-        }
-        grants.emplace_back(resolved);
-    }
-    for (const ShellCommandGrant& command : allow.commands) {
-        grants.emplace_back(command);
-    }
-    return grants;
 }
 
 void apply_skill_policies(Config& config, const SkillPolicyChanges& changes)

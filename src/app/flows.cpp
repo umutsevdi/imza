@@ -173,7 +173,10 @@ namespace {
         std::optional<std::string> submission
             = state.session->plan_submission_for_build();
         std::vector<Message> history = state.session->build_history(
-            full_system_prompt(state, settings.mode), settings.route.dialect);
+            full_system_prompt(*state.prompts, *state.environment,
+                *state.providers, state.mcp.get(), state.skills.get(),
+                settings.mode),
+            settings.route.dialect);
         if (submission) {
             history.push_back({ Message::Type::USER, std::move(*submission) });
         }

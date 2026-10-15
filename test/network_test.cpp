@@ -916,3 +916,20 @@ TEST_CASE("tool schemas embed verbatim without re-validation")
     CHECK(input_schema.is_object());
     CHECK(str(at(input_schema, "type")) == "weird");
 }
+
+TEST_CASE("reasoning effort maps per dialect")
+{
+    imza::ChatRequest req;
+    req.model = "m";
+
+    imza::apply_reasoning_dialect(req, imza::ApiStandard::ANTHROPIC, "low");
+    CHECK(req.thinking_budget == 2000);
+    CHECK_FALSE(req.reasoning_effort.has_value());
+
+    imza::apply_reasoning_dialect(req, imza::ApiStandard::ANTHROPIC, "high");
+    CHECK(req.thinking_budget == 16000);
+
+    imza::apply_reasoning_dialect(req, imza::ApiStandard::OPENAI, "default");
+    CHECK(req.reasoning_effort == "medium");
+    CHECK_FALSE(req.thinking_budget.has_value());
+}

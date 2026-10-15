@@ -1,4 +1,5 @@
 #include "turn/delegation.h"
+#include "app/application_state.h"
 #include "common/types.h"
 #include "common/util.h"
 #include "conversation/format.h"

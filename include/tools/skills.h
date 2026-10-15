@@ -16,19 +16,11 @@
 #include "network/json.h"
 #include "tools/tool_args.h"
 #include "workspace/attachments.h"
+#include "workspace/skills.h"
 
 namespace imza {
 
 struct Config;
-
-struct Skill {
-    enum class Scope { GLOBAL, PROJECT };
-    std::string name;
-    std::string description;
-    std::filesystem::path path;
-    Scope scope = Scope::GLOBAL;
-    std::optional<std::filesystem::path> project_root;
-};
 
 struct SkillCounts {
     std::size_t active = 0;

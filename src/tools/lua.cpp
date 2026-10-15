@@ -3,9 +3,9 @@
 #include "tools/lua.h"
 #include "tools/tool.h"
 
+#include "common/text_edit.h"
 #include "common/util.h"
 #include "network/json.h"
-#include "tools/file_ops.h"
 
 #include <algorithm>
 #include <chrono>

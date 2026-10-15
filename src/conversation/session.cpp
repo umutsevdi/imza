@@ -1,9 +1,9 @@
 #include "conversation/session.h"
+#include "common/text_edit.h"
 #include "common/types.h"
 #include "common/util.h"
 #include "conversation/format.h"
 #include "providers/pricing.h"
-#include "tools/file_ops.h"
 
 #include <algorithm>
 #include <cassert>

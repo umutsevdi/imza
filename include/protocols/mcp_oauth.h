@@ -142,8 +142,8 @@ public:
 private:
     void close();
 
-    std::intptr_t listen_ = -1; // POSIX fd or WinSOCKET
-    int port_             = 0;
+    std::intptr_t _listen = -1; // POSIX fd or WinSOCKET
+    int _port             = 0;
 };
 
 struct McpSignInHooks {

@@ -5,9 +5,9 @@
 #include <string_view>
 #include <vector>
 
+#include "common/permission_request.h"
 #include "common/tool_call.h"
 #include "permissions/filesystem.h"
-#include "permissions/prompt.h"
 
 namespace imza {
 

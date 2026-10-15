@@ -1,6 +1,8 @@
 #include "tools/bindings.h"
 
 #include "common/language_match.h"
+#include "common/text_edit.h"
+#include "common/ts_query.h"
 #include "common/util.h"
 #include "permissions/filesystem.h"
 #include "tools/file_ops.h"
@@ -570,27 +572,6 @@ namespace {
     constexpr std::size_t MAX_TS_NODE_TEXT = 400;
     constexpr std::size_t MAX_TS_MATCHES   = 200;
 
-    struct ParserDeleter {
-        void operator()(TSParser* parser) const { ts_parser_delete(parser); }
-    };
-    struct TreeDeleter {
-        void operator()(TSTree* tree) const { ts_tree_delete(tree); }
-    };
-    struct QueryDeleter {
-        void operator()(TSQuery* query) const { ts_query_delete(query); }
-    };
-    struct QueryCursorDeleter {
-        void operator()(TSQueryCursor* cursor) const
-        {
-            ts_query_cursor_delete(cursor);
-        }
-    };
-
-    using ParserPtr      = std::unique_ptr<TSParser, ParserDeleter>;
-    using TreePtr        = std::unique_ptr<TSTree, TreeDeleter>;
-    using QueryPtr       = std::unique_ptr<TSQuery, QueryDeleter>;
-    using QueryCursorPtr = std::unique_ptr<TSQueryCursor, QueryCursorDeleter>;
-
     const TSLanguage* language_for_path(std::string_view path)
     {
         const LanguageEntry* entry
@@ -600,20 +581,15 @@ namespace {
 
     // One fresh parser per call: a script parses a handful of files, so
     // the UI's cached-parser machinery is not worth its locking here.
-    ParserPtr make_parser(const TSLanguage* language)
+    TsParserPtr make_parser(const TSLanguage* language)
     {
-        ParserPtr parser(ts_parser_new());
+        TsParserPtr parser(ts_parser_new());
         if (parser == nullptr
             || !ts_parser_set_language(parser.get(), language)) {
             parser.reset();
         }
         return parser;
     }
-
-    struct PredicateStep {
-        bool is_capture   = false;
-        uint32_t value_id = 0;
-    };
 
     std::string_view ts_node_text(std::string_view code, const TSNode& node)
     {
@@ -623,7 +599,7 @@ namespace {
 
     struct Parsed {
         std::string code;
-        TreePtr tree;
+        TsTreePtr tree;
     };
 
     // Loads and parses `path`; the caller has already resolved the
@@ -645,13 +621,13 @@ namespace {
             binding_error(L, "ts_query: file too large: " + path);
             return std::nullopt;
         }
-        const ParserPtr parser = make_parser(language);
+        const TsParserPtr parser = make_parser(language);
         if (parser == nullptr) {
             binding_error(L, "ts_query: cannot create parser for: " + path);
             return std::nullopt;
         }
-        TreePtr tree(ts_parser_parse_string(parser.get(), nullptr, code.data(),
-            static_cast<uint32_t>(code.size())));
+        TsTreePtr tree(ts_parser_parse_string(parser.get(), nullptr,
+            code.data(), static_cast<uint32_t>(code.size())));
         if (tree == nullptr) {
             binding_error(L, "ts_query: parse failed: " + path);
             return std::nullopt;
@@ -686,12 +662,12 @@ namespace {
     }
 
     // Null only after the binding error has been raised.
-    QueryPtr compile_query(
+    TsQueryPtr compile_query(
         lua_State* L, const TSLanguage* language, const std::string& query)
     {
         uint32_t offset   = 0;
         TSQueryError type = TSQueryErrorNone;
-        QueryPtr compiled(ts_query_new(language, query.data(),
+        TsQueryPtr compiled(ts_query_new(language, query.data(),
             static_cast<uint32_t>(query.size()), &offset, &type));
         if (compiled == nullptr) {
             binding_error(L, query_error_message(type, query, offset));
@@ -744,27 +720,15 @@ namespace {
         return { };
     }
 
-    std::string predicate_string_value(const TSQuery* query, uint32_t value_id)
-    {
-        uint32_t length = 0;
-        const char* value
-            = ts_query_string_value_for_id(query, value_id, &length);
-        return std::string(value, length);
-    }
-
     // Evaluates the portable predicate set (#eq?, #not-eq?, #match?,
     // #not-match?, #any-of?, #not-any-of?) against capture text.
     // Unknown predicates are ignored rather than fatal.
     bool predicates_hold(
         const TSQuery* query, const TSQueryMatch& match, std::string_view code)
     {
-        uint32_t step_count               = 0;
-        const TSQueryPredicateStep* steps = ts_query_predicates_for_pattern(
-            query, match.pattern_index, &step_count);
-        std::vector<PredicateStep> predicate;
-        const auto argument_text = [&](const PredicateStep& step) {
+        const auto argument_text = [&](const TsPredicateStep& step) {
             if (!step.is_capture) {
-                return predicate_string_value(query, step.value_id);
+                return ts_string_value(query, step.value_id);
             }
             uint32_t length = 0;
             const char* name
@@ -772,14 +736,14 @@ namespace {
             return predicate_capture_text(
                 query, match, code, std::string(name, length));
         };
-        const auto evaluate = [&]() {
+        const auto evaluate = [&](const TsPredicateGroup& predicate) {
             // The operator is always a string step; a leading capture
             // step is malformed, not something to filter on.
             if (predicate.size() < 2 || predicate[0].is_capture) {
                 return true;
             }
             const std::string op
-                = predicate_string_value(query, predicate[0].value_id);
+                = ts_string_value(query, predicate[0].value_id);
             if (op != "#eq?" && op != "#not-eq?" && op != "#match?"
                 && op != "#not-match?" && op != "#any-of?"
                 && op != "#not-any-of?") {
@@ -818,19 +782,13 @@ namespace {
                 return true; // unusable pattern: do not silently drop rows
             }
         };
-        for (uint32_t i = 0; i < step_count; ++i) {
-            const TSQueryPredicateStep& step = steps[i];
-            if (step.type == TSQueryPredicateStepTypeDone) {
-                if (!evaluate()) {
-                    return false;
-                }
-                predicate.clear();
-                continue;
+        for (const TsPredicateGroup& predicate :
+            ts_predicate_groups(query, match.pattern_index)) {
+            if (!evaluate(predicate)) {
+                return false;
             }
-            predicate.push_back({ step.type == TSQueryPredicateStepTypeCapture,
-                step.value_id });
         }
-        return predicate.empty() || evaluate();
+        return true;
     }
 
     // One result row: { file, captures = { name = TsCapture } }.
@@ -875,7 +833,7 @@ namespace {
         const Parsed& parsed, const std::string& file)
     {
         lua_State* L = state.lua;
-        QueryCursorPtr cursor(ts_query_cursor_new());
+        TsQueryCursorPtr cursor(ts_query_cursor_new());
         if (cursor == nullptr) {
             binding_error(L, "ts_query: cannot create query cursor");
         }
@@ -901,7 +859,7 @@ namespace {
     // Per-language compiled queries for a directory walk: grammars
     // interleave, and a query is bound to one language.
     struct QueryCache {
-        std::vector<std::pair<const TSLanguage*, QueryPtr>> entries;
+        std::vector<std::pair<const TSLanguage*, TsQueryPtr>> entries;
 
         const TSQuery* get_or_compile(
             lua_State* L, const TSLanguage* language, const std::string& query)
@@ -911,7 +869,7 @@ namespace {
                     return cached.get();
                 }
             }
-            QueryPtr compiled = compile_query(L, language, query);
+            TsQueryPtr compiled = compile_query(L, language, query);
             entries.emplace_back(language, std::move(compiled));
             return entries.back().second.get();
         }
@@ -949,7 +907,7 @@ namespace {
             }
             // Compile first: an invalid pattern is a script bug and
             // should not depend on the target being parseable.
-            const QueryPtr compiled = compile_query(L, language, query);
+            const TsQueryPtr compiled = compile_query(L, language, query);
             if (compiled == nullptr) {
                 return 2;
             }

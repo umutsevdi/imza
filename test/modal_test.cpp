@@ -1142,3 +1142,92 @@ Allow once Reject
 Esc reject
 )");
 }
+
+TEST_CASE("variant modal lists efforts and commits the selection")
+{
+    AgentEnv env;
+    imza::enqueue_user_modal(*env.state,
+        imza::VariantModal { { "off", "low", "default", "high" }, "default" });
+    REQUIRE(env.pump.wait_for([&] {
+        return std::holds_alternative<imza::VariantModal>(env.session->modal());
+    }));
+
+    ftxui::Component modal = imza::make_modal(env.state);
+    const std::string list = imza::test::to_text(modal->Render(), 80, 20);
+    CHECK(list.find("Reasoning effort") != std::string::npos);
+    for (const char* effort : { "off", "low", "default", "high" }) {
+        CHECK(list.find(effort) != std::string::npos);
+    }
+
+    // "default" is current; one step down lands on "high", and
+    // committing persists the effort the status line will show.
+    REQUIRE(modal->OnEvent(ftxui::Event::ArrowDown));
+    REQUIRE(modal->OnEvent(ftxui::Event::Return));
+    CHECK(env.pump.wait_for([&] {
+        return env.state->providers->status().reasoning_effort == "high";
+    }));
+}
+
+TEST_CASE("sessions modal lists saved sessions and empty state")
+{
+    imza::test::IsolatedDataHome data_home;
+    AgentEnv env;
+    imza::enqueue_user_modal(*env.state, imza::SessionsModal { });
+    REQUIRE(env.pump.wait_for([&] {
+        return std::holds_alternative<imza::SessionsModal>(
+            env.session->modal());
+    }));
+
+    ftxui::Component modal = imza::make_modal(env.state);
+    CHECK(imza::test::to_text(modal->Render(), 80, 20).find("No saved sessions")
+        != std::string::npos);
+    imza::close_modal(*env.state);
+
+    env.session->set_title("Sessions probe");
+    env.session->begin_send("hello");
+    env.session->append_assistant("model", "off");
+    env.session->apply(imza::make_delta_event("world"), { });
+    env.session->finish_session("");
+    // Saved through the store: the modal lists what the store sees.
+    REQUIRE(env.state->sessions->save(*env.session) == imza::Status::OK);
+
+    imza::enqueue_user_modal(*env.state, imza::SessionsModal { });
+    REQUIRE(env.pump.wait_for([&] {
+        return std::holds_alternative<imza::SessionsModal>(
+            env.session->modal());
+    }));
+    const std::string list = imza::test::to_text(modal->Render(), 80, 20);
+    CHECK(list.find("Sessions probe") != std::string::npos);
+    imza::close_modal(*env.state);
+}
+
+TEST_CASE("mcp modal shows the server list and add section")
+{
+    imza::test::IsolatedDataHome data_home;
+    AgentEnv env;
+    imza::enqueue_user_modal(*env.state, imza::McpModal { });
+    REQUIRE(env.pump.wait_for([&] {
+        return std::holds_alternative<imza::McpModal>(env.session->modal());
+    }));
+
+    ftxui::Component modal = imza::make_modal(env.state);
+    const std::string list = imza::test::to_text(modal->Render(), 80, 30);
+    CHECK(list.find("MCP Servers") != std::string::npos);
+    CHECK(list.find("Add Server") != std::string::npos);
+    imza::close_modal(*env.state);
+}
+
+TEST_CASE("connect modal opens on the connections entry")
+{
+    AgentEnv env;
+    imza::enqueue_user_modal(*env.state, imza::ConnectModal { });
+    REQUIRE(env.pump.wait_for([&] {
+        return std::holds_alternative<imza::ConnectModal>(env.session->modal());
+    }));
+
+    ftxui::Component modal = imza::make_modal(env.state);
+    const std::string list = imza::test::to_text(modal->Render(), 80, 30);
+    CHECK(list.find("Connections") != std::string::npos);
+    CHECK(list.find("Add Provider") != std::string::npos);
+    imza::close_modal(*env.state);
+}

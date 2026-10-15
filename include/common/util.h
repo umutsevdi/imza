@@ -96,16 +96,22 @@ inline std::string join_lines(
     return out;
 }
 
-inline std::string format_local_time(const char* fmt)
+inline std::tm local_tm(std::time_t value)
 {
-    const auto now          = std::chrono::system_clock::now();
-    const std::time_t value = std::chrono::system_clock::to_time_t(now);
     std::tm local { };
 #ifdef _WIN32
     localtime_s(&local, &value);
 #else
     localtime_r(&value, &local);
 #endif
+    return local;
+}
+
+inline std::string format_local_time(const char* fmt)
+{
+    const auto now          = std::chrono::system_clock::now();
+    const std::time_t value = std::chrono::system_clock::to_time_t(now);
+    const std::tm local     = local_tm(value);
     std::ostringstream out;
     out << std::put_time(&local, fmt);
     return out.str();

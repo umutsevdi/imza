@@ -9,18 +9,13 @@
 #include <vector>
 
 #include "common/imza_signal.h"
+#include "common/permission_request.h"
 #include "common/types.h"
+#include "platform/config.h"
 
 namespace imza {
 
 using ExternalGrant = std::filesystem::path;
-
-struct ShellCommandGrant {
-    std::string program;
-    std::optional<std::string> subcommand;
-
-    bool operator==(const ShellCommandGrant&) const = default;
-};
 
 struct SkillGrant {
     std::filesystem::path path;
@@ -70,5 +65,10 @@ inline bool grants_cover(
 {
     return grants && grants_cover(*grants, requested);
 }
+
+// Grants declared by `config.allow`, ready for PermissionStore::install.
+// Directories that no longer exist are dropped rather than failing the
+// batch: a stale allowlist entry must not block startup.
+PermissionStore::Grants allow_grants(const AllowConfig& allow);
 
 } // namespace imza

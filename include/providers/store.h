@@ -19,6 +19,7 @@
 #include "platform/config.h"
 #include "providers/catalog.h"
 #include "providers/pricing.h"
+#include "providers/subscriptions.h"
 
 namespace imza {
 
@@ -30,6 +31,11 @@ using ModelsFn = std::function<Status(const Route&, std::vector<ModelInfo>&)>;
 // providers that require it are passed through here.
 using TermsFn           = std::function<Status(const Route&)>;
 using ProviderChangedFn = std::function<void()>;
+// Subscription token refresh behind authenticated_route_for; injectable so
+// the refresh boundary is testable without network.
+using RefreshFn
+    = std::function<SubscriptionResult(std::string_view connection_id,
+        std::string_view refresh_token, std::string_view account_id)>;
 
 struct ConnectionView {
     enum class State { FETCHING, READY, FAILED };
@@ -82,8 +88,8 @@ using ConnectCompleteFn = std::function<void(ConnectOutcome)>;
 
 class ProviderStore final : public ApplicationComponent {
 public:
-    explicit ProviderStore(
-        Config config, ModelsFn models_fn = { }, TermsFn terms_fn = { });
+    explicit ProviderStore(Config config, ModelsFn models_fn = { },
+        TermsFn terms_fn = { }, RefreshFn refresh_fn = { });
     ~ProviderStore();
 
     ProviderStore(const ProviderStore&)            = delete;
@@ -158,6 +164,7 @@ private:
     std::map<std::string, ModelPricing> _pricing;
     ModelsFn _models_fn;
     TermsFn _terms_fn;
+    RefreshFn _refresh_fn;
 
     std::map<std::string, CatalogEntry> _model_catalog;
     std::map<std::string, int> _generations;

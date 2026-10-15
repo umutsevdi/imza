@@ -1,11 +1,6 @@
 #pragma once
 
-#include <cstddef>
-#include <optional>
 #include <string>
-#include <vector>
-
-#include "common/tool_call.h"
 
 namespace imza {
 
@@ -24,26 +19,7 @@ bool make_directories(const std::string& path, std::string& err);
 // permission authorization.
 bool remove_path(const std::string& path, std::string& err);
 
-// Pure content transforms. Each returns the new content or an error;
-// the caller decides whether to persist. Semantics match the lua
-// imza.fs.* bindings:
-//   insert: 1-based line; the text goes before that line, pushing it
-//     down. line == 0 or line == length+1 appends; beyond is an error.
-//   replace: first `count` occurrences of `old`; count == 0 = all.
-//     Empty `old` or no match is an error.
-std::optional<std::string> insert_text(const std::string& content,
-    const std::string& text, std::size_t line, std::string& err);
-std::optional<std::string> replace_text(const std::string& content,
-    const std::string& old, const std::string& fresh, std::size_t count,
-    std::string& err);
-
-// Diff of two file versions as localized hunks: patience diff with a
-// Myers fallback computes the edit script, hunks separated by fewer than
-// 2*context unchanged lines are merged, and large gaps collapse into
-// DiffRow::Kind::SKIP elision rows. Used for the lua aggregate per-file
-// diffs.
-DiffView make_diff_view(const std::string& path,
-    const std::vector<std::string>& old_lines,
-    const std::vector<std::string>& new_lines);
+// Pure content transforms (insert_text, replace_text, make_diff_view)
+// live in common/text_edit.h.
 
 } // namespace imza

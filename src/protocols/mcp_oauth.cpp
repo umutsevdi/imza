@@ -729,23 +729,23 @@ bool McpLoopbackListener::start()
         close_socket(fd);
         return false;
     }
-    port_   = ntohs(bound.sin_port);
-    listen_ = static_cast<std::intptr_t>(fd);
+    _port   = ntohs(bound.sin_port);
+    _listen = static_cast<std::intptr_t>(fd);
     return true;
 }
 
-bool McpLoopbackListener::valid() const { return listen_ != -1; }
+bool McpLoopbackListener::valid() const { return _listen != -1; }
 
 std::string McpLoopbackListener::redirect_uri() const
 {
-    return "http://127.0.0.1:" + std::to_string(port_) + "/callback";
+    return "http://127.0.0.1:" + std::to_string(_port) + "/callback";
 }
 
 void McpLoopbackListener::close()
 {
-    if (listen_ != -1) {
-        close_socket(static_cast<socket_t>(listen_));
-        listen_ = -1;
+    if (_listen != -1) {
+        close_socket(static_cast<socket_t>(_listen));
+        _listen = -1;
     }
 }
 
@@ -830,7 +830,7 @@ Status McpLoopbackListener::wait_for_callback(const std::string& state,
 {
     const auto deadline
         = std::chrono::steady_clock::now() + std::chrono::seconds(timeout_secs);
-    const socket_t listen_fd = static_cast<socket_t>(listen_);
+    const socket_t listen_fd = static_cast<socket_t>(_listen);
     for (;;) {
         if (cancel.load()) {
             detail = "cancelled";

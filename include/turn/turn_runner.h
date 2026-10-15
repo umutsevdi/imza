@@ -10,14 +10,16 @@
 #include <thread>
 #include <vector>
 
-#include "app/application_state.h"
 #include "common/types.h"
 #include "conversation/session.h"
 #include "network/network.h"
+#include "runtime/callbacks.h"
 #include "tools/tool.h"
+#include "turn/stream_updates.h"
 
 namespace imza {
 
+struct ApplicationState;
 class SkillStore;
 class ProviderStore;
 struct PermissionEvaluation;
@@ -34,28 +36,6 @@ struct ProviderSelection;
 
 TurnSettings make_turn_settings(
     const ProviderSelection& selection, Session::Mode mode);
-
-// Bounded transcript shared by automatic compaction and sidechat seeding.
-std::string conversation_transcript(
-    const std::string& compacted_summary, const SessionSnapshot& snapshot);
-
-class StreamUpdateBuffer {
-public:
-    StreamUpdateBuffer(PostFn post, std::shared_ptr<Session> session);
-    ~StreamUpdateBuffer();
-
-    StreamUpdateBuffer(const StreamUpdateBuffer&)            = delete;
-    StreamUpdateBuffer& operator=(const StreamUpdateBuffer&) = delete;
-
-    void push(const StreamEvent& event, const ModelPricing& pricing);
-    void finish();
-
-private:
-    struct State;
-    static void _publish(const std::shared_ptr<State>& state);
-    std::shared_ptr<State> _state;
-    std::jthread _publisher;
-};
 
 class TurnRunner final : public ApplicationComponent {
 public:
@@ -77,7 +57,6 @@ public:
     bool compaction_active() const { return _compaction_active.load(); }
     void clear();
     void stop();
-    void set_on_finish(std::function<void(std::string)> on_finish);
     bool has_stream_override() const { return _has_stream(); }
     const StreamFn& stream_fn() const { return _stream_fn; }
     Status run_stream(const ChatRequest& req, const Route& route,

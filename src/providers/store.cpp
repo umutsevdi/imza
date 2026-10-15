@@ -6,6 +6,7 @@
 #include "providers/subscriptions.h"
 
 #include <algorithm>
+#include <chrono>
 #include <ctime>
 #include <string>
 #include <utility>
@@ -192,10 +193,11 @@ std::string subagent_variant_or_default(
 }
 
 ProviderStore::ProviderStore(
-    Config config, ModelsFn models_fn, TermsFn terms_fn)
+    Config config, ModelsFn models_fn, TermsFn terms_fn, RefreshFn refresh_fn)
     : _config(std::move(config))
     , _models_fn(std::move(models_fn))
     , _terms_fn(std::move(terms_fn))
+    , _refresh_fn(std::move(refresh_fn))
 {
     if (!_models_fn) {
         _models_fn = [](const Route& route, std::vector<ModelInfo>& models) {
@@ -204,6 +206,14 @@ ProviderStore::ProviderStore(
     }
     if (!_terms_fn) {
         _terms_fn = [](const Route& route) { return accept_terms(route); };
+    }
+    if (!_refresh_fn) {
+        _refresh_fn
+            = [](std::string_view connection_id, std::string_view refresh_token,
+                  std::string_view account_id) {
+                  return refresh_subscription(
+                      connection_id, refresh_token, account_id);
+              };
     }
     _catalog_loader.emplace([this] { _load_catalog(); });
 }
@@ -246,6 +256,14 @@ void ProviderStore::_maybe_start_catalog_refresh()
         _catalog_syncing = true;
     }
     _catalog_worker.emplace([this] {
+        struct SyncingSlot {
+            ProviderStore& store;
+            ~SyncingSlot()
+            {
+                std::lock_guard lock(store._mutex);
+                store._catalog_syncing = false;
+            }
+        } syncing_slot { *this };
         Catalog catalog;
         const Status status = fetch_catalog(catalog);
         if (!_alive.load()) {
@@ -253,7 +271,6 @@ void ProviderStore::_maybe_start_catalog_refresh()
         }
         {
             std::lock_guard lock(_mutex);
-            _catalog_syncing = false;
             if (status != Status::OK) {
                 return;
             }
@@ -268,7 +285,10 @@ void ProviderStore::_maybe_start_catalog_refresh()
 void ProviderStore::_wait_catalog_locked(
     std::unique_lock<std::mutex>& lock) const
 {
-    _catalog_cv.wait(lock, [this] { return _catalog_loaded; });
+    // A loader thread that died without setting the flag must not wedge
+    // every caller: past the deadline we serve the un-catalogued config.
+    _catalog_cv.wait_for(
+        lock, std::chrono::seconds(30), [this] { return _catalog_loaded; });
 }
 
 Signal<>::Subscription ProviderStore::subscribe(ProviderChangedFn callback)
@@ -467,7 +487,10 @@ Route ProviderStore::authenticated_route_for(std::string_view connection_id,
     Connection snapshot;
     {
         std::unique_lock lock(_mutex);
-        _refresh_changed.wait(lock, [&] { return !_refreshing.contains(id); });
+        // A refresher wedged by a slow or failed round trip must not block
+        // this caller forever: past the deadline we use the stale token.
+        _refresh_changed.wait_for(lock, std::chrono::seconds(30),
+            [&] { return !_refreshing.contains(id); });
         _wait_catalog_locked(lock);
         const Connection* connection = _find_locked(id);
         if (connection == nullptr) {
@@ -488,9 +511,23 @@ Route ProviderStore::authenticated_route_for(std::string_view connection_id,
         snapshot = *connection;
         _refreshing.insert(id);
     }
+    // The refresh round trip below can fail mid-flight; the slot guard
+    // keeps the marker from wedging every later call for this connection.
+    struct RefreshSlot {
+        ProviderStore& store;
+        std::string id;
+        ~RefreshSlot()
+        {
+            {
+                std::lock_guard lock(store._mutex);
+                store._refreshing.erase(id);
+            }
+            store._refresh_changed.notify_all();
+        }
+    } refresh_slot { *this, id };
 
-    const SubscriptionResult refreshed = refresh_subscription(
-        snapshot.id, snapshot.refresh_token, snapshot.account_id);
+    const SubscriptionResult refreshed
+        = _refresh_fn(snapshot.id, snapshot.refresh_token, snapshot.account_id);
     bool persisted = false;
     if (refreshed.status == Status::OK) {
         persisted = _update_config([&](Config& candidate) {
@@ -513,13 +550,11 @@ Route ProviderStore::authenticated_route_for(std::string_view connection_id,
     Route route;
     {
         std::lock_guard lock(_mutex);
-        _refreshing.erase(id);
         const Connection* connection = _find_locked(id);
         if (connection != nullptr) {
             route = _route_locked(*connection, dialect, opencode_session);
         }
     }
-    _refresh_changed.notify_all();
     if (refreshed.status != Status::OK || !persisted) {
         route.error = refreshed.status == Status::OK ? Status::CONFIG_ERROR
                                                      : refreshed.status;

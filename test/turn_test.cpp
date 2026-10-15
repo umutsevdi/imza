@@ -404,4 +404,112 @@ TEST_CASE("manual /compact reports an in-progress compaction")
     CHECK(env.session->snapshot().compacted_summary == "slow summary");
 }
 
+namespace {
+
+    using AgentEnv = imza::test::AgentEnv;
+
+    // True when an assistant turn with exactly `markdown` is in the session.
+    bool assistant_markdown_present(
+        const AgentEnv& env, std::string_view markdown)
+    {
+        const auto items = env.session->items();
+        for (const auto& it : *items) {
+            if (const auto* a = std::get_if<imza::AssistantTurn>(&it)) {
+                if (a->markdown == markdown) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+} // namespace
+
+TEST_CASE("controller retries rate-limited requests and then completes")
+{
+    AgentEnv env;
+    auto round   = std::make_shared<int>(0);
+    AgentEnv* ep = &env;
+    env.stream   = [ep, round](const imza::ChatRequest& req,
+                       const imza::StreamCallback& cb) -> imza::Status {
+        ep->requests.push_back(req);
+        if ((*round)++ == 0) {
+            cb(imza::make_error_event(imza::Status::RATE_LIMITED, "slow down"));
+            return imza::Status::RATE_LIMITED;
+        }
+        cb(imza::make_connected_event());
+        cb(imza::make_delta_event("recovered"));
+        cb(imza::make_done_event());
+        return imza::Status::OK;
+    };
+    imza::submit(*env.state, "hello");
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
+    CHECK(env.requests.size() == 2);
+    CHECK(env.session->error().empty());
+    CHECK(assistant_markdown_present(env, "recovered"));
+}
+
+TEST_CASE("controller does not retry budget errors")
+{
+    AgentEnv env;
+    auto round   = std::make_shared<int>(0);
+    AgentEnv* ep = &env;
+    env.stream   = [ep, round](const imza::ChatRequest& req,
+                       const imza::StreamCallback& cb) -> imza::Status {
+        ep->requests.push_back(req);
+        cb(imza::make_error_event(
+            imza::Status::BUDGET_EXCEEDED, "insufficient credits"));
+        return imza::Status::BUDGET_EXCEEDED;
+    };
+    imza::submit(*env.state, "hello");
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
+    CHECK(env.requests.size() == 1);
+    CHECK(env.session->error()
+        == "Out of budget / insufficient credits: insufficient credits.");
+}
+
+TEST_CASE("controller retries stalled connections before any data arrives")
+{
+    AgentEnv env;
+    auto round   = std::make_shared<int>(0);
+    AgentEnv* ep = &env;
+    env.stream   = [ep, round](const imza::ChatRequest& req,
+                       const imza::StreamCallback& cb) -> imza::Status {
+        ep->requests.push_back(req);
+        if ((*round)++ == 0) {
+            cb(imza::make_connected_event());
+            cb(imza::make_error_event(
+                imza::Status::TIMEOUT, "Operation too slow"));
+            return imza::Status::TIMEOUT;
+        }
+        cb(imza::make_connected_event());
+        cb(imza::make_delta_event("recovered"));
+        cb(imza::make_done_event());
+        return imza::Status::OK;
+    };
+    imza::submit(*env.state, "hello");
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
+    CHECK(env.requests.size() == 2);
+    CHECK(env.session->error().empty());
+    CHECK(assistant_markdown_present(env, "recovered"));
+}
+
+TEST_CASE("controller does not retry a stall after content arrived")
+{
+    AgentEnv env;
+    AgentEnv* ep = &env;
+    env.stream   = [ep](const imza::ChatRequest& req,
+                       const imza::StreamCallback& cb) -> imza::Status {
+        ep->requests.push_back(req);
+        cb(imza::make_connected_event());
+        cb(imza::make_delta_event("partial"));
+        cb(imza::make_error_event(imza::Status::TIMEOUT, "Operation too slow"));
+        return imza::Status::TIMEOUT;
+    };
+    imza::submit(*env.state, "hello");
+    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
+    CHECK(env.requests.size() == 1);
+    CHECK(env.session->error() == "Timed out: Operation too slow.");
+}
+
 } // namespace imza

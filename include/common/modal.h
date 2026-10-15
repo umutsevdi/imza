@@ -7,9 +7,9 @@
 #include <variant>
 #include <vector>
 
+#include "common/permission_request.h"
 #include "common/tool_call.h"
 #include "common/types.h"
-#include "permissions/prompt.h"
 
 namespace imza {
 

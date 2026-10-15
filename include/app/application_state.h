@@ -15,6 +15,7 @@
 #include "platform/config.h"
 #include "providers/store.h"
 #include "runtime/bg_process_manager.h"
+#include "runtime/callbacks.h"
 #include "runtime/modal_queue.h"
 #include "runtime/subagent_manager.h"
 #include "tools/lua.h"
@@ -32,13 +33,6 @@ class PermissionStore;
 class PromptStore;
 class McpManager;
 class SkillRegistry;
-
-enum class AgentNotification { TURN_FINISHED, INPUT_REQUIRED };
-
-using PostFn = std::function<void(std::function<void()>)>;
-using StreamFn
-    = std::function<Status(const ChatRequest&, const StreamCallback&)>;
-using ModalRequestFn = std::function<std::future<ModalResult>(ModalPayload)>;
 
 struct ApplicationState {
     std::shared_ptr<Session> session;

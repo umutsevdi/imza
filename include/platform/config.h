@@ -10,8 +10,8 @@
 #include <vector>
 
 #include "common/modal.h"
+#include "common/permission_request.h"
 #include "common/types.h"
-#include "permissions/store.h"
 
 namespace imza {
 
@@ -166,10 +166,8 @@ ConfigUpdateResult update_config(const std::filesystem::path& path,
     Config* result = nullptr);
 void apply_skill_policies(Config& config, const SkillPolicyChanges& changes);
 
-// Grants declared by `config.allow`, ready for PermissionStore::install.
-// Directories that no longer exist are dropped rather than failing the
-// batch: a stale allowlist entry must not block startup.
-PermissionStore::Grants allow_grants(const AllowConfig& allow);
+// Grants declared by `config.allow` are converted for the permission
+// store by allow_grants in permissions/store.h.
 
 // Published JSON Schema for config.json, written into the file as
 // `$schema` so editors offer autocomplete while hand-editing.

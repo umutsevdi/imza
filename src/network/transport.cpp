@@ -648,65 +648,6 @@ Provider get_provider(const Route& route)
     return openai_provider;
 }
 
-ToolCallRequest finish_accum(const ToolAccum& acc)
-{
-    ToolCallRequest req;
-    req.name = acc.name;
-    req.args = acc.args.empty() ? "{}" : acc.args;
-    req.id   = acc.id;
-    return req;
-}
-
-std::vector<std::string> stream_headers()
-{
-    return {
-        "Content-Type: application/json",
-        "Accept: text/event-stream",
-    };
-}
-
-void flush_tool_accums(ParseState& state, std::vector<StreamEvent>& outs)
-{
-    for (auto& [index, acc] : state.tool_accums) {
-        if (acc.name.empty()) {
-            continue;
-        }
-        outs.push_back(make_tool_call_event(finish_accum(acc)));
-    }
-    state.tool_accums.clear();
-}
-
-void emit_ready_tool_start(ToolAccum& acc, std::vector<StreamEvent>& outs)
-{
-    if (acc.started || acc.name.empty()) {
-        return;
-    }
-    acc.started = true;
-    outs.push_back(make_tool_call_start_event(finish_accum(acc)));
-}
-
-void emit_usage_once(
-    ParseState& state, const Usage& usage, std::vector<StreamEvent>& outs)
-{
-    if (state.usage_emitted
-        || (usage.prompt == 0 && usage.completion == 0 && usage.total == 0)) {
-        return;
-    }
-    state.usage_emitted = true;
-    outs.push_back(make_usage_event(usage));
-}
-
-const char* role_str(Message::Type type)
-{
-    switch (type) {
-    case Message::Type::SYSTEM: return "system";
-    case Message::Type::USER: return "user";
-    case Message::Type::ASSISTANT: return "assistant";
-    case Message::Type::TOOL: return "tool";
-    }
-    return "user";
-}
-
 Status parse_api_error(std::string_view body, std::string& message)
 {
     message.clear();

@@ -47,4 +47,11 @@ struct ChatRequest {
 
 const char* role_str(Message::Type type);
 
+// Maps a configured reasoning effort ("off"/"low"/"default"/"high") onto
+// the request's wire fields for one dialect: Anthropic takes a thinking
+// token budget, every other dialect takes the effort string. The caller
+// gates on whether the model reasons at all.
+void apply_reasoning_dialect(
+    ChatRequest& request, ApiStandard dialect, std::string_view effort);
+
 } // namespace imza

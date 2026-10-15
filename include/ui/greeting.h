@@ -9,7 +9,7 @@ namespace imza {
 
 // Time-of-day bucket for the startup greeting. Night spans 22:00-05:00;
 // everything else is Day.
-enum class TimeBucket { Night, Day };
+enum class TimeBucket { NIGHT, DAY };
 
 TimeBucket time_bucket(int hour);
 

@@ -1,5 +1,5 @@
 #include "turn/turn_runner.h"
-#include "app/flows.h"
+#include "app/application_state.h"
 #include "common/types.h"
 #include "common/util.h"
 #include "conversation/format.h"
@@ -135,13 +135,7 @@ void apply_reasoning(ChatRequest& req, ApiStandard dialect,
         || !providers.model_reasons(req.model, connection_id)) {
         return;
     }
-    if (dialect == ApiStandard::ANTHROPIC) {
-        req.thinking_budget = configured == "low" ? 2000
-            : configured == "high"                ? 16000
-                                                  : 8000;
-    } else {
-        req.reasoning_effort = to_wire_effort(configured);
-    }
+    apply_reasoning_dialect(req, dialect, configured);
 }
 
 TurnRunner::TurnRunner(ApplicationState& state, PostFn post,
@@ -187,11 +181,6 @@ void TurnRunner::stop()
 {
     _alive.store(false);
     _compaction_worker.reset();
-}
-
-void TurnRunner::set_on_finish(std::function<void(std::string)> on_finish)
-{
-    _on_finish = std::move(on_finish);
 }
 
 void TurnRunner::_post(std::function<void()> f)
@@ -605,8 +594,10 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
         }
 
         const PermissionEvaluation evaluation = evaluate_tool_request(original,
-            permission_context_for(*_state, mode), _state->providers->config(),
-            _state->environment->skills(), *_skills);
+            make_permission_context(*_state->environment, *_state->permissions,
+                mode, _state->skills->loaded_directories(), _state->mcp.get()),
+            _state->providers->config(), _state->environment->skills(),
+            *_skills);
         if (evaluation.decision.kind == PermissionDecision::Kind::REJECT) {
             _reject_tool(original, evaluation.decision.reason, tool_msgs);
             continue;
@@ -706,7 +697,9 @@ void TurnRunner::_run_tool(const PermissionEvaluation& evaluation,
     Session::Mode mode, std::vector<Message>& tool_msgs)
 {
     const PermissionEvaluation current = evaluate_tool_request(
-        evaluation.request, permission_context_for(*_state, mode),
+        evaluation.request,
+        make_permission_context(*_state->environment, *_state->permissions,
+            mode, _state->skills->loaded_directories(), _state->mcp.get()),
         _state->providers->config(), _state->environment->skills(), *_skills);
     if (current.decision.kind == PermissionDecision::Kind::REJECT
         || current.request.args != evaluation.request.args) {

@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include "common/text_edit.h"
 #include "tools/file_ops.h"
 
 #include <string>

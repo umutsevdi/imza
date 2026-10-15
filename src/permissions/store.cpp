@@ -1,6 +1,7 @@
 #include "permissions/store.h"
 
 #include <algorithm>
+#include <system_error>
 #include <type_traits>
 
 #include "common/util.h"
@@ -138,6 +139,27 @@ bool grants_cover(
 {
     return std::any_of(grants.begin(), grants.end(),
         [&](const auto& stored) { return grant_covers(stored, requested); });
+}
+
+PermissionStore::Grants allow_grants(const AllowConfig& allow)
+{
+    PermissionStore::Grants grants;
+    grants.reserve(allow.directories.size() + allow.commands.size());
+    std::error_code ec;
+    for (const std::filesystem::path& entry : allow.directories) {
+        const std::filesystem::path resolved = entry.is_absolute()
+            ? entry
+            : std::filesystem::weakly_canonical(
+                  std::filesystem::current_path() / entry, ec);
+        if (ec || !std::filesystem::is_directory(resolved, ec) || ec) {
+            continue;
+        }
+        grants.emplace_back(resolved);
+    }
+    for (const ShellCommandGrant& command : allow.commands) {
+        grants.emplace_back(command);
+    }
+    return grants;
 }
 
 } // namespace imza

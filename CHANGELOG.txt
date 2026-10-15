@@ -8,6 +8,14 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
+0.6.3 - UNRELEASED
+-------------------------------------------------------------------------------
+Changes:
+  - Subscription sign-in refresh can no longer freeze the app when the
+    token service stalls, and the Review tab no longer keeps a background
+    worker alive after it closes.
+
+-------------------------------------------------------------------------------
 0.6.3 - 2026-10-15
 -------------------------------------------------------------------------------
 Changes:

@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "common/language_match.h"
+#include "common/ts_query.h"
 #include "common/util.h"
 
 namespace imza {
@@ -32,30 +33,6 @@ namespace {
         COMMENT,
         SPECIAL,
     };
-
-    struct QueryDeleter {
-        void operator()(TSQuery* query) const { ts_query_delete(query); }
-    };
-
-    struct ParserDeleter {
-        void operator()(TSParser* parser) const { ts_parser_delete(parser); }
-    };
-
-    struct TreeDeleter {
-        void operator()(TSTree* tree) const { ts_tree_delete(tree); }
-    };
-
-    struct CursorDeleter {
-        void operator()(TSQueryCursor* cursor) const
-        {
-            ts_query_cursor_delete(cursor);
-        }
-    };
-
-    using QueryPtr  = std::unique_ptr<TSQuery, QueryDeleter>;
-    using ParserPtr = std::unique_ptr<TSParser, ParserDeleter>;
-    using TreePtr   = std::unique_ptr<TSTree, TreeDeleter>;
-    using CursorPtr = std::unique_ptr<TSQueryCursor, CursorDeleter>;
 
     using LanguageFunction = const TSLanguage* (*)();
 
@@ -95,20 +72,20 @@ namespace {
         struct Runtime {
             std::once_flag initialized;
             const TSLanguage* language { };
-            QueryPtr query;
-            ParserPtr parser;
-            CursorPtr cursor;
+            TsQueryPtr query;
+            TsParserPtr parser;
+            TsQueryCursorPtr cursor;
             std::vector<std::vector<QueryPredicate>> predicates;
             std::mutex use_mutex;
         };
         std::unique_ptr<Runtime> runtime;
     };
 
-    QueryPtr make_query(const TSLanguage* language, std::string_view source)
+    TsQueryPtr make_query(const TSLanguage* language, std::string_view source)
     {
         uint32_t offset    = 0;
         TSQueryError error = TSQueryErrorNone;
-        return QueryPtr(ts_query_new(language, source.data(),
+        return TsQueryPtr(ts_query_new(language, source.data(),
             static_cast<uint32_t>(source.size()), &offset, &error));
     }
 
@@ -247,43 +224,27 @@ namespace {
         std::vector<std::vector<QueryPredicate>> predicates(
             ts_query_pattern_count(query));
         for (uint32_t pattern = 0; pattern < predicates.size(); ++pattern) {
-            uint32_t count = 0;
-            const TSQueryPredicateStep* steps
-                = ts_query_predicates_for_pattern(query, pattern, &count);
-            uint32_t at = 0;
-            while (at < count) {
-                if (steps[at].type != TSQueryPredicateStepTypeString) {
-                    while (at < count
-                        && steps[at].type != TSQueryPredicateStepTypeDone) {
-                        ++at;
-                    }
-                    ++at;
+            for (const TsPredicateGroup& group :
+                ts_predicate_groups(query, pattern)) {
+                if (group.empty() || group.front().is_capture) {
                     continue;
                 }
-                uint32_t operation_size   = 0;
-                const char* operation_raw = ts_query_string_value_for_id(
-                    query, steps[at++].value_id, &operation_size);
-                std::string_view operation(operation_raw, operation_size);
+                const std::string operation_text
+                    = ts_string_value(query, group.front().value_id);
+                std::string_view operation(operation_text);
                 if (operation.starts_with('#')) {
                     operation.remove_prefix(1);
                 }
                 std::optional<uint32_t> capture_id;
                 std::vector<std::string> values;
-                while (at < count
-                    && steps[at].type != TSQueryPredicateStepTypeDone) {
-                    if (steps[at].type == TSQueryPredicateStepTypeCapture
-                        && !capture_id.has_value()) {
-                        capture_id = steps[at].value_id;
-                    } else if (steps[at].type
-                        == TSQueryPredicateStepTypeString) {
-                        uint32_t value_size   = 0;
-                        const char* value_raw = ts_query_string_value_for_id(
-                            query, steps[at].value_id, &value_size);
-                        values.emplace_back(value_raw, value_size);
+                for (std::size_t at = 1; at < group.size(); ++at) {
+                    if (group[at].is_capture && !capture_id.has_value()) {
+                        capture_id = group[at].value_id;
+                    } else if (!group[at].is_capture) {
+                        values.push_back(
+                            ts_string_value(query, group[at].value_id));
                     }
-                    ++at;
                 }
-                ++at;
                 if (!capture_id.has_value() || values.empty()) {
                     continue;
                 }
@@ -405,7 +366,7 @@ namespace {
             return styles;
         }
         std::lock_guard lock(runtime.use_mutex);
-        TreePtr tree(ts_parser_parse_string(runtime.parser.get(), nullptr,
+        TsTreePtr tree(ts_parser_parse_string(runtime.parser.get(), nullptr,
             code.data(), static_cast<uint32_t>(code.size())));
         if (!tree) {
             return styles;

@@ -324,6 +324,7 @@ add_library(imza_execution
     src/app/one_shot.cpp
     src/app/slash_commands.cpp
     src/permissions/evaluator.cpp
+    src/permissions/shell.cpp
     src/permissions/store.cpp
     src/permissions/filesystem.cpp
     src/permissions/shell_analysis.cpp
@@ -332,7 +333,7 @@ add_library(imza_execution
     src/tools/file_ops.cpp
     src/tools/lua.cpp
     src/tools/bindings/bg.cpp
-    src/tools/bindings/binding.cpp
+    src/tools/bindings/bindings.cpp
     src/tools/bindings/canvas.cpp
     src/tools/bindings/core.cpp
     src/tools/bindings/fs.cpp

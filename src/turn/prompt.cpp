@@ -1,9 +1,9 @@
 #include "turn/prompt.h"
-#include "app/application_state.h"
 #include "common/util.h"
 #include "conversation/session.h"
 #include "network/json.h"
 #include "platform/json_file.h"
+#include "providers/store.h"
 #include "tools/mcp_manager.h"
 #include "tools/skills.h"
 #include "workspace/review.h"
@@ -251,18 +251,19 @@ std::string current_mode_prompt(Session::Mode mode)
                                        : "<runtime-mode name=\"build\"/>";
 }
 
-std::string full_system_prompt(
-    const ApplicationState& state, std::optional<Session::Mode> mode)
+std::string full_system_prompt(const PromptStore& prompts,
+    const Environment& environment, const ProviderStore& providers,
+    const McpManager* mcp, const SkillStore* skills,
+    std::optional<Session::Mode> mode)
 {
-    const std::shared_ptr<Environment> env = state.environment;
-    const Config config                    = state.providers->config();
-    std::string prompt                     = build_system_prompt(
-        *state.prompts, env->system().get(), env->workspace().get(), &config);
-    const std::string mcps = mcp_block(state.mcp.get());
+    const Config config    = providers.config();
+    std::string prompt     = build_system_prompt(prompts,
+        environment.system().get(), environment.workspace().get(), &config);
+    const std::string mcps = mcp_block(mcp);
     if (!mcps.empty()) {
         prompt += "\n\n" + mcps;
     }
-    prompt += state.skills->prompt_suffix();
+    prompt += skills->prompt_suffix();
     if (mode) {
         prompt += "\n\n";
         prompt += current_mode_prompt(*mode);

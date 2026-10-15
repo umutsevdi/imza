@@ -135,7 +135,10 @@ namespace {
             [raw](ModalPayload payload) {
                 return request_modal(*raw, std::move(payload));
             },
-            state->skills, std::function<void(std::string)> { });
+            state->skills,
+            [raw](std::string error) {
+                on_turn_finished(*raw, std::move(error));
+            });
         state->delegation = std::make_unique<Delegation>(
             *raw, state->post,
             [raw](ModalPayload payload) {
@@ -145,9 +148,6 @@ namespace {
         *state->subagent_slot = [raw](const ToolCallRequest& req) {
             return raw->delegation->run_subagents(req);
         };
-        state->runner->set_on_finish([raw](std::string error) {
-            on_turn_finished(*raw, std::move(error));
-        });
         const auto resume_when_ready = [raw] {
             raw->post([raw] {
                 present_front(*raw);
