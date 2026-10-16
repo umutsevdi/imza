@@ -22,11 +22,6 @@ namespace imza {
 
 struct Config;
 
-struct SkillCounts {
-    std::size_t active = 0;
-    std::size_t total  = 0;
-};
-
 struct PendingSkillTurn {
     std::string text;
     std::vector<Attachment> attachments;
@@ -59,8 +54,6 @@ public:
     std::string prompt_suffix() const;
     // The loaded skills' directories (SKILL.md parents), sorted.
     std::vector<std::filesystem::path> loaded_directories() const;
-    std::pair<SkillCounts, SkillCounts> counts(
-        const std::vector<Skill>& catalog) const;
     void clear();
     std::optional<PendingSkillTurn> pending_turn() const;
     void set_pending_turn(PendingSkillTurn turn);

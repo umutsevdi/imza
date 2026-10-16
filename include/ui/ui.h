@@ -398,9 +398,16 @@ ftxui::Element session_error_element(const Session& session);
 
 ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx);
 ftxui::Element render_todo(const TodoList& todo, const LayoutCtx& ctx);
+// One sidebar context entry: a skill name and whether it is loaded.
+struct ContextSkill {
+    std::string name;
+    bool loaded = false;
+};
+
 ftxui::Element render_context_box(const std::optional<std::string>& rules,
-    const std::vector<std::string>& attachments, SkillCounts project_skills,
-    SkillCounts global_skills, const std::vector<std::string>& mcp_servers);
+    const std::vector<std::string>& attachments,
+    const std::vector<ContextSkill>& skills,
+    const std::vector<std::string>& mcp_servers);
 
 struct PermissionView {
     bool web_disabled      = false;

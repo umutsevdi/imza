@@ -3,8 +3,6 @@
 #include "permissions/store.h"
 #include "tools/mcp_manager.h"
 #include "ui/ui.h"
-
-#include "tools/skills.h"
 #include "workspace/review.h"
 
 #include <ftxui/component/app.hpp>
@@ -13,6 +11,7 @@
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/box.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <filesystem>
 #include <format>
@@ -143,8 +142,11 @@ public:
                 _attachment_names = _state->session->attachment_names();
             }
             if (_sidebar.context) {
-                const auto [project, global]
-                    = _state->skills->counts(_state->environment->skills());
+                std::vector<ContextSkill> skills;
+                for (const Skill& skill : env->skills()) {
+                    skills.push_back(
+                        { skill.name, _state->skills->is_loaded(skill.path) });
+                }
                 std::vector<std::string> mcp_servers;
                 if (_state->mcp != nullptr) {
                     for (const auto& server : _state->mcp->snapshot()) {
@@ -156,7 +158,7 @@ public:
                     }
                 }
                 parts.push_back(render_context_box(env->agent_rules_path(),
-                    _attachment_names, project, global, mcp_servers));
+                    _attachment_names, skills, mcp_servers));
             }
             if (_sidebar.permissions) {
                 const PermissionStore::Snapshot grants
@@ -432,45 +434,51 @@ Element render_todo(const TodoList& todo, const LayoutCtx&)
 }
 
 Element render_context_box(const std::optional<std::string>& rules,
-    const std::vector<std::string>& attachments, SkillCounts project_skills,
-    SkillCounts global_skills, const std::vector<std::string>& mcp_servers)
+    const std::vector<std::string>& attachments,
+    const std::vector<ContextSkill>& skills,
+    const std::vector<std::string>& mcp_servers)
 {
     Elements context_box;
+    const auto append_values = [&context_box](std::string label,
+                                   const std::vector<std::string>& values) {
+        if (values.empty()) {
+            return;
+        }
+        Elements rendered;
+        for (const std::string& value : values) {
+            rendered.push_back(paragraph(value) | color(PANEL_FG) | dim);
+        }
+        context_box.push_back(
+            hbox({ text(std::move(label)) | bold | color(PANEL_FG) | xflex,
+                vbox(std::move(rendered)) }));
+    };
+
     if (rules || !attachments.empty()) {
-        Elements files;
+        std::vector<std::string> files;
         if (rules) {
-            files.push_back(paragraph(*rules) | color(PANEL_FG) | dim);
+            files.push_back(*rules);
         }
-        for (const std::string& attachment : attachments) {
-            files.push_back(paragraph(attachment) | color(PANEL_FG) | dim);
+        files.insert(files.end(), attachments.begin(), attachments.end());
+        append_values("Files", files);
+    }
+    if (!skills.empty()) {
+        std::vector<std::string> loaded_names;
+        for (const ContextSkill& skill : skills) {
+            if (skill.loaded) {
+                loaded_names.push_back(skill.name);
+            }
         }
-        context_box.push_back(hbox({
-            text("Files") | bold | color(PANEL_FG) | xflex,
-            vbox(std::move(files)),
-        }));
+        const std::string label
+            = std::format("Skills {}/{}", loaded_names.size(), skills.size());
+        if (loaded_names.empty()) {
+            context_box.push_back(
+                hbox({ text(label) | bold | color(PANEL_FG) | xflex,
+                    text("none") | color(PANEL_FG) | dim }));
+        } else {
+            append_values(label, loaded_names);
+        }
     }
-    if (project_skills.total > 0) {
-        context_box.push_back(hbox({
-            text("Project Skills") | bold | color(PANEL_FG) | xflex,
-            text(std::format(
-                "{}/{}", project_skills.active, project_skills.total))
-                | color(PANEL_FG) | dim,
-        }));
-    }
-    if (global_skills.total > 0) {
-        context_box.push_back(hbox({
-            text("Global Skills") | bold | color(PANEL_FG) | xflex,
-            text(
-                std::format("{}/{}", global_skills.active, global_skills.total))
-                | color(PANEL_FG) | dim,
-        }));
-    }
-    if (!mcp_servers.empty()) {
-        context_box.push_back(hbox({
-            text("MCP") | bold | color(PANEL_FG) | xflex,
-            text(join(mcp_servers, ", ")) | color(PANEL_FG) | dim,
-        }));
-    }
+    append_values("MCP", mcp_servers);
     if (!context_box.empty()) {
         Element body = vbox(std::move(context_box))
             | borderStyled(ROUNDED, PANEL_BORDER);

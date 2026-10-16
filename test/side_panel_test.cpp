@@ -223,7 +223,7 @@ TEST_CASE("side panel context box lists only reachable mcp servers")
 TEST_CASE("render_context_box lists attachment basenames under files")
 {
     const std::string out = to_text(imza::render_context_box(
-        "AGENTS.md", { "main.cpp", "design.md" }, { }, { }, { }));
+        "AGENTS.md", { "main.cpp", "design.md" }, { }, { }));
 
     CHECK(out.find("Files") != std::string::npos);
     CHECK(out.find("AGENTS.md") != std::string::npos);

@@ -205,23 +205,6 @@ std::vector<std::filesystem::path> SkillStore::loaded_directories() const
     return out;
 }
 
-std::pair<SkillCounts, SkillCounts> SkillStore::counts(
-    const std::vector<Skill>& catalog) const
-{
-    SkillCounts project;
-    SkillCounts global;
-    std::lock_guard lock(_mutex);
-    for (const Skill& skill : catalog) {
-        SkillCounts& scope
-            = skill.scope == Skill::Scope::PROJECT ? project : global;
-        ++scope.total;
-        if (_loaded.contains(skill.path.string())) {
-            ++scope.active;
-        }
-    }
-    return { project, global };
-}
-
 void SkillStore::clear()
 {
     std::lock_guard lock(_mutex);
