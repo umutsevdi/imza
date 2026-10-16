@@ -59,10 +59,8 @@ struct ShellFixture {
     {
         store.set_skip_permissions(skip_permissions);
         imza::LuaHost host;
-        host.shell_enabled    = shell_enabled;
-        host.skip_permissions = [this] {
-            return store.skip_permissions();
-        };
+        host.shell_enabled      = shell_enabled;
+        host.skip_permissions   = [this] { return store.skip_permissions(); };
         host.permission_context = [this] {
             return imza::PermissionContext { system, workspace,
                 store.snapshot(), imza::SessionMode::BUILD };

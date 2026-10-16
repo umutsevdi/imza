@@ -11,6 +11,9 @@ CHANGELOG
 0.6.4 - UNRELEASED
 -------------------------------------------------------------------------------
 Changes:
+  - On Windows, one-shot answers (--ask/--exec) now print as formatted
+    output that fits your terminal, and --update shows a live progress
+    display; output piped to files or other programs stays plain text.
   - Imza now ships its own documentation as a bundled `imza-docs` skill; the
     agent can answer questions about Imza itself, and the skill is always
     allowed and cannot be removed.

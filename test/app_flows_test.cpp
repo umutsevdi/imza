@@ -9,6 +9,7 @@
 
 #include "app/application_state.h"
 #include "app/flows.h"
+#include "common/util.h"
 #include "conversation/persistence.h"
 #include "conversation/session.h"
 #include "conversation/session_store.h"
@@ -16,6 +17,8 @@
 #include "test_fs.h"
 #include "test_helpers.h"
 #include "test_state.h"
+
+#include <functional>
 
 namespace {
 
@@ -62,6 +65,32 @@ TEST_CASE("skills modal marks bundled skills and skips their policies")
     const imza::Config config = state->providers->config();
     CHECK(config.global_skills.find("imza-docs") == config.global_skills.end());
     ::unsetenv("IMZA_BUNDLED_SKILLS");
+}
+
+TEST_CASE("markdown output renders wrapped styled text at a fixed width")
+{
+    const std::string text = imza::test::without_ansi(
+        imza::render_markdown_to_text("# Heading\\n\\nBody text.\\n", 40));
+    CHECK(text.find("Heading") != std::string::npos);
+    CHECK(text.find("Body text.") != std::string::npos);
+    // Every rendered line fits the requested width.
+    for (const std::string& line :
+        imza::split_lines(imza::render_markdown_to_text(
+            "A paragraph that is longer than the requested wrap width "
+            "so it must fold.\\n",
+            30))) {
+        CHECK(line.size() <= 30);
+    }
+}
+
+TEST_CASE("update flow runs work and returns its exit code")
+{
+    const int code = imza::run_update_display(
+        [](const std::function<void(std::string)>& progress) {
+            progress("stage one");
+            return 7;
+        });
+    CHECK(code == 7);
 }
 
 TEST_CASE("CLI session list aligns columns without terminal tabs")

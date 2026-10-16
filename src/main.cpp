@@ -11,6 +11,7 @@
 #include "conversation/persistence.h"
 #include "permissions/store.h"
 #include "platform/config.h"
+#include "platform/console_mode.h"
 #include "runtime/main_thread_queue.h"
 #include "tools/mcp_manager.h"
 #include "tools/skills.h"
@@ -18,8 +19,14 @@
 
 int main(int argc, char** argv)
 {
+#ifdef _WIN32
+    const imza::ConsoleModeScope console_mode;
+#endif
     const imza::CliResult cli = imza::run_cli(argc, argv);
     if (!cli.continue_as_interactive) {
+        if (cli.update_requested) {
+            return imza::run_update_display(imza::run_update_command);
+        }
         return cli.exit_code;
     }
     if (cli.working_directory) {
@@ -153,7 +160,7 @@ int main(int argc, char** argv)
         const imza::OneShotResult result
             = imza::run_one_shot(*state, main_thread, *cli.one_shot);
         if (!result.output.empty()) {
-            std::println("{}", result.output);
+            imza::print_markdown_output(result.output);
         }
         if (!result.error.empty()) {
             std::println(stderr, "{}", result.error);

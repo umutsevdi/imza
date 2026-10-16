@@ -102,10 +102,11 @@ namespace {
             = (state->runtime_flags & RuntimeFlag::SHELL) != RuntimeFlag::NONE,
             .mcp_enabled
             = (state->runtime_flags & RuntimeFlag::MCP) != RuntimeFlag::NONE,
-            .skip_permissions = [state] {
-                return state->permissions != nullptr
-                    && state->permissions->skip_permissions();
-            },
+            .skip_permissions =
+                [state] {
+                    return state->permissions != nullptr
+                        && state->permissions->skip_permissions();
+                },
             .unattended = (state->runtime_flags & RuntimeFlag::ATTENDED)
                 == RuntimeFlag::NONE,
         };
@@ -218,7 +219,7 @@ namespace {
         state->permissions = std::make_shared<PermissionStore>();
         state->permissions->set_skip_permissions(
             (runtime_flags & RuntimeFlag::SKIP_PERMISSIONS)
-                != RuntimeFlag::NONE);
+            != RuntimeFlag::NONE);
         SkillRegistryHooks registry_hooks;
         registry_hooks.install_root = global_skills_directory();
         // Self-hosted mirrors and tests override the skills.sh endpoint.

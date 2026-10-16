@@ -101,14 +101,14 @@ struct LuaHost {
     std::function<bool(
         const std::string&, std::chrono::seconds, const std::string&)>
         spawn_bg;
-    bool web_enabled      = false;
-    bool shell_enabled    = false;
-    bool mcp_enabled      = false;
+    bool web_enabled   = false;
+    bool shell_enabled = false;
+    bool mcp_enabled   = false;
     // Live approval-skipping switch; read at each gated call so a
     // runtime /auto toggle reaches the sandbox without a restart. Empty
     // means false (tests).
     std::function<bool()> skip_permissions;
-    bool unattended       = false;
+    bool unattended = false;
 };
 
 Tool make_lua_tool(LuaState& state, LuaHost host = { });

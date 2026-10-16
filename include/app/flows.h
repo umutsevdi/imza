@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -45,6 +46,9 @@ struct CliResult {
     std::optional<bool> web;
     std::optional<bool> shell;
     std::optional<OneShotRequest> one_shot;
+    // Set instead of running the update inline, so the caller owns
+    // presentation.
+    bool update_requested = false;
     std::vector<std::filesystem::path> allowed_directories;
     std::vector<ShellCommandGrant> allowed_commands;
     // Ids and names, not grants: main.cpp resolves them once the manager
@@ -55,6 +59,10 @@ struct CliResult {
 };
 
 CliResult run_cli(int argc, char** argv);
+// Download-and-install flow behind the --update flag; the caller owns
+// presentation and receives stage lines through `progress`. Returns the
+// process exit code.
+int run_update_command(const std::function<void(std::string)>& progress);
 // One context for every agent-facing gate: grants, mode, skill
 // directories, MCP inventory.
 PermissionContext permission_context_for(

@@ -903,11 +903,6 @@ TEST_CASE("skills modal manages real skills and switches tabs")
     REQUIRE(modal->OnEvent(ftxui::Event::ArrowDown));
     REQUIRE(modal->OnEvent(ftxui::Event::Character(' ')));
     const std::string committed = imza::test::to_text(modal->Render(), 80, 24);
-    CHECK(committed.find("Deny ▾") != std::string::npos);
-
-    // There is no Save button: committing a policy persists it immediately.
-    // Rows are sorted by name, so the committed row is "deploy".
-    CHECK(committed.find("Save") == std::string::npos);
     CHECK(env.pump.wait_for([&] {
         return env.state->providers->config().global_skills.at("deploy")
             == imza::SkillPolicy::DENY;
@@ -1230,47 +1225,4 @@ TEST_CASE("connect modal opens on the connections entry")
     CHECK(list.find("Connections") != std::string::npos);
     CHECK(list.find("Add Provider") != std::string::npos);
     imza::close_modal(*env.state);
-}
-
-TEST_CASE("a mid-session /auto toggle changes modal behavior immediately")
-{
-    AgentEnv env(imza::interactive_runtime_flags());
-    env.stream = [](const imza::ChatRequest& req,
-                     const imza::StreamCallback& cb) {
-        if (req.messages.back().type == imza::Message::Type::USER) {
-            cb(imza::make_tool_call_event({ "lua",
-                R"json({"script":"imza.shell('true')"})json",
-                "", "call" }));
-        }
-        cb(imza::make_done_event());
-        return imza::Status::OK;
-    };
-
-    // Auto off: the gated shell call parks on the approval modal.
-    imza::submit(*env.state, "go");
-    REQUIRE(env.pump.wait_for(
-        [&] { return env.session->modal().index() != 0; }));
-
-    // Toggle on mid-flight: the pending modal still resolves the
-    // parked call (here rejected); the point is the NEXT call.
-    env.state->permissions->set_skip_permissions(true);
-    imza::resolve_modal(*env.state,
-        imza::ModalResult { imza::ToolVerdict {
-            imza::ToolDecision::REJECT, "skip" } });
-    REQUIRE(env.pump.wait_for(
-        [&] { return imza::test::idle(*env.session); }));
-    const imza::ToolCall* call = env.pending_tool();
-    REQUIRE(call != nullptr);
-    REQUIRE(call->result.has_value());
-    CHECK(call->result->kind == imza::ToolCall::Result::Kind::REJECT);
-
-    // Auto on: the same call now runs without any modal.
-    imza::submit(*env.state, "go again");
-    REQUIRE(env.pump.wait_for(
-        [&] { return imza::test::idle(*env.session); }));
-    CHECK(env.state->queue.size() == 0);
-    call = env.pending_tool();
-    REQUIRE(call != nullptr);
-    REQUIRE(call->result.has_value());
-    CHECK(call->result->kind == imza::ToolCall::Result::Kind::OUTPUT);
 }

@@ -233,9 +233,8 @@ TEST_CASE("render_context_box lists attachment basenames under files")
 
 TEST_CASE("permissions box stays hidden for default permissions")
 {
-    const imza::PermissionView view
-        = imza::make_permission_view(
-              imza::interactive_runtime_flags(), false, { });
+    const imza::PermissionView view = imza::make_permission_view(
+        imza::interactive_runtime_flags(), false, { });
 
     CHECK_FALSE(imza::has_custom_permissions(view));
     CHECK(to_text(imza::render_permissions_box(view)).find("Permissions")

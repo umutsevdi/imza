@@ -257,6 +257,7 @@ add_library(imza_foundation
     src/platform/clipboard.cpp
     src/platform/command_runner.cpp
     src/platform/config.cpp
+    src/platform/console_mode.cpp
     src/platform/file_lock.cpp
     src/platform/json_file.cpp
     src/platform/process.cpp
@@ -384,6 +385,7 @@ add_library(imza_ui
     src/ui/modals/subagents.cpp
     src/ui/modals/tools.cpp
     src/ui/modals/variant.cpp
+    src/ui/one_shot_output.cpp
     src/ui/review_syntax.cpp
     src/ui/scroll.cpp
     src/ui/side_panel.cpp

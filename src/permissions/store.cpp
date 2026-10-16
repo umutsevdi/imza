@@ -141,8 +141,7 @@ bool PermissionStore::skip_permissions() const
 
 void PermissionStore::set_skip_permissions(bool skip)
 {
-    if (_skip_permissions.exchange(skip, std::memory_order_relaxed)
-        != skip) {
+    if (_skip_permissions.exchange(skip, std::memory_order_relaxed) != skip) {
         _skip_changed.publish();
     }
 }

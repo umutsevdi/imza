@@ -421,8 +421,8 @@ struct PermissionView {
 // `approvals_skipped` comes from PermissionStore::skip_permissions():
 // the live value, not the startup flags. `flags` still carries the
 // static web/shell capability switches.
-PermissionView make_permission_view(RuntimeFlag flags,
-    bool approvals_skipped, const PermissionStore::Grants& grants);
+PermissionView make_permission_view(RuntimeFlag flags, bool approvals_skipped,
+    const PermissionStore::Grants& grants);
 bool has_custom_permissions(const PermissionView& view);
 ftxui::Element render_permissions_box(const PermissionView& view);
 ftxui::Element render_update_available(std::string version);
@@ -503,5 +503,15 @@ ftxui::Component make_build_tab(std::shared_ptr<ApplicationState> state,
 
 int run_repl(
     std::shared_ptr<ApplicationState> state, MainThreadQueue& main_thread);
+
+// Rendered markdown as terminal text (ANSI styled, wrapped at `width`).
+std::string render_markdown_to_text(std::string_view md, int width);
+// Final one-shot answer: rendered markdown when stdout is a terminal, raw
+// text otherwise, so redirected output stays clean markdown.
+void print_markdown_output(std::string_view md);
+// --update progress: a spinner + stage line when stdout is a terminal,
+// plain println lines otherwise. Returns `work`'s exit code.
+int run_update_display(
+    const std::function<int(const std::function<void(std::string)>&)>& work);
 
 } // namespace imza

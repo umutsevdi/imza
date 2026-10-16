@@ -10,6 +10,7 @@
 #include <CLI/CLI.hpp>
 
 #include <algorithm>
+#include <functional>
 #include <optional>
 #include <print>
 #include <string>
@@ -49,34 +50,6 @@ namespace {
             = cached_update(IMZA_VERSION)) {
             std::println(stderr, "<Update available v{}>", *version);
         }
-    }
-
-    int run_update_command()
-    {
-        std::vector<std::string> package_managers;
-        detect_package_managers(package_managers);
-        std::println("Checking for the latest imza release...");
-        const std::optional<UpdateInfo> update
-            = fetch_update(package_managers, IMZA_VERSION);
-        if (!update) {
-            std::println("No update available.");
-            return 0;
-        }
-        std::println("Downloading imza {}...", update->version);
-        std::error_code error;
-        const std::filesystem::path temp = prepare_imza_temporary_directory(
-            std::filesystem::temp_directory_path(error));
-        if (error) {
-            std::println(stderr, "cannot resolve temporary directory");
-            return 1;
-        }
-        if (install_update(*update, temp) != 0) {
-            std::println(
-                stderr, "installation of imza {} failed", update->version);
-            return 1;
-        }
-        std::println("Installed imza {}.", update->version);
-        return 0;
     }
 
     int edit_config()
@@ -185,6 +158,33 @@ std::string format_session_list(const std::vector<SavedSession>& sessions)
         append_row(session.path.stem().string(), saved, session.title);
     }
     return output;
+}
+
+int run_update_command(const std::function<void(std::string)>& progress)
+{
+    std::vector<std::string> package_managers;
+    detect_package_managers(package_managers);
+    progress("Checking for the latest imza release...");
+    const std::optional<UpdateInfo> update
+        = fetch_update(package_managers, IMZA_VERSION);
+    if (!update) {
+        progress("No update available.");
+        return 0;
+    }
+    progress("Downloading imza " + update->version + "...");
+    std::error_code error;
+    const std::filesystem::path temp = prepare_imza_temporary_directory(
+        std::filesystem::temp_directory_path(error));
+    if (error) {
+        std::println(stderr, "cannot resolve temporary directory");
+        return 1;
+    }
+    if (install_update(*update, temp) != 0) {
+        std::println(stderr, "installation of imza {} failed", update->version);
+        return 1;
+    }
+    progress("Installed imza " + update->version + ".");
+    return 0;
 }
 
 CliResult run_cli(int argc, char** argv)
@@ -331,7 +331,10 @@ CliResult run_cli(int argc, char** argv)
     };
 
     if (update_requested) {
-        return finished(run_update_command());
+        CliResult result;
+        result.continue_as_interactive = false;
+        result.update_requested        = true;
+        return result;
     }
     if (config_requested) {
         return finished(edit_config());
