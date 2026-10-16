@@ -112,8 +112,7 @@ namespace {
             const PermissionEvaluation evaluation = evaluate_permission(
                 state, skill_request(skill), state.session->mode());
             if (evaluation.decision.kind == PermissionDecision::Kind::ACCEPT
-                || (state.runtime_flags & RuntimeFlag::SKIP_PERMISSIONS)
-                    != RuntimeFlag::NONE) {
+                || state.permissions->skip_permissions()) {
                 if (!load_skill(state, skill, evaluation.request)) {
                     return;
                 }
@@ -668,6 +667,17 @@ void run_slash(ApplicationState& state, std::string_view command)
         }
         start_make_skill_turn(state, std::string(args));
         break;
+    case SlashCommand::Action::AUTO: {
+        const std::string arg = to_lower(args);
+        if (!arg.empty() && arg != "on" && arg != "off") {
+            state.session->set_error("Usage: /auto on|off");
+            break;
+        }
+        const bool on = arg.empty() ? !state.permissions->skip_permissions()
+                                    : arg == "on";
+        state.permissions->set_skip_permissions(on);
+        break;
+    }
     case SlashCommand::Action::CHANGELOG: {
         const std::optional<std::string> changelog = read_changelog();
         if (!changelog) {

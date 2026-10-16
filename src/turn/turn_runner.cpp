@@ -603,8 +603,7 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
             continue;
         }
         if (evaluation.decision.kind == PermissionDecision::Kind::ACCEPT
-            || (_state->runtime_flags & RuntimeFlag::SKIP_PERMISSIONS)
-                != RuntimeFlag::NONE) {
+            || _state->permissions->skip_permissions()) {
             _run_tool(evaluation, mode, tool_msgs);
             continue;
         }

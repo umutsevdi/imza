@@ -25,6 +25,8 @@ std::span<const SlashCommand> slash_commands()
             SlashCommand::Action::COMPACT },
         { "/make-skill", "draft a skill from a workflow description",
             SlashCommand::Action::MAKE_SKILL, true },
+        { "/auto", "turn permission auto-approval on or off",
+            SlashCommand::Action::AUTO, true },
     };
     return commands;
 }

@@ -429,3 +429,38 @@ TEST_CASE("autocomplete submits argument-less commands on Enter")
     CHECK(submit);
     CHECK(text == "/exit");
 }
+
+TEST_CASE("chat input box switches to the magenta palette while auto is on")
+{
+    auto state = imza::test::make_test_state();
+    auto chat  = imza::make_chat(
+        state, [] { return imza::test::wide_layout(); });
+
+    auto screen = imza::test::to_screen(chat->Render(), 100, 30);
+    REQUIRE(screen.dimy() > 0);
+    // Default: the input box paints the dark panel background.
+    bool saw_panel = false;
+    for (int y = 0; y < screen.dimy(); ++y) {
+        if (screen.CellAt(2, y).background_color
+            == imza::PANEL_COLOR) {
+            saw_panel = true;
+        }
+    }
+    CHECK(saw_panel);
+
+    state->permissions->set_skip_permissions(true);
+    screen = imza::test::to_screen(chat->Render(), 100, 30);
+    bool saw_magenta  = false;
+    bool saw_panel_bg = false;
+    for (int y = 0; y < screen.dimy(); ++y) {
+        const auto& bg = screen.CellAt(2, y).background_color;
+        if (bg == imza::HL_MAGENTA) {
+            saw_magenta = true;
+        }
+        if (bg == imza::PANEL_COLOR) {
+            saw_panel_bg = true;
+        }
+    }
+    CHECK(saw_magenta);
+    CHECK_FALSE(saw_panel_bg);
+}

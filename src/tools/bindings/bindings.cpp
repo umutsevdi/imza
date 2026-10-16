@@ -172,7 +172,8 @@ bool resolve_ask(LuaRunContext& run, const std::string& label,
         denial = std::move(reason);
         return false;
     };
-    if (run.host->skip_permissions) {
+    if (run.host->skip_permissions
+        && run.host->skip_permissions()) {
         return true;
     }
     if (run.host->unattended) {

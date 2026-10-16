@@ -134,6 +134,25 @@ Signal<>::Subscription PermissionStore::subscribe_to_grants_change(
     return _changed.subscribe(std::move(callback));
 }
 
+bool PermissionStore::skip_permissions() const
+{
+    return _skip_permissions.load(std::memory_order_relaxed);
+}
+
+void PermissionStore::set_skip_permissions(bool skip)
+{
+    if (_skip_permissions.exchange(skip, std::memory_order_relaxed)
+        != skip) {
+        _skip_changed.publish();
+    }
+}
+
+Signal<>::Subscription PermissionStore::subscribe_to_skip_change(
+    Signal<>::Callback callback)
+{
+    return _skip_changed.subscribe(std::move(callback));
+}
+
 bool grants_cover(
     const PermissionStore::Grants& grants, const PermissionGrant& requested)
 {

@@ -249,6 +249,13 @@ namespace {
             , _session(_state->session)
             , _layout(std::move(layout))
             , _hints(std::move(hints))
+            , _skip_subscription(_state->permissions->subscribe_to_skip_change(
+                  [state = std::weak_ptr<ApplicationState>(_state)] {
+                      if (const auto current = state.lock()) {
+                          current->post(
+                              [] { animation::RequestAnimationFrame(); });
+                      }
+                  }))
         {
             if (_hints.input_hint.empty()) {
                 _hints.input_hint = "  " + std::string(MULTILINE_KEY)
@@ -559,6 +566,7 @@ namespace {
                                   + std::max(0, _viewport.viewport_lines() - 1)
                                       / 2))
                 | vscroll_indicator | yframe;
+            const bool auto_on = _state->permissions->skip_permissions();
 
             Element input_box = panel(vbox({
                 separatorEmpty(),
@@ -596,8 +604,9 @@ namespace {
             if (_autocomplete.active()) {
                 bottom.push_back(_autocomplete.render(ctx));
             }
-            Element hint_line = text(_hints.input_hint) | color(PANEL_FG_DIM)
-                | bgcolor(PANEL_COLOR);
+            Element hint_line = hbox({ text(auto_on ? " auto " : "")
+                    | color(PANEL_COLOR) | bgcolor(HL_RED),
+                text(_hints.input_hint) | color(PANEL_FG_DIM) });
             bottom.push_back(
                 vbox({ std::move(input_box) | yflex, std::move(hint_line) }));
             if (!st.error().empty() || st.retry_countdown()) {
@@ -878,6 +887,7 @@ namespace {
         std::shared_ptr<Session> _session;
         LayoutFn _layout;
         ChatHints _hints;
+        Signal<>::Subscription _skip_subscription;
 
         Component _container;
         std::map<std::size_t, Component> _read_buttons;

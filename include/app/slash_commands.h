@@ -19,7 +19,8 @@ struct SlashCommand {
         SKILLS,
         MCP,
         COMPACT,
-        MAKE_SKILL
+        MAKE_SKILL,
+        AUTO
     };
 
     std::string_view name;

@@ -404,4 +404,41 @@ TEST_CASE("CLI accepts MCP and skill startup allow lists")
     CHECK(result.allowed_skills[1] == "anatomy");
 }
 
+TEST_CASE("find_command routes /auto")
+{
+    CHECK(find_command("/auto")->action == SlashCommand::Action::AUTO);
+    CHECK(find_command("/auto")->takes_argument);
+}
+
+TEST_CASE("/auto toggles the shared approval-skipping switch")
+{
+    auto state = imza::test::make_test_state();
+    REQUIRE_FALSE(state->permissions->skip_permissions());
+
+    run_slash(*state, "/auto on");
+    CHECK(state->permissions->skip_permissions());
+    // State changes are silent: the hint badge shows it.
+    CHECK(state->session->error().empty());
+
+    run_slash(*state, "/auto off");
+    CHECK_FALSE(state->permissions->skip_permissions());
+    CHECK(state->session->error().empty());
+
+    // Bare /auto flips to the opposite state.
+    run_slash(*state, "/auto");
+    CHECK(state->permissions->skip_permissions());
+}
+
+TEST_CASE("/auto rejects unknown arguments without flipping")
+{
+    auto state = imza::test::make_test_state();
+
+    run_slash(*state, "/auto maybe");
+    CHECK_FALSE(state->permissions->skip_permissions());
+    CHECK(state->session->error().find("Usage") != std::string::npos);
+
+    run_slash(*state, "/auto ON");
+    CHECK(state->permissions->skip_permissions());
+}
+
 } // namespace imza

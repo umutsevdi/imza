@@ -234,7 +234,8 @@ TEST_CASE("render_context_box lists attachment basenames under files")
 TEST_CASE("permissions box stays hidden for default permissions")
 {
     const imza::PermissionView view
-        = imza::make_permission_view(imza::interactive_runtime_flags(), { });
+        = imza::make_permission_view(
+              imza::interactive_runtime_flags(), false, { });
 
     CHECK_FALSE(imza::has_custom_permissions(view));
     CHECK(to_text(imza::render_permissions_box(view)).find("Permissions")
@@ -249,10 +250,11 @@ TEST_CASE("permissions box renders only custom settings and grants")
         imza::SkillGrant { "/skills/docs/SKILL.md" },
         imza::ShellCommandGrant { "cmake", "--build" },
     };
-    const auto flags = static_cast<imza::RuntimeFlag>(
-        imza::SHELL | imza::ATTENDED | imza::SKIP_PERMISSIONS);
+    const auto flags
+        = static_cast<imza::RuntimeFlag>(imza::SHELL | imza::ATTENDED);
 
-    const imza::PermissionView view = imza::make_permission_view(flags, grants);
+    const imza::PermissionView view
+        = imza::make_permission_view(flags, true, grants);
     const std::string out = to_text(imza::render_permissions_box(view));
 
     CHECK(imza::has_custom_permissions(view));

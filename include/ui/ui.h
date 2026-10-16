@@ -418,8 +418,11 @@ struct PermissionView {
     std::vector<std::string> mcp_servers;
 };
 
-PermissionView make_permission_view(
-    RuntimeFlag flags, const PermissionStore::Grants& grants);
+// `approvals_skipped` comes from PermissionStore::skip_permissions():
+// the live value, not the startup flags. `flags` still carries the
+// static web/shell capability switches.
+PermissionView make_permission_view(RuntimeFlag flags,
+    bool approvals_skipped, const PermissionStore::Grants& grants);
 bool has_custom_permissions(const PermissionView& view);
 ftxui::Element render_permissions_box(const PermissionView& view);
 ftxui::Element render_update_available(std::string version);

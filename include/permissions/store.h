@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <filesystem>
 #include <memory>
 #include <mutex>
@@ -46,10 +47,20 @@ public:
     [[nodiscard]] Signal<>::Subscription subscribe_to_grants_change(
         Signal<>::Callback callback);
 
+    // Live approval-skipping switch shared by every session on this
+    // store (main, children, sidechat). Set once from
+    // --skip-permissions at startup, flipped at runtime by /auto.
+    bool skip_permissions() const;
+    void set_skip_permissions(bool skip);
+    [[nodiscard]] Signal<>::Subscription subscribe_to_skip_change(
+        Signal<>::Callback callback);
+
 private:
     mutable std::mutex _mutex;
     Snapshot _grants;
+    std::atomic<bool> _skip_permissions { false };
     Signal<> _changed;
+    Signal<> _skip_changed;
 };
 
 // True when `stored` already authorizes everything `requested` covers:

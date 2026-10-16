@@ -218,6 +218,42 @@ TEST_CASE("permission store publishes only effective grant changes")
     CHECK(changes == 2);
 }
 
+TEST_CASE("permission store exposes the live approval-skipping switch")
+{
+    PermissionStore store;
+    CHECK_FALSE(store.skip_permissions());
+
+    bool notified = false;
+    const auto subscription
+        = store.subscribe_to_skip_change([&] { notified = true; });
+
+    store.set_skip_permissions(true);
+    CHECK(store.skip_permissions());
+    CHECK(notified);
+
+    notified = false;
+    store.set_skip_permissions(true);
+    CHECK_FALSE(notified);
+
+    store.set_skip_permissions(false);
+    CHECK_FALSE(store.skip_permissions());
+    CHECK(notified);
+}
+
+TEST_CASE("approval skipping is shared with children and the sidechat")
+{
+    auto parent = imza::test::make_test_state();
+    parent->permissions->set_skip_permissions(true);
+    auto child = imza::make_child_application_state(
+        *parent, imza::test::run_immediately);
+    auto sidechat = imza::make_sidechat_application_state(*parent);
+    CHECK(parent->permissions == child->permissions);
+    CHECK(parent->permissions == sidechat->permissions);
+    CHECK(child->permissions->skip_permissions());
+    sidechat->permissions->set_skip_permissions(false);
+    CHECK_FALSE(parent->permissions->skip_permissions());
+}
+
 TEST_CASE("runtime shell grants match subcommands and whole programs")
 {
     PermissionStore store;

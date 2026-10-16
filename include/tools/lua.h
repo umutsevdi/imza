@@ -104,7 +104,10 @@ struct LuaHost {
     bool web_enabled      = false;
     bool shell_enabled    = false;
     bool mcp_enabled      = false;
-    bool skip_permissions = false;
+    // Live approval-skipping switch; read at each gated call so a
+    // runtime /auto toggle reaches the sandbox without a restart. Empty
+    // means false (tests).
+    std::function<bool()> skip_permissions;
     bool unattended       = false;
 };
 

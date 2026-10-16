@@ -94,6 +94,14 @@ public:
                               [] { animation::RequestAnimationFrame(); });
                       }
                   }))
+        , _skip_subscription(
+              _state->permissions->subscribe_to_skip_change(
+                  [state = std::weak_ptr<ApplicationState>(_state)] {
+                      if (const auto current = state.lock()) {
+                          current->post(
+                              [] { animation::RequestAnimationFrame(); });
+                      }
+                  }))
         , _update_subscription(_state->environment->subscribe_to_update_change(
               [state = std::weak_ptr<ApplicationState>(_state)] {
                   if (const auto current = state.lock()) {
@@ -163,8 +171,9 @@ public:
             if (_sidebar.permissions) {
                 const PermissionStore::Snapshot grants
                     = _state->permissions->snapshot();
-                PermissionView permissions
-                    = make_permission_view(_state->runtime_flags, *grants);
+                PermissionView permissions = make_permission_view(
+                    _state->runtime_flags,
+                    _state->permissions->skip_permissions(), *grants);
                 if (has_custom_permissions(permissions)) {
                     parts.push_back(render_permissions_box(permissions));
                 }
@@ -343,6 +352,7 @@ private:
     Signal<>::Subscription _attachments_subscription;
     Signal<>::Subscription _review_subscription;
     Signal<>::Subscription _permission_subscription;
+    Signal<>::Subscription _skip_subscription;
     Signal<>::Subscription _update_subscription;
     Signal<>::Subscription _documents_subscription;
     Component _links_container;
@@ -487,14 +497,13 @@ Element render_context_box(const std::optional<std::string>& rules,
     return vbox();
 }
 
-PermissionView make_permission_view(
-    RuntimeFlag flags, const PermissionStore::Grants& grants)
+PermissionView make_permission_view(RuntimeFlag flags,
+    bool approvals_skipped, const PermissionStore::Grants& grants)
 {
     PermissionView view;
     view.web_disabled   = (flags & RuntimeFlag::WEB) == RuntimeFlag::NONE;
     view.shell_disabled = (flags & RuntimeFlag::SHELL) == RuntimeFlag::NONE;
-    view.approvals_skipped
-        = (flags & RuntimeFlag::SKIP_PERMISSIONS) != RuntimeFlag::NONE;
+    view.approvals_skipped = approvals_skipped;
 
     for (const PermissionGrant& grant : grants) {
         if (const auto* directory = std::get_if<ExternalGrant>(&grant)) {
