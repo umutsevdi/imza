@@ -310,4 +310,32 @@ TEST_CASE("skill registry reports search failures without throwing")
     CHECK(registry.snapshot().results.empty());
 }
 
+TEST_CASE("removing a skill outside the install root is refused")
+{
+    imza::test::TempDir root;
+    imza::test::TempDir elsewhere;
+    imza::SkillRegistryHooks hooks;
+    hooks.install_root = root.path;
+    imza::SkillRegistry registry(std::move(hooks));
+
+    imza::test::write_file(elsewhere.path / "imza-docs" / "SKILL.md", "docs");
+    registry.remove_path(elsewhere.path / "imza-docs" / "SKILL.md");
+    CHECK(std::filesystem::is_regular_file(
+        elsewhere.path / "imza-docs" / "SKILL.md"));
+
+    bool settled = false;
+    for (int i = 0; i < 500 && !settled; ++i) {
+        const auto snap = registry.snapshot();
+        if (snap.phase == imza::SkillRegistry::Phase::IDLE
+            && !snap.status.empty()) {
+            settled = true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    REQUIRE(settled);
+    CHECK_FALSE(registry.snapshot().status_ok);
+    CHECK(registry.snapshot().status.find("cannot be removed")
+        != std::string::npos);
+}
+
 } // namespace

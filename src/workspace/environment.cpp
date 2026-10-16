@@ -2,6 +2,7 @@
 
 #include "common/util.h"
 #include "platform/command_runner.h"
+#include "platform/config.h"
 #include "platform/json_file.h"
 #include "platform/update.h"
 
@@ -150,11 +151,24 @@ namespace {
 #endif
     }
 
+    // Reads the scalar after `description:` in YAML front matter. Skills
+    // in the wild use folded (`>`) and literal (`|`) block scalars, so
+    // their indented continuation lines fold into one line.
     std::string skill_description(const std::filesystem::path& path)
     {
         std::ifstream in(path);
         std::string line;
         bool frontmatter = false;
+        enum class State { NONE, BLOCK };
+        State state      = State::NONE;
+        int block_indent = 0;
+        std::string value;
+        const auto strip_quotes = [](std::string text) {
+            if (text.size() >= 2 && text.front() == '"' && text.back() == '"') {
+                return text.substr(1, text.size() - 2);
+            }
+            return text;
+        };
         while (std::getline(in, line)) {
             if (line == "---") {
                 if (frontmatter) {
@@ -163,22 +177,55 @@ namespace {
                 frontmatter = true;
                 continue;
             }
-            if (frontmatter && line.starts_with("description:")) {
-                std::string value
-                    = std::string(trim(std::string_view(line).substr(12)));
-                if (value.size() >= 2 && value.front() == '"'
-                    && value.back() == '"') {
-                    value = value.substr(1, value.size() - 2);
+            if (!frontmatter) {
+                continue;
+            }
+            if (state == State::BLOCK) {
+                if (line == "---") {
+                    break;
                 }
-                return value;
+                const auto text = trim(std::string_view(line));
+                if (text.empty()) {
+                    if (!value.empty()) {
+                        value += ' ';
+                    }
+                    continue;
+                }
+                const int indent
+                    = static_cast<int>(line.find_first_not_of(' '));
+                // The first non-empty line fixes the block's indent.
+                if (block_indent < 0) {
+                    block_indent = indent;
+                }
+                if (indent < block_indent) {
+                    state = State::NONE;
+                } else {
+                    if (!value.empty()) {
+                        value += ' ';
+                    }
+                    value += text;
+                }
+                continue;
+            }
+            if (line.starts_with("description:")) {
+                const auto rest = trim(std::string_view(line).substr(12));
+                if (rest == ">" || rest == "|" || rest == ">-" || rest == "|-"
+                    || rest == ">+" || rest == "|+") {
+                    state        = State::BLOCK;
+                    block_indent = -1; // fixed by the first body line
+                    value.clear();
+                    continue;
+                }
+                value = strip_quotes(std::string(rest));
+                break;
             }
         }
-        return { };
+        return value;
     }
 
     void add_skills(const std::filesystem::path& directory, Skill::Scope scope,
         const std::optional<std::filesystem::path>& root,
-        std::unordered_map<std::string, Skill>& skills)
+        std::unordered_map<std::string, Skill>& skills, bool bundled = false)
     {
         std::error_code ec;
         if (!std::filesystem::is_directory(directory, ec)) {
@@ -193,7 +240,8 @@ namespace {
             }
             const std::string name = it->path().filename().string();
             skills.emplace(name,
-                Skill { name, skill_description(file), file, scope, root });
+                Skill { name, skill_description(file), file, scope, root,
+                    bundled });
         }
     }
 
@@ -229,6 +277,10 @@ namespace {
         }
         add_skills(global_skills_directory(), Skill::Scope::GLOBAL,
             std::nullopt, global_skills);
+        // Skills shipped in the install layout; emplace keeps any
+        // same-named user skill discovered above.
+        add_skills(bundled_skills_directory(), Skill::Scope::GLOBAL,
+            std::nullopt, global_skills, true);
     }
 
     void detect_project_skills(const std::filesystem::path& root,

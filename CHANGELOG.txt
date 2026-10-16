@@ -11,9 +11,13 @@ CHANGELOG
 0.6.4 - UNRELEASED
 -------------------------------------------------------------------------------
 Changes:
-  - The sidebar Context widget now lists loaded skills by name with a
-    loaded/total count, and one MCP server and file per line, matching
-    the Permissions widget's layout.
+  - Imza now ships its own documentation as a bundled `imza-docs` skill; the
+    agent can answer questions about Imza itself, and the skill is always
+    allowed and cannot be removed.
+  - New /auto command lets you turn permission approvals on or off while
+    the app is running; the input box changes color while approvals are
+    skipped.
+  - Updated sidebar widgets.
   - Subscription sign-in refresh can no longer freeze the app when the
     token service stalls, and the Review tab no longer keeps a background
     worker alive after it closes.

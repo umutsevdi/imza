@@ -271,6 +271,25 @@ void SkillRegistry::install(const RemoteSkill& skill)
 
 void SkillRegistry::remove_path(std::filesystem::path skill_md_path)
 {
+    // Only skills under the install root are user-managed; bundled skills
+    // and anything outside are refused before touching the registry.
+    std::error_code ec;
+    const std::filesystem::path canonical
+        = std::filesystem::weakly_canonical(skill_md_path, ec);
+    const std::filesystem::path canonical_root
+        = std::filesystem::weakly_canonical(_hooks.install_root, ec);
+    if (ec || _hooks.install_root.empty()
+        || !path_within(canonical_root, canonical)) {
+        {
+            std::lock_guard lock(_mutex);
+            _snapshot.phase = Phase::IDLE;
+            _snapshot.active.clear();
+            _snapshot.status    = "This skill cannot be removed.";
+            _snapshot.status_ok = false;
+        }
+        _changed.publish();
+        return;
+    }
     if (_running.exchange(true)) {
         return;
     }

@@ -16,6 +16,8 @@ struct Skill {
     std::filesystem::path path;
     Scope scope = Scope::GLOBAL;
     std::optional<std::filesystem::path> project_root;
+    // Shipped with the application: always allowed, never removable.
+    bool bundled = false;
 };
 
 } // namespace imza

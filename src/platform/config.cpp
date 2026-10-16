@@ -66,6 +66,25 @@ namespace {
     }
 } // namespace
 
+std::filesystem::path bundled_skills_directory()
+{
+    // Override for tests and portable installations.
+    if (const char* override_dir = std::getenv("IMZA_BUNDLED_SKILLS");
+        override_dir && *override_dir) {
+        return { override_dir };
+    }
+#if defined(_WIN32)
+    const std::filesystem::path executable = current_executable_path();
+    if (executable.empty()) {
+        return { };
+    }
+    return executable.parent_path() / "skills";
+#else
+    return std::filesystem::path { IMZA_INSTALL_PREFIX } / IMZA_INSTALL_DOCDIR
+        / "skills";
+#endif
+}
+
 std::optional<std::string> read_changelog()
 {
     const std::filesystem::path path = changelog_path();

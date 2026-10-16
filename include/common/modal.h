@@ -95,6 +95,8 @@ struct SkillsModal {
         std::string description;
         std::string project_root;
         SkillPolicy policy = SkillPolicy::ASK;
+        // Shipped with the application: no policy chip, not removable.
+        bool bundled = false;
 
         bool operator==(const Entry&) const = default;
     };

@@ -196,4 +196,9 @@ inline std::filesystem::path update_state_path()
 inline std::filesystem::path prompts_dir() { return data_dir() / "prompts"; }
 std::optional<std::string> read_changelog(void);
 
+// Read-only resources shipped with the application: the bundled skills
+// tree (e.g. the imza-docs skill) lives beside the changelog in the
+// install layout. Empty when the executable path cannot be resolved.
+std::filesystem::path bundled_skills_directory(void);
+
 } // namespace imza

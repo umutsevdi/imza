@@ -874,6 +874,40 @@ TEST_CASE("skill policy and runtime grants use the same central evaluator")
         == PermissionDecision::Kind::REJECT);
 }
 
+TEST_CASE("bundled skills are always allowed and deny policy cannot hide them")
+{
+    PermissionFixture fixture;
+    const auto path = fixture.outside / "SKILL.md";
+    {
+        std::ofstream file(path);
+        file << "Use the documented workflow.";
+    }
+    const Skill skill { "imza-docs", "Bundled manual", path,
+        Skill::Scope::GLOBAL, std::nullopt, true };
+    const std::vector<Skill> skills { skill };
+    SkillStore loaded;
+    Config config;
+    const ToolCallRequest request { "skill", R"({"name":"imza-docs"})", "",
+        "" };
+
+    config.global_skills["imza-docs"] = SkillPolicy::DENY;
+    auto evaluation                   = evaluate_tool_request(
+        request, fixture.context(Session::Mode::PLAN), config, skills, loaded);
+    CHECK(evaluation.decision.kind == PermissionDecision::Kind::ACCEPT);
+
+    // Bundled skill bodies are application content: reads inside the
+    // skill directory never prompt, even without a session grant.
+    loaded.clear();
+    std::string load_error;
+    REQUIRE(loaded.load(skill, load_error));
+    const auto skill_directories = loaded.loaded_directories();
+    REQUIRE_FALSE(skill_directories.empty());
+    const PermissionContext context
+        = fixture.context(Session::Mode::PLAN, { }, skill_directories);
+    const auto read = evaluate_filesystem_request(read_request(path), context);
+    CHECK(read.decision.kind == PermissionDecision::Kind::ACCEPT);
+}
+
 TEST_CASE("authorized_skill_path accepts only the canonical target")
 {
     PermissionFixture fixture;

@@ -60,6 +60,9 @@ CliResult run_cli(int argc, char** argv);
 PermissionContext permission_context_for(
     ApplicationState& state, Session::Mode mode);
 std::string format_session_list(const std::vector<SavedSession>& sessions);
+// The current skill catalogue as the skills modal renders it, bundled
+// entries flagged.
+SkillsModal skills_modal(const ApplicationState& state);
 RuntimeFlag runtime_flags_for(const CliResult& result);
 OneShotResult run_one_shot(ApplicationState& state,
     MainThreadQueue& main_thread, const OneShotRequest& request);

@@ -372,4 +372,70 @@ TEST_CASE("configured instructions load outside a project root")
     CHECK(workspace.extra_instructions[0].content == "loose notes");
 }
 
+TEST_CASE("skill descriptions fold block scalars into one line")
+{
+    imza::test::IsolatedConfigHome home;
+    // Parser shapes: inline, quoted, folded (>), literal (|).
+    const std::vector<std::pair<std::string, std::string>> cases {
+        { "inline", "---\ndescription: plain line\n---\n\nBody.\n" },
+        { "quoted", "---\ndescription: \"quoted text\"\n---\n\nBody.\n" },
+        { "folded",
+            "---\ndescription: >\n  first part\n  second "
+            "part\n---\n\nBody.\n" },
+        { "literal",
+            "---\ndescription: |\n  literal one\n  literal "
+            "two\n---\n\nBody.\n" },
+    };
+    for (const auto& [name, content] : cases) {
+        imza::test::write_file(
+            home.root() / "agents" / "skills" / name / "SKILL.md", content);
+    }
+
+    imza::Environment env;
+    REQUIRE(wait_until_ready(env));
+    const auto system = env.system();
+    REQUIRE(system != nullptr);
+    CHECK(system->global_skills.at("inline").description == "plain line");
+    CHECK(system->global_skills.at("quoted").description == "quoted text");
+    CHECK(system->global_skills.at("folded").description
+        == "first part second part");
+    CHECK(system->global_skills.at("literal").description
+        == "literal one literal two");
+}
+
+TEST_CASE("bundled skills are discovered and flagged")
+{
+    // Point the bundled root at a scratch directory; RAII restores the
+    // environment variable so later tests are unaffected.
+    const imza::test::TempDir bundled_root;
+    const std::string previous = [] {
+        if (const char* value = std::getenv("IMZA_BUNDLED_SKILLS")) {
+            return std::string(value);
+        }
+        return std::string { };
+    }();
+    const bool had_previous = !previous.empty();
+    ::setenv("IMZA_BUNDLED_SKILLS", bundled_root.path.string().c_str(), 1);
+    const auto restore = [&] {
+        if (had_previous) {
+            ::setenv("IMZA_BUNDLED_SKILLS", previous.c_str(), 1);
+        } else {
+            ::unsetenv("IMZA_BUNDLED_SKILLS");
+        }
+    };
+
+    imza::test::write_file(bundled_root.path / "imza-docs" / "SKILL.md",
+        "---\ndescription: bundled manual\n---\n\nDocs body.\n");
+
+    imza::Environment env;
+    REQUIRE(wait_until_ready(env));
+    const auto system = env.system();
+    REQUIRE(system != nullptr);
+    const auto it = system->global_skills.find("imza-docs");
+    REQUIRE(it != system->global_skills.end());
+    CHECK(it->second.bundled);
+    CHECK_FALSE(it->second.path.empty());
+    restore();
+}
+
 } // namespace

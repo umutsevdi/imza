@@ -78,6 +78,12 @@ Source: "{#Source}\misc\imza.ico"; DestDir: "{app}"
 Source: "{#Source}\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"
 Source: "{#Source}\CHANGELOG.txt"; DestDir: "{app}"
 Source: "{#Source}\README.md"; DestDir: "{app}"; DestName: "README.txt"
+; The bundled docs skill. The cmake step materializes wiki-snapshot in
+; the build directory (cloning imza.wiki when the checkout lacks it).
+#if FileExists(Build + "\wiki-snapshot\Home.md")
+Source: "{#Source}\misc\docs-skill\SKILL.md"; DestDir: "{app}\skills\imza-docs"; Flags: recursesubdir
+Source: "{#Build}\wiki-snapshot\*.md"; DestDir: "{app}\skills\imza-docs\wiki"; Flags: recursesubdir
+#endif
 
 [Icons]
 Name: "{autoprograms}\{#imzaName}"; Filename: "{app}\{#imzaExe}"

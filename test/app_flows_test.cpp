@@ -24,6 +24,46 @@ using imza::test::CurrentDirectory;
 
 } // namespace
 
+TEST_CASE("skills modal marks bundled skills and skips their policies")
+{
+    // The bundled root must exist before the environment scan runs.
+    imza::test::TempDir bundled_root;
+    imza::test::write_file(bundled_root.path / "imza-docs" / "SKILL.md",
+        "---\ndescription: bundled manual\n---\n\nDocs body.\n");
+    ::setenv("IMZA_BUNDLED_SKILLS", bundled_root.path.string().c_str(), 1);
+
+    DataHome home;
+    auto state = imza::test::make_test_state();
+    imza::test::wait_for_environment(*state);
+
+    const imza::SkillsModal modal = imza::skills_modal(*state);
+    bool saw_bundled              = false;
+    for (const auto& entry : modal.entries) {
+        if (entry.name == "imza-docs") {
+            saw_bundled = true;
+            REQUIRE(entry.bundled);
+            CHECK(entry.policy == imza::SkillPolicy::ALLOW);
+        } else {
+            CHECK_FALSE(entry.bundled);
+        }
+    }
+    REQUIRE(saw_bundled);
+
+    // Simulating the modal's persist: bundled entries are excluded, and a
+    // deny policy set for another skill never lands on the bundled one.
+    imza::SkillPolicyChanges changes;
+    for (const auto& entry : modal.entries) {
+        if (!entry.bundled) {
+            changes.entries.push_back(
+                { entry.name, entry.project_root, entry.policy });
+        }
+    }
+    CHECK(state->providers->set_skill_policies(changes));
+    const imza::Config config = state->providers->config();
+    CHECK(config.global_skills.find("imza-docs") == config.global_skills.end());
+    ::unsetenv("IMZA_BUNDLED_SKILLS");
+}
+
 TEST_CASE("CLI session list aligns columns without terminal tabs")
 {
     const std::vector<imza::SavedSession> sessions {

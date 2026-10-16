@@ -202,22 +202,6 @@ namespace {
 
     SessionsModal sessions_modal() { return { }; }
 
-    SkillsModal skills_modal(const ApplicationState& state)
-    {
-        SkillsModal modal;
-        const std::vector<Skill> catalog = state.environment->skills();
-        const Config config              = state.providers->config();
-        for (const Skill& skill : catalog) {
-            const std::string root
-                = skill.scope == Skill::Scope::PROJECT && skill.project_root
-                ? skill.project_root->string()
-                : std::string { };
-            modal.entries.push_back({ skill.name, skill.description, root,
-                skill_policy(config, skill) });
-        }
-        return modal;
-    }
-
     void prefix_label(ModalPayload& payload, const std::string& agent_label)
     {
         if (agent_label.empty()) {
@@ -320,6 +304,22 @@ namespace {
     }
 
 } // namespace
+
+SkillsModal skills_modal(const ApplicationState& state)
+{
+    SkillsModal modal;
+    const std::vector<Skill> catalog = state.environment->skills();
+    const Config config              = state.providers->config();
+    for (const Skill& skill : catalog) {
+        const std::string root
+            = skill.scope == Skill::Scope::PROJECT && skill.project_root
+            ? skill.project_root->string()
+            : std::string { };
+        modal.entries.push_back({ skill.name, skill.description, root,
+            skill_policy(config, skill), skill.bundled });
+    }
+    return modal;
+}
 
 void submit(ApplicationState& state, std::string text,
     std::vector<Attachment> attachments)

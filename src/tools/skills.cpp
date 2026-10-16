@@ -106,6 +106,11 @@ std::optional<Skill> resolve_skill(
 
 SkillPolicy skill_policy(const Config& config, const Skill& skill)
 {
+    // Bundled skills are part of the application: config policies target
+    // user-installed skills and must not be able to hide or block these.
+    if (skill.bundled) {
+        return SkillPolicy::ALLOW;
+    }
     if (skill.scope == Skill::Scope::GLOBAL) {
         if (auto it = config.global_skills.find(skill.name);
             it != config.global_skills.end()) {

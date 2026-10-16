@@ -28,7 +28,7 @@ namespace {
 
     constexpr int COL_NAME  = 22;
     constexpr int COL_SCOPE = 8;
-    constexpr int COL_DESC  = 26;
+    constexpr int COL_DESC  = 34;
     // Wait this long after the last keystroke before querying skills.sh.
     constexpr auto SEARCH_DEBOUNCE = std::chrono::milliseconds(350);
 
@@ -170,7 +170,8 @@ namespace {
                 _row_move(event == Event::ArrowDown ? 1 : -1);
                 return true;
             }
-            if (event == Event::Delete && !_entries.empty()) {
+            if (event == Event::Delete && !_entries.empty()
+                && !_entries[static_cast<std::size_t>(_row_selected)].bundled) {
                 _confirm[_row_selected] = true;
                 _rebuild_manage();
                 return true;
@@ -235,11 +236,15 @@ namespace {
         }
 
         // Persists the current policy set; the modal applies each change
-        // immediately so Esc can never discard an edit.
+        // immediately so Esc can never discard an edit. Bundled skills are
+        // fixed application content and never get user policies.
         void _persist_policies()
         {
             SkillPolicyChanges changes;
             for (const auto& entry : _entries) {
+                if (entry.bundled) {
+                    continue;
+                }
                 changes.entries.push_back(
                     { entry.name, entry.project_root, entry.policy });
             }
@@ -285,7 +290,7 @@ namespace {
                     ? skill.project_root->string()
                     : std::string { };
                 fresh.push_back({ skill.name, skill.description, root,
-                    skill_policy(config, skill) });
+                    skill_policy(config, skill), skill.bundled });
             }
             if (fresh == _entries) {
                 return;
@@ -330,19 +335,31 @@ namespace {
                     _rebuild_manage();
                 }));
             } else {
-                controls.push_back(inline_link_button(
-                    [this, index] {
-                        const auto& entry
-                            = _entries[static_cast<std::size_t>(index)];
-                        return text(policy_names()[static_cast<std::size_t>(
-                                        policy_index(entry.policy))]
-                            + " ▾");
-                    },
-                    [this, index] { _open_policy(index); }));
-                controls.push_back(action_button("Remove", [this, index] {
-                    _confirm[index] = true;
-                    _rebuild_manage();
-                }));
+                const bool bundled
+                    = _entries[static_cast<std::size_t>(index)].bundled;
+                if (!bundled) {
+                    controls.push_back(inline_link_button(
+                        [this, index] {
+                            const auto& entry
+                                = _entries[static_cast<std::size_t>(index)];
+                            // Equal chip widths keep the controls column
+                            // aligned across rows with different policies.
+                            std::string name
+                                = policy_names()[static_cast<std::size_t>(
+                                    policy_index(entry.policy))];
+                            name.resize(5, ' ');
+                            return text(name + " ▾");
+                        },
+                        [this, index] { _open_policy(index); }));
+                    controls.push_back(action_button("Remove", [this, index] {
+                        _confirm[index] = true;
+                        _rebuild_manage();
+                    }));
+                } else {
+                    controls.push_back(Renderer([] {
+                        return text("System Skill") | color(PANEL_FG_DIM);
+                    }));
+                }
             }
             Component row = Container::Horizontal(std::move(controls));
             _row_buttons.push_back(row);
