@@ -519,7 +519,12 @@ TYPES)desc";
             out.blocked_permission = run.blocked_permission;
             out.canvases           = std::move(run.canvases);
             for (const FileMutation& m : run.mutations) {
-                if (m.original == m.latest) {
+                // A creation or deletion has one empty side, so the
+                // content comparison would skip it; the kind decides
+                // whether the diff is shown at all.
+                const bool created = m.kind == FileMutation::Kind::ADDED;
+                const bool removed = m.kind == FileMutation::Kind::REMOVED;
+                if (!created && !removed && m.original == m.latest) {
                     continue;
                 }
                 out.diffs.push_back(make_diff_view(

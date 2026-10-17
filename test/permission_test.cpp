@@ -299,6 +299,57 @@ TEST_CASE("shell analysis extracts compound command and subcommand pairs")
         == ShellAnalysis::Reuse::SESSION);
 }
 
+TEST_CASE("launcher unwrapping flattens code into classifiable invocations")
+{
+    const auto invocation = [](std::string_view command) {
+        return analyze_shell(command).invocations.front();
+    };
+
+    const ShellAnalysis single = analyze_shell("bash -c 'ls'");
+    REQUIRE(single.invocations.size() == 1);
+    CHECK(single.invocations[0].program == "ls");
+    CHECK_FALSE(single.invocations[0].unresolvable);
+
+    const ShellAnalysis piped = analyze_shell("bash -c 'ls | grep x'");
+    CHECK(piped.invocations.size() == 2);
+
+    const ShellAnalysis deleted = analyze_shell("bash -c 'rm -rf build'");
+    REQUIRE(deleted.invocations.size() == 1);
+    CHECK(deleted.invocations[0].program == "rm");
+
+    CHECK(invocation("env FOO=bar ls").program == "ls");
+    CHECK(invocation("sudo ls").program == "ls");
+    CHECK(invocation("sudo -u root ls").program == "ls");
+    CHECK(invocation("env FOO=bar rm -rf x").program == "rm");
+
+    CHECK(invocation("cmd /c \"dir\"").program == "dir");
+    CHECK(invocation("powershell -c \"Get-ChildItem\"").program
+        == "Get-ChildItem");
+
+    CHECK(invocation("bash script.sh").unresolvable);
+    CHECK(invocation("python3 -c 'print(1)'").unresolvable);
+    CHECK(invocation("awk 'BEGIN{system(\"ls\")}'").unresolvable);
+    CHECK(invocation("bash").unresolvable);
+}
+
+TEST_CASE("launcher programs are never grantable")
+{
+    for (std::string_view program : { "bash", "sh", "zsh", "dash", "cmd",
+             "cmd.exe", "powershell", "pwsh", "env", "sudo", "xargs", "nice",
+             "nohup", "time", "stdbuf", "command", "exec", "python", "python3",
+             "perl", "ruby", "node", "php", "lua", "awk", "gawk" }) {
+        CHECK(shell_launcher_denied(program));
+    }
+    CHECK_FALSE(shell_launcher_denied("ls"));
+    CHECK_FALSE(shell_launcher_denied("git"));
+    CHECK_FALSE(shell_launcher_denied("cmake"));
+
+    PermissionStore store;
+    CHECK_FALSE(store.install({ ShellCommandGrant { "bash", std::nullopt } }));
+    CHECK_FALSE(store.install({ ShellCommandGrant { "env", "ls" } }));
+    CHECK(store.snapshot()->empty());
+}
+
 TEST_CASE("read-only command pair catalog is platform specific")
 {
     const auto invocation = [](std::string_view command) {
@@ -801,6 +852,40 @@ TEST_CASE("shell policy rejects an empty command")
     PermissionFixture fixture;
     const auto empty = shell_policy("", fixture.context(Session::Mode::BUILD));
     CHECK(empty.decision.kind == PermissionDecision::Kind::REJECT);
+}
+
+TEST_CASE("launcher wrapping cannot bypass the shell rules")
+{
+    PermissionFixture fixture;
+    const auto evaluate = [&](std::string command) {
+        return shell_policy(
+            std::move(command), fixture.context(Session::Mode::BUILD));
+    };
+
+    const ShellEvaluation deleted = evaluate("bash -c 'rm -rf build'");
+    CHECK(deleted.decision.kind == PermissionDecision::Kind::REJECT);
+    CHECK(deleted.decision.reason.find("imza.fs.remove") != std::string::npos);
+
+    const ShellEvaluation prefixed = evaluate("env FOO=bar rm -rf build");
+    CHECK(prefixed.decision.kind == PermissionDecision::Kind::REJECT);
+
+    CHECK(evaluate("bash -c 'ls'").decision.kind
+        == PermissionDecision::Kind::ACCEPT);
+    CHECK(evaluate("bash -c 'git status'").decision.kind
+        == PermissionDecision::Kind::ACCEPT);
+    CHECK(evaluate("env FOO=bar ls").decision.kind
+        == PermissionDecision::Kind::ACCEPT);
+    CHECK(
+        evaluate("sudo ls").decision.kind == PermissionDecision::Kind::ACCEPT);
+
+    // Unreadable code asks once and carries no grant, so approval cannot
+    // become a reusable bypass.
+    for (std::string_view command : { "python3 -c 'print(1)'", "bash script.sh",
+             "awk 'BEGIN{system(\"ls\")}'" }) {
+        const ShellEvaluation result = evaluate(std::string(command));
+        CHECK(result.decision.kind == PermissionDecision::Kind::ASK);
+        CHECK(result.session_grants.empty());
+    }
 }
 
 TEST_CASE("skill policy and runtime grants use the same central evaluator")

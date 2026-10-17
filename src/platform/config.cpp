@@ -1,6 +1,7 @@
 #include "platform/config.h"
 
 #include "network/web.h"
+#include "permissions/shell_analysis.h"
 #include "platform/file_lock.h"
 #include "platform/json_file.h"
 #include "protocols/mcp_oauth.h"
@@ -545,6 +546,13 @@ Status load_config(
                     return fail(Status::CONFIG_ERROR,
                         "'allow.commands' entry requires a non-empty"
                         " 'program'");
+                }
+                if (shell_deletion_denied(grant.program)
+                    || shell_launcher_denied(grant.program)) {
+                    return fail(Status::CONFIG_ERROR,
+                        "'allow.commands' entry for '" + grant.program
+                            + "' cannot be granted: it runs code that cannot "
+                              "be inspected");
                 }
                 if (entry.subcommand.has_value()) {
                     if (entry.subcommand->empty()) {

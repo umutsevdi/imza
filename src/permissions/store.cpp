@@ -5,6 +5,7 @@
 #include <type_traits>
 
 #include "common/util.h"
+#include "permissions/shell_analysis.h"
 
 namespace imza {
 
@@ -24,8 +25,14 @@ namespace {
                     return !error && std::filesystem::is_directory(value, error)
                         && !error;
                 } else if constexpr (std::is_same_v<T, ShellCommandGrant>) {
+                    // A launcher grant would authorize every command the
+                    // program can run, so it is refused at the store: the
+                    // analyzer unwraps launchers into classifiable
+                    // invocations, and none of them should ever be one.
                     return !value.program.empty()
-                        && (!value.subcommand || !value.subcommand->empty());
+                        && (!value.subcommand || !value.subcommand->empty())
+                        && !shell_deletion_denied(value.program)
+                        && !shell_launcher_denied(value.program);
                 } else if constexpr (std::is_same_v<T, McpGrant>) {
                     return !value.server_id.empty();
                 } else if constexpr (std::is_same_v<T, SkillGrant>) {

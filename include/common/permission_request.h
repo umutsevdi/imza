@@ -78,9 +78,20 @@ struct RemoveRequest {
     bool operator==(const RemoveRequest&) const = default;
 };
 
+// Copies or moves a regular file to a new path. Write-class on the
+// destination; the source is only read. `target` is the destination so
+// the shared path checks and the session grant apply where the effect
+// lands.
+struct CopyFileRequest {
+    std::filesystem::path source;
+    std::filesystem::path target;
+
+    bool operator==(const CopyFileRequest&) const = default;
+};
+
 using FilesystemRequest = std::variant<ReadFileRequest, ListDirectoryRequest,
     FindFilesRequest, InsertFileRequest, EditFileRequest, WriteFileRequest,
-    MakeDirectoryRequest, RemoveRequest>;
+    MakeDirectoryRequest, RemoveRequest, CopyFileRequest>;
 
 struct ShellRequest {
     std::string command;

@@ -3,7 +3,7 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 project(
     imza
-    VERSION 0.6.3
+    VERSION 0.6.4
     HOMEPAGE_URL "https://imza.run"
     LANGUAGES C CXX
 )
@@ -265,6 +265,7 @@ add_library(imza_foundation
     src/providers/catalog.cpp
     src/providers/pricing.cpp
     src/providers/subscriptions.cpp
+    src/workspace/files.cpp
     src/workspace/git.cpp
 )
 target_include_directories(imza_foundation PRIVATE

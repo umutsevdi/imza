@@ -62,6 +62,25 @@ bool save_text(
     return true;
 }
 
+bool transfer_file(const std::string& source, const std::string& target,
+    bool move, std::string& err)
+{
+    // Copy-then-remove for a move: a failure at any point leaves the
+    // original in place rather than losing it to a half-completed rename
+    // across filesystems.
+    std::string content;
+    if (!load_text(source, content, err)) {
+        return false;
+    }
+    if (!save_text(target, content, err)) {
+        return false;
+    }
+    if (move && !remove_path(source, err)) {
+        return false;
+    }
+    return true;
+}
+
 bool make_directories(const std::string& path, std::string& err)
 {
     std::error_code ec;

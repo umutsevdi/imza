@@ -8,12 +8,10 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
-0.6.4 - UNRELEASED
+0.6.4 - 2026-10-17
 -------------------------------------------------------------------------------
 Changes:
-  - On Windows, one-shot answers (--ask/--exec) now print as formatted
-    output that fits your terminal, and --update shows a live progress
-    display; output piped to files or other programs stays plain text.
+  - Fixed formatting issues in one-shot answers (--ask/--exec) and --update.
   - Imza now ships its own documentation as a bundled `imza-docs` skill; the
     agent can answer questions about Imza itself, and the skill is always
     allowed and cannot be removed.
@@ -24,6 +22,18 @@ Changes:
   - Subscription sign-in refresh can no longer freeze the app when the
     token service stalls, and the Review tab no longer keeps a background
     worker alive after it closes.
+  - Wrapping a command in `bash -c` (or `sh`, `cmd /c`, `powershell -c`, and
+    similar) no longer sidesteps the shell rules.
+  - Searching with `imza.fs.grep` now skips build output, dependency trees,
+    and version-control internals, and reads each file once — searching a
+    whole project finishes quickly instead of timing out. A path you name
+    explicitly is still searched as given.
+  - Two new bindings round out what used to need a shell: `imza.json` to read
+    and write JSON in Lua, and `imza.fs.copy`/`move` to copy or move a file
+    through the permission gate.
+  - Copying, moving, and deleting a file now show up in the diff view, so a
+    deletion reads as a deletion and a new file as a new file instead of
+    happening invisibly.
 
 -------------------------------------------------------------------------------
 0.6.3 - 2026-10-15

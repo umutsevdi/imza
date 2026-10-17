@@ -68,6 +68,20 @@ ShellEvaluation evaluate_shell_request(
         return { { PermissionDecision::Kind::REJECT, std::move(guidance) },
             std::move(request), { } };
     }
+    // An unresolvable launcher carries code the analyzer cannot read, so
+    // there is nothing to classify or to bind a grant to: it asks once and
+    // installs no session grant.
+    for (const ShellInvocation& invocation : analysis.invocations) {
+        if (!invocation.unresolvable) {
+            continue;
+        }
+        return { { PermissionDecision::Kind::ASK,
+                     "'" + invocation.program
+                         + "' runs code that cannot be inspected; this "
+                           "execution requires approval and cannot be "
+                           "granted for the session" },
+            std::move(request), { } };
+    }
     if (analysis.reuse == ShellAnalysis::Reuse::ONCE) {
         return { { PermissionDecision::Kind::ASK,
                      "shell syntax requires approval for each execution" },
@@ -78,6 +92,12 @@ ShellEvaluation evaluate_shell_request(
     for (const ShellInvocation& invocation : analysis.invocations) {
         if (shell_builtin_allowed(invocation.program)
             || shell_readonly_allowed(invocation)) {
+            continue;
+        }
+        // A launcher name never becomes a grant candidate: unwrapping
+        // already replaced the readable ones, and the rest took the
+        // unresolvable path above.
+        if (shell_launcher_denied(invocation.program)) {
             continue;
         }
         const ShellCommandGrant requested { invocation.program,

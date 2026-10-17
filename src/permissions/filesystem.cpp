@@ -74,6 +74,11 @@ namespace {
         return std::holds_alternative<RemoveRequest>(request);
     }
 
+    bool is_copy(const FilesystemRequest& request)
+    {
+        return std::holds_alternative<CopyFileRequest>(request);
+    }
+
     void set_target(FilesystemRequest& request, std::filesystem::path target)
     {
         std::visit(
@@ -118,6 +123,8 @@ std::string_view filesystem_request_name(const FilesystemRequest& request)
                 return "mkdir";
             } else if constexpr (std::is_same_v<T, RemoveRequest>) {
                 return "remove";
+            } else if constexpr (std::is_same_v<T, CopyFileRequest>) {
+                return "copy";
             } else {
                 return "write";
             }
@@ -133,7 +140,7 @@ FilesystemEvaluation evaluate_filesystem_request(
     }
     if (context.mode == SessionMode::PLAN
         && (is_edit(request) || is_write(request) || is_mkdir(request)
-            || is_remove(request))) {
+            || is_remove(request) || is_copy(request))) {
         return reject("unavailable in Plan mode");
     }
 
@@ -169,7 +176,25 @@ FilesystemEvaluation evaluate_filesystem_request(
                 && !std::filesystem::is_regular_file(target, error)))) {
         return reject("target is not a file or directory");
     }
-    if (is_write(request)) {
+    if (is_copy(request)) {
+        // The source must be an existing regular file; the destination
+        // follows the write rules below, since that is where the effect
+        // lands and what a session grant covers.
+        const CopyFileRequest& copy  = std::get<CopyFileRequest>(request);
+        std::filesystem::path source = copy.source;
+        if (source.is_relative()) {
+            source = working_directory / source;
+        }
+        source = std::filesystem::weakly_canonical(source, error);
+        if (error || source.empty()) {
+            return reject(CANNOT_INSPECT_TARGET);
+        }
+        if (!std::filesystem::exists(source, error)
+            || !std::filesystem::is_regular_file(source, error)) {
+            return reject("source is not a file");
+        }
+    }
+    if (is_write(request) || is_copy(request)) {
         if (exists && !std::filesystem::is_regular_file(target, error)) {
             return reject("target is not a file");
         }
@@ -265,7 +290,7 @@ FilesystemEvaluation evaluate_filesystem_request(
     // Approving a skill implies reading the files its instructions
     // reference; mutation there still needs its own approval.
     if (!is_edit(request) && !is_write(request) && !is_mkdir(request)
-        && !is_remove(request)) {
+        && !is_remove(request) && !is_copy(request)) {
         for (const std::filesystem::path& directory :
             context.skill_directories) {
             if (path_within(directory, target)) {
@@ -274,8 +299,8 @@ FilesystemEvaluation evaluate_filesystem_request(
         }
     }
 
-    const bool write
-        = is_edit(request) || is_write(request) || is_mkdir(request);
+    const bool write = is_edit(request) || is_write(request)
+        || is_mkdir(request) || is_copy(request);
     const bool granted = matches_path(*context.grants, target);
     const std::filesystem::path& project_root = context.workspace->project_root
         ? *context.workspace->project_root

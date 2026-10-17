@@ -2,6 +2,8 @@
 
 #include "common/modal.h"
 #include "common/util.h"
+#include "network/json.h"
+#include "network/json_io.h"
 #include "permissions/shell.h"
 #include "permissions/shell_analysis.h"
 #include "platform/command_runner.h"
@@ -23,6 +25,87 @@ namespace imza {
 namespace {
 
     namespace fs = std::filesystem;
+
+    // Bounds for json.decode: a deeply nested or huge document decodes to
+    // nil rather than exhausting the VM.
+    constexpr int MAX_JSON_NODES = 100000;
+    constexpr int MAX_JSON_DEPTH = 64;
+
+    void push_json_value(
+        lua_State* L, const JsonValue& value, int depth, int& nodes)
+    {
+        if (++nodes > MAX_JSON_NODES) {
+            lua_pushnil(L);
+            return;
+        }
+        if (value.is_object()) {
+            if (depth >= MAX_JSON_DEPTH) {
+                lua_pushnil(L);
+                return;
+            }
+            lua_newtable(L);
+            for (const auto& [key, child] : value.get<JsonValue::object_t>()) {
+                push_json_value(L, child, depth + 1, nodes);
+                lua_setfield(L, -2, key.c_str());
+            }
+            return;
+        }
+        if (value.is_array()) {
+            if (depth >= MAX_JSON_DEPTH) {
+                lua_pushnil(L);
+                return;
+            }
+            lua_newtable(L);
+            const auto& array = value.get<JsonValue::array_t>();
+            for (std::size_t index = 0; index < array.size(); ++index) {
+                push_json_value(L, array[index], depth + 1, nodes);
+                lua_rawseti(L, -2, static_cast<lua_Integer>(index + 1));
+            }
+            return;
+        }
+        if (value.is_string()) {
+            const std::string& text = value.get<std::string>();
+            lua_pushlstring(L, text.data(), text.size());
+            return;
+        }
+        if (value.is_number()) {
+            lua_pushnumber(L, value.get<double>());
+            return;
+        }
+        if (value.is_boolean()) {
+            lua_pushboolean(L, value.get<bool>() ? 1 : 0);
+            return;
+        }
+        lua_pushnil(L);
+    }
+
+    int binding_json_decode(lua_State* L)
+    {
+        const std::string text = luaL_checkstring(L, 1);
+        // parse_json yields null for malformed input, which is
+        // indistinguishable from a literal `null` document; both decode to
+        // nil rather than raising.
+        const JsonValue value = parse_json(text);
+        int nodes             = 0;
+        push_json_value(L, value, 0, nodes);
+        record_call(L, "json.decode", "", true);
+        return 1;
+    }
+
+    int binding_json_encode(lua_State* L)
+    {
+        luaL_checkany(L, 1);
+        JsonValue value;
+        std::string error;
+        if (!lua_value_to_json(L, 1, value, error)) {
+            record_call(L, "json.encode", "", false);
+            return binding_error(L, "json.encode: " + error);
+        }
+        const std::string encoded = json_dump(value);
+        record_call(L, "json.encode", "", true);
+        lua_pushlstring(L, encoded.data(), encoded.size());
+        return 1;
+    }
 
     int binding_todo_get(lua_State* L)
     {
@@ -293,6 +376,25 @@ Parks the script for `seconds` seconds without spending its execution
 budget, so a poll loop can wait past the script timeout. Wakes early and throws
 when the turn is interrupted or the script exceeds its maximum wall-clock
 time.)desc",
+        },
+        {
+            "json.decode",
+            binding_json_decode,
+            R"desc((text: string) returns value
+Parses a JSON document into Lua values: objects and arrays become tables,
+strings/numbers/booleans their Lua counterparts, null becomes nil.
+Malformed input decodes to nil rather than raising, so test the result.
+Bounded by depth and node count; a document exceeding either decodes to
+nil.)desc",
+        },
+        {
+            "json.encode",
+            binding_json_encode,
+            R"desc((value) returns string, throws
+Serializes a Lua value to compact JSON: tables become arrays (contiguous
+1-based integer keys) or objects (string keys), scalars their JSON
+counterparts. Throws on unsupported values, cyclic or mixed-key tables,
+and non-finite numbers.)desc",
         },
         {
             "todo.get",

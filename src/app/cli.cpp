@@ -292,6 +292,13 @@ CliResult run_cli(int argc, char** argv)
                 invocation.program);
             return finished(2);
         }
+        if (shell_launcher_denied(invocation.program)) {
+            std::println(stderr,
+                "cannot allow '{}': it runs code that cannot be inspected, "
+                "so a grant would authorize every command it can run",
+                invocation.program);
+            return finished(2);
+        }
         command_grants.push_back({ invocation.program, invocation.subcommand });
     }
 

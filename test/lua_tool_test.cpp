@@ -1598,13 +1598,99 @@ TEST_CASE("imza.shell refuses deletion programs with binding guidance")
     CHECK(out.text.find("dead") == std::string::npos);
     CHECK(fx.ask_calls == 0);
 
-    // A session grant for the program does not re-enable it.
+    // A session grant for the program is refused at the store, so the
+    // deletion can never be re-enabled through one.
     ShellFixture granted;
-    CHECK(granted.install({ imza::ShellCommandGrant { "rm", std::nullopt } }));
+    CHECK_FALSE(
+        granted.install({ imza::ShellCommandGrant { "rm", std::nullopt } }));
     const imza::ToolOutput still_denied = imza::test::run_lua(
         "imza.shell('rm file')\nprint('dead')", granted.host());
     CHECK(still_denied.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(still_denied.text.find("imza.fs.remove") != std::string::npos);
+}
+
+TEST_CASE("imza.json round-trips values and fails closed on bad input")
+{
+    const imza::ToolOutput out = imza::test::run_lua(R"lua(
+local doc = imza.json.decode('{"a":[1,2,3],"b":{"c":true},"d":null}')
+print(doc.a[2] == 2, doc.b.c == true, doc.d == nil)
+print(imza.json.encode({ x = 1, y = { "a", "b" } }))
+print(imza.json.decode('{not json') == nil)
+)lua");
+    CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(out.text.find("true    true    true") != std::string::npos);
+    CHECK(out.text.find(R"({"x":1,"y":["a","b"]})") != std::string::npos);
+    // Malformed input decodes to nil rather than raising.
+    CHECK(out.text.find("true") != std::string::npos);
+}
+
+TEST_CASE("imza.fs.copy and move transfer a file and fail closed")
+{
+    imza::test::TempDir dir;
+    const std::string source = dir.file("source.txt").string();
+    const std::string target = dir.file("target.txt").string();
+    imza::test::write_file(dir.file("source.txt"), "payload");
+
+    const imza::ToolOutput copied = imza::test::run_lua(
+        "imza.fs.copy([[" + source + "]], [[" + target + "]])");
+    CHECK(copied.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(fs::exists(target));
+    CHECK(fs::exists(source));
+
+    REQUIRE(copied.diffs.size() == 1);
+    CHECK(copied.diffs[0].file == target);
+    REQUIRE(copied.diffs[0].rows.size() == 1);
+    CHECK(copied.diffs[0].rows[0].kind == imza::DiffRow::Kind::ADD);
+    CHECK(copied.diffs[0].rows[0].right == "payload");
+
+    const std::string moved       = dir.file("moved.txt").string();
+    const imza::ToolOutput result = imza::test::run_lua(
+        "imza.fs.move([[" + target + "]], [[" + moved + "]])");
+    CHECK(result.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(fs::exists(moved));
+    CHECK_FALSE(fs::exists(target));
+    REQUIRE(result.diffs.size() == 2);
+    CHECK(result.diffs[0].file == moved);
+    CHECK(result.diffs[0].rows[0].kind == imza::DiffRow::Kind::ADD);
+    CHECK(result.diffs[1].file == target);
+    CHECK(result.diffs[1].rows[0].kind == imza::DiffRow::Kind::REMOVE);
+
+    // A missing source is an error, not a silent no-op.
+    const imza::ToolOutput missing = imza::test::run_lua("imza.fs.copy([["
+        + dir.file("absent.txt").string() + "]], [["
+        + dir.file("out.txt").string() + "]])");
+    CHECK(missing.kind == imza::ToolOutput::Kind::ERROR);
+}
+
+TEST_CASE("imza.fs.remove shows a deletion diff for a file")
+{
+    imza::test::TempDir dir;
+    imza::test::write_file(dir.file("gone.txt"), "alpha\nbeta\n");
+    const std::string path = dir.file("gone.txt").string();
+
+    const imza::ToolOutput out
+        = imza::test::run_lua("imza.fs.remove([[" + path + "]])");
+    CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK_FALSE(fs::exists(path));
+    REQUIRE(out.diffs.size() == 1);
+    CHECK(out.diffs[0].file == path);
+    REQUIRE(out.diffs[0].rows.size() == 2);
+    for (const imza::DiffRow& row : out.diffs[0].rows) {
+        CHECK(row.kind == imza::DiffRow::Kind::REMOVE);
+    }
+}
+
+TEST_CASE("a whole-file write to a new path reads as a creation")
+{
+    imza::test::TempDir dir;
+    const std::string path = dir.file("fresh.txt").string();
+    const imza::ToolOutput out
+        = imza::test::run_lua("imza.fs.write([[" + path + "]], 'new content')");
+    CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    REQUIRE(out.diffs.size() == 1);
+    CHECK(out.diffs[0].file == path);
+    REQUIRE(out.diffs[0].rows.size() == 1);
+    CHECK(out.diffs[0].rows[0].kind == imza::DiffRow::Kind::ADD);
 }
 
 TEST_CASE("canvas caps charts per run and fails closed")

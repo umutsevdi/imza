@@ -34,13 +34,75 @@ namespace {
         return true;
     }
 
-    struct CommandPair {
-        std::string_view program;
-        std::string_view subcommand;
-    };
+    bool is_flag(const std::string& word)
+    {
+        return !word.empty() && word.front() == '-';
+    }
+
+    // TRANSPARENT prefixes name the program they invoke (env, sudo);
+    // SHELL programs take a command string in a flag (sh -c, cmd /c);
+    // OPAQUE programs carry code the analyzer cannot read.
+    enum class Launcher { NONE, TRANSPARENT, SHELL, OPAQUE };
+
+    // Bound on launcher unwrapping depth; a deeper chain stops and the
+    // remaining program is unresolvable.
+    constexpr int MAX_LAUNCHER_DEPTH = 4;
+
+    Launcher launcher_kind(std::string_view program)
+    {
+        static constexpr std::array<std::string_view, 10> transparent { "env",
+            "sudo", "doas", "xargs", "nice", "nohup", "time", "stdbuf",
+            "command", "exec" };
+        static constexpr std::array<std::string_view, 10> shells { "sh", "bash",
+            "zsh", "dash", "ksh", "fish", "cmd", "cmd.exe", "powershell",
+            "pwsh" };
+        static constexpr std::array<std::string_view, 9> opaque { "python",
+            "python3", "perl", "ruby", "node", "php", "lua", "awk", "gawk" };
+        for (const std::string_view candidate : transparent) {
+            if (program == candidate) {
+                return Launcher::TRANSPARENT;
+            }
+        }
+        for (const std::string_view candidate : shells) {
+            if (program == candidate) {
+                return Launcher::SHELL;
+            }
+        }
+        for (const std::string_view candidate : opaque) {
+            if (program == candidate) {
+                return Launcher::OPAQUE;
+            }
+        }
+        return Launcher::NONE;
+    }
+
+    std::optional<std::string> shell_code_argument(
+        std::string_view program, const std::vector<std::string>& words)
+    {
+        const bool cmd_style = program == "cmd" || program == "cmd.exe";
+        for (std::size_t index = 1; index < words.size(); ++index) {
+            const std::string& word = words[index];
+            bool carries_code       = false;
+            if (cmd_style) {
+                carries_code = word == "/c" || word == "/C";
+            } else if (word == "-c" || word == "-Command"
+                || word == "--command") {
+                carries_code = true;
+            } else if (word.size() > 2 && word.front() == '-'
+                && word[1] != '-') {
+                carries_code = word.find('c') != std::string::npos;
+            }
+            if (carries_code && index + 1 < words.size()) {
+                return words[index + 1];
+            }
+        }
+        return std::nullopt;
+    }
+
+    ShellAnalysis analyze_shell_impl(std::string_view command, int depth);
 
     void append_invocation(
-        ShellAnalysis& analysis, std::vector<std::string>& words)
+        ShellAnalysis& analysis, std::vector<std::string>& words, int depth)
     {
         std::size_t program = 0;
         while (program < words.size() && is_assignment(words[program])) {
@@ -51,20 +113,81 @@ namespace {
             words.clear();
             return;
         }
-        ShellInvocation invocation;
-        invocation.program = std::move(words[program]);
+        std::string name = words[program];
 #ifdef _WIN32
-        invocation.program = to_lower(invocation.program);
+        name = to_lower(name);
 #endif
+        const Launcher kind = launcher_kind(name);
+
+        // The prefix's own assignments and flags are consumed here rather
+        // than by the assignment rule below, which would otherwise mark
+        // `env FOO=x ls` dynamic.
+        if (kind == Launcher::TRANSPARENT && depth < MAX_LAUNCHER_DEPTH) {
+            std::size_t next = program + 1;
+            while (next < words.size()) {
+                if (is_assignment(words[next])) {
+                    ++next;
+                    continue;
+                }
+                if (!is_flag(words[next])) {
+                    break;
+                }
+                if (words[next].size() == 2 && words[next][1] != '-'
+                    && next + 1 < words.size() && !is_flag(words[next + 1])) {
+                    next += 2;
+                    continue;
+                }
+                ++next;
+            }
+            if (next >= words.size()) {
+                words.clear();
+                ShellInvocation opaque;
+                opaque.program      = std::move(name);
+                opaque.unresolvable = true;
+                analysis.invocations.push_back(std::move(opaque));
+                return;
+            }
+            words.erase(words.begin(),
+                words.begin() + static_cast<std::ptrdiff_t>(next));
+            append_invocation(analysis, words, depth + 1);
+            return;
+        }
+
+        // Readable code is replaced by the commands it names: `bash -c
+        // 'ls | grep x'` becomes two invocations, which the one-command
+        // rule rejects; `bash -c 'rm -rf x'` becomes a deletion.
+        if (kind == Launcher::SHELL && depth < MAX_LAUNCHER_DEPTH) {
+            if (const auto code = shell_code_argument(name, words)) {
+                words.clear();
+                const ShellAnalysis nested
+                    = analyze_shell_impl(*code, depth + 1);
+                if (nested.reuse == ShellAnalysis::Reuse::ONCE) {
+                    analysis.reuse = ShellAnalysis::Reuse::ONCE;
+                }
+                for (const ShellInvocation& invocation : nested.invocations) {
+                    analysis.invocations.push_back(invocation);
+                }
+                if (nested.invocations.empty()) {
+                    ShellInvocation opaque;
+                    opaque.program      = std::move(name);
+                    opaque.unresolvable = true;
+                    analysis.invocations.push_back(std::move(opaque));
+                }
+                return;
+            }
+        }
+
+        ShellInvocation invocation;
+        invocation.program = std::move(name);
+        // A launcher whose code could not be unwrapped is approval-once
+        // and never grantable: there is nothing to classify.
+        invocation.unresolvable = kind != Launcher::NONE;
         // Subcommand identity: first word after the program that is not an
         // option. Options before the subcommand carry no grant identity; a
         // short option and its separate value (git -C build) are skipped
         // whole. Past the subcommand only flags are retained as arguments:
         // operands cannot widen a grant, and their values are consumed with
         // their option.
-        const auto is_flag = [](const std::string& word) {
-            return !word.empty() && word.front() == '-';
-        };
         std::size_t index = program + 1;
         while (index < words.size() && is_flag(words[index])) {
             if (words[index].size() == 2 && words[index][1] != '-'
@@ -118,126 +241,131 @@ namespace {
             || character == '\n';
     }
 
+    ShellAnalysis analyze_shell_impl(std::string_view command, int depth)
+    {
+        ShellAnalysis analysis;
+        analysis.reuse = ShellAnalysis::Reuse::SESSION;
+        std::vector<std::string> words;
+        std::string word;
+        Quote quote           = Quote::NONE;
+        bool escaped          = false;
+        bool word_started     = false;
+        bool redirect_operand = false;
+
+        const auto finish_word = [&] {
+            if (word_started) {
+                if (!redirect_operand) {
+                    words.push_back(std::move(word));
+                }
+                word.clear();
+                word_started     = false;
+                redirect_operand = false;
+            }
+        };
+
+        for (std::size_t index = 0; index < command.size(); ++index) {
+            const char character = command[index];
+            if (character == '>') {
+                analysis.reuse = ShellAnalysis::Reuse::ONCE;
+            }
+            if (escaped) {
+                word.push_back(character);
+                word_started = true;
+                escaped      = false;
+                continue;
+            }
+            if (quote == Quote::SINGLE) {
+                if (character == '\'') {
+                    quote = Quote::NONE;
+                } else {
+                    word.push_back(character);
+                }
+                word_started = true;
+                continue;
+            }
+            if (quote == Quote::DOUBLE) {
+                if (character == '"') {
+                    quote = Quote::NONE;
+                } else if (character == '\\') {
+                    escaped = true;
+                } else {
+                    if (character == '$' || character == '`') {
+                        analysis.reuse = ShellAnalysis::Reuse::ONCE;
+                    }
+                    word.push_back(character);
+                }
+                word_started = true;
+                continue;
+            }
+            if (character == '\\') {
+                escaped      = true;
+                word_started = true;
+                continue;
+            }
+            if (character == '\'' || character == '"') {
+                quote = character == '\'' ? Quote::SINGLE : Quote::DOUBLE;
+                word_started = true;
+                continue;
+            }
+            if (std::isspace(static_cast<unsigned char>(character))
+                && character != '\n') {
+                finish_word();
+                continue;
+            }
+            if (character == '#' && !word_started) {
+                while (index < command.size() && command[index] != '\n') {
+                    ++index;
+                }
+                finish_word();
+                append_invocation(analysis, words, depth);
+                continue;
+            }
+            if (character == '>') {
+                finish_word();
+                redirect_operand = true;
+                continue;
+            }
+            if (character == '<') {
+                finish_word();
+                if (index + 1 < command.size() && command[index + 1] == '<') {
+                    analysis.reuse = ShellAnalysis::Reuse::ONCE;
+                }
+                redirect_operand = true;
+                continue;
+            }
+            if (is_separator(character)) {
+                finish_word();
+                append_invocation(analysis, words, depth);
+                while (index + 1 < command.size()
+                    && is_separator(command[index + 1])
+                    && command[index + 1] != '\n') {
+                    ++index;
+                }
+                continue;
+            }
+            if (character == '$' || character == '`' || character == '('
+                || character == ')' || character == '{' || character == '}') {
+                analysis.reuse = ShellAnalysis::Reuse::ONCE;
+            }
+            word.push_back(character);
+            word_started = true;
+        }
+        if (escaped || quote != Quote::NONE) {
+            analysis.reuse = ShellAnalysis::Reuse::ONCE;
+        }
+        finish_word();
+        append_invocation(analysis, words, depth);
+        if (analysis.invocations.empty()) {
+            analysis.reuse = ShellAnalysis::Reuse::ONCE;
+        }
+        return analysis;
+    }
+
 } // namespace
 
 ShellAnalysis analyze_shell(std::string_view command)
 {
-    ShellAnalysis analysis;
-    analysis.reuse = ShellAnalysis::Reuse::SESSION;
-    std::vector<std::string> words;
-    std::string word;
-    Quote quote           = Quote::NONE;
-    bool escaped          = false;
-    bool word_started     = false;
-    bool redirect_operand = false;
-
-    const auto finish_word = [&] {
-        if (word_started) {
-            if (!redirect_operand) {
-                words.push_back(std::move(word));
-            }
-            word.clear();
-            word_started     = false;
-            redirect_operand = false;
-        }
-    };
-
-    for (std::size_t index = 0; index < command.size(); ++index) {
-        const char character = command[index];
-        if (character == '>') {
-            analysis.reuse = ShellAnalysis::Reuse::ONCE;
-        }
-        if (escaped) {
-            word.push_back(character);
-            word_started = true;
-            escaped      = false;
-            continue;
-        }
-        if (quote == Quote::SINGLE) {
-            if (character == '\'') {
-                quote = Quote::NONE;
-            } else {
-                word.push_back(character);
-            }
-            word_started = true;
-            continue;
-        }
-        if (quote == Quote::DOUBLE) {
-            if (character == '"') {
-                quote = Quote::NONE;
-            } else if (character == '\\') {
-                escaped = true;
-            } else {
-                if (character == '$' || character == '`') {
-                    analysis.reuse = ShellAnalysis::Reuse::ONCE;
-                }
-                word.push_back(character);
-            }
-            word_started = true;
-            continue;
-        }
-        if (character == '\\') {
-            escaped      = true;
-            word_started = true;
-            continue;
-        }
-        if (character == '\'' || character == '"') {
-            quote        = character == '\'' ? Quote::SINGLE : Quote::DOUBLE;
-            word_started = true;
-            continue;
-        }
-        if (std::isspace(static_cast<unsigned char>(character))
-            && character != '\n') {
-            finish_word();
-            continue;
-        }
-        if (character == '#' && !word_started) {
-            while (index < command.size() && command[index] != '\n') {
-                ++index;
-            }
-            finish_word();
-            append_invocation(analysis, words);
-            continue;
-        }
-        if (character == '>') {
-            finish_word();
-            redirect_operand = true;
-            continue;
-        }
-        if (character == '<') {
-            finish_word();
-            if (index + 1 < command.size() && command[index + 1] == '<') {
-                analysis.reuse = ShellAnalysis::Reuse::ONCE;
-            }
-            redirect_operand = true;
-            continue;
-        }
-        if (is_separator(character)) {
-            finish_word();
-            append_invocation(analysis, words);
-            while (index + 1 < command.size()
-                && is_separator(command[index + 1])
-                && command[index + 1] != '\n') {
-                ++index;
-            }
-            continue;
-        }
-        if (character == '$' || character == '`' || character == '('
-            || character == ')' || character == '{' || character == '}') {
-            analysis.reuse = ShellAnalysis::Reuse::ONCE;
-        }
-        word.push_back(character);
-        word_started = true;
-    }
-    if (escaped || quote != Quote::NONE) {
-        analysis.reuse = ShellAnalysis::Reuse::ONCE;
-    }
-    finish_word();
-    append_invocation(analysis, words);
-    if (analysis.invocations.empty()) {
-        analysis.reuse = ShellAnalysis::Reuse::ONCE;
-    }
-    return analysis;
+    return analyze_shell_impl(command, 0);
 }
 
 bool shell_builtin_allowed(std::string_view program)
@@ -277,6 +405,23 @@ bool shell_deletion_denied(std::string_view program)
     // into the model-facing guidance.
     static constexpr std::array<std::string_view, 6> denied { "rm", "rmdir",
         "del", "erase", "unlink", "shred" };
+    for (const std::string_view candidate : denied) {
+        if (program == candidate) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool shell_launcher_denied(std::string_view program)
+{
+    // The set analyze_shell unwraps: a grant naming one of these would
+    // authorize every command the program can run.
+    static constexpr std::array<std::string_view, 29> denied { "env", "sudo",
+        "doas", "xargs", "nice", "nohup", "time", "stdbuf", "command", "exec",
+        "sh", "bash", "zsh", "dash", "ksh", "fish", "cmd", "cmd.exe",
+        "powershell", "pwsh", "python", "python3", "perl", "ruby", "node",
+        "php", "lua", "awk", "gawk" };
     for (const std::string_view candidate : denied) {
         if (program == candidate) {
             return true;

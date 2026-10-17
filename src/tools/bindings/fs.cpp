@@ -6,6 +6,7 @@
 #include "common/util.h"
 #include "permissions/filesystem.h"
 #include "tools/file_ops.h"
+#include "workspace/files.h"
 
 #include <tree_sitter/api.h>
 
@@ -131,7 +132,8 @@ namespace {
     }
 
     int list_directory(lua_State* L, const fs::path& root,
-        const std::string& target, int depth, bool show_hidden, int* count)
+        const std::string& target, int depth, bool show_hidden,
+        bool apply_ignores, int* count)
     {
         std::error_code ec;
         fs::directory_iterator it(
@@ -164,8 +166,12 @@ namespace {
             push_list_entry(L, entry, root, sec);
             lua_rawseti(L, -2, static_cast<lua_Integer>(*count));
             if (depth > 1 && entry.is_directory(sec)) {
-                if (const int failed = list_directory(L, root,
-                        entry.path().string(), depth - 1, show_hidden, count)) {
+                if (apply_ignores && ignored_directory(name)) {
+                    continue;
+                }
+                if (const int failed
+                    = list_directory(L, root, entry.path().string(), depth - 1,
+                        show_hidden, apply_ignores, count)) {
                     return failed;
                 }
             }
@@ -199,8 +205,10 @@ namespace {
 
         lua_newtable(L);
         int count = 0;
-        if (const int failed = list_directory(
-                L, fs::path(target), target, depth, show_hidden, &count)) {
+        // A directory the caller named explicitly is listed as given.
+        const bool apply_ignores = path == ".";
+        if (const int failed = list_directory(L, fs::path(target), target,
+                depth, show_hidden, apply_ignores, &count)) {
             return failed;
         }
         return 1;
@@ -243,26 +251,20 @@ namespace {
             return GrepFileResult::UNREADABLE;
         }
 
-        char buffer[8192];
-        while (input) {
-            if (grep_timed_out(state)) {
-                return GrepFileResult::TIMED_OUT;
-            }
-            input.read(buffer, sizeof(buffer));
-            if (std::find(buffer, buffer + input.gcount(), '\0')
-                != buffer + input.gcount()) {
-                return GrepFileResult::BINARY;
-            }
+        // One pass: probe the first block for NUL, then continue the same
+        // stream line by line.
+        char probe[8192];
+        input.read(probe, sizeof(probe));
+        const std::streamsize probed = input.gcount();
+        if (std::find(probe, probe + probed, '\0') != probe + probed) {
+            return GrepFileResult::BINARY;
         }
-        if (!input.eof()) {
-            return GrepFileResult::UNREADABLE;
-        }
-
         input.clear();
         input.seekg(0);
         if (!input) {
             return GrepFileResult::UNREADABLE;
         }
+
         std::string line;
         std::size_t line_number = 0;
         while (std::getline(input, line)) {
@@ -286,10 +288,10 @@ namespace {
                            : GrepFileResult::UNREADABLE;
     }
 
-    int grep_run(
-        lua_State* L, const std::regex& expression, const fs::path& target)
+    int grep_run(lua_State* L, const std::regex& expression,
+        const fs::path& target, bool apply_ignores,
+        std::chrono::seconds timeout)
     {
-        constexpr auto timeout              = std::chrono::seconds { 10 };
         const std::string timed_out_message = "grep: search timed out after "
             + std::to_string(timeout.count()) + " seconds";
         GrepState state { L, expression,
@@ -312,32 +314,30 @@ namespace {
                     L, "grep: cannot read file: " + utf8_from_path(target));
             }
         } else if (fs::is_directory(target_status)) {
-            fs::recursive_directory_iterator iterator(
-                target, fs::directory_options::skip_permission_denied, ec);
-            const fs::recursive_directory_iterator end;
-            if (ec) {
-                return binding_error(L,
-                    "grep: cannot read directory: " + utf8_from_path(target));
-            }
-            while (iterator != end && !state.truncated) {
-                if (grep_timed_out(state)) {
-                    return binding_error(L, timed_out_message);
-                }
-                const fs::directory_entry entry = *iterator;
-                std::error_code status_error;
-                const fs::file_status status
-                    = entry.symlink_status(status_error);
-                if (!status_error && fs::is_regular_file(status)) {
-                    const GrepFileResult result
-                        = grep_file(state, entry.path());
-                    if (result == GrepFileResult::TIMED_OUT) {
-                        return binding_error(L, timed_out_message);
+            FileWalkOptions options;
+            options.root          = fs::path(target);
+            options.apply_ignores = apply_ignores;
+            options.deadline      = state.deadline;
+            bool walk_truncated   = false;
+            for_each_file(
+                options,
+                [&](const fs::path& relative) {
+                    if (state.truncated) {
+                        return false;
                     }
-                }
-                iterator.increment(ec);
-                if (ec) {
-                    ec.clear();
-                }
+                    if (grep_timed_out(state)) {
+                        return false;
+                    }
+                    const fs::path file         = options.root / relative;
+                    const GrepFileResult result = grep_file(state, file);
+                    if (result == GrepFileResult::TIMED_OUT) {
+                        return false;
+                    }
+                    return true;
+                },
+                walk_truncated);
+            if (walk_truncated && !state.truncated) {
+                state.truncated = true;
             }
         } else {
             return binding_error(L,
@@ -346,6 +346,8 @@ namespace {
         }
 
         if (state.truncated) {
+            // `truncated` is set only on the marker row, so a caller can
+            // skip it without type-checking the other fields.
             lua_newtable(L);
             lua_pushboolean(L, 0);
             lua_setfield(L, -2, "file");
@@ -353,6 +355,8 @@ namespace {
             lua_setfield(L, -2, "line");
             lua_pushliteral(L, "[truncated]");
             lua_setfield(L, -2, "text");
+            lua_pushboolean(L, 1);
+            lua_setfield(L, -2, "truncated");
             lua_rawseti(L, -2, static_cast<lua_Integer>(state.rows + 1));
         }
         return 1;
@@ -362,6 +366,8 @@ namespace {
     {
         const std::string path    = opt_string(L, 1).value_or(".");
         const std::string pattern = luaL_checkstring(L, 2);
+        const long timeout        = std::clamp<long>(
+            opt_integer(L, 3).value_or(10), 1, MAX_SCRIPT_SECONDS);
         if (pattern.empty()) {
             return binding_error(L, "grep: pattern must be a non-empty string");
         }
@@ -382,7 +388,10 @@ namespace {
             return denied;
         }
 
-        return grep_run(L, expression, fs::path(target));
+        // "." means "search the workspace"; a named directory is
+        // searched as given.
+        return grep_run(L, expression, fs::path(target), path == ".",
+            std::chrono::seconds(timeout));
     }
 
     // The run's record for `target`, or nullptr when the file has not been
@@ -433,7 +442,12 @@ namespace {
             return false;
         }
         if (mutation == nullptr) {
-            run->mutations.push_back({ target, original, *next });
+            // A whole-file write to a path that did not exist is a
+            // creation, not a modification.
+            const FileMutation::Kind kind = whole_file && original.empty()
+                ? FileMutation::Kind::ADDED
+                : FileMutation::Kind::MODIFIED;
+            run->mutations.push_back({ target, original, *next, kind });
         } else {
             mutation->latest = *next;
         }
@@ -552,6 +566,47 @@ namespace {
         return 0;
     }
 
+    // Shared by fs.copy and fs.move. The destination is the authorized
+    // target, so the path checks and any session grant apply where the
+    // effect lands.
+    int transfer_binding(lua_State* L, bool move)
+    {
+        const std::string source = luaL_checkstring(L, 1);
+        const std::string path   = luaL_checkstring(L, 2);
+        const std::string label  = move ? "fs.move" : "fs.copy";
+
+        const CopyFileRequest request { source, path };
+        std::string target;
+        if (const int denied = authorize_target(L, request, path, target)) {
+            return denied;
+        }
+
+        // The destination is a creation; a move also removes the source,
+        // so both sides show in the run's diff.
+        std::string content;
+        std::string read_error;
+        const bool have_source = load_text(source, content, read_error);
+
+        std::string err;
+        if (!transfer_file(source, target, move, err)) {
+            return binding_error(L, label + ": " + err);
+        }
+        LuaRunContext* run = run_of(L);
+        if (have_source) {
+            run->mutations.push_back(
+                { target, "", content, FileMutation::Kind::ADDED });
+            if (move) {
+                run->mutations.push_back(
+                    { source, content, "", FileMutation::Kind::REMOVED });
+            }
+        }
+        return 0;
+    }
+
+    int binding_file_copy(lua_State* L) { return transfer_binding(L, false); }
+
+    int binding_file_move(lua_State* L) { return transfer_binding(L, true); }
+
     int binding_remove(lua_State* L)
     {
         const std::string path = luaL_checkstring(L, 1);
@@ -560,9 +615,18 @@ namespace {
         if (const int denied = authorize_target(L, request, path, target)) {
             return denied;
         }
+        // Read before deleting so the run shows a deletion diff. A
+        // directory has no content to record.
+        std::string original;
+        std::string read_error;
+        const bool is_file = load_text(target, original, read_error);
         std::string err;
         if (!remove_path(target, err)) {
             return binding_error(L, "fs.remove: " + err);
+        }
+        if (is_file) {
+            run_of(L)->mutations.push_back(
+                { target, original, "", FileMutation::Kind::REMOVED });
         }
         return 0;
     }
@@ -920,41 +984,42 @@ namespace {
         } else if (fs::is_directory(status)) {
             const LuaRunContext& run = *run_of(L);
             QueryCache cache;
-            for (auto it = fs::recursive_directory_iterator(
-                     target, fs::directory_options::skip_permission_denied, ec);
-                it != fs::recursive_directory_iterator(); it.increment(ec)) {
-                if (ec) {
-                    ec.clear();
-                    continue;
-                }
-                if (state.rows == MAX_TS_MATCHES) {
-                    state.truncated = true;
-                    break;
-                }
-                if (std::chrono::steady_clock::now() > run.deadline) {
-                    return binding_error(L, "ts_query: search timed out");
-                }
-                std::error_code file_ec;
-                if (!it->is_regular_file(file_ec) || file_ec) {
-                    continue;
-                }
-                const std::string file     = utf8_from_path(it->path());
-                const TSLanguage* language = language_for_path(file);
-                if (language == nullptr) {
-                    continue; // unrecognized files are skipped, not errors
-                }
-                const auto parsed = parse_file(L, language, file);
-                if (!parsed) {
-                    return 2;
-                }
-                const TSQuery* compiled
-                    = cache.get_or_compile(L, language, query);
-                if (compiled == nullptr) {
-                    return 2;
-                }
-                if (!ts_query_run_file(state, compiled, *parsed, file)) {
-                    break;
-                }
+            FileWalkOptions options;
+            options.root          = fs::path(target);
+            options.apply_ignores = path == ".";
+            options.deadline      = run.deadline;
+            bool walk_truncated   = false;
+            for_each_file(
+                options,
+                [&](const fs::path& relative) {
+                    if (state.rows == MAX_TS_MATCHES) {
+                        state.truncated = true;
+                        return false;
+                    }
+                    if (std::chrono::steady_clock::now() > run.deadline) {
+                        return false;
+                    }
+                    const std::string file
+                        = utf8_from_path(options.root / relative);
+                    const TSLanguage* language = language_for_path(file);
+                    if (language == nullptr) {
+                        // Unrecognized files are skipped, not errors.
+                        return true;
+                    }
+                    const auto parsed = parse_file(L, language, file);
+                    if (!parsed) {
+                        return false;
+                    }
+                    const TSQuery* compiled
+                        = cache.get_or_compile(L, language, query);
+                    if (compiled == nullptr) {
+                        return false;
+                    }
+                    return ts_query_run_file(state, compiled, *parsed, file);
+                },
+                walk_truncated);
+            if (walk_truncated && !state.truncated) {
+                state.truncated = true;
             }
         } else {
             return binding_error(
@@ -967,6 +1032,8 @@ namespace {
             lua_setfield(L, -2, "file");
             lua_pushliteral(L, "[truncated]");
             lua_setfield(L, -2, "text");
+            lua_pushboolean(L, 1);
+            lua_setfield(L, -2, "truncated");
             lua_rawseti(L, -2, static_cast<lua_Integer>(state.rows + 1));
         }
         return 1;
@@ -996,10 +1063,14 @@ unreadable.)desc",
         {
             "grep",
             binding_grep,
-            R"desc((path: string, pattern: string) returns GrepHit[], throws
+            R"desc((path: string, pattern: string, timeout?: integer=10) returns GrepHit[], throws
 Run a POSIX extended regex (not a Lua pattern) over a file or directory tree,
 one hit per matching line.
-Capped at 500 hits, followed by a hit whose text is "[truncated]".)desc",
+Directory walks skip ignored paths (.git, build output, dependencies), so
+searching "." is fast even in a repository with a large build tree; a path
+you name explicitly is searched as given.
+Capped at 500 hits; a final row with `truncated = true` marks the cut, so
+skip rows where `row.truncated` before reading file/line/text.)desc",
         },
         {
             "insert",
@@ -1045,6 +1116,25 @@ Always asks for approval — inside the workspace included — unless a session
 grant already covers the path; rejected in Plan mode. Throws when the target
 is missing, when the directory is not empty, or when the path is the working
 directory, the project root, or an ancestor of either.)desc",
+        },
+        {
+            "copy",
+            binding_file_copy,
+            R"desc((source: string, target: string) throws
+Copies a regular file from `source` to `target`, creating missing parent
+directories. Write-class on the destination: automatic inside trusted roots
+in Build mode, asking outside them, rejected in Plan mode. Throws when the
+source is missing or not a regular file, or the destination cannot be
+written.)desc",
+        },
+        {
+            "move",
+            binding_file_move,
+            R"desc((source: string, target: string) throws
+Moves a regular file from `source` to `target`, creating missing parent
+directories. Copies first and removes the source only on success, so a
+failure never loses the original. Write-class on the destination, with the
+same rules as fs.copy.)desc",
         },
         {
             "ts_query",

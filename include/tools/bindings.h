@@ -25,9 +25,17 @@ namespace imza {
 // touch, latest content after each accepted call. The driver turns these
 // into one diff per touched file when the run finishes.
 struct FileMutation {
+    // How the file changed, so the diff can say "deleted" or "created"
+    // rather than showing an unlabeled empty side. REMOVED renders as a
+    // whole-file deletion, ADDED as a whole-file addition; MODIFIED is
+    // an ordinary content diff. A move records both: REMOVED at the
+    // source, ADDED at the destination.
+    enum class Kind { MODIFIED, ADDED, REMOVED };
+
     std::string path;
     std::string original;
     std::string latest;
+    Kind kind = Kind::MODIFIED;
 };
 
 // Everything a binding needs from the run, reached via run_of(). Lives on
