@@ -366,3 +366,44 @@ TEST_CASE("removing a selected mention detaches its snapshot")
     imza::retain_mentioned_attachments("review it", attachments);
     CHECK(attachments.empty());
 }
+
+TEST_CASE("expand_user_path expands only the bare home shorthand")
+{
+    const std::string home = imza::home_dir();
+    if (home.empty()) {
+        return;
+    }
+    CHECK(imza::expand_user_path("~") == home);
+    CHECK(imza::expand_user_path("~/src") == home + "/src");
+    CHECK(imza::expand_user_path("/abs/path") == "/abs/path");
+    CHECK(imza::expand_user_path("relative/path") == "relative/path");
+    CHECK(imza::expand_user_path("") == "");
+    // `~user` is not resolved.
+    CHECK(imza::expand_user_path("~someone/src") == "~someone/src");
+}
+
+TEST_CASE("directory candidates complete directories and keep the typed shape")
+{
+    TempDir tmp;
+    imza::test::write_file(tmp.file("alpha") / "SKILL.md", "x");
+    imza::test::write_file(tmp.file("beta") / "SKILL.md", "x");
+    imza::test::write_file(tmp.file("plain.txt"), "x");
+    std::error_code error;
+    std::filesystem::create_directories(tmp.file("alpha") / "nested", error);
+    REQUIRE_FALSE(error);
+
+    // Files are excluded, directories carry a trailing separator, sorted.
+    CHECK(imza::directory_candidates(tmp.path, "")
+        == std::vector<std::string> { "alpha/", "beta/" });
+    CHECK(imza::directory_candidates(tmp.path, "al")
+        == std::vector<std::string> { "alpha/" });
+    CHECK(imza::directory_candidates(tmp.path, "alpha/")
+        == std::vector<std::string> { "alpha/nested/" });
+    // The typed prefix is echoed back, so a relative query stays relative
+    // and an absolute one stays absolute.
+    CHECK(imza::directory_candidates(tmp.path, "./al")
+        == std::vector<std::string> { "./alpha/" });
+    CHECK(imza::directory_candidates(tmp.path, tmp.path.string() + "/al")
+        == std::vector<std::string> { tmp.path.string() + "/alpha/" });
+    CHECK(imza::directory_candidates(tmp.path, "missing/").empty());
+}

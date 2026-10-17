@@ -27,6 +27,8 @@ std::span<const SlashCommand> slash_commands()
             SlashCommand::Action::MAKE_SKILL, true },
         { "/auto", "turn permission auto-approval on or off",
             SlashCommand::Action::AUTO, true },
+        { "/cd", "change the session working directory",
+            SlashCommand::Action::CHDIR, true },
     };
     return commands;
 }

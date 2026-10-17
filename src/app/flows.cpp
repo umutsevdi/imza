@@ -35,22 +35,25 @@ namespace {
         }
     }
 
-    bool change_directory(
+    Environment::ChdirResult change_directory(
         ApplicationState& state, const std::filesystem::path& directory)
     {
         std::error_code error;
         const std::filesystem::path canonical
             = std::filesystem::weakly_canonical(directory, error);
         if (error) {
-            return false;
+            return Environment::ChdirResult::FAILED;
         }
-        switch (state.environment->chdir(canonical)) {
-        case Environment::ChdirResult::FAILED: return false;
-        case Environment::ChdirResult::UNCHANGED: return true;
-        case Environment::ChdirResult::CHANGED: break;
+        const Environment::ChdirResult result
+            = state.environment->chdir(canonical);
+        if (result != Environment::ChdirResult::CHANGED) {
+            return result;
         }
+        // Grants and loaded skills are workspace-scoped: neither crosses
+        // into the new directory.
         state.permissions->clear();
-        return true;
+        state.skills->clear();
+        return result;
     }
 
     void start_turn(ApplicationState& state, std::string text,
@@ -678,6 +681,40 @@ void run_slash(ApplicationState& state, std::string_view command)
         state.permissions->set_skip_permissions(on);
         break;
     }
+    case SlashCommand::Action::CHDIR: {
+        if (args.empty()) {
+            state.session->set_error("Usage: /cd <directory>");
+            break;
+        }
+        // A busy session queues the command; drain_queued re-runs it once
+        // idle. Phase-only: enqueueing on a non-empty queue would
+        // re-enqueue the popped command forever.
+        if (state.session->phase() != Session::Phase::IDLE) {
+            state.session->enqueue_message(std::string(command));
+            break;
+        }
+        const std::filesystem::path target
+            = path_from_utf8(expand_user_path(args));
+        std::error_code error;
+        if (!std::filesystem::is_directory(target, error) || error) {
+            state.session->set_error("Not a directory: " + std::string(args));
+            break;
+        }
+        switch (change_directory(state, target)) {
+        case Environment::ChdirResult::FAILED:
+            state.session->set_error("Cannot change to: " + std::string(args));
+            break;
+        case Environment::ChdirResult::UNCHANGED: break;
+        case Environment::ChdirResult::CHANGED: {
+            const auto workspace = state.environment->workspace();
+            state.session->append_notice("Working directory changed to "
+                + (workspace ? workspace->working_directory.string()
+                             : std::string(args)));
+            break;
+        }
+        }
+        break;
+    }
     case SlashCommand::Action::CHANGELOG: {
         const std::optional<std::string> changelog = read_changelog();
         if (!changelog) {
@@ -991,7 +1028,8 @@ void switch_session(ApplicationState& state, const std::filesystem::path& path)
         state.session->set_error("Session is open in another imza process.");
         return;
     }
-    if (!change_directory(state, loaded.workspace)) {
+    if (change_directory(state, loaded.workspace)
+        == Environment::ChdirResult::FAILED) {
         state.sessions->deactivate();
         state.session->set_error("Failed to load session.");
         return;

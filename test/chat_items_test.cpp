@@ -22,6 +22,15 @@ TEST_CASE("render_item renders user attachment labels")
     CHECK(out.find("@src/main.cpp") != std::string::npos);
 }
 
+TEST_CASE("render_item renders a notice")
+{
+    imza::ConversationItem item
+        = imza::Notice { "Working directory changed to /tmp/x" };
+    const std::string out
+        = to_text(imza::render_item(item, { imza::LayoutCtx::Kind::WIDE, 60 }));
+    CHECK(out.find("Working directory changed to /tmp/x") != std::string::npos);
+}
+
 TEST_CASE("render_item renders completed compaction")
 {
     imza::ConversationItem item

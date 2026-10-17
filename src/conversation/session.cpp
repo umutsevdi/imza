@@ -442,7 +442,13 @@ std::vector<std::string> Session::attachment_names() const
 bool Session::claim_title_generation()
 {
     std::lock_guard lock(_mutex);
-    if (_title_generation_claimed || !_items->empty()) {
+    // A notice carries no user request: a /cd before the first turn must
+    // not consume the one-shot claim.
+    const bool has_conversation = std::any_of(
+        _items->begin(), _items->end(), [](const ConversationItem& item) {
+            return !std::holds_alternative<Notice>(item);
+        });
+    if (_title_generation_claimed || has_conversation) {
         return false;
     }
     _title_generation_claimed = true;
@@ -539,6 +545,14 @@ void Session::append_item(ConversationItem item)
     _dirty = true;
     _ensure_unique(_items);
     _items->push_back(std::move(item));
+}
+
+void Session::append_notice(std::string text)
+{
+    std::lock_guard lock(_mutex);
+    _dirty = true;
+    _ensure_unique(_items);
+    _items->emplace_back(Notice { std::move(text) });
 }
 
 std::pair<std::size_t, std::size_t> Session::begin_compaction()
@@ -917,6 +931,9 @@ std::vector<Message> Session::build_history(
             history.push_back(std::move(user));
         } else if (const auto* a = std::get_if<AssistantTurn>(&item)) {
             history.push_back(assistant_message(a->markdown, a, dialect));
+        } else if (const auto* notice = std::get_if<Notice>(&item)) {
+            history.push_back({ Message::Type::USER,
+                "<notice>\n" + notice->text + "\n</notice>" });
         } else if (const auto* tc = std::get_if<ToolCall>(&item)) {
             if (tc->phase == ToolCall::Phase::PLANNING) {
                 continue;

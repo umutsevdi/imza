@@ -36,15 +36,16 @@ public:
     ftxui::Element render(const LayoutCtx& ctx) const;
 
 private:
-    // Which suggestion set the priority rule selected: files, then skills,
-    // then commands.
-    enum class Set { FILES, SKILLS, COMMANDS };
+    // Which suggestion set the priority rule selected: paths, then files,
+    // then skills, then commands.
+    enum class Set { PATHS, FILES, SKILLS, COMMANDS };
     Set _active_set() const;
     int _count() const;
 
     std::vector<const SlashCommand*> _commands;
     std::vector<Skill> _skills;
     std::vector<AttachmentCandidate> _files;
+    std::vector<std::string> _paths;
     std::optional<AttachmentToken> _token;
     std::optional<std::size_t> _skill_begin;
     int _selected = 0;

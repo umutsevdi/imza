@@ -48,6 +48,9 @@ namespace {
         } else if (const auto* assistant = std::get_if<AssistantTurn>(&item)) {
             out += "\nASSISTANT:\n";
             out += capped(assistant->markdown, TURN_LINE_CAP);
+        } else if (const auto* notice = std::get_if<Notice>(&item)) {
+            out += "\nNOTICE:\n";
+            out += capped(notice->text, TURN_LINE_CAP);
         } else if (const auto* call = std::get_if<ToolCall>(&item)) {
             out += "\n";
             out += TOOL_PREFIX;

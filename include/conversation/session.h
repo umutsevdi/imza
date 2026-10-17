@@ -86,8 +86,15 @@ struct CompactionEvent {
     Status status  = Status::RUNNING;
 };
 
+// A session-level event with no model turn behind it (a working-directory
+// change). Rendered dim in the timeline and replayed into model history as
+// a tagged user message so the agent sees it as a discrete event.
+struct Notice {
+    std::string text;
+};
+
 using ConversationItem = std::variant<UserTurn, AssistantTurn, ToolCall,
-    TodoList, CompactionEvent>;
+    TodoList, CompactionEvent, Notice>;
 
 // 0-based index of the final UserTurn in `items`, or nullopt when there
 // is none; shared by the compaction boundary scans.
@@ -214,6 +221,7 @@ public:
     void set_last_assistant_metadata(
         std::string model, std::string reasoning_effort);
     void append_item(ConversationItem item);
+    void append_notice(std::string text);
     std::pair<std::size_t, std::size_t> begin_compaction();
     void finish_compaction(std::size_t id, std::string summary,
         std::size_t compacted_item_count, bool success);

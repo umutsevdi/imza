@@ -425,6 +425,23 @@ inline std::string home_dir()
     );
 }
 
+// Expands a leading `~` — alone or followed by a separator — to the home
+// directory. `~user` and any other input are returned unchanged.
+inline std::string expand_user_path(std::string_view path)
+{
+    if (path.empty() || path.front() != '~') {
+        return std::string(path);
+    }
+    if (path.size() > 1 && path[1] != '/' && path[1] != '\\') {
+        return std::string(path);
+    }
+    const std::string home = home_dir();
+    if (home.empty()) {
+        return std::string(path);
+    }
+    return home + std::string(path.substr(1));
+}
+
 // Globally unique, sortable identifier: wall-clock milliseconds plus a random
 // 32-bit suffix. Generated once per fresh Session object; a loaded session
 // instead adopts its source file's stem as the id so saves continue that file

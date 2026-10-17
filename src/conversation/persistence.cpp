@@ -305,6 +305,9 @@ namespace {
             stored.type   = "compaction";
             stored.id     = static_cast<std::int64_t>(event->id);
             stored.status = static_cast<int>(event->status);
+        } else if (const auto* notice = std::get_if<Notice>(&item)) {
+            stored.type = "notice";
+            stored.text = notice->text;
         } else {
             return std::nullopt;
         }
@@ -415,6 +418,9 @@ namespace {
                 }
             }
             return todo;
+        }
+        if (stored.type == "notice") {
+            return Notice { stored.text.value_or("") };
         }
         if (stored.type == "compaction") {
             CompactionEvent event;

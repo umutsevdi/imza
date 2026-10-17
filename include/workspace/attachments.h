@@ -34,6 +34,13 @@ bool can_add_attachment(const std::vector<Attachment>& existing,
 std::vector<AttachmentCandidate> attachment_candidates(
     const std::filesystem::path& root, std::string_view query,
     std::size_t limit = 50);
+// Directory-only completion for a partially typed path. `query` may be
+// relative, absolute, or `~`-prefixed; relative queries resolve against
+// `base`. Results keep the shape the caller typed and carry a trailing
+// separator so accepting one descends. Not workspace-confined: leaving the
+// workspace is the operation this serves.
+std::vector<std::string> directory_candidates(const std::filesystem::path& base,
+    std::string_view query, std::size_t limit = 50);
 AttachmentResult load_attachment(
     const std::filesystem::path& root, std::string_view relative_path);
 std::string message_with_attachments(

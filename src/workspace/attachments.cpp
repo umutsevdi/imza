@@ -152,6 +152,61 @@ std::vector<AttachmentCandidate> attachment_candidates(
     return out;
 }
 
+std::vector<std::string> directory_candidates(const std::filesystem::path& base,
+    std::string_view query, std::size_t limit)
+{
+    const std::string typed(query);
+    // Only the trailing segment is matched; the text before the final
+    // separator is echoed back so candidates keep the shape the user typed.
+    std::string prefix;
+    std::string needle;
+    if (typed == "~") {
+        prefix = "~/";
+    } else if (const std::size_t sep = typed.find_last_of("/\\");
+        sep == std::string::npos) {
+        needle = typed;
+    } else {
+        prefix = typed.substr(0, sep + 1);
+        needle = typed.substr(sep + 1);
+    }
+
+    std::filesystem::path search = base;
+    if (!prefix.empty()) {
+        const std::filesystem::path resolved
+            = path_from_utf8(expand_user_path(prefix));
+        search = resolved.is_absolute() ? resolved : base / resolved;
+    }
+
+    std::error_code ec;
+    if (!std::filesystem::is_directory(search, ec) || ec) {
+        return { };
+    }
+    const std::string key = to_lower(needle);
+    std::vector<std::string> out;
+    std::filesystem::directory_iterator it(
+        search, std::filesystem::directory_options::skip_permission_denied, ec);
+    constexpr std::size_t MAX_INSPECTED = 2000;
+    std::size_t inspected               = 0;
+    for (const auto& entry : it) {
+        if (ec || inspected++ >= MAX_INSPECTED) {
+            break;
+        }
+        if (!entry.is_directory(ec) || ec) {
+            continue;
+        }
+        const std::string name = utf8_from_path(entry.path().filename());
+        if (!key.empty() && !to_lower(name).starts_with(key)) {
+            continue;
+        }
+        out.push_back(prefix + name + '/');
+        if (out.size() >= limit) {
+            break;
+        }
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
 AttachmentResult load_attachment(
     const std::filesystem::path& root, std::string_view relative_path)
 {

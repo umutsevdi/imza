@@ -20,7 +20,8 @@ struct SlashCommand {
         MCP,
         COMPACT,
         MAKE_SKILL,
-        AUTO
+        AUTO,
+        CHDIR
     };
 
     std::string_view name;

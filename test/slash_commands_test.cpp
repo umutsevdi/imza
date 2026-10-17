@@ -1,6 +1,7 @@
 #include "app/application_state.h"
 #include "app/flows.h"
 #include "app/slash_commands.h"
+#include "common/util.h"
 #include "platform/config.h"
 #include "test_fs.h"
 #include "test_helpers.h"
@@ -402,6 +403,108 @@ TEST_CASE("CLI accepts MCP and skill startup allow lists")
     REQUIRE(result.allowed_skills.size() == 2);
     CHECK(result.allowed_skills[0] == "review");
     CHECK(result.allowed_skills[1] == "anatomy");
+}
+
+TEST_CASE("find_command routes /cd")
+{
+    CHECK(find_command("/cd")->action == SlashCommand::Action::CHDIR);
+    CHECK(find_command("/cd")->takes_argument);
+}
+
+TEST_CASE("/cd changes the working directory and records a notice")
+{
+    const imza::test::CurrentDirectory original;
+    const imza::test::TempDir target;
+    auto state = imza::test::make_test_state();
+    imza::test::wait_for_environment(*state);
+
+    run_slash(*state, "/cd " + target.path.string());
+
+    std::error_code error;
+    CHECK(state->session->error().empty());
+    CHECK(std::filesystem::current_path(error)
+        == std::filesystem::weakly_canonical(target.path));
+
+    const auto items = state->session->items();
+    REQUIRE(items->size() == 1);
+    const auto* notice = std::get_if<imza::Notice>(&items->front());
+    REQUIRE(notice != nullptr);
+    CHECK(notice->text.find("Working directory changed") != std::string::npos);
+
+    // The notice reaches the model as a tagged user message.
+    const auto history
+        = state->session->build_history("system", imza::ApiStandard::OPENAI);
+    REQUIRE(history.size() == 2);
+    CHECK(history[1].content.find("<notice>") != std::string::npos);
+    CHECK(history[1].content.find(target.path.filename().string())
+        != std::string::npos);
+}
+
+TEST_CASE("/cd clears grants and loaded skills")
+{
+    const imza::test::CurrentDirectory original;
+    const imza::test::TempDir target;
+    const imza::test::TempDir granted;
+    auto state = imza::test::make_test_state();
+    imza::test::wait_for_environment(*state);
+
+    REQUIRE(
+        state->permissions->install({ imza::ExternalGrant { granted.path } }));
+    state->skills->record_tool_load(granted.file("SKILL.md"), "body");
+    REQUIRE(state->permissions->snapshot()->size() == 1);
+    REQUIRE(state->skills->loaded_directories().size() == 1);
+
+    run_slash(*state, "/cd " + target.path.string());
+
+    CHECK(state->session->error().empty());
+    CHECK(state->permissions->snapshot()->empty());
+    CHECK(state->skills->loaded_directories().empty());
+}
+
+TEST_CASE("/cd rejects an empty argument and a missing directory")
+{
+    const imza::test::CurrentDirectory original;
+    auto state = imza::test::make_test_state();
+    imza::test::wait_for_environment(*state);
+
+    run_slash(*state, "/cd");
+    CHECK(state->session->error() == "Usage: /cd <directory>");
+
+    run_slash(*state, "/cd /definitely/not/a/directory/here");
+    CHECK(state->session->error().find("Not a directory") != std::string::npos);
+    CHECK_FALSE(state->session->has_items());
+    std::error_code error;
+    CHECK(std::filesystem::current_path(error) == original.original);
+}
+
+TEST_CASE("/cd during a turn waits in the queue")
+{
+    const imza::test::CurrentDirectory original;
+    const imza::test::TempDir target;
+    auto state = imza::test::make_test_state();
+    imza::test::wait_for_environment(*state);
+
+    state->session->set_phase(imza::Session::Phase::STREAMING);
+    run_slash(*state, "/cd " + target.path.string());
+
+    // Queued, not applied.
+    CHECK(state->session->error().empty());
+    REQUIRE(state->session->queued()->size() == 1);
+    CHECK(state->session->queued()->front().text
+        == "/cd " + target.path.string());
+    std::error_code error;
+    CHECK(std::filesystem::current_path(error) == original.original);
+
+    // Draining once idle applies it exactly once.
+    state->session->set_phase(imza::Session::Phase::IDLE);
+    imza::drain_queued(*state);
+    CHECK(state->session->error().empty());
+    CHECK(std::filesystem::current_path(error)
+        == std::filesystem::weakly_canonical(target.path));
+    CHECK(state->session->queued()->empty());
+    const auto items = state->session->items();
+    REQUIRE(items->size() == 1);
+    CHECK(std::holds_alternative<imza::Notice>(items->front()));
 }
 
 TEST_CASE("find_command routes /auto")

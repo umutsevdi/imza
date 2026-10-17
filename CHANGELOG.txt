@@ -14,6 +14,9 @@ Changes:
   - Imza is now installable with Homebrew: `brew install umutsevdi/imza/imza`;
     every release updates the cask automatically.
   - A single delegation can now run up to eight subagents.
+  - New /cd command switches the session to another directory without
+    restarting; the path completes as you type, and a switch requested during
+    a turn waits until the turn finishes.
 
 -------------------------------------------------------------------------------
 0.6.4 - 2026-10-17

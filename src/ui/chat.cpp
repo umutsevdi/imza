@@ -176,6 +176,9 @@ namespace {
         if (const auto* event = std::get_if<CompactionEvent>(&it)) {
             return static_cast<std::size_t>(event->status);
         }
+        if (const auto* notice = std::get_if<Notice>(&it)) {
+            return notice->text.size();
+        }
         return 0;
     }
 
@@ -1455,6 +1458,8 @@ ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx)
                     return text("Compaction failed") | dim;
                 }
                 return text("Compacting…") | dim;
+            } else if constexpr (std::is_same_v<T, Notice>) {
+                return text("· " + v.text) | dim;
             }
             return text("");
         },

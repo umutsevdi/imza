@@ -14,6 +14,9 @@ namespace imza {
 
 Autocomplete::Set Autocomplete::_active_set() const
 {
+    if (!_paths.empty()) {
+        return Set::PATHS;
+    }
     if (!_files.empty()) {
         return Set::FILES;
     }
@@ -26,6 +29,7 @@ Autocomplete::Set Autocomplete::_active_set() const
 int Autocomplete::_count() const
 {
     switch (_active_set()) {
+    case Set::PATHS: return static_cast<int>(_paths.size());
     case Set::FILES: return static_cast<int>(_files.size());
     case Set::SKILLS: return static_cast<int>(_skills.size());
     case Set::COMMANDS: break;
@@ -57,7 +61,14 @@ void Autocomplete::refresh(
 {
     clear();
     const std::size_t at = static_cast<std::size_t>(cursor);
-    _token               = attachment_token_at(text, at);
+    // Everything after `/cd ` is the query: a path may contain spaces.
+    if (text.size() >= 4 && text[3] == ' '
+        && to_lower(text.substr(0, 3)) == "/cd") {
+        _paths = directory_candidates(
+            std::filesystem::current_path(), text.substr(4));
+        return;
+    }
+    _token = attachment_token_at(text, at);
     if (_token) {
         _files = attachment_candidates(
             std::filesystem::current_path(), _token->query);
@@ -98,6 +109,15 @@ void Autocomplete::refresh(
 bool Autocomplete::accept(const ApplicationState& state, std::string& text,
     int& cursor, std::vector<Attachment>& attachments)
 {
+    if (!_paths.empty()) {
+        const std::string replacement
+            = _paths[static_cast<std::size_t>(_selected)];
+        text.replace(4, std::string::npos, replacement);
+        cursor = static_cast<int>(text.size());
+        // Keep the menu open so the user can keep descending.
+        refresh(state, text, cursor);
+        return false;
+    }
     if (!_files.empty() && _token) {
         const AttachmentCandidate& candidate
             = _files[static_cast<std::size_t>(_selected)];
@@ -159,6 +179,7 @@ void Autocomplete::clear()
     _commands.clear();
     _skills.clear();
     _files.clear();
+    _paths.clear();
     _token.reset();
     _skill_begin.reset();
     _selected = 0;
@@ -173,7 +194,8 @@ ftxui::Element Autocomplete::render(const LayoutCtx& ctx) const
         : ctx.width;
     const int description_width = std::clamp(available_width - 28, 8, 56);
     const Set set               = _active_set();
-    const size_t total          = set == Set::FILES ? _files.size()
+    const size_t total          = set == Set::PATHS ? _paths.size()
+        : set == Set::FILES                         ? _files.size()
         : set == Set::SKILLS                        ? _skills.size()
                                                     : _commands.size();
     const size_t shown          = std::min(total, max_rows);
@@ -188,15 +210,16 @@ ftxui::Element Autocomplete::render(const LayoutCtx& ctx) const
     for (size_t row_index = 0; row_index < shown; ++row_index) {
         const size_t i              = first + row_index;
         const bool sel              = static_cast<int>(i) == _selected;
-        const std::string name_text = set == Set::FILES ? "@" + _files[i].path
+        const std::string name_text = set == Set::PATHS ? _paths[i]
+            : set == Set::FILES                         ? "@" + _files[i].path
             : set == Set::SKILLS ? "$" + _skills[i].name
                                  : std::string(_commands[i]->name);
         Element name                = text(name_text);
         if (sel) {
             name = name | bold;
         }
-        const std::string description = set == Set::FILES
-            ? (_files[i].directory ? "directory" : "file")
+        const std::string description = set == Set::PATHS ? "directory"
+            : set == Set::FILES  ? (_files[i].directory ? "directory" : "file")
             : set == Set::SKILLS ? _skills[i].description
                                  : std::string(_commands[i]->desc);
         Element row                   = hbox({

@@ -1038,3 +1038,23 @@ TEST_CASE("pre-Glaze transcript with unknown members still loads")
     CHECK(loaded.snapshot.todo.items.size() == 1);
     CHECK(loaded.snapshot.todo.items[0].content == "task");
 }
+
+TEST_CASE("notices survive session persistence")
+{
+    DataHome home;
+    imza::Session source;
+    source.set_title("with a notice");
+    source.begin_send("hello");
+    source.append_assistant("model", "off");
+    source.apply(imza::make_delta_event("world"), { });
+    source.finish_session("");
+    source.append_notice("Working directory changed to /tmp/target");
+
+    imza::Session loaded;
+    roundtrip(source, loaded);
+    const auto items = loaded.items();
+    REQUIRE(items->size() == 3);
+    const auto* notice = std::get_if<imza::Notice>(&items->back());
+    REQUIRE(notice != nullptr);
+    CHECK(notice->text == "Working directory changed to /tmp/target");
+}

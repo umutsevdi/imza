@@ -5,6 +5,7 @@
 #include <doctest/doctest.h>
 #include <ftxui/component/component.hpp>
 
+#include "test_fs.h"
 #include "test_helpers.h"
 #include "test_state.h"
 #include "ui/autocomplete.h"
@@ -405,6 +406,38 @@ TEST_CASE("autocomplete completes a command on Enter without submitting")
     // The popup is gone, so the next Enter takes the plain submit path.
     CHECK_FALSE(autocomplete.active());
     autocomplete.clear();
+}
+
+TEST_CASE("autocomplete completes /cd paths and keeps descending")
+{
+    const imza::test::CurrentDirectory original;
+    const imza::test::TempDir root;
+    std::error_code error;
+    std::filesystem::create_directories(root.file("alpha") / "nested", error);
+    REQUIRE_FALSE(error);
+    std::filesystem::create_directories(root.file("beta"), error);
+    REQUIRE_FALSE(error);
+    std::filesystem::current_path(root.path, error);
+    REQUIRE_FALSE(error);
+
+    auto state = imza::test::make_test_state();
+    imza::Autocomplete autocomplete;
+
+    std::string text = "/cd ";
+    autocomplete.refresh(*state, text, static_cast<int>(text.size()));
+    REQUIRE(autocomplete.active());
+    const std::string menu
+        = to_text(autocomplete.render({ imza::LayoutCtx::Kind::WIDE, 80 }));
+    CHECK(menu.find("alpha/") != std::string::npos);
+    CHECK(menu.find("beta/") != std::string::npos);
+
+    // Accepting descends and keeps the menu open instead of submitting.
+    int cursor = static_cast<int>(text.size());
+    std::vector<imza::Attachment> attachments;
+    CHECK_FALSE(autocomplete.accept(*state, text, cursor, attachments));
+    CHECK(text == "/cd alpha/");
+    CHECK(cursor == static_cast<int>(text.size()));
+    CHECK(autocomplete.active());
 }
 
 TEST_CASE("autocomplete submits argument-less commands on Enter")

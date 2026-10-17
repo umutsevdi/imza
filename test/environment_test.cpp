@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <optional>
@@ -9,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/util.h"
 #include "test_fs.h"
 #include "workspace/environment.h"
 
