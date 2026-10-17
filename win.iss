@@ -83,6 +83,8 @@ Source: "{#Source}\README.md"; DestDir: "{app}"; DestName: "README.txt"
 #if FileExists(Build + "\wiki-snapshot\Home.md")
 Source: "{#Source}\misc\docs-skill\SKILL.md"; DestDir: "{app}\skills\imza-docs"; Flags: recursesubdir
 Source: "{#Build}\wiki-snapshot\*.md"; DestDir: "{app}\skills\imza-docs\wiki"; Flags: recursesubdir
+#else
+#error Packaging failure: wiki-snapshot\Home.md not found - the imza-docs skill cannot be bundled. The cmake configure step should have materialized it; it clones imza.wiki when the checkout lacks www/src/content/wiki.
 #endif
 
 [Icons]

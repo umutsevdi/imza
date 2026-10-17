@@ -150,6 +150,7 @@ jobs:
         run: |
           mkdir -p staging/release
           cp build/Release/imza.exe staging/release/imza.exe
+          cp -r build/wiki-snapshot staging/wiki-snapshot
       - name: Build installer
         shell: pwsh
         run: |

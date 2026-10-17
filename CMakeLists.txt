@@ -460,6 +460,29 @@ if (IMZA_BUILD_TESTS)
 endif()
 add_custom_target(bundle DEPENDS ${BUNDLE_OUTPUTS})
 add_dependencies(${PROJECT_NAME} bundle)
+# The bundled imza-docs skill's wiki pages. Single-sourced from the
+# imza.wiki clone under the website content tree, which fresh checkouts
+# do not have; package builds fall back to a shallow clone into the
+# build directory. Runs for every packaging-enabled configure, including
+# multi-config generators (Windows) where CMAKE_BUILD_TYPE is empty.
+if(IMZA_PACKAGE)
+    set(IMZA_WIKI_DIR "${CMAKE_SOURCE_DIR}/www/src/content/wiki")
+    if(NOT EXISTS "${IMZA_WIKI_DIR}/Home.md")
+        set(IMZA_WIKI_DIR "${CMAKE_CURRENT_BINARY_DIR}/wiki-snapshot")
+        if(NOT EXISTS "${IMZA_WIKI_DIR}/Home.md")
+            message(STATUS
+                "Packaging: cloning imza.wiki for the imza-docs skill…")
+            execute_process(
+                COMMAND
+                    git clone --depth 1
+                    https://github.com/umutsevdi/imza.wiki.git
+                    "${IMZA_WIKI_DIR}"
+                COMMAND_ERROR_IS_FATAL ANY
+            )
+        endif()
+    endif()
+endif()
+
 if(CMAKE_BUILD_TYPE STREQUAL "Release" AND IMZA_PACKAGE)
     if(NOT WIN32)
         set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
@@ -486,25 +509,6 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release" AND IMZA_PACKAGE)
                 "${CMAKE_SOURCE_DIR}/misc/LICENSE.thirdparty.txt"
             DESTINATION "${CMAKE_INSTALL_DOCDIR}"
         )
-        # The bundled imza-docs skill. The wiki pages are single-sourced
-        # from the imza.wiki clone under the website content tree, which
-        # fresh checkouts do not have; package builds fall back to a
-        # shallow clone into the build directory.
-        set(IMZA_WIKI_DIR "${CMAKE_SOURCE_DIR}/www/src/content/wiki")
-        if(NOT EXISTS "${IMZA_WIKI_DIR}/Home.md")
-            set(IMZA_WIKI_DIR "${CMAKE_CURRENT_BINARY_DIR}/wiki-snapshot")
-            if(NOT EXISTS "${IMZA_WIKI_DIR}/Home.md")
-                message(STATUS
-                    "Packaging: cloning imza.wiki for the imza-docs skill…")
-                execute_process(
-                    COMMAND
-                        git clone --depth 1
-                        https://github.com/umutsevdi/imza.wiki.git
-                        "${IMZA_WIKI_DIR}"
-                    COMMAND_ERROR_IS_FATAL ANY
-                )
-            endif()
-        endif()
         install(FILES "${CMAKE_SOURCE_DIR}/misc/docs-skill/SKILL.md"
             DESTINATION "${CMAKE_INSTALL_DOCDIR}/skills/imza-docs"
         )
