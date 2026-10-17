@@ -8,6 +8,14 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
+0.7.0 - Unreleased
+-------------------------------------------------------------------------------
+Changes:
+  - Imza is now installable with Homebrew: `brew install umutsevdi/imza/imza`;
+    every release updates the cask automatically.
+  - A single delegation can now run up to eight subagents.
+
+-------------------------------------------------------------------------------
 0.6.4 - 2026-10-17
 -------------------------------------------------------------------------------
 Changes:

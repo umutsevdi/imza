@@ -161,7 +161,7 @@ std::vector<Tool> default_tools(LuaHost lua_host, SkillToolDeps skill_deps,
 std::optional<std::string> validate_subagent_tool_arguments(
     const SubagentToolArgs& arguments, bool allow_build)
 {
-    if (arguments.tasks.empty() || arguments.tasks.size() > 5) {
+    if (arguments.tasks.empty() || arguments.tasks.size() > 8) {
         return std::string(SUBAGENT_ARGS_ERROR);
     }
     for (const auto& task : arguments.tasks) {
@@ -255,11 +255,11 @@ Tool make_subagent_tool(SubagentToolSlot delegate)
     ToolSpec spec;
     spec.name = "subagent";
     spec.description
-        = "Delegate one to five independent tasks to concurrent research or "
+        = "Delegate one to eight independent tasks to concurrent research or "
           "build agents and wait for their reports. Build agents are only "
           "available while the main agent is in build mode.";
     spec.parameters
-        = R"json({"type":"object","properties":{"tasks":{"type":"array","minItems":1,"maxItems":5,"items":{"type":"object","properties":{"mode":{"type":"string","enum":["research","build"]},"prompt":{"type":"string","minLength":1}},"required":["mode","prompt"],"additionalProperties":false}}},"required":["tasks"],"additionalProperties":false})json";
+        = R"json({"type":"object","properties":{"tasks":{"type":"array","minItems":1,"maxItems":8,"items":{"type":"object","properties":{"mode":{"type":"string","enum":["research","build"]},"prompt":{"type":"string","minLength":1}},"required":["mode","prompt"],"additionalProperties":false}}},"required":["tasks"],"additionalProperties":false})json";
     if (!delegate) {
         delegate = std::make_shared<SubagentToolFn>();
     }

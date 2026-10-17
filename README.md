@@ -66,7 +66,7 @@ with review findings fed back into planning as revisions
 * Sidechat for asking questions without disrupting the main agent's work
 * Bring-your-own-model support, including local OpenAI-compatible models
 * Native terminal UI with a small runtime footprint
-* Up to five concurrent research or build subagents
+* Up to eight concurrent research or build subagents
 * Persistent sessions, transcripts, and automatic context compaction
 * Overridable prompts: replace any built-in prompt fragment with your own
   Markdown in a `prompts/` directory

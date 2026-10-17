@@ -48,6 +48,6 @@ inline constexpr std::string_view LOAD_ARGS_ERROR
 inline constexpr std::string_view LOAD_MCP_ARGS_ERROR
     = "load_mcp: expected a server id";
 inline constexpr std::string_view SUBAGENT_ARGS_ERROR
-    = "subagent: expected one to five tasks";
+    = "subagent: expected one to eight tasks";
 
 } // namespace imza

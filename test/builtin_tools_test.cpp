@@ -1,9 +1,8 @@
 #include <doctest/doctest.h>
 
-#include <filesystem>
 #include <string>
+#include <vector>
 
-#include "network/json_io.h"
 #include "test_fs.h"
 #include "tools/skills.h"
 #include "tools/tool.h"
