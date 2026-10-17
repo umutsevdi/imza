@@ -210,3 +210,47 @@ jobs:
         with:
           path: www/dist
       - uses: actions/deploy-pages@v4
+  homebrew:
+    # The tap repo (umutsevdi/homebrew-imza) is a plain store: this pipeline
+    # is the only writer of Casks/imza.rb. Runs after `release` so the asset
+    # URLs the cask points at are already uploaded. macOS ships arm64 only.
+    runs-on: ubuntu-latest
+    needs: [prepare, release]
+    if: github.event_name == 'release'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Bump cask in umutsevdi/homebrew-imza
+        env:
+          GH_TOKEN: ${{ secrets.TAP_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          pkg="$(ls dist/imza-*-macos-arm64.pkg)" || true
+          if [ -z "$pkg" ]; then
+            echo "::error::Missing macOS arm64 pkg artifact; refusing to bump the cask."
+            exit 1
+          fi
+          sha="$(sha256sum "$pkg" | cut -d' ' -f1)"
+
+          gh repo clone umutsevdi/homebrew-imza tap -- --depth 1
+          cd tap
+
+          sed -i \
+            -e "s/version \".*\"/version \"$VERSION\"/" \
+            -e "s/sha256 \"[a-f0-9]\{64\}\"/sha256 \"$sha\"/" \
+            Casks/imza.rb
+
+          # Fail loudly if the rewrite did not land (cask format changed).
+          grep -q "version \"$VERSION\"" Casks/imza.rb
+          grep -q "sha256 \"$sha\"" Casks/imza.rb
+          if git diff --quiet; then
+            echo "::error::Cask unchanged after bump; version $VERSION may already be published."
+            exit 1
+          fi
+
+          git config user.name "release-bot"
+          git config user.email "mail@umutsevdi.com"
+          git commit -am "imza $VERSION"
+          git push
