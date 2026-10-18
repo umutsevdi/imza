@@ -333,18 +333,17 @@ void TurnRunner::_begin_compaction_job(
     // Background compaction is otherwise silent; announce it so the overlay
     // explains the pause. The finish notice is posted from the worker.
     if (_state->notifications) {
-        _state->notifications->publish(NotificationLevel::INFO,
-            "Compacting the conversation in the background…");
+        _state->notifications->publish(
+            false, "Compacting the conversation in the background…");
     }
-    _compaction_worker.emplace(
-        [this, settings = std::move(settings), report_nothing]() mutable {
-            _run_compaction(std::move(settings), report_nothing);
-            _compaction_active.store(false);
-            if (_state->notifications) {
-                _state->notifications->publish(
-                    NotificationLevel::INFO, "Conversation compacted.");
-            }
-        });
+    _compaction_worker.emplace([this, settings = std::move(settings),
+                                   report_nothing]() mutable {
+        _run_compaction(std::move(settings), report_nothing);
+        _compaction_active.store(false);
+        if (_state->notifications) {
+            _state->notifications->publish(false, "Conversation compacted.");
+        }
+    });
 }
 
 // The manual /compact path: forced compaction while the session is idle.

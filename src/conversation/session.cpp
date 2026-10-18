@@ -394,8 +394,7 @@ void Session::set_mode(Mode next_mode)
     }
 }
 
-void Session::set_error(
-    std::string msg, std::optional<std::chrono::milliseconds> ttl)
+void Session::set_error(std::string msg)
 {
     ErrorSink sink;
     {
@@ -405,7 +404,7 @@ void Session::set_error(
     }
     // Published outside the lock; the sink may re-enter accessors.
     if (sink && !msg.empty()) {
-        sink(std::move(msg), ttl);
+        sink(std::move(msg));
     }
 }
 
@@ -886,7 +885,7 @@ void Session::mark_retry(int wait_seconds, bool stalled)
     _phase           = Phase::CONNECTING;
     _retry_countdown = Countdown { std::chrono::steady_clock::now()
             + std::chrono::seconds(wait_seconds),
-        stalled };
+        stalled, std::chrono::seconds(wait_seconds) };
 }
 
 void Session::reset_reasoning()

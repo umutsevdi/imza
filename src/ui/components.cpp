@@ -433,27 +433,21 @@ namespace {
 
 namespace {
 
-    Color notification_accent(NotificationLevel level)
-    {
-        switch (level) {
-        case NotificationLevel::INFO: return HL_GREEN;
-        case NotificationLevel::ERROR: return HL_RED;
-        }
-    }
+    Color notification_accent(bool error) { return error ? HL_RED : HL_GREEN; }
 
-    // Remaining fraction of a notice's window; nullopt when it has no
-    // deadline (an error, the update banner), which renders no bar.
-    std::optional<float> notification_progress(const Notification& entry)
+    // Remaining fraction of a window, for the draining bar.
+    float remaining_fraction(std::chrono::steady_clock::time_point deadline,
+        std::chrono::milliseconds ttl)
     {
-        if (!entry.expires_at || entry.ttl.count() <= 0) {
-            return std::nullopt;
+        if (ttl.count() <= 0) {
+            return 0.0f;
         }
         const auto remaining
             = std::chrono::duration_cast<std::chrono::milliseconds>(
-                *entry.expires_at - std::chrono::steady_clock::now())
+                deadline - std::chrono::steady_clock::now())
                   .count();
-        return std::clamp(static_cast<float>(remaining)
-                / static_cast<float>(entry.ttl.count()),
+        return std::clamp(
+            static_cast<float>(remaining) / static_cast<float>(ttl.count()),
             0.0f, 1.0f);
     }
 
@@ -471,11 +465,10 @@ namespace {
     }
 
     // One notice at a fixed width: the message wrapped to the inner width,
-    // and — when it has a deadline — a rule beneath it whose accent part
-    // drains as the notice ages. The whole card reflects into `row_box`, so a
-    // click anywhere dismisses the notice.
-    Element notification_row(NotificationLevel level, std::string message,
-        std::optional<float> progress, Box& row_box)
+    // and a rule beneath it whose accent part drains as the notice ages. The
+    // whole card reflects into `row_box`, so a click anywhere dismisses it.
+    Element notification_row(
+        bool error, std::string message, float progress, Box& row_box)
     {
         // Not named WIDTH: that would shadow ftxui's direction enum.
         constexpr int card_width = NOTIFICATION_WIDTH;
@@ -483,17 +476,17 @@ namespace {
         // One column of padding each side, shared by the text and the rule so
         // the bar lines up with the message.
         constexpr int content = inner - 2;
-        const Color accent    = notification_accent(level);
+        const Color accent    = notification_accent(error);
 
         Elements body;
         for (const std::string& row : wrap_text(message, content)) {
             body.push_back(hbox(
                 { text(" "), text(row) | color(PANEL_FG) | xflex, text(" ") }));
         }
-        if (progress) {
+        {
             constexpr std::string_view RULE = "─";
             const int left
-                = std::clamp(static_cast<int>(*progress * content), 0, content);
+                = std::clamp(static_cast<int>(progress * content), 0, content);
             body.push_back(hbox({
                 text(" "),
                 text(repeat_glyph(RULE, left)) | color(accent),
@@ -523,13 +516,15 @@ Element render_notifications(const std::vector<Notification>& entries,
             ? "Connection stalled - retrying in " + std::to_string(remaining)
                 + "s…"
             : "Rate limited - retrying in " + std::to_string(remaining) + "s…";
-        rows.push_back(notification_row(
-            NotificationLevel::INFO, message, std::nullopt, row_boxes[0]));
+        rows.push_back(notification_row(false, message,
+            remaining_fraction(countdown->deadline, countdown->ttl),
+            row_boxes[0]));
     }
     for (const Notification& entry : entries) {
         rows.push_back(
-            notification_row(entry.level, error_sentence(entry.description),
-                notification_progress(entry), row_boxes[entry.id]));
+            notification_row(entry.error, error_sentence(entry.description),
+                remaining_fraction(entry.expires_at, entry.ttl),
+                row_boxes[entry.id]));
     }
     if (rows.empty()) {
         return text("");

@@ -18,7 +18,6 @@ using imza::test::without_ansi;
 namespace {
 
 using imza::Notification;
-using imza::NotificationLevel;
 using imza::NotificationStore;
 
 std::vector<Notification> entries_of(const NotificationStore& store)
@@ -32,13 +31,13 @@ std::vector<Notification> entries_of(const NotificationStore& store)
 TEST_CASE("the store publishes, dismisses by id, and bounds itself")
 {
     NotificationStore store;
-    const std::size_t first  = store.publish(NotificationLevel::INFO, "one");
-    const std::size_t second = store.publish(NotificationLevel::ERROR, "two");
+    const std::size_t first  = store.publish(false, "one");
+    const std::size_t second = store.publish(true, "two");
     CHECK(first != 0);
     CHECK(second != first);
 
     // An empty description is not an entry.
-    CHECK(store.publish(NotificationLevel::INFO, "") == 0);
+    CHECK(store.publish(false, "") == 0);
 
     // An unknown id is a no-op; a known one removes exactly that entry.
     store.dismiss(9999);
@@ -50,7 +49,7 @@ TEST_CASE("the store publishes, dismisses by id, and bounds itself")
 
     // Past the cap the oldest entries are dropped, newest kept.
     for (std::size_t i = 0; i < imza::MAX_NOTIFICATIONS + 3; ++i) {
-        store.publish(NotificationLevel::INFO, "n" + std::to_string(i));
+        store.publish(false, "n" + std::to_string(i));
     }
     const auto bounded = entries_of(store);
     REQUIRE(bounded.size() == imza::MAX_NOTIFICATIONS);
@@ -58,40 +57,27 @@ TEST_CASE("the store publishes, dismisses by id, and bounds itself")
         == "n" + std::to_string(imza::MAX_NOTIFICATIONS + 2));
 }
 
-TEST_CASE("the level sets the lifetime and an explicit ttl overrides it")
+TEST_CASE("the error flag selects the lifetime and every entry expires")
 {
     NotificationStore store;
-    store.publish(NotificationLevel::INFO, "info");
-    store.publish(NotificationLevel::INFO, "warn");
-    store.publish(NotificationLevel::ERROR, "error");
-    // NOTIFICATION_PERSIST keeps a transient level alive; a short ttl pins
-    // a persistent one.
-    store.publish(
-        NotificationLevel::INFO, "standing", imza::NOTIFICATION_PERSIST);
-    store.publish(
-        NotificationLevel::ERROR, "pinned", std::chrono::milliseconds { 1 });
+    store.publish(false, "info");
+    store.publish(true, "error");
 
     const auto entries = entries_of(store);
-    REQUIRE(entries.size() == 5);
-    CHECK(entries[0].expires_at.has_value());
-    CHECK(entries[1].expires_at.has_value());
-    CHECK_FALSE(entries[2].expires_at.has_value());
-    CHECK_FALSE(entries[3].expires_at.has_value());
-    CHECK(entries[4].expires_at.has_value());
-    // The window is recorded alongside the deadline so the overlay can draw
-    // the remaining fraction; a persistent entry carries none.
-    CHECK(entries[0].ttl.count() > 0);
-    CHECK(entries[3].ttl.count() == 0);
+    REQUIRE(entries.size() == 2);
+    // Nothing persists: both carry a deadline and the window it came from.
+    CHECK(entries[0].ttl == imza::INFO_TTL);
+    CHECK(entries[1].ttl == imza::ERROR_TTL);
+    CHECK(entries[0].expires_at > std::chrono::steady_clock::now());
+    CHECK(entries[1].expires_at > entries[0].expires_at);
 }
 
 TEST_CASE("expiry drops only the elapsed entries")
 {
     NotificationStore store;
-    store.publish(
-        NotificationLevel::INFO, "transient", std::chrono::milliseconds { 10 });
-    store.publish(NotificationLevel::ERROR, "persistent");
-    // A pending deadline is what keeps the UI frame loop alive.
-    CHECK(store.has_pending_expiry());
+    // A short window so the test does not sleep for the 5s default.
+    store.publish(false, "transient", std::chrono::milliseconds { 10 });
+    store.publish(true, "standing");
 
     CHECK_FALSE(store.dismiss_expired());
     std::this_thread::sleep_for(std::chrono::milliseconds { 30 });
@@ -99,18 +85,17 @@ TEST_CASE("expiry drops only the elapsed entries")
 
     const auto entries = entries_of(store);
     REQUIRE(entries.size() == 1);
-    CHECK(entries[0].description == "persistent");
-    CHECK_FALSE(store.has_pending_expiry());
+    CHECK(entries[0].description == "standing");
     CHECK_FALSE(store.dismiss_expired());
 }
 
 TEST_CASE("a held snapshot is not mutated by later publishes")
 {
     NotificationStore store;
-    store.publish(NotificationLevel::INFO, "first");
+    store.publish(false, "first");
     const auto held = store.notifications();
 
-    store.publish(NotificationLevel::INFO, "second");
+    store.publish(false, "second");
     store.dismiss(held->front().id);
 
     REQUIRE(held->size() == 1);
@@ -126,7 +111,7 @@ TEST_CASE("publishing and dismissing announce through the change signal")
     int changes       = 0;
     auto subscription = store.subscribe_to_change([&changes] { ++changes; });
 
-    const std::size_t id = store.publish(NotificationLevel::INFO, "one");
+    const std::size_t id = store.publish(false, "one");
     CHECK(changes == 1);
     store.dismiss(id);
     CHECK(changes == 2);
@@ -177,26 +162,10 @@ TEST_CASE("a session error publishes and outlives clear_error")
 
     const auto entries = entries_of(*state->notifications);
     REQUIRE(entries.size() == 1);
-    CHECK(entries[0].level == NotificationLevel::ERROR);
+    CHECK(entries[0].error);
     CHECK(entries[0].description == "Something broke.");
 
     // The notice is dismissed by the user, not by session bookkeeping.
     state->session->clear_error();
     CHECK(entries_of(*state->notifications).size() == 1);
-}
-
-TEST_CASE("a transient error carries a deadline, a plain one does not")
-{
-    auto state = imza::test::make_test_state();
-
-    // A usage mistake opts into a short window.
-    state->session->set_error("Usage: /auto on|off", imza::TRANSIENT_ERROR_TTL);
-    // A failure waits for the user.
-    state->session->set_error("Failed to load session.");
-
-    const auto entries = entries_of(*state->notifications);
-    REQUIRE(entries.size() == 2);
-    CHECK(entries[0].expires_at.has_value());
-    CHECK(entries[0].ttl == imza::TRANSIENT_ERROR_TTL);
-    CHECK_FALSE(entries[1].expires_at.has_value());
 }

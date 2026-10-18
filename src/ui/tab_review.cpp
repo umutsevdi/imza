@@ -346,13 +346,11 @@ namespace {
                 = _state->review->comments();
             if (comments.empty()) {
                 _state->session->set_error(
-                    "Add a review comment before sending.",
-                    TRANSIENT_ERROR_TTL);
+                    "Add a review comment before sending.");
                 return;
             }
             if (!_state->providers->active_selection()) {
-                _state->session->set_error(
-                    NO_MODEL_SELECTED, TRANSIENT_ERROR_TTL);
+                _state->session->set_error(NO_MODEL_SELECTED);
                 return;
             }
             std::string prompt = format_review_plan_prompt(
@@ -369,8 +367,7 @@ namespace {
             const ReviewState::Snapshot snapshot = _state->review->snapshot();
             if (snapshot.status != ReviewState::LoadStatus::LOADED
                 || snapshot.review->files.empty()) {
-                _state->session->set_error(
-                    "There are no changes to review.", TRANSIENT_ERROR_TTL);
+                _state->session->set_error("There are no changes to review.");
                 return;
             }
             std::string prompt = format_ai_review_prompt(

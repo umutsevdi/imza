@@ -118,14 +118,11 @@ namespace {
     void wire_error_sink(ApplicationState& state)
     {
         ApplicationState* raw = &state;
-        state.session->set_error_sink(
-            [raw](std::string message,
-                std::optional<std::chrono::milliseconds> ttl) {
-                if (raw->notifications) {
-                    raw->notifications->publish(
-                        NotificationLevel::ERROR, std::move(message), ttl);
-                }
-            });
+        state.session->set_error_sink([raw](std::string message) {
+            if (raw->notifications) {
+                raw->notifications->publish(true, std::move(message));
+            }
+        });
     }
 
     // Lazy so the roster can be built before state->skills exists.
@@ -227,12 +224,12 @@ namespace {
         };
         mcp_hooks.open_browser
             = [](const std::string& url) { return open_browser(url); };
-        mcp_hooks.notify = [raw = state.get()](
-                               NotificationLevel level, std::string message) {
-            if (raw->notifications) {
-                raw->notifications->publish(level, std::move(message));
-            }
-        };
+        mcp_hooks.notify
+            = [raw = state.get()](bool error, std::string message) {
+                  if (raw->notifications) {
+                      raw->notifications->publish(error, std::move(message));
+                  }
+              };
         state->mcp = std::make_shared<McpManager>(
             std::move(mcp_servers), std::move(mcp_hooks));
         state->mcp->autoload();
@@ -250,10 +247,9 @@ namespace {
                     const std::optional<std::string> version
                         = raw->environment->update_available();
                     if (raw->notifications && version) {
-                        raw->notifications->publish(NotificationLevel::INFO,
+                        raw->notifications->publish(false,
                             "Imza v" + *version
-                                + " is available - run /update.",
-                            NOTIFICATION_PERSIST);
+                                + " is available - run /update.");
                     }
                 });
         state->permissions = std::make_shared<PermissionStore>();

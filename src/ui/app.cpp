@@ -200,10 +200,10 @@ namespace {
             const bool copied = copy_to_clipboard(tool, selected);
             if (state.notifications) {
                 if (copied) {
-                    state.notifications->publish(NotificationLevel::INFO,
-                        "Copied the selection to the clipboard.");
+                    state.notifications->publish(
+                        false, "Copied the selection to the clipboard.");
                 } else {
-                    state.notifications->publish(NotificationLevel::INFO,
+                    state.notifications->publish(false,
                         tool.empty()
                             ? "No clipboard tool found - install win32yank or "
                               "xclip to copy selections."
@@ -507,7 +507,7 @@ namespace {
             // notice with a deadline keeps requesting frames until it clears,
             // so the loop cannot stall with one still pending.
             _state->notifications->dismiss_expired();
-            if (_state->notifications->has_pending_expiry()) {
+            if (!_state->notifications->notifications()->empty()) {
                 animation::RequestAnimationFrame();
             }
         }

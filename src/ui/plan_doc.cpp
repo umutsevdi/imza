@@ -499,12 +499,12 @@ namespace {
         {
             if (_notes.empty()) {
                 _status = "Add a note before sending.";
-                _state->session->set_error(_status, TRANSIENT_ERROR_TTL);
+                _state->session->set_error(_status);
                 return;
             }
             if (!_state->providers->active_selection()) {
                 _status = NO_MODEL_SELECTED;
-                _state->session->set_error(_status, TRANSIENT_ERROR_TTL);
+                _state->session->set_error(_status);
                 return;
             }
             const std::string prompt = format_plan_annotations_prompt(

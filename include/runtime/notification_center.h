@@ -13,19 +13,16 @@
 
 namespace imza {
 
-enum class NotificationLevel { INFO, ERROR };
-
 // One transient message shown in the app-wide overlay. `expires_at` is an
 // absolute deadline rather than a countdown: the render thread derives the
 // remaining time, so no thread mutates the entry after publication.
-// `nullopt` means the entry persists until dismissed (the ERROR default).
 struct Notification {
-    std::size_t id          = 0;
-    NotificationLevel level = NotificationLevel::INFO;
+    std::size_t id = 0;
+    bool error     = false;
     std::string description;
-    std::optional<std::chrono::steady_clock::time_point> expires_at;
+    std::chrono::steady_clock::time_point expires_at;
     // The window `expires_at` was derived from, so the overlay can render the
-    // remaining fraction as a bar. Zero when the entry does not expire.
+    // remaining fraction as a bar.
     std::chrono::milliseconds ttl { 0 };
 };
 
@@ -33,36 +30,24 @@ struct Notification {
 // grow the overlay without bound.
 inline constexpr std::size_t MAX_NOTIFICATIONS = 5;
 
-// ttl sentinel: keep the entry until the user dismisses it, whatever the
-// level's default. For notices that describe standing state (an available
-// release) rather than a moment.
-inline constexpr std::chrono::milliseconds NOTIFICATION_PERSIST {
-    std::chrono::milliseconds::max()
-};
-
-// A short-lived error: a usage mistake or a refused precondition the user can
-// act on immediately, as opposed to a failure worth keeping on screen. Errors
-// default to persistent, so these opt in explicitly.
-inline constexpr std::chrono::milliseconds TRANSIENT_ERROR_TTL { 6000 };
+// Default lifetimes, keyed by the error flag. Callers do not choose a window.
+inline constexpr std::chrono::milliseconds INFO_TTL { 5000 };
+inline constexpr std::chrono::milliseconds ERROR_TTL { 10000 };
 
 // Thread-safe store behind the overlay: any worker may publish, the UI
 // thread snapshots and renders. Long-lived ApplicationComponent; hands out
 // copy-on-write snapshots, never a reference into locked state.
 class NotificationStore final : public ApplicationComponent {
 public:
-    // Returns the new entry's id. `ttl` schedules auto-dismissal; omit it
-    // to persist until dismiss().
-    std::size_t publish(NotificationLevel level, std::string description,
+    // Returns the new entry's id; the entry expires after the window its
+    // error flag selects. `ttl` overrides that window (tests only).
+    std::size_t publish(bool error, std::string description,
         std::optional<std::chrono::milliseconds> ttl = std::nullopt);
     void dismiss(std::size_t id);
     // Drops every entry whose deadline has passed and returns whether
     // anything was removed; called from the UI animation tick, so the store
     // owns no timer thread.
     bool dismiss_expired();
-    // True while any entry still carries a deadline. The UI keeps requesting
-    // animation frames on this, so an auto-dismissing notice actually expires
-    // even though nothing else is animating.
-    bool has_pending_expiry() const;
     std::shared_ptr<const std::vector<Notification>> notifications() const;
     // Callbacks run on the publishing thread; keep the Subscription.
     [[nodiscard]] Signal<>::Subscription subscribe_to_change(
