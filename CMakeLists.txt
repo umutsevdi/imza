@@ -302,6 +302,7 @@ add_library(imza_runtime
     src/runtime/bg_process_manager.cpp
     src/runtime/main_thread_queue.cpp
     src/runtime/modal_queue.cpp
+    src/runtime/notification_center.cpp
     src/runtime/subagent_manager.cpp
     src/tools/skills.cpp
     src/tools/skill_registry.cpp

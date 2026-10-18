@@ -231,6 +231,13 @@ void McpManager::spawn(std::function<void()> work)
     _workers.emplace_back(std::move(work));
 }
 
+void McpManager::_notify(NotificationLevel level, std::string message) const
+{
+    if (_hooks.notify) {
+        _hooks.notify(level, std::move(message));
+    }
+}
+
 void McpManager::run_handshake(
     std::shared_ptr<ServerEntry> entry, bool force_token_refresh)
 {
@@ -260,8 +267,9 @@ void McpManager::run_handshake(
     std::string detail;
     std::optional<McpSession> fresh = make_session(entry->config, detail);
     std::vector<McpToolDefinition> tools;
-    bool failed = false;
-    int attempt = 0;
+    bool failed           = false;
+    bool was_reconnecting = false;
+    int attempt           = 0;
     {
         std::lock_guard io_lock(entry->io);
         Status st = Status::OK;
@@ -275,6 +283,7 @@ void McpManager::run_handshake(
         }
         std::lock_guard state_lock(entry->state_mutex);
         if (st == Status::OK) {
+            was_reconnecting          = entry->reconnect_attempts > 0;
             entry->session            = std::move(*fresh);
             entry->tools              = std::move(tools);
             entry->state              = McpServerState::CONNECTED;
@@ -294,16 +303,27 @@ void McpManager::run_handshake(
         }
     }
     _changed.publish();
+    if (!failed && was_reconnecting) {
+        _notify(NotificationLevel::INFO,
+            "MCP server '" + entry->config.id + "' reconnected.");
+    }
     if (failed) {
         if (attempt < MAX_RECONNECT_ATTEMPTS) {
             const long delay
                 = RETRY_DELAYS_SECS[static_cast<std::size_t>(attempt - 1)];
+            _notify(NotificationLevel::WARN,
+                "MCP server '" + entry->config.id
+                    + "' disconnected - retrying.");
             spawn([this, entry, delay] {
                 if (wait_interruptible(delay * 1000)) {
                     return;
                 }
                 run_handshake(entry);
             });
+        } else {
+            _notify(NotificationLevel::ERROR,
+                "MCP server '" + entry->config.id
+                    + "' could not be reached: " + detail);
         }
         return;
     }
@@ -660,6 +680,9 @@ bool McpManager::refresh_entry_tokens(
         oauth.token_endpoint, client, oauth.refresh_token, { }, tokens, detail);
     if (status != Status::OK) {
         detail = "sign-in needed again: " + detail;
+        _notify(NotificationLevel::WARN,
+            "Could not renew the access token for MCP server '"
+                + entry->config.id + "': " + detail);
         return false;
     }
     {
@@ -674,6 +697,8 @@ bool McpManager::refresh_entry_tokens(
         && still_tracked(entry->config.id, entry)) {
         _hooks.persist_server(entry->config);
     }
+    _notify(NotificationLevel::INFO,
+        "Renewed the access token for MCP server '" + entry->config.id + "'.");
     return true;
 }
 

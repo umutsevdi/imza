@@ -219,10 +219,6 @@ namespace {
             const ReviewState::Snapshot review_snapshot
                 = _state->review->snapshot();
             Elements bottom { };
-            if (!_state->session->error().empty()
-                || _state->session->retry_countdown()) {
-                bottom.push_back(session_error_element(*_state->session));
-            }
             const bool review_running
                 = review_snapshot.findings.task_id.has_value();
             const bool handoff_running
@@ -252,10 +248,6 @@ namespace {
 
         bool OnEvent(Event event) override
         {
-            if (_is_user_interaction(event)
-                && !_state->session->error().empty()) {
-                _state->session->clear_error();
-            }
             if (_editor.is_open()) {
                 switch (_editor.handle_event(event)) {
                 case AnnotationAction::CANCEL: _close_editor(); return true;
@@ -345,22 +337,6 @@ namespace {
         }
 
     private:
-        static bool _is_user_interaction(Event event)
-        {
-            const bool mouse_input = event.is_mouse()
-                && (event.mouse().motion == Mouse::Pressed
-                    || event.mouse().button == Mouse::WheelUp
-                    || event.mouse().button == Mouse::WheelDown);
-            return mouse_input || event.is_character()
-                || event == Event::Backspace || event == Event::Delete
-                || event == Event::Return || event == Event::Escape
-                || event == Event::ArrowUp || event == Event::ArrowDown
-                || event == Event::ArrowLeft || event == Event::ArrowRight
-                || event == Event::PageUp || event == Event::PageDown
-                || event == Event::Home || event == Event::End
-                || is_alt_enter(event);
-        }
-
         void _send_to_plan()
         {
             if (_state->review->snapshot().findings.task_id) {

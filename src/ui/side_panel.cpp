@@ -100,12 +100,6 @@ public:
                       current->post([] { animation::RequestAnimationFrame(); });
                   }
               }))
-        , _update_subscription(_state->environment->subscribe_to_update_change(
-              [state = std::weak_ptr<ApplicationState>(_state)] {
-                  if (const auto current = state.lock()) {
-                      current->post([] { animation::RequestAnimationFrame(); });
-                  }
-              }))
         , _documents_subscription(
               _state->session->subscribe_to_documents_change(
                   [state = std::weak_ptr<ApplicationState>(_state)] {
@@ -175,12 +169,6 @@ public:
                 if (has_custom_permissions(permissions)) {
                     parts.push_back(render_permissions_box(permissions));
                 }
-            }
-        }
-        if (_sidebar.update) {
-            if (const std::optional<std::string> update
-                = _state->environment->update_available()) {
-                parts.push_back(render_update_available(*update));
             }
         }
         Element body = vbox(std::move(parts));
@@ -351,7 +339,6 @@ private:
     Signal<>::Subscription _review_subscription;
     Signal<>::Subscription _permission_subscription;
     Signal<>::Subscription _skip_subscription;
-    Signal<>::Subscription _update_subscription;
     Signal<>::Subscription _documents_subscription;
     Component _links_container;
     std::map<std::string, Link<ChangedFile>> _file_links;
@@ -575,16 +562,6 @@ Element render_permissions_box(const PermissionView& view)
     }
     Element body = vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER);
     return titled_section("Permissions", std::move(body));
-}
-
-Element render_update_available(std::string version)
-{
-    return hbox({
-        text(" Update Available ") | bold | color(PANEL_FG),
-        filler(),
-        text("  v" + std::move(version) + " ") | bold | color(PANEL_COLOR_FOCUS)
-            | bgcolor(HL_GREEN),
-    });
 }
 
 } // namespace imza

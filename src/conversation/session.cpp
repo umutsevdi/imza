@@ -396,14 +396,28 @@ void Session::set_mode(Mode next_mode)
 
 void Session::set_error(std::string msg)
 {
-    std::lock_guard lock(_mutex);
-    _error = std::move(msg);
+    std::function<void(std::string)> sink;
+    {
+        std::lock_guard lock(_mutex);
+        _error = msg;
+        sink   = _error_sink;
+    }
+    // Published outside the lock; the sink may re-enter accessors.
+    if (sink && !msg.empty()) {
+        sink(std::move(msg));
+    }
 }
 
 void Session::clear_error()
 {
     std::lock_guard lock(_mutex);
     _error.clear();
+}
+
+void Session::set_error_sink(std::function<void(std::string)> sink)
+{
+    std::lock_guard lock(_mutex);
+    _error_sink = std::move(sink);
 }
 
 void Session::set_connect_status(std::string status)

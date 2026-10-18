@@ -25,14 +25,22 @@
 namespace imza {
 
 namespace {
+    // Terminal alert (OSC 9 / bell) for an event the user may be away
+    // from. Only the root attended session alerts: children and the
+    // sidechat share the store, and headless installs no terminal
+    // subscriber, so the alert is a no-op there.
     void notify_user(ApplicationState& state, AgentNotification notification)
     {
-        if (state.agent_label.empty()
-            && (state.runtime_flags & RuntimeFlag::ATTENDED)
-                != RuntimeFlag::NONE
-            && state.notify_user) {
-            state.notify_user(notification);
+        if (!state.agent_label.empty()
+            || (state.runtime_flags & RuntimeFlag::ATTENDED)
+                == RuntimeFlag::NONE
+            || !state.notifications) {
+            return;
         }
+        state.notifications->alert(
+            notification == AgentNotification::TURN_FINISHED
+                ? "Imza finished"
+                : "Imza needs your attention");
     }
 
     Environment::ChdirResult change_directory(
@@ -472,9 +480,15 @@ void drain_queued(ApplicationState& state)
 
 void on_turn_finished(ApplicationState& state, std::string error)
 {
-    const bool ended = state.session->finish_session(std::move(error));
+    const bool failed = !error.empty();
+    const bool ended  = state.session->finish_session(std::move(error));
     if (!ended) {
         return;
+    }
+    // The final turn error bypasses set_error, so publish it here.
+    if (failed && state.notifications) {
+        state.notifications->publish(
+            NotificationLevel::ERROR, state.session->error());
     }
     notify_user(state, AgentNotification::TURN_FINISHED);
     present_front(state);

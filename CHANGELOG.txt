@@ -17,6 +17,14 @@ Changes:
   - New /cd command switches the session to another directory without
     restarting; the path completes as you type, and a switch requested during
     a turn waits until the turn finishes.
+  - A notification overlay now reports background activity that used to be
+    invisible: copying a selection, MCP reconnects and token renewals, and
+    background compaction. Errors no longer disappear when you type - they
+    stay on screen until you dismiss them with Esc or the close button.
+  - Terminal alerts (OSC 9 or the bell) now go through the same notification
+    store, so turn-finished and input-required alerts share one path.
+  - An available update is now a persistent notification naming the new
+    version, instead of a sidebar banner.
 
 -------------------------------------------------------------------------------
 0.6.4 - 2026-10-17

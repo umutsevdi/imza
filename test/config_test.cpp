@@ -900,13 +900,27 @@ TEST_CASE("allow and instructions are absent from a minimal config")
     CHECK(loaded.sidebar.context);
 }
 
+TEST_CASE("a legacy sidebar update flag is ignored, not rejected")
+{
+    // The update banner moved to the notification overlay; a config written
+    // by an older build still carries the flag and must keep loading.
+    const auto path = temp_file("sidebar-legacy-update.json");
+    {
+        std::ofstream out(path);
+        out << R"({"sidebar":{"update":false,"documents":false}})";
+    }
+    imza::Config loaded;
+    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
+    CHECK_FALSE(loaded.sidebar.documents);
+    CHECK(loaded.sidebar.review_comments);
+}
+
 TEST_CASE("config roundtrip preserves hidden sidebar widgets")
 {
     const auto path = temp_file("sidebar-roundtrip.json");
     imza::Config cfg;
     cfg.sidebar.documents     = false;
     cfg.sidebar.changed_files = false;
-    cfg.sidebar.update        = false;
 
     REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
 
@@ -914,7 +928,6 @@ TEST_CASE("config roundtrip preserves hidden sidebar widgets")
     const std::string json = imza::test::read_all(path);
     CHECK(json.find("\"documents\"") != std::string::npos);
     CHECK(json.find("\"changed_files\"") != std::string::npos);
-    CHECK(json.find("\"update\"") != std::string::npos);
     CHECK(json.find("\"tasks\"") == std::string::npos);
     CHECK(json.find("\"context\"") == std::string::npos);
 
@@ -922,7 +935,6 @@ TEST_CASE("config roundtrip preserves hidden sidebar widgets")
     REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
     CHECK_FALSE(loaded.sidebar.documents);
     CHECK_FALSE(loaded.sidebar.changed_files);
-    CHECK_FALSE(loaded.sidebar.update);
     CHECK(loaded.sidebar.review_comments);
     CHECK(loaded.sidebar.tasks);
     CHECK(loaded.sidebar.context);

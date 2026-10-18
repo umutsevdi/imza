@@ -612,9 +612,6 @@ namespace {
                 text(_hints.input_hint) | color(PANEL_FG_DIM) });
             bottom.push_back(
                 vbox({ std::move(input_box) | yflex, std::move(hint_line) }));
-            if (!st.error().empty() || st.retry_countdown()) {
-                bottom.push_back(session_error_element(st));
-            }
             Elements root;
             root.push_back(std::move(main));
             root.push_back(separatorEmpty());
@@ -814,7 +811,6 @@ namespace {
                 _history_index.reset();
                 _history_draft.clear();
             }
-            _session->clear_error();
             retain_mentioned_attachments(_input_buf, _attachments);
             _autocomplete.refresh(*_state, _input_buf, _input_cursor);
         }

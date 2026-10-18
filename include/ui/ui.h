@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -25,6 +26,7 @@
 #include "conversation/session.h"
 #include "network/network.h"
 #include "permissions/store.h"
+#include "runtime/notification_center.h"
 #include "tools/skills.h"
 
 namespace imza {
@@ -394,7 +396,12 @@ ftxui::Element diffstat_chip(std::size_t additions, std::size_t deletions);
 // Draws a canvas module chart as an inline chat element at a fixed
 // size that shrinks only when the content is narrower.
 ftxui::Element canvas_chart(const CanvasView& view, int available_width);
-ftxui::Element session_error_element(const Session& session);
+// App-wide notification overlay: one bordered row per live notice, the
+// most recent last, plus a synthetic row for the session's retry countdown.
+// `close_boxes` receives each row's close affordance box, keyed by
+// notification id (0 for the countdown row), so the host can hit-test clicks.
+ftxui::Element render_notifications(const std::vector<Notification>& entries,
+    const Session& session, std::map<std::size_t, ftxui::Box>& close_boxes);
 
 ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx);
 ftxui::Element render_todo(const TodoList& todo, const LayoutCtx& ctx);
@@ -425,7 +432,6 @@ PermissionView make_permission_view(RuntimeFlag flags, bool approvals_skipped,
     const PermissionStore::Grants& grants);
 bool has_custom_permissions(const PermissionView& view);
 ftxui::Element render_permissions_box(const PermissionView& view);
-ftxui::Element render_update_available(std::string version);
 
 // Per-chat footer text; the sidechat clears hints and sets its own input
 // hint.

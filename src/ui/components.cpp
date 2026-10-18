@@ -431,30 +431,60 @@ namespace {
 
 } // namespace
 
-Element session_error_element(const Session& session)
-{
-    std::string message = error_sentence(session.error());
-    if (session.retry_countdown()) {
-        auto remaining = std::chrono::duration_cast<std::chrono::seconds>(
-            session.retry_countdown()->deadline
-            - std::chrono::steady_clock::now())
-                             .count();
-        if (remaining < 0) {
-            remaining = 0;
+namespace {
+
+    Color notification_accent(NotificationLevel level)
+    {
+        switch (level) {
+        case NotificationLevel::INFO: return HL_BLUE;
+        case NotificationLevel::WARN: return HL_YELLOW;
+        case NotificationLevel::ERROR: return HL_RED;
         }
-        message = session.retry_countdown()->stalled
+        return HL_BLUE;
+    }
+
+    Element notification_row(
+        NotificationLevel level, std::string message, Box& close_box)
+    {
+        const Color accent = notification_accent(level);
+        return hbox({
+                   text(" ") | bgcolor(accent),
+                   text(" " + std::move(message) + " ") | bgcolor(PANEL_COLOR)
+                       | color(PANEL_FG) | xflex,
+                   text(" ✕ ") | bgcolor(PANEL_COLOR) | color(PANEL_FG_DIM)
+                       | reflect(close_box),
+               })
+            | bgcolor(PANEL_COLOR) | borderStyled(ROUNDED, accent);
+    }
+
+} // namespace
+
+Element render_notifications(const std::vector<Notification>& entries,
+    const Session& session, std::map<std::size_t, Box>& close_boxes)
+{
+    Elements rows;
+    // The retry countdown has no store entry (it is live session state), so
+    // it renders as a synthetic row above the published notices.
+    if (const auto countdown = session.retry_countdown()) {
+        auto remaining = std::chrono::duration_cast<std::chrono::seconds>(
+            countdown->deadline - std::chrono::steady_clock::now())
+                             .count();
+        remaining                 = std::max<std::int64_t>(remaining, 0);
+        const std::string message = countdown->stalled
             ? "Connection stalled - retrying in " + std::to_string(remaining)
                 + "s…"
             : "Rate limited - retrying in " + std::to_string(remaining) + "s…";
+        rows.push_back(
+            notification_row(NotificationLevel::WARN, message, close_boxes[0]));
     }
-    if (message.empty()) {
+    for (const Notification& entry : entries) {
+        rows.push_back(notification_row(entry.level,
+            error_sentence(entry.description), close_boxes[entry.id]));
+    }
+    if (rows.empty()) {
         return text("");
     }
-    return hbox({
-        text(" ") | bgcolor(HL_RED),
-        text(" " + message) | bgcolor(HL_RED),
-        filler() | bgcolor(HL_RED),
-    });
+    return vbox(std::move(rows));
 }
 
 namespace {

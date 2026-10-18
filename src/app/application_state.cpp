@@ -112,6 +112,20 @@ namespace {
         };
     }
 
+    // Session errors become app-wide notifications; the ~40 set_error call
+    // sites stay untouched. Reads state->notifications at call time, so the
+    // sink may be installed before the store is created.
+    void wire_error_sink(ApplicationState& state)
+    {
+        ApplicationState* raw = &state;
+        state.session->set_error_sink([raw](std::string message) {
+            if (raw->notifications) {
+                raw->notifications->publish(
+                    NotificationLevel::ERROR, std::move(message));
+            }
+        });
+    }
+
     // Lazy so the roster can be built before state->skills exists.
     SkillToolDeps skill_deps(ApplicationState* state)
     {
@@ -181,7 +195,11 @@ namespace {
         state->lua_state = make_lua_state();
         state->prompts   = std::make_shared<PromptStore>(prompts_dir());
         state->session   = std::make_shared<Session>();
-        state->sessions  = std::make_shared<SessionStore>();
+        // Created before the managers that publish into it, so a worker that
+        // fires during construction still finds the store.
+        state->notifications = std::make_shared<NotificationStore>();
+        wire_error_sink(*state);
+        state->sessions = std::make_shared<SessionStore>();
         state->input_history
             = std::make_shared<InputHistoryStore>(input_history_path());
         std::map<std::string, McpServerConfig> mcp_servers
@@ -207,6 +225,12 @@ namespace {
         };
         mcp_hooks.open_browser
             = [](const std::string& url) { return open_browser(url); };
+        mcp_hooks.notify = [raw = state.get()](
+                               NotificationLevel level, std::string message) {
+            if (raw->notifications) {
+                raw->notifications->publish(level, std::move(message));
+            }
+        };
         state->mcp = std::make_shared<McpManager>(
             std::move(mcp_servers), std::move(mcp_hooks));
         state->mcp->autoload();
@@ -214,8 +238,22 @@ namespace {
         state->bg_processes = std::make_shared<BgProcessManager>();
         state->environment
             = std::make_shared<Environment>(std::move(instructions));
-        state->review      = std::make_shared<ReviewState>();
-        state->skills      = std::make_shared<SkillStore>();
+        state->review = std::make_shared<ReviewState>();
+        state->skills = std::make_shared<SkillStore>();
+        // The found-update notice rides the overlay alongside the sidebar
+        // banner; the environment publishes it once, from its worker.
+        state->update_subscription
+            = state->environment->subscribe_to_update_change(
+                [raw = state.get()] {
+                    const std::optional<std::string> version
+                        = raw->environment->update_available();
+                    if (raw->notifications && version) {
+                        raw->notifications->publish(NotificationLevel::INFO,
+                            "Imza v" + *version
+                                + " is available - run /update.",
+                            NOTIFICATION_PERSIST);
+                    }
+                });
         state->permissions = std::make_shared<PermissionStore>();
         state->permissions->set_skip_permissions(
             (runtime_flags & RuntimeFlag::SKIP_PERMISSIONS)
@@ -266,7 +304,9 @@ namespace {
         state->skill_registry = parent.skill_registry;
         state->permissions    = parent.permissions;
         state->prompts        = parent.prompts;
+        state->notifications  = parent.notifications;
         state->post           = guarded_post(state.get(), std::move(post));
+        wire_error_sink(*state);
         state->on_exit        = [] { };
         state->parent_routing = std::move(parent_routing);
         state->agent_label    = std::move(agent_label);
@@ -298,6 +338,7 @@ ApplicationState::~ApplicationState()
     alive.store(false);
     queue.abandon();
     provider_subscription.disconnect();
+    update_subscription.disconnect();
     env_subscription.disconnect();
     system_subscription.disconnect();
     subagents->stop();

@@ -54,13 +54,12 @@ TEST_CASE("plan requests omit edit and write tools")
         [](const imza::ToolSpec& tool) { return tool.name == "lua"; }));
 }
 
-TEST_CASE("attended root turn notifies once after completion")
+TEST_CASE("attended root turn alerts once after completion")
 {
     AgentEnv env;
-    std::vector<imza::AgentNotification> notifications;
-    env.state->notify_user = [&notifications](imza::AgentNotification event) {
-        notifications.push_back(event);
-    };
+    std::vector<std::string> alerts;
+    auto subscription = env.state->notifications->subscribe_to_alert(
+        [&alerts](const std::string& message) { alerts.push_back(message); });
     env.stream
         = [](const imza::ChatRequest&, const imza::StreamCallback& callback) {
               callback(imza::make_done_event());
@@ -69,20 +68,19 @@ TEST_CASE("attended root turn notifies once after completion")
 
     imza::submit(*env.state, "inspect");
     REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
-    REQUIRE(notifications.size() == 1);
-    CHECK(notifications.front() == imza::AgentNotification::TURN_FINISHED);
+    REQUIRE(alerts.size() == 1);
+    CHECK(alerts.front() == "Imza finished");
 
     imza::on_turn_finished(*env.state, "");
-    CHECK(notifications.size() == 1);
+    CHECK(alerts.size() == 1);
 }
 
-TEST_CASE("agent shell approval notifies when input is required")
+TEST_CASE("agent shell approval alerts when input is required")
 {
     AgentEnv env;
-    std::vector<imza::AgentNotification> notifications;
-    env.state->notify_user = [&notifications](imza::AgentNotification event) {
-        notifications.push_back(event);
-    };
+    std::vector<std::string> alerts;
+    auto subscription = env.state->notifications->subscribe_to_alert(
+        [&alerts](const std::string& message) { alerts.push_back(message); });
     env.stream = [](const imza::ChatRequest& request,
                      const imza::StreamCallback& callback) {
         if (request.messages.back().type == imza::Message::Type::USER) {
@@ -96,38 +94,37 @@ TEST_CASE("agent shell approval notifies when input is required")
 
     imza::submit(*env.state, "run it");
     REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
-    REQUIRE(notifications.size() == 1);
-    CHECK(notifications.front() == imza::AgentNotification::INPUT_REQUIRED);
+    REQUIRE(alerts.size() == 1);
+    CHECK(alerts.front() == "Imza needs your attention");
 
     imza::resolve_modal(
         *env.state, imza::ToolVerdict { imza::ToolDecision::REJECT, "" });
     REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
-    REQUIRE(notifications.size() == 2);
-    CHECK(notifications.back() == imza::AgentNotification::TURN_FINISHED);
+    REQUIRE(alerts.size() == 2);
+    CHECK(alerts.back() == "Imza finished");
 }
 
-TEST_CASE("queued agent modal notifies only when presented")
+TEST_CASE("queued agent modal alerts only when presented")
 {
     AgentEnv env;
-    std::vector<imza::AgentNotification> notifications;
-    env.state->notify_user = [&notifications](imza::AgentNotification event) {
-        notifications.push_back(event);
-    };
+    std::vector<std::string> alerts;
+    auto subscription = env.state->notifications->subscribe_to_alert(
+        [&alerts](const std::string& message) { alerts.push_back(message); });
     imza::enqueue_user_modal(
         *env.state, imza::ViewerModal { "First", "content" });
     auto result = imza::request_modal(
         *env.state, imza::ViewerModal { "Agent", "content" });
     env.pump.pump();
 
-    CHECK(notifications.empty());
+    CHECK(alerts.empty());
     REQUIRE(std::holds_alternative<imza::ViewerModal>(env.session->modal()));
     CHECK(std::get<imza::ViewerModal>(env.session->modal()).title == "First");
 
     imza::close_modal(*env.state);
     REQUIRE(std::holds_alternative<imza::ViewerModal>(env.session->modal()));
     CHECK(std::get<imza::ViewerModal>(env.session->modal()).title == "Agent");
-    REQUIRE(notifications.size() == 1);
-    CHECK(notifications.front() == imza::AgentNotification::INPUT_REQUIRED);
+    REQUIRE(alerts.size() == 1);
+    CHECK(alerts.front() == "Imza needs your attention");
 
     imza::close_modal(*env.state);
     CHECK(result.get().index() == 0);

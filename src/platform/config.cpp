@@ -251,7 +251,6 @@ struct StoredSidebar {
     std::optional<bool> changed_files;
     std::optional<bool> context;
     std::optional<bool> permissions;
-    std::optional<bool> update;
 };
 
 struct StoredConfig {
@@ -580,7 +579,6 @@ Status load_config(
             = stored_sidebar.context.value_or(out.sidebar.context);
         out.sidebar.permissions
             = stored_sidebar.permissions.value_or(out.sidebar.permissions);
-        out.sidebar.update = stored_sidebar.update.value_or(out.sidebar.update);
     }
 
     if (stored.instructions) {
@@ -825,12 +823,9 @@ namespace {
         if (cfg.sidebar.permissions != defaults.permissions) {
             sidebar.permissions = cfg.sidebar.permissions;
         }
-        if (cfg.sidebar.update != defaults.update) {
-            sidebar.update = cfg.sidebar.update;
-        }
         if (sidebar.documents || sidebar.review_comments || sidebar.tasks
-            || sidebar.changed_files || sidebar.context || sidebar.permissions
-            || sidebar.update) {
+            || sidebar.changed_files || sidebar.context
+            || sidebar.permissions) {
             stored.sidebar = std::move(sidebar);
         }
 

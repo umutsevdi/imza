@@ -17,6 +17,7 @@
 #include "runtime/bg_process_manager.h"
 #include "runtime/callbacks.h"
 #include "runtime/modal_queue.h"
+#include "runtime/notification_center.h"
 #include "runtime/subagent_manager.h"
 #include "tools/lua.h"
 #include "tools/skill_registry.h"
@@ -48,6 +49,9 @@ struct ApplicationState {
     std::shared_ptr<SkillRegistry> skill_registry;
     std::shared_ptr<PermissionStore> permissions;
     std::shared_ptr<PromptStore> prompts;
+    // App-wide transient messages; shared with children and the sidechat so
+    // one overlay shows every publisher's notice.
+    std::shared_ptr<NotificationStore> notifications;
 
     std::unique_ptr<LuaState> lua_state;
     std::unique_ptr<TurnRunner> runner;
@@ -64,7 +68,6 @@ struct ApplicationState {
 
     PostFn post;
     std::function<void()> on_exit;
-    std::function<void(AgentNotification)> notify_user;
     ModalRequestFn parent_routing;
     std::string agent_label;
     RuntimeFlag runtime_flags = interactive_runtime_flags();
@@ -75,6 +78,7 @@ struct ApplicationState {
     Signal<>::Subscription env_subscription;
     Signal<>::Subscription system_subscription;
     Signal<>::Subscription provider_subscription;
+    Signal<>::Subscription update_subscription;
 
     ~ApplicationState();
 

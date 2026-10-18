@@ -195,8 +195,21 @@ namespace {
             if (selected.empty()) {
                 return false;
             }
-            copy_to_clipboard(
-                state.environment->system()->clipboard_tool, selected);
+            const std::string& tool
+                = state.environment->system()->clipboard_tool;
+            const bool copied = copy_to_clipboard(tool, selected);
+            if (state.notifications) {
+                if (copied) {
+                    state.notifications->publish(NotificationLevel::INFO,
+                        "Copied the selection to the clipboard.");
+                } else {
+                    state.notifications->publish(NotificationLevel::WARN,
+                        tool.empty()
+                            ? "No clipboard tool found - install win32yank or "
+                              "xclip to copy selections."
+                            : "Could not copy the selection to the clipboard.");
+                }
+            }
             return true;
         }
 
@@ -253,6 +266,12 @@ namespace {
                     [] { animation::RequestAnimationFrame(); });
             _title_subscription = _state->session->subscribe_to_title_change(
                 [] { animation::RequestAnimationFrame(); });
+            // Notifications publish from arbitrary workers, so marshal
+            // the redraw request onto the main thread.
+            _notification_subscription
+                = _state->notifications->subscribe_to_change([this] {
+                      _state->post([] { animation::RequestAnimationFrame(); });
+                  });
             // Flows can flip the session mode directly (/make-skill seeds
             // a Build turn); follow so the tabs and status line agree.
             _mode_subscription = _state->session->subscribe_to_mode_change(
@@ -367,11 +386,48 @@ namespace {
                     | size(HEIGHT, LESS_THAN, mh);
                 root = dbox({ dim(std::move(root)), center(std::move(popup)) });
             }
+
+            _notification_close_boxes.clear();
+            const auto notifications = _state->notifications->notifications();
+            if (!notifications->empty() || _state->session->retry_countdown()) {
+                Element overlay = render_notifications(*notifications,
+                    *_state->session, _notification_close_boxes);
+                // Top-right stack, above modals; presentation only, so it
+                // never takes focus.
+                root = dbox({ std::move(root),
+                    vbox({ hbox({ filler(), std::move(overlay) }),
+                        filler() }) });
+            }
             return root;
         }
 
         bool OnEvent(Event event) override
         {
+            // A click on a notice's close affordance, or Esc, dismisses it;
+            // neither steals focus.
+            if (event.is_mouse() && event.mouse().motion == Mouse::Pressed) {
+                const Mouse& m = event.mouse();
+                for (const auto& [id, box] : _notification_close_boxes) {
+                    // id 0 is the synthetic countdown row: no store entry to
+                    // dismiss, so the click falls through.
+                    if (id != 0 && box.Contain(m.x, m.y)) {
+                        _state->notifications->dismiss(id);
+                        return true;
+                    }
+                }
+            }
+            // Esc dismisses the newest notice only while the session is
+            // idle: during a turn Esc still interrupts.
+            if (event == Event::Escape && !_notification_close_boxes.empty()
+                && _state->session->modal().index() == 0
+                && _state->session->phase() == Session::Phase::IDLE) {
+                const auto notifications
+                    = _state->notifications->notifications();
+                if (!notifications->empty()) {
+                    _state->notifications->dismiss(notifications->back().id);
+                    return true;
+                }
+            }
             if (event == Event::CtrlC || event == Event::CtrlD) {
                 // A stray Ctrl+C must not throw the user out of a live
                 // conversation: confirm first. Empty sessions have nothing
@@ -447,6 +503,13 @@ namespace {
         {
             ComponentBase::OnAnimation(params);
             _sidechat->OnAnimation(params);
+            // Expiry is driven by the frame loop, not a timer thread. A
+            // notice with a deadline keeps requesting frames until it clears,
+            // so the loop cannot stall with one still pending.
+            _state->notifications->dismiss_expired();
+            if (_state->notifications->has_pending_expiry()) {
+                animation::RequestAnimationFrame();
+            }
         }
 
         Component ActiveChild() override
@@ -558,6 +621,8 @@ namespace {
         Signal<>::Subscription _system_subscription;
         Signal<>::Subscription _title_subscription;
         Signal<>::Subscription _mode_subscription;
+        Signal<>::Subscription _notification_subscription;
+        std::map<std::size_t, ftxui::Box> _notification_close_boxes;
         LayoutCtx _layout = layout_context(0);
         WorkflowPhase _phase { WorkflowPhase::PLAN };
         std::vector<std::string> _tab_names;
@@ -579,15 +644,15 @@ int run_repl(
 
     ScreenInteractive screen = ScreenInteractive::FullscreenAlternateScreen();
     screen.ForceHandleCtrlC(false);
-    state->notify_user = [](AgentNotification notification) {
-        const std::string_view message
-            = notification == AgentNotification::TURN_FINISHED
-            ? "Imza finished"
-            : "Imza needs your attention";
-        std::cout << terminal_notification_sequence(
-            terminal_supports_osc9(), message)
-                  << std::flush;
-    };
+    // The store carries no terminal knowledge; the terminal layer encodes
+    // its alerts here. Only the interactive root installs this, so headless
+    // and child states stay silent.
+    const bool osc9         = terminal_supports_osc9();
+    auto alert_subscription = state->notifications->subscribe_to_alert(
+        [osc9](const std::string& message) {
+            std::cout << terminal_notification_sequence(osc9, message)
+                      << std::flush;
+        });
     auto task_subscription = main_thread.subscribe([&screen, &main_thread] {
         screen.Post([&main_thread] { main_thread.drain(); });
         screen.PostEvent(Event::Custom);

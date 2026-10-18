@@ -127,7 +127,6 @@ struct SidebarConfig {
     bool changed_files   = true;
     bool context         = true;
     bool permissions     = true;
-    bool update          = true;
 };
 
 struct Config {

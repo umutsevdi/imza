@@ -4,6 +4,7 @@
 #include "common/types.h"
 #include "platform/config.h"
 #include "protocols/mcp.h"
+#include "runtime/notification_center.h"
 
 #include <atomic>
 #include <map>
@@ -43,6 +44,9 @@ struct McpServerSnapshot {
 struct McpManagerHooks {
     std::function<void(const McpServerConfig& server)> persist_server;
     std::function<bool(const std::string& url)> open_browser;
+    // Surfaces a background outcome (reconnect, token renewal) to the
+    // notification store; runs on the manager's worker thread.
+    std::function<void(NotificationLevel, std::string)> notify;
 };
 
 // Owns one MCP session per configured server. Long-lived
@@ -137,6 +141,8 @@ private:
     bool refresh_entry_tokens(const std::shared_ptr<ServerEntry>& entry,
         bool forced, std::string& detail);
     bool wait_interruptible(long ms) const;
+    // Publishes through the injected notify hook; a no-op without one.
+    void _notify(NotificationLevel level, std::string message) const;
 
     std::atomic_bool _stopping { false };
     mutable std::mutex _map_mutex;
