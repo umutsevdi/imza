@@ -204,12 +204,17 @@ public:
     void set_persistence(SessionPersistence persistence);
 
     void set_mode(Mode next_mode);
-    void set_error(std::string msg);
+    // `ttl` schedules auto-dismissal of the resulting notification; omit it
+    // for a failure that should stay until the user dismisses it.
+    void set_error(std::string msg,
+        std::optional<std::chrono::milliseconds> ttl = std::nullopt);
     void clear_error();
     // Optional sink invoked (outside the lock) whenever set_error publishes a
     // message; the composition root wires it to the notification store so the
     // error surfaces app-wide. Empty means no sink.
-    void set_error_sink(std::function<void(std::string)> sink);
+    using ErrorSink = std::function<void(
+        std::string, std::optional<std::chrono::milliseconds>)>;
+    void set_error_sink(ErrorSink sink);
     void set_connect_status(std::string status);
     bool claim_title_generation();
     void set_title(std::string title);
@@ -333,7 +338,7 @@ private:
     Phase _phase                  = Phase::IDLE;
     Mode _mode                    = Mode::PLAN;
     std::string _error;
-    std::function<void(std::string)> _error_sink;
+    ErrorSink _error_sink;
     std::string _connect_status;
     std::string _title;
     bool _title_generation_claimed = false;

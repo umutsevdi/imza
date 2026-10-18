@@ -13,8 +13,7 @@ namespace {
         NotificationLevel level)
     {
         switch (level) {
-        case NotificationLevel::INFO: return std::chrono::seconds { 4 };
-        case NotificationLevel::WARN: return std::chrono::seconds { 8 };
+        case NotificationLevel::INFO: return std::chrono::seconds { 5 };
         case NotificationLevel::ERROR: return std::nullopt;
         }
         return std::nullopt;
@@ -48,6 +47,7 @@ std::size_t NotificationStore::publish(NotificationLevel level,
         const auto window = ttl ? ttl : default_ttl(level);
         if (window && *window != NOTIFICATION_PERSIST) {
             entry.expires_at = std::chrono::steady_clock::now() + *window;
+            entry.ttl        = *window;
         }
         _entries->push_back(std::move(entry));
         while (_entries->size() > MAX_NOTIFICATIONS) {

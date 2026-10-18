@@ -62,12 +62,12 @@ TEST_CASE("the level sets the lifetime and an explicit ttl overrides it")
 {
     NotificationStore store;
     store.publish(NotificationLevel::INFO, "info");
-    store.publish(NotificationLevel::WARN, "warn");
+    store.publish(NotificationLevel::INFO, "warn");
     store.publish(NotificationLevel::ERROR, "error");
     // NOTIFICATION_PERSIST keeps a transient level alive; a short ttl pins
     // a persistent one.
-    store.publish(NotificationLevel::INFO, "standing",
-        imza::NOTIFICATION_PERSIST);
+    store.publish(
+        NotificationLevel::INFO, "standing", imza::NOTIFICATION_PERSIST);
     store.publish(
         NotificationLevel::ERROR, "pinned", std::chrono::milliseconds { 1 });
 
@@ -78,6 +78,10 @@ TEST_CASE("the level sets the lifetime and an explicit ttl overrides it")
     CHECK_FALSE(entries[2].expires_at.has_value());
     CHECK_FALSE(entries[3].expires_at.has_value());
     CHECK(entries[4].expires_at.has_value());
+    // The window is recorded alongside the deadline so the overlay can draw
+    // the remaining fraction; a persistent entry carries none.
+    CHECK(entries[0].ttl.count() > 0);
+    CHECK(entries[3].ttl.count() == 0);
 }
 
 TEST_CASE("expiry drops only the elapsed entries")
@@ -181,28 +185,18 @@ TEST_CASE("a session error publishes and outlives clear_error")
     CHECK(entries_of(*state->notifications).size() == 1);
 }
 
-TEST_CASE("the overlay renders one dismissible row per notice")
+TEST_CASE("a transient error carries a deadline, a plain one does not")
 {
-    imza::Session session;
-    session.mark_retry(7, false);
-    const std::vector<Notification> entries {
-        Notification {
-            1, NotificationLevel::INFO, "copied to clipboard", std::nullopt },
-        Notification {
-            2, NotificationLevel::ERROR, "something broke", std::nullopt },
-    };
+    auto state = imza::test::make_test_state();
 
-    std::map<std::size_t, ftxui::Box> boxes;
-    const std::string out = without_ansi(
-        to_text(imza::render_notifications(entries, session, boxes), 60, 10));
+    // A usage mistake opts into a short window.
+    state->session->set_error("Usage: /auto on|off", imza::TRANSIENT_ERROR_TTL);
+    // A failure waits for the user.
+    state->session->set_error("Failed to load session.");
 
-    // Descriptions render sentence-cased, like the old per-pane error line.
-    CHECK(out.find("Copied to clipboard.") != std::string::npos);
-    CHECK(out.find("Something broke.") != std::string::npos);
-    // The retry countdown is live session state, not a store entry, so it
-    // renders as its own row keyed to id 0.
-    CHECK(out.find("Rate limited") != std::string::npos);
-    CHECK(boxes.count(0) == 1);
-    CHECK(boxes.count(1) == 1);
-    CHECK(boxes.count(2) == 1);
+    const auto entries = entries_of(*state->notifications);
+    REQUIRE(entries.size() == 2);
+    CHECK(entries[0].expires_at.has_value());
+    CHECK(entries[0].ttl == imza::TRANSIENT_ERROR_TTL);
+    CHECK_FALSE(entries[1].expires_at.has_value());
 }

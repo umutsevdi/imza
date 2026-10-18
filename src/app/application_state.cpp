@@ -118,12 +118,14 @@ namespace {
     void wire_error_sink(ApplicationState& state)
     {
         ApplicationState* raw = &state;
-        state.session->set_error_sink([raw](std::string message) {
-            if (raw->notifications) {
-                raw->notifications->publish(
-                    NotificationLevel::ERROR, std::move(message));
-            }
-        });
+        state.session->set_error_sink(
+            [raw](std::string message,
+                std::optional<std::chrono::milliseconds> ttl) {
+                if (raw->notifications) {
+                    raw->notifications->publish(
+                        NotificationLevel::ERROR, std::move(message), ttl);
+                }
+            });
     }
 
     // Lazy so the roster can be built before state->skills exists.

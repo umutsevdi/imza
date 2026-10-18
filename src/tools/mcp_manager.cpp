@@ -311,7 +311,7 @@ void McpManager::run_handshake(
         if (attempt < MAX_RECONNECT_ATTEMPTS) {
             const long delay
                 = RETRY_DELAYS_SECS[static_cast<std::size_t>(attempt - 1)];
-            _notify(NotificationLevel::WARN,
+            _notify(NotificationLevel::INFO,
                 "MCP server '" + entry->config.id
                     + "' disconnected - retrying.");
             spawn([this, entry, delay] {
@@ -680,7 +680,7 @@ bool McpManager::refresh_entry_tokens(
         oauth.token_endpoint, client, oauth.refresh_token, { }, tokens, detail);
     if (status != Status::OK) {
         detail = "sign-in needed again: " + detail;
-        _notify(NotificationLevel::WARN,
+        _notify(NotificationLevel::INFO,
             "Could not renew the access token for MCP server '"
                 + entry->config.id + "': " + detail);
         return false;

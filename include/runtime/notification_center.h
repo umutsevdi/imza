@@ -13,7 +13,7 @@
 
 namespace imza {
 
-enum class NotificationLevel { INFO, WARN, ERROR };
+enum class NotificationLevel { INFO, ERROR };
 
 // One transient message shown in the app-wide overlay. `expires_at` is an
 // absolute deadline rather than a countdown: the render thread derives the
@@ -24,6 +24,9 @@ struct Notification {
     NotificationLevel level = NotificationLevel::INFO;
     std::string description;
     std::optional<std::chrono::steady_clock::time_point> expires_at;
+    // The window `expires_at` was derived from, so the overlay can render the
+    // remaining fraction as a bar. Zero when the entry does not expire.
+    std::chrono::milliseconds ttl { 0 };
 };
 
 // Newest entries beyond this are dropped, so a runaway publisher cannot
@@ -36,6 +39,11 @@ inline constexpr std::size_t MAX_NOTIFICATIONS = 5;
 inline constexpr std::chrono::milliseconds NOTIFICATION_PERSIST {
     std::chrono::milliseconds::max()
 };
+
+// A short-lived error: a usage mistake or a refused precondition the user can
+// act on immediately, as opposed to a failure worth keeping on screen. Errors
+// default to persistent, so these opt in explicitly.
+inline constexpr std::chrono::milliseconds TRANSIENT_ERROR_TTL { 6000 };
 
 // Thread-safe store behind the overlay: any worker may publish, the UI
 // thread snapshots and renders. Long-lived ApplicationComponent; hands out

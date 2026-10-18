@@ -436,31 +436,80 @@ namespace {
     Color notification_accent(NotificationLevel level)
     {
         switch (level) {
-        case NotificationLevel::INFO: return HL_BLUE;
-        case NotificationLevel::WARN: return HL_YELLOW;
+        case NotificationLevel::INFO: return HL_GREEN;
         case NotificationLevel::ERROR: return HL_RED;
         }
-        return HL_BLUE;
     }
 
-    Element notification_row(
-        NotificationLevel level, std::string message, Box& close_box)
+    // Remaining fraction of a notice's window; nullopt when it has no
+    // deadline (an error, the update banner), which renders no bar.
+    std::optional<float> notification_progress(const Notification& entry)
     {
-        const Color accent = notification_accent(level);
-        return hbox({
-                   text(" ") | bgcolor(accent),
-                   text(" " + std::move(message) + " ") | bgcolor(PANEL_COLOR)
-                       | color(PANEL_FG) | xflex,
-                   text(" ✕ ") | bgcolor(PANEL_COLOR) | color(PANEL_FG_DIM)
-                       | reflect(close_box),
-               })
-            | bgcolor(PANEL_COLOR) | borderStyled(ROUNDED, accent);
+        if (!entry.expires_at || entry.ttl.count() <= 0) {
+            return std::nullopt;
+        }
+        const auto remaining
+            = std::chrono::duration_cast<std::chrono::milliseconds>(
+                *entry.expires_at - std::chrono::steady_clock::now())
+                  .count();
+        return std::clamp(static_cast<float>(remaining)
+                / static_cast<float>(entry.ttl.count()),
+            0.0f, 1.0f);
+    }
+
+    // A run of `count` copies of a multi-byte glyph. The box-drawing
+    // character is three UTF-8 bytes, so it must be repeated as a string; a
+    // char literal would truncate it to one byte and render nothing.
+    std::string repeat_glyph(std::string_view glyph, int count)
+    {
+        std::string out;
+        out.reserve(glyph.size() * static_cast<std::size_t>(count));
+        for (int i = 0; i < count; ++i) {
+            out += glyph;
+        }
+        return out;
+    }
+
+    // One notice at a fixed width: the message wrapped to the inner width,
+    // and — when it has a deadline — a rule beneath it whose accent part
+    // drains as the notice ages. The whole card reflects into `row_box`, so a
+    // click anywhere dismisses the notice.
+    Element notification_row(NotificationLevel level, std::string message,
+        std::optional<float> progress, Box& row_box)
+    {
+        // Not named WIDTH: that would shadow ftxui's direction enum.
+        constexpr int card_width = NOTIFICATION_WIDTH;
+        constexpr int inner      = card_width - 2; // inside the border
+        // One column of padding each side, shared by the text and the rule so
+        // the bar lines up with the message.
+        constexpr int content = inner - 2;
+        const Color accent    = notification_accent(level);
+
+        Elements body;
+        for (const std::string& row : wrap_text(message, content)) {
+            body.push_back(hbox(
+                { text(" "), text(row) | color(PANEL_FG) | xflex, text(" ") }));
+        }
+        if (progress) {
+            constexpr std::string_view RULE = "─";
+            const int left
+                = std::clamp(static_cast<int>(*progress * content), 0, content);
+            body.push_back(hbox({
+                text(" "),
+                text(repeat_glyph(RULE, left)) | color(accent),
+                text(repeat_glyph(RULE, content - left))
+                    | color(PANEL_COLOR_FOCUS),
+                text(" "),
+            }));
+        }
+        return vbox(std::move(body)) | borderStyled(ROUNDED, accent)
+            | size(ftxui::WIDTH, EQUAL, card_width) | reflect(row_box);
     }
 
 } // namespace
 
 Element render_notifications(const std::vector<Notification>& entries,
-    const Session& session, std::map<std::size_t, Box>& close_boxes)
+    const Session& session, std::map<std::size_t, Box>& row_boxes)
 {
     Elements rows;
     // The retry countdown has no store entry (it is live session state), so
@@ -474,12 +523,13 @@ Element render_notifications(const std::vector<Notification>& entries,
             ? "Connection stalled - retrying in " + std::to_string(remaining)
                 + "s…"
             : "Rate limited - retrying in " + std::to_string(remaining) + "s…";
-        rows.push_back(
-            notification_row(NotificationLevel::WARN, message, close_boxes[0]));
+        rows.push_back(notification_row(
+            NotificationLevel::INFO, message, std::nullopt, row_boxes[0]));
     }
     for (const Notification& entry : entries) {
-        rows.push_back(notification_row(entry.level,
-            error_sentence(entry.description), close_boxes[entry.id]));
+        rows.push_back(
+            notification_row(entry.level, error_sentence(entry.description),
+                notification_progress(entry), row_boxes[entry.id]));
     }
     if (rows.empty()) {
         return text("");

@@ -203,7 +203,7 @@ namespace {
                     state.notifications->publish(NotificationLevel::INFO,
                         "Copied the selection to the clipboard.");
                 } else {
-                    state.notifications->publish(NotificationLevel::WARN,
+                    state.notifications->publish(NotificationLevel::INFO,
                         tool.empty()
                             ? "No clipboard tool found - install win32yank or "
                               "xclip to copy selections."
@@ -387,27 +387,27 @@ namespace {
                 root = dbox({ dim(std::move(root)), center(std::move(popup)) });
             }
 
-            _notification_close_boxes.clear();
+            _notification_boxes.clear();
             const auto notifications = _state->notifications->notifications();
             if (!notifications->empty() || _state->session->retry_countdown()) {
-                Element overlay = render_notifications(*notifications,
-                    *_state->session, _notification_close_boxes);
-                // Top-right stack, above modals; presentation only, so it
-                // never takes focus.
+                Element overlay = render_notifications(
+                    *notifications, *_state->session, _notification_boxes);
+                // Bottom-right stack, lifted clear of the status line and
+                // input hints; presentation only, so it never takes focus.
                 root = dbox({ std::move(root),
-                    vbox({ hbox({ filler(), std::move(overlay) }),
-                        filler() }) });
+                    vbox({ filler(), hbox({ filler(), std::move(overlay) }),
+                        vertical_space(NOTIFICATION_BOTTOM_MARGIN) }) });
             }
             return root;
         }
 
         bool OnEvent(Event event) override
         {
-            // A click on a notice's close affordance, or Esc, dismisses it;
-            // neither steals focus.
+            // A click anywhere on a notice, or Esc, dismisses it; neither
+            // steals focus.
             if (event.is_mouse() && event.mouse().motion == Mouse::Pressed) {
                 const Mouse& m = event.mouse();
-                for (const auto& [id, box] : _notification_close_boxes) {
+                for (const auto& [id, box] : _notification_boxes) {
                     // id 0 is the synthetic countdown row: no store entry to
                     // dismiss, so the click falls through.
                     if (id != 0 && box.Contain(m.x, m.y)) {
@@ -418,7 +418,7 @@ namespace {
             }
             // Esc dismisses the newest notice only while the session is
             // idle: during a turn Esc still interrupts.
-            if (event == Event::Escape && !_notification_close_boxes.empty()
+            if (event == Event::Escape && !_notification_boxes.empty()
                 && _state->session->modal().index() == 0
                 && _state->session->phase() == Session::Phase::IDLE) {
                 const auto notifications
@@ -622,7 +622,7 @@ namespace {
         Signal<>::Subscription _title_subscription;
         Signal<>::Subscription _mode_subscription;
         Signal<>::Subscription _notification_subscription;
-        std::map<std::size_t, ftxui::Box> _notification_close_boxes;
+        std::map<std::size_t, ftxui::Box> _notification_boxes;
         LayoutCtx _layout = layout_context(0);
         WorkflowPhase _phase { WorkflowPhase::PLAN };
         std::vector<std::string> _tab_names;

@@ -394,9 +394,10 @@ void Session::set_mode(Mode next_mode)
     }
 }
 
-void Session::set_error(std::string msg)
+void Session::set_error(
+    std::string msg, std::optional<std::chrono::milliseconds> ttl)
 {
-    std::function<void(std::string)> sink;
+    ErrorSink sink;
     {
         std::lock_guard lock(_mutex);
         _error = msg;
@@ -404,7 +405,7 @@ void Session::set_error(std::string msg)
     }
     // Published outside the lock; the sink may re-enter accessors.
     if (sink && !msg.empty()) {
-        sink(std::move(msg));
+        sink(std::move(msg), ttl);
     }
 }
 
@@ -414,7 +415,7 @@ void Session::clear_error()
     _error.clear();
 }
 
-void Session::set_error_sink(std::function<void(std::string)> sink)
+void Session::set_error_sink(ErrorSink sink)
 {
     std::lock_guard lock(_mutex);
     _error_sink = std::move(sink);

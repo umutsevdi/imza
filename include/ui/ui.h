@@ -64,6 +64,12 @@ inline const ftxui::Color HL_BLUE           = ftxui::Color::RGB(121, 192, 255);
 inline const ftxui::Color HL_MAGENTA        = ftxui::Color::RGB(210, 168, 255);
 inline const ftxui::Color HL_CYAN           = ftxui::Color::RGB(104, 216, 232);
 inline constexpr int MODAL_MAX_WIDTH        = 100;
+// The notification overlay sits at the bottom right, lifted this many rows
+// clear of the status line and input hints.
+inline constexpr int NOTIFICATION_BOTTOM_MARGIN = 7;
+// Every notice is this wide, so the stack stays aligned and the progress
+// rule has a constant denominator; longer messages wrap.
+inline constexpr int NOTIFICATION_WIDTH = 44;
 // The exit confirmation is a compact dialog, not a content modal.
 inline constexpr int EXIT_CONFIRM_WIDTH = 52;
 // Streaming tail playout: the view releases queued characters at a paced
@@ -396,12 +402,13 @@ ftxui::Element diffstat_chip(std::size_t additions, std::size_t deletions);
 // Draws a canvas module chart as an inline chat element at a fixed
 // size that shrinks only when the content is narrower.
 ftxui::Element canvas_chart(const CanvasView& view, int available_width);
-// App-wide notification overlay: one bordered row per live notice, the
+// App-wide notification overlay: one bordered card per live notice, the
 // most recent last, plus a synthetic row for the session's retry countdown.
-// `close_boxes` receives each row's close affordance box, keyed by
-// notification id (0 for the countdown row), so the host can hit-test clicks.
+// A notice with a deadline carries a remaining-time bar. `row_boxes` receives
+// each card's full box, keyed by notification id (0 for the countdown row),
+// so the host can hit-test clicks anywhere on the card.
 ftxui::Element render_notifications(const std::vector<Notification>& entries,
-    const Session& session, std::map<std::size_t, ftxui::Box>& close_boxes);
+    const Session& session, std::map<std::size_t, ftxui::Box>& row_boxes);
 
 ftxui::Element render_item(const ConversationItem& item, const LayoutCtx& ctx);
 ftxui::Element render_todo(const TodoList& todo, const LayoutCtx& ctx);

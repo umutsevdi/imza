@@ -132,7 +132,8 @@ namespace {
             if ((state.runtime_flags & RuntimeFlag::ATTENDED)
                 == RuntimeFlag::NONE) {
                 state.session->set_error(
-                    "Skill permission is unavailable in unattended mode.");
+                    "Skill permission is unavailable in unattended mode.",
+                    TRANSIENT_ERROR_TTL);
                 return;
             }
             awaiting.push_back(skill);
@@ -165,7 +166,7 @@ namespace {
         const std::optional<ProviderSelection> selection
             = state.providers->active_selection();
         if (!selection.has_value()) {
-            state.session->set_error(NO_MODEL_SELECTED);
+            state.session->set_error(NO_MODEL_SELECTED, TRANSIENT_ERROR_TTL);
             return;
         }
         if (mode != state.session->mode()) {
@@ -276,7 +277,8 @@ namespace {
         if (state.session->has_pending_work()) {
             state.session->set_error(
                 "Finish or interrupt pending work before starting a new "
-                "session.");
+                "session.",
+                TRANSIENT_ERROR_TTL);
             return;
         }
         if (!save_active_session(state)) {
@@ -571,7 +573,8 @@ void resolve_modal(ApplicationState& state, ModalResult result)
     }
     if (!manual_accepted) {
         state.skills->take_pending_turn();
-        state.session->set_error("Skill activation cancelled.");
+        state.session->set_error(
+            "Skill activation cancelled.", TRANSIENT_ERROR_TTL);
         return;
     }
     advance_pending_skill(state);
@@ -582,7 +585,8 @@ void resolve_modal(ApplicationState& state, ModalResult result)
 void compact_session(ApplicationState& state, TurnSettings settings)
 {
     if (state.runner->compaction_active()) {
-        state.session->set_error("Compaction already in progress.");
+        state.session->set_error(
+            "Compaction already in progress.", TRANSIENT_ERROR_TTL);
         return;
     }
     state.session->clear_interrupt();
@@ -616,7 +620,8 @@ void run_slash(ApplicationState& state, std::string_view command)
     }
     const SlashCommand* found = find_command(base);
     if (found == nullptr) {
-        state.session->set_error("Unknown command: " + std::string(base) + ".");
+        state.session->set_error(
+            "Unknown command: " + std::string(base) + ".", TRANSIENT_ERROR_TTL);
         return;
     }
     switch (found->action) {
@@ -630,7 +635,8 @@ void run_slash(ApplicationState& state, std::string_view command)
         break;
     case SlashCommand::Action::MODEL:
         if (state.providers->connections().empty()) {
-            state.session->set_error("No connections - run /connect first.");
+            state.session->set_error(
+                "No connections - run /connect first.", TRANSIENT_ERROR_TTL);
             break;
         }
         enqueue_user_modal(
@@ -657,16 +663,18 @@ void run_slash(ApplicationState& state, std::string_view command)
     case SlashCommand::Action::COMPACT:
         if (state.session->has_pending_work()) {
             state.session->set_error(
-                "Finish or interrupt pending work before compacting.");
+                "Finish or interrupt pending work before compacting.",
+                TRANSIENT_ERROR_TTL);
             break;
         }
         if (!state.session->has_items()) {
-            state.session->set_error("Nothing to compact.");
+            state.session->set_error(
+                "Nothing to compact.", TRANSIENT_ERROR_TTL);
             break;
         }
         if (const auto selection = state.providers->active_selection();
             !selection.has_value()) {
-            state.session->set_error(NO_MODEL_SELECTED);
+            state.session->set_error(NO_MODEL_SELECTED, TRANSIENT_ERROR_TTL);
             break;
         }
         compact_session(state,
@@ -676,7 +684,8 @@ void run_slash(ApplicationState& state, std::string_view command)
     case SlashCommand::Action::MAKE_SKILL:
         if (args.empty()) {
             state.session->set_error(
-                "Usage: /make-skill <workflow description>");
+                "Usage: /make-skill <workflow description>",
+                TRANSIENT_ERROR_TTL);
             break;
         }
         if (args.size() > 2000) {
@@ -687,7 +696,8 @@ void run_slash(ApplicationState& state, std::string_view command)
     case SlashCommand::Action::AUTO: {
         const std::string arg = to_lower(args);
         if (!arg.empty() && arg != "on" && arg != "off") {
-            state.session->set_error("Usage: /auto on|off");
+            state.session->set_error(
+                "Usage: /auto on|off", TRANSIENT_ERROR_TTL);
             break;
         }
         const bool on = arg.empty() ? !state.permissions->skip_permissions()
@@ -697,7 +707,8 @@ void run_slash(ApplicationState& state, std::string_view command)
     }
     case SlashCommand::Action::CHDIR: {
         if (args.empty()) {
-            state.session->set_error("Usage: /cd <directory>");
+            state.session->set_error(
+                "Usage: /cd <directory>", TRANSIENT_ERROR_TTL);
             break;
         }
         // A busy session queues the command; drain_queued re-runs it once
@@ -711,12 +722,14 @@ void run_slash(ApplicationState& state, std::string_view command)
             = path_from_utf8(expand_user_path(args));
         std::error_code error;
         if (!std::filesystem::is_directory(target, error) || error) {
-            state.session->set_error("Not a directory: " + std::string(args));
+            state.session->set_error(
+                "Not a directory: " + std::string(args), TRANSIENT_ERROR_TTL);
             break;
         }
         switch (change_directory(state, target)) {
         case Environment::ChdirResult::FAILED:
-            state.session->set_error("Cannot change to: " + std::string(args));
+            state.session->set_error(
+                "Cannot change to: " + std::string(args), TRANSIENT_ERROR_TTL);
             break;
         case Environment::ChdirResult::UNCHANGED: break;
         case Environment::ChdirResult::CHANGED: {
@@ -943,7 +956,8 @@ void run_handoff(ApplicationState& state)
 {
     const ReviewState::Snapshot snapshot = state.review->snapshot();
     if (!snapshot.review) {
-        state.session->set_error("There are no changes to report on.");
+        state.session->set_error(
+            "There are no changes to report on.", TRANSIENT_ERROR_TTL);
         return;
     }
     const SessionSnapshot session = state.session->snapshot();
@@ -1020,7 +1034,8 @@ void switch_session(ApplicationState& state, const std::filesystem::path& path)
 {
     if (state.session->has_pending_work()) {
         state.session->set_error(
-            "Finish or interrupt pending work before loading a session.");
+            "Finish or interrupt pending work before loading a session.",
+            TRANSIENT_ERROR_TTL);
         return;
     }
     if (state.sessions->is_locked(path)) {
@@ -1122,7 +1137,8 @@ void refresh_sidechat(ApplicationState& state)
 {
     if (state.sidechat == nullptr) {
         state.session->set_error(
-            "No Sidechat is open - open one with Ctrl+S first.");
+            "No Sidechat is open - open one with Ctrl+S first.",
+            TRANSIENT_ERROR_TTL);
         return;
     }
     interrupt(*state.sidechat);
