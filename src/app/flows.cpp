@@ -373,20 +373,17 @@ void enqueue_user_modal(ApplicationState& state, ModalPayload payload)
     }
 }
 
-// Applies `mutate` to the persisted config; on a committed change the MCP
-// manager reloads the resulting server map. False when nothing was written.
+// Applies `mutate` to the persisted config through the one shared store;
+// on a committed change the MCP manager reloads the resulting server map.
+// False when nothing was written.
 bool mutate_mcp_config(
     ApplicationState& state, const std::function<bool(Config&)>& mutate)
 {
-    Config initial = state.providers->config();
-    Config result;
-    const ConfigUpdateResult updated
-        = update_config(config_path(), initial, mutate, &result);
-    if (updated != ConfigUpdateResult::UPDATED) {
+    if (state.config->update(mutate) != ConfigUpdateResult::UPDATED) {
         return false;
     }
     if (state.mcp) {
-        state.mcp->reload(std::move(result.mcp_servers));
+        state.mcp->reload(state.config->snapshot()->mcp_servers);
     }
     return true;
 }

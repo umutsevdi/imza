@@ -634,13 +634,13 @@ namespace {
 
 } // namespace
 
-int run_repl(
-    std::shared_ptr<ApplicationState> state, MainThreadQueue& main_thread)
+int run_repl(std::shared_ptr<ApplicationState> state)
 {
     if (!is_interactive_terminal()) {
         std::println("imza requires an interactive terminal");
         return 1;
     }
+    MainThreadQueue& main_thread = *state->main_thread;
 
     ScreenInteractive screen = ScreenInteractive::FullscreenAlternateScreen();
     screen.ForceHandleCtrlC(false);
@@ -653,10 +653,11 @@ int run_repl(
             std::cout << terminal_notification_sequence(osc9, message)
                       << std::flush;
         });
-    auto task_subscription = main_thread.subscribe([&screen, &main_thread] {
-        screen.Post([&main_thread] { main_thread.drain(); });
-        screen.PostEvent(Event::Custom);
-    });
+    auto task_subscription
+        = main_thread.subscribe_to_change([&screen, &main_thread] {
+              screen.Post([&main_thread] { main_thread.drain(); });
+              screen.PostEvent(Event::Custom);
+          });
     BracketedPasteMode bracketed_paste(screen);
     state->on_exit = [&screen, &bracketed_paste] {
         bracketed_paste.disable();

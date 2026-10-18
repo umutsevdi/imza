@@ -158,7 +158,7 @@ TurnRunner::TurnRunner(ApplicationState& state, PostFn post,
 
 TurnRunner::~TurnRunner()
 {
-    _alive.store(false);
+    mark_dead();
     _compaction_worker.reset();
     _worker.reset();
 }
@@ -182,13 +182,13 @@ void TurnRunner::clear()
 
 void TurnRunner::stop()
 {
-    _alive.store(false);
+    mark_dead();
     _compaction_worker.reset();
 }
 
 void TurnRunner::_post(std::function<void()> f)
 {
-    if (_alive.load()) {
+    if (alive()) {
         _post_fn(std::move(f));
     }
 }
@@ -522,7 +522,7 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
             const auto deadline
                 = std::chrono::steady_clock::now() + std::chrono::seconds(wait);
             while (std::chrono::steady_clock::now() < deadline) {
-                if (!_alive.load() || _state->session->interrupt_requested()) {
+                if (!alive() || _state->session->interrupt_requested()) {
                     _finish_idle();
                     return;
                 }
@@ -548,14 +548,14 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
         retries       = 0;
         prompt_tokens = request_prompt_tokens;
 
-        if (!_alive.load()) {
+        if (!alive()) {
             return;
         }
 
         const size_t history_before = history.size();
         _drain_pending_asks(
             history, text_buffer, active_dialect, settings.mode);
-        if (!_alive.load()) {
+        if (!alive()) {
             return;
         }
         if (_state->session->interrupt_requested()) {
@@ -589,7 +589,7 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
     bool had_tool_calls = false;
 
     for (const auto& ev : _stream_events) {
-        if (!_alive.load()) {
+        if (!alive()) {
             return;
         }
         if (ev.kind != StreamEvent::Kind::TOOL_CALL) {

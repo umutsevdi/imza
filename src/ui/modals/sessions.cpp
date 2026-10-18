@@ -26,7 +26,7 @@ namespace {
             : _state(std::move(state))
             , _session(_state->session)
         {
-            _store_subscription = _state->sessions->subscribe(
+            _store_subscription = _state->sessions->subscribe_to_change(
                 [] { animation::RequestAnimationFrame(); });
             _filter_input = Input(field_option(
                 &_filter_text, &_filter_cursor, "filter sessions", [this] {

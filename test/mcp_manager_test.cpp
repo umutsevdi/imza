@@ -62,7 +62,7 @@ TEST_CASE("mcp manager connects, caches tools, and calls through the session")
     imza::McpManager manager({ { "exa", server_config("exa", server.url()) } });
     unsigned changes = 0;
     imza::Signal<>::Subscription subscription
-        = manager.subscribe([&] { ++changes; });
+        = manager.subscribe_to_change([&] { ++changes; });
 
     auto snapshot = manager.snapshot();
     REQUIRE(snapshot.size() == 1);

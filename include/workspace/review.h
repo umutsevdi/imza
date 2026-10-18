@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -8,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <variant>
 #include <vector>
 
@@ -64,6 +66,9 @@ class ReviewState final : public ApplicationComponent {
 public:
     enum class LoadStatus { IDLE, LOADING, LOADED, ERROR };
 
+    ReviewState() = default;
+    ~ReviewState();
+
     struct Snapshot {
         Snapshot();
 
@@ -83,6 +88,12 @@ public:
 
     Snapshot snapshot() const;
     std::vector<ReviewComment> comments() const;
+    // Loads the repository review for `root` on a component-owned worker.
+    // Coalesces: a request arriving mid-load reruns once with the newest
+    // root. Empty `root` is a no-op. The tab starts no thread.
+    void reload(std::filesystem::path root);
+    // Stops and joins the loader; called from the composition root.
+    void stop() override;
     void set_loading();
     void set_result(ReviewLoadResult result);
     std::size_t add_comment(ReviewLineAnchor anchor, std::string body);
@@ -95,13 +106,19 @@ public:
     void clear_file_jump();
     void clear_comments();
     void set_pass_task(ReviewPass pass, std::optional<std::size_t> task_id);
-    [[nodiscard]] Signal<>::Subscription subscribe(Signal<>::Callback callback);
+    [[nodiscard]] Signal<>::Subscription subscribe_to_change(
+        Signal<>::Callback callback);
 
 private:
     void _publish();
+    void _maybe_start_worker();
     mutable std::mutex _mutex;
     Snapshot _state;
     std::size_t _next_comment_id = 1;
+    std::filesystem::path _reload_root;
+    bool _reload_pending = false;
+    bool _reload_running = false;
+    std::jthread _worker;
     Signal<> _changed;
 };
 

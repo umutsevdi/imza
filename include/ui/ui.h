@@ -69,7 +69,7 @@ inline constexpr int MODAL_MAX_WIDTH        = 100;
 inline constexpr int NOTIFICATION_BOTTOM_MARGIN = 7;
 // Every notice is this wide, so the stack stays aligned and the progress
 // rule has a constant denominator; longer messages wrap.
-inline constexpr int NOTIFICATION_WIDTH = 44;
+inline constexpr int NOTIFICATION_WIDTH = 36;
 // The exit confirmation is a compact dialog, not a content modal.
 inline constexpr int EXIT_CONFIRM_WIDTH = 52;
 // Streaming tail playout: the view releases queued characters at a paced
@@ -514,8 +514,7 @@ ftxui::Component make_build_tab(std::shared_ptr<ApplicationState> state,
     LayoutFn layout, ftxui::Component chat, ftxui::Component sidechat,
     SidechatStatus& status);
 
-int run_repl(
-    std::shared_ptr<ApplicationState> state, MainThreadQueue& main_thread);
+int run_repl(std::shared_ptr<ApplicationState> state);
 
 // Rendered markdown as terminal text (ANSI styled, wrapped at `width`).
 std::string render_markdown_to_text(std::string_view md, int width);

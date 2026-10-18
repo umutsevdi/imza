@@ -56,7 +56,7 @@ public:
     void spawn_compaction(TurnSettings settings);
     bool compaction_active() const { return _compaction_active.load(); }
     void clear();
-    void stop();
+    void stop() override;
     bool has_stream_override() const { return _has_stream(); }
     const StreamFn& stream_fn() const { return _stream_fn; }
     Status run_stream(const ChatRequest& req, const Route& route,
@@ -102,7 +102,6 @@ private:
     std::vector<Tool> _tools;
     std::vector<ToolSpec> _specs_all;
     std::vector<StreamEvent> _stream_events;
-    std::atomic<bool> _alive { true };
     std::atomic<bool> _blocked_permission { false };
     std::atomic<bool> _compaction_active { false };
     std::optional<std::jthread> _worker;

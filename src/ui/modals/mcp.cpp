@@ -152,10 +152,11 @@ namespace {
             if (_state->mcp != nullptr) {
                 // Manager workers announce on their thread; bump the modal
                 // serial on the main thread so the rows refresh.
-                _subscription = _state->mcp->subscribe([state = _state] {
-                    state->post(
-                        [state] { state->session->bump_modal_serial(); });
-                });
+                _subscription
+                    = _state->mcp->subscribe_to_change([state = _state] {
+                          state->post(
+                              [state] { state->session->bump_modal_serial(); });
+                      });
             }
         }
 

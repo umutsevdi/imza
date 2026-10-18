@@ -141,6 +141,24 @@ namespace {
         };
     }
 
+    // Registered once every component exists. The destructor stops them
+    // in reverse registration order.
+    void register_stoppable(ApplicationState& state)
+    {
+        if (state.runner != nullptr) {
+            state.stoppable.push_back(state.runner.get());
+        }
+        if (state.review != nullptr) {
+            state.stoppable.push_back(state.review.get());
+        }
+        if (state.bg_processes != nullptr) {
+            state.stoppable.push_back(state.bg_processes.get());
+        }
+        if (state.subagents != nullptr) {
+            state.stoppable.push_back(state.subagents.get());
+        }
+    }
+
     void wire(std::shared_ptr<ApplicationState> state, StreamFn stream_fn,
         std::vector<Tool> tools)
     {
@@ -160,9 +178,6 @@ namespace {
                 return request_modal(*raw, std::move(payload));
             },
             *state->runner);
-        *state->subagent_slot = [raw](const ToolCallRequest& req) {
-            return raw->delegation->run_subagents(req);
-        };
         const auto resume_when_ready = [raw] {
             raw->post([raw] {
                 present_front(*raw);
@@ -177,9 +192,10 @@ namespace {
                 resume_when_ready);
         state->system_subscription
             = state->environment->subscribe_to_system_change(resume_when_ready);
-        state->provider_subscription = state->providers->subscribe(
+        state->provider_subscription = state->providers->subscribe_to_change(
             [raw] { raw->post([raw] { raw->session->bump_modal_serial(); }); });
         state->post([raw] { raw->providers->start_model_fetches(); });
+        register_stoppable(*state);
     }
 
 } // namespace
@@ -191,6 +207,16 @@ namespace {
         StreamFn stream_fn, std::vector<Tool> tools, RuntimeFlag runtime_flags,
         bool use_default_tools)
     {
+        // The state owns the queue; an empty `post` posts into it, so the
+        // interactive loop and the headless drain reach the same queue
+        // through the state instead of a separately threaded reference.
+        state->main_thread = std::make_shared<MainThreadQueue>();
+        if (!post) {
+            std::shared_ptr<MainThreadQueue> queue = state->main_thread;
+            post = [queue](std::function<void()> task) {
+                queue->post(std::move(task));
+            };
+        }
         state->lua_state = make_lua_state();
         state->prompts   = std::make_shared<PromptStore>(prompts_dir());
         state->session   = std::make_shared<Session>();
@@ -203,25 +229,22 @@ namespace {
             = std::make_shared<InputHistoryStore>(input_history_path());
         std::map<std::string, McpServerConfig> mcp_servers
             = std::move(config.mcp_servers);
-        // Taken before the config moves into the provider store.
+        // Taken before the config moves into the config store.
         std::vector<std::string> instructions = std::move(config.instructions);
         state->sidebar                        = config.sidebar;
-        state->providers = std::make_shared<ProviderStore>(std::move(config));
+        state->config    = std::make_shared<ConfigStore>(std::move(config));
+        state->providers = std::make_shared<ProviderStore>(state->config);
         McpManagerHooks mcp_hooks;
         // Sign-ins and background token refreshes write straight through
-        // the locked config RMW; no manager reload follows because the
-        // manager already applied the same values to its entry.
-        mcp_hooks.persist_server = [](const McpServerConfig& server) {
-            Config initial;
-            load_config(config_path(), initial);
-            update_config(
-                config_path(), initial,
-                [&server](Config& cfg) {
-                    cfg.mcp_servers.insert_or_assign(server.id, server);
-                    return true;
-                },
-                nullptr);
-        };
+        // the shared locked config RMW; no manager reload follows because
+        // the manager already applied the same values to its entry.
+        mcp_hooks.persist_server
+            = [config = state->config](const McpServerConfig& server) {
+                  config->update([&server](Config& cfg) {
+                      cfg.mcp_servers.insert_or_assign(server.id, server);
+                      return true;
+                  });
+              };
         mcp_hooks.open_browser
             = [](const std::string& url) { return open_browser(url); };
         mcp_hooks.notify
@@ -273,13 +296,14 @@ namespace {
         state->post          = guarded_post(state.get(), std::move(post));
         state->on_exit       = [] { };
         state->runtime_flags = runtime_flags;
-        if (!state->subagent_slot) {
-            state->subagent_slot = std::make_shared<SubagentToolFn>();
-        }
         if (use_default_tools) {
             ApplicationState* captured = state.get();
+            // Filled before the roster is built: the accessor reads the
+            // member at call time, so it sees the delegation wire() adds.
+            state->subagent_deps
+                = [captured] { return captured->delegation.get(); };
             tools = default_tools(lua_host(captured), skill_deps(captured),
-                state->subagent_slot, *state->lua_state, mcp_docs(captured));
+                state->subagent_deps, *state->lua_state, mcp_docs(captured));
         }
         wire(state, std::move(stream_fn), std::move(tools));
         return state;
@@ -293,26 +317,30 @@ namespace {
         state->session        = std::make_shared<Session>();
         state->sessions       = parent.sessions;
         state->input_history  = parent.input_history;
+        state->config         = parent.config;
         state->providers      = parent.providers;
         state->mcp            = parent.mcp;
-        state->subagents      = std::make_shared<SubagentManager>();
         state->environment    = parent.environment;
-        state->review         = std::make_shared<ReviewState>();
         state->skills         = std::make_shared<SkillStore>();
         state->skill_registry = parent.skill_registry;
         state->permissions    = parent.permissions;
         state->prompts        = parent.prompts;
         state->notifications  = parent.notifications;
-        state->post           = guarded_post(state.get(), std::move(post));
+        // Background processes are app-wide, so a child shares the root's
+        // manager: imza.bg.shell works inside a subagent, and teardown
+        // kills every process this process started.
+        state->bg_processes = parent.bg_processes;
+        // A child owns no review pane and spawns no subagents of its own:
+        // delegation is stripped from its roster and the review tab is
+        // root-only. Both stay null here rather than allocating a
+        // component nothing reads.
+        state->post = guarded_post(state.get(), std::move(post));
         wire_error_sink(*state);
         state->on_exit        = [] { };
         state->parent_routing = std::move(parent_routing);
         state->agent_label    = std::move(agent_label);
         state->runtime_flags  = parent.runtime_flags;
         state->sidebar        = parent.sidebar;
-        if (!state->subagent_slot) {
-            state->subagent_slot = std::make_shared<SubagentToolFn>();
-        }
         wire(state, std::move(stream_fn), std::move(tools));
         return state;
     }
@@ -335,15 +363,16 @@ ApplicationState::~ApplicationState()
 {
     alive.store(false);
     queue.abandon();
+    // Subscriptions disconnect through their own RAII; the explicit
+    // disconnects here only order them before workers stop.
     provider_subscription.disconnect();
     update_subscription.disconnect();
     env_subscription.disconnect();
     system_subscription.disconnect();
-    subagents->stop();
-    if (bg_processes) {
-        bg_processes->stop();
+    for (auto component = stoppable.rbegin(); component != stoppable.rend();
+        ++component) {
+        (*component)->stop();
     }
-    runner->stop();
 }
 
 std::shared_ptr<ApplicationState> make_application_state(

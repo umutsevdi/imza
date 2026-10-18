@@ -49,7 +49,10 @@ struct LuaModule {
 struct Tool; // defined in tools/tool.h; returned by value from make_lua_tool
 class McpManager;
 
-class LuaState final : public ApplicationComponent {
+// Immutable module registry: built once by make_lua_state, read by
+// every lua tool call. A value type, not an ApplicationComponent - it
+// owns no state that outlives a call and needs no synchronization.
+class LuaState {
 public:
     LuaState()                           = default;
     LuaState(const LuaState&)            = delete;

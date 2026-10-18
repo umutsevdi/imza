@@ -50,7 +50,6 @@ int main(int argc, char** argv)
     }
 
     const imza::RuntimeFlag runtime = imza::runtime_flags_for(cli);
-    imza::MainThreadQueue main_thread;
     // Read before the config is moved into the application state.
     imza::PermissionStore::Grants startup_grants
         = imza::allow_grants(cfg.allow);
@@ -58,9 +57,7 @@ int main(int argc, char** argv)
         + cli.allowed_directories.size() + cli.allowed_commands.size()
         + cli.allowed_mcp.size() + cli.allowed_skills.size());
     auto state = imza::make_application_state(
-        [&main_thread](
-            std::function<void()> task) { main_thread.post(std::move(task)); },
-        std::move(cfg), imza::StreamFn { }, runtime);
+        imza::PostFn { }, std::move(cfg), imza::StreamFn { }, runtime);
     for (const std::filesystem::path& directory : cli.allowed_directories) {
         startup_grants.emplace_back(directory);
     }
@@ -125,7 +122,7 @@ int main(int argc, char** argv)
             if (cli.working_directory
                 || state->environment->chdir(loaded.workspace)
                     != imza::Environment::ChdirResult::FAILED) {
-                return imza::run_repl(std::move(state), main_thread);
+                return imza::run_repl(std::move(state));
             }
             state->sessions->deactivate();
         }
@@ -158,7 +155,7 @@ int main(int argc, char** argv)
     }
     if (cli.one_shot) {
         const imza::OneShotResult result
-            = imza::run_one_shot(*state, main_thread, *cli.one_shot);
+            = imza::run_one_shot(*state, *cli.one_shot);
         if (!result.output.empty()) {
             imza::print_markdown_output(result.output);
         }
@@ -167,5 +164,5 @@ int main(int argc, char** argv)
         }
         return imza::one_shot_exit_code(result.kind);
     }
-    return imza::run_repl(std::move(state), main_thread);
+    return imza::run_repl(std::move(state));
 }

@@ -36,7 +36,8 @@ bool MainThreadQueue::wait_for_task(std::chrono::milliseconds timeout)
     return _ready.wait_for(lock, timeout, [this] { return !_tasks.empty(); });
 }
 
-Signal<>::Subscription MainThreadQueue::subscribe(Signal<>::Callback callback)
+Signal<>::Subscription MainThreadQueue::subscribe_to_change(
+    Signal<>::Callback callback)
 {
     auto subscription = _posted.subscribe(callback);
     bool notify_now;

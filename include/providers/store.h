@@ -17,6 +17,7 @@
 #include "common/types.h"
 #include "network/network.h"
 #include "platform/config.h"
+#include "platform/config_store.h"
 #include "providers/catalog.h"
 #include "providers/pricing.h"
 #include "providers/subscriptions.h"
@@ -88,16 +89,21 @@ using ConnectCompleteFn = std::function<void(ConnectOutcome)>;
 
 class ProviderStore final : public ApplicationComponent {
 public:
-    explicit ProviderStore(Config config, ModelsFn models_fn = { },
-        TermsFn terms_fn = { }, RefreshFn refresh_fn = { });
+    explicit ProviderStore(std::shared_ptr<ConfigStore> config_store,
+        ModelsFn models_fn = { }, TermsFn terms_fn = { },
+        RefreshFn refresh_fn = { });
     ~ProviderStore();
 
     ProviderStore(const ProviderStore&)            = delete;
     ProviderStore& operator=(const ProviderStore&) = delete;
 
-    [[nodiscard]] Signal<>::Subscription subscribe(ProviderChangedFn callback);
+    [[nodiscard]] Signal<>::Subscription subscribe_to_change(
+        ProviderChangedFn callback);
 
     Config config() const;
+    // The store every writer shares; the composition root keeps the
+    // ConfigStore alive for the process lifetime.
+    ConfigStore& config_store() const { return *_config_store; }
     StatusConfigView status() const;
     std::vector<ConnectionView> connections() const;
     ModelList models_for(std::string_view connection_id) const;
@@ -143,8 +149,6 @@ private:
         std::variant<Fetching, Ready, Failed> state;
     };
 
-    Connection* _find_locked(std::string_view id);
-    const Connection* _find_locked(std::string_view id) const;
     Route _route_locked(const Connection& connection, ApiStandard dialect,
         std::string_view opencode_session = { }) const;
     void _load_catalog();
@@ -155,11 +159,11 @@ private:
     void _start_fetch_locked(const std::string& connection_id);
     Status _commit_connection_locked(const ConnectResult& result,
         const std::vector<ModelInfo>& models, bool& first);
-    bool _update_config(std::function<bool(Config&)> mutate,
-        std::function<void()> on_commit = { });
+    bool _update_config(
+        const ConfigMutator& mutate, std::function<void()> on_commit = { });
     void _notify_changed();
 
-    Config _config;
+    std::shared_ptr<ConfigStore> _config_store;
     Catalog _catalog;
     std::map<std::string, ModelPricing> _pricing;
     ModelsFn _models_fn;
@@ -179,7 +183,6 @@ private:
     std::vector<std::jthread> _workers;
     std::optional<std::jthread> _catalog_worker;
     Signal<> _changed;
-    std::atomic<bool> _alive { true };
 };
 
 } // namespace imza

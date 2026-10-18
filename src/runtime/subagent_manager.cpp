@@ -110,6 +110,7 @@ void SubagentManager::prune_completed()
 
 void SubagentManager::stop()
 {
+    mark_dead();
     std::vector<std::pair<std::size_t, std::jthread>> workers;
     {
         std::lock_guard lock(_mutex);
@@ -136,7 +137,7 @@ std::size_t SubagentManager::running_count(bool visible_only) const
         }));
 }
 
-Signal<const SubagentEvent&>::Subscription SubagentManager::subscribe(
+Signal<const SubagentEvent&>::Subscription SubagentManager::subscribe_to_change(
     Signal<const SubagentEvent&>::Callback callback)
 {
     return _changed.subscribe(std::move(callback));

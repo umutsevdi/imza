@@ -23,7 +23,7 @@ TEST_CASE("subagent manager publishes ordered lifecycle events")
     imza::SubagentManager manager;
     std::vector<imza::SubagentEvent::Kind> events;
     auto subscription
-        = manager.subscribe([&](const imza::SubagentEvent& event) {
+        = manager.subscribe_to_change([&](const imza::SubagentEvent& event) {
               events.push_back(event.kind);
           });
 

@@ -14,6 +14,7 @@
 #include <doctest/doctest.h>
 
 #include "app/application_state.h"
+#include "platform/config_store.h"
 
 namespace imza::test {
 
@@ -78,6 +79,14 @@ template <typename Pred> bool wait_until(Pred pred)
     }
     FAIL("timed out waiting for a condition");
     return false;
+}
+
+// A ConfigStore over an isolated data home; the ProviderStore tests build
+// their store from one so the persisted document has a single owner.
+inline std::shared_ptr<imza::ConfigStore> make_config_store(
+    imza::Config config = { })
+{
+    return std::make_shared<imza::ConfigStore>(std::move(config));
 }
 
 // One provider/selection so submit() reaches the test's stream stub.

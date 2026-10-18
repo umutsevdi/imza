@@ -19,7 +19,8 @@ public:
     void drain();
     bool wait_for_task(std::chrono::milliseconds timeout);
 
-    [[nodiscard]] Signal<>::Subscription subscribe(Signal<>::Callback callback);
+    [[nodiscard]] Signal<>::Subscription subscribe_to_change(
+        Signal<>::Callback callback);
 
 private:
     mutable std::mutex _mutex;

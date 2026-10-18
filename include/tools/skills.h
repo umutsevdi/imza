@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/imza_signal.h"
 #include "common/tool_call.h"
 #include "common/types.h"
 #include "network/json.h"
@@ -60,11 +61,18 @@ public:
     std::optional<PendingSkillTurn> advance_pending_turn();
     std::optional<PendingSkillTurn> take_pending_turn();
 
+    // Fires when the loaded set changes (load, tool load, clear). Callbacks
+    // run on the publishing thread; keep the Subscription.
+    [[nodiscard]] Signal<>::Subscription subscribe_to_change(
+        Signal<>::Callback callback);
+
 private:
+    void _publish();
     mutable std::mutex _mutex;
     std::set<std::string> _loaded;
     std::map<std::string, std::string> _contents;
     std::optional<PendingSkillTurn> _pending_turn;
+    Signal<> _changed;
 };
 
 } // namespace imza

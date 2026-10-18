@@ -17,7 +17,9 @@ class McpManager;
 class ProviderStore;
 class SkillStore;
 
-class PromptStore final : public ApplicationComponent {
+// Immutable prompt catalog loaded once at startup. A value type, not
+// an ApplicationComponent: no mutation, no threads, no notification.
+class PromptStore {
 public:
     explicit PromptStore(const std::filesystem::path& overrides = { });
 

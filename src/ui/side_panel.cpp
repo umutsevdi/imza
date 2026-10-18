@@ -82,10 +82,16 @@ public:
                   _attachments_dirty.store(true);
                   animation::RequestAnimationFrame();
               }))
-        , _review_subscription(_state->review ? _state->review->subscribe([] {
-            animation::RequestAnimationFrame();
-        })
-                                              : Signal<>::Subscription { })
+        , _review_subscription(_state->review
+                  ? _state->review->subscribe_to_change(
+                        [] { animation::RequestAnimationFrame(); })
+                  : Signal<>::Subscription { })
+        , _skills_subscription(_state->skills->subscribe_to_change(
+              [state = std::weak_ptr<ApplicationState>(_state)] {
+                  if (const auto current = state.lock()) {
+                      current->post([] { animation::RequestAnimationFrame(); });
+                  }
+              }))
         , _permission_subscription(
               _state->permissions->subscribe_to_grants_change(
                   [state = std::weak_ptr<ApplicationState>(_state)] {
@@ -337,6 +343,7 @@ private:
     std::vector<std::string> _attachment_names;
     Signal<>::Subscription _attachments_subscription;
     Signal<>::Subscription _review_subscription;
+    Signal<>::Subscription _skills_subscription;
     Signal<>::Subscription _permission_subscription;
     Signal<>::Subscription _skip_subscription;
     Signal<>::Subscription _documents_subscription;

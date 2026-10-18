@@ -31,7 +31,7 @@ public:
     // when it could not be spawned.
     bool start(const std::string& command, std::chrono::seconds timeout,
         const std::filesystem::path& workspace);
-    void stop();
+    void stop() override;
 
 private:
     struct Worker {

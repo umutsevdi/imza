@@ -39,8 +39,6 @@ namespace {
 
 } // namespace
 
-static_assert(std::is_base_of_v<ApplicationComponent, PromptStore>);
-
 TEST_CASE("embedded prompts match the repository sources")
 {
     const PromptStore prompts;

@@ -18,6 +18,7 @@ namespace imza {
 
 struct Skill;
 class SkillStore;
+class Delegation;
 
 // Exact prefix tests match on when the model calls an unregistered tool.
 inline constexpr const char* UNKNOWN_TOOL_PREFIX = "unknown tool: ";
@@ -81,17 +82,16 @@ Tool make_skill_tool(SkillToolDeps deps = { });
 Tool make_load_tool(LuaState& state);
 Tool make_load_mcp_tool(McpToolDocsDeps deps = { });
 
-// Slot indirection breaks the TurnRunner/Delegation cycle: the tool
-// captures it empty, wire() fills it once both exist.
-using SubagentToolFn   = std::function<ToolOutput(const ToolCallRequest&)>;
-using SubagentToolSlot = std::shared_ptr<SubagentToolFn>;
+// Lazy accessor to the state's Delegation, filled by wire() once both
+// the runner and the delegation exist; empty means the roster carries no
+// delegation (children, sidechat).
+using SubagentDeps = std::function<Delegation*()>;
 
-Tool make_subagent_tool(SubagentToolSlot delegate = { });
+Tool make_subagent_tool(SubagentDeps delegate = { });
 
 // Builds the model-facing roster: skill, load_mcp, subagent, and the lua
 // sandbox (see tools/lua.h for the LuaHost the lua tool is wired with).
 std::vector<Tool> default_tools(LuaHost lua_host, SkillToolDeps skill_deps,
-    SubagentToolSlot subagent, LuaState& lua_state,
-    McpToolDocsDeps mcp_docs = { });
+    SubagentDeps subagent, LuaState& lua_state, McpToolDocsDeps mcp_docs = { });
 
 } // namespace imza

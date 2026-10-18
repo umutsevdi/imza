@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -11,7 +12,31 @@
 
 namespace imza {
 
-struct ApplicationComponent { };
+struct ApplicationState;
+
+// Base of every long-lived, thread-safe subsystem. Carries the shutdown
+// latch so teardown has one spelling across components: mark_dead() runs
+// first (workers observe it and bail), then the owner calls stop() and
+// joins them. Derived classes stay final and keep guarding their own
+// state. stop() is the one sanctioned virtual: lifecycle, not behavior.
+class ApplicationComponent {
+public:
+    ApplicationComponent()          = default;
+    virtual ~ApplicationComponent() = default;
+
+    ApplicationComponent(const ApplicationComponent&)            = delete;
+    ApplicationComponent& operator=(const ApplicationComponent&) = delete;
+
+    // Idempotent: marks the component dead, then stops its workers.
+    // Components without workers inherit the no-op.
+    virtual void stop() { mark_dead(); }
+
+    bool alive() const { return _alive.load(); }
+    void mark_dead() { _alive.store(false); }
+
+private:
+    std::atomic<bool> _alive { true };
+};
 
 struct Attachment {
     enum class Type { TEXT, IMAGE, PDF };

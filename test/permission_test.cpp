@@ -1311,3 +1311,29 @@ TEST_CASE("a loaded skill implies read-class access inside its directory")
 }
 
 } // namespace imza
+TEST_CASE("child states share the roots process and config owners")
+{
+    imza::test::IsolatedDataHome home;
+    auto state = imza::test::make_test_state();
+    imza::test::wait_for_environment(*state);
+
+    auto child = imza::make_child_application_state(
+        *state, imza::test::run_immediately);
+
+    // Shared with the root: one process-wide owner each.
+    CHECK(child->bg_processes == state->bg_processes);
+    CHECK(child->config == state->config);
+    CHECK(child->providers == state->providers);
+    CHECK(child->environment == state->environment);
+    CHECK(child->permissions == state->permissions);
+
+    // Owned per state: conversation-local components.
+    CHECK(child->session != state->session);
+    CHECK(child->skills != state->skills);
+    CHECK(child->runner != state->runner);
+
+    // A child renders no review pane and spawns no subagents of its own;
+    // both stay null instead of allocating a component nothing reads.
+    CHECK(child->review == nullptr);
+    CHECK(child->subagents == nullptr);
+}

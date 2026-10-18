@@ -192,9 +192,9 @@ std::string subagent_variant_or_default(
         : std::string(subagent_default_variant(role));
 }
 
-ProviderStore::ProviderStore(
-    Config config, ModelsFn models_fn, TermsFn terms_fn, RefreshFn refresh_fn)
-    : _config(std::move(config))
+ProviderStore::ProviderStore(std::shared_ptr<ConfigStore> config_store,
+    ModelsFn models_fn, TermsFn terms_fn, RefreshFn refresh_fn)
+    : _config_store(std::move(config_store))
     , _models_fn(std::move(models_fn))
     , _terms_fn(std::move(terms_fn))
     , _refresh_fn(std::move(refresh_fn))
@@ -220,7 +220,7 @@ ProviderStore::ProviderStore(
 
 ProviderStore::~ProviderStore()
 {
-    _alive.store(false);
+    mark_dead();
     _catalog_loader.reset();
     _catalog_worker.reset();
     _workers.clear();
@@ -266,7 +266,7 @@ void ProviderStore::_maybe_start_catalog_refresh()
         } syncing_slot { *this };
         Catalog catalog;
         const Status status = fetch_catalog(catalog);
-        if (!_alive.load()) {
+        if (!alive()) {
             return;
         }
         {
@@ -291,31 +291,29 @@ void ProviderStore::_wait_catalog_locked(
         lock, std::chrono::seconds(30), [this] { return _catalog_loaded; });
 }
 
-Signal<>::Subscription ProviderStore::subscribe(ProviderChangedFn callback)
+Signal<>::Subscription ProviderStore::subscribe_to_change(
+    ProviderChangedFn callback)
 {
     return _changed.subscribe(std::move(callback));
 }
 
-Config ProviderStore::config() const
-{
-    std::lock_guard lock(_mutex);
-    return _config;
-}
+Config ProviderStore::config() const { return *_config_store->snapshot(); }
 
 StatusConfigView ProviderStore::status() const
 {
-    std::lock_guard lock(_mutex);
-    return { _config.last_used ? _config.last_used->model : "",
-        _config.reasoning_effort.value_or("off") };
+    const std::shared_ptr<const Config> config = _config_store->snapshot();
+    return { config->last_used ? config->last_used->model : "",
+        config->reasoning_effort.value_or("off") };
 }
 
 std::vector<ConnectionView> ProviderStore::connections() const
 {
     std::unique_lock lock(_mutex);
     _wait_catalog_locked(lock);
+    const std::shared_ptr<const Config> config = _config_store->snapshot();
     std::vector<ConnectionView> views;
-    views.reserve(_config.providers.size());
-    for (const Connection& connection : _config.providers) {
+    views.reserve(config->providers.size());
+    for (const Connection& connection : config->providers) {
         ConnectionView view;
         view.id       = connection_key(connection);
         view.provider = connection.id;
@@ -356,7 +354,9 @@ ModelList ProviderStore::models_for(std::string_view connection_id) const
     std::unique_lock lock(_mutex);
     _wait_catalog_locked(lock);
     ModelList list;
-    const Connection* connection = _find_locked(connection_id);
+    const std::shared_ptr<const Config> config = _config_store->snapshot();
+    const Connection* connection
+        = find_connection(config->providers, connection_id);
     if (connection == nullptr) {
         list.state = ModelList::State::FAILED;
         list.error = Status::CONFIG_ERROR;
@@ -432,15 +432,17 @@ std::optional<ProviderSelection> ProviderStore::active_selection() const
 {
     std::unique_lock lock(_mutex);
     _wait_catalog_locked(lock);
-    if (!_config.last_used || _config.last_used->model.empty()) {
+    const std::shared_ptr<const Config> config = _config_store->snapshot();
+    if (!config->last_used || config->last_used->model.empty()) {
         return std::nullopt;
     }
-    const Connection* connection = _find_locked(_config.last_used->provider);
+    const Connection* connection
+        = find_connection(config->providers, config->last_used->provider);
     if (connection == nullptr) {
         return std::nullopt;
     }
-    return _selection_locked(*connection, _config.last_used->model,
-        _config.reasoning_effort.value_or("off"));
+    return _selection_locked(*connection, config->last_used->model,
+        config->reasoning_effort.value_or("off"));
 }
 
 std::optional<ProviderSelection> ProviderStore::subagent_selection(
@@ -448,23 +450,24 @@ std::optional<ProviderSelection> ProviderStore::subagent_selection(
 {
     std::unique_lock lock(_mutex);
     _wait_catalog_locked(lock);
-    const auto configured  = _config.subagents.find(role);
-    const bool use_default = configured == _config.subagents.end()
+    const std::shared_ptr<const Config> config = _config_store->snapshot();
+    const auto configured                      = config->subagents.find(role);
+    const bool use_default = configured == config->subagents.end()
         || configured->second.provider.empty();
     if (use_default
-        && (!_config.last_used || _config.last_used->model.empty())) {
+        && (!config->last_used || config->last_used->model.empty())) {
         return std::nullopt;
     }
-    const std::string& provider = use_default ? _config.last_used->provider
+    const std::string& provider = use_default ? config->last_used->provider
                                               : configured->second.provider;
     const std::string& model
-        = use_default ? _config.last_used->model : configured->second.model;
-    const Connection* connection = _find_locked(provider);
+        = use_default ? config->last_used->model : configured->second.model;
+    const Connection* connection = find_connection(config->providers, provider);
     if (connection == nullptr) {
         return std::nullopt;
     }
     return _selection_locked(*connection, model,
-        subagent_variant_or_default(configured != _config.subagents.end()
+        subagent_variant_or_default(configured != config->subagents.end()
                 ? &configured->second
                 : nullptr,
             role));
@@ -475,7 +478,9 @@ Route ProviderStore::route_for(
 {
     std::unique_lock lock(_mutex);
     _wait_catalog_locked(lock);
-    const Connection* connection = _find_locked(connection_id);
+    const std::shared_ptr<const Config> config = _config_store->snapshot();
+    const Connection* connection
+        = find_connection(config->providers, connection_id);
     return connection == nullptr ? Route { }
                                  : _route_locked(*connection, dialect);
 }
@@ -492,7 +497,8 @@ Route ProviderStore::authenticated_route_for(std::string_view connection_id,
         _refresh_changed.wait_for(lock, std::chrono::seconds(30),
             [&] { return !_refreshing.contains(id); });
         _wait_catalog_locked(lock);
-        const Connection* connection = _find_locked(id);
+        const std::shared_ptr<const Config> config = _config_store->snapshot();
+        const Connection* connection = find_connection(config->providers, id);
         if (connection == nullptr) {
             return { };
         }
@@ -550,7 +556,8 @@ Route ProviderStore::authenticated_route_for(std::string_view connection_id,
     Route route;
     {
         std::lock_guard lock(_mutex);
-        const Connection* connection = _find_locked(id);
+        const std::shared_ptr<const Config> config = _config_store->snapshot();
+        const Connection* connection = find_connection(config->providers, id);
         if (connection != nullptr) {
             route = _route_locked(*connection, dialect, opencode_session);
         }
@@ -587,8 +594,10 @@ ModelMetadata ProviderStore::model_metadata_for(
         }
     }
     // The catalog fills only the gaps, from this connection's own row.
-    const Connection* connection = _find_locked(connection_id);
-    const auto provider          = _catalog.providers.find(
+    const std::shared_ptr<const Config> config = _config_store->snapshot();
+    const Connection* connection
+        = find_connection(config->providers, connection_id);
+    const auto provider = _catalog.providers.find(
         connection != nullptr ? connection->id : std::string(connection_id));
     if (provider != _catalog.providers.end()) {
         if (const CachedModel* match
@@ -626,7 +635,9 @@ ModelPricing ProviderStore::pricing_for(
     }
     std::unique_lock lock(_mutex);
     _wait_catalog_locked(lock);
-    const Connection* connection  = _find_locked(connection_id);
+    const std::shared_ptr<const Config> config = _config_store->snapshot();
+    const Connection* connection
+        = find_connection(config->providers, connection_id);
     const std::string provider_id = to_lower(
         connection != nullptr ? connection->id : std::string(connection_id));
     // Keys are qualified (`provider/model`), so the lookup can only match
@@ -641,7 +652,8 @@ void ProviderStore::start_model_fetches()
     {
         std::unique_lock lock(_mutex);
         _wait_catalog_locked(lock);
-        for (const Connection& connection : _config.providers) {
+        const std::shared_ptr<const Config> config = _config_store->snapshot();
+        for (const Connection& connection : config->providers) {
             _start_fetch_locked(connection_key(connection));
         }
     }
@@ -699,7 +711,7 @@ void ProviderStore::connect(ConnectResult result, ConnectCompleteFn complete)
                     fetched = _models_fn(route, models);
                 }
             }
-            if (!_alive.load()) {
+            if (!alive()) {
                 return;
             }
             ConnectOutcome outcome;
@@ -743,7 +755,9 @@ bool ProviderStore::remove_connection(
             return true;
         },
         [&] {
-            if (_find_locked(expected_id) == nullptr) {
+            if (find_connection(
+                    _config_store->snapshot()->providers, expected_id)
+                == nullptr) {
                 ++_generations[std::string(expected_id)];
                 _model_catalog.erase(std::string(expected_id));
             }
@@ -826,17 +840,12 @@ void ProviderStore::ensure_catalog_fresh()
 }
 
 bool ProviderStore::_update_config(
-    std::function<bool(Config&)> mutate, std::function<void()> on_commit)
+    const ConfigMutator& mutate, std::function<void()> on_commit)
 {
     bool committed = false;
     {
         std::lock_guard lock(_mutex);
-        Config candidate;
-        const ConfigUpdateResult result
-            = update_config(config_path(), _config, mutate, &candidate);
-        if (result != ConfigUpdateResult::FAILURE) {
-            _config = std::move(candidate);
-        }
+        const ConfigUpdateResult result = _config_store->update(mutate);
         if (result == ConfigUpdateResult::UPDATED) {
             committed = true;
             if (on_commit) {
@@ -850,17 +859,6 @@ bool ProviderStore::_update_config(
     return committed;
 }
 
-Connection* ProviderStore::_find_locked(std::string_view id)
-{
-    return const_cast<Connection*>(
-        static_cast<const ProviderStore*>(this)->_find_locked(id));
-}
-
-const Connection* ProviderStore::_find_locked(std::string_view id) const
-{
-    return find_connection(_config.providers, id);
-}
-
 Route ProviderStore::_route_locked(const Connection& connection,
     ApiStandard dialect, std::string_view opencode_session) const
 {
@@ -869,7 +867,8 @@ Route ProviderStore::_route_locked(const Connection& connection,
 
 void ProviderStore::_start_fetch_locked(const std::string& connection_id)
 {
-    const Connection* connection = _find_locked(connection_id);
+    const Connection* connection
+        = find_connection(_config_store->snapshot()->providers, connection_id);
     if (connection == nullptr) {
         return;
     }
@@ -890,7 +889,7 @@ void ProviderStore::_start_fetch_locked(const std::string& connection_id)
     _workers.emplace_back([this, connection_id, generation, route] {
         std::vector<ModelInfo> models;
         const Status status = _models_fn(route, models);
-        if (!_alive.load()) {
+        if (!alive()) {
             return;
         }
         {
@@ -925,26 +924,22 @@ Status ProviderStore::_commit_connection_locked(const ConnectResult& result,
     }
 
     std::string id;
-    Config candidate;
-    const ConfigUpdateResult updated = update_config(
-        config_path(), _config,
-        [&](Config& latest) {
-            first     = !latest.last_used.has_value();
-            stored.id = result.id;
-            id        = connection_key(stored);
-            for (const Connection& connection : latest.providers) {
-                if (connection_key(connection) == id) {
-                    return false;
-                }
-            }
-            latest.providers.push_back(std::move(stored));
-            return true;
-        },
-        &candidate);
+    const ConfigUpdateResult updated
+        = _config_store->update([&](Config& latest) {
+              first     = !latest.last_used.has_value();
+              stored.id = result.id;
+              id        = connection_key(stored);
+              for (const Connection& connection : latest.providers) {
+                  if (connection_key(connection) == id) {
+                      return false;
+                  }
+              }
+              latest.providers.push_back(std::move(stored));
+              return true;
+          });
     if (updated != ConfigUpdateResult::UPDATED) {
         return Status::CONFIG_ERROR;
     }
-    _config = std::move(candidate);
     ++_generations[id];
     _model_catalog[id] = CatalogEntry { CatalogEntry::Ready { models } };
     return Status::OK;

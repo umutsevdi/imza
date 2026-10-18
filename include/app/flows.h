@@ -72,8 +72,8 @@ std::string format_session_list(const std::vector<SavedSession>& sessions);
 // entries flagged.
 SkillsModal skills_modal(const ApplicationState& state);
 RuntimeFlag runtime_flags_for(const CliResult& result);
-OneShotResult run_one_shot(ApplicationState& state,
-    MainThreadQueue& main_thread, const OneShotRequest& request);
+OneShotResult run_one_shot(
+    ApplicationState& state, const OneShotRequest& request);
 int one_shot_exit_code(OneShotResult::Kind kind);
 void submit(ApplicationState& state, std::string text,
     std::vector<Attachment> attachments = { });

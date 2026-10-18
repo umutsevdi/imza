@@ -74,7 +74,8 @@ void SessionStore::deactivate()
     _active_lock.reset();
 }
 
-Signal<>::Subscription SessionStore::subscribe(Signal<>::Callback callback)
+Signal<>::Subscription SessionStore::subscribe_to_change(
+    Signal<>::Callback callback)
 {
     return _changed.subscribe(std::move(callback));
 }

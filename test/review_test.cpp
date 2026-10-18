@@ -1,5 +1,12 @@
 #include <doctest/doctest.h>
 
+#include <chrono>
+#include <filesystem>
+#include <string>
+
+#include "platform/command_runner.h"
+#include "test_fs.h"
+#include "test_state.h"
 #include "turn/prompt.h"
 #include "workspace/review.h"
 
@@ -191,4 +198,41 @@ TEST_CASE("review state adds AI comments without exact duplicates")
     const auto comments = state.comments();
     REQUIRE(comments.size() == 2);
     CHECK(comments[1].body == "[P3] A separate issue.");
+}
+TEST_CASE("ReviewState reloads the repository on its own worker")
+{
+    const imza::test::TempDir dir;
+    const std::filesystem::path root = dir.path;
+    const auto git                   = [&](const std::string& command) {
+        return imza::command_ok(imza::run_command(
+            "git " + command, std::chrono::seconds { 10 }, root));
+    };
+    REQUIRE(git("init -q"));
+    imza::test::write_file(root / "a.txt", "one\n");
+    REQUIRE(git("add a.txt"));
+    REQUIRE(git("-c user.email=t@t -c user.name=t commit -qm init"));
+    imza::test::write_file(root / "a.txt", "one\ntwo\n");
+
+    imza::ReviewState review;
+    CHECK(review.snapshot().status == imza::ReviewState::LoadStatus::IDLE);
+
+    review.reload(root);
+    REQUIRE(imza::test::wait_until([&] {
+        return review.snapshot().status
+            == imza::ReviewState::LoadStatus::LOADED;
+    }));
+    const auto snapshot = review.snapshot();
+    REQUIRE(snapshot.review != nullptr);
+    REQUIRE(snapshot.review->files.size() == 1);
+    CHECK(snapshot.review->files[0].new_path == "a.txt");
+
+    // A second request reruns the load against the newest state.
+    imza::test::write_file(root / "b.txt", "new\n");
+    REQUIRE(git("add b.txt"));
+    review.reload(root);
+    REQUIRE(imza::test::wait_until([&] {
+        const auto current = review.snapshot();
+        return current.review != nullptr && current.review->files.size() == 2;
+    }));
+    review.stop();
 }

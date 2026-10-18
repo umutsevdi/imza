@@ -330,6 +330,73 @@ std::vector<ReviewComment> ReviewState::comments() const
     return _state.comments;
 }
 
+ReviewState::~ReviewState() { stop(); }
+
+void ReviewState::reload(std::filesystem::path root)
+{
+    if (root.empty()) {
+        return;
+    }
+    {
+        std::lock_guard lock(_mutex);
+        _reload_root    = std::move(root);
+        _reload_pending = true;
+    }
+    _maybe_start_worker();
+}
+
+void ReviewState::stop()
+{
+    mark_dead();
+    {
+        std::lock_guard lock(_mutex);
+        _reload_pending = false;
+    }
+    if (_worker.joinable()) {
+        _worker.request_stop();
+        _worker.join();
+    }
+}
+
+void ReviewState::_maybe_start_worker()
+{
+    {
+        std::lock_guard lock(_mutex);
+        if (_reload_running) {
+            // A live worker will observe the pending request.
+            return;
+        }
+        _reload_running = true;
+    }
+    // The previous worker has exited (running was false); joining waits
+    // only for its teardown.
+    if (_worker.joinable()) {
+        _worker.join();
+    }
+    _worker = std::jthread([this](const std::stop_token& stop) {
+        for (;;) {
+            std::filesystem::path root;
+            {
+                std::lock_guard lock(_mutex);
+                if (!_reload_pending || stop.stop_requested()) {
+                    _reload_running = false;
+                    return;
+                }
+                root            = _reload_root;
+                _reload_pending = false;
+            }
+            set_loading();
+            ReviewLoadResult result = load_repository_review(root);
+            if (stop.stop_requested()) {
+                std::lock_guard lock(_mutex);
+                _reload_running = false;
+                return;
+            }
+            set_result(std::move(result));
+        }
+    });
+}
+
 void ReviewState::set_loading()
 {
     {
@@ -510,7 +577,8 @@ void ReviewState::clear_comments()
     _publish();
 }
 
-Signal<>::Subscription ReviewState::subscribe(Signal<>::Callback callback)
+Signal<>::Subscription ReviewState::subscribe_to_change(
+    Signal<>::Callback callback)
 {
     return _changed.subscribe(std::move(callback));
 }

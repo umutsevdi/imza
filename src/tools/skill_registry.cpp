@@ -208,7 +208,7 @@ SkillRegistry::SkillRegistry(SkillRegistryHooks hooks)
 
 SkillRegistry::~SkillRegistry()
 {
-    _stopping.store(true);
+    mark_dead();
     for (;;) {
         std::vector<std::thread> workers;
         {
@@ -317,7 +317,8 @@ bool SkillRegistry::installed(std::string_view slug) const
         _hooks.install_root / path_from_utf8(slug) / "SKILL.md", ec);
 }
 
-Signal<>::Subscription SkillRegistry::subscribe(Signal<>::Callback callback)
+Signal<>::Subscription SkillRegistry::subscribe_to_change(
+    Signal<>::Callback callback)
 {
     return _changed.subscribe(std::move(callback));
 }

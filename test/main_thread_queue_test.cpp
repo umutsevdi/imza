@@ -29,7 +29,8 @@ TEST_CASE("main thread queue notifies subscribers of pending work")
     int notifications = 0;
     queue.post([] { });
 
-    auto subscription = queue.subscribe([&notifications] { ++notifications; });
+    auto subscription
+        = queue.subscribe_to_change([&notifications] { ++notifications; });
     CHECK(notifications == 1);
 
     queue.drain();

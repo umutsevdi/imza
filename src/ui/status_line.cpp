@@ -36,17 +36,18 @@ namespace {
             , _repository_subscription(
                   _state->environment->subscribe_to_repository_change(
                       [] { animation::RequestAnimationFrame(); }))
-            , _subagent_subscription(
-                  _state->subagents->subscribe([](const SubagentEvent&) {
+            , _subagent_subscription(_state->subagents->subscribe_to_change(
+                  [](const SubagentEvent&) {
                       animation::RequestAnimationFrame();
                   }))
             , _compaction_subscription(
                   _state->session->subscribe_to_compaction_change(
                       [] { animation::RequestAnimationFrame(); }))
-            , _provider_subscription(_state->providers->subscribe([this] {
-                _provider_dirty.store(true);
-                animation::RequestAnimationFrame();
-            }))
+            , _provider_subscription(
+                  _state->providers->subscribe_to_change([this] {
+                      _provider_dirty.store(true);
+                      animation::RequestAnimationFrame();
+                  }))
         {
         }
 

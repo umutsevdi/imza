@@ -133,7 +133,7 @@ McpManager::~McpManager()
 {
     // Workers reference this through the signal and their entries; stop
     // streams and retries, then join before any member dies.
-    _stopping.store(true);
+    mark_dead();
     for (auto& [id, entry] : _servers) {
         entry->stream_cancel.store(true);
     }
@@ -333,17 +333,17 @@ void McpManager::run_handshake(
 
 bool McpManager::wait_interruptible(long ms) const
 {
-    for (long waited = 0; waited < ms && !_stopping.load(); waited += 200) {
+    for (long waited = 0; waited < ms && !!alive(); waited += 200) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
-    return _stopping.load();
+    return !alive();
 }
 
 void McpManager::run_listener(std::shared_ptr<ServerEntry> entry)
 {
     std::string last_event_id;
     long retry_delay_ms = 3000;
-    while (!_stopping.load()) {
+    while (!!alive()) {
         {
             std::lock_guard state_lock(entry->state_mutex);
             if (entry->state != McpServerState::CONNECTED
@@ -417,7 +417,7 @@ void McpManager::run_listener(std::shared_ptr<ServerEntry> entry)
             },
             last_event_id, &http_code);
 
-        if (_stopping.load()) {
+        if (!alive()) {
             return;
         }
         if (http_code == 405) {
@@ -616,7 +616,7 @@ void McpManager::run_sign_in(std::shared_ptr<ServerEntry> entry)
         }
     }
     _changed.publish();
-    if (!succeeded || _stopping.load()) {
+    if (!succeeded || !alive()) {
         return;
     }
     // Persist only while the entry is still configured: a removal that
@@ -686,7 +686,7 @@ bool McpManager::refresh_entry_tokens(
         }
         entry->config.oauth.expires_at = tokens.expires_at;
     }
-    if (_hooks.persist_server && !_stopping.load()
+    if (_hooks.persist_server && !!alive()
         && still_tracked(entry->config.id, entry)) {
         _hooks.persist_server(entry->config);
     }
@@ -778,7 +778,8 @@ std::optional<std::vector<McpToolDefinition>> McpManager::tools(
     return entry->tools;
 }
 
-Signal<>::Subscription McpManager::subscribe(std::function<void()> callback)
+Signal<>::Subscription McpManager::subscribe_to_change(
+    std::function<void()> callback)
 {
     return _changed.subscribe(std::move(callback));
 }

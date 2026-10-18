@@ -65,11 +65,11 @@ public:
         std::shared_ptr<Session> session = { });
     bool cancel(std::size_t id);
     void prune_completed();
-    void stop();
+    void stop() override;
     std::vector<SubagentTask> tasks() const;
     std::size_t running_count(bool visible_only = true) const;
-    [[nodiscard]] Signal<const SubagentEvent&>::Subscription subscribe(
-        Signal<const SubagentEvent&>::Callback callback);
+    [[nodiscard]] Signal<const SubagentEvent&>::Subscription
+    subscribe_to_change(Signal<const SubagentEvent&>::Callback callback);
 
 private:
     mutable std::mutex _mutex;

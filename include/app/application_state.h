@@ -13,9 +13,11 @@
 #include "conversation/session_store.h"
 #include "network/network.h"
 #include "platform/config.h"
+#include "platform/config_store.h"
 #include "providers/store.h"
 #include "runtime/bg_process_manager.h"
 #include "runtime/callbacks.h"
+#include "runtime/main_thread_queue.h"
 #include "runtime/modal_queue.h"
 #include "runtime/notification_center.h"
 #include "runtime/subagent_manager.h"
@@ -39,6 +41,9 @@ struct ApplicationState {
     std::shared_ptr<Session> session;
     std::shared_ptr<SessionStore> sessions;
     std::shared_ptr<InputHistoryStore> input_history;
+    // The single owner of the persisted Config document; every
+    // writer goes through it, so no reader can hold a stale copy.
+    std::shared_ptr<ConfigStore> config;
     std::shared_ptr<ProviderStore> providers;
     std::shared_ptr<McpManager> mcp;
     std::shared_ptr<SubagentManager> subagents;
@@ -53,11 +58,17 @@ struct ApplicationState {
     // one overlay shows every publisher's notice.
     std::shared_ptr<NotificationStore> notifications;
 
+    // The main-thread task queue. Created by the factory so the state owns
+    // it; the interactive loop and the headless drain read it here instead
+    // of threading a separate reference through every entry point.
+    std::shared_ptr<MainThreadQueue> main_thread;
+
     std::unique_ptr<LuaState> lua_state;
     std::unique_ptr<TurnRunner> runner;
     std::unique_ptr<Delegation> delegation;
-    // Shared with the subagent tool; wire() fills it once both exist.
-    SubagentToolSlot subagent_slot;
+    // Lazy accessor the subagent tool uses to reach this state's
+    // delegation; wire() fills it once the delegation exists.
+    SubagentDeps subagent_deps;
     ModalQueue queue;
 
     // Sidechat pane, declared last so it dies before the components it shares.
@@ -79,6 +90,12 @@ struct ApplicationState {
     Signal<>::Subscription system_subscription;
     Signal<>::Subscription provider_subscription;
     Signal<>::Subscription update_subscription;
+
+    // Components with teardown work, registered by the factories in the
+    // order they must stop. The destructor marks each dead and stops it in
+    // reverse; adding a worker-bearing component means registering it, not
+    // editing the destructor.
+    std::vector<ApplicationComponent*> stoppable;
 
     ~ApplicationState();
 

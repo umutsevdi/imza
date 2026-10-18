@@ -12,6 +12,7 @@ BgProcessManager::~BgProcessManager() { stop(); }
 
 void BgProcessManager::stop()
 {
+    mark_dead();
     std::vector<Worker> workers;
     {
         std::lock_guard lock(_mutex);

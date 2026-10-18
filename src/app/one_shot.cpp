@@ -38,9 +38,10 @@ namespace {
 
 } // namespace
 
-OneShotResult run_one_shot(ApplicationState& state,
-    MainThreadQueue& main_thread, const OneShotRequest& request)
+OneShotResult run_one_shot(
+    ApplicationState& state, const OneShotRequest& request)
 {
+    MainThreadQueue& main_thread = *state.main_thread;
     state.session->set_mode(request.mode == OneShotRequest::Mode::ASK
             ? Session::Mode::PLAN
             : Session::Mode::BUILD);

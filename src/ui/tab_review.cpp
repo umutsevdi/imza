@@ -85,18 +85,12 @@ namespace {
             , _navigate(std::move(navigate))
             , _editor([this] { animation::RequestAnimationFrame(); })
             , _repository_subscription(
-                  _state->environment->subscribe_to_repository_change([this] {
-                      _load_generation.fetch_add(1);
-                      _reload_pending.store(true);
-                      animation::RequestAnimationFrame();
-                  }))
+                  _state->environment->subscribe_to_repository_change(
+                      [this] { _request_reload(); }))
             , _workspace_subscription(
-                  _state->environment->subscribe_to_workspace_change([this] {
-                      _load_generation.fetch_add(1);
-                      _reload_pending.store(true);
-                      animation::RequestAnimationFrame();
-                  }))
-            , _review_subscription(_state->review->subscribe(
+                  _state->environment->subscribe_to_workspace_change(
+                      [this] { _request_reload(); }))
+            , _review_subscription(_state->review->subscribe_to_change(
                   [] { animation::RequestAnimationFrame(); }))
         {
             _plan_button
@@ -117,22 +111,14 @@ namespace {
             Add(_review_cancel_button);
             Add(_handoff_action_button);
             Add(_handoff_cancel_button);
-        }
-
-        ~Review() override
-        {
-            _load_generation.fetch_add(1);
-            if (_load_thread.joinable()) {
-                _load_thread.join();
-            }
+            // A repository already loaded at construction fires no change
+            // signal, so ask once here; later changes arrive by
+            // subscription.
+            _request_reload();
         }
 
         Element OnRender() override
         {
-            if (_reload_pending.load() && !_load_running.load()) {
-                _reload_pending.store(false);
-                _reload();
-            }
             const ReviewState::Snapshot snapshot = _state->review->snapshot();
             _consume_jump(snapshot);
             _visible.clear();
@@ -993,32 +979,16 @@ namespace {
             return file.new_path.empty() ? file.old_path : file.new_path;
         }
 
-        void _reload()
+        // The load runs on ReviewState's own worker; the tab only asks
+        // for it and repaints when the state publishes.
+        void _request_reload()
         {
             const auto workspace = _state->environment->workspace();
             if (!workspace || !workspace->project_root) {
                 return;
             }
-            if (_load_running.exchange(true)) {
-                _reload_pending.store(true);
-                return;
-            }
-            // OnRender only starts a load after the previous loader stored
-            // false, so joining here waits at most for thread teardown.
-            if (_load_thread.joinable()) {
-                _load_thread.join();
-            }
-            const std::filesystem::path root = *workspace->project_root;
-            _state->review->set_loading();
-            const std::uint64_t generation = _load_generation.load();
-            _load_thread = std::jthread([this, root, generation] {
-                ReviewLoadResult result = load_repository_review(root);
-                if (_load_generation.load() == generation) {
-                    _state->review->set_result(std::move(result));
-                }
-                _load_running.store(false);
-                animation::RequestAnimationFrame();
-            });
+            _state->review->reload(*workspace->project_root);
+            animation::RequestAnimationFrame();
         }
         Component _plan_button;
         Component _review_action_button;
@@ -1050,12 +1020,6 @@ namespace {
         int _render_radius             = 120;
         int _highlighted_width         = 0;
         bool _highlighted_side_by_side = false;
-        std::atomic<std::uint64_t> _load_generation { 0 };
-        std::atomic<bool> _load_running { false };
-        std::atomic<bool> _reload_pending { true };
-        // Declared after the state it reads so member destruction joins the
-        // loader before anything it captures through `this` goes away.
-        std::jthread _load_thread;
         Signal<>::Subscription _repository_subscription;
         Signal<>::Subscription _workspace_subscription;
         Signal<>::Subscription _review_subscription;

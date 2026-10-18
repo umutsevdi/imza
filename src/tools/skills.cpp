@@ -173,18 +173,24 @@ bool SkillStore::load(const Skill& skill, std::string& error)
         error = "Cannot load skill '" + skill.name + "': " + reason + ".";
         return false;
     }
-    std::lock_guard lock(_mutex);
-    _loaded.insert(skill.path.string());
-    _contents[skill.path.string()] = std::move(*body);
+    {
+        std::lock_guard lock(_mutex);
+        _loaded.insert(skill.path.string());
+        _contents[skill.path.string()] = std::move(*body);
+    }
+    _publish();
     return true;
 }
 
 void SkillStore::record_tool_load(
     const std::filesystem::path& path, std::string body)
 {
-    std::lock_guard lock(_mutex);
-    _loaded.insert(path.string());
-    _contents[path.string()] = std::move(body);
+    {
+        std::lock_guard lock(_mutex);
+        _loaded.insert(path.string());
+        _contents[path.string()] = std::move(body);
+    }
+    _publish();
 }
 
 std::string SkillStore::prompt_suffix() const
@@ -212,11 +218,22 @@ std::vector<std::filesystem::path> SkillStore::loaded_directories() const
 
 void SkillStore::clear()
 {
-    std::lock_guard lock(_mutex);
-    _loaded.clear();
-    _contents.clear();
-    _pending_turn.reset();
+    {
+        std::lock_guard lock(_mutex);
+        _loaded.clear();
+        _contents.clear();
+        _pending_turn.reset();
+    }
+    _publish();
 }
+
+Signal<>::Subscription SkillStore::subscribe_to_change(
+    Signal<>::Callback callback)
+{
+    return _changed.subscribe(std::move(callback));
+}
+
+void SkillStore::_publish() { _changed.publish(); }
 
 std::optional<PendingSkillTurn> SkillStore::pending_turn() const
 {

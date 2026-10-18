@@ -64,7 +64,7 @@ namespace {
             _entries = std::get<SkillsModal>(_state->session->modal()).entries;
             _installed = _installed_names();
             if (_state->skill_registry) {
-                _subscription = _state->skill_registry->subscribe(
+                _subscription = _state->skill_registry->subscribe_to_change(
                     [] { animation::RequestAnimationFrame(); });
             }
             _tab_names = { "Manage", "Search" };

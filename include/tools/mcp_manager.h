@@ -105,7 +105,7 @@ public:
 
     // Callbacks run on manager worker threads; keep the Subscription and
     // marshal UI work through the main-thread queue.
-    [[nodiscard]] Signal<>::Subscription subscribe(
+    [[nodiscard]] Signal<>::Subscription subscribe_to_change(
         std::function<void()> callback);
 
 private:
@@ -143,7 +143,6 @@ private:
         bool forced, std::string& detail);
     bool wait_interruptible(long ms) const;
 
-    std::atomic_bool _stopping { false };
     mutable std::mutex _map_mutex;
     std::map<std::string, std::shared_ptr<ServerEntry>> _servers;
     // Guards _workers: workers spawn follow-up work (retries, listeners)

@@ -4,6 +4,7 @@
 #include "tools/bindings.h"
 #include "tools/mcp_manager.h"
 #include "tools/skills.h"
+#include "turn/delegation.h"
 
 #include <chrono>
 #include <cstdint>
@@ -147,7 +148,7 @@ Tool make_load_mcp_tool(McpToolDocsDeps deps)
 }
 
 std::vector<Tool> default_tools(LuaHost lua_host, SkillToolDeps skill_deps,
-    SubagentToolSlot subagent, LuaState& lua_state, McpToolDocsDeps mcp_docs)
+    SubagentDeps subagent, LuaState& lua_state, McpToolDocsDeps mcp_docs)
 {
     std::vector<Tool> tools;
     tools.push_back(make_skill_tool(std::move(skill_deps)));
@@ -250,7 +251,7 @@ Tool make_load_tool(LuaState& state)
             } };
 }
 
-Tool make_subagent_tool(SubagentToolSlot delegate)
+Tool make_subagent_tool(SubagentDeps delegate)
 {
     ToolSpec spec;
     spec.name = "subagent";
@@ -260,9 +261,6 @@ Tool make_subagent_tool(SubagentToolSlot delegate)
           "available while the main agent is in build mode.";
     spec.parameters
         = R"json({"type":"object","properties":{"tasks":{"type":"array","minItems":1,"maxItems":8,"items":{"type":"object","properties":{"mode":{"type":"string","enum":["research","build"]},"prompt":{"type":"string","minLength":1}},"required":["mode","prompt"],"additionalProperties":false}}},"required":["tasks"],"additionalProperties":false})json";
-    if (!delegate) {
-        delegate = std::make_shared<SubagentToolFn>();
-    }
     return { std::move(spec),
         [delegate = std::move(delegate)](
             const ToolCallRequest& req) -> ToolOutput {
@@ -270,10 +268,11 @@ Tool make_subagent_tool(SubagentToolSlot delegate)
             if (json_parse_checked(req.args, args)) {
                 return tool_error(std::string(SUBAGENT_ARGS_ERROR));
             }
-            if (!*delegate) {
+            Delegation* delegation = delegate ? delegate() : nullptr;
+            if (delegation == nullptr) {
                 return tool_error("subagent: delegation is unavailable");
             }
-            return (*delegate)(req);
+            return delegation->run_subagents(req);
         } };
 }
 

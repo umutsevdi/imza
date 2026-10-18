@@ -91,7 +91,8 @@ public:
     // True when the install root holds a directory for `slug`.
     bool installed(std::string_view slug) const;
 
-    [[nodiscard]] Signal<>::Subscription subscribe(Signal<>::Callback callback);
+    [[nodiscard]] Signal<>::Subscription subscribe_to_change(
+        Signal<>::Callback callback);
 
 private:
     void spawn(std::function<void()> work);
@@ -104,7 +105,6 @@ private:
     mutable std::mutex _mutex;
     Snapshot _snapshot;
     std::atomic_bool _running { false };
-    std::atomic_bool _stopping { false };
     std::mutex _workers_mutex;
     std::vector<std::thread> _workers;
     Signal<> _changed;

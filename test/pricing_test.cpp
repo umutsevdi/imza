@@ -11,6 +11,7 @@
 #include "providers/pricing.h"
 #include "providers/store.h"
 #include "test_fs.h"
+#include "test_state.h"
 
 namespace {
 
@@ -109,7 +110,7 @@ TEST_CASE(
     "pricing_for is connection-scoped, case-insensitive, and never borrows")
 {
     CatalogHome home;
-    imza::ProviderStore store { imza::Config { } };
+    imza::ProviderStore store { imza::test::make_config_store() };
 
     // Case-insensitive within the owning connection.
     const auto sonnet = store.pricing_for("Claude-Sonnet-4", "anthropic");
@@ -134,7 +135,7 @@ TEST_CASE(
 TEST_CASE("pricing_for keeps zero-cost models and rejects unknown ones")
 {
     CatalogHome home;
-    imza::ProviderStore store { imza::Config { } };
+    imza::ProviderStore store { imza::test::make_config_store() };
 
     const auto free = store.pricing_for("glm-5-flash", "zai");
     CHECK(free.input_per_1k == 0.0);

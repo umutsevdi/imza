@@ -31,7 +31,8 @@ public:
     // process holds it; releases any previously held session file first.
     bool activate(const std::filesystem::path& path);
     void deactivate();
-    [[nodiscard]] Signal<>::Subscription subscribe(Signal<>::Callback callback);
+    [[nodiscard]] Signal<>::Subscription subscribe_to_change(
+        Signal<>::Callback callback);
 
 private:
     void _publish(std::vector<SavedSession> entries);

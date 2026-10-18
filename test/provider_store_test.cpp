@@ -14,6 +14,7 @@
 #include "providers/store.h"
 #include "providers/subscriptions.h"
 #include "test_fs.h"
+#include "test_state.h"
 
 namespace {
 
@@ -53,7 +54,9 @@ TEST_CASE("authenticated_route_for serves the cached token outside the "
 {
     imza::test::IsolatedDataHome home;
     std::atomic<int> refresh_calls { 0 };
-    imza::ProviderStore providers(subscription_config(now_plus(3600), "r1"),
+    imza::ProviderStore providers(
+        imza::test::make_config_store(
+            subscription_config(now_plus(3600), "r1")),
         { }, { }, [&](std::string_view, std::string_view, std::string_view) {
             ++refresh_calls;
             return refreshed_credentials();
@@ -70,8 +73,9 @@ TEST_CASE("authenticated_route_for serves the cached token outside the "
 TEST_CASE("authenticated_route_for fails closed without a refresh token")
 {
     imza::test::IsolatedDataHome home;
-    imza::ProviderStore providers(subscription_config(now_plus(100), ""), { },
-        { }, [](std::string_view, std::string_view, std::string_view) {
+    imza::ProviderStore providers(
+        imza::test::make_config_store(subscription_config(now_plus(100), "")),
+        { }, { }, [](std::string_view, std::string_view, std::string_view) {
             FAIL("refresh must not run without a refresh token");
             return imza::SubscriptionResult { };
         });
@@ -89,8 +93,9 @@ TEST_CASE("authenticated_route_for refreshes an expiring token and "
 {
     imza::test::IsolatedDataHome home;
     std::atomic<int> refresh_calls { 0 };
-    imza::ProviderStore providers(subscription_config(now_plus(100), "r1"), { },
-        { }, [&](std::string_view, std::string_view, std::string_view) {
+    imza::ProviderStore providers(
+        imza::test::make_config_store(subscription_config(now_plus(100), "r1")),
+        { }, { }, [&](std::string_view, std::string_view, std::string_view) {
             ++refresh_calls;
             return refreshed_credentials();
         });
@@ -118,8 +123,9 @@ TEST_CASE("concurrent authenticated_route_for calls share one refresh")
     bool refresh_entered = false;
     bool gate_open       = false;
 
-    imza::ProviderStore providers(subscription_config(now_plus(100), "r1"), { },
-        { }, [&](std::string_view, std::string_view, std::string_view) {
+    imza::ProviderStore providers(
+        imza::test::make_config_store(subscription_config(now_plus(100), "r1")),
+        { }, { }, [&](std::string_view, std::string_view, std::string_view) {
             ++refresh_calls;
             std::unique_lock lock(gate_mutex);
             refresh_entered = true;
@@ -166,8 +172,9 @@ TEST_CASE("authenticated_route_for reports a failed refresh without "
           "losing the connection")
 {
     imza::test::IsolatedDataHome home;
-    imza::ProviderStore providers(subscription_config(now_plus(100), "r1"), { },
-        { }, [](std::string_view, std::string_view, std::string_view) {
+    imza::ProviderStore providers(
+        imza::test::make_config_store(subscription_config(now_plus(100), "r1")),
+        { }, { }, [](std::string_view, std::string_view, std::string_view) {
             imza::SubscriptionResult result;
             result.status = imza::Status::NETWORK_ERROR;
             result.error  = "offline";
