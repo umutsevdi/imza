@@ -25,8 +25,8 @@
 #include "common/tool_call.h"
 #include "conversation/session.h"
 #include "network/network.h"
-#include "permissions/store.h"
-#include "runtime/notification_center.h"
+#include "permissions/permission_store.h"
+#include "runtime/notification_store.h"
 #include "tools/skills.h"
 
 namespace imza {

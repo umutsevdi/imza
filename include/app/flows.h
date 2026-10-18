@@ -9,7 +9,7 @@
 
 #include "app/application_state.h"
 #include "common/modal.h"
-#include "permissions/store.h"
+#include "permissions/permission_store.h"
 #include "turn/turn_runner.h"
 #include "workspace/review_subsystem.h"
 

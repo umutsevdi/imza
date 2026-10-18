@@ -5,7 +5,7 @@
 #include "runtime/mcp_subsystem.h"
 #include "test_helpers.h"
 #include "tools/tool.h"
-#include "turn/prompt.h"
+#include "turn/prompt_store.h"
 
 #include <chrono>
 #include <map>

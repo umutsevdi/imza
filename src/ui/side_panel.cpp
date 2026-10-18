@@ -1,6 +1,6 @@
 #include "app/application_state.h"
 #include "app/flows.h"
-#include "permissions/store.h"
+#include "permissions/permission_store.h"
 #include "runtime/mcp_subsystem.h"
 #include "ui/ui.h"
 #include "workspace/review_subsystem.h"

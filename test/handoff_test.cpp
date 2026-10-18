@@ -1,7 +1,7 @@
 #include <doctest/doctest.h>
 
 #include "conversation/session.h"
-#include "turn/prompt.h"
+#include "turn/prompt_store.h"
 #include "workspace/review_subsystem.h"
 
 #include "test_helpers.h"

@@ -6,7 +6,7 @@
 
 #include "common/util.h"
 #include "conversation/session.h"
-#include "permissions/store.h"
+#include "permissions/permission_store.h"
 #include "test_fs.h"
 #include "test_helpers.h"
 #include "tools/tool.h"

@@ -9,7 +9,7 @@
 #include "app/application_state.h"
 #include "app/flows.h"
 #include "conversation/persistence.h"
-#include "permissions/store.h"
+#include "permissions/permission_store.h"
 #include "platform/config.h"
 #include "platform/console_mode.h"
 #include "runtime/main_thread_queue.h"

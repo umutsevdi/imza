@@ -2,7 +2,7 @@
 
 #include "app/application_state.h"
 #include "common/util.h"
-#include "providers/store.h"
+#include "providers/provider_store.h"
 #include "tools/skills.h"
 #include "ui/ui.h"
 #include "workspace/environment.h"

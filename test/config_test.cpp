@@ -11,7 +11,7 @@
 
 #include "network/json.h"
 #include "network/json_io.h"
-#include "permissions/store.h"
+#include "permissions/permission_store.h"
 #include "platform/config.h"
 #include "platform/json_file.h"
 #include "test_fs.h"

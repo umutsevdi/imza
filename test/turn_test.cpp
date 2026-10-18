@@ -14,7 +14,7 @@
 #include "providers/catalog.h"
 #include "test_fs.h"
 #include "test_state.h"
-#include "turn/prompt.h"
+#include "turn/prompt_store.h"
 
 namespace imza {
 

@@ -7,7 +7,7 @@
 #include "platform/command_runner.h"
 #include "test_fs.h"
 #include "test_state.h"
-#include "turn/prompt.h"
+#include "turn/prompt_store.h"
 #include "workspace/review_subsystem.h"
 
 TEST_CASE("git diff parser builds files hunks and line numbers")

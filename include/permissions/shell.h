@@ -6,7 +6,7 @@
 
 #include "common/permission_request.h"
 #include "permissions/filesystem.h"
-#include "permissions/store.h"
+#include "permissions/permission_store.h"
 
 namespace imza {
 

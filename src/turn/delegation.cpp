@@ -6,7 +6,7 @@
 #include "network/json.h"
 #include "tools/skills.h"
 #include "tools/tool_args.h"
-#include "turn/prompt.h"
+#include "turn/prompt_store.h"
 
 #include <algorithm>
 #include <memory>

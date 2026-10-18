@@ -4,7 +4,7 @@
 #include <string>
 
 #include "common/tool_call.h"
-#include "permissions/store.h"
+#include "permissions/permission_store.h"
 
 namespace imza {
 

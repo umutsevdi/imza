@@ -11,7 +11,7 @@
 
 #include "common/permission_request.h"
 #include "common/types.h"
-#include "permissions/store.h"
+#include "permissions/permission_store.h"
 
 namespace imza {
 

@@ -7,7 +7,7 @@
 
 #include "conversation/session.h"
 #include "test_fs.h"
-#include "turn/prompt.h"
+#include "turn/prompt_store.h"
 
 namespace imza {
 

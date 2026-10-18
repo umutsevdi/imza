@@ -11,7 +11,7 @@
 
 #include "platform/config.h"
 #include "providers/catalog.h"
-#include "providers/store.h"
+#include "providers/provider_store.h"
 #include "providers/subscriptions.h"
 #include "test_fs.h"
 #include "test_state.h"

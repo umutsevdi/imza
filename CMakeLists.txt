@@ -295,7 +295,7 @@ add_library(imza_runtime
     src/conversation/persistence.cpp
     src/conversation/session.cpp
     src/conversation/session_store.cpp
-    src/providers/store.cpp
+    src/providers/provider_store.cpp
     src/tools/mcp_catalog.cpp
     src/runtime/mcp_subsystem.cpp
     src/tools/web.cpp
@@ -303,7 +303,7 @@ add_library(imza_runtime
     src/runtime/bg_process_subsystem.cpp
     src/runtime/main_thread_queue.cpp
     src/runtime/modal_queue.cpp
-    src/runtime/notification_center.cpp
+    src/runtime/notification_store.cpp
     src/runtime/subagent_subsystem.cpp
     src/tools/skills.cpp
     src/tools/skill_subsystem.cpp
@@ -329,7 +329,7 @@ add_library(imza_execution
     src/app/slash_commands.cpp
     src/permissions/evaluator.cpp
     src/permissions/shell.cpp
-    src/permissions/store.cpp
+    src/permissions/permission_store.cpp
     src/permissions/filesystem.cpp
     src/permissions/shell_analysis.cpp
     src/permissions/verdict.cpp
@@ -346,7 +346,7 @@ add_library(imza_execution
     src/tools/bindings/web.cpp
     src/tools/bindings/mcp.cpp
     src/turn/delegation.cpp
-    src/turn/prompt.cpp
+    src/turn/prompt_store.cpp
     src/turn/stream_updates.cpp
     src/turn/turn_runner.cpp
 )

@@ -31,8 +31,8 @@ struct Notification {
 inline constexpr std::size_t MAX_NOTIFICATIONS = 5;
 
 // Default lifetimes, keyed by the error flag. Callers do not choose a window.
-inline constexpr std::chrono::milliseconds INFO_TTL { 5000 };
-inline constexpr std::chrono::milliseconds ERROR_TTL { 10000 };
+inline constexpr std::chrono::milliseconds INFO_TTL { 4000 };
+inline constexpr std::chrono::milliseconds ERROR_TTL { 8000 };
 
 // Thread-safe store behind the overlay: any worker may publish, the UI
 // thread snapshots and renders. Long-lived Subsystem; hands out

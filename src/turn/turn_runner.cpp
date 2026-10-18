@@ -6,9 +6,9 @@
 #include "permissions/evaluator.h"
 #include "permissions/verdict.h"
 #include "providers/pricing.h"
-#include "providers/store.h"
+#include "providers/provider_store.h"
 #include "tools/skills.h"
-#include "turn/prompt.h"
+#include "turn/prompt_store.h"
 #include "workspace/attachments.h"
 
 #include <algorithm>

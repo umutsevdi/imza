@@ -7,7 +7,7 @@
 
 #include "app/application_state.h"
 #include "app/flows.h"
-#include "runtime/notification_center.h"
+#include "runtime/notification_store.h"
 #include "test_helpers.h"
 #include "test_state.h"
 #include "ui/ui.h"

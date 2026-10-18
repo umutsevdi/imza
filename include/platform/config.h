@@ -166,7 +166,7 @@ ConfigUpdateResult update_config(const std::filesystem::path& path,
 void apply_skill_policies(Config& config, const SkillPolicyChanges& changes);
 
 // Grants declared by `config.allow` are converted for the permission
-// store by allow_grants in permissions/store.h.
+// store by allow_grants in permissions/permission_store.h.
 
 // Published JSON Schema for config.json, written into the file as
 // `$schema` so editors offer autocomplete while hand-editing.
