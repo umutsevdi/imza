@@ -5,13 +5,13 @@
 #include "permissions/filesystem.h"
 #include "permissions/store.h"
 #include "platform/command_runner.h"
-#include "tools/mcp_manager.h"
-#include "tools/skill_registry.h"
+#include "runtime/mcp_subsystem.h"
+#include "tools/skill_subsystem.h"
 #include "tools/skills.h"
 #include "turn/delegation.h"
 #include "turn/prompt.h"
 #include "turn/turn_runner.h"
-#include "workspace/review.h"
+#include "workspace/review_subsystem.h"
 
 #include <memory>
 #include <utility>
@@ -39,7 +39,7 @@ namespace {
                     return state->environment && state->permissions
                         ? make_permission_context(*state->environment,
                               *state->permissions, state->session->mode(),
-                              state->skills->loaded_directories(),
+                              state->session->loaded_skill_directories(),
                               state->mcp.get())
                         : PermissionContext { };
                 },
@@ -85,7 +85,7 @@ namespace {
                 [state](PermissionStore::Grants grants) {
                     return state->permissions->install(std::move(grants));
                 },
-            .mcp = [state] -> McpManager* { return state->mcp.get(); },
+            .mcp = [state] -> McpSubsystem* { return state->mcp.get(); },
             .interrupted
             = [state] { return state->session->interrupt_requested(); },
             .spawn_bg =
@@ -125,19 +125,19 @@ namespace {
         });
     }
 
-    // Lazy so the roster can be built before state->skills exists.
+    // Lazy so the roster can be built before the session exists.
     SkillToolDeps skill_deps(ApplicationState* state)
     {
         return SkillToolDeps {
             [state] { return state->environment->skills(); },
-            [state] -> SkillStore& { return *state->skills; },
+            [state] -> Session& { return *state->session; },
         };
     }
 
     McpToolDocsDeps mcp_docs(ApplicationState* state)
     {
         return McpToolDocsDeps {
-            [state] -> McpManager* { return state->mcp.get(); },
+            [state] -> McpSubsystem* { return state->mcp.get(); },
         };
     }
 
@@ -168,7 +168,6 @@ namespace {
             [raw](ModalPayload payload) {
                 return request_modal(*raw, std::move(payload));
             },
-            state->skills,
             [raw](std::string error) {
                 on_turn_finished(*raw, std::move(error));
             });
@@ -234,7 +233,7 @@ namespace {
         state->sidebar                        = config.sidebar;
         state->config    = std::make_shared<ConfigStore>(std::move(config));
         state->providers = std::make_shared<ProviderStore>(state->config);
-        McpManagerHooks mcp_hooks;
+        McpSubsystemHooks mcp_hooks;
         // Sign-ins and background token refreshes write straight through
         // the shared locked config RMW; no manager reload follows because
         // the manager already applied the same values to its entry.
@@ -253,15 +252,14 @@ namespace {
                       raw->notifications->publish(error, std::move(message));
                   }
               };
-        state->mcp = std::make_shared<McpManager>(
+        state->mcp = std::make_shared<McpSubsystem>(
             std::move(mcp_servers), std::move(mcp_hooks));
         state->mcp->autoload();
-        state->subagents    = std::make_shared<SubagentManager>();
-        state->bg_processes = std::make_shared<BgProcessManager>();
+        state->subagents    = std::make_shared<SubagentSubsystem>();
+        state->bg_processes = std::make_shared<BgProcessSubsystem>();
         state->environment
             = std::make_shared<Environment>(std::move(instructions));
-        state->review = std::make_shared<ReviewState>();
-        state->skills = std::make_shared<SkillStore>();
+        state->review = std::make_shared<ReviewSubsystem>();
         // The found-update notice rides the overlay alongside the sidebar
         // banner; the environment publishes it once, from its worker.
         state->update_subscription
@@ -279,7 +277,7 @@ namespace {
         state->permissions->set_skip_permissions(
             (runtime_flags & RuntimeFlag::SKIP_PERMISSIONS)
             != RuntimeFlag::NONE);
-        SkillRegistryHooks registry_hooks;
+        SkillSubsystemHooks registry_hooks;
         registry_hooks.install_root = global_skills_directory();
         // Self-hosted mirrors and tests override the skills.sh endpoint.
         if (const std::string url = env_or_empty("IMZA_SKILLS_URL");
@@ -291,8 +289,8 @@ namespace {
         registry_hooks.on_mutated = [environment = state->environment] {
             environment->rescan_skills();
         };
-        state->skill_registry
-            = std::make_shared<SkillRegistry>(std::move(registry_hooks));
+        state->skill_subsystem
+            = std::make_shared<SkillSubsystem>(std::move(registry_hooks));
         state->post          = guarded_post(state.get(), std::move(post));
         state->on_exit       = [] { };
         state->runtime_flags = runtime_flags;
@@ -314,18 +312,17 @@ namespace {
         PostFn post, StreamFn stream_fn, ModalRequestFn parent_routing,
         std::string agent_label, std::vector<Tool> tools)
     {
-        state->session        = std::make_shared<Session>();
-        state->sessions       = parent.sessions;
-        state->input_history  = parent.input_history;
-        state->config         = parent.config;
-        state->providers      = parent.providers;
-        state->mcp            = parent.mcp;
-        state->environment    = parent.environment;
-        state->skills         = std::make_shared<SkillStore>();
-        state->skill_registry = parent.skill_registry;
-        state->permissions    = parent.permissions;
-        state->prompts        = parent.prompts;
-        state->notifications  = parent.notifications;
+        state->session         = std::make_shared<Session>();
+        state->sessions        = parent.sessions;
+        state->input_history   = parent.input_history;
+        state->config          = parent.config;
+        state->providers       = parent.providers;
+        state->mcp             = parent.mcp;
+        state->environment     = parent.environment;
+        state->skill_subsystem = parent.skill_subsystem;
+        state->permissions     = parent.permissions;
+        state->prompts         = parent.prompts;
+        state->notifications   = parent.notifications;
         // Background processes are app-wide, so a child shares the root's
         // manager: imza.bg.shell works inside a subagent, and teardown
         // kills every process this process started.
@@ -362,7 +359,8 @@ namespace {
 ApplicationState::~ApplicationState()
 {
     alive.store(false);
-    queue.abandon();
+    // The session's queue abandons its pending promises in ~Session,
+    // which runs when the state releases its shared_ptr below.
     // Subscriptions disconnect through their own RAII; the explicit
     // disconnects here only order them before workers stop.
     provider_subscription.disconnect();

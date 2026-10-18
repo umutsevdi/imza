@@ -2,7 +2,7 @@
 #include "common/util.h"
 #include "providers/pricing.h"
 #include "providers/store.h"
-#include "runtime/subagent_manager.h"
+#include "runtime/subagent_subsystem.h"
 #include "ui/ui.h"
 
 #include <algorithm>

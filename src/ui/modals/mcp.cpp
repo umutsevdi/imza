@@ -4,8 +4,8 @@
 #include "common/util.h"
 #include "network/web.h"
 #include "platform/config.h"
+#include "runtime/mcp_subsystem.h"
 #include "tools/mcp_catalog.h"
-#include "tools/mcp_manager.h"
 #include "ui/ui.h"
 
 #include <ftxui/component/component.hpp>

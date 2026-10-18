@@ -62,12 +62,12 @@ struct ReviewPassState {
     std::optional<std::size_t> task_id;
 };
 
-class ReviewState final : public ApplicationComponent {
+class ReviewSubsystem final : public Subsystem {
 public:
     enum class LoadStatus { IDLE, LOADING, LOADED, ERROR };
 
-    ReviewState() = default;
-    ~ReviewState();
+    ReviewSubsystem() = default;
+    ~ReviewSubsystem();
 
     struct Snapshot {
         Snapshot();

@@ -1,6 +1,6 @@
 #include <doctest/doctest.h>
 
-#include "runtime/subagent_manager.h"
+#include "runtime/subagent_subsystem.h"
 
 #include <atomic>
 #include <chrono>
@@ -20,7 +20,7 @@ imza::SubagentResult spin_until_stopped(
 
 TEST_CASE("subagent manager publishes ordered lifecycle events")
 {
-    imza::SubagentManager manager;
+    imza::SubagentSubsystem manager;
     std::vector<imza::SubagentEvent::Kind> events;
     auto subscription
         = manager.subscribe_to_change([&](const imza::SubagentEvent& event) {
@@ -43,7 +43,7 @@ TEST_CASE("subagent manager publishes ordered lifecycle events")
 
 TEST_CASE("hidden subagents are excluded from the visible running count")
 {
-    imza::SubagentManager manager;
+    imza::SubagentSubsystem manager;
     std::promise<void> release;
     auto gate   = release.get_future().share();
     auto handle = manager.start(
@@ -60,7 +60,7 @@ TEST_CASE("hidden subagents are excluded from the visible running count")
 
 TEST_CASE("subagent failures retain a typed status")
 {
-    imza::SubagentManager manager;
+    imza::SubagentSubsystem manager;
     auto handle
         = manager.start("inspect", "model", "high", true, [](std::stop_token) {
               return imza::SubagentResult { imza::Status::NETWORK_ERROR,
@@ -75,7 +75,7 @@ TEST_CASE("subagent failures retain a typed status")
 
 TEST_CASE("completed subagents can release retained task state")
 {
-    imza::SubagentManager manager;
+    imza::SubagentSubsystem manager;
     auto handle = manager.start(
         "large prompt", "model", "low", true, [](std::stop_token) {
             return imza::SubagentResult { imza::Status::OK, "large output" };
@@ -92,7 +92,7 @@ TEST_CASE("completed subagents can release retained task state")
 
 TEST_CASE("stopping subagents joins active workers")
 {
-    imza::SubagentManager manager;
+    imza::SubagentSubsystem manager;
     auto handle = manager.start("inspect", "model", "low", true,
         [](std::stop_token stop) { return spin_until_stopped(stop); });
 
@@ -105,7 +105,7 @@ TEST_CASE("stopping subagents joins active workers")
 
 TEST_CASE("a single subagent can be cancelled")
 {
-    imza::SubagentManager manager;
+    imza::SubagentSubsystem manager;
     auto handle = manager.start("inspect", "model", "low", true,
         [](std::stop_token stop) { return spin_until_stopped(stop); });
 
@@ -120,7 +120,7 @@ TEST_CASE("a single subagent can be cancelled")
 // there must not reap (and join) that same thread.
 TEST_CASE("pruning from a completion callback does not join the caller")
 {
-    imza::SubagentManager manager;
+    imza::SubagentSubsystem manager;
     std::promise<void> pruned;
     std::atomic<bool> callback_ran { false };
     auto handle = manager.start(

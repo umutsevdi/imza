@@ -53,16 +53,16 @@ Status remove_skill_files(
 // Effects injected at the composition boundary: the API base, where
 // installed skills land, and a notification after a successful install or
 // removal so the catalogue can rescan.
-struct SkillRegistryHooks {
+struct SkillSubsystemHooks {
     std::string base_url = "https://skills.sh";
     std::filesystem::path install_root;
     std::function<void()> on_mutated;
 };
 
-// Searches and installs skills.sh skills. Long-lived ApplicationComponent:
+// Searches and installs skills.sh skills. Long-lived Subsystem:
 // network work runs on registry-owned workers and announces through the
 // signal; snapshot() returns an immutable copy for the UI thread.
-class SkillRegistry final : public ApplicationComponent {
+class SkillSubsystem final : public Subsystem {
 public:
     enum class Phase { IDLE, SEARCHING, INSTALLING, REMOVING };
 
@@ -75,11 +75,11 @@ public:
         std::string active; // id being installed or removed
     };
 
-    explicit SkillRegistry(SkillRegistryHooks hooks = { });
-    ~SkillRegistry();
+    explicit SkillSubsystem(SkillSubsystemHooks hooks = { });
+    ~SkillSubsystem();
 
-    SkillRegistry(const SkillRegistry&)            = delete;
-    SkillRegistry& operator=(const SkillRegistry&) = delete;
+    SkillSubsystem(const SkillSubsystem&)            = delete;
+    SkillSubsystem& operator=(const SkillSubsystem&) = delete;
 
     // Ignored while another operation runs.
     void search(std::string query);
@@ -101,7 +101,7 @@ private:
     void run_remove(std::filesystem::path skill_md_path);
     bool busy() const;
 
-    SkillRegistryHooks _hooks;
+    SkillSubsystemHooks _hooks;
     mutable std::mutex _mutex;
     Snapshot _snapshot;
     std::atomic_bool _running { false };

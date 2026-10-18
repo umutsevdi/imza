@@ -47,10 +47,10 @@ struct LuaModule {
 };
 
 struct Tool; // defined in tools/tool.h; returned by value from make_lua_tool
-class McpManager;
+class McpSubsystem;
 
 // Immutable module registry: built once by make_lua_state, read by
-// every lua tool call. A value type, not an ApplicationComponent - it
+// every lua tool call. A value type, not an Subsystem - it
 // owns no state that outlives a call and needs no synchronization.
 class LuaState {
 public:
@@ -94,7 +94,7 @@ struct LuaHost {
     std::function<bool(PermissionStore::Grants)> install_grants;
     // MCP server sessions; empty accessor means the bindings are
     // unavailable (no manager in this run).
-    std::function<McpManager*()> mcp;
+    std::function<McpSubsystem*()> mcp;
     // True when the run's session has an interrupt pending; imza.sleep
     // bails out on it. Empty means never interrupted (tests).
     std::function<bool()> interrupted;

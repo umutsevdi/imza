@@ -2,8 +2,8 @@
 
 #include "loopback_mcp_server.h"
 #include "protocols/mcp.h"
+#include "runtime/mcp_subsystem.h"
 #include "test_helpers.h"
-#include "tools/mcp_manager.h"
 #include "tools/tool.h"
 #include "turn/prompt.h"
 
@@ -17,7 +17,7 @@ namespace {
 // A lua host wired to a manager connected to the loopback server.
 struct McpFixture {
     imza::test::LoopbackMcpServer server;
-    std::unique_ptr<imza::McpManager> manager;
+    std::unique_ptr<imza::McpSubsystem> manager;
     bool enabled = true;
 
     bool start()
@@ -28,7 +28,7 @@ struct McpFixture {
         imza::McpServerConfig config;
         config.id  = "exa";
         config.url = server.url();
-        manager    = std::make_unique<imza::McpManager>(
+        manager    = std::make_unique<imza::McpSubsystem>(
             std::map<std::string, imza::McpServerConfig> { { "exa", config } });
         manager->connect("exa");
         // The handshake runs on a manager worker; wait for the inventory.
@@ -45,7 +45,7 @@ struct McpFixture {
     {
         imza::LuaHost host;
         host.mcp_enabled = enabled;
-        host.mcp = [this] -> imza::McpManager* { return manager.get(); };
+        host.mcp = [this] -> imza::McpSubsystem* { return manager.get(); };
         return host;
     }
 };
@@ -118,7 +118,7 @@ TEST_CASE("load_mcp renders the server's tool reference")
     REQUIRE(fx.start());
 
     imza::Tool tool = imza::make_load_mcp_tool(
-        { [&fx] -> imza::McpManager* { return fx.manager.get(); } });
+        { [&fx] -> imza::McpSubsystem* { return fx.manager.get(); } });
     const imza::ToolOutput out
         = tool.run({ "load_mcp", R"({"server":"exa"})", "", "" });
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
@@ -170,11 +170,11 @@ TEST_CASE(
     config.id  = "exa";
     config.url = server.url();
     // No connect call: the tool itself must bring the server up.
-    imza::McpManager manager(
+    imza::McpSubsystem manager(
         std::map<std::string, imza::McpServerConfig> { { "exa", config } });
 
     imza::Tool tool = imza::make_load_mcp_tool(
-        { [&manager] -> imza::McpManager* { return &manager; } });
+        { [&manager] -> imza::McpSubsystem* { return &manager; } });
     const imza::ToolOutput out
         = tool.run({ "load_mcp", R"({"server":"exa"})", "", "" });
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
@@ -190,11 +190,11 @@ TEST_CASE("load_mcp reports a failed connect instead of the reference")
     imza::McpServerConfig config;
     config.id  = "dead";
     config.url = "http://127.0.0.1:1/mcp";
-    imza::McpManager manager(
+    imza::McpSubsystem manager(
         std::map<std::string, imza::McpServerConfig> { { "dead", config } });
 
     imza::Tool tool = imza::make_load_mcp_tool(
-        { [&manager] -> imza::McpManager* { return &manager; } });
+        { [&manager] -> imza::McpSubsystem* { return &manager; } });
     const imza::ToolOutput out
         = tool.run({ "load_mcp", R"({"server":"dead"})", "", "" });
     CHECK(out.kind == imza::ToolOutput::Kind::ERROR);

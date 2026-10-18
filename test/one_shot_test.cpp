@@ -158,7 +158,7 @@ TEST_CASE("one-shot reports unattended permission blocks without a modal")
 
     CHECK(result.kind == imza::OneShotResult::Kind::BLOCKED_PERMISSION);
     CHECK(imza::one_shot_exit_code(result.kind) == 3);
-    CHECK(state->queue.size() == 0);
+    CHECK(state->session->queue.size() == 0);
     CHECK(state->session->modal().index() == 0);
     CHECK_FALSE(std::filesystem::exists(path));
 }

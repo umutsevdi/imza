@@ -11,7 +11,7 @@
 
 namespace imza {
 
-class MainThreadQueue final : public ApplicationComponent {
+class MainThreadQueue final : public Subsystem {
 public:
     using Task = std::function<void()>;
 

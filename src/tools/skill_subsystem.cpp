@@ -1,4 +1,4 @@
-#include "tools/skill_registry.h"
+#include "tools/skill_subsystem.h"
 
 #include "common/util.h"
 #include "network/json.h"
@@ -201,12 +201,12 @@ Status remove_skill_files(
     return Status::OK;
 }
 
-SkillRegistry::SkillRegistry(SkillRegistryHooks hooks)
+SkillSubsystem::SkillSubsystem(SkillSubsystemHooks hooks)
     : _hooks(std::move(hooks))
 {
 }
 
-SkillRegistry::~SkillRegistry()
+SkillSubsystem::~SkillSubsystem()
 {
     mark_dead();
     for (;;) {
@@ -226,15 +226,15 @@ SkillRegistry::~SkillRegistry()
     }
 }
 
-void SkillRegistry::spawn(std::function<void()> work)
+void SkillSubsystem::spawn(std::function<void()> work)
 {
     std::lock_guard lock(_workers_mutex);
     _workers.emplace_back(std::move(work));
 }
 
-bool SkillRegistry::busy() const { return _running.load(); }
+bool SkillSubsystem::busy() const { return _running.load(); }
 
-void SkillRegistry::search(std::string query)
+void SkillSubsystem::search(std::string query)
 {
     query = std::string(trim(query));
     if (query.size() < 2 || _running.exchange(true)) {
@@ -253,7 +253,7 @@ void SkillRegistry::search(std::string query)
     spawn([this, query = std::move(query)] { run_search(query); });
 }
 
-void SkillRegistry::install(const RemoteSkill& skill)
+void SkillSubsystem::install(const RemoteSkill& skill)
 {
     if (skill.id.empty() || _running.exchange(true)) {
         return;
@@ -269,7 +269,7 @@ void SkillRegistry::install(const RemoteSkill& skill)
     spawn([this, skill] { run_install(skill); });
 }
 
-void SkillRegistry::remove_path(std::filesystem::path skill_md_path)
+void SkillSubsystem::remove_path(std::filesystem::path skill_md_path)
 {
     // Only skills under the install root are user-managed; bundled skills
     // and anything outside are refused before touching the registry.
@@ -304,26 +304,26 @@ void SkillRegistry::remove_path(std::filesystem::path skill_md_path)
     spawn([this, path = std::move(skill_md_path)] { run_remove(path); });
 }
 
-SkillRegistry::Snapshot SkillRegistry::snapshot() const
+SkillSubsystem::Snapshot SkillSubsystem::snapshot() const
 {
     std::lock_guard lock(_mutex);
     return _snapshot;
 }
 
-bool SkillRegistry::installed(std::string_view slug) const
+bool SkillSubsystem::installed(std::string_view slug) const
 {
     std::error_code ec;
     return std::filesystem::is_regular_file(
         _hooks.install_root / path_from_utf8(slug) / "SKILL.md", ec);
 }
 
-Signal<>::Subscription SkillRegistry::subscribe_to_change(
+Signal<>::Subscription SkillSubsystem::subscribe_to_change(
     Signal<>::Callback callback)
 {
     return _changed.subscribe(std::move(callback));
 }
 
-void SkillRegistry::run_search(std::string query)
+void SkillSubsystem::run_search(std::string query)
 {
     std::string body;
     long code             = 0;
@@ -363,7 +363,7 @@ void SkillRegistry::run_search(std::string query)
     _changed.publish();
 }
 
-void SkillRegistry::run_install(RemoteSkill skill)
+void SkillSubsystem::run_install(RemoteSkill skill)
 {
     std::string body;
     long code             = 0;
@@ -406,7 +406,7 @@ void SkillRegistry::run_install(RemoteSkill skill)
     _changed.publish();
 }
 
-void SkillRegistry::run_remove(std::filesystem::path skill_md_path)
+void SkillSubsystem::run_remove(std::filesystem::path skill_md_path)
 {
     std::string detail;
     const Status st = remove_skill_files(skill_md_path, detail);

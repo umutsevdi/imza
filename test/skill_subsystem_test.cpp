@@ -5,7 +5,7 @@
 #include "test_fs.h"
 #include "test_helpers.h"
 #include "test_state.h"
-#include "tools/skill_registry.h"
+#include "tools/skill_subsystem.h"
 #include "ui/ui.h"
 
 #include <chrono>
@@ -159,18 +159,18 @@ TEST_CASE("skill registry searches and installs through the loopback server")
     REQUIRE(server.start());
 
     imza::test::TempDir root;
-    imza::SkillRegistryHooks hooks;
+    imza::SkillSubsystemHooks hooks;
     hooks.base_url     = server.base_url();
     hooks.install_root = root.path;
     unsigned mutations = 0;
     hooks.on_mutated   = [&mutations] { ++mutations; };
-    imza::SkillRegistry registry(std::move(hooks));
+    imza::SkillSubsystem registry(std::move(hooks));
 
     registry.search("react");
     bool searched = false;
     for (int i = 0; i < 500 && !searched; ++i) {
         const auto snap = registry.snapshot();
-        if (snap.phase == imza::SkillRegistry::Phase::IDLE
+        if (snap.phase == imza::SkillSubsystem::Phase::IDLE
             && !snap.results.empty()) {
             searched = true;
         }
@@ -292,14 +292,14 @@ TEST_CASE("skill registry reports search failures without throwing")
     };
     REQUIRE(server.start());
 
-    imza::SkillRegistryHooks hooks;
+    imza::SkillSubsystemHooks hooks;
     hooks.base_url = server.base_url();
-    imza::SkillRegistry registry(std::move(hooks));
+    imza::SkillSubsystem registry(std::move(hooks));
 
     registry.search("react");
     bool settled = false;
     for (int i = 0; i < 500 && !settled; ++i) {
-        if (registry.snapshot().phase == imza::SkillRegistry::Phase::IDLE
+        if (registry.snapshot().phase == imza::SkillSubsystem::Phase::IDLE
             && !registry.snapshot().status.empty()) {
             settled = true;
         }
@@ -314,9 +314,9 @@ TEST_CASE("removing a skill outside the install root is refused")
 {
     imza::test::TempDir root;
     imza::test::TempDir elsewhere;
-    imza::SkillRegistryHooks hooks;
+    imza::SkillSubsystemHooks hooks;
     hooks.install_root = root.path;
-    imza::SkillRegistry registry(std::move(hooks));
+    imza::SkillSubsystem registry(std::move(hooks));
 
     imza::test::write_file(elsewhere.path / "imza-docs" / "SKILL.md", "docs");
     registry.remove_path(elsewhere.path / "imza-docs" / "SKILL.md");
@@ -326,7 +326,7 @@ TEST_CASE("removing a skill outside the install root is refused")
     bool settled = false;
     for (int i = 0; i < 500 && !settled; ++i) {
         const auto snap = registry.snapshot();
-        if (snap.phase == imza::SkillRegistry::Phase::IDLE
+        if (snap.phase == imza::SkillSubsystem::Phase::IDLE
             && !snap.status.empty()) {
             settled = true;
         }

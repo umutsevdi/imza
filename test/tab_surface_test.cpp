@@ -7,7 +7,7 @@
 #include "test_helpers.h"
 #include "test_state.h"
 #include "ui/ui.h"
-#include "workspace/review.h"
+#include "workspace/review_subsystem.h"
 
 namespace {
 

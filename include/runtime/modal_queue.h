@@ -20,7 +20,7 @@ struct PendingModal {
     ModalOrigin origin = ModalOrigin::USER;
 };
 
-class ModalQueue final : public ApplicationComponent {
+class ModalQueue final : public Subsystem {
 public:
     void enqueue(ModalPayload payload, ModalOrigin origin,
         std::shared_ptr<std::promise<ModalResult>> promise = { });

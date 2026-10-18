@@ -17,10 +17,10 @@
 #include "permissions/shell_analysis.h"
 #include "permissions/store.h"
 #include "platform/config.h"
+#include "runtime/mcp_subsystem.h"
 #include "test_fs.h"
 #include "test_helpers.h"
 #include "test_state.h"
-#include "tools/mcp_manager.h"
 #include "tools/skills.h"
 #include "tools/tool.h"
 #include "workspace/environment.h"
@@ -39,7 +39,7 @@ namespace {
     }
 
     // Manager transitions run on worker threads; poll like the manager tests.
-    bool wait_state(imza::McpManager& manager, const std::string& id,
+    bool wait_state(imza::McpSubsystem& manager, const std::string& id,
         imza::McpServerState want)
     {
         for (int i = 0; i < 1000; ++i) {
@@ -87,7 +87,7 @@ namespace {
         PermissionContext context(Session::Mode mode,
             PermissionStore::Grants grants,
             std::vector<std::filesystem::path> skill_directories,
-            const McpManager* mcp = nullptr) const
+            const McpSubsystem* mcp = nullptr) const
         {
             return { system, environment,
                 std::make_shared<const PermissionStore::Grants>(
@@ -761,7 +761,7 @@ TEST_CASE("central evaluator assigns explicit policies to built-in tools")
     const PermissionContext plan = fixture.context(Session::Mode::PLAN);
     const Config config;
     const std::vector<Skill> skills;
-    SkillStore loaded;
+    Session loaded;
 
     const auto evaluate = [&](std::string name, std::string arguments) {
         return evaluate_tool_request(
@@ -798,7 +798,7 @@ TEST_CASE("shell policy reuses, combines, and broadens session grants")
     PermissionFixture fixture;
     const Config config;
     const std::vector<Skill> skills;
-    SkillStore loaded;
+    Session loaded;
     const auto evaluate
         = [&](std::string command, PermissionStore::Grants grants = { }) {
               return shell_policy(std::move(command),
@@ -899,7 +899,7 @@ TEST_CASE("skill policy and runtime grants use the same central evaluator")
     const Skill skill { "docs", "Documentation workflow", path,
         Skill::Scope::GLOBAL, std::nullopt };
     const std::vector<Skill> skills { skill };
-    SkillStore loaded;
+    Session loaded;
     Config config;
     const ToolCallRequest request { "skill", R"({"name":"docs"})", "", "" };
 
@@ -931,7 +931,7 @@ TEST_CASE("skill policy and runtime grants use the same central evaluator")
 
     config.global_skills["docs"] = SkillPolicy::ASK;
     std::string error;
-    REQUIRE(loaded.load(skill, error));
+    REQUIRE(loaded.load_skill(skill, error));
     CHECK(evaluate_tool_request(request, fixture.context(Session::Mode::PLAN),
               config, skills, loaded)
               .decision.kind
@@ -970,7 +970,7 @@ TEST_CASE("bundled skills are always allowed and deny policy cannot hide them")
     const Skill skill { "imza-docs", "Bundled manual", path,
         Skill::Scope::GLOBAL, std::nullopt, true };
     const std::vector<Skill> skills { skill };
-    SkillStore loaded;
+    Session loaded;
     Config config;
     const ToolCallRequest request { "skill", R"({"name":"imza-docs"})", "",
         "" };
@@ -982,10 +982,10 @@ TEST_CASE("bundled skills are always allowed and deny policy cannot hide them")
 
     // Bundled skill bodies are application content: reads inside the
     // skill directory never prompt, even without a session grant.
-    loaded.clear();
+    loaded.clear_loaded_skills();
     std::string load_error;
-    REQUIRE(loaded.load(skill, load_error));
-    const auto skill_directories = loaded.loaded_directories();
+    REQUIRE(loaded.load_skill(skill, load_error));
+    const auto skill_directories = loaded.loaded_skill_directories();
     REQUIRE_FALSE(skill_directories.empty());
     const PermissionContext context
         = fixture.context(Session::Mode::PLAN, { }, skill_directories);
@@ -1155,7 +1155,7 @@ TEST_CASE("skill evaluation binds approval to the canonical instruction path")
         Skill::Scope::GLOBAL, std::nullopt };
     const std::vector<Skill> skills { skill };
     const Config config;
-    SkillStore loaded;
+    Session loaded;
     const ToolCallRequest request { "skill", R"({"name":"changing"})", "", "" };
     const PermissionEvaluation approved = evaluate_tool_request(
         request, fixture.context(Session::Mode::PLAN), config, skills, loaded);
@@ -1191,7 +1191,7 @@ TEST_CASE("load_mcp policy: connected accepts, offline asks, disabled and "
 
     imza::McpServerConfig disabled = server_config("idle", server.url());
     disabled.enabled               = false;
-    imza::McpManager manager({ { "exa", server_config("exa", server.url()) },
+    imza::McpSubsystem manager({ { "exa", server_config("exa", server.url()) },
         { "offline", server_config("offline", "http://127.0.0.1:1/mcp") },
         { "idle", disabled },
         { "dead", server_config("dead", "http://127.0.0.1:1/mcp") } });
@@ -1202,7 +1202,7 @@ TEST_CASE("load_mcp policy: connected accepts, offline asks, disabled and "
 
     const Config config;
     const std::vector<Skill> skills;
-    SkillStore loaded;
+    Session loaded;
     const auto evaluate
         = [&](const std::string& id, PermissionStore::Grants grants = { }) {
               return evaluate_tool_request(
@@ -1329,7 +1329,6 @@ TEST_CASE("child states share the roots process and config owners")
 
     // Owned per state: conversation-local components.
     CHECK(child->session != state->session);
-    CHECK(child->skills != state->skills);
     CHECK(child->runner != state->runner);
 
     // A child renders no review pane and spawns no subagents of its own;

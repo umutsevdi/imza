@@ -35,9 +35,9 @@ inline constexpr std::chrono::milliseconds INFO_TTL { 5000 };
 inline constexpr std::chrono::milliseconds ERROR_TTL { 10000 };
 
 // Thread-safe store behind the overlay: any worker may publish, the UI
-// thread snapshots and renders. Long-lived ApplicationComponent; hands out
+// thread snapshots and renders. Long-lived Subsystem; hands out
 // copy-on-write snapshots, never a reference into locked state.
-class NotificationStore final : public ApplicationComponent {
+class NotificationStore final : public Subsystem {
 public:
     // Returns the new entry's id; the entry expires after the window its
     // error flag selects. `ttl` overrides that window (tests only).

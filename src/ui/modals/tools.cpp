@@ -614,7 +614,7 @@ namespace {
 
         Element _header_line(std::string_view title)
         {
-            const size_t remaining = _state->queue.size();
+            const size_t remaining = _state->session->queue.size();
             return hbox({
                 text(std::string(title)) | bold,
                 filler(),

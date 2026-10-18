@@ -4,7 +4,7 @@
 #include "turn/prompt.h"
 #include "ui/annotations.h"
 #include "ui/ui.h"
-#include "workspace/review.h"
+#include "workspace/review_subsystem.h"
 
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/event.hpp>
@@ -119,7 +119,8 @@ namespace {
 
         Element OnRender() override
         {
-            const ReviewState::Snapshot snapshot = _state->review->snapshot();
+            const ReviewSubsystem::Snapshot snapshot
+                = _state->review->snapshot();
             _consume_jump(snapshot);
             _visible.clear();
             _boxes.clear();
@@ -127,12 +128,12 @@ namespace {
             _rendered_y     = 0;
             _skipped_height = 0;
 
-            if (snapshot.status == ReviewState::LoadStatus::IDLE
-                || snapshot.status == ReviewState::LoadStatus::LOADING) {
+            if (snapshot.status == ReviewSubsystem::LoadStatus::IDLE
+                || snapshot.status == ReviewSubsystem::LoadStatus::LOADING) {
                 return center(text("Loading changes…") | color(PANEL_FG_DIM))
                     | flex;
             }
-            if (snapshot.status == ReviewState::LoadStatus::ERROR) {
+            if (snapshot.status == ReviewSubsystem::LoadStatus::ERROR) {
                 return center(vbox({ text("Unable to load changes") | bold,
                            paragraph(snapshot.error) | color(PANEL_FG_DIM) }))
                     | flex;
@@ -202,7 +203,7 @@ namespace {
                 : _selected_comment ? "↑↓ navigate · e edit · DEL delete"
                                     : "↑↓ navigate · [] files · Enter comment "
                                       "· c collapse";
-            const ReviewState::Snapshot review_snapshot
+            const ReviewSubsystem::Snapshot review_snapshot
                 = _state->review->snapshot();
             Elements bottom { };
             const bool review_running
@@ -350,8 +351,9 @@ namespace {
 
         void _provide_review()
         {
-            const ReviewState::Snapshot snapshot = _state->review->snapshot();
-            if (snapshot.status != ReviewState::LoadStatus::LOADED
+            const ReviewSubsystem::Snapshot snapshot
+                = _state->review->snapshot();
+            if (snapshot.status != ReviewSubsystem::LoadStatus::LOADED
                 || snapshot.review->files.empty()) {
                 _state->session->set_error("There are no changes to review.");
                 return;
@@ -365,7 +367,7 @@ namespace {
                     .label                = "AI review",
                     .complete =
                         [state = _state](std::string output) {
-                            const ReviewState::Snapshot current
+                            const ReviewSubsystem::Snapshot current
                                 = state->review->snapshot();
                             if (!current.review) {
                                 return std::string { };
@@ -474,9 +476,9 @@ namespace {
             rows.push_back(std::move(row) | xflex | reflect(_boxes.back()));
         }
 
-        void _push_file(Elements& rows, const ReviewState::Snapshot& snapshot,
-            const ReviewFile& file, std::size_t file_index, int review_width,
-            bool side_by_side)
+        void _push_file(Elements& rows,
+            const ReviewSubsystem::Snapshot& snapshot, const ReviewFile& file,
+            std::size_t file_index, int review_width, bool side_by_side)
         {
             Elements file_rows;
             const std::string& path
@@ -568,7 +570,7 @@ namespace {
         }
 
         void _push_comments(Elements& rows,
-            const ReviewState::Snapshot& snapshot, std::size_t file_index,
+            const ReviewSubsystem::Snapshot& snapshot, std::size_t file_index,
             const std::string& path, const ReviewLine& line, int review_width)
         {
             for (const ReviewComment& comment : snapshot.comments) {
@@ -602,7 +604,7 @@ namespace {
         }
 
         void _push_unified_line(Elements& rows,
-            const ReviewState::Snapshot& snapshot, std::size_t file_index,
+            const ReviewSubsystem::Snapshot& snapshot, std::size_t file_index,
             const std::string& path, const ReviewLine& line, int review_width)
         {
             const LineChangeStyle style     = line_change_style(line.kind);
@@ -687,7 +689,7 @@ namespace {
         }
 
         void _push_side_by_side_pair(Elements& rows,
-            const ReviewState::Snapshot& snapshot, std::size_t file_index,
+            const ReviewSubsystem::Snapshot& snapshot, std::size_t file_index,
             const std::string& path, const ReviewLine* old_line,
             const ReviewLine* new_line, int side_width)
         {
@@ -732,7 +734,7 @@ namespace {
         }
 
         void _push_side_by_side_hunk(Elements& rows,
-            const ReviewState::Snapshot& snapshot, std::size_t file_index,
+            const ReviewSubsystem::Snapshot& snapshot, std::size_t file_index,
             const std::string& path, const ReviewHunk& hunk, int side_width)
         {
             std::size_t index = 0;
@@ -836,7 +838,8 @@ namespace {
                 return _forward_press(_plan_button, mouse)
                     || (_send_to_plan(), true);
             }
-            const ReviewState::Snapshot snapshot = _state->review->snapshot();
+            const ReviewSubsystem::Snapshot snapshot
+                = _state->review->snapshot();
             if (_review_slot_box.Contain(mouse.x, mouse.y)) {
                 if (snapshot.findings.task_id) {
                     return _forward_press(_review_cancel_button, mouse)
@@ -952,7 +955,7 @@ namespace {
             return true;
         }
 
-        void _consume_jump(const ReviewState::Snapshot& snapshot)
+        void _consume_jump(const ReviewSubsystem::Snapshot& snapshot)
         {
             if (snapshot.jump_file) {
                 _collapsed.erase(*snapshot.jump_file);
@@ -979,7 +982,7 @@ namespace {
             return file.new_path.empty() ? file.old_path : file.new_path;
         }
 
-        // The load runs on ReviewState's own worker; the tab only asks
+        // The load runs on ReviewSubsystem's own worker; the tab only asks
         // for it and repaints when the state publishes.
         void _request_reload()
         {

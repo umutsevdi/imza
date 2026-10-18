@@ -19,13 +19,13 @@ struct ApplicationState;
 // first (workers observe it and bail), then the owner calls stop() and
 // joins them. Derived classes stay final and keep guarding their own
 // state. stop() is the one sanctioned virtual: lifecycle, not behavior.
-class ApplicationComponent {
+class Subsystem {
 public:
-    ApplicationComponent()          = default;
-    virtual ~ApplicationComponent() = default;
+    Subsystem()          = default;
+    virtual ~Subsystem() = default;
 
-    ApplicationComponent(const ApplicationComponent&)            = delete;
-    ApplicationComponent& operator=(const ApplicationComponent&) = delete;
+    Subsystem(const Subsystem&)            = delete;
+    Subsystem& operator=(const Subsystem&) = delete;
 
     // Idempotent: marks the component dead, then stops its workers.
     // Components without workers inherit the no-op.

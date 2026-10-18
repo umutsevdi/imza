@@ -143,12 +143,10 @@ void apply_reasoning(ChatRequest& req, ApiStandard dialect,
 
 TurnRunner::TurnRunner(ApplicationState& state, PostFn post,
     std::vector<Tool> tools, StreamFn stream_fn, ModalRequestFn modal_request,
-    std::shared_ptr<SkillStore> skills,
     std::function<void(std::string)> on_finish)
     : _state(&state)
     , _post_fn(std::move(post))
     , _modal_request(std::move(modal_request))
-    , _skills(std::move(skills))
     , _on_finish(std::move(on_finish))
     , _stream_fn(std::move(stream_fn))
     , _tools(std::move(tools))
@@ -607,9 +605,10 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
 
         const PermissionEvaluation evaluation = evaluate_tool_request(original,
             make_permission_context(*_state->environment, *_state->permissions,
-                mode, _state->skills->loaded_directories(), _state->mcp.get()),
+                mode, _state->session->loaded_skill_directories(),
+                _state->mcp.get()),
             _state->providers->config(), _state->environment->skills(),
-            *_skills);
+            *_state->session);
         if (evaluation.decision.kind == PermissionDecision::Kind::REJECT) {
             _reject_tool(original, evaluation.decision.reason, tool_msgs);
             continue;
@@ -707,11 +706,13 @@ void TurnRunner::_finish_tool(const ToolCallRequest& req,
 void TurnRunner::_run_tool(const PermissionEvaluation& evaluation,
     Session::Mode mode, std::vector<Message>& tool_msgs)
 {
-    const PermissionEvaluation current = evaluate_tool_request(
-        evaluation.request,
-        make_permission_context(*_state->environment, *_state->permissions,
-            mode, _state->skills->loaded_directories(), _state->mcp.get()),
-        _state->providers->config(), _state->environment->skills(), *_skills);
+    const PermissionEvaluation current
+        = evaluate_tool_request(evaluation.request,
+            make_permission_context(*_state->environment, *_state->permissions,
+                mode, _state->session->loaded_skill_directories(),
+                _state->mcp.get()),
+            _state->providers->config(), _state->environment->skills(),
+            *_state->session);
     if (current.decision.kind == PermissionDecision::Kind::REJECT
         || current.request.args != evaluation.request.args) {
         const std::string reason

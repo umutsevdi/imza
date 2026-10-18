@@ -23,13 +23,6 @@ namespace imza {
 
 struct Config;
 
-struct PendingSkillTurn {
-    std::string text;
-    std::vector<Attachment> attachments;
-    std::vector<Skill> awaiting;
-    std::size_t next = 0;
-};
-
 // nullopt with `reason` set when the read fails or the size limit is hit.
 std::optional<std::string> load_skill_checked(
     const Skill& skill, std::string& reason);
@@ -46,33 +39,5 @@ std::vector<Skill> mentioned_skills(
     const std::vector<Skill>& catalog, std::string_view text);
 std::vector<Skill> allowed_skills(
     const std::vector<Skill>& catalog, const Config& config);
-
-class SkillStore final : public ApplicationComponent {
-public:
-    bool is_loaded(const std::filesystem::path& path) const;
-    bool load(const Skill& skill, std::string& error);
-    void record_tool_load(const std::filesystem::path& path, std::string body);
-    std::string prompt_suffix() const;
-    // The loaded skills' directories (SKILL.md parents), sorted.
-    std::vector<std::filesystem::path> loaded_directories() const;
-    void clear();
-    std::optional<PendingSkillTurn> pending_turn() const;
-    void set_pending_turn(PendingSkillTurn turn);
-    std::optional<PendingSkillTurn> advance_pending_turn();
-    std::optional<PendingSkillTurn> take_pending_turn();
-
-    // Fires when the loaded set changes (load, tool load, clear). Callbacks
-    // run on the publishing thread; keep the Subscription.
-    [[nodiscard]] Signal<>::Subscription subscribe_to_change(
-        Signal<>::Callback callback);
-
-private:
-    void _publish();
-    mutable std::mutex _mutex;
-    std::set<std::string> _loaded;
-    std::map<std::string, std::string> _contents;
-    std::optional<PendingSkillTurn> _pending_turn;
-    Signal<> _changed;
-};
 
 } // namespace imza

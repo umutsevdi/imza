@@ -15,27 +15,25 @@
 #include "platform/config.h"
 #include "platform/config_store.h"
 #include "providers/store.h"
-#include "runtime/bg_process_manager.h"
+#include "runtime/bg_process_subsystem.h"
 #include "runtime/callbacks.h"
 #include "runtime/main_thread_queue.h"
-#include "runtime/modal_queue.h"
 #include "runtime/notification_center.h"
-#include "runtime/subagent_manager.h"
+#include "runtime/subagent_subsystem.h"
 #include "tools/lua.h"
-#include "tools/skill_registry.h"
+#include "tools/skill_subsystem.h"
 #include "tools/tool.h"
 #include "workspace/environment.h"
 
 namespace imza {
 
-class ReviewState;
-class SkillStore;
+class ReviewSubsystem;
 class TurnRunner;
 class Delegation;
 class PermissionStore;
 class PromptStore;
-class McpManager;
-class SkillRegistry;
+class McpSubsystem;
+class SkillSubsystem;
 
 struct ApplicationState {
     std::shared_ptr<Session> session;
@@ -45,13 +43,12 @@ struct ApplicationState {
     // writer goes through it, so no reader can hold a stale copy.
     std::shared_ptr<ConfigStore> config;
     std::shared_ptr<ProviderStore> providers;
-    std::shared_ptr<McpManager> mcp;
-    std::shared_ptr<SubagentManager> subagents;
-    std::shared_ptr<BgProcessManager> bg_processes;
+    std::shared_ptr<McpSubsystem> mcp;
+    std::shared_ptr<SubagentSubsystem> subagents;
+    std::shared_ptr<BgProcessSubsystem> bg_processes;
     std::shared_ptr<Environment> environment;
-    std::shared_ptr<ReviewState> review;
-    std::shared_ptr<SkillStore> skills;
-    std::shared_ptr<SkillRegistry> skill_registry;
+    std::shared_ptr<ReviewSubsystem> review;
+    std::shared_ptr<SkillSubsystem> skill_subsystem;
     std::shared_ptr<PermissionStore> permissions;
     std::shared_ptr<PromptStore> prompts;
     // App-wide transient messages; shared with children and the sidechat so
@@ -69,7 +66,6 @@ struct ApplicationState {
     // Lazy accessor the subagent tool uses to reach this state's
     // delegation; wire() fills it once the delegation exists.
     SubagentDeps subagent_deps;
-    ModalQueue queue;
 
     // Sidechat pane, declared last so it dies before the components it shares.
     std::shared_ptr<ApplicationState> sidechat;
@@ -95,7 +91,7 @@ struct ApplicationState {
     // order they must stop. The destructor marks each dead and stops it in
     // reverse; adding a worker-bearing component means registering it, not
     // editing the destructor.
-    std::vector<ApplicationComponent*> stoppable;
+    std::vector<Subsystem*> stoppable;
 
     ~ApplicationState();
 

@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "conversation/session.h"
 #include "test_fs.h"
 #include "tools/skills.h"
 #include "tools/tool.h"
@@ -42,10 +43,10 @@ TEST_CASE("the skill tool handler reads instructions and records the load")
     imza::test::write_file(path, "documented workflow");
     const imza::Skill skill { "docs", "Documentation workflow", path,
         imza::Skill::Scope::GLOBAL, std::nullopt };
-    auto store = std::make_shared<imza::SkillStore>();
+    auto session = std::make_shared<imza::Session>();
     imza::SkillToolDeps deps;
     deps.catalog = [skill] { return std::vector<imza::Skill> { skill }; };
-    deps.store   = [store] -> imza::SkillStore& { return *store; };
+    deps.session = [session] -> imza::Session& { return *session; };
 
     const auto tool = imza::make_skill_tool(std::move(deps));
     const auto out
@@ -53,7 +54,7 @@ TEST_CASE("the skill tool handler reads instructions and records the load")
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(out.text.find("documented workflow") != std::string::npos);
     // Loading through the tool records the skill so the gate stops asking.
-    CHECK(store->is_loaded(path));
+    CHECK(session->is_skill_loaded(path));
 
     const auto missing
         = tool.run({ "skill", R"json({"name":"absent"})json", "", "" });

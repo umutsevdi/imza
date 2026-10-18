@@ -1,9 +1,11 @@
 #include "conversation/session.h"
+
 #include "common/text_edit.h"
 #include "common/types.h"
 #include "common/util.h"
 #include "conversation/format.h"
 #include "providers/pricing.h"
+#include "tools/skills.h"
 
 #include <algorithm>
 #include <cassert>
@@ -341,6 +343,12 @@ void Session::restore(SessionSnapshot snapshot)
         _mode   = snapshot.plan_mode ? Mode::PLAN : Mode::BUILD;
         _modal  = std::monostate { };
         _queued = std::make_shared<std::vector<QueuedMessage>>();
+        // A restored conversation carries no pending dialogs, loaded
+        // skills, or skill-gated submissions.
+        queue.clear();
+        _loaded_skills.clear();
+        _skill_contents.clear();
+        _pending_skill_turn.reset();
         _error.clear();
         _retry_countdown.reset();
         _reasoning_start.reset();
@@ -512,6 +520,113 @@ std::optional<QueuedMessage> Session::pop_queued()
     QueuedMessage next = std::move(_queued->front());
     _queued->erase(_queued->begin());
     return next;
+}
+
+bool Session::is_skill_loaded(const std::filesystem::path& path) const
+{
+    std::lock_guard lock(_mutex);
+    return _loaded_skills.contains(path.string());
+}
+
+bool Session::load_skill(const Skill& skill, std::string& error)
+{
+    if (is_skill_loaded(skill.path)) {
+        return true;
+    }
+    std::string reason;
+    const std::optional<std::string> body = load_skill_checked(skill, reason);
+    if (!body) {
+        error = "Cannot load skill '" + skill.name + "': " + reason + ".";
+        return false;
+    }
+    {
+        std::lock_guard lock(_mutex);
+        _loaded_skills.insert(skill.path.string());
+        _skill_contents[skill.path.string()] = std::move(*body);
+    }
+    _skills_changed.publish();
+    return true;
+}
+
+void Session::record_skill_load(
+    const std::filesystem::path& path, std::string body)
+{
+    {
+        std::lock_guard lock(_mutex);
+        _loaded_skills.insert(path.string());
+        _skill_contents[path.string()] = std::move(body);
+    }
+    _skills_changed.publish();
+}
+
+std::string Session::skill_prompt_suffix() const
+{
+    std::lock_guard lock(_mutex);
+    std::string out;
+    for (const auto& [path, content] : _skill_contents) {
+        out += "\n\n" + content;
+    }
+    return out;
+}
+
+std::vector<std::filesystem::path> Session::loaded_skill_directories() const
+{
+    std::lock_guard lock(_mutex);
+    std::vector<std::filesystem::path> out;
+    out.reserve(_loaded_skills.size());
+    for (const std::string& path : _loaded_skills) {
+        out.push_back(std::filesystem::path(path).parent_path());
+    }
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
+}
+
+void Session::clear_loaded_skills()
+{
+    {
+        std::lock_guard lock(_mutex);
+        _loaded_skills.clear();
+        _skill_contents.clear();
+        _pending_skill_turn.reset();
+    }
+    _skills_changed.publish();
+}
+
+std::optional<PendingSkillTurn> Session::pending_skill_turn() const
+{
+    std::lock_guard lock(_mutex);
+    return _pending_skill_turn;
+}
+
+void Session::set_pending_skill_turn(PendingSkillTurn turn)
+{
+    std::lock_guard lock(_mutex);
+    _pending_skill_turn = std::move(turn);
+}
+
+std::optional<PendingSkillTurn> Session::advance_pending_skill_turn()
+{
+    std::lock_guard lock(_mutex);
+    if (!_pending_skill_turn) {
+        return std::nullopt;
+    }
+    ++_pending_skill_turn->next;
+    return _pending_skill_turn;
+}
+
+std::optional<PendingSkillTurn> Session::take_pending_skill_turn()
+{
+    std::lock_guard lock(_mutex);
+    std::optional<PendingSkillTurn> turn = std::move(_pending_skill_turn);
+    _pending_skill_turn.reset();
+    return turn;
+}
+
+Signal<>::Subscription Session::subscribe_to_skills_change(
+    Signal<>::Callback callback)
+{
+    return _skills_changed.subscribe(std::move(callback));
 }
 
 void Session::begin_send(std::string text, std::vector<Attachment> attachments)

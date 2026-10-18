@@ -16,7 +16,7 @@ namespace imza {
 
 class Session;
 
-class SessionStore final : public ApplicationComponent {
+class SessionStore final : public Subsystem {
 public:
     SessionStore();
     ~SessionStore();

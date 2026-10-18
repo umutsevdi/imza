@@ -1,8 +1,9 @@
 #include "tools/tool.h"
 #include "common/util.h"
+#include "conversation/session.h"
 #include "network/json.h"
+#include "runtime/mcp_subsystem.h"
 #include "tools/bindings.h"
-#include "tools/mcp_manager.h"
 #include "tools/skills.h"
 #include "turn/delegation.h"
 
@@ -64,7 +65,7 @@ Tool make_load_mcp_tool(McpToolDocsDeps deps)
             if (json_parse_checked(req.args, args) || args.server.empty()) {
                 return tool_error(std::string(LOAD_MCP_ARGS_ERROR));
             }
-            McpManager* manager = deps.mcp ? deps.mcp() : nullptr;
+            McpSubsystem* manager = deps.mcp ? deps.mcp() : nullptr;
             if (manager == nullptr) {
                 return tool_error("load_mcp: MCP is not available in this run");
             }
@@ -208,10 +209,10 @@ Tool make_skill_tool(SkillToolDeps deps)
             if (!body) {
                 return tool_error("skill: " + reason);
             }
-            if (deps.store) {
+            if (deps.session) {
                 const std::optional<std::filesystem::path> path
                     = canonical_skill_path(*skill);
-                deps.store().record_tool_load(
+                deps.session().record_skill_load(
                     path.value_or(skill->path), *body);
             }
             return tool_output(*body);

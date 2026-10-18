@@ -2,7 +2,7 @@
 #include "common/modal.h"
 #include "common/types.h"
 #include "common/util.h"
-#include "tools/skill_registry.h"
+#include "tools/skill_subsystem.h"
 #include "ui/ui.h"
 
 #include <ftxui/component/animation.hpp>
@@ -63,8 +63,8 @@ namespace {
         {
             _entries = std::get<SkillsModal>(_state->session->modal()).entries;
             _installed = _installed_names();
-            if (_state->skill_registry) {
-                _subscription = _state->skill_registry->subscribe_to_change(
+            if (_state->skill_subsystem) {
+                _subscription = _state->skill_subsystem->subscribe_to_change(
                     [] { animation::RequestAnimationFrame(); });
             }
             _tab_names = { "Manage", "Search" };
@@ -265,12 +265,12 @@ namespace {
 
         void _remove_by_name(const std::string& name)
         {
-            if (!_state->skill_registry) {
+            if (!_state->skill_subsystem) {
                 return;
             }
             for (const Skill& skill : _state->environment->skills()) {
                 if (skill.name == name) {
-                    _state->skill_registry->remove_path(skill.path);
+                    _state->skill_subsystem->remove_path(skill.path);
                     return;
                 }
             }
@@ -421,7 +421,7 @@ namespace {
         Element _render_search()
         {
             _maybe_fire_search();
-            const SkillRegistry::Snapshot snap = _snapshot();
+            const SkillSubsystem::Snapshot snap = _snapshot();
             _sync_results(snap);
 
             Elements rows;
@@ -431,7 +431,7 @@ namespace {
             // count must not linger next to the new (empty) list.
             std::string status;
             bool ok = true;
-            if (snap.phase == SkillRegistry::Phase::SEARCHING
+            if (snap.phase == SkillSubsystem::Phase::SEARCHING
                 && snap.query == _query) {
                 status = "searching…";
             } else if (snap.query == _query) {
@@ -444,7 +444,7 @@ namespace {
             if (_results.empty()) {
                 if (_query.size() < 2) {
                     rows.push_back(text("type to search skills.sh") | dim);
-                } else if (snap.phase == SkillRegistry::Phase::IDLE
+                } else if (snap.phase == SkillSubsystem::Phase::IDLE
                     && snap.status_ok && snap.query == _query) {
                     rows.push_back(text("no matches") | dim);
                 }
@@ -518,25 +518,25 @@ namespace {
             }
             _searched        = _query;
             _search_selected = 0;
-            if (_state->skill_registry) {
-                _state->skill_registry->search(_query);
+            if (_state->skill_subsystem) {
+                _state->skill_subsystem->search(_query);
             }
         }
 
         void _install(const RemoteSkill& skill)
         {
-            if (!_installed.contains(skill.slug) && _state->skill_registry) {
-                _state->skill_registry->install(skill);
+            if (!_installed.contains(skill.slug) && _state->skill_subsystem) {
+                _state->skill_subsystem->install(skill);
             }
         }
 
-        SkillRegistry::Snapshot _snapshot() const
+        SkillSubsystem::Snapshot _snapshot() const
         {
-            return _state->skill_registry ? _state->skill_registry->snapshot()
-                                          : SkillRegistry::Snapshot { };
+            return _state->skill_subsystem ? _state->skill_subsystem->snapshot()
+                                           : SkillSubsystem::Snapshot { };
         }
 
-        void _sync_results(const SkillRegistry::Snapshot& snap)
+        void _sync_results(const SkillSubsystem::Snapshot& snap)
         {
             // Only adopt results for the query currently in the box: an
             // in-flight or superseded search must not repopulate the list.

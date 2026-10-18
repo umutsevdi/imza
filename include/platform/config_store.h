@@ -16,7 +16,7 @@ namespace imza {
 // changed, and republishes the in-memory snapshot. Readers take snapshot(),
 // a copy-on-write view that is never stale and never a reference into
 // locked state.
-class ConfigStore final : public ApplicationComponent {
+class ConfigStore final : public Subsystem {
 public:
     explicit ConfigStore(
         Config initial = { }, std::filesystem::path path = config_path());

@@ -40,7 +40,7 @@ struct McpServerSnapshot {
 // Effects injected at the composition boundary: persisting refreshed or
 // signed-in credentials (without a manager reload), and opening the
 // user's browser. Defaults make both no-ops so tests stay hermetic.
-struct McpManagerHooks {
+struct McpSubsystemHooks {
     std::function<void(const McpServerConfig& server)> persist_server;
     std::function<bool(const std::string& url)> open_browser;
     // Surfaces a background outcome (reconnect, token renewal) to the
@@ -51,19 +51,19 @@ struct McpManagerHooks {
 };
 
 // Owns one MCP session per configured server. Long-lived
-// ApplicationComponent: connect/disconnect run on manager-owned workers
+// Subsystem: connect/disconnect run on manager-owned workers
 // (the UI thread never blocks) and announce through the signal; call()
 // blocks on network I/O and is for agent workers. Entry I/O serializes on
 // a per-entry mutex; reload() applies config changes without network I/O
 // (abandoned sessions are cleaned up server-side).
-class McpManager final : public ApplicationComponent {
+class McpSubsystem final : public Subsystem {
 public:
-    explicit McpManager(std::map<std::string, McpServerConfig> servers,
-        McpManagerHooks hooks = { });
-    ~McpManager();
+    explicit McpSubsystem(std::map<std::string, McpServerConfig> servers,
+        McpSubsystemHooks hooks = { });
+    ~McpSubsystem();
 
-    McpManager(const McpManager&)            = delete;
-    McpManager& operator=(const McpManager&) = delete;
+    McpSubsystem(const McpSubsystem&)            = delete;
+    McpSubsystem& operator=(const McpSubsystem&) = delete;
 
     // Applies config changes: added servers appear offline, removed
     // servers are dropped (their sessions abandoned), kept servers keep
@@ -149,7 +149,7 @@ private:
     // from their own threads, so appends race the destructor's join.
     std::mutex _workers_mutex;
     std::vector<std::thread> _workers;
-    McpManagerHooks _hooks;
+    McpSubsystemHooks _hooks;
     Signal<> _changed;
 };
 

@@ -8,7 +8,7 @@
 
 #include "conversation/session.h"
 #include "runtime/callbacks.h"
-#include "runtime/subagent_manager.h"
+#include "runtime/subagent_subsystem.h"
 #include "turn/turn_runner.h"
 
 namespace imza {
@@ -26,7 +26,7 @@ struct SubagentOptions {
     std::shared_ptr<Session> transcript;
 };
 
-class Delegation final : public ApplicationComponent {
+class Delegation final : public Subsystem {
 public:
     Delegation(ApplicationState& state, PostFn post,
         ModalRequestFn modal_request, TurnRunner& runner);

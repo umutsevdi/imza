@@ -67,7 +67,7 @@ std::filesystem::path prepare_imza_temporary_directory(
 WorkspaceEnvironment scan_workspace(const std::filesystem::path& directory,
     const std::vector<std::string>& instructions = { });
 
-class Environment final : public ApplicationComponent {
+class Environment final : public Subsystem {
 public:
     enum class ChdirResult { CHANGED, UNCHANGED, FAILED };
 

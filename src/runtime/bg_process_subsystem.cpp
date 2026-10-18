@@ -1,4 +1,4 @@
-#include "runtime/bg_process_manager.h"
+#include "runtime/bg_process_subsystem.h"
 
 #include "platform/command_runner.h"
 
@@ -8,9 +8,9 @@
 
 namespace imza {
 
-BgProcessManager::~BgProcessManager() { stop(); }
+BgProcessSubsystem::~BgProcessSubsystem() { stop(); }
 
-void BgProcessManager::stop()
+void BgProcessSubsystem::stop()
 {
     mark_dead();
     std::vector<Worker> workers;
@@ -25,7 +25,7 @@ void BgProcessManager::stop()
     // returns only after every background process has been killed and reaped.
 }
 
-bool BgProcessManager::start(const std::string& command,
+bool BgProcessSubsystem::start(const std::string& command,
     std::chrono::seconds timeout, const std::filesystem::path& workspace)
 {
     auto promise  = std::make_shared<std::promise<bool>>();

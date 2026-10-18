@@ -10,7 +10,7 @@
 
 namespace imza {
 
-class InputHistoryStore final : public ApplicationComponent {
+class InputHistoryStore final : public Subsystem {
 public:
     explicit InputHistoryStore(
         std::filesystem::path path, std::size_t limit = 100);

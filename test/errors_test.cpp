@@ -4,7 +4,7 @@
 #include "network/sse_parse.h"
 #include "test_state.h"
 #include "tools/skills.h"
-#include "workspace/review.h"
+#include "workspace/review_subsystem.h"
 #include <doctest/doctest.h>
 
 #include <arpa/inet.h>

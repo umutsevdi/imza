@@ -1,10 +1,12 @@
 #include "permissions/evaluator.h"
 
+#include "conversation/session.h"
+
 #include "network/json.h"
 #include "permissions/shell.h"
 #include "permissions/shell_analysis.h"
 #include "platform/config.h"
-#include "tools/mcp_manager.h"
+#include "runtime/mcp_subsystem.h"
 #include "tools/skills.h"
 #include "tools/tool.h"
 
@@ -53,7 +55,7 @@ namespace {
         const std::string& server, const PermissionContext& context,
         PermissionStore::Grants grants)
     {
-        const McpManager* manager = context.mcp;
+        const McpSubsystem* manager = context.mcp;
         std::optional<McpServerSnapshot> found;
         if (manager != nullptr) {
             for (const McpServerSnapshot& candidate : manager->snapshot()) {
@@ -98,7 +100,7 @@ namespace {
 
     PermissionEvaluation evaluate_skill(const ToolCallRequest& original,
         const PermissionContext& context, const Config& config,
-        const std::vector<Skill>& skills, const SkillStore& loaded_skills)
+        const std::vector<Skill>& skills, const Session& session)
     {
         SkillToolArgs arguments;
         if (json_parse_checked(original.args, arguments)) {
@@ -125,8 +127,8 @@ namespace {
         request.args    = json_dump(normalized);
 
         const SkillGrant grant { *path };
-        if (loaded_skills.is_loaded(skill->path)
-            || loaded_skills.is_loaded(*path)
+        if (session.is_skill_loaded(skill->path)
+            || session.is_skill_loaded(*path)
             || grants_cover(context.grants, grant)) {
             return accept(std::move(request));
         }
@@ -150,7 +152,7 @@ namespace {
 
 PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
     const PermissionContext& context, const Config& config,
-    const std::vector<Skill>& skills, const SkillStore& loaded_skills)
+    const std::vector<Skill>& skills, const Session& session)
 {
     ToolCallRequest request = original;
 
@@ -162,7 +164,7 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
 
     switch (*tool) {
     case RosterTool::SKILL:
-        return evaluate_skill(original, context, config, skills, loaded_skills);
+        return evaluate_skill(original, context, config, skills, session);
     case RosterTool::SUBAGENT: {
         SubagentToolArgs arguments;
         if (json_parse_checked(original.args, arguments)) {

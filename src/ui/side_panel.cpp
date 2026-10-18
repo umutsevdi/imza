@@ -1,9 +1,9 @@
 #include "app/application_state.h"
 #include "app/flows.h"
 #include "permissions/store.h"
-#include "tools/mcp_manager.h"
+#include "runtime/mcp_subsystem.h"
 #include "ui/ui.h"
-#include "workspace/review.h"
+#include "workspace/review_subsystem.h"
 
 #include <ftxui/component/app.hpp>
 #include <ftxui/component/component.hpp>
@@ -86,7 +86,7 @@ public:
                   ? _state->review->subscribe_to_change(
                         [] { animation::RequestAnimationFrame(); })
                   : Signal<>::Subscription { })
-        , _skills_subscription(_state->skills->subscribe_to_change(
+        , _skills_subscription(_state->session->subscribe_to_skills_change(
               [state = std::weak_ptr<ApplicationState>(_state)] {
                   if (const auto current = state.lock()) {
                       current->post([] { animation::RequestAnimationFrame(); });
@@ -150,8 +150,8 @@ public:
             if (_sidebar.context) {
                 std::vector<ContextSkill> skills;
                 for (const Skill& skill : env->skills()) {
-                    skills.push_back(
-                        { skill.name, _state->skills->is_loaded(skill.path) });
+                    skills.push_back({ skill.name,
+                        _state->session->is_skill_loaded(skill.path) });
                 }
                 std::vector<std::string> mcp_servers;
                 if (_state->mcp != nullptr) {

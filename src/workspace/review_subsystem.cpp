@@ -1,4 +1,4 @@
-#include "workspace/review.h"
+#include "workspace/review_subsystem.h"
 #include "common/util.h"
 #include "network/json.h"
 #include "platform/command_runner.h"
@@ -313,26 +313,26 @@ AiReviewParseResult parse_ai_review_response(
     return comments;
 }
 
-ReviewState::Snapshot::Snapshot()
+ReviewSubsystem::Snapshot::Snapshot()
     : review(std::make_shared<const RepositoryReview>())
 {
 }
 
-ReviewState::Snapshot ReviewState::snapshot() const
+ReviewSubsystem::Snapshot ReviewSubsystem::snapshot() const
 {
     std::lock_guard lock(_mutex);
     return _state;
 }
 
-std::vector<ReviewComment> ReviewState::comments() const
+std::vector<ReviewComment> ReviewSubsystem::comments() const
 {
     std::lock_guard lock(_mutex);
     return _state.comments;
 }
 
-ReviewState::~ReviewState() { stop(); }
+ReviewSubsystem::~ReviewSubsystem() { stop(); }
 
-void ReviewState::reload(std::filesystem::path root)
+void ReviewSubsystem::reload(std::filesystem::path root)
 {
     if (root.empty()) {
         return;
@@ -345,7 +345,7 @@ void ReviewState::reload(std::filesystem::path root)
     _maybe_start_worker();
 }
 
-void ReviewState::stop()
+void ReviewSubsystem::stop()
 {
     mark_dead();
     {
@@ -358,7 +358,7 @@ void ReviewState::stop()
     }
 }
 
-void ReviewState::_maybe_start_worker()
+void ReviewSubsystem::_maybe_start_worker()
 {
     {
         std::lock_guard lock(_mutex);
@@ -397,7 +397,7 @@ void ReviewState::_maybe_start_worker()
     });
 }
 
-void ReviewState::set_loading()
+void ReviewSubsystem::set_loading()
 {
     {
         std::lock_guard lock(_mutex);
@@ -408,7 +408,7 @@ void ReviewState::set_loading()
     _publish();
 }
 
-void ReviewState::set_result(ReviewLoadResult result)
+void ReviewSubsystem::set_result(ReviewLoadResult result)
 {
     {
         std::lock_guard lock(_mutex);
@@ -453,7 +453,8 @@ void ReviewState::set_result(ReviewLoadResult result)
     _publish();
 }
 
-std::size_t ReviewState::add_comment(ReviewLineAnchor anchor, std::string body)
+std::size_t ReviewSubsystem::add_comment(
+    ReviewLineAnchor anchor, std::string body)
 {
     std::size_t id;
     {
@@ -467,7 +468,8 @@ std::size_t ReviewState::add_comment(ReviewLineAnchor anchor, std::string body)
     return id;
 }
 
-std::size_t ReviewState::add_comments(std::vector<ReviewCommentDraft> comments)
+std::size_t ReviewSubsystem::add_comments(
+    std::vector<ReviewCommentDraft> comments)
 {
     std::size_t added = 0;
     {
@@ -494,7 +496,7 @@ std::size_t ReviewState::add_comments(std::vector<ReviewCommentDraft> comments)
     return added;
 }
 
-void ReviewState::update_comment(std::size_t id, std::string body)
+void ReviewSubsystem::update_comment(std::size_t id, std::string body)
 {
     {
         std::lock_guard lock(_mutex);
@@ -509,7 +511,7 @@ void ReviewState::update_comment(std::size_t id, std::string body)
     _publish();
 }
 
-void ReviewState::delete_comment(std::size_t id)
+void ReviewSubsystem::delete_comment(std::size_t id)
 {
     {
         std::lock_guard lock(_mutex);
@@ -520,7 +522,7 @@ void ReviewState::delete_comment(std::size_t id)
     _publish();
 }
 
-void ReviewState::request_jump(std::size_t id)
+void ReviewSubsystem::request_jump(std::size_t id)
 {
     {
         std::lock_guard lock(_mutex);
@@ -530,13 +532,13 @@ void ReviewState::request_jump(std::size_t id)
     _publish();
 }
 
-void ReviewState::clear_jump()
+void ReviewSubsystem::clear_jump()
 {
     std::lock_guard lock(_mutex);
     _state.jump_comment.reset();
 }
 
-void ReviewState::request_file_jump(std::string path)
+void ReviewSubsystem::request_file_jump(std::string path)
 {
     {
         std::lock_guard lock(_mutex);
@@ -546,13 +548,13 @@ void ReviewState::request_file_jump(std::string path)
     _publish();
 }
 
-void ReviewState::clear_file_jump()
+void ReviewSubsystem::clear_file_jump()
 {
     std::lock_guard lock(_mutex);
     _state.jump_file.reset();
 }
 
-void ReviewState::set_pass_task(
+void ReviewSubsystem::set_pass_task(
     ReviewPass pass, std::optional<std::size_t> task_id)
 {
     {
@@ -563,7 +565,7 @@ void ReviewState::set_pass_task(
     _publish();
 }
 
-void ReviewState::clear_comments()
+void ReviewSubsystem::clear_comments()
 {
     {
         std::lock_guard lock(_mutex);
@@ -577,12 +579,12 @@ void ReviewState::clear_comments()
     _publish();
 }
 
-Signal<>::Subscription ReviewState::subscribe_to_change(
+Signal<>::Subscription ReviewSubsystem::subscribe_to_change(
     Signal<>::Callback callback)
 {
     return _changed.subscribe(std::move(callback));
 }
 
-void ReviewState::_publish() { _changed.publish(); }
+void ReviewSubsystem::_publish() { _changed.publish(); }
 
 } // namespace imza

@@ -1,4 +1,4 @@
-#include "tools/mcp_manager.h"
+#include "runtime/mcp_subsystem.h"
 
 #include "network/json_io.h"
 #include "platform/process.h"
@@ -122,14 +122,14 @@ namespace {
 
 } // namespace
 
-McpManager::McpManager(
-    std::map<std::string, McpServerConfig> servers, McpManagerHooks hooks)
+McpSubsystem::McpSubsystem(
+    std::map<std::string, McpServerConfig> servers, McpSubsystemHooks hooks)
     : _hooks(std::move(hooks))
 {
     reload(std::move(servers));
 }
 
-McpManager::~McpManager()
+McpSubsystem::~McpSubsystem()
 {
     // Workers reference this through the signal and their entries; stop
     // streams and retries, then join before any member dies.
@@ -159,7 +159,7 @@ McpManager::~McpManager()
     }
 }
 
-void McpManager::reload(std::map<std::string, McpServerConfig> servers)
+void McpSubsystem::reload(std::map<std::string, McpServerConfig> servers)
 {
     std::map<std::string, std::shared_ptr<ServerEntry>> fresh;
     bool changed = false;
@@ -217,7 +217,7 @@ void McpManager::reload(std::map<std::string, McpServerConfig> servers)
     }
 }
 
-std::shared_ptr<McpManager::ServerEntry> McpManager::find(
+std::shared_ptr<McpSubsystem::ServerEntry> McpSubsystem::find(
     const std::string& id) const
 {
     std::lock_guard map_lock(_map_mutex);
@@ -225,13 +225,13 @@ std::shared_ptr<McpManager::ServerEntry> McpManager::find(
     return found == _servers.end() ? nullptr : found->second;
 }
 
-void McpManager::spawn(std::function<void()> work)
+void McpSubsystem::spawn(std::function<void()> work)
 {
     std::lock_guard lock(_workers_mutex);
     _workers.emplace_back(std::move(work));
 }
 
-void McpManager::run_handshake(
+void McpSubsystem::run_handshake(
     std::shared_ptr<ServerEntry> entry, bool force_token_refresh)
 {
     // Renew an expiring OAuth token before building the session; a failed
@@ -331,7 +331,7 @@ void McpManager::run_handshake(
     }
 }
 
-bool McpManager::wait_interruptible(long ms) const
+bool McpSubsystem::wait_interruptible(long ms) const
 {
     for (long waited = 0; waited < ms && !!alive(); waited += 200) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -339,7 +339,7 @@ bool McpManager::wait_interruptible(long ms) const
     return !alive();
 }
 
-void McpManager::run_listener(std::shared_ptr<ServerEntry> entry)
+void McpSubsystem::run_listener(std::shared_ptr<ServerEntry> entry)
 {
     std::string last_event_id;
     long retry_delay_ms = 3000;
@@ -440,7 +440,7 @@ void McpManager::run_listener(std::shared_ptr<ServerEntry> entry)
     }
 }
 
-void McpManager::connect(const std::string& id)
+void McpSubsystem::connect(const std::string& id)
 {
     const std::shared_ptr<ServerEntry> entry = find(id);
     if (entry == nullptr) {
@@ -468,7 +468,7 @@ void McpManager::connect(const std::string& id)
     spawn([this, entry] { run_handshake(entry); });
 }
 
-void McpManager::autoload()
+void McpSubsystem::autoload()
 {
     std::vector<std::string> ids;
     {
@@ -484,7 +484,7 @@ void McpManager::autoload()
     }
 }
 
-void McpManager::disconnect(const std::string& id)
+void McpSubsystem::disconnect(const std::string& id)
 {
     const std::shared_ptr<ServerEntry> entry = find(id);
     if (entry == nullptr) {
@@ -507,7 +507,7 @@ void McpManager::disconnect(const std::string& id)
     });
 }
 
-void McpManager::sign_in(const std::string& id)
+void McpSubsystem::sign_in(const std::string& id)
 {
     const std::shared_ptr<ServerEntry> entry = find(id);
     if (entry == nullptr) {
@@ -528,7 +528,7 @@ void McpManager::sign_in(const std::string& id)
     spawn([this, entry] { run_sign_in(entry); });
 }
 
-void McpManager::cancel_sign_in(const std::string& id)
+void McpSubsystem::cancel_sign_in(const std::string& id)
 {
     const std::shared_ptr<ServerEntry> entry = find(id);
     if (entry == nullptr) {
@@ -537,7 +537,7 @@ void McpManager::cancel_sign_in(const std::string& id)
     entry->sign_in_cancel.store(true);
 }
 
-void McpManager::run_sign_in(std::shared_ptr<ServerEntry> entry)
+void McpSubsystem::run_sign_in(std::shared_ptr<ServerEntry> entry)
 {
     const std::string id = [&entry] {
         std::lock_guard state_lock(entry->state_mutex);
@@ -641,7 +641,7 @@ void McpManager::run_sign_in(std::shared_ptr<ServerEntry> entry)
     run_handshake(entry);
 }
 
-bool McpManager::still_tracked(
+bool McpSubsystem::still_tracked(
     const std::string& id, const std::shared_ptr<ServerEntry>& entry) const
 {
     std::lock_guard map_lock(_map_mutex);
@@ -649,7 +649,7 @@ bool McpManager::still_tracked(
     return found != _servers.end() && found->second == entry;
 }
 
-bool McpManager::refresh_entry_tokens(
+bool McpSubsystem::refresh_entry_tokens(
     const std::shared_ptr<ServerEntry>& entry, bool forced, std::string& detail)
 {
     McpOauthCredentials oauth;
@@ -695,7 +695,7 @@ bool McpManager::refresh_entry_tokens(
     return true;
 }
 
-Status McpManager::call(const std::string& id, const std::string& tool,
+Status McpSubsystem::call(const std::string& id, const std::string& tool,
     const JsonValue& arguments, McpToolCallResult& out, std::string& detail)
 {
     const std::shared_ptr<ServerEntry> entry = find(id);
@@ -742,7 +742,7 @@ Status McpManager::call(const std::string& id, const std::string& tool,
     return status;
 }
 
-std::vector<McpServerSnapshot> McpManager::snapshot() const
+std::vector<McpServerSnapshot> McpSubsystem::snapshot() const
 {
     std::map<std::string, std::shared_ptr<ServerEntry>> entries;
     {
@@ -764,7 +764,7 @@ std::vector<McpServerSnapshot> McpManager::snapshot() const
     return out;
 }
 
-std::optional<std::vector<McpToolDefinition>> McpManager::tools(
+std::optional<std::vector<McpToolDefinition>> McpSubsystem::tools(
     const std::string& id) const
 {
     const std::shared_ptr<ServerEntry> entry = find(id);
@@ -778,7 +778,7 @@ std::optional<std::vector<McpToolDefinition>> McpManager::tools(
     return entry->tools;
 }
 
-Signal<>::Subscription McpManager::subscribe_to_change(
+Signal<>::Subscription McpSubsystem::subscribe_to_change(
     std::function<void()> callback)
 {
     return _changed.subscribe(std::move(callback));

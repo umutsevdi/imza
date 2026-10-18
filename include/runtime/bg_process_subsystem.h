@@ -18,13 +18,13 @@ namespace imza {
 // elapses, or stop() is requested (then the process group is killed).
 // Destruction stops and joins every worker, so application teardown kills
 // the background processes it started.
-class BgProcessManager final : public ApplicationComponent {
+class BgProcessSubsystem final : public Subsystem {
 public:
-    BgProcessManager() = default;
-    ~BgProcessManager();
+    BgProcessSubsystem() = default;
+    ~BgProcessSubsystem();
 
-    BgProcessManager(const BgProcessManager&)            = delete;
-    BgProcessManager& operator=(const BgProcessManager&) = delete;
+    BgProcessSubsystem(const BgProcessSubsystem&)            = delete;
+    BgProcessSubsystem& operator=(const BgProcessSubsystem&) = delete;
 
     // Spawns `command` detached (stdio on /dev/null; the command must
     // redirect its own output) and returns once the fork succeeds. False

@@ -1,7 +1,7 @@
 #include "tools/bindings.h"
 
 #include "common/util.h"
-#include "tools/mcp_manager.h"
+#include "runtime/mcp_subsystem.h"
 
 #include <string>
 #include <utility>
@@ -51,8 +51,8 @@ namespace {
             }
         }
 
-        LuaRunContext* run  = run_of(L);
-        McpManager* manager = run->host->mcp ? run->host->mcp() : nullptr;
+        LuaRunContext* run    = run_of(L);
+        McpSubsystem* manager = run->host->mcp ? run->host->mcp() : nullptr;
         if (manager == nullptr) {
             return fail("mcp.call: MCP is not available in this run");
         }

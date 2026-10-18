@@ -1,4 +1,4 @@
-#include "runtime/subagent_manager.h"
+#include "runtime/subagent_subsystem.h"
 
 #include <algorithm>
 #include <memory>
@@ -7,9 +7,9 @@
 
 namespace imza {
 
-SubagentManager::~SubagentManager() { stop(); }
+SubagentSubsystem::~SubagentSubsystem() { stop(); }
 
-SubagentHandle SubagentManager::start(std::string prompt, std::string model,
+SubagentHandle SubagentSubsystem::start(std::string prompt, std::string model,
     std::string variant, bool visible, SubagentRunFn run,
     SubagentCompleteFn complete, std::shared_ptr<Session> session)
 {
@@ -67,7 +67,7 @@ SubagentHandle SubagentManager::start(std::string prompt, std::string model,
     return handle;
 }
 
-bool SubagentManager::cancel(std::size_t id)
+bool SubagentSubsystem::cancel(std::size_t id)
 {
     std::lock_guard lock(_mutex);
     const auto worker = std::ranges::find(
@@ -79,7 +79,7 @@ bool SubagentManager::cancel(std::size_t id)
     return true;
 }
 
-void SubagentManager::prune_completed()
+void SubagentSubsystem::prune_completed()
 {
     std::vector<std::pair<std::size_t, std::jthread>> completed_workers;
     {
@@ -108,7 +108,7 @@ void SubagentManager::prune_completed()
     }
 }
 
-void SubagentManager::stop()
+void SubagentSubsystem::stop()
 {
     mark_dead();
     std::vector<std::pair<std::size_t, std::jthread>> workers;
@@ -121,13 +121,13 @@ void SubagentManager::stop()
     }
 }
 
-std::vector<SubagentTask> SubagentManager::tasks() const
+std::vector<SubagentTask> SubagentSubsystem::tasks() const
 {
     std::lock_guard lock(_mutex);
     return _tasks;
 }
 
-std::size_t SubagentManager::running_count(bool visible_only) const
+std::size_t SubagentSubsystem::running_count(bool visible_only) const
 {
     std::lock_guard lock(_mutex);
     return static_cast<std::size_t>(std::count_if(
@@ -137,7 +137,8 @@ std::size_t SubagentManager::running_count(bool visible_only) const
         }));
 }
 
-Signal<const SubagentEvent&>::Subscription SubagentManager::subscribe_to_change(
+Signal<const SubagentEvent&>::Subscription
+SubagentSubsystem::subscribe_to_change(
     Signal<const SubagentEvent&>::Callback callback)
 {
     return _changed.subscribe(std::move(callback));

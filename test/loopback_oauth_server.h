@@ -1,7 +1,7 @@
 #pragma once
 
 // Scripted OAuth authorization server + MCP resource server shared by the
-// mcp_oauth and mcp_manager tests, on the shared loopback HTTP core
+// mcp_oauth and mcp_subsystem tests, on the shared loopback HTTP core
 // (loopback_http.h). Serves RFC 8414 metadata, RFC 7591 registration, an
 // /authorize redirect, RFC 6749 token grants, and an MCP endpoint gated
 // on the bearer token it issued. Knobs are set before start(); the atomic

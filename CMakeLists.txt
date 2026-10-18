@@ -297,16 +297,16 @@ add_library(imza_runtime
     src/conversation/session_store.cpp
     src/providers/store.cpp
     src/tools/mcp_catalog.cpp
-    src/tools/mcp_manager.cpp
+    src/runtime/mcp_subsystem.cpp
     src/tools/web.cpp
-    src/workspace/review.cpp
-    src/runtime/bg_process_manager.cpp
+    src/workspace/review_subsystem.cpp
+    src/runtime/bg_process_subsystem.cpp
     src/runtime/main_thread_queue.cpp
     src/runtime/modal_queue.cpp
     src/runtime/notification_center.cpp
-    src/runtime/subagent_manager.cpp
+    src/runtime/subagent_subsystem.cpp
     src/tools/skills.cpp
-    src/tools/skill_registry.cpp
+    src/tools/skill_subsystem.cpp
     src/workspace/attachments.cpp
     src/workspace/environment.cpp
 )

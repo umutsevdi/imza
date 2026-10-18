@@ -3,8 +3,8 @@
 #include "loopback_mcp_server.h"
 #include "loopback_oauth_server.h"
 #include "protocols/mcp.h"
+#include "runtime/mcp_subsystem.h"
 #include "tools/mcp_catalog.h"
-#include "tools/mcp_manager.h"
 
 #include <atomic>
 #include <chrono>
@@ -38,8 +38,8 @@ template <typename Predicate> bool wait_for(Predicate predicate)
 }
 
 // Connect/disconnect run on manager workers; poll for the transition.
-bool wait_state(
-    imza::McpManager& manager, const std::string& id, imza::McpServerState want)
+bool wait_state(imza::McpSubsystem& manager, const std::string& id,
+    imza::McpServerState want)
 {
     return wait_for([&] {
         for (const auto& server : manager.snapshot()) {
@@ -59,7 +59,8 @@ TEST_CASE("mcp manager connects, caches tools, and calls through the session")
     imza::test::LoopbackMcpServer server;
     REQUIRE(server.start());
 
-    imza::McpManager manager({ { "exa", server_config("exa", server.url()) } });
+    imza::McpSubsystem manager(
+        { { "exa", server_config("exa", server.url()) } });
     unsigned changes = 0;
     imza::Signal<>::Subscription subscription
         = manager.subscribe_to_change([&] { ++changes; });
@@ -107,7 +108,7 @@ TEST_CASE("mcp manager connects, caches tools, and calls through the session")
 TEST_CASE("mcp manager reports connection failures and gates calls")
 {
     // Port 1 on loopback refuses immediately.
-    imza::McpManager manager(
+    imza::McpSubsystem manager(
         { { "dead", server_config("dead", "http://127.0.0.1:1/mcp") } });
 
     manager.connect("dead");
@@ -137,7 +138,7 @@ TEST_CASE("mcp manager keeps inactive servers off")
 
     imza::McpServerConfig config = server_config("off", server.url());
     config.enabled               = false;
-    imza::McpManager manager({ { "off", config } });
+    imza::McpSubsystem manager({ { "off", config } });
 
     auto snapshot = manager.snapshot();
     CHECK(snapshot[0].state == imza::McpServerState::INACTIVE);
@@ -163,7 +164,8 @@ TEST_CASE("mcp manager serializes concurrent calls on one session")
     imza::test::LoopbackMcpServer server;
     REQUIRE(server.start());
 
-    imza::McpManager manager({ { "exa", server_config("exa", server.url()) } });
+    imza::McpSubsystem manager(
+        { { "exa", server_config("exa", server.url()) } });
     manager.connect("exa");
     // The handshake runs on a manager worker; calls before it completes
     // would fail, so wait for the inventory first.
@@ -217,7 +219,8 @@ TEST_CASE("mcp manager retries failed handshakes with backoff")
     server.fail_handshakes = 1;
     REQUIRE(server.start());
 
-    imza::McpManager manager({ { "exa", server_config("exa", server.url()) } });
+    imza::McpSubsystem manager(
+        { { "exa", server_config("exa", server.url()) } });
     manager.connect("exa");
     // First handshake answers 500; the retry lands after the 2 s backoff.
     REQUIRE(wait_state(manager, "exa", imza::McpServerState::CONNECTED));
@@ -237,7 +240,8 @@ TEST_CASE("mcp manager refreshes tools on notifications/tools/list_changed")
     server.push_list_changed = true;
     REQUIRE(server.start());
 
-    imza::McpManager manager({ { "exa", server_config("exa", server.url()) } });
+    imza::McpSubsystem manager(
+        { { "exa", server_config("exa", server.url()) } });
     manager.connect("exa");
     REQUIRE(wait_state(manager, "exa", imza::McpServerState::CONNECTED));
     // The notification may land before this check runs: the inventory is
@@ -262,7 +266,8 @@ TEST_CASE("mcp listener exits quietly when the server has no stream")
     server.get_returns_405 = true;
     REQUIRE(server.start());
 
-    imza::McpManager manager({ { "exa", server_config("exa", server.url()) } });
+    imza::McpSubsystem manager(
+        { { "exa", server_config("exa", server.url()) } });
     manager.connect("exa");
     REQUIRE(wait_state(manager, "exa", imza::McpServerState::CONNECTED));
     REQUIRE(wait_for([&] { return server.saw_get.load(); }));
@@ -283,7 +288,8 @@ TEST_CASE("mcp listener rebuilds the session after a stream 404")
     server.get_returns_404 = true;
     REQUIRE(server.start());
 
-    imza::McpManager manager({ { "exa", server_config("exa", server.url()) } });
+    imza::McpSubsystem manager(
+        { { "exa", server_config("exa", server.url()) } });
     manager.connect("exa");
     REQUIRE(wait_state(manager, "exa", imza::McpServerState::CONNECTED));
     REQUIRE(wait_for([&] { return server.saw_get.load(); }));
@@ -306,7 +312,8 @@ TEST_CASE("mcp manager reload drops removed servers and applies toggles")
     imza::test::LoopbackMcpServer server;
     REQUIRE(server.start());
 
-    imza::McpManager manager({ { "exa", server_config("exa", server.url()) } });
+    imza::McpSubsystem manager(
+        { { "exa", server_config("exa", server.url()) } });
     manager.connect("exa");
     REQUIRE(wait_state(manager, "exa", imza::McpServerState::CONNECTED));
 
@@ -336,7 +343,7 @@ TEST_CASE("mcp manager autoloads only servers flagged for autoload")
     imza::McpServerConfig eager = server_config("eager", server.url());
     eager.autoload              = true;
     imza::McpServerConfig lazy  = server_config("lazy", server.url());
-    imza::McpManager manager({ { "eager", eager }, { "lazy", lazy } });
+    imza::McpSubsystem manager({ { "eager", eager }, { "lazy", lazy } });
 
     for (const auto& entry : manager.snapshot()) {
         CHECK(entry.state == imza::McpServerState::OFFLINE);
@@ -388,7 +395,7 @@ TEST_CASE("mcp manager fails catalogue references offline when dangling")
     imza::McpServerConfig config;
     config.id         = "gone";
     config.catalog_id = "no-such-entry";
-    imza::McpManager manager(
+    imza::McpSubsystem manager(
         std::map<std::string, imza::McpServerConfig> { { "gone", config } });
 
     manager.connect("gone");
@@ -409,7 +416,7 @@ TEST_CASE("mcp manager resolves catalogue labels and urls from the bundle")
     imza::McpServerConfig config;
     config.id         = "docs";
     config.catalog_id = "github";
-    imza::McpManager manager(
+    imza::McpSubsystem manager(
         std::map<std::string, imza::McpServerConfig> { { "docs", config } });
 
     // Label falls back to the catalogue entry's label, not the id.
@@ -453,7 +460,7 @@ imza::McpServerConfig stdio_config(const std::string& id)
 
 TEST_CASE("mcp manager reports a stdio spawn failure as FAILED")
 {
-    imza::McpManager manager(std::map<std::string, imza::McpServerConfig> {
+    imza::McpSubsystem manager(std::map<std::string, imza::McpServerConfig> {
         { "local", stdio_config("local") } });
 
     manager.connect("local");
@@ -469,7 +476,7 @@ TEST_CASE("mcp manager reports a stdio spawn failure as FAILED")
 
 TEST_CASE("mcp manager reload drops a stdio session when its command changes")
 {
-    imza::McpManager manager(std::map<std::string, imza::McpServerConfig> {
+    imza::McpSubsystem manager(std::map<std::string, imza::McpServerConfig> {
         { "local", stdio_config("local") } });
     // A stdio server is offline until connected; a field change must still
     // reset the entry rather than keep a stale session.
@@ -532,7 +539,7 @@ TEST_CASE("mcp manager sign-in connects through the browser flow")
     REQUIRE(server.start());
 
     RecordedConfig recorded;
-    imza::McpManagerHooks hooks;
+    imza::McpSubsystemHooks hooks;
     hooks.open_browser = [](const std::string& url) {
         return imza::test::oauth_fake_browser(url);
     };
@@ -542,7 +549,7 @@ TEST_CASE("mcp manager sign-in connects through the browser flow")
 
     imza::McpServerConfig config = server_config("linear", server.mcp_url());
     config.enabled               = false;
-    imza::McpManager manager({ { "linear", config } }, hooks);
+    imza::McpSubsystem manager({ { "linear", config } }, hooks);
 
     auto snapshot = manager.snapshot();
     REQUIRE(snapshot.size() == 1);
@@ -579,7 +586,7 @@ TEST_CASE("mcp manager sign-in can be cancelled and leaves the row intact")
     REQUIRE(server.start());
 
     RecordedConfig recorded;
-    imza::McpManagerHooks hooks;
+    imza::McpSubsystemHooks hooks;
     hooks.open_browser   = [](const std::string&) { return false; };
     hooks.persist_server = [&recorded](const imza::McpServerConfig& server) {
         recorded.record(server);
@@ -587,7 +594,7 @@ TEST_CASE("mcp manager sign-in can be cancelled and leaves the row intact")
 
     imza::McpServerConfig config = server_config("linear", server.mcp_url());
     config.enabled               = false;
-    imza::McpManager manager({ { "linear", config } }, hooks);
+    imza::McpSubsystem manager({ { "linear", config } }, hooks);
 
     manager.sign_in("linear");
     REQUIRE(wait_for([&] {
@@ -615,7 +622,7 @@ TEST_CASE("a server removed mid-sign-in is not resurrected in config")
 
     std::atomic<bool> release { false };
     RecordedConfig recorded;
-    imza::McpManagerHooks hooks;
+    imza::McpSubsystemHooks hooks;
     hooks.open_browser = [&release](const std::string& url) {
         wait_for([&] { return release.load(); });
         return imza::test::oauth_fake_browser(url);
@@ -626,7 +633,7 @@ TEST_CASE("a server removed mid-sign-in is not resurrected in config")
 
     imza::McpServerConfig config = server_config("linear", server.mcp_url());
     config.enabled               = false;
-    imza::McpManager manager({ { "linear", config } }, hooks);
+    imza::McpSubsystem manager({ { "linear", config } }, hooks);
 
     manager.sign_in("linear");
     REQUIRE(wait_for([&] {
@@ -651,7 +658,7 @@ TEST_CASE("handshakes refresh an expiring oauth token before connecting")
     REQUIRE(server.start());
 
     RecordedConfig recorded;
-    imza::McpManagerHooks hooks;
+    imza::McpSubsystemHooks hooks;
     hooks.persist_server = [&recorded](const imza::McpServerConfig& server) {
         recorded.record(server);
     };
@@ -660,7 +667,7 @@ TEST_CASE("handshakes refresh an expiring oauth token before connecting")
     imza::McpServerConfig config = oauth_config("exa", server.mcp_url());
     config.oauth.access_token    = "tok-0";
     config.oauth.expires_at      = std::time(nullptr) + 60;
-    imza::McpManager manager({ { "exa", config } }, hooks);
+    imza::McpSubsystem manager({ { "exa", config } }, hooks);
 
     manager.connect("exa");
     REQUIRE(wait_state(manager, "exa", imza::McpServerState::CONNECTED));
@@ -677,7 +684,7 @@ TEST_CASE("handshakes refresh an expiring oauth token before connecting")
     imza::McpServerConfig current = oauth_config("exa", fresh.mcp_url());
     current.oauth.access_token    = "tok-1";
     current.oauth.expires_at      = std::time(nullptr) + 3600;
-    imza::McpManager quiet({ { "exa", current } });
+    imza::McpSubsystem quiet({ { "exa", current } });
     quiet.connect("exa");
     REQUIRE(wait_state(quiet, "exa", imza::McpServerState::CONNECTED));
     CHECK(fresh.refresh_count.load() == 0);
@@ -691,7 +698,7 @@ TEST_CASE("a rejected access token is refreshed and the call retried")
     REQUIRE(server.start());
 
     RecordedConfig recorded;
-    imza::McpManagerHooks hooks;
+    imza::McpSubsystemHooks hooks;
     hooks.persist_server = [&recorded](const imza::McpServerConfig& server) {
         recorded.record(server);
     };
@@ -699,7 +706,7 @@ TEST_CASE("a rejected access token is refreshed and the call retried")
     imza::McpServerConfig config = oauth_config("exa", server.mcp_url());
     config.oauth.access_token    = "tok-1";
     config.oauth.expires_at      = std::time(nullptr) + 3600;
-    imza::McpManager manager({ { "exa", config } }, hooks);
+    imza::McpSubsystem manager({ { "exa", config } }, hooks);
 
     manager.connect("exa");
     REQUIRE(wait_state(manager, "exa", imza::McpServerState::CONNECTED));
@@ -728,7 +735,7 @@ TEST_CASE("a failing refresh marks the server failed without retry storms")
     config.oauth.refresh_token   = "refresh-bad";
     config.oauth.access_token    = "tok-0";
     config.oauth.expires_at      = std::time(nullptr) + 60;
-    imza::McpManager manager({ { "exa", config } });
+    imza::McpSubsystem manager({ { "exa", config } });
 
     manager.connect("exa");
     REQUIRE(wait_state(manager, "exa", imza::McpServerState::FAILED));
@@ -751,7 +758,7 @@ TEST_CASE("snapshots flag catalogue oauth servers before any sign-in")
     imza::McpServerConfig github;
     github.catalog_id = "github";
 
-    imza::McpManager manager({ { "linear", linear }, { "github", github } });
+    imza::McpSubsystem manager({ { "linear", linear }, { "github", github } });
     const auto snapshot = manager.snapshot();
     REQUIRE(snapshot.size() == 2);
     bool linear_oauth = false;

@@ -5,9 +5,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -22,7 +24,9 @@
 #include "network/json.h"
 #include "network/network.h"
 #include "providers/pricing.h"
+#include "runtime/modal_queue.h"
 #include "workspace/attachments.h"
+#include "workspace/skills.h"
 
 namespace imza {
 
@@ -152,7 +156,15 @@ struct QueuedMessage {
     std::vector<Attachment> attachments;
 };
 
-class Session final : public ApplicationComponent {
+// A submission waiting on skill approvals before its turn may start.
+struct PendingSkillTurn {
+    std::string text;
+    std::vector<Attachment> attachments;
+    std::vector<Skill> awaiting;
+    std::size_t next = 0;
+};
+
+class Session final : public Subsystem {
 public:
     enum class Phase { IDLE, CONNECTING, STREAMING, AWAITING };
     using Mode = SessionMode;
@@ -171,6 +183,8 @@ public:
     };
 
     Session() = default;
+    // Abandons pending modal promises so blocked workers unblock.
+    ~Session() { queue.abandon(); }
 
     // Snapshots: safe to read without the session lock.
     std::shared_ptr<const std::vector<ConversationItem>> items() const;
@@ -267,6 +281,30 @@ public:
     void clear_modal();
     void bump_modal_serial();
     void present_modal(ModalPayload payload);
+
+    // The conversation's modal queue: user dialogs and agent requests
+    // awaiting presentation. Conversation-scoped by design — a new or
+    // restored conversation starts with an empty queue.
+    ModalQueue queue;
+
+    // Loaded skills and the pending skill turn: conversation-scoped, so
+    // they vanish with the conversation (clear on restore, /new, chdir).
+    bool is_skill_loaded(const std::filesystem::path& path) const;
+    // Records a loaded skill's rendered body; empty `error` on success.
+    bool load_skill(const Skill& skill, std::string& error);
+    void record_skill_load(const std::filesystem::path& path, std::string body);
+    std::string skill_prompt_suffix() const;
+    // The loaded skills' directories (SKILL.md parents), sorted.
+    std::vector<std::filesystem::path> loaded_skill_directories() const;
+    void clear_loaded_skills();
+    std::optional<PendingSkillTurn> pending_skill_turn() const;
+    void set_pending_skill_turn(PendingSkillTurn turn);
+    std::optional<PendingSkillTurn> advance_pending_skill_turn();
+    std::optional<PendingSkillTurn> take_pending_skill_turn();
+    // Fires when the loaded set changes. Callbacks run on the publishing
+    // thread; keep the Subscription.
+    [[nodiscard]] Signal<>::Subscription subscribe_to_skills_change(
+        Signal<>::Callback callback);
     // Exit confirmation overlay: a full-screen dialog that supersedes any
     // presented modal without disturbing it. Presentation state only.
     bool exit_confirm() const;
@@ -355,6 +393,10 @@ private:
     std::size_t _plan_submitted_version = 0;
     std::shared_ptr<std::vector<QueuedMessage>> _queued
         = std::make_shared<std::vector<QueuedMessage>>();
+    std::set<std::string> _loaded_skills;
+    std::map<std::string, std::string> _skill_contents;
+    std::optional<PendingSkillTurn> _pending_skill_turn;
+    Signal<> _skills_changed;
 
     std::optional<Countdown> _retry_countdown;
 

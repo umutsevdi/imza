@@ -197,3 +197,30 @@ TEST_CASE("switch_session locks the target and reports foreign locks")
     REQUIRE(imza::save_session(*state->session) == imza::Status::OK);
     CHECK(imza::saved_sessions().size() == 2);
 }
+TEST_CASE("new session clears every conversation-scoped surface")
+{
+    imza::test::IsolatedDataHome home;
+    auto state = imza::test::make_test_state();
+    imza::test::wait_for_environment(*state);
+
+    // Conversation-scoped state: a loaded skill, a queued modal, a pending
+    // skill turn, and a session grant.
+    const std::filesystem::path skill_path
+        = imza::test::TempDir { }.file("SKILL.md");
+    imza::test::write_file(skill_path, "instructions");
+    state->session->record_skill_load(skill_path, "body");
+    state->session->set_pending_skill_turn(
+        imza::PendingSkillTurn { "text", { }, { }, 0 });
+    state->session->queue.enqueue(
+        imza::ViewerModal { .title = "t", .content = "c" },
+        imza::ModalOrigin::USER);
+    REQUIRE(state->permissions->install({ imza::ExternalGrant { "/tmp" } }));
+
+    imza::run_slash(*state, "/new");
+
+    CHECK(state->session->loaded_skill_directories().empty());
+    CHECK_FALSE(state->session->pending_skill_turn().has_value());
+    CHECK(state->session->queue.size() == 0);
+    CHECK(state->permissions->snapshot()->empty());
+    CHECK(state->session->has_items() == false);
+}

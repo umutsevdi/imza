@@ -11,7 +11,7 @@
 #include "common/modal.h"
 #include "permissions/store.h"
 #include "turn/turn_runner.h"
-#include "workspace/review.h"
+#include "workspace/review_subsystem.h"
 
 namespace imza {
 
@@ -141,6 +141,13 @@ void delete_saved_session(
 // current session, lock and validate the target, restore, clear runtime
 // state. On failure the active conversation stays and a session error is set.
 void switch_session(ApplicationState& state, const std::filesystem::path& path);
+// Startup restore: validate, lock, and install `path` as the first
+// conversation, moving to its workspace. False when the file is locked,
+// unreadable, or its workspace is unreachable; the caller presents the
+// error. The lock is released on failure.
+bool restore_session_at_startup(ApplicationState& state,
+    const std::filesystem::path& path,
+    std::optional<std::filesystem::path> workspace_override = std::nullopt);
 // Show the Sidechat pane; its context loads lazily on the first prompt.
 void open_sidechat(ApplicationState& state);
 // Hide the Sidechat pane. An in-flight turn is interrupted; the session

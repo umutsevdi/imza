@@ -7,13 +7,13 @@
 #include "permissions/store.h"
 #include "platform/command_runner.h"
 #include "platform/config.h"
+#include "runtime/mcp_subsystem.h"
 #include "tools/file_ops.h"
-#include "tools/mcp_manager.h"
 #include "tools/skills.h"
 #include "turn/delegation.h"
 #include "turn/prompt.h"
 #include "turn/turn_runner.h"
-#include "workspace/review.h"
+#include "workspace/review_subsystem.h"
 
 #include <functional>
 #include <memory>
@@ -60,7 +60,7 @@ namespace {
         // Grants and loaded skills are workspace-scoped: neither crosses
         // into the new directory.
         state.permissions->clear();
-        state.skills->clear();
+        state.session->clear_loaded_skills();
         return result;
     }
 
@@ -78,7 +78,7 @@ namespace {
             return false;
         }
         std::string error;
-        if (!state.skills->load(skill, error)) {
+        if (!state.session->load_skill(skill, error)) {
             state.session->set_error(std::move(error));
             return false;
         }
@@ -111,7 +111,7 @@ namespace {
     {
         return evaluate_tool_request(request,
             permission_context_for(state, mode), state.providers->config(),
-            state.environment->skills(), *state.skills);
+            state.environment->skills(), *state.session);
     }
 
     void submit_with_skills(ApplicationState& state, std::string text,
@@ -142,7 +142,7 @@ namespace {
             return;
         }
         const Skill first = awaiting.front();
-        state.skills->set_pending_turn(PendingSkillTurn {
+        state.session->set_pending_skill_turn(PendingSkillTurn {
             std::move(text), std::move(attachments), std::move(awaiting), 0 });
         const PermissionEvaluation evaluation = evaluate_permission(
             state, skill_request(first), state.session->mode());
@@ -184,7 +184,7 @@ namespace {
             = state.session->plan_submission_for_build();
         std::vector<Message> history = state.session->build_history(
             full_system_prompt(*state.prompts, *state.environment,
-                *state.providers, state.mcp.get(), state.skills.get(),
+                *state.providers, state.mcp.get(), state.session.get(),
                 settings.mode),
             settings.route.dialect);
         if (submission) {
@@ -263,9 +263,16 @@ namespace {
         return true;
     }
 
-    void clear_runtime_state(ApplicationState& state)
+    // The one operation that swaps the active conversation. Owns the
+    // whole protocol: the caller has already saved and released the
+    // previous file lock; this clears every conversation-scoped surface
+    // (queue, loaded skills, pending skill turn — via restore) plus the
+    // workspace-scoped grants and runner flags, then installs the
+    // snapshot. Nothing else may clear these piecemeal.
+    void install_session(ApplicationState& state, SessionSnapshot snapshot)
     {
-        state.skills->clear();
+        state.session->restore(std::move(snapshot));
+        // Grants are workspace-scoped: a new conversation starts clean.
         state.permissions->clear();
         state.runner->clear();
         state.subagents->prune_completed();
@@ -284,15 +291,13 @@ namespace {
         }
         // The archived file is no longer chat-active in this process.
         state.sessions->deactivate();
-        state.queue.clear();
-        clear_runtime_state(state);
-        state.session->restore(SessionSnapshot { });
+        install_session(state, SessionSnapshot { });
     }
 
     void advance_pending_skill(ApplicationState& state)
     {
         const std::optional<PendingSkillTurn> pending
-            = state.skills->advance_pending_turn();
+            = state.session->advance_pending_skill_turn();
         if (!pending) {
             return;
         }
@@ -310,7 +315,7 @@ namespace {
             return;
         }
         std::optional<PendingSkillTurn> turn
-            = state.skills->take_pending_turn();
+            = state.session->take_pending_skill_turn();
         start_turn(state, std::move(turn->text), std::move(turn->attachments));
     }
 
@@ -364,7 +369,7 @@ void close_modal(ApplicationState& state)
 
 void enqueue_user_modal(ApplicationState& state, ModalPayload payload)
 {
-    state.queue.enqueue(std::move(payload), ModalOrigin::USER);
+    state.session->queue.enqueue(std::move(payload), ModalOrigin::USER);
     if (state.session->modal().index() == 0
         && (state.session->phase() == Session::Phase::IDLE
             || state.session->phase() == Session::Phase::CONNECTING
@@ -445,7 +450,7 @@ std::future<ModalResult> request_modal(
 
     auto promise = std::make_shared<std::promise<ModalResult>>();
     auto future  = promise->get_future();
-    state.queue.enqueue(
+    state.session->queue.enqueue(
         std::move(payload), ModalOrigin::AGENT, std::move(promise));
     state.post([&state] { present_front(state); });
     return future;
@@ -456,7 +461,7 @@ void present_front(ApplicationState& state)
     if (state.session->modal().index() != 0) {
         return;
     }
-    auto pending = state.queue.peek_front();
+    auto pending = state.session->queue.peek_front();
     if (!pending) {
         return;
     }
@@ -495,7 +500,7 @@ PermissionContext permission_context_for(
     ApplicationState& state, Session::Mode mode)
 {
     return make_permission_context(*state.environment, *state.permissions, mode,
-        state.skills->loaded_directories(), state.mcp.get());
+        state.session->loaded_skill_directories(), state.mcp.get());
 }
 
 void resolve_modal(ApplicationState& state, ModalResult result)
@@ -510,7 +515,7 @@ void resolve_modal(ApplicationState& state, ModalResult result)
         manual_accepted
             = verdict != nullptr && verdict->decision != ToolDecision::REJECT;
         const std::optional<PendingSkillTurn> pending
-            = state.skills->pending_turn();
+            = state.session->pending_skill_turn();
         std::optional<ToolCallRequest> manual_authorization;
         if (manual_accepted) {
             const ToolCallRequest request = authorized_request(*prompt);
@@ -552,7 +557,7 @@ void resolve_modal(ApplicationState& state, ModalResult result)
         state.session->bump_modal_serial();
     }
     {
-        auto entry = state.queue.try_pop();
+        auto entry = state.session->queue.try_pop();
         if (entry && entry->promise) {
             entry->promise->set_value(std::move(result));
         }
@@ -566,7 +571,7 @@ void resolve_modal(ApplicationState& state, ModalResult result)
         return;
     }
     if (!manual_accepted) {
-        state.skills->take_pending_turn();
+        state.session->take_pending_skill_turn();
         state.session->set_error("Skill activation cancelled.");
         return;
     }
@@ -813,7 +818,7 @@ namespace {
 std::optional<std::size_t> run_review_pass(
     ApplicationState& state, ReviewPassRequest request, std::string& error)
 {
-    const ReviewState::Snapshot snapshot = state.review->snapshot();
+    const ReviewSubsystem::Snapshot snapshot = state.review->snapshot();
     // Each pass owns its own slot and Cancel button, so the two may run
     // together; only a repeat of the same pass is refused.
     const bool running = request.pass == ReviewPass::HANDOFF
@@ -823,8 +828,8 @@ std::optional<std::size_t> run_review_pass(
         error = request.label + " is already running.";
         return std::nullopt;
     }
-    if (snapshot.status != ReviewState::LoadStatus::LOADED || !snapshot.review
-        || snapshot.review->files.empty()) {
+    if (snapshot.status != ReviewSubsystem::LoadStatus::LOADED
+        || !snapshot.review || snapshot.review->files.empty()) {
         error = "There are no changes to review.";
         return std::nullopt;
     }
@@ -926,7 +931,7 @@ std::optional<std::size_t> run_review_pass(
 
 bool cancel_review_pass(ApplicationState& state, ReviewPass pass)
 {
-    const ReviewState::Snapshot snapshot = state.review->snapshot();
+    const ReviewSubsystem::Snapshot snapshot = state.review->snapshot();
     const ReviewPassState& current
         = pass == ReviewPass::HANDOFF ? snapshot.handoff : snapshot.findings;
     if (!current.task_id) {
@@ -937,7 +942,7 @@ bool cancel_review_pass(ApplicationState& state, ReviewPass pass)
 
 void run_handoff(ApplicationState& state)
 {
-    const ReviewState::Snapshot snapshot = state.review->snapshot();
+    const ReviewSubsystem::Snapshot snapshot = state.review->snapshot();
     if (!snapshot.review) {
         state.session->set_error("There are no changes to report on.");
         return;
@@ -1044,8 +1049,30 @@ void switch_session(ApplicationState& state, const std::filesystem::path& path)
         state.session->set_error("Failed to load session.");
         return;
     }
+    install_session(state, std::move(loaded.snapshot));
+}
+
+bool restore_session_at_startup(ApplicationState& state,
+    const std::filesystem::path& path,
+    std::optional<std::filesystem::path> workspace_override)
+{
+    if (state.sessions->is_locked(path)) {
+        return false;
+    }
+    LoadedSession loaded;
+    if (read_session(path, loaded) != Status::OK
+        || !state.sessions->activate(path)) {
+        return false;
+    }
     state.session->restore(std::move(loaded.snapshot));
-    clear_runtime_state(state);
+    const std::filesystem::path workspace
+        = workspace_override ? *workspace_override : loaded.workspace;
+    if (state.environment->chdir(workspace)
+        == Environment::ChdirResult::FAILED) {
+        state.sessions->deactivate();
+        return false;
+    }
+    return true;
 }
 
 void delete_saved_session(

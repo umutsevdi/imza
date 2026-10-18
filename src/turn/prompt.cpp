@@ -4,9 +4,9 @@
 #include "network/json.h"
 #include "platform/json_file.h"
 #include "providers/store.h"
-#include "tools/mcp_manager.h"
+#include "runtime/mcp_subsystem.h"
 #include "tools/skills.h"
-#include "workspace/review.h"
+#include "workspace/review_subsystem.h"
 
 #include <algorithm>
 #include <optional>
@@ -147,7 +147,7 @@ namespace {
 
     // One line per configured server; tool descriptions stay behind
     // load_mcp. Rendered only when servers are configured.
-    std::string mcp_block(const McpManager* mcp)
+    std::string mcp_block(const McpSubsystem* mcp)
     {
         if (mcp == nullptr) {
             return "";
@@ -220,7 +220,7 @@ std::string build_system_prompt(const PromptStore& prompts,
 
 std::string build_subagent_system_prompt(const PromptStore& prompts,
     const SystemEnvironment* sys, const WorkspaceEnvironment* ws,
-    SubagentRole role, const Config* config, const McpManager* mcp)
+    SubagentRole role, const Config* config, const McpSubsystem* mcp)
 {
     if (role == SubagentRole::BASIC) {
         return { };
@@ -253,7 +253,7 @@ std::string current_mode_prompt(Session::Mode mode)
 
 std::string full_system_prompt(const PromptStore& prompts,
     const Environment& environment, const ProviderStore& providers,
-    const McpManager* mcp, const SkillStore* skills,
+    const McpSubsystem* mcp, const Session* session,
     std::optional<Session::Mode> mode)
 {
     const Config config    = providers.config();
@@ -263,7 +263,7 @@ std::string full_system_prompt(const PromptStore& prompts,
     if (!mcps.empty()) {
         prompt += "\n\n" + mcps;
     }
-    prompt += skills->prompt_suffix();
+    prompt += session->skill_prompt_suffix();
     if (mode) {
         prompt += "\n\n";
         prompt += current_mode_prompt(*mode);

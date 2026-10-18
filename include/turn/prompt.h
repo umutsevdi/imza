@@ -13,12 +13,12 @@
 
 namespace imza {
 
-class McpManager;
+class McpSubsystem;
 class ProviderStore;
-class SkillStore;
+class Session;
 
 // Immutable prompt catalog loaded once at startup. A value type, not
-// an ApplicationComponent: no mutation, no threads, no notification.
+// an Subsystem: no mutation, no threads, no notification.
 class PromptStore {
 public:
     explicit PromptStore(const std::filesystem::path& overrides = { });
@@ -55,12 +55,12 @@ std::string build_system_prompt(const PromptStore& prompts,
 std::string build_subagent_system_prompt(const PromptStore& prompts,
     const SystemEnvironment* sys, const WorkspaceEnvironment* ws,
     SubagentRole role, const Config* config = nullptr,
-    const McpManager* mcp = nullptr);
+    const McpSubsystem* mcp = nullptr);
 std::string title_prompt(const PromptStore& prompts, std::string_view request);
 std::string current_mode_prompt(Session::Mode mode);
 std::string full_system_prompt(const PromptStore& prompts,
     const Environment& environment, const ProviderStore& providers,
-    const McpManager* mcp, const SkillStore* skills,
+    const McpSubsystem* mcp, const Session* session,
     std::optional<Session::Mode> mode = std::nullopt);
 // One plan-mode revise turn for the annotator: `instructions` plus one
 // bullet per note, located by the nearest heading above the pinned line and

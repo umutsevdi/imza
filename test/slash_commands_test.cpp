@@ -450,15 +450,15 @@ TEST_CASE("/cd clears grants and loaded skills")
 
     REQUIRE(
         state->permissions->install({ imza::ExternalGrant { granted.path } }));
-    state->skills->record_tool_load(granted.file("SKILL.md"), "body");
+    state->session->record_skill_load(granted.file("SKILL.md"), "body");
     REQUIRE(state->permissions->snapshot()->size() == 1);
-    REQUIRE(state->skills->loaded_directories().size() == 1);
+    REQUIRE(state->session->loaded_skill_directories().size() == 1);
 
     run_slash(*state, "/cd " + target.path.string());
 
     CHECK(state->session->error().empty());
     CHECK(state->permissions->snapshot()->empty());
-    CHECK(state->skills->loaded_directories().empty());
+    CHECK(state->session->loaded_skill_directories().empty());
 }
 
 TEST_CASE("/cd rejects an empty argument and a missing directory")

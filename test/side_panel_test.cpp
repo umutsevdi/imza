@@ -4,9 +4,9 @@
 #include <doctest/doctest.h>
 
 #include "loopback_mcp_server.h"
+#include "runtime/mcp_subsystem.h"
 #include "test_helpers.h"
 #include "test_state.h"
-#include "tools/mcp_manager.h"
 #include "ui/ui.h"
 #include "workspace/environment.h"
 

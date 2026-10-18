@@ -51,13 +51,13 @@ struct SubagentHandle {
 using SubagentRunFn      = std::function<SubagentResult(std::stop_token)>;
 using SubagentCompleteFn = std::function<void(const SubagentResult&)>;
 
-class SubagentManager final : public ApplicationComponent {
+class SubagentSubsystem final : public Subsystem {
 public:
-    SubagentManager() = default;
-    ~SubagentManager();
+    SubagentSubsystem() = default;
+    ~SubagentSubsystem();
 
-    SubagentManager(const SubagentManager&)            = delete;
-    SubagentManager& operator=(const SubagentManager&) = delete;
+    SubagentSubsystem(const SubagentSubsystem&)            = delete;
+    SubagentSubsystem& operator=(const SubagentSubsystem&) = delete;
 
     SubagentHandle start(std::string prompt, std::string model,
         std::string variant, bool visible, SubagentRunFn run,

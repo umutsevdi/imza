@@ -8,7 +8,7 @@
 
 #include "common/util.h"
 #include "network/json.h"
-#include "runtime/bg_process_manager.h"
+#include "runtime/bg_process_subsystem.h"
 #include "test_fs.h"
 #include "test_helpers.h"
 #include "tools/lua.h"
@@ -141,7 +141,7 @@ TEST_CASE("imza.bg.shell hands the authorized command to the host")
 TEST_CASE("a background process outlives the call that started it")
 {
     imza::test::TempDir dir;
-    imza::BgProcessManager manager;
+    imza::BgProcessSubsystem manager;
     const fs::path marker = dir.path / "done.txt";
 
     const auto started = std::chrono::steady_clock::now();
@@ -164,7 +164,7 @@ TEST_CASE("a background process outlives the call that started it")
 TEST_CASE("stopping the manager kills a long-running background process")
 {
     imza::test::TempDir dir;
-    auto manager = std::make_unique<imza::BgProcessManager>();
+    auto manager = std::make_unique<imza::BgProcessSubsystem>();
     REQUIRE(manager->start("sleep 60", std::chrono::seconds(120), dir.path));
 
     const auto started = std::chrono::steady_clock::now();
@@ -178,7 +178,7 @@ TEST_CASE("stopping the manager kills a long-running background process")
 TEST_CASE("a background command times out on its own")
 {
     imza::test::TempDir dir;
-    imza::BgProcessManager manager;
+    imza::BgProcessSubsystem manager;
     const fs::path marker = dir.path / "after.txt";
 
     // The command would write the marker after 5s, but its 1s timeout kills

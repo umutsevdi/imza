@@ -2,7 +2,7 @@
 
 #include "conversation/session.h"
 #include "turn/prompt.h"
-#include "workspace/review.h"
+#include "workspace/review_subsystem.h"
 
 #include "test_helpers.h"
 

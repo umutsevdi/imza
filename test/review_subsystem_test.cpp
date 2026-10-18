@@ -8,7 +8,7 @@
 #include "test_fs.h"
 #include "test_state.h"
 #include "turn/prompt.h"
-#include "workspace/review.h"
+#include "workspace/review_subsystem.h"
 
 TEST_CASE("git diff parser builds files hunks and line numbers")
 {
@@ -69,7 +69,7 @@ TEST_CASE("git diff parser defaults omitted hunk counts to one")
 
 TEST_CASE("review state stores updates and removes comments")
 {
-    imza::ReviewState state;
+    imza::ReviewSubsystem state;
     const auto id = state.add_comment({ "file.cpp", 2, 3, "line" }, "note");
     REQUIRE(state.snapshot().comments.size() == 1);
     state.update_comment(id, "updated");
@@ -99,7 +99,7 @@ TEST_CASE("review comments format as a plan prompt and clear together")
            "\n\n- `include/app.h:7` (stale)\n  change the return type"
            "\n  and update callers");
 
-    imza::ReviewState state;
+    imza::ReviewSubsystem state;
     state.add_comment(comments[0].anchor, comments[0].body);
     state.clear_comments();
     CHECK(state.snapshot().comments.empty());
@@ -108,7 +108,7 @@ TEST_CASE("review comments format as a plan prompt and clear together")
 
 TEST_CASE("review state marks comments stale when their line disappears")
 {
-    imza::ReviewState state;
+    imza::ReviewSubsystem state;
     state.add_comment({ "file.cpp", 2, 3, "line" }, "note");
     imza::RepositoryReview review;
     review.files.push_back(imza::ReviewFile { .old_path = "file.cpp",
@@ -185,7 +185,7 @@ TEST_CASE("AI review rejects findings outside changed lines")
 
 TEST_CASE("review state adds AI comments without exact duplicates")
 {
-    imza::ReviewState state;
+    imza::ReviewSubsystem state;
     const imza::ReviewLineAnchor anchor { "src/app.cpp", std::nullopt, 8,
         "updated" };
     state.add_comment(anchor, "The update loses the error.");
@@ -199,7 +199,7 @@ TEST_CASE("review state adds AI comments without exact duplicates")
     REQUIRE(comments.size() == 2);
     CHECK(comments[1].body == "[P3] A separate issue.");
 }
-TEST_CASE("ReviewState reloads the repository on its own worker")
+TEST_CASE("ReviewSubsystem reloads the repository on its own worker")
 {
     const imza::test::TempDir dir;
     const std::filesystem::path root = dir.path;
@@ -213,13 +213,13 @@ TEST_CASE("ReviewState reloads the repository on its own worker")
     REQUIRE(git("-c user.email=t@t -c user.name=t commit -qm init"));
     imza::test::write_file(root / "a.txt", "one\ntwo\n");
 
-    imza::ReviewState review;
-    CHECK(review.snapshot().status == imza::ReviewState::LoadStatus::IDLE);
+    imza::ReviewSubsystem review;
+    CHECK(review.snapshot().status == imza::ReviewSubsystem::LoadStatus::IDLE);
 
     review.reload(root);
     REQUIRE(imza::test::wait_until([&] {
         return review.snapshot().status
-            == imza::ReviewState::LoadStatus::LOADED;
+            == imza::ReviewSubsystem::LoadStatus::LOADED;
     }));
     const auto snapshot = review.snapshot();
     REQUIRE(snapshot.review != nullptr);

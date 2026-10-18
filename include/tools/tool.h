@@ -17,7 +17,6 @@
 namespace imza {
 
 struct Skill;
-class SkillStore;
 class Delegation;
 
 // Exact prefix tests match on when the model calls an unregistered tool.
@@ -66,16 +65,17 @@ std::optional<std::string> validate_subagent_tool_arguments(
     const SubagentToolArgs& arguments, bool allow_build);
 
 // Lazy accessors, like LuaHost: the roster is built before the
-// environment and store are wired. Skill policy is gated once upstream.
+// environment and session are wired. Skill policy is gated once upstream.
+class Session;
 struct SkillToolDeps {
     std::function<std::vector<Skill>()> catalog;
-    std::function<SkillStore&()> store;
+    std::function<Session&()> session;
 };
 
 // Docs source for load_mcp: the accessor is empty when MCP is
 // unavailable in this run. Filled in wire().
 struct McpToolDocsDeps {
-    std::function<McpManager*()> mcp;
+    std::function<McpSubsystem*()> mcp;
 };
 
 Tool make_skill_tool(SkillToolDeps deps = { });

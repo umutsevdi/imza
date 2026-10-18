@@ -11,7 +11,7 @@
 
 namespace imza {
 
-class SkillStore;
+class Session;
 struct Config;
 struct Skill;
 
@@ -33,6 +33,6 @@ struct PermissionEvaluation {
 
 PermissionEvaluation evaluate_tool_request(const ToolCallRequest& request,
     const PermissionContext& context, const Config& config,
-    const std::vector<Skill>& skills, const SkillStore& loaded_skills);
+    const std::vector<Skill>& skills, const Session& session);
 
 } // namespace imza

@@ -13,7 +13,7 @@
 #include "platform/config.h"
 #include "platform/console_mode.h"
 #include "runtime/main_thread_queue.h"
-#include "tools/mcp_manager.h"
+#include "runtime/mcp_subsystem.h"
 #include "tools/skills.h"
 #include "ui/ui.h"
 
@@ -113,23 +113,18 @@ int main(int argc, char** argv)
         return 2;
     }
     if (cli.session_path) {
-        const bool locked = state->sessions->is_locked(*cli.session_path);
-        imza::LoadedSession loaded;
-        if (!locked
-            && imza::read_session(*cli.session_path, loaded) == imza::Status::OK
-            && state->sessions->activate(*cli.session_path)) {
-            state->session->restore(std::move(loaded.snapshot));
-            if (cli.working_directory
-                || state->environment->chdir(loaded.workspace)
-                    != imza::Environment::ChdirResult::FAILED) {
-                return imza::run_repl(std::move(state));
-            }
-            state->sessions->deactivate();
+        // A --cd flag wins: the file still loads, but its recorded
+        // workspace does not override the requested directory.
+        if (imza::restore_session_at_startup(*state, *cli.session_path,
+                cli.working_directory ? std::optional<std::filesystem::path> { }
+                                      : std::nullopt)) {
+            return imza::run_repl(std::move(state));
         }
         std::println(stderr, "failed to load session '{}': {}",
             cli.session_path->stem().string(),
-            locked ? "session is open in another imza process"
-                   : "unreadable or invalid session file");
+            state->sessions->is_locked(*cli.session_path)
+                ? "session is open in another imza process"
+                : "unreadable or invalid session file");
         return 2;
     }
     if (cli.model) {

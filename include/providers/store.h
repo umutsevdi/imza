@@ -87,7 +87,7 @@ struct ConnectOutcome {
 
 using ConnectCompleteFn = std::function<void(ConnectOutcome)>;
 
-class ProviderStore final : public ApplicationComponent {
+class ProviderStore final : public Subsystem {
 public:
     explicit ProviderStore(std::shared_ptr<ConfigStore> config_store,
         ModelsFn models_fn = { }, TermsFn terms_fn = { },

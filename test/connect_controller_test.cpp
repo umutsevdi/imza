@@ -14,7 +14,7 @@
 #include "test_fs.h"
 #include "test_state.h"
 #include "tools/skills.h"
-#include "workspace/review.h"
+#include "workspace/review_subsystem.h"
 
 namespace {
 

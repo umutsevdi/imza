@@ -34,7 +34,7 @@ struct McpGrant {
 using PermissionGrant
     = std::variant<ExternalGrant, ShellCommandGrant, SkillGrant, McpGrant>;
 
-class PermissionStore final : public ApplicationComponent {
+class PermissionStore final : public Subsystem {
 public:
     using Grants   = std::vector<PermissionGrant>;
     using Snapshot = std::shared_ptr<const Grants>;

@@ -401,7 +401,7 @@ TEST_CASE("subagent tool rejects build tasks while main agent is planning")
     CHECK(call->result->kind == imza::ToolCall::Result::Kind::REJECT);
     CHECK(call->result->text.find("require main-agent build mode")
         != std::string::npos);
-    CHECK(env.state->queue.size() == 0);
+    CHECK(env.state->session->queue.size() == 0);
 }
 
 TEST_CASE("tool accept: output fills result, request half byte-stable")
@@ -522,7 +522,7 @@ TEST_CASE("esc on tool injects generic denial, appends nothing to transcript")
     CHECK(env.user_turn_count() == 1);
 
     REQUIRE(env.requests.size() == 1);
-    CHECK(env.state->queue.size() == 0);
+    CHECK(env.state->session->queue.size() == 0);
 }
 
 TEST_CASE("FIFO order preserved and queue_size counts overlays")
@@ -547,24 +547,24 @@ TEST_CASE("FIFO order preserved and queue_size counts overlays")
     imza::enqueue_user_modal(
         *env.state, imza::ViewerModal { "Queued", "content" });
     env.pump.pump();
-    CHECK(env.state->queue.size() == 2);
+    CHECK(env.state->session->queue.size() == 2);
 
     imza::resolve_modal(*env.state,
         imza::ModalResult {
             imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" } });
     REQUIRE(env.pump.wait_for([&] {
         return std::holds_alternative<imza::ViewerModal>(env.session->modal())
-            && env.state->queue.size() == 2;
+            && env.state->session->queue.size() == 2;
     }));
-    CHECK(env.state->queue.size() == 2);
+    CHECK(env.state->session->queue.size() == 2);
 
     imza::close_modal(*env.state);
     REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
-    CHECK(env.state->queue.size() == 1);
+    CHECK(env.state->session->queue.size() == 1);
 
     imza::close_modal(*env.state);
     REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
-    CHECK(env.state->queue.size() == 0);
+    CHECK(env.state->session->queue.size() == 0);
 }
 
 TEST_CASE("markdown viewer renders markdown instead of source lines")
@@ -615,7 +615,7 @@ TEST_CASE("one-time shell approval does not authorize later calls")
             imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" } });
 
     REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
-    CHECK(env.state->queue.size() == 1);
+    CHECK(env.state->session->queue.size() == 1);
     imza::resolve_modal(*env.state,
         imza::ModalResult {
             imza::ToolVerdict { imza::ToolDecision::REJECT, "" } });
@@ -666,7 +666,7 @@ TEST_CASE("filesystem session approval installs an exact reusable grant")
         imza::ToolVerdict { imza::ToolDecision::ACCEPT_FOR_SESSION, "" });
 
     REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
-    CHECK(env.state->queue.size() == 0);
+    CHECK(env.state->session->queue.size() == 0);
     CHECK(env.state->permissions->snapshot()->size() == 1);
     const auto lua_items = env.session->items();
     for (const auto& item : *lua_items) {
@@ -698,7 +698,7 @@ TEST_CASE("dangerous skip accepts permission-gated tools without a modal")
     REQUIRE(call != nullptr);
     REQUIRE(call->result.has_value());
     CHECK(call->result->kind == imza::ToolCall::Result::Kind::OUTPUT);
-    CHECK(env.state->queue.size() == 0);
+    CHECK(env.state->session->queue.size() == 0);
     CHECK_FALSE(env.state->runner->blocked_permission());
 }
 
@@ -717,7 +717,7 @@ TEST_CASE("dangerous skip does not weaken hard rejection")
           };
     imza::submit(*env.state, "go");
     REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
-    CHECK(env.state->queue.size() == 0);
+    CHECK(env.state->session->queue.size() == 0);
     const imza::ToolCall* call = env.pending_tool();
     REQUIRE(call != nullptr);
     REQUIRE(call->result.has_value());
@@ -745,7 +745,7 @@ TEST_CASE("tools with an automatic policy run without an approval modal")
     imza::submit(*env.state, "go");
     REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
 
-    CHECK(env.state->queue.size() == 0);
+    CHECK(env.state->session->queue.size() == 0);
 
     const imza::ToolCall* tc = env.pending_tool();
     REQUIRE(tc != nullptr);
@@ -775,7 +775,7 @@ TEST_CASE("unknown tools error back to the model without a modal")
     imza::submit(*env.state, "go");
     REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
 
-    CHECK(env.state->queue.size() == 0);
+    CHECK(env.state->session->queue.size() == 0);
 
     const imza::ToolCall* tc = env.pending_tool();
     REQUIRE(tc != nullptr);

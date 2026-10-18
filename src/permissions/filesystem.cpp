@@ -89,7 +89,8 @@ namespace {
 
 PermissionContext make_permission_context(const Environment& environment,
     const PermissionStore& permissions, SessionMode mode,
-    std::vector<std::filesystem::path> skill_directories, const McpManager* mcp)
+    std::vector<std::filesystem::path> skill_directories,
+    const McpSubsystem* mcp)
 {
     return { environment.system(), environment.workspace(),
         permissions.snapshot(), mode, std::move(skill_directories), mcp };

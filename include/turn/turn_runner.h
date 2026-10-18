@@ -20,7 +20,6 @@
 namespace imza {
 
 struct ApplicationState;
-class SkillStore;
 class ProviderStore;
 struct PermissionEvaluation;
 
@@ -37,11 +36,10 @@ struct ProviderSelection;
 TurnSettings make_turn_settings(
     const ProviderSelection& selection, Session::Mode mode);
 
-class TurnRunner final : public ApplicationComponent {
+class TurnRunner final : public Subsystem {
 public:
     TurnRunner(ApplicationState& state, PostFn post, std::vector<Tool> tools,
         StreamFn stream_fn, ModalRequestFn modal_request,
-        std::shared_ptr<SkillStore> skills,
         std::function<void(std::string)> on_finish);
     ~TurnRunner();
 
@@ -96,7 +94,6 @@ private:
     ApplicationState* _state;
     PostFn _post_fn;
     ModalRequestFn _modal_request;
-    std::shared_ptr<SkillStore> _skills;
     std::function<void(std::string)> _on_finish;
     StreamFn _stream_fn;
     std::vector<Tool> _tools;
