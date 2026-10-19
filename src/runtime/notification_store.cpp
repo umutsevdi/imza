@@ -8,7 +8,7 @@ namespace imza {
 
 void NotificationStore::_ensure_unique()
 {
-    if (!_entries.unique()) {
+    if (_entries.use_count() > 1) {
         _entries = std::make_shared<std::vector<Notification>>(*_entries);
     }
 }

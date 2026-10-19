@@ -14,7 +14,6 @@
 #include <wincred.h>
 #include <windows.h>
 #elif !defined(__APPLE__)
-
 #include <libsecret/secret.h>
 #endif
 
@@ -22,8 +21,8 @@ namespace imza {
 
 namespace {
 
-    constexpr std::string_view PACKAGE = "run.imza.cli";
-    constexpr std::string_view SERVICE = "imza";
+    [[maybe_unused]] constexpr std::string_view PACKAGE = "run.imza.cli";
+    constexpr std::string_view SERVICE                  = "imza";
     // Windows Credential Manager caps a blob at 2.5 KiB; the same bound keeps
     // the other backends honest.
     constexpr std::size_t MAX_VALUE_BYTES = 2560;

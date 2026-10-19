@@ -300,9 +300,9 @@ Status load_config(
     }
 
     StoredConfig stored;
-    if (glz::error_ctx error = json_parse_checked(*text, stored)) {
+    if (glz::error_ctx parse_error = json_parse_checked(*text, stored)) {
         return fail(Status::CONFIG_ERROR,
-            "invalid JSON: " + imza::json_parse_error(*text, error));
+            "invalid JSON: " + imza::json_parse_error(*text, parse_error));
     }
 
     if (stored.preferences && stored.preferences->credentials) {

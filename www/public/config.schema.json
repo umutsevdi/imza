@@ -123,10 +123,6 @@
         "permissions": {
           "type": "boolean",
           "description": "Show the permissions widget when custom permissions are active. Defaults to true."
-        },
-        "update": {
-          "type": "boolean",
-          "description": "Show the update-available banner. Defaults to true."
         }
       }
     },
