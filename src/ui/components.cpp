@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <format>
+#include <ftxui/component/animation.hpp>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/event.hpp>
 #include <ftxui/dom/canvas.hpp>
@@ -496,7 +497,8 @@ namespace {
             }));
         }
         return vbox(std::move(body)) | borderStyled(ROUNDED, accent)
-            | size(ftxui::WIDTH, EQUAL, card_width) | reflect(row_box);
+            | size(ftxui::WIDTH, EQUAL, card_width) | reflect(row_box)
+            | bgcolor(PANEL_COLOR);
     }
 
 } // namespace
@@ -793,6 +795,87 @@ Component split_inline_link_button(std::string primary, std::string secondary,
               return hbox({ std::move(element), filler() });
           };
     return space_activates(Button(std::move(option)), std::move(on_click));
+}
+
+namespace {
+
+    // Non-focusable, hover-driven link for panes that host a text input:
+    // a click cannot move the parent container's selector, so the input
+    // keeps the frame's cursor. Modal forms keep inline_link_button.
+    class HoverLink : public ComponentBase {
+    public:
+        HoverLink(std::function<Element()> render,
+            std::function<void()> on_click, Color inactive_color)
+            : _render(std::move(render))
+            , _on_click(std::move(on_click))
+            , _inactive_color(inactive_color)
+        {
+        }
+
+        Element OnRender() override
+        {
+            Element element = _render();
+            if (_hovered) {
+                element
+                    = std::move(element) | bold | underlined | color(PANEL_FG);
+            } else {
+                element = std::move(element) | color(_inactive_color);
+            }
+            return hbox({ std::move(element), filler() }) | reflect(_box);
+        }
+
+        bool OnEvent(Event event) override
+        {
+            if (!event.is_mouse()) {
+                return false;
+            }
+            const bool inside = _box.Contain(event.mouse().x, event.mouse().y);
+            if (inside != _hovered) {
+                _hovered = inside;
+                animation::RequestAnimationFrame();
+            }
+            if (!inside || event.mouse().button != Mouse::Left
+                || event.mouse().motion != Mouse::Pressed) {
+                return false;
+            }
+            if (!CaptureMouse(event)) {
+                return false;
+            }
+            _on_click();
+            return true;
+        }
+
+    private:
+        std::function<Element()> _render;
+        std::function<void()> _on_click;
+        Color _inactive_color;
+        Box _box;
+        bool _hovered = false;
+    };
+
+} // namespace
+
+Component hover_link(std::function<Element()> render,
+    std::function<void()> on_click, const Color& inactive_color)
+{
+    return Make<HoverLink>(
+        std::move(render), std::move(on_click), inactive_color);
+}
+
+Component split_hover_link(std::string primary, std::string secondary,
+    std::function<void()> on_click, const Color& primary_color)
+{
+    return hover_link(
+        [primary = std::move(primary), secondary = std::move(secondary),
+            primary_color] {
+            Elements parts { text(primary) | bold | color(primary_color) };
+            if (!secondary.empty()) {
+                parts.push_back(text(" "));
+                parts.push_back(text(secondary) | color(PANEL_FG_DIM));
+            }
+            return hbox(std::move(parts));
+        },
+        std::move(on_click));
 }
 
 std::string elapsed_text(std::chrono::milliseconds elapsed)

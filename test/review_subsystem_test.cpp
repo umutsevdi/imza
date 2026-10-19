@@ -210,7 +210,10 @@ TEST_CASE("ReviewSubsystem reloads the repository on its own worker")
     REQUIRE(git("init -q"));
     imza::test::write_file(root / "a.txt", "one\n");
     REQUIRE(git("add a.txt"));
-    REQUIRE(git("-c user.email=t@t -c user.name=t commit -qm init"));
+    // Disable signing: a global commit.gpgsign would otherwise make the
+    // test depend on the developer's GPG setup.
+    REQUIRE(git("-c user.email=t@t -c user.name=t -c commit.gpgsign=false "
+                "commit -qm init"));
     imza::test::write_file(root / "a.txt", "one\ntwo\n");
 
     imza::ReviewSubsystem review;

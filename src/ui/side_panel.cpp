@@ -208,9 +208,11 @@ private:
     {
         auto found = cache.find(key);
         if (found == cache.end()) {
-            Component component = inline_link_button(
-                [payload, render] { return render(*payload); },
-                std::move(on_click), PANEL_FG_DIM);
+            // Non-focusable: a click must not rotate the app-level Stacked
+            // container away from the main column.
+            Component component
+                = hover_link([payload, render] { return render(*payload); },
+                    std::move(on_click), PANEL_FG_DIM);
             _links_container->Add(component);
             found = cache
                         .emplace(std::move(key),

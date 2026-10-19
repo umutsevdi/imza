@@ -278,9 +278,14 @@ namespace {
                 state.element |= bgcolor(PANEL_COLOR) | block_cursor();
                 return state.element;
             };
-            _input     = ftxui::Input(_input_options);
-            _container = Container::Vertical({ _input });
-            Add(_container);
+            _input = ftxui::Input(_input_options);
+            // Links live in their own container: as siblings of the input
+            // they could take its container's selector on click, and FTXUI
+            // then handed the frame's single cursor to them instead.
+            _input_container       = Container::Vertical({ _input });
+            _interaction_container = Container::Vertical({ });
+            Add(_input_container);
+            Add(_interaction_container);
             _input->TakeFocus();
         }
 
@@ -888,7 +893,8 @@ namespace {
         ChatHints _hints;
         Signal<>::Subscription _skip_subscription;
 
-        Component _container;
+        Component _input_container;
+        Component _interaction_container;
         std::map<std::size_t, Component> _read_buttons;
         std::map<std::size_t, Component> _pending_lua_buttons;
         std::map<std::pair<std::size_t, std::size_t>, Component>
@@ -1224,7 +1230,7 @@ namespace {
             }
             Component button = make();
             cache.emplace(std::move(key), button);
-            _container->Add(button);
+            _interaction_container->Add(button);
             return button;
         }
 
@@ -1235,7 +1241,7 @@ namespace {
             return _memoized_button(cache, std::move(key), [&] {
                 auto shared_label
                     = std::make_shared<const std::string>(std::move(label));
-                return inline_link_button(
+                return hover_link(
                     [shared_label] { return text(*shared_label); },
                     std::move(on_click), PANEL_FG_DIM);
             });
@@ -1303,7 +1309,7 @@ namespace {
                 auto shared_label
                     = std::make_shared<const std::string>(std::move(label));
                 const std::size_t id = tc.id;
-                return inline_link_button(
+                return hover_link(
                     [failed, shared_label] {
                         return failed ? text(*shared_label) | strikethrough
                                       : text(*shared_label) | bold;
@@ -1327,7 +1333,7 @@ namespace {
                     ? "Load Skill"
                     : tool_display_name(tc.name);
                 const std::size_t id = tc.id;
-                return split_inline_link_button(
+                return split_hover_link(
                     std::move(name), std::move(detail), [this, id] {
                         const auto items = _session->items();
                         if (const auto* call = _find_tool_call(*items, id);
@@ -1401,7 +1407,7 @@ namespace {
             auto content_ptr  = entry.content;
             auto metadata_ptr = entry.metadata;
             entry.component
-                = inline_link_button([label_ptr] { return text(*label_ptr); },
+                = hover_link([label_ptr] { return text(*label_ptr); },
                     [this, content_ptr, metadata_ptr] {
                         ViewerModal vm { " Thinking", *content_ptr, "md", 1 };
                         vm.line_numbers = false;
@@ -1409,7 +1415,7 @@ namespace {
                         enqueue_user_modal(*_state, vm);
                     },
                     PANEL_FG_DIM);
-            _container->Add(entry.component);
+            _interaction_container->Add(entry.component);
             _reasoning_links.emplace(index, std::move(entry));
             return _reasoning_links.find(index)->second.component;
         }
