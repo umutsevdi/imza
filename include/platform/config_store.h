@@ -10,6 +10,8 @@
 
 namespace imza {
 
+class CredentialStore;
+
 // The single owner of the persisted Config document. Every writer goes
 // through update(), which reloads the newest on-disk state under the
 // interprocess lock, applies the mutation, replaces the file only when it
@@ -18,8 +20,11 @@ namespace imza {
 // locked state.
 class ConfigStore final : public Subsystem {
 public:
-    explicit ConfigStore(
-        Config initial = { }, std::filesystem::path path = config_path());
+    // `credentials` is borrowed, not owned: ApplicationState owns the store
+    // and outlives this one.
+    explicit ConfigStore(Config initial = { },
+        std::filesystem::path path      = config_path(),
+        CredentialStore* credentials    = nullptr);
 
     ConfigStore(const ConfigStore&)            = delete;
     ConfigStore& operator=(const ConfigStore&) = delete;
@@ -38,6 +43,7 @@ private:
     mutable std::mutex _mutex;
     std::shared_ptr<Config> _config;
     std::filesystem::path _path;
+    CredentialStore* _credentials = nullptr;
     Signal<> _changed;
 };
 

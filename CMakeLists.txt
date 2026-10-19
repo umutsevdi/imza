@@ -258,6 +258,7 @@ add_library(imza_foundation
     src/platform/command_runner.cpp
     src/platform/config.cpp
     src/platform/config_store.cpp
+    src/platform/credential_store.cpp
     src/platform/console_mode.cpp
     src/platform/file_lock.cpp
     src/platform/json_file.cpp
@@ -277,6 +278,14 @@ target_link_libraries(imza_foundation PUBLIC
     imza_protocols
     glaze::glaze
 )
+if(APPLE)
+    # The keychain is reached through /usr/bin/security, never the native API:
+    # an unsigned, re-signed-on-update binary would lose access each release.
+elseif(NOT WIN32)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBSECRET REQUIRED IMPORTED_TARGET libsecret-1)
+    target_link_libraries(imza_foundation PRIVATE PkgConfig::LIBSECRET)
+endif()
 
 set_source_files_properties(src/providers/catalog.cpp PROPERTIES
     COMPILE_DEFINITIONS IMZA_VERSION="${PROJECT_VERSION}")
@@ -551,14 +560,14 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release" AND IMZA_PACKAGE)
             set(CPACK_GENERATOR "productbuild")
         else()
             set(IMZA_OS "linux")
-            set(CPACK_RPM_PACKAGE_REQUIRES "libcurl")
+            set(CPACK_RPM_PACKAGE_REQUIRES "libcurl, libsecret")
             set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-or-later")
             set(CPACK_RPM_PACKAGE_GROUP "Development/Tools")
             set(CPACK_RPM_PACKAGE_DESCRIPTION
                 "${CPACK_PACKAGE_DESCRIPTION}"
             )
             set(CPACK_DEBIAN_PACKAGE_RELEASE "1")
-            set(CPACK_DEBIAN_PACKAGE_DEPENDS "libcurl4")
+            set(CPACK_DEBIAN_PACKAGE_DEPENDS "libcurl4, libsecret-1-0")
             install(
                 FILES "${CMAKE_SOURCE_DIR}/LICENSE"
                 DESTINATION "${CMAKE_INSTALL_DOCDIR}"

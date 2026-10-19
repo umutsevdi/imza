@@ -1,12 +1,16 @@
 #include "platform/config_store.h"
 
+#include "platform/credential_store.h"
+
 #include <utility>
 
 namespace imza {
 
-ConfigStore::ConfigStore(Config initial, std::filesystem::path path)
+ConfigStore::ConfigStore(
+    Config initial, std::filesystem::path path, CredentialStore* credentials)
     : _config(std::make_shared<Config>(std::move(initial)))
     , _path(std::move(path))
+    , _credentials(credentials)
 {
 }
 
@@ -22,7 +26,8 @@ ConfigUpdateResult ConfigStore::update(const ConfigMutator& mutate)
     {
         std::lock_guard lock(_mutex);
         Config candidate;
-        result = update_config(_path, *_config, mutate, &candidate);
+        result
+            = update_config(_path, *_config, mutate, &candidate, _credentials);
         if (result != ConfigUpdateResult::FAILURE) {
             // Copy-on-write: a reader still holding the previous snapshot
             // keeps reading immutable memory.

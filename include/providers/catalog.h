@@ -40,8 +40,8 @@ struct Catalog {
 inline constexpr std::string_view CUSTOM_PROVIDER_ID  = "custom";
 inline constexpr std::string_view EVREN_PROVIDER_ID   = "evren";
 inline constexpr std::string_view EVREN_PROVIDER_NAME = "EVREN";
-inline constexpr std::string_view OPENAI_SUBSCRIPTION_ID
-    = "openai-subscription";
+// OPENAI_SUBSCRIPTION_ID lives in common/types.h: the credential shape is a
+// platform concern and must not reach into the provider catalogue.
 inline constexpr std::string_view OPENAI_SUBSCRIPTION_NAME
     = "Open AI Subscription";
 

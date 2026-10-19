@@ -45,7 +45,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y git software-properties-common ca-certificates \
-              gnupg python3 python3-pip libcurl4-openssl-dev
+              gnupg python3 python3-pip libcurl4-openssl-dev libsecret-1-dev
           add-apt-repository -y ppa:ubuntu-toolchain-r/test
           apt-get update
           apt-get install -y gcc-14 g++-14
@@ -82,7 +82,7 @@ jobs:
         run: |
           # EL9 ships python3.9 but the project requires Python 3.10+.
           dnf install -y gcc-toolset-14 cmake git libcurl-devel make \
-              python3.11 rpm-build
+              python3.11 rpm-build libsecret-devel
       - uses: actions/checkout@v4
         with:
           submodules: recursive

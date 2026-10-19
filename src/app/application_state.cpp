@@ -204,7 +204,7 @@ namespace {
     std::shared_ptr<ApplicationState> initialize_root(
         std::shared_ptr<ApplicationState> state, PostFn post, Config config,
         StreamFn stream_fn, std::vector<Tool> tools, RuntimeFlag runtime_flags,
-        bool use_default_tools)
+        bool use_default_tools, std::shared_ptr<CredentialStore> credentials)
     {
         // The state owns the queue; an empty `post` posts into it, so the
         // interactive loop and the headless drain reach the same queue
@@ -231,7 +231,9 @@ namespace {
         // Taken before the config moves into the config store.
         std::vector<std::string> instructions = std::move(config.instructions);
         state->sidebar                        = config.sidebar;
-        state->config    = std::make_shared<ConfigStore>(std::move(config));
+        state->credentials                    = std::move(credentials);
+        state->config                         = std::make_shared<ConfigStore>(
+            std::move(config), config_path(), state->credentials.get());
         state->providers = std::make_shared<ProviderStore>(state->config);
         McpSubsystemHooks mcp_hooks;
         // Sign-ins and background token refreshes write straight through
@@ -316,6 +318,7 @@ namespace {
         state->sessions        = parent.sessions;
         state->input_history   = parent.input_history;
         state->config          = parent.config;
+        state->credentials     = parent.credentials;
         state->providers       = parent.providers;
         state->mcp             = parent.mcp;
         state->environment     = parent.environment;
@@ -373,12 +376,13 @@ ApplicationState::~ApplicationState()
     }
 }
 
-std::shared_ptr<ApplicationState> make_application_state(
-    PostFn post, Config config, StreamFn stream_fn, RuntimeFlag runtime_flags)
+std::shared_ptr<ApplicationState> make_application_state(PostFn post,
+    Config config, StreamFn stream_fn, RuntimeFlag runtime_flags,
+    std::shared_ptr<CredentialStore> credentials)
 {
     std::shared_ptr<ApplicationState> state(new ApplicationState());
     return initialize_root(std::move(state), std::move(post), std::move(config),
-        std::move(stream_fn), { }, runtime_flags, true);
+        std::move(stream_fn), { }, runtime_flags, true, std::move(credentials));
 }
 
 std::shared_ptr<ApplicationState> make_child_application_state(

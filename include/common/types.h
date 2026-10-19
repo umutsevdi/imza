@@ -137,7 +137,8 @@ enum class Status {
     CANCELLED,
     TIMEOUT,
     CONFIG_ERROR,
-    TRUNCATED
+    TRUNCATED,
+    NOT_FOUND
 };
 
 inline std::string error_text(Status st)
@@ -156,11 +157,17 @@ inline std::string error_text(Status st)
     case Status::TIMEOUT: return "Timed out.";
     case Status::CONFIG_ERROR: return "Configuration error.";
     case Status::TRUNCATED: return "Response truncated before completion.";
+    case Status::NOT_FOUND: return "Not found.";
     }
     return "Unknown error.";
 }
 
 enum class ApiStandard { OPENAI, OPENAI_RESPONSES, ANTHROPIC };
+
+// The built-in subscription connection. It is the one connection whose
+// credential is a pair of tokens rather than a single API key.
+inline constexpr std::string_view OPENAI_SUBSCRIPTION_ID
+    = "openai-subscription";
 
 // One tool call the model requested: the wire name, raw JSON args, and the
 // id that pairs it with its result. Neutral value type shared by transport,

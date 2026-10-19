@@ -12,6 +12,7 @@
 #include "permissions/permission_store.h"
 #include "platform/config.h"
 #include "platform/console_mode.h"
+#include "platform/credential_store.h"
 #include "runtime/main_thread_queue.h"
 #include "runtime/mcp_subsystem.h"
 #include "tools/skills.h"
@@ -49,6 +50,18 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // A failed probe degrades to plaintext for this run; the notice is
+    // published once the state exists.
+    auto credentials = std::make_shared<imza::CredentialStore>(
+        cfg.preferences.credentials == imza::Preferences::Credentials::PLAINTEXT
+            ? imza::CredentialStore::Mode::PLAINTEXT
+            : imza::CredentialStore::Mode::OS);
+    if (imza::resolve_credentials(cfg, *credentials) != imza::Status::OK) {
+        std::println("failed to read stored credentials");
+        return 1;
+    }
+    imza::adopt_legacy_credentials(path, cfg, *credentials);
+
     const imza::RuntimeFlag runtime = imza::runtime_flags_for(cli);
     // Read before the config is moved into the application state.
     imza::PermissionStore::Grants startup_grants
@@ -56,8 +69,15 @@ int main(int argc, char** argv)
     startup_grants.reserve(startup_grants.size()
         + cli.allowed_directories.size() + cli.allowed_commands.size()
         + cli.allowed_mcp.size() + cli.allowed_skills.size());
-    auto state = imza::make_application_state(
-        imza::PostFn { }, std::move(cfg), imza::StreamFn { }, runtime);
+    const bool keychain_available      = credentials->is_keychain_available();
+    const std::string plaintext_reason = credentials->unavailable_reason();
+    auto state = imza::make_application_state(imza::PostFn { }, std::move(cfg),
+        imza::StreamFn { }, runtime, std::move(credentials));
+    if (!keychain_available && !plaintext_reason.empty()) {
+        state->notifications->publish(true,
+            "Credentials will be stored as plaintext because "
+                + plaintext_reason + ".");
+    }
     for (const std::filesystem::path& directory : cli.allowed_directories) {
         startup_grants.emplace_back(directory);
     }

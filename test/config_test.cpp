@@ -13,6 +13,8 @@
 #include "network/json_io.h"
 #include "permissions/permission_store.h"
 #include "platform/config.h"
+#include "platform/config_store.h"
+#include "platform/credential_store.h"
 #include "platform/json_file.h"
 #include "test_fs.h"
 
@@ -80,10 +82,141 @@ TEST_CASE("load_config legacy-less body without providers is empty")
     CHECK(cfg.providers.empty());
 }
 
+TEST_CASE("preferences default to the os keychain")
+{
+    const auto path = temp_file("preferences-default.json");
+    imza::Config cfg;
+    REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
+
+    imza::Config loaded;
+    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
+    CHECK(loaded.preferences.credentials == imza::Preferences::Credentials::OS);
+
+    const std::optional<imza::JsonValue> document = imza::read_json_file(path);
+    REQUIRE(document.has_value());
+    const imza::JsonValue* preferences
+        = imza::find_member(*document, "preferences");
+    REQUIRE(preferences != nullptr);
+    CHECK(json_str(imza::find_member(*preferences, "credentials")) == "os");
+}
+
+TEST_CASE("load_config rejects an unknown credentials preference")
+{
+    const auto path = temp_file("preferences-invalid.json");
+    {
+        std::ofstream out(path);
+        out << R"({"preferences": {"credentials": "vault"}})";
+    }
+    imza::Config cfg;
+    std::string error;
+    CHECK(imza::load_config(path, cfg, &error) == imza::Status::CONFIG_ERROR);
+    CHECK(error.find("credentials") != std::string::npos);
+}
+
+TEST_CASE("keychain mode omits secrets and reloads them from the store")
+{
+    imza::CredentialStore store(imza::CredentialStore::Mode::OS);
+    if (!store.is_keychain_available()) {
+        return;
+    }
+    const auto path      = temp_file("keychain-mode.json");
+    const std::string id = "keychain-mode-" + std::to_string(::getpid());
+    imza::Config cfg;
+    imza::Connection conn;
+    conn.id      = id;
+    conn.api_key = "sk-or-test";
+    cfg.providers.push_back(conn);
+
+    imza::ConfigStore config_store(cfg, path, &store);
+    REQUIRE(config_store.update([](imza::Config&) { return true; })
+        == imza::ConfigUpdateResult::UPDATED);
+    const std::optional<imza::JsonValue> document = imza::read_json_file(path);
+    REQUIRE(document.has_value());
+    const imza::JsonValue* providers
+        = imza::find_member(*document, "providers");
+    REQUIRE(providers != nullptr);
+    REQUIRE(providers->size() == 1);
+    CHECK_FALSE(json_has((*providers)[std::size_t { 0 }], "api_key"));
+
+    imza::Status status = imza::Status::OK;
+    CHECK(store.get("provider/" + id, status) == "sk-or-test");
+    CHECK(status == imza::Status::OK);
+
+    imza::Config loaded;
+    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
+    CHECK(loaded.providers[0].api_key.empty());
+    REQUIRE(imza::resolve_credentials(loaded, store) == imza::Status::OK);
+    CHECK(loaded.providers[0].api_key == "sk-or-test");
+
+    CHECK(store.remove("provider/" + id) == imza::Status::OK);
+}
+
+TEST_CASE("legacy plaintext is adopted once and dropped from the document")
+{
+    imza::CredentialStore store(imza::CredentialStore::Mode::OS);
+    if (!store.is_keychain_available()) {
+        return;
+    }
+    const auto path       = temp_file("legacy-adopt.json");
+    const std::string id  = "legacy-" + std::to_string(::getpid());
+    const std::string key = "provider/" + id;
+    CHECK(store.remove(key) == imza::Status::NOT_FOUND);
+
+    {
+        std::ofstream out(path);
+        out << R"({"providers": [{"id": ")" << id
+            << R"(", "api_key": "old-key"}]})";
+    }
+    imza::Config cfg;
+    REQUIRE(imza::load_config(path, cfg) == imza::Status::OK);
+    REQUIRE(imza::resolve_credentials(cfg, store) == imza::Status::OK);
+    CHECK(cfg.providers[0].api_key == "old-key");
+
+    CHECK(imza::adopt_legacy_credentials(path, cfg, store));
+    imza::Status status = imza::Status::OK;
+    CHECK(store.get(key, status) == "old-key");
+    CHECK(status == imza::Status::OK);
+
+    imza::Config reloaded;
+    REQUIRE(imza::load_config(path, reloaded) == imza::Status::OK);
+    CHECK(reloaded.providers[0].api_key.empty());
+
+    CHECK_FALSE(imza::adopt_legacy_credentials(path, reloaded, store));
+    CHECK(store.remove(key) == imza::Status::OK);
+}
+
+TEST_CASE("the keychain wins over a stale plaintext field")
+{
+    imza::CredentialStore store(imza::CredentialStore::Mode::OS);
+    if (!store.is_keychain_available()) {
+        return;
+    }
+    const auto path       = temp_file("legacy-store-wins.json");
+    const std::string id  = "store-wins-" + std::to_string(::getpid());
+    const std::string key = "provider/" + id;
+    REQUIRE(store.set(key, "fresh-key") == imza::Status::OK);
+    {
+        std::ofstream out(path);
+        out << R"({"providers": [{"id": ")" << id
+            << R"(", "api_key": "stale"}]})";
+    }
+    imza::Config cfg;
+    REQUIRE(imza::load_config(path, cfg) == imza::Status::OK);
+    REQUIRE(imza::resolve_credentials(cfg, store) == imza::Status::OK);
+    CHECK(cfg.providers[0].api_key == "fresh-key");
+
+    CHECK_FALSE(imza::adopt_legacy_credentials(path, cfg, store));
+    imza::Status status = imza::Status::OK;
+    CHECK(store.get(key, status) == "fresh-key");
+    CHECK(store.remove(key) == imza::Status::OK);
+}
+
 TEST_CASE("config roundtrip preserves connections and last_used")
 {
     const auto path = temp_file("roundtrip.json");
     imza::Config cfg;
+    cfg.preferences.credentials = imza::Preferences::Credentials::PLAINTEXT;
+    imza::CredentialStore store(imza::CredentialStore::Mode::PLAINTEXT);
     imza::Connection conn;
     conn.id            = "openrouter";
     conn.api_key       = "sk-or-test";
@@ -103,10 +236,12 @@ TEST_CASE("config roundtrip preserves connections and last_used")
     cfg.last_used        = imza::LastUsed { "openrouter", "" };
     cfg.reasoning_effort = "high";
 
-    REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
+    REQUIRE(imza::save_config(path, cfg, &store) == imza::Status::OK);
 
     imza::Config loaded;
     CHECK(imza::load_config(path, loaded) == imza::Status::OK);
+    CHECK(loaded.preferences.credentials
+        == imza::Preferences::Credentials::PLAINTEXT);
     REQUIRE(loaded.providers.size() == 2);
     CHECK(loaded.providers[0].id == "openrouter");
     CHECK(loaded.providers[0].api_key == "sk-or-test");

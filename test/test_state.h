@@ -15,6 +15,7 @@
 
 #include "app/application_state.h"
 #include "platform/config_store.h"
+#include "platform/credential_store.h"
 
 namespace imza::test {
 
@@ -84,9 +85,10 @@ template <typename Pred> bool wait_until(Pred pred)
 // A ConfigStore over an isolated data home; the ProviderStore tests build
 // their store from one so the persisted document has a single owner.
 inline std::shared_ptr<imza::ConfigStore> make_config_store(
-    imza::Config config = { })
+    imza::Config config = { }, imza::CredentialStore* credentials = nullptr)
 {
-    return std::make_shared<imza::ConfigStore>(std::move(config));
+    return std::make_shared<imza::ConfigStore>(
+        std::move(config), imza::config_path(), credentials);
 }
 
 // One provider/selection so submit() reaches the test's stream stub.
@@ -108,10 +110,11 @@ inline void run_immediately(std::function<void()> task) { task(); }
 // a test copy of its wiring.
 inline std::shared_ptr<imza::ApplicationState> make_test_state(
     imza::PostFn post, imza::Config config = { }, imza::StreamFn stream = { },
-    imza::RuntimeFlag flags = imza::interactive_runtime_flags())
+    imza::RuntimeFlag flags = imza::interactive_runtime_flags(),
+    std::shared_ptr<imza::CredentialStore> credentials = nullptr)
 {
-    return imza::make_application_state(
-        std::move(post), std::move(config), std::move(stream), flags);
+    return imza::make_application_state(std::move(post), std::move(config),
+        std::move(stream), flags, std::move(credentials));
 }
 
 // Empty-config interactive state with an immediate main thread: the shape

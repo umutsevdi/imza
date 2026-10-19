@@ -11,15 +11,18 @@ CHANGELOG
 0.7.0 - Unreleased
 -------------------------------------------------------------------------------
 Changes:
+  - API keys and subscription tokens now live in your operating system's
+    keychain. Existing keys move over automatically on the first start.
+  - New /cd command switches the session to another directory without
+    restarting.
+  - Slash commands now understand the names other coding agents use: /quit
+    completes to /exit, /clear to /new, /agents to /subagents, /reasoning to
+    /variant, and so on; a typo gets a suggestion.
+  - Increased subagent limit to 8.
+  - Added a central in-app notification system.
+  - Fixed the chat input cursor disappearing or blinking.
   - Imza is now installable with Homebrew: `brew install umutsevdi/imza/imza`;
     every release updates the cask automatically.
-  - A single delegation can now run up to eight subagents.
-  - New /cd command switches the session to another directory without
-    restarting; the path completes as you type, and a switch requested during
-    a turn waits until the turn finishes.
-  - Added a central in-app notification system.
-  - Terminal alerts (OSC 9 or the bell) now go through the same notification
-    store, so turn-finished and input-required alerts share one path.
 
 -------------------------------------------------------------------------------
 0.6.4 - 2026-10-17

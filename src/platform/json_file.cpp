@@ -64,6 +64,13 @@ Status write_json_file(
     if (ec) {
         return Status::CONFIG_ERROR;
     }
+#ifndef _WIN32
+    // The data directory holds credentials and transcripts; keep it private.
+    std::filesystem::permissions(path.parent_path(),
+        std::filesystem::perms::owner_all,
+        std::filesystem::perm_options::replace, ec);
+    ec.clear();
+#endif
 
     const std::filesystem::path tmp = path.string() + ".tmp";
     {
@@ -83,7 +90,14 @@ Status write_json_file(
             static_cast<int>(GetLastError()), std::system_category());
     }
 #else
-    std::filesystem::rename(tmp, path, ec);
+    // Owner-only; the rename carries this mode onto the destination.
+    std::filesystem::permissions(tmp,
+        std::filesystem::perms::owner_read
+            | std::filesystem::perms::owner_write,
+        std::filesystem::perm_options::replace, ec);
+    if (!ec) {
+        std::filesystem::rename(tmp, path, ec);
+    }
 #endif
     return ec ? Status::CONFIG_ERROR : Status::OK;
 }

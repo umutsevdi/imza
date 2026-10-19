@@ -6,6 +6,19 @@
   "type": "object",
   "additionalProperties": true,
   "properties": {
+    "preferences": {
+      "type": "object",
+      "description": "User-facing switches that are not tied to one section.",
+      "additionalProperties": false,
+      "properties": {
+        "credentials": {
+          "type": "string",
+          "enum": ["os", "plaintext"],
+          "default": "os",
+          "description": "Where provider secrets are stored. `os` keeps them in the system keychain and omits them from this file; if no keychain is usable, imza falls back to plaintext for that run and warns. `plaintext` keeps them in this file and never touches the keychain."
+        }
+      }
+    },
     "providers": {
       "type": "array",
       "description": "Provider connections. Two entries sharing an id are disambiguated by label, whose identity becomes `id/label`.",
@@ -147,10 +160,15 @@
           "type": "string",
           "description": "Custom base URL, e.g. a local Ollama endpoint. Empty for hosted providers."
         },
-        "api_key": { "type": "string", "description": "API key credential." },
+        "api_key": {
+          "type": "string",
+          "description": "API key credential. Written only when `preferences.credentials` is `plaintext`; otherwise it lives in the system keychain.",
+          "deprecated": true
+        },
         "refresh_token": {
           "type": "string",
-          "description": "OAuth refresh token for subscription providers."
+          "description": "OAuth refresh token for subscription providers. Written only when `preferences.credentials` is `plaintext`; otherwise it lives in the system keychain.",
+          "deprecated": true
         },
         "expires_at": {
           "type": "integer",
