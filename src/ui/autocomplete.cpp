@@ -93,15 +93,10 @@ void Autocomplete::refresh(
     if (text.empty() || text[0] != '/' || text.find(' ') != std::string::npos) {
         return;
     }
-    const std::string key = to_lower(text);
-    for (const auto& c : slash_commands()) {
-        const std::string name = to_lower(c.name);
-        if (name.size() >= key.size()
-            && name.compare(0, key.size(), key) == 0) {
-            _commands.push_back(&c);
-        }
-    }
-    if (_commands.size() == 1 && _commands[0]->name == text) {
+    _commands = match_commands(text);
+    // A fully typed canonical name closes the popup; Enter then submits
+    // through the normal path.
+    if (_commands.size() == 1 && _commands[0].command->name == text) {
         _commands.clear();
     }
 }
@@ -164,9 +159,10 @@ bool Autocomplete::accept(const ApplicationState& state, std::string& text,
         refresh(state, text, cursor);
         return false;
     }
-    const SlashCommand* cmd = _commands[static_cast<std::size_t>(_selected)];
-    text                    = cmd->name;
-    cursor                  = static_cast<int>(text.size());
+    const SlashCommand* cmd
+        = _commands[static_cast<std::size_t>(_selected)].command;
+    text   = cmd->name;
+    cursor = static_cast<int>(text.size());
     // Argument-taking commands (/make-skill …) complete without
     // submitting so the user can type the argument; with the menu closed
     // the next Enter submits. Argument-less commands execute right away.
@@ -208,20 +204,25 @@ ftxui::Element Autocomplete::render(const LayoutCtx& ctx) const
             | color(PANEL_FG_DIM));
     }
     for (size_t row_index = 0; row_index < shown; ++row_index) {
-        const size_t i              = first + row_index;
-        const bool sel              = static_cast<int>(i) == _selected;
-        const std::string name_text = set == Set::PATHS ? _paths[i]
-            : set == Set::FILES                         ? "@" + _files[i].path
+        const size_t i        = first + row_index;
+        const bool sel        = static_cast<int>(i) == _selected;
+        std::string name_text = set == Set::PATHS ? _paths[i]
+            : set == Set::FILES                   ? "@" + _files[i].path
             : set == Set::SKILLS ? "$" + _skills[i].name
-                                 : std::string(_commands[i]->name);
-        Element name                = text(name_text);
+                                 : std::string(_commands[i].command->name);
+        // An alias hit names the canonical command, with the matched alias
+        // beside it so the user sees why it was offered.
+        if (set == Set::COMMANDS && !_commands[i].alias.empty()) {
+            name_text += "  (" + std::string(_commands[i].alias) + ")";
+        }
+        Element name = text(name_text);
         if (sel) {
             name = name | bold;
         }
         const std::string description = set == Set::PATHS ? "directory"
             : set == Set::FILES  ? (_files[i].directory ? "directory" : "file")
             : set == Set::SKILLS ? _skills[i].description
-                                 : std::string(_commands[i]->desc);
+                                 : std::string(_commands[i].command->desc);
         Element row                   = hbox({
             std::move(name) | xflex,
             text("  "),

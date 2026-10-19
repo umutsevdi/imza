@@ -11,7 +11,9 @@
 #include <functional>
 
 #include <algorithm>
+#include <string>
 #include <string_view>
+#include <vector>
 
 #include <doctest/doctest.h>
 
@@ -47,6 +49,105 @@ TEST_CASE("find_command matches case-insensitively")
     CHECK(find_command("/refresh") == nullptr);
     CHECK(find_command("/handoff") == nullptr);
     CHECK(find_command("/foo") == nullptr);
+}
+
+TEST_CASE("harness aliases resolve to their canonical commands")
+{
+    struct Case {
+        std::string_view alias;
+        SlashCommand::Action action;
+    };
+    const Case cases[] = {
+        { "/quit", SlashCommand::Action::EXIT },
+        { "/clear", SlashCommand::Action::NEW },
+        { "/reset", SlashCommand::Action::NEW },
+        { "/compress", SlashCommand::Action::COMPACT },
+        { "/reasoning", SlashCommand::Action::VARIANT },
+        { "/effort", SlashCommand::Action::VARIANT },
+        { "/reasoning-effort", SlashCommand::Action::VARIANT },
+        { "/models", SlashCommand::Action::MODEL },
+        { "/resume", SlashCommand::Action::SESSIONS },
+        { "/agents", SlashCommand::Action::SUBAGENTS },
+        { "/login", SlashCommand::Action::CONNECT },
+        { "/auth", SlashCommand::Action::CONNECT },
+        { "/dir", SlashCommand::Action::CHDIR },
+        { "/directory", SlashCommand::Action::CHDIR },
+        { "/permissions", SlashCommand::Action::AUTO },
+        { "/approvals", SlashCommand::Action::AUTO },
+    };
+    for (const Case& c : cases) {
+        const SlashCommand* command = find_command(c.alias);
+        REQUIRE_MESSAGE(command != nullptr, c.alias);
+        CHECK_MESSAGE(command->action == c.action, c.alias);
+    }
+    // Aliases resolve case-insensitively like canonical names.
+    CHECK(find_command("/QUIT")->action == SlashCommand::Action::EXIT);
+    CHECK(find_command("/Agents")->action == SlashCommand::Action::SUBAGENTS);
+    CHECK(find_command("/init") == nullptr);
+}
+
+TEST_CASE("alias table has no duplicates and never shadows a canonical name")
+{
+    std::vector<std::string> seen;
+    for (const SlashCommand& command : slash_commands()) {
+        seen.emplace_back(to_lower(command.name.substr(1)));
+    }
+    const std::size_t canonical = seen.size();
+    for (const SlashCommand& command : slash_commands()) {
+        for (const std::string_view alias : command.aliases) {
+            CHECK_MESSAGE(std::ranges::find(seen, alias) == seen.end(), alias);
+            seen.emplace_back(alias);
+        }
+    }
+    CHECK(seen.size() > canonical);
+    // Every alias resolves back to the command that declares it.
+    for (const SlashCommand& command : slash_commands()) {
+        for (const std::string_view alias : command.aliases) {
+            CHECK(find_command(alias) == &command);
+        }
+    }
+}
+
+TEST_CASE("match_commands ranks canonical prefixes above alias hits")
+{
+    const auto matches = match_commands("/ex");
+    REQUIRE(!matches.empty());
+    CHECK(matches.front().command->name == "/exit");
+    CHECK(matches.front().alias.empty());
+
+    // An alias prefix still finds the command, and reports the alias.
+    const auto quit = match_commands("/qui");
+    REQUIRE(!quit.empty());
+    CHECK(quit.front().command->name == "/exit");
+    CHECK(quit.front().alias == "quit");
+
+    // A canonical name always outranks an alias for the same prefix.
+    const auto model = match_commands("/model");
+    REQUIRE(!model.empty());
+    CHECK(model.front().command->name == "/model");
+    CHECK(model.front().alias.empty());
+
+    // Subsequence matching kicks in only once the query is specific.
+    const auto sub = match_commands("/cmp");
+    CHECK(std::ranges::any_of(sub,
+        [](const CommandMatch& m) { return m.command->name == "/compact"; }));
+    CHECK(match_commands("/zq").empty());
+}
+
+TEST_CASE("suggest_command offers a near miss and stays quiet on a far one")
+{
+    const auto typo = suggest_command("/quitt");
+    REQUIRE(typo.has_value());
+    CHECK(typo->command->name == "/exit");
+    CHECK(typo->alias == "quit");
+
+    const auto canonical = suggest_command("/exitt");
+    REQUIRE(canonical.has_value());
+    CHECK(canonical->command->name == "/exit");
+    CHECK(canonical->alias.empty());
+
+    CHECK_FALSE(suggest_command("/zzzzzz").has_value());
+    CHECK_FALSE(suggest_command("/").has_value());
 }
 
 TEST_CASE("CLI continues interactively without arguments")
@@ -380,6 +481,11 @@ TEST_CASE("run_slash emits application effects")
 
     run_slash(*state, "/missing");
     CHECK(state->session->error() == "Unknown command: /missing.");
+
+    // A near miss names the command the user probably meant.
+    run_slash(*state, "/quitt");
+    CHECK(state->session->error()
+        == "Unknown command: /quitt. Did you mean /exit (quit)?");
 }
 
 TEST_CASE("CLI accepts MCP and skill startup allow lists")

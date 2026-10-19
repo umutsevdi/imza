@@ -617,7 +617,16 @@ void run_slash(ApplicationState& state, std::string_view command)
     }
     const SlashCommand* found = find_command(base);
     if (found == nullptr) {
-        state.session->set_error("Unknown command: " + std::string(base) + ".");
+        std::string message = "Unknown command: " + std::string(base) + ".";
+        if (const auto suggestion = suggest_command(base)) {
+            message
+                += " Did you mean " + std::string(suggestion->command->name);
+            if (!suggestion->alias.empty()) {
+                message += " (" + std::string(suggestion->alias) + ")";
+            }
+            message += "?";
+        }
+        state.session->set_error(std::move(message));
         return;
     }
     switch (found->action) {

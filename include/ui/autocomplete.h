@@ -42,7 +42,7 @@ private:
     Set _active_set() const;
     int _count() const;
 
-    std::vector<const SlashCommand*> _commands;
+    std::vector<CommandMatch> _commands;
     std::vector<Skill> _skills;
     std::vector<AttachmentCandidate> _files;
     std::vector<std::string> _paths;

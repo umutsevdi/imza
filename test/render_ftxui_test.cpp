@@ -408,6 +408,36 @@ TEST_CASE("autocomplete completes a command on Enter without submitting")
     autocomplete.clear();
 }
 
+TEST_CASE("autocomplete resolves harness aliases to canonical commands")
+{
+    auto state = imza::test::make_test_state();
+    imza::Autocomplete autocomplete;
+
+    // `/quit` lists /exit, annotated with the alias that matched.
+    autocomplete.refresh(*state, "/quit", 5);
+    REQUIRE(autocomplete.active());
+    const std::string menu
+        = to_text(autocomplete.render({ imza::LayoutCtx::Kind::WIDE, 80 }));
+    CHECK(menu.find("/exit") != std::string::npos);
+    CHECK(menu.find("(quit)") != std::string::npos);
+
+    std::string text = "/quit";
+    int cursor       = 5;
+    std::vector<imza::Attachment> attachments;
+    const bool submit = autocomplete.accept(*state, text, cursor, attachments);
+    // Inserting the canonical name submits, like typing /exit would.
+    CHECK(submit);
+    CHECK(text == "/exit");
+
+    // `/reasoning` completes to /variant.
+    autocomplete.refresh(*state, "/reasoning", 10);
+    REQUIRE(autocomplete.active());
+    text   = "/reasoning";
+    cursor = 10;
+    CHECK(autocomplete.accept(*state, text, cursor, attachments));
+    CHECK(text == "/variant");
+}
+
 TEST_CASE("autocomplete completes /cd paths and keeps descending")
 {
     const imza::test::CurrentDirectory original;
