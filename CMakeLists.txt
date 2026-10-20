@@ -22,9 +22,11 @@ else()
     endif()
 endif()
 # windows.h defines min/max as macros unless suppressed project-wide; they
-# break every std::min/std::max call that is not extra-parenthesized.
+# break every std::min/std::max call that is not extra-parenthesized. NOGDI is
+# required too: wingdi.h defines ERROR even under WIN32_LEAN_AND_MEAN, which
+# collides with enum constants named ERROR.
 if(WIN32)
-    add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
+    add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN NOGDI)
 endif()
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Debug")

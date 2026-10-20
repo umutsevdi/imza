@@ -379,9 +379,18 @@ namespace {
                                 = std::get_if<std::string>(&parsed)) {
                                 return std::move(*parse_error);
                             }
-                            state->review->add_comments(std::move(
+                            std::vector<ReviewCommentDraft> drafts = std::move(
                                 std::get<std::vector<ReviewCommentDraft>>(
-                                    parsed)));
+                                    parsed));
+                            const std::size_t count = drafts.size();
+                            state->review->add_comments(std::move(drafts));
+                            if (state->notifications) {
+                                state->notifications->publish(false,
+                                    count == 1 ? "AI review found 1 finding."
+                                               : "AI review found "
+                                            + std::to_string(count)
+                                            + " findings.");
+                            }
                             return std::string { };
                         } },
                 error);

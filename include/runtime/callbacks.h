@@ -8,7 +8,11 @@
 
 namespace imza {
 
-enum class AgentNotification { TURN_FINISHED, INPUT_REQUIRED };
+enum class AgentNotification {
+    TURN_FINISHED,
+    INPUT_REQUIRED,
+    REVIEW_PASS_FINISHED
+};
 
 using PostFn = std::function<void(std::function<void()>)>;
 using StreamFn

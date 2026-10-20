@@ -75,7 +75,9 @@ jobs:
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DIMZA_STATIC_RUNTIME=ON
-          cmake --build build --parallel
+          # Hosted runners OOM-kill the build near the imza_tests link when
+          # several -O3 test TUs compile concurrently (exit 137 mid-run).
+          cmake --build build --parallel 2
           ./build/release/imza_tests
       - name: Package
         env:
@@ -120,7 +122,9 @@ jobs:
           source /opt/rh/gcc-toolset-14/enable
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DIMZA_STATIC_RUNTIME=ON \
               -DPython3_EXECUTABLE=/usr/bin/python3.11
-          cmake --build build --parallel
+          # Hosted runners OOM-kill the build near the imza_tests link when
+          # several -O3 test TUs compile concurrently (exit 137 mid-run).
+          cmake --build build --parallel 2
           ./build/release/imza_tests
       - name: Package
         run: |
@@ -152,7 +156,9 @@ jobs:
               -DCURL_NO_CURL_CMAKE=ON \
               -DCURL_LIBRARY="$sdk_root/usr/lib/libcurl.tbd" \
               -DCURL_INCLUDE_DIR="$sdk_root/usr/include"
-          cmake --build build --parallel
+          # Heavy -O3 test TUs thrash the hosted runner to the point of the
+          # job appearing hung; low parallelism keeps memory under control.
+          cmake --build build --parallel 2
           ./build/release/imza_tests
       - name: Package
         run: |

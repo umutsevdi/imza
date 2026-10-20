@@ -514,8 +514,6 @@ namespace {
         void _build(const ViewerModal& payload)
         {
             _reset_static_scroll();
-            _viewer_export_status.clear();
-            _viewer_export_ok = true;
             if (!_viewer_export) {
                 _viewer_export = action_button("Export", [this] { _export(); });
             }
@@ -540,7 +538,6 @@ namespace {
         {
             _viewer_content.reset();
             _viewer_export.reset();
-            _viewer_export_status.clear();
             _body.reset();
             _form.clear();
             _cards.clear();
@@ -690,13 +687,14 @@ namespace {
             std::string error;
             const std::string path
                 = export_viewer_content(*_state, *payload, error);
-            if (!error.empty()) {
-                _viewer_export_status = std::move(error);
-                _viewer_export_ok     = false;
+            if (!_state->notifications) {
                 return;
             }
-            _viewer_export_status = "Exported to " + path;
-            _viewer_export_ok     = true;
+            if (!error.empty()) {
+                _state->notifications->publish(true, std::move(error));
+                return;
+            }
+            _state->notifications->publish(false, "Exported to " + path);
         }
 
         Element _viewer_body(const ViewerModal& payload)
@@ -704,11 +702,6 @@ namespace {
             Elements rows { _header_line(payload.title), separatorEmpty(),
                 _static_viewport(_viewer_content, payload.metadata,
                     _viewer_export->Render()) };
-            if (!_viewer_export_status.empty()) {
-                rows.push_back(separatorEmpty());
-                rows.push_back(
-                    status_text(_viewer_export_status, _viewer_export_ok));
-            }
             return vbox(std::move(rows)) | xflex;
         }
 
@@ -756,8 +749,6 @@ namespace {
         Element _viewer_content;
 
         Component _viewer_export;
-        std::string _viewer_export_status;
-        bool _viewer_export_ok = true;
 
         Component _exit_yes;
         Component _exit_no;

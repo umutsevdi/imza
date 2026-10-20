@@ -29,7 +29,8 @@ namespace {
     // from. Only the root attended session alerts: children and the
     // sidechat share the store, and headless installs no terminal
     // subscriber, so the alert is a no-op there.
-    void notify_user(ApplicationState& state, AgentNotification notification)
+    void notify_user(ApplicationState& state, AgentNotification notification,
+        std::optional<std::string> message = std::nullopt)
     {
         if (!state.agent_label.empty()
             || (state.runtime_flags & RuntimeFlag::ATTENDED)
@@ -37,10 +38,23 @@ namespace {
             || !state.notifications) {
             return;
         }
+        if (message.has_value()) {
+            state.notifications->alert(std::move(*message));
+            return;
+        }
         state.notifications->alert(
             notification == AgentNotification::TURN_FINISHED
                 ? "Imza finished"
                 : "Imza needs your attention");
+    }
+
+    void notify_review_pass(
+        ApplicationState& state, ReviewPass pass, bool success)
+    {
+        notify_user(state, AgentNotification::REVIEW_PASS_FINISHED,
+            pass == ReviewPass::HANDOFF
+                ? (success ? "Handoff report ready" : "Handoff report failed")
+                : (success ? "AI review finished" : "AI review failed"));
     }
 
     Environment::ChdirResult change_directory(
@@ -895,18 +909,21 @@ std::optional<std::size_t> run_review_pass(
             if (result.status != Status::OK && !truncated) {
                 state_ptr->session->set_error(
                     label + " failed: " + error_text(result.status));
+                notify_review_pass(*state_ptr, pass, false);
                 return;
             }
             std::string parse_error;
             if (!truncated) {
                 parse_error = complete(result.output);
                 if (parse_error.empty()) {
+                    notify_review_pass(*state_ptr, pass, true);
                     return;
                 }
             }
             if (!retry) {
                 state_ptr->session->set_error(
                     truncated ? error_text(Status::TRUNCATED) : parse_error);
+                notify_review_pass(*state_ptr, pass, false);
                 return;
             }
             // One deterministic rerun without reasoning recovers both a
@@ -931,6 +948,7 @@ std::optional<std::size_t> run_review_pass(
                 if (!rerun) {
                     state_ptr->session->set_error(
                         retry_error.empty() ? failure_message : retry_error);
+                    notify_review_pass(*state_ptr, pass, false);
                 }
             });
         });
@@ -974,6 +992,10 @@ void run_handoff(ApplicationState& state)
                 }
                 report += "\n";
                 state_ptr->session->append_handoff_report(std::move(report));
+                if (state_ptr->notifications) {
+                    state_ptr->notifications->publish(
+                        false, "Handoff report saved.");
+                }
                 return std::string { };
             } },
         error);

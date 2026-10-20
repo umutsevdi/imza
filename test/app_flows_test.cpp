@@ -217,3 +217,183 @@ TEST_CASE("new session clears every conversation-scoped surface")
     CHECK(state->permissions->snapshot()->empty());
     CHECK(state->session->has_items() == false);
 }
+
+namespace {
+
+const char* review_diff()
+{
+    return "diff --git a/file.cpp b/file.cpp\n"
+           "--- a/file.cpp\n+++ b/file.cpp\n@@ -1,1 +1,2 @@\n same\n+added\n";
+}
+
+std::string findings_reply()
+{
+    return "{\"findings\":[{\"file\":\"file.cpp\",\"side\":\"new\","
+           "\"line\":2,\"severity\":\"P1\",\"body\":\"oops\"}]}";
+}
+
+// test_config() carries no endpoint, so the pass workers would refuse
+// with a configuration error before reaching the stream stub.
+imza::Config review_pass_config()
+{
+    imza::Config cfg;
+    imza::Connection conn;
+    conn.id       = "test";
+    conn.endpoint = "https://example.test/v1/chat/completions";
+    cfg.providers.push_back(conn);
+    cfg.last_used = imza::LastUsed { "test", "m" };
+    return cfg;
+}
+
+std::string toast_text(const imza::ApplicationState& state)
+{
+    std::string text;
+    for (const imza::Notification& entry :
+        *state.notifications->notifications()) {
+        if (!text.empty()) {
+            text += "\n";
+        }
+        text += entry.description;
+    }
+    return text;
+}
+
+} // namespace
+
+TEST_CASE("a finished review pass alerts and toasts the attended root")
+{
+    auto pump  = std::make_shared<imza::test::PostPump>();
+    auto state = imza::test::make_test_state(
+        [pump](std::function<void()> task) { pump->fn()(std::move(task)); },
+        review_pass_config(),
+        [](const imza::ChatRequest&, const imza::StreamCallback& cb) {
+            cb(imza::make_delta_event(findings_reply()));
+            cb(imza::make_done_event());
+            return imza::Status::OK;
+        });
+    imza::test::wait_for_environment(*state);
+    state->review->set_result(imza::parse_git_diff(review_diff()));
+    std::vector<std::string> alerts;
+    auto alerts_subscription = state->notifications->subscribe_to_alert(
+        [&alerts](const std::string& message) { alerts.push_back(message); });
+
+    std::string error;
+    (void)imza::run_review_pass(*state,
+        imza::ReviewPassRequest { .pass = imza::ReviewPass::FINDINGS,
+            .prompt                     = "review this",
+            .label                      = "AI review",
+            .complete =
+                [state](std::string output) {
+                    const imza::ReviewSubsystem::Snapshot current
+                        = state->review->snapshot();
+                    if (!current.review) {
+                        return std::string { };
+                    }
+                    imza::AiReviewParseResult parsed
+                        = imza::parse_ai_review_response(
+                            output, *current.review);
+                    if (auto* parse_error = std::get_if<std::string>(&parsed)) {
+                        return std::move(*parse_error);
+                    }
+                    std::vector<imza::ReviewCommentDraft> drafts = std::move(
+                        std::get<std::vector<imza::ReviewCommentDraft>>(
+                            parsed));
+                    const std::size_t count = drafts.size();
+                    state->review->add_comments(std::move(drafts));
+                    if (state->notifications) {
+                        state->notifications->publish(false,
+                            count == 1 ? "AI review found 1 finding."
+                                       : "AI review found "
+                                    + std::to_string(count) + " findings.");
+                    }
+                    return std::string { };
+                } },
+        error);
+    CHECK(error.empty());
+    REQUIRE(pump->wait_for([&] { return alerts.size() == 1; }));
+    CHECK(alerts.front() == "AI review finished");
+    CHECK(toast_text(*state) == "AI review found 1 finding.");
+    CHECK(state->session->error().empty());
+
+    imza::run_handoff(*state);
+    REQUIRE(pump->wait_for([&] { return alerts.size() == 2; }));
+    CHECK(alerts.back() == "Handoff report ready");
+    REQUIRE(pump->wait_for(
+        [&] { return !state->session->snapshot().documents.empty(); }));
+    CHECK(
+        toast_text(*state).find("Handoff report saved.") != std::string::npos);
+}
+
+TEST_CASE("a failed review pass rings without adding a second toast")
+{
+    // Truncation with retry disabled: set_error already publishes the
+    // error toast, so the pass failure must only add the bell.
+    auto pump  = std::make_shared<imza::test::PostPump>();
+    auto state = imza::test::make_test_state(
+        [pump](std::function<void()> task) { pump->fn()(std::move(task)); },
+        review_pass_config(),
+        [](const imza::ChatRequest&, const imza::StreamCallback& cb) {
+            cb(imza::make_delta_event("{\"findings\":[{\"file\":\"a"));
+            cb(imza::make_error_event(imza::Status::TRUNCATED, "cut off"));
+            cb(imza::make_done_event());
+            return imza::Status::OK;
+        });
+    imza::test::wait_for_environment(*state);
+    state->review->set_result(imza::parse_git_diff(review_diff()));
+    std::vector<std::string> alerts;
+    auto alerts_subscription = state->notifications->subscribe_to_alert(
+        [&alerts](const std::string& message) { alerts.push_back(message); });
+
+    std::string error;
+    (void)imza::run_review_pass(*state,
+        imza::ReviewPassRequest { .pass = imza::ReviewPass::FINDINGS,
+            .prompt                     = "review this",
+            .label                      = "AI review",
+            .complete
+            = [](std::string) -> std::string { return std::string { }; },
+            .retry = false },
+        error);
+
+    REQUIRE(pump->wait_for([&] { return !state->session->error().empty(); }));
+    CHECK(state->session->error().find("truncated") != std::string::npos);
+    REQUIRE(pump->wait_for([&] { return alerts.size() == 1; }));
+    CHECK(alerts.front() == "AI review failed");
+    // Exactly one error toast, from set_error itself.
+    const auto entries = state->notifications->notifications();
+    REQUIRE(entries->size() == 1);
+    CHECK(entries->front().error);
+}
+
+TEST_CASE("a cancelled review pass stays silent")
+{
+    auto pump  = std::make_shared<imza::test::PostPump>();
+    auto state = imza::test::make_test_state(
+        [pump](std::function<void()> task) { pump->fn()(std::move(task)); },
+        review_pass_config(),
+        [](const imza::ChatRequest&, const imza::StreamCallback& cb) {
+            cb(imza::make_delta_event(findings_reply()));
+            return imza::Status::CANCELLED;
+        });
+    imza::test::wait_for_environment(*state);
+    state->review->set_result(imza::parse_git_diff(review_diff()));
+    std::vector<std::string> alerts;
+    auto alerts_subscription = state->notifications->subscribe_to_alert(
+        [&alerts](const std::string& message) { alerts.push_back(message); });
+
+    std::string error;
+    (void)imza::run_review_pass(*state,
+        imza::ReviewPassRequest { .pass = imza::ReviewPass::FINDINGS,
+            .prompt                     = "review this",
+            .label                      = "AI review",
+            .complete
+            = [](std::string) -> std::string { return std::string { }; },
+            .retry = false },
+        error);
+
+    REQUIRE(pump->wait_for([&] {
+        return !state->review->snapshot().findings.task_id.has_value();
+    }));
+    CHECK(alerts.empty());
+    CHECK(state->session->error().empty());
+    CHECK(toast_text(*state).empty());
+}
