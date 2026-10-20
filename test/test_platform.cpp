@@ -265,12 +265,10 @@ std::string print_cwd_command()
 
 std::string failing_command()
 {
-    // Both exit non-zero when the name is not found and are catalogued
-    // read-only, so the gate never prompts.
 #ifdef _WIN32
     return "where imza-no-such-program";
 #else
-    return "which imza-no-such-program";
+    return "false";
 #endif
 }
 

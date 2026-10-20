@@ -7,6 +7,12 @@
 #include "network/network.h"
 #include "network/sse_parse.h"
 
+struct JsonTestPayload {
+    std::string name;
+    int count = 0;
+    std::optional<int> note;
+};
+
 namespace {
 
 std::vector<imza::StreamEvent> parse_all(const imza::Provider& p,
@@ -78,12 +84,6 @@ std::size_t len(const imza::JsonValue* v)
     }
     return 0;
 }
-
-struct JsonTestPayload {
-    std::string name;
-    int count = 0;
-    std::optional<int> note;
-};
 
 } // namespace
 

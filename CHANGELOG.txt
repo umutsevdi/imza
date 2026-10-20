@@ -20,11 +20,11 @@ Changes:
     /variant, and so on; a typo gets a suggestion.
   - Increased subagent limit to 8.
   - Added a central in-app notification system.
-  - Fixed the chat input cursor disappearing or blinking.
   - Imza is now installable with Homebrew: `brew install umutsevdi/imza/imza`;
     every release updates the cask automatically.
-  - Improved performance during diff scans.
   - Added arm64 Linux packages.
+  - Improved performance during diff scans.
+  - Fixed the chat input cursor disappearing or blinking.
 
 -------------------------------------------------------------------------------
 0.6.4 - 2026-10-17
