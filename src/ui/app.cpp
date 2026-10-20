@@ -556,6 +556,7 @@ namespace {
             if (const auto mode = workflow_mode(phase)) {
                 _state->session->set_mode(*mode);
             }
+            _state->review->set_active(phase == WorkflowPhase::REVIEW);
             if (phase != WorkflowPhase::REVIEW) {
                 _attach_chat();
             }

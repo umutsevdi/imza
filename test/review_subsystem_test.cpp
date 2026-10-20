@@ -219,6 +219,7 @@ TEST_CASE("ReviewSubsystem reloads the repository on its own worker")
     imza::ReviewSubsystem review;
     CHECK(review.snapshot().status == imza::ReviewSubsystem::LoadStatus::IDLE);
 
+    review.set_active(true);
     review.reload(root);
     REQUIRE(imza::test::wait_until([&] {
         return review.snapshot().status
@@ -237,5 +238,35 @@ TEST_CASE("ReviewSubsystem reloads the repository on its own worker")
         const auto current = review.snapshot();
         return current.review != nullptr && current.review->files.size() == 2;
     }));
+    review.stop();
+}
+
+TEST_CASE("ReviewSubsystem defers the repository load until it is visible")
+{
+    const imza::test::TempDir dir;
+    const std::filesystem::path root = dir.path;
+    const auto git                   = [&](const std::string& command) {
+        return imza::command_ok(imza::run_command(
+            "git " + command, std::chrono::seconds { 10 }, root));
+    };
+    REQUIRE(git("init -q"));
+    imza::test::write_file(root / "a.txt", "one\n");
+    REQUIRE(git("add a.txt"));
+    REQUIRE(git("-c user.email=t@t -c user.name=t -c commit.gpgsign=false "
+                "commit -qm init"));
+    imza::test::write_file(root / "a.txt", "one\ntwo\n");
+
+    imza::ReviewSubsystem review;
+    CHECK_FALSE(review.active());
+
+    review.reload(root);
+    CHECK(review.snapshot().status == imza::ReviewSubsystem::LoadStatus::IDLE);
+
+    review.set_active(true);
+    REQUIRE(imza::test::wait_until([&] {
+        return review.snapshot().status
+            == imza::ReviewSubsystem::LoadStatus::LOADED;
+    }));
+    CHECK(review.snapshot().review != nullptr);
     review.stop();
 }

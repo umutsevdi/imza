@@ -232,3 +232,26 @@ TEST_CASE("interrupt snaps the playout instead of draining")
         = imza::test::without_ansi(to_text(chat->Render(), 100, 40));
     CHECK(rendered.find("interrupt sentinel") != std::string::npos);
 }
+
+TEST_CASE("busy chat footer shows the phase hint without a progress sweep")
+{
+    auto state = imza::test::make_test_state();
+    state->session->begin_send("keep working");
+    state->session->append_item(imza::AssistantTurn { });
+    state->session->set_phase(imza::Session::Phase::STREAMING);
+
+    auto chat
+        = imza::make_chat(state, [] { return imza::test::wide_layout(); });
+    const std::string rendered
+        = imza::test::without_ansi(to_text(chat->Render(), 100, 40));
+
+    bool seen_hint = false;
+    for (const std::string& line : imza::split_lines(rendered)) {
+        if (line.find("Ctrl+S Sidechat") == std::string::npos) {
+            continue;
+        }
+        seen_hint = true;
+        CHECK(line.find("─") == std::string::npos);
+    }
+    CHECK(seen_hint);
+}

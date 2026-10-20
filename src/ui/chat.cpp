@@ -86,34 +86,6 @@ namespace {
         return " " + elapsed_text(*elapsed);
     }
 
-    Element queued_indicator(int frame)
-    {
-        constexpr int period = PROCESS_PERIOD_TICKS;
-        const auto triangle  = [](int t, int p) {
-            t %= 2 * p;
-            if (t < 0) {
-                t += 2 * p;
-            }
-            return t < p ? t : 2 * p - t;
-        };
-        const int travel = triangle(frame, period);
-        const int half   = std::max(1, period / 2);
-        const int width  = 1
-            + std::min(PROCESS_MAX_BLOCKS - 1,
-                triangle(travel, half) * PROCESS_MAX_BLOCKS / half);
-        const int center = std::min(
-            PROCESS_TRACK_BLOCKS - 1, travel * PROCESS_TRACK_BLOCKS / period);
-        const int begin
-            = std::clamp(center - width / 2, 0, PROCESS_TRACK_BLOCKS - width);
-        Elements blocks;
-        for (int i = 0; i < PROCESS_TRACK_BLOCKS; ++i) {
-            const bool filled = i >= begin && i < begin + width;
-            blocks.push_back(
-                text("─") | color(filled ? HL_GREEN : PANEL_FG_DIM));
-        }
-        return hbox(std::move(blocks));
-    }
-
     // Spinner row shown while the agent works: spinner, then a status
     // label or button; the interrupt hint trails everything but the
     // subagent row, which renders alone.
@@ -599,12 +571,7 @@ namespace {
                 ? _hints.phase_line_fn()
                 : _hints.phase_line;
             if (!phase_line.empty()) {
-                if (busy) {
-                    hints.push_back(hbox({ queued_indicator(_indicator_tick()),
-                        filler(), text(phase_line) | dim }));
-                } else {
-                    hints.push_back(hint_bar(phase_line));
-                }
+                hints.push_back(hint_bar(phase_line));
             }
             if (!hints.empty()) {
                 bottom.push_back(vbox(std::move(hints)) | xflex);
@@ -771,11 +738,6 @@ namespace {
         int _spinner_step() const
         {
             return static_cast<int>(_animation_ms.count()) / SPINNER_FRAME_MS;
-        }
-
-        int _indicator_tick() const
-        {
-            return static_cast<int>(_animation_ms.count()) / PROCESS_TICK_MS;
         }
 
     private:

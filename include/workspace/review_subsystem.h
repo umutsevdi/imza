@@ -88,6 +88,10 @@ public:
 
     Snapshot snapshot() const;
     std::vector<ReviewComment> comments() const;
+    // The repository diff is fetched only for a visible pane.
+    bool active() const;
+    // Requests arriving while inactive are replayed on the next activation.
+    void set_active(bool active);
     // Loads the repository review for `root` on a component-owned worker.
     // Coalesces: a request arriving mid-load reruns once with the newest
     // root. Empty `root` is a no-op. The tab starts no thread.
@@ -118,6 +122,7 @@ private:
     std::filesystem::path _reload_root;
     bool _reload_pending = false;
     bool _reload_running = false;
+    bool _active         = false;
     std::jthread _worker;
     Signal<> _changed;
 };

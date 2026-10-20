@@ -120,6 +120,38 @@ namespace {
             && parse_range(new_part, hunk.new_start, hunk.new_count);
     }
 
+    std::optional<std::filesystem::path> resolve_git_directory(
+        const std::filesystem::path& root)
+    {
+        std::error_code ec;
+        std::filesystem::path git_directory = root / ".git";
+        if (std::filesystem::is_directory(git_directory, ec) && !ec) {
+            return git_directory;
+        }
+        if (!std::filesystem::is_regular_file(git_directory, ec) || ec) {
+            return std::nullopt;
+        }
+        std::ifstream pointer(git_directory);
+        std::string line;
+        if (!std::getline(pointer, line)) {
+            return std::nullopt;
+        }
+        std::string_view target(trim(line));
+        constexpr std::string_view prefix = "gitdir:";
+        if (!target.starts_with(prefix)) {
+            return std::nullopt;
+        }
+        target = trim(target.substr(prefix.size()));
+        if (target.empty()) {
+            return std::nullopt;
+        }
+        std::filesystem::path resolved(target);
+        if (resolved.is_relative()) {
+            resolved = root / resolved;
+        }
+        return resolved;
+    }
+
 } // namespace
 
 std::vector<ChangedFile> parse_git_status(std::string_view status)
@@ -147,28 +179,12 @@ std::optional<std::uint64_t> git_metadata_stamp(
     const std::filesystem::path& root)
 {
     std::error_code ec;
-    std::filesystem::path git_directory = root / ".git";
-    if (std::filesystem::is_regular_file(git_directory, ec)) {
-        std::ifstream pointer(git_directory);
-        std::string line;
-        if (!std::getline(pointer, line)) {
-            return std::nullopt;
-        }
-        std::string_view target(trim(line));
-        constexpr std::string_view prefix = "gitdir:";
-        if (!target.starts_with(prefix)) {
-            return std::nullopt;
-        }
-        target = trim(target.substr(prefix.size()));
-        if (target.empty()) {
-            return std::nullopt;
-        }
-        std::filesystem::path resolved(target);
-        if (resolved.is_relative()) {
-            resolved = root / resolved;
-        }
-        git_directory = std::move(resolved);
+    const std::optional<std::filesystem::path> resolved
+        = resolve_git_directory(root);
+    if (!resolved) {
+        return std::nullopt;
     }
+    const std::filesystem::path& git_directory = *resolved;
 
     std::uint64_t stamp = FNV_OFFSET;
     bool found          = false;
@@ -194,6 +210,24 @@ std::optional<std::uint64_t> git_metadata_stamp(
         return std::nullopt;
     }
     return stamp;
+}
+
+bool git_index_locked(
+    const std::filesystem::path& root, std::chrono::seconds max_age)
+{
+    const std::optional<std::filesystem::path> git_directory
+        = resolve_git_directory(root);
+    if (!git_directory) {
+        return false;
+    }
+    std::error_code ec;
+    const auto lock    = *git_directory / "index.lock";
+    const auto written = std::filesystem::last_write_time(lock, ec);
+    if (ec) {
+        return false;
+    }
+    const auto age = std::filesystem::file_time_type::clock::now() - written;
+    return age < max_age;
 }
 
 ChangeSummary summarize_git_diff(std::string_view diff)
@@ -363,8 +397,14 @@ std::optional<std::string> git_working_diff(
     if (options.renames) {
         flags += " --find-renames --find-copies";
     }
+    if (options.ignore_submodules) {
+        flags += " --ignore-submodules=dirty";
+    }
     if (options.numstat) {
-        flags += " --numstat --patch";
+        flags += " --numstat";
+    }
+    if (options.patch) {
+        flags += " --patch";
     }
     CommandResult diff
         = run_command(prefix + flags + " HEAD --", std::chrono::seconds { 10 });

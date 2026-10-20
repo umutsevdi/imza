@@ -167,8 +167,8 @@ namespace {
 
 ReviewLoadResult load_repository_review(const std::filesystem::path& root)
 {
-    const std::optional<std::string> diff
-        = git_working_diff(root, { .renames = true });
+    const std::optional<std::string> diff = git_working_diff(
+        root, { .renames = true, .patch = true, .ignore_submodules = true });
     if (!diff.has_value()) {
         return "Git diff could not be loaded.";
     }
@@ -332,6 +332,31 @@ std::vector<ReviewComment> ReviewSubsystem::comments() const
 
 ReviewSubsystem::~ReviewSubsystem() { stop(); }
 
+bool ReviewSubsystem::active() const
+{
+    std::lock_guard lock(_mutex);
+    return _active;
+}
+
+void ReviewSubsystem::set_active(bool active)
+{
+    bool start = false;
+    {
+        std::lock_guard lock(_mutex);
+        if (_active == active) {
+            return;
+        }
+        _active = active;
+        start   = active && _reload_pending;
+        if (!active) {
+            _reload_pending = false;
+        }
+    }
+    if (start) {
+        _maybe_start_worker();
+    }
+}
+
 void ReviewSubsystem::reload(std::filesystem::path root)
 {
     if (root.empty()) {
@@ -341,6 +366,9 @@ void ReviewSubsystem::reload(std::filesystem::path root)
         std::lock_guard lock(_mutex);
         _reload_root    = std::move(root);
         _reload_pending = true;
+        if (!_active) {
+            return;
+        }
     }
     _maybe_start_worker();
 }

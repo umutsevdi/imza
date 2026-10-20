@@ -558,23 +558,29 @@ void Environment::_start_git_worker()
             if (!has_root) {
                 continue;
             }
+            const std::filesystem::path& root
+                = observed_workspace->project_root.value();
+            if (git_index_locked(root)) {
+                continue;
+            }
             const CommandResult status
-                = run_command("git status --porcelain=v1 --untracked-files=all",
-                    std::chrono::seconds { 1 });
+                = run_command("git status --porcelain=v1 --untracked-files=all "
+                              "--ignore-submodules=dirty",
+                    std::chrono::seconds { 5 });
             const CommandResult branch = run_command(
-                "git branch --show-current", std::chrono::seconds { 1 });
-            const std::optional<std::string> diff
-                = git_working_diff(observed_workspace->project_root.value(),
-                    { .renames = true, .numstat = true });
+                "git branch --show-current", std::chrono::seconds { 5 });
+            const std::optional<std::string> diff = git_working_diff(root,
+                { .renames             = true,
+                    .numstat           = true,
+                    .patch             = true,
+                    .ignore_submodules = true });
             if (command_ok(status) && command_ok(branch) && diff.has_value()) {
                 std::vector<ChangedFile> changed_files
                     = parse_git_status(status.output);
                 const std::string branch_name
                     = normalize_git_branch(branch.output);
                 ChangeSummary changes = summarize_git_diff(*diff);
-                summarize_untracked_files(
-                    observed_workspace->project_root.value(), changed_files,
-                    changes);
+                summarize_untracked_files(root, changed_files, changes);
                 const auto current = repository();
                 if (!current || changed_files != current->changed_files
                     || branch_name != current->branch

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -40,6 +41,11 @@ std::string normalize_git_branch(std::string_view branch);
 std::optional<std::uint64_t> git_metadata_stamp(
     const std::filesystem::path& root);
 
+// True while a git process holds the index lock. Only a lock younger than
+// `max_age` counts, so a stale one cannot disable polling forever.
+bool git_index_locked(const std::filesystem::path& root,
+    std::chrono::seconds max_age = std::chrono::seconds { 10 });
+
 struct ChangeSummary {
     std::size_t additions   = 0;
     std::size_t deletions   = 0;
@@ -54,7 +60,13 @@ void summarize_untracked_files(const std::filesystem::path& root,
 
 struct GitDiffOptions {
     bool renames = false;
-    bool numstat = false; // prepend added/deleted counts before the patch
+    bool numstat = false;
+    // The change signature hashes the patch body, so dropping it would miss
+    // an edit that leaves the counts unchanged.
+    bool patch = false;
+    // Recursing into submodules spawns one git status each and dominates the
+    // cost on a repo with many.
+    bool ignore_submodules = false;
 };
 
 std::optional<std::string> git_working_diff(

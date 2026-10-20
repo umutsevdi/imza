@@ -111,14 +111,14 @@ namespace {
             Add(_review_cancel_button);
             Add(_handoff_action_button);
             Add(_handoff_cancel_button);
-            // A repository already loaded at construction fires no change
-            // signal, so ask once here; later changes arrive by
-            // subscription.
-            _request_reload();
         }
 
         Element OnRender() override
         {
+            if (!_load_requested) {
+                _load_requested = true;
+                _request_reload();
+            }
             const ReviewSubsystem::Snapshot snapshot
                 = _state->review->snapshot();
             _consume_jump(snapshot);
@@ -1008,6 +1008,7 @@ namespace {
         std::optional<std::size_t> _pending_jump;
         std::optional<std::string> _pending_file_jump;
         std::set<std::string> _collapsed;
+        bool _load_requested = false;
         std::vector<VisibleRow> _visible;
         std::shared_ptr<const RepositoryReview> _rendered_review;
         ReviewHighlights _highlights;

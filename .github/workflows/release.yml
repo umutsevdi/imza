@@ -234,6 +234,7 @@ jobs:
           fi
           sha="$(sha256sum "$pkg" | cut -d' ' -f1)"
 
+          gh auth setup-git
           gh repo clone umutsevdi/homebrew-imza tap -- --depth 1
           cd tap
 

@@ -84,6 +84,34 @@ TEST_CASE("git diff summary counts lines and fingerprints content")
     CHECK(first.signature != second.signature);
 }
 
+TEST_CASE("git index lock is reported from the resolved git directory")
+{
+    const imza::test::TempDir root_dir;
+    const auto root = root_dir.path;
+    const auto git  = root / ".git";
+    REQUIRE(std::filesystem::create_directories(git));
+
+    CHECK_FALSE(imza::git_index_locked(root));
+    imza::test::write_file(git / "index.lock", "");
+    CHECK(imza::git_index_locked(root));
+
+    const auto old = std::filesystem::file_time_type::clock::now()
+        - std::chrono::seconds { 60 };
+    std::filesystem::last_write_time(git / "index.lock", old);
+    CHECK_FALSE(imza::git_index_locked(root));
+    CHECK(imza::git_index_locked(root, std::chrono::seconds { 120 }));
+
+    const imza::test::TempDir pointer_dir;
+    const auto pointer_root = pointer_dir.path;
+    const auto real         = pointer_dir.file("real-git");
+    REQUIRE(std::filesystem::create_directories(real));
+    imza::test::write_file(
+        pointer_root / ".git", "gitdir: " + real.string() + "\n");
+    CHECK_FALSE(imza::git_index_locked(pointer_root));
+    imza::test::write_file(real / "index.lock", "");
+    CHECK(imza::git_index_locked(pointer_root));
+}
+
 TEST_CASE("git metadata stamp tracks index and HEAD rewrites")
 {
     const imza::test::TempDir root_dir;
