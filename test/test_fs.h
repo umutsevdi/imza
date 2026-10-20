@@ -3,12 +3,12 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <string_view>
 
-#include <unistd.h>
-
 #include "platform/file_lock.h"
+#include "test_platform.h"
 
 namespace imza::test {
 
@@ -25,7 +25,7 @@ template <typename LockVariant> void release_lock(LockVariant& held)
 struct TempDir {
     TempDir()
         : path(std::filesystem::temp_directory_path()
-              / ("imza-test-" + std::to_string(::getpid()) + "-"
+              / ("imza-test-" + std::to_string(process_id()) + "-"
                   + std::to_string(++sequence())))
     {
         std::filesystem::create_directories(path);
@@ -77,33 +77,57 @@ public:
     const std::filesystem::path original;
 };
 
-// RAII isolation of Imza's data home: a fresh TempDir is exported as
-// XDG_DATA_HOME and the previous value is restored on destruction, so a
-// suite cannot leak it process-wide into the ones that follow.
+// The variables data_dir() reads to locate Imza's state root. Windows and
+// macOS resolve through APPDATA/HOME rather than XDG, so isolating only the
+// XDG variables would leave those platforms writing to the real profile.
+inline const char* data_home_variable()
+{
+#ifdef _WIN32
+    return "APPDATA";
+#elif defined(__APPLE__)
+    return "HOME";
+#else
+    return "XDG_DATA_HOME";
+#endif
+}
+
+inline const char* config_home_variable()
+{
+#ifdef _WIN32
+    return "APPDATA";
+#elif defined(__APPLE__)
+    return "HOME";
+#else
+    return "XDG_CONFIG_HOME";
+#endif
+}
+
+// RAII isolation of Imza's data home: a fresh TempDir is exported through the
+// variable data_dir() reads on this platform, and the previous value is
+// restored on destruction, so a suite cannot leak it process-wide into the
+// ones that follow.
 class IsolatedDataHome {
 public:
     IsolatedDataHome()
+        : _previous(env_value(data_home_variable()))
+        , _had_previous(!_previous.empty())
     {
-        if (const char* value = std::getenv("XDG_DATA_HOME")) {
-            _previous     = value;
-            _had_previous = true;
-        }
-        setenv("XDG_DATA_HOME", _root.path.string().c_str(), 1);
+        set_env(data_home_variable(), _root.path.string());
     }
 
     ~IsolatedDataHome()
     {
         if (_had_previous) {
-            setenv("XDG_DATA_HOME", _previous.c_str(), 1);
+            set_env(data_home_variable(), _previous);
         } else {
-            unsetenv("XDG_DATA_HOME");
+            unset_env(data_home_variable());
         }
     }
 
     IsolatedDataHome(const IsolatedDataHome&)            = delete;
     IsolatedDataHome& operator=(const IsolatedDataHome&) = delete;
 
-    // The exported XDG_DATA_HOME root; Imza's files live under imza_dir().
+    // The exported root; Imza's files live under imza_dir().
     std::filesystem::path root() const { return _root.path; }
     std::filesystem::path imza_dir() const { return _root.path / "imza"; }
 
@@ -128,26 +152,27 @@ inline std::string read_all(const std::filesystem::path& path)
         std::istreambuf_iterator<char>() };
 }
 
-// RAII isolation of the config home: a fresh TempDir is exported as
-// XDG_CONFIG_HOME and the previous value is restored on destruction. Imza
-// discovers global skills under `<config-home>/agents/skills`.
+// RAII isolation of the config home: a fresh TempDir is exported through the
+// variable the environment scan reads on this platform. Imza discovers global
+// skills under `<config-home>/agents/skills`.
 class IsolatedConfigHome {
 public:
     IsolatedConfigHome()
+        : _previous(env_value(config_home_variable()))
+        , _had_previous(!_previous.empty())
     {
-        if (const char* value = std::getenv("XDG_CONFIG_HOME")) {
-            _previous     = value;
-            _had_previous = true;
-        }
-        setenv("XDG_CONFIG_HOME", _root.path.string().c_str(), 1);
+        set_env(config_home_variable(), _root.path.string());
+        // The scan also walks `<home>/.agents/skills` and friends; point HOME
+        // at the scratch root so a developer's real skills never leak in.
+        _home = std::make_unique<ScopedEnv>("HOME", _root.path.string());
     }
 
     ~IsolatedConfigHome()
     {
         if (_had_previous) {
-            setenv("XDG_CONFIG_HOME", _previous.c_str(), 1);
+            set_env(config_home_variable(), _previous);
         } else {
-            unsetenv("XDG_CONFIG_HOME");
+            unset_env(config_home_variable());
         }
     }
 
@@ -171,6 +196,7 @@ private:
     TempDir _root;
     std::string _previous;
     bool _had_previous = false;
+    std::unique_ptr<ScopedEnv> _home;
 };
 
 } // namespace imza::test

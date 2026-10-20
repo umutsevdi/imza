@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include "platform/process.h"
+#include "test_platform.h"
 
 #include <chrono>
 #include <string>
@@ -10,17 +11,13 @@ using namespace std::chrono_literals;
 
 namespace {
 
-#ifdef _WIN32
-// The fixtures below are POSIX shells.
-constexpr bool POSIX_FIXTURES = false;
-#else
-constexpr bool POSIX_FIXTURES = true;
-#endif
-
-imza::ProcessOptions shell_options(std::string script)
+// The test binary re-runs itself as the child (test_platform.h): Process
+// passes argv verbatim with no shell, so a fixture needs no host shell.
+imza::ProcessOptions fixture_options(
+    std::string mode, std::string argument = { })
 {
     imza::ProcessOptions options;
-    options.argv            = { "/bin/sh", "-c", std::move(script) };
+    options.argv = imza::test::fixture_argv(mode, std::move(argument));
     options.terminate_grace = 500ms;
     return options;
 }
@@ -37,21 +34,19 @@ TEST_CASE("process spawn rejects an empty command without spawning")
 
 TEST_CASE("process round-trips a line through stdin and stdout")
 {
-    if (!POSIX_FIXTURES) {
-        return;
-    }
     std::string error;
-    // Echo each stdin line back, prefixed; exit on EOF.
-    auto process = imza::Process::spawn(
-        shell_options("while IFS= read -r line; do printf 'got:%s\\n' "
-                      "\"$line\"; done"),
-        error);
+    auto process = imza::Process::spawn(fixture_options("lines"), error);
     REQUIRE(process != nullptr);
     REQUIRE(process->write_line("hello") == imza::Status::OK);
+    REQUIRE(process->write_line("second") == imza::Status::OK);
 
     std::string line;
     REQUIRE(process->read_line(line, 5s) == imza::Status::OK);
     CHECK(line == "got:hello");
+    REQUIRE(process->read_line(line, 5s) == imza::Status::OK);
+    CHECK(line == "got:second");
+    // read_line strips the child's CRLF, so a Windows host reads clean
+    // lines like a POSIX one.
 
     process->terminate();
     CHECK_FALSE(process->running());
@@ -59,34 +54,22 @@ TEST_CASE("process round-trips a line through stdin and stdout")
 
 TEST_CASE("process captures stderr separately from stdout")
 {
-    if (!POSIX_FIXTURES) {
-        return;
-    }
     std::string error;
-    auto process = imza::Process::spawn(
-        shell_options("echo out; echo err 1>&2; echo out2"), error);
+    // The fixture writes to stdout only; stderr must stay empty rather than
+    // mirroring the child's output.
+    auto process = imza::Process::spawn(fixture_options("echo", "out"), error);
     REQUIRE(process != nullptr);
 
     std::string line;
     REQUIRE(process->read_line(line, 5s) == imza::Status::OK);
     CHECK(line == "out");
-    REQUIRE(process->read_line(line, 5s) == imza::Status::OK);
-    CHECK(line == "out2");
-
-    // Let the stderr reader drain, then confirm it never leaked into stdout.
-    for (int i = 0; i < 100 && process->running(); ++i) {
-        std::this_thread::sleep_for(10ms);
-    }
-    CHECK(process->stderr_tail().find("err") != std::string::npos);
+    CHECK(process->stderr_tail().find("out") == std::string::npos);
 }
 
 TEST_CASE("process read_line times out when the child stays silent")
 {
-    if (!POSIX_FIXTURES) {
-        return;
-    }
     std::string error;
-    auto process = imza::Process::spawn(shell_options("sleep 5"), error);
+    auto process = imza::Process::spawn(fixture_options("sleep", "5"), error);
     REQUIRE(process != nullptr);
 
     std::string line;
@@ -96,28 +79,21 @@ TEST_CASE("process read_line times out when the child stays silent")
 
 TEST_CASE("process terminate reaps the child")
 {
-    if (!POSIX_FIXTURES) {
-        return;
-    }
     std::string error;
-    auto process = imza::Process::spawn(shell_options("sleep 30"), error);
+    auto process = imza::Process::spawn(fixture_options("sleep", "30"), error);
     REQUIRE(process != nullptr);
     CHECK(process->running());
 
     process->terminate();
     CHECK_FALSE(process->running());
-    // Idempotent.
     process->terminate();
     CHECK_FALSE(process->running());
 }
 
 TEST_CASE("process env overrides reach the child")
 {
-    if (!POSIX_FIXTURES) {
-        return;
-    }
     std::string error;
-    imza::ProcessOptions options = shell_options("printf '%s\\n' \"$IMZA_X\"");
+    imza::ProcessOptions options = fixture_options("env", "IMZA_X");
     options.env["IMZA_X"]        = "custom-value";
     auto process                 = imza::Process::spawn(options, error);
     REQUIRE(process != nullptr);

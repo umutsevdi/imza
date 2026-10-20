@@ -216,7 +216,9 @@ else()
 endif()
 target_link_libraries(imza_tree_sitter_grammars PUBLIC tree-sitter)
 
-file(GLOB TEST_SOURCES "test/*.cpp")
+# CONFIGURE_DEPENDS: a new test file must not require a manual
+# reconfigure before it is compiled and run.
+file(GLOB TEST_SOURCES CONFIGURE_DEPENDS "test/*.cpp")
 
 # Network transport (no ftxui, no cmark)
 add_library(imza_network

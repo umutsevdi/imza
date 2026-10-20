@@ -36,10 +36,8 @@ TEST_CASE("the store publishes, dismisses by id, and bounds itself")
     CHECK(first != 0);
     CHECK(second != first);
 
-    // An empty description is not an entry.
     CHECK(store.publish(false, "") == 0);
 
-    // An unknown id is a no-op; a known one removes exactly that entry.
     store.dismiss(9999);
     CHECK(entries_of(store).size() == 2);
     store.dismiss(first);
@@ -47,7 +45,6 @@ TEST_CASE("the store publishes, dismisses by id, and bounds itself")
     REQUIRE(entries.size() == 1);
     CHECK(entries[0].description == "two");
 
-    // Past the cap the oldest entries are dropped, newest kept.
     for (std::size_t i = 0; i < imza::MAX_NOTIFICATIONS + 3; ++i) {
         store.publish(false, "n" + std::to_string(i));
     }
@@ -75,12 +72,12 @@ TEST_CASE("the error flag selects the lifetime and every entry expires")
 TEST_CASE("expiry drops only the elapsed entries")
 {
     NotificationStore store;
-    // A short window so the test does not sleep for the 5s default.
-    store.publish(false, "transient", std::chrono::milliseconds { 10 });
     store.publish(true, "standing");
 
     CHECK_FALSE(store.dismiss_expired());
-    std::this_thread::sleep_for(std::chrono::milliseconds { 30 });
+    // A zero-length window is already elapsed on the next sweep, so the
+    // test never waits on the clock.
+    store.publish(false, "expired", std::chrono::milliseconds { 0 });
     CHECK(store.dismiss_expired());
 
     const auto entries = entries_of(store);

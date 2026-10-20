@@ -5,12 +5,6 @@
 // "Connection: close". Fixtures install a Handler before start(); knobs
 // and scripted responses belong to them, transport plumbing lives here.
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <unistd.h>
-
 #include <cctype>
 #include <cstdlib>
 #include <functional>
@@ -18,7 +12,159 @@
 #include <string>
 #include <thread>
 
+// winsock2.h must precede windows.h, which other headers may pull in.
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#endif
+
+#include "test_platform.h"
+
+#ifndef _WIN32
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <unistd.h>
+#endif
+
 namespace imza::test {
+
+namespace detail {
+
+// Thin socket shim so the fixture body below reads the same on every
+// platform. Windows spells the same operations differently and needs a
+// process-wide WSAStartup before the first call.
+#ifdef _WIN32
+    using Socket                          = SOCKET;
+    constexpr Socket INVALID_SOCKET_VALUE = INVALID_SOCKET;
+
+    inline bool socket_layer_ready()
+    {
+        static const bool ready = [] {
+            WSADATA data { };
+            return WSAStartup(MAKEWORD(2, 2), &data) == 0;
+        }();
+        return ready;
+    }
+
+    inline Socket open_socket()
+    {
+        return socket_layer_ready() ? ::socket(AF_INET, SOCK_STREAM, 0)
+                                    : INVALID_SOCKET;
+    }
+    inline void close_socket(Socket handle)
+    {
+        if (handle != INVALID_SOCKET) {
+            ::closesocket(handle);
+        }
+    }
+    inline int send_bytes(Socket handle, const char* data, std::size_t size)
+    {
+        return ::send(handle, data, static_cast<int>(size), 0);
+    }
+    inline int receive_bytes(Socket handle, char* data, std::size_t size)
+    {
+        return ::recv(handle, data, static_cast<int>(size), 0);
+    }
+    inline void shutdown_socket(Socket handle) { ::shutdown(handle, SD_BOTH); }
+    inline bool set_receive_timeout(Socket handle, int seconds)
+    {
+        const DWORD timeout = static_cast<DWORD>(seconds) * 1000;
+        return ::setsockopt(handle, SOL_SOCKET, SO_RCVTIMEO,
+                   reinterpret_cast<const char*>(&timeout), sizeof(timeout))
+            == 0;
+    }
+    inline bool set_reuse_address(Socket handle)
+    {
+        const BOOL enabled = TRUE;
+        return ::setsockopt(handle, SOL_SOCKET, SO_REUSEADDR,
+                   reinterpret_cast<const char*>(&enabled), sizeof(enabled))
+            == 0;
+    }
+    inline Socket accept_socket(Socket listener)
+    {
+        return ::accept(listener, nullptr, nullptr);
+    }
+    inline bool bind_loopback(Socket handle, sockaddr_in& address)
+    {
+        return ::bind(handle, reinterpret_cast<sockaddr*>(&address),
+                   sizeof(address))
+            == 0;
+    }
+    inline bool listen_socket(Socket handle)
+    {
+        return ::listen(handle, 8) == 0;
+    }
+    inline bool bound_port(Socket handle, sockaddr_in& address)
+    {
+        int length = sizeof(address);
+        return ::getsockname(
+                   handle, reinterpret_cast<sockaddr*>(&address), &length)
+            == 0;
+    }
+#else
+    using Socket                          = int;
+    constexpr Socket INVALID_SOCKET_VALUE = -1;
+
+    inline bool socket_layer_ready() { return true; }
+    inline Socket open_socket() { return ::socket(AF_INET, SOCK_STREAM, 0); }
+    inline void close_socket(Socket handle)
+    {
+        if (handle >= 0) {
+            ::close(handle);
+        }
+    }
+    inline int send_bytes(Socket handle, const char* data, std::size_t size)
+    {
+        return static_cast<int>(::send(handle, data, size, 0));
+    }
+    inline int receive_bytes(Socket handle, char* data, std::size_t size)
+    {
+        return static_cast<int>(::recv(handle, data, size, 0));
+    }
+    inline void shutdown_socket(Socket handle)
+    {
+        ::shutdown(handle, SHUT_RDWR);
+    }
+    inline bool set_receive_timeout(Socket handle, int seconds)
+    {
+        const timeval timeout { seconds, 0 };
+        return ::setsockopt(
+                   handle, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout))
+            == 0;
+    }
+    inline bool set_reuse_address(Socket handle)
+    {
+        int enabled = 1;
+        return ::setsockopt(
+                   handle, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled))
+            == 0;
+    }
+    inline Socket accept_socket(Socket listener)
+    {
+        return ::accept(listener, nullptr, nullptr);
+    }
+    inline bool bind_loopback(Socket handle, sockaddr_in& address)
+    {
+        return ::bind(handle, reinterpret_cast<sockaddr*>(&address),
+                   sizeof(address))
+            == 0;
+    }
+    inline bool listen_socket(Socket handle)
+    {
+        return ::listen(handle, 8) == 0;
+    }
+    inline bool bound_port(Socket handle, sockaddr_in& address)
+    {
+        socklen_t length = sizeof(address);
+        return ::getsockname(
+                   handle, reinterpret_cast<sockaddr*>(&address), &length)
+            == 0;
+    }
+#endif
+
+} // namespace detail
 
 struct LoopbackRequest {
     std::string method;
@@ -31,7 +177,7 @@ struct LoopbackRequest {
 
 class LoopbackHttpServer {
 public:
-    using Handler = std::function<void(int fd, const LoopbackRequest&)>;
+    using Handler = std::function<void(detail::Socket, const LoopbackRequest&)>;
 
     // Set before start(); answers each accepted connection and may call
     // respond(). Runs on the server thread.
@@ -45,28 +191,27 @@ public:
 
     bool start()
     {
-        listen_fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
-        if (listen_fd_ < 0) {
+        listen_fd_ = detail::open_socket();
+        if (listen_fd_ == detail::INVALID_SOCKET_VALUE) {
             return false;
         }
-        int reuse = 1;
-        ::setsockopt(
-            listen_fd_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+        detail::set_reuse_address(listen_fd_);
         sockaddr_in address { };
         address.sin_family      = AF_INET;
         address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         address.sin_port        = 0;
-        if (::bind(listen_fd_, reinterpret_cast<sockaddr*>(&address),
-                sizeof(address))
-                < 0
-            || ::listen(listen_fd_, 8) < 0) {
-            ::close(listen_fd_);
-            listen_fd_ = -1;
+        if (!detail::bind_loopback(listen_fd_, address)
+            || !detail::listen_socket(listen_fd_)) {
+            detail::close_socket(listen_fd_);
+            listen_fd_ = detail::INVALID_SOCKET_VALUE;
             return false;
         }
         sockaddr_in bound { };
-        socklen_t length = sizeof(bound);
-        ::getsockname(listen_fd_, reinterpret_cast<sockaddr*>(&bound), &length);
+        if (!detail::bound_port(listen_fd_, bound)) {
+            detail::close_socket(listen_fd_);
+            listen_fd_ = detail::INVALID_SOCKET_VALUE;
+            return false;
+        }
         base_   = "http://127.0.0.1:" + std::to_string(ntohs(bound.sin_port));
         thread_ = std::thread([this] { serve(); });
         return true;
@@ -74,21 +219,21 @@ public:
 
     void stop()
     {
-        if (listen_fd_ >= 0) {
-            ::shutdown(listen_fd_, SHUT_RDWR);
+        if (listen_fd_ != detail::INVALID_SOCKET_VALUE) {
+            detail::shutdown_socket(listen_fd_);
         }
         if (thread_.joinable()) {
             thread_.join();
         }
-        if (listen_fd_ >= 0) {
-            ::close(listen_fd_);
-            listen_fd_ = -1;
+        if (listen_fd_ != detail::INVALID_SOCKET_VALUE) {
+            detail::close_socket(listen_fd_);
+            listen_fd_ = detail::INVALID_SOCKET_VALUE;
         }
     }
 
     const std::string& base_url() const { return base_; }
 
-    static void respond(int fd, const std::string& status,
+    static void respond(detail::Socket fd, const std::string& status,
         std::initializer_list<std::string> headers, const std::string& body)
     {
         std::string wire = status + "\r\nConnection: close\r\n";
@@ -99,8 +244,8 @@ public:
         wire += body;
         std::size_t sent = 0;
         while (sent < wire.size()) {
-            const ssize_t sent_now
-                = ::send(fd, wire.data() + sent, wire.size() - sent, 0);
+            const int sent_now = detail::send_bytes(
+                fd, wire.data() + sent, wire.size() - sent);
             if (sent_now <= 0) {
                 return;
             }
@@ -112,28 +257,27 @@ private:
     void serve()
     {
         for (;;) {
-            const int fd = ::accept(listen_fd_, nullptr, nullptr);
-            if (fd < 0) {
+            const detail::Socket fd = detail::accept_socket(listen_fd_);
+            if (fd == detail::INVALID_SOCKET_VALUE) {
                 return; // unblocked by stop()'s shutdown
             }
-            const timeval timeout { 5, 0 };
-            ::setsockopt(
-                fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+            detail::set_receive_timeout(fd, 5);
             LoopbackRequest request;
             if (read_request(fd, request) && handle) {
                 handle(fd, request);
             }
-            ::close(fd);
+            detail::close_socket(fd);
         }
     }
 
-    static bool read_request(int fd, LoopbackRequest& request)
+    static bool read_request(detail::Socket fd, LoopbackRequest& request)
     {
         std::string buffer;
         char chunk[4096];
         std::size_t header_end = std::string::npos;
         while ((header_end = buffer.find("\r\n\r\n")) == std::string::npos) {
-            const ssize_t received = ::recv(fd, chunk, sizeof(chunk), 0);
+            const int received
+                = detail::receive_bytes(fd, chunk, sizeof(chunk));
             if (received <= 0) {
                 return false;
             }
@@ -172,7 +316,8 @@ private:
         }
         request.body = buffer.substr(header_end + 4);
         while (request.body.size() < content_length) {
-            const ssize_t received = ::recv(fd, chunk, sizeof(chunk), 0);
+            const int received
+                = detail::receive_bytes(fd, chunk, sizeof(chunk));
             if (received <= 0) {
                 return false;
             }
@@ -181,7 +326,7 @@ private:
         return true;
     }
 
-    int listen_fd_ = -1;
+    detail::Socket listen_fd_ = detail::INVALID_SOCKET_VALUE;
     std::thread thread_;
     std::string base_;
 };
@@ -189,8 +334,8 @@ private:
 inline void allow_loopback_direct()
 {
     // Bypass any ambient proxy settings for the local fixture server.
-    ::setenv("NO_PROXY", "127.0.0.1,localhost", 1);
-    ::setenv("no_proxy", "127.0.0.1,localhost", 1);
+    set_env("NO_PROXY", "127.0.0.1,localhost");
+    set_env("no_proxy", "127.0.0.1,localhost");
 }
 
 } // namespace imza::test

@@ -4,6 +4,7 @@
 #include <ftxui/component/component_options.hpp>
 #include <ftxui/component/event.hpp>
 #include <ftxui/component/mouse.hpp>
+#include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/box.hpp>
 #include <ftxui/screen/color.hpp>
@@ -516,6 +517,12 @@ ftxui::Component make_sidechat_component(
 ftxui::Component make_build_tab(std::shared_ptr<ApplicationState> state,
     LayoutFn layout, ftxui::Component chat, ftxui::Component sidechat,
     SidechatStatus& status);
+
+// The interactive composition root: sidebar, tab bar, tab content, status
+// line and modal host stacked in the order the screen loop expects. Exposed
+// so tests exercise the real root instead of rebuilding it.
+ftxui::Component make_repl_root(
+    std::shared_ptr<ApplicationState> state, ftxui::ScreenInteractive* screen);
 
 int run_repl(std::shared_ptr<ApplicationState> state);
 

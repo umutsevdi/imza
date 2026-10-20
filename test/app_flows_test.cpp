@@ -33,7 +33,8 @@ TEST_CASE("skills modal marks bundled skills and skips their policies")
     imza::test::TempDir bundled_root;
     imza::test::write_file(bundled_root.path / "imza-docs" / "SKILL.md",
         "---\ndescription: bundled manual\n---\n\nDocs body.\n");
-    ::setenv("IMZA_BUNDLED_SKILLS", bundled_root.path.string().c_str(), 1);
+    const imza::test::ScopedEnv bundled(
+        "IMZA_BUNDLED_SKILLS", bundled_root.path.string());
 
     DataHome home;
     auto state = imza::test::make_test_state();
@@ -64,7 +65,6 @@ TEST_CASE("skills modal marks bundled skills and skips their policies")
     CHECK(state->providers->set_skill_policies(changes));
     const imza::Config config = state->providers->config();
     CHECK(config.global_skills.find("imza-docs") == config.global_skills.end());
-    ::unsetenv("IMZA_BUNDLED_SKILLS");
 }
 
 TEST_CASE("markdown output renders wrapped styled text at a fixed width")
@@ -73,7 +73,6 @@ TEST_CASE("markdown output renders wrapped styled text at a fixed width")
         imza::render_markdown_to_text("# Heading\\n\\nBody text.\\n", 40));
     CHECK(text.find("Heading") != std::string::npos);
     CHECK(text.find("Body text.") != std::string::npos);
-    // Every rendered line fits the requested width.
     for (const std::string& line :
         imza::split_lines(imza::render_markdown_to_text(
             "A paragraph that is longer than the requested wrap width "
@@ -107,9 +106,6 @@ TEST_CASE("CLI session list aligns columns without terminal tabs")
 }
 TEST_CASE("CLI opens and removes saved sessions by ID")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     DataHome home;
     imza::Session source;
     source.begin_send("remember this");
@@ -151,9 +147,6 @@ TEST_CASE("CLI opens and removes saved sessions by ID")
 
 TEST_CASE("switch_session locks the target and reports foreign locks")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     DataHome home;
     CurrentDirectory directory;
     auto state = imza::test::make_test_state();

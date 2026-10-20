@@ -46,8 +46,8 @@ imza::Status load_session(const std::filesystem::path& path,
 using DataHome = imza::test::IsolatedDataHome;
 using imza::test::CurrentDirectory;
 
-// Fill `source` as a finished one-tool session: user turn, assistant
-// stub, the request applied through Session::apply, and its filled result.
+// A finished one-tool session: user turn, assistant stub, the request
+// applied through Session::apply, and its filled result.
 void make_tool_session(const imza::ToolCallRequest& request,
     imza::ToolCall::Result result, imza::Session& source)
 {
@@ -58,8 +58,8 @@ void make_tool_session(const imza::ToolCallRequest& request,
     source.finish_session("");
 }
 
-// Save `source`, require exactly one archived session, and load it back
-// into `loaded`; `archived` receives the saved path when requested.
+// Save `source`, require exactly one archived session, load it back into
+// `loaded`, and report the saved path.
 void roundtrip(imza::Session& source, imza::Session& loaded,
     std::filesystem::path* archived = nullptr)
 {
@@ -76,9 +76,6 @@ void roundtrip(imza::Session& source, imza::Session& loaded,
 
 TEST_CASE("saved sessions continue in place and rewrite the same file")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     DataHome home;
     imza::Session source;
     source.set_title("Continued session");
@@ -96,7 +93,6 @@ TEST_CASE("saved sessions continue in place and rewrite the same file")
     const std::filesystem::path saved_path = saved.front().path;
     CHECK(saved_path.stem().string() == source.session_id());
 
-    // A re-save of the same run rewrites its own file.
     source.begin_send("follow-up");
     CHECK(source.snapshot_for_save().has_value());
     REQUIRE(imza::save_session(source) == imza::Status::OK);
@@ -115,8 +111,6 @@ TEST_CASE("saved sessions continue in place and rewrite the same file")
     std::filesystem::path workspace;
     REQUIRE(load_session(saved_path, loaded, &workspace) == imza::Status::OK);
     CHECK(workspace == directory.original);
-    // A resumed session adopts the source file stem and saves back into the
-    // same file once dirtied.
     CHECK(loaded.session_id() == saved_path.stem().string());
     const auto loaded_items = loaded.items();
     CHECK(std::get<imza::UserTurn>((*loaded_items)[0]).text == "hello");
@@ -148,17 +142,13 @@ TEST_CASE("a dangling tool call from an interrupted turn heals on restore")
 
     imza::Session loaded;
     REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
-    // The restored session must not carry pending work, or compaction
-    // and session switching stay blocked forever.
+    // Pending work would block compaction and session switching forever.
     CHECK_FALSE(loaded.has_pending_work());
     CHECK(loaded.phase() == imza::Session::Phase::IDLE);
 }
 
 TEST_CASE("empty sessions are not saved")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     DataHome home;
     imza::Session session;
     CHECK_FALSE(session.has_items());
@@ -169,9 +159,6 @@ TEST_CASE("empty sessions are not saved")
 
 TEST_CASE("session index is created and rebuilt from session files")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     DataHome home;
     imza::Session session;
     session.set_title("Indexed title");
@@ -204,9 +191,6 @@ TEST_CASE("session index is created and rebuilt from session files")
 
 TEST_CASE("concurrent session saves merge their index entries")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     DataHome home;
     constexpr int count = 8;
     std::vector<std::thread> workers;
@@ -237,9 +221,6 @@ TEST_CASE("concurrent session saves merge their index entries")
 
 TEST_CASE("saved sessions retain delegated-agent chat transcripts")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     DataHome home;
     imza::Session source;
     source.begin_send("delegate");
@@ -265,9 +246,6 @@ TEST_CASE("saved sessions retain delegated-agent chat transcripts")
 
 TEST_CASE("lua dispatch log survives session persistence")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     DataHome home;
     const imza::ToolCallRequest request { "lua",
         R"json({"script":"print(1)"})json", "", "call-1" };
@@ -293,9 +271,6 @@ TEST_CASE("lua dispatch log survives session persistence")
 
 TEST_CASE("lua return value survives session persistence")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     DataHome home;
     const imza::ToolCallRequest request { "lua",
         R"json({"script":"return {a = 1}"})json", "", "call-1" };
@@ -328,9 +303,6 @@ TEST_CASE("lua return value survives session persistence")
 
 TEST_CASE("a tool result with invalid utf-8 still loads and replays clean")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     DataHome home;
     // A truncated three-byte sequence, as a byte-sliced tool result leaves.
     const char raw[] = "table: \xe2\x9c";
@@ -349,7 +321,6 @@ TEST_CASE("a tool result with invalid utf-8 still loads and replays clean")
     REQUIRE(call.result.has_value());
     CHECK_FALSE(imza::strip_invalid_utf8(call.result->text).has_value());
 
-    // The replayed history carries no invalid byte either.
     const std::vector<imza::Message> history
         = loaded.build_history("system prompt");
     for (const imza::Message& message : history) {
@@ -359,9 +330,6 @@ TEST_CASE("a tool result with invalid utf-8 still loads and replays clean")
 
 TEST_CASE("legacy lua result without a return value still loads")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     DataHome home;
     const imza::ToolCallRequest request { "lua",
         R"json({"script":"print(1)"})json", "", "call-1" };
@@ -381,9 +349,6 @@ TEST_CASE("legacy lua result without a return value still loads")
 
 TEST_CASE("lua aggregate diffs survive session persistence")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     DataHome home;
     const imza::ToolCallRequest request { "lua",
         R"json({"script":"imza.fs.edit(...)"} )json", "", "call-1" };
@@ -413,9 +378,6 @@ TEST_CASE("lua aggregate diffs survive session persistence")
 
 TEST_CASE("canvas charts survive session persistence")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     DataHome home;
     const imza::ToolCallRequest request { "lua", "{}", "", "call-1" };
     imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT, "" };
@@ -449,9 +411,6 @@ TEST_CASE("canvas charts survive session persistence")
 
 TEST_CASE("lua aggregate diffs round-trip SKIP and clamp unknown kinds")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     DataHome home;
     const imza::ToolCallRequest request { "lua", "{}", "", "call-1" };
     imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT, "" };
@@ -502,9 +461,6 @@ TEST_CASE("lua aggregate diffs round-trip SKIP and clamp unknown kinds")
 }
 TEST_CASE("empty title is normalized in both file and index")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     DataHome home;
     imza::Session session;
     session.begin_send("hello");
@@ -521,9 +477,6 @@ TEST_CASE("empty title is normalized in both file and index")
 
 TEST_CASE("non-ASCII workspace paths round-trip as valid UTF-8")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     DataHome home;
     CurrentDirectory directory;
     const auto workspace = home.root() / "Eylül çalışma";
@@ -565,9 +518,6 @@ TEST_CASE("non-ASCII workspace paths round-trip as valid UTF-8")
 
 TEST_CASE("missing or stale workspace falls back to the current directory")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     DataHome home;
     CurrentDirectory directory;
     std::filesystem::create_directories(home.root());
@@ -606,9 +556,6 @@ TEST_CASE("missing or stale workspace falls back to the current directory")
 
 TEST_CASE("malformed field types fail the load instead of crashing")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     DataHome home;
     CurrentDirectory directory;
     std::filesystem::create_directories(home.root());
@@ -628,15 +575,12 @@ TEST_CASE("malformed field types fail the load instead of crashing")
 
 TEST_CASE("session id is generated ahead of use and adopts the stem on load")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     DataHome home;
     imza::Session session;
     const std::string initial_id = session.session_id();
     CHECK_FALSE(initial_id.empty());
-    // The id predates any traffic, so it can be attached as the gateway
-    // session header from the very first request of a run.
+    // The id predates any traffic, so the gateway session header can carry
+    // it from the first request of a run.
     session.set_title("Lifecycle test");
     session.begin_send("hello");
     CHECK(session.session_id() == initial_id);
@@ -646,8 +590,8 @@ TEST_CASE("session id is generated ahead of use and adopts the stem on load")
     CHECK(saved.front().path.stem().string() == initial_id);
     CHECK(session.snapshot_for_save() == std::nullopt);
 
-    // Starting a new session in place (the /new flow) rotates the id, so
-    // the fresh conversation cannot overwrite the archive it left behind.
+    // The /new flow reuses the object; a rotated id keeps the fresh
+    // conversation from overwriting the archive it left behind.
     const std::string pre_new_id = session.session_id();
     session.restore(imza::SessionSnapshot { });
     CHECK(session.session_id() != pre_new_id);
@@ -656,9 +600,6 @@ TEST_CASE("session id is generated ahead of use and adopts the stem on load")
 
 TEST_CASE("locked sessions block loads and deletion, then recover")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     DataHome home;
     CurrentDirectory directory;
     imza::Session source;
@@ -670,8 +611,8 @@ TEST_CASE("locked sessions block loads and deletion, then recover")
     const auto path = saved.front().path;
 
     imza::SessionStore store;
-    // A lock held by another process (simulated with a raw handle) makes
-    // activation fail and the session stay locked.
+    // A lock held by another process makes activation fail and the session
+    // stay locked.
     auto foreign = imza::acquire_file_lock(imza::lock_path_for(path),
         imza::FileLockRequest { imza::FileLockMode::EXCLUSIVE, false });
     REQUIRE(std::holds_alternative<imza::FileLock>(foreign));
@@ -679,27 +620,25 @@ TEST_CASE("locked sessions block loads and deletion, then recover")
     CHECK(store.is_locked(path));
     CHECK_FALSE(store.activate(path));
     CHECK(imza::session_file_locked(path));
-    // Reads refuse a foreign-locked file instead of blocking, and the
-    // exclusive lock also makes deletion fail.
+    // Reads refuse a foreign-locked file instead of blocking; the exclusive
+    // lock also makes deletion fail.
     imza::LoadedSession loaded;
     CHECK(imza::read_session(path, loaded) == imza::Status::CONFIG_ERROR);
     CHECK(imza::delete_saved_session(path)
         == imza::DeleteSessionResult::REMOVE_FAILED);
     CHECK(imza::saved_sessions().size() == 1);
 
-    // After the foreign lock is dropped the same probe succeeds and the
-    // session can be activated; activating another path releases the first.
+    // Activating another path releases the first.
     imza::test::release_lock(foreign);
     CHECK_FALSE(store.is_locked(path));
     REQUIRE(store.activate(path));
     CHECK(store.is_locked(path));
     const auto other = imza::sessions_dir() / "other-session.json";
     REQUIRE(store.activate(other));
-    // The previous guard was released, so the session is free again.
     CHECK_FALSE(store.is_locked(path));
     REQUIRE(store.activate(path));
-    // Deleting the active session through the store drops the guard first,
-    // so the removal succeeds; a foreign lock would still make it fail.
+    // The store drops its own guard before deleting; a foreign lock would
+    // still make the removal fail.
     CHECK(store.remove(path) == imza::DeleteSessionResult::OK);
     CHECK(imza::saved_sessions().empty());
     store.deactivate();
@@ -707,9 +646,6 @@ TEST_CASE("locked sessions block loads and deletion, then recover")
 
 TEST_CASE("native and legacy attachments survive session persistence")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     DataHome home;
     const std::string image_bytes("\x89PNG\r\n\x1a\n\0payload", 16);
     const std::string pdf_bytes("%PDF-1.7\n\0payload", 17);
@@ -786,9 +722,6 @@ TEST_CASE("native and legacy attachments survive session persistence")
 }
 TEST_CASE("plan document persists across save and restore")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     DataHome home;
     imza::Session source;
     source.begin_send("plan this");
@@ -798,8 +731,6 @@ TEST_CASE("plan document persists across save and restore")
     REQUIRE(source
             .edit_plan("# Requirements\nx", "# Requirements\nauth tokens\n", 1)
             .empty());
-    // A superseded document stays in the vector; the current plan is the
-    // back entry.
     const std::string second = skeleton + "\nextra";
     REQUIRE(source.create_plan(second).empty());
     CHECK(source.plan_doc() == second);
@@ -817,15 +748,11 @@ TEST_CASE("plan document persists across save and restore")
         == "# Requirements\nauth tokens\n\n# Approach\nx\n# Changes\nx\n"
            "# Verification\nx");
 
-    // Validation still applies to a restored session.
     CHECK_FALSE(source.create_plan("no headings").empty());
 }
 
 TEST_CASE("build decisions persist interleaved with plan revisions")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     DataHome home;
     imza::Session source;
     source.begin_send("build this");
@@ -850,15 +777,11 @@ TEST_CASE("build decisions persist interleaved with plan revisions")
     CHECK(documents->at(2).kind == imza::SessionDoc::Kind::PLAN);
     CHECK(documents->at(3).kind == imza::SessionDoc::Kind::BUILD);
     CHECK(documents->at(3).content == "second stint");
-    // The plan accessor still resolves to the last plan revision.
     CHECK(loaded.plan_doc() == imza::test::PLAN_SKELETON + "\nmore");
 }
 
 TEST_CASE("legacy plans-only transcript loads as plan documents")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     DataHome home;
     CurrentDirectory directory;
     std::filesystem::create_directories(home.root());
@@ -888,8 +811,7 @@ TEST_CASE("plan document history is not replayed into model context")
     REQUIRE(session.create_plan(skeleton).empty());
     const std::vector<imza::Message> history
         = session.build_history("system prompt");
-    // The plan rides in session state only; history carries the system
-    // prompt and the user turn, nothing about the plan.
+    // The plan rides in session state only, never in the model history.
     REQUIRE(history.size() == 1);
     CHECK(history[0].type == imza::Message::Type::SYSTEM);
     CHECK(history[0].content == "system prompt");
@@ -899,18 +821,15 @@ TEST_CASE("plan edit staleness is enforced inside the session")
 {
     imza::Session session;
     const std::string& skeleton = imza::test::PLAN_SKELETON;
-    // Creating counts as having seen the content: the edit applies.
+    // Creating counts as having seen the content.
     REQUIRE(session.create_plan(skeleton).empty());
     CHECK(session.edit_plan("x", "y", 1).empty());
 
-    // The stale-read contract lives in Session, not the bindings: a fresh
-    // session object over the same restored state has not read the plan,
-    // so its first edit is rejected until plan_doc() marks it seen.
+    // The stale-read contract lives in Session, not the bindings.
     imza::Session fresh_reader;
     imza::SessionSnapshot snapshot = session.snapshot();
     fresh_reader.restore(std::move(snapshot));
-    // restore marks the state seen (it is not a mid-turn mutation); a
-    // restored session can edit directly.
+    // restore marks the state seen, so a restored session edits directly.
     CHECK(fresh_reader.edit_plan("y", "z", 1).empty());
     CHECK(fresh_reader.plan_doc()
         == "# Requirements\nz\n"
@@ -923,11 +842,9 @@ TEST_CASE("plan submission messages are emitted once per revision in build")
     const std::string& skeleton = imza::test::PLAN_SKELETON;
     REQUIRE(session.create_plan(skeleton).empty());
 
-    // No plan staged and PLAN mode both hold nothing back for build.
     CHECK_FALSE(imza::Session { }.plan_submission_for_build().has_value());
     CHECK_FALSE(session.plan_submission_for_build().has_value());
 
-    // First build turn of a stint: the plan rides as an approval message.
     session.set_mode(imza::Session::Mode::BUILD);
     const auto submitted = session.plan_submission_for_build();
     REQUIRE(submitted.has_value());
@@ -935,10 +852,8 @@ TEST_CASE("plan submission messages are emitted once per revision in build")
     CHECK(submitted->find(skeleton) != std::string::npos);
     CHECK(submitted->ends_with("</plan>"));
 
-    // No re-emission while the plan is unchanged.
     CHECK_FALSE(session.plan_submission_for_build().has_value());
 
-    // A revision in PLAN mode re-submits with the changed wording.
     session.set_mode(imza::Session::Mode::PLAN);
     REQUIRE(
         session.edit_plan("# Requirements\nx", "# Requirements\ntokens\n", 1)
@@ -954,8 +869,8 @@ TEST_CASE("plan submission messages are emitted once per revision in build")
         imza::Session loaded;
         loaded.restore(session.snapshot());
         loaded.set_mode(imza::Session::Mode::BUILD);
-        // The submission watermark is session state, not persisted: a
-        // loaded session re-submits the plan once, the safe direction.
+        // The watermark is session state, not persisted: a loaded session
+        // re-submits once, the safe direction.
         const auto submitted = loaded.plan_submission_for_build();
         REQUIRE(submitted.has_value());
         CHECK(submitted->find("Plan approved for build: <plan>") == 0);
@@ -964,12 +879,9 @@ TEST_CASE("plan submission messages are emitted once per revision in build")
 
     SUBCASE("restoring into a reused session re-submits its plan once")
     {
-        // /new reuses the Session object, so the submission watermark must
-        // reset alongside the plan version or the restored plan is silently
-        // suppressed.
-        // The plan was submitted earlier in this test, so the watermark is
-        // non-zero; restore() must clear it or the restored plan is silently
-        // suppressed.
+        // /new reuses the Session object, so restore() must clear the
+        // submission watermark alongside the plan version or the restored
+        // plan is silently suppressed.
         session.restore(session.snapshot());
         const auto resubmitted = session.plan_submission_for_build();
         REQUIRE(resubmitted.has_value());

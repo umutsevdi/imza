@@ -17,9 +17,6 @@ using imza::test::TempDir;
 
 TEST_CASE("acquired lock blocks a second holder until released")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     const TempDir dir;
     const auto path = dir.file("mutex.lock");
     auto first      = imza::acquire_file_lock(path);
@@ -48,16 +45,18 @@ TEST_CASE("acquired lock blocks a second holder until released")
 
 TEST_CASE("lock file is removed on release and can be reacquired")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     const TempDir dir;
     const auto path = dir.file("persist.lock");
     {
         auto lock = imza::acquire_file_lock(path);
         REQUIRE(std::holds_alternative<imza::FileLock>(lock));
     }
+#ifdef _WIN32
+    // Windows locks a path-derived named mutex and never creates a file.
     CHECK_FALSE(std::filesystem::exists(path));
+#else
+    CHECK_FALSE(std::filesystem::exists(path));
+#endif
     {
         auto lock = imza::acquire_file_lock(path);
         REQUIRE(std::holds_alternative<imza::FileLock>(lock));
@@ -67,9 +66,6 @@ TEST_CASE("lock file is removed on release and can be reacquired")
 
 TEST_CASE("non-blocking request fails while another holder is live")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     const TempDir dir;
     const auto path = dir.file("try.lock");
     auto first      = imza::acquire_file_lock(path);
@@ -87,40 +83,41 @@ TEST_CASE("non-blocking request fails while another holder is live")
     auto third = imza::acquire_file_lock(
         path, imza::FileLockRequest { imza::FileLockMode::EXCLUSIVE, false });
     CHECK(std::holds_alternative<imza::FileLock>(third));
-    // The probe reports any holder, including this process.
     CHECK(imza::file_lock_held(path));
 }
 
 TEST_CASE("shared locks coexist and yield to an exclusive holder")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     const TempDir dir;
     const auto path = dir.file("shared.lock");
     auto first      = imza::acquire_file_lock(
         path, imza::FileLockRequest { imza::FileLockMode::SHARED, false });
+    REQUIRE(std::holds_alternative<imza::FileLock>(first));
+
     auto second = imza::acquire_file_lock(
         path, imza::FileLockRequest { imza::FileLockMode::SHARED, false });
-    REQUIRE(std::holds_alternative<imza::FileLock>(first));
+#ifdef _WIN32
+    // Named mutexes are exclusive only, so a shared request degrades to an
+    // exclusive one and the second holder is refused.
+    CHECK(std::holds_alternative<imza::FileLockError>(second));
+#else
     REQUIRE(std::holds_alternative<imza::FileLock>(second));
 
-    auto exclusive = imza::acquire_file_lock(
+    auto blocked = imza::acquire_file_lock(
         path, imza::FileLockRequest { imza::FileLockMode::EXCLUSIVE, false });
-    CHECK(std::holds_alternative<imza::FileLockError>(exclusive));
+    CHECK(std::holds_alternative<imza::FileLockError>(blocked));
+
+    imza::test::release_lock(second);
+#endif
 
     imza::test::release_lock(first);
-    imza::test::release_lock(second);
-    exclusive = imza::acquire_file_lock(
+    auto exclusive = imza::acquire_file_lock(
         path, imza::FileLockRequest { imza::FileLockMode::EXCLUSIVE, false });
     CHECK(std::holds_alternative<imza::FileLock>(exclusive));
 }
 
 TEST_CASE("exclusive holder blocks a shared request")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     const TempDir dir;
     const auto path = dir.file("excl.lock");
     auto first      = imza::acquire_file_lock(path);
@@ -134,5 +131,8 @@ TEST_CASE("exclusive holder blocks a shared request")
     shared = imza::acquire_file_lock(
         path, imza::FileLockRequest { imza::FileLockMode::SHARED, false });
     CHECK(std::holds_alternative<imza::FileLockError>(shared));
+#ifndef _WIN32
+    // Only the POSIX backend materializes a lock file to keep around.
     CHECK(std::filesystem::exists(path));
+#endif
 }

@@ -41,9 +41,10 @@ public:
 
     bool start()
     {
-        http_.handle = [this](int fd, const LoopbackRequest& request) {
-            handle(fd, request);
-        };
+        http_.handle
+            = [this](detail::Socket fd, const LoopbackRequest& request) {
+                  handle(fd, request);
+              };
         return http_.start();
     }
 
@@ -61,7 +62,7 @@ public:
     void revoke_access_token() { generation_.fetch_add(1); }
 
 private:
-    void handle(int fd, const LoopbackRequest& request)
+    void handle(detail::Socket fd, const LoopbackRequest& request)
     {
         if (request.path == "/mcp") {
             handle_mcp(fd, request);
@@ -129,7 +130,7 @@ private:
         LoopbackHttpServer::respond(fd, "HTTP/1.1 404 Not Found", { }, "");
     }
 
-    void handle_mcp(int fd, const LoopbackRequest& request)
+    void handle_mcp(detail::Socket fd, const LoopbackRequest& request)
     {
         const std::string expected
             = "authorization: bearer " + current_access_token();
@@ -179,7 +180,8 @@ private:
         LoopbackHttpServer::respond(fd, "HTTP/1.1 202 Accepted", { }, "");
     }
 
-    void handle_token(int fd, const std::map<std::string, std::string>& form)
+    void handle_token(
+        detail::Socket fd, const std::map<std::string, std::string>& form)
     {
         if (invalid_grant) {
             LoopbackHttpServer::respond(fd, "HTTP/1.1 400 Bad Request",

@@ -22,18 +22,6 @@
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/screen.hpp>
 
-#ifdef _WIN32
-// Windows-only tests abort here with a visible marker instead of a silent
-// early return.
-#define SKIP_ON_WIN32()                                                        \
-    do {                                                                       \
-        MESSAGE("skipped: windows-only test");                                 \
-        return;                                                                \
-    } while (false)
-#else
-#define SKIP_ON_WIN32()
-#endif
-
 namespace imza::test {
 
 // The minimal plan document the plan-validation contract accepts.

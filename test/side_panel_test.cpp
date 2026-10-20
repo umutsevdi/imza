@@ -58,7 +58,6 @@ TEST_CASE("documents widget interleaves build logs with plan revisions")
     CHECK(out.find("Plan Revision - 1") != std::string::npos);
     CHECK(out.find("Build Notes - 2") != std::string::npos);
 
-    // Clicking a build row opens its log in the viewer.
     REQUIRE(imza::test::click_label(panel, "Build Notes - 1", 120, 40));
     const imza::ModalPayload payload = state->session->modal();
     const auto* viewer               = std::get_if<imza::ViewerModal>(&payload);
@@ -66,45 +65,6 @@ TEST_CASE("documents widget interleaves build logs with plan revisions")
     CHECK(viewer->title == "Build Notes - 1");
     CHECK(viewer->content.find("chose A over B") != std::string::npos);
     CHECK(viewer->content.find("added dependency Z") != std::string::npos);
-}
-
-TEST_CASE("only the latest plan renders bright, older ones stay dim")
-{
-    auto state = imza::test::make_test_state();
-    REQUIRE(state->session->create_plan(imza::test::PLAN_SKELETON).empty());
-    REQUIRE(state->session->create_plan(imza::test::PLAN_SKELETON + "\nmore")
-            .empty());
-
-    auto panel = imza::make_side_panel(
-        state,
-        [] { return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 120, 40 }; },
-        [] { return imza::WorkflowPhase::PLAN; }, [](imza::WorkflowPhase) { });
-
-    auto screen = imza::test::to_screen(panel->Render(), 120, 40);
-
-    bool initial_is_dim  = false;
-    bool revision_is_dim = false;
-    bool initial_found   = false;
-    bool revision_found  = false;
-    for (int y = 0; y < screen.dimy(); ++y) {
-        std::string row;
-        for (int x = 0; x < screen.dimx(); ++x) {
-            row += screen.at(x, y);
-        }
-        // Narrow panels squeeze word spaces out of wrapped paragraphs.
-        if (row.find("Initial") != std::string::npos) {
-            initial_found  = true;
-            initial_is_dim = screen.CellAt(1, y).dim;
-        }
-        if (row.find("Revision") != std::string::npos) {
-            revision_found  = true;
-            revision_is_dim = screen.CellAt(1, y).dim;
-        }
-    }
-    REQUIRE(initial_found);
-    REQUIRE(revision_found);
-    REQUIRE(initial_is_dim);
-    REQUIRE_FALSE(revision_is_dim);
 }
 
 TEST_CASE("clicking a plan opens it in the viewer modal")

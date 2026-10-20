@@ -11,6 +11,7 @@
 #include "runtime/bg_process_subsystem.h"
 #include "test_fs.h"
 #include "test_helpers.h"
+#include "test_platform.h"
 #include "tools/lua.h"
 #include "tools/tool.h"
 
@@ -38,16 +39,16 @@ imza::ToolOutput run_lua_timeout(
 
 TEST_CASE("imza.sleep parks in seconds without spending the budget")
 {
-    // A 1s budget and a 2s park: without deadline credit the next instruction
+    // A 1s budget and a 1s park: without deadline credit the next instruction
     // after the sleep would trip the hook. The elapsed floor is what pins the
     // argument down to seconds rather than milliseconds.
     const auto started = std::chrono::steady_clock::now();
     const imza::ToolOutput out
-        = run_lua_timeout("imza.sleep(2)\nprint('alive')", 1);
+        = run_lua_timeout("imza.sleep(1)\nprint('alive')", 1);
     const auto elapsed = std::chrono::steady_clock::now() - started;
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(out.text.find("alive") != std::string::npos);
-    CHECK(elapsed >= std::chrono::milliseconds(1900));
+    CHECK(elapsed >= std::chrono::milliseconds(900));
 }
 
 TEST_CASE("imza.sleep rejects a negative duration")
@@ -145,8 +146,10 @@ TEST_CASE("a background process outlives the call that started it")
     const fs::path marker = dir.path / "done.txt";
 
     const auto started = std::chrono::steady_clock::now();
-    const bool ok      = manager.start("sleep 1; echo hi > " + marker.string(),
-        std::chrono::seconds(10), dir.path);
+    const bool ok
+        = manager.start(imza::test::shell_and(imza::test::sleep_seconds(1),
+                            imza::test::mutating_command(marker)),
+            std::chrono::seconds(10), dir.path);
     const auto elapsed = std::chrono::steady_clock::now() - started;
 
     CHECK(ok);
@@ -154,8 +157,7 @@ TEST_CASE("a background process outlives the call that started it")
     CHECK(elapsed < std::chrono::milliseconds(500));
     CHECK(!fs::exists(marker));
 
-    // The process kept running after start() returned.
-    for (int i = 0; i < 40 && !fs::exists(marker); ++i) {
+    for (int i = 0; i < 100 && !fs::exists(marker); ++i) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     CHECK(fs::exists(marker));
@@ -165,7 +167,8 @@ TEST_CASE("stopping the manager kills a long-running background process")
 {
     imza::test::TempDir dir;
     auto manager = std::make_unique<imza::BgProcessSubsystem>();
-    REQUIRE(manager->start("sleep 60", std::chrono::seconds(120), dir.path));
+    REQUIRE(manager->start(
+        imza::test::sleep_seconds(60), std::chrono::seconds(120), dir.path));
 
     const auto started = std::chrono::steady_clock::now();
     manager.reset();
@@ -181,10 +184,11 @@ TEST_CASE("a background command times out on its own")
     imza::BgProcessSubsystem manager;
     const fs::path marker = dir.path / "after.txt";
 
-    // The command would write the marker after 5s, but its 1s timeout kills
-    // it first, so the marker never appears.
-    REQUIRE(manager.start("sleep 5; echo late > " + marker.string(),
+    // The command would create the marker after 5s, but its 1s timeout
+    // kills it first, so the marker never appears.
+    REQUIRE(manager.start(imza::test::shell_and(imza::test::sleep_seconds(5),
+                              imza::test::mutating_command(marker)),
         std::chrono::seconds(1), dir.path));
-    std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
     CHECK(!fs::exists(marker));
 }

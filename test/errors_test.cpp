@@ -1,5 +1,6 @@
 #include "app/flows.h"
 #include "common/types.h"
+#include "loopback_http.h"
 #include "network/network.h"
 #include "network/sse_parse.h"
 #include "test_state.h"
@@ -7,14 +8,7 @@
 #include "workspace/review_subsystem.h"
 #include <doctest/doctest.h>
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
-
-#include <cstring>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -68,86 +62,52 @@ TEST_CASE("OpenAI parse turns mid-stream error blocks into ERROR events")
     CHECK(outs[0].text == "Provider had an incident");
 }
 
-struct FakeApi {
-    std::string response;
-    std::string request;
-    int port = 0;
-    int fd   = -1;
-    std::thread server;
+// One scripted response over the shared loopback fixture: the stream client
+// opens exactly one connection per call.
+struct ScriptedApi {
+    imza::test::LoopbackHttpServer server;
 
-    explicit FakeApi(std::string resp)
-        : response(std::move(resp))
+    ScriptedApi(
+        std::string status, std::vector<std::string> headers, std::string body)
     {
-        fd = ::socket(AF_INET, SOCK_STREAM, 0);
-        REQUIRE_MESSAGE(fd >= 0, std::strerror(errno));
-        sockaddr_in addr { };
-        addr.sin_family      = AF_INET;
-        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        addr.sin_port        = 0;
-        REQUIRE_MESSAGE(
-            ::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0,
-            std::strerror(errno));
-        socklen_t len = sizeof(addr);
-        ::getsockname(fd, reinterpret_cast<sockaddr*>(&addr), &len);
-        port = ntohs(addr.sin_port);
-        REQUIRE(::listen(fd, 1) == 0);
-        server = std::thread([this] { _serve(); });
+        server.handle
+            = [status = std::move(status), headers = std::move(headers),
+                  body = std::move(body)](imza::test::detail::Socket fd,
+                  const imza::test::LoopbackRequest&) {
+                  // respond() takes an initializer_list; build the wire
+                  // directly so the header vector can stay dynamic.
+                  std::string wire = status + "\r\nConnection: close\r\n";
+                  for (const std::string& header : headers) {
+                      wire += header + "\r\n";
+                  }
+                  wire += "Content-Length: " + std::to_string(body.size())
+                      + "\r\n\r\n" + body;
+                  std::size_t sent = 0;
+                  while (sent < wire.size()) {
+                      const int now = imza::test::detail::send_bytes(
+                          fd, wire.data() + sent, wire.size() - sent);
+                      if (now <= 0) {
+                          return;
+                      }
+                      sent += static_cast<std::size_t>(now);
+                  }
+              };
     }
 
-    ~FakeApi()
-    {
-        if (server.joinable()) {
-            server.join();
-        }
-        ::close(fd);
-    }
-
-    void _serve()
-    {
-        const int c = ::accept(fd, nullptr, nullptr);
-        if (c < 0) {
-            return;
-        }
-        std::string acc;
-        char buf[8192];
-        for (;;) {
-            const ssize_t n = ::recv(c, buf, sizeof(buf), 0);
-            if (n <= 0) {
-                break;
-            }
-            acc.append(buf, static_cast<size_t>(n));
-            if (acc.find("\r\n\r\n") != std::string::npos) {
-                break;
-            }
-        }
-        request     = acc;
-        ssize_t off = 0;
-        while (off < static_cast<ssize_t>(response.size())) {
-            const ssize_t n = ::send(c, response.data() + off,
-                response.size() - static_cast<size_t>(off), 0);
-            if (n <= 0) {
-                break;
-            }
-            off += n;
-        }
-        ::shutdown(c, SHUT_WR);
-        ::close(c);
-    }
+    std::string url() const { return server.base_url(); }
 };
 
 TEST_CASE("stream reports rate limit, retry-after and provider message")
 {
-    FakeApi api("HTTP/1.1 429 Too Many Requests\r\n"
-                "Content-Type: application/json\r\n"
-                "Retry-After: 7\r\n"
-                "\r\n"
-                R"({"error":{"message":"Rate limit exceeded"}})");
+    ScriptedApi api("HTTP/1.1 429 Too Many Requests",
+        { "Content-Type: application/json", "Retry-After: 7" },
+        R"({"error":{"message":"Rate limit exceeded"}})");
+    REQUIRE(api.server.start());
 
     imza::Route route;
-    route.endpoint
-        = "http://127.0.0.1:" + std::to_string(api.port) + "/chat/completions";
-    route.api     = "http://127.0.0.1:" + std::to_string(api.port);
-    route.api_key = "k";
+    route.endpoint = api.url() + "/chat/completions";
+    route.api      = api.url();
+    route.api_key  = "k";
 
     imza::ChatRequest req;
     req.model = "gpt-4o";
@@ -168,16 +128,14 @@ TEST_CASE("stream reports rate limit, retry-after and provider message")
 
 TEST_CASE("stream emits CONNECTED then parses SSE on success")
 {
-    FakeApi api("HTTP/1.1 200 OK\r\n"
-                "Content-Type: text/event-stream\r\n"
-                "\r\n"
-                "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n"
-                "data: [DONE]\n\n");
+    ScriptedApi api("HTTP/1.1 200 OK", { "Content-Type: text/event-stream" },
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n"
+        "data: [DONE]\n\n");
+    REQUIRE(api.server.start());
 
     imza::Route route;
-    route.endpoint
-        = "http://127.0.0.1:" + std::to_string(api.port) + "/chat/completions";
-    route.api_key = "k";
+    route.endpoint = api.url() + "/chat/completions";
+    route.api_key  = "k";
 
     imza::ChatRequest req;
     req.model = "gpt-4o";

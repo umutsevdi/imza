@@ -80,7 +80,6 @@ TEST_CASE("harness aliases resolve to their canonical commands")
         REQUIRE_MESSAGE(command != nullptr, c.alias);
         CHECK_MESSAGE(command->action == c.action, c.alias);
     }
-    // Aliases resolve case-insensitively like canonical names.
     CHECK(find_command("/QUIT")->action == SlashCommand::Action::EXIT);
     CHECK(find_command("/Agents")->action == SlashCommand::Action::SUBAGENTS);
     CHECK(find_command("/init") == nullptr);
@@ -100,7 +99,6 @@ TEST_CASE("alias table has no duplicates and never shadows a canonical name")
         }
     }
     CHECK(seen.size() > canonical);
-    // Every alias resolves back to the command that declares it.
     for (const SlashCommand& command : slash_commands()) {
         for (const std::string_view alias : command.aliases) {
             CHECK(find_command(alias) == &command);
@@ -115,19 +113,16 @@ TEST_CASE("match_commands ranks canonical prefixes above alias hits")
     CHECK(matches.front().command->name == "/exit");
     CHECK(matches.front().alias.empty());
 
-    // An alias prefix still finds the command, and reports the alias.
     const auto quit = match_commands("/qui");
     REQUIRE(!quit.empty());
     CHECK(quit.front().command->name == "/exit");
     CHECK(quit.front().alias == "quit");
 
-    // A canonical name always outranks an alias for the same prefix.
     const auto model = match_commands("/model");
     REQUIRE(!model.empty());
     CHECK(model.front().command->name == "/model");
     CHECK(model.front().alias.empty());
 
-    // Subsequence matching kicks in only once the query is specific.
     const auto sub = match_commands("/cmp");
     CHECK(std::ranges::any_of(sub,
         [](const CommandMatch& m) { return m.command->name == "/compact"; }));
@@ -247,14 +242,8 @@ TEST_CASE("CLI accepts multiple allowed directories")
 
 TEST_CASE("CLI config creates the file and opens an editor")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
     const imza::test::IsolatedDataHome home;
-    const char* previous_visual = std::getenv("VISUAL");
-    const std::string saved_visual
-        = previous_visual == nullptr ? "" : previous_visual;
-    setenv("VISUAL", "true", 1);
+    const imza::test::ScopedEnv visual("VISUAL", "true");
 
     char program[]         = "imza";
     char option[]          = "--config";
@@ -264,12 +253,6 @@ TEST_CASE("CLI config creates the file and opens an editor")
     CHECK_FALSE(result.continue_as_interactive);
     CHECK(result.exit_code == 0);
     CHECK(std::filesystem::is_regular_file(home.imza_dir() / "config.json"));
-
-    if (previous_visual == nullptr) {
-        unsetenv("VISUAL");
-    } else {
-        setenv("VISUAL", saved_visual.c_str(), 1);
-    }
 }
 
 TEST_CASE("CLI parses ask as an unattended Plan one-shot")
@@ -383,8 +366,7 @@ TEST_CASE("run_slash /make-skill seeds a Build-mode turn")
     CHECK(state->session->mode() == imza::Session::Mode::BUILD);
     CHECK(mode_changes > 0);
     CHECK(build_mode);
-    // The transcript records the command line; the seeded instructions
-    // ride the model history's final user message.
+    // The seeded instructions ride the model history's final user message.
     CHECK(transcript_user_turn.find("deploy with docker compose")
         != std::string::npos);
     CHECK(transcript_user_turn.find(".agents/skills") == std::string::npos);
@@ -412,8 +394,8 @@ TEST_CASE("run_slash /compact folds a forced summary into the session")
     auto state = imza::test::make_test_state(imza::test::run_immediately,
         imza::test::test_config(),
         [&](const imza::ChatRequest& request, const imza::StreamCallback& cb) {
-            // The compaction request: system prompt is the compaction
-            // prompt, single user message is the transcript.
+            // The compaction request: system prompt is the compaction prompt,
+            // the single user message is the transcript.
             if (request.messages.size() == 2
                 && request.messages[0].content.find("Summarize")
                     != std::string::npos) {
@@ -434,7 +416,6 @@ TEST_CASE("run_slash /compact folds a forced summary into the session")
     state->session->clear_error();
 
     run_slash(*state, "/compact");
-    // The worker terminalizes the compaction event when it commits.
     REQUIRE(imza::test::wait_until([&] {
         const auto items = state->session->items();
         for (const auto& item : *items) {
@@ -447,7 +428,7 @@ TEST_CASE("run_slash /compact folds a forced summary into the session")
 
     CHECK(summarizer_input.find("first user message") != std::string::npos);
     CHECK(state->session->error().empty());
-    // build_history now leads with the summary; the raw turn stays in the
+    // build_history leads with the summary; the raw turn stays in the
     // timeline but is skipped as compacted.
     const std::string prompt
         = state->session->build_history("system", imza::ApiStandard::OPENAI)
@@ -482,7 +463,6 @@ TEST_CASE("run_slash emits application effects")
     run_slash(*state, "/missing");
     CHECK(state->session->error() == "Unknown command: /missing.");
 
-    // A near miss names the command the user probably meant.
     run_slash(*state, "/quitt");
     CHECK(state->session->error()
         == "Unknown command: /quitt. Did you mean /exit (quit)?");
@@ -537,7 +517,6 @@ TEST_CASE("/cd changes the working directory and records a notice")
     REQUIRE(notice != nullptr);
     CHECK(notice->text.find("Working directory changed") != std::string::npos);
 
-    // The notice reaches the model as a tagged user message.
     const auto history
         = state->session->build_history("system", imza::ApiStandard::OPENAI);
     REQUIRE(history.size() == 2);
@@ -593,7 +572,6 @@ TEST_CASE("/cd during a turn waits in the queue")
     state->session->set_phase(imza::Session::Phase::STREAMING);
     run_slash(*state, "/cd " + target.path.string());
 
-    // Queued, not applied.
     CHECK(state->session->error().empty());
     REQUIRE(state->session->queued()->size() == 1);
     CHECK(state->session->queued()->front().text
@@ -601,7 +579,6 @@ TEST_CASE("/cd during a turn waits in the queue")
     std::error_code error;
     CHECK(std::filesystem::current_path(error) == original.original);
 
-    // Draining once idle applies it exactly once.
     state->session->set_phase(imza::Session::Phase::IDLE);
     imza::drain_queued(*state);
     CHECK(state->session->error().empty());
@@ -626,14 +603,12 @@ TEST_CASE("/auto toggles the shared approval-skipping switch")
 
     run_slash(*state, "/auto on");
     CHECK(state->permissions->skip_permissions());
-    // State changes are silent: the hint badge shows it.
     CHECK(state->session->error().empty());
 
     run_slash(*state, "/auto off");
     CHECK_FALSE(state->permissions->skip_permissions());
     CHECK(state->session->error().empty());
 
-    // Bare /auto flips to the opposite state.
     run_slash(*state, "/auto");
     CHECK(state->permissions->skip_permissions());
 }

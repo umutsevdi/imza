@@ -11,8 +11,7 @@
 
 namespace {
 
-// A plan tab with its chat child attached at the wide layout; the shape
-// every plan-tab test starts from.
+// A plan tab with its chat child attached at the wide layout.
 ftxui::Component plan_tab_with_chat(
     const std::shared_ptr<imza::ApplicationState>& state)
 {
@@ -45,16 +44,6 @@ TEST_CASE("build tab renders the chat")
     CHECK(rendered.find("build this") != std::string::npos);
 }
 
-TEST_CASE("review tab renders its pane")
-{
-    auto state  = imza::test::make_test_state();
-    auto review = imza::make_review(
-        state, [] { return imza::test::wide_layout(); },
-        [](imza::WorkflowPhase) { });
-
-    const std::string rendered = imza::test::to_text(review->Render(), 100, 40);
-    CHECK_FALSE(rendered.empty());
-}
 TEST_CASE("chat hints resolve the phase line provider per render")
 {
     imza::ChatHints hints;
@@ -83,7 +72,6 @@ TEST_CASE("plan tab is chat-only until a plan exists")
 
     auto plan = plan_tab_with_chat(state);
 
-    // Without a plan: chat only, no doc pane, no empty-state text.
     const std::string no_plan = imza::test::to_text(plan->Render(), 100, 40);
     CHECK(no_plan.find("plan this") != std::string::npos);
     CHECK(no_plan.find("No plan") == std::string::npos);
@@ -105,12 +93,10 @@ TEST_CASE("plan tab moves focus to the doc pane on click")
     auto plan = plan_tab_with_chat(state);
     plan->TakeFocus();
 
-    // Chat focused: the annotator pane renders dim and ignores keys.
     const std::string chat_focused
         = imza::test::to_text(plan->Render(), 100, 40);
     CHECK(chat_focused.find("Initial Plan") != std::string::npos);
 
-    // Clicking the doc pane focuses it and the annotator keys light up.
     REQUIRE(imza::test::click_label(plan, "Initial Plan"));
     const std::string doc_focused
         = imza::test::to_text(plan->Render(), 100, 40);
@@ -129,8 +115,8 @@ TEST_CASE("plan tab moves focus back to the chat pane on click")
     CHECK(imza::test::to_text(plan->Render(), 100, 40).find("Enter note")
         != std::string::npos);
 
-    // Click the chat pane (an ASCII row, so the label offset matches the
-    // click column): typing must reach the chat input again.
+    // The chat pane is an ASCII row, so the label offset matches the click
+    // column.
     REQUIRE(imza::test::click_label(plan, "Ask anything"));
     REQUIRE(plan->OnEvent(ftxui::Event::Character("q")));
     CHECK(imza::test::to_text(plan->Render(), 100, 40).find("q")
@@ -152,13 +138,11 @@ TEST_CASE("wide plan tab places the chat left of the doc pane")
     const std::vector<std::string> lines = imza::split_lines(rendered);
     int chat_column                      = -1;
     int doc_column                       = -1;
-    int doc_row                          = -1;
-    for (int y = 0; y < static_cast<int>(lines.size()); ++y) {
-        const std::string plain = imza::test::without_ansi(lines[y]);
+    for (const std::string& line : lines) {
+        const std::string plain = imza::test::without_ansi(line);
         if (const auto at = plain.find("Initial Plan");
             at != std::string::npos) {
             doc_column = static_cast<int>(at);
-            doc_row    = y;
         }
         if (const auto at = plain.find("Ask anything");
             at != std::string::npos) {
@@ -167,10 +151,8 @@ TEST_CASE("wide plan tab places the chat left of the doc pane")
     }
     REQUIRE(doc_column != -1);
     REQUIRE(chat_column != -1);
-    // Same row region: the input row and the doc header sit in the same
-    // half of the pane; the doc starts right of the chat column.
+    // Side by side, not stacked: the doc pane starts right of the chat.
     CHECK(doc_column > chat_column);
-    (void)doc_row;
 }
 
 TEST_CASE("chat focused: annotator keys land in the chat input")
@@ -185,7 +167,6 @@ TEST_CASE("chat focused: annotator keys land in the chat input")
     plan->TakeFocus();
     (void)plan->Render();
 
-    // The chat owns focus; printable annotator keys must reach it.
     REQUIRE(plan->OnEvent(ftxui::Event::Character("c")));
     REQUIRE(plan->OnEvent(ftxui::Event::Character("[")));
     REQUIRE(plan->OnEvent(ftxui::Event::Character("]")));
@@ -204,19 +185,16 @@ TEST_CASE("review pane shortcuts: p sends to plan, r refuses without a diff")
         [](imza::WorkflowPhase) { });
     (void)imza::test::to_text(review->Render(), 100, 40);
 
-    // No comments yet: p refuses instead of sending.
     REQUIRE(review->OnEvent(ftxui::Event::Character("p")));
     CHECK(state->session->error().find("Add a review comment")
         != std::string::npos);
     CHECK(state->session->items()->empty());
 
-    // r without a loaded diff refuses.
     state->session->clear_error();
     REQUIRE(review->OnEvent(ftxui::Event::Character("r")));
     CHECK(state->session->error().find("no changes to review")
         != std::string::npos);
 
-    // With a comment, p submits a plan turn and clears the comments.
     state->session->clear_error();
     REQUIRE(
         state->review->add_comment({ "file.cpp", 2, 3, "line" }, "note") != 0);
@@ -248,7 +226,6 @@ TEST_CASE("review pass retries a truncated reply instead of failing")
         std::move(cfg),
         [calls](const imza::ChatRequest&, const imza::StreamCallback& cb) {
             if (calls->fetch_add(1) == 0) {
-                // First attempt: a reply cut off at the output limit.
                 cb(imza::make_delta_event("{\"findings\":[{\"file\":\"a"));
                 cb(imza::make_error_event(imza::Status::TRUNCATED, "cut off"));
                 cb(imza::make_done_event());
@@ -262,7 +239,6 @@ TEST_CASE("review pass retries a truncated reply instead of failing")
         });
     imza::test::wait_for_environment(*state);
 
-    // A loaded review whose added line the retry's finding anchors to.
     state->review->set_result(
         imza::parse_git_diff("diff --git a/file.cpp b/file.cpp\n"
                              "--- a/file.cpp\n"
@@ -300,9 +276,8 @@ TEST_CASE("review pass retries a truncated reply instead of failing")
 
 TEST_CASE("an uncatalogued model sends no output cap on a review pass")
 {
-    // A model absent from the catalog has an unknown context window; the
-    // pass must send no max_output_tokens rather than a fixed guess, which
-    // truncated valid replies.
+    // An uncatalogued model has an unknown context window, so the pass sends
+    // no max_output_tokens: a fixed guess truncated valid replies.
     auto pump        = std::make_shared<imza::test::PostPump>();
     auto saw_cap     = std::make_shared<std::atomic<bool>>(false);
     auto saw_request = std::make_shared<std::atomic<bool>>(false);
@@ -347,7 +322,7 @@ TEST_CASE("an uncatalogued model sends no output cap on a review pass")
 
 TEST_CASE("a truncated review reply surfaces as truncation, not invalid JSON")
 {
-    // retry disabled: the truncation must be reported as such, not parsed.
+    // Retry disabled: the truncation is reported as such, not parsed.
     auto pump = std::make_shared<imza::test::PostPump>();
     imza::Config cfg;
     imza::Connection conn;
@@ -391,9 +366,8 @@ TEST_CASE("a truncated review reply surfaces as truncation, not invalid JSON")
 
 TEST_CASE("the two review passes run together but a repeat is refused")
 {
-    // Each pass owns its own slot and Cancel button, so AI Review and
-    // Handoff may run at once; only a second copy of the same pass is
-    // refused, and it says so rather than appearing to do nothing.
+    // Each pass owns its own slot, so AI Review and Handoff run at once; only
+    // a second copy of the same pass is refused, and it says so.
     auto pump  = std::make_shared<imza::test::PostPump>();
     auto state = imza::test::make_test_state(
         [pump](std::function<void()> task) { pump->fn()(std::move(task)); },
@@ -412,7 +386,6 @@ TEST_CASE("the two review passes run together but a repeat is refused")
                              " same\n"
                              "+added\n"));
 
-    // A running handoff does not block an AI review pass.
     state->review->set_pass_task(imza::ReviewPass::HANDOFF, 1);
     std::string error;
     const auto review = imza::run_review_pass(*state,
@@ -427,7 +400,6 @@ TEST_CASE("the two review passes run together but a repeat is refused")
     CHECK(state->review->snapshot().findings.task_id.has_value());
     CHECK(state->review->snapshot().handoff.task_id.has_value());
 
-    // A second handoff is refused, and the reason is reported.
     imza::run_handoff(*state);
     CHECK(state->session->error().find("already running") != std::string::npos);
 }

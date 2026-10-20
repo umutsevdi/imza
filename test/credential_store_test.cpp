@@ -1,10 +1,9 @@
 #include <doctest/doctest.h>
 
-#include <unistd.h>
-
 #include <string>
 
 #include "platform/credential_store.h"
+#include "test_platform.h"
 
 namespace {
 
@@ -12,7 +11,7 @@ namespace {
 std::string unique_key()
 {
     static int sequence = 0;
-    return "imza-test-" + std::to_string(::getpid()) + "-"
+    return "imza-test-" + std::to_string(imza::test::process_id()) + "-"
         + std::to_string(++sequence);
 }
 
@@ -22,7 +21,6 @@ TEST_CASE("plaintext mode never probes and stores nothing")
 {
     imza::CredentialStore store(imza::CredentialStore::Mode::PLAINTEXT);
     CHECK_FALSE(store.is_keychain_available());
-    // An explicit choice is not a degradation, so nothing is reported.
     CHECK(store.unavailable_reason().empty());
 
     imza::Status status = imza::Status::OK;

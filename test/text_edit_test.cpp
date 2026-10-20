@@ -64,7 +64,6 @@ TEST_CASE("two distant edits produce two hunks with elision between")
     const imza::DiffView diff
         = imza::make_diff_view("a.txt", old_lines, new_lines);
     const std::string kinds = kinds_of(diff);
-    // Each hunk emits its REMOVE row before its ADD rows.
     CHECK(kinds.find("-+") != std::string::npos);
     CHECK(kinds.find("+-") == std::string::npos);
     // Gap of 16 lines: 3 context on each side, 10 elided between.

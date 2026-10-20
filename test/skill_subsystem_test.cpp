@@ -4,6 +4,7 @@
 #include "loopback_http.h"
 #include "test_fs.h"
 #include "test_helpers.h"
+#include "test_platform.h"
 #include "test_state.h"
 #include "tools/skill_subsystem.h"
 #include "ui/ui.h"
@@ -18,33 +19,6 @@
 namespace {
 
 using imza::Status;
-
-struct ScopedSkillsUrl {
-    // Exports IMZA_SKILLS_URL, restoring the previous value afterwards.
-    explicit ScopedSkillsUrl(const std::string& url)
-    {
-        if (const char* previous = std::getenv("IMZA_SKILLS_URL")) {
-            _previous = previous;
-            _had      = true;
-        }
-        ::setenv("IMZA_SKILLS_URL", url.c_str(), 1);
-    }
-
-    ~ScopedSkillsUrl()
-    {
-        if (_had) {
-            ::setenv("IMZA_SKILLS_URL", _previous.c_str(), 1);
-        } else {
-            ::unsetenv("IMZA_SKILLS_URL");
-        }
-    }
-
-    ScopedSkillsUrl(const ScopedSkillsUrl&)            = delete;
-    ScopedSkillsUrl& operator=(const ScopedSkillsUrl&) = delete;
-
-    std::string _previous;
-    bool _had = false;
-};
 
 TEST_CASE("parse_skill_search reads the skills.sh payload")
 {
@@ -108,8 +82,9 @@ TEST_CASE("install_skill_files rejects unsafe paths and missing SKILL.md")
     CHECK(imza::install_skill_files(
               root.path, "demo", { { "../escape.md", "x" } }, detail)
         == Status::API_ERROR);
-    CHECK(imza::install_skill_files(
-              root.path, "demo", { { "/etc/passwd", "x" } }, detail)
+    // An absolute target is refused whatever the host's root looks like.
+    CHECK(imza::install_skill_files(root.path, "demo",
+              { { (root.path / "outside.md").string(), "x" } }, detail)
         == Status::API_ERROR);
     CHECK(imza::install_skill_files(
               root.path, "demo", { { "notes.md", "x" } }, detail)
@@ -137,8 +112,8 @@ TEST_CASE("skill registry searches and installs through the loopback server")
     imza::test::allow_loopback_direct();
     imza::test::LoopbackHttpServer server;
     std::string last_query;
-    server.handle = [&last_query](
-                        int fd, const imza::test::LoopbackRequest& req) {
+    server.handle = [&last_query](imza::test::detail::Socket fd,
+                        const imza::test::LoopbackRequest& req) {
         if (req.path == "/api/search") {
             last_query = req.query;
             imza::test::LoopbackHttpServer::respond(fd, "HTTP/1.1 200 OK",
@@ -209,7 +184,8 @@ TEST_CASE("skills modal searches as you type and installs the choice")
 {
     imza::test::allow_loopback_direct();
     imza::test::LoopbackHttpServer server;
-    server.handle = [](int fd, const imza::test::LoopbackRequest& req) {
+    server.handle = [](imza::test::detail::Socket fd,
+                        const imza::test::LoopbackRequest& req) {
         if (req.path == "/api/search") {
             imza::test::LoopbackHttpServer::respond(fd, "HTTP/1.1 200 OK",
                 { "Content-Type: application/json" },
@@ -227,11 +203,10 @@ TEST_CASE("skills modal searches as you type and installs the choice")
             fd, "HTTP/1.1 404 Not Found", { }, "{}");
     };
     REQUIRE(server.start());
-    ScopedSkillsUrl scoped(server.base_url());
+    imza::test::ScopedEnv scoped("IMZA_SKILLS_URL", server.base_url());
 
     imza::test::TempDir root;
-    imza::test::IsolatedDataHome data_home;
-    ::setenv("XDG_CONFIG_HOME", data_home.root().c_str(), 1);
+    imza::test::IsolatedConfigHome config_home;
 
     imza::test::AgentEnv env;
     imza::SkillsModal payload;
@@ -260,7 +235,6 @@ TEST_CASE("skills modal searches as you type and installs the choice")
     const std::string cleared = imza::test::to_text(modal->Render(), 80, 20);
     CHECK(cleared.find("Demo") == std::string::npos);
 
-    // Back to the first query; Enter installs the selected result.
     for (int i = 0; i < 2; ++i) {
         REQUIRE(modal->OnEvent(ftxui::Event::Backspace));
     }
@@ -275,7 +249,7 @@ TEST_CASE("skills modal searches as you type and installs the choice")
     bool installed = false;
     for (int i = 0; i < 200 && !installed; ++i) {
         installed = std::filesystem::is_regular_file(
-            data_home.root() / "agents" / "skills" / "demo" / "SKILL.md");
+            config_home.root() / "agents" / "skills" / "demo" / "SKILL.md");
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     CHECK(installed);
@@ -286,7 +260,8 @@ TEST_CASE("skill registry reports search failures without throwing")
 {
     imza::test::allow_loopback_direct();
     imza::test::LoopbackHttpServer server;
-    server.handle = [](int fd, const imza::test::LoopbackRequest&) {
+    server.handle = [](imza::test::detail::Socket fd,
+                        const imza::test::LoopbackRequest&) {
         imza::test::LoopbackHttpServer::respond(
             fd, "HTTP/1.1 500 Server Error", { }, "{}");
     };

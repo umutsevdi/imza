@@ -317,7 +317,6 @@ TEST_CASE("streamed tool call starts planning then executes in place")
     request.name = "lua";
     request.args = R"({"script":"return 1"})";
 
-    // The start event creates a single planning item with no arguments yet.
     session.apply(imza::make_tool_call_start_event(request), { });
     const auto planning_items = session.items();
     REQUIRE(planning_items->size() == 3);
@@ -325,7 +324,6 @@ TEST_CASE("streamed tool call starts planning then executes in place")
     REQUIRE(planning != nullptr);
     CHECK(planning->phase == imza::ToolCall::Phase::PLANNING);
     CHECK(planning->args.empty());
-    // A still-streaming call is not part of the model history.
     CHECK(session.build_history("system").size() == 3);
 
     // The complete call updates that same item rather than appending a new one.
@@ -338,7 +336,6 @@ TEST_CASE("streamed tool call starts planning then executes in place")
     CHECK(executing->args == request.args);
     CHECK(executing->id == planning->id);
 
-    // Now the call is part of history.
     const auto history = session.build_history("system");
     REQUIRE(history.size() == 4);
     CHECK(history[2].tool_calls.size() == 1);
@@ -378,7 +375,6 @@ TEST_CASE("expand_user_path expands only the bare home shorthand")
     CHECK(imza::expand_user_path("/abs/path") == "/abs/path");
     CHECK(imza::expand_user_path("relative/path") == "relative/path");
     CHECK(imza::expand_user_path("") == "");
-    // `~user` is not resolved.
     CHECK(imza::expand_user_path("~someone/src") == "~someone/src");
 }
 

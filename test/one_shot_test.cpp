@@ -2,6 +2,7 @@
 #include "app/flows.h"
 #include "network/json.h"
 #include "runtime/main_thread_queue.h"
+#include "test_fs.h"
 #include "test_state.h"
 
 #include <doctest/doctest.h>
@@ -131,11 +132,9 @@ TEST_CASE("one-shot reports unattended permission blocks without a modal")
 {
     // Outside the workspace and the trusted temporary root, so the write
     // gate raises ASK; without ATTENDED the run must fail closed.
-    const std::filesystem::path path = std::filesystem::path(getenv("HOME"))
-        / ("imza-one-shot-blocked-"
-            + std::to_string(
-                std::chrono::steady_clock::now().time_since_epoch().count()));
-    auto state = make_one_shot_state(
+    const imza::test::TempDir scratch;
+    const std::filesystem::path path = scratch.path / "imza-one-shot-blocked";
+    auto state                       = make_one_shot_state(
         [path](const imza::ChatRequest& request,
             const imza::StreamCallback& callback) {
             if (request.messages.back().type == imza::Message::Type::USER) {

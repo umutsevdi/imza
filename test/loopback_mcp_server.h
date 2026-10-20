@@ -39,9 +39,10 @@ public:
 
     bool start()
     {
-        http_.handle = [this](int fd, const LoopbackRequest& request) {
-            handle(fd, request);
-        };
+        http_.handle
+            = [this](detail::Socket fd, const LoopbackRequest& request) {
+                  handle(fd, request);
+              };
         return http_.start();
     }
 
@@ -50,7 +51,7 @@ public:
     std::string url() const { return http_.base_url() + "/mcp"; }
 
 private:
-    void handle(int fd, const LoopbackRequest& request)
+    void handle(detail::Socket fd, const LoopbackRequest& request)
     {
         if (request.method == "DELETE") {
             saw_delete = true;

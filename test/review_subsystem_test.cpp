@@ -230,7 +230,6 @@ TEST_CASE("ReviewSubsystem reloads the repository on its own worker")
     REQUIRE(snapshot.review->files.size() == 1);
     CHECK(snapshot.review->files[0].new_path == "a.txt");
 
-    // A second request reruns the load against the newest state.
     imza::test::write_file(root / "b.txt", "new\n");
     REQUIRE(git("add b.txt"));
     review.reload(root);

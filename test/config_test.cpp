@@ -1,7 +1,5 @@
 #include <doctest/doctest.h>
 
-#include <unistd.h>
-
 #include <array>
 #include <cstdio>
 #include <filesystem>
@@ -119,8 +117,9 @@ TEST_CASE("keychain mode omits secrets and reloads them from the store")
     if (!store.is_keychain_available()) {
         return;
     }
-    const auto path      = temp_file("keychain-mode.json");
-    const std::string id = "keychain-mode-" + std::to_string(::getpid());
+    const auto path = temp_file("keychain-mode.json");
+    const std::string id
+        = "keychain-mode-" + std::to_string(imza::test::process_id());
     imza::Config cfg;
     imza::Connection conn;
     conn.id      = id;
@@ -157,8 +156,8 @@ TEST_CASE("legacy plaintext is adopted once and dropped from the document")
     if (!store.is_keychain_available()) {
         return;
     }
-    const auto path       = temp_file("legacy-adopt.json");
-    const std::string id  = "legacy-" + std::to_string(::getpid());
+    const auto path      = temp_file("legacy-adopt.json");
+    const std::string id = "legacy-" + std::to_string(imza::test::process_id());
     const std::string key = "provider/" + id;
     CHECK(store.remove(key) == imza::Status::NOT_FOUND);
 
@@ -191,8 +190,9 @@ TEST_CASE("the keychain wins over a stale plaintext field")
     if (!store.is_keychain_available()) {
         return;
     }
-    const auto path       = temp_file("legacy-store-wins.json");
-    const std::string id  = "store-wins-" + std::to_string(::getpid());
+    const auto path = temp_file("legacy-store-wins.json");
+    const std::string id
+        = "store-wins-" + std::to_string(imza::test::process_id());
     const std::string key = "provider/" + id;
     REQUIRE(store.set(key, "fresh-key") == imza::Status::OK);
     {
@@ -401,8 +401,8 @@ TEST_CASE("load_config rejects unresolved models main provider")
 TEST_CASE("save_config creates parent directories")
 {
     auto path = std::filesystem::temp_directory_path()
-        / ("imza-config-nested-" + std::to_string(::getpid())) / "deep"
-        / "nested" / "config.json";
+        / ("imza-config-nested-" + std::to_string(imza::test::process_id()))
+        / "deep" / "nested" / "config.json";
     std::filesystem::remove_all(path.parent_path().parent_path());
 
     imza::Config cfg;

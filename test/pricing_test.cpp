@@ -1,7 +1,5 @@
 #include <doctest/doctest.h>
 
-#include <unistd.h>
-
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
@@ -99,7 +97,6 @@ TEST_CASE("pricing_table_from keys only by provider-qualified id")
             == doctest::Approx(scenario.expected.cache_write_per_1k));
         CHECK(actual.context_limit == scenario.expected.context_limit);
     }
-    // A bare id is ambiguous, so it is never indexed.
     CHECK(table.count("gpt-4o-mini") == 0);
     CHECK(table.count("claude-sonnet-4") == 0);
     CHECK(table.count("costless-model") == 0);
@@ -112,18 +109,15 @@ TEST_CASE(
     CatalogHome home;
     imza::ProviderStore store { imza::test::make_config_store() };
 
-    // Case-insensitive within the owning connection.
     const auto sonnet = store.pricing_for("Claude-Sonnet-4", "anthropic");
     CHECK(sonnet.input_per_1k == doctest::Approx(0.003));
     CHECK(sonnet.cache_write_per_1k == doctest::Approx(0.00375));
 
-    // A decorated id resolves to its base row.
     const auto decorated
         = store.pricing_for("gpt-4o-mini-2024-07-18", "openai");
     CHECK(decorated.input_per_1k == doctest::Approx(0.00015));
 
-    // The model exists under openai, not anthropic: a lookup scoped to
-    // anthropic must not resolve to openai's price.
+    // A model under openai must not resolve for an anthropic lookup.
     const auto borrowed = store.pricing_for("gpt-4o-mini", "anthropic");
     CHECK(borrowed.input_per_1k == 0.0);
     CHECK(borrowed.context_limit == 0);

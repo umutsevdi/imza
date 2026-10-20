@@ -24,6 +24,7 @@ Changes:
   - Imza is now installable with Homebrew: `brew install umutsevdi/imza/imza`;
     every release updates the cask automatically.
   - Improved performance during diff scans.
+  - Added support for arm64 Linux.
 
 -------------------------------------------------------------------------------
 0.6.4 - 2026-10-17

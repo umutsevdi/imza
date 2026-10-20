@@ -38,7 +38,6 @@ namespace {
         return config;
     }
 
-    // Manager transitions run on worker threads; poll like the manager tests.
     bool wait_state(imza::McpSubsystem& manager, const std::string& id,
         imza::McpServerState want)
     {
@@ -368,15 +367,10 @@ TEST_CASE("read-only command pair catalog is platform specific")
     CHECK_FALSE(shell_readonly_allowed(invocation("curl status")));
     CHECK_FALSE(shell_readonly_allowed(invocation("git diff --output=x.txt")));
     CHECK(shell_readonly_allowed(invocation("git diff --stat")));
-    // Removed: make -n runs $(shell ...) even in dry-run mode.
     CHECK_FALSE(shell_readonly_allowed(invocation("make -n")));
-    // Removed: whois has no literal "domain" subcommand; the domain is the
-    // operand and lands in the subcommand slot.
     CHECK_FALSE(shell_readonly_allowed(invocation("whois example.com")));
-    // Removed: terraform plan writes state and runs data sources.
     CHECK_FALSE(shell_readonly_allowed(invocation("terraform plan")));
 #ifdef _WIN32
-    // Windows /flag rows are not catalogued; the builtin list covers them.
     CHECK(shell_builtin_allowed("where"));
     CHECK(shell_builtin_allowed("netstat"));
     CHECK_FALSE(shell_readonly_allowed(invocation("systemctl status")));
@@ -412,7 +406,6 @@ TEST_CASE("read-only subcommand catalog rows match their intended commands")
              "go list", "go doc fmt" }) {
         CHECK(shell_readonly_allowed(invocation(command)));
     }
-    // Mutating siblings of the added subcommands must stay out.
     CHECK_FALSE(shell_readonly_allowed(invocation("docker run alpine")));
     CHECK_FALSE(shell_readonly_allowed(invocation("kubectl apply -f x.yaml")));
     CHECK_FALSE(shell_readonly_allowed(invocation("pip install requests")));
@@ -431,13 +424,10 @@ TEST_CASE("whole-program read-only commands are safe with any operand")
             "readelf", "nm", "seq", "expr", "sleep" }) {
         CHECK(shell_builtin_allowed(program));
     }
-    // Commands with a mutating flag or operand must stay out.
     for (std::string_view program : { "xxd", "iconv", "sort", "date", "dmesg",
              "env", "rg", "tree", "ip", "ldd" }) {
         CHECK_FALSE(shell_builtin_allowed(program));
     }
-    // Promoted commands are accepted with an operand, which the flag
-    // catalog could not match.
     const ShellAnalysis with_operand = analyze_shell("du -sh node_modules");
     CHECK(shell_builtin_allowed(with_operand.invocations.front().program));
     CHECK_FALSE(shell_readonly_allowed(with_operand.invocations.front()));
@@ -716,8 +706,8 @@ TEST_CASE("filesystem normalization resolves traversal and missing writes")
     CHECK(filesystem_target(*missing.request)
         == fixture.workspace / "nested" / "new.txt");
 
-    // Deep missing parents are fine: save_text creates every missing
-    // level, so only a non-directory ancestor can block the write.
+    // Missing parents are fine: save_text creates every level, so only a
+    // non-directory ancestor can block the write.
     const auto missing_parent = evaluate_filesystem_request(
         write_request(fixture.workspace / "absent" / "new.txt"),
         fixture.context(Session::Mode::BUILD));
@@ -732,9 +722,9 @@ TEST_CASE("filesystem normalization resolves traversal and missing writes")
 
 TEST_CASE("filesystem normalization follows symlinked targets and parents")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
+    if (!imza::test::can_create_symlinks()) {
+        SKIP_TEST("this account cannot create symlinks");
+    }
     PermissionFixture fixture;
     std::filesystem::create_directory_symlink(
         fixture.outside, fixture.workspace / "outside-link");
@@ -1016,7 +1006,6 @@ TEST_CASE("authorized_skill_path accepts only the canonical target")
               skill, { "skill", imza::json_dump(bound), "", "" })
         == canonical_skill_path(skill));
 
-    // A request aimed at a different file must not authorize this skill.
     imza::JsonValue other = imza::JsonValue::object_t { };
     {
         auto& object    = other.get<imza::JsonValue::object_t>();
@@ -1027,7 +1016,6 @@ TEST_CASE("authorized_skill_path accepts only the canonical target")
     CHECK_FALSE(authorized_skill_path(
         skill, { "skill", imza::json_dump(other), "", "" }));
 
-    // Nor one that omits the path, as an unnormalized model call does.
     CHECK_FALSE(authorized_skill_path(
         skill, { "skill", R"({"name":"docs"})", "", "" }));
 }
@@ -1036,8 +1024,8 @@ TEST_CASE("mkdir follows the write policy, remove always asks")
 {
     PermissionFixture fixture;
 
-    // mkdir is write-class: rejected in Plan, automatic inside the
-    // workspace in Build, asking outside.
+    // mkdir is write-class: rejected in Plan, automatic inside the workspace
+    // in Build, asking outside.
     const auto planned = evaluate_filesystem_request(
         mkdir_request(fixture.workspace / "new-dir"),
         fixture.context(Session::Mode::PLAN));
@@ -1055,14 +1043,12 @@ TEST_CASE("mkdir follows the write policy, remove always asks")
         fixture.context(Session::Mode::BUILD));
     CHECK(outside.decision.kind == PermissionDecision::Kind::ASK);
 
-    // remove always asks, even inside the trusted workspace in Build.
     const auto inside_remove = evaluate_filesystem_request(
         remove_request(fixture.workspace / "inside.txt"),
         fixture.context(Session::Mode::BUILD));
     CHECK(inside_remove.decision.kind == PermissionDecision::Kind::ASK);
     CHECK(inside_remove.decision.reason.find("removing") != std::string::npos);
 
-    // A directory grant suppresses the ask; a removal is then accepted.
     const PermissionGrant directory = ExternalGrant { fixture.workspace };
     const auto granted              = evaluate_filesystem_request(
         remove_request(fixture.workspace / "inside.txt"),
@@ -1088,8 +1074,8 @@ TEST_CASE("remove rejects non-empty directories and session roots")
         fixture.context(Session::Mode::BUILD));
     CHECK(empty.decision.kind == PermissionDecision::Kind::ASK);
 
-    // The working directory, the project root, and any ancestor of either
-    // are never removable, even with a grant covering them.
+    // The working directory, the project root, and their ancestors are never
+    // removable, even with a grant covering them.
     const PermissionGrant grant = ExternalGrant { fixture.root() };
     for (const auto& target : { fixture.workspace, fixture.root() }) {
         const auto result = evaluate_filesystem_request(remove_request(target),
@@ -1108,7 +1094,6 @@ TEST_CASE("remove rejects non-empty directories and session roots")
 TEST_CASE("shell deletion programs are rejected with binding guidance")
 {
     PermissionFixture fixture;
-    // Even a whole-program session grant cannot re-enable a deletion.
     const PermissionStore::Grants grants { PermissionGrant {
         ShellCommandGrant { "rm", std::nullopt } } };
     const ShellEvaluation denied = shell_policy(
@@ -1134,9 +1119,9 @@ TEST_CASE("shell deletion programs are rejected with binding guidance")
 
 TEST_CASE("skill evaluation binds approval to the canonical instruction path")
 {
-#ifdef _WIN32
-    SKIP_ON_WIN32()
-#endif
+    if (!imza::test::can_create_symlinks()) {
+        SKIP_TEST("this account cannot create symlinks");
+    }
     PermissionFixture fixture;
     const auto first  = fixture.outside / "first-skill.md";
     const auto second = fixture.outside / "second-skill.md";
@@ -1225,18 +1210,15 @@ TEST_CASE("load_mcp policy: connected accepts, offline asks, disabled and "
     REQUIRE(request != nullptr);
     CHECK(request->id == "offline");
 
-    // A startup --allow-mcp grant accepts without asking.
     CHECK(evaluate("offline", { PermissionGrant { McpGrant { "offline" } } })
               .decision.kind
         == PermissionDecision::Kind::ACCEPT);
 
-    // Disabled and failed servers never ask.
     CHECK(evaluate("idle").decision.kind == PermissionDecision::Kind::REJECT);
     const auto failed = evaluate("dead");
     CHECK(failed.decision.kind == PermissionDecision::Kind::REJECT);
     CHECK(failed.decision.reason.find("failed") != std::string::npos);
 
-    // Unknown server and missing args: not gate material, handler reports.
     CHECK(evaluate("nope").decision.kind == PermissionDecision::Kind::ACCEPT);
     CHECK(evaluate_tool_request({ "load_mcp", R"({"server":""})", "", "" },
               fixture.context(Session::Mode::PLAN), config, skills, loaded)
@@ -1253,7 +1235,6 @@ TEST_CASE("permission store covers McpGrant by exact id")
     CHECK(grants_cover(store.snapshot(), McpGrant { "exa" }));
     CHECK_FALSE(grants_cover(store.snapshot(), McpGrant { "other" }));
     CHECK_FALSE(store.install({ McpGrant { "" } }));
-    // A second install of the same grant does not grow the store.
     REQUIRE(store.install({ McpGrant { "exa" } }));
     CHECK(store.snapshot()->size() == 1);
 }
@@ -1273,7 +1254,6 @@ TEST_CASE("a loaded skill implies read-class access inside its directory")
                   ReadFileRequest { target }, fixture.context(mode, { }, dirs));
           };
 
-    // Reads inside the skill directory auto-accept in both modes.
     for (const Session::Mode mode :
         { Session::Mode::PLAN, Session::Mode::BUILD }) {
         CHECK(read_decision(mode, skill_dir / "SKILL.md", { skill_dir })
@@ -1285,19 +1265,16 @@ TEST_CASE("a loaded skill implies read-class access inside its directory")
             == PermissionDecision::Kind::ACCEPT);
     }
 
-    // Without the loaded skill the same read asks (external directory).
     CHECK(read_decision(Session::Mode::PLAN, skill_dir / "SKILL.md", { })
               .decision.kind
         == PermissionDecision::Kind::ASK);
 
-    // Unrelated directories stay gated.
     CHECK(read_decision(Session::Mode::PLAN, fixture.outside / "outside.txt",
               { skill_dir })
               .decision.kind
         == PermissionDecision::Kind::ASK);
 
-    // Mutation inside the skill directory still follows ordinary policy:
-    // writes and removes ask outside trusted roots even in Build mode.
+    // Mutation inside the skill directory still follows ordinary policy.
     const PermissionContext build
         = fixture.context(Session::Mode::BUILD, { }, { skill_dir });
     CHECK(evaluate_filesystem_request(
@@ -1320,19 +1297,16 @@ TEST_CASE("child states share the roots process and config owners")
     auto child = imza::make_child_application_state(
         *state, imza::test::run_immediately);
 
-    // Shared with the root: one process-wide owner each.
     CHECK(child->bg_processes == state->bg_processes);
     CHECK(child->config == state->config);
     CHECK(child->providers == state->providers);
     CHECK(child->environment == state->environment);
     CHECK(child->permissions == state->permissions);
 
-    // Owned per state: conversation-local components.
     CHECK(child->session != state->session);
     CHECK(child->runner != state->runner);
 
-    // A child renders no review pane and spawns no subagents of its own;
-    // both stay null instead of allocating a component nothing reads.
+    // A child renders no review pane and spawns no subagents of its own.
     CHECK(child->review == nullptr);
     CHECK(child->subagents == nullptr);
 }

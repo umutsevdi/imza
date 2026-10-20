@@ -125,11 +125,9 @@ TEST_CASE("git metadata stamp tracks index and HEAD rewrites")
     const auto initial = imza::git_metadata_stamp(root);
     REQUIRE(initial.has_value());
 
-    // An unrelated worktree edit leaves the metadata untouched.
     imza::test::write_file(root / "tracked.cpp", "edited\n");
     CHECK(imza::git_metadata_stamp(root) == initial);
 
-    // Staging rewrites the index, moving the branch rewrites HEAD.
     imza::test::write_file(git / "index", "second-index-content");
     const auto staged = imza::git_metadata_stamp(root);
     REQUIRE(staged.has_value());
@@ -154,11 +152,9 @@ TEST_CASE("git metadata stamp resolves a .git pointer file")
     const auto stamp = imza::git_metadata_stamp(root);
     REQUIRE(stamp.has_value());
 
-    // The stamp follows the pointer into the real git directory.
     imza::test::write_file(real / "index", "changed");
     CHECK(imza::git_metadata_stamp(root) != stamp);
 
-    // A malformed pointer yields no stamp rather than a bogus one.
     imza::test::write_file(root / ".git", "not a gitdir\n");
     CHECK_FALSE(imza::git_metadata_stamp(root).has_value());
 }
@@ -207,7 +203,6 @@ TEST_CASE("system detection announces its arrival")
         [&] { announced = env.system() && !env.system()->os_name.empty(); });
     REQUIRE(wait_until_ready(env));
     CHECK(announced);
-    // Late subscribers see the published state immediately.
     bool late = false;
     const auto late_subscription
         = env.subscribe_to_system_change([&] { late = true; });
@@ -221,12 +216,16 @@ TEST_CASE("Imza temporary directory is reusable and canonical")
     std::error_code error;
     std::filesystem::create_directories(base / "real", error);
     REQUIRE_FALSE(error);
-#ifdef _WIN32
-    const auto input = base / "real";
-#else
-    std::filesystem::create_directory_symlink(base / "real", base / "link");
-    const auto input = base / "link";
-#endif
+    std::filesystem::path input = base / "real";
+    if (imza::test::can_create_symlinks()) {
+        // The canonicalization under test is only observable through a link;
+        // without the privilege the plain directory still exercises reuse.
+        std::filesystem::create_directory_symlink(
+            base / "real", base / "link", error);
+        if (!error) {
+            input = base / "link";
+        }
+    }
 
     const auto first  = imza::prepare_imza_temporary_directory(input);
     const auto second = imza::prepare_imza_temporary_directory(input);
@@ -438,21 +437,8 @@ TEST_CASE("bundled skills are discovered and flagged")
     // Point the bundled root at a scratch directory; RAII restores the
     // environment variable so later tests are unaffected.
     const imza::test::TempDir bundled_root;
-    const std::string previous = [] {
-        if (const char* value = std::getenv("IMZA_BUNDLED_SKILLS")) {
-            return std::string(value);
-        }
-        return std::string { };
-    }();
-    const bool had_previous = !previous.empty();
-    ::setenv("IMZA_BUNDLED_SKILLS", bundled_root.path.string().c_str(), 1);
-    const auto restore = [&] {
-        if (had_previous) {
-            ::setenv("IMZA_BUNDLED_SKILLS", previous.c_str(), 1);
-        } else {
-            ::unsetenv("IMZA_BUNDLED_SKILLS");
-        }
-    };
+    const imza::test::ScopedEnv bundled(
+        "IMZA_BUNDLED_SKILLS", bundled_root.path.string());
 
     imza::test::write_file(bundled_root.path / "imza-docs" / "SKILL.md",
         "---\ndescription: bundled manual\n---\n\nDocs body.\n");
@@ -465,7 +451,6 @@ TEST_CASE("bundled skills are discovered and flagged")
     REQUIRE(it != system->global_skills.end());
     CHECK(it->second.bundled);
     CHECK_FALSE(it->second.path.empty());
-    restore();
 }
 
 } // namespace

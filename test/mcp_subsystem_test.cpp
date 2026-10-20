@@ -4,6 +4,7 @@
 #include "loopback_oauth_server.h"
 #include "protocols/mcp.h"
 #include "runtime/mcp_subsystem.h"
+#include "test_platform.h"
 #include "tools/mcp_catalog.h"
 
 #include <atomic>
@@ -37,7 +38,6 @@ template <typename Predicate> bool wait_for(Predicate predicate)
     return false;
 }
 
-// Connect/disconnect run on manager workers; poll for the transition.
 bool wait_state(imza::McpSubsystem& manager, const std::string& id,
     imza::McpServerState want)
 {
@@ -107,7 +107,6 @@ TEST_CASE("mcp manager connects, caches tools, and calls through the session")
 
 TEST_CASE("mcp manager reports connection failures and gates calls")
 {
-    // Port 1 on loopback refuses immediately.
     imza::McpSubsystem manager(
         { { "dead", server_config("dead", "http://127.0.0.1:1/mcp") } });
 
@@ -167,8 +166,7 @@ TEST_CASE("mcp manager serializes concurrent calls on one session")
     imza::McpSubsystem manager(
         { { "exa", server_config("exa", server.url()) } });
     manager.connect("exa");
-    // The handshake runs on a manager worker; calls before it completes
-    // would fail, so wait for the inventory first.
+    // The handshake runs on a manager worker, so wait for the inventory.
     for (int i = 0; i < 1000 && !manager.tools("exa").has_value(); ++i) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
@@ -200,7 +198,7 @@ TEST_CASE("mcp manager serializes concurrent calls on one session")
 
 TEST_CASE("expand_env_vars resolves references with defaults")
 {
-    ::setenv("IMZA_TEST_TOKEN", "s3cret", 1);
+    imza::test::set_env("IMZA_TEST_TOKEN", "s3cret");
     CHECK(imza::expand_env_vars("${IMZA_TEST_TOKEN}") == "s3cret");
     CHECK(imza::expand_env_vars("Bearer ${IMZA_TEST_TOKEN}!")
         == "Bearer s3cret!");
@@ -222,7 +220,6 @@ TEST_CASE("mcp manager retries failed handshakes with backoff")
     imza::McpSubsystem manager(
         { { "exa", server_config("exa", server.url()) } });
     manager.connect("exa");
-    // First handshake answers 500; the retry lands after the 2 s backoff.
     REQUIRE(wait_state(manager, "exa", imza::McpServerState::CONNECTED));
 
     imza::McpToolCallResult result;
@@ -244,12 +241,10 @@ TEST_CASE("mcp manager refreshes tools on notifications/tools/list_changed")
         { { "exa", server_config("exa", server.url()) } });
     manager.connect("exa");
     REQUIRE(wait_state(manager, "exa", imza::McpServerState::CONNECTED));
-    // The notification may land before this check runs: the inventory is
+    // The notification may land before this check runs, so the inventory is
     // either the initial roster or the already-refreshed one.
     CHECK(manager.tools("exa").has_value());
 
-    // The notification listener re-lists; the fixture answers with the
-    // updated one-tool roster.
     REQUIRE(wait_for([&] {
         const auto tools = manager.tools("exa");
         return tools.has_value() && tools->size() == 1
@@ -272,7 +267,6 @@ TEST_CASE("mcp listener exits quietly when the server has no stream")
     REQUIRE(wait_state(manager, "exa", imza::McpServerState::CONNECTED));
     REQUIRE(wait_for([&] { return server.saw_get.load(); }));
 
-    // Still connected, listener gone; calls keep working.
     imza::McpToolCallResult result;
     std::string detail;
     CHECK(manager.call("exa", "echo", { }, result, detail) == imza::Status::OK);
@@ -294,9 +288,8 @@ TEST_CASE("mcp listener rebuilds the session after a stream 404")
     REQUIRE(wait_state(manager, "exa", imza::McpServerState::CONNECTED));
     REQUIRE(wait_for([&] { return server.saw_get.load(); }));
 
-    // The expired session must be rebuilt (second initialize) and the
-    // entry must keep answering calls; the rebuild path must not hold the
-    // entry I/O lock or the call below deadlocks.
+    // The expired session is rebuilt and keeps answering; the rebuild path
+    // must not hold the entry I/O lock or the call below deadlocks.
     REQUIRE(wait_for([&] { return server.initialize_count.load() >= 2; }));
     imza::McpToolCallResult result;
     std::string detail;
@@ -404,7 +397,6 @@ TEST_CASE("mcp manager fails catalogue references offline when dangling")
     CHECK(snapshot[0].state == imza::McpServerState::FAILED);
     CHECK(snapshot[0].detail.find("no longer exists") != std::string::npos);
 
-    // Calls explain the failure without touching the network.
     imza::McpToolCallResult result;
     std::string detail;
     CHECK(manager.call("gone", "echo", { }, result, detail)
@@ -419,27 +411,23 @@ TEST_CASE("mcp manager resolves catalogue labels and urls from the bundle")
     imza::McpSubsystem manager(
         std::map<std::string, imza::McpServerConfig> { { "docs", config } });
 
-    // Label falls back to the catalogue entry's label, not the id.
     CHECK(manager.snapshot()[0].label == "GitHub");
 }
 
 TEST_CASE("resolved_mcp_url picks the explicit url, the catalogue url, or none")
 {
-    // A catalogue reference carries no url of its own; the bundled entry's
-    // url is what the handshake must use.
+    // A catalogue reference carries no url; the bundled entry's is used.
     imza::McpServerConfig reference;
     reference.catalog_id = "github";
     const auto entry     = imza::find_mcp_catalog_entry("github");
     REQUIRE(entry.has_value());
     CHECK(imza::resolved_mcp_url(reference) == entry->url);
 
-    // An explicit url wins over the reference.
     imza::McpServerConfig custom;
     custom.catalog_id = "github";
     custom.url        = "http://127.0.0.1:9/custom";
     CHECK(imza::resolved_mcp_url(custom) == "http://127.0.0.1:9/custom");
 
-    // A dangling reference resolves to nothing.
     imza::McpServerConfig dangling;
     dangling.catalog_id = "no-such-entry";
     CHECK(imza::resolved_mcp_url(dangling).empty());
@@ -478,8 +466,8 @@ TEST_CASE("mcp manager reload drops a stdio session when its command changes")
 {
     imza::McpSubsystem manager(std::map<std::string, imza::McpServerConfig> {
         { "local", stdio_config("local") } });
-    // A stdio server is offline until connected; a field change must still
-    // reset the entry rather than keep a stale session.
+    // A stdio server is offline until connected, but a field change must
+    // still reset the entry rather than keep a stale session.
     manager.reload({ { "local", stdio_config("local") } });
     CHECK(manager.snapshot()[0].state == imza::McpServerState::OFFLINE);
 
@@ -488,15 +476,12 @@ TEST_CASE("mcp manager reload drops a stdio session when its command changes")
     manager.reload({ { "local", edited } });
     CHECK(manager.snapshot()[0].state == imza::McpServerState::OFFLINE);
 
-    // A presentation-only edit keeps the entry untouched.
     imza::McpServerConfig relabeled = edited;
     relabeled.label                 = "Local";
     manager.reload({ { "local", relabeled } });
     CHECK(manager.snapshot()[0].label == "Local");
     CHECK(manager.snapshot()[0].state == imza::McpServerState::OFFLINE);
 }
-
-// ---- OAuth sign-in and token refresh --------------------------------------
 
 namespace {
 
@@ -641,8 +626,8 @@ TEST_CASE("a server removed mid-sign-in is not resurrected in config")
         return !snapshot.empty()
             && snapshot[0].sign_in == imza::McpSignInStatus::RUNNING;
     }));
-    // Remove the server while the browser phase blocks; the flow finishes
-    // (the code is exchanged) but nothing may be written back.
+    // Removing the server while the browser phase blocks: the flow finishes
+    // but nothing may be written back.
     manager.reload({ });
     release.store(true);
     REQUIRE(wait_for([&] { return server.exchange_count.load() >= 1; }));
@@ -663,7 +648,6 @@ TEST_CASE("handshakes refresh an expiring oauth token before connecting")
         recorded.record(server);
     };
 
-    // The stored token expires inside the refresh margin.
     imza::McpServerConfig config = oauth_config("exa", server.mcp_url());
     config.oauth.access_token    = "tok-0";
     config.oauth.expires_at      = std::time(nullptr) + 60;
@@ -676,7 +660,6 @@ TEST_CASE("handshakes refresh an expiring oauth token before connecting")
     REQUIRE(persisted.has_value());
     CHECK(persisted->oauth.access_token == "tok-1");
 
-    // Far from expiry: the stored token is used as-is, no refresh.
     imza::test::LoopbackOauthServer fresh;
     fresh.revoke_access_token(); // only tok-1 is accepted now
     REQUIRE(fresh.start());
@@ -745,7 +728,6 @@ TEST_CASE("a failing refresh marks the server failed without retry storms")
     CHECK(snapshot[0].sign_in == imza::McpSignInStatus::NONE);
     CHECK(snapshot[0].oauth);
 
-    // Refresh failures need a fresh sign-in; the retry ladder stays off.
     CHECK(server.refresh_count.load() == 1);
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     CHECK(server.refresh_count.load() == 1);

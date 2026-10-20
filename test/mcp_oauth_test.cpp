@@ -47,7 +47,6 @@ TEST_CASE("resource_metadata is parsed out of WWW-Authenticate")
               { "WWW-Authenticate: Bearer realm=\"mcp\", "
                 "resource_metadata=\"https://as.example/.well-known/xyz\"" })
         == "https://as.example/.well-known/xyz");
-    // Header names are case-insensitive on the wire.
     CHECK(mcp_resource_metadata_url(
               { "www-authenticate: Bearer "
                 "resource_metadata=\"https://as.example/pr\"" })

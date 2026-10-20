@@ -1,7 +1,5 @@
 #include <doctest/doctest.h>
 
-#include <unistd.h>
-
 #include <algorithm>
 #include <cstdlib>
 #include <ctime>

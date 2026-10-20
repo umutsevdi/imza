@@ -1,7 +1,5 @@
 #include <doctest/doctest.h>
 
-#include <unistd.h>
-
 #include <filesystem>
 #include <string>
 
@@ -58,7 +56,6 @@ TEST_CASE("ConfigStore snapshot reflects a write made through another handle")
     const std::shared_ptr<const imza::Config> before = store->snapshot();
     CHECK(before->mcp_servers.contains("alpha"));
 
-    // A concurrent writer, as a second process would be.
     imza::ConfigStore other(config_with_server("alpha"), path);
     CHECK(other.update([&](imza::Config& config) {
         config.mcp_servers.erase("alpha");
@@ -67,7 +64,6 @@ TEST_CASE("ConfigStore snapshot reflects a write made through another handle")
         return true;
     }) == imza::ConfigUpdateResult::UPDATED);
 
-    // A read through the first handle sees the newest on-disk state.
     CHECK(store->update([](imza::Config&) { return false; })
         == imza::ConfigUpdateResult::UNCHANGED);
     CHECK_FALSE(store->snapshot()->mcp_servers.contains("alpha"));
@@ -87,7 +83,7 @@ TEST_CASE("ConfigStore syncs changed and removed connections to the keychain")
     const imza::test::TempDir dir;
     const std::filesystem::path path = dir.file("config.json");
     imza::ConfigStore config(imza::Config { }, path, &store);
-    const std::string id  = "sync-" + std::to_string(::getpid());
+    const std::string id  = "sync-" + std::to_string(imza::test::process_id());
     const std::string key = "provider/" + id;
 
     CHECK(config.update([&id](imza::Config& cfg) {

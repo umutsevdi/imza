@@ -635,6 +635,12 @@ namespace {
 
 } // namespace
 
+ftxui::Component make_repl_root(
+    std::shared_ptr<ApplicationState> state, ftxui::ScreenInteractive* screen)
+{
+    return ftxui::Make<Repl>(std::move(state), screen);
+}
+
 int run_repl(std::shared_ptr<ApplicationState> state)
 {
     if (!is_interactive_terminal()) {
@@ -670,7 +676,7 @@ int run_repl(std::shared_ptr<ApplicationState> state)
         imza::enqueue_user_modal(
             *state, ConnectModal { ConnectModal::Entry::MANAGE });
     }
-    auto app = ftxui::Make<Repl>(state, &screen);
+    auto app = make_repl_root(state, &screen);
     // Empty callback: FTXUI only posts Event::Custom after selection changes
     // when one is registered; SelectionCopier consumes it.
     screen.SelectionChange([] { });
