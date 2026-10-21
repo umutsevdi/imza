@@ -1,6 +1,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT
 #include <doctest/doctest.h>
 
+#include <cstdio>
 #include <cstdlib>
 
 #include "test_platform.h"
@@ -11,6 +12,10 @@
 int main(int argc, char** argv)
 {
     imza::test::set_executable_path(argv[0]);
+    // CI captures stdout through a fully buffered pipe: without this, a
+    // hang in one test case leaves the log silent from the build's end on,
+    // hiding everything that ran before it.
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
     if (imza::test::run_fixture(argc, argv)) {
         return 0;
     }

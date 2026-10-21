@@ -3,7 +3,6 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
-#include <memory>
 #include <string>
 #include <string_view>
 
@@ -22,11 +21,17 @@ template <typename LockVariant> void release_lock(LockVariant& held)
 // RAII scratch directory: unique per instance under the system temp path,
 // created eagerly, removed with everything inside it on destruction
 // (including when an assertion fails mid-test).
+//
+// The stored path is canonicalized: macOS exposes the system temp as
+// /var/folders/..., a symlink to /private/var/folders/..., while the
+// permission evaluator and product code canonicalize paths, so comparisons
+// against the raw temp path fail only on macOS.
 struct TempDir {
     TempDir()
-        : path(std::filesystem::temp_directory_path()
+        : path(std::filesystem::weakly_canonical(
+              std::filesystem::temp_directory_path()
               / ("imza-test-" + std::to_string(process_id()) + "-"
-                  + std::to_string(++sequence())))
+                  + std::to_string(++sequence()))))
     {
         std::filesystem::create_directories(path);
     }
@@ -127,9 +132,18 @@ public:
     IsolatedDataHome(const IsolatedDataHome&)            = delete;
     IsolatedDataHome& operator=(const IsolatedDataHome&) = delete;
 
-    // The exported root; Imza's files live under imza_dir().
+    // The exported root; Imza's files live under imza_dir() which mirrors
+    // the per-platform layout of data_dir() (platform/config.cpp): Windows
+    // and Linux carry the plain "imza" suffix, macOS nests below Library.
     std::filesystem::path root() const { return _root.path; }
-    std::filesystem::path imza_dir() const { return _root.path / "imza"; }
+    std::filesystem::path imza_dir() const
+    {
+#if defined(__APPLE__)
+        return _root.path / "Library" / "Application Support" / "imza";
+#else
+        return _root.path / "imza";
+#endif
+    }
 
 private:
     TempDir _root;
@@ -157,14 +171,18 @@ inline std::string read_all(const std::filesystem::path& path)
 // skills under `<config-home>/agents/skills`.
 class IsolatedConfigHome {
 public:
+    // The scan prefers XDG_CONFIG_HOME (`agent_config_base_dir` in
+    // workspace/environment.cpp) before HOME/.config on every non-Windows
+    // platform, so both must point into the scratch root. HOME points there
+    // too: the scan also walks `<home>/.agents/skills` and friends, which
+    // keeps a developer's real skills from leaking into the suite.
     IsolatedConfigHome()
         : _previous(env_value(config_home_variable()))
         , _had_previous(!_previous.empty())
+        , _xdg_config("XDG_CONFIG_HOME", _root.path.string())
+        , _home("HOME", _root.path.string())
     {
         set_env(config_home_variable(), _root.path.string());
-        // The scan also walks `<home>/.agents/skills` and friends; point HOME
-        // at the scratch root so a developer's real skills never leak in.
-        _home = std::make_unique<ScopedEnv>("HOME", _root.path.string());
     }
 
     ~IsolatedConfigHome()
@@ -196,7 +214,11 @@ private:
     TempDir _root;
     std::string _previous;
     bool _had_previous = false;
-    std::unique_ptr<ScopedEnv> _home;
+    // Reverse member order at destruction: HOME restores first, then
+    // XDG_CONFIG_HOME, after the destructor body restores the config-home
+    // variable.
+    ScopedEnv _xdg_config;
+    ScopedEnv _home;
 };
 
 } // namespace imza::test

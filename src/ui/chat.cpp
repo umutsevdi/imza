@@ -112,7 +112,7 @@ namespace {
             void ComputeRequirement() override
             {
                 Node::ComputeRequirement();
-                requirement_                      = children_[0]->requirement();
+                requirement_ = children_[0]->requirement();
                 requirement_.focused.cursor_shape
                     = Screen::Cursor::BlockBlinking;
             }

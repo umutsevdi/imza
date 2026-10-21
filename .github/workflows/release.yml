@@ -189,10 +189,19 @@ jobs:
       # Multi-config generator: the test binary lands beside the release
       # executable, so one build serves both.
       - name: Build and test
+        # Runs the suite once per test source file: doctest only emits its
+        # banners (streamed thanks to setvbuf in test_main.cpp), so a hang
+        # inside a file announces itself in the log instead of 20 minutes
+        # of silence ending in a manual abort.
+        shell: bash
         run: |
           cmake -S . -B build
           cmake --build build --config Release --parallel
-          ./build/Release/imza_tests.exe
+          for file in test/*_test.cpp; do
+            name="$(basename "$file")"
+            echo "=== $file"
+            ./build/Release/imza_tests.exe -sf="*$name*"
+          done
       - name: Stage installer input
         shell: bash
         run: |

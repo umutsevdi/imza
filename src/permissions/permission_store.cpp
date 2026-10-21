@@ -172,10 +172,14 @@ PermissionStore::Grants allow_grants(const AllowConfig& allow)
     grants.reserve(allow.directories.size() + allow.commands.size());
     std::error_code ec;
     for (const std::filesystem::path& entry : allow.directories) {
-        const std::filesystem::path resolved = entry.is_absolute()
-            ? entry
-            : std::filesystem::weakly_canonical(
-                  std::filesystem::current_path() / entry, ec);
+        // Absolute entries canonicalize too: on macOS the temp root carries
+        // a symlinked prefix (/var/folders → /private/var/folders) and every
+        // grant cover check runs against canonicalized targets.
+        const std::filesystem::path resolved
+            = std::filesystem::weakly_canonical(entry.is_absolute()
+                    ? entry
+                    : std::filesystem::current_path() / entry,
+                ec);
         if (ec || !std::filesystem::is_directory(resolved, ec) || ec) {
             continue;
         }

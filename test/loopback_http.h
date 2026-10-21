@@ -77,6 +77,13 @@ namespace detail {
                    reinterpret_cast<const char*>(&timeout), sizeof(timeout))
             == 0;
     }
+    inline bool set_send_timeout(Socket handle, int seconds)
+    {
+        const DWORD timeout = static_cast<DWORD>(seconds) * 1000;
+        return ::setsockopt(handle, SOL_SOCKET, SO_SNDTIMEO,
+                   reinterpret_cast<const char*>(&timeout), sizeof(timeout))
+            == 0;
+    }
     inline bool set_reuse_address(Socket handle)
     {
         const BOOL enabled = TRUE;
@@ -137,6 +144,13 @@ namespace detail {
         const timeval timeout { seconds, 0 };
         return ::setsockopt(
                    handle, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout))
+            == 0;
+    }
+    inline bool set_send_timeout(Socket handle, int seconds)
+    {
+        const timeval timeout { seconds, 0 };
+        return ::setsockopt(
+                   handle, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout))
             == 0;
     }
     inline bool set_reuse_address(Socket handle)
@@ -284,6 +298,10 @@ private:
                 return;
             }
             detail::set_receive_timeout(fd, 5);
+            // respond() streams the scripted answer back; without a send
+            // timeout a stalled peer would park the server thread forever
+            // and a stop() join would never return.
+            detail::set_send_timeout(fd, 5);
             LoopbackRequest request;
             if (read_request(fd, request) && handle) {
                 handle(fd, request);

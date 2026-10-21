@@ -11,7 +11,11 @@
 #include <process.h>
 #include <windows.h>
 #else
+#include <fcntl.h>
 #include <unistd.h>
+#endif
+#if __has_include(<sys/param.h>)
+#include <sys/param.h>
 #endif
 
 namespace imza::test {
@@ -187,6 +191,15 @@ bool run_fixture(int argc, char** argv)
         // Lets a test prove the parent's terminal stdin was not inherited.
 #ifdef _WIN32
         std::cout << "nul\n";
+#elif defined(__APPLE__)
+        // macOS has no /proc symlink to read; F_GETPATH reports the file an
+        // open descriptor refers to.
+        char path[MAXPATHLEN];
+        if (::fcntl(STDIN_FILENO, F_GETPATH, path) < 0) {
+            std::cout << "unknown\n";
+        } else {
+            std::cout << path << '\n';
+        }
 #else
         char buffer[4096];
         const ssize_t length
