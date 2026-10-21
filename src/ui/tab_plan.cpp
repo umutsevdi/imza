@@ -112,7 +112,7 @@ namespace {
             return false;
         }
 
-        bool _has_plan() const { return !_state->session->plan_doc().empty(); }
+        bool _has_plan() const { return _state->session->has_plan(); }
 
         void _toggle_focus()
         {

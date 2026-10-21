@@ -143,3 +143,20 @@ TEST_CASE("pruning from a completion callback does not join the caller")
     CHECK(manager.tasks().empty());
     CHECK(handle.completion.get().output == "report");
 }
+
+TEST_CASE("task snapshots a single subagent by id")
+{
+    imza::SubagentSubsystem manager;
+    auto handle
+        = manager.start("inspect", "model", "low", true, [](std::stop_token) {
+              return imza::SubagentResult { imza::Status::OK, "report" };
+          });
+    CHECK(handle.completion.wait_for(std::chrono::seconds(3))
+        == std::future_status::ready);
+
+    const auto task = manager.task(handle.id);
+    REQUIRE(task != nullptr);
+    CHECK(task->id == handle.id);
+    CHECK(task->prompt == "inspect");
+    CHECK(manager.task(handle.id + 1000) == nullptr);
+}

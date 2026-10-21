@@ -192,6 +192,10 @@ public:
     std::shared_ptr<const std::vector<QueuedMessage>> queued() const;
     std::shared_ptr<const std::vector<SessionDoc>> documents() const;
     ModalPayload modal() const;
+    // modal() deep-copies the payload; the probes below exist for per-frame
+    // render paths instead.
+    std::size_t modal_kind() const;
+    std::shared_ptr<const ModalPayload> modal_handle() const;
     std::uint64_t modal_serial() const;
     std::uint64_t content_serial() const;
     std::string session_id() const;
@@ -202,6 +206,7 @@ public:
     std::string title() const;
     std::vector<std::string> attachment_names() const;
     std::string plan_doc() const;
+    bool has_plan() const;
     std::optional<Countdown> retry_countdown() const;
     Usage last() const;
     std::optional<std::chrono::milliseconds> turn_elapsed() const;
@@ -368,7 +373,11 @@ private:
 
     std::shared_ptr<std::vector<ConversationItem>> _items
         = std::make_shared<std::vector<ConversationItem>>();
-    ModalPayload _modal           = std::monostate { };
+    ModalPayload _modal = std::monostate { };
+    // Shared snapshot backing modal_handle(); refreshed under _mutex
+    // wherever _modal is assigned.
+    std::shared_ptr<const ModalPayload> _modal_handle
+        = std::make_shared<const ModalPayload>();
     bool _exit_confirm            = false;
     std::uint64_t _modal_serial   = 0;
     std::uint64_t _content_serial = 0;

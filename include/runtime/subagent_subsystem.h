@@ -66,6 +66,9 @@ public:
     bool cancel(std::size_t id);
     void prune_completed();
     void stop() override;
+    // Single-task lookup so one-subagent callers avoid tasks()'s copy of
+    // every prompt and transcript.
+    std::shared_ptr<const SubagentTask> task(std::size_t id) const;
     std::vector<SubagentTask> tasks() const;
     std::size_t running_count(bool visible_only = true) const;
     [[nodiscard]] Signal<const SubagentEvent&>::Subscription

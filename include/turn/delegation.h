@@ -43,6 +43,8 @@ public:
     void spawn_title(std::string input, TurnSettings settings);
     SubagentChat subagent_chat(std::size_t id, std::string title) const;
     SubagentChat subagent_chat(const ToolCall& call, std::size_t index) const;
+    // Card label only: no transcript assembly, safe to call every frame.
+    std::string subagent_title(const ToolCall& call, std::size_t index) const;
 
 private:
     ApplicationState* _state;

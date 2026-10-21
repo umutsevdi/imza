@@ -230,22 +230,24 @@ namespace {
                 _ensure_exit_confirm();
                 return _exit_confirm_body();
             }
-            if (st.modal().index() == 0) {
+            const std::shared_ptr<const ModalPayload> payload
+                = st.modal_handle();
+            if (payload->index() == 0) {
                 if (_built) {
                     _clear_built_content();
                 }
                 _built = false;
                 return text("");
             }
-            _ensure_built(st);
-            if (std::holds_alternative<PermissionPrompt>(st.modal())) {
-                return _tool_body(std::get<PermissionPrompt>(st.modal()));
+            _ensure_built(st, *payload);
+            if (std::holds_alternative<PermissionPrompt>(*payload)) {
+                return _tool_body(std::get<PermissionPrompt>(*payload));
             }
-            if (std::holds_alternative<QuestionForm>(st.modal())) {
+            if (std::holds_alternative<QuestionForm>(*payload)) {
                 return _question_body();
             }
-            if (std::holds_alternative<ViewerModal>(st.modal())) {
-                return _viewer_body(std::get<ViewerModal>(st.modal()));
+            if (std::holds_alternative<ViewerModal>(*payload)) {
+                return _viewer_body(std::get<ViewerModal>(*payload));
             }
             return _body->Render();
         }
@@ -271,29 +273,31 @@ namespace {
                 }
                 return _exit_buttons->OnEvent(event);
             }
-            if (st.modal().index() == 0) {
+            const std::shared_ptr<const ModalPayload> payload
+                = st.modal_handle();
+            if (payload->index() == 0) {
                 return false;
             }
-            _ensure_built(st);
+            _ensure_built(st, *payload);
             if (event == Event::Escape) {
-                if (std::holds_alternative<ConnectModal>(st.modal())) {
+                if (std::holds_alternative<ConnectModal>(*payload)) {
                     if (_body && _body->OnEvent(event)) {
                         return true;
                     }
                     imza::close_modal(*_state);
                     return true;
                 }
-                if (std::holds_alternative<SessionsModal>(st.modal()) && _body
+                if (std::holds_alternative<SessionsModal>(*payload) && _body
                     && _body->OnEvent(event)) {
                     return true;
                 }
                 // The skills view uses Escape to close an open policy list
                 // or cancel a removal before the modal itself closes.
-                if (std::holds_alternative<SkillsModal>(st.modal()) && _body
+                if (std::holds_alternative<SkillsModal>(*payload) && _body
                     && _body->OnEvent(event)) {
                     return true;
                 }
-                if (std::holds_alternative<PermissionPrompt>(st.modal())
+                if (std::holds_alternative<PermissionPrompt>(*payload)
                     && _tool_phase == ToolPhase::REASON) {
                     _set_tool_phase(ToolPhase::DECIDE);
                     return true;
@@ -301,7 +305,7 @@ namespace {
                 imza::close_modal(*_state);
                 return true;
             }
-            if (std::holds_alternative<ViewerModal>(st.modal())) {
+            if (std::holds_alternative<ViewerModal>(*payload)) {
                 if (event == Event::Return) {
                     imza::close_modal(*_state);
                     return true;
@@ -365,7 +369,7 @@ namespace {
                 | xflex;
         }
 
-        void _ensure_built(const Session& st)
+        void _ensure_built(const Session& st, const ModalPayload& payload)
         {
             if (_built && _serial == st.modal_serial()) {
                 return;
@@ -373,7 +377,7 @@ namespace {
             _built  = true;
             _serial = st.modal_serial();
             std::visit(
-                [this](const auto& payload) { _build(payload); }, st.modal());
+                [this](const auto& payload) { _build(payload); }, payload);
         }
 
         void _build(const PermissionPrompt& request)
@@ -517,7 +521,8 @@ namespace {
             if (!_viewer_export) {
                 _viewer_export = action_button("Export", [this] { _export(); });
             }
-            const int content_width = modal_content_width(_session->modal());
+            const int content_width
+                = modal_content_width(*_session->modal_handle());
             if (payload.diff.has_value()) {
                 _viewer_content = diff_split(*payload.diff, content_width);
             } else if (is_markdown_type(payload.lang)) {
@@ -629,7 +634,7 @@ namespace {
             rows.push_back(separatorEmpty());
             rows.push_back(
                 tool_request_body(req, *_state->environment->system(),
-                    modal_content_width(_session->modal())));
+                    modal_content_width(*_session->modal_handle())));
             rows.push_back(separatorEmpty());
             if (_tool_phase == ToolPhase::REASON) {
                 rows.push_back(section_title("Reason for rejecting", PANEL_FG));
@@ -679,8 +684,9 @@ namespace {
 
         void _export()
         {
-            const ModalPayload modal   = _session->modal();
-            const ViewerModal* payload = std::get_if<ViewerModal>(&modal);
+            const std::shared_ptr<const ModalPayload> handle
+                = _session->modal_handle();
+            const ViewerModal* payload = std::get_if<ViewerModal>(handle.get());
             if (payload == nullptr) {
                 return;
             }

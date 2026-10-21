@@ -254,14 +254,9 @@ ToolOutput Delegation::run_subagents(const ToolCallRequest& req)
 SubagentChat Delegation::subagent_chat(
     const ToolCall& call, std::size_t index) const
 {
+    std::string title = subagent_title(call, index);
     if (index < call.subagent_chats.size()) {
         return call.subagent_chats[index];
-    }
-    SubagentToolArgs args;
-    (void)json_parse_checked(call.args, args);
-    std::string title = "Agent " + std::to_string(index + 1);
-    if (index < args.tasks.size() && !args.tasks[index].mode.empty()) {
-        title = agent_label(index, args.tasks[index].mode);
     }
     if (index >= call.subagent_ids.size()) {
         return { std::move(title), "No delegated-agent history is available." };
@@ -269,12 +264,24 @@ SubagentChat Delegation::subagent_chat(
     return subagent_chat(call.subagent_ids[index], std::move(title));
 }
 
+std::string Delegation::subagent_title(
+    const ToolCall& call, std::size_t index) const
+{
+    if (index < call.subagent_chats.size()) {
+        return call.subagent_chats[index].title;
+    }
+    SubagentToolArgs args;
+    (void)json_parse_checked(call.args, args);
+    if (index < args.tasks.size() && !args.tasks[index].mode.empty()) {
+        return agent_label(index, args.tasks[index].mode);
+    }
+    return "Agent " + std::to_string(index + 1);
+}
+
 SubagentChat Delegation::subagent_chat(std::size_t id, std::string title) const
 {
-    const std::vector<SubagentTask> tasks = _state->subagents->tasks();
-    const auto found = std::find_if(tasks.begin(), tasks.end(),
-        [id](const SubagentTask& task) { return task.id == id; });
-    if (found == tasks.end()) {
+    const auto found = _state->subagents->task(id);
+    if (found == nullptr) {
         return { std::move(title), "No delegated-agent history is available." };
     }
     std::string transcript = "**Task:** " + found->prompt + "\n\n";

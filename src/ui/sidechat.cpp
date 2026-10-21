@@ -125,7 +125,7 @@ private:
     bool _has_modal() const
     {
         return _state->sidechat != nullptr
-            && _state->sidechat->session->modal().index() != 0;
+            && _state->sidechat->session->modal_kind() != 0;
     }
 
     void _sync()

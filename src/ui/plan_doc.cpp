@@ -251,14 +251,21 @@ namespace {
                 }
             }
             _has_plan = _revision > 0;
-            _current  = session_doc;
+            if (_current != session_doc) {
+                _current      = session_doc;
+                _blocks_valid = false;
+            }
         }
 
         void _build_rows(Elements& rows, int width)
         {
             _rows.clear();
             _boxes.clear();
-            _blocks     = render_markdown_blocks(_current, width);
+            if (!_blocks_valid || _blocks_width != width) {
+                _blocks       = render_markdown_blocks(_current, width);
+                _blocks_width = width;
+                _blocks_valid = true;
+            }
             int y       = 0;
             int section = 0;
             // The block hosting each note's card: the block containing the
@@ -526,6 +533,8 @@ namespace {
         Component _revise_button;
         std::string _current;
         std::vector<MarkdownBlock> _blocks;
+        int _blocks_width  = -1;
+        bool _blocks_valid = false;
         std::vector<Row> _rows;
         std::deque<Box> _boxes;
         Box _content_box { };

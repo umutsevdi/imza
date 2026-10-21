@@ -181,6 +181,18 @@ ModalPayload Session::modal() const
     return _modal;
 }
 
+std::size_t Session::modal_kind() const
+{
+    std::lock_guard lock(_mutex);
+    return _modal.index();
+}
+
+std::shared_ptr<const ModalPayload> Session::modal_handle() const
+{
+    std::lock_guard lock(_mutex);
+    return _modal_handle;
+}
+
 std::uint64_t Session::modal_serial() const
 {
     std::lock_guard lock(_mutex);
@@ -293,6 +305,15 @@ std::string Session::plan_doc() const
     return { };
 }
 
+bool Session::has_plan() const
+{
+    std::lock_guard lock(_mutex);
+    return std::any_of(
+        _documents->rbegin(), _documents->rend(), [](const SessionDoc& doc) {
+            return doc.kind == SessionDoc::Kind::PLAN;
+        });
+}
+
 SessionSnapshot Session::_build_snapshot() const
 {
     return { _title, *_items, *_todo, *_documents, _compacted_summary,
@@ -339,10 +360,11 @@ void Session::restore(SessionSnapshot snapshot)
         } else {
             _session_id = unique_session_id();
         }
-        _dirty  = false;
-        _mode   = snapshot.plan_mode ? Mode::PLAN : Mode::BUILD;
-        _modal  = std::monostate { };
-        _queued = std::make_shared<std::vector<QueuedMessage>>();
+        _dirty        = false;
+        _mode         = snapshot.plan_mode ? Mode::PLAN : Mode::BUILD;
+        _modal        = std::monostate { };
+        _modal_handle = std::make_shared<const ModalPayload>(_modal);
+        _queued       = std::make_shared<std::vector<QueuedMessage>>();
         // A restored conversation carries no pending dialogs, loaded
         // skills, or skill-gated submissions.
         queue.clear();
@@ -946,13 +968,15 @@ std::optional<std::string> Session::plan_submission_for_build()
 void Session::set_modal(ModalPayload payload)
 {
     std::lock_guard lock(_mutex);
-    _modal = std::move(payload);
+    _modal        = std::move(payload);
+    _modal_handle = std::make_shared<const ModalPayload>(_modal);
 }
 
 void Session::clear_modal()
 {
     std::lock_guard lock(_mutex);
-    _modal = std::monostate { };
+    _modal        = std::monostate { };
+    _modal_handle = std::make_shared<const ModalPayload>(_modal);
 }
 
 void Session::bump_modal_serial()
@@ -980,9 +1004,10 @@ void Session::set_exit_confirm(bool open)
 void Session::present_modal(ModalPayload payload)
 {
     std::lock_guard lock(_mutex);
-    _modal = std::move(payload);
-    if (std::holds_alternative<PermissionPrompt>(_modal)
-        || std::holds_alternative<QuestionForm>(_modal)) {
+    _modal        = std::move(payload);
+    _modal_handle = std::make_shared<const ModalPayload>(_modal);
+    if (std::holds_alternative<PermissionPrompt>(*(_modal_handle))
+        || std::holds_alternative<QuestionForm>(*(_modal_handle))) {
         _phase = Phase::AWAITING;
     }
     ++_modal_serial;

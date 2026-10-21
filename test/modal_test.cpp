@@ -130,6 +130,44 @@ TEST_CASE("queued agent modal alerts only when presented")
     CHECK(result.get().index() == 0);
 }
 
+TEST_CASE("modal kind and handle track the presented payload")
+{
+    AgentEnv env;
+    CHECK(env.session->modal_kind() == 0);
+
+    imza::enqueue_user_modal(
+        *env.state, imza::ViewerModal { "Kind", "content" });
+    CHECK(env.session->modal_kind() == 1);
+    REQUIRE(std::holds_alternative<imza::ViewerModal>(
+        *env.session->modal_handle()));
+    CHECK(std::get<imza::ViewerModal>(*env.session->modal_handle()).title
+        == "Kind");
+
+    imza::close_modal(*env.state);
+    CHECK(env.session->modal_kind() == 0);
+    CHECK(std::holds_alternative<std::monostate>(*env.session->modal_handle()));
+}
+
+TEST_CASE("subagent titles prefer stored chats and fall back to arguments")
+{
+    AgentEnv env;
+    imza::ToolCall call;
+    call.name = "subagent";
+    call.args = R"({"tasks":[{"mode":"research","prompt":"a"},)"
+                R"({"mode":"build","prompt":"b"},{"prompt":"c"}]})";
+    CHECK(
+        env.state->delegation->subagent_title(call, 0) == "Agent 1 (research)");
+    CHECK(env.state->delegation->subagent_title(call, 1) == "Agent 2 (build)");
+    // A task without a recorded mode, and one past the argument list,
+    // keep the plain numbering.
+    CHECK(env.state->delegation->subagent_title(call, 2) == "Agent 3");
+    CHECK(env.state->delegation->subagent_title(call, 9) == "Agent 10");
+
+    call.subagent_chats.push_back(
+        imza::SubagentChat { "Stored", "transcript" });
+    CHECK(env.state->delegation->subagent_title(call, 0) == "Stored");
+}
+
 TEST_CASE("plan mode rejects mutating file operations at the gate")
 {
     AgentEnv env;

@@ -350,7 +350,9 @@ namespace {
                 std::size_t eff_version = version;
                 if (const auto* tc = std::get_if<ToolCall>(&it);
                     tc != nullptr && is_running_tool(*tc)) {
-                    eff_version = static_cast<std::size_t>(_frame);
+                    // Rebuild only when the card visibly changes: the
+                    // spinner steps on wall-clock time, not every frame.
+                    eff_version = static_cast<std::size_t>(_spinner_step());
                     if (tc->phase == ToolCall::Phase::EXECUTING) {
                         eff_version ^= std::size_t { 1 } << 60;
                     }
@@ -380,7 +382,7 @@ namespace {
                         || (at.reasoning.empty() && !at.reasoning_ms.has_value()
                             && _reasoning_enabled(at));
                     if (thinking_now) {
-                        eff_version = static_cast<std::size_t>(_frame);
+                        eff_version = static_cast<std::size_t>(_spinner_step());
                     }
                 }
                 if (pacing) {
@@ -697,7 +699,6 @@ namespace {
         {
             const auto phase = _session->phase();
             if (phase != Session::Phase::IDLE) {
-                ++_frame;
                 _animation_ms
                     += std::chrono::duration_cast<std::chrono::milliseconds>(
                         params.duration());
@@ -707,7 +708,6 @@ namespace {
             // Background compaction outlives the turn: keep the timeline
             // spinner alive while its event is still running.
             if (_session->compaction_running()) {
-                ++_frame;
                 _animation_ms
                     += std::chrono::duration_cast<std::chrono::milliseconds>(
                         params.duration());
@@ -724,7 +724,6 @@ namespace {
                 const auto* turn
                     = std::get_if<AssistantTurn>(&(*items)[_playout_index]);
                 if (turn != nullptr && _playout_chars < turn->markdown.size()) {
-                    ++_frame;
                     _animation_ms += std::chrono::duration_cast<
                         std::chrono::milliseconds>(params.duration());
                     animation::RequestAnimationFrame();
@@ -732,9 +731,8 @@ namespace {
             }
         }
 
-        // Animation steps are derived from accumulated animation time, not
-        // the per-callback frame counter, so their speed is independent of
-        // the render loop's frame rate.
+        // Animation steps are derived from accumulated animation time so
+        // their speed is independent of the render loop's frame rate.
         int _spinner_step() const
         {
             return static_cast<int>(_animation_ms.count()) / SPINNER_FRAME_MS;
@@ -1163,10 +1161,10 @@ namespace {
             const ToolCall& tc, std::size_t count, Elements& rows)
         {
             for (std::size_t index = 0; index < count; ++index) {
-                const SubagentChat chat
-                    = _state->delegation->subagent_chat(tc, index);
+                const std::string title
+                    = _state->delegation->subagent_title(tc, index);
                 rows.push_back(_make_subagent_viewer_button(
-                    tc.id, index, "‹ View " + chat.title + " chat ›")
+                    tc.id, index, "‹ View " + title + " chat ›")
                         ->Render());
             }
         }
@@ -1396,7 +1394,6 @@ namespace {
 
         bool _follow      = true;
         bool _hover_dirty = false;
-        int _frame        = 0;
         std::chrono::milliseconds _animation_ms { };
         std::uint64_t _content_serial = 0;
         ScrollView _viewport { };

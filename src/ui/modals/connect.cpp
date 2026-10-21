@@ -191,8 +191,9 @@ namespace {
         void _sync_phase()
         {
             const Session& st = *_session;
-            const auto modal  = st.modal();
-            if (const auto* m = std::get_if<ConnectModal>(&modal)) {
+            const std::shared_ptr<const ModalPayload> payload
+                = st.modal_handle();
+            if (const auto* m = std::get_if<ConnectModal>(payload.get())) {
                 if (m->entry != _entry) {
                     _picker_open  = false;
                     _in_add       = false;

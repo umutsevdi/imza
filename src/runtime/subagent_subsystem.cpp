@@ -121,6 +121,18 @@ void SubagentSubsystem::stop()
     }
 }
 
+std::shared_ptr<const SubagentTask> SubagentSubsystem::task(
+    std::size_t id) const
+{
+    std::lock_guard lock(_mutex);
+    for (const SubagentTask& task : _tasks) {
+        if (task.id == id) {
+            return std::make_shared<SubagentTask>(task);
+        }
+    }
+    return nullptr;
+}
+
 std::vector<SubagentTask> SubagentSubsystem::tasks() const
 {
     std::lock_guard lock(_mutex);

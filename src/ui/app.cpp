@@ -365,7 +365,7 @@ namespace {
             if (_state->session->exit_confirm()) {
                 popup_source  = _modal;
                 modal_session = _state->session;
-            } else if (_state->session->modal().index() != 0) {
+            } else if (_state->session->modal_kind() != 0) {
                 popup_source  = _modal;
                 modal_session = _state->session;
             } else if (_sidechat_status.has_modal
@@ -378,7 +378,8 @@ namespace {
                 const int h   = terminal_size.dimy;
                 const int mw  = _state->session->exit_confirm()
                     ? std::min(w - 4, EXIT_CONFIRM_WIDTH)
-                    : std::min(w - 4, modal_max_width(modal_session->modal()));
+                    : std::min(w - 4,
+                          modal_max_width(*modal_session->modal_handle()));
                 const int mh  = std::max(10, h - 4);
                 Element popup = popup_source->Render()
                     | borderStyled(ROUNDED, PANEL_BORDER) | bgcolor(PANEL_COLOR)
@@ -419,7 +420,7 @@ namespace {
             // Esc dismisses the newest notice only while the session is
             // idle: during a turn Esc still interrupts.
             if (event == Event::Escape && !_notification_boxes.empty()
-                && _state->session->modal().index() == 0
+                && _state->session->modal_kind() == 0
                 && _state->session->phase() == Session::Phase::IDLE) {
                 const auto notifications
                     = _state->notifications->notifications();
@@ -443,7 +444,7 @@ namespace {
                 return true;
             }
             if (_state->session->exit_confirm()
-                || _state->session->modal().index() != 0) {
+                || _state->session->modal_kind() != 0) {
                 return _modal->OnEvent(event);
             }
             if (_sidechat_status.has_modal && _sidechat_status.has_modal()) {
@@ -583,7 +584,7 @@ namespace {
         void _restore_focus_after_modal()
         {
             const bool open = _state->session->exit_confirm()
-                || _state->session->modal().index() != 0;
+                || _state->session->modal_kind() != 0;
             if (_modal_was_open && !open) {
                 if (_phase == WorkflowPhase::PLAN) {
                     _plan_tab->TakeFocus();
