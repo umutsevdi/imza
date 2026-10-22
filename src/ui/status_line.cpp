@@ -83,7 +83,6 @@ namespace {
 
             const auto repository = _state->environment->repository();
             Elements bar;
-            bar.push_back(text(" "));
             bar.push_back(std::move(mode));
             if (!active_model.empty()) {
                 bar.push_back(text(" · " + active_model) | color(PANEL_FG_DIM));

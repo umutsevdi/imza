@@ -698,8 +698,14 @@ Status save_session(Session& session)
 
 Status read_session(const std::filesystem::path& path, LoadedSession& loaded)
 {
-    // Never blocking: an exclusive holder is a chat-active session in
-    // another imza process, and waiting on it would freeze the loader.
+    // An exclusive holder is a chat-active session in another imza process;
+    // refuse before reading so a switch never gets as far as mutating the
+    // active conversation.
+    if (foreign_lock_live(lock_path_for(path))) {
+        return Status::CONFIG_ERROR;
+    }
+    // Never blocking: a holder that raced in after the probe still refuses
+    // the degraded shared request instead of freezing the loader.
     auto guard = acquire_file_lock(
         lock_path_for(path), FileLockRequest { FileLockMode::SHARED, false });
     if (!std::holds_alternative<FileLock>(guard)) {
@@ -778,7 +784,7 @@ std::vector<SavedSession> saved_sessions()
 
 bool session_file_locked(const std::filesystem::path& path)
 {
-    return file_lock_held(lock_path_for(path));
+    return foreign_lock_live(lock_path_for(path));
 }
 
 DeleteSessionResult delete_saved_session(const std::filesystem::path& path)

@@ -1,11 +1,20 @@
 #include "test_platform.h"
 
+#include "common/util.h"
+#include "platform/command_runner.h"
+
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <future>
 #include <iostream>
+#include <memory>
 #include <thread>
+#include <variant>
+
+#include "platform/file_lock.h"
 
 #ifdef _WIN32
 #include <process.h>
@@ -290,6 +299,15 @@ std::string echo_command(std::string_view text)
     return "echo " + std::string(text);
 }
 
+std::string editor_command()
+{
+#ifdef _WIN32
+    return fixture_command("exit", "0");
+#else
+    return "true";
+#endif
+}
+
 std::string stdin_target_command() { return fixture_command("stdin-target"); }
 
 std::string mutating_command(const std::filesystem::path& path)
@@ -307,6 +325,95 @@ std::string shell_and(std::string_view first, std::string_view second)
     return std::string(first) + "; " + std::string(second);
 #endif
 }
+
+std::string lua_path(const std::filesystem::path& path)
+{
+    std::string out;
+    for (const char character : portable_string(path)) {
+        if (character == '\\' || character == '\'') {
+            out += '\\';
+        }
+        out += character;
+    }
+    return out;
+}
+
+bool git_available()
+{
+    static const bool available = [] {
+        auto result
+            = imza::run_command("git --version", std::chrono::seconds { 10 });
+        return result.spawned && result.exit_code == 0;
+    }();
+    return available;
+}
+
+struct ForeignLock::Impl {
+    explicit Impl(std::filesystem::path file)
+        : lock_path(std::move(file))
+        , worker([this] {
+            // Bounded retry: every wait in this fixture must complete so
+            // teardown joins instead of hanging.
+            while (!stopping.load()) {
+                held = imza::acquire_file_lock(lock_path,
+                    imza::FileLockRequest {
+                        imza::FileLockMode::EXCLUSIVE, false });
+                if (std::holds_alternative<imza::FileLock>(held)) {
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            acquired.set_value();
+            // Release on the worker thread: the registry only clears a
+            // holder on its owning thread. The gate makes this a no-op
+            // wait when stop() already fired.
+            release_gate.wait();
+            held = imza::FileLockError { };
+        })
+    {
+    }
+
+    void wait_held()
+    {
+        if (acquired.get_future().wait_for(std::chrono::seconds(5))
+            != std::future_status::ready) {
+            stop();
+            REQUIRE_MESSAGE(
+                false, "ForeignLock could not acquire the lock within 5s");
+        }
+    }
+
+    // Idempotent: signals the worker to drop the lock and waits for it.
+    void stop()
+    {
+        if (stopped.exchange(true)) {
+            return;
+        }
+        stopping.store(true);
+        release_gate_signal.set_value();
+        worker.join();
+    }
+
+    std::filesystem::path lock_path;
+    std::promise<void> acquired;
+    std::promise<void> release_gate_signal;
+    std::future<void> release_gate = release_gate_signal.get_future();
+    std::atomic<bool> stopping { false };
+    std::atomic<bool> stopped { false };
+    std::variant<imza::FileLock, imza::FileLockError> held
+        = imza::FileLockError { };
+    std::thread worker;
+};
+
+ForeignLock::ForeignLock(const std::filesystem::path& file)
+    : _impl(std::make_unique<Impl>(imza::lock_path_for(file)))
+{
+    _impl->wait_held();
+}
+
+ForeignLock::~ForeignLock() { _impl->stop(); }
+
+void ForeignLock::release() { _impl->stop(); }
 
 bool can_create_symlinks()
 {

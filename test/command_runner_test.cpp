@@ -17,7 +17,6 @@ imza::CommandResult run(const std::string& cmd, std::chrono::seconds t)
     return imza::run_command(cmd, t);
 }
 
-// A command that prints `text` and exits 0, portable across hosts.
 std::string echo_command(const std::string& text)
 {
     return imza::test::fixture_command("echo", text);

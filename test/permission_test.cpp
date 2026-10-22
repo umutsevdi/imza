@@ -322,8 +322,14 @@ TEST_CASE("launcher unwrapping flattens code into classifiable invocations")
     CHECK(invocation("env FOO=bar rm -rf x").program == "rm");
 
     CHECK(invocation("cmd /c \"dir\"").program == "dir");
+#ifdef _WIN32
+    // Program names are folded to lower case on Windows.
+    CHECK(invocation("powershell -c \"Get-ChildItem\"").program
+        == "get-childitem");
+#else
     CHECK(invocation("powershell -c \"Get-ChildItem\"").program
         == "Get-ChildItem");
+#endif
 
     CHECK(invocation("bash script.sh").unresolvable);
     CHECK(invocation("python3 -c 'print(1)'").unresolvable);
@@ -415,6 +421,21 @@ TEST_CASE("read-only subcommand catalog rows match their intended commands")
 
 TEST_CASE("whole-program read-only commands are safe with any operand")
 {
+#ifdef _WIN32
+    // The Windows catalogue is the cmd.exe builtin set, which shares almost
+    // nothing with the POSIX one.
+    for (std::string_view program : { "whoami", "hostname", "netstat", "type",
+             "where", "tree", "dir", "tasklist", "systeminfo" }) {
+        CHECK(shell_builtin_allowed(program));
+    }
+    for (std::string_view program : { "logname", "tty", "arch", "nproc", "jq",
+             "du", "ps", "lsblk", "objdump", "env", "rg", "ip", "ldd" }) {
+        CHECK_FALSE(shell_builtin_allowed(program));
+    }
+    const ShellAnalysis with_operand = analyze_shell("tree node_modules");
+    CHECK(shell_builtin_allowed(with_operand.invocations.front().program));
+    CHECK_FALSE(shell_readonly_allowed(with_operand.invocations.front()));
+#else
     for (std::string_view program :
         { "whoami", "logname", "tty", "arch", "nproc", "diff", "uniq", "comm",
             "join", "paste", "fold", "nl", "rev", "tac", "od", "base64", "jq",
@@ -431,6 +452,7 @@ TEST_CASE("whole-program read-only commands are safe with any operand")
     const ShellAnalysis with_operand = analyze_shell("du -sh node_modules");
     CHECK(shell_builtin_allowed(with_operand.invocations.front().program));
     CHECK_FALSE(shell_readonly_allowed(with_operand.invocations.front()));
+#endif
 }
 
 TEST_CASE("application state shares grants with children")
@@ -859,6 +881,18 @@ TEST_CASE("launcher wrapping cannot bypass the shell rules")
     const ShellEvaluation prefixed = evaluate("env FOO=bar rm -rf build");
     CHECK(prefixed.decision.kind == PermissionDecision::Kind::REJECT);
 
+    // Unwrapping works on every host, but the accept verdicts below rely
+    // on the POSIX read-only catalog; the Windows catalog (cmd.exe
+    // builtins) has no ls, so the launcher-wrapped forms legitimately ask.
+#ifdef _WIN32
+    // dir is catalogued read-only on Windows, so both launcher-wrapped and
+    // direct forms are accepted; the wrapper cannot smuggle anything past
+    // the same rules.
+    CHECK(evaluate("bash -c 'dir'").decision.kind
+        == PermissionDecision::Kind::ACCEPT);
+    CHECK(evaluate("cmd /c dir").decision.kind
+        == PermissionDecision::Kind::ACCEPT);
+#else
     CHECK(evaluate("bash -c 'ls'").decision.kind
         == PermissionDecision::Kind::ACCEPT);
     CHECK(evaluate("bash -c 'git status'").decision.kind
@@ -867,6 +901,7 @@ TEST_CASE("launcher wrapping cannot bypass the shell rules")
         == PermissionDecision::Kind::ACCEPT);
     CHECK(
         evaluate("sudo ls").decision.kind == PermissionDecision::Kind::ACCEPT);
+#endif
 
     // Unreadable code asks once and carries no grant, so approval cannot
     // become a reusable bypass.

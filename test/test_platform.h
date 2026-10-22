@@ -4,6 +4,7 @@
 // POSIX headers or calls setenv/getpid.
 
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -71,6 +72,11 @@ std::string failing_command();
 // Catalogued read-only on both hosts.
 std::string echo_command(std::string_view text);
 
+// A command that exits 0 immediately, for tests that only need a child to
+// succeed: POSIX `true`, the exit-0 fixture on Windows where `true` is not a
+// program.
+std::string editor_command();
+
 // Prints what the child's stdin is connected to.
 std::string stdin_target_command();
 
@@ -82,6 +88,34 @@ std::string_view mutating_program();
 
 // Joins two commands with the host shell's separator (POSIX ';', cmd '&').
 std::string shell_and(std::string_view first, std::string_view second);
+
+// Renders `path` as a Lua short-string literal: backslashes doubled so a
+// Windows path does not trip the \u/\t escape machinery.
+std::string lua_path(const std::filesystem::path& path);
+
+// True when a `git` executable answers on PATH; probed once. Repository
+// fixtures report a skip instead of a 20-second silent timeout without it.
+bool git_available();
+
+// A foreign holder parked on a worker thread for the lifetime of the object.
+// The thread matters: Windows named mutexes are recursive per-thread, so a
+// lock taken on the calling thread is invisible to foreign_lock_live() and
+// every is_locked()-style predicate. release() drops the lock early;
+// destruction releases whatever is still held and joins the worker.
+class ForeignLock {
+public:
+    explicit ForeignLock(const std::filesystem::path& file);
+    ~ForeignLock();
+
+    void release();
+
+    ForeignLock(const ForeignLock&)            = delete;
+    ForeignLock& operator=(const ForeignLock&) = delete;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> _impl;
+};
 
 // Symlink creation needs a privilege Windows only grants in developer mode.
 // Probed once; tests that need a real symlink report a skip instead of

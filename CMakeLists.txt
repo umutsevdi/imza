@@ -473,6 +473,11 @@ if (IMZA_BUILD_TESTS)
         imza_ui
         doctest::doctest
     )
+    if(WIN32)
+        # The loopback HTTP fixtures speak Winsock directly; do not rely on
+        # curl pulling the library in transitively.
+        target_link_libraries(imza_tests PRIVATE ws2_32)
+    endif()
 endif()
 add_custom_target(bundle DEPENDS ${BUNDLE_OUTPUTS})
 add_dependencies(${PROJECT_NAME} bundle)

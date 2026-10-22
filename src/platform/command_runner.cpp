@@ -32,9 +32,11 @@ namespace {
     CommandResult run_windows(const std::string& command,
         std::chrono::seconds timeout, CommandResult result,
         const std::filesystem::path& working_directory,
-        std::string_view stdin_data)
+        std::string_view stdin_data, StderrCapture stderr_capture)
     {
-        std::wstring cmdline = L"cmd.exe /c " + to_wide(command);
+        // /s /c plus outer quotes disables cmd's strip-first-and-last-quote
+        // rule, which mangles any command carrying more than one quoted token.
+        std::wstring cmdline = L"cmd.exe /s /c \"" + to_wide(command) + L"\"";
 
         SECURITY_ATTRIBUTES sa { };
         sa.nLength        = sizeof(sa);
@@ -45,6 +47,15 @@ namespace {
             return result;
         }
         SetHandleInformation(out_read, HANDLE_FLAG_INHERIT, 0);
+
+        HANDLE err_write = nullptr;
+        if (stderr_capture == StderrCapture::STDOUT_ONLY) {
+            err_write = CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_READ, &sa,
+                OPEN_EXISTING, 0, nullptr);
+            if (err_write == INVALID_HANDLE_VALUE) {
+                err_write = nullptr;
+            }
+        }
 
         HANDLE in_read  = nullptr;
         HANDLE in_write = nullptr;
@@ -60,6 +71,9 @@ namespace {
             if (in_read == INVALID_HANDLE_VALUE) {
                 CloseHandle(out_read);
                 CloseHandle(out_write);
+                if (err_write != nullptr) {
+                    CloseHandle(err_write);
+                }
                 in_read = nullptr;
                 return result;
             }
@@ -69,7 +83,7 @@ namespace {
         si.cb         = sizeof(si);
         si.dwFlags    = STARTF_USESTDHANDLES;
         si.hStdOutput = out_write;
-        si.hStdError  = out_write;
+        si.hStdError  = err_write != nullptr ? err_write : out_write;
         si.hStdInput  = in_read;
 
         PROCESS_INFORMATION pi { };
@@ -83,6 +97,9 @@ namespace {
                 &pi)) {
             CloseHandle(out_read);
             CloseHandle(out_write);
+            if (err_write != nullptr) {
+                CloseHandle(err_write);
+            }
             CloseHandle(in_read);
             if (has_stdin) {
                 CloseHandle(in_write);
@@ -90,6 +107,9 @@ namespace {
             return result;
         }
         CloseHandle(out_write);
+        if (err_write != nullptr) {
+            CloseHandle(err_write);
+        }
         CloseHandle(in_read);
 
         // The Windows killpg: a timeout must reap the descendants too, or one
@@ -170,7 +190,9 @@ namespace {
         const std::filesystem::path& working_directory, std::stop_token stop,
         const std::function<void()>& on_spawned)
     {
-        std::wstring cmdline = L"cmd.exe /c " + to_wide(command);
+        // /s /c plus outer quotes disables cmd's strip-first-and-last-quote
+        // rule, which mangles any command carrying more than one quoted token.
+        std::wstring cmdline = L"cmd.exe /s /c \"" + to_wide(command) + L"\"";
         STARTUPINFOW startup { };
         startup.cb = sizeof(startup);
         PROCESS_INFORMATION process { };
@@ -245,7 +267,7 @@ namespace {
     CommandResult run_posix(const std::string& command,
         std::chrono::seconds timeout, CommandResult result,
         const std::filesystem::path& working_directory,
-        std::string_view stdin_data)
+        std::string_view stdin_data, StderrCapture stderr_capture)
     {
         int pipefd[2];
         if (pipe(pipefd) != 0) {
@@ -288,7 +310,19 @@ namespace {
                 close(devnull);
             }
             dup2(pipefd[1], STDOUT_FILENO);
-            dup2(pipefd[1], STDERR_FILENO);
+            if (stderr_capture == StderrCapture::STDOUT_ONLY) {
+                const int null_fd = open("/dev/null", O_WRONLY);
+                if (null_fd >= 0) {
+                    dup2(null_fd, STDERR_FILENO);
+                    if (null_fd > 2) {
+                        close(null_fd);
+                    }
+                } else {
+                    dup2(pipefd[1], STDERR_FILENO);
+                }
+            } else {
+                dup2(pipefd[1], STDERR_FILENO);
+            }
             close(pipefd[0]);
             close(pipefd[1]);
             execl("/bin/sh", "sh", "-c", command.c_str(),
@@ -478,18 +512,19 @@ std::string shell_quote(const std::filesystem::path& path)
 
 CommandResult run_command(const std::string& command,
     std::chrono::seconds timeout,
-    const std::filesystem::path& working_directory, std::string_view stdin_data)
+    const std::filesystem::path& working_directory, std::string_view stdin_data,
+    StderrCapture stderr_capture)
 {
     CommandResult result;
     if (command.empty() || timeout < std::chrono::seconds(0)) {
         return result;
     }
 #ifdef _WIN32
-    return run_windows(
-        command, timeout, std::move(result), working_directory, stdin_data);
+    return run_windows(command, timeout, std::move(result), working_directory,
+        stdin_data, stderr_capture);
 #else
-    return run_posix(
-        command, timeout, std::move(result), working_directory, stdin_data);
+    return run_posix(command, timeout, std::move(result), working_directory,
+        stdin_data, stderr_capture);
 #endif
 }
 

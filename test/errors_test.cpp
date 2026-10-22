@@ -170,4 +170,41 @@ TEST_CASE("stream emits CONNECTED then parses SSE on success")
     CHECK(events[2].kind == imza::StreamEvent::Kind::DONE);
 }
 
+TEST_CASE("abort_all_transfers cancels an in-flight request promptly")
+{
+    // A handler that reads the request but never answers: the transfer
+    // would ride out its full timeout without the abort.
+    imza::test::LoopbackHttpServer server;
+    server.handle = [](imza::test::detail::Socket fd,
+                        const imza::test::LoopbackRequest&) {
+        char byte = 0;
+        (void)imza::test::detail::receive_bytes(fd, &byte, 1);
+    };
+    REQUIRE(server.start());
+
+    std::atomic<bool> finished { false };
+    std::thread request([&] {
+        std::string body;
+        long code = 0;
+        const imza::Status st
+            = imza::http_get(server.base_url() + "/slow", { }, 30, body, &code);
+        (void)st;
+        finished.store(true);
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    const auto started = std::chrono::steady_clock::now();
+    imza::abort_all_transfers();
+    const auto deadline
+        = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!finished.load() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    CHECK(finished.load());
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    CHECK(elapsed < std::chrono::seconds(5));
+    request.join();
+    server.stop();
+}
+
 } // namespace

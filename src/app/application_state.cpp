@@ -1,5 +1,7 @@
 #include "app/application_state.h"
 
+#include "network/network.h"
+
 #include "app/flows.h"
 #include "permissions/evaluator.h"
 #include "permissions/filesystem.h"
@@ -306,6 +308,11 @@ namespace {
                 state->subagent_deps, *state->lua_state, mcp_docs(captured));
         }
         wire(state, std::move(stream_fn), std::move(tools));
+        // The store is process-wide and children share it, so only the root
+        // stops it. Registered last so teardown stops it first: connect and
+        // catalog workers call into the session and post through the state,
+        // which must still be alive while they join.
+        state->stoppable.push_back(state->providers.get());
         return state;
     }
 
@@ -362,6 +369,9 @@ namespace {
 ApplicationState::~ApplicationState()
 {
     alive.store(false);
+    // In-flight network requests would otherwise hold their full transfer
+    // timeout while the component stops below join their workers.
+    imza::abort_all_transfers();
     // The session's queue abandons its pending promises in ~Session,
     // which runs when the state releases its shared_ptr below.
     // Subscriptions disconnect through their own RAII; the explicit

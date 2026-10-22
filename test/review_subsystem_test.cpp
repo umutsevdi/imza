@@ -201,6 +201,9 @@ TEST_CASE("review state adds AI comments without exact duplicates")
 }
 TEST_CASE("ReviewSubsystem reloads the repository on its own worker")
 {
+    if (!imza::test::git_available()) {
+        SKIP_TEST("git is not on PATH");
+    }
     const imza::test::TempDir dir;
     const std::filesystem::path root = dir.path;
     const auto git                   = [&](const std::string& command) {
@@ -222,10 +225,18 @@ TEST_CASE("ReviewSubsystem reloads the repository on its own worker")
     review.set_active(true);
     review.reload(root);
     REQUIRE(imza::test::wait_until([&] {
-        return review.snapshot().status
-            == imza::ReviewSubsystem::LoadStatus::LOADED;
+        const auto current = review.snapshot();
+        // Fail fast with the subsystem's own message instead of spinning
+        // out: git failures (missing config, CRLF warnings, path quoting)
+        // land here as ERROR.
+        if (current.status == imza::ReviewSubsystem::LoadStatus::ERROR) {
+            MESSAGE("review load error: " << current.error);
+            return true;
+        }
+        return current.status == imza::ReviewSubsystem::LoadStatus::LOADED;
     }));
     const auto snapshot = review.snapshot();
+    REQUIRE(snapshot.status == imza::ReviewSubsystem::LoadStatus::LOADED);
     REQUIRE(snapshot.review != nullptr);
     REQUIRE(snapshot.review->files.size() == 1);
     CHECK(snapshot.review->files[0].new_path == "a.txt");
@@ -242,6 +253,9 @@ TEST_CASE("ReviewSubsystem reloads the repository on its own worker")
 
 TEST_CASE("ReviewSubsystem defers the repository load until it is visible")
 {
+    if (!imza::test::git_available()) {
+        SKIP_TEST("git is not on PATH");
+    }
     const imza::test::TempDir dir;
     const std::filesystem::path root = dir.path;
     const auto git                   = [&](const std::string& command) {
@@ -263,9 +277,15 @@ TEST_CASE("ReviewSubsystem defers the repository load until it is visible")
 
     review.set_active(true);
     REQUIRE(imza::test::wait_until([&] {
-        return review.snapshot().status
-            == imza::ReviewSubsystem::LoadStatus::LOADED;
+        const auto current = review.snapshot();
+        if (current.status == imza::ReviewSubsystem::LoadStatus::ERROR) {
+            MESSAGE("review load error: " << current.error);
+            return true;
+        }
+        return current.status == imza::ReviewSubsystem::LoadStatus::LOADED;
     }));
+    CHECK(
+        review.snapshot().status == imza::ReviewSubsystem::LoadStatus::LOADED);
     CHECK(review.snapshot().review != nullptr);
     review.stop();
 }

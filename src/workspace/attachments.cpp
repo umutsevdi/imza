@@ -134,7 +134,7 @@ std::vector<AttachmentCandidate> attachment_candidates(
         if (!is_dir && !entry.is_regular_file(ec)) {
             continue;
         }
-        std::string path = utf8_from_path(directory / name);
+        std::string path = portable_string(directory / name);
         if (is_dir) {
             path += '/';
         }
@@ -256,7 +256,7 @@ AttachmentResult load_attachment(
                 + std::string(relative_path) + "." };
     }
     const std::string display
-        = utf8_from_path(std::filesystem::relative(path, canonical_root, ec));
+        = portable_string(std::filesystem::relative(path, canonical_root, ec));
     std::string encoded;
     if (type != Attachment::Type::TEXT) {
         encoded = base64_encode(content);

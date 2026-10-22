@@ -12,7 +12,6 @@ namespace imza {
 
 namespace {
 
-    // Runs a script through a fresh trusted-mode lua tool; returns output.
     std::string eval_script(const std::string& script)
     {
         return imza::test::run_lua(script).text;

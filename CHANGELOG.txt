@@ -26,6 +26,11 @@ Changes:
   - Fixed the chat input cursor disappearing or blinking.
   - Improved performance during diff scans.
   - Reduced CPU usage during streaming.
+  - Fixed a rare crash when closing Imza while a provider connection was
+    still being tested.
+  - Fixed sessions opened by another Imza process not being recognized as
+    in use on Windows, letting a switch overwrite them.
+  - Fixed child processes on Windows losing their environment.
 
 -------------------------------------------------------------------------------
 0.6.4 - 2026-10-17

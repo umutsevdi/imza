@@ -180,7 +180,7 @@ ReviewLoadResult load_repository_review(const std::filesystem::path& root)
     const std::string prefix = "git -C " + shell_quote(root);
     const CommandResult untracked
         = run_command(prefix + " ls-files --others --exclude-standard",
-            std::chrono::seconds { 5 });
+            std::chrono::seconds { 5 }, { }, { }, StderrCapture::STDOUT_ONLY);
     if (command_ok(untracked)) {
         append_untracked(*review, root, untracked.output);
     }

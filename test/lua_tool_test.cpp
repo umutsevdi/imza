@@ -17,7 +17,6 @@ namespace fs = std::filesystem;
 
 namespace {
 
-// A lua host wired to a session's plan document.
 imza::LuaHost plan_session_host(imza::Session& session)
 {
     imza::LuaHost host { };
@@ -276,7 +275,8 @@ TEST_CASE("return-value conversion failure preserves log and diffs")
 {
     imza::test::TempDir dir;
     imza::test::write_file(dir.file("a.txt"), "one\n");
-    const std::string script = "imza.fs.write('" + dir.file("a.txt").string()
+    const std::string script = "imza.fs.write('"
+        + imza::test::lua_path(dir.file("a.txt"))
         + "', 'two\\n')\n"
           "return function() end";
     const imza::ToolOutput out = imza::test::run_lua(script);
@@ -285,7 +285,7 @@ TEST_CASE("return-value conversion failure preserves log and diffs")
     REQUIRE(out.dispatch_log.size() == 1);
     CHECK(out.dispatch_log[0].binding == "fs.write");
     REQUIRE(out.diffs.size() == 1);
-    CHECK(out.diffs[0].file == dir.file("a.txt").string());
+    CHECK(out.diffs[0].file == imza::portable_string(dir.file("a.txt")));
 }
 
 TEST_CASE("lua print truncation respects the hard output cap")
@@ -339,10 +339,10 @@ TEST_CASE("imza.fs.list returns entries with type and size fields")
     fs::create_directories(dir.file("sub"));
     imza::test::write_file(dir.file("sub/nested.txt"), "content");
 
-    const imza::ToolOutput out
-        = imza::test::run_lua("local rows = imza.fs.list([[" + dir.path.string()
-            + "]], 2)\n"
-              "for _, r in ipairs(rows) do print(r.path, r.type) end");
+    const imza::ToolOutput out = imza::test::run_lua(
+        "local rows = imza.fs.list([[" + imza::test::lua_path(dir.path)
+        + "]], 2)\n"
+          "for _, r in ipairs(rows) do print(r.path, r.type) end");
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(out.text.find("visible.txt    file") != std::string::npos);
     CHECK(out.text.find("sub    dir") != std::string::npos);
@@ -845,7 +845,8 @@ TEST_CASE("imza.sh routes redirects and non-catalog commands to the gate")
     ShellFixture unattended;
     unattended.attendable             = false;
     const imza::ToolOutput redirected = imza::test::run_lua(
-        "imza.shell('echo hi > " + marker.string() + "')", unattended.host());
+        "imza.shell('echo hi > " + imza::test::lua_path(marker) + "')",
+        unattended.host());
     CHECK(redirected.kind == imza::ToolOutput::Kind::ERROR);
     CHECK(redirected.text.find("approval") != std::string::npos);
 
@@ -914,7 +915,8 @@ TEST_CASE("imza.sh accepts pre-installed grants and skip-permissions silently")
 {
     imza::test::TempDir dir;
     ShellFixture pre;
-    const std::string pre_granted_path = dir.file("pre-granted").string();
+    const std::string pre_granted_path
+        = imza::portable_string(dir.file("pre-granted"));
     const std::string pre_granted
         = imza::test::mutating_command(pre_granted_path);
     CHECK(pre.install({ imza::ShellCommandGrant {

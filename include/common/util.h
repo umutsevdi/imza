@@ -44,6 +44,16 @@ inline std::filesystem::path path_from_utf8(std::string_view text)
     return std::filesystem::path(std::u8string(text.begin(), text.end()));
 }
 
+// UTF-8 text of `path` with forward slashes: the canonical form for
+// user-visible and model-visible path strings. `native` formatting leaks
+// backslashes on Windows and makes paths inside prompts, tool output, and
+// transcripts non-portable.
+inline std::string portable_string(const std::filesystem::path& path)
+{
+    const std::u8string text = path.generic_u8string();
+    return std::string(text.begin(), text.end());
+}
+
 inline std::string env_or_empty(const char* key)
 {
 #ifdef _WIN32

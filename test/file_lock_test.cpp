@@ -52,8 +52,9 @@ TEST_CASE("lock file is removed on release and can be reacquired")
         REQUIRE(std::holds_alternative<imza::FileLock>(lock));
     }
 #ifdef _WIN32
-    // Windows locks a path-derived named mutex and never creates a file.
-    CHECK_FALSE(std::filesystem::exists(path));
+    // Windows locks a path-derived named mutex and never creates a file,
+    // so the observable release is the probe going quiet.
+    CHECK_FALSE(imza::foreign_lock_live(path));
 #else
     CHECK_FALSE(std::filesystem::exists(path));
 #endif
@@ -96,11 +97,6 @@ TEST_CASE("shared locks coexist and yield to an exclusive holder")
 
     auto second = imza::acquire_file_lock(
         path, imza::FileLockRequest { imza::FileLockMode::SHARED, false });
-#ifdef _WIN32
-    // Named mutexes are exclusive only, so a shared request degrades to an
-    // exclusive one and the second holder is refused.
-    CHECK(std::holds_alternative<imza::FileLockError>(second));
-#else
     REQUIRE(std::holds_alternative<imza::FileLock>(second));
 
     auto blocked = imza::acquire_file_lock(
@@ -108,7 +104,6 @@ TEST_CASE("shared locks coexist and yield to an exclusive holder")
     CHECK(std::holds_alternative<imza::FileLockError>(blocked));
 
     imza::test::release_lock(second);
-#endif
 
     imza::test::release_lock(first);
     auto exclusive = imza::acquire_file_lock(

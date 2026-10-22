@@ -11,7 +11,6 @@
 
 namespace {
 
-// A plan tab with its chat child attached at the wide layout.
 ftxui::Component plan_tab_with_chat(
     const std::shared_ptr<imza::ApplicationState>& state)
 {
@@ -371,7 +370,7 @@ TEST_CASE("the two review passes run together but a repeat is refused")
     auto pump  = std::make_shared<imza::test::PostPump>();
     auto state = imza::test::make_test_state(
         [pump](std::function<void()> task) { pump->fn()(std::move(task)); },
-        imza::test::test_config(),
+        imza::test::review_pass_config(),
         [](const imza::ChatRequest&, const imza::StreamCallback& cb) {
             cb(imza::make_delta_event("{\"findings\":[]}"));
             cb(imza::make_done_event());

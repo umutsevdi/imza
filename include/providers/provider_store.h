@@ -94,6 +94,8 @@ public:
         RefreshFn refresh_fn = { });
     ~ProviderStore();
 
+    void stop() override;
+
     ProviderStore(const ProviderStore&)            = delete;
     ProviderStore& operator=(const ProviderStore&) = delete;
 

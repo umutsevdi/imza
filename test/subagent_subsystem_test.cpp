@@ -8,7 +8,6 @@
 #include <thread>
 #include <vector>
 
-// Worker that spins until cancelled, reporting `status`.
 imza::SubagentResult spin_until_stopped(
     std::stop_token stop, imza::Status status = imza::Status::CANCELLED)
 {

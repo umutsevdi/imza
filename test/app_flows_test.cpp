@@ -169,9 +169,7 @@ TEST_CASE("switch_session locks the target and reports foreign locks")
             return entry.title == "Target";
         })->path;
 
-    auto foreign = imza::acquire_file_lock(imza::lock_path_for(target_path),
-        imza::FileLockRequest { imza::FileLockMode::EXCLUSIVE, false });
-    REQUIRE(std::holds_alternative<imza::FileLock>(foreign));
+    imza::test::ForeignLock foreign(target_path);
 
     imza::switch_session(*state, target_path);
     CHECK(state->session->title() == "Current");
@@ -180,7 +178,7 @@ TEST_CASE("switch_session locks the target and reports foreign locks")
     CHECK(state->session->session_id() == current_stem);
     CHECK(imza::saved_sessions().size() == 2);
 
-    imza::test::release_lock(foreign);
+    foreign.release();
     imza::switch_session(*state, target_path);
     CHECK(state->session->title() == "Target");
     CHECK(state->session->error().empty());
@@ -196,8 +194,6 @@ TEST_CASE("new session clears every conversation-scoped surface")
     auto state = imza::test::make_test_state();
     imza::test::wait_for_environment(*state);
 
-    // Conversation-scoped state: a loaded skill, a queued modal, a pending
-    // skill turn, and a session grant.
     const std::filesystem::path skill_path
         = imza::test::TempDir { }.file("SKILL.md");
     imza::test::write_file(skill_path, "instructions");
@@ -207,7 +203,8 @@ TEST_CASE("new session clears every conversation-scoped surface")
     state->session->queue.enqueue(
         imza::ViewerModal { .title = "t", .content = "c" },
         imza::ModalOrigin::USER);
-    REQUIRE(state->permissions->install({ imza::ExternalGrant { "/tmp" } }));
+    REQUIRE(state->permissions->install(
+        { imza::ExternalGrant { std::filesystem::temp_directory_path() } }));
 
     imza::run_slash(*state, "/new");
 
@@ -232,19 +229,6 @@ std::string findings_reply()
            "\"line\":2,\"severity\":\"P1\",\"body\":\"oops\"}]}";
 }
 
-// test_config() carries no endpoint, so the pass workers would refuse
-// with a configuration error before reaching the stream stub.
-imza::Config review_pass_config()
-{
-    imza::Config cfg;
-    imza::Connection conn;
-    conn.id       = "test";
-    conn.endpoint = "https://example.test/v1/chat/completions";
-    cfg.providers.push_back(conn);
-    cfg.last_used = imza::LastUsed { "test", "m" };
-    return cfg;
-}
-
 std::string toast_text(const imza::ApplicationState& state)
 {
     std::string text;
@@ -265,7 +249,7 @@ TEST_CASE("a finished review pass alerts and toasts the attended root")
     auto pump  = std::make_shared<imza::test::PostPump>();
     auto state = imza::test::make_test_state(
         [pump](std::function<void()> task) { pump->fn()(std::move(task)); },
-        review_pass_config(),
+        imza::test::review_pass_config(),
         [](const imza::ChatRequest&, const imza::StreamCallback& cb) {
             cb(imza::make_delta_event(findings_reply()));
             cb(imza::make_done_event());
@@ -331,7 +315,7 @@ TEST_CASE("a failed review pass rings without adding a second toast")
     auto pump  = std::make_shared<imza::test::PostPump>();
     auto state = imza::test::make_test_state(
         [pump](std::function<void()> task) { pump->fn()(std::move(task)); },
-        review_pass_config(),
+        imza::test::review_pass_config(),
         [](const imza::ChatRequest&, const imza::StreamCallback& cb) {
             cb(imza::make_delta_event("{\"findings\":[{\"file\":\"a"));
             cb(imza::make_error_event(imza::Status::TRUNCATED, "cut off"));
@@ -369,7 +353,7 @@ TEST_CASE("a cancelled review pass stays silent")
     auto pump  = std::make_shared<imza::test::PostPump>();
     auto state = imza::test::make_test_state(
         [pump](std::function<void()> task) { pump->fn()(std::move(task)); },
-        review_pass_config(),
+        imza::test::review_pass_config(),
         [](const imza::ChatRequest&, const imza::StreamCallback& cb) {
             cb(imza::make_delta_event(findings_reply()));
             return imza::Status::CANCELLED;

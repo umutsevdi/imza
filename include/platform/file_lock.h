@@ -41,15 +41,23 @@ private:
 };
 
 // Advisory cross-process lock. Exclusive mode admits one holder; shared mode
-// admits any number of holders unless an exclusive lock is live. On Windows
-// shared requests degrade to exclusive. A non-blocking request fails with
-// FileLockError instead of waiting.
+// admits any number of holders unless an exclusive lock is live. A
+// non-blocking request fails with FileLockError instead of waiting; a
+// blocking request against a holder in the same process also fails rather
+// than deadlocking on the recursive named mutex.
 std::variant<FileLock, FileLockError> acquire_file_lock(
     const std::filesystem::path& path, const FileLockRequest& request = { });
 
 // True when any holder - in this process or elsewhere - keeps the file
 // locked right now. Never creates a lingering lock file.
 bool file_lock_held(const std::filesystem::path& path);
+
+// Liveness probe that stays honest on backends whose non-blocking acquire
+// cannot distinguish "already held" from "acquired by this call" (named
+// mutexes on Windows): succeeds only when someone else holds the lock, and
+// releases immediately on POSIX where the probe would have taken it.
+// Never creates a lock file and never disturbs an existing holder.
+bool foreign_lock_live(const std::filesystem::path& path);
 
 std::filesystem::path lock_path_for(const std::filesystem::path& file);
 

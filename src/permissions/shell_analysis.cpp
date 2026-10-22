@@ -287,7 +287,17 @@ namespace {
                 if (character == '"') {
                     quote = Quote::NONE;
                 } else if (character == '\\') {
-                    escaped = true;
+                    // POSIX: inside double quotes a backslash is special
+                    // only before $ ` " \ or newline; anywhere else both
+                    // characters stay literal, so Windows paths survive.
+                    const char next
+                        = index + 1 < command.size() ? command[index + 1] : 0;
+                    if (next == '$' || next == '`' || next == '"'
+                        || next == '\\' || next == '\n') {
+                        escaped = true;
+                    } else {
+                        word.push_back(character);
+                    }
                 } else {
                     if (character == '$' || character == '`') {
                         analysis.reuse = ShellAnalysis::Reuse::ONCE;

@@ -914,8 +914,9 @@ TEST_CASE("config roundtrip preserves the allow list and instructions")
     imza::Config loaded;
     REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
     REQUIRE(loaded.allow.directories.size() == 1);
-    CHECK(
-        loaded.allow.directories[0] == std::filesystem::path("/work/project"));
+    // The document stores path::string(), which spells separators the host's
+    // way; compare the portable form so the check holds on every platform.
+    CHECK(loaded.allow.directories[0].generic_string() == "/work/project");
     REQUIRE(loaded.allow.commands.size() == 2);
     CHECK(loaded.allow.commands[0].program == "git");
     CHECK(loaded.allow.commands[0].subcommand == "push");

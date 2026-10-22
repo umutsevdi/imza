@@ -102,3 +102,19 @@ TEST_CASE("process env overrides reach the child")
     REQUIRE(process->read_line(line, 5s) == imza::Status::OK);
     CHECK(line == "custom-value");
 }
+
+TEST_CASE("process env overrides merge over the inherited environment")
+{
+    // The child environment is built from scratch on every host; an override
+    // must not drop the rest, or PATH disappears and later spawns fail.
+    std::string error;
+    imza::ProcessOptions options = fixture_options("env", "PATH");
+    options.env["IMZA_X"]        = "custom-value";
+    auto process                 = imza::Process::spawn(options, error);
+    REQUIRE(process != nullptr);
+
+    std::string line;
+    REQUIRE(process->read_line(line, 5s) == imza::Status::OK);
+    CHECK_FALSE(line.empty());
+    process->terminate();
+}

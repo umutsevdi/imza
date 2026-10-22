@@ -6,8 +6,10 @@
 
 #include <curl/curl.h>
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <charconv>
+#include <mutex>
 #include <optional>
 #include <string_view>
 
@@ -108,10 +110,84 @@ namespace {
         }
     };
 
+    // Easy handles are pooled per process instead of per thread with
+    // cleanup at thread exit: curl_easy_cleanup tears down the handle's
+    // threaded-DNS worker pool by joining threads, and on Windows a TLS
+    // destructor runs that join while holding the loader lock - the pool
+    // workers wait for the same lock to exit, so the join never returns.
+    // Returning a handle to the pool only moves a pointer, so thread
+    // teardown can never block; idle handles live until process exit.
+    struct HandlePool {
+        std::mutex mutex;
+        std::vector<CURL*> idle;
+
+        CURL* take()
+        {
+            {
+                std::lock_guard lock(mutex);
+                if (!idle.empty()) {
+                    CURL* handle = idle.back();
+                    idle.pop_back();
+                    return handle;
+                }
+            }
+            return curl_easy_init();
+        }
+
+        void give_back(CURL* handle)
+        {
+            std::lock_guard lock(mutex);
+            idle.push_back(handle);
+        }
+    };
+
+    HandlePool& handle_pool()
+    {
+        // Never destroyed: the main thread's borrowed handle outlives
+        // function-local statics' own destruction at process teardown.
+        static HandlePool* pool = new HandlePool { };
+        return *pool;
+    }
+
+    struct BorrowedHandle {
+        CURL* value;
+
+        BorrowedHandle()
+            : value(handle_pool().take())
+        {
+        }
+
+        ~BorrowedHandle()
+        {
+            if (value != nullptr) {
+                handle_pool().give_back(value);
+            }
+        }
+
+        BorrowedHandle(const BorrowedHandle&)            = delete;
+        BorrowedHandle& operator=(const BorrowedHandle&) = delete;
+    };
+
     CURL* reuse_handle()
     {
-        static thread_local CurlHandle handle;
+        static thread_local BorrowedHandle handle;
         return handle.value;
+    }
+
+    // Cooperative cancellation: tearing the application down must not wait
+    // out a full transfer timeout for every in-flight request. Each perform
+    // snapshots the generation; bumping it makes every progress callback
+    // abort its transfer, which returns CURLE_ABORTED_BY_CALLBACK to the
+    // owning worker and lets joins complete.
+    std::atomic<std::uint64_t> transfer_generation { 0 };
+    thread_local std::uint64_t transfer_generation_snapshot = 0;
+
+    int transfer_progress(void*, curl_off_t, curl_off_t, curl_off_t, curl_off_t)
+    {
+        if (transfer_generation != transfer_generation_snapshot) {
+            return 1;
+        }
+        return 0;
     }
 
     curl_slist* build_header_list(const std::vector<std::string>& headers)
@@ -159,6 +235,10 @@ namespace {
         }
         curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, append_body);
         curl_easy_setopt(handle, CURLOPT_WRITEDATA, &sink);
+        transfer_generation_snapshot = transfer_generation.load();
+        curl_easy_setopt(handle, CURLOPT_XFERINFOFUNCTION, transfer_progress);
+        curl_easy_setopt(handle, CURLOPT_XFERINFODATA, nullptr);
+        curl_easy_setopt(handle, CURLOPT_NOPROGRESS, 0L);
         if (response_headers != nullptr) {
             curl_easy_setopt(handle, CURLOPT_HEADERFUNCTION, capture_headers);
             curl_easy_setopt(handle, CURLOPT_HEADERDATA, response_headers);
@@ -184,6 +264,14 @@ namespace {
     }
 
 } // namespace
+
+void abort_all_transfers()
+{
+    // Every in-flight perform aborts on its next progress tick; new
+    // transfers started after this call snapshot the bumped generation and
+    // run normally until the next abort request.
+    transfer_generation.fetch_add(1);
+}
 
 Status http_get(const std::string& url, const std::vector<std::string>& headers,
     long timeout_secs, std::string& body, long* http_code,

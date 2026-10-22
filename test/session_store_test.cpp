@@ -479,7 +479,10 @@ TEST_CASE("non-ASCII workspace paths round-trip as valid UTF-8")
 {
     DataHome home;
     CurrentDirectory directory;
-    const auto workspace = home.root() / "Eylül çalışma";
+    // Narrow literals reach path via the ANSI code page on Windows and
+    // mangle the name on disk; build it from the UTF-8 bytes instead.
+    const auto workspace
+        = imza::path_from_utf8(home.root().generic_string() + "/Eylül çalışma");
     std::filesystem::create_directories(workspace);
     std::error_code ec;
     std::filesystem::current_path(workspace, ec);
@@ -529,7 +532,7 @@ TEST_CASE("missing or stale workspace falls back to the current directory")
              << "  \"title\": \"Stale workspace\",\n"
              << "  \"saved_at\": \"2026-09-10 19:17:27\",\n"
              << "  \"mode\": \"build\",\n"
-             << "  \"workspace\": \"" << directory.original.string()
+             << "  \"workspace\": \"" << directory.original.generic_string()
              << "/gone-away\",\n"
              << "  \"items\": [{\"type\": \"user\", \"text\": \"hello\"}]\n"
              << "}\n";
@@ -613,13 +616,11 @@ TEST_CASE("locked sessions block loads and deletion, then recover")
     imza::SessionStore store;
     // A lock held by another process makes activation fail and the session
     // stay locked.
-    auto foreign = imza::acquire_file_lock(imza::lock_path_for(path),
-        imza::FileLockRequest { imza::FileLockMode::EXCLUSIVE, false });
-    REQUIRE(std::holds_alternative<imza::FileLock>(foreign));
+    imza::test::ForeignLock foreign(path);
 
     CHECK(store.is_locked(path));
-    CHECK_FALSE(store.activate(path));
     CHECK(imza::session_file_locked(path));
+    CHECK_FALSE(store.activate(path));
     // Reads refuse a foreign-locked file instead of blocking; the exclusive
     // lock also makes deletion fail.
     imza::LoadedSession loaded;
@@ -629,7 +630,7 @@ TEST_CASE("locked sessions block loads and deletion, then recover")
     CHECK(imza::saved_sessions().size() == 1);
 
     // Activating another path releases the first.
-    imza::test::release_lock(foreign);
+    foreign.release();
     CHECK_FALSE(store.is_locked(path));
     REQUIRE(store.activate(path));
     CHECK(store.is_locked(path));

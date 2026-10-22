@@ -113,7 +113,8 @@ namespace {
     {
         lua_newtable(L);
         std::error_code rec;
-        const std::string name = fs::relative(entry.path(), root, rec).string();
+        const std::string name
+            = portable_string(fs::relative(entry.path(), root, rec));
         lua_pushlstring(L, name.data(), name.size());
         lua_setfield(L, -2, "path");
         const bool directory = entry.is_directory(ec);

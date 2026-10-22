@@ -19,7 +19,6 @@ namespace fs = std::filesystem;
 
 namespace {
 
-// Runs a lua script with an explicit timeout through a fresh tool.
 imza::ToolOutput run_lua_timeout(
     const std::string& script, long timeout, imza::LuaHost host = { })
 {

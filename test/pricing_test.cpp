@@ -55,7 +55,6 @@ imza::Catalog test_catalog()
     return catalog;
 }
 
-// Data home with a fetched catalog carrying the pricing rows above.
 struct CatalogHome : imza::test::IsolatedDataHome {
     CatalogHome()
     {

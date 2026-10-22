@@ -394,7 +394,6 @@ TEST_CASE("autocomplete completes a command on Enter without submitting")
     CHECK_FALSE(submit);
     CHECK(text == "/make-skill");
     CHECK(cursor == static_cast<int>(text.size()));
-    // The popup is gone, so the next Enter takes the plain submit path.
     CHECK_FALSE(autocomplete.active());
     autocomplete.clear();
 }

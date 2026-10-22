@@ -176,11 +176,15 @@ public:
     // platform, so both must point into the scratch root. HOME points there
     // too: the scan also walks `<home>/.agents/skills` and friends, which
     // keeps a developer's real skills from leaking into the suite.
+    // USERPROFILE is what home_dir() reads on Windows, so it is exported
+    // unconditionally: harmless elsewhere, and without it the Windows scan
+    // would read the real profile.
     IsolatedConfigHome()
         : _previous(env_value(config_home_variable()))
         , _had_previous(!_previous.empty())
         , _xdg_config("XDG_CONFIG_HOME", _root.path.string())
         , _home("HOME", _root.path.string())
+        , _profile("USERPROFILE", _root.path.string())
     {
         set_env(config_home_variable(), _root.path.string());
     }
@@ -219,6 +223,7 @@ private:
     // variable.
     ScopedEnv _xdg_config;
     ScopedEnv _home;
+    ScopedEnv _profile;
 };
 
 } // namespace imza::test

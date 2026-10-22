@@ -16,7 +16,6 @@
 
 namespace {
 
-// Data home with a fetched catalog listing testprov and its m1/m2 models.
 struct CatalogHome : imza::test::IsolatedDataHome {
     CatalogHome()
     {
@@ -39,9 +38,17 @@ std::shared_ptr<imza::ApplicationState> make_state(
     std::shared_ptr<imza::Session> session,
     std::shared_ptr<imza::ProviderStore> providers, imza::PostFn post)
 {
-    auto state       = imza::test::make_test_state(std::move(post));
-    state->session   = session;
+    auto state     = imza::test::make_test_state(std::move(post));
+    state->session = session;
+    // Dropping the factory store here would leave its stoppable entry
+    // dangling, so release it from the registry before the swap.
+    std::erase_if(state->stoppable,
+        [raw = state->providers.get()](
+            imza::Subsystem* component) { return component == raw; });
     state->providers = providers;
+    // The swapped-in store must join its workers while the state and
+    // session are still alive.
+    state->stoppable.push_back(providers.get());
     return state;
 }
 

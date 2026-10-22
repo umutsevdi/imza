@@ -29,6 +29,18 @@ namespace {
             std::ios::binary);
         std::string text { std::istreambuf_iterator<char>(file),
             std::istreambuf_iterator<char>() };
+        // The build embeds LF-only content (the generator normalizes), while
+        // a core.autocrlf checkout gives the sources CRLF; compare in the
+        // embedded convention.
+        std::string normalized;
+        normalized.reserve(text.size());
+        for (std::size_t i = 0; i < text.size(); ++i) {
+            if (text[i] == '\r' && i + 1 < text.size() && text[i + 1] == '\n') {
+                continue;
+            }
+            normalized += text[i];
+        }
+        text = std::move(normalized);
         while (!text.empty()
             && (text.back() == '\n' || text.back() == '\r' || text.back() == ' '
                 || text.back() == '\t')) {

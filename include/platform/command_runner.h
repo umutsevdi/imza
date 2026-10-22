@@ -21,11 +21,19 @@ inline bool command_ok(const CommandResult& result)
     return result.spawned && !result.timed_out && result.exit_code == 0;
 }
 
+// MERGE keeps run_command's usual behavior of folding stderr into `output`
+// (a shell command's diagnostics are part of what the user asked to see).
+// STDOUT_ONLY discards stderr: for commands whose stdout is parsed - git
+// emits CRLF-conversion warnings on stderr that would corrupt the parse -
+// and a discarded stream can never fill a pipe and block the child.
+enum class StderrCapture { MERGE, STDOUT_ONLY };
+
 std::string shell_quote(const std::filesystem::path& path);
 CommandResult run_command(const std::string& command,
     std::chrono::seconds timeout,
     const std::filesystem::path& working_directory = { },
-    std::string_view stdin_data                    = { });
+    std::string_view stdin_data                    = { },
+    StderrCapture stderr_capture                   = StderrCapture::MERGE);
 CommandResult run_attached_command(const std::string& command);
 // Launches `command` detached: returns as soon as the child is spawned, so
 // the caller keeps its terminal. Used to hand a file to the user's editor

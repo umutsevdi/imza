@@ -218,13 +218,23 @@ ProviderStore::ProviderStore(std::shared_ptr<ConfigStore> config_store,
     _catalog_loader.emplace([this] { _load_catalog(); });
 }
 
-ProviderStore::~ProviderStore()
+// Joins every worker while the object is still valid; called by the
+// composition root before shared state the completion callbacks touch
+// (ApplicationState, Session) is torn down. The destructor only runs it
+// when no one stopped the store earlier.
+void ProviderStore::stop()
 {
     mark_dead();
+    // Fetch workers park in curl for up to their transfer timeout; the
+    // abort makes every in-flight request return now, so the joins below
+    // complete promptly even when the network is unreachable.
+    abort_all_transfers();
     _catalog_loader.reset();
     _catalog_worker.reset();
     _workers.clear();
 }
+
+ProviderStore::~ProviderStore() { stop(); }
 
 void ProviderStore::_load_catalog()
 {

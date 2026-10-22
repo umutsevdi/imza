@@ -243,7 +243,7 @@ TEST_CASE("CLI accepts multiple allowed directories")
 TEST_CASE("CLI config creates the file and opens an editor")
 {
     const imza::test::IsolatedDataHome home;
-    const imza::test::ScopedEnv visual("VISUAL", "true");
+    const imza::test::ScopedEnv visual("VISUAL", imza::test::editor_command());
 
     char program[]         = "imza";
     char option[]          = "--config";

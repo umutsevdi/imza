@@ -242,7 +242,10 @@ TEST_CASE("Imza temporary directory is reusable and canonical")
 TEST_CASE("workspace retains its directory outside a project")
 {
     const imza::test::CurrentDirectory directory;
-    const auto dir = directory.original.root_path();
+    // A scratch directory, not the cwd's root: on Windows root_path() is a
+    // drive root, which may itself sit inside a repository.
+    const imza::test::TempDir scratch;
+    const auto dir = scratch.path;
 
     imza::Environment env;
     REQUIRE(wait_until_ready(env));
@@ -355,7 +358,7 @@ TEST_CASE("load_instruction_file resolves relative paths against the root")
 
     const auto found = imza::load_instruction_file(dir.path, "docs/guide.md");
     REQUIRE(found.has_value());
-    CHECK(found->path == (dir.path / "docs" / "guide.md").string());
+    CHECK(found->path == imza::portable_string(dir.path / "docs" / "guide.md"));
     CHECK(found->content == "guide rules");
 }
 

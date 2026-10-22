@@ -406,13 +406,15 @@ std::optional<std::string> git_working_diff(
     if (options.patch) {
         flags += " --patch";
     }
-    CommandResult diff
-        = run_command(prefix + flags + " HEAD --", std::chrono::seconds { 10 });
+    // STDERR discarded: the output is parsed, and git's CRLF-conversion
+    // warnings on stderr would land before the first "diff --git" header.
+    CommandResult diff = run_command(prefix + flags + " HEAD --",
+        std::chrono::seconds { 10 }, { }, { }, StderrCapture::STDOUT_ONLY);
     // Only a diff that ran to completion and failed is retried; a
     // timeout or spawn failure is rejected below without a retry.
     if (diff.spawned && !diff.timed_out && !command_ok(diff)) {
-        diff = run_command(
-            prefix + flags + " --cached --", std::chrono::seconds { 10 });
+        diff = run_command(prefix + flags + " --cached --",
+            std::chrono::seconds { 10 }, { }, { }, StderrCapture::STDOUT_ONLY);
     }
     if (!command_ok(diff)) {
         return std::nullopt;

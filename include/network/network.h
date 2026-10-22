@@ -77,6 +77,12 @@ struct HttpPostOptions {
     std::vector<std::string>* response_headers = nullptr;
 };
 
+// Aborts every in-flight http_* transfer: each perform's progress callback
+// sees the bumped generation and returns failure immediately. Used at
+// teardown so subsystem stops() can join workers that are mid-request
+// instead of waiting out their full timeouts.
+void abort_all_transfers();
+
 Status http_get(const std::string& url, const std::vector<std::string>& headers,
     long timeout_secs, std::string& body, long* http_code,
     const HttpGetOptions& opts = { });

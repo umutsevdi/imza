@@ -354,7 +354,7 @@ std::optional<InstructionFile> load_instruction_file(
         return std::nullopt;
     }
     *content = truncate_marked(std::move(*content), max_bytes);
-    return InstructionFile { path.string(), std::move(*content) };
+    return InstructionFile { portable_string(path), std::move(*content) };
 }
 
 std::filesystem::path prepare_imza_temporary_directory(
@@ -566,9 +566,11 @@ void Environment::_start_git_worker()
             const CommandResult status
                 = run_command("git status --porcelain=v1 --untracked-files=all "
                               "--ignore-submodules=dirty",
-                    std::chrono::seconds { 5 });
+                    std::chrono::seconds { 5 }, { }, { },
+                    StderrCapture::STDOUT_ONLY);
             const CommandResult branch = run_command(
-                "git branch --show-current", std::chrono::seconds { 5 });
+                "git branch --show-current", std::chrono::seconds { 5 }, { },
+                { }, StderrCapture::STDOUT_ONLY);
             const std::optional<std::string> diff = git_working_diff(root,
                 { .renames             = true,
                     .numstat           = true,

@@ -102,6 +102,20 @@ inline imza::Config test_config()
     return cfg;
 }
 
+// The same selection with an endpoint: review passes build a Route before
+// they ever reach the stream stub, and an endpoint-less connection makes
+// every pass worker fail with a configuration error instead.
+inline imza::Config review_pass_config()
+{
+    imza::Config cfg;
+    imza::Connection conn;
+    conn.id       = "test";
+    conn.endpoint = "https://example.test/v1/chat/completions";
+    cfg.providers.push_back(conn);
+    cfg.last_used = imza::LastUsed { "test", "m" };
+    return cfg;
+}
+
 // The calling thread is the main thread: posted closures run inline.
 inline void run_immediately(std::function<void()> task) { task(); }
 
