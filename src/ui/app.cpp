@@ -683,7 +683,7 @@ int run_repl(std::shared_ptr<ApplicationState> state)
         [state] {
             return state->session->phase() != Session::Phase::IDLE
                 || state->session->compaction_running()
-                || !state->environment->ready()
+                || !state->credentials->ready() || !state->environment->ready()
                 || state->subagents->running_count(false) > 0
                 || !state->notifications->notifications()->empty();
         },

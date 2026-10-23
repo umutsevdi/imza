@@ -7,6 +7,7 @@
 #include "permissions/filesystem.h"
 #include "permissions/permission_store.h"
 #include "platform/command_runner.h"
+#include "platform/credential_subsystem.h"
 #include "runtime/mcp_subsystem.h"
 #include "tools/skill_subsystem.h"
 #include "tools/skills.h"
@@ -206,7 +207,7 @@ namespace {
     std::shared_ptr<ApplicationState> initialize_root(
         std::shared_ptr<ApplicationState> state, PostFn post, Config config,
         StreamFn stream_fn, std::vector<Tool> tools, RuntimeFlag runtime_flags,
-        bool use_default_tools, std::shared_ptr<CredentialStore> credentials)
+        bool use_default_tools)
     {
         // The state owns the queue; an empty `post` posts into it, so the
         // interactive loop and the headless drain reach the same queue
@@ -233,9 +234,37 @@ namespace {
         // Taken before the config moves into the config store.
         std::vector<std::string> instructions = std::move(config.instructions);
         state->sidebar                        = config.sidebar;
-        state->credentials                    = std::move(credentials);
-        state->config                         = std::make_shared<ConfigStore>(
+        // Resolves the providers off the startup path; ConfigStore overlays
+        // what it finds.
+        state->credentials = std::make_shared<CredentialSubsystem>(
+            config.preferences.credentials
+                    == Preferences::Credentials::PLAINTEXT
+                ? CredentialSubsystem::Mode::PLAINTEXT
+                : CredentialSubsystem::Mode::OS,
+            config.providers, config_path());
+        state->config = std::make_shared<ConfigStore>(
             std::move(config), config_path(), state->credentials.get());
+        // A failed probe degrades to plaintext for this run; the worker
+        // decides that off the startup path, so the notice lands when it
+        // does rather than blocking the first frame.
+        auto notice_published = std::make_shared<std::atomic<bool>>(false);
+        const auto publish_degradation = [raw = state.get(), notice_published] {
+            if (!raw->credentials->ready()
+                || notice_published->exchange(true)) {
+                return;
+            }
+            const std::string reason = raw->credentials->unavailable_reason();
+            if (raw->notifications && !reason.empty()) {
+                raw->notifications->publish(true,
+                    "Credentials will be stored as plaintext because " + reason
+                        + ".");
+            }
+        };
+        state->credential_subscription
+            = state->credentials->subscribe_to_change(publish_degradation);
+        // The worker may have finished between construction and the
+        // subscription; the signal only announces later changes.
+        publish_degradation();
         state->providers = std::make_shared<ProviderStore>(state->config);
         McpSubsystemHooks mcp_hooks;
         // Sign-ins and background token refreshes write straight through
@@ -313,6 +342,9 @@ namespace {
         // catalog workers call into the session and post through the state,
         // which must still be alive while they join.
         state->stoppable.push_back(state->providers.get());
+        // Registered last: the credential worker rewrites the config during
+        // its legacy migration, so it must stop before the store does.
+        state->stoppable.push_back(state->credentials.get());
         return state;
     }
 
@@ -378,6 +410,7 @@ ApplicationState::~ApplicationState()
     // disconnects here only order them before workers stop.
     provider_subscription.disconnect();
     update_subscription.disconnect();
+    credential_subscription.disconnect();
     env_subscription.disconnect();
     system_subscription.disconnect();
     for (auto component = stoppable.rbegin(); component != stoppable.rend();
@@ -386,13 +419,12 @@ ApplicationState::~ApplicationState()
     }
 }
 
-std::shared_ptr<ApplicationState> make_application_state(PostFn post,
-    Config config, StreamFn stream_fn, RuntimeFlag runtime_flags,
-    std::shared_ptr<CredentialStore> credentials)
+std::shared_ptr<ApplicationState> make_application_state(
+    PostFn post, Config config, StreamFn stream_fn, RuntimeFlag runtime_flags)
 {
     std::shared_ptr<ApplicationState> state(new ApplicationState());
     return initialize_root(std::move(state), std::move(post), std::move(config),
-        std::move(stream_fn), { }, runtime_flags, true, std::move(credentials));
+        std::move(stream_fn), { }, runtime_flags, true);
 }
 
 std::shared_ptr<ApplicationState> make_child_application_state(

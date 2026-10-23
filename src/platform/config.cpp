@@ -2,7 +2,7 @@
 
 #include "network/web.h"
 #include "permissions/shell_analysis.h"
-#include "platform/credential_store.h"
+#include "platform/credential_subsystem.h"
 #include "platform/file_lock.h"
 #include "platform/json_file.h"
 #include "protocols/mcp_oauth.h"
@@ -904,27 +904,24 @@ namespace {
 
 namespace {
 
-    std::string credential_key(const Connection& connection)
-    {
-        return "provider/" + connection_key(connection);
-    }
-
-    bool plaintext_mode(const CredentialStore* credentials)
+    bool plaintext_mode(const CredentialSubsystem* credentials)
     {
         return credentials == nullptr || !credentials->is_keychain_available();
     }
 
 } // namespace
 
-Status resolve_credentials(Config& cfg, const CredentialStore& credentials)
+Status resolve_credentials(Config& cfg, const CredentialSubsystem& credentials)
 {
     if (!credentials.is_keychain_available()) {
         return Status::OK;
     }
     for (Connection& connection : cfg.providers) {
         Status status = Status::OK;
+        // lookup() serves the worker's already-resolved value, so a start
+        // pays one keychain round trip per provider, not one per call.
         const std::string stored
-            = credentials.get(credential_key(connection), status);
+            = credentials.lookup(credential_key(connection), status);
         if (status == Status::NOT_FOUND) {
             continue;
         }
@@ -939,13 +936,20 @@ Status resolve_credentials(Config& cfg, const CredentialStore& credentials)
 }
 
 bool adopt_legacy_credentials(const std::filesystem::path& path, Config& cfg,
-    CredentialStore& credentials)
+    CredentialSubsystem& credentials)
 {
     if (!credentials.is_keychain_available()) {
         return false;
     }
     // resolve_credentials has already filled every entry the keychain knows
     // about, so only genuine leftovers reach the locked read-modify-write.
+    // A document with no plaintext secret left is the common case, and the
+    // one that must not pay for the lock and the rewrite.
+    if (std::ranges::none_of(cfg.providers, [](const Connection& connection) {
+            return connection.has_secret();
+        })) {
+        return false;
+    }
     const ConfigUpdateResult result = update_config(
         path, cfg,
         [&credentials](Config& candidate) {
@@ -979,7 +983,7 @@ namespace {
 
     // Writes one connection's secret, or drops the entry when it carries none.
     Status sync_credential(
-        const Connection& connection, CredentialStore& credentials)
+        const Connection& connection, CredentialSubsystem& credentials)
     {
         const std::string key = credential_key(connection);
         if (!connection.has_secret()) {
@@ -991,7 +995,7 @@ namespace {
 
     // Drops the entry of a connection that no longer exists.
     Status remove_credential(
-        std::string_view connection_id, CredentialStore& credentials)
+        std::string_view connection_id, CredentialSubsystem& credentials)
     {
         const Status removed
             = credentials.remove("provider/" + std::string(connection_id));
@@ -1001,7 +1005,7 @@ namespace {
 } // namespace
 
 Status sync_credentials(
-    const Config& before, const Config& after, CredentialStore& credentials)
+    const Config& before, const Config& after, CredentialSubsystem& credentials)
 {
     if (!credentials.is_keychain_available()) {
         return Status::OK;
@@ -1037,7 +1041,7 @@ Status sync_credentials(
 }
 
 Status save_config(const std::filesystem::path& path, const Config& cfg,
-    CredentialStore* credentials)
+    CredentialSubsystem* credentials)
 {
     auto lock = acquire_file_lock(lock_path_for(path));
     if (!std::holds_alternative<FileLock>(lock)) {
@@ -1048,7 +1052,7 @@ Status save_config(const std::filesystem::path& path, const Config& cfg,
 
 ConfigUpdateResult update_config(const std::filesystem::path& path,
     const Config& initial, const ConfigMutator& mutate, Config* result,
-    CredentialStore* credentials)
+    CredentialSubsystem* credentials)
 {
     auto lock = acquire_file_lock(lock_path_for(path));
     if (!std::holds_alternative<FileLock>(lock)) {

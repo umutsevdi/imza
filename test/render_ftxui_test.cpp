@@ -377,6 +377,23 @@ TEST_CASE("canvas surface chart renders a wireframe")
     CHECK(drawn.find("Wave") != std::string::npos);
     CHECK(has_braille(drawn));
 }
+TEST_CASE("status line renders with the credential stage settled")
+{
+    auto state = imza::test::make_test_state();
+    imza::test::wait_for_environment(*state);
+    REQUIRE(state->credentials->ready());
+
+    auto line = imza::make_status_line(
+        state,
+        [] { return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 120 }; },
+        [] { return imza::WorkflowPhase::PLAN; });
+    const std::string drawn
+        = imza::test::without_ansi(imza::test::to_text(line->Render(), 120, 3));
+    CHECK(drawn.find("PLAN") != std::string::npos);
+    // A settled stage contributes no background-task label.
+    CHECK(drawn.find("Authenticating") == std::string::npos);
+}
+
 TEST_CASE("autocomplete completes a command on Enter without submitting")
 {
     auto state = imza::test::make_test_state();

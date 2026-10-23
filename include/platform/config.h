@@ -15,7 +15,7 @@
 
 namespace imza {
 
-class CredentialStore;
+class CredentialSubsystem;
 
 struct Connection {
     std::string id;
@@ -49,6 +49,12 @@ inline std::string connection_key_for(
 inline std::string connection_key(const Connection& connection)
 {
     return connection_key_for(connection.id, connection.label);
+}
+// Keychain key of a connection's secret. One spelling for the writer and the
+// reader, so a rename cannot silently orphan a stored key.
+inline std::string credential_key(const Connection& connection)
+{
+    return "provider/" + connection_key(connection);
 }
 // First connection whose identity key matches `key`; nullptr when absent.
 inline const Connection* find_connection(
@@ -181,26 +187,26 @@ Status load_config(const std::filesystem::path& path, Config& out,
     std::string* error = nullptr);
 // Secrets are written only when the store has no keychain (plaintext mode).
 Status save_config(const std::filesystem::path& path, const Config& cfg,
-    CredentialStore* credentials = nullptr);
+    CredentialSubsystem* credentials = nullptr);
 ConfigUpdateResult update_config(const std::filesystem::path& path,
     const Config& initial, const ConfigMutator& mutate,
-    Config* result = nullptr, CredentialStore* credentials = nullptr);
+    Config* result = nullptr, CredentialSubsystem* credentials = nullptr);
 
 // Fills every connection's api_key/refresh_token from the keychain. An absent
 // entry leaves the value parsed from the file, which adopt_legacy_credentials
 // then moves.
-Status resolve_credentials(Config& cfg, const CredentialStore& credentials);
+Status resolve_credentials(Config& cfg, const CredentialSubsystem& credentials);
 // Writes changed secrets and drops entries for vanished connections. Runs
 // before the document is written, so a keychain-mode save never drops a
 // secret it has not stored.
-Status sync_credentials(
-    const Config& before, const Config& after, CredentialStore& credentials);
+Status sync_credentials(const Config& before, const Config& after,
+    CredentialSubsystem& credentials);
 // Moves plaintext secrets into the keychain and rewrites the document without
 // them. No-op unless the keychain is available; also how a keyring installed
 // later, or a switch back to `os`, is picked up. Returns whether the document
 // was rewritten.
 bool adopt_legacy_credentials(const std::filesystem::path& path, Config& cfg,
-    CredentialStore& credentials);
+    CredentialSubsystem& credentials);
 void apply_skill_policies(Config& config, const SkillPolicyChanges& changes);
 
 // Grants declared by `config.allow` are converted for the permission

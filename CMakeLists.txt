@@ -262,7 +262,7 @@ add_library(imza_foundation
     src/platform/command_runner.cpp
     src/platform/config.cpp
     src/platform/config_store.cpp
-    src/platform/credential_store.cpp
+    src/platform/credential_subsystem.cpp
     src/platform/console_mode.cpp
     src/platform/file_lock.cpp
     src/platform/json_file.cpp

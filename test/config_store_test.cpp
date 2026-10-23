@@ -1,11 +1,12 @@
 #include <doctest/doctest.h>
 
+#include <chrono>
 #include <filesystem>
 #include <string>
 
 #include "platform/config.h"
 #include "platform/config_store.h"
-#include "platform/credential_store.h"
+#include "platform/credential_subsystem.h"
 #include "test_fs.h"
 
 namespace {
@@ -76,7 +77,7 @@ TEST_CASE("ConfigStore snapshot reflects a write made through another handle")
 
 TEST_CASE("ConfigStore syncs changed and removed connections to the keychain")
 {
-    imza::CredentialStore store(imza::CredentialStore::Mode::OS);
+    imza::CredentialSubsystem store(imza::CredentialSubsystem::Mode::OS);
     if (!store.is_keychain_available()) {
         return;
     }
@@ -113,6 +114,35 @@ TEST_CASE("ConfigStore syncs changed and removed connections to the keychain")
         return true;
     }) == imza::ConfigUpdateResult::UPDATED);
     CHECK(store.has(key) == imza::Status::NOT_FOUND);
+}
+
+TEST_CASE("ConfigStore overlays the resolved secret onto its snapshot")
+{
+    imza::CredentialSubsystem probe(imza::CredentialSubsystem::Mode::OS);
+    if (!probe.is_keychain_available()) {
+        return;
+    }
+    const std::string id
+        = "overlay-" + std::to_string(imza::test::process_id());
+    const std::string key = "provider/" + id;
+    REQUIRE(probe.set(key, "from-keychain") == imza::Status::OK);
+
+    // The document carries no secret, as keychain mode writes it.
+    imza::Connection connection;
+    connection.id = id;
+    imza::Config initial;
+    initial.providers.push_back(connection);
+
+    imza::CredentialSubsystem credentials(
+        imza::CredentialSubsystem::Mode::OS, { connection }, { });
+    REQUIRE(credentials.wait_ready(std::chrono::seconds { 30 }));
+
+    const imza::test::TempDir dir;
+    imza::ConfigStore store(initial, dir.file("config.json"), &credentials);
+    // The document itself stays clean; the snapshot is what carries the key.
+    CHECK(store.snapshot()->providers.at(0).api_key == "from-keychain");
+
+    CHECK(probe.remove(key) == imza::Status::OK);
 }
 
 TEST_CASE("ConfigStore leaves the snapshot untouched on a failed update")

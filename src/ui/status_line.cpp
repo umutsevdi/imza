@@ -1,5 +1,6 @@
 #include "app/application_state.h"
 #include "common/util.h"
+#include "platform/credential_subsystem.h"
 #include "providers/pricing.h"
 #include "providers/provider_store.h"
 #include "runtime/subagent_subsystem.h"
@@ -49,6 +50,8 @@ namespace {
                       _provider_dirty.store(true);
                       animation::RequestAnimationFrame();
                   }))
+            , _credential_subscription(_state->credentials->subscribe_to_change(
+                  [] { animation::RequestAnimationFrame(); }))
         {
         }
 
@@ -168,6 +171,7 @@ namespace {
         {
             const std::size_t agents = _state->subagents->running_count(false);
             const BackgroundTask tasks[] = {
+                { "Authenticating…", !_state->credentials->ready() },
                 { "Caching…", !_state->environment->ready() },
                 { "Compacting…", _state->session->compaction_running() },
                 { std::to_string(agents) + (agents == 1 ? " agent" : " agents"),
@@ -213,6 +217,7 @@ namespace {
         Signal<const SubagentEvent&>::Subscription _subagent_subscription;
         Signal<>::Subscription _compaction_subscription;
         Signal<>::Subscription _provider_subscription;
+        Signal<>::Subscription _credential_subscription;
 
         void _sync_provider_caches()
         {

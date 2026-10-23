@@ -2,7 +2,7 @@
 
 #include <string>
 
-#include "platform/credential_store.h"
+#include "platform/credential_subsystem.h"
 #include "test_platform.h"
 
 namespace {
@@ -17,9 +17,10 @@ std::string unique_key()
 
 } // namespace
 
-TEST_CASE("plaintext mode never probes and stores nothing")
+TEST_CASE("plaintext mode settles immediately and stores nothing")
 {
-    imza::CredentialStore store(imza::CredentialStore::Mode::PLAINTEXT);
+    imza::CredentialSubsystem store(imza::CredentialSubsystem::Mode::PLAINTEXT);
+    CHECK(store.ready());
     CHECK_FALSE(store.is_keychain_available());
     CHECK(store.unavailable_reason().empty());
 
@@ -29,17 +30,12 @@ TEST_CASE("plaintext mode never probes and stores nothing")
     CHECK(store.set("provider/test", "value") == imza::Status::CONFIG_ERROR);
     CHECK(store.remove("provider/test") == imza::Status::CONFIG_ERROR);
     CHECK(store.has("provider/test") == imza::Status::NOT_FOUND);
-}
-
-TEST_CASE("a failed probe reports a reason, a successful one does not")
-{
-    imza::CredentialStore store(imza::CredentialStore::Mode::OS);
-    CHECK(store.is_keychain_available() == store.unavailable_reason().empty());
+    CHECK_FALSE(store.cached_secret("provider/test").has_value());
 }
 
 TEST_CASE("keychain round trip when one is available")
 {
-    imza::CredentialStore store(imza::CredentialStore::Mode::OS);
+    imza::CredentialSubsystem store(imza::CredentialSubsystem::Mode::OS);
     if (!store.is_keychain_available()) {
         return;
     }
@@ -53,18 +49,21 @@ TEST_CASE("keychain round trip when one is available")
     CHECK(store.has(key) == imza::Status::OK);
     CHECK(store.get(key, status) == "first");
     CHECK(status == imza::Status::OK);
+    // set() caches, so a reader after the write never round-trips again.
+    CHECK(store.cached_secret(key) == std::optional<std::string> { "first" });
 
     CHECK(store.set(key, "second") == imza::Status::OK);
     CHECK(store.get(key, status) == "second");
 
     CHECK(store.remove(key) == imza::Status::OK);
     CHECK(store.has(key) == imza::Status::NOT_FOUND);
+    CHECK_FALSE(store.cached_secret(key).has_value());
     CHECK(store.remove(key) == imza::Status::NOT_FOUND);
 }
 
 TEST_CASE("keychain values are bounded")
 {
-    imza::CredentialStore store(imza::CredentialStore::Mode::OS);
+    imza::CredentialSubsystem store(imza::CredentialSubsystem::Mode::OS);
     if (!store.is_keychain_available()) {
         return;
     }
@@ -75,7 +74,7 @@ TEST_CASE("keychain values are bounded")
 
 TEST_CASE("credential changes publish")
 {
-    imza::CredentialStore store(imza::CredentialStore::Mode::OS);
+    imza::CredentialSubsystem store(imza::CredentialSubsystem::Mode::OS);
     if (!store.is_keychain_available()) {
         return;
     }
@@ -87,4 +86,42 @@ TEST_CASE("credential changes publish")
     CHECK(published == 1);
     CHECK(store.remove(key) == imza::Status::OK);
     CHECK(published == 2);
+}
+
+TEST_CASE("the worker resolves a provider once and serves it from cache")
+{
+    imza::CredentialSubsystem probe(imza::CredentialSubsystem::Mode::OS);
+    if (!probe.is_keychain_available()) {
+        return;
+    }
+    const std::string id
+        = "resolve-" + std::to_string(imza::test::process_id());
+    const std::string key = "provider/" + id;
+    REQUIRE(probe.set(key, "resolved") == imza::Status::OK);
+
+    imza::Connection connection;
+    connection.id = id;
+    imza::CredentialSubsystem store(
+        imza::CredentialSubsystem::Mode::OS, { connection }, { });
+    REQUIRE(store.wait_ready(std::chrono::seconds { 30 }));
+    CHECK(
+        store.cached_secret(key) == std::optional<std::string> { "resolved" });
+
+    imza::Status status = imza::Status::OK;
+    CHECK(store.lookup(key, status) == "resolved");
+    CHECK(status == imza::Status::OK);
+    // A key the worker never resolved still falls through to the backend.
+    CHECK(store.lookup("provider/absent", status).empty());
+    CHECK(status == imza::Status::NOT_FOUND);
+
+    CHECK(probe.remove(key) == imza::Status::OK);
+}
+
+TEST_CASE("stop unblocks a waiter that never saw the worker finish")
+{
+    auto store = std::make_unique<imza::CredentialSubsystem>(
+        imza::CredentialSubsystem::Mode::OS);
+    store->stop();
+    CHECK(store->ready());
+    CHECK(store->wait_ready(std::chrono::milliseconds { 10 }));
 }

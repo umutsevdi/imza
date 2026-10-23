@@ -7,6 +7,7 @@
 #include "permissions/permission_store.h"
 #include "platform/command_runner.h"
 #include "platform/config.h"
+#include "platform/credential_subsystem.h"
 #include "runtime/mcp_subsystem.h"
 #include "tools/file_ops.h"
 #include "tools/skills.h"
@@ -15,6 +16,7 @@
 #include "turn/turn_runner.h"
 #include "workspace/review_subsystem.h"
 
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -180,6 +182,13 @@ namespace {
         if (!state.environment->ready()) {
             state.session->enqueue_message(
                 std::move(text), std::move(attachments));
+            return;
+        }
+        // Starting before the worker lands would send an unauthenticated
+        // request. Bounded, so a wedged keyring surfaces as a turn error.
+        if (!state.credentials->wait_ready(std::chrono::seconds { 10 })) {
+            state.session->set_error(
+                "Credentials are still loading; try again in a moment.");
             return;
         }
         const TurnSettings settings = make_turn_settings(*selection, mode);

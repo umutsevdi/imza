@@ -14,7 +14,7 @@
 #include "network/network.h"
 #include "platform/config.h"
 #include "platform/config_store.h"
-#include "platform/credential_store.h"
+#include "platform/credential_subsystem.h"
 #include "providers/provider_store.h"
 #include "runtime/bg_process_subsystem.h"
 #include "runtime/callbacks.h"
@@ -44,7 +44,7 @@ struct ApplicationState {
     // writer goes through it, so no reader can hold a stale copy.
     std::shared_ptr<ConfigStore> config;
     // The OS keychain owner, shared with children.
-    std::shared_ptr<CredentialStore> credentials;
+    std::shared_ptr<CredentialSubsystem> credentials;
     std::shared_ptr<ProviderStore> providers;
     std::shared_ptr<McpSubsystem> mcp;
     std::shared_ptr<SubagentSubsystem> subagents;
@@ -89,6 +89,7 @@ struct ApplicationState {
     Signal<>::Subscription system_subscription;
     Signal<>::Subscription provider_subscription;
     Signal<>::Subscription update_subscription;
+    Signal<>::Subscription credential_subscription;
 
     // Components with teardown work, registered by the factories in the
     // order they must stop. The destructor marks each dead and stops it in
@@ -103,8 +104,8 @@ struct ApplicationState {
 
 private:
     ApplicationState() = default;
-    friend std::shared_ptr<ApplicationState> make_application_state(PostFn,
-        Config, StreamFn, RuntimeFlag, std::shared_ptr<CredentialStore>);
+    friend std::shared_ptr<ApplicationState> make_application_state(
+        PostFn, Config, StreamFn, RuntimeFlag);
     friend std::shared_ptr<ApplicationState> make_child_application_state(
         const ApplicationState&, PostFn, StreamFn, ModalRequestFn, std::string);
     friend std::shared_ptr<ApplicationState> make_sidechat_application_state(
@@ -113,8 +114,7 @@ private:
 
 std::shared_ptr<ApplicationState> make_application_state(PostFn post,
     Config config, StreamFn stream_fn = { },
-    RuntimeFlag runtime_flags                    = interactive_runtime_flags(),
-    std::shared_ptr<CredentialStore> credentials = nullptr);
+    RuntimeFlag runtime_flags = interactive_runtime_flags());
 
 std::shared_ptr<ApplicationState> make_child_application_state(
     const ApplicationState& parent, PostFn post, StreamFn stream_fn = { },

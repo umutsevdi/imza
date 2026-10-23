@@ -12,7 +12,7 @@
 #include "permissions/permission_store.h"
 #include "platform/config.h"
 #include "platform/config_store.h"
-#include "platform/credential_store.h"
+#include "platform/credential_subsystem.h"
 #include "platform/json_file.h"
 #include "test_fs.h"
 
@@ -113,7 +113,7 @@ TEST_CASE("load_config rejects an unknown credentials preference")
 
 TEST_CASE("keychain mode omits secrets and reloads them from the store")
 {
-    imza::CredentialStore store(imza::CredentialStore::Mode::OS);
+    imza::CredentialSubsystem store(imza::CredentialSubsystem::Mode::OS);
     if (!store.is_keychain_available()) {
         return;
     }
@@ -152,7 +152,7 @@ TEST_CASE("keychain mode omits secrets and reloads them from the store")
 
 TEST_CASE("legacy plaintext is adopted once and dropped from the document")
 {
-    imza::CredentialStore store(imza::CredentialStore::Mode::OS);
+    imza::CredentialSubsystem store(imza::CredentialSubsystem::Mode::OS);
     if (!store.is_keychain_available()) {
         return;
     }
@@ -186,7 +186,7 @@ TEST_CASE("legacy plaintext is adopted once and dropped from the document")
 
 TEST_CASE("the keychain wins over a stale plaintext field")
 {
-    imza::CredentialStore store(imza::CredentialStore::Mode::OS);
+    imza::CredentialSubsystem store(imza::CredentialSubsystem::Mode::OS);
     if (!store.is_keychain_available()) {
         return;
     }
@@ -216,7 +216,7 @@ TEST_CASE("config roundtrip preserves connections and last_used")
     const auto path = temp_file("roundtrip.json");
     imza::Config cfg;
     cfg.preferences.credentials = imza::Preferences::Credentials::PLAINTEXT;
-    imza::CredentialStore store(imza::CredentialStore::Mode::PLAINTEXT);
+    imza::CredentialSubsystem store(imza::CredentialSubsystem::Mode::PLAINTEXT);
     imza::Connection conn;
     conn.id            = "openrouter";
     conn.api_key       = "sk-or-test";
