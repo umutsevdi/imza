@@ -4,7 +4,6 @@
 
 #include <atomic>
 #include <future>
-#include <utility>
 
 namespace imza {
 

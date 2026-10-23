@@ -4,7 +4,6 @@
 #include "common/text_edit.h"
 #include "common/ts_query.h"
 #include "common/util.h"
-#include "permissions/filesystem.h"
 #include "tools/file_ops.h"
 #include "workspace/files.h"
 
@@ -13,7 +12,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
-#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -37,6 +35,25 @@ namespace imza {
 #include "language_registry.inc"
 
 namespace {
+    // Terminal marker row appended when a hit cap cuts the result set;
+    // file/line are nulled so callers can skip it by type-checking one
+    // field. `has_line` distinguishes the grep row (file/line/text) from
+    // the ts_query row (file/text).
+    void push_truncated_row(lua_State* L, lua_Integer next_index, bool has_line)
+    {
+        lua_newtable(L);
+        lua_pushboolean(L, 0);
+        lua_setfield(L, -2, "file");
+        if (has_line) {
+            lua_pushinteger(L, 0);
+            lua_setfield(L, -2, "line");
+        }
+        lua_pushliteral(L, "[truncated]");
+        lua_setfield(L, -2, "text");
+        lua_pushboolean(L, 1);
+        lua_setfield(L, -2, "truncated");
+        lua_rawseti(L, -2, next_index);
+    }
 
     namespace fs = std::filesystem;
 
@@ -347,18 +364,7 @@ namespace {
         }
 
         if (state.truncated) {
-            // `truncated` is set only on the marker row, so a caller can
-            // skip it without type-checking the other fields.
-            lua_newtable(L);
-            lua_pushboolean(L, 0);
-            lua_setfield(L, -2, "file");
-            lua_pushinteger(L, 0);
-            lua_setfield(L, -2, "line");
-            lua_pushliteral(L, "[truncated]");
-            lua_setfield(L, -2, "text");
-            lua_pushboolean(L, 1);
-            lua_setfield(L, -2, "truncated");
-            lua_rawseti(L, -2, static_cast<lua_Integer>(state.rows + 1));
+            push_truncated_row(L, state.rows + 1, true);
         }
         return 1;
     }
@@ -856,7 +862,6 @@ namespace {
         return true;
     }
 
-    // One result row: { file, captures = { name = TsCapture } }.
     void push_match_row(lua_State* L, const std::string& file,
         const TSQuery* query, const TSQueryMatch& match, std::string_view code)
     {
@@ -1028,14 +1033,8 @@ namespace {
         }
 
         if (state.truncated) {
-            lua_newtable(L);
-            lua_pushboolean(L, 0);
-            lua_setfield(L, -2, "file");
-            lua_pushliteral(L, "[truncated]");
-            lua_setfield(L, -2, "text");
-            lua_pushboolean(L, 1);
-            lua_setfield(L, -2, "truncated");
-            lua_rawseti(L, -2, static_cast<lua_Integer>(state.rows + 1));
+            push_truncated_row(
+                L, static_cast<lua_Integer>(state.rows + 1), false);
         }
         return 1;
     }

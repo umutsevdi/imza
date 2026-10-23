@@ -120,14 +120,6 @@ namespace {
         return { "skill", json_dump(args), prompt.description, prompt.id };
     }
 
-    PermissionEvaluation evaluate_permission(ApplicationState& state,
-        const ToolCallRequest& request, Session::Mode mode)
-    {
-        return evaluate_tool_request(request,
-            permission_context_for(state, mode), state.providers->config(),
-            state.environment->skills(), *state.session);
-    }
-
     void submit_with_skills(ApplicationState& state, std::string text,
         std::vector<Attachment> attachments)
     {
@@ -386,20 +378,24 @@ void enqueue_user_modal(ApplicationState& state, ModalPayload payload)
     }
 }
 
-// Applies `mutate` to the persisted config through the one shared store;
-// on a committed change the MCP manager reloads the resulting server map.
-// False when nothing was written.
-bool mutate_mcp_config(
-    ApplicationState& state, const std::function<bool(Config&)>& mutate)
-{
-    if (state.config->update(mutate) != ConfigUpdateResult::UPDATED) {
-        return false;
+namespace {
+
+    // Applies `mutate` to the persisted config through the one shared store;
+    // on a committed change the MCP manager reloads the resulting server map.
+    // False when nothing was written.
+    bool mutate_mcp_config(
+        ApplicationState& state, const std::function<bool(Config&)>& mutate)
+    {
+        if (state.config->update(mutate) != ConfigUpdateResult::UPDATED) {
+            return false;
+        }
+        if (state.mcp) {
+            state.mcp->reload(state.config->snapshot()->mcp_servers);
+        }
+        return true;
     }
-    if (state.mcp) {
-        state.mcp->reload(state.config->snapshot()->mcp_servers);
-    }
-    return true;
-}
+
+} // namespace
 
 void mcp_add_server(ApplicationState& state, const McpServerConfig& server)
 {
@@ -511,6 +507,13 @@ PermissionContext permission_context_for(
         state.session->loaded_skill_directories(), state.mcp.get());
 }
 
+PermissionEvaluation evaluate_permission(
+    ApplicationState& state, const ToolCallRequest& request, Session::Mode mode)
+{
+    return evaluate_tool_request(request, permission_context_for(state, mode),
+        state.providers->config(), state.environment->skills(), *state.session);
+}
+
 void resolve_modal(ApplicationState& state, ModalResult result)
 {
     bool manual_skill                = false;
@@ -598,17 +601,21 @@ void compact_session(ApplicationState& state, TurnSettings settings)
     state.runner->spawn_compaction(std::move(settings));
 }
 
-// Seeded Build turn: flips the session to Build. The visible transcript
-// records only the command line; the seeded instructions ride the model
-// history as an extra user message, like the plan submission.
-void start_make_skill_turn(ApplicationState& state, std::string description)
-{
-    begin_turn(state, Session::Mode::BUILD,
-        "/make-skill " + std::string(trim(description)), { },
-        "/make-skill " + description,
-        Message {
-            Message::Type::USER, state.prompts->make_skill() + description });
-}
+namespace {
+
+    // Seeded Build turn: flips the session to Build. The visible transcript
+    // records only the command line; the seeded instructions ride the model
+    // history as an extra user message, like the plan submission.
+    void start_make_skill_turn(ApplicationState& state, std::string description)
+    {
+        begin_turn(state, Session::Mode::BUILD,
+            "/make-skill " + std::string(trim(description)), { },
+            "/make-skill " + description,
+            Message { Message::Type::USER,
+                state.prompts->make_skill() + description });
+    }
+
+} // namespace
 
 void run_slash(ApplicationState& state, std::string_view command)
 {

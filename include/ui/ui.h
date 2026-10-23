@@ -142,9 +142,6 @@ ftxui::Component action_button(const std::string* label,
 ftxui::Component inline_link_button(std::function<ftxui::Element()> render,
     std::function<void()> on_click,
     const ftxui::Color& inactive_color = PANEL_FG_DIM);
-ftxui::Component split_inline_link_button(std::string primary,
-    std::string secondary, std::function<void()> on_click,
-    const ftxui::Color& primary_color = HL_GREEN);
 // Mouse-only link that never takes focus. Emphasis follows hover, so a pane
 // hosting it cannot lose its input cursor to it (see chat.cpp).
 ftxui::Component hover_link(std::function<ftxui::Element()> render,

@@ -16,7 +16,6 @@
 
 #include <algorithm>
 #include <cstdlib>
-#include <functional>
 #include <iostream>
 #include <print>
 

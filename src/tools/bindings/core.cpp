@@ -4,10 +4,8 @@
 #include "common/util.h"
 #include "network/json.h"
 #include "network/json_io.h"
-#include "permissions/shell.h"
 #include "permissions/shell_analysis.h"
 #include "platform/command_runner.h"
-#include "workspace/environment.h"
 
 #include <algorithm>
 #include <chrono>

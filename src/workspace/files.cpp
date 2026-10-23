@@ -2,11 +2,9 @@
 
 #include "platform/command_runner.h"
 
-#include <algorithm>
 #include <sstream>
 #include <system_error>
 #include <unordered_set>
-#include <vector>
 
 namespace imza {
 

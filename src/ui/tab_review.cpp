@@ -13,14 +13,12 @@
 #include <ftxui/screen/box.hpp>
 
 #include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <deque>
 #include <format>
 #include <map>
 #include <set>
-#include <thread>
 
 namespace imza {
 

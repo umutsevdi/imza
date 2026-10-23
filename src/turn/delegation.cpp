@@ -2,13 +2,10 @@
 #include "app/application_state.h"
 #include "common/types.h"
 #include "common/util.h"
-#include "conversation/format.h"
 #include "network/json.h"
-#include "tools/skills.h"
 #include "tools/tool_args.h"
 #include "turn/prompt_store.h"
 
-#include <algorithm>
 #include <memory>
 #include <thread>
 #include <utility>

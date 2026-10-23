@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <filesystem>
 #include <limits>
 #include <mutex>
 #include <optional>

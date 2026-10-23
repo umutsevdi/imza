@@ -13,7 +13,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <functional>
 #include <map>
 #include <memory>
 #include <set>
@@ -149,8 +148,6 @@ namespace {
         }
 
     private:
-        // ---- Manage tab -------------------------------------------------
-
         bool _confirming() const
         {
             return std::ranges::any_of(
@@ -415,8 +412,6 @@ namespace {
             }
             return _rows_container->Render() | vscroll_indicator | frame;
         }
-
-        // ---- Search tab -------------------------------------------------
 
         Element _render_search()
         {

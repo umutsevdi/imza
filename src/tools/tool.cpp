@@ -3,12 +3,10 @@
 #include "conversation/session.h"
 #include "network/json.h"
 #include "runtime/mcp_subsystem.h"
-#include "tools/bindings.h"
 #include "tools/skills.h"
 #include "turn/delegation.h"
 
 #include <chrono>
-#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>

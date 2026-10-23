@@ -1,7 +1,5 @@
 #include "network/json_io.h"
 
-#include "common/util.h"
-
 namespace imza {
 
 JsonValue parse_json(std::string_view text)

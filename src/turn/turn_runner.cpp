@@ -1,5 +1,6 @@
 #include "turn/turn_runner.h"
 #include "app/application_state.h"
+#include "app/flows.h"
 #include "common/types.h"
 #include "common/util.h"
 #include "conversation/format.h"
@@ -7,13 +8,11 @@
 #include "permissions/verdict.h"
 #include "providers/pricing.h"
 #include "providers/provider_store.h"
-#include "tools/skills.h"
 #include "turn/prompt_store.h"
 #include "workspace/attachments.h"
 
 #include <algorithm>
 #include <chrono>
-#include <iterator>
 #include <memory>
 #include <optional>
 #include <string>
@@ -603,12 +602,8 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
             continue;
         }
 
-        const PermissionEvaluation evaluation = evaluate_tool_request(original,
-            make_permission_context(*_state->environment, *_state->permissions,
-                mode, _state->session->loaded_skill_directories(),
-                _state->mcp.get()),
-            _state->providers->config(), _state->environment->skills(),
-            *_state->session);
+        const PermissionEvaluation evaluation
+            = evaluate_permission(*_state, original, mode);
         if (evaluation.decision.kind == PermissionDecision::Kind::REJECT) {
             _reject_tool(original, evaluation.decision.reason, tool_msgs);
             continue;
@@ -707,12 +702,7 @@ void TurnRunner::_run_tool(const PermissionEvaluation& evaluation,
     Session::Mode mode, std::vector<Message>& tool_msgs)
 {
     const PermissionEvaluation current
-        = evaluate_tool_request(evaluation.request,
-            make_permission_context(*_state->environment, *_state->permissions,
-                mode, _state->session->loaded_skill_directories(),
-                _state->mcp.get()),
-            _state->providers->config(), _state->environment->skills(),
-            *_state->session);
+        = evaluate_permission(*_state, evaluation.request, mode);
     if (current.decision.kind == PermissionDecision::Kind::REJECT
         || current.request.args != evaluation.request.args) {
         const std::string reason

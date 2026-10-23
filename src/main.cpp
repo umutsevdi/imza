@@ -8,12 +8,10 @@
 
 #include "app/application_state.h"
 #include "app/flows.h"
-#include "conversation/persistence.h"
 #include "permissions/permission_store.h"
 #include "platform/config.h"
 #include "platform/console_mode.h"
 #include "platform/credential_store.h"
-#include "runtime/main_thread_queue.h"
 #include "runtime/mcp_subsystem.h"
 #include "tools/skills.h"
 #include "ui/ui.h"

@@ -1,7 +1,5 @@
 #include "tools/bindings.h"
 
-#include "common/util.h"
-#include "permissions/shell.h"
 #include "permissions/shell_analysis.h"
 
 #include <algorithm>

@@ -6,7 +6,7 @@
 #include "providers/provider_store.h"
 #include "runtime/mcp_subsystem.h"
 #include "tools/skills.h"
-#include "workspace/review_subsystem.h"
+#include "workspace/git.h"
 
 #include <algorithm>
 #include <optional>

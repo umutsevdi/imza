@@ -67,6 +67,9 @@ int run_update_command(const std::function<void(std::string)>& progress);
 // directories, MCP inventory.
 PermissionContext permission_context_for(
     ApplicationState& state, Session::Mode mode);
+// Full authorization of a tool call against the current context.
+PermissionEvaluation evaluate_permission(ApplicationState& state,
+    const ToolCallRequest& request, Session::Mode mode);
 std::string format_session_list(const std::vector<SavedSession>& sessions);
 // The current skill catalogue as the skills modal renders it, bundled
 // entries flagged.

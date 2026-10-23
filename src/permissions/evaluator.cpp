@@ -3,14 +3,12 @@
 #include "conversation/session.h"
 
 #include "network/json.h"
-#include "permissions/shell.h"
 #include "permissions/shell_analysis.h"
 #include "platform/config.h"
 #include "runtime/mcp_subsystem.h"
 #include "tools/skills.h"
 #include "tools/tool.h"
 
-#include <algorithm>
 #include <filesystem>
 #include <string>
 #include <utility>

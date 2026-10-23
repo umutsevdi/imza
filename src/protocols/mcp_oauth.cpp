@@ -2,7 +2,6 @@
 
 #include "common/util.h"
 #include "network/json.h"
-#include "network/json_io.h"
 #include "protocols/mcp.h"
 
 #include <algorithm>
@@ -403,6 +402,34 @@ namespace {
         return fallback;
     }
 
+    // Shared token-endpoint POST: form-encoded, JSON accepted, the OAuth
+    // error body preferred over the bare status on failure. The detail
+    // strings name the flow: `network_detail` verbatim, the HTTP fallback
+    // as "HTTP <code> <http_detail>".
+    Status token_request(const std::string& token_endpoint,
+        const std::string& form, std::string_view old_refresh,
+        std::string_view network_detail, std::string_view http_detail,
+        const McpOauthPost& post, McpOauthTokens& out, std::string& detail)
+    {
+        std::string body;
+        long code_http      = 0;
+        const Status status = resolve_post(post)(token_endpoint,
+            { "Content-Type: application/x-www-form-urlencoded",
+                "Accept: application/json" },
+            form, TOKEN_TIMEOUT_SECS, body, &code_http, nullptr);
+        if (status != Status::OK) {
+            detail = std::string(network_detail);
+            return Status::NETWORK_ERROR;
+        }
+        if (!http_ok(code_http)) {
+            detail = error_detail(body,
+                "HTTP " + std::to_string(code_http) + " "
+                    + std::string(http_detail));
+            return Status::API_ERROR;
+        }
+        return parse_token_response(body, old_refresh, out, detail);
+    }
+
     void append_form_pair(
         std::string& form, const char* key, std::string_view value)
     {
@@ -653,24 +680,9 @@ Status mcp_exchange_code(const std::string& token_endpoint,
     append_form_pair(form, "client_secret", client.client_secret);
     append_form_pair(form, "code_verifier", verifier);
 
-    std::string body;
-    long code_http      = 0;
-    const Status status = resolve_post(post)(token_endpoint,
-        { "Content-Type: application/x-www-form-urlencoded",
-            "Accept: application/json" },
-        form, TOKEN_TIMEOUT_SECS, body, &code_http, nullptr);
-    if (status != Status::OK) {
-        detail = "token exchange request failed";
-        return Status::NETWORK_ERROR;
-    }
-    if (!http_ok(code_http)) {
-        detail = error_detail(body,
-            "HTTP " + std::to_string(code_http)
-                + " exchanging the authorization code");
-        return Status::API_ERROR;
-    }
-    const Status parsed = parse_token_response(body, "", out, detail);
-    return parsed;
+    return token_request(token_endpoint, form, "",
+        "token exchange request failed", "exchanging the authorization code",
+        post, out, detail);
 }
 
 Status mcp_refresh_tokens(const std::string& token_endpoint,
@@ -682,24 +694,9 @@ Status mcp_refresh_tokens(const std::string& token_endpoint,
     append_form_pair(form, "client_id", client.client_id);
     append_form_pair(form, "client_secret", client.client_secret);
 
-    std::string body;
-    long code           = 0;
-    const Status status = resolve_post(post)(token_endpoint,
-        { "Content-Type: application/x-www-form-urlencoded",
-            "Accept: application/json" },
-        form, TOKEN_TIMEOUT_SECS, body, &code, nullptr);
-    if (status != Status::OK) {
-        detail = "token refresh request failed";
-        return Status::NETWORK_ERROR;
-    }
-    if (!http_ok(code)) {
-        detail = error_detail(
-            body, "HTTP " + std::to_string(code) + " refreshing the token");
-        return Status::API_ERROR;
-    }
-    const Status parsed
-        = parse_token_response(body, refresh_token, out, detail);
-    return parsed;
+    return token_request(token_endpoint, form, refresh_token,
+        "token refresh request failed", "refreshing the token", post, out,
+        detail);
 }
 
 McpLoopbackListener::~McpLoopbackListener() { close(); }

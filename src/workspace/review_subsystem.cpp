@@ -7,7 +7,6 @@
 #include <cctype>
 #include <chrono>
 #include <fstream>
-#include <sstream>
 
 namespace imza {
 namespace {
