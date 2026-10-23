@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -27,10 +28,12 @@ public:
     BgProcessSubsystem& operator=(const BgProcessSubsystem&) = delete;
 
     // Spawns `command` detached (stdio on /dev/null; the command must
-    // redirect its own output) and returns once the fork succeeds. False
-    // when it could not be spawned.
+    // redirect its own output) and returns once the fork succeeds. `env`
+    // entries merge over the inherited environment. False when it could
+    // not be spawned.
     bool start(const std::string& command, std::chrono::seconds timeout,
-        const std::filesystem::path& workspace);
+        const std::filesystem::path& workspace,
+        const std::map<std::string, std::string>& env = { });
     void stop() override;
 
 private:

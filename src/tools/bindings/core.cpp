@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <map>
 #include <string>
 #include <thread>
 #include <utility>
@@ -279,6 +280,8 @@ namespace {
                 return failed;
             }
         }
+        const auto env = opt_env_table(L, 4).value_or(
+            std::map<std::string, std::string> { });
 
         const ShellAnalysis analysis = analyze_shell(command);
         if (analysis.invocations.size() > 1) {
@@ -292,11 +295,14 @@ namespace {
         }
 
         const GateOutcome gate = authorize_shell(L,
-            ShellRequest {
-                command, std::chrono::seconds(timeout), fs::path(workspace) });
+            ShellRequest { command, std::chrono::seconds(timeout),
+                fs::path(workspace), env });
         if (!gate) {
             return binding_error(L, gate.denial);
         }
+        // Execution uses the authorized request's env, never the raw input.
+        const std::map<std::string, std::string> run_env
+            = gate.shell ? gate.shell->env : env;
         const std::string run_dir
             = gate.shell ? gate.shell->workspace.string() : workspace;
 
@@ -304,8 +310,8 @@ namespace {
         // instruction hook cannot fire; credit the elapsed wall clock back
         // to the compute budget so a long command does not kill the script.
         const auto started = std::chrono::steady_clock::now();
-        CommandResult r    = run_command(
-            command, std::chrono::seconds(timeout), fs::path(run_dir));
+        CommandResult r    = run_command(command, std::chrono::seconds(timeout),
+            fs::path(run_dir), { }, StderrCapture::MERGE, run_env);
         credit_deadline(*run_of(L), std::chrono::steady_clock::now() - started);
 
         if (!r.spawned) {
@@ -418,13 +424,15 @@ Throws when dismissed by the user; unavailable in unattended runs.)desc",
         {
             "shell",
             binding_shell,
-            R"desc((command: string, timeout?: integer=10, workspace?: string) returns output: string, exit_code: integer, throws
+            R"desc((command: string, timeout?: integer=10, workspace?: string,
+env?: table<string, string>) returns output: string, exit_code: integer, throws
 Runs a single external command, returning its captured output (capped at 64 KB)
 and exit status.
 A non-zero exit_code is a successful call, so test exit_code rather than nil.
 Throws when the command could not start, timed out (1..240 s) or was denied.
 Chains and pipelines are rejected. Compose results in Lua instead.
-`workspace` is the directory the command runs in.)desc",
+`workspace` is the directory the command runs in. `env` maps variable
+names to values, merged over the inherited environment.)desc",
             LuaCapability::SHELL,
             "shell: shell access is disabled for this run",
         },

@@ -25,7 +25,8 @@ void BgProcessSubsystem::stop()
 }
 
 bool BgProcessSubsystem::start(const std::string& command,
-    std::chrono::seconds timeout, const std::filesystem::path& workspace)
+    std::chrono::seconds timeout, const std::filesystem::path& workspace,
+    const std::map<std::string, std::string>& env)
 {
     auto promise  = std::make_shared<std::promise<bool>>();
     auto future   = promise->get_future();
@@ -37,10 +38,11 @@ bool BgProcessSubsystem::start(const std::string& command,
         std::erase_if(_workers,
             [](const Worker& worker) { return worker.finished->load(); });
         _workers.push_back(Worker { finished,
-            std::jthread([command, timeout, workspace, promise, finished](
+            std::jthread([command, timeout, workspace, env, promise, finished](
                              std::stop_token stop) {
-                const bool spawned = spawn_background_command(command, timeout,
-                    workspace, stop, [promise] { promise->set_value(true); });
+                const bool spawned = spawn_background_command(
+                    command, timeout, workspace, stop,
+                    [promise] { promise->set_value(true); }, env);
                 if (!spawned) {
                     promise->set_value(false);
                 }

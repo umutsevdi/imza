@@ -183,9 +183,20 @@ namespace {
                     cwd.clear();
                 }
             }
-            const std::string metadata
-                = (cwd.empty() ? std::string { } : cwd + " · ") + "timeout "
-                + std::to_string(shell->timeout.count()) + "s";
+            std::string metadata = (cwd.empty() ? std::string { } : cwd + " · ")
+                + "timeout " + std::to_string(shell->timeout.count()) + "s";
+            if (!shell->env.empty()) {
+                metadata += " · env:";
+                std::size_t shown = 0;
+                for (const auto& [name, value] : shell->env) {
+                    if (shown == 4) {
+                        metadata += " …";
+                        break;
+                    }
+                    metadata += (shown == 0 ? " " : ", ") + name;
+                    ++shown;
+                }
+            }
             return vbox({ code_block(preview_text(shell->command),
                               shell_name(system), width),
                 hint_bar(metadata) });

@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <functional>
 #include <future>
+#include <map>
 #include <memory>
 #include <span>
 #include <string>
@@ -99,10 +100,11 @@ struct LuaHost {
     // bails out on it. Empty means never interrupted (tests).
     std::function<bool()> interrupted;
     // Starts a detached background command (stdio to /dev/null, killed on
-    // timeout or application teardown). Returns false when it could not be
-    // spawned; empty means imza.bg.shell is unavailable in this run.
-    std::function<bool(
-        const std::string&, std::chrono::seconds, const std::string&)>
+    // timeout or application teardown). Env entries merge over the
+    // inherited environment. Returns false when it could not be spawned;
+    // empty means imza.bg.shell is unavailable in this run.
+    std::function<bool(const std::string&, std::chrono::seconds,
+        const std::string&, const std::map<std::string, std::string>&)>
         spawn_bg;
     bool web_enabled   = false;
     bool shell_enabled = false;

@@ -93,11 +93,11 @@ namespace {
             = [state] { return state->session->interrupt_requested(); },
             .spawn_bg =
                 [state](const std::string& command,
-                    std::chrono::seconds timeout,
-                    const std::string& workspace) {
+                    std::chrono::seconds timeout, const std::string& workspace,
+                    const std::map<std::string, std::string>& env) {
                     return state->bg_processes != nullptr
                         && state->bg_processes->start(
-                            command, timeout, workspace);
+                            command, timeout, workspace, env);
                 },
             .web_enabled
             = (state->runtime_flags & RuntimeFlag::WEB) != RuntimeFlag::NONE,

@@ -145,6 +145,26 @@ TEST_CASE("chat records slash commands and queued prompts")
     REQUIRE(queued->size() == 1);
     CHECK(queued->front().text == "queued prompt");
 }
+TEST_CASE("alt enter inserts a newline in every terminal encoding")
+{
+    HistoryFile file;
+    auto state           = imza::test::make_test_state();
+    state->input_history = std::make_shared<imza::InputHistoryStore>(file.path);
+    auto chat            = make_test_chat(state);
+
+    imza::test::type(chat, "one");
+    REQUIRE(chat->OnEvent(ftxui::Event::Special("\x1B\r")));
+    imza::test::type(chat, "two");
+    REQUIRE(chat->OnEvent(ftxui::Event::Special("\x1B[13;3u")));
+    imza::test::type(chat, "three");
+    REQUIRE(chat->OnEvent(ftxui::Event::Special("\x1B[27;3;13~")));
+    imza::test::type(chat, "four");
+    REQUIRE(chat->OnEvent(ftxui::Event::Return));
+
+    CHECK(state->input_history->entries()
+        == std::vector<std::string> { "one\ntwo\nthree\nfour" });
+}
+
 TEST_CASE("bracketed multiline paste is submitted as one history entry")
 {
     HistoryFile file;

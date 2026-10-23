@@ -337,10 +337,12 @@ std::optional<SessionSnapshot> Session::snapshot_for_save() const
 
 void Session::restore(SessionSnapshot snapshot)
 {
+    Mode previous_mode;
     {
         std::lock_guard lock(_mutex);
-        _title = std::move(snapshot.title);
-        _items = std::make_shared<std::vector<ConversationItem>>(
+        previous_mode = _mode;
+        _title        = std::move(snapshot.title);
+        _items        = std::make_shared<std::vector<ConversationItem>>(
             std::move(snapshot.items));
         _todo      = std::make_shared<TodoList>(std::move(snapshot.todo));
         _documents = std::make_shared<std::vector<SessionDoc>>(
@@ -400,6 +402,11 @@ void Session::restore(SessionSnapshot snapshot)
         ++_content_serial;
     }
     _attachments_changed.publish();
+    // Published outside the lock, mirroring set_mode: the UI follows this
+    // signal to land on the restored conversation's phase.
+    if (_mode != previous_mode) {
+        _mode_changed.publish();
+    }
 }
 
 void Session::set_persistence(SessionPersistence persistence)

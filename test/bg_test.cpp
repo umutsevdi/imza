@@ -3,6 +3,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <string>
 #include <thread>
 
@@ -75,11 +76,12 @@ TEST_CASE("the background timeout is clamped to the ceiling")
     std::chrono::seconds seen_timeout { 0 };
     imza::LuaHost host;
     host.shell_enabled = true;
-    host.spawn_bg      = [&](const std::string&, std::chrono::seconds timeout,
-                             const std::string&) {
-        seen_timeout = timeout;
-        return true;
-    };
+    host.spawn_bg
+        = [&](const std::string&, std::chrono::seconds timeout,
+              const std::string&, const std::map<std::string, std::string>&) {
+              seen_timeout = timeout;
+              return true;
+          };
     const imza::ToolOutput out
         = imza::test::run_lua("imza.bg.shell('true', 9999)", host);
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
@@ -100,8 +102,9 @@ TEST_CASE("imza.bg.shell rejects chained commands")
 {
     imza::LuaHost host;
     host.shell_enabled = true;
-    host.spawn_bg      = [](const std::string&, std::chrono::seconds,
-                             const std::string&) { return true; };
+    host.spawn_bg
+        = [](const std::string&, std::chrono::seconds, const std::string&,
+              const std::map<std::string, std::string>&) { return true; };
     const imza::ToolOutput out
         = imza::test::run_lua("imza.bg.shell('true && true')", host);
     CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
@@ -112,8 +115,9 @@ TEST_CASE("imza.bg.shell is gated by the shell capability")
 {
     imza::LuaHost host;
     host.shell_enabled = false;
-    host.spawn_bg      = [](const std::string&, std::chrono::seconds,
-                             const std::string&) { return true; };
+    host.spawn_bg
+        = [](const std::string&, std::chrono::seconds, const std::string&,
+              const std::map<std::string, std::string>&) { return true; };
     const imza::ToolOutput out
         = imza::test::run_lua("imza.bg.shell('true')", host);
     CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
@@ -127,7 +131,8 @@ TEST_CASE("imza.bg.shell hands the authorized command to the host")
     imza::LuaHost host;
     host.shell_enabled = true;
     host.spawn_bg      = [&](const std::string& command, std::chrono::seconds,
-                             const std::string& workspace) {
+                             const std::string& workspace,
+                             const std::map<std::string, std::string>&) {
         seen_command   = command;
         seen_workspace = workspace;
         return true;
@@ -136,6 +141,26 @@ TEST_CASE("imza.bg.shell hands the authorized command to the host")
         = imza::test::run_lua("imza.bg.shell('echo hi', 300)", host);
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(seen_command == "echo hi");
+}
+
+TEST_CASE("imza.bg.shell passes the env table to the host")
+{
+    std::map<std::string, std::string> seen_env;
+    imza::LuaHost host;
+    host.shell_enabled = true;
+    host.spawn_bg
+        = [&](const std::string&, std::chrono::seconds, const std::string&,
+              const std::map<std::string, std::string>& env) {
+              seen_env = env;
+              return true;
+          };
+    const imza::ToolOutput out = imza::test::run_lua(
+        "imza.bg.shell('serve', nil, nil, { PORT = '8080', DEBUG = '1' })",
+        host);
+    CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(seen_env.size() == 2);
+    CHECK(seen_env.at("PORT") == "8080");
+    CHECK(seen_env.at("DEBUG") == "1");
 }
 
 TEST_CASE("a background process outlives the call that started it")

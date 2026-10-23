@@ -890,6 +890,27 @@ TEST_CASE("plan submission messages are emitted once per revision in build")
     }
 }
 
+TEST_CASE("restore publishes the mode change so the UI follows it")
+{
+    imza::Session session;
+    REQUIRE(session.mode() == imza::Session::Mode::PLAN);
+
+    imza::SessionSnapshot snapshot;
+    snapshot.plan_mode = false;
+    int published      = 0;
+    const auto subscription
+        = session.subscribe_to_mode_change([&published] { ++published; });
+
+    session.restore(std::move(snapshot));
+    CHECK(session.mode() == imza::Session::Mode::BUILD);
+    CHECK(published == 1);
+
+    // Restoring a conversation in the same mode stays silent.
+    session.restore(imza::SessionSnapshot { });
+    CHECK(session.mode() == imza::Session::Mode::PLAN);
+    CHECK(published == 2);
+}
+
 TEST_CASE("plan changes publish the plan signal")
 {
     imza::Session session;

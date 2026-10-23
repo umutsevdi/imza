@@ -6,10 +6,12 @@
 #include <chrono>
 #include <cstring>
 #include <future>
+#include <map>
 #include <stop_token>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -21,6 +23,7 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
+extern char** environ;
 #endif
 
 namespace imza {
@@ -32,7 +35,8 @@ namespace {
     CommandResult run_windows(const std::string& command,
         std::chrono::seconds timeout, CommandResult result,
         const std::filesystem::path& working_directory,
-        std::string_view stdin_data, StderrCapture stderr_capture)
+        std::string_view stdin_data, StderrCapture stderr_capture,
+        const std::map<std::string, std::string>& env)
     {
         // /s /c plus outer quotes disables cmd's strip-first-and-last-quote
         // rule, which mangles any command carrying more than one quoted token.
@@ -87,12 +91,14 @@ namespace {
         si.hStdInput  = in_read;
 
         PROCESS_INFORMATION pi { };
-        const std::wstring wide_directory = working_directory.empty()
+        const std::wstring wide_directory    = working_directory.empty()
             ? std::wstring { }
             : working_directory.wstring();
+        const std::vector<wchar_t> env_block = windows_environment_block(env);
         // Suspended so the job exists before the shell can spawn anything.
         if (!CreateProcessW(nullptr, cmdline.data(), nullptr, nullptr, TRUE,
-                CREATE_SUSPENDED, nullptr,
+                CREATE_SUSPENDED,
+                env_block.empty() ? nullptr : env_block.data(),
                 wide_directory.empty() ? nullptr : wide_directory.c_str(), &si,
                 &pi)) {
             CloseHandle(out_read);
@@ -188,7 +194,8 @@ namespace {
     bool spawn_windows_background(const std::string& command,
         std::chrono::seconds timeout,
         const std::filesystem::path& working_directory, std::stop_token stop,
-        const std::function<void()>& on_spawned)
+        const std::function<void()>& on_spawned,
+        const std::map<std::string, std::string>& env)
     {
         // /s /c plus outer quotes disables cmd's strip-first-and-last-quote
         // rule, which mangles any command carrying more than one quoted token.
@@ -196,11 +203,13 @@ namespace {
         STARTUPINFOW startup { };
         startup.cb = sizeof(startup);
         PROCESS_INFORMATION process { };
-        const std::wstring wide_directory = working_directory.empty()
+        const std::wstring wide_directory    = working_directory.empty()
             ? std::wstring { }
             : working_directory.wstring();
+        const std::vector<wchar_t> env_block = windows_environment_block(env);
         if (!CreateProcessW(nullptr, cmdline.data(), nullptr, nullptr, FALSE,
-                CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS, nullptr,
+                CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
+                env_block.empty() ? nullptr : env_block.data(),
                 wide_directory.empty() ? nullptr : wide_directory.c_str(),
                 &startup, &process)) {
             return false;
@@ -262,12 +271,103 @@ namespace {
         return result;
     }
 
+    // UTF-16 environment block in the CreateProcess double-NUL-terminated
+    // form; empty `env` returns an empty vector, meaning "inherit". The
+    // inherited entries are copied first and the overrides substituted in:
+    // dropping the rest would strip PATH and SystemRoot and the child could
+    // not start. "=C:=..." drive-directory entries have no name to override
+    // and are kept as they are.
+    std::vector<wchar_t> windows_environment_block(
+        const std::map<std::string, std::string>& env)
+    {
+        std::vector<wchar_t> block;
+        if (env.empty()) {
+            return block;
+        }
+        std::vector<std::wstring> overridden;
+        overridden.reserve(env.size());
+        for (const auto& [name, value] : env) {
+            overridden.push_back(to_wide(name));
+        }
+        std::vector<std::wstring> entries;
+        if (wchar_t* inherited = GetEnvironmentStringsW()) {
+            for (const wchar_t* cursor = inherited; *cursor != L'\0';
+                cursor += std::wcslen(cursor) + 1) {
+                const std::wstring entry(cursor);
+                const std::size_t equals = entry.find(L'=');
+                const std::wstring name
+                    = equals == 0 ? std::wstring { } : entry.substr(0, equals);
+                if (name.empty()
+                    || std::ranges::find(overridden, name)
+                        == overridden.end()) {
+                    entries.push_back(entry);
+                }
+            }
+            FreeEnvironmentStringsW(inherited);
+        }
+        for (const auto& [name, value] : env) {
+            entries.push_back(to_wide(name + "=" + value));
+        }
+        for (const std::wstring& entry : entries) {
+            block.insert(block.end(), entry.begin(), entry.end());
+            block.push_back(L'\0');
+        }
+        block.push_back(L'\0');
+        return block;
+    }
+
 #else
+
+    // The parent's environment with `env` substituted in; empty `env`
+    // returns empty so the caller execs with `environ` itself (execle with
+    // an empty array would blank the child's environment).
+    std::vector<std::string> merged_environment(
+        const std::map<std::string, std::string>& env)
+    {
+        if (env.empty()) {
+            return { };
+        }
+        std::vector<std::string> merged;
+        for (char** entry = environ; *entry != nullptr; ++entry) {
+            const std::string_view line(*entry);
+            const std::size_t equals    = line.find('=');
+            const std::string_view name = line.substr(0, equals);
+            if (env.count(std::string(name)) == 0) {
+                merged.emplace_back(line);
+            }
+        }
+        for (const auto& [name, value] : env) {
+            merged.push_back(name + "=" + value);
+        }
+        return merged;
+    }
+
+    // In-child exec of /bin/sh with `env` merged over the inherited
+    // environment; only returns when the exec itself failed.
+    void exec_child(const char* program, const std::string& command,
+        const std::map<std::string, std::string>& env)
+    {
+        if (env.empty()) {
+            execl(program, "sh", "-c", command.c_str(),
+                static_cast<char*>(nullptr));
+            return;
+        }
+        const std::vector<std::string> envp = merged_environment(env);
+        std::vector<char*> env_exec;
+        env_exec.reserve(envp.size() + 1);
+        for (const std::string& entry : envp) {
+            env_exec.push_back(const_cast<char*>(entry.c_str()));
+        }
+        env_exec.push_back(nullptr);
+        execle(program, "sh", "-c", command.c_str(),
+            static_cast<char*>(nullptr), env_exec.data());
+    }
 
     CommandResult run_posix(const std::string& command,
         std::chrono::seconds timeout, CommandResult result,
         const std::filesystem::path& working_directory,
-        std::string_view stdin_data, StderrCapture stderr_capture)
+        std::string_view stdin_data, StderrCapture stderr_capture,
+        const std::map<std::string, std::string>& env)
     {
         int pipefd[2];
         if (pipe(pipefd) != 0) {
@@ -325,8 +425,7 @@ namespace {
             }
             close(pipefd[0]);
             close(pipefd[1]);
-            execl("/bin/sh", "sh", "-c", command.c_str(),
-                static_cast<char*>(nullptr));
+            exec_child("/bin/sh", command, env);
             _exit(127);
         }
 
@@ -408,7 +507,8 @@ namespace {
     bool spawn_posix_background(const std::string& command,
         std::chrono::seconds timeout,
         const std::filesystem::path& working_directory, std::stop_token stop,
-        const std::function<void()>& on_spawned)
+        const std::function<void()>& on_spawned,
+        const std::map<std::string, std::string>& env)
     {
         const pid_t pid = fork();
         if (pid < 0) {
@@ -429,8 +529,7 @@ namespace {
                     close(null_fd);
                 }
             }
-            execl("/bin/sh", "sh", "-c", command.c_str(),
-                static_cast<char*>(nullptr));
+            exec_child("/bin/sh", command, env);
             _exit(127);
         }
         // setsid makes the child a group leader, so killpg(-pid) reaps the
@@ -513,7 +612,7 @@ std::string shell_quote(const std::filesystem::path& path)
 CommandResult run_command(const std::string& command,
     std::chrono::seconds timeout,
     const std::filesystem::path& working_directory, std::string_view stdin_data,
-    StderrCapture stderr_capture)
+    StderrCapture stderr_capture, const std::map<std::string, std::string>& env)
 {
     CommandResult result;
     if (command.empty() || timeout < std::chrono::seconds(0)) {
@@ -521,10 +620,10 @@ CommandResult run_command(const std::string& command,
     }
 #ifdef _WIN32
     return run_windows(command, timeout, std::move(result), working_directory,
-        stdin_data, stderr_capture);
+        stdin_data, stderr_capture, env);
 #else
     return run_posix(command, timeout, std::move(result), working_directory,
-        stdin_data, stderr_capture);
+        stdin_data, stderr_capture, env);
 #endif
 }
 
@@ -593,17 +692,18 @@ bool spawn_detached_command(const std::string& command)
 bool spawn_background_command(const std::string& command,
     std::chrono::seconds timeout,
     const std::filesystem::path& working_directory, std::stop_token stop,
-    const std::function<void()>& on_spawned)
+    const std::function<void()>& on_spawned,
+    const std::map<std::string, std::string>& env)
 {
     if (command.empty()) {
         return false;
     }
 #ifdef _WIN32
     return spawn_windows_background(
-        command, timeout, working_directory, stop, on_spawned);
+        command, timeout, working_directory, stop, on_spawned, env);
 #else
     return spawn_posix_background(
-        command, timeout, working_directory, stop, on_spawned);
+        command, timeout, working_directory, stop, on_spawned, env);
 #endif
 }
 

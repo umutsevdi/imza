@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <variant>
@@ -97,6 +98,9 @@ struct ShellRequest {
     std::string command;
     std::chrono::seconds timeout { 10 };
     std::filesystem::path workspace;
+    // Merged over the inherited environment for the child process; rides
+    // the request so execution uses the authorized parameters.
+    std::map<std::string, std::string> env;
 
     bool operator==(const ShellRequest&) const = default;
 };

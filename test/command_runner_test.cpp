@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <map>
 #include <string>
 
 #include "platform/command_runner.h"
@@ -21,8 +22,30 @@ std::string echo_command(const std::string& text)
 {
     return imza::test::fixture_command("echo", text);
 }
-
 } // namespace
+
+TEST_CASE("run_command merges env over the inherited environment")
+{
+    // The parent's variables stay visible unless overridden.
+    imza::test::ScopedEnv guard("IMZA_TEST_MERGE", "base");
+    const auto inherited = imza::run_command(
+        imza::test::fixture_command("env", "IMZA_TEST_MERGE"), 10s);
+    CHECK(inherited.spawned);
+    CHECK(inherited.output.find("base") != std::string::npos);
+
+    std::map<std::string, std::string> overrides;
+    overrides["IMZA_TEST_MERGE"] = "overridden";
+    overrides["IMZA_TEST_NEW"]   = "added";
+    const auto merged            = imza::run_command(
+        imza::test::fixture_command("env", "IMZA_TEST_MERGE"), 10s, { }, { },
+        imza::StderrCapture::MERGE, overrides);
+    CHECK(merged.output.find("overridden") != std::string::npos);
+
+    const auto added
+        = imza::run_command(imza::test::fixture_command("env", "IMZA_TEST_NEW"),
+            10s, { }, { }, imza::StderrCapture::MERGE, overrides);
+    CHECK(added.output.find("added") != std::string::npos);
+}
 
 TEST_CASE("run_command captures stdout")
 {

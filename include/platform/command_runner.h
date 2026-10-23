@@ -3,6 +3,7 @@
 #include <chrono>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <stop_token>
 #include <string>
 #include <string_view>
@@ -29,11 +30,14 @@ inline bool command_ok(const CommandResult& result)
 enum class StderrCapture { MERGE, STDOUT_ONLY };
 
 std::string shell_quote(const std::filesystem::path& path);
+// `env` entries are merged over the inherited environment; empty
+// inherits unchanged.
 CommandResult run_command(const std::string& command,
     std::chrono::seconds timeout,
     const std::filesystem::path& working_directory = { },
     std::string_view stdin_data                    = { },
-    StderrCapture stderr_capture                   = StderrCapture::MERGE);
+    StderrCapture stderr_capture                   = StderrCapture::MERGE,
+    const std::map<std::string, std::string>& env  = { });
 CommandResult run_attached_command(const std::string& command);
 // Launches `command` detached: returns as soon as the child is spawned, so
 // the caller keeps its terminal. Used to hand a file to the user's editor
@@ -49,7 +53,8 @@ bool spawn_detached_command(const std::string& command);
 bool spawn_background_command(const std::string& command,
     std::chrono::seconds timeout,
     const std::filesystem::path& working_directory, std::stop_token stop = { },
-    const std::function<void()>& on_spawned = { });
+    const std::function<void()>& on_spawned       = { },
+    const std::map<std::string, std::string>& env = { });
 bool open_browser(std::string_view url);
 
 } // namespace imza

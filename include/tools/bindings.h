@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -135,6 +136,11 @@ std::string gate_denied(
 std::optional<std::string> opt_string(lua_State* L, int index);
 std::optional<lua_Integer> opt_integer(lua_State* L, int index);
 std::optional<bool> opt_boolean(lua_State* L, int index);
+// Reads an optional name -> value string table (e.g. imza.shell's env).
+// Absent or nil gives nullopt; a non-table or a non-string key/value
+// raises. Empty table gives an empty map (still merge-over-inherited).
+std::optional<std::map<std::string, std::string>> opt_env_table(
+    lua_State* L, int index);
 
 // Converts the Lua value at `index` into JSON: scalars directly, tables
 // as arrays (1-based contiguous integer keys) or objects (string keys).

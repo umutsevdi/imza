@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <map>
 #include <string>
 #include <utility>
 
@@ -80,6 +81,26 @@ std::optional<bool> opt_boolean(lua_State* L, int index)
         return std::nullopt;
     }
     return lua_toboolean(L, index) != 0;
+}
+
+std::optional<std::map<std::string, std::string>> opt_env_table(
+    lua_State* L, int index)
+{
+    if (lua_gettop(L) < index || lua_isnil(L, index)) {
+        return std::nullopt;
+    }
+    luaL_checktype(L, index, LUA_TTABLE);
+    std::map<std::string, std::string> env;
+    lua_pushnil(L);
+    while (lua_next(L, index) != 0) {
+        // Key and value are at the top two slots; checklstring raises on a
+        // non-string either side, keeping the walk consistent (value first).
+        const char* value = luaL_checkstring(L, -1);
+        const char* name  = luaL_checkstring(L, -2);
+        env.emplace(name, value);
+        lua_pop(L, 1);
+    }
+    return env;
 }
 
 int authorize_target(lua_State* L, const FilesystemRequest& request,

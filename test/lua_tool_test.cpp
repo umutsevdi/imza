@@ -819,6 +819,39 @@ TEST_CASE("imza.sh workspace argument selects the run directory")
     CHECK(empty.text.find("must not be empty") != std::string::npos);
 }
 
+TEST_CASE("imza.sh env argument reaches the child and the gate")
+{
+    ShellFixture fx;
+    // $-expansion makes the gate ask once; ACCEPT_ONCE lets it run, and the
+    // child shell expands the variable that only the env argument provides.
+    fx.verdict = imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" };
+    const imza::ToolOutput env_run = imza::test::run_lua(
+        "local out, code = imza.shell('echo $IMZA_TEST_MARKER', 10, nil, "
+        "{ IMZA_TEST_MARKER = 'present' })\nprint(out, code)",
+        fx.host());
+    CHECK(env_run.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(env_run.text.find("present") != std::string::npos);
+
+    // The typed request carries the env through the gate.
+    ShellFixture asking;
+    asking.verdict = imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" };
+    const std::string cmd           = imza::test::mutating_command("x");
+    const imza::ToolOutput approved = imza::test::run_lua(
+        "imza.shell([[" + cmd + "]], 10, nil, { FOO = 'bar' })", asking.host());
+    REQUIRE(asking.ask_calls == 1);
+    REQUIRE(asking.last_prompt.has_value());
+    const auto& request
+        = std::get<imza::ShellRequest>(asking.last_prompt->request);
+    CHECK(request.env.at("FOO") == "bar");
+
+    // A nil env argument is the same as omitting it.
+    const std::string plain       = imza::test::echo_command("plain");
+    const imza::ToolOutput no_env = imza::test::run_lua(
+        "local out = imza.shell([[" + plain + "]], 10, nil)\nprint(out)",
+        fx.host());
+    CHECK(no_env.text.find("plain") != std::string::npos);
+}
+
 TEST_CASE("imza.sh rejects only multiple command expressions")
 {
     ShellFixture fx;

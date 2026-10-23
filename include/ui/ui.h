@@ -310,11 +310,16 @@ inline constexpr std::string_view MULTILINE_KEY = "Alt+Shift+Enter";
 inline constexpr std::string_view MULTILINE_KEY = "Alt+Enter";
 #endif
 
-// Alt+Enter (both legacy encodings) inserts a newline in multi-line inputs.
+// Alt+Enter inserts a newline in multi-line inputs. Match every wire
+// encoding: the legacy ESC-prefixed newline, the kitty keyboard protocol
+// form and the xterm modifyOtherKeys form (terminal-dependent, not
+// platform-dependent).
 inline bool is_alt_enter(const ftxui::Event& event)
 {
-    return event == ftxui::Event::Special("\x1B\r")
-        || event == ftxui::Event::Special("\x1B\n");
+    return event == ftxui::Event::Special("\x1B\r")         // legacy CR
+        || event == ftxui::Event::Special("\x1B\n")         // legacy LF
+        || event == ftxui::Event::Special("\x1B[13;3u")     // kitty CSI u
+        || event == ftxui::Event::Special("\x1B[27;3;13~"); // modifyOtherKeys
 }
 inline bool is_bracketed_paste_begin(const ftxui::Event& event)
 {

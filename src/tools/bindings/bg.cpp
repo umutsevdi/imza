@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <map>
 #include <string>
 
 extern "C" {
@@ -34,6 +35,8 @@ namespace {
                 return failed;
             }
         }
+        const auto env = opt_env_table(L, 4).value_or(
+            std::map<std::string, std::string> { });
 
         const ShellAnalysis analysis = analyze_shell(command);
         if (analysis.invocations.size() > 1) {
@@ -46,11 +49,14 @@ namespace {
         }
 
         const GateOutcome gate = authorize_shell(L,
-            ShellRequest {
-                command, std::chrono::seconds(timeout), fs::path(workspace) });
+            ShellRequest { command, std::chrono::seconds(timeout),
+                fs::path(workspace), env });
         if (!gate) {
             return binding_error(L, gate.denial);
         }
+        // Execution uses the authorized request's env, never the raw input.
+        const std::map<std::string, std::string> run_env
+            = gate.shell ? gate.shell->env : env;
         const std::string run_dir
             = gate.shell ? gate.shell->workspace.string() : workspace;
 
@@ -59,7 +65,7 @@ namespace {
             return binding_error(L, "bg.shell: unavailable in this context");
         }
         if (!run->host->spawn_bg(
-                command, std::chrono::seconds(timeout), run_dir)) {
+                command, std::chrono::seconds(timeout), run_dir, run_env)) {
             record_call(L, "bg.shell", command, false);
             return binding_error(L, "bg.shell: failed to start command");
         }
@@ -71,14 +77,16 @@ namespace {
         {
             "shell",
             binding_bg_shell,
-            R"desc((command: string, timeout?: integer=120, workspace?: string) throws
+            R"desc((command: string, timeout?: integer=120, workspace?: string,
+env?: table<string, string>) throws
 Starts a command in the background and returns as soon as it is running, so
 it outlives this script and a later script can interact with it (e.g. start
 a server, then curl it). Output is not captured: redirect it in the command
 (`cmd > log 2>&1`) and read the file with imza.fs.read.
 The process ends on its own exit, after `timeout` seconds (1..600), or when
 the application exits. Throws when the command could not start or was denied.
-Chains and pipelines are rejected, like imza.shell.)desc",
+Chains and pipelines are rejected, like imza.shell. `env` maps variable
+names to values, merged over the inherited environment.)desc",
             LuaCapability::SHELL,
             "bg.shell: shell access is disabled for this run",
         },
