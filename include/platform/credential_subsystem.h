@@ -55,6 +55,13 @@ public:
     std::string unavailable_reason() const;
 
     bool ready() const { return _ready.load(); }
+    // True once the platform probe finished; never blocks. The worker's
+    // startup announcement always comes after this, so a caller that sees
+    // it can read unavailable_reason() without waiting.
+    bool probed() const { return _probed.load(); }
+    // The worker publishes its startup announcement before flipping the
+    // latch, so a subscriber installed after this returns cannot mistake
+    // that announcement for a later change.
     bool wait_ready(std::chrono::milliseconds timeout) const;
 
     // Bumped on every change to the resolved set. A reader caching a view

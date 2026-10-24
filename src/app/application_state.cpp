@@ -249,8 +249,7 @@ namespace {
         // does rather than blocking the first frame.
         auto notice_published = std::make_shared<std::atomic<bool>>(false);
         const auto publish_degradation = [raw = state.get(), notice_published] {
-            if (!raw->credentials->ready()
-                || notice_published->exchange(true)) {
+            if (notice_published->exchange(true)) {
                 return;
             }
             const std::string reason = raw->credentials->unavailable_reason();
@@ -262,9 +261,13 @@ namespace {
         };
         state->credential_subscription
             = state->credentials->subscribe_to_change(publish_degradation);
-        // The worker may have finished between construction and the
-        // subscription; the signal only announces later changes.
-        publish_degradation();
+        // The worker's announcement always follows its probe, so a probe
+        // that already finished means the signal may have been missed; the
+        // one-shot latch keeps the notice from landing twice. Neither path
+        // blocks the first frame.
+        if (state->credentials->probed()) {
+            publish_degradation();
+        }
         state->providers = std::make_shared<ProviderStore>(state->config);
         McpSubsystemHooks mcp_hooks;
         // Sign-ins and background token refreshes write straight through

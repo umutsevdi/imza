@@ -78,6 +78,9 @@ TEST_CASE("credential changes publish")
     if (!store.is_keychain_available()) {
         return;
     }
+    // The worker's startup announcement must be behind us: subscribing
+    // earlier would count it as a change.
+    REQUIRE(store.wait_ready(std::chrono::seconds { 30 }));
     const std::string key = unique_key();
     int published         = 0;
     auto subscription     = store.subscribe_to_change([&] { ++published; });

@@ -275,10 +275,13 @@ CredentialSubsystem::CredentialSubsystem(Mode mode,
             if (stop.stop_requested()) {
                 return;
             }
-            _ready.store(true);
+            // Announce before flipping the latch: a subscriber that sees
+            // ready() must already have received the startup announcement,
+            // or it would observe the publish as a later change.
             _generation.fetch_add(1);
-            _ready_cv.notify_all();
             _changed.publish();
+            _ready.store(true);
+            _ready_cv.notify_all();
         });
 }
 

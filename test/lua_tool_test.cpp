@@ -822,13 +822,16 @@ TEST_CASE("imza.sh workspace argument selects the run directory")
 TEST_CASE("imza.sh env argument reaches the child and the gate")
 {
     ShellFixture fx;
-    // $-expansion makes the gate ask once; ACCEPT_ONCE lets it run, and the
-    // child shell expands the variable that only the env argument provides.
+    // The fixture reports the variable the child actually received, so the
+    // assertion does not depend on the host shell's expansion syntax. The
+    // program is not catalogued, so the gate asks; ACCEPT_ONCE lets it run.
     fx.verdict = imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" };
-    const imza::ToolOutput env_run = imza::test::run_lua(
-        "local out, code = imza.shell('echo $IMZA_TEST_MARKER', 10, nil, "
-        "{ IMZA_TEST_MARKER = 'present' })\nprint(out, code)",
-        fx.host());
+    const imza::ToolOutput env_run
+        = imza::test::run_lua("local out, code = imza.shell([["
+                + imza::test::fixture_command("env", "IMZA_TEST_MARKER")
+                + "]], 10, nil, { IMZA_TEST_MARKER = 'present' })\n"
+                  "print(out, code)",
+            fx.host());
     CHECK(env_run.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(env_run.text.find("present") != std::string::npos);
 
