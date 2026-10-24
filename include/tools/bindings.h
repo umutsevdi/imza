@@ -28,15 +28,16 @@ namespace imza {
 struct FileMutation {
     // How the file changed, so the diff can say "deleted" or "created"
     // rather than showing an unlabeled empty side. REMOVED renders as a
-    // whole-file deletion, ADDED as a whole-file addition; MODIFIED is
-    // an ordinary content diff. A move records both: REMOVED at the
-    // source, ADDED at the destination.
-    enum class Kind { MODIFIED, ADDED, REMOVED };
-
+    // whole-file deletion, ADDED as a whole-file addition; MODIFIED is an
+    // ordinary content diff. A move records both: REMOVED at the source,
+    // ADDED at the destination.
     std::string path;
     std::string original;
     std::string latest;
-    Kind kind = Kind::MODIFIED;
+    FileChange::Kind kind = FileChange::Kind::MODIFIED;
+    // An existing empty file and a missing one both read as "", but only
+    // the missing one is a creation.
+    bool existed = true;
 };
 
 // Everything a binding needs from the run, reached via run_of(). Lives on
@@ -55,6 +56,8 @@ struct LuaRunContext {
     bool truncated = false;
     std::vector<LuaBindingCall> log;
     std::vector<FileMutation> mutations;
+    // One entry per accepted call, in order, for the undo stack.
+    std::vector<FileChange> changes;
     std::vector<CanvasView> canvases;
     // Borrowed; set by the driver before any binding can run, so
     // binding code never null-checks it.

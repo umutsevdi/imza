@@ -598,9 +598,16 @@ namespace {
             if (_autocomplete.active()) {
                 bottom.push_back(_autocomplete.render(ctx));
             }
+            const std::size_t undo_depth = _session->undo_depth();
+            std::string undo_hint;
+            if (undo_depth > 0) {
+                undo_hint = "  /undo (" + std::to_string(undo_depth)
+                    + (undo_depth == 1 ? " change)" : " changes)");
+            }
             Element hint_line = hbox({ text(auto_on ? " auto " : "")
                     | color(PANEL_COLOR) | bgcolor(HL_RED),
-                text(_hints.input_hint) | color(PANEL_FG_DIM) });
+                text(_hints.input_hint) | color(PANEL_FG_DIM),
+                text(std::move(undo_hint)) | color(PANEL_FG_DIM) });
             bottom.push_back(
                 vbox({ std::move(input_box) | yflex, std::move(hint_line) }));
             Elements root;

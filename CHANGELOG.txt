@@ -8,11 +8,13 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
-0.7.0 - Unreleased
+0.7.0 - 2026-10-24
 -------------------------------------------------------------------------------
 Changes:
   - Imza is now installable with Homebrew: `brew install umutsevdi/imza/imza`;
     every release updates the cask automatically.
+  - New /undo command reverts the last file change the agent made, one file
+    at a time.
   - API keys and subscription tokens now live in your operating system's
     keychain. Existing keys move over automatically on the first start.
   - Added arm64 Linux packages.

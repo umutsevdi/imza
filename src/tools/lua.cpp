@@ -515,15 +515,31 @@ TYPES)desc";
         lua_sethook(L, deadline_hook, LUA_MASKCOUNT, HOOK_INTERVAL);
 
         const auto finish = [&](ToolOutput out) {
+            // Read before the log moves out.
+            const bool shell_ran = std::any_of(
+                run.log.begin(), run.log.end(), [](const LuaBindingCall& call) {
+                    return call.binding == "shell"
+                        || call.binding == "bg.shell";
+                });
             out.dispatch_log       = std::move(run.log);
             out.blocked_permission = run.blocked_permission;
             out.canvases           = std::move(run.canvases);
+            out.changes            = std::move(run.changes);
+            for (FileChange& change : out.changes) {
+                change.shell_side_effects = shell_ran;
+            }
+            // An edit that changes nothing is not a step; keeping it would
+            // make /undo a no-op that still consumes a press.
+            std::erase_if(out.changes, [](const FileChange& change) {
+                return change.kind == FileChange::Kind::MODIFIED
+                    && change.before == change.after;
+            });
             for (const FileMutation& m : run.mutations) {
                 // A creation or deletion has one empty side, so the
                 // content comparison would skip it; the kind decides
                 // whether the diff is shown at all.
-                const bool created = m.kind == FileMutation::Kind::ADDED;
-                const bool removed = m.kind == FileMutation::Kind::REMOVED;
+                const bool created = m.kind == FileChange::Kind::ADDED;
+                const bool removed = m.kind == FileChange::Kind::REMOVED;
                 if (!created && !removed && m.original == m.latest) {
                     continue;
                 }

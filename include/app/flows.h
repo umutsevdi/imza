@@ -152,6 +152,10 @@ std::string export_viewer_content(
     ApplicationState& state, const ViewerModal& payload, std::string& error);
 void compact_session(ApplicationState& state, TurnSettings settings);
 void interrupt(ApplicationState& state);
+// Reverts the newest recorded file change. The inverse is a typed request
+// evaluated by the permission layer, so Plan mode refuses it and an
+// out-of-workspace target asks first.
+void undo_last(ApplicationState& state);
 void delete_saved_session(
     ApplicationState& state, const std::filesystem::path& path);
 // Load `path` as the active conversation: pending-work guard, save the

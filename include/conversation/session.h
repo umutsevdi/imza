@@ -70,6 +70,8 @@ struct ToolCall {
         std::string text;
         std::optional<JsonValue> return_value;
         std::vector<DiffView> diffs;
+        // One entry per accepted file mutation, in call order, for undo.
+        std::vector<FileChange> changes;
         std::vector<CanvasView> canvases;
         std::optional<ShellStatus> shell_status;
         std::vector<LuaBindingCall> dispatch_log;
@@ -133,6 +135,10 @@ struct PlanNote {
 // Hard cap on one plan document, applied to both the stored object and
 // any future model-facing rendering of it.
 inline constexpr std::size_t MAX_PLAN_BYTES = 16 * 1024;
+
+// Undo stack bounds; the oldest entries are evicted first.
+inline constexpr std::size_t MAX_UNDO_STEPS = 200;
+inline constexpr std::size_t MAX_UNDO_BYTES = 16 * 1024 * 1024;
 
 struct SessionSnapshot {
     std::string title;
@@ -259,6 +265,22 @@ public:
     void complete_manual_compaction(
         std::size_t id, std::string summary, std::size_t absorbed_items);
     void fill_tool_result(const ToolCallRequest& req, ToolCall::Result result);
+
+    // Undo stack, newest last. Conversation-scoped: restore() and a fresh
+    // session start empty, and it is never persisted.
+    void push_undo(std::vector<FileChange> changes);
+    // The newest entry without removing it, so the caller can check for
+    // drift before committing to the revert.
+    std::optional<FileChange> peek_undo() const;
+    std::optional<FileChange> pop_undo();
+    // Empties the stack oldest-first; a subagent's parent folds the child's
+    // changes in this way.
+    std::vector<FileChange> drain_undo();
+    std::size_t undo_depth() const;
+    // A popped entry parked while its inverse waits on a permission prompt.
+    std::optional<FileChange> pending_undo() const;
+    void set_pending_undo(std::optional<FileChange> change);
+    void clear_undo();
     void set_tool_subagents(
         const ToolCallRequest& req, std::vector<std::size_t> ids);
     void set_tool_subagent_chats(
@@ -349,6 +371,7 @@ private:
         std::size_t id, CompactionEvent::Status status);
     ToolCall* _find_tool_locked(
         const ToolCallRequest& req, bool unfinished_only);
+    void _push_undo_locked(std::vector<FileChange> changes);
     ToolCall* _find_planning_tool_locked(const ToolCallRequest& req);
     void _finalize_reasoning(AssistantTurn& a);
     void _finish_session_locked(const std::string& error);
@@ -418,6 +441,10 @@ private:
     std::optional<std::chrono::steady_clock::time_point> _reasoning_start;
     std::optional<std::chrono::steady_clock::time_point> _turn_started;
     std::atomic<bool> _interrupt_requested { false };
+
+    std::vector<FileChange> _undo;
+    std::size_t _undo_bytes = 0;
+    std::optional<FileChange> _pending_undo;
 
     std::string _compacted_summary;
     std::size_t _compacted_item_count = 0;

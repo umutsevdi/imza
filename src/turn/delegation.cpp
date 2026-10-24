@@ -6,6 +6,7 @@
 #include "tools/tool_args.h"
 #include "turn/prompt_store.h"
 
+#include <iterator>
 #include <memory>
 #include <thread>
 #include <utility>
@@ -224,6 +225,7 @@ ToolOutput Delegation::run_subagents(const ToolCallRequest& req)
 
     std::string output;
     std::vector<SubagentChat> chats;
+    std::vector<FileChange> changes;
     for (std::size_t index = 0; index < handles.size(); ++index) {
         const SubagentResult result = handles[index].completion.get();
         if (!output.empty()) {
@@ -233,6 +235,12 @@ ToolOutput Delegation::run_subagents(const ToolCallRequest& req)
         chats.push_back(
             SubagentChat { agent_label(index, (*parsed)[index].mode_name),
                 session_transcript(*sessions[index]) });
+        // A child owns its own conversation, so its stack would die with
+        // it. Fold the records in so the parent's /undo reaches them.
+        std::vector<FileChange> child_changes = sessions[index]->drain_undo();
+        changes.insert(changes.end(),
+            std::make_move_iterator(child_changes.begin()),
+            std::make_move_iterator(child_changes.end()));
     }
     if (!validation_error.empty()) {
         if (!output.empty()) {
@@ -244,8 +252,10 @@ ToolOutput Delegation::run_subagents(const ToolCallRequest& req)
         _state->session->set_tool_subagent_chats(req, std::move(chats));
         _state->subagents->prune_completed();
     });
-    return validation_error.empty() ? tool_output(std::move(output))
-                                    : tool_error(std::move(output));
+    ToolOutput out = validation_error.empty() ? tool_output(std::move(output))
+                                              : tool_error(std::move(output));
+    out.changes    = std::move(changes);
+    return out;
 }
 
 SubagentChat Delegation::subagent_chat(

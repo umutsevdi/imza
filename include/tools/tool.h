@@ -30,6 +30,9 @@ struct ToolOutput {
     // Net per-file diffs a lua script produced through imza.fs.*;
     // multiple mutations of one file collapse into a single before/after.
     std::vector<DiffView> diffs { };
+    // One entry per accepted call, in order. Unlike `diffs` these are not
+    // collapsed: undo walks back one file change at a time.
+    std::vector<FileChange> changes { };
     // Charts the canvas module rendered for the chat.
     std::vector<CanvasView> canvases { };
     std::vector<LuaBindingCall> dispatch_log { };

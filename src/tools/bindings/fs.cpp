@@ -426,9 +426,13 @@ namespace {
         FileMutation* mutation = find_mutation(run, target);
         std::string original;
         std::string content;
+        // Content alone cannot say: an existing empty file and a missing
+        // one both read as "", but only the missing one is a creation.
+        bool existed = false;
         if (mutation != nullptr) {
             original = mutation->original;
             content  = mutation->latest;
+            existed  = mutation->existed;
         } else {
             // load_text distinguishes a missing file (whole_file: a fresh
             // write from empty) from unreadable content (always an error).
@@ -438,6 +442,8 @@ namespace {
                 }
                 err.clear();
                 content.clear();
+            } else {
+                existed = true;
             }
             original = content;
         }
@@ -448,13 +454,13 @@ namespace {
         if (!save_text(target, *next, err)) {
             return false;
         }
+        // The undo record is per call, before the net mutation collapses.
+        const FileChange::Kind kind
+            = existed ? FileChange::Kind::MODIFIED : FileChange::Kind::ADDED;
+        run->changes.push_back({ target, content, *next, kind });
         if (mutation == nullptr) {
-            // A whole-file write to a path that did not exist is a
-            // creation, not a modification.
-            const FileMutation::Kind kind = whole_file && original.empty()
-                ? FileMutation::Kind::ADDED
-                : FileMutation::Kind::MODIFIED;
             run->mutations.push_back({ target, original, *next, kind });
+            run->mutations.back().existed = existed;
         } else {
             mutation->latest = *next;
         }
@@ -566,9 +572,16 @@ namespace {
         if (const int denied = authorize_target(L, request, path, target)) {
             return denied;
         }
+        std::error_code exists_error;
+        const bool existed = std::filesystem::exists(target, exists_error);
         std::string err;
         if (!make_directories(target, err)) {
             return binding_error(L, "fs.mkdir: " + err);
+        }
+        if (!existed) {
+            FileChange change { target, "", "", FileChange::Kind::ADDED };
+            change.directory = true;
+            run_of(L)->changes.push_back(std::move(change));
         }
         return 0;
     }
@@ -593,6 +606,13 @@ namespace {
         std::string content;
         std::string read_error;
         const bool have_source = load_text(source, content, read_error);
+        // Existence and readability are separate: an unreadable target
+        // still existed, so it must never be recorded as a creation.
+        std::string overwritten;
+        std::error_code exists_error;
+        const bool existed = std::filesystem::exists(target, exists_error);
+        const bool readable
+            = existed && load_text(target, overwritten, read_error);
 
         std::string err;
         if (!transfer_file(source, target, move, err)) {
@@ -600,11 +620,20 @@ namespace {
         }
         LuaRunContext* run = run_of(L);
         if (have_source) {
-            run->mutations.push_back(
-                { target, "", content, FileMutation::Kind::ADDED });
+            const FileChange::Kind kind = existed ? FileChange::Kind::MODIFIED
+                                                  : FileChange::Kind::ADDED;
+            run->mutations.push_back({ target, readable ? overwritten : "",
+                content, kind, existed });
+            // An unreadable overwrite cannot be inverted; the diff still
+            // shows the write.
+            if (!existed || readable) {
+                run->changes.push_back({ target, overwritten, content, kind });
+            }
             if (move) {
+                run->changes.push_back(
+                    { source, content, "", FileChange::Kind::REMOVED });
                 run->mutations.push_back(
-                    { source, content, "", FileMutation::Kind::REMOVED });
+                    { source, content, "", FileChange::Kind::REMOVED });
             }
         }
         return 0;
@@ -623,17 +652,28 @@ namespace {
             return denied;
         }
         // Read before deleting so the run shows a deletion diff. A
-        // directory has no content to record.
+        // directory still needs a record, or the next /undo would skip over
+        // it and revert an unrelated earlier file.
         std::string original;
         std::string read_error;
         const bool is_file = load_text(target, original, read_error);
+        std::error_code status_error;
+        const bool is_directory
+            = std::filesystem::is_directory(target, status_error);
         std::string err;
         if (!remove_path(target, err)) {
             return binding_error(L, "fs.remove: " + err);
         }
+        LuaRunContext* run = run_of(L);
         if (is_file) {
-            run_of(L)->mutations.push_back(
-                { target, original, "", FileMutation::Kind::REMOVED });
+            run->changes.push_back(
+                { target, original, "", FileChange::Kind::REMOVED });
+            run->mutations.push_back(
+                { target, original, "", FileChange::Kind::REMOVED });
+        } else if (is_directory) {
+            FileChange change { target, "", "", FileChange::Kind::REMOVED };
+            change.directory = true;
+            run->changes.push_back(std::move(change));
         }
         return 0;
     }

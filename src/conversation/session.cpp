@@ -373,6 +373,9 @@ void Session::restore(SessionSnapshot snapshot)
         _loaded_skills.clear();
         _skill_contents.clear();
         _pending_skill_turn.reset();
+        _undo.clear();
+        _undo_bytes = 0;
+        _pending_undo.reset();
         _error.clear();
         _retry_countdown.reset();
         _reasoning_start.reset();
@@ -830,12 +833,94 @@ void Session::set_tool_subagents(
 void Session::fill_tool_result(
     const ToolCallRequest& req, ToolCall::Result result)
 {
+    // Moved out first: the undo stack owns the contents, and the transcript
+    // copy must not carry them (snapshots copy items).
+    std::vector<FileChange> changes = std::move(result.changes);
     std::lock_guard lock(_mutex);
     _ensure_unique(_items);
     if (auto* call = _find_tool_locked(req, true)) {
         call->result = std::move(result);
         _dirty       = true;
     }
+    // Same lock as the result, so stack order matches transcript order.
+    _push_undo_locked(std::move(changes));
+}
+
+void Session::_push_undo_locked(std::vector<FileChange> changes)
+{
+    for (FileChange& change : changes) {
+        _undo_bytes += change.before.size() + change.after.size();
+        _undo.push_back(std::move(change));
+    }
+    // An entry over the byte cap is still kept when it is the only one:
+    // dropping the newest change would make it un-undoable.
+    while (_undo.size() > MAX_UNDO_STEPS
+        || (_undo_bytes > MAX_UNDO_BYTES && _undo.size() > 1)) {
+        _undo_bytes -= _undo.front().before.size() + _undo.front().after.size();
+        _undo.erase(_undo.begin());
+    }
+}
+
+void Session::push_undo(std::vector<FileChange> changes)
+{
+    std::lock_guard lock(_mutex);
+    _push_undo_locked(std::move(changes));
+}
+
+std::optional<FileChange> Session::peek_undo() const
+{
+    std::lock_guard lock(_mutex);
+    if (_undo.empty()) {
+        return std::nullopt;
+    }
+    return _undo.back();
+}
+
+std::optional<FileChange> Session::pop_undo()
+{
+    std::lock_guard lock(_mutex);
+    if (_undo.empty()) {
+        return std::nullopt;
+    }
+    FileChange change = std::move(_undo.back());
+    _undo.pop_back();
+    _undo_bytes -= change.before.size() + change.after.size();
+    return change;
+}
+
+std::vector<FileChange> Session::drain_undo()
+{
+    std::lock_guard lock(_mutex);
+    std::vector<FileChange> drained = std::move(_undo);
+    _undo.clear();
+    _undo_bytes = 0;
+    return drained;
+}
+
+std::size_t Session::undo_depth() const
+{
+    std::lock_guard lock(_mutex);
+    return _undo.size();
+}
+
+std::optional<FileChange> Session::pending_undo() const
+{
+    std::lock_guard lock(_mutex);
+    return _pending_undo;
+}
+
+void Session::set_pending_undo(std::optional<FileChange> change)
+{
+    std::lock_guard lock(_mutex);
+    _pending_undo = std::move(change);
+}
+
+void Session::clear_undo()
+{
+    std::lock_guard lock(_mutex);
+    _undo.clear();
+    _undo_bytes = 0;
+    _pending_undo.reset();
 }
 
 void Session::set_todo(TodoList todo)
@@ -1013,8 +1098,13 @@ void Session::present_modal(ModalPayload payload)
     std::lock_guard lock(_mutex);
     _modal        = std::move(payload);
     _modal_handle = std::make_shared<const ModalPayload>(_modal);
-    if (std::holds_alternative<PermissionPrompt>(*(_modal_handle))
-        || std::holds_alternative<QuestionForm>(*(_modal_handle))) {
+    // AWAITING means a turn is blocked on an answer. A prompt raised
+    // outside a turn must not move the phase: resolve_modal restores
+    // CONNECTING, which only a turn advances.
+    const bool during_turn = _phase != Phase::IDLE;
+    if (during_turn
+        && (std::holds_alternative<PermissionPrompt>(*(_modal_handle))
+            || std::holds_alternative<QuestionForm>(*(_modal_handle)))) {
         _phase = Phase::AWAITING;
     }
     ++_modal_serial;

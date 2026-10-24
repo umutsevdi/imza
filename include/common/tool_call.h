@@ -25,6 +25,24 @@ struct DiffView {
     std::vector<DiffRow> rows;
 };
 
+// One accepted file mutation, with the whole file on both sides of that
+// call. DiffView elides unchanged runs, so it cannot be inverted.
+struct FileChange {
+    enum class Kind { MODIFIED, ADDED, REMOVED };
+
+    std::string path;
+    std::string before;
+    std::string after;
+    Kind kind = Kind::MODIFIED;
+    // The run also executed a shell command, so reverting the file does not
+    // fully undo the step.
+    bool shell_side_effects = false;
+    // A directory has no content: the inverse is a mkdir or an rmdir.
+    bool directory = false;
+
+    bool operator==(const FileChange&) const = default;
+};
+
 struct CanvasSeries {
     std::string label;
     std::vector<double> values;

@@ -24,6 +24,7 @@ namespace {
     constexpr std::array<std::string_view, 2> CHDIR_ALIASES { "dir",
         "directory" };
     constexpr std::array<std::string_view, 1> AUTO_ALIASES { "approvals" };
+    constexpr std::array<std::string_view, 1> UNDO_ALIASES { "revert" };
 
     // The query without its leading slash, lowercased.
     std::string command_key(std::string_view query)
@@ -95,6 +96,8 @@ std::span<const SlashCommand> slash_commands()
             SlashCommand::Action::COMPACT, false, COMPACT_ALIASES },
         { "/make-skill", "draft a skill from a workflow description",
             SlashCommand::Action::MAKE_SKILL, true },
+        { "/undo", "revert the last file change the agent made",
+            SlashCommand::Action::UNDO, false, UNDO_ALIASES },
         { "/changelog", "show the version history",
             SlashCommand::Action::CHANGELOG },
         { "/exit", "quit imza", SlashCommand::Action::EXIT, false,
