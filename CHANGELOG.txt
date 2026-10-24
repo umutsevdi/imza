@@ -35,7 +35,7 @@ Changes:
   - Fixed sessions opened by another Imza process not being recognized as
     in use on Windows, letting a switch overwrite them.
   - Fixed child processes on Windows losing their environment.
-  - Fixed a bug that caused agent's mode to be displayed incorrectly when 
+  - Fixed a bug that caused agent's mode to be displayed incorrectly when
     loaded from a session.
 
 -------------------------------------------------------------------------------

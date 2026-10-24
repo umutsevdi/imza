@@ -1,11 +1,12 @@
 # Imza
 
-**A terminal coding agent that doesn't hide what it does.**
+**A terminal coding agent that keeps you in the loop.**
 
-Plan it together, build it together, review it together. Imza speeds up
-development without leaving you behind.
+Agents write code faster than you can read it. Imza speeds up development
+without leaving you behind. Plan it together, build it together, review it
+together.
 
-> Imza is a native C++ application. It is not lightweight because it does less.
+> Imza is a native C++ application. It stays small without doing less.
 
 **~20 MB binary · ~5-8 MB RAM at startup · ~20-40 MB during typical agentic
 work[^1]**
@@ -21,11 +22,10 @@ Browse the [wiki](https://github.com/umutsevdi/imza/wiki) or the
 
 Existing coding agents make development faster, but the developer gradually
 stops reading the code. Plans, summaries, and tool output start replacing
-direct interaction with the implementation, and your understanding of how the
-codebase is actually changing falls behind.
+direct interaction with the implementation, and you fall behind on how the
+codebase is changing.
 
-Imza is designed to keep the developer inside that implementation loop.
-Development is separated into three explicit modes:
+Imza keeps you inside that loop with three explicit modes:
 
 - **Plan: build a flawless spec, together.** The agent investigates the
 repository, understands the problem, and designs the change without modifying
@@ -49,9 +49,8 @@ checkpoint:
 
 **Plan → Build → Review → Plan → Build**
 
-Imza aims to give the agent autonomy over the mechanical work without removing
-the developer from the code itself. You still see what is being written, review
-the resulting implementation, and decide how the next iteration should proceed.
+Every file the agent writes stays visible, and you decide what the next
+iteration does.
 
 ![imza-layout](./screenshots/layout.png)
 
@@ -59,13 +58,14 @@ the resulting implementation, and decide how the next iteration should proceed.
 
 * Plan → Build → Review workflow built around a co-editable plan document,
 with review findings fed back into planning as revisions
-* Interactive diffs and AI-assisted code review throughout development
-* Sandboxed tool orchestration for fewer round trips and less context overhead
+* Interactive diffs and AI-assisted code review
+* Sandboxed Lua tool execution: fewer model round trips, less context overhead
 * Shell-aware, scoped permission controls
 * Full MCP support
 * Sidechat for asking questions without disrupting the main agent's work
+* `/undo` reverts the last file change the agent made, one file per press
 * Bring-your-own-model support, including local OpenAI-compatible models
-* Native terminal UI with a small runtime footprint
+* Native terminal UI (no Electron, no JavaScript runtime)
 * Up to eight concurrent research or build subagents
 * Persistent sessions, transcripts, and automatic context compaction
 * Overridable prompts: replace any built-in prompt fragment with your own
@@ -112,21 +112,27 @@ Instead of requiring a separate model round trip for every read, search, edit,
 or command, Imza has the model write sandboxed Lua scripts where reads, edits,
 searches, and shell commands compose into one operation.
 
-The model works in bulk and discards data it doesn't need before it ever
-reaches your context, making tasks such as filtering files, gathering context,
-and performing coordinated edits more efficient.
+The model works in bulk and discards data it doesn't need before it reaches
+your context. Filtering files, gathering context, and coordinated edits all
+cost fewer round trips.
 
 These operations still go through Imza's permission and mutation tracking
 systems, so shell execution, filesystem access, and resulting code changes
 remain observable.
 
-In Imza's own development sessions, this approach substantially reduced
-intermediate tool output and context overhead.
-[Read the analysis](https://github.com/umutsevdi/imza/discussions/1).
+Imza's own development sessions run on this approach; see the measured effect
+on tool output and context size in
+[the analysis](https://github.com/umutsevdi/imza/discussions/1).
 
 ## Installation
 
-Pre-built packages are available from the
+On macOS, install with Homebrew:
+
+```sh
+brew install umutsevdi/imza/imza
+```
+
+Pre-built packages for Linux and Windows are available from the
 [latest release](https://github.com/umutsevdi/imza/releases/latest).
 
 > Downloaded macOS packages are currently unsigned. On first launch,
@@ -141,8 +147,6 @@ Type `/` in the chat input to browse the available commands.
 > Run `imza --update` to install the latest version.
 
 ### Building from Source
-
-Want to build Imza yourself or contribute to development?
 
 See the
 [build and installation guide](https://github.com/umutsevdi/imza/wiki/01_Installation#building-from-source)
