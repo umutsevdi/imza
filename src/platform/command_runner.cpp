@@ -32,6 +32,51 @@ namespace {
 
 #ifdef _WIN32
 
+    // UTF-16 environment block in the CreateProcess double-NUL-terminated
+    // form; empty `env` returns an empty vector, meaning "inherit". The
+    // inherited entries are copied first and the overrides substituted in:
+    // dropping the rest would strip PATH and SystemRoot and the child could
+    // not start. "=C:=..." drive-directory entries have no name to override
+    // and are kept as they are.
+    std::vector<wchar_t> windows_environment_block(
+        const std::map<std::string, std::string>& env)
+    {
+        std::vector<wchar_t> block;
+        if (env.empty()) {
+            return block;
+        }
+        std::vector<std::wstring> overridden;
+        overridden.reserve(env.size());
+        for (const auto& [name, value] : env) {
+            overridden.push_back(to_wide(name));
+        }
+        std::vector<std::wstring> entries;
+        if (wchar_t* inherited = GetEnvironmentStringsW()) {
+            for (const wchar_t* cursor = inherited; *cursor != L'\0';
+                cursor += std::wcslen(cursor) + 1) {
+                const std::wstring entry(cursor);
+                const std::size_t equals = entry.find(L'=');
+                const std::wstring name
+                    = equals == 0 ? std::wstring { } : entry.substr(0, equals);
+                if (name.empty()
+                    || std::ranges::find(overridden, name)
+                        == overridden.end()) {
+                    entries.push_back(entry);
+                }
+            }
+            FreeEnvironmentStringsW(inherited);
+        }
+        for (const auto& [name, value] : env) {
+            entries.push_back(to_wide(name + "=" + value));
+        }
+        for (const std::wstring& entry : entries) {
+            block.insert(block.end(), entry.begin(), entry.end());
+            block.push_back(L'\0');
+        }
+        block.push_back(L'\0');
+        return block;
+    }
+
     CommandResult run_windows(const std::string& command,
         std::chrono::seconds timeout, CommandResult result,
         const std::filesystem::path& working_directory,
@@ -98,7 +143,8 @@ namespace {
         // Suspended so the job exists before the shell can spawn anything.
         if (!CreateProcessW(nullptr, cmdline.data(), nullptr, nullptr, TRUE,
                 CREATE_SUSPENDED,
-                env_block.empty() ? nullptr : env_block.data(),
+                env_block.empty() ? nullptr
+                                  : const_cast<wchar_t*>(env_block.data()),
                 wide_directory.empty() ? nullptr : wide_directory.c_str(), &si,
                 &pi)) {
             CloseHandle(out_read);
@@ -209,7 +255,8 @@ namespace {
         const std::vector<wchar_t> env_block = windows_environment_block(env);
         if (!CreateProcessW(nullptr, cmdline.data(), nullptr, nullptr, FALSE,
                 CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
-                env_block.empty() ? nullptr : env_block.data(),
+                env_block.empty() ? nullptr
+                                  : const_cast<wchar_t*>(env_block.data()),
                 wide_directory.empty() ? nullptr : wide_directory.c_str(),
                 &startup, &process)) {
             return false;
@@ -272,50 +319,6 @@ namespace {
     }
 
     // UTF-16 environment block in the CreateProcess double-NUL-terminated
-    // form; empty `env` returns an empty vector, meaning "inherit". The
-    // inherited entries are copied first and the overrides substituted in:
-    // dropping the rest would strip PATH and SystemRoot and the child could
-    // not start. "=C:=..." drive-directory entries have no name to override
-    // and are kept as they are.
-    std::vector<wchar_t> windows_environment_block(
-        const std::map<std::string, std::string>& env)
-    {
-        std::vector<wchar_t> block;
-        if (env.empty()) {
-            return block;
-        }
-        std::vector<std::wstring> overridden;
-        overridden.reserve(env.size());
-        for (const auto& [name, value] : env) {
-            overridden.push_back(to_wide(name));
-        }
-        std::vector<std::wstring> entries;
-        if (wchar_t* inherited = GetEnvironmentStringsW()) {
-            for (const wchar_t* cursor = inherited; *cursor != L'\0';
-                cursor += std::wcslen(cursor) + 1) {
-                const std::wstring entry(cursor);
-                const std::size_t equals = entry.find(L'=');
-                const std::wstring name
-                    = equals == 0 ? std::wstring { } : entry.substr(0, equals);
-                if (name.empty()
-                    || std::ranges::find(overridden, name)
-                        == overridden.end()) {
-                    entries.push_back(entry);
-                }
-            }
-            FreeEnvironmentStringsW(inherited);
-        }
-        for (const auto& [name, value] : env) {
-            entries.push_back(to_wide(name + "=" + value));
-        }
-        for (const std::wstring& entry : entries) {
-            block.insert(block.end(), entry.begin(), entry.end());
-            block.push_back(L'\0');
-        }
-        block.push_back(L'\0');
-        return block;
-    }
-
 #else
 
     // The parent's environment with `env` substituted in; empty `env`
