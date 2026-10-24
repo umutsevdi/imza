@@ -6,6 +6,8 @@
 #include <vector>
 
 #include <doctest/doctest.h>
+#include <ftxui/component/event.hpp>
+#include <ftxui/screen/screen.hpp>
 
 #include "app/application_state.h"
 #include "app/flows.h"
@@ -13,7 +15,6 @@
 #include "conversation/persistence.h"
 #include "conversation/session.h"
 #include "conversation/session_store.h"
-#include "platform/file_lock.h"
 #include "test_fs.h"
 #include "test_helpers.h"
 #include "test_state.h"
@@ -26,6 +27,48 @@ using DataHome = imza::test::IsolatedDataHome;
 using imza::test::CurrentDirectory;
 
 } // namespace
+
+TEST_CASE("permissions modal adds a grant from the keyboard")
+{
+    imza::test::IsolatedDataHome home;
+    imza::test::AgentEnv env;
+    imza::enqueue_user_modal(*env.state, imza::PermissionsModal { });
+    REQUIRE(env.pump.wait_for([&] {
+        return std::holds_alternative<imza::PermissionsModal>(
+            env.session->modal());
+    }));
+
+    ftxui::Component modal = imza::make_modal(env.state);
+    modal->Render();
+    // Entering the add form moves the terminal cursor to the input: the
+    // tab menu's focus requirement must not win over the focused chain.
+    REQUIRE(modal->OnEvent(ftxui::Event::ArrowDown));
+    modal->Render();
+    ftxui::Screen screen = ftxui::Screen::Create(
+        ftxui::Dimension::Fixed(80), ftxui::Dimension::Fixed(30));
+    ftxui::Render(screen, modal->Render());
+    CHECK(screen.cursor().shape != ftxui::Screen::Cursor::Shape::Hidden);
+
+    // A missing directory is refused inline without writing the config.
+    REQUIRE(modal->OnEvent(ftxui::Event::Character("d")));
+    REQUIRE(modal->OnEvent(ftxui::Event::Return));
+    modal->Render();
+    const std::string refused = imza::test::without_ansi(
+        imza::test::to_text(modal->Render(), 80, 30));
+    CHECK(refused.find("Not a directory") != std::string::npos);
+    CHECK(env.state->config->snapshot()->allow.directories.empty());
+
+    // The commands tab accepts a grantable command and installs it live.
+    REQUIRE(modal->OnEvent(ftxui::Event::Tab));
+    REQUIRE(modal->OnEvent(ftxui::Event::Character("r")));
+    REQUIRE(modal->OnEvent(ftxui::Event::Character("g")));
+    REQUIRE(modal->OnEvent(ftxui::Event::Return));
+    REQUIRE(env.pump.wait_for([&] {
+        return imza::grants_cover(env.state->permissions->snapshot(),
+            imza::ShellCommandGrant { "rg" });
+    }));
+    imza::close_modal(*env.state);
+}
 
 TEST_CASE("skills modal marks bundled skills and skips their policies")
 {

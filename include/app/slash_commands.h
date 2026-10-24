@@ -23,6 +23,7 @@ struct SlashCommand {
         COMPACT,
         MAKE_SKILL,
         AUTO,
+        PERMISSIONS,
         CHDIR
     };
 

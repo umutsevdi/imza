@@ -396,6 +396,7 @@ add_library(imza_ui
     src/ui/markdown.cpp
     src/ui/modals/connect.cpp
     src/ui/modals/mcp.cpp
+    src/ui/modals/permissions.cpp
     src/ui/modals/signin.cpp
     src/ui/modals/sessions.cpp
     src/ui/modals/skills.cpp

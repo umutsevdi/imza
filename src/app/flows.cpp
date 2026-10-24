@@ -5,6 +5,7 @@
 #include "conversation/persistence.h"
 #include "permissions/evaluator.h"
 #include "permissions/permission_store.h"
+#include "permissions/shell_analysis.h"
 #include "platform/command_runner.h"
 #include "platform/config.h"
 #include "platform/credential_subsystem.h"
@@ -453,6 +454,159 @@ bool mcp_begin_server_sign_in(
     return true;
 }
 
+// The persisted allow list, ordered directories first so the modal's row
+// index maps to one section deterministically.
+std::vector<PermissionGrant> allow_grants_view(const ApplicationState& state)
+{
+    std::vector<PermissionGrant> out;
+    const auto config = state.config->snapshot();
+    for (const std::filesystem::path& directory : config->allow.directories) {
+        out.emplace_back(directory);
+    }
+    for (const ShellCommandGrant& command : config->allow.commands) {
+        out.emplace_back(command);
+    }
+    return out;
+}
+
+bool allow_add_directory(
+    ApplicationState& state, const std::string& path, std::string& error)
+{
+    const std::string trimmed(trim(path));
+    if (trimmed.empty()) {
+        error = "Enter a directory to allow.";
+        return false;
+    }
+    std::filesystem::path directory = path_from_utf8(expand_user_path(trimmed));
+    if (directory.is_relative()) {
+        // Matches the config file's rule: relative entries resolve against
+        // the directory Imza starts in.
+        directory
+            = state.environment->workspace()->working_directory / directory;
+    }
+    if (!std::filesystem::is_directory(directory)) {
+        error = "Not a directory: " + trimmed;
+        return false;
+    }
+    std::error_code fs_error;
+    const std::filesystem::path canonical
+        = std::filesystem::weakly_canonical(directory, fs_error);
+    if (fs_error) {
+        error = "Cannot resolve: " + trimmed;
+        return false;
+    }
+    const std::vector<PermissionGrant> existing = allow_grants_view(state);
+    for (const PermissionGrant& grant : existing) {
+        if (grant_covers(grant, ExternalGrant { canonical })) {
+            error = "Already covered by an existing grant.";
+            return false;
+        }
+    }
+    if (state.config->update([&canonical](Config& cfg) {
+            for (const std::filesystem::path& stored : cfg.allow.directories) {
+                if (stored == canonical) {
+                    return false;
+                }
+            }
+            cfg.allow.directories.push_back(canonical);
+            return true;
+        })
+        != ConfigUpdateResult::UPDATED) {
+        error = "Could not save the configuration.";
+        return false;
+    }
+    state.permissions->install({ ExternalGrant { canonical } });
+    return true;
+}
+
+bool allow_add_command(
+    ApplicationState& state, const std::string& command, std::string& error)
+{
+    const std::string trimmed(trim(command));
+    if (trimmed.empty()) {
+        error = "Enter a command to allow.";
+        return false;
+    }
+    // Same gate as --allow-cmd: only reusable, classifiable invocations
+    // may become persistent grants, so the two entry points never
+    // disagree on what is grantable.
+    const ShellAnalysis analysis = analyze_shell(trimmed);
+    if (analysis.reuse != ShellAnalysis::Reuse::SESSION
+        || analysis.invocations.size() != 1) {
+        error = "invalid --allow-cmd value: '" + trimmed + "'";
+        return false;
+    }
+    const ShellInvocation& invocation = analysis.invocations.front();
+    if (shell_deletion_denied(invocation.program)) {
+        error = "cannot allow '" + invocation.program
+            + "': deletion runs through imza.fs.remove";
+        return false;
+    }
+    if (shell_launcher_denied(invocation.program)) {
+        error = "cannot allow '" + invocation.program
+            + "': it runs code that cannot be inspected, so a grant would "
+              "authorize every command it can run";
+        return false;
+    }
+    const ShellCommandGrant grant { invocation.program, invocation.subcommand };
+    const std::vector<PermissionGrant> existing = allow_grants_view(state);
+    for (const PermissionGrant& stored : existing) {
+        if (grant_covers(stored, grant)) {
+            error = "Already covered by an existing grant.";
+            return false;
+        }
+    }
+    if (state.config->update([&grant](Config& cfg) {
+            for (const ShellCommandGrant& stored : cfg.allow.commands) {
+                if (stored == grant) {
+                    return false;
+                }
+            }
+            cfg.allow.commands.push_back(grant);
+            return true;
+        })
+        != ConfigUpdateResult::UPDATED) {
+        error = "Could not save the configuration.";
+        return false;
+    }
+    state.permissions->install({ grant });
+    return true;
+}
+
+bool allow_remove_directory(ApplicationState& state, std::size_t index)
+{
+    const bool removed = state.config->update([index](Config& cfg) {
+        if (index >= cfg.allow.directories.size()) {
+            return false;
+        }
+        cfg.allow.directories.erase(
+            cfg.allow.directories.begin() + static_cast<std::ptrdiff_t>(index));
+        return true;
+    }) == ConfigUpdateResult::UPDATED;
+    if (!removed) {
+        state.session->set_error("Failed to save permission grants.");
+        return false;
+    }
+    return true;
+}
+
+bool allow_remove_command(ApplicationState& state, std::size_t index)
+{
+    const bool removed = state.config->update([index](Config& cfg) {
+        if (index >= cfg.allow.commands.size()) {
+            return false;
+        }
+        cfg.allow.commands.erase(
+            cfg.allow.commands.begin() + static_cast<std::ptrdiff_t>(index));
+        return true;
+    }) == ConfigUpdateResult::UPDATED;
+    if (!removed) {
+        state.session->set_error("Failed to save permission grants.");
+        return false;
+    }
+    return true;
+}
+
 std::future<ModalResult> request_modal(
     ApplicationState& state, ModalPayload payload)
 {
@@ -661,6 +815,9 @@ void run_slash(ApplicationState& state, std::string_view command)
         break;
     case SlashCommand::Action::MCP:
         enqueue_user_modal(state, McpModal { });
+        break;
+    case SlashCommand::Action::PERMISSIONS:
+        enqueue_user_modal(state, PermissionsModal { });
         break;
     case SlashCommand::Action::MODEL:
         if (state.providers->connections().empty()) {

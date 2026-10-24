@@ -534,6 +534,11 @@ namespace {
 
         void _build(const McpModal&) { _body = make_mcp(_state); }
 
+        void _build(const PermissionsModal&)
+        {
+            _body = make_permissions(_state);
+        }
+
         void _build(const ViewerModal& payload)
         {
             _reset_static_scroll();

@@ -11,18 +11,20 @@ CHANGELOG
 0.7.0 - Unreleased
 -------------------------------------------------------------------------------
 Changes:
+  - Imza is now installable with Homebrew: `brew install umutsevdi/imza/imza`;
+    every release updates the cask automatically.
   - API keys and subscription tokens now live in your operating system's
     keychain. Existing keys move over automatically on the first start.
+  - Added arm64 Linux packages.
   - New /cd command switches the session to another directory without
     restarting.
   - Slash commands now understand the names other coding agents use: /quit
     completes to /exit, /clear to /new, /agents to /subagents, /reasoning to
     /variant, and so on; a typo gets a suggestion.
-  - Increased subagent limit to 8.
+  - New /permissions dialog manages the persistent permission grants, so
+    stopping the same prompts no longer requires editing config.json.
   - Added a central in-app notification system.
-  - Imza is now installable with Homebrew: `brew install umutsevdi/imza/imza`;
-    every release updates the cask automatically.
-  - Added arm64 Linux packages.
+  - Increased subagent limit to 8.
   - Fixed the chat input cursor disappearing or blinking.
   - Improved performance during diff scans.
   - Reduced CPU usage during streaming.

@@ -72,7 +72,7 @@ TEST_CASE("harness aliases resolve to their canonical commands")
         { "/auth", SlashCommand::Action::CONNECT },
         { "/dir", SlashCommand::Action::CHDIR },
         { "/directory", SlashCommand::Action::CHDIR },
-        { "/permissions", SlashCommand::Action::AUTO },
+        { "/permissions", SlashCommand::Action::PERMISSIONS },
         { "/approvals", SlashCommand::Action::AUTO },
     };
     for (const Case& c : cases) {
@@ -623,6 +623,20 @@ TEST_CASE("/auto rejects unknown arguments without flipping")
 
     run_slash(*state, "/auto ON");
     CHECK(state->permissions->skip_permissions());
+}
+
+TEST_CASE("/permissions opens the grants modal, not the /auto toggle")
+{
+    const SlashCommand* command = find_command("/permissions");
+    REQUIRE(command != nullptr);
+    CHECK(command->action == SlashCommand::Action::PERMISSIONS);
+    CHECK_FALSE(command->takes_argument);
+
+    auto state = imza::test::make_test_state();
+    run_slash(*state, "/permissions");
+    CHECK(std::holds_alternative<PermissionsModal>(state->session->modal()));
+    CHECK_FALSE(state->permissions->skip_permissions());
+    CHECK(state->session->error().empty());
 }
 
 } // namespace imza

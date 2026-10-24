@@ -23,8 +23,7 @@ namespace {
         "auth" };
     constexpr std::array<std::string_view, 2> CHDIR_ALIASES { "dir",
         "directory" };
-    constexpr std::array<std::string_view, 2> AUTO_ALIASES { "permissions",
-        "approvals" };
+    constexpr std::array<std::string_view, 1> AUTO_ALIASES { "approvals" };
 
     // The query without its leading slash, lowercased.
     std::string command_key(std::string_view query)
@@ -78,6 +77,8 @@ std::span<const SlashCommand> slash_commands()
             SlashCommand::Action::CHDIR, true, CHDIR_ALIASES },
         { "/auto", "turn permission auto-approval on or off",
             SlashCommand::Action::AUTO, true, AUTO_ALIASES },
+        { "/permissions", "manage persistent permission grants",
+            SlashCommand::Action::PERMISSIONS },
         { "/sessions", "load or delete saved sessions",
             SlashCommand::Action::SESSIONS, false, SESSIONS_ALIASES },
         { "/connect", "manage provider connections",

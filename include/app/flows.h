@@ -84,6 +84,20 @@ void resolve_modal(ApplicationState& state, ModalResult result);
 void close_modal(ApplicationState& state);
 void enqueue_user_modal(ApplicationState& state, ModalPayload payload);
 
+// Persistent `allow` grants: validate-then-commit through the locked
+// config read-modify-write, installing accepted additions into the live
+// permission store right away. Returns false with `error` set when the
+// request was refused; the messages match the --allow-cmd refusals.
+bool allow_add_directory(
+    ApplicationState& state, const std::string& path, std::string& error);
+bool allow_add_command(
+    ApplicationState& state, const std::string& command, std::string& error);
+// Removes one persisted grant by section index; stays active for the
+// current session (session grants are additive), effective next start.
+// False when the index is out of range or nothing was committed.
+bool allow_remove_directory(ApplicationState& state, std::size_t index);
+bool allow_remove_command(ApplicationState& state, std::size_t index);
+
 // MCP server persistence: validate-then-commit through the locked config
 // read-modify-write, then apply to the live manager (reload, and connect
 // for a newly added server). The remove/autoload forms return false when

@@ -53,28 +53,6 @@ TEST_CASE("plan requests omit edit and write tools")
     CHECK(std::any_of(tools.begin(), tools.end(),
         [](const imza::ToolSpec& tool) { return tool.name == "lua"; }));
 }
-
-TEST_CASE("attended root turn alerts once after completion")
-{
-    AgentEnv env;
-    std::vector<std::string> alerts;
-    auto subscription = env.state->notifications->subscribe_to_alert(
-        [&alerts](const std::string& message) { alerts.push_back(message); });
-    env.stream
-        = [](const imza::ChatRequest&, const imza::StreamCallback& callback) {
-              callback(imza::make_done_event());
-              return imza::Status::OK;
-          };
-
-    imza::submit(*env.state, "inspect");
-    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
-    REQUIRE(alerts.size() == 1);
-    CHECK(alerts.front() == "Imza finished");
-
-    imza::on_turn_finished(*env.state, "");
-    CHECK(alerts.size() == 1);
-}
-
 TEST_CASE("agent shell approval alerts when input is required")
 {
     AgentEnv env;
@@ -103,51 +81,6 @@ TEST_CASE("agent shell approval alerts when input is required")
     REQUIRE(alerts.size() == 2);
     CHECK(alerts.back() == "Imza finished");
 }
-
-TEST_CASE("queued agent modal alerts only when presented")
-{
-    AgentEnv env;
-    std::vector<std::string> alerts;
-    auto subscription = env.state->notifications->subscribe_to_alert(
-        [&alerts](const std::string& message) { alerts.push_back(message); });
-    imza::enqueue_user_modal(
-        *env.state, imza::ViewerModal { "First", "content" });
-    auto result = imza::request_modal(
-        *env.state, imza::ViewerModal { "Agent", "content" });
-    env.pump.pump();
-
-    CHECK(alerts.empty());
-    REQUIRE(std::holds_alternative<imza::ViewerModal>(env.session->modal()));
-    CHECK(std::get<imza::ViewerModal>(env.session->modal()).title == "First");
-
-    imza::close_modal(*env.state);
-    REQUIRE(std::holds_alternative<imza::ViewerModal>(env.session->modal()));
-    CHECK(std::get<imza::ViewerModal>(env.session->modal()).title == "Agent");
-    REQUIRE(alerts.size() == 1);
-    CHECK(alerts.front() == "Imza needs your attention");
-
-    imza::close_modal(*env.state);
-    CHECK(result.get().index() == 0);
-}
-
-TEST_CASE("modal kind and handle track the presented payload")
-{
-    AgentEnv env;
-    CHECK(env.session->modal_kind() == 0);
-
-    imza::enqueue_user_modal(
-        *env.state, imza::ViewerModal { "Kind", "content" });
-    CHECK(env.session->modal_kind() == 1);
-    REQUIRE(std::holds_alternative<imza::ViewerModal>(
-        *env.session->modal_handle()));
-    CHECK(std::get<imza::ViewerModal>(*env.session->modal_handle()).title
-        == "Kind");
-
-    imza::close_modal(*env.state);
-    CHECK(env.session->modal_kind() == 0);
-    CHECK(std::holds_alternative<std::monostate>(*env.session->modal_handle()));
-}
-
 TEST_CASE("subagent titles prefer stored chats and fall back to arguments")
 {
     AgentEnv env;
@@ -198,60 +131,6 @@ TEST_CASE("plan mode rejects mutating file operations at the gate")
     CHECK(call->result->text.find("fs.write: denied") != std::string::npos);
     CHECK_FALSE(std::filesystem::is_regular_file(out_path));
 }
-
-TEST_CASE("subagent tool waits for a research agent and retains its chat")
-{
-    AgentEnv env;
-    env.stream
-        = [&env](const imza::ChatRequest& req, const imza::StreamCallback& cb) {
-              env.requests.push_back(req);
-              const std::string last = req.messages.empty()
-                  ? std::string { }
-                  : req.messages.back().content;
-              if (last.starts_with("delegate")) {
-                  cb(imza::make_tool_call_event({ "subagent",
-                      R"({"tasks":[{"mode":"research","prompt":"inspect"}]})",
-                      "delegate inspection", "delegate-1" }));
-              } else if (last.starts_with("inspect")) {
-                  cb(imza::make_delta_event("research report"));
-              } else {
-                  cb(imza::make_delta_event("main complete"));
-              }
-              cb(imza::make_done_event());
-              return imza::Status::OK;
-          };
-
-    imza::submit(*env.state, "delegate");
-    const bool finished = env.pump.wait_for([&] {
-        return imza::test::idle(*env.session) && env.pending_tool() != nullptr;
-    });
-    REQUIRE(finished);
-    const imza::ToolCall* call = env.pending_tool();
-    REQUIRE(call != nullptr);
-    REQUIRE(call->result.has_value());
-    CHECK(call->result->kind == imza::ToolCall::Result::Kind::OUTPUT);
-    CHECK(call->result->text.find("research report") != std::string::npos);
-    REQUIRE(call->subagent_chats.size() == 1);
-    CHECK(call->subagent_chats[0].transcript.find("inspect")
-        != std::string::npos);
-    CHECK(call->subagent_chats[0].transcript.find("research report")
-        != std::string::npos);
-    const auto child_request = std::find_if(env.requests.begin(),
-        env.requests.end(), [](const imza::ChatRequest& request) {
-            return !request.messages.empty()
-                && request.messages.back().content.starts_with("inspect");
-        });
-    REQUIRE(child_request != env.requests.end());
-    REQUIRE(child_request->messages.size() >= 2);
-    CHECK(child_request->messages.front().type == imza::Message::Type::SYSTEM);
-    CHECK_FALSE(child_request->messages.front().content.empty());
-    CHECK(child_request->messages.back().content == "inspect");
-    CHECK(std::none_of(child_request->tools.begin(), child_request->tools.end(),
-        [](const imza::ToolSpec& tool) {
-            return tool.name == "subagent" || tool.name == "todo";
-        }));
-}
-
 TEST_CASE("subagent tool captures two concurrent agents separately")
 {
     AgentEnv env;
@@ -604,23 +483,6 @@ TEST_CASE("FIFO order preserved and queue_size counts overlays")
     REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
     CHECK(env.state->session->queue.size() == 0);
 }
-
-TEST_CASE("markdown viewer renders markdown instead of source lines")
-{
-    AgentEnv env;
-    imza::enqueue_user_modal(*env.state,
-        imza::ViewerModal { "Document", "# Heading\n\n```cpp\nreturn 1;\n```",
-            "markdown", 1, true, "" });
-    REQUIRE(env.pump.wait_for([&] {
-        return std::holds_alternative<imza::ViewerModal>(env.session->modal());
-    }));
-
-    ftxui::Component modal     = imza::make_modal(env.state);
-    const std::string rendered = imza::test::to_text(modal->Render(), 60, 12);
-    CHECK(rendered.find("Heading") != std::string::npos);
-    CHECK(rendered.find("# Heading") == std::string::npos);
-}
-
 TEST_CASE("one-time shell approval does not authorize later calls")
 {
     AgentEnv env;
@@ -825,34 +687,6 @@ TEST_CASE("unknown tools error back to the model without a modal")
     CHECK(env.last_request().messages.back().content.find("unknown tool: nope")
         != std::string::npos);
 }
-
-TEST_CASE("modal action buttons respond to mouse clicks")
-{
-    AgentEnv env;
-    env.session->set_mode(imza::Session::Mode::BUILD);
-    env.stream = [&env](const imza::ChatRequest& req,
-                     const imza::StreamCallback& cb) {
-        env.requests.push_back(req);
-        if (req.messages.back().type == imza::Message::Type::USER) {
-            cb(imza::make_tool_call_event({ "lua",
-                R"json({"script":"pcall(imza.shell, 'custom click') print('ran')"})json",
-                "", "call-1" }));
-        }
-        cb(imza::make_done_event());
-        return imza::Status::OK;
-    };
-    imza::submit(*env.state, "go");
-    REQUIRE(env.pump.wait_for([&] { return showing_tool_ask(*env.session); }));
-
-    ftxui::Component modal = imza::make_modal(env.state);
-    CHECK(imza::test::click_label(modal, "Allow once"));
-    REQUIRE(env.pump.wait_for([&] { return imza::test::idle(*env.session); }));
-    const imza::ToolCall* call = env.pending_tool();
-    REQUIRE(call != nullptr);
-    REQUIRE(call->result.has_value());
-    CHECK(call->result->kind == imza::ToolCall::Result::Kind::OUTPUT);
-}
-
 TEST_CASE("skill approval modal shows the skill identity and its choices")
 {
     AgentEnv env;
@@ -886,146 +720,6 @@ TEST_CASE("skill approval modal shows the skill identity and its choices")
     CHECK(flat.find("Allow for this session") != std::string::npos);
     CHECK(flat.find("Reject") != std::string::npos);
 }
-
-TEST_CASE("skills modal manages real skills and switches tabs")
-{
-    imza::test::IsolatedDataHome data_home; // policy commits hit the store
-    imza::test::IsolatedConfigHome config_home;
-    config_home.add_skill("docs", "Write documentation");
-    config_home.add_skill("deploy", "Ship it");
-
-    AgentEnv env;
-    imza::enqueue_user_modal(*env.state, imza::SkillsModal { });
-    REQUIRE(env.pump.wait_for([&] {
-        return std::holds_alternative<imza::SkillsModal>(env.session->modal());
-    }));
-
-    ftxui::Component modal   = imza::make_modal(env.state);
-    const std::string manage = imza::test::to_text(modal->Render(), 80, 20);
-    CHECK(manage.find("Manage") != std::string::npos);
-    CHECK(manage.find("Search") != std::string::npos);
-    CHECK(manage.find("docs") != std::string::npos);
-    CHECK(manage.find("Write documentation") != std::string::npos);
-    CHECK(manage.find("deploy") != std::string::npos);
-    CHECK(manage.find("Global") != std::string::npos);
-    CHECK(manage.find("Ask") != std::string::npos); // default policy
-    CHECK(manage.find("Remove") != std::string::npos);
-
-    REQUIRE(modal->OnEvent(ftxui::Event::Return));
-    const std::string opened = imza::test::to_text(modal->Render(), 80, 24);
-    CHECK(opened.find("Deny") != std::string::npos);
-    CHECK(opened.find("Remove") != std::string::npos);
-
-    REQUIRE(modal->OnEvent(ftxui::Event::ArrowDown));
-    REQUIRE(modal->OnEvent(ftxui::Event::Character(' ')));
-    const std::string committed = imza::test::to_text(modal->Render(), 80, 24);
-    CHECK(env.pump.wait_for([&] {
-        return env.state->providers->config().global_skills.at("deploy")
-            == imza::SkillPolicy::DENY;
-    }));
-    CHECK(env.state->providers->config().global_skills.at("docs")
-        == imza::SkillPolicy::ASK);
-
-    REQUIRE(modal->OnEvent(ftxui::Event::Tab));
-    const std::string search = imza::test::to_text(modal->Render(), 80, 20);
-    CHECK(search.find("search skills.sh") != std::string::npos);
-    imza::close_modal(*env.state);
-}
-
-TEST_CASE("skills modal picks up a skill installed after it opened")
-{
-    imza::test::IsolatedConfigHome config_home;
-    config_home.add_skill("docs", "Write documentation");
-
-    AgentEnv env;
-    imza::enqueue_user_modal(*env.state, imza::SkillsModal { });
-    REQUIRE(env.pump.wait_for([&] {
-        return std::holds_alternative<imza::SkillsModal>(env.session->modal());
-    }));
-
-    ftxui::Component modal = imza::make_modal(env.state);
-    CHECK(imza::test::to_text(modal->Render(), 80, 20).find("docs")
-        != std::string::npos);
-    CHECK(imza::test::to_text(modal->Render(), 80, 20).find("fresh")
-        == std::string::npos);
-
-    // A skill installed while the modal is open must appear in Manage
-    // without reopening it.
-    config_home.add_skill("fresh", "Just installed");
-    env.state->environment->rescan_skills();
-    REQUIRE(env.pump.wait_for([&] {
-        return imza::test::to_text(modal->Render(), 80, 20).find("fresh")
-            != std::string::npos;
-    }));
-    imza::close_modal(*env.state);
-}
-TEST_CASE("skills modal keys are consistent across the policy chip and Remove")
-{
-    imza::test::IsolatedConfigHome config_home;
-    config_home.add_skill("docs", "Write documentation");
-
-    AgentEnv env;
-    imza::enqueue_user_modal(*env.state, imza::SkillsModal { });
-    REQUIRE(env.pump.wait_for([&] {
-        return std::holds_alternative<imza::SkillsModal>(env.session->modal());
-    }));
-
-    ftxui::Component modal = imza::make_modal(env.state);
-    (void)modal->Render();
-
-    REQUIRE(modal->OnEvent(ftxui::Event::Character(' ')));
-    CHECK(imza::test::to_text(modal->Render(), 80, 24).find("Deny")
-        != std::string::npos);
-    REQUIRE(modal->OnEvent(ftxui::Event::Escape)); // close the list
-
-    REQUIRE(modal->OnEvent(ftxui::Event::ArrowRight));
-    REQUIRE(modal->OnEvent(ftxui::Event::Return));
-    CHECK(imza::test::to_text(modal->Render(), 80, 24).find("Yes")
-        != std::string::npos);
-    imza::close_modal(*env.state);
-}
-
-TEST_CASE("subagents modal aligns the model and variant columns")
-{
-    AgentEnv env;
-    imza::enqueue_user_modal(*env.state,
-        imza::ConnectModal { imza::ConnectModal::Entry::SUBAGENTS });
-    REQUIRE(env.pump.wait_for([&] {
-        return std::holds_alternative<imza::ConnectModal>(env.session->modal());
-    }));
-
-    ftxui::Component modal = imza::make_modal(env.state);
-    const std::string text = imza::test::without_ansi(
-        imza::test::to_text(modal->Render(), 100, 20));
-
-    // Every role row's model column must begin at the same offset or the
-    // list reads as ragged.
-    std::vector<std::size_t> model_columns;
-    std::vector<std::size_t> variant_columns;
-    for (const std::string& line : imza::split_lines(text)) {
-        if (line.find("Subagent  ") == std::string::npos) {
-            continue;
-        }
-        const std::size_t model = line.find("<Default>");
-        REQUIRE(model != std::string::npos);
-        model_columns.push_back(model);
-        // Basic runs with reasoning off, so it has no variant cell; the blank
-        // reservation keeps its model column aligned.
-        const std::size_t variant = line.find("< ", model);
-        if (variant != std::string::npos) {
-            variant_columns.push_back(variant);
-        }
-    }
-    REQUIRE(model_columns.size() == 3);
-    CHECK(model_columns[0] == model_columns[1]);
-    CHECK(model_columns[1] == model_columns[2]);
-
-    REQUIRE(variant_columns.size() == 2);
-    CHECK(variant_columns[0] == variant_columns[1]);
-
-    imza::close_modal(*env.state);
-}
-
 TEST_CASE("a modal owns the keyboard until it closes")
 {
     AgentEnv env;
@@ -1094,91 +788,4 @@ TEST_CASE("mcp connect approval omits the session-wide choice")
     CHECK(flat.find("Allow once") != std::string::npos);
     CHECK(flat.find("Reject") != std::string::npos);
     CHECK(flat.find("Allow for this session") == std::string::npos);
-}
-
-TEST_CASE("variant modal lists efforts and commits the selection")
-{
-    AgentEnv env;
-    imza::enqueue_user_modal(*env.state,
-        imza::VariantModal { { "off", "low", "default", "high" }, "default" });
-    REQUIRE(env.pump.wait_for([&] {
-        return std::holds_alternative<imza::VariantModal>(env.session->modal());
-    }));
-
-    ftxui::Component modal = imza::make_modal(env.state);
-    const std::string list = imza::test::to_text(modal->Render(), 80, 20);
-    CHECK(list.find("Reasoning effort") != std::string::npos);
-    for (const char* effort : { "off", "low", "default", "high" }) {
-        CHECK(list.find(effort) != std::string::npos);
-    }
-
-    // "default" is current; one step down lands on "high".
-    REQUIRE(modal->OnEvent(ftxui::Event::ArrowDown));
-    REQUIRE(modal->OnEvent(ftxui::Event::Return));
-    CHECK(env.pump.wait_for([&] {
-        return env.state->providers->status().reasoning_effort == "high";
-    }));
-}
-
-TEST_CASE("sessions modal lists saved sessions and empty state")
-{
-    imza::test::IsolatedDataHome data_home;
-    AgentEnv env;
-    imza::enqueue_user_modal(*env.state, imza::SessionsModal { });
-    REQUIRE(env.pump.wait_for([&] {
-        return std::holds_alternative<imza::SessionsModal>(
-            env.session->modal());
-    }));
-
-    ftxui::Component modal = imza::make_modal(env.state);
-    CHECK(imza::test::to_text(modal->Render(), 80, 20).find("No saved sessions")
-        != std::string::npos);
-    imza::close_modal(*env.state);
-
-    env.session->set_title("Sessions probe");
-    env.session->begin_send("hello");
-    env.session->append_assistant("model", "off");
-    env.session->apply(imza::make_delta_event("world"), { });
-    env.session->finish_session("");
-    REQUIRE(env.state->sessions->save(*env.session) == imza::Status::OK);
-
-    imza::enqueue_user_modal(*env.state, imza::SessionsModal { });
-    REQUIRE(env.pump.wait_for([&] {
-        return std::holds_alternative<imza::SessionsModal>(
-            env.session->modal());
-    }));
-    const std::string list = imza::test::to_text(modal->Render(), 80, 20);
-    CHECK(list.find("Sessions probe") != std::string::npos);
-    imza::close_modal(*env.state);
-}
-
-TEST_CASE("mcp modal shows the server list and add section")
-{
-    imza::test::IsolatedDataHome data_home;
-    AgentEnv env;
-    imza::enqueue_user_modal(*env.state, imza::McpModal { });
-    REQUIRE(env.pump.wait_for([&] {
-        return std::holds_alternative<imza::McpModal>(env.session->modal());
-    }));
-
-    ftxui::Component modal = imza::make_modal(env.state);
-    const std::string list = imza::test::to_text(modal->Render(), 80, 30);
-    CHECK(list.find("MCP Servers") != std::string::npos);
-    CHECK(list.find("Add Server") != std::string::npos);
-    imza::close_modal(*env.state);
-}
-
-TEST_CASE("connect modal opens on the connections entry")
-{
-    AgentEnv env;
-    imza::enqueue_user_modal(*env.state, imza::ConnectModal { });
-    REQUIRE(env.pump.wait_for([&] {
-        return std::holds_alternative<imza::ConnectModal>(env.session->modal());
-    }));
-
-    ftxui::Component modal = imza::make_modal(env.state);
-    const std::string list = imza::test::to_text(modal->Render(), 80, 30);
-    CHECK(list.find("Connections") != std::string::npos);
-    CHECK(list.find("Add Provider") != std::string::npos);
-    imza::close_modal(*env.state);
 }

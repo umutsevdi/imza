@@ -488,6 +488,7 @@ ftxui::Component make_status_line(std::shared_ptr<ApplicationState> state,
     LayoutFn layout, WorkflowFn workflow);
 ftxui::Component make_connect(std::shared_ptr<ApplicationState> state);
 ftxui::Component make_mcp(std::shared_ptr<ApplicationState> state);
+ftxui::Component make_permissions(std::shared_ptr<ApplicationState> state);
 struct SubscriptionSigninView {
     enum class Phase { IDLE, STARTING, WAITING, FAILED };
     Phase phase = Phase::IDLE;
