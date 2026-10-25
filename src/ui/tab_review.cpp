@@ -209,8 +209,6 @@ namespace {
                 = review_snapshot.findings.task_id.has_value();
             const bool handoff_running
                 = review_snapshot.handoff.task_id.has_value();
-            // One slot per pass, in fixed order; a running pass swaps its
-            // action button for Cancel in place.
             _plan_box         = Box { };
             _review_slot_box  = Box { };
             _handoff_slot_box = Box { };

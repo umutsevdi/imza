@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <string>
 
+#include "app/flows.h"
 #include "platform/command_runner.h"
 #include "test_fs.h"
 #include "test_state.h"
@@ -288,4 +289,197 @@ TEST_CASE("ReviewSubsystem defers the repository load until it is visible")
         review.snapshot().status == imza::ReviewSubsystem::LoadStatus::LOADED);
     CHECK(review.snapshot().review != nullptr);
     review.stop();
+}
+
+TEST_CASE("review pass retries a truncated reply instead of failing")
+{
+    auto pump  = std::make_shared<imza::test::PostPump>();
+    auto calls = std::make_shared<std::atomic<int>>(0);
+    imza::Config cfg;
+    imza::Connection conn;
+    conn.id       = "test";
+    conn.endpoint = "https://example.test/v1/chat/completions";
+    cfg.providers.push_back(conn);
+    cfg.last_used = imza::LastUsed { "test", "m" };
+    auto state    = imza::test::make_test_state(
+        [pump](std::function<void()> task) { pump->fn()(std::move(task)); },
+        std::move(cfg),
+        [calls](const imza::ChatRequest&, const imza::StreamCallback& cb) {
+            if (calls->fetch_add(1) == 0) {
+                cb(imza::make_delta_event("{\"findings\":[{\"file\":\"a"));
+                cb(imza::make_error_event(imza::Status::TRUNCATED, "cut off"));
+                cb(imza::make_done_event());
+                return imza::Status::OK;
+            }
+            cb(imza::make_delta_event(
+                R"({"findings":[{"file":"file.cpp","side":"new","line":2,)"
+                R"("severity":"P2","body":"real finding"}]})"));
+            cb(imza::make_done_event());
+            return imza::Status::OK;
+        });
+    imza::test::wait_for_environment(*state);
+
+    state->review->set_result(
+        imza::parse_git_diff("diff --git a/file.cpp b/file.cpp\n"
+                             "--- a/file.cpp\n"
+                             "+++ b/file.cpp\n"
+                             "@@ -1,1 +1,2 @@\n"
+                             " same\n"
+                             "+added\n"));
+
+    std::string error;
+    (void)imza::run_review_pass(*state,
+        imza::ReviewPassRequest { .pass = imza::ReviewPass::FINDINGS,
+            .prompt                     = "review this",
+            .label                      = "AI review",
+            .complete = [state](std::string output) -> std::string {
+                const auto review = state->review->snapshot().review;
+                if (!review) {
+                    return std::string { };
+                }
+                auto parsed = imza::parse_ai_review_response(output, *review);
+                if (auto* parse_error = std::get_if<std::string>(&parsed)) {
+                    return std::move(*parse_error);
+                }
+                state->review->add_comments(std::move(
+                    std::get<std::vector<imza::ReviewCommentDraft>>(parsed)));
+                return std::string { };
+            } },
+        error);
+
+    REQUIRE(pump->wait_for([&] { return calls->load() >= 2; }));
+    CHECK(state->session->error().find("invalid JSON") == std::string::npos);
+    REQUIRE(state->review->comments().size() == 1);
+    CHECK(state->review->comments().front().body.find("real finding")
+        != std::string::npos);
+}
+
+TEST_CASE("an uncatalogued model sends no output cap on a review pass")
+{
+    // An uncatalogued model has an unknown context window, so the pass sends
+    // no max_output_tokens: a fixed guess truncated valid replies.
+    auto pump        = std::make_shared<imza::test::PostPump>();
+    auto saw_cap     = std::make_shared<std::atomic<bool>>(false);
+    auto saw_request = std::make_shared<std::atomic<bool>>(false);
+    imza::Config cfg;
+    imza::Connection conn;
+    conn.id       = "test";
+    conn.endpoint = "https://example.test/v1/chat/completions";
+    cfg.providers.push_back(conn);
+    cfg.last_used = imza::LastUsed { "test", "uncatalogued-model" };
+    auto state    = imza::test::make_test_state(
+        [pump](std::function<void()> task) { pump->fn()(std::move(task)); },
+        std::move(cfg),
+        [saw_cap, saw_request](
+            const imza::ChatRequest& req, const imza::StreamCallback& cb) {
+            saw_request->store(true);
+            saw_cap->store(req.max_output_tokens.has_value());
+            cb(imza::make_delta_event("{\"findings\":[]}"));
+            cb(imza::make_done_event());
+            return imza::Status::OK;
+        });
+    imza::test::wait_for_environment(*state);
+    state->review->set_result(
+        imza::parse_git_diff("diff --git a/file.cpp b/file.cpp\n"
+                             "--- a/file.cpp\n"
+                             "+++ b/file.cpp\n"
+                             "@@ -1,1 +1,2 @@\n"
+                             " same\n"
+                             "+added\n"));
+
+    std::string error;
+    (void)imza::run_review_pass(*state,
+        imza::ReviewPassRequest { .pass = imza::ReviewPass::FINDINGS,
+            .prompt                     = "review this",
+            .label                      = "AI review",
+            .complete
+            = [](std::string) -> std::string { return std::string { }; } },
+        error);
+
+    REQUIRE(pump->wait_for([&] { return saw_request->load(); }));
+    CHECK_FALSE(saw_cap->load());
+}
+
+TEST_CASE("a truncated review reply surfaces as truncation, not invalid JSON")
+{
+    // Retry disabled: the truncation is reported as such, not parsed.
+    auto pump = std::make_shared<imza::test::PostPump>();
+    imza::Config cfg;
+    imza::Connection conn;
+    conn.id       = "test";
+    conn.endpoint = "https://example.test/v1/chat/completions";
+    cfg.providers.push_back(conn);
+    cfg.last_used = imza::LastUsed { "test", "m" };
+    auto state    = imza::test::make_test_state(
+        [pump](std::function<void()> task) { pump->fn()(std::move(task)); },
+        std::move(cfg),
+        [](const imza::ChatRequest&, const imza::StreamCallback& cb) {
+            cb(imza::make_delta_event("{\"findings\":[{\"file\":\"a"));
+            cb(imza::make_error_event(imza::Status::TRUNCATED, "cut off"));
+            cb(imza::make_done_event());
+            return imza::Status::OK;
+        });
+    imza::test::wait_for_environment(*state);
+    state->review->set_result(
+        imza::parse_git_diff("diff --git a/file.cpp b/file.cpp\n"
+                             "--- a/file.cpp\n"
+                             "+++ b/file.cpp\n"
+                             "@@ -1,1 +1,2 @@\n"
+                             " same\n"
+                             "+added\n"));
+
+    std::string error;
+    (void)imza::run_review_pass(*state,
+        imza::ReviewPassRequest { .pass = imza::ReviewPass::FINDINGS,
+            .prompt                     = "review this",
+            .label                      = "AI review",
+            .complete                   = [](std::string) -> std::string {
+                return std::string("AI review returned invalid JSON.");
+            },
+            .retry = false },
+        error);
+
+    REQUIRE(pump->wait_for([&] { return !state->session->error().empty(); }));
+    CHECK(state->session->error().find("truncated") != std::string::npos);
+    CHECK(state->session->error().find("invalid JSON") == std::string::npos);
+}
+
+TEST_CASE("the two review passes run together but a repeat is refused")
+{
+    // Each pass owns its own slot, so AI Review and Handoff run at once; only
+    // a second copy of the same pass is refused, and it says so.
+    auto pump  = std::make_shared<imza::test::PostPump>();
+    auto state = imza::test::make_test_state(
+        [pump](std::function<void()> task) { pump->fn()(std::move(task)); },
+        imza::test::review_pass_config(),
+        [](const imza::ChatRequest&, const imza::StreamCallback& cb) {
+            cb(imza::make_delta_event("{\"findings\":[]}"));
+            cb(imza::make_done_event());
+            return imza::Status::OK;
+        });
+    imza::test::wait_for_environment(*state);
+    state->review->set_result(
+        imza::parse_git_diff("diff --git a/file.cpp b/file.cpp\n"
+                             "--- a/file.cpp\n"
+                             "+++ b/file.cpp\n"
+                             "@@ -1,1 +1,2 @@\n"
+                             " same\n"
+                             "+added\n"));
+
+    state->review->set_pass_task(imza::ReviewPass::HANDOFF, 1);
+    std::string error;
+    const auto review = imza::run_review_pass(*state,
+        imza::ReviewPassRequest { .pass = imza::ReviewPass::FINDINGS,
+            .prompt                     = "review this",
+            .label                      = "AI review",
+            .complete
+            = [](std::string) -> std::string { return std::string { }; } },
+        error);
+    CHECK(review.has_value());
+    CHECK(error.empty());
+    CHECK(state->review->snapshot().findings.task_id.has_value());
+    CHECK(state->review->snapshot().handoff.task_id.has_value());
+
+    imza::run_handoff(*state);
+    CHECK(state->session->error().find("already running") != std::string::npos);
 }

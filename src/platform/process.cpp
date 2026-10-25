@@ -216,7 +216,7 @@ namespace {
             if (n < 0 && errno == EINTR) {
                 continue;
             }
-            break; // EOF or error
+            break;
         }
         if (is_stdout) {
             impl.mark_stdout_closed();

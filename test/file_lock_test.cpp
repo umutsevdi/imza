@@ -22,25 +22,29 @@ TEST_CASE("acquired lock blocks a second holder until released")
     auto first      = imza::acquire_file_lock(path);
     REQUIRE(std::holds_alternative<imza::FileLock>(first));
 
+    std::atomic<bool> rejected { false };
     std::atomic<bool> acquired { false };
     std::thread second([&] {
+        // A non-blocking attempt proves exclusion without a timing window;
+        // the blocking attempt that follows proves release wakes the waiter.
+        auto probe = imza::acquire_file_lock(
+            path, { imza::FileLockMode::EXCLUSIVE, false });
+        rejected = std::holds_alternative<imza::FileLockError>(probe);
         auto lock = imza::acquire_file_lock(path);
         acquired  = std::holds_alternative<imza::FileLock>(lock);
     });
 
     const auto deadline
-        = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
-    while (std::chrono::steady_clock::now() < deadline) {
-        if (acquired) {
-            break;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!rejected.load() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    CHECK_FALSE(acquired);
+    REQUIRE(rejected.load());
+    CHECK_FALSE(acquired.load());
 
     imza::test::release_lock(first);
     second.join();
-    CHECK(acquired);
+    CHECK(acquired.load());
 }
 
 TEST_CASE("lock file is removed on release and can be reacquired")

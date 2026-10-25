@@ -9,7 +9,6 @@ namespace imza {
 
 namespace {
 
-    // Night is 22:00-05:00; the rest of the day is Day.
     constexpr int NIGHT_START_HOUR = 22;
     constexpr int NIGHT_END_HOUR   = 5;
 
@@ -80,7 +79,6 @@ std::string greeting_line_for(std::time_t now)
 {
     const std::tm local     = local_tm(now);
     const TimeBucket bucket = time_bucket(local.tm_hour);
-    // Day-of-year plus year: a stable per-day seed that advances daily.
     const unsigned seed = static_cast<unsigned>(local.tm_yday)
         + static_cast<unsigned>(local.tm_year) * 366u;
     return greeting_line(bucket, seed);

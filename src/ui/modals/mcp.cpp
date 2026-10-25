@@ -104,7 +104,6 @@ namespace {
         return out;
     }
 
-    // Parses "KEY=VALUE KEY2=VALUE2"; false on a malformed token.
     bool parse_env_pairs(
         const std::string& text, std::map<std::string, std::string>& out)
     {
@@ -118,7 +117,6 @@ namespace {
         return true;
     }
 
-    // Host part of an https URL, sanitized into a server id.
     std::string id_from_url(const std::string& url)
     {
         std::string host  = url;
@@ -985,8 +983,8 @@ namespace {
         std::string _timeout_buf;
         int _timeout_cursor = 0;
 
-        bool _stdio    = false; // custom-server transport choice
-        bool _autoload = false; // add-form autoload choice
+        bool _stdio    = false;
+        bool _autoload = false;
         std::map<std::string, bool> _row_autoload;
         Component _transport_button;
         Component _autoload_button;

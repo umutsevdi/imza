@@ -13,8 +13,6 @@ namespace imza {
 
 namespace {
 
-    // Review-style annotation card: cyan rail, focused background, body
-    // rows.
     ftxui::Element annotation_card(ftxui::Element body, int height)
     {
         std::vector<ftxui::Element> rail;

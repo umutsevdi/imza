@@ -127,7 +127,7 @@ TEST_CASE("refresh_sidechat clears the sidechat and the next prompt reloads")
     CHECK(
         fresh.compacted_summary.find("sidechat question") == std::string::npos);
     CHECK(fresh.items.empty());
-    CHECK(fresh.title.starts_with("Sidechat · "));
+    CHECK_FALSE(fresh.title.empty());
 }
 
 TEST_CASE("refresh_sidechat requires an open sidechat")

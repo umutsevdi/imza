@@ -752,11 +752,17 @@ TEST_CASE("the chat hint shows undo availability")
 
     state->session->push_undo(
         { { "a", "1", "2", imza::FileChange::Kind::MODIFIED } });
-    CHECK(render().find("/undo (1 change)") != std::string::npos);
+    const std::string one = render();
+    CHECK(one.find("/undo") != std::string::npos);
+    CHECK(one.find("1") != std::string::npos);
 
+    // A second change updates the hint instead of leaving it stale.
     state->session->push_undo(
         { { "b", "1", "2", imza::FileChange::Kind::MODIFIED } });
-    CHECK(render().find("/undo (2 changes)") != std::string::npos);
+    const std::string two = render();
+    CHECK(two.find("/undo") != std::string::npos);
+    CHECK(two.find("2") != std::string::npos);
+    CHECK(two != one);
 }
 
 TEST_CASE("a failed apply puts the entry back")

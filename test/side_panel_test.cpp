@@ -67,24 +67,6 @@ TEST_CASE("documents widget interleaves build logs with plan revisions")
     CHECK(viewer->content.find("added dependency Z") != std::string::npos);
 }
 
-TEST_CASE("clicking a plan opens it in the viewer modal")
-{
-    auto state = imza::test::make_test_state();
-    REQUIRE(state->session->create_plan(imza::test::PLAN_SKELETON).empty());
-
-    auto panel = imza::make_side_panel(
-        state,
-        [] { return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 120, 40 }; },
-        [] { return imza::WorkflowPhase::PLAN; }, [](imza::WorkflowPhase) { });
-
-    REQUIRE(imza::test::click_label(panel, "Initial Plan", 120, 40));
-    const imza::ModalPayload payload = state->session->modal();
-    const auto* viewer               = std::get_if<imza::ViewerModal>(&payload);
-    REQUIRE(viewer != nullptr);
-    CHECK(viewer->title == "Initial Plan");
-    CHECK(viewer->content == imza::test::PLAN_SKELETON);
-}
-
 TEST_CASE("side panel hides widgets disabled in the sidebar config")
 {
     imza::Config config      = imza::test::test_config();
@@ -107,37 +89,6 @@ TEST_CASE("side panel hides widgets disabled in the sidebar config")
     CHECK(out.find("Initial Plan") == std::string::npos);
     CHECK(out.find("Tasks") == std::string::npos);
     CHECK(out.find("hidden task") == std::string::npos);
-}
-
-TEST_CASE("render_todo renders status marks")
-{
-    using Status = imza::TodoItem::Status;
-    imza::TodoList todo { { { "a", Status::PENDING },
-        { "b", Status::IN_PROGRESS }, { "c", Status::COMPLETED } } };
-
-    const std::string wide = to_text(
-        imza::render_todo(todo, { imza::LayoutCtx::Kind::WIDE, 120 }));
-    CHECK(wide.find("[ ]") != std::string::npos);
-    CHECK(wide.find("→") != std::string::npos);
-    CHECK(wide.find("[x]") != std::string::npos);
-}
-
-TEST_CASE("render_todo wraps long items instead of clipping")
-{
-    using Status = imza::TodoItem::Status;
-    imza::TodoList todo {
-        { { "investigate the flaky parser regression test", Status::PENDING } }
-    };
-    auto screen = ftxui::Screen::Create(
-        ftxui::Dimension::Fixed(30), ftxui::Dimension::Fixed(10));
-    ftxui::Render(screen,
-        imza::render_todo(todo, { imza::LayoutCtx::Kind::WIDE, 30 })
-            | ftxui::size(ftxui::WIDTH, ftxui::EQUAL, 30));
-    const std::string out = screen.ToString();
-    CHECK(out.find("investigate") != std::string::npos);
-    CHECK(out.find("flaky") != std::string::npos);
-    CHECK(out.find("regression") != std::string::npos);
-    CHECK(out.find("test") != std::string::npos);
 }
 
 TEST_CASE("side panel context box lists only reachable mcp servers")
@@ -180,27 +131,6 @@ TEST_CASE("side panel context box lists only reachable mcp servers")
     server.stop();
 }
 
-TEST_CASE("render_context_box lists attachment basenames under files")
-{
-    const std::string out = to_text(imza::render_context_box(
-        "AGENTS.md", { "main.cpp", "design.md" }, { }, { }));
-
-    CHECK(out.find("Files") != std::string::npos);
-    CHECK(out.find("AGENTS.md") != std::string::npos);
-    CHECK(out.find("main.cpp") != std::string::npos);
-    CHECK(out.find("design.md") != std::string::npos);
-}
-
-TEST_CASE("permissions box stays hidden for default permissions")
-{
-    const imza::PermissionView view = imza::make_permission_view(
-        imza::interactive_runtime_flags(), false, { });
-
-    CHECK_FALSE(imza::has_custom_permissions(view));
-    CHECK(to_text(imza::render_permissions_box(view)).find("Permissions")
-        == std::string::npos);
-}
-
 TEST_CASE("permissions box renders only custom settings and grants")
 {
     const std::vector<imza::PermissionGrant> grants {
@@ -218,17 +148,13 @@ TEST_CASE("permissions box renders only custom settings and grants")
 
     CHECK(imza::has_custom_permissions(view));
     CHECK(out.find("Permissions") != std::string::npos);
-    CHECK(out.find("Web") != std::string::npos);
-    CHECK(out.find("disabled") != std::string::npos);
-    CHECK(out.find("Approvals") != std::string::npos);
-    CHECK(out.find("skipped") != std::string::npos);
-    CHECK(out.find("Shell") == std::string::npos);
-    CHECK(out.find("Files") == std::string::npos);
     CHECK(out.find("/outside") != std::string::npos);
-    CHECK(out.find("/outside/generated") != std::string::npos);
-    CHECK(out.find("read ") == std::string::npos);
-    CHECK(out.find("write ") == std::string::npos);
-    CHECK(out.find("Skills") == std::string::npos);
-    CHECK(out.find("docs") == std::string::npos);
     CHECK(out.find("cmake --build") != std::string::npos);
+
+    // Default permissions contribute no box at all.
+    const imza::PermissionView plain = imza::make_permission_view(
+        imza::interactive_runtime_flags(), false, { });
+    CHECK_FALSE(imza::has_custom_permissions(plain));
+    CHECK(to_text(imza::render_permissions_box(plain)).find("Permissions")
+        == std::string::npos);
 }

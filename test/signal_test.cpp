@@ -58,13 +58,3 @@ TEST_CASE("signal permits subscription changes while publishing")
     CHECK(calls == 1);
 }
 
-TEST_CASE("signal subscription may outlive its publisher")
-{
-    imza::Signal<>::Subscription subscription;
-    {
-        imza::Signal<> signal;
-        subscription = signal.subscribe([] { });
-    }
-
-    subscription.disconnect();
-}

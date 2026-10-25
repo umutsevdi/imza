@@ -545,7 +545,6 @@ namespace {
         std::vector<PlanNote> _notes;
         Box _button_box { };
         int _selected = 0;
-        // Row to select on the next render: the just-saved note card.
         int _pending_note_select = -1;
         bool _has_plan           = false;
         std::size_t _revision    = 0;

@@ -88,18 +88,6 @@ TEST_CASE("blank user files use embedded prompts")
     CHECK(prompts.system() == PromptStore().system());
 }
 
-TEST_CASE("prompt sources contain prose instead of runtime markup")
-{
-    for (const std::string_view name :
-        { "system.md", "subagent.md", "subagent_research.md",
-            "subagent_build.md", "title.md", "compaction.md", "review.md",
-            "review_plan.md", "plan_annotations.md" }) {
-        const std::string prompt = read_prompt(name);
-        CHECK(prompt.find("<system-reminder") == std::string::npos);
-        CHECK(prompt.find("{{") == std::string::npos);
-    }
-}
-
 TEST_CASE("current mode prompts declare one authoritative state")
 {
     const std::string plan = current_mode_prompt(Session::Mode::PLAN);

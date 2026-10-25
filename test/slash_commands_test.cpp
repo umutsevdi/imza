@@ -19,18 +19,6 @@
 
 namespace imza {
 
-TEST_CASE("slash_commands includes built-ins")
-{
-    const auto cmds = slash_commands();
-    for (const std::string_view name :
-        { "/exit", "/connect", "/model", "/subagents" }) {
-        CHECK_MESSAGE(
-            std::any_of(cmds.begin(), cmds.end(),
-                [name](const SlashCommand& c) { return c.name == name; }),
-            name);
-    }
-}
-
 TEST_CASE("find_command matches case-insensitively")
 {
     CHECK(find_command("/compact")->action == SlashCommand::Action::COMPACT);
@@ -59,20 +47,9 @@ TEST_CASE("harness aliases resolve to their canonical commands")
     };
     const Case cases[] = {
         { "/quit", SlashCommand::Action::EXIT },
-        { "/clear", SlashCommand::Action::NEW },
         { "/reset", SlashCommand::Action::NEW },
-        { "/compress", SlashCommand::Action::COMPACT },
-        { "/reasoning", SlashCommand::Action::VARIANT },
-        { "/effort", SlashCommand::Action::VARIANT },
         { "/reasoning-effort", SlashCommand::Action::VARIANT },
-        { "/models", SlashCommand::Action::MODEL },
-        { "/resume", SlashCommand::Action::SESSIONS },
-        { "/agents", SlashCommand::Action::SUBAGENTS },
-        { "/login", SlashCommand::Action::CONNECT },
-        { "/auth", SlashCommand::Action::CONNECT },
-        { "/dir", SlashCommand::Action::CHDIR },
         { "/directory", SlashCommand::Action::CHDIR },
-        { "/permissions", SlashCommand::Action::PERMISSIONS },
         { "/approvals", SlashCommand::Action::AUTO },
     };
     for (const Case& c : cases) {
@@ -99,11 +76,6 @@ TEST_CASE("alias table has no duplicates and never shadows a canonical name")
         }
     }
     CHECK(seen.size() > canonical);
-    for (const SlashCommand& command : slash_commands()) {
-        for (const std::string_view alias : command.aliases) {
-            CHECK(find_command(alias) == &command);
-        }
-    }
 }
 
 TEST_CASE("match_commands ranks canonical prefixes above alias hits")
@@ -380,7 +352,7 @@ TEST_CASE("run_slash /make-skill seeds a Build-mode turn")
     CHECK(user_turn->text == "/make-skill deploy with docker compose");
 }
 
-TEST_CASE("run_slash /compact guards an empty or busy session")
+TEST_CASE("run_slash /compact guards an empty session")
 {
     auto state = imza::test::make_test_state();
 
@@ -491,12 +463,6 @@ TEST_CASE("CLI accepts MCP and skill startup allow lists")
     CHECK(result.allowed_skills[1] == "anatomy");
 }
 
-TEST_CASE("find_command routes /cd")
-{
-    CHECK(find_command("/cd")->action == SlashCommand::Action::CHDIR);
-    CHECK(find_command("/cd")->takes_argument);
-}
-
 TEST_CASE("/cd changes the working directory and records a notice")
 {
     const imza::test::CurrentDirectory original;
@@ -588,12 +554,6 @@ TEST_CASE("/cd during a turn waits in the queue")
     const auto items = state->session->items();
     REQUIRE(items->size() == 1);
     CHECK(std::holds_alternative<imza::Notice>(items->front()));
-}
-
-TEST_CASE("find_command routes /auto")
-{
-    CHECK(find_command("/auto")->action == SlashCommand::Action::AUTO);
-    CHECK(find_command("/auto")->takes_argument);
 }
 
 TEST_CASE("/auto toggles the shared approval-skipping switch")

@@ -28,7 +28,7 @@ TEST_CASE("session snapshots stay valid while a worker mutates")
 {
     imza::Session session;
     std::atomic<bool> stop { false };
-    std::atomic<std::size_t> observed { 0 };
+    std::atomic<std::size_t> reads { 0 };
 
     std::thread writer([&] {
         for (std::size_t round = 0; !stop.load(); ++round) {
@@ -40,21 +40,28 @@ TEST_CASE("session snapshots stay valid while a worker mutates")
 
     std::thread reader([&] {
         while (!stop.load()) {
-            const auto todo   = session.todo();
-            const auto items  = session.items();
+            const auto todo  = session.todo();
+            const auto items = session.items();
             std::size_t total = items->size();
             for (const imza::TodoItem& item : todo->items) {
                 total += item.content.size();
             }
-            observed.store(total);
+            (void)total;
+            reads.fetch_add(1);
         }
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    // Event-driven: stop once the reader has actually raced the writer,
+    // not after a fixed wall-clock window.
+    const auto deadline
+        = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (reads.load() < 100 && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     stop.store(true);
     writer.join();
     reader.join();
-    CHECK(observed.load() > 0);
+    CHECK(reads.load() >= 100);
 }
 
 // Copy-on-write: a snapshot keeps its contents when the session mutates.

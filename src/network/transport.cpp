@@ -300,7 +300,6 @@ Status http_delete(const std::string& url,
 
 namespace {
 
-    // Strips trailing CRLF and parses "HTTP/x.y CODE" into `status`.
     template <typename T>
     void parse_status_line(std::string_view line, T& status)
     {

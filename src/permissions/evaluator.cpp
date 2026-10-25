@@ -48,7 +48,6 @@ namespace {
         return context.grants ? *context.grants : PermissionStore::Grants { };
     }
 
-    // every disconnected load asks again, and only --allow-mcp spares it.
     PermissionEvaluation evaluate_load_mcp(ToolCallRequest request,
         const std::string& server, const PermissionContext& context,
         PermissionStore::Grants grants)

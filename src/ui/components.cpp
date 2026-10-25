@@ -435,7 +435,6 @@ namespace {
 
     Color notification_accent(bool error) { return error ? HL_RED : HL_GREEN; }
 
-    // Remaining fraction of a window, for the draining bar.
     float remaining_fraction(std::chrono::steady_clock::time_point deadline,
         std::chrono::milliseconds ttl)
     {
@@ -472,7 +471,7 @@ namespace {
     {
         // Not named WIDTH: that would shadow ftxui's direction enum.
         constexpr int card_width = NOTIFICATION_WIDTH;
-        constexpr int inner      = card_width - 2; // inside the border
+        constexpr int inner      = card_width - 2;
         // One column of padding each side, shared by the text and the rule so
         // the bar lines up with the message.
         constexpr int content = inner - 2;
@@ -1061,8 +1060,6 @@ namespace {
     Element render_bar(const CanvasView& view, int width_px)
     {
         Canvas c(width_px, CHART_HEIGHT);
-        // The value range always includes zero so bars grow from a
-        // baseline at 0.
         double vmin = 0;
         double vmax = 0;
         for (const CanvasSeries& point : view.series) {

@@ -21,32 +21,28 @@ namespace {
 
 TEST_CASE("binding catalog registers every path as a callable function")
 {
-    const std::string script = R"lua(
-local paths = {
-  "fs.read", "fs.list", "fs.grep", "fs.ts_query",
-  "todo.get", "todo.set", "ask",
-  "plan.get", "plan.create", "plan.edit",
-  "build.decision",
-  "shell",
-  "web.fetch", "web.search",
-  "mcp.call",
-  "fs.insert", "fs.edit", "fs.write", "fs.mkdir", "fs.remove",
-  "canvas.line", "canvas.bar", "canvas.pie", "canvas.surface",
-}
-for _, path in ipairs(paths) do
-  local t = imza
-  local name = path
-  local dot = path:find("%.")
-  if dot then
-    t = t[path:sub(1, dot - 1)]
-    name = path:sub(dot + 1)
-  end
-  if type(t) ~= "table" then error("missing table for " .. path) end
-  if type(t[name]) ~= "function" then error("missing function " .. path) end
-end
-print("catalog-ok")
-)lua";
-    CHECK(eval_script(script).find("missing") == std::string::npos);
+    // Derived from the live module registry, so a new binding is covered
+    // without editing a literal path list.
+    auto state = make_lua_state();
+    REQUIRE_FALSE(state->modules().empty());
+    std::string script = "local missing = {}\n";
+    for (const LuaModule& module : state->modules()) {
+        for (const LuaMethod& method : module.methods) {
+            std::string path = std::string(method.name);
+            if (!module.name.empty()) {
+                path = std::string(module.name) + "." + path;
+            }
+            script += "do local t, name = imza, '" + path + "'\n";
+            script += "local dot = name:find('%.')\n";
+            script += "if dot then t = t[name:sub(1, dot - 1)];"
+                      " name = name:sub(dot + 1) end\n";
+            script += "if type(t) ~= 'table' or type(t[name]) ~= 'function'"
+                      " then missing[#missing + 1] = name end end\n";
+        }
+    }
+    script += "print(#missing == 0 and 'catalog-ok' or "
+              "table.concat(missing, ','))\n";
+    CHECK(eval_script(script).find("catalog-ok") != std::string::npos);
 }
 
 TEST_CASE("capability-disabled bindings fail closed, not absent")

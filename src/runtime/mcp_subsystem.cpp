@@ -208,7 +208,7 @@ void McpSubsystem::reload(std::map<std::string, McpServerConfig> servers)
             fresh.emplace(id, std::move(entry));
         }
         if (_servers.size() != servers.size()) {
-            changed = true; // removals
+            changed = true;
         }
         _servers = std::move(fresh);
     }

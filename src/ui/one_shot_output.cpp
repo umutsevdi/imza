@@ -37,8 +37,6 @@ namespace {
 #endif
     }
 
-    // A spinner plus the latest stage message; a ticker thread drives
-    // frames until `done` is set and the host exits the loop.
     class UpdateScreen final : public ftxui::ComponentBase {
     public:
         UpdateScreen(const std::atomic_bool& done, std::function<void()> poke,

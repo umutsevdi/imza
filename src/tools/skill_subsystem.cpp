@@ -163,7 +163,7 @@ Status install_skill_files(const std::filesystem::path& root,
     for (const RemoteSkillFile& file : files) {
         std::filesystem::path relative;
         if (!safe_relative_path(file.path, relative)) {
-            continue; // already validated above
+            continue;
         }
         const std::filesystem::path destination = target / relative;
         std::filesystem::create_directories(destination.parent_path(), ec);

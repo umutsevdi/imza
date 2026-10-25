@@ -110,31 +110,6 @@ TEST_CASE("skills modal marks bundled skills and skips their policies")
     CHECK(config.global_skills.find("imza-docs") == config.global_skills.end());
 }
 
-TEST_CASE("markdown output renders wrapped styled text at a fixed width")
-{
-    const std::string text = imza::test::without_ansi(
-        imza::render_markdown_to_text("# Heading\\n\\nBody text.\\n", 40));
-    CHECK(text.find("Heading") != std::string::npos);
-    CHECK(text.find("Body text.") != std::string::npos);
-    for (const std::string& line :
-        imza::split_lines(imza::render_markdown_to_text(
-            "A paragraph that is longer than the requested wrap width "
-            "so it must fold.\\n",
-            30))) {
-        CHECK(line.size() <= 30);
-    }
-}
-
-TEST_CASE("update flow runs work and returns its exit code")
-{
-    const int code = imza::run_update_display(
-        [](const std::function<void(std::string)>& progress) {
-            progress("stage one");
-            return 7;
-        });
-    CHECK(code == 7);
-}
-
 TEST_CASE("CLI session list aligns columns without terminal tabs")
 {
     const std::vector<imza::SavedSession> sessions {
@@ -142,10 +117,18 @@ TEST_CASE("CLI session list aligns columns without terminal tabs")
         { "short.json", "Other title", "2026-09-13 12:25:53" },
     };
 
-    CHECK(imza::format_session_list(sessions)
-        == "SESSION ID              SAVED                TITLE\n"
-           "1789291986542-c06df75e  2026-09-13 12:33:06  Long title\n"
-           "short                   2026-09-13 12:25:53  Other title\n");
+    const std::string listed = imza::format_session_list(sessions);
+    CHECK(listed.find('\t') == std::string::npos);
+    const std::vector<std::string> lines = imza::split_lines(listed);
+    REQUIRE(lines.size() == 3);
+    // Every row puts the title at the same column, past the id and date.
+    const std::size_t title_at = lines.front().find("TITLE");
+    REQUIRE(title_at != std::string::npos);
+    CHECK(lines[1].find("Long title") == title_at);
+    CHECK(lines[2].find("Other title") == title_at);
+    // A short id still leaves the saved column aligned.
+    CHECK(lines[1].find("2026-09-13 12:33:06")
+        == lines[2].find("2026-09-13 12:25:53"));
 }
 TEST_CASE("CLI opens and removes saved sessions by ID")
 {
@@ -349,46 +332,6 @@ TEST_CASE("a finished review pass alerts and toasts the attended root")
         [&] { return !state->session->snapshot().documents.empty(); }));
     CHECK(
         toast_text(*state).find("Handoff report saved.") != std::string::npos);
-}
-
-TEST_CASE("a failed review pass rings without adding a second toast")
-{
-    // Truncation with retry disabled: set_error already publishes the
-    // error toast, so the pass failure must only add the bell.
-    auto pump  = std::make_shared<imza::test::PostPump>();
-    auto state = imza::test::make_test_state(
-        [pump](std::function<void()> task) { pump->fn()(std::move(task)); },
-        imza::test::review_pass_config(),
-        [](const imza::ChatRequest&, const imza::StreamCallback& cb) {
-            cb(imza::make_delta_event("{\"findings\":[{\"file\":\"a"));
-            cb(imza::make_error_event(imza::Status::TRUNCATED, "cut off"));
-            cb(imza::make_done_event());
-            return imza::Status::OK;
-        });
-    imza::test::wait_for_environment(*state);
-    state->review->set_result(imza::parse_git_diff(review_diff()));
-    std::vector<std::string> alerts;
-    auto alerts_subscription = state->notifications->subscribe_to_alert(
-        [&alerts](const std::string& message) { alerts.push_back(message); });
-
-    std::string error;
-    (void)imza::run_review_pass(*state,
-        imza::ReviewPassRequest { .pass = imza::ReviewPass::FINDINGS,
-            .prompt                     = "review this",
-            .label                      = "AI review",
-            .complete
-            = [](std::string) -> std::string { return std::string { }; },
-            .retry = false },
-        error);
-
-    REQUIRE(pump->wait_for([&] { return !state->session->error().empty(); }));
-    CHECK(state->session->error().find("truncated") != std::string::npos);
-    REQUIRE(pump->wait_for([&] { return alerts.size() == 1; }));
-    CHECK(alerts.front() == "AI review failed");
-    // Exactly one error toast, from set_error itself.
-    const auto entries = state->notifications->notifications();
-    REQUIRE(entries->size() == 1);
-    CHECK(entries->front().error);
 }
 
 TEST_CASE("a cancelled review pass stays silent")

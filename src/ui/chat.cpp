@@ -128,7 +128,6 @@ namespace {
         };
     }
 
-    // Pending long-running tools whose card animates per frame.
     bool is_running_tool(const ToolCall& tc)
     {
         return (tc.name == "shell" || tc.name == "subagent" || tc.name == "lua")
@@ -1070,7 +1069,6 @@ namespace {
             return nullptr;
         }
 
-        // A flagged result as a card: a colored marker plus the result text.
         Element _render_tool_status(
             const ToolCall& tc, std::string marker, ftxui::Color tone)
         {

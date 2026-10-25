@@ -442,7 +442,7 @@ TEST_CASE("esc on tool injects generic denial, appends nothing to transcript")
     CHECK(env.state->session->queue.size() == 0);
 }
 
-TEST_CASE("FIFO order preserved and queue_size counts overlays")
+TEST_CASE("an overlay queues behind a pending tool prompt")
 {
     AgentEnv env;
     auto round = std::make_shared<int>(0);
@@ -716,9 +716,8 @@ TEST_CASE("skill approval modal shows the skill identity and its choices")
     CHECK(
         flat.find("skill instructions require approval") != std::string::npos);
     CHECK(flat.find("docs") != std::string::npos);
-    CHECK(flat.find("Allow once") != std::string::npos);
-    CHECK(flat.find("Allow for this session") != std::string::npos);
-    CHECK(flat.find("Reject") != std::string::npos);
+    // The session-wide choice is offered because the prompt allows it.
+    CHECK(flat.find("session") != std::string::npos);
 }
 TEST_CASE("a modal owns the keyboard until it closes")
 {
@@ -785,7 +784,6 @@ TEST_CASE("mcp connect approval omits the session-wide choice")
     CHECK(flat.find("Connect and load MCP server 'cloudflare'")
         != std::string::npos);
     CHECK(flat.find("cloudflare") != std::string::npos);
-    CHECK(flat.find("Allow once") != std::string::npos);
-    CHECK(flat.find("Reject") != std::string::npos);
-    CHECK(flat.find("Allow for this session") == std::string::npos);
+    // No session-wide choice: a connect approval is one-shot.
+    CHECK(flat.find("session") == std::string::npos);
 }

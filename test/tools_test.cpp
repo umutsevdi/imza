@@ -18,22 +18,24 @@ namespace {
 
 } // namespace
 
-TEST_CASE("dispatch hands the raw args to the handler")
+TEST_CASE("dispatch routes by name and reports handler outcomes")
 {
     const std::vector<Tool> tools = echo_tools();
-    const ToolOutput out          = dispatch_tool(
+    const ToolOutput echoed       = dispatch_tool(
         tools, ToolCallRequest { "echo", R"({"msg":"hi"})", "", "" });
-    CHECK(out.kind == ToolOutput::Kind::OUTPUT);
-    CHECK(out.text == R"({"msg":"hi"})");
-}
+    CHECK(echoed.kind == ToolOutput::Kind::OUTPUT);
+    CHECK(echoed.text == R"({"msg":"hi"})");
 
-TEST_CASE("dispatch propagates handler errors")
-{
-    std::vector<Tool> tools { { { "boom", "always fails", "{}" },
+    // An unregistered name is an error, not a silent no-op.
+    const ToolOutput unknown = dispatch_tool(tools, { "nope", "{}", "", "" });
+    CHECK(unknown.kind == ToolOutput::Kind::ERROR);
+    CHECK(unknown.text.find("nope") != std::string::npos);
+
+    std::vector<Tool> failing { { { "boom", "always fails", "{}" },
         [](const ToolCallRequest&) {
             return ToolOutput { ToolOutput::Kind::ERROR, "it broke" };
         } } };
-    const ToolOutput out = dispatch_tool(tools, { "boom", "{}", "", "" });
+    const ToolOutput out = dispatch_tool(failing, { "boom", "{}", "", "" });
     CHECK(out.kind == ToolOutput::Kind::ERROR);
     CHECK(out.text == "it broke");
 }

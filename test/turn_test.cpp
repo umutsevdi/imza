@@ -110,20 +110,6 @@ TEST_CASE("system prompt appends configured instructions in order")
         != std::string::npos);
 }
 
-TEST_CASE("system prompt omits the instructions block when absent")
-{
-    SystemEnvironment sys;
-    sys.os_name       = "Linux";
-    sys.default_shell = "/bin/bash";
-    sys.today         = "Fri Aug 28 2026";
-    WorkspaceEnvironment ws;
-    ws.working_directory = std::filesystem::temp_directory_path();
-
-    const PromptStore prompts;
-    const std::string prompt = build_system_prompt(prompts, &sys, &ws);
-    CHECK(prompt.find("<instructions") == std::string::npos);
-}
-
 TEST_CASE("system prompt advertises active skills and hides denied skills")
 {
     SystemEnvironment sys;

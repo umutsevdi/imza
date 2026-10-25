@@ -70,10 +70,6 @@ namespace {
             // terminal cursor from the input.
             _content = Container::Vertical({ });
             Add(_content);
-            // Attached so the menu stops claiming focus once the pane
-            // chain is active; detached, a component always reports
-            // Focused() and its focus requirement steals the terminal
-            // cursor from the input.
             Add(_tabs);
             _refresh_entries();
             _rebuild();
@@ -193,7 +189,6 @@ namespace {
             _refocus();
         }
 
-        // Puts focus on the active tab's selected row controls.
         void _refocus()
         {
             auto& buttons = _tab == 0 ? _dir_buttons : _cmd_buttons;

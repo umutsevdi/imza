@@ -42,7 +42,6 @@ struct ToolReport {
 ToolReport make_tool_report(const ToolCall& call);
 std::string tool_report_markdown(const ToolReport& report);
 
-// Display formatting for tool calls in the conversation UI.
 std::string tool_display_name(const std::string& name);
 std::string tool_args_summary(const std::string& args);
 std::string tool_call_head(const ToolCall& call);
