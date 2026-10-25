@@ -1,3 +1,4 @@
+#include "app/application_state.h"
 #include "common/util.h"
 #include "ui/ui.h"
 
@@ -162,6 +163,184 @@ ftxui::Element render_model_pick(const std::string& title,
     rows.push_back(ftxui::separatorEmpty());
     rows.push_back(hint_bar(std::move(hint)));
     return ftxui::vbox(std::move(rows)) | ftxui::xflex;
+}
+
+void PickerList::refill(
+    const std::vector<std::pair<std::string, std::string>>& entries)
+{
+    const std::string needle = to_lower(trim(buffer));
+    ids.clear();
+    labels.clear();
+    selected = 0;
+    for (const auto& [id, label] : entries) {
+        if (!needle.empty() && to_lower(label).find(needle) == std::string::npos
+            && id.find(needle) == std::string::npos) {
+            continue;
+        }
+        ids.push_back(id);
+        labels.push_back(label);
+    }
+}
+
+bool PickerList::chosen(std::string& id) const
+{
+    if (ids.empty() || selected >= static_cast<int>(ids.size())) {
+        return false;
+    }
+    id = ids[static_cast<std::size_t>(selected)];
+    return true;
+}
+
+std::string PickerList::selected_label() const
+{
+    if (ids.empty() || selected >= static_cast<int>(labels.size())) {
+        return buffer;
+    }
+    return labels[static_cast<std::size_t>(selected)];
+}
+
+void PickerList::close()
+{
+    buffer = selected_label();
+    cursor = static_cast<int>(buffer.size());
+    open   = false;
+}
+
+ftxui::Component make_picker_input(PickerList& picker, std::string placeholder,
+    std::function<void()> on_change, std::function<void()> on_enter)
+{
+    return Input(field_option(
+        &picker.buffer, &picker.cursor, std::move(placeholder),
+        [&picker, on_change = std::move(on_change)] {
+            picker.open = true;
+            if (on_change) {
+                on_change();
+            }
+        },
+        [&picker, on_enter = std::move(on_enter)] {
+            if (!picker.open) {
+                return;
+            }
+            if (on_enter) {
+                on_enter();
+            } else {
+                picker.close();
+            }
+        }));
+}
+
+ftxui::Element picker_area(
+    const PickerList& picker, int label_width, std::string_view noun)
+{
+    const std::string pad(static_cast<std::size_t>(label_width) + 2, ' ');
+    ftxui::Elements rows;
+    if (!picker.open) {
+        return ftxui::vbox(std::move(rows));
+    }
+    rows.push_back(
+        ftxui::text(pad + std::to_string(picker.ids.size()) + " "
+            + std::string(noun) + (picker.ids.size() == 1 ? "" : "s"))
+        | ftxui::dim);
+    if (picker.ids.empty()) {
+        rows.push_back(
+            ftxui::text(pad + "no matching " + std::string(noun) + "s")
+            | ftxui::dim);
+        return ftxui::vbox(std::move(rows));
+    }
+    for (int i = 0; i < static_cast<int>(picker.labels.size()); ++i) {
+        const bool selected = i == picker.selected;
+        ftxui::Element e    = ftxui::text(pad + (selected ? "› " : "  ")
+            + picker.labels[static_cast<std::size_t>(i)]);
+        if (selected) {
+            e = std::move(e) | ftxui::bold | ftxui::color(PANEL_FG);
+        } else {
+            e = std::move(e) | ftxui::color(PANEL_FG_DIM);
+        }
+        rows.push_back(std::move(e));
+    }
+    return ftxui::vbox(std::move(rows));
+}
+
+std::optional<int> pane_navigation(
+    const ftxui::Event& event, int selected, int count)
+{
+    if (count <= 0) {
+        return std::nullopt;
+    }
+    const auto clamp
+        = [count](int value) { return std::clamp(value, 0, count - 1); };
+    if (event == ftxui::Event::ArrowUp) {
+        return clamp(selected - 1);
+    }
+    if (event == ftxui::Event::ArrowDown) {
+        return clamp(selected + 1);
+    }
+    if (event == ftxui::Event::PageUp) {
+        return clamp(selected - 10);
+    }
+    if (event == ftxui::Event::PageDown) {
+        return clamp(selected + 10);
+    }
+    if (event == ftxui::Event::Home) {
+        return 0;
+    }
+    if (event == ftxui::Event::End) {
+        return count - 1;
+    }
+    return std::nullopt;
+}
+
+std::optional<int> pane_hit_test(ftxui::Event& event,
+    const std::deque<ftxui::Box>& boxes, const std::vector<int>& rows)
+{
+    if (!event.is_mouse()) {
+        return std::nullopt;
+    }
+    const ftxui::Mouse& mouse = event.mouse();
+    if (mouse.button != ftxui::Mouse::Left
+        || mouse.motion != ftxui::Mouse::Pressed) {
+        return std::nullopt;
+    }
+    for (std::size_t i = 0; i < boxes.size() && i < rows.size(); ++i) {
+        if (boxes[i].Contain(mouse.x, mouse.y)) {
+            return rows[i];
+        }
+    }
+    return std::nullopt;
+}
+
+ftxui::Components confirm_buttons(bool confirming,
+    std::function<void()> on_remove, std::function<void()> on_yes,
+    std::function<void()> on_no)
+{
+    if (!confirming) {
+        return { action_button("Remove", std::move(on_remove)) };
+    }
+    return { action_button("Yes", std::move(on_yes)),
+        ftxui::Renderer([] { return ftxui::text(" "); }),
+        action_button("No", std::move(on_no)) };
+}
+
+RowCursor::Move RowCursor::move(int delta, int count, bool has_add_form)
+{
+    if (count == 0) {
+        if (has_add_form && !in_add) {
+            in_add = true;
+            return Move::ENTER_ADD;
+        }
+        return Move::NONE;
+    }
+    if (delta > 0 && has_add_form && (in_add || selected >= count - 1)) {
+        in_add = true;
+        return Move::ENTER_ADD;
+    }
+    if (delta < 0 && in_add) {
+        in_add   = false;
+        selected = count - 1;
+        return Move::LEAVE_ADD;
+    }
+    selected = std::clamp(selected + delta, 0, count - 1);
+    return Move::ROW;
 }
 
 std::string document_label(SessionDoc::Kind kind, std::size_t plan_index,
@@ -645,6 +824,16 @@ Elements modal_header(std::string title, std::string subtitle)
     }
     rows.push_back(separatorEmpty());
     return rows;
+}
+
+std::function<void()> redraw_on_change(
+    const std::shared_ptr<ApplicationState>& state)
+{
+    return [state = std::weak_ptr<ApplicationState>(state)] {
+        if (const auto current = state.lock()) {
+            current->post([] { animation::RequestAnimationFrame(); });
+        }
+    };
 }
 
 Element panel(Element e)

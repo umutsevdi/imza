@@ -38,6 +38,10 @@ struct ParseState {
 
 std::vector<std::string> stream_headers();
 void flush_tool_accums(ParseState& state, std::vector<StreamEvent>& outs);
+// Ends the stream: marks the parse terminal, flushes any pending tool
+// accumulation into TOOL_CALL events, and emits DONE. Every dialect's
+// terminal event runs this, so the closing sequence has one spelling.
+void finish_stream(ParseState& state, std::vector<StreamEvent>& outs);
 void emit_ready_tool_start(ToolAccum& acc, std::vector<StreamEvent>& outs);
 void emit_usage_once(
     ParseState& state, const Usage& usage, std::vector<StreamEvent>& outs);

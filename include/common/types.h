@@ -4,9 +4,13 @@
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
+#include <vector>
 
 #include "common/util.h"
 
@@ -36,6 +40,49 @@ public:
 
 private:
     std::atomic<bool> _alive { true };
+};
+
+// Worker fan-out shared by the subsystems that spawn short-lived threads:
+// spawn() appends under the mutex, and join_workers() drains in waves
+// because a worker may append follow-up work (retries, listeners) while it
+// is being joined. A plain vector of std::thread is used rather than
+// jthreads: these workers observe the subsystem's own shutdown latch and
+// cancellation flags, not a stop_token.
+class WorkerPool {
+public:
+    WorkerPool()                             = default;
+    WorkerPool(const WorkerPool&)            = delete;
+    WorkerPool& operator=(const WorkerPool&) = delete;
+
+    void spawn(std::function<void()> work)
+    {
+        std::lock_guard lock(_mutex);
+        _workers.emplace_back(std::move(work));
+    }
+
+    // Joins every worker, including ones appended during the join.
+    void join_all()
+    {
+        for (;;) {
+            std::vector<std::thread> workers;
+            {
+                std::lock_guard lock(_mutex);
+                workers.swap(_workers);
+            }
+            if (workers.empty()) {
+                return;
+            }
+            for (std::thread& worker : workers) {
+                if (worker.joinable()) {
+                    worker.join();
+                }
+            }
+        }
+    }
+
+private:
+    std::mutex _mutex;
+    std::vector<std::thread> _workers;
 };
 
 struct Attachment {

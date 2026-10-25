@@ -87,33 +87,15 @@ public:
                         [] { animation::RequestAnimationFrame(); })
                   : Signal<>::Subscription { })
         , _skills_subscription(_state->session->subscribe_to_skills_change(
-              [state = std::weak_ptr<ApplicationState>(_state)] {
-                  if (const auto current = state.lock()) {
-                      current->post([] { animation::RequestAnimationFrame(); });
-                  }
-              }))
+              redraw_on_change(_state)))
         , _permission_subscription(
               _state->permissions->subscribe_to_grants_change(
-                  [state = std::weak_ptr<ApplicationState>(_state)] {
-                      if (const auto current = state.lock()) {
-                          current->post(
-                              [] { animation::RequestAnimationFrame(); });
-                      }
-                  }))
+                  redraw_on_change(_state)))
         , _skip_subscription(_state->permissions->subscribe_to_skip_change(
-              [state = std::weak_ptr<ApplicationState>(_state)] {
-                  if (const auto current = state.lock()) {
-                      current->post([] { animation::RequestAnimationFrame(); });
-                  }
-              }))
+              redraw_on_change(_state)))
         , _documents_subscription(
               _state->session->subscribe_to_documents_change(
-                  [state = std::weak_ptr<ApplicationState>(_state)] {
-                      if (const auto current = state.lock()) {
-                          current->post(
-                              [] { animation::RequestAnimationFrame(); });
-                      }
-                  }))
+                  redraw_on_change(_state)))
     {
         _links_container = Container::Vertical({ });
         Add(_links_container);

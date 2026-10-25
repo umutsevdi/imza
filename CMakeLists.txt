@@ -412,7 +412,6 @@ add_library(imza_ui
     src/ui/syntax.cpp
     src/ui/chat.cpp
     src/ui/plan_doc.cpp
-    src/ui/tab_build.cpp
     src/ui/tab_plan.cpp
     src/ui/tab_review.cpp
     src/ui/tool_format.cpp

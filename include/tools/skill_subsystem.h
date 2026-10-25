@@ -105,8 +105,7 @@ private:
     mutable std::mutex _mutex;
     Snapshot _snapshot;
     std::atomic_bool _running { false };
-    std::mutex _workers_mutex;
-    std::vector<std::thread> _workers;
+    WorkerPool _workers;
     Signal<> _changed;
 };
 

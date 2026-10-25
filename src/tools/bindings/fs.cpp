@@ -786,122 +786,6 @@ namespace {
         return compiled;
     }
 
-    // The text bound to a predicate argument: the capture's own text, or
-    // the text of the capture named by the ".suffix" form (e.g.
-    // @function.kind) as a field access on a child node.
-    std::string predicate_capture_text(const TSQuery* query,
-        const TSQueryMatch& match, std::string_view code,
-        const std::string& argument)
-    {
-        const std::size_t dot = argument.find('.');
-        const std::string name
-            = dot == std::string::npos ? argument : argument.substr(0, dot);
-        const uint32_t count = ts_query_capture_count(query);
-        for (uint32_t id = 0; id < count; ++id) {
-            uint32_t length = 0;
-            const char* capture
-                = ts_query_capture_name_for_id(query, id, &length);
-            if (std::string_view(capture, length) != name) {
-                continue;
-            }
-            for (uint16_t i = 0; i < match.capture_count; ++i) {
-                if (match.captures[i].index != id) {
-                    continue;
-                }
-                if (dot == std::string::npos) {
-                    return std::string(
-                        ts_node_text(code, match.captures[i].node));
-                }
-                const TSNode node       = match.captures[i].node;
-                const std::string field = argument.substr(dot + 1);
-                const uint32_t children = ts_node_child_count(node);
-                for (uint32_t child = 0; child < children; ++child) {
-                    const char* child_field
-                        = ts_node_field_name_for_child(node, child);
-                    if (child_field != nullptr && field == child_field) {
-                        const TSNode found = ts_node_child(node, child);
-                        if (!ts_node_is_null(found)) {
-                            return std::string(ts_node_text(code, found));
-                        }
-                    }
-                }
-                return { };
-            }
-        }
-        return { };
-    }
-
-    // Evaluates the portable predicate set (#eq?, #not-eq?, #match?,
-    // #not-match?, #any-of?, #not-any-of?) against capture text.
-    // Unknown predicates are ignored rather than fatal.
-    bool predicates_hold(
-        const TSQuery* query, const TSQueryMatch& match, std::string_view code)
-    {
-        const auto argument_text = [&](const TsPredicateStep& step) {
-            if (!step.is_capture) {
-                return ts_string_value(query, step.value_id);
-            }
-            uint32_t length = 0;
-            const char* name
-                = ts_query_capture_name_for_id(query, step.value_id, &length);
-            return predicate_capture_text(
-                query, match, code, std::string(name, length));
-        };
-        const auto evaluate = [&](const TsPredicateGroup& predicate) {
-            // The operator is always a string step; a leading capture
-            // step is malformed, not something to filter on.
-            if (predicate.size() < 2 || predicate[0].is_capture) {
-                return true;
-            }
-            const std::string op
-                = ts_string_value(query, predicate[0].value_id);
-            if (op != "#eq?" && op != "#not-eq?" && op != "#match?"
-                && op != "#not-match?" && op != "#any-of?"
-                && op != "#not-any-of?") {
-                return true; // not ours to judge
-            }
-            if (predicate.size() < 3) {
-                return true;
-            }
-            const std::string left = argument_text(predicate[1]);
-            if (op == "#eq?" || op == "#not-eq?") {
-                if (predicate.size() != 3) {
-                    return true;
-                }
-                const bool equal = left == argument_text(predicate[2]);
-                return op == "#eq?" ? equal : !equal;
-            }
-            if (op == "#any-of?" || op == "#not-any-of?") {
-                bool any = false;
-                for (std::size_t i = 2; i < predicate.size(); ++i) {
-                    if (left == argument_text(predicate[i])) {
-                        any = true;
-                        break;
-                    }
-                }
-                return op == "#any-of?" ? any : !any;
-            }
-            // #match? / #not-match?: ECMAScript regex over capture text.
-            if (predicate.size() != 3 || predicate[2].is_capture) {
-                return true;
-            }
-            try {
-                const std::regex expression(argument_text(predicate[2]));
-                const bool hit = std::regex_search(left, expression);
-                return op == "#match?" ? hit : !hit;
-            } catch (const std::regex_error&) {
-                return true; // unusable pattern: do not silently drop rows
-            }
-        };
-        for (const TsPredicateGroup& predicate :
-            ts_predicate_groups(query, match.pattern_index)) {
-            if (!evaluate(predicate)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     void push_match_row(lua_State* L, const std::string& file,
         const TSQuery* query, const TSQueryMatch& match, std::string_view code)
     {
@@ -940,7 +824,8 @@ namespace {
 
     // Appends one row per match; false once the match cap is hit.
     bool ts_query_run_file(TsQueryState& state, const TSQuery* query,
-        const Parsed& parsed, const std::string& file)
+        const TsPredicateSet& predicates, const Parsed& parsed,
+        const std::string& file)
     {
         lua_State* L = state.lua;
         TsQueryCursorPtr cursor(ts_query_cursor_new());
@@ -952,7 +837,7 @@ namespace {
 
         TSQueryMatch match;
         while (ts_query_cursor_next_match(cursor.get(), &match)) {
-            if (!predicates_hold(query, match, parsed.code)) {
+            if (!ts_predicates_hold(predicates, query, match, parsed.code)) {
                 continue;
             }
             if (state.rows == MAX_TS_MATCHES) {
@@ -969,19 +854,29 @@ namespace {
     // Per-language compiled queries for a directory walk: grammars
     // interleave, and a query is bound to one language.
     struct QueryCache {
-        std::vector<std::pair<const TSLanguage*, TsQueryPtr>> entries;
+        struct Entry {
+            const TSLanguage* language;
+            TsQueryPtr query;
+            TsPredicateSet predicates;
+        };
+        std::vector<Entry> entries;
 
-        const TSQuery* get_or_compile(
+        const Entry* get_or_compile(
             lua_State* L, const TSLanguage* language, const std::string& query)
         {
-            for (const auto& [cached_language, cached] : entries) {
-                if (cached_language == language) {
-                    return cached.get();
+            for (const Entry& entry : entries) {
+                if (entry.language == language) {
+                    return &entry;
                 }
             }
             TsQueryPtr compiled = compile_query(L, language, query);
-            entries.emplace_back(language, std::move(compiled));
-            return entries.back().second.get();
+            if (compiled == nullptr) {
+                return nullptr;
+            }
+            Entry entry { language, std::move(compiled), { } };
+            entry.predicates = ts_compile_predicates(entry.query.get());
+            entries.push_back(std::move(entry));
+            return &entries.back();
         }
     };
 
@@ -1026,7 +921,8 @@ namespace {
                 return 2;
             }
 
-            ts_query_run_file(state, compiled.get(), *parsed, target);
+            ts_query_run_file(state, compiled.get(),
+                ts_compile_predicates(compiled.get()), *parsed, target);
         } else if (fs::is_directory(status)) {
             const LuaRunContext& run = *run_of(L);
             QueryCache cache;
@@ -1056,12 +952,13 @@ namespace {
                     if (!parsed) {
                         return false;
                     }
-                    const TSQuery* compiled
+                    const QueryCache::Entry* compiled
                         = cache.get_or_compile(L, language, query);
                     if (compiled == nullptr) {
                         return false;
                     }
-                    return ts_query_run_file(state, compiled, *parsed, file);
+                    return ts_query_run_file(state, compiled->query.get(),
+                        compiled->predicates, *parsed, file);
                 },
                 walk_truncated);
             if (walk_truncated && !state.truncated) {

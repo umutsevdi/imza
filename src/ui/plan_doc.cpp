@@ -146,24 +146,9 @@ namespace {
             }
             // The pane's keys own ' ' and Enter; the button must not see
             // them first (space_activates would fire revise on space).
-            if (event == Event::ArrowUp) {
-                return _move(-1);
-            }
-            if (event == Event::ArrowDown) {
-                return _move(1);
-            }
-            if (event == Event::PageUp) {
-                return _move(-10);
-            }
-            if (event == Event::PageDown) {
-                return _move(10);
-            }
-            if (event == Event::Home) {
-                _selected = 0;
-                return true;
-            }
-            if (event == Event::End) {
-                _selected = std::max(0, static_cast<int>(_rows.size()) - 1);
+            if (const auto next = pane_navigation(
+                    event, _selected, static_cast<int>(_rows.size()))) {
+                _selected = *next;
                 return true;
             }
             if (event == Event::Character("[")) {
@@ -544,7 +529,7 @@ namespace {
         std::vector<int> _last_kinds;
         std::vector<PlanNote> _notes;
         Box _button_box { };
-        int _selected = 0;
+        int _selected            = 0;
         int _pending_note_select = -1;
         bool _has_plan           = false;
         std::size_t _revision    = 0;

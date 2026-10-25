@@ -130,6 +130,26 @@ bool resolve_ask(LuaRunContext& run, const std::string& label,
 GateOutcome authorize_filesystem(lua_State* L, FilesystemRequest request);
 GateOutcome authorize_shell(lua_State* L, const ShellRequest& request);
 
+// One parsed and authorized shell request, shared by imza.shell and
+// imza.bg.shell: both take (command, timeout, workspace, env), reject
+// chained commands, and go through the same permission gate. Only the
+// execution tail differs (blocking run vs detached spawn). Returns 0 and
+// fills `out` on success; otherwise raises the binding error and returns
+// the Lua return count.
+struct ShellRequestArgs {
+    std::string command;
+    long timeout = 0;
+    std::string workspace;
+    std::map<std::string, std::string> env;
+    // The gate's canonicalized request; execute against this, never the
+    // raw script arguments.
+    std::string run_dir;
+    std::map<std::string, std::string> run_env;
+};
+
+int resolve_shell_request(lua_State* L, std::string_view label,
+    std::string_view chained_help, long default_timeout, long max_timeout,
+    ShellRequestArgs& out);
 // Binding error for a denied gate call: the historical permission-denied
 // text plus the gate/verdict reason when one exists.
 std::string gate_denied(

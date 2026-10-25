@@ -224,9 +224,7 @@ namespace openai_responses {
         std::vector<StreamEvent>& outs)
     {
         emit_usage_once(state, read_usage(response), outs);
-        state.terminal = true;
-        flush_tool_accums(state, outs);
-        outs.push_back(make_done_event());
+        finish_stream(state, outs);
     }
 
     void parse(ParseState& state, std::string_view event, std::string_view data,

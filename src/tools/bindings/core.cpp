@@ -4,7 +4,6 @@
 #include "common/util.h"
 #include "network/json.h"
 #include "network/json_io.h"
-#include "permissions/shell_analysis.h"
 #include "platform/command_runner.h"
 
 #include <algorithm>
@@ -269,49 +268,22 @@ namespace {
 
     int binding_shell(lua_State* L)
     {
-        const std::string command = luaL_checkstring(L, 1);
-        const long timeout        = std::clamp<long>(
-            opt_integer(L, 2).value_or(10), 1, MAX_SCRIPT_SECONDS);
-
-        std::string workspace;
-        if (const auto given = opt_string(L, 3)) {
-            if (const int failed = resolve_workspace(L, given, workspace);
-                failed != 0) {
-                return failed;
-            }
+        ShellRequestArgs args;
+        if (const int failed = resolve_shell_request(L, "shell",
+                "compose results in Lua instead of chaining with && || ; |", 10,
+                MAX_SCRIPT_SECONDS, args);
+            failed != 0) {
+            return failed;
         }
-        const auto env = opt_env_table(L, 4).value_or(
-            std::map<std::string, std::string> { });
-
-        const ShellAnalysis analysis = analyze_shell(command);
-        if (analysis.invocations.size() > 1) {
-            return binding_error(L,
-                "shell: one command per call; compose results in Lua instead "
-                "of "
-                "chaining with && || ; |");
-        }
-        if (analysis.invocations.empty()) {
-            return binding_error(L, "shell: empty command");
-        }
-
-        const GateOutcome gate = authorize_shell(L,
-            ShellRequest { command, std::chrono::seconds(timeout),
-                fs::path(workspace), env });
-        if (!gate) {
-            return binding_error(L, gate.denial);
-        }
-        // Execution uses the authorized request's env, never the raw input.
-        const std::map<std::string, std::string> run_env
-            = gate.shell ? gate.shell->env : env;
-        const std::string run_dir
-            = gate.shell ? gate.shell->workspace.string() : workspace;
+        const std::string& command = args.command;
+        const long timeout         = args.timeout;
 
         // The command blocks the VM in a C call, during which the
         // instruction hook cannot fire; credit the elapsed wall clock back
         // to the compute budget so a long command does not kill the script.
         const auto started = std::chrono::steady_clock::now();
         CommandResult r    = run_command(command, std::chrono::seconds(timeout),
-            fs::path(run_dir), { }, StderrCapture::MERGE, run_env);
+            fs::path(args.run_dir), { }, StderrCapture::MERGE, args.run_env);
         credit_deadline(*run_of(L), std::chrono::steady_clock::now() - started);
 
         if (!r.spawned) {

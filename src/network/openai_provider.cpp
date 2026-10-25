@@ -222,9 +222,7 @@ namespace openai {
         std::vector<StreamEvent>& outs)
     {
         if (data == "[DONE]") {
-            state.terminal = true;
-            flush_tool_accums(state, outs);
-            outs.push_back(make_done_event());
+            finish_stream(state, outs);
             return;
         }
         Chunk chunk;

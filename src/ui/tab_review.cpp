@@ -254,34 +254,19 @@ namespace {
                     if (_button_press(mouse)) {
                         return true;
                     }
-                    for (std::size_t i = 0; i < _boxes.size(); ++i) {
-                        if (_boxes[i].Contain(mouse.x, mouse.y)) {
-                            _selected = _box_rows[i];
-                            _activate(true);
-                            return true;
-                        }
+                    if (const auto row
+                        = pane_hit_test(event, _boxes, _box_rows)) {
+                        _selected = *row;
+                        _activate(true);
+                        return true;
                     }
                 }
                 return false;
             }
-            if (event == Event::ArrowUp) {
-                return _move(-1);
-            }
-            if (event == Event::ArrowDown) {
-                return _move(1);
-            }
-            if (event == Event::PageUp) {
-                return _move(-10);
-            }
-            if (event == Event::PageDown) {
-                return _move(10);
-            }
-            if (event == Event::Home) {
-                _selected = 0;
-                return true;
-            }
-            if (event == Event::End) {
-                _selected = std::max(0, static_cast<int>(_visible.size()) - 1);
+            if (const auto next = pane_navigation(
+                    event, _selected, static_cast<int>(_visible.size()))) {
+                _selected         = *next;
+                _selected_comment = _visible[_selected].comment_id;
                 return true;
             }
             if (event == Event::Character("[")) {

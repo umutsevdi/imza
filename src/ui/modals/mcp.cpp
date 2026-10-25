@@ -166,10 +166,10 @@ namespace {
 
         bool OnEvent(Event event) override
         {
-            if (_picker_open) {
+            if (_picker.open) {
                 if (event == Event::ArrowDown || event == Event::ArrowUp) {
-                    move_list_cursor(event, _picker_selected,
-                        static_cast<int>(_picker_ids.size()));
+                    move_list_cursor(event, _picker.selected,
+                        static_cast<int>(_picker.ids.size()));
                     return true;
                 }
                 if (event == Event::Escape) {
@@ -185,7 +185,7 @@ namespace {
 
             if (_confirming()) {
                 if (event == Event::Character('y')) {
-                    _confirm_remove(_row_selected);
+                    _confirm_remove(_cursor.selected);
                     return true;
                 }
                 if (event == Event::Character('n') || event == Event::Escape) {
@@ -198,7 +198,7 @@ namespace {
 
             const bool focus_in_add
                 = _add_container && _add_container->Focused();
-            if (!_in_add && !focus_in_add) {
+            if (!_cursor.in_add && !focus_in_add) {
                 if (event == Event::ArrowDown) {
                     _row_move(1);
                     return true;
@@ -208,22 +208,22 @@ namespace {
                     return true;
                 }
                 if (event == Event::Delete) {
-                    if (_row_selected >= 0
-                        && _row_selected
+                    if (_cursor.selected >= 0
+                        && _cursor.selected
                             < static_cast<int>(_servers().size())) {
-                        _confirm[_row_selected] = true;
+                        _confirm.arm(_cursor.selected);
                         _maybe_rebuild();
                     }
                     return true;
                 }
             } else if (event == Event::ArrowUp && _picker_input
                 && _picker_input->Focused()) {
-                _in_add        = false;
+                _cursor.in_add = false;
                 const auto all = _servers();
-                _row_selected
+                _cursor.selected
                     = all.empty() ? 0 : static_cast<int>(all.size()) - 1;
-                if (_row_selected < static_cast<int>(_row_buttons.size())) {
-                    _row_buttons[static_cast<std::size_t>(_row_selected)]
+                if (_cursor.selected < static_cast<int>(_row_buttons.size())) {
+                    _row_buttons[static_cast<std::size_t>(_cursor.selected)]
                         ->TakeFocus();
                 }
                 return true;
@@ -280,7 +280,7 @@ namespace {
             std::string serial = std::to_string(_session->modal_serial()) + "/"
                 + std::to_string(_servers().size()) + "/" + _selected + "/"
                 + std::to_string(_confirming()) + "/" + std::to_string(_stdio)
-                + "/" + std::to_string(_in_add) + "/"
+                + "/" + std::to_string(_cursor.in_add) + "/"
                 + std::to_string(_autoload);
             // Sign-in transitions and phase text re-render the rows.
             for (const McpServerSnapshot& server : _servers()) {
@@ -292,11 +292,7 @@ namespace {
             return serial;
         }
 
-        bool _confirming() const
-        {
-            return std::ranges::any_of(
-                _confirm, [](const auto& entry) { return entry.second; });
-        }
+        bool _confirming() const { return _confirm.any(); }
 
         void _maybe_rebuild()
         {
@@ -311,40 +307,28 @@ namespace {
 
         void _row_move(int delta)
         {
-            const auto all         = _servers();
-            const bool at_last_row = delta > 0
-                && _row_selected >= static_cast<int>(all.size()) - 1;
-            if (all.empty() || at_last_row) {
-                _in_add = true;
+            const int count = static_cast<int>(_servers().size());
+            switch (_cursor.move(delta, count)) {
+            case RowCursor::Move::ENTER_ADD:
                 if (_picker_input) {
                     _picker_input->TakeFocus();
                 }
-                return;
-            }
-            _row_selected = std::clamp(
-                _row_selected + delta, 0, static_cast<int>(all.size()) - 1);
-            if (_row_selected < static_cast<int>(_row_buttons.size())) {
-                _row_buttons[static_cast<std::size_t>(_row_selected)]
-                    ->TakeFocus();
+                break;
+            case RowCursor::Move::LEAVE_ADD:
+            case RowCursor::Move::ROW:
+                if (_cursor.selected < static_cast<int>(_row_buttons.size())) {
+                    _row_buttons[static_cast<std::size_t>(_cursor.selected)]
+                        ->TakeFocus();
+                }
+                break;
+            case RowCursor::Move::NONE: break;
             }
         }
 
         void _refill_picker()
         {
-            const std::string needle = to_lower(trim(_picker_buf));
-            _picker_labels.clear();
-            _picker_ids.clear();
-            _picker_selected = 0;
-            const auto add   = [&](std::string id, std::string label) {
-                if (!needle.empty()
-                    && to_lower(label).find(needle) == std::string::npos
-                    && id.find(needle) == std::string::npos) {
-                    return;
-                }
-                _picker_ids.push_back(std::move(id));
-                _picker_labels.push_back(std::move(label));
-            };
-            add(std::string(CUSTOM_SERVER_ID), "Custom server…");
+            std::vector<std::pair<std::string, std::string>> entries;
+            entries.emplace_back(CUSTOM_SERVER_ID, "Custom server…");
             for (const McpCatalogEntry& entry : _catalog) {
                 std::string label = entry.label;
                 if (entry.auth_kind == "oauth") {
@@ -352,21 +336,20 @@ namespace {
                 } else if (entry.auth_kind == "token") {
                     label += "  (key)";
                 }
-                add(entry.id, std::move(label));
+                entries.emplace_back(entry.id, std::move(label));
             }
+            _picker.refill(entries);
         }
 
         void _commit_picker()
         {
-            if (_picker_ids.empty()
-                || _picker_selected >= static_cast<int>(_picker_ids.size())) {
-                _close_picker();
+            std::string id;
+            if (!_picker.chosen(id)) {
+                _picker.close();
                 return;
             }
-            _selected = _picker_ids[static_cast<std::size_t>(_picker_selected)];
-            _picker_buf    = _selected_name();
-            _picker_cursor = static_cast<int>(_picker_buf.size());
-            _picker_open   = false;
+            _selected = std::move(id);
+            _picker.close();
             _row_error.clear();
             if (!_is_custom()) {
                 _stdio = false;
@@ -383,30 +366,18 @@ namespace {
             }
         }
 
-        void _close_picker()
-        {
-            _picker_buf    = _selected_name();
-            _picker_cursor = static_cast<int>(_picker_buf.size());
-            _picker_open   = false;
-        }
+        void _close_picker() { _picker.close(); }
 
         void _rebuild()
         {
             _refill_picker();
-            _picker_input = Input(field_option(
-                &_picker_buf, &_picker_cursor, "type to search servers",
+            _picker_input = make_picker_input(
+                _picker, "type to search servers",
                 [this] {
                     _row_error.clear();
-                    if (!_picker_open) {
-                        _picker_open = true;
-                    }
                     _refill_picker();
                 },
-                [this] {
-                    if (_picker_open) {
-                        _commit_picker();
-                    }
-                }));
+                [this] { _commit_picker(); });
 
             const bool custom = _is_custom();
             const bool oauth  = _is_oauth();
@@ -479,7 +450,7 @@ namespace {
                     },
                     [this] {
                         _stdio             = !_stdio;
-                        _in_add            = true;
+                        _cursor.in_add     = true;
                         _refocus_transport = true;
                         _row_error.clear();
                     });
@@ -535,12 +506,12 @@ namespace {
                 // dropping back to the rows at the top.
                 _refocus_transport = false;
                 _transport_button->TakeFocus();
-            } else if (_in_add) {
+            } else if (_cursor.in_add) {
                 if (_picker_input) {
                     _picker_input->TakeFocus();
                 }
             } else if (!_row_buttons.empty()) {
-                _row_buttons[static_cast<std::size_t>(std::min(_row_selected,
+                _row_buttons[static_cast<std::size_t>(std::min(_cursor.selected,
                                  static_cast<int>(_row_buttons.size()) - 1))]
                     ->TakeFocus();
             }
@@ -548,8 +519,7 @@ namespace {
 
         Component _make_row(int index)
         {
-            const bool is_confirm
-                = _confirm.count(index) != 0 && _confirm.at(index);
+            const bool is_confirm = _confirm.armed_at(index);
 
             Component label = Renderer([this, index] {
                 const auto all = _servers();
@@ -558,8 +528,9 @@ namespace {
                 }
                 const McpServerSnapshot& server
                     = all[static_cast<std::size_t>(index)];
-                const bool highlighted = index == _row_selected && !_in_add;
-                std::string name       = server.id;
+                const bool highlighted
+                    = index == _cursor.selected && !_cursor.in_add;
+                std::string name = server.id;
                 if (!server.label.empty() && server.label != server.id) {
                     name += " (" + server.label + ")";
                 }
@@ -583,14 +554,12 @@ namespace {
 
             Component right;
             if (is_confirm) {
-                Component yes = action_button(
-                    "Yes", [this, index] { _confirm_remove(index); });
-                Component no = action_button("No", [this, index] {
-                    _confirm.erase(index);
-                    _maybe_rebuild();
-                });
-                right        = Container::Horizontal(
-                    { yes, Renderer([] { return text(" "); }), no });
+                right = Container::Horizontal(confirm_buttons(
+                    true, { }, [this, index] { _confirm_remove(index); },
+                    [this, index] {
+                        _confirm.disarm(index);
+                        _maybe_rebuild();
+                    }));
             } else {
                 const McpServerSnapshot server
                     = _servers()[static_cast<std::size_t>(index)];
@@ -630,7 +599,7 @@ namespace {
                         }));
                 }
                 buttons.push_back(action_button("Remove", [this, index] {
-                    _confirm[index] = true;
+                    _confirm.arm(index);
                     _maybe_rebuild();
                 }));
                 bool& autoload = _row_autoload[server.id];
@@ -658,7 +627,8 @@ namespace {
             _row_buttons.push_back(right);
             return Renderer(row, [row, index, is_confirm, this] {
                 Element e = row->Render() | xflex;
-                if (is_confirm || (index == _row_selected && !_in_add)) {
+                if (is_confirm
+                    || (index == _cursor.selected && !_cursor.in_add)) {
                     e |= bgcolor(PANEL_COLOR_FOCUS);
                 }
                 return e;
@@ -667,7 +637,7 @@ namespace {
 
         void _confirm_remove(int index)
         {
-            _confirm.erase(index);
+            _confirm.disarm(index);
             const auto all = _servers();
             if (index < 0 || index >= static_cast<int>(all.size())) {
                 return;
@@ -678,7 +648,7 @@ namespace {
             } else {
                 _row_error = "Could not save the configuration.";
             }
-            _row_selected = 0;
+            _cursor.selected = 0;
             _maybe_rebuild();
         }
 
@@ -805,48 +775,26 @@ namespace {
             _label_buf.clear();
             _autoload = false;
             _close_picker();
-            _in_add        = false;
+            _cursor.in_add = false;
             const auto all = _servers();
             for (int i = 0; i < static_cast<int>(all.size()); ++i) {
                 if (all[static_cast<std::size_t>(i)].id == added_id) {
-                    _row_selected = i;
+                    _cursor.selected = i;
                     break;
                 }
             }
             _maybe_rebuild();
-            if (_row_selected < static_cast<int>(_row_buttons.size())) {
-                _row_buttons[static_cast<std::size_t>(_row_selected)]
+            if (_cursor.selected < static_cast<int>(_row_buttons.size())) {
+                _row_buttons[static_cast<std::size_t>(_cursor.selected)]
                     ->TakeFocus();
             }
         }
 
         Element _picker_area()
         {
-            const std::string pad(FORM_LABEL + 2, ' ');
             Elements rows;
             rows.push_back(_picker_input->Render() | xflex);
-            if (_picker_open) {
-                rows.push_back(
-                    text(pad + std::to_string(_picker_ids.size()) + " server"
-                        + (_picker_ids.size() == 1 ? "" : "s"))
-                    | dim);
-                if (_picker_ids.empty()) {
-                    rows.push_back(text(pad + "no matching servers") | dim);
-                } else {
-                    for (int i = 0; i < static_cast<int>(_picker_labels.size());
-                        ++i) {
-                        const bool selected = i == _picker_selected;
-                        Element e = text(pad + (selected ? "› " : "  ")
-                            + _picker_labels[static_cast<std::size_t>(i)]);
-                        if (selected) {
-                            e = std::move(e) | bold | color(PANEL_FG);
-                        } else {
-                            e = std::move(e) | color(PANEL_FG_DIM);
-                        }
-                        rows.push_back(std::move(e));
-                    }
-                }
-            }
+            rows.push_back(picker_area(_picker, FORM_LABEL, "server"));
             return vbox(std::move(rows));
         }
 
@@ -950,22 +898,16 @@ namespace {
         Component _rows_container;
         Component _add_container;
         std::vector<Component> _row_buttons;
-        std::map<int, bool> _confirm;
+        ConfirmState _confirm;
         std::string _row_error;
         std::string _serial;
         bool _built = false;
 
-        bool _picker_open = false;
         std::string _selected;
-        std::string _picker_buf;
-        int _picker_cursor = 0;
-        std::vector<std::string> _picker_ids;
-        std::vector<std::string> _picker_labels;
-        int _picker_selected = 0;
+        PickerList _picker;
         Component _picker_input;
 
-        int _row_selected       = 0;
-        bool _in_add            = false;
+        RowCursor _cursor;
         bool _refocus_transport = false;
 
         Component _label_input;

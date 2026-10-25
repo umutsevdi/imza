@@ -492,45 +492,6 @@ std::unique_ptr<Process> Process::spawn(
         command_line += quote_arg(arg);
     }
 
-    // An environment block replaces the parent's wholesale, so the inherited
-    // entries are copied first and the overrides substituted in: dropping the
-    // rest would strip PATH and SystemRoot and the child could not start. The
-    // block is UTF-16, hence CREATE_UNICODE_ENVIRONMENT below.
-    std::wstring environment;
-    if (!options.env.empty()) {
-        std::vector<std::wstring> overridden;
-        overridden.reserve(options.env.size());
-        for (const auto& [name, value] : options.env) {
-            overridden.push_back(to_wide(name));
-        }
-        std::vector<std::wstring> entries;
-        if (wchar_t* inherited = GetEnvironmentStringsW()) {
-            for (const wchar_t* cursor = inherited; *cursor != L'\0';
-                cursor += std::wcslen(cursor) + 1) {
-                const std::wstring entry(cursor);
-                const std::size_t equals = entry.find(L'=');
-                // "=C:=C:\\..." entries carry a drive's current directory;
-                // they have no name to override and are kept as they are.
-                const std::wstring name
-                    = equals == 0 ? std::wstring { } : entry.substr(0, equals);
-                if (name.empty()
-                    || std::ranges::find(overridden, name)
-                        == overridden.end()) {
-                    entries.push_back(entry);
-                }
-            }
-            FreeEnvironmentStringsW(inherited);
-        }
-        for (const auto& [name, value] : options.env) {
-            entries.push_back(to_wide(name + "=" + value));
-        }
-        for (const std::wstring& entry : entries) {
-            environment += entry;
-            environment.push_back(L'\0');
-        }
-        environment.push_back(L'\0');
-    }
-
     STARTUPINFOW si { };
     si.cb         = sizeof(si);
     si.dwFlags    = STARTF_USESTDHANDLES;
@@ -539,15 +500,18 @@ std::unique_ptr<Process> Process::spawn(
     si.hStdError  = err_w;
 
     PROCESS_INFORMATION pi { };
+    const std::vector<wchar_t> env_block
+        = windows_environment_block(options.env);
     const std::wstring wide_command   = to_wide(command_line);
     const std::wstring wide_directory = options.working_directory.empty()
         ? std::wstring { }
         : options.working_directory.wstring();
     const DWORD flags                 = CREATE_SUSPENDED
-        | (options.env.empty() ? 0 : CREATE_UNICODE_ENVIRONMENT);
+        | (env_block.empty() ? 0 : CREATE_UNICODE_ENVIRONMENT);
     const BOOL ok = CreateProcessW(nullptr,
         const_cast<wchar_t*>(wide_command.data()), nullptr, nullptr, TRUE,
-        flags, options.env.empty() ? nullptr : environment.data(),
+        flags,
+        env_block.empty() ? nullptr : const_cast<wchar_t*>(env_block.data()),
         wide_directory.empty() ? nullptr : wide_directory.c_str(), &si, &pi);
     CloseHandle(in_r);
     CloseHandle(out_w);

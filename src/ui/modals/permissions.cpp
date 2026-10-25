@@ -122,7 +122,7 @@ namespace {
                 _tab = _tab == 0 ? 1 : 0;
                 _dir_confirm.clear();
                 _cmd_confirm.clear();
-                _dir_in_add = _cmd_in_add = false;
+                _dir_row.in_add = _cmd_row.in_add = false;
                 _rebuild();
                 _refocus();
                 return true;
@@ -132,12 +132,6 @@ namespace {
         }
 
     private:
-        static bool _any_confirmed(const std::map<int, bool>& confirm)
-        {
-            return std::ranges::any_of(
-                confirm, [](const auto& entry) { return entry.second; });
-        }
-
         // Picks up grants changed outside the modal (another Imza process
         // saving the config) without discarding in-progress input.
         void _refresh_entries()
@@ -147,11 +141,11 @@ namespace {
                 && snapshot->allow.commands == _commands) {
                 return;
             }
-            _dirs         = snapshot->allow.directories;
-            _commands     = snapshot->allow.commands;
-            _dir_selected = std::clamp(_dir_selected, 0,
+            _dirs             = snapshot->allow.directories;
+            _commands         = snapshot->allow.commands;
+            _dir_row.selected = std::clamp(_dir_row.selected, 0,
                 std::max(0, static_cast<int>(_dirs.size()) - 1));
-            _cmd_selected = std::clamp(_cmd_selected, 0,
+            _cmd_row.selected = std::clamp(_cmd_row.selected, 0,
                 std::max(0, static_cast<int>(_commands.size()) - 1));
             _dir_confirm.clear();
             _cmd_confirm.clear();
@@ -160,46 +154,30 @@ namespace {
 
         void _row_move(int delta)
         {
-            auto& selected = _tab == 0 ? _dir_selected : _cmd_selected;
+            RowCursor& cursor = _tab == 0 ? _dir_row : _cmd_row;
             const int count
                 = static_cast<int>(_tab == 0 ? _dirs.size() : _commands.size());
-            auto& in_add = _tab == 0 ? _dir_in_add : _cmd_in_add;
-            // Past the last row the cursor enters the add form, matching
-            // the MCP modal's flow; ArrowUp from the form returns.
-            if (delta > 0 && (in_add || selected >= count - 1)) {
-                in_add = true;
+            switch (cursor.move(delta, count)) {
+            case RowCursor::Move::ENTER_ADD:
                 (_tab == 0 ? _dir_input : _cmd_input)->TakeFocus();
-                return;
+                break;
+            case RowCursor::Move::LEAVE_ADD: _refocus(); break;
+            case RowCursor::Move::ROW: _refocus(); break;
+            case RowCursor::Move::NONE: break;
             }
-            if (delta < 0 && in_add) {
-                in_add = false;
-                if (count == 0) {
-                    return;
-                }
-                selected = count - 1;
-                _refocus();
-                return;
-            }
-            if (count == 0) {
-                in_add = true;
-                (_tab == 0 ? _dir_input : _cmd_input)->TakeFocus();
-                return;
-            }
-            selected = std::clamp(selected + delta, 0, count - 1);
-            _refocus();
         }
 
         void _refocus()
         {
             auto& buttons = _tab == 0 ? _dir_buttons : _cmd_buttons;
             if (buttons.empty()) {
-                (_tab == 0 ? _dir_in_add : _cmd_in_add) = true;
+                (_tab == 0 ? _dir_row.in_add : _cmd_row.in_add) = true;
                 (_tab == 0 ? _dir_input : _cmd_input)->TakeFocus();
                 return;
             }
-            buttons[static_cast<std::size_t>(
-                        std::min(_tab == 0 ? _dir_selected : _cmd_selected,
-                            static_cast<int>(buttons.size()) - 1))]
+            buttons[static_cast<std::size_t>(std::min(
+                        _tab == 0 ? _dir_row.selected : _cmd_row.selected,
+                        static_cast<int>(buttons.size()) - 1))]
                 ->TakeFocus();
         }
 
@@ -223,9 +201,8 @@ namespace {
 
         Component _make_row(bool is_dir, int index)
         {
-            std::map<int, bool>& confirm = is_dir ? _dir_confirm : _cmd_confirm;
-            const bool is_confirm
-                = confirm.count(index) != 0 && confirm.at(index);
+            ConfirmState& confirm = is_dir ? _dir_confirm : _cmd_confirm;
+            const bool is_confirm = confirm.armed_at(index);
 
             Components controls;
             if (is_confirm) {
@@ -238,9 +215,9 @@ namespace {
                 }));
                 controls.push_back(action_button("No", [this, is_dir, index] {
                     if (is_dir) {
-                        _dir_confirm.erase(index);
+                        _dir_confirm.disarm(index);
                     } else {
-                        _cmd_confirm.erase(index);
+                        _cmd_confirm.disarm(index);
                     }
                     _rebuild();
                     _refocus();
@@ -249,9 +226,9 @@ namespace {
                 controls.push_back(
                     action_button("Remove", [this, is_dir, index] {
                         if (is_dir) {
-                            _dir_confirm[index] = true;
+                            _dir_confirm.arm(index);
                         } else {
-                            _cmd_confirm[index] = true;
+                            _cmd_confirm.arm(index);
                         }
                         _rebuild();
                         _refocus();
@@ -264,7 +241,7 @@ namespace {
                 Element line = hbox({ _row_label(is_dir, index), filler(),
                     row->Render() | xflex });
                 const bool selected
-                    = index == (is_dir ? _dir_selected : _cmd_selected);
+                    = index == (is_dir ? _dir_row.selected : _cmd_row.selected);
                 if (is_confirm || selected) {
                     line |= bgcolor(PANEL_COLOR_FOCUS);
                 }
@@ -300,28 +277,28 @@ namespace {
 
         void _confirm_remove_dir(int index)
         {
-            _dir_confirm.erase(index);
+            _dir_confirm.disarm(index);
             if (index >= 0 && index < static_cast<int>(_dirs.size())) {
                 if (allow_remove_directory(
                         *_state, static_cast<std::size_t>(index))) {
                     _dirs.erase(_dirs.begin() + index);
                 }
             }
-            _dir_selected = 0;
+            _dir_row.selected = 0;
             _rebuild();
             _refocus();
         }
 
         void _confirm_remove_cmd(int index)
         {
-            _cmd_confirm.erase(index);
+            _cmd_confirm.disarm(index);
             if (index >= 0 && index < static_cast<int>(_commands.size())) {
                 if (allow_remove_command(
                         *_state, static_cast<std::size_t>(index))) {
                     _commands.erase(_commands.begin() + index);
                 }
             }
-            _cmd_selected = 0;
+            _cmd_row.selected = 0;
             _rebuild();
             _refocus();
         }
@@ -392,10 +369,10 @@ namespace {
         // of the row is focused.
         bool _handle_directories(const Event& event)
         {
-            if (_any_confirmed(_dir_confirm)) {
+            if (_dir_confirm.any()) {
                 return _dir_rows ? _dir_rows->OnEvent(event) : false;
             }
-            if (_dir_in_add) {
+            if (_dir_row.in_add) {
                 if (event == Event::ArrowUp && !_dirs.empty()) {
                     _row_move(-1);
                     return true;
@@ -407,7 +384,7 @@ namespace {
                 return true;
             }
             if (event == Event::Delete && !_dirs.empty()) {
-                _dir_confirm[_dir_selected] = true;
+                _dir_confirm.arm(_dir_row.selected);
                 _rebuild();
                 _refocus();
                 return true;
@@ -417,10 +394,10 @@ namespace {
 
         bool _handle_commands(const Event& event)
         {
-            if (_any_confirmed(_cmd_confirm)) {
+            if (_cmd_confirm.any()) {
                 return _cmd_rows ? _cmd_rows->OnEvent(event) : false;
             }
-            if (_cmd_in_add) {
+            if (_cmd_row.in_add) {
                 if (event == Event::ArrowUp && !_commands.empty()) {
                     _row_move(-1);
                     return true;
@@ -432,7 +409,7 @@ namespace {
                 return true;
             }
             if (event == Event::Delete && !_commands.empty()) {
-                _cmd_confirm[_cmd_selected] = true;
+                _cmd_confirm.arm(_cmd_row.selected);
                 _rebuild();
                 _refocus();
                 return true;
@@ -447,8 +424,8 @@ namespace {
                 _dir_buf.clear();
                 _dir_cursor = 0;
                 _dir_error.clear();
-                _dir_in_add = false;
-                _dir_selected
+                _dir_row.in_add = false;
+                _dir_row.selected
                     = static_cast<int>(
                           _state->config->snapshot()->allow.directories.size())
                     - 1;
@@ -466,8 +443,8 @@ namespace {
                 _cmd_buf.clear();
                 _cmd_cursor = 0;
                 _cmd_error.clear();
-                _cmd_in_add = false;
-                _cmd_selected
+                _cmd_row.in_add = false;
+                _cmd_row.selected
                     = static_cast<int>(
                           _state->config->snapshot()->allow.commands.size())
                     - 1;
@@ -491,12 +468,10 @@ namespace {
         Component _cmd_rows;
         std::vector<Component> _dir_buttons;
         std::vector<Component> _cmd_buttons;
-        std::map<int, bool> _dir_confirm;
-        std::map<int, bool> _cmd_confirm;
-        int _dir_selected = 0;
-        int _cmd_selected = 0;
-        bool _dir_in_add  = false;
-        bool _cmd_in_add  = false;
+        ConfirmState _dir_confirm;
+        ConfirmState _cmd_confirm;
+        RowCursor _dir_row;
+        RowCursor _cmd_row;
         std::string _dir_error;
         std::string _cmd_error;
 

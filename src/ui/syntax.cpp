@@ -45,23 +45,6 @@ namespace {
 
 #include "syntax_registry.inc"
 
-    struct QueryPredicate {
-        enum class Kind {
-            EQUAL,
-            NOT_EQUAL,
-            ANY_OF,
-            NOT_ANY_OF,
-            MATCH,
-            NOT_MATCH,
-            INVALID,
-        };
-
-        Kind kind           = Kind::INVALID;
-        uint32_t capture_id = 0;
-        std::vector<std::string> values;
-        std::optional<std::regex> regex;
-    };
-
     struct LanguageDefinition {
         std::string_view name;
         std::span<const std::string_view> extensions;
@@ -74,7 +57,7 @@ namespace {
             TsQueryPtr query;
             TsParserPtr parser;
             TsQueryCursorPtr cursor;
-            std::vector<std::vector<QueryPredicate>> predicates;
+            TsPredicateSet predicates;
             std::mutex use_mutex;
         };
         std::unique_ptr<Runtime> runtime;
@@ -181,109 +164,6 @@ namespace {
         return PANEL_FG;
     }
 
-    std::string_view capture_text(
-        const TSQueryMatch& match, uint32_t capture_id, std::string_view code)
-    {
-        for (uint16_t i = 0; i < match.capture_count; ++i) {
-            const TSQueryCapture& capture = match.captures[i];
-            if (capture.index != capture_id) {
-                continue;
-            }
-            const uint32_t begin = ts_node_start_byte(capture.node);
-            const uint32_t end   = ts_node_end_byte(capture.node);
-            if (begin <= end && end <= code.size()) {
-                return code.substr(begin, end - begin);
-            }
-        }
-        return { };
-    }
-
-    std::string lua_regex(std::string_view pattern)
-    {
-        std::string converted;
-        for (std::size_t i = 0; i < pattern.size(); ++i) {
-            if (pattern[i] != '%' || i + 1 == pattern.size()) {
-                converted.push_back(pattern[i]);
-                continue;
-            }
-            switch (pattern[++i]) {
-            case 'u': converted += "A-Z"; break;
-            case 'l': converted += "a-z"; break;
-            case 'd': converted += "0-9"; break;
-            case 'w': converted += "A-Za-z0-9_"; break;
-            default: converted.push_back(pattern[i]); break;
-            }
-        }
-        return converted;
-    }
-
-    std::vector<std::vector<QueryPredicate>> compile_predicates(
-        const TSQuery* query)
-    {
-        std::vector<std::vector<QueryPredicate>> predicates(
-            ts_query_pattern_count(query));
-        for (uint32_t pattern = 0; pattern < predicates.size(); ++pattern) {
-            for (const TsPredicateGroup& group :
-                ts_predicate_groups(query, pattern)) {
-                if (group.empty() || group.front().is_capture) {
-                    continue;
-                }
-                const std::string operation_text
-                    = ts_string_value(query, group.front().value_id);
-                std::string_view operation(operation_text);
-                if (operation.starts_with('#')) {
-                    operation.remove_prefix(1);
-                }
-                std::optional<uint32_t> capture_id;
-                std::vector<std::string> values;
-                for (std::size_t at = 1; at < group.size(); ++at) {
-                    if (group[at].is_capture && !capture_id.has_value()) {
-                        capture_id = group[at].value_id;
-                    } else if (!group[at].is_capture) {
-                        values.push_back(
-                            ts_string_value(query, group[at].value_id));
-                    }
-                }
-                if (!capture_id.has_value() || values.empty()) {
-                    continue;
-                }
-
-                std::optional<QueryPredicate::Kind> kind;
-                if (operation == "eq?") {
-                    kind = QueryPredicate::Kind::EQUAL;
-                } else if (operation == "not-eq?") {
-                    kind = QueryPredicate::Kind::NOT_EQUAL;
-                } else if (operation == "any-of?") {
-                    kind = QueryPredicate::Kind::ANY_OF;
-                } else if (operation == "not-any-of?") {
-                    kind = QueryPredicate::Kind::NOT_ANY_OF;
-                } else if (operation == "match?" || operation == "lua-match?") {
-                    kind = QueryPredicate::Kind::MATCH;
-                } else if (operation == "not-match?") {
-                    kind = QueryPredicate::Kind::NOT_MATCH;
-                }
-                if (!kind.has_value()) {
-                    continue;
-                }
-
-                std::optional<std::regex> regex;
-                if (*kind == QueryPredicate::Kind::MATCH
-                    || *kind == QueryPredicate::Kind::NOT_MATCH) {
-                    try {
-                        regex.emplace(operation == "lua-match?"
-                                ? lua_regex(values.front())
-                                : values.front());
-                    } catch (const std::regex_error&) {
-                        kind = QueryPredicate::Kind::INVALID;
-                    }
-                }
-                predicates[pattern].push_back(QueryPredicate {
-                    *kind, *capture_id, std::move(values), std::move(regex) });
-            }
-        }
-        return predicates;
-    }
-
     LanguageDefinition::Runtime& language_runtime(
         const LanguageDefinition& definition)
     {
@@ -296,7 +176,7 @@ namespace {
             runtime.query
                 = make_query(runtime.language, definition.highlight_query);
             if (runtime.query != nullptr) {
-                runtime.predicates = compile_predicates(runtime.query.get());
+                runtime.predicates = ts_compile_predicates(runtime.query.get());
             }
             runtime.parser.reset(ts_parser_new());
             if (runtime.parser != nullptr
@@ -307,47 +187,6 @@ namespace {
             runtime.cursor.reset(ts_query_cursor_new());
         });
         return runtime;
-    }
-
-    bool predicates_match(const LanguageDefinition::Runtime& runtime,
-        const TSQueryMatch& match, std::string_view code)
-    {
-        if (match.pattern_index >= runtime.predicates.size()) {
-            return true;
-        }
-        for (const QueryPredicate& predicate :
-            runtime.predicates[match.pattern_index]) {
-            const std::string_view body
-                = capture_text(match, predicate.capture_id, code);
-            bool matched = true;
-            switch (predicate.kind) {
-            case QueryPredicate::Kind::EQUAL:
-            case QueryPredicate::Kind::NOT_EQUAL:
-                matched = body == predicate.values.front();
-                break;
-            case QueryPredicate::Kind::ANY_OF:
-            case QueryPredicate::Kind::NOT_ANY_OF:
-                matched = std::ranges::find(predicate.values, body)
-                    != predicate.values.end();
-                break;
-            case QueryPredicate::Kind::MATCH:
-            case QueryPredicate::Kind::NOT_MATCH:
-                matched = predicate.regex.has_value()
-                    && std::regex_search(
-                        body.begin(), body.end(), *predicate.regex);
-                break;
-            case QueryPredicate::Kind::INVALID: matched = false; break;
-            }
-            if (predicate.kind == QueryPredicate::Kind::NOT_EQUAL
-                || predicate.kind == QueryPredicate::Kind::NOT_ANY_OF
-                || predicate.kind == QueryPredicate::Kind::NOT_MATCH) {
-                matched = !matched;
-            }
-            if (!matched) {
-                return false;
-            }
-        }
-        return true;
     }
 
     std::vector<SyntaxStyle> syntax_styles(
@@ -379,7 +218,7 @@ namespace {
         uint32_t capture_index = 0;
         while (ts_query_cursor_next_capture(
             runtime.cursor.get(), &match, &capture_index)) {
-            if (!predicates_match(runtime, match, code)) {
+            if (!ts_predicates_hold(runtime.predicates, query, match, code)) {
                 continue;
             }
             const TSQueryCapture& capture = match.captures[capture_index];

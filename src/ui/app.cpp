@@ -248,14 +248,15 @@ namespace {
                     ? ctx.width / 2
                     : review_content_width(ctx);
             };
-            _chat      = make_chat(_state, layout, _chat_hints);
-            _plan_tab  = make_plan_tab(_state, layout, _chat);
-            _build_tab = make_build_tab(
-                _state, layout, _chat, _sidechat, _sidechat_status);
-            _review   = make_review(_state, layout,
+            _chat     = make_chat(_state, layout, _chat_hints);
+            _plan_tab = make_plan_tab(_state, layout, _chat);
+            // The Build tab hosts only the shared chat, which _attach_chat
+            // moves into whichever tab is active.
+            _build_tab = ftxui::Container::Vertical({ });
+            _review    = make_review(_state, layout,
                 [this](WorkflowPhase phase) { _set_phase(phase); });
-            _modal    = make_modal(_state);
-            _sidechat = make_sidechat_component(
+            _modal     = make_modal(_state);
+            _sidechat  = make_sidechat_component(
                 _state, [this] { _focus_main(); }, _sidechat_status);
 
             _workspace_subscription

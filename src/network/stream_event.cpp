@@ -96,6 +96,13 @@ void flush_tool_accums(ParseState& state, std::vector<StreamEvent>& outs)
     state.tool_accums.clear();
 }
 
+void finish_stream(ParseState& state, std::vector<StreamEvent>& outs)
+{
+    state.terminal = true;
+    flush_tool_accums(state, outs);
+    outs.push_back(make_done_event());
+}
+
 void emit_ready_tool_start(ToolAccum& acc, std::vector<StreamEvent>& outs)
 {
     if (acc.started || acc.name.empty()) {

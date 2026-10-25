@@ -209,27 +209,12 @@ SkillSubsystem::SkillSubsystem(SkillSubsystemHooks hooks)
 SkillSubsystem::~SkillSubsystem()
 {
     mark_dead();
-    for (;;) {
-        std::vector<std::thread> workers;
-        {
-            std::lock_guard lock(_workers_mutex);
-            workers.swap(_workers);
-        }
-        if (workers.empty()) {
-            break;
-        }
-        for (std::thread& worker : workers) {
-            if (worker.joinable()) {
-                worker.join();
-            }
-        }
-    }
+    _workers.join_all();
 }
 
 void SkillSubsystem::spawn(std::function<void()> work)
 {
-    std::lock_guard lock(_workers_mutex);
-    _workers.emplace_back(std::move(work));
+    _workers.spawn(std::move(work));
 }
 
 bool SkillSubsystem::busy() const { return _running.load(); }

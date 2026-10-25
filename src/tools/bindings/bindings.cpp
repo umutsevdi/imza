@@ -4,6 +4,7 @@
 
 #include "permissions/filesystem.h"
 #include "permissions/shell.h"
+#include "permissions/shell_analysis.h"
 #include "workspace/environment.h"
 
 #include <chrono>
@@ -18,6 +19,8 @@ extern "C" {
 }
 
 namespace imza {
+
+namespace fs = std::filesystem;
 
 LuaRunContext* run_of(lua_State* L)
 {
@@ -165,6 +168,44 @@ int resolve_workspace(lua_State* L, const std::optional<std::string>& given,
     return 0;
 }
 
+int resolve_shell_request(lua_State* L, std::string_view label,
+    std::string_view chained_help, long default_timeout, long max_timeout,
+    ShellRequestArgs& out)
+{
+    out.command = luaL_checkstring(L, 1);
+    out.timeout = std::clamp<long>(
+        opt_integer(L, 2).value_or(default_timeout), 1, max_timeout);
+
+    if (const auto given = opt_string(L, 3)) {
+        if (const int failed = resolve_workspace(L, given, out.workspace);
+            failed != 0) {
+            return failed;
+        }
+    }
+    out.env
+        = opt_env_table(L, 4).value_or(std::map<std::string, std::string> { });
+
+    const ShellAnalysis analysis = analyze_shell(out.command);
+    if (analysis.invocations.size() > 1) {
+        return binding_error(L,
+            std::string(label) + ": one command per call; "
+                + std::string(chained_help));
+    }
+    if (analysis.invocations.empty()) {
+        return binding_error(L, std::string(label) + ": empty command");
+    }
+
+    const GateOutcome gate = authorize_shell(L,
+        ShellRequest { out.command, std::chrono::seconds(out.timeout),
+            fs::path(out.workspace), out.env });
+    if (!gate) {
+        return binding_error(L, gate.denial);
+    }
+    // Execution uses the authorized request's env, never the raw input.
+    out.run_env = gate.shell ? gate.shell->env : out.env;
+    out.run_dir = gate.shell ? gate.shell->workspace.string() : out.workspace;
+    return 0;
+}
 namespace {
 
     PermissionPrompt gate_prompt(std::string name, std::string reason,

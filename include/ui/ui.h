@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <map>
 #include <memory>
@@ -121,6 +122,13 @@ ftxui::Element wrapped_input_element(std::string_view content,
     bool focused = true);
 
 ftxui::Element panel(ftxui::Element e);
+
+// Redraw-on-change callback for a UI component's signal subscriptions.
+// Publishers run on arbitrary threads, so the frame request is marshalled
+// through the state's main-thread queue; the weak reference keeps a
+// subscription from outliving the state it redraws.
+std::function<void()> redraw_on_change(
+    const std::shared_ptr<ApplicationState>& state);
 
 LayoutCtx layout_context(int width, int height = 0);
 
@@ -273,6 +281,93 @@ ftxui::Element render_model_pick(const std::string& title,
 std::vector<std::size_t> filter_visible(const std::string& filter,
     std::size_t row_count,
     const std::function<std::string(std::size_t)>& match);
+
+// Filterable id/label picker shared by the connection and MCP modals: type
+// to narrow, arrows to choose, Enter to commit. The host owns what a
+// committed id means; the kit owns the buffer, the visible rows, and the
+// open/closed state.
+struct PickerList {
+    std::vector<std::string> ids;
+    std::vector<std::string> labels;
+    std::string buffer;
+    int cursor   = 0;
+    int selected = 0;
+    bool open    = false;
+
+    // Rebuilds the visible rows from `entries`, keeping those whose id or
+    // label contains the lowercased, trimmed buffer.
+    void refill(
+        const std::vector<std::pair<std::string, std::string>>& entries);
+    // The selected id; false when nothing is visible.
+    bool chosen(std::string& id) const;
+    // The selected row's label, or empty.
+    std::string selected_label() const;
+    // Collapses the list, restoring the buffer to the selected label.
+    void close();
+};
+
+// The picker's filter input: typing opens the list and calls `on_change`;
+// Enter calls `on_enter` (the host commits and moves focus). `picker` must
+// outlive the returned component.
+ftxui::Component make_picker_input(PickerList& picker, std::string placeholder,
+    std::function<void()> on_change = { },
+    std::function<void()> on_enter  = { });
+// The picker's rows under the input, indented past `label_width`; `noun` is
+// the pluralized row noun ("provider"/"server").
+ftxui::Element picker_area(
+    const PickerList& picker, int label_width, std::string_view noun);
+
+// Armed inline-removal state for a row list: which rows are asking "remove
+// this?", plus the two derived queries every host needs.
+struct ConfirmState {
+    std::map<int, bool> armed;
+
+    bool any() const
+    {
+        return std::ranges::any_of(
+            armed, [](const auto& entry) { return entry.second; });
+    }
+    bool armed_at(int index) const
+    {
+        return armed.count(index) != 0 && armed.at(index);
+    }
+    bool empty() const { return armed.empty(); }
+    void arm(int index) { armed[index] = true; }
+    void disarm(int index) { armed.erase(index); }
+    void clear() { armed.clear(); }
+};
+
+// One cursor step for the annotatable panes (Plan, Review): arrows move by
+// one, PageUp/PageDown by ten, Home/End jump to the ends. Returns the new
+// selection, or nullopt when the event is not a navigation key.
+std::optional<int> pane_navigation(
+    const ftxui::Event& event, int selected, int count);
+
+// The row under a left press, or nullopt when the event is not a press or no
+// box contains it. `rows` maps each box to the row index it selects.
+std::optional<int> pane_hit_test(ftxui::Event& event,
+    const std::deque<ftxui::Box>& boxes, const std::vector<int>& rows);
+
+// The inline remove confirmation every row-list modal shares: a "Remove"
+// button, or the Yes/No pair once the row is arming. The host owns what
+// removal means and where the row's focus goes.
+ftxui::Components confirm_buttons(bool confirming,
+    std::function<void()> on_remove, std::function<void()> on_yes,
+    std::function<void()> on_no);
+
+// Row-list cursor shared by the picker modals: arrows walk the rows, moving
+// past the last one enters the add form, and moving up from the form returns
+// to the last row.
+struct RowCursor {
+    enum class Move { NONE, ROW, ENTER_ADD, LEAVE_ADD };
+
+    int selected = 0;
+    bool in_add  = false;
+
+    // `count` rows, `has_add_form` false for a list with no add form (the
+    // cursor then clamps).
+    Move move(int delta, int count, bool has_add_form = true);
+};
 
 ftxui::Element render_markdown_element(std::string_view md, int width);
 
@@ -517,9 +612,6 @@ struct SidechatStatus {
 
 ftxui::Component make_sidechat_component(
     std::shared_ptr<ApplicationState> state, std::function<void()> on_focus,
-    SidechatStatus& status);
-ftxui::Component make_build_tab(std::shared_ptr<ApplicationState> state,
-    LayoutFn layout, ftxui::Component chat, ftxui::Component sidechat,
     SidechatStatus& status);
 
 // The interactive composition root: sidebar, tab bar, tab content, status

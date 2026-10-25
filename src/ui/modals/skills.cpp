@@ -148,11 +148,7 @@ namespace {
         }
 
     private:
-        bool _confirming() const
-        {
-            return std::ranges::any_of(
-                _confirm, [](const auto& entry) { return entry.second; });
-        }
+        bool _confirming() const { return _confirm.any(); }
 
         bool _handle_manage(const Event& event)
         {
@@ -168,8 +164,9 @@ namespace {
                 return true;
             }
             if (event == Event::Delete && !_entries.empty()
-                && !_entries[static_cast<std::size_t>(_row_selected)].bundled) {
-                _confirm[_row_selected] = true;
+                && !_entries[static_cast<std::size_t>(_cursor.selected)]
+                    .bundled) {
+                _confirm.arm(_cursor.selected);
                 _rebuild_manage();
                 return true;
             }
@@ -221,13 +218,14 @@ namespace {
 
         void _row_move(int delta)
         {
-            if (_entries.empty()) {
+            // Skills has no add form, so the cursor clamps instead of
+            // stepping into one.
+            if (_cursor.move(delta, static_cast<int>(_entries.size()), false)
+                != RowCursor::Move::ROW) {
                 return;
             }
-            _row_selected = std::clamp(_row_selected + delta, 0,
-                static_cast<int>(_entries.size()) - 1);
-            if (_row_selected < static_cast<int>(_row_buttons.size())) {
-                _row_buttons[static_cast<std::size_t>(_row_selected)]
+            if (_cursor.selected < static_cast<int>(_row_buttons.size())) {
+                _row_buttons[static_cast<std::size_t>(_cursor.selected)]
                     ->TakeFocus();
             }
         }
@@ -252,12 +250,12 @@ namespace {
 
         void _remove(int index)
         {
-            _confirm.erase(index);
+            _confirm.disarm(index);
             if (index < 0 || index >= static_cast<int>(_entries.size())) {
                 return;
             }
             _remove_by_name(_entries[static_cast<std::size_t>(index)].name);
-            _row_selected = 0;
+            _cursor.selected = 0;
         }
 
         void _remove_by_name(const std::string& name)
@@ -293,7 +291,7 @@ namespace {
                 return;
             }
             _entries         = std::move(fresh);
-            _row_selected    = std::clamp(_row_selected, 0,
+            _cursor.selected = std::clamp(_cursor.selected, 0,
                 std::max(0, static_cast<int>(_entries.size()) - 1));
             _policy_open_row = -1;
             _confirm.clear();
@@ -309,7 +307,7 @@ namespace {
             }
             _rows_container = Container::Vertical(std::move(rows));
             if (!_row_buttons.empty()) {
-                _row_buttons[static_cast<std::size_t>(std::min(_row_selected,
+                _row_buttons[static_cast<std::size_t>(std::min(_cursor.selected,
                                  static_cast<int>(_row_buttons.size()) - 1))]
                     ->TakeFocus();
             }
@@ -317,8 +315,7 @@ namespace {
 
         Component _make_row(int index)
         {
-            const bool is_confirm
-                = _confirm.count(index) != 0 && _confirm.at(index);
+            const bool is_confirm = _confirm.armed_at(index);
 
             // Only the controls are focusable children, so Left/Right moves
             // between the policy chip and Remove; the label is drawn by the
@@ -328,7 +325,7 @@ namespace {
                 controls.push_back(
                     action_button("Yes", [this, index] { _remove(index); }));
                 controls.push_back(action_button("No", [this, index] {
-                    _confirm.erase(index);
+                    _confirm.disarm(index);
                     _rebuild_manage();
                 }));
             } else {
@@ -349,7 +346,7 @@ namespace {
                         },
                         [this, index] { _open_policy(index); }));
                     controls.push_back(action_button("Remove", [this, index] {
-                        _confirm[index] = true;
+                        _confirm.arm(index);
                         _rebuild_manage();
                     }));
                 } else {
@@ -375,7 +372,7 @@ namespace {
                 }
                 Element line = hbox(
                     { std::move(label), filler(), row->Render() | xflex });
-                if (is_confirm || index == _row_selected) {
+                if (is_confirm || index == _cursor.selected) {
                     line |= bgcolor(PANEL_COLOR_FOCUS);
                 }
                 if (index != _policy_open_row) {
@@ -566,8 +563,8 @@ namespace {
         std::vector<SkillsModal::Entry> _entries;
         Component _rows_container;
         std::vector<Component> _row_buttons;
-        std::map<int, bool> _confirm;
-        int _row_selected    = 0;
+        ConfirmState _confirm;
+        RowCursor _cursor;
         int _policy_open_row = -1;
         int _policy_cursor   = 1;
 

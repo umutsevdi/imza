@@ -1,11 +1,6 @@
 #include "tools/bindings.h"
 
-#include "permissions/shell_analysis.h"
-
-#include <algorithm>
 #include <chrono>
-#include <filesystem>
-#include <map>
 #include <string>
 
 extern "C" {
@@ -16,60 +11,30 @@ extern "C" {
 namespace imza {
 namespace {
 
-    namespace fs = std::filesystem;
-
     // Runs a command detached, in its own process group, so it outlives the
     // tool call and a later script can interact with it. Output is not
     // captured: the command redirects it itself.
     int binding_bg_shell(lua_State* L)
     {
-        const std::string command = luaL_checkstring(L, 1);
-        const long timeout
-            = std::clamp<long>(opt_integer(L, 2).value_or(DEFAULT_BG_SECONDS),
-                1, MAX_TASK_SECONDS);
-
-        std::string workspace;
-        if (const auto given = opt_string(L, 3)) {
-            if (const int failed = resolve_workspace(L, given, workspace);
-                failed != 0) {
-                return failed;
-            }
+        ShellRequestArgs args;
+        if (const int failed = resolve_shell_request(L, "bg.shell",
+                "compose results in Lua instead of chaining with && || ; |",
+                DEFAULT_BG_SECONDS, MAX_TASK_SECONDS, args);
+            failed != 0) {
+            return failed;
         }
-        const auto env = opt_env_table(L, 4).value_or(
-            std::map<std::string, std::string> { });
-
-        const ShellAnalysis analysis = analyze_shell(command);
-        if (analysis.invocations.size() > 1) {
-            return binding_error(L,
-                "bg.shell: one command per call; compose results in Lua "
-                "instead of chaining with && || ; |");
-        }
-        if (analysis.invocations.empty()) {
-            return binding_error(L, "bg.shell: empty command");
-        }
-
-        const GateOutcome gate = authorize_shell(L,
-            ShellRequest { command, std::chrono::seconds(timeout),
-                fs::path(workspace), env });
-        if (!gate) {
-            return binding_error(L, gate.denial);
-        }
-        // Execution uses the authorized request's env, never the raw input.
-        const std::map<std::string, std::string> run_env
-            = gate.shell ? gate.shell->env : env;
-        const std::string run_dir
-            = gate.shell ? gate.shell->workspace.string() : workspace;
 
         LuaRunContext* run = run_of(L);
         if (!run->host->spawn_bg) {
             return binding_error(L, "bg.shell: unavailable in this context");
         }
-        if (!run->host->spawn_bg(
-                command, std::chrono::seconds(timeout), run_dir, run_env)) {
-            record_call(L, "bg.shell", command, false);
+        if (!run->host->spawn_bg(args.command,
+                std::chrono::seconds(args.timeout), args.run_dir,
+                args.run_env)) {
+            record_call(L, "bg.shell", args.command, false);
             return binding_error(L, "bg.shell: failed to start command");
         }
-        record_call(L, "bg.shell", command, true);
+        record_call(L, "bg.shell", args.command, true);
         return 0;
     }
 

@@ -1016,7 +1016,41 @@ TEST_CASE("imza.fs.ts_query applies #eq? predicates")
           "print(#rows, rows[1].captures.callee.text, "
           "rows[1].captures.callee.start_line)");
     REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(out.text == "2    one    2\n");
+    CHECK(out.text == "1    one    2\n");
+}
+
+TEST_CASE("imza.fs.ts_query applies #match?, #any-of?, and #not-eq?")
+{
+    imza::test::TempDir dir;
+    imza::test::write_file(dir.file("calls.c"),
+        "int one(void) { return 0; }\n"
+        "int two(void) { return one(); }\n"
+        "int three(void) { return two(); }\n");
+
+    const std::string base = "local rows = imza.fs.ts_query([["
+        + dir.file("calls.c").string()
+        + "]], '((call_expression function: (identifier) @callee) ";
+
+    // #match? is an ECMAScript regex over the capture text.
+    const imza::ToolOutput match = imza::test::run_lua(base
+        + "(#match? @callee \"^t\"))')\n"
+          "print(#rows, rows[1].captures.callee.text)");
+    REQUIRE(match.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(match.text == "1    two\n");
+
+    // #any-of? keeps the listed values only.
+    const imza::ToolOutput any_of = imza::test::run_lua(base
+        + "(#any-of? @callee \"one\" \"two\"))')\n"
+          "print(#rows, rows[1].captures.callee.text)");
+    REQUIRE(any_of.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(any_of.text == "2    one\n");
+
+    // #not-eq? is the negation of #eq?.
+    const imza::ToolOutput negated = imza::test::run_lua(base
+        + "(#not-eq? @callee \"two\"))')\n"
+          "print(#rows, rows[1].captures.callee.text)");
+    REQUIRE(negated.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(negated.text == "1    one\n");
 }
 
 TEST_CASE("imza.fs.ts_query rejects invalid queries")

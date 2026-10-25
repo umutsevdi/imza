@@ -226,12 +226,7 @@ namespace {
             , _layout(std::move(layout))
             , _hints(std::move(hints))
             , _skip_subscription(_state->permissions->subscribe_to_skip_change(
-                  [state = std::weak_ptr<ApplicationState>(_state)] {
-                      if (const auto current = state.lock()) {
-                          current->post(
-                              [] { animation::RequestAnimationFrame(); });
-                      }
-                  }))
+                  redraw_on_change(_state)))
         {
             if (_hints.input_hint.empty()) {
                 _hints.input_hint = "  " + std::string(MULTILINE_KEY)

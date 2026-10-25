@@ -145,10 +145,9 @@ private:
 
     mutable std::mutex _map_mutex;
     std::map<std::string, std::shared_ptr<ServerEntry>> _servers;
-    // Guards _workers: workers spawn follow-up work (retries, listeners)
-    // from their own threads, so appends race the destructor's join.
-    std::mutex _workers_mutex;
-    std::vector<std::thread> _workers;
+    // Workers spawn follow-up work (retries, listeners) from their own
+    // threads, so appends race the destructor's join.
+    WorkerPool _workers;
     McpSubsystemHooks _hooks;
     Signal<> _changed;
 };
