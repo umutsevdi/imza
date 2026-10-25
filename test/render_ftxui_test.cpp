@@ -398,14 +398,26 @@ TEST_CASE("autocomplete resolves harness aliases to canonical commands")
     // Inserting the canonical name submits, like typing /exit would.
     CHECK(submit);
     CHECK(text == "/exit");
-
-    // `/reasoning` completes to /variant.
+    // `/reasoning` completes to /variant, which waits for its argument.
     autocomplete.refresh(*state, "/reasoning", 10);
     REQUIRE(autocomplete.active());
     text   = "/reasoning";
     cursor = 10;
-    CHECK(autocomplete.accept(*state, text, cursor, attachments));
+    CHECK_FALSE(autocomplete.accept(*state, text, cursor, attachments));
     CHECK(text == "/variant");
+    // The trailing space opens the effort choices; the active one is
+    // marked and accepting one fills the argument.
+    autocomplete.refresh(*state, "/variant ", 9);
+    REQUIRE(autocomplete.active());
+    std::string choices
+        = to_text(autocomplete.render({ imza::LayoutCtx::Kind::WIDE, 80 }));
+    CHECK(choices.find("off") != std::string::npos);
+    CHECK(choices.find("high") != std::string::npos);
+    CHECK(choices.find("current") != std::string::npos);
+    // A fully typed choice closes the popup so Enter submits instead of
+    // being eaten by another accept pass.
+    autocomplete.refresh(*state, "/variant default", 16);
+    CHECK_FALSE(autocomplete.active());
 }
 
 TEST_CASE("autocomplete completes /cd paths and keeps descending")

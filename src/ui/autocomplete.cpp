@@ -17,6 +17,9 @@ Autocomplete::Set Autocomplete::_active_set() const
     if (!_paths.empty()) {
         return Set::PATHS;
     }
+    if (!_arguments.empty()) {
+        return Set::ARGUMENTS;
+    }
     if (!_files.empty()) {
         return Set::FILES;
     }
@@ -30,6 +33,7 @@ int Autocomplete::_count() const
 {
     switch (_active_set()) {
     case Set::PATHS: return static_cast<int>(_paths.size());
+    case Set::ARGUMENTS: return static_cast<int>(_arguments.size());
     case Set::FILES: return static_cast<int>(_files.size());
     case Set::SKILLS: return static_cast<int>(_skills.size());
     case Set::COMMANDS: break;
@@ -68,6 +72,37 @@ void Autocomplete::refresh(
             std::filesystem::current_path(), text.substr(4));
         return;
     }
+    // "<command> <partial argument>" offers the command's closed
+    // argument vocabulary. Aliases resolve to their command.
+    const std::size_t space = text.find(' ');
+    if (space != std::string::npos && at > space) {
+        const std::string head = to_lower(text.substr(0, space));
+        if (head.starts_with('/')) {
+            const SlashCommand* command = find_command(head);
+            if (command && !command->argument_choices.empty()) {
+                const std::string key = to_lower(text.substr(space + 1));
+                const std::string current
+                    = command->action == SlashCommand::Action::VARIANT
+                    ? state.providers->status().reasoning_effort
+                    : std::string();
+                for (const std::string_view choice :
+                    command->argument_choices) {
+                    if (choice.starts_with(key)) {
+                        _arguments.push_back(choice);
+                        _argument_captions.push_back(
+                            choice == current ? "current" : "set");
+                    }
+                }
+                // A fully typed choice closes the popup; Enter then
+                // submits through the normal path.
+                if (_arguments.size() == 1 && _arguments.front() == key) {
+                    _arguments.clear();
+                    _argument_captions.clear();
+                }
+                return;
+            }
+        }
+    }
     _token = attachment_token_at(text, at);
     if (_token) {
         _files = attachment_candidates(
@@ -104,6 +139,15 @@ void Autocomplete::refresh(
 bool Autocomplete::accept(const ApplicationState& state, std::string& text,
     int& cursor, std::vector<Attachment>& attachments)
 {
+    if (!_arguments.empty()) {
+        const std::string_view choice
+            = _arguments[static_cast<std::size_t>(_selected)];
+        const std::size_t space = text.find(' ');
+        text.replace(space + 1, std::string::npos, choice);
+        cursor = static_cast<int>(text.size());
+        refresh(state, text, cursor);
+        return false;
+    }
     if (!_paths.empty()) {
         const std::string replacement
             = _paths[static_cast<std::size_t>(_selected)];
@@ -172,6 +216,8 @@ bool Autocomplete::accept(const ApplicationState& state, std::string& text,
 
 void Autocomplete::clear()
 {
+    _arguments.clear();
+    _argument_captions.clear();
     _commands.clear();
     _skills.clear();
     _files.clear();
@@ -191,6 +237,7 @@ ftxui::Element Autocomplete::render(const LayoutCtx& ctx) const
     const int description_width = std::clamp(available_width - 28, 8, 56);
     const Set set               = _active_set();
     const size_t total          = set == Set::PATHS ? _paths.size()
+        : set == Set::ARGUMENTS                     ? _arguments.size()
         : set == Set::FILES                         ? _files.size()
         : set == Set::SKILLS                        ? _skills.size()
                                                     : _commands.size();
@@ -207,6 +254,7 @@ ftxui::Element Autocomplete::render(const LayoutCtx& ctx) const
         const size_t i        = first + row_index;
         const bool sel        = static_cast<int>(i) == _selected;
         std::string name_text = set == Set::PATHS ? _paths[i]
+            : set == Set::ARGUMENTS               ? std::string(_arguments[i])
             : set == Set::FILES                   ? "@" + _files[i].path
             : set == Set::SKILLS ? "$" + _skills[i].name
                                  : std::string(_commands[i].command->name);
@@ -220,6 +268,7 @@ ftxui::Element Autocomplete::render(const LayoutCtx& ctx) const
             name = name | bold;
         }
         const std::string description = set == Set::PATHS ? "directory"
+            : set == Set::ARGUMENTS ? _argument_captions[i]
             : set == Set::FILES  ? (_files[i].directory ? "directory" : "file")
             : set == Set::SKILLS ? _skills[i].description
                                  : std::string(_commands[i].command->desc);

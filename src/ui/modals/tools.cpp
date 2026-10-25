@@ -526,8 +526,6 @@ namespace {
             }
         }
 
-        void _build(const VariantModal&) { _body = make_variant(_state); }
-
         void _build(const SessionsModal&) { _body = make_sessions(_state); }
 
         void _build(const SkillsModal&) { _body = make_skills(_state); }

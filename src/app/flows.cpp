@@ -909,10 +909,6 @@ void resolve_modal(ApplicationState& state, ModalResult result)
     if (auto* choice = std::get_if<ModelChoice>(&result)) {
         state.providers->select_model(*choice);
     }
-    if (auto* variant = std::get_if<VariantChoice>(&result)) {
-        state.providers->set_reasoning_effort(variant->effort);
-        state.session->bump_modal_serial();
-    }
     {
         auto entry = state.session->queue.try_pop();
         if (entry && entry->promise) {
@@ -1011,11 +1007,13 @@ void run_slash(ApplicationState& state, std::string_view command)
             state, ConnectModal { ConnectModal::Entry::PICK_MODEL });
         break;
     case SlashCommand::Action::VARIANT: {
-        const std::vector<std::string> choices(
-            REASONING_EFFORT_CHOICES.begin(), REASONING_EFFORT_CHOICES.end());
-        std::string current
-            = to_config_effort(state.providers->status().reasoning_effort);
-        enqueue_user_modal(state, VariantModal { choices, std::move(current) });
+        const std::string effort = to_lower(args);
+        if (!std::ranges::contains(REASONING_EFFORT_CHOICES, effort)) {
+            state.session->set_error(
+                "Usage: /variant <effort> - off|low|default|high");
+            break;
+        }
+        state.providers->set_reasoning_effort(std::move(effort));
         break;
     }
     case SlashCommand::Action::SUBAGENTS:

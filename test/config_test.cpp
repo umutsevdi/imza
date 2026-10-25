@@ -439,7 +439,9 @@ TEST_CASE("empty config writes every editable option")
     REQUIRE(main != nullptr);
     CHECK_FALSE(json_has(*main, "provider"));
     CHECK_FALSE(json_has(*main, "model"));
-    CHECK(json_str(imza::find_member(*main, "reasoning_effort")) == "off");
+    // An unset main effort stays unset: the implicit "off" default is not
+    // materialized into the document.
+    CHECK_FALSE(json_has(*main, "reasoning_effort"));
     const imza::JsonValue* builder = imza::find_member(*models, "builder");
     REQUIRE(builder != nullptr);
     CHECK_FALSE(json_has(*builder, "provider"));

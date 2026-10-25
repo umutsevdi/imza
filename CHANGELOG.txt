@@ -8,6 +8,16 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
+0.7.1 - Unreleased
+-------------------------------------------------------------------------------
+Changes:
+  - `/variant` now takes the reasoning effort right on the input line
+    (`/variant high`) with autocomplete suggestions, instead of opening a
+    picker dialog.
+  - Fixed `imza.fs.ts_query` ignoring its query predicates, so filtered
+    searches returned unfiltered matches.
+
+-------------------------------------------------------------------------------
 0.7.0 - 2026-10-24
 -------------------------------------------------------------------------------
 Changes:

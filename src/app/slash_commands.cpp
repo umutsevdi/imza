@@ -1,4 +1,5 @@
 #include "app/slash_commands.h"
+#include "common/types.h"
 #include "common/util.h"
 
 #include <algorithm>
@@ -24,6 +25,7 @@ namespace {
     constexpr std::array<std::string_view, 2> CHDIR_ALIASES { "dir",
         "directory" };
     constexpr std::array<std::string_view, 1> AUTO_ALIASES { "approvals" };
+    constexpr std::array<std::string_view, 2> AUTO_CHOICES { "on", "off" };
     constexpr std::array<std::string_view, 1> UNDO_ALIASES { "revert" };
 
     // The query without its leading slash, lowercased.
@@ -77,7 +79,7 @@ std::span<const SlashCommand> slash_commands()
         { "/cd", "change the session working directory",
             SlashCommand::Action::CHDIR, true, CHDIR_ALIASES },
         { "/auto", "turn permission auto-approval on or off",
-            SlashCommand::Action::AUTO, true, AUTO_ALIASES },
+            SlashCommand::Action::AUTO, true, AUTO_ALIASES, AUTO_CHOICES },
         { "/permissions", "manage persistent permission grants",
             SlashCommand::Action::PERMISSIONS },
         { "/sessions", "load or delete saved sessions",
@@ -86,8 +88,8 @@ std::span<const SlashCommand> slash_commands()
             SlashCommand::Action::CONNECT, false, CONNECT_ALIASES },
         { "/model", "pick the active model", SlashCommand::Action::MODEL, false,
             MODEL_ALIASES },
-        { "/variant", "pick reasoning effort", SlashCommand::Action::VARIANT,
-            false, VARIANT_ALIASES },
+        { "/variant", "set reasoning effort", SlashCommand::Action::VARIANT,
+            true, VARIANT_ALIASES, REASONING_EFFORT_CHOICES },
         { "/mcp", "manage MCP servers", SlashCommand::Action::MCP },
         { "/subagents", "configure subagent models",
             SlashCommand::Action::SUBAGENTS, false, SUBAGENTS_ALIASES },

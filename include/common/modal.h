@@ -48,10 +48,6 @@ struct ModelChoice {
     std::string model_id;
 };
 
-struct VariantChoice {
-    std::string effort;
-};
-
 struct SkillPolicyChange {
     std::string name;
     std::string project_root;
@@ -80,11 +76,6 @@ struct ViewerModal {
     std::string save_name;
 };
 
-struct VariantModal {
-    std::vector<std::string> options;
-    std::string current;
-};
-
 struct SessionsModal { };
 
 struct McpModal { };
@@ -105,11 +96,11 @@ struct SkillsModal {
     std::vector<Entry> entries;
 };
 
-using ModalPayload = std::variant<std::monostate, ViewerModal, PermissionPrompt,
-    QuestionForm, ConnectModal, VariantModal, SessionsModal, SkillsModal,
-    McpModal, PermissionsModal>;
+using ModalPayload
+    = std::variant<std::monostate, ViewerModal, PermissionPrompt, QuestionForm,
+        ConnectModal, SessionsModal, SkillsModal, McpModal, PermissionsModal>;
 
 using ModalResult = std::variant<std::monostate, ToolVerdict, ModalAnswer,
-    ConnectResult, ModelChoice, VariantChoice, std::filesystem::path>;
+    ConnectResult, ModelChoice, std::filesystem::path>;
 
 } // namespace imza

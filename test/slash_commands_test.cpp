@@ -585,6 +585,40 @@ TEST_CASE("/auto rejects unknown arguments without flipping")
     CHECK(state->permissions->skip_permissions());
 }
 
+TEST_CASE("/variant sets the reasoning effort from its argument")
+{
+    auto state = imza::test::make_test_state();
+
+    run_slash(*state, "/variant high");
+    CHECK(state->providers->status().reasoning_effort == "high");
+    CHECK(state->session->error().empty());
+    CHECK(std::holds_alternative<std::monostate>(state->session->modal()));
+
+    run_slash(*state, "/variant off");
+    CHECK(state->providers->status().reasoning_effort == "off");
+}
+
+TEST_CASE("/variant is off until an effort is picked")
+{
+    auto state = imza::test::make_test_state();
+    CHECK(state->providers->status().reasoning_effort == "off");
+}
+
+TEST_CASE("/variant rejects a missing or unknown effort")
+{
+    auto state               = imza::test::make_test_state();
+    const std::string before = state->providers->status().reasoning_effort;
+
+    run_slash(*state, "/variant");
+    CHECK(state->providers->status().reasoning_effort == before);
+    CHECK(state->session->error().find("Usage") != std::string::npos);
+
+    run_slash(*state, "/variant bogus");
+    CHECK(state->providers->status().reasoning_effort == before);
+    CHECK(state->session->error().find("Usage") != std::string::npos);
+    CHECK(std::holds_alternative<std::monostate>(state->session->modal()));
+}
+
 TEST_CASE("/permissions opens the grants modal, not the /auto toggle")
 {
     const SlashCommand* command = find_command("/permissions");

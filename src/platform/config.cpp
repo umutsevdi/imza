@@ -712,7 +712,10 @@ namespace {
             main.provider = cfg.last_used->provider;
             main.model    = cfg.last_used->model;
         }
-        main.reasoning_effort     = cfg.reasoning_effort.value_or("off");
+        // An unset effort stays unset: materializing "off" here would
+        // turn the implicit default into a persisted value on the first
+        // unrelated save.
+        main.reasoning_effort     = cfg.reasoning_effort;
         models.main               = std::move(main);
         const auto write_subagent = [&](SubagentRole role) {
             StoredModelChoice value;

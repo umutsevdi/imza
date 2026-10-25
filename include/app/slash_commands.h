@@ -6,6 +6,8 @@
 #include <string_view>
 #include <vector>
 
+#include "common/types.h"
+
 namespace imza {
 
 struct SlashCommand {
@@ -38,6 +40,9 @@ struct SlashCommand {
     // Aliases never shadow a canonical name; `find_command` resolves the
     // canonical name first.
     std::span<const std::string_view> aliases;
+    // Closed argument vocabulary, offered by the autocomplete popup after
+    // the command and a space; empty when the argument is free-form.
+    std::span<const std::string_view> argument_choices { };
 };
 
 // One autocomplete hit: the command to run and the alias that matched it,
