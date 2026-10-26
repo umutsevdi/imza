@@ -57,4 +57,3 @@ TEST_CASE("signal permits subscription changes while publishing")
 
     CHECK(calls == 1);
 }
-

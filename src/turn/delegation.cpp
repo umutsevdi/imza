@@ -241,6 +241,8 @@ ToolOutput Delegation::run_subagents(const ToolCallRequest& req)
         changes.insert(changes.end(),
             std::make_move_iterator(child_changes.begin()),
             std::make_move_iterator(child_changes.end()));
+        // The child's usage joins the parent's analytics log once.
+        _state->session->add_usage(sessions[index]->drain_usage());
     }
     if (!validation_error.empty()) {
         if (!output.empty()) {

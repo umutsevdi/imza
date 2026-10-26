@@ -40,8 +40,8 @@ TEST_CASE("session snapshots stay valid while a worker mutates")
 
     std::thread reader([&] {
         while (!stop.load()) {
-            const auto todo  = session.todo();
-            const auto items = session.items();
+            const auto todo   = session.todo();
+            const auto items  = session.items();
             std::size_t total = items->size();
             for (const imza::TodoItem& item : todo->items) {
                 total += item.content.size();

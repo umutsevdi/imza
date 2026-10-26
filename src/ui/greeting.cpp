@@ -79,7 +79,7 @@ std::string greeting_line_for(std::time_t now)
 {
     const std::tm local     = local_tm(now);
     const TimeBucket bucket = time_bucket(local.tm_hour);
-    const unsigned seed = static_cast<unsigned>(local.tm_yday)
+    const unsigned seed     = static_cast<unsigned>(local.tm_yday)
         + static_cast<unsigned>(local.tm_year) * 366u;
     return greeting_line(bucket, seed);
 }

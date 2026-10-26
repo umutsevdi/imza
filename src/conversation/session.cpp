@@ -120,6 +120,36 @@ std::optional<std::size_t> last_user_turn_index(
     return std::nullopt;
 }
 
+std::vector<SubmissionUsage> submission_usage(
+    const std::vector<ConversationItem>& items)
+{
+    std::vector<SubmissionUsage> groups;
+    for (const ConversationItem& item : items) {
+        if (std::holds_alternative<UserTurn>(item)) {
+            groups.emplace_back();
+            continue;
+        }
+        const auto* turn = std::get_if<AssistantTurn>(&item);
+        if (turn == nullptr || turn->usage.empty()) {
+            continue;
+        }
+        if (groups.empty()) {
+            groups.emplace_back();
+        }
+        SubmissionUsage& group = groups.back();
+        for (const UsageEntry& entry : turn->usage) {
+            group.tokens += entry.usage.total;
+            group.cost += entry.cost;
+        }
+        // The final model and finish time label the group.
+        group.model       = turn->model;
+        group.finished_at = turn->finished_at;
+    }
+    std::erase_if(groups, [](const SubmissionUsage& group) {
+        return group.tokens == 0 && group.cost == 0.0;
+    });
+    return groups;
+}
 void Session::_ensure_unique(
     std::shared_ptr<std::vector<ConversationItem>>& items)
 {
@@ -317,7 +347,8 @@ bool Session::has_plan() const
 SessionSnapshot Session::_build_snapshot() const
 {
     return { _title, *_items, *_todo, *_documents, _compacted_summary,
-        _compacted_item_count, _mode == Mode::PLAN, _persistence };
+        _compacted_item_count, _mode == Mode::PLAN, _persistence, _totals,
+        _last, _total_cost, _usage_log };
 }
 
 SessionSnapshot Session::snapshot() const
@@ -380,10 +411,12 @@ void Session::restore(SessionSnapshot snapshot)
         _retry_countdown.reset();
         _reasoning_start.reset();
         _turn_started.reset();
-        _phase                    = Phase::IDLE;
-        _totals                   = { };
-        _last                     = { };
-        _total_cost               = 0.0;
+        _phase      = Phase::IDLE;
+        _totals     = snapshot.totals;
+        _last       = snapshot.last;
+        _total_cost = snapshot.total_cost;
+        _usage_log  = std::move(snapshot.usage_log);
+        _entry_provider.clear();
         _title_generation_claimed = !_title.empty();
         _interrupt_requested.store(false);
         _next_tool_id        = 1;
@@ -1263,6 +1296,9 @@ void Session::apply(const StreamEvent& ev, const ModelPricing& pricing)
     case StreamEvent::Kind::DONE:
         if (auto* a = _last_assistant_locked()) {
             _finalize_reasoning(*a);
+            if (a->finished_at == std::chrono::system_clock::time_point { }) {
+                a->finished_at = std::chrono::system_clock::now();
+            }
         }
         break;
     case StreamEvent::Kind::ERROR:
@@ -1275,7 +1311,10 @@ void Session::apply(const StreamEvent& ev, const ModelPricing& pricing)
             _phase = Phase::STREAMING;
         }
         break;
-    case StreamEvent::Kind::USAGE: _update_usage(ev, pricing); break;
+    case StreamEvent::Kind::USAGE:
+        _update_usage(ev, pricing);
+        _dirty = true;
+        break;
     }
 }
 
@@ -1346,7 +1385,70 @@ void Session::_update_usage(
     _totals.prompt += usage_event.usage.prompt;
     _totals.completion += usage_event.usage.completion;
     _totals.total += usage_event.usage.total;
-    _total_cost += compute_cost(usage_event.usage, pricing);
+    const double cost = compute_cost(usage_event.usage, pricing);
+    _total_cost += cost;
+    // The trailing assistant turn carries this turn's requests.
+    if (AssistantTurn* turn = _last_assistant_locked()) {
+        UsageEntry entry;
+        entry.provider    = _entry_provider;
+        entry.model       = turn->model;
+        entry.usage       = usage_event.usage;
+        entry.cost        = cost;
+        entry.finished_at = std::chrono::system_clock::now();
+        if (turn->finished_at == std::chrono::system_clock::time_point { }) {
+            turn->finished_at = entry.finished_at;
+        }
+        turn->usage.push_back(entry);
+        _usage_log.push_back(std::move(entry));
+    }
+}
+
+std::vector<UsageEntry> Session::usage_log() const
+{
+    std::lock_guard lock(_mutex);
+    return _usage_log;
+}
+
+std::vector<UsageEntry> Session::drain_usage()
+{
+    std::lock_guard lock(_mutex);
+    // Zeroing the totals keeps a saved summary consistent with the now
+    // empty log: the cost moved to the parent, it did not stay here too.
+    _totals     = { };
+    _last       = { };
+    _total_cost = 0.0;
+    return std::move(_usage_log);
+}
+
+void Session::set_entry_provider(std::string provider)
+{
+    std::lock_guard lock(_mutex);
+    _entry_provider = std::move(provider);
+}
+
+void Session::add_usage(std::vector<UsageEntry> entries)
+{
+    if (entries.empty()) {
+        return;
+    }
+    std::lock_guard lock(_mutex);
+    _ensure_unique(_items);
+    AssistantTurn* turn = _last_assistant_locked();
+    for (UsageEntry& entry : entries) {
+        _totals.prompt += entry.usage.prompt;
+        _totals.completion += entry.usage.completion;
+        _totals.total += entry.usage.total;
+        _total_cost += entry.cost;
+        // The spawning turn carries the child's requests too, so turn
+        // views include subagent spend.
+        if (turn != nullptr) {
+            entry.model = entry.model.empty() ? turn->model : entry.model;
+            turn->usage.push_back(entry);
+        }
+    }
+    _usage_log.insert(_usage_log.end(),
+        std::make_move_iterator(entries.begin()),
+        std::make_move_iterator(entries.end()));
 }
 
 Signal<>::Subscription Session::subscribe_to_mode_change(

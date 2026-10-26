@@ -61,6 +61,9 @@ struct CanvasView {
     std::string title;
     std::vector<CanvasSeries> series;
     std::vector<std::vector<double>> grid;
+    // Bar charts: category label per slot when set; otherwise slots are
+    // labeled by their series (one value per series).
+    std::vector<std::string> categories;
 
     bool operator==(const CanvasView&) const = default;
 };

@@ -1102,6 +1102,9 @@ void run_slash(ApplicationState& state, std::string_view command)
         break;
     }
     case SlashCommand::Action::UNDO: undo_last(state); break;
+    case SlashCommand::Action::USAGE:
+        enqueue_user_modal(state, UsageModal { });
+        break;
     case SlashCommand::Action::CHANGELOG: {
         const std::optional<std::string> changelog = read_changelog();
         if (!changelog) {

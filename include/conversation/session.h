@@ -55,6 +55,10 @@ struct AssistantTurn {
     std::optional<std::chrono::milliseconds> reasoning_ms;
     std::string model;
     std::string reasoning_effort;
+    // Wall-clock finish time; epoch 0 when the turn predates tracking.
+    std::chrono::system_clock::time_point finished_at { };
+    // Every provider request this turn made (a tool loop produces several).
+    std::vector<UsageEntry> usage;
 };
 
 struct SubagentChat {
@@ -107,6 +111,23 @@ using ConversationItem = std::variant<UserTurn, AssistantTurn, ToolCall,
 std::optional<std::size_t> last_user_turn_index(
     const std::vector<ConversationItem>& items);
 
+// One user submission's usage: everything the agent spent between two
+// user messages (the whole tool loop, across model rounds, including
+// subagent work folded into the spawning turn). Usage recorded before
+// the first user message forms its own leading group.
+struct SubmissionUsage {
+    std::string model;
+    std::chrono::system_clock::time_point finished_at { };
+    std::uint64_t tokens = 0;
+    double cost          = 0.0;
+};
+
+// Groups a transcript into per-submission usage rows, in order. Groups
+// with no usage are dropped; the model and finish time label each group
+// from its last assistant turn.
+std::vector<SubmissionUsage> submission_usage(
+    const std::vector<ConversationItem>& items);
+
 struct UnsavedSession { };
 
 struct PersistedSession {
@@ -149,6 +170,10 @@ struct SessionSnapshot {
     std::size_t compacted_item_count = 0;
     bool plan_mode                   = true;
     SessionPersistence persistence   = UnsavedSession { };
+    Usage totals;
+    Usage last;
+    double total_cost = 0.0;
+    std::vector<UsageEntry> usage_log;
 };
 
 struct LoadedSession {
@@ -230,6 +255,18 @@ public:
     std::optional<SessionSnapshot> snapshot_for_save() const;
     void restore(SessionSnapshot snapshot);
     void set_persistence(SessionPersistence persistence);
+
+    // One entry per provider request this conversation made, including
+    // subagent work folded in.
+    std::vector<UsageEntry> usage_log() const;
+    // Folds finished entries in (a subagent's log) without re-computing
+    // cost.
+    void add_usage(std::vector<UsageEntry> entries);
+    // Moves the log out; handing entries to the parent this way cannot
+    // double-count them.
+    std::vector<UsageEntry> drain_usage();
+    // Provider id stamped on usage entries recorded for the current turn.
+    void set_entry_provider(std::string provider);
 
     void set_mode(Mode next_mode);
     void set_error(std::string msg);
@@ -433,6 +470,8 @@ private:
     Usage _totals;
     Usage _last;
     double _total_cost = 0.0;
+    std::vector<UsageEntry> _usage_log;
+    std::string _entry_provider;
 
     std::size_t _next_tool_id        = 1;
     std::size_t _next_compaction_id  = 1;

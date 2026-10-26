@@ -597,6 +597,7 @@ ftxui::Component make_subscription_signin(
     std::function<std::string()> label = { });
 ftxui::Component make_subagents(std::shared_ptr<ApplicationState> state);
 ftxui::Component make_sessions(std::shared_ptr<ApplicationState> state);
+ftxui::Component make_usage(std::shared_ptr<ApplicationState> state);
 ftxui::Component make_skills(std::shared_ptr<ApplicationState> state);
 ftxui::Component make_modal(std::shared_ptr<ApplicationState> state);
 // Sidechat column: owns its chat pane, modal host, focus state, and mouse

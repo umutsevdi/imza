@@ -528,6 +528,8 @@ namespace {
 
         void _build(const SessionsModal&) { _body = make_sessions(_state); }
 
+        void _build(const UsageModal&) { _body = make_usage(_state); }
+
         void _build(const SkillsModal&) { _body = make_skills(_state); }
 
         void _build(const McpModal&) { _body = make_mcp(_state); }

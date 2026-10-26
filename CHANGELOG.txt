@@ -11,6 +11,10 @@ CHANGELOG
 0.7.1 - Unreleased
 -------------------------------------------------------------------------------
 Changes:
+  - Each agent message now shows the tokens it used and the date right of
+    the model name, and the new /usage command opens a spending dashboard
+    with per-model and per-day charts for this session and all saved
+    sessions combined.
   - `/variant` now takes the reasoning effort right on the input line
     (`/variant high`) with autocomplete suggestions, instead of opening a
     picker dialog.

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -32,6 +33,19 @@ struct Usage {
     std::uint64_t cached_read  = 0;
     std::uint64_t cached_write = 0;
     std::uint64_t total        = 0;
+};
+
+// One provider request's usage, recorded per assistant turn and in the
+// session's analytics log. Provider identity rides along so global views
+// can group by vendor (and subscription vs pay-per-token), not just model.
+// The epoch-0 default marks entries that predate per-request timestamps;
+// per-day views fall back to their turn or save day.
+struct UsageEntry {
+    std::string provider;
+    std::string model;
+    Usage usage;
+    double cost = 0.0;
+    std::chrono::system_clock::time_point finished_at { };
 };
 
 struct ChatRequest {

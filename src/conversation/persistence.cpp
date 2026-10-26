@@ -11,6 +11,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -63,6 +64,45 @@ struct StoredDispatch {
     std::optional<bool> ok;
 };
 
+struct StoredUsageEntry {
+    std::optional<std::string> provider;
+    std::optional<std::string> model;
+    std::optional<std::uint64_t> prompt;
+    std::optional<std::uint64_t> completion;
+    std::optional<std::uint64_t> cached_read;
+    std::optional<std::uint64_t> cached_write;
+    std::optional<std::uint64_t> total;
+    std::optional<double> cost;
+    // Epoch seconds; absent in legacy files.
+    std::optional<std::int64_t> finished_at;
+};
+
+// One "provider + model" row of a session's usage summary.
+struct StoredModelUsage {
+    std::string provider;
+    std::string model;
+    std::uint64_t prompt     = 0;
+    std::uint64_t completion = 0;
+    std::uint64_t total      = 0;
+    double cost              = 0.0;
+};
+
+struct StoredDayUsage {
+    std::string day;
+    std::uint64_t total = 0;
+    double cost         = 0.0;
+    std::optional<std::vector<StoredModelUsage>> by_model;
+};
+
+struct StoredUsageSummary {
+    std::uint64_t prompt     = 0;
+    std::uint64_t completion = 0;
+    std::uint64_t total      = 0;
+    double cost              = 0.0;
+    std::optional<std::vector<StoredModelUsage>> by_model;
+    std::optional<std::vector<StoredDayUsage>> by_day;
+};
+
 struct StoredItem {
     std::string type;
     std::optional<std::string> text;
@@ -73,6 +113,9 @@ struct StoredItem {
     std::optional<std::int64_t> reasoning_ms;
     std::optional<std::string> model;
     std::optional<std::string> reasoning_effort;
+    // Epoch seconds; absent in legacy files (turn predates tracking).
+    std::optional<std::int64_t> finished_at;
+    std::optional<std::vector<StoredUsageEntry>> usage;
     std::optional<std::int64_t> id;
     std::optional<std::string> call_id;
     std::optional<std::string> name;
@@ -110,6 +153,9 @@ struct StoredSessionDoc {
     std::optional<std::string> mode;
     std::optional<std::string> workspace;
     std::optional<std::vector<StoredItem>> items;
+    // Absent fields load as zero so legacy files load.
+    std::optional<StoredUsageSummary> usage;
+    std::optional<std::vector<StoredUsageEntry>> usage_log;
 };
 
 namespace {
@@ -140,6 +186,132 @@ namespace {
             item.status = static_cast<TodoItem::Status>(entry.status);
         }
         return item;
+    }
+
+    StoredUsageEntry to_stored(const UsageEntry& entry)
+    {
+        StoredUsageEntry stored;
+        stored.provider     = entry.provider;
+        stored.model        = entry.model;
+        stored.prompt       = entry.usage.prompt;
+        stored.completion   = entry.usage.completion;
+        stored.cached_read  = entry.usage.cached_read;
+        stored.cached_write = entry.usage.cached_write;
+        stored.total        = entry.usage.total;
+        stored.cost         = entry.cost;
+        if (entry.finished_at != std::chrono::system_clock::time_point { }) {
+            stored.finished_at
+                = std::chrono::duration_cast<std::chrono::seconds>(
+                    entry.finished_at.time_since_epoch())
+                      .count();
+        }
+        return stored;
+    }
+
+    UsageEntry from_stored(const StoredUsageEntry& stored)
+    {
+        UsageEntry entry;
+        entry.provider           = stored.provider.value_or("");
+        entry.model              = stored.model.value_or("");
+        entry.usage.prompt       = stored.prompt.value_or(0);
+        entry.usage.completion   = stored.completion.value_or(0);
+        entry.usage.cached_read  = stored.cached_read.value_or(0);
+        entry.usage.cached_write = stored.cached_write.value_or(0);
+        entry.usage.total        = stored.total.value_or(0);
+        entry.cost               = stored.cost.value_or(0.0);
+        if (stored.finished_at) {
+            entry.finished_at = std::chrono::system_clock::time_point {
+                std::chrono::seconds(*stored.finished_at)
+            };
+        }
+        return entry;
+    }
+
+    StoredDayUsage to_stored(const UsageDayRow& row)
+    {
+        StoredDayUsage stored { row.day, row.total, row.cost, std::nullopt };
+        if (!row.by_model.empty()) {
+            stored.by_model
+                = map_all(row.by_model, [](const UsageModelRow& model) {
+                      return StoredModelUsage { model.provider, model.model,
+                          model.prompt, model.completion, model.total,
+                          model.cost };
+                  });
+        }
+        return stored;
+    }
+
+    // The one Stored <-> domain pair for summaries; every index and
+    // session-file path converts through these.
+    StoredUsageSummary to_stored(const UsageSummary& usage)
+    {
+        StoredUsageSummary stored;
+        stored.prompt     = usage.prompt;
+        stored.completion = usage.completion;
+        stored.total      = usage.total;
+        stored.cost       = usage.cost;
+        if (!usage.by_model.empty()) {
+            stored.by_model
+                = map_all(usage.by_model, [](const UsageModelRow& row) {
+                      return StoredModelUsage { row.provider, row.model,
+                          row.prompt, row.completion, row.total, row.cost };
+                  });
+        }
+        if (!usage.by_day.empty()) {
+            stored.by_day = map_all(usage.by_day,
+                [](const UsageDayRow& row) { return to_stored(row); });
+        }
+        return stored;
+    }
+
+    StoredUsageSummary to_stored(const GlobalUsageSummary& summary)
+    {
+        StoredUsageSummary stored;
+        stored.prompt     = summary.prompt;
+        stored.completion = summary.completion;
+        stored.total      = summary.total;
+        stored.cost       = summary.total_cost;
+        if (!summary.by_model.empty()) {
+            stored.by_model
+                = map_all(summary.by_model, [](const UsageBreakdownRow& row) {
+                      return StoredModelUsage { row.provider, row.model,
+                          row.prompt, row.completion, row.total, row.cost };
+                  });
+        }
+        if (!summary.by_day.empty()) {
+            stored.by_day = map_all(summary.by_day,
+                [](const UsageDayRow& row) { return to_stored(row); });
+        }
+        return stored;
+    }
+
+    UsageSummary from_stored(const StoredUsageSummary& stored)
+    {
+        UsageSummary usage;
+        usage.prompt     = stored.prompt;
+        usage.completion = stored.completion;
+        usage.total      = stored.total;
+        usage.cost       = stored.cost;
+        if (stored.by_model) {
+            for (const StoredModelUsage& row : *stored.by_model) {
+                usage.by_model.push_back({ row.provider, row.model, row.prompt,
+                    row.completion, row.total, row.cost });
+            }
+        }
+        if (stored.by_day) {
+            for (const StoredDayUsage& row : *stored.by_day) {
+                UsageDayRow day { row.day, row.total, row.cost, { } };
+                if (row.by_model) {
+                    for (const StoredModelUsage& model : *row.by_model) {
+                        day.by_model.push_back(
+                            { model.provider, model.model, model.prompt,
+                                model.completion, model.total, model.cost });
+                    }
+                }
+                usage.by_day.push_back(std::move(day));
+            }
+        }
+        return usage;
     }
 
     StoredAttachment to_stored(const Attachment& attachment)
@@ -243,6 +415,15 @@ namespace {
             stored.reasoning_signature = assistant->reasoning_signature;
             stored.model               = assistant->model;
             stored.reasoning_effort    = assistant->reasoning_effort;
+            if (assistant->finished_at
+                != std::chrono::system_clock::time_point { }) {
+                stored.finished_at
+                    = std::chrono::duration_cast<std::chrono::seconds>(
+                        assistant->finished_at.time_since_epoch())
+                          .count();
+            }
+            stored.usage = map_all(assistant->usage,
+                [](const UsageEntry& entry) { return to_stored(entry); });
             if (assistant->reasoning_ms) {
                 stored.reasoning_ms = assistant->reasoning_ms->count();
             }
@@ -354,6 +535,16 @@ namespace {
                 = stored.reasoning_signature.value_or("");
             assistant.model            = stored.model.value_or("");
             assistant.reasoning_effort = stored.reasoning_effort.value_or("");
+            if (stored.finished_at) {
+                assistant.finished_at = std::chrono::system_clock::time_point {
+                    std::chrono::seconds(*stored.finished_at)
+                };
+            }
+            if (stored.usage) {
+                for (const auto& entry : *stored.usage) {
+                    assistant.usage.push_back(from_stored(entry));
+                }
+            }
             if (stored.reasoning_ms) {
                 assistant.reasoning_ms
                     = std::chrono::milliseconds(*stored.reasoning_ms);
@@ -450,6 +641,8 @@ struct StoredIndexEntry {
     std::string file;
     std::string title;
     std::string saved_at;
+    // Absent in legacy indexes; treated as zero.
+    std::optional<StoredUsageSummary> usage;
 };
 
 struct StoredIndex {
@@ -483,8 +676,14 @@ namespace {
                 || !seen.insert(file_name.string()).second) {
                 return std::nullopt;
             }
-            sessions.push_back(
-                { sessions_dir() / file_name, entry.title, entry.saved_at });
+            SavedSession saved;
+            saved.path     = sessions_dir() / file_name;
+            saved.title    = entry.title;
+            saved.saved_at = entry.saved_at;
+            if (entry.usage) {
+                saved.usage = from_stored(*entry.usage);
+            }
+            sessions.push_back(std::move(saved));
         }
         sort_sessions(sessions);
         return sessions;
@@ -496,8 +695,9 @@ namespace {
         index.version = 1.0;
         index.sessions.reserve(sessions.size());
         for (const SavedSession& session : sessions) {
-            index.sessions.push_back({ session.path.filename().string(),
-                session.title, session.saved_at });
+            StoredIndexEntry entry { session.path.filename().string(),
+                session.title, session.saved_at, to_stored(session.usage) };
+            index.sessions.push_back(std::move(entry));
         }
         auto serialized = json_dump_checked(index);
         if (!serialized) {
@@ -563,7 +763,11 @@ namespace {
         if (title.empty()) {
             title = UNTITLED_TITLE;
         }
-        return SavedSession { path, std::move(title), doc.saved_at };
+        SavedSession saved { path, std::move(title), doc.saved_at };
+        if (doc.usage) {
+            saved.usage = from_stored(*doc.usage);
+        }
+        return saved;
     }
 
     std::vector<SavedSession> reconcile_index(
@@ -652,6 +856,9 @@ Status save_session(Session& session)
         = static_cast<std::int64_t>(snapshot.compacted_item_count);
     doc.mode      = snapshot.plan_mode ? "plan" : "build";
     doc.workspace = utf8_from_path(workspace);
+    doc.usage     = to_stored(summarize_usage(snapshot.usage_log));
+    doc.usage_log = map_all(
+        snapshot.usage_log, [](const UsageEntry& e) { return to_stored(e); });
     std::vector<StoredItem> items;
     for (auto& item : snapshot.items) {
         // A still-streaming tool call has no complete arguments and must
@@ -678,7 +885,8 @@ Status save_session(Session& session)
         return st;
     }
     session.set_persistence(PersistedSession { path });
-    const SavedSession saved { path, doc.title, doc.saved_at };
+    const SavedSession saved { path, doc.title, doc.saved_at,
+        from_stored(*doc.usage) };
     if (mutate_index([&](std::vector<SavedSession>& indexed) {
             // A re-save of the same run rewrites the same file, so replace
             // its index entry instead of duplicating it.
@@ -770,6 +978,30 @@ Status read_session(const std::filesystem::path& path, LoadedSession& loaded)
             }
         }
     }
+    if (doc.usage_log) {
+        for (const auto& entry : *doc.usage_log) {
+            snapshot.usage_log.push_back(from_stored(entry));
+        }
+    }
+    if (doc.usage) {
+        snapshot.totals.prompt     = doc.usage->prompt;
+        snapshot.totals.completion = doc.usage->completion;
+        snapshot.totals.total      = doc.usage->total;
+        snapshot.total_cost        = doc.usage->cost;
+    } else if (!snapshot.usage_log.empty()) {
+        // A log without a summary (crash between writes) still yields
+        // correct totals.
+        const GlobalUsageSummary derived = summarize_usage(snapshot.usage_log);
+        snapshot.totals.prompt           = derived.prompt;
+        snapshot.totals.completion       = derived.completion;
+        snapshot.totals.total            = derived.total;
+        snapshot.total_cost              = derived.total_cost;
+    }
+    // The last request's usage is the current context size; the log's
+    // newest entry restores it exactly.
+    if (!snapshot.usage_log.empty()) {
+        snapshot.last = snapshot.usage_log.back().usage;
+    }
     loaded = LoadedSession { std::move(snapshot), std::move(workspace) };
     return Status::OK;
 }
@@ -780,6 +1012,175 @@ std::vector<SavedSession> saved_sessions()
         return *indexed;
     }
     return reconcile_index();
+}
+
+// Sorts accumulated rows by provider then model, merging duplicates.
+template <typename Row> void merge_rollup_rows(std::vector<Row>& rows)
+{
+    std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) {
+        return std::tie(a.provider, a.model) < std::tie(b.provider, b.model);
+    });
+    rows.erase(std::unique(rows.begin(), rows.end(),
+                   [](const Row& a, const Row& b) {
+                       return a.provider == b.provider && a.model == b.model;
+                   }),
+        rows.end());
+}
+
+std::vector<UsageBreakdownRow> rollup_usage_by_model(
+    const std::vector<UsageEntry>& entries)
+{
+    std::map<std::pair<std::string, std::string>, UsageBreakdownRow> rows;
+    for (const UsageEntry& entry : entries) {
+        auto& row    = rows[{ entry.provider, entry.model }];
+        row.provider = entry.provider;
+        row.model    = entry.model;
+        row.prompt += entry.usage.prompt;
+        row.completion += entry.usage.completion;
+        row.total += entry.usage.total;
+        row.cost += entry.cost;
+    }
+    std::vector<UsageBreakdownRow> out;
+    out.reserve(rows.size());
+    for (auto& [key, row] : rows) {
+        out.push_back(std::move(row));
+    }
+    return out;
+}
+
+// Spend day of one entry: its own request timestamp, rendered in local
+// time so days match what the user saw. Entries that predate
+// per-request timestamps (epoch 0) have no day; their caller buckets
+// them from the session's save date instead.
+bool usage_entry_day(const UsageEntry& entry, std::string& day)
+{
+    if (entry.finished_at == std::chrono::system_clock::time_point { }) {
+        return false;
+    }
+    day = format_local_time(entry.finished_at, "%Y-%m-%d");
+    return true;
+}
+
+GlobalUsageSummary summarize_usage(const std::vector<UsageEntry>& entries)
+{
+    GlobalUsageSummary out;
+    std::map<std::string, UsageDayRow> by_day;
+    // The day's own model breakdown feeds stacked charts; accumulated
+    // per (provider, model) so repeat requests join their segment.
+    std::map<std::string,
+        std::map<std::pair<std::string, std::string>, UsageModelRow>>
+        day_models;
+    for (const UsageEntry& entry : entries) {
+        out.prompt += entry.usage.prompt;
+        out.completion += entry.usage.completion;
+        out.total += entry.usage.total;
+        out.total_cost += entry.cost;
+        // Legacy entries carry no request date; "1970-01-01" is their
+        // epoch bucket, sorting before every real day.
+        std::string day = "1970-01-01";
+        usage_entry_day(entry, day);
+        UsageDayRow& row = by_day[day];
+        row.day          = day;
+        row.total += entry.usage.total;
+        row.cost += entry.cost;
+        auto& model    = day_models[day][{ entry.provider, entry.model }];
+        model.provider = entry.provider;
+        model.model    = entry.model;
+        model.total += entry.usage.total;
+        model.cost += entry.cost;
+    }
+    out.by_model = rollup_usage_by_model(entries);
+    for (auto& [day, row] : by_day) {
+        auto& rows = day_models[day];
+        row.by_model.reserve(rows.size());
+        for (auto& [key, model] : rows) {
+            row.by_model.push_back(std::move(model));
+        }
+        out.by_day.push_back(std::move(row));
+    }
+    return out;
+}
+
+GlobalUsageSummary summarize_saved_usage(const std::vector<SavedSession>& saved)
+{
+    GlobalUsageSummary out;
+    std::map<std::string, UsageDayRow> by_day;
+    // Day model rows summed per (provider, model): sessions can overlap
+    // on a day, and stacked charts need one segment per model.
+    std::map<std::string,
+        std::map<std::pair<std::string, std::string>, UsageModelRow>>
+        day_models;
+    for (const SavedSession& saved : saved) {
+        out.prompt += saved.usage.prompt;
+        out.completion += saved.usage.completion;
+        out.total += saved.usage.total;
+        out.total_cost += saved.usage.cost;
+        for (const UsageModelRow& row : saved.usage.by_model) {
+            auto& agg      = out.by_model.emplace_back();
+            agg.provider   = row.provider;
+            agg.model      = row.model;
+            agg.prompt     = row.prompt;
+            agg.completion = row.completion;
+            agg.total      = row.total;
+            agg.cost       = row.cost;
+        }
+        // Index entries written before per-day buckets existed: fall back
+        // to the save day so the chart still sees their usage. saved_at
+        // is "%Y-%m-%d %H:%M:%S".
+        const std::string fallback_day
+            = saved.saved_at.size() >= 10 ? saved.saved_at.substr(0, 10) : "";
+        if (!saved.usage.by_day.empty()) {
+            for (const UsageDayRow& row : saved.usage.by_day) {
+                auto& agg = by_day[row.day];
+                agg.day   = row.day;
+                agg.total += row.total;
+                agg.cost += row.cost;
+                for (const UsageModelRow& model : row.by_model) {
+                    auto& segment
+                        = day_models[row.day][{ model.provider, model.model }];
+                    segment.provider = model.provider;
+                    segment.model    = model.model;
+                    segment.prompt += model.prompt;
+                    segment.completion += model.completion;
+                    segment.total += model.total;
+                    segment.cost += model.cost;
+                }
+            }
+        } else if (!fallback_day.empty()
+            && (saved.usage.total > 0 || saved.usage.cost > 0.0)) {
+            auto& agg = by_day[fallback_day];
+            agg.day   = fallback_day;
+            agg.total += saved.usage.total;
+            agg.cost += saved.usage.cost;
+            // Legacy bucket: the session's model rows are the best
+            // attribution its usage has.
+            for (const UsageModelRow& model : saved.usage.by_model) {
+                auto& segment
+                    = day_models[fallback_day][{ model.provider, model.model }];
+                segment.provider = model.provider;
+                segment.model    = model.model;
+                segment.prompt += model.prompt;
+                segment.completion += model.completion;
+                segment.total += model.total;
+                segment.cost += model.cost;
+            }
+        }
+    }
+    merge_rollup_rows(out.by_model);
+    for (auto& [day, row] : by_day) {
+        auto& rows = day_models[day];
+        row.by_model.reserve(rows.size());
+        for (auto& [key, model] : rows) {
+            row.by_model.push_back(std::move(model));
+        }
+        out.by_day.push_back(std::move(row));
+    }
+    return out;
+}
+
+GlobalUsageSummary global_usage_summary()
+{
+    return summarize_saved_usage(saved_sessions());
 }
 
 bool session_file_locked(const std::filesystem::path& path)

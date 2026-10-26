@@ -1168,10 +1168,27 @@ namespace {
             std::max(40, (std::max(available_width, 20) - 2) * CELL_X));
     }
 
+    // Human-scale axis number, matching compact_number's K/M style;
+    // scientific notation is unreadable at a glance.
     std::string axis_label(double value)
     {
+        const double magnitude = std::abs(value);
         char buffer[32];
-        std::snprintf(buffer, sizeof(buffer), "%.4g", value);
+        if (magnitude >= 1'000'000'000.0) {
+            std::snprintf(buffer, sizeof(buffer), "%.1fB", value / 1e9);
+        } else if (magnitude >= 1'000'000.0) {
+            std::snprintf(buffer, sizeof(buffer), "%.2fM", value / 1e6);
+        } else if (magnitude >= 10'000.0) {
+            std::snprintf(buffer, sizeof(buffer), "%.0fK", value / 1e3);
+        } else if (magnitude >= 100.0) {
+            std::snprintf(buffer, sizeof(buffer), "%.0f", value);
+        } else if (magnitude >= 1.0) {
+            std::snprintf(buffer, sizeof(buffer), "%.1f", value);
+        } else if (magnitude == 0.0) {
+            return "0";
+        } else {
+            std::snprintf(buffer, sizeof(buffer), "%.2f", value);
+        }
         return buffer;
     }
 
@@ -1203,6 +1220,11 @@ namespace {
                 }
                 first = false;
             }
+        }
+        // Counts never go below zero; anchoring the axis there keeps the
+        // curve's slope honest instead of magnifying day-to-day noise.
+        if (vmin > 0.0) {
+            vmin = 0.0;
         }
         if (vmin == vmax) {
             vmin -= 1;
@@ -1246,14 +1268,34 @@ namespace {
         return canvas(std::move(c));
     }
 
+    // Sum of every series' value at slot `i` (stacked mode) or the
+    // single series value (classic mode).
+    double slot_value(const CanvasView& view, int i)
+    {
+        if (!view.categories.empty()) {
+            double sum = 0.0;
+            for (const CanvasSeries& series : view.series) {
+                if (i < int(series.values.size())) {
+                    sum += series.values[std::size_t(i)];
+                }
+            }
+            return sum;
+        }
+        return i < int(view.series.size())
+            ? category_value(view.series[std::size_t(i)])
+            : 0.0;
+    }
+
     Element render_bar(const CanvasView& view, int width_px)
     {
         Canvas c(width_px, CHART_HEIGHT);
-        double vmin = 0;
-        double vmax = 0;
-        for (const CanvasSeries& point : view.series) {
-            vmin = std::min(vmin, category_value(point));
-            vmax = std::max(vmax, category_value(point));
+        double vmin     = 0;
+        double vmax     = 0;
+        const int slots = view.categories.empty() ? int(view.series.size())
+                                                  : int(view.categories.size());
+        for (int i = 0; i < slots; ++i) {
+            vmax = std::max(vmax, slot_value(view, i));
+            vmin = std::min(vmin, slot_value(view, i));
         }
         if (vmin == vmax) {
             vmax += 1;
@@ -1271,30 +1313,54 @@ namespace {
         c.DrawText(0, top, axis_label(vmax), PANEL_FG_DIM);
         c.DrawText(0, bottom - CELL_Y, axis_label(vmin), PANEL_FG_DIM);
 
-        const int n     = int(view.series.size());
         const int span  = right - left;
-        const int slot  = std::max(1, span / std::max(1, n));
+        const int slot  = std::max(1, span / std::max(1, slots));
         const int gap   = std::min(4, slot / 4);
-        const int x_end = left + n * slot;
-        for (int i = 0; i < n; ++i) {
-            const int x0     = left + i * slot + gap;
-            const int x1     = std::min(x_end - gap, x0 + slot - 2 * gap);
-            const int y0     = block_y(category_value(view.series[i]));
-            const int y1     = block_y(0);
-            const Color tone = series_color(std::size_t(i));
-            for (int x = x0; x <= x1; ++x) {
-                c.DrawBlockLine(x, y0, x, y1, tone);
+        const int x_end = left + slots * slot;
+        for (int i = 0; i < slots; ++i) {
+            const int x0 = left + i * slot + gap;
+            const int x1 = std::min(x_end - gap, x0 + slot - 2 * gap);
+            if (view.categories.empty()) {
+                // One series per slot.
+                const int y0
+                    = block_y(category_value(view.series[std::size_t(i)]));
+                const Color tone = series_color(std::size_t(i));
+                for (int x = x0; x <= x1; ++x) {
+                    c.DrawBlockLine(x, y0, x, block_y(0), tone);
+                }
+                continue;
+            }
+            // Stacked: each series adds a segment from the running top.
+            double running = 0.0;
+            for (std::size_t s = 0; s < view.series.size(); ++s) {
+                const CanvasSeries& series = view.series[s];
+                if (i >= int(series.values.size())) {
+                    continue;
+                }
+                const double value = series.values[std::size_t(i)];
+                if (value <= 0.0) {
+                    continue;
+                }
+                const int y0     = block_y(running + value);
+                const int y1     = block_y(running);
+                const Color tone = series_color(s);
+                for (int x = x0; x <= x1; ++x) {
+                    c.DrawBlockLine(x, y0, x, y1, tone);
+                }
+                running += value;
             }
         }
         // Category labels below the axis, thinned so each drawn label
         // keeps at least four cells and truncated to its slot.
         const int fit         = std::max(1, span / (4 * CELL_X));
-        const int step        = std::max(1, (n + fit - 1) / fit);
+        const int step        = std::max(1, (slots + fit - 1) / fit);
         const int label_cells = std::max(2, slot * step / CELL_X - 1);
-        for (int i = 0; i < n; i += step) {
+        for (int i = 0; i < slots; i += step) {
+            const std::string& label = view.categories.empty()
+                ? view.series[std::size_t(i)].label
+                : view.categories[std::size_t(i)];
             c.DrawText((left + i * slot) & ~1, bottom + CELL_Y,
-                view.series[i].label.substr(0, std::size_t(label_cells)),
-                PANEL_FG_DIM);
+                label.substr(0, std::size_t(label_cells)), PANEL_FG_DIM);
         }
         return canvas(std::move(c));
     }
@@ -1419,6 +1485,15 @@ Element canvas_chart(const CanvasView& view, int available_width)
         break;
     case CanvasView::Kind::BAR:
         rows.push_back(render_bar(view, width_px));
+        // Stacked bars label series (models), not slots (days).
+        if (!view.categories.empty()) {
+            for (std::size_t s = 0; s < view.series.size(); ++s) {
+                if (!view.series[s].label.empty()) {
+                    legend_items.emplace_back(
+                        view.series[s].label, series_color(s));
+                }
+            }
+        }
         break;
     case CanvasView::Kind::PIE:
         rows.push_back(render_pie(view, width_px));

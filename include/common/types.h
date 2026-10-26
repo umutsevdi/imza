@@ -126,10 +126,49 @@ struct Attachment {
     }
 };
 
+// Usage totals for one provider/model pair within a session.
+struct UsageModelRow {
+    std::string provider;
+    std::string model;
+    std::uint64_t prompt     = 0;
+    std::uint64_t completion = 0;
+    std::uint64_t total      = 0;
+    double cost              = 0.0;
+
+    bool operator==(const UsageModelRow&) const = default;
+};
+
+// Usage attributed to one day ("YYYY-MM-DD"); by_model breaks the day's
+// tokens and cost down per (provider, model) so charts can stack them.
+struct UsageDayRow {
+    std::string day;
+    std::uint64_t total = 0;
+    double cost         = 0.0;
+    std::vector<UsageModelRow> by_model;
+
+    bool operator==(const UsageDayRow&) const = default;
+};
+
+// Per-session usage summary stored in the index entry, so global
+// analytics read only the index file.
+struct UsageSummary {
+    std::uint64_t prompt     = 0;
+    std::uint64_t completion = 0;
+    std::uint64_t total      = 0;
+    double cost              = 0.0;
+    std::vector<UsageModelRow> by_model;
+    // Cost by spend day, ordered ascending. Entries whose request has no
+    // timestamp (legacy logs) fall back to the save day.
+    std::vector<UsageDayRow> by_day;
+
+    bool operator==(const UsageSummary&) const = default;
+};
+
 struct SavedSession {
     std::filesystem::path path;
     std::string title;
     std::string saved_at;
+    UsageSummary usage;
 
     bool operator==(const SavedSession&) const = default;
 };

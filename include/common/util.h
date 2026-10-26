@@ -117,14 +117,19 @@ inline std::tm local_tm(std::time_t value)
     return local;
 }
 
-inline std::string format_local_time(const char* fmt)
+inline std::string format_local_time(
+    std::chrono::system_clock::time_point point, const char* fmt)
 {
-    const auto now          = std::chrono::system_clock::now();
-    const std::time_t value = std::chrono::system_clock::to_time_t(now);
+    const std::time_t value = std::chrono::system_clock::to_time_t(point);
     const std::tm local     = local_tm(value);
     std::ostringstream out;
     out << std::put_time(&local, fmt);
     return out.str();
+}
+
+inline std::string format_local_time(const char* fmt)
+{
+    return format_local_time(std::chrono::system_clock::now(), fmt);
 }
 
 // Expands ${VAR} and ${VAR:-default} from the environment; unmatched

@@ -353,6 +353,12 @@ void TurnRunner::spawn_compaction(TurnSettings settings)
 void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
 {
     _authenticate_route(settings);
+    for (const ConnectionView& view : _state->providers->connections()) {
+        if (view.id == settings.connection_id) {
+            _state->session->set_entry_provider(view.provider);
+            break;
+        }
+    }
     int retries                 = 0;
     std::uint64_t prompt_tokens = 0;
     for (;;) {

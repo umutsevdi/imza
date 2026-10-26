@@ -348,7 +348,8 @@ TEST_CASE("revise works repeatedly with and without a plan change")
     const auto submitted = [&fx](std::string_view needle) {
         for (const auto& item : *fx.state->session->items()) {
             const auto* user = std::get_if<imza::UserTurn>(&item);
-            if (user != nullptr && user->text.find(needle) != std::string::npos) {
+            if (user != nullptr
+                && user->text.find(needle) != std::string::npos) {
                 return true;
             }
         }

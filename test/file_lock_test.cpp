@@ -29,7 +29,7 @@ TEST_CASE("acquired lock blocks a second holder until released")
         // the blocking attempt that follows proves release wakes the waiter.
         auto probe = imza::acquire_file_lock(
             path, { imza::FileLockMode::EXCLUSIVE, false });
-        rejected = std::holds_alternative<imza::FileLockError>(probe);
+        rejected  = std::holds_alternative<imza::FileLockError>(probe);
         auto lock = imza::acquire_file_lock(path);
         acquired  = std::holds_alternative<imza::FileLock>(lock);
     });

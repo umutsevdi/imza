@@ -402,6 +402,7 @@ add_library(imza_ui
     src/ui/modals/skills.cpp
     src/ui/modals/subagents.cpp
     src/ui/modals/tools.cpp
+    src/ui/modals/usage.cpp
     src/ui/one_shot_output.cpp
     src/ui/review_syntax.cpp
     src/ui/scroll.cpp

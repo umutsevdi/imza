@@ -18,15 +18,17 @@ namespace {
     constexpr std::array<std::string_view, 3> VARIANT_ALIASES { "reasoning",
         "effort", "reasoning-effort" };
     constexpr std::array<std::string_view, 1> MODEL_ALIASES { "models" };
-    constexpr std::array<std::string_view, 1> SESSIONS_ALIASES { "resume" };
+    constexpr std::array<std::string_view, 2> SESSIONS_ALIASES { "resume",
+        "continue" };
     constexpr std::array<std::string_view, 1> SUBAGENTS_ALIASES { "agents" };
     constexpr std::array<std::string_view, 2> CONNECT_ALIASES { "login",
         "auth" };
-    constexpr std::array<std::string_view, 2> CHDIR_ALIASES { "dir",
+    constexpr std::array<std::string_view, 3> CHDIR_ALIASES { "dir", "chdir",
         "directory" };
     constexpr std::array<std::string_view, 1> AUTO_ALIASES { "approvals" };
     constexpr std::array<std::string_view, 2> AUTO_CHOICES { "on", "off" };
     constexpr std::array<std::string_view, 1> UNDO_ALIASES { "revert" };
+    constexpr std::array<std::string_view, 1> USAGE_ALIASES { "spend" };
 
     // The query without its leading slash, lowercased.
     std::string command_key(std::string_view query)
@@ -100,6 +102,8 @@ std::span<const SlashCommand> slash_commands()
             SlashCommand::Action::MAKE_SKILL, true },
         { "/undo", "revert the last file change the agent made",
             SlashCommand::Action::UNDO, false, UNDO_ALIASES },
+        { "/usage", "show session and lifetime token/cost analytics",
+            SlashCommand::Action::USAGE, false, USAGE_ALIASES },
         { "/changelog", "show the version history",
             SlashCommand::Action::CHANGELOG },
         { "/exit", "quit imza", SlashCommand::Action::EXIT, false,
