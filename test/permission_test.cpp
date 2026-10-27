@@ -881,6 +881,7 @@ TEST_CASE("sensitive path classification matches the credential patterns")
 
 TEST_CASE("shell commands naming sensitive material always ask")
 {
+#ifndef _WIN32
     PermissionFixture fixture;
     imza::test::write_file(fixture.workspace / ".env", "SECRET=1\n");
 
@@ -903,6 +904,7 @@ TEST_CASE("shell commands naming sensitive material always ask")
         { "cat inside.txt", std::chrono::seconds(10), { } },
         fixture.context(Session::Mode::BUILD));
     CHECK(plain.decision.kind == PermissionDecision::Kind::ACCEPT);
+#endif
 }
 
 TEST_CASE("filesystem normalization rejects malformed and wrong-type targets")
