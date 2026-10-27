@@ -44,7 +44,7 @@ struct LuaToolArgs {
 inline constexpr std::string_view LUA_ARGS_ERROR
     = "lua: expected a non-empty 'script' string";
 inline constexpr std::string_view LOAD_ARGS_ERROR
-    = "load: expected a module name";
+    = "load_module: expected a module name";
 inline constexpr std::string_view LOAD_MCP_ARGS_ERROR
     = "load_mcp: expected a server id";
 inline constexpr std::string_view SUBAGENT_ARGS_ERROR

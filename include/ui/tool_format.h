@@ -46,6 +46,10 @@ std::string tool_display_name(const std::string& name);
 std::string tool_args_summary(const std::string& args);
 std::string tool_call_head(const ToolCall& call);
 std::string tool_header_args(const ToolCall& call);
+// Loader detection across roster generations: persisted transcripts
+// from before the rename still say "skill" and "load".
+bool is_skill_call(const std::string& name);
+bool is_module_call(const std::string& name);
 
 // Card detail for a lua tool call: the binding dispatch log collapsed
 // to "N tools (M failed)"; empty when there are no logged calls.

@@ -129,7 +129,9 @@ TEST_CASE("system prompt advertises active skills and hides denied skills")
     CHECK(
         prompt.find("docs [global]: Write documentation") != std::string::npos);
     CHECK(prompt.find("secret [global]") == std::string::npos);
-    CHECK(prompt.find("`skill` tool") != std::string::npos);
+    CHECK(prompt.find("`load_skill` tool") != std::string::npos);
+    CHECK(prompt.find("not skills; load them with the `load_module` tool")
+        != std::string::npos);
 }
 
 TEST_CASE("subagent prompts enforce role policies")

@@ -778,7 +778,7 @@ namespace {
         void _open_viewer_for(const ToolCall& tc)
         {
             ViewerModal vm { tool_call_head(tc), tc.result->text,
-                tc.name == "skill" ? "markdown" : "", 1, tc.name != "lua" };
+                is_skill_call(tc.name) ? "markdown" : "", 1, tc.name != "lua" };
             if (tc.name == "lua") {
                 vm.content   = lua_viewer_content(tc);
                 vm.lang      = "markdown";
@@ -1028,9 +1028,7 @@ namespace {
         Element _tool_header_element(const ToolCall& tc)
         {
             Elements parts {
-                text(tc.name == "skill" ? "Load Skill"
-                                        : tool_display_name(tc.name))
-                    | bold | color(HL_GREEN),
+                text(tool_display_name(tc.name)) | bold | color(HL_GREEN),
                 text(" "),
                 text(_header_args_text(tc)) | color(PANEL_FG_DIM),
             };
@@ -1335,9 +1333,7 @@ namespace {
             const ToolCall& tc, std::string detail)
         {
             return _memoized_button(_read_buttons, tc.id, [&] {
-                std::string name     = tc.name == "skill"
-                    ? "Load Skill"
-                    : tool_display_name(tc.name);
+                std::string name     = tool_display_name(tc.name);
                 const std::size_t id = tc.id;
                 return split_hover_link(
                     std::move(name), std::move(detail), [this, id] {

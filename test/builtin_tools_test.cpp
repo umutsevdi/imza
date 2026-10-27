@@ -13,10 +13,10 @@ TEST_CASE("builtin tools expose the current tool set")
     auto state       = imza::make_lua_state();
     const auto tools = imza::default_tools({ }, { }, { }, *state);
 
-    REQUIRE(find_tool(tools, "skill") != nullptr);
+    REQUIRE(find_tool(tools, "load_skill") != nullptr);
     REQUIRE(find_tool(tools, "subagent") != nullptr);
     REQUIRE(find_tool(tools, "lua") != nullptr);
-    REQUIRE(find_tool(tools, "load") != nullptr);
+    REQUIRE(find_tool(tools, "load_module") != nullptr);
     CHECK(find_tool(tools, "read") == nullptr);
     CHECK(find_tool(tools, "list") == nullptr);
     CHECK(find_tool(tools, "find") == nullptr);
@@ -50,16 +50,16 @@ TEST_CASE("the skill tool handler reads instructions and records the load")
 
     const auto tool = imza::make_skill_tool(std::move(deps));
     const auto out
-        = tool.run({ "skill", R"json({"name":"docs"})json", "", "" });
+        = tool.run({ "load_skill", R"json({"name":"docs"})json", "", "" });
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(out.text.find("documented workflow") != std::string::npos);
     // Loading through the tool records the skill so the gate stops asking.
     CHECK(session->is_skill_loaded(path));
 
     const auto missing
-        = tool.run({ "skill", R"json({"name":"absent"})json", "", "" });
+        = tool.run({ "load_skill", R"json({"name":"absent"})json", "", "" });
     CHECK(missing.kind == imza::ToolOutput::Kind::ERROR);
-    CHECK(missing.text == "skill: unknown or unavailable skill");
+    CHECK(missing.text == "load_skill: unknown or unavailable skill");
 }
 
 TEST_CASE("the skill tool reads instructions without a store")
@@ -73,7 +73,7 @@ TEST_CASE("the skill tool reads instructions without a store")
     deps.catalog    = [skill] { return std::vector<imza::Skill> { skill }; };
     const auto tool = imza::make_skill_tool(std::move(deps));
     const auto out
-        = tool.run({ "skill", R"json({"name":"docs"})json", "", "" });
+        = tool.run({ "load_skill", R"json({"name":"docs"})json", "", "" });
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(out.text.find("instructions") != std::string::npos);
 }

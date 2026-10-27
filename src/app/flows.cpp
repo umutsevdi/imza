@@ -108,7 +108,7 @@ namespace {
         args.name = skill.name;
         args.scope
             = skill.scope == Skill::Scope::PROJECT ? "project" : "global";
-        return { "skill", json_dump(args), "Load skill " + skill.name,
+        return { "load_skill", json_dump(args), "Load skill " + skill.name,
             "manual-skill" };
     }
 
@@ -120,7 +120,7 @@ namespace {
         args.name  = details.name;
         args.scope = details.scope;
         args.path  = details.path;
-        return { "skill", json_dump(args), prompt.description, prompt.id };
+        return { "load_skill", json_dump(args), prompt.description, prompt.id };
     }
 
     void submit_with_skills(ApplicationState& state, std::string text,

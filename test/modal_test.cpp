@@ -691,7 +691,7 @@ TEST_CASE("skill approval modal shows the skill identity and its choices")
 {
     AgentEnv env;
     imza::PermissionPrompt prompt;
-    prompt.name              = "skill";
+    prompt.name              = "load_skill";
     prompt.description       = "Load skill docs";
     prompt.reason            = "skill instructions require approval";
     prompt.allow_for_session = true;
@@ -715,6 +715,7 @@ TEST_CASE("skill approval modal shows the skill identity and its choices")
     CHECK(flat.find("Load skill docs") != std::string::npos);
     CHECK(
         flat.find("skill instructions require approval") != std::string::npos);
+    CHECK(flat.find("Load Skill") != std::string::npos);
     CHECK(flat.find("docs") != std::string::npos);
     // The session-wide choice is offered because the prompt allows it.
     CHECK(flat.find("session") != std::string::npos);

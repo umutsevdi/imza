@@ -202,10 +202,27 @@ TEST_CASE("tool_args_summary formats object and non-object args")
 
 TEST_CASE("tool_call_head special-cases roster tools, args otherwise")
 {
-    imza::ToolCall skill { 1, "", "skill",
+    imza::ToolCall skill { 1, "", "load_skill",
         R"({"name":"code-review","scope":"project"})", { } };
     CHECK(imza::tool_call_head(skill) == "Load Skill code-review");
     CHECK(imza::tool_header_args(skill) == "code-review");
+
+    // Pre-rename records keep their loader labels instead of falling
+    // through to key=value.
+    imza::ToolCall legacy_skill { 1, "", "skill",
+        R"({"name":"code-review","scope":"project"})", { } };
+    CHECK(imza::tool_call_head(legacy_skill) == "Load Skill code-review");
+
+    imza::ToolCall module { 1, "", "load_module", R"({"name":"plan"})", { } };
+    CHECK(imza::tool_call_head(module) == "Load Module plan");
+    CHECK(imza::tool_header_args(module) == "plan");
+
+    imza::ToolCall legacy_module { 1, "", "load", R"({"name":"canvas"})", { } };
+    CHECK(imza::tool_call_head(legacy_module) == "Load Module canvas");
+
+    imza::ToolCall mcp { 1, "", "load_mcp", R"({"server":"cloudflare"})", { } };
+    CHECK(imza::tool_call_head(mcp) == "Load MCP cloudflare");
+    CHECK(imza::tool_header_args(mcp) == "cloudflare");
 
     imza::ToolCall subagent { 1, "", "subagent",
         R"({"tasks":[{"mode":"research","prompt":"Inspect parser behavior"},{"mode":"build","prompt":"Implement the fix"}]})",

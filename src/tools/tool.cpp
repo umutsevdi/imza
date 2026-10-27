@@ -182,7 +182,7 @@ std::optional<std::string> validate_subagent_tool_arguments(
 Tool make_skill_tool(SkillToolDeps deps)
 {
     ToolSpec spec;
-    spec.name        = "skill";
+    spec.name        = "load_skill";
     spec.description = "Load the instructions for a discovered skill by name. "
                        "Optionally specify scope as project or global.";
     spec.parameters
@@ -193,19 +193,19 @@ Tool make_skill_tool(SkillToolDeps deps)
         [deps = std::move(deps)](const ToolCallRequest& req) -> ToolOutput {
             SkillToolArgs args;
             if (json_parse_checked(req.args, args)) {
-                return tool_error("skill: expected a name");
+                return tool_error("load_skill: expected a name");
             }
             const std::vector<Skill> catalog
                 = deps.catalog ? deps.catalog() : std::vector<Skill> { };
             const std::optional<Skill> skill = resolve_skill(catalog, args);
             if (!skill) {
-                return tool_error("skill: unknown or unavailable skill");
+                return tool_error("load_skill: unknown or unavailable skill");
             }
             std::string reason;
             const std::optional<std::string> body
                 = load_skill_checked(*skill, reason);
             if (!body) {
-                return tool_error("skill: " + reason);
+                return tool_error("load_skill: " + reason);
             }
             if (deps.session) {
                 const std::optional<std::filesystem::path> path
@@ -220,7 +220,7 @@ Tool make_skill_tool(SkillToolDeps deps)
 Tool make_load_tool(LuaState& state)
 {
     ToolSpec spec;
-    spec.name        = "load";
+    spec.name        = "load_module";
     spec.description = "Load the documentation for a Lua module by name. "
                        "Returns the module's TYPES and METHODS reference; "
                        "call it before first use of any module listed under "
@@ -246,7 +246,7 @@ Tool make_load_tool(LuaState& state)
                     available += module.name;
                 }
                 return tool_error(
-                    "load: unknown module, available: " + available);
+                    "load_module: unknown module, available: " + available);
             } };
 }
 

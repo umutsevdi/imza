@@ -115,7 +115,7 @@ TEST_CASE("load returns module documentation while bindings are always present")
     const Tool load = make_load_tool(*state);
 
     const ToolOutput canvas
-        = load.run({ "load", R"json({"name":"canvas"})json", "", "" });
+        = load.run({ "load_module", R"json({"name":"canvas"})json", "", "" });
     CHECK(canvas.kind == ToolOutput::Kind::OUTPUT);
     for (const LuaMethod& method : canvas_module().methods) {
         CHECK(canvas.text.find(
@@ -123,7 +123,7 @@ TEST_CASE("load returns module documentation while bindings are always present")
             != std::string::npos);
     }
     const ToolOutput plan
-        = load.run({ "load", R"json({"name":"plan"})json", "", "" });
+        = load.run({ "load_module", R"json({"name":"plan"})json", "", "" });
     CHECK(plan.kind == ToolOutput::Kind::OUTPUT);
     CHECK(plan.text.find("imza.plan.create(") != std::string::npos);
     CHECK(plan.text.find("imza.plan.edit(") != std::string::npos);
@@ -135,9 +135,10 @@ TEST_CASE("load returns module documentation while bindings are always present")
     CHECK(plan.text.find("ready for build") == std::string::npos);
 
     const ToolOutput unknown
-        = load.run({ "load", R"json({"name":"unknown"})json", "", "" });
+        = load.run({ "load_module", R"json({"name":"unknown"})json", "", "" });
     CHECK(unknown.kind == ToolOutput::Kind::ERROR);
-    CHECK(unknown.text.find("load: unknown module") != std::string::npos);
+    CHECK(
+        unknown.text.find("load_module: unknown module") != std::string::npos);
 }
 
 } // namespace imza

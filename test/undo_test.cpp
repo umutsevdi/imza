@@ -593,7 +593,7 @@ TEST_CASE("a prompt outside a turn leaves the session idle")
 
     // A rejected skill prompt took the same path.
     imza::PermissionPrompt skill;
-    skill.name    = "skill";
+    skill.name    = "load_skill";
     skill.id      = "manual-skill";
     skill.request = imza::SkillRequest { "docs", "project", "/tmp/SKILL.md" };
     imza::enqueue_user_modal(*env.state, skill);

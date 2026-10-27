@@ -35,13 +35,27 @@ namespace {
         return std::filesystem::path(sys.default_shell).filename().string();
     }
 
+    // The MCP server id rides in the title; other labels come straight
+    // from the shared display name.
+    std::string modal_tool_header(const PermissionPrompt& req)
+    {
+        if (req.name == "load_mcp") {
+            std::string label = tool_display_name(req.name);
+            if (!req.target.empty()) {
+                label += " " + req.target;
+            }
+            return label;
+        }
+        return tool_display_name(req.name);
+    }
+
     std::string tool_action_description(const PermissionPrompt& req)
     {
         if (!req.description.empty() && req.description != req.name) {
             return req.description;
         }
-        if (req.name == "skill") {
-            return "Allow this tool to run";
+        if (is_skill_call(req.name)) {
+            return "Load a skill";
         }
         if (req.name == "shell") {
             return "Run a shell command";
@@ -651,7 +665,7 @@ namespace {
 
         Element _tool_body(const PermissionPrompt& req)
         {
-            Elements rows { _header_line(tool_display_name(req.name)),
+            Elements rows { _header_line(modal_tool_header(req)),
                 _tool_static };
             if (_tool_phase == ToolPhase::REASON) {
                 rows.push_back(section_title("Reason for rejecting", PANEL_FG));

@@ -33,7 +33,7 @@ namespace {
         PermissionStore::Grants grants, SkillRequest details)
     {
         PermissionPrompt prompt;
-        prompt.name              = "skill";
+        prompt.name              = "load_skill";
         prompt.description       = request.description;
         prompt.reason            = reason;
         prompt.allow_for_session = !grants.empty();
@@ -101,19 +101,21 @@ namespace {
     {
         SkillToolArgs arguments;
         if (json_parse_checked(original.args, arguments)) {
-            return reject(original, "skill: unknown or unavailable skill");
+            return reject(original, "load_skill: unknown or unavailable skill");
         }
         const std::optional<Skill> skill = resolve_skill(skills, arguments);
         if (!skill) {
-            return reject(original, "skill: unknown or unavailable skill");
+            return reject(original, "load_skill: unknown or unavailable skill");
         }
         if (skill_policy(config, *skill) == SkillPolicy::DENY) {
-            return reject(original, "skill: access denied by configuration");
+            return reject(
+                original, "load_skill: access denied by configuration");
         }
         const std::optional<std::filesystem::path> path
             = canonical_skill_path(*skill);
         if (!path) {
-            return reject(original, "skill: cannot normalize instructions");
+            return reject(
+                original, "load_skill: cannot normalize instructions");
         }
         ToolCallRequest request = original;
         SkillToolArgs normalized;
@@ -131,7 +133,7 @@ namespace {
         }
         std::string reason;
         if (!load_skill_checked(*skill, reason)) {
-            return reject(original, "skill: " + reason);
+            return reject(original, "load_skill: " + reason);
         }
         if (skill_policy(config, *skill) == SkillPolicy::ALLOW) {
             return accept(std::move(request));
@@ -205,7 +207,7 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
 
 std::optional<RosterTool> classify_roster_tool(std::string_view name)
 {
-    if (name == "skill") {
+    if (name == "skill" || name == "load_skill") {
         return RosterTool::SKILL;
     }
     if (name == "subagent") {
@@ -214,7 +216,7 @@ std::optional<RosterTool> classify_roster_tool(std::string_view name)
     if (name == "lua") {
         return RosterTool::LUA;
     }
-    if (name == "load") {
+    if (name == "load" || name == "load_module") {
         return RosterTool::LOAD;
     }
     if (name == "load_mcp") {

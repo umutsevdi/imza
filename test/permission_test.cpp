@@ -1015,11 +1015,11 @@ TEST_CASE("central evaluator assigns explicit policies to built-in tools")
         == PermissionDecision::Kind::ACCEPT);
     CHECK(evaluate("lua", R"js({"script":""})js").decision.kind
         == PermissionDecision::Kind::REJECT);
-    CHECK(evaluate("load", R"({"name":"canvas"})").decision.kind
+    CHECK(evaluate("load_module", R"({"name":"canvas"})").decision.kind
         == PermissionDecision::Kind::ACCEPT);
-    CHECK(evaluate("load", R"({"name":""})").decision.kind
+    CHECK(evaluate("load_module", R"({"name":""})").decision.kind
         == PermissionDecision::Kind::REJECT);
-    CHECK(evaluate("load", "{}").decision.kind
+    CHECK(evaluate("load_module", "{}").decision.kind
         == PermissionDecision::Kind::REJECT);
 }
 
@@ -1162,7 +1162,8 @@ TEST_CASE("skill policy and runtime grants use the same central evaluator")
     const std::vector<Skill> skills { skill };
     Session loaded;
     Config config;
-    const ToolCallRequest request { "skill", R"({"name":"docs"})", "", "" };
+    const ToolCallRequest request { "load_skill", R"({"name":"docs"})", "",
+        "" };
 
     auto evaluation = evaluate_tool_request(
         request, fixture.context(Session::Mode::PLAN), config, skills, loaded);
@@ -1200,10 +1201,11 @@ TEST_CASE("skill policy and runtime grants use the same central evaluator")
 
     const Skill missing { "missing", "Missing instructions",
         fixture.outside / "missing.md", Skill::Scope::GLOBAL, std::nullopt };
-    CHECK(evaluate_tool_request({ "skill", R"({"name":"missing"})", "", "" },
-              fixture.context(Session::Mode::PLAN), config,
-              std::vector<Skill> { missing }, loaded)
-              .decision.kind
+    CHECK(
+        evaluate_tool_request({ "load_skill", R"({"name":"missing"})", "", "" },
+            fixture.context(Session::Mode::PLAN), config,
+            std::vector<Skill> { missing }, loaded)
+            .decision.kind
         == PermissionDecision::Kind::REJECT);
 
     const auto large_path = fixture.outside / "large.md";
@@ -1213,7 +1215,7 @@ TEST_CASE("skill policy and runtime grants use the same central evaluator")
     }
     const Skill large { "large", "Large instructions", large_path,
         Skill::Scope::GLOBAL, std::nullopt };
-    CHECK(evaluate_tool_request({ "skill", R"({"name":"large"})", "", "" },
+    CHECK(evaluate_tool_request({ "load_skill", R"({"name":"large"})", "", "" },
               fixture.context(Session::Mode::PLAN), config,
               std::vector<Skill> { large }, loaded)
               .decision.kind
@@ -1233,7 +1235,7 @@ TEST_CASE("bundled skills are always allowed and deny policy cannot hide them")
     const std::vector<Skill> skills { skill };
     Session loaded;
     Config config;
-    const ToolCallRequest request { "skill", R"({"name":"imza-docs"})", "",
+    const ToolCallRequest request { "load_skill", R"({"name":"imza-docs"})", "",
         "" };
 
     config.global_skills["imza-docs"] = SkillPolicy::DENY;
@@ -1274,7 +1276,7 @@ TEST_CASE("authorized_skill_path accepts only the canonical target")
         object["path"]  = imza::JsonValue(canonical);
     }
     CHECK(authorized_skill_path(
-              skill, { "skill", imza::json_dump(bound), "", "" })
+              skill, { "load_skill", imza::json_dump(bound), "", "" })
         == canonical_skill_path(skill));
 
     imza::JsonValue other = imza::JsonValue::object_t { };
@@ -1285,10 +1287,10 @@ TEST_CASE("authorized_skill_path accepts only the canonical target")
         object["path"] = JsonValue((fixture.outside / "elsewhere.md").string());
     }
     CHECK_FALSE(authorized_skill_path(
-        skill, { "skill", imza::json_dump(other), "", "" }));
+        skill, { "load_skill", imza::json_dump(other), "", "" }));
 
     CHECK_FALSE(authorized_skill_path(
-        skill, { "skill", R"({"name":"docs"})", "", "" }));
+        skill, { "load_skill", R"({"name":"docs"})", "", "" }));
 }
 
 TEST_CASE("mkdir follows the write policy, remove always asks")
@@ -1412,7 +1414,8 @@ TEST_CASE("skill evaluation binds approval to the canonical instruction path")
     const std::vector<Skill> skills { skill };
     const Config config;
     Session loaded;
-    const ToolCallRequest request { "skill", R"({"name":"changing"})", "", "" };
+    const ToolCallRequest request { "load_skill", R"({"name":"changing"})", "",
+        "" };
     const PermissionEvaluation approved = evaluate_tool_request(
         request, fixture.context(Session::Mode::PLAN), config, skills, loaded);
     REQUIRE(approved.decision.kind == PermissionDecision::Kind::ASK);

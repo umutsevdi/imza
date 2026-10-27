@@ -65,10 +65,38 @@ namespace {
         return out;
     }
 
+    bool is_legacy_skill_name(const std::string& name)
+    {
+        return name == "skill";
+    }
+
+    bool is_legacy_module_name(const std::string& name)
+    {
+        return name == "load";
+    }
+
 } // namespace
+
+// Loader calls across roster generations: pre-rename transcripts carry
+// the bare wire names.
+bool is_skill_call(const std::string& name)
+{
+    return name == "load_skill" || is_legacy_skill_name(name);
+}
+
+bool is_module_call(const std::string& name)
+{
+    return name == "load_module" || is_legacy_module_name(name);
+}
 
 std::string tool_display_name(const std::string& name)
 {
+    if (is_skill_call(name)) {
+        return "Load Skill";
+    }
+    if (is_module_call(name)) {
+        return "Load Module";
+    }
     if (name == "load_mcp") {
         return "Load MCP";
     }
@@ -106,7 +134,7 @@ std::string tool_args_summary(const std::string& args)
 
 std::string tool_call_head(const ToolCall& call)
 {
-    if (call.name == "skill") {
+    if (is_skill_call(call.name)) {
         SkillToolArgs parsed;
         (void)json_parse_checked(call.args, parsed);
         return parsed.name.empty() ? "Load Skill" : "Load Skill " + parsed.name;
@@ -118,6 +146,12 @@ std::string tool_call_head(const ToolCall& call)
         LoadMcpToolArgs parsed;
         (void)json_parse_checked(call.args, parsed);
         return parsed.server.empty() ? "Load MCP" : "Load MCP " + parsed.server;
+    }
+    if (is_module_call(call.name)) {
+        LoadToolArgs parsed;
+        (void)json_parse_checked(call.args, parsed);
+        return parsed.name.empty() ? "Load Module"
+                                   : "Load Module " + parsed.name;
     }
     if (call.name == "lua") {
         const std::string counts = lua_dispatch_counts(call);
@@ -133,7 +167,7 @@ std::string tool_call_head(const ToolCall& call)
 
 std::string tool_header_args(const ToolCall& call)
 {
-    if (call.name == "skill") {
+    if (is_skill_call(call.name)) {
         SkillToolArgs parsed;
         (void)json_parse_checked(call.args, parsed);
         return parsed.name;
@@ -145,6 +179,11 @@ std::string tool_header_args(const ToolCall& call)
         LoadMcpToolArgs parsed;
         (void)json_parse_checked(call.args, parsed);
         return parsed.server;
+    }
+    if (is_module_call(call.name)) {
+        LoadToolArgs parsed;
+        (void)json_parse_checked(call.args, parsed);
+        return parsed.name;
     }
     if (call.name == "lua") {
         // The binding counts identify the run; echoing the script would
