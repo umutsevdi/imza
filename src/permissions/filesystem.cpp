@@ -1,6 +1,8 @@
 #include "permissions/filesystem.h"
 
 #include <algorithm>
+#include <array>
+#include <string>
 #include <system_error>
 #include <type_traits>
 
@@ -29,6 +31,103 @@ namespace {
             grants.begin(), grants.end(), [&](const auto& grant) {
                 const auto* directory = std::get_if<ExternalGrant>(&grant);
                 return directory != nullptr && path_within(*directory, target);
+            });
+    }
+
+    bool equals_insensitive(std::string_view text, std::string_view literal)
+    {
+        if (text.size() != literal.size()) {
+            return false;
+        }
+        for (std::size_t i = 0; i < text.size(); ++i) {
+            const char a = text[i] >= 'A' && text[i] <= 'Z'
+                ? static_cast<char>(text[i] - 'A' + 'a')
+                : text[i];
+            const char b = literal[i] >= 'A' && literal[i] <= 'Z'
+                ? static_cast<char>(literal[i] - 'A' + 'a')
+                : literal[i];
+            if (a != b) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool starts_with_insensitive(std::string_view text, std::string_view prefix)
+    {
+        return text.size() >= prefix.size()
+            && equals_insensitive(text.substr(0, prefix.size()), prefix);
+    }
+
+    bool ends_with_insensitive(std::string_view text, std::string_view suffix)
+    {
+        return text.size() >= suffix.size()
+            && equals_insensitive(
+                text.substr(text.size() - suffix.size()), suffix);
+    }
+
+    // The `.`-prefixed forms require a following character so names like
+    // `.envrc` are not swallowed.
+    bool filename_is_sensitive(std::string_view name)
+    {
+        if (name.empty()) {
+            return false;
+        }
+        static constexpr std::array<std::string_view, 3> exact { ".env",
+            "credentials", ".git-credentials" };
+        static constexpr std::array<std::string_view, 2> dot_prefixes
+            = { ".env.", "credentials." };
+        static constexpr std::array<std::string_view, 4> key_prefixes
+            = { "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa" };
+        for (const std::string_view candidate : exact) {
+            if (equals_insensitive(name, candidate)) {
+                return true;
+            }
+        }
+        for (const std::string_view prefix : dot_prefixes) {
+            if (starts_with_insensitive(name, prefix)) {
+                return true;
+            }
+        }
+        if (ends_with_insensitive(name, ".pem")
+            || ends_with_insensitive(name, ".key")) {
+            return true;
+        }
+        for (const std::string_view prefix : key_prefixes) {
+            if (starts_with_insensitive(name, prefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool token_is_sensitive(std::string_view token)
+    {
+        // Split once on `=` to check the value side of VAR=... tokens.
+        const std::size_t equals    = token.find('=');
+        const std::string_view part = equals == std::string_view::npos
+            ? token
+            : token.substr(equals + 1);
+        if (part.empty()) {
+            return false;
+        }
+        const std::filesystem::path candidate(part);
+        for (const auto& component : candidate) {
+            if (equals_insensitive(component.string(), ".git")) {
+                return true;
+            }
+        }
+        return filename_is_sensitive(candidate.filename().string());
+    }
+
+    // A grant covering a sensitive target must name the target itself.
+    bool exact_path_grant(const PermissionStore::Grants& grants,
+        const std::filesystem::path& target)
+    {
+        return std::any_of(
+            grants.begin(), grants.end(), [&](const auto& grant) {
+                const auto* directory = std::get_if<ExternalGrant>(&grant);
+                return directory != nullptr && *directory == target;
             });
     }
 
@@ -280,7 +379,9 @@ FilesystemEvaluation evaluate_filesystem_request(
     // Removal is its own class: it always asks, inside the workspace
     // included, unless a session grant already covers the target.
     if (is_remove(request)) {
-        if (matches_path(*context.grants, target)) {
+        const bool sensitive = path_is_sensitive(target);
+        if (sensitive ? exact_path_grant(*context.grants, target)
+                      : matches_path(*context.grants, target)) {
             return { { PermissionDecision::Kind::ACCEPT, "" }, request };
         }
         return { { PermissionDecision::Kind::ASK,
@@ -308,6 +409,16 @@ FilesystemEvaluation evaluate_filesystem_request(
         : working_directory;
     const bool trusted = path_within(project_root, target)
         || path_within(context.system->temporary_directory, target);
+    // Sensitive targets lose every inherited shortcut: trusted roots and
+    // directory grants do not reach into secret material.
+    if (path_is_sensitive(target)) {
+        if (exact_path_grant(*context.grants, target)) {
+            return { { PermissionDecision::Kind::ACCEPT, "" }, request };
+        }
+        return { { PermissionDecision::Kind::ASK,
+                     "access to sensitive files requires explicit approval" },
+            request };
+    }
     if (granted
         || (trusted && (!write || context.mode == SessionMode::BUILD))) {
         return { { PermissionDecision::Kind::ACCEPT, "" }, request };
@@ -317,13 +428,53 @@ FilesystemEvaluation evaluate_filesystem_request(
         request };
 }
 
+bool path_is_sensitive(const std::filesystem::path& path)
+{
+    if (path.empty()) {
+        return false;
+    }
+    for (const auto& component : path) {
+        if (equals_insensitive(component.string(), ".git")) {
+            return true;
+        }
+    }
+    return filename_is_sensitive(path.filename().string());
+}
+
+bool command_touches_sensitive(std::string_view command)
+{
+    std::size_t begin = std::string_view::npos;
+    for (std::size_t index = 0; index <= command.size(); ++index) {
+        const bool at_end    = index == command.size();
+        const char character = at_end ? ' ' : command[index];
+        const bool boundary
+            = std::string_view(" \t\r\n;|&<>()'\"`").find(character)
+            != std::string_view::npos;
+        if (boundary && begin != std::string_view::npos) {
+            if (token_is_sensitive(command.substr(begin, index - begin))) {
+                return true;
+            }
+            begin = std::string_view::npos;
+        }
+        if (!boundary && begin == std::string_view::npos) {
+            begin = index;
+        }
+    }
+    return false;
+}
+
 std::optional<ExternalGrant> filesystem_session_grant(
     const FilesystemRequest& request)
 {
     if (is_list(request) || is_find(request)) {
         return std::nullopt;
     }
-    return filesystem_target(request).parent_path();
+    const std::filesystem::path& target = filesystem_target(request);
+    // A sensitive file is granted by itself, so siblings keep asking.
+    if (path_is_sensitive(target)) {
+        return target;
+    }
+    return target.parent_path();
 }
 
 } // namespace imza

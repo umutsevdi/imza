@@ -68,6 +68,15 @@ ShellEvaluation evaluate_shell_request(
         return { { PermissionDecision::Kind::REJECT, std::move(guidance) },
             std::move(request), { } };
     }
+    // Ahead of the catalogs and grants: `cat .env` must not ride a
+    // `cat` entry, and the approval installs no reusable grant.
+    if (command_touches_sensitive(request.command)) {
+        return { { PermissionDecision::Kind::ASK,
+                     "command names sensitive material; this execution "
+                     "requires approval and cannot be granted for the "
+                     "session" },
+            std::move(request), { } };
+    }
     // An unresolvable launcher carries code the analyzer cannot read, so
     // there is nothing to classify or to bind a grant to: it asks once and
     // installs no session grant.

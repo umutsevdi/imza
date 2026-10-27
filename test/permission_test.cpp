@@ -687,6 +687,145 @@ TEST_CASE("one external grant authorizes mode-available operations")
     CHECK(edit.decision.kind == PermissionDecision::Kind::ACCEPT);
 }
 
+TEST_CASE("sensitive paths require an exact grant even inside trusted roots")
+{
+    PermissionFixture fixture;
+    imza::test::write_file(fixture.workspace / ".env", "SECRET=1\n");
+    std::filesystem::create_directories(fixture.workspace / ".git");
+    imza::test::write_file(fixture.workspace / ".git" / "config", "[core]\n");
+    imza::test::write_file(fixture.workspace / "server.pem", "key\n");
+
+    // Trusted-root reads stop being automatic.
+    for (const auto& target : std::vector<std::filesystem::path> {
+             fixture.workspace / ".env", fixture.workspace / ".git" / "config",
+             fixture.workspace / "server.pem" }) {
+        const auto read = evaluate_filesystem_request(
+            read_request(target), fixture.context(Session::Mode::BUILD));
+        CHECK(read.decision.kind == PermissionDecision::Kind::ASK);
+    }
+
+    // A workspace-wide grant does not inherit down into secret material.
+    const PermissionGrant directory = ExternalGrant { fixture.workspace };
+    const auto granted_directory
+        = evaluate_filesystem_request(read_request(fixture.workspace / ".env"),
+            fixture.context(Session::Mode::BUILD, { directory }));
+    CHECK(granted_directory.decision.kind == PermissionDecision::Kind::ASK);
+
+    const PermissionGrant exact = ExternalGrant { fixture.workspace / ".env" };
+    const auto granted_exact
+        = evaluate_filesystem_request(read_request(fixture.workspace / ".env"),
+            fixture.context(Session::Mode::PLAN, { exact }));
+    CHECK(granted_exact.decision.kind == PermissionDecision::Kind::ACCEPT);
+
+    // Writes keep the Plan-mode rejection ahead of any grant.
+    const auto planned_write
+        = evaluate_filesystem_request(write_request(fixture.workspace / ".env"),
+            fixture.context(Session::Mode::PLAN, { exact }));
+    CHECK(planned_write.decision.kind == PermissionDecision::Kind::REJECT);
+
+    // A non-sensitive neighbor keeps its normal trusted-root verdict.
+    const auto neighbor = evaluate_filesystem_request(
+        read_request(fixture.workspace / "inside.txt"),
+        fixture.context(Session::Mode::PLAN));
+    CHECK(neighbor.decision.kind == PermissionDecision::Kind::ACCEPT);
+}
+
+TEST_CASE("approving a sensitive file grants the file, not its directory")
+{
+    PermissionFixture fixture;
+    imza::test::write_file(fixture.workspace / ".env", "SECRET=1\n");
+    imza::test::write_file(fixture.workspace / ".env.local", "SECRET=2\n");
+
+    const auto ask
+        = evaluate_filesystem_request(read_request(fixture.workspace / ".env"),
+            fixture.context(Session::Mode::PLAN));
+    REQUIRE(ask.decision.kind == PermissionDecision::Kind::ASK);
+    REQUIRE(ask.request.has_value());
+    const auto grant = filesystem_session_grant(*ask.request);
+    REQUIRE(grant.has_value());
+    CHECK(*grant == fixture.workspace / ".env");
+
+    const auto again = evaluate_filesystem_request(
+        read_request(fixture.workspace / ".env"),
+        fixture.context(Session::Mode::PLAN, { PermissionGrant { *grant } }));
+    CHECK(again.decision.kind == PermissionDecision::Kind::ACCEPT);
+
+    const auto sibling = evaluate_filesystem_request(
+        read_request(fixture.workspace / ".env.local"),
+        fixture.context(Session::Mode::PLAN, { PermissionGrant { *grant } }));
+    CHECK(sibling.decision.kind == PermissionDecision::Kind::ASK);
+}
+
+TEST_CASE("sensitive removal and copy follow the exact-grant rule")
+{
+    PermissionFixture fixture;
+    imza::test::write_file(fixture.workspace / ".env", "SECRET=1\n");
+    imza::test::write_file(fixture.outside / "id_rsa", "key\n");
+    const PermissionGrant directory = ExternalGrant { fixture.workspace };
+
+    // Remove keeps its always-ask class; a directory grant does not help.
+    const auto removal = evaluate_filesystem_request(
+        remove_request(fixture.workspace / ".env"),
+        fixture.context(Session::Mode::BUILD, { directory }));
+    CHECK(removal.decision.kind == PermissionDecision::Kind::ASK);
+
+    // Copying onto a sensitive destination asks despite the grant.
+    const auto onto_secret = evaluate_filesystem_request(
+        CopyFileRequest {
+            fixture.workspace / "inside.txt", fixture.workspace / ".env" },
+        fixture.context(Session::Mode::BUILD, { directory }));
+    CHECK(onto_secret.decision.kind == PermissionDecision::Kind::ASK);
+}
+
+TEST_CASE("sensitive path classification matches the credential patterns")
+{
+    CHECK(path_is_sensitive(".env"));
+    CHECK(path_is_sensitive(".env.production"));
+    CHECK(path_is_sensitive("config/server.pem"));
+    CHECK(path_is_sensitive("keys/id_rsa"));
+    CHECK(path_is_sensitive("ID_ECDSA"));
+    CHECK(path_is_sensitive("credentials.json"));
+    CHECK(path_is_sensitive(".git/config"));
+    CHECK(path_is_sensitive(".git-credentials"));
+
+    CHECK_FALSE(path_is_sensitive("environment"));
+    CHECK_FALSE(path_is_sensitive("notes.envx"));
+    CHECK_FALSE(path_is_sensitive("keyring.txt"));
+    CHECK_FALSE(path_is_sensitive("src/credentials_reader.cpp"));
+
+    CHECK(command_touches_sensitive("cat .env"));
+    CHECK(command_touches_sensitive("git -C repo/.git status"));
+    CHECK(command_touches_sensitive("VAR=.env printenv"));
+    CHECK_FALSE(command_touches_sensitive("git status"));
+    CHECK_FALSE(command_touches_sensitive("cat inside.txt"));
+}
+
+TEST_CASE("shell commands naming sensitive material always ask")
+{
+    PermissionFixture fixture;
+    imza::test::write_file(fixture.workspace / ".env", "SECRET=1\n");
+
+    const auto cat
+        = evaluate_shell_request({ "cat .env", std::chrono::seconds(10), { } },
+            fixture.context(Session::Mode::BUILD));
+    CHECK(cat.decision.kind == PermissionDecision::Kind::ASK);
+    CHECK(cat.session_grants.empty());
+
+    // A session grant for the same program is no better.
+    const PermissionGrant shell_grant = ShellCommandGrant { "cat" };
+    const auto granted
+        = evaluate_shell_request({ "cat .env", std::chrono::seconds(10), { } },
+            fixture.context(Session::Mode::BUILD, { shell_grant }));
+    CHECK(granted.decision.kind == PermissionDecision::Kind::ASK);
+    CHECK(granted.session_grants.empty());
+
+    // Non-sensitive operands keep their catalog verdict.
+    const auto plain = evaluate_shell_request(
+        { "cat inside.txt", std::chrono::seconds(10), { } },
+        fixture.context(Session::Mode::BUILD));
+    CHECK(plain.decision.kind == PermissionDecision::Kind::ACCEPT);
+}
+
 TEST_CASE("filesystem normalization rejects malformed and wrong-type targets")
 {
     PermissionFixture fixture;
