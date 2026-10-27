@@ -62,7 +62,6 @@ TEST_CASE("embedded prompts match the repository sources")
     CHECK(prompts.compaction() == read_prompt("compaction.md"));
     CHECK(prompts.review() == read_prompt("review.md"));
     CHECK(prompts.review_plan() == read_prompt("review_plan.md"));
-    CHECK(prompts.plan_annotations() == read_prompt("plan_annotations.md"));
 }
 
 TEST_CASE("user directory overrides prompts independently")
@@ -97,16 +96,17 @@ TEST_CASE("current mode prompts declare one authoritative state")
     CHECK(build == "<runtime-mode name=\"build\"/>");
 }
 
-TEST_CASE("system prompt carries the plan artifact contract")
+TEST_CASE("system prompt defers plan detail to the plan module")
 {
     const std::string system = PromptStore().system();
     // Stable contract phrases, not exact prose, so wording can evolve.
-    CHECK(system.find("imza.plan.create") != std::string::npos);
-    CHECK(system.find("imza.plan.get()") != std::string::npos);
+    CHECK(system.find("load the `plan` module") != std::string::npos);
     CHECK(system.find("ready for build") != std::string::npos);
-    CHECK(system.find("contract for future workspace mutation")
-        != std::string::npos);
     CHECK(system.find("imza.build.decision") != std::string::npos);
+    // The detailed plan protocol moved into the plan module's load docs.
+    CHECK(system.find("imza.plan.get()") == std::string::npos);
+    CHECK(system.find("imza.plan.create") == std::string::npos);
+    CHECK(system.find("# Requirements") == std::string::npos);
 }
 
 TEST_CASE("plan annotations prompt derives section and line anchors")
@@ -119,14 +119,11 @@ TEST_CASE("plan annotations prompt derives section and line anchors")
         { 2, "sharpen the contract" },
         { 40, "gone" },
     };
-    const std::string prompt = format_plan_annotations_prompt(
-        PromptStore().plan_annotations(), notes, document);
-    CHECK(prompt.find("imza.plan.edit") != std::string::npos);
+    const std::string prompt = format_plan_annotations_prompt(notes, document);
+    CHECK(prompt.find("Revise the current plan document") != std::string::npos);
     CHECK(prompt.find("`Approach > 2. second step`") != std::string::npos);
     CHECK(prompt.find("`Requirements > first plan`") != std::string::npos);
     CHECK(prompt.find("(stale)") != std::string::npos);
-    CHECK(format_plan_annotations_prompt(
-        PromptStore().plan_annotations(), { }, document)
-            .empty());
+    CHECK(format_plan_annotations_prompt({ }, document).empty());
 }
 } // namespace imza

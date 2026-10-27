@@ -203,8 +203,6 @@ PromptStore::PromptStore(const std::filesystem::path& overrides)
     , _review(load_prompt(overrides, "review.md", prompts_detail::REVIEW))
     , _review_plan(
           load_prompt(overrides, "review_plan.md", prompts_detail::REVIEW_PLAN))
-    , _plan_annotations(load_prompt(
-          overrides, "plan_annotations.md", prompts_detail::PLAN_ANNOTATIONS))
     , _handoff(load_prompt(overrides, "handoff.md", prompts_detail::HANDOFF))
 {
 }
@@ -271,12 +269,18 @@ std::string full_system_prompt(const PromptStore& prompts,
     return prompt;
 }
 
-std::string format_plan_annotations_prompt(std::string_view instructions,
+std::string format_plan_annotations_prompt(
     const std::vector<PlanNote>& notes, std::string_view document)
 {
+    // The fixed revise lead-in; the note-application semantics live in the
+    // plan module's load() documentation, which the revise turn reads.
+    constexpr std::string_view INSTRUCTIONS
+        = "Revise the current plan document to apply the following "
+          "annotations, using the imza.plan module you have loaded.";
     if (notes.empty()) {
         return { };
     }
+    std::string prompt(INSTRUCTIONS);
     std::vector<std::string> lines = split_lines(document);
     // A document ending in '\n' pins one final empty line; keep it so
     // notes on that line resolve instead of turning stale.
@@ -307,7 +311,6 @@ std::string format_plan_annotations_prompt(std::string_view instructions,
         }
         return std::string_view("Document");
     };
-    std::string prompt(instructions);
     for (const PlanNote& note : notes) {
         prompt += "\n\n- `";
         if (note.line == 0 || note.line > lines.size()) {

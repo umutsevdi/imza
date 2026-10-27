@@ -32,7 +32,6 @@ public:
     const std::string& make_skill() const { return _make_skill; }
     const std::string& review() const { return _review; }
     const std::string& review_plan() const { return _review_plan; }
-    const std::string& plan_annotations() const { return _plan_annotations; }
     const std::string& handoff() const { return _handoff; }
 
 private:
@@ -45,7 +44,6 @@ private:
     std::string _make_skill;
     std::string _review;
     std::string _review_plan;
-    std::string _plan_annotations;
     std::string _handoff;
 };
 
@@ -62,11 +60,11 @@ std::string full_system_prompt(const PromptStore& prompts,
     const Environment& environment, const ProviderStore& providers,
     const McpSubsystem* mcp, const Session* session,
     std::optional<Session::Mode> mode = std::nullopt);
-// One plan-mode revise turn for the annotator: `instructions` plus one
+// One plan-mode revise turn for the annotator: a fixed lead-in plus one
 // bullet per note, located by the nearest heading above the pinned line and
 // the current text of that line ("section > anchor" backticks). Notes whose
 // line no longer exists are marked stale. Empty when there are no notes.
-std::string format_plan_annotations_prompt(std::string_view instructions,
+std::string format_plan_annotations_prompt(
     const std::vector<PlanNote>& notes, std::string_view document);
 // One handoff-report turn: `instructions` plus a JSON payload carrying the
 // latest plan, earlier revisions, user messages, build logs, and the final

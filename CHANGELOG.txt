@@ -18,6 +18,7 @@ Changes:
   - `/variant` now takes the reasoning effort right on the input line
     (`/variant high`) with autocomplete suggestions, instead of opening a
     picker dialog.
+  - Plan documentation now loads on demand.
   - Fixed `imza.fs.ts_query` ignoring its query predicates, so filtered
     searches returned unfiltered matches.
 

@@ -96,32 +96,80 @@ namespace {
             "get",
             binding_plan_get,
             R"desc(() returns string, throws
-Returns the current plan document: markdown with a required skeleton
-(Requirements / Approach / Changes / Verification, plus an optional
-Problem opener), or an empty string when none exists. Marks the plan as
-read; imza.plan.edit compares against this.)desc",
+Returns the current plan document, or "" when none exists yet.
+
+WHEN TO READ
+- Before every edit: edit() is rejected unless the document was read
+  at its current revision, so the call sequence is get() -> edit().
+- At the start of a Build turn that follows a plan: the document is
+  the contract the build must satisfy.
+- Whenever a later turn may have written or annotated: never assume
+  the document still says what you last wrote.
+
+Empty string means no plan exists; create one rather than editing.)desc",
         },
         {
             "create",
             binding_plan_create,
             R"desc((doc: string) throws
-Creates a new plan document as the current plan; the previous one is
-kept in the session but superseded. Validates the skeleton and the
-16 KiB cap. Never mutates an existing document.
-Shape the document short (aim for well under ~60 lines): an optional
-`# Problem` (one to three lines naming what is wrong today),
-`# Requirements` as small observable bullets, `# Approach` as a short
-summary, `# Changes` as one bullet per affected file, and
-`# Verification`.)desc",
+Appends a new plan document and makes it the current plan. The
+previous revision is kept in the session but superseded; the user
+sees only the new one. Never mutates an existing document - a
+rewrite is always a fresh create, not an edit.
+
+DOCUMENT SHAPE
+Required sections, in order, under 16 KiB (aim well under 60 lines):
+# Problem     (optional) one to three lines naming what is wrong
+              today; omit when there is no problem.
+# Requirements  formal requirement statements, one per bullet, each
+              observable and testable; never vague wants or restated
+              prose of the request.
+# Approach    a short summary of the intended change; not a
+              step-by-step essay.
+# Changes     one bullet per affected file(in this format `/path/to/file`),
+              then what changes there.
+# Verification  how to confirm the change: commands to run, tests
+              expected to pass, behavior to check.
+
+Validation rejects a document missing any required heading or over
+the cap; the error names what is missing.
+
+REVISIONS
+Planning is collaboration. After the initial document, apply user
+feedback as targeted edit() calls; when the feedback reshapes the
+document more than a patch allows, write the full new revision with
+create and it supersedes the old. Only the agent writes the document:
+the user responds in chat or pins notes on the pane (delivered as a
+revise turn, see edit), never editing the text directly.
+
+BUILD HANDOFF
+Switching to Build submits the current revision once as context; in
+Build mode the document is frozen (create/edit are rejected) and is
+the contract the work follows. Changing the contract means going
+back to Plan mode and revising there.)desc",
         },
         {
             "edit",
             binding_plan_edit,
             R"desc((old: string, new: string, count?: integer=1) throws
-Replaces the first count occurrences of old in the current plan with new;
-count=0 replaces all. Exact literal match, same semantics as imza.fs.edit.
-Throws when the plan changed since the last imza.plan.get(); re-read
-and retry. Throws when no plan exists.)desc",
+Replaces occurrences of the exact text `old` with `new` in the current
+plan document, in place - the revision count does not advance a
+superseding revision. count=1 (default) replaces the first
+occurrence; count=0 replaces all. Literal match, same semantics as
+imza.fs.edit: include enough surrounding text to make `old` unique.
+
+Throws when the document changed since your last get().
+Throws when no plan exists (create first).
+
+APPLYING PINNED NOTES
+A revise turn delivers user notes as "Section > anchor" locations.
+get() the document, then per note: match the anchor text exactly and
+edit() it (count=1); a note whose line is marked (stale) means the
+content moved - locate it in the current document by its section and
+intent rather than its old line. When the notes reshape the document
+more than patches allow, rewrite with create() instead. Preserve the
+required skeleton and section shapes; reply with one short sentence
+naming what changed.)desc",
         },
     };
 
@@ -129,12 +177,10 @@ and retry. Throws when no plan exists.)desc",
 
 const LuaModule& plan_module()
 {
-    static constexpr LuaModule MODULE { true, "plan",
-        R"desc(The session plan document: the intent object a plan-mode turn
-produces. Create it with imza.plan.create when the turn concludes that
-files should change; patch it with imza.plan.edit. Required sections are
-Requirements / Approach / Changes / Verification, with an optional Problem
-opener; keep the document short and each section in its intended shape.)desc",
+    static constexpr LuaModule MODULE { false, "plan",
+        R"desc(The session plan document: creating and revising it, the required
+shape, applying pinned notes, and the Build handoff. Load it before
+writing a plan or revising one.)desc",
         { }, BINDINGS };
     return MODULE;
 }

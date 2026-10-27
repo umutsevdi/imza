@@ -499,8 +499,8 @@ namespace {
                 _state->session->set_error(_status);
                 return;
             }
-            const std::string prompt = format_plan_annotations_prompt(
-                _state->prompts->plan_annotations(), _notes, _current);
+            const std::string prompt
+                = format_plan_annotations_prompt(_notes, _current);
             imza::submit(*_state, prompt);
             _notes.clear();
             _editor.close();

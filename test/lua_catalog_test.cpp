@@ -109,7 +109,7 @@ TEST_CASE("core description embeds autoload docs, lists others by name")
     CHECK(description.find("(raises)") == std::string::npos);
 }
 
-TEST_CASE("load returns canvas documentation while bindings are always present")
+TEST_CASE("load returns module documentation while bindings are always present")
 {
     auto state      = make_lua_state();
     const Tool load = make_load_tool(*state);
@@ -122,6 +122,17 @@ TEST_CASE("load returns canvas documentation while bindings are always present")
                   std::string("imza.canvas.") + std::string(method.name) + "(")
             != std::string::npos);
     }
+    const ToolOutput plan
+        = load.run({ "load", R"json({"name":"plan"})json", "", "" });
+    CHECK(plan.kind == ToolOutput::Kind::OUTPUT);
+    CHECK(plan.text.find("imza.plan.create(") != std::string::npos);
+    CHECK(plan.text.find("imza.plan.edit(") != std::string::npos);
+    CHECK(plan.text.find("# Requirements") != std::string::npos);
+    CHECK(plan.text.find("# Verification") != std::string::npos);
+    CHECK(plan.text.find("since your last get()") != std::string::npos);
+    CHECK(plan.text.find("APPLYING PINNED NOTES") != std::string::npos);
+    CHECK(plan.text.find("frozen") != std::string::npos);
+    CHECK(plan.text.find("ready for build") == std::string::npos);
 
     const ToolOutput unknown
         = load.run({ "load", R"json({"name":"unknown"})json", "", "" });
