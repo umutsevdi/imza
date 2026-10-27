@@ -182,32 +182,35 @@ namespace {
         // A launcher whose code could not be unwrapped is approval-once
         // and never grantable: there is nothing to classify.
         invocation.unresolvable = kind != Launcher::NONE;
-        // Subcommand identity: first word after the program that is not an
-        // option. Options before the subcommand carry no grant identity; a
-        // short option and its separate value (git -C build) are skipped
-        // whole. Past the subcommand only flags are retained as arguments:
-        // operands cannot widen a grant, and their values are consumed with
-        // their option.
+        // Program-level options are kept, not discarded: dropping
+        // `-c core.fsmonitor=…` would let a `git status` grant cover it.
+        // A short option's separate value is consumed with it (`top -n 1`).
         std::size_t index = program + 1;
         while (index < words.size() && is_flag(words[index])) {
-            if (words[index].size() == 2 && words[index][1] != '-'
-                && index + 1 < words.size() && !is_flag(words[index + 1])) {
-                ++index;
+            const bool takes_value = words[index].size() == 2
+                && words[index][1] != '-' && index + 1 < words.size()
+                && !is_flag(words[index + 1]);
+            if (shell_program_option_denied(invocation.program, words[index])) {
+                analysis.reuse = ShellAnalysis::Reuse::ONCE;
             }
-            ++index;
+            invocation.options.push_back(std::move(words[index]));
+            index += takes_value ? 2 : 1;
         }
         if (index < words.size()) {
             invocation.subcommand = std::move(words[index]);
             ++index;
+        } else {
+            // Without a subcommand the leading options are the command's
+            // own flags (`top -n 1`).
+            for (std::string& option : invocation.options) {
+                invocation.arguments.push_back(std::move(option));
+            }
+            invocation.options.clear();
         }
+        // Order matters: a bare word may be a flag's value or an operand
+        // that turns the subcommand into a write, and only the catalog
+        // knows which flags take a value.
         for (; index < words.size(); ++index) {
-            if (!is_flag(words[index])) {
-                continue;
-            }
-            if (words[index].size() == 2 && words[index][1] != '-'
-                && index + 1 < words.size() && !is_flag(words[index + 1])) {
-                ++index;
-            }
             invocation.arguments.push_back(std::move(words[index]));
         }
         analysis.invocations.push_back(std::move(invocation));
@@ -218,6 +221,17 @@ namespace {
         std::string_view program;
         std::optional<std::string_view> subcommand;
         std::string_view flags;
+        // Program-level options allowed before the subcommand; anything
+        // else asks.
+        std::string_view options = "";
+        // Flags whose value is the following word, so it is not judged as
+        // an operand.
+        std::string_view value_flags = "";
+        // Operand words allowed after the flags: "*" for any, a list for
+        // specific words, empty for none. A leading '+' requires at least
+        // one, for subcommands whose bare form is a write (`git stash`
+        // stashes, `git stash list` reads).
+        std::string_view operands = "";
     };
 
     bool flag_allowed(std::string_view flags, std::string_view argument)
@@ -241,33 +255,71 @@ namespace {
             || character == '\n';
     }
 
+    // INPUT reads a file; OUTPUT writes one unless it is /dev/null;
+    // DESCRIPTOR duplicates a stream (`2>&1`) and writes nothing.
+    enum class Redirect { NONE, INPUT, OUTPUT, DESCRIPTOR };
+
+    bool is_digits(std::string_view text)
+    {
+        return !text.empty()
+            && std::all_of(text.begin(), text.end(), [](char character) {
+                   return std::isdigit(static_cast<unsigned char>(character))
+                       != 0;
+               });
+    }
+
+    bool redirect_target_benign(Redirect kind, std::string_view target)
+    {
+        switch (kind) {
+        case Redirect::INPUT: return true;
+        case Redirect::OUTPUT: return target == "/dev/null";
+        case Redirect::DESCRIPTOR: return target == "-" || is_digits(target);
+        case Redirect::NONE: break;
+        }
+        return false;
+    }
+
     ShellAnalysis analyze_shell_impl(std::string_view command, int depth)
     {
         ShellAnalysis analysis;
         analysis.reuse = ShellAnalysis::Reuse::SESSION;
         std::vector<std::string> words;
         std::string word;
-        Quote quote           = Quote::NONE;
-        bool escaped          = false;
-        bool word_started     = false;
-        bool redirect_operand = false;
+        Quote quote       = Quote::NONE;
+        Redirect redirect = Redirect::NONE;
+        bool escaped      = false;
+        bool word_started = false;
 
         const auto finish_word = [&] {
-            if (word_started) {
-                if (!redirect_operand) {
-                    words.push_back(std::move(word));
+            if (redirect != Redirect::NONE) {
+                if (!word_started || !redirect_target_benign(redirect, word)) {
+                    analysis.reuse = ShellAnalysis::Reuse::ONCE;
                 }
                 word.clear();
-                word_started     = false;
-                redirect_operand = false;
+                word_started = false;
+                redirect     = Redirect::NONE;
+                return;
             }
+            if (word_started) {
+                words.push_back(std::move(word));
+                word.clear();
+                word_started = false;
+            }
+        };
+
+        // A word of digits before the operator is a file descriptor
+        // (`2>`), so it is dropped rather than kept as an argument.
+        const auto start_redirect = [&](Redirect kind) {
+            if (word_started && !is_digits(word)) {
+                words.push_back(std::move(word));
+            }
+            word.clear();
+            word_started = false;
+            redirect     = kind;
         };
 
         for (std::size_t index = 0; index < command.size(); ++index) {
             const char character = command[index];
-            if (character == '>') {
-                analysis.reuse = ShellAnalysis::Reuse::ONCE;
-            }
             if (escaped) {
                 word.push_back(character);
                 word_started = true;
@@ -319,6 +371,9 @@ namespace {
             }
             if (std::isspace(static_cast<unsigned char>(character))
                 && character != '\n') {
+                if (redirect != Redirect::NONE && !word_started) {
+                    continue;
+                }
                 finish_word();
                 continue;
             }
@@ -331,19 +386,39 @@ namespace {
                 continue;
             }
             if (character == '>') {
-                finish_word();
-                redirect_operand = true;
+                Redirect kind = Redirect::OUTPUT;
+                if (index + 1 < command.size() && command[index + 1] == '>') {
+                    ++index;
+                } else if (index + 1 < command.size()
+                    && command[index + 1] == '&') {
+                    ++index;
+                    kind = Redirect::DESCRIPTOR;
+                }
+                start_redirect(kind);
                 continue;
             }
             if (character == '<') {
-                finish_word();
                 if (index + 1 < command.size() && command[index + 1] == '<') {
+                    // Heredoc or here-string: the body is unreadable.
                     analysis.reuse = ShellAnalysis::Reuse::ONCE;
+                    ++index;
+                    if (index + 1 < command.size()
+                        && command[index + 1] == '<') {
+                        ++index;
+                    }
                 }
-                redirect_operand = true;
+                start_redirect(Redirect::INPUT);
                 continue;
             }
             if (is_separator(character)) {
+                // `&>` redirects both streams, so the `&` is not a
+                // separator there.
+                if (character == '&' && index + 1 < command.size()
+                    && command[index + 1] == '>') {
+                    ++index;
+                    start_redirect(Redirect::OUTPUT);
+                    continue;
+                }
                 finish_word();
                 append_invocation(analysis, words, depth);
                 while (index + 1 < command.size()
@@ -440,35 +515,126 @@ bool shell_launcher_denied(std::string_view program)
     return false;
 }
 
+bool shell_program_option_denied(
+    std::string_view program, std::string_view option)
+{
+    // `git -c name=value` is how a read-only subcommand runs arbitrary
+    // code: core.pager, core.fsmonitor, diff.external and alias.* all
+    // execute a command string. The rest point git at a different
+    // repository or program, so the catalog row no longer means what it
+    // says.
+    if (program != "git") {
+        return false;
+    }
+    // The value may ride the option (`--exec-path=/tmp/e`).
+    const std::size_t equals = option.find('=');
+    const std::string_view name
+        = equals == std::string_view::npos ? option : option.substr(0, equals);
+    static constexpr std::array<std::string_view, 8> denied { "-c",
+        "--exec-path", "--config-env", "--upload-pack", "--receive-pack",
+        "--git-dir", "--work-tree", "--namespace" };
+    return std::any_of(denied.begin(), denied.end(),
+        [&name](std::string_view candidate) { return name == candidate; });
+}
+
 bool shell_readonly_allowed(const ShellInvocation& invocation)
 {
     if (invocation.program.empty()) {
         return false;
     }
-    // Combined short flags (git status -sb) match when every character is an
-    // allowed flag; uncombined args must match the catalog verbatim.
+    // A long option matches on its name, so a value cannot widen a read
+    // (--porcelain=v1). A numeric shorthand (-5) is git's -n, and a bare
+    // `--` separates paths.
     const auto argument_allowed = [](const ReadOnlyCommand& entry,
                                       const std::string& argument) {
-        if (argument.size() > 2 && argument.front() == '-'
-            && argument[1] != '-') {
-            return std::all_of(
-                argument.begin() + 1, argument.end(), [&entry](char flag) {
-                    return flag_allowed(entry.flags, std::string("-") + flag);
-                });
+        if (argument == "--") {
+            return true;
+        }
+        if (argument.starts_with("--")) {
+            const std::size_t equals    = argument.find('=');
+            const std::string_view name = equals == std::string::npos
+                ? std::string_view(argument)
+                : std::string_view(argument).substr(0, equals);
+            return flag_allowed(entry.flags, name);
+        }
+        if (argument.size() > 1 && argument.front() == '-') {
+            const std::string_view body(
+                argument.data() + 1, argument.size() - 1);
+            const bool digits
+                = std::all_of(body.begin(), body.end(), [](char character) {
+                      return std::isdigit(static_cast<unsigned char>(character))
+                          != 0;
+                  });
+            if (digits) {
+                return flag_allowed(entry.flags, "-n");
+            }
+            // A multi-character single-dash flag (go list -json) is a name
+            // in its own right, matched before the combined reading.
+            if (flag_allowed(entry.flags, argument)) {
+                return true;
+            }
+            if (argument.size() > 2) {
+                return std::all_of(
+                    body.begin(), body.end(), [&entry](char flag) {
+                        return flag_allowed(
+                            entry.flags, std::string("-") + flag);
+                    });
+            }
         }
         return flag_allowed(entry.flags, argument);
     };
-    const auto matches = [&argument_allowed](const ShellInvocation& call,
-                             const ReadOnlyCommand& entry) {
-        if (call.program != entry.program
-            || call.subcommand != entry.subcommand) {
-            return false;
-        }
-        return std::all_of(call.arguments.begin(), call.arguments.end(),
-            [&entry, &argument_allowed](const std::string& argument) {
-                return argument_allowed(entry, argument);
-            });
-    };
+    // The next word after these flags is their value, not an operand
+    // (`git branch --contains v1`).
+    const auto flag_takes_value
+        = [](const ReadOnlyCommand& entry, const std::string& argument) {
+              return flag_allowed(entry.value_flags, argument);
+          };
+    const auto operand_allowed
+        = [](const ReadOnlyCommand& entry, const std::string& argument) {
+              const std::string_view allowed = entry.operands.starts_with("+")
+                  ? entry.operands.substr(1)
+                  : entry.operands;
+              if (allowed == "*") {
+                  return true;
+              }
+              return flag_allowed(allowed, argument);
+          };
+    const auto matches
+        = [&argument_allowed, &flag_takes_value, &operand_allowed](
+              const ShellInvocation& call, const ReadOnlyCommand& entry) {
+              if (call.program != entry.program
+                  || call.subcommand != entry.subcommand) {
+                  return false;
+              }
+              for (const std::string& option : call.options) {
+                  if (!flag_allowed(entry.options, option)) {
+                      return false;
+                  }
+              }
+              bool expect_value = false;
+              bool saw_operand  = false;
+              for (const std::string& argument : call.arguments) {
+                  if (expect_value) {
+                      expect_value = false;
+                      continue;
+                  }
+                  if (argument == "--") {
+                      continue;
+                  }
+                  if (!argument.empty() && argument.front() == '-') {
+                      if (!argument_allowed(entry, argument)) {
+                          return false;
+                      }
+                      expect_value = flag_takes_value(entry, argument);
+                      continue;
+                  }
+                  if (!operand_allowed(entry, argument)) {
+                      return false;
+                  }
+                  saw_operand = true;
+              }
+              return !entry.operands.starts_with("+") || saw_operand;
+          };
 #ifdef _WIN32
     // Windows commands keyed on /flag syntax cannot be catalogued: the
     // analyzer only treats '-' as a flag prefix, so '/v' lands in the
@@ -476,78 +642,186 @@ bool shell_readonly_allowed(const ShellInvocation& invocation)
     static constexpr std::array<ReadOnlyCommand, 0> platform_only { };
 #else
     static constexpr std::array<ReadOnlyCommand, 25> platform_only {
-        { { "top", std::nullopt, "-b -n -p -u -d" },
-            { "systemctl", "status", "-l --no-pager" },
-            { "systemctl", "list-units", "--type --state --all" },
-            { "systemctl", "list-timers", "--all" },
-            { "systemctl", "is-active", "" }, { "systemctl", "is-enabled", "" },
-            { "systemctl", "is-failed", "" }, { "systemctl", "show", "" },
-            { "systemctl", "cat", "" },
-            { "systemctl", "list-dependencies", "" },
-            { "systemctl", "get-default", "" },
+        { { "top", std::nullopt, "-b -n -p -u -d", "", "-n -p -u -d", "*" },
+            { "systemctl", "status", "-l --no-pager", "", "", "*" },
+            { "systemctl", "list-units", "--type --state --all", "", "--type",
+                "*" },
+            { "systemctl", "list-timers", "--all", "", "", "" },
+            { "systemctl", "is-active", "", "", "", "*" },
+            { "systemctl", "is-enabled", "", "", "", "*" },
+            { "systemctl", "is-failed", "", "", "", "*" },
+            { "systemctl", "show", "", "", "", "*" },
+            { "systemctl", "cat", "", "", "", "*" },
+            { "systemctl", "list-dependencies", "", "", "", "*" },
+            { "systemctl", "get-default", "", "", "", "" },
             { "dnf", "list",
-                "--installed --available --updates "
-                "--obsoletes --recent --all" },
-            { "dnf", "info", "--installed --available --updates --all" },
-            { "dnf", "repolist", "" }, { "dnf", "search", "" },
-            { "dnf", "provides", "" }, { "dnf", "check-update", "" },
-            { "cargo", "tree", "-i --invert -e --edges -d --duplicates" },
-            { "cargo", "metadata", "--no-deps --format-version" },
-            { "cargo", "locate-project", "--workspace --message-format" },
-            { "gem", "list", "-a --all -l --local -r --remote -d" },
-            { "gem", "which", "" }, { "gem", "environment", "" },
-            { "gem", "contents", "" }, { "date", std::nullopt, "-u -R -I" } }
+                "--installed --available --updates --obsoletes --recent "
+                "--all",
+                "", "", "*" },
+            { "dnf", "info", "--installed --available --updates --all", "", "",
+                "*" },
+            { "dnf", "repolist", "", "", "", "*" },
+            { "dnf", "search", "", "", "", "*" },
+            { "dnf", "provides", "", "", "", "*" },
+            { "dnf", "check-update", "", "", "", "" },
+            { "cargo", "tree", "-i --invert -e --edges -d --duplicates", "",
+                "-e --edges", "*" },
+            { "cargo", "metadata", "--no-deps --format-version", "",
+                "--format-version", "" },
+            { "cargo", "locate-project", "--workspace --message-format", "",
+                "--message-format", "" },
+            { "gem", "list", "-a --all -l --local -r --remote -d", "", "",
+                "*" },
+            { "gem", "which", "", "", "", "*" },
+            { "gem", "environment", "", "", "", "" },
+            { "gem", "contents", "", "", "", "*" },
+            { "date", std::nullopt, "-u -R -I", "", "", "" } }
     };
 #endif
-    static constexpr std::array<ReadOnlyCommand, 45> shared {
+    static constexpr std::array<ReadOnlyCommand, 60> shared {
         { { "git", "status",
-              "-s -b -v --short --branch --porcelain -u "
-              "--untracked-files" },
+              "-s -b -v --short --branch --porcelain -u --untracked-files",
+              "-C --no-pager", "", "*" },
             { "git", "log",
-                "-p -n --oneline --graph --all --stat --follow "
-                "--decorate" },
+                "-p -n --oneline --graph --all --stat --follow --decorate "
+                "--format --pretty --date --since --until --author "
+                "--committer --grep --numstat --name-only --name-status "
+                "--no-merges --merges --first-parent --reverse --tags "
+                "--simplify-by-decoration --abbrev-commit --relative-date "
+                "--no-color --color --max-count --skip --shortstat "
+                "--summary --raw --patch --no-patch --left-right -S -G",
+                "-C --no-pager",
+                "--format --pretty --date --since --until --author "
+                "--committer --grep --max-count --skip -S -G -n",
+                "*" },
             { "git", "diff",
-                "--cached --stat --name-only --name-status "
-                "--shortstat --summary -U --unified" },
-            { "git", "show", "--stat --name-only --name-status --oneline" },
-            { "git", "blame", "-L -w -M -C --line-porcelain" },
+                "--cached --stat --name-only --name-status --shortstat "
+                "--summary -U --unified --numstat --word-diff "
+                "--color-words --no-color --color --exit-code --quiet "
+                "--diff-filter --relative --src-prefix --dst-prefix",
+                "-C --no-pager", "--diff-filter --unified -U", "*" },
+            { "git", "show",
+                "--stat --name-only --name-status --oneline --format "
+                "--pretty --date --numstat --shortstat --summary "
+                "--no-color --color",
+                "-C --no-pager", "--format --pretty --date", "*" },
+            { "git", "blame",
+                "-L -w -M -C --line-porcelain --porcelain --show-email",
+                "-C --no-pager", "-L", "*" },
             { "git", "branch",
-                "-a -r -v -vv --list --show-current "
-                "--contains --merged --no-merged" },
+                "-a -r -v -vv --list --show-current --contains --merged "
+                "--no-merged --sort --format --no-color",
+                "-C --no-pager",
+                "--contains --merged --no-merged --sort "
+                "--format",
+                "" },
             { "git", "tag",
-                "-l -n --list --contains --merged --no-merged "
-                "--sort" },
-            { "git", "remote", "-v --verbose --get-url" },
+                "-l -n --list --contains --merged --no-merged --sort "
+                "--format --no-color",
+                "-C --no-pager",
+                "--contains --merged --no-merged --sort "
+                "--format",
+                "" },
+            { "git", "remote", "-v --verbose --get-url", "-C --no-pager",
+                "--get-url", "" },
             { "git", "ls-files",
-                "-s -o -m -c -d --others --modified "
-                "--cached --deleted --full-name" },
-            { "git", "describe", "--tags --all --long --abbrev --contains" },
-            { "git", "config", "--get --get-regexp --list --list-all" },
-            { "docker", "ps", "-a -q -s --all --quiet --size" },
-            { "docker", "images", "-a -q --all --quiet" },
-            { "docker", "logs", "-f -t --follow --timestamps --tail" },
-            { "docker", "inspect", "" }, { "docker", "version", "" },
-            { "docker", "info", "" }, { "docker", "top", "" },
-            { "docker", "port", "" }, { "docker", "stats", "" },
-            { "docker", "history", "" }, { "docker", "diff", "" },
-            { "docker", "search", "" },
+                "-s -o -m -c -d --others --modified --cached --deleted "
+                "--full-name --error-unmatch",
+                "-C --no-pager", "", "*" },
+            { "git", "describe",
+                "--tags --all --long --abbrev --contains --always --dirty "
+                "--match --exclude",
+                "-C --no-pager", "--abbrev --match --exclude", "*" },
+            { "git", "config",
+                "--get --get-regexp --list --list-all --local --global "
+                "--system --show-origin --show-scope",
+                "-C --no-pager", "--get --get-regexp", "" },
+            { "git", "grep",
+                "-n -i -w -l -L -c -I --line-number --ignore-case "
+                "--word-regexp --files-with-matches --files-without-match "
+                "--count --text --no-color --color --break --heading "
+                "--full-name --recurse-submodules",
+                "-C --no-pager", "", "*" },
+            { "git", "rev-parse",
+                "--abbrev-ref --show-toplevel --show-prefix --git-dir "
+                "--git-common-dir --is-inside-work-tree --is-bare-repository "
+                "--short --verify --quiet --symbolic --symbolic-full-name "
+                "--all --branches --tags --remotes "
+                "--show-superproject-working-tree",
+                "-C --no-pager", "", "*" },
+            { "git", "rev-list",
+                "--count --max-count --all --branches --tags --remotes "
+                "--reverse --first-parent --no-merges --merges --oneline "
+                "--abbrev-commit --left-right",
+                "-C --no-pager", "--max-count", "*" },
+            { "git", "shortlog", "-s -n -e --summary --numbered --email",
+                "-C --no-pager", "", "*" },
+            { "git", "ls-tree",
+                "-r -t -d -l --name-only --name-status --full-name "
+                "--abbrev --long",
+                "-C --no-pager", "", "*" },
+            { "git", "cat-file", "-p -t -s -e --pretty --type --size --exists",
+                "-C --no-pager", "", "*" },
+            { "git", "merge-base", "--all --is-ancestor --octopus --fork-point",
+                "-C --no-pager", "", "*" },
+            { "git", "for-each-ref", "--sort --format --count --points-at",
+                "-C --no-pager", "--sort --format --count", "*" },
+            { "git", "show-ref",
+                "-d -s --dereference --hash --heads "
+                "--tags",
+                "-C --no-pager", "", "*" },
+            { "git", "reflog", "--no-color", "-C --no-pager", "", "show" },
+            { "git", "stash", "--no-color", "-C --no-pager", "", "+list" },
+            { "git", "worktree", "--porcelain", "-C --no-pager", "", "+list" },
+            { "git", "version", "", "-C --no-pager", "", "" },
+            { "git", "count-objects", "-v --verbose -H --human-readable",
+                "-C --no-pager", "", "" },
+            { "docker", "ps", "-a -q -s --all --quiet --size --format", "",
+                "--format", "" },
+            { "docker", "images", "-a -q --all --quiet --format", "",
+                "--format", "" },
+            { "docker", "logs", "-f -t --follow --timestamps --tail", "",
+                "--tail", "*" },
+            { "docker", "inspect", "", "", "", "*" },
+            { "docker", "version", "", "", "", "" },
+            { "docker", "info", "", "", "", "" },
+            { "docker", "top", "", "", "", "*" },
+            { "docker", "port", "", "", "", "*" },
+            { "docker", "stats", "", "", "", "*" },
+            { "docker", "history", "", "", "", "*" },
+            { "docker", "diff", "", "", "", "*" },
+            { "docker", "search", "", "", "", "*" },
             { "kubectl", "get",
-                "-o --output -A --all-namespaces -n "
-                "--namespace --watch" },
-            { "kubectl", "describe", "-n --namespace" },
-            { "kubectl", "logs", "-f --tail -n --namespace --previous" },
-            { "kubectl", "api-resources", "" },
-            { "kubectl", "api-versions", "" },
-            { "kubectl", "cluster-info", "" }, { "kubectl", "explain", "" },
-            { "kubectl", "version", "" },
-            { "npm", "ls", "-g --global --depth" },
-            { "npm", "outdated", "-g --global" }, { "npm", "view", "" },
-            { "npm", "why", "" }, { "npm", "root", "" },
-            { "npm", "prefix", "" },
-            { "pip", "list", "-o --outdated --format" },
-            { "pip", "show", "-f --files" }, { "pip", "freeze", "" },
-            { "pip", "check", "" }, { "go", "version", "-m" },
-            { "go", "env", "" }, { "go", "list", "" }, { "go", "doc", "" } }
+                "-o --output -A --all-namespaces -n --namespace --watch "
+                "--show-labels --no-headers --sort-by",
+                "", "-o --output -n --namespace --sort-by", "*" },
+            { "kubectl", "describe", "-n --namespace", "", "-n --namespace",
+                "*" },
+            { "kubectl", "logs",
+                "-f --tail -n --namespace --previous --since --timestamps", "",
+                "--tail -n --namespace --since", "*" },
+            { "kubectl", "api-resources", "", "", "", "" },
+            { "kubectl", "api-versions", "", "", "", "" },
+            { "kubectl", "cluster-info", "", "", "", "" },
+            { "kubectl", "explain", "", "", "", "*" },
+            { "kubectl", "version", "", "", "", "" },
+            { "kubectl", "config", "--minify --raw", "", "", "view" },
+            { "npm", "ls", "-g --global --depth --json --long", "", "--depth",
+                "*" },
+            { "npm", "outdated", "-g --global --json", "", "", "" },
+            { "npm", "view", "--json", "", "", "*" },
+            { "npm", "why", "", "", "", "*" },
+            { "npm", "root", "-g --global", "", "", "" },
+            { "npm", "prefix", "-g --global", "", "", "" },
+            { "pip", "list", "-o --outdated --format --local", "", "--format",
+                "" },
+            { "pip", "show", "-f --files", "", "", "*" },
+            { "pip", "freeze", "--local --all", "", "", "" },
+            { "pip", "check", "", "", "", "" },
+            { "go", "version", "-m", "", "", "" },
+            { "go", "env", "", "", "", "*" },
+            { "go", "list", "-m -json --json", "", "", "*" },
+            { "go", "doc", "", "", "", "*" } }
     };
     return std::any_of(platform_only.begin(), platform_only.end(),
                [&](const ReadOnlyCommand& entry) {

@@ -21,6 +21,7 @@ Changes:
   - Plan documentation now loads on demand.
   - Fixed `imza.fs.ts_query` ignoring its query predicates, so filtered
     searches returned unfiltered matches.
+  - Read-only shell commands now cover far more common forms.
   - Secret-bearing files (.env, keys, credentials, .git contents) now
     always require explicit approval, even inside an allowed directory,
     and shell commands naming them are never auto-accepted.

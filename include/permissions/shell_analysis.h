@@ -10,7 +10,14 @@ namespace imza {
 struct ShellInvocation {
     std::string program;
     std::optional<std::string> subcommand;
+    // Every word after the subcommand, in order. A bare word may be a
+    // flag's value (`git branch --contains v1`) or an operand that turns
+    // the subcommand into a write (`git branch v1`), and only the catalog
+    // knows which flags take a value.
     std::vector<std::string> arguments;
+    // Program-level options before the subcommand (`git -C build status`),
+    // kept so the catalog can reject the ones that change what runs.
+    std::vector<std::string> options;
     // True when the program carries code the analyzer cannot read: an
     // interpreter, a script file, or a launcher with no nested command
     // string. Such an invocation is approval-once and never grantable.
@@ -47,5 +54,12 @@ bool shell_deletion_denied(std::string_view program);
 // grant naming one is refused, because it would authorize every command
 // the program can run.
 bool shell_launcher_denied(std::string_view program);
+
+// Options that make a program read configuration or run code the analyzer
+// cannot see (git's `-c` and its remote-command hooks). Such an option
+// forces approval-once, because a program/subcommand grant would otherwise
+// cover it.
+bool shell_program_option_denied(
+    std::string_view program, std::string_view option);
 
 } // namespace imza

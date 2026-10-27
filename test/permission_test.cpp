@@ -270,24 +270,33 @@ TEST_CASE("runtime shell grants match subcommands and whole programs")
 
 TEST_CASE("shell analysis extracts compound command and subcommand pairs")
 {
+    const auto first = [](std::string_view command) {
+        return analyze_shell(command).invocations.front();
+    };
+
     const ShellAnalysis analysis
         = analyze_shell("git push origin && cmake --build build | tee log");
     REQUIRE(analysis.reuse == ShellAnalysis::Reuse::SESSION);
     REQUIRE(analysis.invocations.size() == 3);
-    CHECK(analysis.invocations[0] == (ShellInvocation { "git", "push" }));
-    CHECK(analysis.invocations[1] == (ShellInvocation { "cmake", "build" }));
-    CHECK(analysis.invocations[2] == (ShellInvocation { "tee", "log" }));
+    CHECK(analysis.invocations[0].program == "git");
+    CHECK(analysis.invocations[0].subcommand == "push");
+    CHECK(analysis.invocations[0].arguments
+        == std::vector<std::string> { "origin" });
+    CHECK(analysis.invocations[1].program == "cmake");
+    CHECK(analysis.invocations[1].subcommand == "build");
+    CHECK(analysis.invocations[2].program == "tee");
+    CHECK(analysis.invocations[2].subcommand == "log");
 
     const ShellAnalysis flagged = analyze_shell("git -C build status");
     REQUIRE(flagged.invocations.size() == 1);
-    CHECK(flagged.invocations[0] == (ShellInvocation { "git", "status" }));
+    CHECK(flagged.invocations[0].program == "git");
+    CHECK(flagged.invocations[0].subcommand == "status");
+    CHECK(flagged.invocations[0].options == std::vector<std::string> { "-C" });
 
-    CHECK(analyze_shell("grep --color pattern src").invocations[0]
-        == (ShellInvocation { "grep", "pattern" }));
-    CHECK(analyze_shell("git status").invocations[0]
-        == (ShellInvocation { "git", "status" }));
-    CHECK(analyze_shell("git").invocations[0]
-        == (ShellInvocation { "git", std::nullopt }));
+    CHECK(first("grep --color pattern src").program == "grep");
+    CHECK(first("grep --color pattern src").subcommand == "pattern");
+    CHECK(first("git status").subcommand == "status");
+    CHECK_FALSE(first("git").subcommand.has_value());
 
     CHECK(
         analyze_shell("ls > listing.txt").reuse == ShellAnalysis::Reuse::ONCE);
@@ -296,6 +305,35 @@ TEST_CASE("shell analysis extracts compound command and subcommand pairs")
     CHECK(analyze_shell("echo $VALUE").reuse == ShellAnalysis::Reuse::ONCE);
     CHECK(analyze_shell("printf '%s\\n' literal").reuse
         == ShellAnalysis::Reuse::SESSION);
+}
+
+TEST_CASE("only a redirect that writes a real file costs the session grant")
+{
+    const auto reuse
+        = [](std::string_view command) { return analyze_shell(command).reuse; };
+
+    // Discarding output or duplicating a stream writes nothing.
+    CHECK(reuse("git status 2>/dev/null") == ShellAnalysis::Reuse::SESSION);
+    CHECK(reuse("git status > /dev/null") == ShellAnalysis::Reuse::SESSION);
+    CHECK(reuse("git status >/dev/null 2>&1") == ShellAnalysis::Reuse::SESSION);
+    CHECK(reuse("git status 2>&1") == ShellAnalysis::Reuse::SESSION);
+    CHECK(reuse("git status 1>&2") == ShellAnalysis::Reuse::SESSION);
+    CHECK(reuse("git status >&2") == ShellAnalysis::Reuse::SESSION);
+    CHECK(reuse("cat x < y") == ShellAnalysis::Reuse::SESSION);
+
+    // Writing a file, appending, or a heredoc does.
+    CHECK(reuse("git status > out.txt") == ShellAnalysis::Reuse::ONCE);
+    CHECK(reuse("git status >> out.txt") == ShellAnalysis::Reuse::ONCE);
+    CHECK(reuse("git status &> out.txt") == ShellAnalysis::Reuse::ONCE);
+    CHECK(reuse("git status 2> err.txt") == ShellAnalysis::Reuse::ONCE);
+    CHECK(reuse("git status 2>/dev/null > out.txt")
+        == ShellAnalysis::Reuse::ONCE);
+    CHECK(reuse("cat <<EOF") == ShellAnalysis::Reuse::ONCE);
+
+    // The target is never mistaken for an argument of the command.
+    const ShellAnalysis redirected = analyze_shell("git status > out.txt");
+    REQUIRE(redirected.invocations.size() == 1);
+    CHECK(redirected.invocations[0].arguments.empty());
 }
 
 TEST_CASE("launcher unwrapping flattens code into classifiable invocations")
@@ -373,6 +411,14 @@ TEST_CASE("read-only command pair catalog is platform specific")
     CHECK_FALSE(shell_readonly_allowed(invocation("curl status")));
     CHECK_FALSE(shell_readonly_allowed(invocation("git diff --output=x.txt")));
     CHECK(shell_readonly_allowed(invocation("git diff --stat")));
+    CHECK(shell_readonly_allowed(invocation("git status --porcelain=v1")));
+    CHECK(shell_readonly_allowed(invocation("git log --since=2026-10-15")));
+    CHECK(shell_readonly_allowed(invocation("git log --oneline -5")));
+    CHECK(shell_readonly_allowed(invocation("git log -1 --format=%h %s")));
+    CHECK(shell_readonly_allowed(invocation("git grep -n x -- src")));
+    CHECK(
+        shell_readonly_allowed(invocation("git rev-parse --abbrev-ref HEAD")));
+    CHECK(shell_readonly_allowed(invocation("git describe --always --dirty")));
     CHECK_FALSE(shell_readonly_allowed(invocation("make -n")));
     CHECK_FALSE(shell_readonly_allowed(invocation("whois example.com")));
     CHECK_FALSE(shell_readonly_allowed(invocation("terraform plan")));
@@ -385,6 +431,39 @@ TEST_CASE("read-only command pair catalog is platform specific")
     CHECK_FALSE(shell_readonly_allowed(invocation("systemctl start foo")));
     CHECK_FALSE(shell_readonly_allowed(invocation("tasklist /v")));
 #endif
+}
+
+TEST_CASE("a catalog row decides which operands and options stay read-only")
+{
+    const auto allowed = [](std::string_view command) {
+        return shell_readonly_allowed(
+            analyze_shell(command).invocations.front());
+    };
+
+    // The same slot is a write for the sibling form.
+    CHECK_FALSE(allowed("git remote add origin u"));
+    CHECK_FALSE(allowed("git remote remove o"));
+    CHECK_FALSE(allowed("git branch newbranch"));
+    CHECK_FALSE(allowed("git branch -v newbranch"));
+    CHECK_FALSE(allowed("git tag v1"));
+    CHECK_FALSE(allowed("git tag -n v1"));
+    CHECK_FALSE(allowed("git config user.name Bob"));
+    CHECK_FALSE(allowed("git stash"));
+    CHECK_FALSE(allowed("git stash drop"));
+    CHECK_FALSE(allowed("git worktree add ../x"));
+    CHECK_FALSE(allowed("git reflog expire --all"));
+
+    CHECK(allowed("git config --get user.name"));
+    CHECK(allowed("git branch --contains v1"));
+    CHECK(allowed("git stash list"));
+    CHECK(allowed("git worktree list"));
+    CHECK(allowed("git reflog"));
+
+    CHECK(allowed("git -C build status"));
+    CHECK(allowed("git --no-pager log"));
+    CHECK_FALSE(allowed("git -c core.pager=x log"));
+    CHECK_FALSE(allowed("git --git-dir=/tmp/x log"));
+    CHECK_FALSE(allowed("git --exec-path=/tmp/x log"));
 }
 
 TEST_CASE("read-only subcommand catalog rows match their intended commands")
@@ -996,6 +1075,24 @@ TEST_CASE("shell policy reuses, combines, and broadens session grants")
     CHECK(redirected.decision.kind == PermissionDecision::Kind::ASK);
     CHECK(redirected.session_grants.empty());
     CHECK(redirected.request.command == "ls > files.txt");
+
+    // A program-wide grant covers the program, not the options that make
+    // it read configuration or run another program.
+    const PermissionStore::Grants everything { ShellCommandGrant {
+        "git", std::nullopt } };
+    for (std::string_view command : { "git -c core.pager=evil log",
+             "git -c core.fsmonitor=touch /tmp/x status",
+             "git --exec-path=/tmp/e log", "git --git-dir=/tmp/x log",
+             "git --config-env=a=b log" }) {
+        const ShellEvaluation denied
+            = evaluate(std::string(command), everything);
+        CHECK(denied.decision.kind == PermissionDecision::Kind::ASK);
+        CHECK(denied.session_grants.empty());
+    }
+    CHECK(evaluate("git log", everything).decision.kind
+        == PermissionDecision::Kind::ACCEPT);
+    CHECK(evaluate("git -C build status", everything).decision.kind
+        == PermissionDecision::Kind::ACCEPT);
 }
 
 TEST_CASE("shell policy rejects an empty command")
