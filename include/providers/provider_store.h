@@ -18,6 +18,7 @@
 #include "network/network.h"
 #include "platform/config.h"
 #include "platform/config_store.h"
+#include "platform/credential_subsystem.h"
 #include "providers/catalog.h"
 #include "providers/pricing.h"
 #include "providers/subscriptions.h"
@@ -91,7 +92,7 @@ class ProviderStore final : public Subsystem {
 public:
     explicit ProviderStore(std::shared_ptr<ConfigStore> config_store,
         ModelsFn models_fn = { }, TermsFn terms_fn = { },
-        RefreshFn refresh_fn = { });
+        RefreshFn refresh_fn = { }, CredentialSubsystem* credentials = nullptr);
     ~ProviderStore();
 
     void stop() override;
@@ -171,6 +172,9 @@ private:
     ModelsFn _models_fn;
     TermsFn _terms_fn;
     RefreshFn _refresh_fn;
+    // Fetch workers park on its wait_ready first so a startup fetch never
+    // sends the pre-resolve snapshot's empty keys; null skips the wait.
+    CredentialSubsystem* _credentials = nullptr;
 
     std::map<std::string, CatalogEntry> _model_catalog;
     std::map<std::string, int> _generations;

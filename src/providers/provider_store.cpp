@@ -193,11 +193,13 @@ std::string subagent_variant_or_default(
 }
 
 ProviderStore::ProviderStore(std::shared_ptr<ConfigStore> config_store,
-    ModelsFn models_fn, TermsFn terms_fn, RefreshFn refresh_fn)
+    ModelsFn models_fn, TermsFn terms_fn, RefreshFn refresh_fn,
+    CredentialSubsystem* credentials)
     : _config_store(std::move(config_store))
     , _models_fn(std::move(models_fn))
     , _terms_fn(std::move(terms_fn))
     , _refresh_fn(std::move(refresh_fn))
+    , _credentials(credentials)
 {
     if (!_models_fn) {
         _models_fn = [](const Route& route, std::vector<ModelInfo>& models) {
@@ -882,21 +884,55 @@ void ProviderStore::_start_fetch_locked(const std::string& connection_id)
     if (connection == nullptr) {
         return;
     }
-    const Route route
-        = _route_locked(*connection, default_dialect(*connection, _catalog));
     const int generation = ++_generations[connection_id];
-    if (route.api.empty()) {
-        _model_catalog[connection_id]
-            = CatalogEntry { CatalogEntry::Failed { Status::INVALID_URL } };
-        return;
-    }
-    _model_catalog[connection_id] = CatalogEntry { CatalogEntry::Fetching { } };
+    // Subscription lists come from the local catalog and need no key, and
+    // an unroutable connection is a synchronous failure: neither waits.
     if (subscription_connection(connection->id)) {
         _model_catalog[connection_id] = CatalogEntry { CatalogEntry::Ready {
             catalog_models(_catalog, connection->id) } };
         return;
     }
-    _workers.emplace_back([this, connection_id, generation, route] {
+    if (_route_locked(*connection, default_dialect(*connection, _catalog))
+            .api.empty()) {
+        _model_catalog[connection_id]
+            = CatalogEntry { CatalogEntry::Failed { Status::INVALID_URL } };
+        return;
+    }
+    _model_catalog[connection_id] = CatalogEntry { CatalogEntry::Fetching { } };
+    _workers.emplace_back([this, connection_id, generation] {
+        // A startup fetch would otherwise race the credential worker and
+        // send the pre-resolve snapshot's empty keys: park here, off the
+        // main thread, until the keychain resolves. Bounded so a wedged
+        // keychain degrades to the un-resolved snapshot past the deadline.
+        if (_credentials != nullptr) {
+            _credentials->wait_ready(std::chrono::seconds { 10 });
+        }
+        if (!alive()) {
+            return;
+        }
+        // Snapshot after the wait: only then does the config view carry
+        // the overlaid keychain secret.
+        Connection snapshot;
+        {
+            std::lock_guard lock(_mutex);
+            const Connection* current = find_connection(
+                _config_store->snapshot()->providers, connection_id);
+            if (current == nullptr) {
+                return;
+            }
+            snapshot = *current;
+        }
+        const Route route
+            = _route_locked(snapshot, default_dialect(snapshot, _catalog));
+        if (route.api.empty()) {
+            std::lock_guard lock(_mutex);
+            if (_generations[connection_id] == generation) {
+                _model_catalog[connection_id] = CatalogEntry {
+                    CatalogEntry::Failed { Status::INVALID_URL }
+                };
+            }
+            return;
+        }
         std::vector<ModelInfo> models;
         const Status status = _models_fn(route, models);
         if (!alive()) {

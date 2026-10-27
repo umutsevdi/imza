@@ -25,6 +25,7 @@ Changes:
   - Secret-bearing files (.env, keys, credentials, .git contents) now
     always require explicit approval, even inside an allowed directory,
     and shell commands naming them are never auto-accepted.
+  - Fixed provider connections showing as failed.
 
 -------------------------------------------------------------------------------
 0.7.0 - 2026-10-24

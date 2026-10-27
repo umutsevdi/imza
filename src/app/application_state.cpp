@@ -268,7 +268,10 @@ namespace {
         if (state->credentials->probed()) {
             publish_degradation();
         }
-        state->providers = std::make_shared<ProviderStore>(state->config);
+        // Fetch workers wait for the credential worker before snapshotting,
+        // so a startup fetch never sends un-resolved keys.
+        state->providers = std::make_shared<ProviderStore>(state->config,
+            ModelsFn { }, TermsFn { }, RefreshFn { }, state->credentials.get());
         McpSubsystemHooks mcp_hooks;
         // Sign-ins and background token refreshes write straight through
         // the shared locked config RMW; no manager reload follows because
