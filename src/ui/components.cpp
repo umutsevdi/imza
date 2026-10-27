@@ -1350,11 +1350,17 @@ namespace {
                 running += value;
             }
         }
-        // Category labels below the axis, thinned so each drawn label
-        // keeps at least four cells and truncated to its slot.
+        // Value atop each labeled slot, so numbers ride with the bars.
         const int fit         = std::max(1, span / (4 * CELL_X));
         const int step        = std::max(1, (slots + fit - 1) / fit);
         const int label_cells = std::max(2, slot * step / CELL_X - 1);
+        for (int i = 0; i < slots; i += step) {
+            const double value = slot_value(view, i);
+            if (value > 0.0) {
+                c.DrawText((left + i * slot) & ~1, top - CELL_Y + 2,
+                    axis_label(value), PANEL_FG_DIM);
+            }
+        }
         for (int i = 0; i < slots; i += step) {
             const std::string& label = view.categories.empty()
                 ? view.series[std::size_t(i)].label

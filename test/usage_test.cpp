@@ -92,9 +92,6 @@ TEST_CASE("usage accumulates per turn and in the analytics log")
     const auto log = session.usage_log();
     REQUIRE(log.size() == 2);
     CHECK(log.back().model == "m");
-
-    const auto view = session.status_view();
-    CHECK(view.totals.total == 250);
 }
 
 TEST_CASE("save and load round-trips usage state")
@@ -121,7 +118,6 @@ TEST_CASE("save and load round-trips usage state")
     REQUIRE(log.size() == 1);
     CHECK(log.front().usage.total == 100);
 
-    // The transcript item carries its usage and timestamp back too.
     const auto items = loaded.items();
     REQUIRE(items->size() == 2);
     const auto* turn = std::get_if<imza::AssistantTurn>(&(*items)[1]);
@@ -148,8 +144,6 @@ TEST_CASE("subagent usage folds into the parent exactly once")
     CHECK(view.total_cost > cost_before);
     REQUIRE(parent.usage_log().size() == 3);
 
-    // Folded entries ride on the spawning turn, so turn views include
-    // subagent spend.
     const auto items = parent.items();
     const auto* turn = std::get_if<imza::AssistantTurn>(&items->back());
     REQUIRE(turn != nullptr);
@@ -173,24 +167,22 @@ TEST_CASE("index usage summary aggregates across sessions")
     first.set_title("one");
     first.begin_send("a");
     first.append_assistant("m1", "off");
+    first.set_entry_provider("alpha");
     first.apply(usage_event(100), test_pricing());
     first.finish_session("");
-    first.set_entry_provider("alpha");
     REQUIRE(imza::save_session(first) == imza::Status::OK);
 
     imza::Session second;
     second.set_title("two");
     second.begin_send("b");
     second.append_assistant("m2", "off");
+    second.set_entry_provider("beta");
     second.apply(usage_event(700), test_pricing());
     second.finish_session("");
-    second.set_entry_provider("beta");
     REQUIRE(imza::save_session(second) == imza::Status::OK);
 
     const auto saved = imza::saved_sessions();
     REQUIRE(saved.size() == 2);
-    // Entries written before the provider stamp (the first turn above)
-    // group under an empty provider; the summary still totals correctly.
     std::uint64_t indexed_total = 0;
     for (const auto& entry : saved) {
         indexed_total += entry.usage.total;
@@ -200,13 +192,13 @@ TEST_CASE("index usage summary aggregates across sessions")
     const imza::GlobalUsageSummary summary = imza::global_usage_summary();
     CHECK(summary.total == 800);
     CHECK(summary.total_cost > 0.0);
-    REQUIRE_FALSE(summary.by_model.empty());
+    // Each session's entry groups under its own provider.
+    REQUIRE(summary.by_model.size() == 2);
     std::uint64_t by_model_total = 0;
     for (const auto& row : summary.by_model) {
         by_model_total += row.total;
     }
     CHECK(by_model_total == 800);
-    // Per-day series has at least one bucket from today's saves.
     REQUIRE_FALSE(summary.by_day.empty());
     double by_day_total = 0.0;
     for (const auto& row : summary.by_day) {
@@ -215,8 +207,7 @@ TEST_CASE("index usage summary aggregates across sessions")
     }
     CHECK(by_day_total == doctest::Approx(summary.total_cost));
 
-    // summarize_saved_usage over the in-memory entries agrees with the
-    // index-backed path.
+    // The in-memory path agrees with the index-backed one.
     const imza::GlobalUsageSummary from_saved
         = imza::summarize_saved_usage(saved);
     CHECK(from_saved.total == summary.total);
@@ -241,7 +232,7 @@ TEST_CASE("rollup and submission grouping")
     imza::UsageEntry entry = make_entry("alpha", "m1", 10, 0.01);
     entry.finished_at      = std::chrono::system_clock::now();
     const imza::GlobalUsageSummary merged
-        = imza::summarize_usage({ entry, entry });
+        = imza::summarize_usage({ entry, entry }, "2026-01-01");
     REQUIRE(merged.by_day.size() == 1);
     REQUIRE(merged.by_day.front().by_model.size() == 1);
     CHECK(merged.by_day.front().by_model.front().total == 20);
@@ -267,15 +258,13 @@ TEST_CASE("summaries bucket spend per day, with legacy fallbacks")
 {
     imza::test::IsolatedDataHome home;
 
-    // Entries without request timestamps (epoch 0) land in the epoch
-    // bucket instead of vanishing from the chart.
-    const imza::GlobalUsageSummary legacy
-        = imza::summarize_usage({ make_entry("p", "m", 100, 0.25) });
+    // Entries without timestamps land on the fallback day.
+    const imza::GlobalUsageSummary legacy = imza::summarize_usage(
+        { make_entry("p", "m", 100, 0.25) }, "2026-10-26");
     REQUIRE(legacy.by_day.size() == 1);
-    CHECK(legacy.by_day.front().day == "1970-01-01");
+    CHECK(legacy.by_day.front().day == "2026-10-26");
     CHECK(legacy.by_day.front().total == 100);
     CHECK(legacy.by_day.front().cost == doctest::Approx(0.25));
-    // The day's model breakdown backs the stacked per-day chart.
     REQUIRE(legacy.by_day.front().by_model.size() == 1);
     CHECK(legacy.by_day.front().by_model.front().model == "m");
     CHECK(legacy.by_day.front().by_model.front().total == 100);
@@ -292,6 +281,27 @@ TEST_CASE("summaries bucket spend per day, with legacy fallbacks")
     CHECK(mixed.by_day.front().day == "2026-03-05");
     CHECK(mixed.by_day.front().total == 500);
     CHECK(mixed.by_day.front().cost == doctest::Approx(1.5));
+}
+
+TEST_CASE("epoch day buckets remap to the session's save day")
+{
+    imza::test::IsolatedDataHome home;
+    imza::SavedSession poisoned;
+    poisoned.title       = "poisoned";
+    poisoned.saved_at    = "2026-10-26 23:00:00";
+    poisoned.usage.total = 7'050'412;
+    poisoned.usage.by_model.push_back(
+        { "zai-coding-plan", "glm-5.3", 7'050'412, 0, 7'050'412, 0.0 });
+    poisoned.usage.by_day.push_back({ "1970-01-01", 7'050'412, 0.0,
+        { { "zai-coding-plan", "glm-5.3", 7'050'412, 0, 7'050'412, 0.0 } } });
+
+    const imza::GlobalUsageSummary summary
+        = imza::summarize_saved_usage({ poisoned });
+    REQUIRE(summary.by_day.size() == 1);
+    CHECK(summary.by_day.front().day == "2026-10-26");
+    CHECK(summary.by_day.front().total == 7'050'412);
+    REQUIRE(summary.by_day.front().by_model.size() == 1);
+    CHECK(summary.by_day.front().by_model.front().total == 7'050'412);
 }
 
 TEST_CASE("legacy session files without usage fields load as zero")

@@ -76,7 +76,6 @@ namespace {
         const std::string effort
             = turn.reasoning_effort.empty() ? "off" : turn.reasoning_effort;
         std::string metadata = turn.model + " · " + effort;
-        // Absent for turns that predate usage tracking.
         if (!turn.usage.empty()) {
             std::uint64_t tokens = 0;
             for (const UsageEntry& entry : turn.usage) {
@@ -85,7 +84,7 @@ namespace {
             metadata += " · " + compact_number(tokens) + " tok";
             if (turn.finished_at != std::chrono::system_clock::time_point { }) {
                 metadata
-                    += " · " + format_local_time(turn.finished_at, "%b %d");
+                    += " · " + format_local_time(turn.finished_at, "%H:%M");
             }
         }
         return metadata;

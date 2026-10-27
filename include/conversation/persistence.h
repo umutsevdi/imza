@@ -42,7 +42,10 @@ std::vector<UsageBreakdownRow> rollup_usage_by_model(
 
 // Totals a usage log: sums plus the shared rollup. Cost is carried by the
 // entries; nothing is re-computed.
-GlobalUsageSummary summarize_usage(const std::vector<UsageEntry>& entries);
+// Aggregates a usage log; entries without a timestamp land on
+// `fallback_day` (the session's save date).
+GlobalUsageSummary summarize_usage(
+    const std::vector<UsageEntry>& entries, std::string fallback_day);
 
 // Title shown for sessions saved without a user-set name.
 inline constexpr char UNTITLED_TITLE[] = "Untitled session";

@@ -856,7 +856,8 @@ Status save_session(Session& session)
         = static_cast<std::int64_t>(snapshot.compacted_item_count);
     doc.mode      = snapshot.plan_mode ? "plan" : "build";
     doc.workspace = utf8_from_path(workspace);
-    doc.usage     = to_stored(summarize_usage(snapshot.usage_log));
+    doc.usage     = to_stored(
+        summarize_usage(snapshot.usage_log, format_local_time("%Y-%m-%d")));
     doc.usage_log = map_all(
         snapshot.usage_log, [](const UsageEntry& e) { return to_stored(e); });
     std::vector<StoredItem> items;
@@ -991,11 +992,12 @@ Status read_session(const std::filesystem::path& path, LoadedSession& loaded)
     } else if (!snapshot.usage_log.empty()) {
         // A log without a summary (crash between writes) still yields
         // correct totals.
-        const GlobalUsageSummary derived = summarize_usage(snapshot.usage_log);
-        snapshot.totals.prompt           = derived.prompt;
-        snapshot.totals.completion       = derived.completion;
-        snapshot.totals.total            = derived.total;
-        snapshot.total_cost              = derived.total_cost;
+        const GlobalUsageSummary derived
+            = summarize_usage(snapshot.usage_log, doc.saved_at.substr(0, 10));
+        snapshot.totals.prompt     = derived.prompt;
+        snapshot.totals.completion = derived.completion;
+        snapshot.totals.total      = derived.total;
+        snapshot.total_cost        = derived.total_cost;
     }
     // The last request's usage is the current context size; the log's
     // newest entry restores it exactly.
@@ -1061,7 +1063,8 @@ bool usage_entry_day(const UsageEntry& entry, std::string& day)
     return true;
 }
 
-GlobalUsageSummary summarize_usage(const std::vector<UsageEntry>& entries)
+GlobalUsageSummary summarize_usage(
+    const std::vector<UsageEntry>& entries, std::string fallback_day)
 {
     GlobalUsageSummary out;
     std::map<std::string, UsageDayRow> by_day;
@@ -1075,9 +1078,9 @@ GlobalUsageSummary summarize_usage(const std::vector<UsageEntry>& entries)
         out.completion += entry.usage.completion;
         out.total += entry.usage.total;
         out.total_cost += entry.cost;
-        // Legacy entries carry no request date; "1970-01-01" is their
-        // epoch bucket, sorting before every real day.
-        std::string day = "1970-01-01";
+        // Entries without a request timestamp (recorded before they
+        // existed) land on the session's save day.
+        std::string day = fallback_day;
         usage_entry_day(entry, day);
         UsageDayRow& row = by_day[day];
         row.day          = day;
@@ -1131,13 +1134,20 @@ GlobalUsageSummary summarize_saved_usage(const std::vector<SavedSession>& saved)
             = saved.saved_at.size() >= 10 ? saved.saved_at.substr(0, 10) : "";
         if (!saved.usage.by_day.empty()) {
             for (const UsageDayRow& row : saved.usage.by_day) {
-                auto& agg = by_day[row.day];
-                agg.day   = row.day;
+                // Entries saved before request timestamps existed were
+                // once bucketed at the epoch; remap that poison bucket to
+                // the session's save day.
+                const std::string day
+                    = row.day == "1970-01-01" && !fallback_day.empty()
+                    ? fallback_day
+                    : row.day;
+                auto& agg = by_day[day];
+                agg.day   = day;
                 agg.total += row.total;
                 agg.cost += row.cost;
                 for (const UsageModelRow& model : row.by_model) {
                     auto& segment
-                        = day_models[row.day][{ model.provider, model.model }];
+                        = day_models[day][{ model.provider, model.model }];
                     segment.provider = model.provider;
                     segment.model    = model.model;
                     segment.prompt += model.prompt;

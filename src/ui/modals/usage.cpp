@@ -59,63 +59,57 @@ namespace {
         return table.Render();
     }
 
-    // Tokens per day, stacked per model; cost can be flat zero on
-    // unpriced models, token counts never are.
-    CanvasView day_chart(const std::vector<UsageDayRow>& by_day,
-        const std::vector<UsageBreakdownRow>& by_model)
+    CanvasView day_chart(const std::vector<UsageDayRow>& by_day)
     {
-        // "MM-DD" labels; the year is noise within one chart.
-        std::vector<std::string> categories;
-        categories.reserve(by_day.size());
-        for (const auto& row : by_day) {
-            categories.push_back(
-                row.day.size() >= 10 ? row.day.substr(5) : row.day);
-        }
         CanvasView view;
-        view.kind       = CanvasView::Kind::BAR;
-        view.title      = "Usage by day";
-        view.categories = std::move(categories);
-        for (const auto& model : by_model) {
-            CanvasSeries series;
-            series.label = model.model.empty() ? "(unknown)" : model.model;
-            for (const auto& day : by_day) {
-                double tokens = 0.0;
-                for (const auto& row : day.by_model) {
-                    if (row.provider == model.provider
-                        && row.model == model.model) {
-                        tokens = double(row.total);
-                    }
-                }
-                series.values.push_back(tokens);
-            }
-            view.series.push_back(std::move(series));
+        view.kind  = CanvasView::Kind::BAR;
+        view.title = "Usage by day";
+        for (const auto& day : by_day) {
+            view.series.push_back(
+                { day.day.size() >= 10 ? day.day.substr(5) : day.day,
+                    { double(day.total) } });
         }
         return view;
     }
 
-    // Per-model table sorted by cost, with token share; optional TOTAL row.
     Element model_table(const std::vector<UsageBreakdownRow>& by_model,
         std::uint64_t grand, bool with_total, double total_cost)
     {
         std::vector<std::vector<std::string>> rows = {
-            { "PROVIDER", "MODEL", "TOKENS", "SHARE", "COST" },
+            { "PROVIDER", "MODEL", "TOKENS", "COST" },
         };
         for (const auto& row : by_model) {
+            rows.push_back(
+                { fit(row.provider, COL_PROVIDER), fit(row.model, COL_MODEL),
+                    compact_number(row.total), money_text(row.cost) });
+        }
+        if (with_total) {
+            rows.push_back(
+                { "TOTAL", "", compact_number(grand), money_text(total_cost) });
+        }
+        return usage_table(rows, { 2, 3 });
+    }
+
+    Element provider_table(const std::vector<UsageBreakdownRow>& by_provider,
+        std::uint64_t grand, bool with_total, double total_cost)
+    {
+        std::vector<std::vector<std::string>> rows = {
+            { "PROVIDER", "TOKENS", "SHARE", "COST" },
+        };
+        for (const auto& row : by_provider) {
             const std::string share = grand > 0
                 ? std::to_string(row.total * 100 / grand) + "%"
                 : "-";
-            rows.push_back(
-                { fit(row.provider, COL_PROVIDER), fit(row.model, COL_MODEL),
-                    compact_number(row.total), share, money_text(row.cost) });
+            rows.push_back({ fit(row.provider, COL_PROVIDER),
+                compact_number(row.total), share, money_text(row.cost) });
         }
         if (with_total) {
-            rows.push_back({ "TOTAL", "", compact_number(grand), "",
-                money_text(total_cost) });
+            rows.push_back(
+                { "TOTAL", compact_number(grand), "", money_text(total_cost) });
         }
-        return usage_table(rows, { 2, 3, 4 });
+        return usage_table(rows, { 1, 2, 3 });
     }
 
-    // Per-provider rollup of per-model rows, by cost.
     std::vector<UsageBreakdownRow> rollup_by_provider(
         const std::vector<UsageBreakdownRow>& by_model)
     {
@@ -140,7 +134,39 @@ namespace {
         return out;
     }
 
-    // Closing summary: what the spend was, over which span.
+    // The most recent 30 days, oldest first.
+    std::vector<UsageDayRow> recent_days(const std::vector<UsageDayRow>& by_day)
+    {
+        constexpr std::size_t MAX_DAYS = 30;
+        if (by_day.size() <= MAX_DAYS) {
+            return by_day;
+        }
+        return { by_day.end() - static_cast<std::ptrdiff_t>(MAX_DAYS),
+            by_day.end() };
+    }
+
+    Element day_table(const std::vector<UsageDayRow>& days, std::uint64_t grand,
+        bool with_total, double total_cost)
+    {
+        std::vector<std::vector<std::string>> rows = {
+            { "DAY", "TOKENS", "SHARE", "COST" },
+        };
+        std::uint64_t shown = 0;
+        for (const auto& day : days) {
+            const std::string share = grand > 0
+                ? std::to_string(day.total * 100 / grand) + "%"
+                : "-";
+            rows.push_back({ day.day, compact_number(day.total), share,
+                money_text(day.cost) });
+            shown += day.total;
+        }
+        if (with_total) {
+            rows.push_back(
+                { "TOTAL", compact_number(shown), "", money_text(total_cost) });
+        }
+        return usage_table(rows, { 1, 2, 3 });
+    }
+
     Element spend_summary(const std::string& scope, std::uint64_t tokens,
         double cost, std::size_t day_count)
     {
@@ -159,14 +185,15 @@ namespace {
             out.push_back(text("No usage recorded yet") | dim);
             return vbox(std::move(out));
         }
-        const GlobalUsageSummary summary        = summarize_usage(log);
+        const GlobalUsageSummary summary
+            = summarize_usage(log, format_local_time("%Y-%m-%d"));
         std::vector<UsageBreakdownRow> by_model = summary.by_model;
         std::sort(by_model.begin(), by_model.end(),
             [](const UsageBreakdownRow& a, const UsageBreakdownRow& b) {
                 return a.cost > b.cost;
             });
 
-        out.push_back(canvas_chart(day_chart(summary.by_day, by_model), width));
+        out.push_back(canvas_chart(day_chart(summary.by_day), width));
         out.push_back(separatorEmpty());
         out.push_back(text("By model") | bold);
         out.push_back(separatorEmpty());
@@ -184,28 +211,48 @@ namespace {
             out.push_back(text("No saved usage yet") | dim);
             return vbox(std::move(out));
         }
-        std::vector<UsageBreakdownRow> by_model = summary.by_model;
+        const std::vector<UsageDayRow> days = recent_days(summary.by_day);
+        GlobalUsageSummary window;
+        std::map<std::pair<std::string, std::string>, UsageBreakdownRow> rollup;
+        for (const UsageDayRow& day : days) {
+            window.total += day.total;
+            window.total_cost += day.cost;
+            for (const UsageModelRow& model : day.by_model) {
+                auto& row    = rollup[{ model.provider, model.model }];
+                row.provider = model.provider;
+                row.model    = model.model;
+                row.prompt += model.prompt;
+                row.completion += model.completion;
+                row.total += model.total;
+                row.cost += model.cost;
+            }
+        }
+        window.by_day = days;
+        std::vector<UsageBreakdownRow> by_model;
+        by_model.reserve(rollup.size());
+        for (auto& [key, row] : rollup) {
+            by_model.push_back(std::move(row));
+        }
         std::sort(by_model.begin(), by_model.end(),
             [](const UsageBreakdownRow& a, const UsageBreakdownRow& b) {
                 return a.cost > b.cost;
             });
-        if (!summary.by_day.empty()) {
-            out.push_back(
-                canvas_chart(day_chart(summary.by_day, by_model), width));
-            out.push_back(separatorEmpty());
-        }
+        out.push_back(canvas_chart(day_chart(days), width));
+        out.push_back(separatorEmpty());
+        out.push_back(day_table(days, window.total, true, window.total_cost));
+        out.push_back(separatorEmpty());
         out.push_back(text("By model") | bold);
         out.push_back(separatorEmpty());
         out.push_back(
-            model_table(by_model, summary.total, true, summary.total_cost));
+            model_table(by_model, window.total, true, window.total_cost));
         out.push_back(separatorEmpty());
         out.push_back(text("By provider") | bold);
         out.push_back(separatorEmpty());
-        out.push_back(model_table(rollup_by_provider(by_model), summary.total,
-            true, summary.total_cost));
+        out.push_back(provider_table(rollup_by_provider(by_model), window.total,
+            true, window.total_cost));
         out.push_back(separatorEmpty());
-        out.push_back(spend_summary("All saved sessions", summary.total,
-            summary.total_cost, summary.by_day.size()));
+        out.push_back(spend_summary("Last 30 days", window.total,
+            window.total_cost, window.by_day.size()));
         return vbox(std::move(out));
     }
 
