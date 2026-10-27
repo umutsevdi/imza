@@ -309,7 +309,7 @@ namespace {
                     if (raw->notifications && version) {
                         raw->notifications->publish(false,
                             "Imza v" + *version
-                                + " is available - run /update.");
+                                + " is available - run imza --update.");
                     }
                 });
         state->permissions = std::make_shared<PermissionStore>();

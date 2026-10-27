@@ -24,7 +24,7 @@ int main(int argc, char** argv)
     const imza::CliResult cli = imza::run_cli(argc, argv);
     if (!cli.continue_as_interactive) {
         if (cli.update_requested) {
-            return imza::run_update_display(imza::run_update_command);
+            return imza::run_update_display();
         }
         return cli.exit_code;
     }

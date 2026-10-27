@@ -26,6 +26,7 @@ Changes:
     always require explicit approval, even inside an allowed directory,
     and shell commands naming them are never auto-accepted.
   - Fixed provider connections showing as failed.
+  - Fixed bugs regarding `imza --update`.
   - The three loader tools are now consistently named `load_skill`,
     `load_module`, and `load_mcp`, and their chat cards and approval
     dialogs are labeled uniformly.

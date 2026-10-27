@@ -91,11 +91,12 @@ void print_markdown_output(std::string_view md)
     std::cout << render_markdown_to_text(md, std::max(40, term_w)) << std::endl;
 }
 
-int run_update_display(
-    const std::function<int(const std::function<void(std::string)>&)>& work)
+int run_update_display()
 {
+    const auto println = [](std::string line) { std::println("{}", line); };
     if (!stdout_is_tty()) {
-        return work([](std::string line) { std::println("{}", line); });
+        const PreparedUpdate update = prepare_update(println);
+        return run_prepared_update(update, println);
     }
 
     std::atomic_bool done { false };
@@ -119,9 +120,11 @@ int run_update_display(
                         ftxui::text(stage) }) });
         });
 
-    int result_code = 0;
+    // sudo reads its password from the terminal, which the spinner's
+    // event loop owns until it exits.
+    PreparedUpdate update;
     std::thread worker([&] {
-        result_code = work([&stage_mutex, &stage](std::string line) {
+        update = prepare_update([&stage_mutex, &stage](std::string line) {
             std::lock_guard lock(stage_mutex);
             stage = std::move(line);
         });
@@ -131,7 +134,8 @@ int run_update_display(
 
     screen.Loop(component);
     worker.join();
-    return result_code;
+    std::println("{}", stage);
+    return run_prepared_update(update, println);
 }
 
 } // namespace imza

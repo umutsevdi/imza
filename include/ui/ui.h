@@ -627,9 +627,9 @@ std::string render_markdown_to_text(std::string_view md, int width);
 // Final one-shot answer: rendered markdown when stdout is a terminal, raw
 // text otherwise, so redirected output stays clean markdown.
 void print_markdown_output(std::string_view md);
-// --update progress: a spinner + stage line when stdout is a terminal,
-// plain println lines otherwise. Returns `work`'s exit code.
-int run_update_display(
-    const std::function<int(const std::function<void(std::string)>&)>& work);
+// --update presentation: spinner + stage line on a terminal, plain lines
+// otherwise; the install runs after the screen closes. Returns the
+// installer exit code.
+int run_update_display();
 
 } // namespace imza

@@ -160,7 +160,7 @@ std::string format_session_list(const std::vector<SavedSession>& sessions)
     return output;
 }
 
-int run_update_command(const std::function<void(std::string)>& progress)
+PreparedUpdate prepare_update(const std::function<void(std::string)>& progress)
 {
     std::vector<std::string> package_managers;
     detect_package_managers(package_managers);
@@ -168,23 +168,45 @@ int run_update_command(const std::function<void(std::string)>& progress)
     const std::optional<UpdateInfo> update
         = fetch_update(package_managers, IMZA_VERSION);
     if (!update) {
-        progress("No update available.");
-        return 0;
+        return { PreparedUpdate::Kind::NONE, { }, { } };
     }
     progress("Downloading imza " + update->version + "...");
     std::error_code error;
     const std::filesystem::path temp = prepare_imza_temporary_directory(
         std::filesystem::temp_directory_path(error));
     if (error) {
-        std::println(stderr, "cannot resolve temporary directory");
+        return { PreparedUpdate::Kind::FAILED, update->version, { } };
+    }
+    const std::optional<std::filesystem::path> installer
+        = download_update(*update, temp);
+    if (!installer) {
+        return { PreparedUpdate::Kind::FAILED, update->version, { } };
+    }
+    return { PreparedUpdate::Kind::READY, update->version, *installer };
+}
+
+int run_prepared_update(const PreparedUpdate& update,
+    const std::function<void(std::string)>& progress)
+{
+    switch (update.kind) {
+    case PreparedUpdate::Kind::NONE: progress("No update available."); return 0;
+    case PreparedUpdate::Kind::FAILED:
+        std::println(stderr, "installation of imza {} failed", update.version);
+        return 1;
+    case PreparedUpdate::Kind::READY: break;
+    }
+    if (run_installer(update.installer) != 0) {
+        std::println(stderr, "installation of imza {} failed", update.version);
         return 1;
     }
-    if (install_update(*update, temp) != 0) {
-        std::println(stderr, "installation of imza {} failed", update->version);
-        return 1;
-    }
-    progress("Installed imza " + update->version + ".");
+    progress("Installed imza " + update.version + ".");
     return 0;
+}
+
+int run_update_command(const std::function<void(std::string)>& progress)
+{
+    const PreparedUpdate update = prepare_update(progress);
+    return run_prepared_update(update, progress);
 }
 
 CliResult run_cli(int argc, char** argv)

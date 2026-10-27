@@ -241,12 +241,12 @@ std::optional<UpdateInfo> fetch_update(
     return update;
 }
 
-int install_update(
+std::optional<std::filesystem::path> download_update(
     const UpdateInfo& update, const std::filesystem::path& directory)
 {
     const auto slash = update.download_url.find_last_of('/');
     if (slash == std::string::npos || slash + 1 >= update.download_url.size()) {
-        return 1;
+        return std::nullopt;
     }
     std::string body;
     long http_code = 0;
@@ -254,7 +254,7 @@ int install_update(
         = http_get(update.download_url, { "User-Agent: imza-updater" },
             DOWNLOAD_TIMEOUT_SECS, body, &http_code);
     if (status != Status::OK || !http_ok(http_code)) {
-        return 1;
+        return std::nullopt;
     }
     std::error_code error;
     std::filesystem::create_directories(directory, error);
@@ -262,11 +262,20 @@ int install_update(
         = directory / update.download_url.substr(slash + 1);
     std::ofstream file(installer, std::ios::binary | std::ios::trunc);
     if (!file) {
-        return 1;
+        return std::nullopt;
     }
     file.write(body.data(), static_cast<std::streamsize>(body.size()));
     file.close();
     if (!file.good()) {
+        return std::nullopt;
+    }
+    return installer;
+}
+
+int run_installer(const std::filesystem::path& installer)
+{
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(installer, error) || error) {
         return 1;
     }
 #if defined(_WIN32)

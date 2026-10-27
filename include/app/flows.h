@@ -59,9 +59,18 @@ struct CliResult {
 };
 
 CliResult run_cli(int argc, char** argv);
-// Download-and-install flow behind the --update flag; the caller owns
-// presentation and receives stage lines through `progress`. Returns the
-// process exit code.
+// Update flow split where the terminal changes hands: check + download
+// run under a spinner, the install after it releases the terminal.
+struct PreparedUpdate {
+    enum class Kind { READY, NONE, FAILED };
+    Kind kind = Kind::NONE;
+    std::string version;
+    std::filesystem::path installer;
+};
+
+PreparedUpdate prepare_update(const std::function<void(std::string)>& progress);
+int run_prepared_update(const PreparedUpdate& update,
+    const std::function<void(std::string)>& progress);
 int run_update_command(const std::function<void(std::string)>& progress);
 // One context for every agent-facing gate: grants, mode, skill
 // directories, MCP inventory.
