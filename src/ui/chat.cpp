@@ -1106,8 +1106,8 @@ namespace {
             const bool failed = tc.result->kind == ToolCall::Result::Kind::ERROR
                 || tc.result->kind == ToolCall::Result::Kind::REJECT;
             const ToolReport report = make_tool_report(tc);
-            Component button
-                = _make_lua_viewer_button(tc, failed, report.detail);
+            Component button        = _make_lua_viewer_button(tc, failed,
+                failed ? std::string() : lua_dispatch_breakdown(tc));
             Elements rows { button->Render() };
             const LayoutCtx ctx = _layout();
             for (const ToolReportSection& section : report.sections) {

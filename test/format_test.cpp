@@ -40,6 +40,34 @@ TEST_CASE("lua dispatch log formats as counts and grouped summary")
     CHECK(imza::lua_dispatch_counts(call) == "1 tool");
 }
 
+TEST_CASE("lua card breakdown folds the dispatch log into labeled buckets")
+{
+    imza::ToolCall call;
+    call.result
+        = imza::ToolCall::Result { imza::ToolCall::Result::Kind::OUTPUT, "" };
+
+    call.result->dispatch_log = {
+        { "fs.read", "a.cpp", true },
+        { "fs.read", "b.cpp", false },
+        { "fs.edit", "a.cpp", true },
+        { "web.search", "q", true },
+        { "shell", "ls", true },
+    };
+    CHECK(imza::lua_dispatch_breakdown(call)
+        == "1 search · 2 reads · 1 edit · 1 command");
+
+    call.result->dispatch_log = {
+        { "plan.get", "", true },
+        { "mcp.call", "s/t", true },
+        { "mcp.call", "s/u", true },
+        { "canvas.line", "CPU", true },
+        { "ask", "", true },
+        { "fs.read", "a.cpp", true },
+    };
+    CHECK(imza::lua_dispatch_breakdown(call)
+        == "1 read · 2 mcp calls · 1 plan · 1 ask · 1 canvas");
+}
+
 TEST_CASE("lua viewer report fences script and output safely")
 {
     imza::ToolCall call = lua_call(

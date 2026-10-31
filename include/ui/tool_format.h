@@ -54,6 +54,11 @@ bool is_module_call(const std::string& name);
 // Card detail for a lua tool call: the binding dispatch log collapsed
 // to "N tools (M failed)"; empty when there are no logged calls.
 std::string lua_dispatch_counts(const ToolCall& call);
+// Card detail for a finished lua tool call: the dispatch log folded into
+// the workspace buckets "2 searches · 3 reads · 4 edits · 1 command"; the
+// four keep a fixed order, plan/ask/canvas/mcp follow by descending count.
+// Bindings with no workspace impact are dropped; empty when nothing is left.
+std::string lua_dispatch_breakdown(const ToolCall& call);
 // Viewer detail for a lua tool call: the dispatch log grouped by binding as
 // "2 read · 3 list (1 failed)".
 std::string lua_dispatch_summary(const ToolCall& call);

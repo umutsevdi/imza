@@ -65,6 +65,70 @@ namespace {
         return out;
     }
 
+    // Card-label buckets for a finished lua run: the four workspace
+    // buckets in fixed order, then the rest by descending count. Bindings
+    // absent from BINDING_BUCKETS are not counted.
+    struct BucketLabel {
+        std::string_view singular;
+        std::string_view plural;
+    };
+
+    constexpr BucketLabel BUCKET_ORDER[] = {
+        { "search", "searches" },
+        { "read", "reads" },
+        { "edit", "edits" },
+        { "command", "commands" },
+        { "plan", "plans" },
+        { "ask", "asks" },
+        { "canvas", "canvases" },
+        { "mcp call", "mcp calls" },
+    };
+    constexpr std::size_t BUCKET_COUNT
+        = sizeof(BUCKET_ORDER) / sizeof(BUCKET_ORDER[0]);
+    constexpr std::size_t FIXED_BUCKETS = 4;
+
+    constexpr std::size_t SEARCH  = 0;
+    constexpr std::size_t READ    = 1;
+    constexpr std::size_t EDIT    = 2;
+    constexpr std::size_t COMMAND = 3;
+    constexpr std::size_t PLAN    = 4;
+    constexpr std::size_t ASK     = 5;
+    constexpr std::size_t CANVAS  = 6;
+    constexpr std::size_t MCP     = 7;
+
+    struct BindingBucket {
+        std::string_view binding;
+        std::size_t bucket;
+    };
+
+    // Catalog paths of the current roster.
+    constexpr BindingBucket BINDING_BUCKETS[] = {
+        { "web.fetch", SEARCH },
+        { "web.search", SEARCH },
+        { "fs.read", READ },
+        { "fs.list", READ },
+        { "fs.grep", READ },
+        { "fs.ts_query", READ },
+        { "fs.insert", EDIT },
+        { "fs.edit", EDIT },
+        { "fs.write", EDIT },
+        { "fs.mkdir", EDIT },
+        { "fs.remove", EDIT },
+        { "fs.copy", EDIT },
+        { "fs.move", EDIT },
+        { "shell", COMMAND },
+        { "bg.shell", COMMAND },
+        { "plan.get", PLAN },
+        { "plan.create", PLAN },
+        { "plan.edit", PLAN },
+        { "ask", ASK },
+        { "canvas.line", CANVAS },
+        { "canvas.bar", CANVAS },
+        { "canvas.pie", CANVAS },
+        { "canvas.surface", CANVAS },
+        { "mcp.call", MCP },
+    };
+
     bool is_legacy_skill_name(const std::string& name)
     {
         return name == "skill";
@@ -207,6 +271,46 @@ std::string lua_dispatch_counts(const ToolCall& call)
     std::string out = std::to_string(total) + (total == 1 ? " tool" : " tools");
     if (failed > 0) {
         out += " (" + std::to_string(failed) + " failed)";
+    }
+    return out;
+}
+
+std::string lua_dispatch_breakdown(const ToolCall& call)
+{
+    if (!call.result.has_value() || call.result->dispatch_log.empty()) {
+        return "";
+    }
+    std::size_t counts[BUCKET_COUNT] = { };
+    for (const LuaBindingCall& entry : call.result->dispatch_log) {
+        for (const BindingBucket& rule : BINDING_BUCKETS) {
+            if (rule.binding == entry.binding) {
+                ++counts[rule.bucket];
+                break;
+            }
+        }
+    }
+    std::vector<std::size_t> shown;
+    std::vector<std::size_t> rest;
+    for (std::size_t index = 0; index < BUCKET_COUNT; ++index) {
+        if (counts[index] == 0) {
+            continue;
+        }
+        (index < FIXED_BUCKETS ? shown : rest).push_back(index);
+    }
+    std::stable_sort(
+        rest.begin(), rest.end(), [&](std::size_t left, std::size_t right) {
+            return counts[left] > counts[right];
+        });
+    shown.insert(shown.end(), rest.begin(), rest.end());
+
+    std::string out;
+    for (const std::size_t index : shown) {
+        if (!out.empty()) {
+            out += " · ";
+        }
+        const BucketLabel& label = BUCKET_ORDER[index];
+        out += std::to_string(counts[index]) + " "
+            + std::string(counts[index] == 1 ? label.singular : label.plural);
     }
     return out;
 }

@@ -74,6 +74,29 @@ TEST_CASE("chat shows planning between thought and lua execution")
     CHECK(rendered.find("Executed") != std::string::npos);
 }
 
+TEST_CASE("finished lua card labels the run by workspace buckets")
+{
+    auto state = imza::test::make_test_state();
+    state->session->begin_send("x");
+
+    const imza::ToolCallRequest request { "lua",
+        R"json({"script":"return 1"})json", "", "call-1" };
+    state->session->apply(imza::make_tool_call_start_event(request), { });
+    state->session->apply(imza::make_tool_call_event(request), { });
+    imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT, "" };
+    result.dispatch_log = { { "fs.read", "a.cpp", true },
+        { "fs.grep", "src", true }, { "fs.edit", "a.cpp", true },
+        { "shell", "ls", true }, { "sleep", "", true } };
+    state->session->fill_tool_result(request, std::move(result));
+
+    auto chat
+        = imza::make_chat(state, [] { return imza::test::wide_layout(); });
+    const std::string rendered
+        = imza::test::without_ansi(to_text(chat->Render(), 100, 40));
+    CHECK(rendered.find("Executed · 2 reads · 1 edit · 1 command")
+        != std::string::npos);
+}
+
 TEST_CASE("virtual list windows the visible rows and keeps measured heights")
 {
     imza::VirtualListState list(3);
