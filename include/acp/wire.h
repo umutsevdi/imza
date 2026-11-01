@@ -29,7 +29,9 @@ std::string dump_response(const JsonValue& id, const JsonValue& result);
 std::string dump_notification(std::string_view method, const JsonValue& params);
 std::string dump_error(const JsonValue& id, int code, std::string_view message);
 
+inline constexpr int ERR_INVALID_REQUEST    = -32600;
 inline constexpr int ERR_METHOD_NOT_FOUND   = -32601;
+inline constexpr int ERR_INVALID_PARAMS     = -32602;
 inline constexpr int ERR_INTERNAL_ERROR     = -32603;
 inline constexpr int ERR_RESOURCE_NOT_FOUND = -32002;
 

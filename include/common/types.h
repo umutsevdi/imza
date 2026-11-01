@@ -164,16 +164,23 @@ struct UsageSummary {
     bool operator==(const UsageSummary&) const = default;
 };
 
-// Which interface created a session. Persisted on the session file and
-// the index entry; absent (legacy files) means TUI.
-enum class SessionType { TUI, ACP };
+// Stored as the client of an ACP session whose client sent no
+// clientInfo.name, so it can never be confused with a terminal session.
+inline constexpr std::string_view ACP_UNNAMED_CLIENT = "acp";
 
 struct SavedSession {
     std::filesystem::path path;
     std::string title;
     std::string saved_at;
     UsageSummary usage;
-    SessionType type = SessionType::TUI;
+    // The interface that created the session, and the only tag separating
+    // them: empty for the terminal, otherwise the ACP client's
+    // clientInfo.name (or ACP_UNNAMED_CLIENT when it sent none). Scopes ACP
+    // listings, lookups, and deletes.
+    std::string client;
+    // The session's working directory, so ACP listings report and filter cwd
+    // without opening the session file.
+    std::optional<std::filesystem::path> workspace;
 
     bool operator==(const SavedSession&) const = default;
 };

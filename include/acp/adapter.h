@@ -14,6 +14,7 @@
 #include "acp/wire.h"
 #include "app/application_state.h"
 #include "common/imza_signal.h"
+#include "platform/file_lock.h"
 
 namespace imza::acp {
 
@@ -42,6 +43,9 @@ private:
         std::string id;
         std::shared_ptr<ApplicationState> state;
         UpdateBuilder updates;
+        // Opaque per-message id for streamed chunks; bumped when a new
+        // message begins (a tool call boundary).
+        std::int64_t message_id = 1;
         // The client call this session's turn worker is blocked on.
         std::optional<std::int64_t> pending_client_call;
         std::promise<JsonValue> client_reply;
@@ -49,6 +53,16 @@ private:
         // session/close defers erasure while a prompt thread runs.
         std::atomic<bool> prompt_running { false };
         bool close_requested = false;
+        // Chat-active guard on the session file: refuses a second writer
+        // (TUI or another ACP connection) and shows the session as locked.
+        std::optional<FileLock> lock;
+        Signal<>::Subscription mode_subscription;
+        Signal<>::Subscription title_subscription;
+        Signal<>::Subscription todo_subscription;
+        Signal<>::Subscription compaction_subscription;
+        Signal<>::Subscription usage_subscription;
+        Signal<const std::string&>::Subscription notice_subscription;
+        Signal<const std::string&>::Subscription error_subscription;
     };
 
     AcpSession* find_session(const std::string& id);
@@ -57,6 +71,9 @@ private:
         const std::string& session_id = { });
 
     void handle_initialize(const JsonValue& id, const JsonValue& params);
+    // False (with -32600 sent) when a request other than initialize
+    // arrives before initialization completes.
+    bool require_initialized(const JsonValue& id, std::string_view method);
     void handle_session_new(const JsonValue& id, const JsonValue& params);
     void handle_session_load(
         const JsonValue& id, std::string_view method, const JsonValue& params);
@@ -67,9 +84,15 @@ private:
         std::shared_ptr<ApplicationState> state, std::string text,
         std::vector<Attachment> attachments);
     void handle_session_list(const JsonValue& id, const JsonValue& params);
+    // False (with -32602 already sent) when the request's cwd names a
+    // directory other than the process working directory.
+    bool accept_cwd(const JsonValue& id, const JsonValue& params);
     void handle_session_delete(const JsonValue& id, const JsonValue& params);
     void handle_session_close(const JsonValue& id, const JsonValue& params);
-    void handle_set_config_option(const JsonValue& id, const JsonValue& params);
+    // Handles both session/set_config_option and the legacy session/set_mode;
+    // `method` selects which field names the target value.
+    void handle_set_config_option(
+        const JsonValue& id, const JsonValue& params, std::string_view method);
 
     // Installed as the child state's modal routing: permission prompts
     // and asks reach the client instead of a TUI.
@@ -79,6 +102,10 @@ private:
     void install_observer(AcpSession& session);
     std::optional<std::string> stream_frame(
         AcpSession& session, const StreamEvent& event);
+    // Context usage pushed to the client on each usage change.
+    void send_usage_update_for(const std::string& session_id);
+    void send_notice_for(const std::string& session_id, const char* severity,
+        const std::string& message);
     // Both require _mutex held by the caller.
     void send_available_commands(AcpSession& session);
     void send_config_options(AcpSession& session);
@@ -93,6 +120,16 @@ private:
     std::int64_t _next_client_call = 1;
     // Advertised by the client at initialize; asks fail closed without it.
     bool _elicitation_form = false;
+    bool _elicitation_url  = false;
+    // Capability-gated outbound updates; false means never send.
+    bool _compaction_capable = false;
+    bool _notices_capable    = false;
+    bool _boolean_options    = false;
+    // False until initialize answers; earlier requests get -32600.
+    bool _initialized = false;
+    // clientInfo.name, stamped on every session this connection creates and
+    // used to scope listings, loads, and deletes.
+    std::string _client_label = std::string(ACP_UNNAMED_CLIENT);
 };
 
 } // namespace imza::acp

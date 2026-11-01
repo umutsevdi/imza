@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "test_fs.h"
 #include "test_platform.h"
 
 // The test binary doubles as the portable child process fixture
@@ -19,6 +20,11 @@ int main(int argc, char** argv)
     if (imza::test::run_fixture(argc, argv)) {
         return 0;
     }
+    // Every test that reaches production factories (SessionStore,
+    // InputHistoryStore, PromptStore) writes under the data home. Isolating it
+    // for the whole run means a test that forgets its own IsolatedDataHome
+    // still cannot touch the developer's real sessions.
+    const imza::test::IsolatedDataHome data_home;
     doctest::Context context(argc, argv);
     const int result = context.run();
     if (context.shouldExit()) {

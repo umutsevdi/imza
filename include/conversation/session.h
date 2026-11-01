@@ -169,12 +169,14 @@ struct SessionSnapshot {
     std::string compacted_summary;
     std::size_t compacted_item_count = 0;
     bool plan_mode                   = true;
-    SessionType session_type         = SessionType::TUI;
     SessionPersistence persistence   = UnsavedSession { };
     Usage totals;
     Usage last;
     double total_cost = 0.0;
     std::vector<UsageEntry> usage_log;
+    // The ACP client that created this conversation (clientInfo.name);
+    // empty for TUI sessions.
+    std::string client;
 };
 
 struct LoadedSession {
@@ -231,7 +233,9 @@ public:
     std::uint64_t modal_serial() const;
     std::uint64_t content_serial() const;
     std::string session_id() const;
-    SessionType session_type() const;
+    // The interface that created this conversation: empty for the terminal,
+    // otherwise the ACP client's name. See SavedSession::client.
+    std::string client() const;
     Phase phase() const;
     Mode mode() const;
     std::string error() const;
@@ -252,6 +256,12 @@ public:
     {
         std::lock_guard lock(_mutex);
         return _running_compactions > 0;
+    }
+    // The retained compaction summary, empty when none.
+    std::string compacted_summary() const
+    {
+        std::lock_guard lock(_mutex);
+        return _compacted_summary;
     }
     SessionSnapshot snapshot() const;
     std::optional<SessionSnapshot> snapshot_for_save() const;
@@ -405,6 +415,21 @@ public:
         Signal<>::Callback callback);
     [[nodiscard]] Signal<>::Subscription subscribe_to_compaction_change(
         Signal<>::Callback callback);
+    // The todo list is session-level state mutated outside the transcript
+    // (imza.todo.set); subscribers re-snapshot on callback.
+    [[nodiscard]] Signal<>::Subscription subscribe_to_todo_change(
+        Signal<>::Callback callback);
+    // Context totals changed (a provider request settled); usage_update
+    // consumers re-read status_view().
+    [[nodiscard]] Signal<>::Subscription subscribe_to_usage_change(
+        Signal<>::Callback callback);
+    // A Notice transcript item was appended; the payload is the notice
+    // text.
+    [[nodiscard]] Signal<const std::string&>::Subscription subscribe_to_notice(
+        Signal<const std::string&>::Callback callback);
+    // A session error was set; the payload is the error text.
+    [[nodiscard]] Signal<const std::string&>::Subscription subscribe_to_error(
+        Signal<const std::string&>::Callback callback);
 
 private:
     AssistantTurn* _last_assistant_locked();
@@ -451,7 +476,7 @@ private:
     std::uint64_t _content_serial = 0;
     Phase _phase                  = Phase::IDLE;
     Mode _mode                    = Mode::PLAN;
-    SessionType _session_type     = SessionType::TUI;
+    std::string _client;
     std::string _error;
     ErrorSink _error_sink;
     std::string _connect_status;
@@ -509,6 +534,12 @@ private:
     Signal<> _attachments_changed;
     Signal<> _documents_changed;
     Signal<> _compaction_changed;
+    Signal<> _todo_changed;
+    Signal<> _usage_changed;
+    // Notice transcript items (informational) and session errors,
+    // separate so consumers can pick a severity.
+    Signal<const std::string&> _notice_published;
+    Signal<const std::string&> _error_published;
 };
 
 enum class WorkflowPhase { PLAN, BUILD, REVIEW };

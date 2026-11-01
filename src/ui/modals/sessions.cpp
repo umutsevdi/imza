@@ -144,7 +144,7 @@ namespace {
             std::vector<SavedSession> sessions;
             for (const SavedSession& entry : all) {
                 // The TUI lists only sessions the TUI created.
-                if (entry.type == SessionType::TUI) {
+                if (entry.client.empty()) {
                     sessions.push_back(entry);
                 }
             }

@@ -23,23 +23,14 @@ std::filesystem::path index_path() { return sessions_dir() / INDEX_FILENAME; }
 
 namespace {
 
-    constexpr std::string_view TUI_TYPE = "tui";
-    constexpr std::string_view ACP_TYPE = "acp";
-
-    SessionType parse_session_type(const std::optional<std::string>& stored)
+    // The stored client tag, omitted for terminal sessions so their entries
+    // stay byte-identical to files written before the field existed.
+    std::optional<std::string> stored_client(const std::string& client)
     {
-        return stored && *stored == ACP_TYPE ? SessionType::ACP
-                                             : SessionType::TUI;
-    }
-
-    // Omitted for TUI so index entries written before the field existed stay
-    // byte-identical to fresh TUI entries.
-    std::optional<std::string> stored_session_type(SessionType type)
-    {
-        if (type == SessionType::ACP) {
-            return std::string(ACP_TYPE);
+        if (client.empty()) {
+            return std::nullopt;
         }
-        return std::nullopt;
+        return client;
     }
 
 } // namespace
@@ -174,8 +165,8 @@ struct StoredSessionDoc {
     std::optional<std::string> compacted_summary;
     std::optional<std::int64_t> compacted_item_count;
     std::optional<std::string> mode;
-    // "acp" | "tui"; absent in legacy files, meaning TUI.
-    std::optional<std::string> type;
+    // The ACP client that created the session; omitted for TUI sessions.
+    std::optional<std::string> client;
     std::optional<std::string> workspace;
     std::optional<std::vector<StoredItem>> items;
     // Absent fields load as zero so legacy files load.
@@ -668,8 +659,11 @@ struct StoredIndexEntry {
     std::string saved_at;
     // Absent in legacy indexes; treated as zero.
     std::optional<StoredUsageSummary> usage;
-    // "acp"; omitted for TUI sessions.
-    std::optional<std::string> type;
+    // The ACP client that created the session; omitted for TUI sessions.
+    std::optional<std::string> client;
+    // The session's working directory, so listings report cwd without
+    // opening the session file.
+    std::optional<std::string> workspace;
 };
 
 struct StoredIndex {
@@ -707,7 +701,10 @@ namespace {
             saved.path     = sessions_dir() / file_name;
             saved.title    = entry.title;
             saved.saved_at = entry.saved_at;
-            saved.type     = parse_session_type(entry.type);
+            saved.client   = entry.client.value_or(std::string { });
+            if (entry.workspace && !entry.workspace->empty()) {
+                saved.workspace = path_from_utf8(*entry.workspace);
+            }
             if (entry.usage) {
                 saved.usage = from_stored(*entry.usage);
             }
@@ -725,7 +722,11 @@ namespace {
         for (const SavedSession& session : sessions) {
             StoredIndexEntry entry { session.path.filename().string(),
                 session.title, session.saved_at, to_stored(session.usage),
-                stored_session_type(session.type) };
+                stored_client(session.client),
+                session.workspace && !session.workspace->empty()
+                    ? std::optional<std::string>(
+                          utf8_from_path(*session.workspace))
+                    : std::nullopt };
             index.sessions.push_back(std::move(entry));
         }
         auto serialized = json_dump_checked(index);
@@ -793,7 +794,10 @@ namespace {
             title = UNTITLED_TITLE;
         }
         SavedSession saved { path, std::move(title), doc.saved_at, { },
-            parse_session_type(doc.type) };
+            doc.client.value_or(std::string { }), std::nullopt };
+        if (doc.workspace && !doc.workspace->empty()) {
+            saved.workspace = path_from_utf8(*doc.workspace);
+        }
         if (doc.usage) {
             saved.usage = from_stored(*doc.usage);
         }
@@ -885,10 +889,8 @@ Status save_session(Session& session)
     doc.compacted_item_count
         = static_cast<std::int64_t>(snapshot.compacted_item_count);
     doc.mode      = snapshot.plan_mode ? "plan" : "build";
-    doc.type      = snapshot.session_type == SessionType::ACP
-        ? std::optional<std::string>(ACP_TYPE)
-        : std::optional<std::string>(TUI_TYPE);
     doc.workspace = utf8_from_path(workspace);
+    doc.client    = stored_client(snapshot.client);
     doc.usage     = to_stored(
         summarize_usage(snapshot.usage_log, format_local_time("%Y-%m-%d")));
     doc.usage_log = map_all(
@@ -920,7 +922,7 @@ Status save_session(Session& session)
     }
     session.set_persistence(PersistedSession { path });
     const SavedSession saved { path, doc.title, doc.saved_at,
-        from_stored(*doc.usage), snapshot.session_type };
+        from_stored(*doc.usage), snapshot.client, std::move(workspace) };
     if (mutate_index([&](std::vector<SavedSession>& indexed) {
             // A re-save of the same run rewrites the same file, so replace
             // its index entry instead of duplicating it.
@@ -975,9 +977,9 @@ Status read_session(const std::filesystem::path& path, LoadedSession& loaded)
         }
     }
     SessionSnapshot snapshot;
-    snapshot.persistence  = PersistedSession { path };
-    snapshot.title        = doc.title;
-    snapshot.session_type = parse_session_type(doc.type);
+    snapshot.persistence = PersistedSession { path };
+    snapshot.title       = doc.title;
+    snapshot.client      = doc.client.value_or(std::string { });
     if (doc.todo) {
         for (const auto& entry : *doc.todo) {
             snapshot.todo.items.push_back(stored_todo_item(entry));
@@ -1050,11 +1052,20 @@ std::vector<SavedSession> saved_sessions()
     return reconcile_index();
 }
 
-std::vector<SavedSession> saved_sessions_of(SessionType type)
+std::vector<SavedSession> saved_sessions_of(std::string_view client)
+{
+    std::vector<SavedSession> sessions = saved_sessions();
+    std::erase_if(sessions, [client](const SavedSession& session) {
+        return session.client != client;
+    });
+    return sessions;
+}
+
+std::vector<SavedSession> acp_sessions()
 {
     std::vector<SavedSession> sessions = saved_sessions();
     std::erase_if(sessions,
-        [type](const SavedSession& session) { return session.type != type; });
+        [](const SavedSession& session) { return session.client.empty(); });
     return sessions;
 }
 

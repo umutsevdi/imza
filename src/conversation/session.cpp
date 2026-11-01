@@ -241,10 +241,10 @@ std::string Session::session_id() const
     return _session_id;
 }
 
-SessionType Session::session_type() const
+std::string Session::client() const
 {
     std::lock_guard lock(_mutex);
-    return _session_type;
+    return _client;
 }
 
 Session::Phase Session::phase() const
@@ -353,8 +353,8 @@ bool Session::has_plan() const
 SessionSnapshot Session::_build_snapshot() const
 {
     return { _title, *_items, *_todo, *_documents, _compacted_summary,
-        _compacted_item_count, _mode == Mode::PLAN, _session_type, _persistence,
-        _totals, _last, _total_cost, _usage_log };
+        _compacted_item_count, _mode == Mode::PLAN, _persistence, _totals,
+        _last, _total_cost, _usage_log, _client };
 }
 
 SessionSnapshot Session::snapshot() const
@@ -390,7 +390,7 @@ void Session::restore(SessionSnapshot snapshot)
         _compacted_summary      = std::move(snapshot.compacted_summary);
         _compacted_item_count   = snapshot.compacted_item_count;
         _persistence            = std::move(snapshot.persistence);
-        _session_type           = snapshot.session_type;
+        _client                 = std::move(snapshot.client);
         // A loaded session continues its source file in place and adopts the
         // file stem as its id. Only fresh conversations (/new, brand-new
         // objects) rotate to a generated id so their first save gains a new
@@ -484,7 +484,10 @@ void Session::set_error(std::string msg)
     }
     // Published outside the lock; the sink may re-enter accessors.
     if (sink && !msg.empty()) {
-        sink(std::move(msg));
+        sink(msg);
+    }
+    if (!msg.empty()) {
+        _error_published.publish(msg);
     }
 }
 
@@ -750,10 +753,25 @@ void Session::append_item(ConversationItem item)
 
 void Session::append_notice(std::string text)
 {
-    std::lock_guard lock(_mutex);
-    _dirty = true;
-    _ensure_unique(_items);
-    _items->emplace_back(Notice { std::move(text) });
+    {
+        std::lock_guard lock(_mutex);
+        _dirty = true;
+        _ensure_unique(_items);
+        _items->emplace_back(Notice { std::move(text) });
+    }
+    _notice_published.publish(text);
+}
+
+Signal<const std::string&>::Subscription Session::subscribe_to_notice(
+    Signal<const std::string&>::Callback callback)
+{
+    return _notice_published.subscribe(std::move(callback));
+}
+
+Signal<const std::string&>::Subscription Session::subscribe_to_error(
+    Signal<const std::string&>::Callback callback)
+{
+    return _error_published.subscribe(std::move(callback));
 }
 
 std::pair<std::size_t, std::size_t> Session::begin_compaction()
@@ -973,11 +991,15 @@ void Session::clear_undo()
 
 void Session::set_todo(TodoList todo)
 {
-    std::lock_guard lock(_mutex);
-    if (todo != *_todo) {
+    {
+        std::lock_guard lock(_mutex);
+        if (todo == *_todo) {
+            return;
+        }
         _dirty = true;
+        _todo  = std::make_shared<TodoList>(std::move(todo));
     }
-    _todo = std::make_shared<TodoList>(std::move(todo));
+    _todo_changed.publish();
 }
 
 // The current plan is the last PLAN document in the sequence; build logs
@@ -1253,9 +1275,16 @@ std::vector<Message> Session::build_history(
 
 void Session::apply(const StreamEvent& ev, const ModelPricing& pricing)
 {
+    bool usage_changed = false;
     {
         std::lock_guard lock(_mutex);
         _apply_locked(ev, pricing);
+        usage_changed = ev.kind == StreamEvent::Kind::USAGE;
+    }
+    // Published outside the session lock: subscribers read status_view(),
+    // which takes this mutex.
+    if (usage_changed) {
+        _usage_changed.publish();
     }
     if (_stream_observer) {
         _stream_observer(ev);
@@ -1468,24 +1497,40 @@ void Session::add_usage(std::vector<UsageEntry> entries)
     if (entries.empty()) {
         return;
     }
-    std::lock_guard lock(_mutex);
-    _ensure_unique(_items);
-    AssistantTurn* turn = _last_assistant_locked();
-    for (UsageEntry& entry : entries) {
-        _totals.prompt += entry.usage.prompt;
-        _totals.completion += entry.usage.completion;
-        _totals.total += entry.usage.total;
-        _total_cost += entry.cost;
-        // The spawning turn carries the child's requests too, so turn
-        // views include subagent spend.
-        if (turn != nullptr) {
-            entry.model = entry.model.empty() ? turn->model : entry.model;
-            turn->usage.push_back(entry);
+    {
+        std::lock_guard lock(_mutex);
+        _ensure_unique(_items);
+        AssistantTurn* turn = _last_assistant_locked();
+        for (UsageEntry& entry : entries) {
+            _totals.prompt += entry.usage.prompt;
+            _totals.completion += entry.usage.completion;
+            _totals.total += entry.usage.total;
+            _total_cost += entry.cost;
+            // The spawning turn carries the child's requests too, so turn
+            // views include subagent spend.
+            if (turn != nullptr) {
+                entry.model = entry.model.empty() ? turn->model : entry.model;
+                turn->usage.push_back(entry);
+            }
         }
+        _usage_log.insert(_usage_log.end(),
+            std::make_move_iterator(entries.begin()),
+            std::make_move_iterator(entries.end()));
     }
-    _usage_log.insert(_usage_log.end(),
-        std::make_move_iterator(entries.begin()),
-        std::make_move_iterator(entries.end()));
+    // Outside the lock: subscribers re-enter status_view().
+    _usage_changed.publish();
+}
+
+Signal<>::Subscription Session::subscribe_to_todo_change(
+    Signal<>::Callback callback)
+{
+    return _todo_changed.subscribe(std::move(callback));
+}
+
+Signal<>::Subscription Session::subscribe_to_usage_change(
+    Signal<>::Callback callback)
+{
+    return _usage_changed.subscribe(std::move(callback));
 }
 
 Signal<>::Subscription Session::subscribe_to_mode_change(

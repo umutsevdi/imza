@@ -92,7 +92,7 @@ namespace {
     int list_sessions()
     {
         const std::vector<SavedSession> sessions
-            = saved_sessions_of(SessionType::TUI);
+            = saved_sessions_of(std::string_view { });
         if (sessions.empty()) {
             std::println("No saved sessions.");
             return 0;
@@ -407,7 +407,7 @@ CliResult run_cli(int argc, char** argv)
     }
 
     const std::string& id = session_arguments.back();
-    const auto path = find_session(saved_sessions_of(SessionType::TUI), id);
+    const auto path = find_session(saved_sessions_of(std::string_view { }), id);
     if (!path) {
         std::println(stderr, "session not found: {}", id);
         return finished(2);

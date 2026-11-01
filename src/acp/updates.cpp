@@ -141,6 +141,26 @@ namespace {
 
 } // namespace
 
+namespace {
+
+    JsonValue with_locations(JsonValue update, const ToolCall& call)
+    {
+        // Locations are display metadata; every touched file is reported
+        // so the client can follow the agent, dedup in the client.
+        JsonValue::array_t locations;
+        if (call.result.has_value()) {
+            for (const DiffView& diff : call.result->diffs) {
+                locations.push_back(JsonValue(diff.file));
+            }
+        }
+        if (!locations.empty()) {
+            update["locations"] = JsonValue(std::move(locations));
+        }
+        return update;
+    }
+
+} // namespace
+
 std::string UpdateBuilder::tool_call(const ToolCall& call)
 {
     return emit(tool_call_payload(call, "tool_call"));
@@ -149,6 +169,12 @@ std::string UpdateBuilder::tool_call(const ToolCall& call)
 std::string UpdateBuilder::tool_call_update(const ToolCall& call)
 {
     return emit(tool_call_payload(call, "tool_call_update"));
+}
+
+std::string UpdateBuilder::tool_call_update_with_locations(const ToolCall& call)
+{
+    return emit(
+        with_locations(tool_call_payload(call, "tool_call_update"), call));
 }
 
 std::string UpdateBuilder::plan(const TodoList& todo)
@@ -174,14 +200,61 @@ std::string UpdateBuilder::session_info(std::string_view title)
     return emit(std::move(update));
 }
 
-std::string UpdateBuilder::compaction_completed(
-    std::int64_t compaction_id, std::string_view summary)
+std::string UpdateBuilder::compaction_update(std::int64_t compaction_id,
+    std::string_view status, std::string_view summary, std::string_view error)
 {
     JsonValue update       = update_of("compaction_update");
     update["compactionId"] = static_cast<double>(compaction_id);
-    update["status"]       = "completed";
+    update["status"]       = std::string(status);
     if (!summary.empty()) {
         update["summary"] = std::string(summary);
+    }
+    if (!error.empty()) {
+        update["error"] = std::string(error);
+    }
+    return emit(std::move(update));
+}
+
+std::string UpdateBuilder::compaction_completed(
+    std::int64_t compaction_id, std::string_view summary)
+{
+    return compaction_update(compaction_id, "completed", summary, "");
+}
+
+std::string UpdateBuilder::compaction_in_progress(std::int64_t compaction_id)
+{
+    return compaction_update(compaction_id, "in_progress", "", "");
+}
+
+std::string UpdateBuilder::compaction_failed(
+    std::int64_t compaction_id, std::string_view error)
+{
+    return compaction_update(compaction_id, "failed", "", error);
+}
+
+std::string UpdateBuilder::usage_update(
+    std::uint64_t used, std::uint64_t size, double cost)
+{
+    JsonValue update = update_of("usage_update");
+    update["used"]   = static_cast<double>(used);
+    update["size"]   = static_cast<double>(size);
+    if (cost > 0.0) {
+        JsonValue money;
+        money["amount"]   = cost;
+        money["currency"] = "USD";
+        update["cost"]    = std::move(money);
+    }
+    return emit(std::move(update));
+}
+
+std::string UpdateBuilder::notice(std::string_view severity,
+    std::string_view title, std::string_view description)
+{
+    JsonValue update   = update_of("notice");
+    update["severity"] = std::string(severity);
+    update["title"]    = std::string(title);
+    if (!description.empty()) {
+        update["description"] = std::string(description);
     }
     return emit(std::move(update));
 }
@@ -189,11 +262,23 @@ std::string UpdateBuilder::compaction_completed(
 std::string UpdateBuilder::available_commands(
     const std::vector<std::pair<std::string, std::string>>& commands)
 {
+    std::vector<std::tuple<std::string, std::string, std::string>> hinted;
+    hinted.reserve(commands.size());
+    for (const auto& [name, description] : commands) {
+        hinted.emplace_back(name, description, "");
+    }
+    return available_commands(hinted);
+}
+
+std::string UpdateBuilder::available_commands(
+    const std::vector<std::tuple<std::string, std::string, std::string>>&
+        commands)
+{
     JsonValue update = update_of("available_commands_update");
     JsonValue::array_t entries;
     entries.reserve(commands.size());
-    for (const auto& [name, description] : commands) {
-        entries.push_back(available_command(name, description));
+    for (const auto& [name, description, hint] : commands) {
+        entries.push_back(available_command(name, description, hint));
     }
     update["availableCommands"] = std::move(entries);
     return emit(std::move(update));
@@ -204,6 +289,13 @@ std::string UpdateBuilder::config_option_update(
 {
     JsonValue update        = update_of("config_option_update");
     update["configOptions"] = dump_config_options(options);
+    return emit(std::move(update));
+}
+
+std::string UpdateBuilder::current_mode(std::string_view mode)
+{
+    JsonValue update        = update_of("current_mode_update");
+    update["currentModeId"] = std::string(mode);
     return emit(std::move(update));
 }
 

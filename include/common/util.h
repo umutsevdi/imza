@@ -132,6 +132,29 @@ inline std::string format_local_time(const char* fmt)
     return format_local_time(std::chrono::system_clock::now(), fmt);
 }
 
+// Converts a stored local "%Y-%m-%d %H:%M:%S" stamp to the RFC 3339 form
+// ACP's updatedAt requires, converted to UTC so the Z suffix is honest.
+// Unparseable input yields an empty string.
+inline std::string rfc3339_from_local(std::string_view local_stamp)
+{
+    std::tm tm { };
+    std::istringstream in { std::string(local_stamp) };
+    in >> std::get_time(&tm, "%Y-%m-%d %H:%M:%S");
+    if (in.fail()) {
+        return { };
+    }
+    tm.tm_isdst             = -1;
+    const std::time_t value = std::mktime(&tm);
+    if (value == static_cast<std::time_t>(-1)) {
+        return { };
+    }
+    std::tm utc { };
+    gmtime_r(&value, &utc);
+    std::ostringstream out;
+    out << std::put_time(&utc, "%Y-%m-%dT%H:%M:%SZ");
+    return std::move(out).str();
+}
+
 // Expands ${VAR} and ${VAR:-default} from the environment; unmatched
 // references expand to empty. Text outside references is copied verbatim.
 inline std::string expand_env_vars(const std::string& text)

@@ -46,9 +46,8 @@ namespace {
         const int width  = std::max(40, std::min(term_w, 80));
 
         std::vector<SavedSession> sessions = store.sessions();
-        std::erase_if(sessions, [](const SavedSession& entry) {
-            return entry.type != SessionType::TUI;
-        });
+        std::erase_if(sessions,
+            [](const SavedSession& entry) { return !entry.client.empty(); });
         if (static_cast<int>(sessions.size()) > 5) {
             sessions.resize(5);
         }
@@ -239,9 +238,8 @@ namespace {
             _chat_hints.phase_line_fn = [this] {
                 return _phase == WorkflowPhase::PLAN
                     ? std::string("Tab/Shift+Tab switch mode· Ctrl+E chat")
-                    : std::string(
-                          "Tab/Shift+Tab switch mode · Ctrl+E "
-                          "Sidechat");
+                    : std::string("Tab/Shift+Tab switch mode · Ctrl+E "
+                                  "Sidechat");
             };
             // The plan tab splits 50/50 once a document exists; the chat
             // renders its left half and must budget for those columns.

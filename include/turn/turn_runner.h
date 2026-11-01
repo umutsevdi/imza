@@ -60,6 +60,10 @@ public:
     Status run_stream(const ChatRequest& req, const Route& route,
         const StreamCallback& cb) const;
     bool blocked_permission() const { return _blocked_permission.load(); }
+    // The Status behind the last failed request this runner saw; OK when
+    // the failure came from somewhere without a Status. ACP maps a
+    // truncation to the max_tokens stop reason.
+    Status last_fail() const { return static_cast<Status>(_last_fail.load()); }
 
 private:
     // Null unless the caller supplied a stream override; the default
@@ -100,6 +104,7 @@ private:
     std::vector<ToolSpec> _specs_all;
     std::vector<StreamEvent> _stream_events;
     std::atomic<bool> _blocked_permission { false };
+    std::atomic<int> _last_fail { static_cast<int>(Status::OK) };
     std::atomic<bool> _compaction_active { false };
     std::optional<std::jthread> _worker;
     std::optional<std::jthread> _compaction_worker;

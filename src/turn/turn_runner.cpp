@@ -163,6 +163,7 @@ TurnRunner::~TurnRunner()
 void TurnRunner::spawn(std::vector<Message> history, TurnSettings settings)
 {
     _blocked_permission.store(false);
+    _last_fail.store(static_cast<int>(Status::OK));
     _state->session->append_assistant(
         settings.model, settings.reasoning_effort);
     _worker.emplace([this, history = std::move(history),
@@ -534,6 +535,7 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
             continue;
         }
         if (fail != Status::OK) {
+            _last_fail.store(static_cast<int>(fail));
             _post([this, fail, msg = error_msg] {
                 _state->session->clear_error();
                 std::string error = error_text(fail);
