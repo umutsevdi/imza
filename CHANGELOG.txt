@@ -12,6 +12,8 @@ CHANGELOG
 -------------------------------------------------------------------------------
 Changes:
   - Execution blocks now explicitly displays used tools.
+  - Imza can now be driven from editors that support the Agent Client
+    Protocol (Zed).
 
 -------------------------------------------------------------------------------
 0.7.1 - 2026-10-27

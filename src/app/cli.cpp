@@ -91,7 +91,8 @@ namespace {
 
     int list_sessions()
     {
-        const std::vector<SavedSession> sessions = saved_sessions();
+        const std::vector<SavedSession> sessions
+            = saved_sessions_of(SessionType::TUI);
         if (sessions.empty()) {
             std::println("No saved sessions.");
             return 0;
@@ -231,11 +232,14 @@ CliResult run_cli(int argc, char** argv)
     bool config_requested = false;
     bool skip_permissions = false;
     bool update_requested = false;
+    bool acp_requested    = false;
     app.add_flag("-c,--config", config_requested, "Open the config file");
     app.add_flag("--skip-permissions", skip_permissions,
         "Automatically allow permission prompts for this process");
     app.add_flag("--update", update_requested,
         "Download and install the latest release");
+    app.add_flag(
+        "--acp", acp_requested, "Serve the Agent Client Protocol over stdio");
     auto* ask_option = app.add_option("-a,--ask", ask,
                               "Run a one-shot read-only agent query")
                            ->type_name("<query>");
@@ -365,6 +369,21 @@ CliResult run_cli(int argc, char** argv)
         result.update_requested        = true;
         return result;
     }
+    if (acp_requested) {
+        if (!session_arguments.empty() || ask_option->count() > 0
+            || exec_option->count() > 0) {
+            std::println(stderr,
+                "--acp cannot be combined with --session, "
+                "--ask, or --exec");
+            return finished(2);
+        }
+        CliResult result;
+        result.continue_as_interactive = false;
+        result.exit_code               = -1; // Run the ACP loop in main.
+        result.acp_requested           = true;
+        apply_runtime_options(result);
+        return result;
+    }
     if (config_requested) {
         return finished(edit_config());
     }
@@ -388,7 +407,7 @@ CliResult run_cli(int argc, char** argv)
     }
 
     const std::string& id = session_arguments.back();
-    const auto path       = find_session(saved_sessions(), id);
+    const auto path = find_session(saved_sessions_of(SessionType::TUI), id);
     if (!path) {
         std::println(stderr, "session not found: {}", id);
         return finished(2);

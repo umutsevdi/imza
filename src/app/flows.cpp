@@ -210,7 +210,10 @@ namespace {
             history.push_back(std::move(*extra));
         }
         state.runner->spawn(std::move(history), std::move(settings));
-        if (generate_title && !state.runner->has_stream_override()) {
+        // Children (subagent/sidechat states) share this turn path but
+        // own no subagent manager; title generation is root-only.
+        if (generate_title && state.subagents != nullptr
+            && !state.runner->has_stream_override()) {
             const auto title_selection
                 = state.providers->subagent_selection(SubagentRole::BASIC);
             const ProviderSelection& selected

@@ -53,6 +53,9 @@ inline constexpr char UNTITLED_TITLE[] = "Untitled session";
 Status save_session(Session& session);
 Status read_session(const std::filesystem::path& path, LoadedSession& loaded);
 std::vector<SavedSession> saved_sessions();
+// The subset created through one interface: TUI listings must not see ACP
+// sessions and vice versa.
+std::vector<SavedSession> saved_sessions_of(SessionType type);
 // Sums the given saved sessions' usage summaries into a per-(provider,
 // model) breakdown and a per-day spend series (days "YYYY-MM-DD",
 // ordered ascending). Entries without a usage summary count as zero.

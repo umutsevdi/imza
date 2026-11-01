@@ -1,5 +1,5 @@
 #include "app/flows.h"
-#include "ui/tool_format.h"
+#include "conversation/tool_format.h"
 #include "ui/ui.h"
 #include "workspace/environment.h"
 

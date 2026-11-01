@@ -241,6 +241,12 @@ std::string Session::session_id() const
     return _session_id;
 }
 
+SessionType Session::session_type() const
+{
+    std::lock_guard lock(_mutex);
+    return _session_type;
+}
+
 Session::Phase Session::phase() const
 {
     std::lock_guard lock(_mutex);
@@ -347,8 +353,8 @@ bool Session::has_plan() const
 SessionSnapshot Session::_build_snapshot() const
 {
     return { _title, *_items, *_todo, *_documents, _compacted_summary,
-        _compacted_item_count, _mode == Mode::PLAN, _persistence, _totals,
-        _last, _total_cost, _usage_log };
+        _compacted_item_count, _mode == Mode::PLAN, _session_type, _persistence,
+        _totals, _last, _total_cost, _usage_log };
 }
 
 SessionSnapshot Session::snapshot() const
@@ -384,6 +390,7 @@ void Session::restore(SessionSnapshot snapshot)
         _compacted_summary      = std::move(snapshot.compacted_summary);
         _compacted_item_count   = snapshot.compacted_item_count;
         _persistence            = std::move(snapshot.persistence);
+        _session_type           = snapshot.session_type;
         // A loaded session continues its source file in place and adopts the
         // file stem as its id. Only fresh conversations (/new, brand-new
         // objects) rotate to a generated id so their first save gains a new
@@ -869,14 +876,22 @@ void Session::fill_tool_result(
     // Moved out first: the undo stack owns the contents, and the transcript
     // copy must not carry them (snapshots copy items).
     std::vector<FileChange> changes = std::move(result.changes);
-    std::lock_guard lock(_mutex);
-    _ensure_unique(_items);
-    if (auto* call = _find_tool_locked(req, true)) {
-        call->result = std::move(result);
-        _dirty       = true;
+    ToolCall finished;
+    {
+        std::lock_guard lock(_mutex);
+        _ensure_unique(_items);
+        if (auto* call = _find_tool_locked(req, true)) {
+            call->result = std::move(result);
+            finished     = *call;
+            _dirty       = true;
+        }
+        // Same lock as the result, so stack order matches transcript order.
+        _push_undo_locked(std::move(changes));
     }
-    // Same lock as the result, so stack order matches transcript order.
-    _push_undo_locked(std::move(changes));
+    // Outside the lock: external interfaces push the final update.
+    if (_tool_result_observer && !finished.call_id.empty()) {
+        _tool_result_observer(finished);
+    }
 }
 
 void Session::_push_undo_locked(std::vector<FileChange> changes)
@@ -1238,7 +1253,29 @@ std::vector<Message> Session::build_history(
 
 void Session::apply(const StreamEvent& ev, const ModelPricing& pricing)
 {
+    {
+        std::lock_guard lock(_mutex);
+        _apply_locked(ev, pricing);
+    }
+    if (_stream_observer) {
+        _stream_observer(ev);
+    }
+}
+
+void Session::set_stream_observer(StreamObserver observer)
+{
     std::lock_guard lock(_mutex);
+    _stream_observer = std::move(observer);
+}
+
+void Session::set_tool_result_observer(ToolResultObserver observer)
+{
+    std::lock_guard lock(_mutex);
+    _tool_result_observer = std::move(observer);
+}
+
+void Session::_apply_locked(const StreamEvent& ev, const ModelPricing& pricing)
+{
     _ensure_unique(_items);
     switch (ev.kind) {
     case StreamEvent::Kind::CONTENT_DELTA:

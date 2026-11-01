@@ -140,7 +140,14 @@ namespace {
 
         void _refresh()
         {
-            const auto sessions = _state->sessions->sessions();
+            const auto all = _state->sessions->sessions();
+            std::vector<SavedSession> sessions;
+            for (const SavedSession& entry : all) {
+                // The TUI lists only sessions the TUI created.
+                if (entry.type == SessionType::TUI) {
+                    sessions.push_back(entry);
+                }
+            }
             if (sessions == _last_sessions) {
                 return;
             }

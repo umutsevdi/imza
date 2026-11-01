@@ -46,6 +46,9 @@ namespace {
         const int width  = std::max(40, std::min(term_w, 80));
 
         std::vector<SavedSession> sessions = store.sessions();
+        std::erase_if(sessions, [](const SavedSession& entry) {
+            return entry.type != SessionType::TUI;
+        });
         if (static_cast<int>(sessions.size()) > 5) {
             sessions.resize(5);
         }

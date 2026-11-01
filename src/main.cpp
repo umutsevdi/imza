@@ -6,6 +6,7 @@
 #include <thread>
 #include <utility>
 
+#include "acp/adapter.h"
 #include "app/application_state.h"
 #include "app/flows.h"
 #include "permissions/permission_store.h"
@@ -26,7 +27,11 @@ int main(int argc, char** argv)
         if (cli.update_requested) {
             return imza::run_update_display();
         }
-        return cli.exit_code;
+        // The ACP loop runs from the fully composed state below; its
+        // CLI result only marks the mode.
+        if (!cli.acp_requested) {
+            return cli.exit_code;
+        }
     }
     if (cli.working_directory) {
         std::error_code error;
@@ -146,6 +151,9 @@ int main(int argc, char** argv)
     if (cli.variant && !state->providers->set_reasoning_effort(*cli.variant)) {
         std::println(stderr, "failed to select variant '{}'", *cli.variant);
         return 2;
+    }
+    if (cli.acp_requested) {
+        return imza::run_acp(state);
     }
     if (cli.one_shot) {
         const imza::OneShotResult result

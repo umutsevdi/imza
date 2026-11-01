@@ -307,6 +307,7 @@ add_library(imza_runtime
     src/conversation/input_history.cpp
     src/conversation/persistence.cpp
     src/conversation/session.cpp
+    src/conversation/tool_format.cpp
     src/conversation/session_store.cpp
     src/providers/provider_store.cpp
     src/tools/mcp_catalog.cpp
@@ -335,6 +336,11 @@ target_link_libraries(imza_runtime PUBLIC
 
 # Application composition, turns, and tools (ftxui-free)
 add_library(imza_execution
+    src/acp/adapter.cpp
+    src/acp/protocol.cpp
+    src/acp/updates.cpp
+    src/acp/wire.cpp
+    src/app/acp_runner.cpp
     src/app/application_state.cpp
     src/app/cli.cpp
     src/app/flows.cpp
@@ -371,6 +377,8 @@ target_include_directories(imza_execution PRIVATE
 set_source_files_properties(src/ui/status_line.cpp PROPERTIES
     COMPILE_DEFINITIONS IMZA_VERSION="${PROJECT_VERSION}")
 set_source_files_properties(src/app/cli.cpp PROPERTIES
+    COMPILE_DEFINITIONS IMZA_VERSION="${PROJECT_VERSION}")
+set_source_files_properties(src/acp/protocol.cpp PROPERTIES
     COMPILE_DEFINITIONS IMZA_VERSION="${PROJECT_VERSION}")
 set_source_files_properties(src/ui/app.cpp PROPERTIES
     COMPILE_DEFINITIONS IMZA_VERSION="${PROJECT_VERSION}")
@@ -414,7 +422,6 @@ add_library(imza_ui
     src/ui/plan_doc.cpp
     src/ui/tab_plan.cpp
     src/ui/tab_review.cpp
-    src/ui/tool_format.cpp
 )
 target_include_directories(imza_ui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include

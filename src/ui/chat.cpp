@@ -1,11 +1,11 @@
 #include "app/flows.h"
 #include "common/util.h"
 #include "conversation/format.h"
+#include "conversation/tool_format.h"
 #include "tools/tool_args.h"
 #include "turn/delegation.h"
 #include "ui/autocomplete.h"
 #include "ui/greeting.h"
-#include "ui/tool_format.h"
 #include "ui/ui.h"
 #include "workspace/attachments.h"
 

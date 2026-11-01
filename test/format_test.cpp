@@ -1,8 +1,8 @@
 #include <string>
 
 #include "conversation/format.h"
+#include "conversation/tool_format.h"
 #include "network/json_io.h"
-#include "ui/tool_format.h"
 #include <doctest/doctest.h>
 
 namespace {

@@ -49,6 +49,9 @@ struct CliResult {
     // Set instead of running the update inline, so the caller owns
     // presentation.
     bool update_requested = false;
+    // Serve the Agent Client Protocol over stdio; main() runs the ACP
+    // loop instead of the REPL.
+    bool acp_requested = false;
     std::vector<std::filesystem::path> allowed_directories;
     std::vector<ShellCommandGrant> allowed_commands;
     // Ids and names, not grants: main.cpp resolves them once the manager
@@ -84,6 +87,9 @@ std::string format_session_list(const std::vector<SavedSession>& sessions);
 // entries flagged.
 SkillsModal skills_modal(const ApplicationState& state);
 RuntimeFlag runtime_flags_for(const CliResult& result);
+// Serve ACP over stdio until the client disconnects or stdin closes;
+// saves the active session on the way out.
+int run_acp(std::shared_ptr<ApplicationState> state);
 OneShotResult run_one_shot(
     ApplicationState& state, const OneShotRequest& request);
 int one_shot_exit_code(OneShotResult::Kind kind);

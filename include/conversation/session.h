@@ -169,6 +169,7 @@ struct SessionSnapshot {
     std::string compacted_summary;
     std::size_t compacted_item_count = 0;
     bool plan_mode                   = true;
+    SessionType session_type         = SessionType::TUI;
     SessionPersistence persistence   = UnsavedSession { };
     Usage totals;
     Usage last;
@@ -230,6 +231,7 @@ public:
     std::uint64_t modal_serial() const;
     std::uint64_t content_serial() const;
     std::string session_id() const;
+    SessionType session_type() const;
     Phase phase() const;
     Mode mode() const;
     std::string error() const;
@@ -386,6 +388,13 @@ public:
     void clear_interrupt();
     bool interrupt_requested() const;
 
+    // External interfaces observe stream and tool-result events outside
+    // the lock; an observer must not touch the session re-entrantly.
+    using StreamObserver = std::function<void(const StreamEvent&)>;
+    void set_stream_observer(StreamObserver observer);
+    using ToolResultObserver = std::function<void(const ToolCall&)>;
+    void set_tool_result_observer(ToolResultObserver observer);
+
     [[nodiscard]] Signal<>::Subscription subscribe_to_mode_change(
         Signal<>::Callback callback);
     [[nodiscard]] Signal<>::Subscription subscribe_to_title_change(
@@ -417,6 +426,7 @@ private:
     void _cancel_dangling_tools_locked();
     void _update_usage(
         const StreamEvent& usage_event, const ModelPricing& pricing);
+    void _apply_locked(const StreamEvent& ev, const ModelPricing& pricing);
     void _notify_title_change();
     // Copy-on-write: detach when a snapshot still holds the container.
     static void _ensure_unique(
@@ -441,6 +451,7 @@ private:
     std::uint64_t _content_serial = 0;
     Phase _phase                  = Phase::IDLE;
     Mode _mode                    = Mode::PLAN;
+    SessionType _session_type     = SessionType::TUI;
     std::string _error;
     ErrorSink _error_sink;
     std::string _connect_status;
@@ -472,6 +483,8 @@ private:
     double _total_cost = 0.0;
     std::vector<UsageEntry> _usage_log;
     std::string _entry_provider;
+    StreamObserver _stream_observer;
+    ToolResultObserver _tool_result_observer;
 
     std::size_t _next_tool_id        = 1;
     std::size_t _next_compaction_id  = 1;

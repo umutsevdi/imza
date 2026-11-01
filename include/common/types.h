@@ -164,11 +164,16 @@ struct UsageSummary {
     bool operator==(const UsageSummary&) const = default;
 };
 
+// Which interface created a session. Persisted on the session file and
+// the index entry; absent (legacy files) means TUI.
+enum class SessionType { TUI, ACP };
+
 struct SavedSession {
     std::filesystem::path path;
     std::string title;
     std::string saved_at;
     UsageSummary usage;
+    SessionType type = SessionType::TUI;
 
     bool operator==(const SavedSession&) const = default;
 };
