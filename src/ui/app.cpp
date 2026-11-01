@@ -235,10 +235,9 @@ namespace {
             _status_line = make_status_line(_state, layout, workflow);
             _chat_hints.phase_line_fn = [this] {
                 return _phase == WorkflowPhase::PLAN
-                    ? std::string("Tab next phase · Shift+Tab previous "
-                                  "phase · Ctrl+E chat")
+                    ? std::string("Tab/Shift+Tab switch mode· Ctrl+E chat")
                     : std::string(
-                          "Tab next phase · Shift+Tab previous phase · Ctrl+E "
+                          "Tab/Shift+Tab switch mode · Ctrl+E "
                           "Sidechat");
             };
             // The plan tab splits 50/50 once a document exists; the chat

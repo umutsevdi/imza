@@ -185,7 +185,6 @@ private:
     struct DocumentLink {
         std::string label;
         std::string content;
-        bool latest                                = false;
         bool operator==(const DocumentLink&) const = default;
     };
 
@@ -231,9 +230,8 @@ private:
         const std::vector<std::string> labels = document_labels(*documents);
         Elements rows;
         for (std::size_t index = 0; index < documents->size(); ++index) {
-            const bool latest = index + 1 == documents->size();
             rows.push_back(_document_link(
-                index, labels[index], (*documents)[index].content, latest)
+                index, labels[index], (*documents)[index].content)
                     ->Render());
         }
         parts.push_back(titled_box("Documents", std::move(rows)));
@@ -294,24 +292,14 @@ private:
             });
     }
 
-    Component _document_link(std::size_t index, std::string label,
-        const std::string& content, bool latest)
+    Component _document_link(
+        std::size_t index, std::string label, const std::string& content)
     {
-        const DocumentLink payload { std::move(label), content, latest };
+        const DocumentLink payload { std::move(label), content };
         return _memoized_link(
             _document_links, index, payload,
             [](const DocumentLink& current) {
-                // Explicit colors are only needed on the latest row: the
-                // link wrapper already paints inactive rows dim-colored,
-                // and | dim keeps them greyed on limited palettes.
-                Element row = hbox({
-                    text("●") | color(current.latest ? HL_GREEN : PANEL_FG_DIM),
-                    text(" "),
-                    paragraph(current.label)
-                        | color(current.latest ? PANEL_FG : PANEL_FG_DIM)
-                        | xflex,
-                });
-                return current.latest ? row : row | dim;
+                return paragraph(current.label) | color(PANEL_FG);
             },
             [this](const DocumentLink& current) {
                 ViewerModal vm { current.label, current.content, "md", 1 };
