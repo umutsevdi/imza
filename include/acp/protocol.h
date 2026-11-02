@@ -12,12 +12,11 @@
 
 namespace imza::acp {
 
-// Imza executes locally, so client fs/terminal capabilities stay off.
+// The client capabilities the adapter acts on. Imza executes locally and
+// never calls the fs/* or terminal/* client methods, so those
+// advertisements are ignored, not parsed.
 struct ClientCapabilities {
-    bool fs_read_text_file = false;
-    bool terminal          = false;
-    bool elicitation_form  = false;
-    bool elicitation_url   = false;
+    bool elicitation_form = false;
     // Compaction updates and notices are capability-gated: the adapter
     // must not send either without the matching client advertisement.
     bool compaction = false;
@@ -51,12 +50,10 @@ struct PromptContent {
     std::string text;
     std::string media_type;
     std::string data;
-    // resource blocks: the resource uri (text content rides in `text`,
-    // blob content in `data`); resource_link blocks: uri, name, and the
-    // optional display fields.
+    // resource blocks: the uri, with text content in `text` and blob
+    // content in `data`; resource_link blocks: uri and name.
     std::string uri;
     std::string name;
-    std::string title;
 };
 
 struct PromptRequest {
@@ -66,18 +63,10 @@ struct PromptRequest {
     static PromptRequest parse(const JsonValue& params);
 };
 
-enum class ToolKind {
-    READ,
-    EDIT,
-    DELETE,
-    MOVE,
-    SEARCH,
-    EXECUTE,
-    THINK,
-    FETCH,
-    SWITCH_MODE,
-    OTHER
-};
+// The client's coarse presentation category per tool call. Imza exposes
+// five tools, so only these values are ever produced; the spec's edit /
+// delete / move / search / switch_mode kinds have no producer here.
+enum class ToolKind { READ, EXECUTE, THINK, FETCH, OTHER };
 ToolKind tool_kind_for(std::string_view tool_name, const ToolCall& call);
 std::string_view tool_kind_name(ToolKind kind);
 
@@ -95,9 +84,6 @@ struct PermissionRequest {
     JsonValue tool_call_update;
 };
 
-// allow_always appears only when a session grant can express it.
-std::vector<PermissionOption> permission_options(
-    const PermissionPrompt& prompt);
 // Nullopt for payloads that are not permission requests.
 std::optional<PermissionRequest> permission_request_for(
     std::string_view session_id, const PermissionPrompt& prompt);

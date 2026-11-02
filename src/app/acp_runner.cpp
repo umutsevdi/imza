@@ -1,10 +1,5 @@
 #include "acp/adapter.h"
 
-#include "app/flows.h"
-#include "conversation/persistence.h"
-#include "runtime/main_thread_queue.h"
-
-#include <chrono>
 #include <cstdio>
 #include <string>
 
@@ -47,7 +42,7 @@ int run_acp(std::shared_ptr<ApplicationState> state)
             continue;
         }
         acp::Message message;
-        if (!acp::parse_frame(line, message)) {
+        if (!parse_rpc_frame(line, message)) {
             line.clear();
             continue;
         }

@@ -56,8 +56,6 @@ std::vector<SavedSession> saved_sessions();
 // The subset created by one client: an empty `client` selects terminal
 // sessions, a non-empty one selects that ACP client's sessions.
 std::vector<SavedSession> saved_sessions_of(std::string_view client);
-// Every session created through ACP, whichever client made it.
-std::vector<SavedSession> acp_sessions();
 // Sums the given saved sessions' usage summaries into a per-(provider,
 // model) breakdown and a per-day spend series (days "YYYY-MM-DD",
 // ordered ascending). Entries without a usage summary count as zero.

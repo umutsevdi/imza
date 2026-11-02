@@ -2,6 +2,7 @@
 
 #include "common/util.h"
 #include "network/json_io.h"
+#include "network/json_rpc.h"
 
 #include <algorithm>
 #include <cctype>
@@ -104,11 +105,7 @@ namespace {
             const JsonValue* id     = find_member(message, "id");
             if (method != nullptr && method->is_string() && id != nullptr
                 && method->as<std::string>() == "ping") {
-                JsonValue reply;
-                reply["jsonrpc"] = "2.0";
-                reply["id"]      = *id;
-                reply["result"]  = JsonValue(JsonValue::object_t { });
-                session.stdio.write(json_dump(reply));
+                session.stdio.write(rpc_response(*id, json_object()));
             }
         }
         return Status::TIMEOUT;
@@ -239,16 +236,9 @@ namespace {
 std::string mcp_rpc_request(
     std::uint64_t id, std::string_view method, const JsonValue& params)
 {
-    // A default-constructed json_t is null; strict servers (Cloudflare's
-    // gateway) reject "params":null as an invalid JSON-RPC message, so
-    // requests always carry an object.
-    JsonValue request;
-    request["jsonrpc"] = "2.0";
-    request["id"]      = static_cast<double>(id);
-    request["method"]  = method;
-    request["params"]
-        = params.is_null() ? JsonValue(JsonValue::object_t { }) : params;
-    return json_dump(request);
+    // The shared envelope already guarantees params is an object: strict
+    // servers (Cloudflare's gateway) reject "params":null.
+    return rpc_request(JsonValue(static_cast<double>(id)), method, params);
 }
 
 bool mcp_version_supported(std::string_view version)
@@ -321,7 +311,7 @@ Status mcp_initialize(McpSession& session, std::string& detail)
 
     JsonValue params;
     params["protocolVersion"] = MCP_PROTOCOL_VERSION;
-    params["capabilities"]    = JsonValue(JsonValue::object_t { });
+    params["capabilities"]    = json_object();
     params["clientInfo"]      = std::move(client_info);
 
     long code = 0;
@@ -366,12 +356,10 @@ Status mcp_initialize(McpSession& session, std::string& detail)
         session.protocol_version = offered;
     }
 
-    JsonValue notification;
-    notification["jsonrpc"] = "2.0";
-    notification["method"]  = "notifications/initialized";
-    long notify_code        = 0;
+    long notify_code = 0;
     std::string notify_body;
-    if (notify(session, json_dump(notification), notify_code, notify_body)
+    if (notify(session, rpc_notification("notifications/initialized", { }),
+            notify_code, notify_body)
         != Status::OK) {
         detail = "initialized notification request failed";
         return Status::NETWORK_ERROR;
@@ -448,13 +436,9 @@ Status mcp_send_result(
     if (!session.initialized) {
         return Status::CONFIG_ERROR;
     }
-    JsonValue response;
-    response["jsonrpc"] = "2.0";
-    response["id"]      = id;
-    response["result"]  = result;
-    long code           = 0;
+    long code = 0;
     std::string body;
-    if (notify(session, json_dump(response), code, body) != Status::OK) {
+    if (notify(session, rpc_response(id, result), code, body) != Status::OK) {
         return Status::NETWORK_ERROR;
     }
     return http_ok(code) ? Status::OK : Status::API_ERROR;

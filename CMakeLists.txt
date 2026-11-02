@@ -225,6 +225,7 @@ file(GLOB TEST_SOURCES CONFIGURE_DEPENDS "test/*.cpp")
 # Network transport (no ftxui, no cmark)
 add_library(imza_network
     src/network/json_io.cpp
+    src/network/json_rpc.cpp
     src/network/stream_event.cpp
     src/network/transport.cpp
     src/network/openai_provider.cpp

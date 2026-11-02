@@ -17,9 +17,6 @@ public:
     std::string agent_thought(std::string_view text, std::int64_t message_id);
     std::string tool_call(const ToolCall& call);
     std::string tool_call_update(const ToolCall& call);
-    // Result update that also reports the files the run touched, so the
-    // client can follow along.
-    std::string tool_call_update_with_locations(const ToolCall& call);
     std::string plan(const TodoList& todo);
     std::string session_info(std::string_view title);
     std::string compaction_update(std::int64_t compaction_id,
@@ -37,8 +34,6 @@ public:
     std::string notice(std::string_view severity, std::string_view title,
         std::string_view description = { });
     std::string available_commands(
-        const std::vector<std::pair<std::string, std::string>>& commands);
-    std::string available_commands(
         const std::vector<std::tuple<std::string, std::string, std::string>>&
             commands);
     std::string config_option_update(const std::vector<ConfigOption>& options);
@@ -50,8 +45,8 @@ private:
     std::string _session_id;
 };
 
-// The label the UI renders for a lua execution card ("Executed · 2 reads");
-// shared with tool_format so both interfaces label runs identically.
+// The row title for a tool call, built from conversation/tool_format so
+// the client shows the same label as the terminal card.
 std::string execution_label(const ToolCall& call);
 
 } // namespace imza::acp

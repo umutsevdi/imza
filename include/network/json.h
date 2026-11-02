@@ -194,4 +194,9 @@ inline const JsonValue* find_member(
     return found == object.end() ? nullptr : &found->second;
 }
 
+// An empty JSON object. A default-constructed JsonValue is null, which
+// strict peers reject where an object is required (JSON-RPC params, ACP
+// capability objects).
+inline JsonValue json_object() { return JsonValue(JsonValue::object_t { }); }
+
 } // namespace imza

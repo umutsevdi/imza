@@ -4,8 +4,10 @@
 #include "common/util.h"
 #include "network/json.h"
 #include "network/json_io.h"
+#include "network/json_rpc.h"
 #include "network/network.h"
 #include "network/sse_parse.h"
+#include "protocols/mcp.h"
 
 struct JsonTestPayload {
     std::string name;
@@ -932,4 +934,67 @@ TEST_CASE("reasoning effort maps per dialect")
     imza::apply_reasoning_dialect(req, imza::ApiStandard::OPENAI, "default");
     CHECK(req.reasoning_effort == "medium");
     CHECK_FALSE(req.thinking_budget.has_value());
+}
+
+TEST_CASE("json-rpc framing is shared by every protocol adapter")
+{
+    // Parsing: requests, notifications, responses, and the id forms peers
+    // actually send.
+    imza::RpcFrame frame;
+    CHECK(imza::parse_rpc_frame(
+        R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}})",
+        frame));
+    CHECK(frame.method == "initialize");
+    CHECK(frame.id.is_number());
+    CHECK(frame.id.get<double>() == doctest::Approx(1.0));
+
+    // Zed sends UUID string ids; both forms must parse and survive.
+    CHECK(imza::parse_rpc_frame(
+        R"({"jsonrpc":"2.0","id":"9afa31b2-e222-4a8b","method":"x"})", frame));
+    CHECK(frame.id.is_string());
+    CHECK(frame.id.get<std::string>() == "9afa31b2-e222-4a8b");
+
+    CHECK(imza::parse_rpc_frame(
+        R"({"jsonrpc":"2.0","method":"session/cancel","params":{}})", frame));
+    CHECK(frame.method == "session/cancel");
+    CHECK(frame.id.is_null());
+
+    CHECK(imza::parse_rpc_frame(
+        R"({"jsonrpc":"2.0","id":7,"result":{"stopReason":"end_turn"}})",
+        frame));
+    CHECK(frame.result.has_value());
+
+    CHECK_FALSE(imza::parse_rpc_frame("not json", frame));
+    CHECK_FALSE(imza::parse_rpc_frame(
+        R"({"id":1,"method":"x"})", frame)); // missing jsonrpc
+    CHECK_FALSE(imza::parse_rpc_frame(
+        R"({"jsonrpc":"2.0"})", frame)); // neither method nor result
+
+    // Serializing: one line, ids echoed verbatim, params never null.
+    const std::string request = imza::rpc_request(
+        imza::JsonValue(3.0), "session/prompt", imza::JsonValue { });
+    CHECK(request.find(R"("id":3)") != std::string::npos);
+    CHECK(request.find("\"method\":\"session/prompt\"") != std::string::npos);
+    CHECK(request.find('\n') == std::string::npos);
+    const imza::JsonValue parsed  = imza::parse_json(request);
+    const imza::JsonValue* params = imza::find_member(parsed, "params");
+    REQUIRE(params != nullptr);
+    CHECK(params->is_object());
+
+    const std::string echoed = imza::rpc_response(
+        imza::JsonValue("abc-1"), imza::JsonValue::object_t { });
+    CHECK(echoed.find(R"("id":"abc-1")") != std::string::npos);
+
+    // The MCP client builds its requests through the same envelope.
+    CHECK(imza::mcp_rpc_request(3, "session/prompt", imza::JsonValue { })
+        == request);
+
+    // Errors carry code and message.
+    const imza::JsonValue error = imza::parse_json(imza::rpc_error(
+        imza::JsonValue("abc"), imza::RPC_INVALID_PARAMS, "bad"));
+    const imza::JsonValue* body = imza::find_member(error, "error");
+    REQUIRE(body != nullptr);
+    CHECK(imza::find_member(*body, "code")->get<double>()
+        == doctest::Approx(-32602.0));
+    CHECK(imza::find_member(error, "id")->get<std::string>() == "abc");
 }

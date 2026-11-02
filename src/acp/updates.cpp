@@ -1,16 +1,16 @@
 #include "acp/updates.h"
 
-#include "conversation/format.h"
 #include "conversation/tool_format.h"
 
 namespace imza::acp {
 
-namespace {
+using imza::parse_rpc_frame;
+using imza::rpc_error;
+using imza::rpc_notification;
+using imza::rpc_request;
+using imza::rpc_response;
 
-    JsonValue array_of(std::vector<JsonValue> items)
-    {
-        return JsonValue(std::move(items));
-    }
+namespace {
 
     std::string todo_status(TodoItem::Status status)
     {
@@ -74,7 +74,7 @@ UpdateBuilder::UpdateBuilder(std::string session_id)
 
 std::string UpdateBuilder::emit(JsonValue update)
 {
-    return dump_notification(
+    return rpc_notification(
         "session/update", session_update(_session_id, std::move(update)));
 }
 
@@ -134,27 +134,7 @@ namespace {
             }
         }
         if (!content.empty()) {
-            update["content"] = array_of(std::move(content));
-        }
-        return update;
-    }
-
-} // namespace
-
-namespace {
-
-    JsonValue with_locations(JsonValue update, const ToolCall& call)
-    {
-        // Locations are display metadata; every touched file is reported
-        // so the client can follow the agent, dedup in the client.
-        JsonValue::array_t locations;
-        if (call.result.has_value()) {
-            for (const DiffView& diff : call.result->diffs) {
-                locations.push_back(JsonValue(diff.file));
-            }
-        }
-        if (!locations.empty()) {
-            update["locations"] = JsonValue(std::move(locations));
+            update["content"] = JsonValue(std::move(content));
         }
         return update;
     }
@@ -168,13 +148,17 @@ std::string UpdateBuilder::tool_call(const ToolCall& call)
 
 std::string UpdateBuilder::tool_call_update(const ToolCall& call)
 {
-    return emit(tool_call_payload(call, "tool_call_update"));
-}
-
-std::string UpdateBuilder::tool_call_update_with_locations(const ToolCall& call)
-{
-    return emit(
-        with_locations(tool_call_payload(call, "tool_call_update"), call));
+    JsonValue update = tool_call_payload(call, "tool_call_update");
+    // Locations are display metadata; every touched file is reported so
+    // the client can follow the agent (dedup is the client's job).
+    if (call.result.has_value() && !call.result->diffs.empty()) {
+        JsonValue::array_t locations;
+        for (const DiffView& diff : call.result->diffs) {
+            locations.push_back(JsonValue(diff.file));
+        }
+        update["locations"] = JsonValue(std::move(locations));
+    }
+    return emit(std::move(update));
 }
 
 std::string UpdateBuilder::plan(const TodoList& todo)
@@ -257,17 +241,6 @@ std::string UpdateBuilder::notice(std::string_view severity,
         update["description"] = std::string(description);
     }
     return emit(std::move(update));
-}
-
-std::string UpdateBuilder::available_commands(
-    const std::vector<std::pair<std::string, std::string>>& commands)
-{
-    std::vector<std::tuple<std::string, std::string, std::string>> hinted;
-    hinted.reserve(commands.size());
-    for (const auto& [name, description] : commands) {
-        hinted.emplace_back(name, description, "");
-    }
-    return available_commands(hinted);
 }
 
 std::string UpdateBuilder::available_commands(

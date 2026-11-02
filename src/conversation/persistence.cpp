@@ -1061,14 +1061,6 @@ std::vector<SavedSession> saved_sessions_of(std::string_view client)
     return sessions;
 }
 
-std::vector<SavedSession> acp_sessions()
-{
-    std::vector<SavedSession> sessions = saved_sessions();
-    std::erase_if(sessions,
-        [](const SavedSession& session) { return session.client.empty(); });
-    return sessions;
-}
-
 // Sorts accumulated rows by provider then model, merging duplicates.
 template <typename Row> void merge_rollup_rows(std::vector<Row>& rows)
 {

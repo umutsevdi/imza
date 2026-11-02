@@ -41,17 +41,23 @@ inline void append_tool(
     session.apply(imza::make_tool_call_event(req), imza::ModelPricing { });
 }
 
-// Runs a script through a fresh lua tool with the given host.
-inline imza::ToolOutput run_lua(
-    const std::string& script, imza::LuaHost host = { })
+// Runs a script through a fresh lua tool with the given host. `timeout`
+// caps the run's compute budget; a test that deliberately burns the
+// deadline passes a short one instead of waiting the 10 s default.
+inline imza::ToolOutput run_lua(const std::string& script,
+    imza::LuaHost host = { }, std::optional<long> timeout = std::nullopt)
 {
     auto state            = imza::make_lua_state();
     const imza::Tool tool = imza::make_lua_tool(*state, std::move(host));
     imza::ToolCallRequest req;
     req.name             = "lua";
     imza::JsonValue args = imza::JsonValue::object_t { };
-    args.get<imza::JsonValue::object_t>()["script"] = imza::JsonValue(script);
-    req.args                                        = imza::json_dump(args);
+    auto& object         = args.get<imza::JsonValue::object_t>();
+    object["script"]     = imza::JsonValue(script);
+    if (timeout) {
+        object["timeout"] = imza::JsonValue(static_cast<double>(*timeout));
+    }
+    req.args = imza::json_dump(args);
     return imza::dispatch_tool({ &tool, 1 }, req);
 }
 

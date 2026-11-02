@@ -14,6 +14,7 @@
 #include <atomic>
 #include <map>
 #include <string>
+#include <thread>
 
 namespace imza::test {
 
@@ -262,7 +263,13 @@ private:
 };
 
 // Acts as the user's browser for OAuth flows: opens the authorize URL,
-// follows the redirect into the client's loopback callback listener.
+// then follows the redirect into the client's loopback callback listener.
+//
+// The redirect is delivered on a detached thread. The sign-in call invokes
+// open_browser synchronously, before it starts waiting on the listener, so
+// a blocking GET here would sit in the accept backlog until its own timeout
+// expired — the flow still succeeded, but every sign-in test paid five
+// seconds for it.
 inline bool oauth_fake_browser(const std::string& url)
 {
     std::vector<std::string> response_headers;
@@ -286,11 +293,16 @@ inline bool oauth_fake_browser(const std::string& url)
     if (location.empty()) {
         return false;
     }
-    imza::HttpGetOptions get_opts { };
-    get_opts.max_redirs = 0;
-    long get_code       = 0;
-    return imza::http_get(location, { }, 5, body, &get_code, get_opts)
-        == imza::Status::OK;
+    // Fire and forget: the client answers the redirect whenever its
+    // listener gets to it, and nothing in the flow depends on the page.
+    std::thread([location = std::move(location)] {
+        std::string page;
+        long get_code = 0;
+        imza::HttpGetOptions get_opts { };
+        get_opts.max_redirs = 0;
+        (void)imza::http_get(location, { }, 5, page, &get_code, get_opts);
+    }).detach();
+    return true;
 }
 
 } // namespace imza::test

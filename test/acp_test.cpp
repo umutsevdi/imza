@@ -4,6 +4,8 @@
 #include "acp/wire.h"
 #include "app/flows.h"
 #include "conversation/persistence.h"
+#include "network/json_io.h"
+#include "protocols/mcp.h"
 #include "test_fs.h"
 #include "test_state.h"
 
@@ -71,6 +73,24 @@ void initialize(imza::acp::AcpInterface& interface)
             { "clientInfo", object_of({ { "name", JsonValue("test") } }) } }));
 }
 
+// Persists one finished one-round conversation for `client` and returns
+// its session id; the fixture behind the load/list/lock tests.
+std::string save_finished_session(
+    imza::PostFn post, const std::string& client, const std::string& text)
+{
+    auto state = imza::test::make_test_state(std::move(post));
+    imza::SessionSnapshot snapshot;
+    snapshot.client = client;
+    state->session->restore(std::move(snapshot));
+    state->session->begin_send("hello");
+    state->session->append_assistant("m", "default");
+    state->session->apply(imza::make_delta_event(text), imza::ModelPricing { });
+    state->session->apply(imza::make_done_event(), imza::ModelPricing { });
+    state->session->finish_session("");
+    REQUIRE(imza::save_session(*state->session) == imza::Status::OK);
+    return state->session->session_id();
+}
+
 std::string created_session_id(const std::vector<std::string>& lines)
 {
     constexpr std::string_view marker = "\"sessionId\":\"";
@@ -86,87 +106,6 @@ std::string created_session_id(const std::vector<std::string>& lines)
     return { };
 }
 } // namespace
-
-TEST_CASE("wire parses and dumps JSON-RPC frames")
-{
-    imza::acp::Message message;
-    CHECK(imza::acp::parse_frame(
-        R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}})",
-        message));
-    CHECK(message.method == "initialize");
-    CHECK(message.id.is_number());
-    CHECK(message.id.get<double>() == doctest::Approx(1.0));
-
-    // Zed sends UUID string ids; both forms must parse and survive.
-    CHECK(imza::acp::parse_frame(
-        R"({"jsonrpc":"2.0","id":"9afa31b2-e222-4a8b","method":"x"})",
-        message));
-    CHECK(message.id.is_string());
-    CHECK(message.id.get<std::string>() == "9afa31b2-e222-4a8b");
-
-    CHECK(imza::acp::parse_frame(
-        R"({"jsonrpc":"2.0","method":"session/cancel","params":{}})", message));
-    CHECK(message.method == "session/cancel");
-    CHECK(message.id.is_null());
-
-    CHECK(imza::acp::parse_frame(
-        R"({"jsonrpc":"2.0","id":7,"result":{"stopReason":"end_turn"}})",
-        message));
-    CHECK(message.result.has_value());
-
-    CHECK_FALSE(imza::acp::parse_frame("not json", message));
-    CHECK_FALSE(imza::acp::parse_frame(
-        R"({"id":1,"method":"x"})", message)); // missing jsonrpc
-    CHECK_FALSE(imza::acp::parse_frame(
-        R"({"jsonrpc":"2.0"})", message)); // neither method nor result
-
-    const std::string request = imza::acp::dump_request(
-        JsonValue(3.0), "session/prompt", JsonValue::object_t { });
-    CHECK(request.find(R"("id":3)") != std::string::npos);
-    // String ids echo verbatim.
-    const std::string echoed
-        = imza::acp::dump_response(JsonValue("abc-1"), JsonValue::object_t { });
-    CHECK(echoed.find(R"("id":"abc-1")") != std::string::npos);
-    CHECK(request.find("\"method\":\"session/prompt\"") != std::string::npos);
-    CHECK(request.find('\n') == std::string::npos);
-}
-
-TEST_CASE("initialize reports agent capabilities and terminal auth")
-{
-    const JsonValue params = object_of({
-        { "protocolVersion", JsonValue(1.0) },
-        { "clientCapabilities",
-            object_of({ { "fs",
-                object_of({ { "readTextFile", JsonValue(true) } }) } }) },
-        { "clientInfo", object_of({ { "name", JsonValue("zed") } }) },
-    });
-    const imza::acp::InitializeRequest request
-        = imza::acp::InitializeRequest::parse(params);
-    CHECK(request.client_name == "zed");
-    CHECK(request.client.fs_read_text_file);
-
-    const JsonValue result   = imza::acp::dump_initialize_result(request);
-    const JsonValue* version = imza::find_member(result, "protocolVersion");
-    REQUIRE(version != nullptr);
-    CHECK(version->get<double>() == doctest::Approx(1.0));
-    const JsonValue* agent = imza::find_member(result, "agentCapabilities");
-    REQUIRE(agent != nullptr);
-    const JsonValue* load = imza::find_member(*agent, "loadSession");
-    REQUIRE(load != nullptr);
-    CHECK(load->get<bool>());
-    // No authMethods: provider sign-in stays in the TUI; advertising a
-    // terminal method makes clients relaunch for interactive login.
-    CHECK(imza::find_member(result, "authMethods") == nullptr);
-
-    // Every implemented session method must be advertised, or a conforming
-    // client is forbidden from calling it.
-    const JsonValue* sessions
-        = imza::find_member(*agent, "sessionCapabilities");
-    REQUIRE(sessions != nullptr);
-    for (const char* method : { "list", "delete", "resume", "close" }) {
-        CHECK(imza::find_member(*sessions, method) != nullptr);
-    }
-}
 
 TEST_CASE("unknown methods return -32601; extension requests too")
 {
@@ -204,8 +143,13 @@ TEST_CASE("session/new registers a session; unknown prompt session 404s")
     CHECK(contains_line(lines, "\"sessionId\":\""));
     CHECK(contains_line(lines, "\"configOptions\""));
     CHECK(contains_line(lines, "\"category\":\"mode\""));
-
     CHECK(contains_line(lines, "\"availableCommands\""));
+    // The protocol id is imza's own session id, never a synthetic
+    // counter: it is the stem the session saves under, so a client that
+    // remembers it can load the conversation back after a restart.
+    const std::string created = created_session_id(lines);
+    REQUIRE_FALSE(created.empty());
+    CHECK(created.find("imza-") != 0);
 
     interface.handle_request(JsonValue(2), "session/prompt",
         object_of({ { "sessionId", JsonValue("missing") } }));
@@ -301,7 +245,10 @@ TEST_CASE("prompt turn runs end-to-end and persists an ACP session")
     CHECK(contains_line(after, R"("stopReason":"end_turn")"));
     CHECK(contains_line(after, "\"agent_message_chunk\""));
 
-    const std::vector<imza::SavedSession> saved = imza::acp_sessions();
+    // Sessions made through ACP are tagged with the client; the helper
+    // that selects them is saved_sessions_of with a non-empty client.
+    const std::vector<imza::SavedSession> saved
+        = imza::saved_sessions_of("test");
     CHECK_FALSE(saved.empty());
     for (const imza::SavedSession& entry : saved) {
         CHECK_FALSE(entry.client.empty());
@@ -432,7 +379,7 @@ TEST_CASE("tool output renders as a report block, not raw fields")
     CHECK(frame.find("\"rawOutput\"") == std::string::npos);
 }
 
-TEST_CASE("session/list scopes to the calling client, not the directory")
+TEST_CASE("session/list scopes to the client and reports cwd and updatedAt")
 {
     imza::test::PostPump pump;
     imza::test::IsolatedDataHome data_home;
@@ -459,9 +406,10 @@ TEST_CASE("session/list scopes to the calling client, not the directory")
         object_of({ { "protocolVersion", JsonValue(1.0) },
             { "clientInfo",
                 object_of({ { "name", JsonValue("imzabot") } }) } }));
-    imzabot.handle_request(
-        JsonValue(2), "session/new", JsonValue::object_t { });
-    const std::string bot_session = created_session_id(other_sink.snapshot());
+    // A saved session is what the listing reports on: an unsaved one has
+    // no index entry and therefore no cwd or updatedAt.
+    const std::string bot_session
+        = save_finished_session(pump.fn(), "imzabot", "hi");
     REQUIRE_FALSE(bot_session.empty());
 
     imzabot.handle_request(
@@ -469,53 +417,14 @@ TEST_CASE("session/list scopes to the calling client, not the directory")
     const auto bot_lines = other_sink.snapshot();
     CHECK(contains_line(bot_lines, bot_session));
     CHECK_FALSE(contains_line(bot_lines, zed_session));
-
-    imzabot.handle_request(JsonValue(4), "session/load",
-        object_of({ { "sessionId", JsonValue(zed_session) } }));
-    CHECK(contains_line(other_sink.snapshot(), "-32002"));
-}
-
-TEST_CASE("session/list reports an absolute cwd and an RFC 3339 stamp")
-{
-    imza::test::PostPump pump;
-    imza::test::IsolatedDataHome data_home;
-    // A session saved by "zed" in the current directory.
-    {
-        auto saved_state = imza::test::make_test_state(pump.fn());
-        imza::SessionSnapshot snapshot;
-        snapshot.client = "zed";
-        saved_state->session->restore(std::move(snapshot));
-        saved_state->session->begin_send("hello");
-        saved_state->session->append_assistant("m", "default");
-        saved_state->session->apply(
-            imza::make_delta_event("hi"), imza::ModelPricing { });
-        saved_state->session->apply(
-            imza::make_done_event(), imza::ModelPricing { });
-        saved_state->session->finish_session("");
-        REQUIRE(imza::save_session(*saved_state->session) == imza::Status::OK);
-    }
-
-    auto state = imza::test::make_test_state(pump.fn());
-    WireSink sink;
-    imza::acp::AcpInterface interface(*state, { });
-    interface.set_writer([&sink](std::string_view line) { sink.write(line); });
-    interface.handle_request(JsonValue(1), "initialize",
-        object_of({ { "protocolVersion", JsonValue(1.0) },
-            { "clientInfo", object_of({ { "name", JsonValue("zed") } }) } }));
-
-    interface.handle_request(
-        JsonValue(2), "session/list", JsonValue::object_t { });
-    const auto lines = sink.snapshot();
-    bool saw_cwd     = false;
-    bool saw_stamp   = false;
-    for (const std::string& line : lines) {
-        if (line.find("\"cwd\":\"\"") != std::string::npos) {
-            FAIL("cwd must be absolute, never empty");
-        }
+    // The listing carries an absolute cwd and an RFC 3339 stamp.
+    bool saw_cwd   = false;
+    bool saw_stamp = false;
+    for (const std::string& line : bot_lines) {
+        CHECK(line.find("\"cwd\":\"\"") == std::string::npos);
         if (line.find("\"cwd\":\"/") != std::string::npos) {
             saw_cwd = true;
         }
-        // RFC 3339: a date, a T separator, and a Z suffix.
         if (line.find("T") != std::string::npos
             && line.find("Z\"") != std::string::npos) {
             saw_stamp = true;
@@ -524,13 +433,18 @@ TEST_CASE("session/list reports an absolute cwd and an RFC 3339 stamp")
     CHECK(saw_cwd);
     CHECK(saw_stamp);
 
-    // A relative cwd is rejected rather than silently ignored.
-    interface.handle_request(JsonValue(3), "session/list",
+    // Another client cannot load this one's session.
+    imzabot.handle_request(JsonValue(4), "session/load",
+        object_of({ { "sessionId", JsonValue(zed_session) } }));
+    CHECK(contains_line(other_sink.snapshot(), "-32002"));
+
+    // A relative cwd filter is rejected rather than silently ignored.
+    imzabot.handle_request(JsonValue(5), "session/list",
         object_of({ { "cwd", JsonValue("relative/path") } }));
-    CHECK(contains_line(sink.snapshot(), "-32602"));
+    CHECK(contains_line(other_sink.snapshot(), "-32602"));
 }
 
-TEST_CASE("session/set_mode and set_config_option both switch the mode")
+TEST_CASE("mode switches through both client methods and announces itself")
 {
     imza::test::PostPump pump;
     imza::test::IsolatedDataHome data_home;
@@ -543,17 +457,18 @@ TEST_CASE("session/set_mode and set_config_option both switch the mode")
         JsonValue(1), "session/new", JsonValue::object_t { });
     const std::string id = created_session_id(sink.snapshot());
     REQUIRE_FALSE(id.empty());
-    CHECK(contains_line(sink.snapshot(), "\"modes\""));
+    // Both switcher surfaces ride every session reply.
+    CHECK(contains_line(sink.snapshot(), "\"configOptions\""));
+    CHECK(contains_line(sink.snapshot(), R"("currentModeId":"plan")"));
+    CHECK(contains_line(sink.snapshot(), "\"availableModes\""));
 
-    // The legacy method names the target modeId, not configId; routing it to
-    // the config handler verbatim made the request a silent no-op.
+    // The legacy method names the target modeId, not configId.
     interface.handle_request(JsonValue(2), "session/set_mode",
         object_of({ { "sessionId", JsonValue(id) },
             { "modeId", JsonValue("build") } }));
     CHECK(contains_line(sink.snapshot(), "\"currentModeId\":\"build\""));
     CHECK(contains_line(sink.snapshot(), R"("currentValue":"build")"));
-
-    // The switch is also announced, so a client that only follows
+    // The switch is announced, so a client that only follows
     // notifications sees it.
     CHECK(contains_line(
         sink.snapshot(), "\"sessionUpdate\":\"current_mode_update\""));
@@ -563,6 +478,18 @@ TEST_CASE("session/set_mode and set_config_option both switch the mode")
             { { "sessionId", JsonValue(id) }, { "configId", JsonValue("mode") },
                 { "value", JsonValue("plan") } }));
     CHECK(contains_line(sink.snapshot(), "\"currentModeId\":\"plan\""));
+
+    // A switch made from the session side, with no client request
+    // involved, still reaches the client as a notification.
+    interface.handle_request(JsonValue(4), "session/prompt",
+        object_of({ { "sessionId", JsonValue(id) },
+            { "prompt",
+                JsonValue::array_t {
+                    JsonValue(object_of({ { "type", JsonValue("text") },
+                        { "text", JsonValue("/mode build") } })) } } }));
+    CHECK(imza::test::wait_until([&] {
+        return contains_line(sink.snapshot(), R"("currentModeId":"build")");
+    }));
 }
 
 TEST_CASE("a cwd other than the process directory is rejected")
@@ -587,30 +514,6 @@ TEST_CASE("a cwd other than the process directory is rejected")
     CHECK(contains_line(sink.snapshot(), "\"sessionId\":\""));
 }
 
-TEST_CASE("session ids round-trip: new, list, load")
-{
-    imza::test::PostPump pump;
-    imza::test::IsolatedDataHome data_home;
-    auto state = imza::test::make_test_state(pump.fn());
-    WireSink sink;
-    imza::acp::AcpInterface interface(*state, { });
-    interface.set_writer([&sink](std::string_view line) { sink.write(line); });
-    initialize(interface);
-
-    interface.handle_request(
-        JsonValue(1), "session/new", JsonValue::object_t { });
-    const std::string created = created_session_id(sink.snapshot());
-    REQUIRE_FALSE(created.empty());
-    // The protocol id is imza's own session id, never a synthetic
-    // counter: it is the stem the session saves under, so a client that
-    // remembers it can load the conversation back after a restart.
-    CHECK(created.find("imza-") != 0);
-
-    interface.handle_request(JsonValue(2), "session/load",
-        object_of({ { "sessionId", JsonValue("no-such-session") } }));
-    CHECK(contains_line(sink.snapshot(), "-32002"));
-}
-
 TEST_CASE("session/load restores a saved ACP session without crashing")
 {
     imza::test::PostPump pump;
@@ -624,21 +527,7 @@ TEST_CASE("session/load restores a saved ACP session without crashing")
         object_of({ { "protocolVersion", JsonValue(1.0) },
             { "clientInfo", object_of({ { "name", JsonValue("zed") } }) } }));
 
-    auto saved_state = imza::test::make_test_state(pump.fn());
-    {
-        imza::SessionSnapshot snapshot;
-        snapshot.client = "zed";
-        saved_state->session->restore(std::move(snapshot));
-        saved_state->session->begin_send("hello");
-        saved_state->session->append_assistant("m", "default");
-        saved_state->session->apply(
-            imza::make_delta_event("hi there"), imza::ModelPricing { });
-        saved_state->session->apply(
-            imza::make_done_event(), imza::ModelPricing { });
-        saved_state->session->finish_session("");
-    }
-    REQUIRE(imza::save_session(*saved_state->session) == imza::Status::OK);
-    const std::string id = saved_state->session->session_id();
+    const std::string id = save_finished_session(pump.fn(), "zed", "hi there");
 
     interface.handle_request(JsonValue(1), "session/load",
         object_of({ { "sessionId", JsonValue(id) } }));
@@ -654,21 +543,7 @@ TEST_CASE("a loaded session is locked; a second load is refused until closed")
     imza::test::IsolatedDataHome data_home;
     auto state = imza::test::make_test_state(pump.fn());
 
-    auto saved_state = imza::test::make_test_state(pump.fn());
-    {
-        imza::SessionSnapshot snapshot;
-        snapshot.client = "zed";
-        saved_state->session->restore(std::move(snapshot));
-        saved_state->session->begin_send("hello");
-        saved_state->session->append_assistant("m", "default");
-        saved_state->session->apply(
-            imza::make_delta_event("hi there"), imza::ModelPricing { });
-        saved_state->session->apply(
-            imza::make_done_event(), imza::ModelPricing { });
-        saved_state->session->finish_session("");
-    }
-    REQUIRE(imza::save_session(*saved_state->session) == imza::Status::OK);
-    const std::string id    = saved_state->session->session_id();
+    const std::string id = save_finished_session(pump.fn(), "zed", "hi there");
     const auto session_path = imza::sessions_dir() / (id + ".json");
 
     imza::acp::AcpInterface first(*state, { });
@@ -719,21 +594,7 @@ TEST_CASE("a TUI-held session lock refuses the ACP load")
     imza::test::IsolatedDataHome data_home;
     auto state = imza::test::make_test_state(pump.fn());
 
-    auto saved_state = imza::test::make_test_state(pump.fn());
-    {
-        imza::SessionSnapshot snapshot;
-        snapshot.client = "zed";
-        saved_state->session->restore(std::move(snapshot));
-        saved_state->session->begin_send("hello");
-        saved_state->session->append_assistant("m", "default");
-        saved_state->session->apply(
-            imza::make_delta_event("hi there"), imza::ModelPricing { });
-        saved_state->session->apply(
-            imza::make_done_event(), imza::ModelPricing { });
-        saved_state->session->finish_session("");
-    }
-    REQUIRE(imza::save_session(*saved_state->session) == imza::Status::OK);
-    const std::string id    = saved_state->session->session_id();
+    const std::string id = save_finished_session(pump.fn(), "zed", "hi there");
     const auto session_path = imza::sessions_dir() / (id + ".json");
 
     imza::test::ForeignLock tui(session_path);
@@ -755,21 +616,7 @@ TEST_CASE("delete propagates the lock result instead of always succeeding")
     imza::test::IsolatedDataHome data_home;
     auto state = imza::test::make_test_state(pump.fn());
 
-    auto saved_state = imza::test::make_test_state(pump.fn());
-    {
-        imza::SessionSnapshot snapshot;
-        snapshot.client = "zed";
-        saved_state->session->restore(std::move(snapshot));
-        saved_state->session->begin_send("hello");
-        saved_state->session->append_assistant("m", "default");
-        saved_state->session->apply(
-            imza::make_delta_event("hi there"), imza::ModelPricing { });
-        saved_state->session->apply(
-            imza::make_done_event(), imza::ModelPricing { });
-        saved_state->session->finish_session("");
-    }
-    REQUIRE(imza::save_session(*saved_state->session) == imza::Status::OK);
-    const std::string id    = saved_state->session->session_id();
+    const std::string id = save_finished_session(pump.fn(), "zed", "hi there");
     const auto session_path = imza::sessions_dir() / (id + ".json");
 
     imza::acp::AcpInterface interface(*state, { });
@@ -798,53 +645,6 @@ TEST_CASE("delete propagates the lock result instead of always succeeding")
     interface.handle_request(JsonValue(3), "session/delete",
         object_of({ { "sessionId", JsonValue("nope") } }));
     CHECK(contains_line(sink.snapshot(), "\"result\""));
-}
-
-TEST_CASE("mode changes announce current_mode_update from any path")
-{
-    imza::test::PostPump pump;
-    imza::test::IsolatedDataHome data_home;
-    auto state = imza::test::make_test_state(pump.fn());
-    WireSink sink;
-    imza::acp::AcpInterface interface(*state, { });
-    interface.set_writer([&sink](std::string_view line) { sink.write(line); });
-    initialize(interface);
-
-    interface.handle_request(
-        JsonValue(1), "session/new", JsonValue::object_t { });
-    const auto lines = sink.snapshot();
-    // Both switcher surfaces ride every session reply.
-    CHECK(contains_line(lines, R"("configOptions")"));
-    CHECK(contains_line(lines, R"("currentModeId":"plan")"));
-    CHECK(contains_line(lines, R"("availableModes")"));
-
-    const std::string id = created_session_id(lines);
-    REQUIRE_FALSE(id.empty());
-
-    // The legacy method also answers with the complete state.
-    interface.handle_request(JsonValue(2), "session/set_mode",
-        object_of({ { "sessionId", JsonValue(id) },
-            { "modeId", JsonValue("build") } }));
-    CHECK(contains_line(sink.snapshot(), R"("currentModeId":"build")"));
-
-    // A switch made from the session side, no client request involved,
-    // still reaches the client as a notification.
-    interface.handle_request(JsonValue(3), "session/prompt",
-        object_of({ { "sessionId", JsonValue(id) },
-            { "prompt",
-                JsonValue::array_t {
-                    JsonValue(object_of({ { "type", JsonValue("text") },
-                        { "text", JsonValue("/mode plan") } })) } } }));
-    // The prompt turn runs on a worker; wait for it to settle so the
-    // notification has been written before we inspect the sink.
-    for (int i = 0; i < 100; ++i) {
-        if (contains_line(sink.snapshot(), R"("current_mode_update")")) {
-            break;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-    CHECK(contains_line(sink.snapshot(), R"("current_mode_update")"));
-    CHECK(contains_line(sink.snapshot(), R"("currentModeId":"plan")"));
 }
 
 const JsonValue* member(const JsonValue& value, const std::string& key)
@@ -887,9 +687,7 @@ TEST_CASE("initialize negotiates the protocol version and capabilities")
     caps["session"]           = session;
     const imza::acp::ClientCapabilities parsed
         = imza::acp::ClientCapabilities::parse(caps);
-    CHECK(parsed.fs_read_text_file);
     CHECK(parsed.elicitation_form);
-    CHECK_FALSE(parsed.elicitation_url); // null advertises nothing
     CHECK(parsed.compaction);
     CHECK(parsed.notices);
     CHECK(parsed.boolean_options);
@@ -901,9 +699,18 @@ TEST_CASE("initialize negotiates the protocol version and capabilities")
     REQUIRE(prompt != nullptr);
     CHECK(member(*prompt, "image")->get<bool>());
     CHECK(member(*prompt, "embeddedContext")->get<bool>());
+    // Every implemented session method must be advertised, or a conforming
+    // client is forbidden from calling it.
     const JsonValue* sessions = member(*agent, "sessionCapabilities");
     REQUIRE(sessions != nullptr);
-    CHECK(member(*sessions, "additionalDirectories")->is_object());
+    for (const char* method :
+        { "list", "delete", "resume", "close", "additionalDirectories" }) {
+        CHECK(member(*sessions, method) != nullptr);
+    }
+    CHECK(member(*agent, "loadSession")->get<bool>());
+    // No authMethods: provider sign-in stays in the TUI; advertising a
+    // terminal method makes clients relaunch for interactive login.
+    CHECK(member(echoed, "authMethods") == nullptr);
     const JsonValue* mcp = member(*agent, "mcpCapabilities");
     REQUIRE(mcp != nullptr);
     CHECK(member(*mcp, "http")->get<bool>());
@@ -1122,8 +929,7 @@ TEST_CASE("additionalDirectories widen the session's grants")
                 JsonValue(imza::portable_string(extra.path)) }) } }));
     const std::string id = created_session_id(sink.snapshot());
     REQUIRE_FALSE(id.empty());
-    // The grant is installed for the session: a read outside the
-    // workspace no longer asks. Verify through the store directly.
+    // Each extra root installs as a session grant.
     imza::PermissionStore::Snapshot grants = state->permissions->snapshot();
     REQUIRE(grants != nullptr);
     bool found = false;

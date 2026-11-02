@@ -3,25 +3,33 @@
 #include "app/flows.h"
 #include "app/slash_commands.h"
 #include "conversation/persistence.h"
-#include "conversation/tool_format.h"
 #include "platform/config.h"
 #include "platform/file_lock.h"
 #include "providers/provider_store.h"
 
 #include <algorithm>
+#include <ctime>
 #include <future>
+#include <iomanip>
 #include <ranges>
+#include <sstream>
 #include <variant>
 
 namespace imza::acp {
+
+using imza::parse_rpc_frame;
+using imza::rpc_error;
+using imza::rpc_notification;
+using imza::rpc_request;
+using imza::rpc_response;
 
 namespace {
 
     constexpr const char* PERMISSION_METHOD = "session/request_permission";
     constexpr const char* ELICIT_METHOD     = "elicitation/create";
 
-    // flows' install_session is file-private; ACP sessions are child
-    // states, which own no subagent manager, so pruning is guarded.
+    // Mirrors app/flows' file-private install_session. A child state owns
+    // no subagent manager, so pruning is guarded.
     void install_session(ApplicationState& state, SessionSnapshot snapshot)
     {
         state.session->restore(std::move(snapshot));
@@ -37,8 +45,6 @@ namespace {
         return mode == Session::Mode::PLAN ? "plan" : "build";
     }
 
-    JsonValue object() { return JsonValue(JsonValue::object_t { }); }
-
     std::string string_member(const JsonValue& value, std::string_view key)
     {
         const JsonValue* found = find_member(value, key);
@@ -46,6 +52,125 @@ namespace {
             return { };
         }
         return found->get<std::string>();
+    }
+
+    // Converts a stored local "%Y-%m-%d %H:%M:%S" stamp to the RFC 3339
+    // form ACP's updatedAt requires, in UTC so the Z suffix is honest.
+    // Unparseable input yields an empty string.
+    std::string rfc3339_from_local(std::string_view local_stamp)
+    {
+        std::tm tm { };
+        std::istringstream in { std::string(local_stamp) };
+        in >> std::get_time(&tm, "%Y-%m-%d %H:%M:%S");
+        if (in.fail()) {
+            return { };
+        }
+        tm.tm_isdst             = -1;
+        const std::time_t value = std::mktime(&tm);
+        if (value == static_cast<std::time_t>(-1)) {
+            return { };
+        }
+        std::tm utc { };
+        gmtime_r(&value, &utc);
+        std::ostringstream out;
+        out << std::put_time(&utc, "%Y-%m-%dT%H:%M:%SZ");
+        return std::move(out).str();
+    }
+
+    // The form-mode schema for a question form: one string property per
+    // card, enum-constrained when the card offers choices.
+    JsonValue elicitation_schema(const QuestionForm& form)
+    {
+        JsonValue::object_t properties;
+        for (std::size_t index = 0; index < form.size(); ++index) {
+            const QuestionCard& card = form[index];
+            JsonValue field;
+            field["type"]        = "string";
+            field["description"] = card.prompt;
+            if (!card.options.empty()) {
+                field["enum"] = JsonValue(JsonValue::array_t(
+                    std::begin(card.options), std::end(card.options)));
+            }
+            properties["card" + std::to_string(index + 1)] = std::move(field);
+        }
+        JsonValue schema     = json_object();
+        schema["type"]       = "object";
+        schema["properties"] = std::move(properties);
+        return schema;
+    }
+
+    // One card's answer text, split on ", " when the card is a choice list.
+    QuestionAnswer answer_for(const QuestionCard& card, const std::string& text)
+    {
+        QuestionAnswer entry;
+        entry.prompt = card.prompt;
+        if (text.empty()) {
+            return entry;
+        }
+        if (card.free_text) {
+            entry.free_text = text;
+            return entry;
+        }
+        std::size_t start = 0;
+        for (;;) {
+            const std::size_t comma = text.find(", ", start);
+            entry.selected.push_back(text.substr(start,
+                comma == std::string::npos ? std::string::npos
+                                           : comma - start));
+            if (comma == std::string::npos) {
+                return entry;
+            }
+            start = comma + 2;
+        }
+    }
+
+    // Accepted form content is one object keyed by the requested schema's
+    // property names ("card1", "card2", ...); a legacy client's
+    // array-of-text-blocks is tolerated too.
+    ModalAnswer answers_from_elicitation(
+        const QuestionForm& form, const JsonValue& raw)
+    {
+        std::map<std::string, std::string> fields;
+        const JsonValue* content = find_member(raw, "content");
+        if (content != nullptr && content->is_object()) {
+            for (const auto& [key, value] :
+                content->get<JsonValue::object_t>()) {
+                if (value.is_string()) {
+                    fields[key] = value.get<std::string>();
+                } else if (value.is_array()) {
+                    // Multi-select: an array of strings.
+                    std::string joined;
+                    for (const JsonValue& item :
+                        value.get<JsonValue::array_t>()) {
+                        if (!item.is_string()) {
+                            continue;
+                        }
+                        if (!joined.empty()) {
+                            joined += ", ";
+                        }
+                        joined += item.get<std::string>();
+                    }
+                    fields[key] = joined;
+                }
+            }
+        } else if (content != nullptr && content->is_array()) {
+            std::size_t index = 1;
+            for (const JsonValue& block : content->get<JsonValue::array_t>()) {
+                if (string_member(block, "type") == "text") {
+                    fields["card" + std::to_string(index)]
+                        = string_member(block, "text");
+                }
+                ++index;
+            }
+        }
+        ModalAnswer answer;
+        for (std::size_t index = 0; index < form.size(); ++index) {
+            const std::string key = "card" + std::to_string(index + 1);
+            const auto found      = fields.find(key);
+            answer.cards.push_back(answer_for(form[index],
+                found == fields.end() ? std::string { } : found->second));
+        }
+        return answer;
     }
 
     std::string join_choices(const SlashCommand& command)
@@ -91,17 +216,6 @@ namespace {
         }
     }
 
-    JsonValue object_of(
-        std::initializer_list<std::pair<std::string, JsonValue>> entries)
-    {
-        JsonValue value = JsonValue(JsonValue::object_t { });
-        auto& object    = value.get<JsonValue::object_t>();
-        for (auto& [key, item] : entries) {
-            object[key] = item;
-        }
-        return value;
-    }
-
 } // namespace
 
 AcpInterface::AcpInterface(ApplicationState& root, Config config)
@@ -118,7 +232,7 @@ void AcpInterface::set_writer(WriteFn write)
 
 void AcpInterface::reply(const JsonValue& id, const JsonValue& result)
 {
-    std::string line = dump_response(id, result);
+    std::string line = rpc_response(id, result);
     std::lock_guard lock(_mutex);
     if (_write) {
         _write(line);
@@ -131,10 +245,10 @@ void AcpInterface::reply_error(const JsonValue& id, int code,
     std::string line;
     if (!session_id.empty()) {
         // -32002 carries data.sessionId per the spec.
-        JsonValue error   = object();
+        JsonValue error   = json_object();
         error["code"]     = static_cast<double>(code);
         error["message"]  = std::string(message);
-        JsonValue data    = object();
+        JsonValue data    = json_object();
         data["sessionId"] = session_id;
         error["data"]     = data;
         JsonValue frame;
@@ -143,7 +257,7 @@ void AcpInterface::reply_error(const JsonValue& id, int code,
         frame["error"]   = error;
         line             = json_dump(frame);
     } else {
-        line = dump_error(id, code, message);
+        line = rpc_error(id, code, message);
     }
     std::lock_guard lock(_mutex);
     if (_write) {
@@ -151,10 +265,32 @@ void AcpInterface::reply_error(const JsonValue& id, int code,
     }
 }
 
-AcpInterface::AcpSession* AcpInterface::find_session(const std::string& id)
+std::shared_ptr<AcpInterface::AcpSession> AcpInterface::find_session(
+    const std::string& id)
 {
     const auto found = _sessions.find(id);
-    return found == _sessions.end() ? nullptr : &found->second;
+    return found == _sessions.end() ? nullptr : found->second;
+}
+
+void AcpInterface::push(const std::string& session_id,
+    const std::function<std::string(AcpSession&)>& build)
+{
+    std::string frame;
+    {
+        std::lock_guard lock(_mutex);
+        auto current = find_session(session_id);
+        if (current == nullptr) {
+            return;
+        }
+        frame = build(*current);
+    }
+    if (frame.empty()) {
+        return;
+    }
+    std::lock_guard lock(_mutex);
+    if (_write && find_session(session_id) != nullptr) {
+        _write(frame);
+    }
 }
 
 void AcpInterface::handle_request(
@@ -187,10 +323,10 @@ void AcpInterface::handle_request(
     } else if (name == "session/set_config_option"
         || name == "session/set_mode") {
         handle_set_config_option(id, params, name);
-    } else if (!name.empty() && name.front() == '_') {
-        reply_error(id, ERR_METHOD_NOT_FOUND, "method not found");
     } else {
-        reply_error(id, ERR_METHOD_NOT_FOUND, "method not found");
+        // Unknown methods and unimplemented extension methods both answer
+        // -32601, per the error page.
+        reply_error(id, RPC_METHOD_NOT_FOUND, "method not found");
     }
 }
 
@@ -203,7 +339,7 @@ void AcpInterface::handle_notification(
     }
     const std::string session_id = string_member(params, "sessionId");
     std::lock_guard lock(_mutex);
-    AcpSession* session = find_session(session_id);
+    auto session = find_session(session_id);
     if (session == nullptr) {
         return;
     }
@@ -224,10 +360,10 @@ JsonValue AcpInterface::call_client(
     const std::string session_id = string_member(params, "sessionId");
     {
         std::lock_guard lock(_mutex);
-        AcpSession* session = find_session(session_id);
+        auto session = find_session(session_id);
         if (session == nullptr) {
             cancelled = true;
-            return object();
+            return json_object();
         }
         call_id                      = _next_client_call++;
         session->pending_client_call = call_id;
@@ -235,7 +371,7 @@ JsonValue AcpInterface::call_client(
         session->awaiting_reply      = true;
         reply                        = session->client_reply.get_future();
     }
-    const std::string line = dump_request(call_id, method, params);
+    const std::string line = rpc_request(call_id, method, params);
     {
         std::lock_guard lock(_mutex);
         if (_write) {
@@ -246,7 +382,7 @@ JsonValue AcpInterface::call_client(
     JsonValue result = reply.get();
     if (result.is_null()) {
         cancelled = true;
-        return object();
+        return json_object();
     }
     return result;
 }
@@ -261,12 +397,13 @@ void AcpInterface::handle_response(const Message& message)
         = static_cast<std::int64_t>(message.id.get<double>());
     std::lock_guard lock(_mutex);
     for (auto& [id, session] : _sessions) {
-        if (session.pending_client_call == call_id && session.awaiting_reply) {
+        if (session->pending_client_call == call_id
+            && session->awaiting_reply) {
             JsonValue result
                 = message.result.has_value() ? *message.result : JsonValue { };
-            session.client_reply.set_value(std::move(result));
-            session.awaiting_reply      = false;
-            session.pending_client_call = std::nullopt;
+            session->client_reply.set_value(std::move(result));
+            session->awaiting_reply      = false;
+            session->pending_client_call = std::nullopt;
             return;
         }
     }
@@ -277,7 +414,6 @@ void AcpInterface::handle_initialize(
 {
     const InitializeRequest request = InitializeRequest::parse(params);
     _elicitation_form               = request.client.elicitation_form;
-    _elicitation_url                = request.client.elicitation_url;
     _compaction_capable             = request.client.compaction;
     _notices_capable                = request.client.notices;
     _boolean_options                = request.client.boolean_options;
@@ -294,7 +430,7 @@ bool AcpInterface::require_initialized(
     if (_initialized) {
         return true;
     }
-    reply_error(id, ERR_INVALID_REQUEST,
+    reply_error(id, RPC_INVALID_REQUEST,
         "request received before initialization: " + std::string(method));
     return false;
 }
@@ -359,6 +495,19 @@ void AcpInterface::send_config_options(AcpSession& session)
     }
 }
 
+void AcpInterface::fill_session_state(
+    const std::string& session_id, JsonValue& result)
+{
+    std::lock_guard lock(_mutex);
+    auto session = find_session(session_id);
+    if (session == nullptr) {
+        return;
+    }
+    result["configOptions"] = dump_config_options(config_options_for(*session));
+    result["modes"]
+        = dump_session_modes(mode_name(session->state->session->mode()));
+}
+
 void AcpInterface::handle_session_new(
     const JsonValue& id, const JsonValue& params)
 {
@@ -378,7 +527,7 @@ void AcpInterface::handle_session_new(
             _root, _root.post, std::move(inherited),
             [this, routing](ModalPayload payload) {
                 std::lock_guard lock(_mutex);
-                AcpSession* session = find_session(*routing);
+                auto session = find_session(*routing);
                 if (session == nullptr) {
                     std::promise<ModalResult> dead;
                     dead.set_value(std::monostate { });
@@ -398,30 +547,23 @@ void AcpInterface::handle_session_new(
 
     {
         std::lock_guard lock(_mutex);
-        auto [entry, inserted] = _sessions.try_emplace(
-            protocol_id, protocol_id, state, UpdateBuilder(protocol_id));
+        auto [entry, inserted] = _sessions.try_emplace(protocol_id,
+            std::make_shared<AcpSession>(
+                AcpSession { protocol_id, state, UpdateBuilder(protocol_id) }));
         if (!inserted) {
-            reply_error(id, ERR_INTERNAL_ERROR, "session id collision");
+            reply_error(id, RPC_INTERNAL_ERROR, "session id collision");
             return;
         }
-        install_observer(entry->second);
+        install_observer(*entry->second);
     }
     // Carried in the reply so the client renders its switchers at once.
-    JsonValue result = object_of({ { "sessionId", JsonValue(protocol_id) } });
-    {
-        std::lock_guard lock(_mutex);
-        AcpSession* session = find_session(protocol_id);
-        if (session != nullptr) {
-            result["configOptions"]
-                = dump_config_options(config_options_for(*session));
-            result["modes"] = dump_session_modes(
-                mode_name(session->state->session->mode()));
-        }
-    }
+    JsonValue result    = json_object();
+    result["sessionId"] = protocol_id;
+    fill_session_state(protocol_id, result);
     reply(id, result);
     {
         std::lock_guard lock(_mutex);
-        AcpSession* session = find_session(protocol_id);
+        auto session = find_session(protocol_id);
         if (session != nullptr) {
             send_available_commands(*session);
         }
@@ -472,7 +614,7 @@ void AcpInterface::handle_session_load(
         _root, _root.post, std::move(inherited),
         [this, protocol_id](ModalPayload payload) {
             std::lock_guard lock(_mutex);
-            AcpSession* session = find_session(protocol_id);
+            auto session = find_session(protocol_id);
             if (session == nullptr) {
                 std::promise<ModalResult> dead;
                 dead.set_value(std::monostate { });
@@ -486,19 +628,20 @@ void AcpInterface::handle_session_load(
 
     {
         std::lock_guard lock(_mutex);
-        auto [entry, inserted] = _sessions.try_emplace(
-            protocol_id, protocol_id, state, UpdateBuilder(protocol_id));
+        auto [entry, inserted] = _sessions.try_emplace(protocol_id,
+            std::make_shared<AcpSession>(
+                AcpSession { protocol_id, state, UpdateBuilder(protocol_id) }));
         if (!inserted) {
-            reply_error(id, ERR_INTERNAL_ERROR, "session id collision");
+            reply_error(id, RPC_INTERNAL_ERROR, "session id collision");
             return;
         }
-        entry->second.lock = std::move(std::get<FileLock>(guard));
-        install_observer(entry->second);
+        entry->second->lock = std::move(std::get<FileLock>(guard));
+        install_observer(*entry->second);
     }
     if (method != "session/resume") {
         // Replay precedes the response, per spec.
         std::lock_guard lock(_mutex);
-        AcpSession* session = find_session(protocol_id);
+        auto session = find_session(protocol_id);
         if (session == nullptr) {
             return;
         }
@@ -509,7 +652,7 @@ void AcpInterface::handle_session_load(
             if (const auto* user = std::get_if<UserTurn>(&item)) {
                 JsonValue update  = update_of("user_message_chunk");
                 update["content"] = text_block(user->text);
-                frames.push_back(dump_notification("session/update",
+                frames.push_back(rpc_notification("session/update",
                     session_update(protocol_id, std::move(update))));
             } else if (const auto* assistant
                 = std::get_if<AssistantTurn>(&item)) {
@@ -544,17 +687,8 @@ void AcpInterface::handle_session_load(
             }
         }
     }
-    JsonValue result = object();
-    {
-        std::lock_guard lock(_mutex);
-        if (AcpSession* session = find_session(protocol_id);
-            session != nullptr) {
-            result["configOptions"]
-                = dump_config_options(config_options_for(*session));
-            result["modes"] = dump_session_modes(
-                mode_name(session->state->session->mode()));
-        }
-    }
+    JsonValue result = json_object();
+    fill_session_state(protocol_id, result);
     reply(id, result);
 }
 
@@ -562,17 +696,12 @@ void AcpInterface::handle_session_prompt(
     const JsonValue& id, const JsonValue& params)
 {
     const PromptRequest request = PromptRequest::parse(params);
-    std::shared_ptr<ApplicationState> state;
+    std::shared_ptr<AcpSession> session;
     {
         std::lock_guard lock(_mutex);
-        AcpSession* session = find_session(request.session_id);
-        if (session == nullptr) {
-            state = nullptr;
-        } else {
-            state = _sessions.find(request.session_id)->second.state;
-        }
+        session = find_session(request.session_id);
     }
-    if (state == nullptr) {
+    if (session == nullptr) {
         reply_error(
             id, ERR_RESOURCE_NOT_FOUND, "unknown session", request.session_id);
         return;
@@ -637,26 +766,21 @@ void AcpInterface::handle_session_prompt(
         }
     }
     // Own thread: the wire loop must keep reading, or cancel and a
-    // second session's frames queue behind this prompt forever.
+    // second session's frames queue behind this prompt forever. The
+    // thread holds its own reference, so a concurrent session/close
+    // cannot pull the session out from under it.
     std::lock_guard lock(_mutex);
-    AcpSession* session = find_session(request.session_id);
-    if (session == nullptr) {
-        return;
-    }
-    session->prompt_running.store(true, std::memory_order_release);
-    const std::string session_id = request.session_id;
-    _prompt_threads.emplace_back(
-        [this, id, session_id, state, text = std::move(text),
-            attachments = std::move(attachments)]() mutable {
-            run_prompt_turn(
-                id, session_id, state, std::move(text), std::move(attachments));
-        });
+    _prompt_threads.emplace_back([this, id, session, text = std::move(text),
+                                     attachments = std::move(attachments)]() {
+        run_prompt_turn(id, session, std::move(text), std::move(attachments));
+    });
 }
 
 void AcpInterface::run_prompt_turn(const JsonValue& id,
-    const std::string& session_id, std::shared_ptr<ApplicationState> state,
-    std::string text, std::vector<Attachment> attachments)
+    std::shared_ptr<AcpSession> session, std::string text,
+    std::vector<Attachment> attachments)
 {
+    std::shared_ptr<ApplicationState> state = session->state;
     submit(*state, std::move(text), std::move(attachments));
 
     MainThreadQueue& main_thread = *_root.main_thread;
@@ -688,27 +812,18 @@ void AcpInterface::run_prompt_turn(const JsonValue& id,
         // the session id, so the path is derived, not re-read.
         const std::filesystem::path path
             = sessions_dir() / (state->session->session_id() + ".json");
-        std::lock_guard lock(_mutex);
-        if (AcpSession* session = find_session(session_id);
-            session != nullptr && !session->lock.has_value()) {
+        if (!session->lock.has_value()) {
             auto guard = acquire_file_lock(lock_path_for(path),
                 FileLockRequest { FileLockMode::EXCLUSIVE, false });
             if (std::holds_alternative<FileLock>(guard)) {
+                std::lock_guard lock(_mutex);
                 session->lock = std::move(std::get<FileLock>(guard));
             }
         }
     }
-    JsonValue result     = object();
+    JsonValue result     = json_object();
     result["stopReason"] = std::string(stop_reason_name(reason));
     reply(id, result);
-
-    std::lock_guard lock(_mutex);
-    if (AcpSession* session = find_session(session_id); session != nullptr) {
-        session->prompt_running.store(false, std::memory_order_release);
-        if (session->close_requested) {
-            _sessions.erase(session_id); // drops the lock with the entry
-        }
-    }
 }
 
 bool AcpInterface::accept_cwd(const JsonValue& id, const JsonValue& params)
@@ -724,7 +839,7 @@ bool AcpInterface::accept_cwd(const JsonValue& id, const JsonValue& params)
     const std::filesystem::path current = std::filesystem::weakly_canonical(
         std::filesystem::current_path(cwd_error), error);
     if (error || cwd_error || given != current) {
-        reply_error(id, ERR_INVALID_PARAMS,
+        reply_error(id, RPC_INVALID_PARAMS,
             "cwd must be the directory imza was started in: "
                 + portable_string(current));
         return false;
@@ -742,7 +857,7 @@ void AcpInterface::handle_session_list(
         const std::filesystem::path filter = std::filesystem::weakly_canonical(
             path_from_utf8(requested_cwd), error);
         if (error || !filter.is_absolute()) {
-            reply_error(id, ERR_INVALID_PARAMS, "cwd must be an absolute path");
+            reply_error(id, RPC_INVALID_PARAMS, "cwd must be an absolute path");
             return;
         }
         std::erase_if(saved, [&filter](const SavedSession& entry) {
@@ -764,11 +879,11 @@ void AcpInterface::handle_session_list(
         try {
             offset = static_cast<std::size_t>(std::stoull(cursor));
         } catch (const std::exception&) {
-            reply_error(id, ERR_INVALID_PARAMS, "invalid cursor");
+            reply_error(id, RPC_INVALID_PARAMS, "invalid cursor");
             return;
         }
     }
-    JsonValue result = object();
+    JsonValue result = json_object();
     JsonValue::array_t entries;
     const std::size_t end = std::min(saved.size(), offset + PAGE);
     for (std::size_t index = offset; index < end; ++index) {
@@ -802,51 +917,51 @@ void AcpInterface::handle_session_delete(
     if (found == saved.end()) {
         // Deleting an unknown or already-deleted session succeeds
         // silently; clients treat -32002 as success either way.
-        reply(id, object());
+        reply(id, json_object());
         return;
     }
     {
         // Drop this process's own guard first, or the delete would fail
         // on a lock we hold ourselves.
         std::lock_guard lock(_mutex);
-        if (AcpSession* session = find_session(session_id);
-            session != nullptr) {
+        if (auto session = find_session(session_id); session != nullptr) {
             session->lock.reset();
         }
     }
     switch (delete_saved_session(found->path)) {
-    case DeleteSessionResult::OK: reply(id, object()); return;
+    case DeleteSessionResult::OK: reply(id, json_object()); return;
     case DeleteSessionResult::INVALID_PATH:
-        reply_error(id, ERR_INVALID_PARAMS, "invalid session path", session_id);
+        reply_error(id, RPC_INVALID_PARAMS, "invalid session path", session_id);
         return;
     case DeleteSessionResult::REMOVE_FAILED:
-        reply_error(id, ERR_INTERNAL_ERROR,
+        reply_error(id, RPC_INTERNAL_ERROR,
             "session is open in another imza process", session_id);
         return;
     }
-    reply(id, object());
+    reply(id, json_object());
 }
 
 void AcpInterface::handle_session_close(
     const JsonValue& id, const JsonValue& params)
 {
     const std::string session_id = string_member(params, "sessionId");
+    std::shared_ptr<AcpSession> session;
     {
         std::lock_guard lock(_mutex);
-        // Idempotent. A running prompt erases its own entry when the
-        // turn settles, so close only interrupts it.
-        if (AcpSession* session = find_session(session_id);
-            session != nullptr) {
-            if (session->prompt_running.load(std::memory_order_acquire)) {
-                session->close_requested = true;
-                session->state->session->request_interrupt();
-            } else {
-                session->lock.reset(); // release the chat-active guard
-                _sessions.erase(session_id);
-            }
+        // Idempotent: an unknown or already-closed session succeeds.
+        const auto found = _sessions.find(session_id);
+        if (found == _sessions.end()) {
+            reply(id, json_object());
+            return;
         }
+        session = found->second;
+        // Dropping the map's reference releases the file lock; a running
+        // prompt thread keeps the session itself alive to finish cleanly.
+        _sessions.erase(found);
     }
-    reply(id, object());
+    // Cancel any work as if session/cancel had been sent.
+    session->state->session->request_interrupt();
+    reply(id, json_object());
 }
 
 void AcpInterface::handle_set_config_option(
@@ -878,20 +993,20 @@ void AcpInterface::handle_set_config_option(
     const bool known = switching_mode || config_id == "thought_level"
         || config_id == "model" || config_id == "skip_permissions";
     if (!known) {
-        reply_error(id, ERR_INVALID_PARAMS, "unknown configId: " + config_id,
+        reply_error(id, RPC_INVALID_PARAMS, "unknown configId: " + config_id,
             session_id);
         return;
     }
     if (config_id == "thought_level" && !typed.empty()
         && !std::ranges::contains(REASONING_EFFORT_CHOICES, typed)) {
         reply_error(
-            id, ERR_INVALID_PARAMS, "unknown value: " + typed, session_id);
+            id, RPC_INVALID_PARAMS, "unknown value: " + typed, session_id);
         return;
     }
     std::shared_ptr<ApplicationState> mode_target;
     {
         std::lock_guard lock(_mutex);
-        AcpSession* session = find_session(session_id);
+        auto session = find_session(session_id);
         if (session == nullptr) {
             reply_error(
                 id, ERR_RESOURCE_NOT_FOUND, "unknown session", session_id);
@@ -919,12 +1034,12 @@ void AcpInterface::handle_set_config_option(
         mode_target->session->set_mode(
             typed == "plan" ? Session::Mode::PLAN : Session::Mode::BUILD);
     }
-    JsonValue result = object();
-    // The reply carries the complete new state; the notification
-    // pushes it to the client's switchers.
+    JsonValue result = json_object();
+    // The reply carries the complete new state; the notification pushes
+    // it to the client's switchers.
     {
         std::lock_guard lock(_mutex);
-        AcpSession* session = find_session(session_id);
+        auto session = find_session(session_id);
         if (session != nullptr) {
             result["configOptions"]
                 = dump_config_options(config_options_for(*session));
@@ -939,7 +1054,7 @@ void AcpInterface::send_usage_update_for(const std::string& session_id)
     std::string frame;
     {
         std::lock_guard lock(_mutex);
-        AcpSession* current = find_session(session_id);
+        auto current = find_session(session_id);
         if (current == nullptr) {
             return;
         }
@@ -969,7 +1084,7 @@ void AcpInterface::send_notice_for(const std::string& session_id,
     std::string frame;
     {
         std::lock_guard lock(_mutex);
-        AcpSession* current = find_session(session_id);
+        auto current = find_session(session_id);
         if (current == nullptr) {
             return;
         }
@@ -983,165 +1098,92 @@ void AcpInterface::send_notice_for(const std::string& session_id,
 
 void AcpInterface::install_observer(AcpSession& session)
 {
-    // Mode and title changes fire on whichever thread made them; the adapter
-    // mutex is taken only to format and write the frame.
+    // Every callback builds a frame from the live session and hands it to
+    // push(); mode and title fire on whichever thread made the change, the
+    // rest on the session's own workers.
+    const std::string id = session.id;
     session.mode_subscription
-        = session.state->session->subscribe_to_mode_change(
-            [this, id = session.id] {
-                std::lock_guard lock(_mutex);
-                AcpSession* current = find_session(id);
-                if (current == nullptr || !_write) {
-                    return;
-                }
-                _write(current->updates.current_mode(
-                    mode_name(current->state->session->mode())));
-            });
+        = session.state->session->subscribe_to_mode_change([this, id] {
+              push(id, [](AcpSession& current) {
+                  return current.updates.current_mode(
+                      mode_name(current.state->session->mode()));
+              });
+          });
     session.title_subscription
-        = session.state->session->subscribe_to_title_change(
-            [this, id = session.id] {
-                std::lock_guard lock(_mutex);
-                AcpSession* current = find_session(id);
-                if (current == nullptr || !_write) {
-                    return;
-                }
-                const std::string title = current->state->session->title();
-                if (!title.empty()) {
-                    _write(current->updates.session_info(title));
-                }
-            });
+        = session.state->session->subscribe_to_title_change([this, id] {
+              push(id, [](AcpSession& current) {
+                  const std::string title = current.state->session->title();
+                  return title.empty() ? std::string { }
+                                       : current.updates.session_info(title);
+              });
+          });
     // The todo list lives outside the transcript, so the client would
     // never see plan changes without this push.
     session.todo_subscription
-        = session.state->session->subscribe_to_todo_change(
-            [this, id = session.id] {
-                std::string frame;
-                {
-                    std::lock_guard lock(_mutex);
-                    AcpSession* current = find_session(id);
-                    if (current == nullptr || !_write) {
-                        return;
-                    }
-                    frame = current->updates.plan(
-                        *current->state->session->todo());
-                }
-                std::lock_guard lock(_mutex);
-                if (_write) {
-                    _write(frame);
-                }
-            });
+        = session.state->session->subscribe_to_todo_change([this, id] {
+              push(id, [](AcpSession& current) {
+                  return current.updates.plan(*current.state->session->todo());
+              });
+          });
     session.compaction_subscription
-        = session.state->session->subscribe_to_compaction_change(
-            [this, id = session.id] {
-                // Re-snapshot: the event that fired may not be the newest.
-                std::optional<CompactionEvent> event;
-                std::string summary;
-                {
-                    std::lock_guard lock(_mutex);
-                    AcpSession* current = find_session(id);
-                    if (current == nullptr) {
-                        return;
-                    }
-                    // Compaction updates are capability-gated.
-                    if (!_compaction_capable) {
-                        return;
-                    }
-                    const auto items = current->state->session->items();
-                    for (const ConversationItem& item :
-                        *items | std::views::reverse) {
-                        if (const auto* entry
-                            = std::get_if<CompactionEvent>(&item)) {
-                            event = *entry;
-                            break;
-                        }
-                    }
-                    summary = current->state->session->compacted_summary();
-                }
-                if (!event.has_value()) {
-                    return;
-                }
-                std::optional<std::string> frame;
-                {
-                    std::lock_guard lock(_mutex);
-                    AcpSession* current = find_session(id);
-                    if (current == nullptr || !_write) {
-                        return;
-                    }
-                    switch (event->status) {
-                    case CompactionEvent::Status::RUNNING:
-                        frame = current->updates.compaction_in_progress(
-                            static_cast<std::int64_t>(event->id));
-                        break;
-                    case CompactionEvent::Status::COMPLETED:
-                        frame = current->updates.compaction_completed(
-                            static_cast<std::int64_t>(event->id), summary);
-                        break;
-                    case CompactionEvent::Status::FAILED:
-                        frame = current->updates.compaction_failed(
-                            static_cast<std::int64_t>(event->id), "");
-                        break;
-                    }
-                }
-                if (frame.has_value()) {
-                    std::lock_guard lock(_mutex);
-                    if (_write) {
-                        _write(*frame);
-                    }
-                }
-            });
+        = session.state->session->subscribe_to_compaction_change([this, id] {
+              if (!_compaction_capable) {
+                  return;
+              }
+              push(id, [](AcpSession& current) {
+                  // Re-snapshot: the event that fired may not be newest.
+                  const auto items = current.state->session->items();
+                  for (const ConversationItem& item :
+                      *items | std::views::reverse) {
+                      const auto* entry = std::get_if<CompactionEvent>(&item);
+                      if (entry == nullptr) {
+                          continue;
+                      }
+                      const auto compaction_id
+                          = static_cast<std::int64_t>(entry->id);
+                      switch (entry->status) {
+                      case CompactionEvent::Status::RUNNING:
+                          return current.updates.compaction_in_progress(
+                              compaction_id);
+                      case CompactionEvent::Status::COMPLETED:
+                          return current.updates.compaction_completed(
+                              compaction_id,
+                              current.state->session->compacted_summary());
+                      case CompactionEvent::Status::FAILED:
+                          return current.updates.compaction_failed(
+                              compaction_id, "");
+                      }
+                  }
+                  return std::string { };
+              });
+          });
     session.usage_subscription
         = session.state->session->subscribe_to_usage_change(
-            [this, id = session.id] { send_usage_update_for(id); });
+            [this, id] { send_usage_update_for(id); });
     session.notice_subscription = session.state->session->subscribe_to_notice(
-        [this, id = session.id](const std::string& message) {
-            if (!_notices_capable) {
-                return;
+        [this, id](const std::string& message) {
+            if (_notices_capable) {
+                send_notice_for(id, "info", message);
             }
-            send_notice_for(id, "info", message);
         });
     session.error_subscription = session.state->session->subscribe_to_error(
-        [this, id = session.id](const std::string& message) {
-            if (!_notices_capable) {
-                return;
-            }
-            send_notice_for(id, "error", message);
-        });
-
-    session.state->session->set_stream_observer(
-        [this, id = session.id](const StreamEvent& event) {
-            std::optional<std::string> frame;
-            {
-                std::lock_guard lock(_mutex);
-                AcpSession* current = find_session(id);
-                if (current == nullptr) {
-                    return;
-                }
-                frame = stream_frame(*current, event);
-            }
-            if (frame.has_value()) {
-                std::lock_guard lock(_mutex);
-                if (_write) {
-                    _write(*frame);
-                }
+        [this, id](const std::string& message) {
+            if (_notices_capable) {
+                send_notice_for(id, "error", message);
             }
         });
     // Tool results land outside the stream.
     session.state->session->set_tool_result_observer(
-        [this, id = session.id](const ToolCall& call) {
-            std::string frame;
-            {
-                std::lock_guard lock(_mutex);
-                AcpSession* current = find_session(id);
-                if (current == nullptr) {
-                    return;
-                }
-                frame = current->updates.tool_call_update_with_locations(call);
-            }
-            {
-                std::lock_guard lock(_mutex);
-                if (_write) {
-                    _write(frame);
-                }
-            }
+        [this, id](const ToolCall& call) {
+            push(id, [&call](AcpSession& current) {
+                return current.updates.tool_call_update(call);
+            });
+        });
+    session.state->session->set_stream_observer(
+        [this, id](const StreamEvent& event) {
+            push(id, [this, &event](AcpSession& current) {
+                return stream_frame(current, event).value_or(std::string { });
+            });
         });
 }
 
@@ -1187,7 +1229,7 @@ std::future<ModalResult> AcpInterface::request_modal(
                 ToolDecision::REJECT, "permission presentation unavailable" });
             return future;
         }
-        JsonValue params    = object();
+        JsonValue params    = json_object();
         params["sessionId"] = session.id;
         params["toolCall"]  = request->tool_call_update;
         JsonValue::array_t options;
@@ -1235,103 +1277,19 @@ std::future<ModalResult> AcpInterface::request_modal(
             done.set_value(std::monostate { });
             return future;
         }
-        JsonValue params    = object();
-        params["sessionId"] = session.id;
-        params["mode"]      = "form";
-        params["message"]   = form->front().prompt;
-        JsonValue::object_t properties;
-        for (std::size_t index = 0; index < form->size(); ++index) {
-            const QuestionCard& card = (*form)[index];
-            JsonValue field;
-            field["type"]        = "string";
-            field["description"] = card.prompt;
-            if (!card.options.empty()) {
-                field["enum"] = JsonValue(JsonValue::array_t(
-                    std::begin(card.options), std::end(card.options)));
-            }
-            properties["card" + std::to_string(index + 1)] = std::move(field);
-        }
-        JsonValue schema          = object();
-        schema["type"]            = "object";
-        schema["properties"]      = std::move(properties);
-        params["requestedSchema"] = std::move(schema);
+        JsonValue params          = json_object();
+        params["sessionId"]       = session.id;
+        params["mode"]            = "form";
+        params["message"]         = form->front().prompt;
+        params["requestedSchema"] = elicitation_schema(*form);
         bool cancelled            = false;
-        const JsonValue raw = call_client(ELICIT_METHOD, params, cancelled);
-        if (cancelled) {
-            done.set_value(std::monostate { });
-            return future;
-        }
+        const JsonValue raw     = call_client(ELICIT_METHOD, params, cancelled);
         const JsonValue* action = find_member(raw, "action");
-        const std::string value = action != nullptr && action->is_string()
-            ? action->get<std::string>()
-            : "cancel";
-        if (value != "accept") {
-            done.set_value(std::monostate { });
-            return future;
-        }
-        ModalAnswer answer;
-        const JsonValue* content = find_member(raw, "content");
-        // Accepted form content is one object keyed by the requested
-        // schema's property names ("card1", "card2", ...); a legacy
-        // client's array-of-text-blocks is tolerated too.
-        std::map<std::string, std::string> fields;
-        if (content != nullptr && content->is_object()) {
-            for (const auto& [key, value] :
-                content->get<JsonValue::object_t>()) {
-                if (value.is_string()) {
-                    fields[key] = value.get<std::string>();
-                } else if (value.is_array()) {
-                    // Multi-select: an array of strings.
-                    std::string joined;
-                    for (const JsonValue& item :
-                        value.get<JsonValue::array_t>()) {
-                        if (!item.is_string()) {
-                            continue;
-                        }
-                        if (!joined.empty()) {
-                            joined += ", ";
-                        }
-                        joined += item.get<std::string>();
-                    }
-                    fields[key] = joined;
-                }
-            }
-        } else if (content != nullptr && content->is_array()) {
-            std::size_t index = 1;
-            for (const JsonValue& block : content->get<JsonValue::array_t>()) {
-                if (string_member(block, "type") == "text") {
-                    fields["card" + std::to_string(index)]
-                        = string_member(block, "text");
-                }
-                ++index;
-            }
-        }
-        for (std::size_t index = 0; index < form->size(); ++index) {
-            QuestionAnswer entry;
-            entry.prompt          = (*form)[index].prompt;
-            const std::string key = "card" + std::to_string(index + 1);
-            if (const auto found = fields.find(key);
-                found != fields.end() && !found->second.empty()) {
-                if ((*form)[index].free_text) {
-                    entry.free_text = found->second;
-                } else {
-                    std::size_t start = 0;
-                    for (;;) {
-                        const std::size_t comma
-                            = found->second.find(", ", start);
-                        entry.selected.push_back(found->second.substr(start,
-                            comma == std::string::npos ? std::string::npos
-                                                       : comma - start));
-                        if (comma == std::string::npos) {
-                            break;
-                        }
-                        start = comma + 2;
-                    }
-                }
-            }
-            answer.cards.push_back(std::move(entry));
-        }
-        done.set_value(std::move(answer));
+        const bool accepted     = !cancelled && action != nullptr
+            && action->is_string() && action->get<std::string>() == "accept";
+        done.set_value(accepted
+                ? ModalResult { answers_from_elicitation(*form, raw) }
+                : ModalResult { std::monostate { } });
         return future;
     }
     // No protocol surface for these modals: fail closed.
@@ -1346,12 +1304,10 @@ void AcpInterface::stop()
     {
         std::lock_guard lock(_mutex);
         for (auto& [id, session] : _sessions) {
-            if (session.prompt_running.load(std::memory_order_acquire)) {
-                session.state->session->request_interrupt();
-            }
-            if (session.awaiting_reply) {
-                session.client_reply.set_value(JsonValue { });
-                session.awaiting_reply = false;
+            session->state->session->request_interrupt();
+            if (session->awaiting_reply) {
+                session->client_reply.set_value(JsonValue { });
+                session->awaiting_reply = false;
             }
         }
     }

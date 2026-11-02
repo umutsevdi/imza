@@ -627,16 +627,24 @@ TEST_CASE("dangerous skip does not weaken hard rejection")
 
 TEST_CASE("tools with an automatic policy run without an approval modal")
 {
+    // A read inside the workspace is auto-allowed: the point is that no
+    // modal appears, not that any particular binding runs. Reading a file
+    // that is already in the repository keeps the test off the network and
+    // out of the filesystem's approval path.
     AgentEnv env(static_cast<imza::RuntimeFlag>(
         imza::interactive_runtime_flags() | imza::RuntimeFlag::WEB));
     auto round = std::make_shared<int>(0);
-    env.stream = [&env, round](const imza::ChatRequest& req,
+    const std::string script
+        = "print(imza.fs.read([[CMakeLists.txt]]):sub(1, 40))";
+    env.stream = [&env, round, script](const imza::ChatRequest& req,
                      const imza::StreamCallback& cb) {
         env.requests.push_back(req);
         if ((*round)++ == 0) {
-            cb(imza::make_tool_call_event({ "lua",
-                R"json({"script":"pcall(imza.web.search, 'imza') print('searched: imza')"})json",
-                "", "" }));
+            imza::JsonValue args = imza::JsonValue::object_t { };
+            args.get<imza::JsonValue::object_t>()["script"]
+                = imza::JsonValue(script);
+            cb(imza::make_tool_call_event(
+                { "lua", imza::json_dump(args), "", "" }));
         }
         cb(imza::make_done_event());
         return imza::Status::OK;
@@ -651,10 +659,10 @@ TEST_CASE("tools with an automatic policy run without an approval modal")
     REQUIRE(tc != nullptr);
     REQUIRE(tc->result.has_value());
     CHECK(tc->result->kind == imza::ToolCall::Result::Kind::OUTPUT);
-    CHECK(tc->result->text.find("searched: imza") != std::string::npos);
+    CHECK(tc->result->text.find("cmake") != std::string::npos);
 
     CHECK(env.last_request().messages.back().type == imza::Message::Type::TOOL);
-    CHECK(env.last_request().messages.back().content.find("searched: imza")
+    CHECK(env.last_request().messages.back().content.find("cmake")
         != std::string::npos);
 }
 

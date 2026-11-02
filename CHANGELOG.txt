@@ -13,7 +13,11 @@ CHANGELOG
 Changes:
   - Execution blocks now explicitly displays used tools.
   - Imza can now be driven from editors that support the Agent Client
-    Protocol (Zed).
+    Protocol (ACP), running imza's sandbox and permission layers with the interface
+    provided by the IDE or text editor of choice. Imza exposes many of it's 
+    features through ACP. However features of imza that are beyond ACP specification
+    are not exposed. And they should be configured through imza itself or it's
+    configuration file.
 
 -------------------------------------------------------------------------------
 0.7.1 - 2026-10-27

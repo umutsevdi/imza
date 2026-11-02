@@ -26,6 +26,7 @@ Page index (all paths relative to this skill's directory):
 | `wiki/11_FAQ.md` | Common questions and troubleshooting. |
 | `wiki/12_Features-and-Roadmap.md` | Feature inventory and planned work. |
 | `wiki/13_Why-Imza.md` | Project motivation and direction. |
+| `wiki/14_ACP-and-Editor-Integrations.md` | Run imza through code editors and IDEs over the Agent Client Protocol. |
 
 Guidelines:
 

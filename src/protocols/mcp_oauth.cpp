@@ -916,7 +916,7 @@ McpSignInOutcome mcp_oauth_sign_in(std::string_view server_url,
     client_info["name"] = "imza";
     JsonValue params;
     params["protocolVersion"] = MCP_PROTOCOL_VERSION;
-    params["capabilities"]    = JsonValue(JsonValue::object_t { });
+    params["capabilities"]    = json_object();
     params["clientInfo"]      = std::move(client_info);
     const std::string probe   = mcp_rpc_request(1, "initialize", params);
 

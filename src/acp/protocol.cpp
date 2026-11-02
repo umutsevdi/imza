@@ -14,26 +14,6 @@ namespace {
     constexpr std::string_view REJECT_ONCE   = "reject_once";
     constexpr std::string_view REJECT_ALWAYS = "reject_always";
 
-    std::optional<bool> bool_member(
-        const JsonValue& object, std::string_view outer, std::string_view inner)
-    {
-        const JsonValue* group = find_member(object, outer);
-        if (group == nullptr || !group->is_object()) {
-            return std::nullopt;
-        }
-        if (inner.empty()) {
-            if (!group->is_boolean()) {
-                return std::nullopt;
-            }
-            return group->get<bool>();
-        }
-        const JsonValue* value = find_member(*group, inner);
-        if (value == nullptr || !value->is_boolean()) {
-            return std::nullopt;
-        }
-        return value->get<bool>();
-    }
-
     std::string string_member(const JsonValue& object, std::string_view key)
     {
         const JsonValue* value = find_member(object, key);
@@ -48,17 +28,13 @@ namespace {
 ClientCapabilities ClientCapabilities::parse(const JsonValue& params)
 {
     ClientCapabilities out;
-    out.fs_read_text_file
-        = bool_member(params, "fs", "readTextFile").value_or(false);
-    out.terminal = bool_member(params, "terminal", "").value_or(false);
-    // Each elicitation mode is advertised only by its own non-null field;
-    // a bare {} or all-null object advertises nothing (differs from MCP).
+    // Form mode is advertised only by a non-null form field; a bare {}
+    // or all-null object advertises nothing (differs from MCP). URL mode
+    // has no imza flow yet, so it is not parsed.
     if (const JsonValue* elicitation = find_member(params, "elicitation");
         elicitation != nullptr && elicitation->is_object()) {
         const JsonValue* form = find_member(*elicitation, "form");
         out.elicitation_form  = form != nullptr && !form->is_null();
-        const JsonValue* url  = find_member(*elicitation, "url");
-        out.elicitation_url   = url != nullptr && !url->is_null();
     }
     // A present (non-null) object advertises; omitted or null means
     // unsupported. The inner object is empty: it carries no fields yet.
@@ -123,12 +99,11 @@ JsonValue dump_initialize_result(const InitializeRequest& request)
     // The session's permission store accepts extra directory grants, so
     // clients may widen the root set at session setup.
     JsonValue session_capabilities;
-    session_capabilities["list"]   = JsonValue(JsonValue::object_t { });
-    session_capabilities["delete"] = JsonValue(JsonValue::object_t { });
-    session_capabilities["resume"] = JsonValue(JsonValue::object_t { });
-    session_capabilities["close"]  = JsonValue(JsonValue::object_t { });
-    session_capabilities["additionalDirectories"]
-        = JsonValue(JsonValue::object_t { });
+    session_capabilities["list"]                  = json_object();
+    session_capabilities["delete"]                = json_object();
+    session_capabilities["resume"]                = json_object();
+    session_capabilities["close"]                 = json_object();
+    session_capabilities["additionalDirectories"] = json_object();
     agent["sessionCapabilities"] = std::move(session_capabilities);
     JsonValue mcp;
     // The manager speaks streamable HTTP; stdio is mandatory for agents.
@@ -189,10 +164,9 @@ PromptRequest PromptRequest::parse(const JsonValue& params)
                 content.media_type = string_member(*resource, "mimeType");
             }
         } else if (kind == "resource_link") {
-            content.kind  = PromptContent::Kind::RESOURCE_LINK;
-            content.uri   = string_member(block, "uri");
-            content.name  = string_member(block, "name");
-            content.title = string_member(block, "title");
+            content.kind = PromptContent::Kind::RESOURCE_LINK;
+            content.uri  = string_member(block, "uri");
+            content.name = string_member(block, "name");
         } else {
             content.kind = PromptContent::Kind::OTHER;
         }
@@ -237,40 +211,32 @@ std::string_view tool_kind_name(ToolKind kind)
 {
     switch (kind) {
     case ToolKind::READ: return "read";
-    case ToolKind::EDIT: return "edit";
-    case ToolKind::DELETE: return "delete";
-    case ToolKind::MOVE: return "move";
-    case ToolKind::SEARCH: return "search";
     case ToolKind::EXECUTE: return "execute";
     case ToolKind::THINK: return "think";
     case ToolKind::FETCH: return "fetch";
-    case ToolKind::SWITCH_MODE: return "switch_mode";
     case ToolKind::OTHER: return "other";
     }
     return "other";
-}
-
-std::vector<PermissionOption> permission_options(const PermissionPrompt& prompt)
-{
-    std::vector<PermissionOption> options;
-    options.push_back({ "allow-once", "Allow once", std::string(ALLOW_ONCE) });
-    if (prompt.allow_for_session) {
-        options.push_back({ "allow-session", "Allow for this session",
-            std::string(ALLOW_ALWAYS) });
-        options.push_back({ "reject-session", "Reject for this session",
-            std::string(REJECT_ALWAYS) });
-    }
-    options.push_back({ "reject-once", "Reject", std::string(REJECT_ONCE) });
-    return options;
 }
 
 std::optional<PermissionRequest> permission_request_for(
     std::string_view session_id, const PermissionPrompt& prompt)
 {
     PermissionRequest out;
-    out.session_id       = std::string(session_id);
-    out.tool_call_id     = prompt.id.empty() ? "manual" : prompt.id;
-    out.options          = permission_options(prompt);
+    out.session_id   = std::string(session_id);
+    out.tool_call_id = prompt.id.empty() ? "manual" : prompt.id;
+    // allow_always / reject_always appear only when a session grant can
+    // express them.
+    out.options.push_back(
+        { "allow-once", "Allow once", std::string(ALLOW_ONCE) });
+    if (prompt.allow_for_session) {
+        out.options.push_back({ "allow-session", "Allow for this session",
+            std::string(ALLOW_ALWAYS) });
+        out.options.push_back({ "reject-session", "Reject for this session",
+            std::string(REJECT_ALWAYS) });
+    }
+    out.options.push_back(
+        { "reject-once", "Reject", std::string(REJECT_ONCE) });
     JsonValue update     = update_of("tool_call_update");
     update["toolCallId"] = out.tool_call_id;
     update["title"]      = prompt.name;

@@ -1174,10 +1174,12 @@ TEST_CASE("a script killed at the deadline keeps its partial log")
 {
     imza::test::TempDir dir;
     imza::test::write_file(dir.file("a.txt"), "x\n");
+    // A one-second budget: the point is the partial log, not the wait.
     const imza::ToolOutput out
         = imza::test::run_lua("imza.fs.read([[" + dir.file("a.txt").string()
-            + "]])\n"
-              "while true do end");
+                + "]])\n"
+                  "while true do end",
+            imza::LuaHost { }, 1L);
     CHECK(out.kind == imza::ToolOutput::Kind::ERROR);
     REQUIRE(out.dispatch_log.size() == 1);
     CHECK(out.dispatch_log[0].binding == "fs.read");
