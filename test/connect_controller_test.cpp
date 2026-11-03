@@ -404,6 +404,36 @@ TEST_CASE("failing test keeps the connection absent")
     CHECK(session->connect_status() == "API error.");
 }
 
+TEST_CASE("a rejected derived-endpoint key shows the provider's reason")
+{
+    imza::test::CatalogDataHome home("databricks");
+
+    const imza::test::ScopedEnv host(
+        "DATABRICKS_HOST", "dbc-123.cloud.databricks.com");
+    imza::test::PostPump pump;
+    auto providers
+        = std::make_shared<imza::ProviderStore>(imza::test::make_config_store(),
+            fake_models_ok(), imza::TermsFn { }, imza::RefreshFn { }, nullptr,
+            [](const imza::Route&, std::string_view, std::string* message) {
+                if (message != nullptr) {
+                    *message = "invalid api key";
+                }
+                return imza::Status::API_ERROR;
+            });
+    auto session = std::make_shared<imza::Session>();
+    auto state   = make_state(session, providers, pump.fn());
+    pump.pump();
+
+    resolve_modal(*state,
+        imza::ModalResult {
+            imza::ConnectResult { "databricks", "", "nope", "", true } });
+    REQUIRE(pump.wait_for([&] { return !session->connect_status().empty(); }));
+
+    // The user sees the provider's explanation, not "API error."
+    CHECK(session->connect_status() == "invalid api key");
+    CHECK(providers->connections().empty());
+}
+
 TEST_CASE("model pick sets last_used and persists")
 {
     CatalogHome home;

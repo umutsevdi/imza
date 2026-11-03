@@ -194,16 +194,23 @@ std::string subagent_variant_or_default(
 
 ProviderStore::ProviderStore(std::shared_ptr<ConfigStore> config_store,
     ModelsFn models_fn, TermsFn terms_fn, RefreshFn refresh_fn,
-    CredentialSubsystem* credentials)
+    CredentialSubsystem* credentials, VerifyFn verify_fn)
     : _config_store(std::move(config_store))
     , _models_fn(std::move(models_fn))
     , _terms_fn(std::move(terms_fn))
     , _refresh_fn(std::move(refresh_fn))
     , _credentials(credentials)
+    , _verify_fn(std::move(verify_fn))
 {
     if (!_models_fn) {
         _models_fn = [](const Route& route, std::vector<ModelInfo>& models) {
             return fetch_models(route, models);
+        };
+    }
+    if (!_verify_fn) {
+        _verify_fn = [](const Route& route, std::string_view model,
+                         std::string* message) {
+            return verify_route(route, model, message);
         };
     }
     if (!_terms_fn) {
@@ -685,7 +692,9 @@ void ProviderStore::refetch_models(std::string_view connection_id)
 void ProviderStore::connect(ConnectResult result, ConnectCompleteFn complete)
 {
     Route route;
-    std::vector<ModelInfo> subscription_models;
+    std::vector<ModelInfo> catalog_listed;
+    bool catalog_backed = false;
+    std::string verify_model;
     {
         std::unique_lock lock(_mutex);
         _wait_catalog_locked(lock);
@@ -697,49 +706,61 @@ void ProviderStore::connect(ConnectResult result, ConnectCompleteFn complete)
             probe.endpoint = result.endpoint;
             probe.api_key  = result.api_key;
             route = _route_locked(probe, default_dialect(probe, _catalog));
-            if (subscription_connection(result.id)) {
-                subscription_models = catalog_models(_catalog, result.id);
+            catalog_backed = subscription_connection(result.id)
+                || catalog_models_only(result.id);
+            if (catalog_backed) {
+                catalog_listed = catalog_models(_catalog, result.id);
+            }
+            if (catalog_models_only(result.id) && !catalog_listed.empty()) {
+                verify_model = catalog_listed.front().id;
             }
         }
     }
     if (route.endpoint.empty()) {
-        complete(ConnectOutcome { Status::INVALID_URL });
+        ConnectOutcome outcome { route.error == Status::OK ? Status::INVALID_URL
+                                                           : route.error };
+        outcome.message = route.error_message;
+        complete(outcome);
         return;
     }
 
     std::lock_guard lock(_mutex);
-    _workers.emplace_back(
-        [this, result = std::move(result), route,
-            subscription_models = std::move(subscription_models),
-            complete            = std::move(complete)] {
-            std::vector<ModelInfo> models = subscription_models;
-            Status fetched                = Status::OK;
-            if (!subscription_connection(result.id)) {
-                // Terms must be accepted before the key can probe models.
-                if (provider_requires_terms(result.id)) {
-                    fetched = _terms_fn(route);
-                }
-                if (fetched == Status::OK) {
-                    fetched = _models_fn(route, models);
-                }
+    _workers.emplace_back([this, result = std::move(result), route,
+                              catalog_listed = std::move(catalog_listed),
+                              catalog_backed = catalog_backed,
+                              verify_model   = std::move(verify_model),
+                              complete       = std::move(complete)] {
+        std::vector<ModelInfo> models = catalog_listed;
+        Status fetched                = Status::OK;
+        if (provider_requires_terms(result.id)) {
+            fetched = _terms_fn(route);
+        }
+        std::string detail;
+        if (fetched == Status::OK && catalog_backed) {
+            if (!verify_model.empty()) {
+                fetched = _verify_fn(route, verify_model, &detail);
             }
-            if (!alive()) {
-                return;
-            }
-            ConnectOutcome outcome;
-            outcome.status      = fetched;
-            outcome.model_count = models.size();
-            if (fetched == Status::OK && result.persist) {
-                std::lock_guard lock(_mutex);
-                outcome.status = _commit_connection_locked(
-                    result, models, outcome.first_connection);
-                outcome.persisted = outcome.status == Status::OK;
-            }
-            if (outcome.persisted) {
-                _notify_changed();
-            }
-            complete(outcome);
-        });
+        } else if (fetched == Status::OK) {
+            fetched = _models_fn(route, models);
+        }
+        if (!alive()) {
+            return;
+        }
+        ConnectOutcome outcome;
+        outcome.status      = fetched;
+        outcome.model_count = models.size();
+        outcome.message     = std::move(detail);
+        if (fetched == Status::OK && result.persist) {
+            std::lock_guard lock(_mutex);
+            outcome.status = _commit_connection_locked(
+                result, models, outcome.first_connection);
+            outcome.persisted = outcome.status == Status::OK;
+        }
+        if (outcome.persisted) {
+            _notify_changed();
+        }
+        complete(outcome);
+    });
 }
 
 bool ProviderStore::remove_connection(
@@ -885,17 +906,21 @@ void ProviderStore::_start_fetch_locked(const std::string& connection_id)
         return;
     }
     const int generation = ++_generations[connection_id];
-    // Subscription lists come from the local catalog and need no key, and
-    // an unroutable connection is a synchronous failure: neither waits.
     if (subscription_connection(connection->id)) {
         _model_catalog[connection_id] = CatalogEntry { CatalogEntry::Ready {
             catalog_models(_catalog, connection->id) } };
         return;
     }
-    if (_route_locked(*connection, default_dialect(*connection, _catalog))
-            .api.empty()) {
-        _model_catalog[connection_id]
-            = CatalogEntry { CatalogEntry::Failed { Status::INVALID_URL } };
+    const Route probe
+        = _route_locked(*connection, default_dialect(*connection, _catalog));
+    if (probe.api.empty()) {
+        _model_catalog[connection_id] = CatalogEntry { CatalogEntry::Failed {
+            probe.error == Status::OK ? Status::INVALID_URL : probe.error } };
+        return;
+    }
+    if (catalog_models_only(connection->id)) {
+        _model_catalog[connection_id] = CatalogEntry { CatalogEntry::Ready {
+            catalog_models(_catalog, connection->id) } };
         return;
     }
     _model_catalog[connection_id] = CatalogEntry { CatalogEntry::Fetching { } };
@@ -927,9 +952,10 @@ void ProviderStore::_start_fetch_locked(const std::string& connection_id)
         if (route.api.empty()) {
             std::lock_guard lock(_mutex);
             if (_generations[connection_id] == generation) {
-                _model_catalog[connection_id] = CatalogEntry {
-                    CatalogEntry::Failed { Status::INVALID_URL }
-                };
+                _model_catalog[connection_id]
+                    = CatalogEntry { CatalogEntry::Failed {
+                        route.error == Status::OK ? Status::INVALID_URL
+                                                  : route.error } };
             }
             return;
         }

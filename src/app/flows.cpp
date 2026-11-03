@@ -254,8 +254,9 @@ namespace {
         state.providers->connect(result, [&state](ConnectOutcome outcome) {
             state.post([&state, outcome] {
                 if (outcome.status != Status::OK) {
-                    state.session->set_connect_status(
-                        error_text(outcome.status));
+                    state.session->set_connect_status(outcome.message.empty()
+                            ? error_text(outcome.status)
+                            : outcome.message);
                     return;
                 }
                 state.session->set_connect_status(

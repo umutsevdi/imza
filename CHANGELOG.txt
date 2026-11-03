@@ -8,9 +8,15 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
-0.7.2 - Unreleased
+0.7.2 - 2026-11-03
 -------------------------------------------------------------------------------
 Changes:
+  - Added support for Amazon Bedrock, Azure OpenAI, Cloudflare Workers AI and
+    Databricks, which build their address from a variable you export
+    (`AWS_REGION`, `AZURE_RESOURCE_NAME`, `CLOUDFLARE_ACCOUNT_ID`,
+    `DATABRICKS_HOST`) instead of a fixed one. These providers have no model
+    list to fetch, so their models come from the built-in catalog and Test
+    verifies your key with a single-token request.
   - Execution blocks now explicitly displays used tools.
   - Imza can now be driven from editors that support the Agent Client
     Protocol (ACP), running imza's sandbox and permission layers with the interface

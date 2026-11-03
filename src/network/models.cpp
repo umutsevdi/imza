@@ -74,6 +74,36 @@ Status parse_models_response(std::string_view body, std::vector<ModelInfo>& out)
     return Status::OK;
 }
 
+Status verify_route(
+    const Route& route, std::string_view model, std::string* message)
+{
+    if (route.endpoint.empty()) {
+        return Status::INVALID_URL;
+    }
+    if (model.empty()) {
+        return Status::CONFIG_ERROR;
+    }
+    ChatRequest request;
+    request.model             = std::string(model);
+    request.max_output_tokens = 1;
+    request.messages.push_back(Message { Message::Type::USER, "hi" });
+
+    Status status = Status::OK;
+    const Status streamed
+        = stream(route, request, [&status, message](const StreamEvent& event) {
+              if (event.kind != StreamEvent::Kind::ERROR) {
+                  return;
+              }
+              status = event.error;
+              // The provider's own words ("invalid api key") explain the
+              // failure far better than the status name.
+              if (message != nullptr) {
+                  *message = event.text;
+              }
+          });
+    return streamed != Status::OK ? streamed : status;
+}
+
 Status fetch_models(const Route& route, std::vector<ModelInfo>& out)
 {
     if (route.api.empty()) {

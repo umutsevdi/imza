@@ -56,7 +56,13 @@ void inject_local_providers(Catalog& catalog);
 
 AuthType auth_from_npm(std::string_view npm);
 ApiStandard dialect_from_npm(std::string_view npm);
-std::string catalog_base(const CachedProvider& provider);
+// Base URL for a catalog provider, derived from the environment when the
+// provider's endpoint depends on the user's cloud tenancy. Empty when a
+// required variable is unset, with `missing` naming it.
+std::string catalog_base(const CachedProvider& provider,
+    std::string_view provider_id = { }, std::string* missing = nullptr);
+// Whether the provider lists models from the catalog instead of probing.
+bool catalog_models_only(std::string_view provider_id);
 Route resolve_route(const Connection& conn, const Catalog& catalog,
     ApiStandard dialect, std::string_view opencode_session = { });
 std::string endpoint_for_base(std::string_view base);

@@ -29,6 +29,10 @@ std::string subagent_variant_or_default(
     const SubagentModelConfig* configured, SubagentRole role);
 
 using ModelsFn = std::function<Status(const Route&, std::vector<ModelInfo>&)>;
+// Proves a credential against a provider that serves no model listing;
+// `message` receives the provider's own explanation on failure.
+using VerifyFn = std::function<Status(
+    const Route&, std::string_view model, std::string* message)>;
 // Accepts a provider's terms of service before its connect probe; only
 // providers that require it are passed through here.
 using TermsFn           = std::function<Status(const Route&)>;
@@ -84,6 +88,8 @@ struct ConnectOutcome {
     std::size_t model_count = 0;
     bool first_connection   = false;
     bool persisted          = false;
+    // Set when the status alone is not specific enough.
+    std::string message;
 };
 
 using ConnectCompleteFn = std::function<void(ConnectOutcome)>;
@@ -92,7 +98,8 @@ class ProviderStore final : public Subsystem {
 public:
     explicit ProviderStore(std::shared_ptr<ConfigStore> config_store,
         ModelsFn models_fn = { }, TermsFn terms_fn = { },
-        RefreshFn refresh_fn = { }, CredentialSubsystem* credentials = nullptr);
+        RefreshFn refresh_fn = { }, CredentialSubsystem* credentials = nullptr,
+        VerifyFn verify_fn = { });
     ~ProviderStore();
 
     void stop() override;
@@ -171,6 +178,7 @@ private:
     std::map<std::string, ModelPricing> _pricing;
     ModelsFn _models_fn;
     TermsFn _terms_fn;
+    VerifyFn _verify_fn;
     RefreshFn _refresh_fn;
     // Fetch workers park on its wait_ready first so a startup fetch never
     // sends the pre-resolve snapshot's empty keys; null skips the wait.

@@ -10,9 +10,11 @@
 #include <thread>
 
 #include "platform/config.h"
+#include "providers/catalog.h"
 #include "providers/provider_store.h"
 #include "providers/subscriptions.h"
 #include "test_fs.h"
+#include "test_platform.h"
 #include "test_state.h"
 
 namespace {
@@ -185,4 +187,121 @@ TEST_CASE("authenticated_route_for reports a failed refresh without "
 
     CHECK(route.error == imza::Status::NETWORK_ERROR);
     CHECK(route.error_message == "offline");
+}
+
+namespace {
+
+using imza::test::CatalogDataHome;
+
+// Counters so a test can prove which path the store took.
+int models_calls = 0;
+int verify_calls = 0;
+std::string verified_model;
+std::string verify_message;
+
+imza::ModelsFn counting_models()
+{
+    return [](const imza::Route&, std::vector<imza::ModelInfo>&) {
+        ++models_calls;
+        return imza::Status::OK;
+    };
+}
+
+imza::VerifyFn recording_verify(imza::Status result)
+{
+    return [result](const imza::Route&, std::string_view model,
+               std::string* message) {
+        ++verify_calls;
+        verified_model = std::string(model);
+        if (message != nullptr) {
+            *message = verify_message;
+        }
+        return result;
+    };
+}
+
+imza::ConnectOutcome connect_databricks(
+    imza::ProviderStore& providers, std::string key = "key")
+{
+    imza::ConnectOutcome outcome;
+    bool done = false;
+    providers.connect(
+        imza::ConnectResult { "databricks", "", std::move(key), "", true },
+        [&](imza::ConnectOutcome result) {
+            outcome = std::move(result);
+            done    = true;
+        });
+    REQUIRE(imza::test::wait_until([&] { return done; }));
+    return outcome;
+}
+
+} // namespace
+
+TEST_CASE("a derived-endpoint provider lists from the catalog but still "
+          "verifies the key")
+{
+    CatalogDataHome home("databricks");
+    const imza::test::ScopedEnv host(
+        "DATABRICKS_HOST", "dbc-123.cloud.databricks.com");
+    models_calls = 0;
+    verify_calls = 0;
+    imza::ProviderStore providers(imza::test::make_config_store(),
+        counting_models(), { }, { }, nullptr,
+        recording_verify(imza::Status::OK));
+
+    const imza::ConnectOutcome outcome = connect_databricks(providers);
+
+    REQUIRE(outcome.status == imza::Status::OK);
+    CHECK(outcome.persisted);
+    // The model list is the catalog row; the credential is proven by a
+    // separate one-token completion, since the endpoint serves no /models.
+    CHECK(models_calls == 0);
+    CHECK(verify_calls == 1);
+    CHECK(verified_model == "catalog-model");
+    CHECK(outcome.model_count == 1);
+}
+
+TEST_CASE("a rejected or unroutable derived-endpoint connect fails closed")
+{
+    CatalogDataHome home("databricks");
+    const imza::test::ScopedEnv host(
+        "DATABRICKS_HOST", "dbc-123.cloud.databricks.com");
+    models_calls   = 0;
+    verify_calls   = 0;
+    verify_message = "invalid api key";
+    imza::ProviderStore providers(imza::test::make_config_store(),
+        counting_models(), { }, { }, nullptr,
+        recording_verify(imza::Status::API_ERROR));
+
+    // A random string must not be accepted just because the catalog has a
+    // model list for the provider, and the provider's own words must reach
+    // the user rather than a bare "API error".
+    const imza::ConnectOutcome rejected
+        = connect_databricks(providers, "not-a-real-key");
+    CHECK(rejected.status == imza::Status::API_ERROR);
+    CHECK_FALSE(rejected.persisted);
+    CHECK(rejected.message == "invalid api key");
+    CHECK(verify_calls == 1);
+    CHECK(providers.connections().empty());
+
+    // Without its variable the connection cannot route at all, so it never
+    // reaches verification and must not report a model list.
+    imza::test::unset_env("DATABRICKS_HOST");
+    imza::ProviderStore unroutable(
+        imza::test::make_config_store(), counting_models());
+    const imza::ConnectOutcome refused = connect_databricks(unroutable);
+    CHECK(refused.status == imza::Status::CONFIG_ERROR);
+    CHECK(refused.message.find("DATABRICKS_HOST") != std::string::npos);
+    CHECK(unroutable.connections().empty());
+
+    imza::Config config;
+    imza::Connection connection;
+    connection.id = "databricks";
+    config.providers.push_back(connection);
+    imza::ProviderStore stored(
+        imza::test::make_config_store(config), counting_models());
+    stored.start_model_fetches();
+    const auto models = stored.models_for("databricks");
+    CHECK(models.state == imza::ModelList::State::FAILED);
+    CHECK(models.error == imza::Status::CONFIG_ERROR);
 }

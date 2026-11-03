@@ -1,12 +1,15 @@
 #pragma once
 
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
 #include <string_view>
+#include <tuple>
 
 #include "platform/file_lock.h"
+#include "providers/catalog.h"
 #include "test_platform.h"
 
 namespace imza::test {
@@ -149,6 +152,23 @@ private:
     TempDir _root;
     std::string _previous;
     bool _had_previous = false;
+};
+
+// A data home whose presets file holds one catalog provider row with a
+// single model, for tests that need a provider the store can resolve.
+class CatalogDataHome : public IsolatedDataHome {
+public:
+    explicit CatalogDataHome(std::string_view provider_id,
+        std::string_view model_id = "catalog-model")
+    {
+        imza::Catalog catalog;
+        catalog.fetched_at = static_cast<std::int64_t>(std::time(nullptr));
+        imza::CachedProvider provider;
+        provider.npm = "@ai-sdk/openai-compatible";
+        provider.models[std::string(model_id)].name = std::string(model_id);
+        catalog.providers[std::string(provider_id)] = provider;
+        std::ignore = imza::save_catalog(imza_dir() / "presets.json", catalog);
+    }
 };
 
 inline void write_file(

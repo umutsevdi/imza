@@ -5,6 +5,7 @@
 
 #include "providers/catalog.h"
 #include "test_fs.h"
+#include "test_platform.h"
 
 namespace {
 
@@ -388,4 +389,75 @@ TEST_CASE("resolve_route stamps the OpenCode session id")
     CHECK(imza::resolve_route(
         custom, catalog, imza::ApiStandard::OPENAI, "abc-123")
             .opencode_session.empty());
+}
+
+namespace {
+
+imza::Route derived_route(std::string_view id, std::string_view api = { })
+{
+    imza::Catalog catalog;
+    imza::CachedProvider provider;
+    provider.api                       = std::string(api);
+    provider.npm                       = "@ai-sdk/openai-compatible";
+    catalog.providers[std::string(id)] = provider;
+
+    imza::Connection connection;
+    connection.id      = std::string(id);
+    connection.api_key = "secret";
+    return imza::resolve_route(connection, catalog, imza::ApiStandard::OPENAI);
+}
+
+} // namespace
+
+TEST_CASE("derived endpoints build their base from the environment")
+{
+    const imza::test::ScopedEnv databricks(
+        "DATABRICKS_HOST", "dbc-123.cloud.databricks.com");
+    const imza::test::ScopedEnv azure("AZURE_RESOURCE_NAME", "my-resource");
+    const imza::test::ScopedEnv cloudflare("CLOUDFLARE_ACCOUNT_ID", "acct123");
+    const imza::test::ScopedEnv region("AWS_REGION", "eu-west-1");
+
+    const std::array cases {
+        std::pair { "databricks",
+            "https://dbc-123.cloud.databricks.com/serving-endpoints"
+            "/chat/completions" },
+        std::pair { "azure",
+            "https://my-resource.openai.azure.com/openai/v1"
+            "/chat/completions" },
+        std::pair { "cloudflare-workers-ai",
+            "https://api.cloudflare.com/client/v4/accounts/acct123/ai/v1"
+            "/chat/completions" },
+        std::pair { "amazon-bedrock",
+            "https://bedrock-runtime.eu-west-1.amazonaws.com/openai/v1"
+            "/chat/completions" },
+    };
+    for (const auto& [id, endpoint] : cases) {
+        CAPTURE(id);
+        const imza::Route route = derived_route(id);
+        CHECK(route.error == imza::Status::OK);
+        CHECK(route.endpoint == endpoint);
+        CHECK(route.auth == imza::AuthType::BEARER);
+    }
+
+    // A stored ${VAR} template never reaches the transport.
+    CHECK(derived_route(
+              "databricks", "https://${DATABRICKS_HOST}/ai-gateway/mlflow/v1")
+              .endpoint
+        == "https://dbc-123.cloud.databricks.com/serving-endpoints"
+           "/chat/completions");
+}
+
+TEST_CASE("a derived endpoint without its variable fails closed")
+{
+    imza::test::unset_env("DATABRICKS_HOST");
+    const imza::Route route = derived_route("databricks");
+    CHECK(route.endpoint.empty());
+    CHECK(route.error == imza::Status::CONFIG_ERROR);
+    CHECK(route.error_message.find("DATABRICKS_HOST") != std::string::npos);
+
+    // Bedrock's region has a documented default, so it is never missing.
+    imza::test::unset_env("AWS_REGION");
+    CHECK(derived_route("amazon-bedrock").endpoint
+        == "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1"
+           "/chat/completions");
 }

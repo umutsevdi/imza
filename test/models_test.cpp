@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include "loopback_http.h"
 #include "network/network.h"
 
 namespace {
@@ -97,3 +98,63 @@ TEST_CASE("parse_models_response rejects malformed bodies")
 }
 
 } // namespace
+namespace {
+
+// A route pointing at a loopback server that answers with one scripted
+// status, so verify_route exercises the real transport.
+// base_url() is only valid after start(), so the caller starts first.
+imza::Route loopback_route(
+    imza::test::LoopbackHttpServer& server, std::string& seen_body)
+{
+    server.handle = [&seen_body](imza::test::detail::Socket fd,
+                        const imza::test::LoopbackRequest& request) {
+        seen_body = request.body;
+        if (request.headers.find("Authorization: Bearer good-key")
+            != std::string::npos) {
+            imza::test::LoopbackHttpServer::respond(fd, "HTTP/1.1 200 OK",
+                { "Content-Type: text/event-stream" },
+                "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"
+                "data: [DONE]\n\n");
+            return;
+        }
+        imza::test::LoopbackHttpServer::respond(fd, "HTTP/1.1 401 Unauthorized",
+            { "Content-Type: application/json" },
+            R"({"error":{"message":"invalid api key"}})");
+    };
+
+    imza::Route route;
+    route.api      = server.base_url();
+    route.endpoint = server.base_url() + "/chat/completions";
+    route.dialect  = imza::ApiStandard::OPENAI;
+    route.auth     = imza::AuthType::BEARER;
+    return route;
+}
+
+} // namespace
+
+TEST_CASE("verify_route rejects a key the provider does not accept")
+{
+    imza::test::LoopbackHttpServer server;
+    std::string body;
+    REQUIRE(server.start());
+    imza::Route route = loopback_route(server, body);
+    route.api_key     = "not-a-real-key";
+
+    std::string message;
+    CHECK(imza::verify_route(route, "some-model", &message)
+        == imza::Status::API_ERROR);
+    // A completion request, not a model listing.
+    CHECK(body.find("\"some-model\"") != std::string::npos);
+    CHECK(body.find("\"messages\"") != std::string::npos);
+    // The provider's explanation survives, so the dialog can show it.
+    CHECK(message == "invalid api key");
+}
+
+TEST_CASE("verify_route fails closed without a model or endpoint")
+{
+    CHECK(
+        imza::verify_route(imza::Route { }, "m") == imza::Status::INVALID_URL);
+    imza::Route route;
+    route.endpoint = "http://127.0.0.1:9/v1/chat/completions";
+    CHECK(imza::verify_route(route, "") == imza::Status::CONFIG_ERROR);
+}

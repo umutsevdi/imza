@@ -495,6 +495,13 @@ namespace {
                 res.id     = "";
                 return res;
             }
+            std::string missing;
+            std::ignore = catalog_base(CachedProvider { }, res.id, &missing);
+            if (!missing.empty()) {
+                _row_error = "Set " + missing + " first.";
+                res.id     = "";
+                return res;
+            }
             res.api_key = trim(_key_buf);
             res.label   = trim(_label_buf);
             if (res.label.find('/') != std::string::npos) {
@@ -575,6 +582,13 @@ namespace {
                         form_gutter("API Key"),
                         _key_input->Render() | xflex,
                     }));
+                    if (const Element endpoint_hint = _endpoint_hint_element();
+                        endpoint_hint != nullptr) {
+                        rows.push_back(hbox({
+                            text(std::string(FORM_LABEL + 2, ' ')),
+                            std::move(endpoint_hint) | xflex,
+                        }));
+                    }
                     rows.push_back(hbox({
                         text(std::string(FORM_LABEL + 2, ' ')),
                         _action_button->Render(),
@@ -590,6 +604,20 @@ namespace {
             }
             rows.push_back(hint_bar(hint));
             return vbox(std::move(rows)) | xflex;
+        }
+
+        Element _endpoint_hint_element()
+        {
+            if (!catalog_models_only(_selected_provider)) {
+                return nullptr;
+            }
+            std::string missing;
+            std::ignore = catalog_base(
+                CachedProvider { }, _selected_provider, &missing);
+            if (!missing.empty()) {
+                return status_text("Missing " + missing, false);
+            }
+            return text("endpoint derived from the environment") | dim;
         }
 
         Element _status_line_element()

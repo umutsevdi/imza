@@ -61,7 +61,7 @@ namespace {
     constexpr long FETCH_TIMEOUT_SECS       = 60;
     constexpr std::int64_t STALE_AFTER_SECS = 7 * 24 * 3600;
 
-    constexpr std::array<std::string_view, 57> WHITELIST = {
+    constexpr std::array<std::string_view, 60> WHITELIST = {
         "abacus",
         "alibaba",
         "alibaba-cn",
@@ -69,9 +69,12 @@ namespace {
         "alibaba-coding-plan-cn",
         "alibaba-token-plan",
         "alibaba-token-plan-cn",
+        "amazon-bedrock",
         "amd",
         "anthropic",
+        "azure",
         "cerebras",
+        "cloudflare-workers-ai",
         "databricks",
         "deepinfra",
         "deepseek",
@@ -140,6 +143,44 @@ namespace {
                 "https://api.together.xyz/v1" },
             { { "xai", ApiStandard::OPENAI }, "https://api.x.ai/v1" },
         };
+
+    // Endpoints that depend on the user's own cloud tenancy, which models.dev
+    // cannot express: it publishes no URL or an unresolved ${VAR} template.
+    struct DerivedEndpoint {
+        std::string_view id;
+        std::string_view env;
+        std::string_view prefix;
+        std::string_view suffix;
+        std::string_view fallback; // empty = env is required
+    };
+    constexpr std::array<DerivedEndpoint, 4> DERIVED_ENDPOINTS = { {
+        { "databricks", "DATABRICKS_HOST", "", "/serving-endpoints", "" },
+        { "azure", "AZURE_RESOURCE_NAME", "https://",
+            ".openai.azure.com/openai/v1", "" },
+        { "cloudflare-workers-ai", "CLOUDFLARE_ACCOUNT_ID",
+            "https://api.cloudflare.com/client/v4/accounts/", "/ai/v1", "" },
+        { "amazon-bedrock", "AWS_REGION", "https://bedrock-runtime.",
+            ".amazonaws.com/openai/v1", "us-east-1" },
+    } };
+
+    const DerivedEndpoint* derived_endpoint(std::string_view id)
+    {
+        const auto rule = std::find_if(DERIVED_ENDPOINTS.begin(),
+            DERIVED_ENDPOINTS.end(), [&](const DerivedEndpoint& candidate) {
+                return candidate.id == id;
+            });
+        return rule == DERIVED_ENDPOINTS.end() ? nullptr : &*rule;
+    }
+
+    std::string with_scheme(std::string value)
+    {
+        value = strip_slash(trim(value));
+        if (value.empty() || value.starts_with("http://")
+            || value.starts_with("https://")) {
+            return value;
+        }
+        return "https://" + value;
+    }
 
     // One input modality from models.dev's modalities.input array. Only
     // image/pdf are meaningful today; unknown entries are ignored.
@@ -419,9 +460,34 @@ ApiStandard dialect_from_npm(std::string_view npm)
     return ApiStandard::OPENAI;
 }
 
-std::string catalog_base(const CachedProvider& provider)
+std::string catalog_base(const CachedProvider& provider,
+    std::string_view provider_id, std::string* missing)
 {
+    // The stored URL may be an unresolved template, so the rule wins.
+    if (const DerivedEndpoint* rule = derived_endpoint(provider_id)) {
+        std::string value = env_or_empty(std::string(rule->env).c_str());
+        if (trim(value).empty()) {
+            if (rule->fallback.empty()) {
+                if (missing != nullptr) {
+                    *missing = std::string(rule->env);
+                }
+                return { };
+            }
+            value = std::string(rule->fallback);
+        }
+        // An empty prefix means the value is a bare host, which tolerates a
+        // missing scheme; the others are path or subdomain fragments.
+        if (rule->prefix.empty()) {
+            value = with_scheme(value);
+        }
+        return std::string(rule->prefix) + value + std::string(rule->suffix);
+    }
     return strip_slash(provider.api);
+}
+
+bool catalog_models_only(std::string_view provider_id)
+{
+    return derived_endpoint(provider_id) != nullptr;
 }
 
 namespace {
@@ -498,8 +564,13 @@ Route resolve_route(const Connection& conn, const Catalog& catalog,
         return route;
     }
     const CachedProvider& provider = it->second;
-    route.api                      = catalog_base(provider);
+    std::string missing;
+    route.api = catalog_base(provider, conn.id, &missing);
     if (route.api.empty()) {
+        if (!missing.empty()) {
+            route.error         = Status::CONFIG_ERROR;
+            route.error_message = "Set " + missing + " to use this provider.";
+        }
         return route;
     }
     route.dialect = dialect;

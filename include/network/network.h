@@ -161,5 +161,10 @@ struct ModelInfo {
 Status parse_models_response(
     std::string_view body, std::vector<ModelInfo>& out);
 Status fetch_models(const Route& route, std::vector<ModelInfo>& out);
+// Cheapest request that proves the credential and route work: a one-token
+// completion. For providers that serve no model listing. `message` receives
+// the provider's own error text when it rejects the request.
+Status verify_route(
+    const Route& route, std::string_view model, std::string* message = nullptr);
 
 } // namespace imza
