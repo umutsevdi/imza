@@ -3,7 +3,7 @@
 #include "conversation/format.h"
 #include "network/json.h"
 #include "network/json_io.h"
-#include "tools/tool.h"
+#include "tools/tool_args.h"
 
 #include <algorithm>
 #include <cctype>

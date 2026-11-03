@@ -84,8 +84,8 @@ namespace {
     // Reverse scan shared by the tool-call lookups; `skip` drops candidates
     // before `matches` is consulted.
     template <typename Skip, typename Match>
-    ToolCall* find_call_locked(std::vector<ConversationItem>& items,
-        const ToolCallRequest& req, Skip skip, Match matches)
+    ToolCall* find_call_locked(
+        std::vector<ConversationItem>& items, Skip skip, Match matches)
     {
         for (auto it = items.rbegin(); it != items.rend(); ++it) {
             auto* call = std::get_if<ToolCall>(&*it);
@@ -845,7 +845,7 @@ ToolCall* Session::_find_tool_locked(
     const ToolCallRequest& req, const bool unfinished_only)
 {
     return find_call_locked(
-        *_items, req,
+        *_items,
         [unfinished_only](const ToolCall& call) {
             return unfinished_only && call.result.has_value();
         },
@@ -857,7 +857,7 @@ ToolCall* Session::_find_tool_locked(
 ToolCall* Session::_find_planning_tool_locked(const ToolCallRequest& req)
 {
     return find_call_locked(
-        *_items, req,
+        *_items,
         [](const ToolCall& call) {
             return call.phase != ToolCall::Phase::PLANNING;
         },
