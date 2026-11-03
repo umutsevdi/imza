@@ -89,7 +89,7 @@ that owns it — there are no separate script files.
 ## Docs pages (/docs)
 
 The wiki clone is rendered at `/docs/` (Home) and `/docs/<slug>` for the
-ten numbered pages. The repository root `CHANGELOG.txt` is mirrored to
+fourteen numbered pages. The repository root `CHANGELOG.txt` is mirrored to
 `src/content/changelog.md` by the prebuild hook and rendered at
 `/changelog/`. At build time a content collection globs
 `src/content/wiki/*.md`; the `remarkDocsLinks` plugin rewrites

@@ -22,11 +22,11 @@ Page index (all paths relative to this skill's directory):
 | `wiki/07_Subagents.md` | Delegation, roles, per-role models, transcripts. |
 | `wiki/08_MCP-Servers.md` | Connecting external services, catalog, OAuth sign-in. |
 | `wiki/09_Headless-Mode.md` | `--ask`, `--exec`, pre-approved grants, exit codes. |
-| `wiki/10_Configuration.md` | Every `config.json` option, data directory, prompt overrides. |
-| `wiki/11_FAQ.md` | Common questions and troubleshooting. |
-| `wiki/12_Features-and-Roadmap.md` | Feature inventory and planned work. |
-| `wiki/13_Why-Imza.md` | Project motivation and direction. |
-| `wiki/14_ACP-and-Editor-Integrations.md` | Run imza through code editors and IDEs over the Agent Client Protocol. |
+| `wiki/10_ACP-and-Editor-Integrations.md` | Run imza through code editors and IDEs over the Agent Client Protocol. |
+| `wiki/11_Configuration.md` | Every `config.json` option, data directory, prompt overrides. |
+| `wiki/12_FAQ.md` | Common questions and troubleshooting. |
+| `wiki/13_Features-and-Roadmap.md` | Feature inventory and planned work. |
+| `wiki/14_Why-Imza.md` | Project motivation and direction. |
 
 Guidelines:
 
