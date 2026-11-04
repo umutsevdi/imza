@@ -418,19 +418,16 @@ TEST_CASE("session/list scopes to the client and reports cwd and updatedAt")
     CHECK(contains_line(bot_lines, bot_session));
     CHECK_FALSE(contains_line(bot_lines, zed_session));
     // The listing carries an absolute cwd and an RFC 3339 stamp.
-    bool saw_cwd   = false;
     bool saw_stamp = false;
     for (const std::string& line : bot_lines) {
         CHECK(line.find("\"cwd\":\"\"") == std::string::npos);
-        if (line.find("\"cwd\":\"/") != std::string::npos) {
-            saw_cwd = true;
-        }
         if (line.find("T") != std::string::npos
             && line.find("Z\"") != std::string::npos) {
             saw_stamp = true;
         }
     }
-    CHECK(saw_cwd);
+    CHECK(contains_line(bot_lines,
+        "\"cwd\":\"" + imza::portable_string(elsewhere.path) + "\""));
     CHECK(saw_stamp);
 
     // Another client cannot load this one's session.
@@ -935,7 +932,8 @@ TEST_CASE("additionalDirectories widen the session's grants")
     bool found = false;
     for (const imza::PermissionGrant& grant : *grants) {
         if (const auto* dir = std::get_if<imza::ExternalGrant>(&grant)) {
-            if (dir->string() == imza::portable_string(extra.path)) {
+            if (imza::portable_string(*dir)
+                == imza::portable_string(extra.path)) {
                 found = true;
             }
         }
