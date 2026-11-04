@@ -2,6 +2,7 @@
 
 #include "app/flows.h"
 #include "app/slash_commands.h"
+#include "common/util.h"
 #include "conversation/persistence.h"
 #include "platform/config.h"
 #include "platform/file_lock.h"
@@ -70,8 +71,7 @@ namespace {
         if (value == static_cast<std::time_t>(-1)) {
             return { };
         }
-        std::tm utc { };
-        gmtime_r(&value, &utc);
+        const std::tm utc = utc_tm(value);
         std::ostringstream out;
         out << std::put_time(&utc, "%Y-%m-%dT%H:%M:%SZ");
         return std::move(out).str();
@@ -853,10 +853,17 @@ void AcpInterface::handle_session_list(
     std::vector<SavedSession> saved = saved_sessions_of(_client_label);
     const std::string requested_cwd = string_member(params, "cwd");
     if (!requested_cwd.empty()) {
+        // Checked before canonicalizing: weakly_canonical resolves a
+        // relative path against the cwd and would return it absolute.
+        const std::filesystem::path requested = path_from_utf8(requested_cwd);
+        if (!requested.is_absolute()) {
+            reply_error(id, RPC_INVALID_PARAMS, "cwd must be an absolute path");
+            return;
+        }
         std::error_code error;
-        const std::filesystem::path filter = std::filesystem::weakly_canonical(
-            path_from_utf8(requested_cwd), error);
-        if (error || !filter.is_absolute()) {
+        const std::filesystem::path filter
+            = std::filesystem::weakly_canonical(requested, error);
+        if (error || filter.empty()) {
             reply_error(id, RPC_INVALID_PARAMS, "cwd must be an absolute path");
             return;
         }

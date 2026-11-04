@@ -87,7 +87,7 @@ TEST_CASE("ConfigStore syncs changed and removed connections to the keychain")
     const std::string id  = "sync-" + std::to_string(imza::test::process_id());
     const std::string key = "provider/" + id;
 
-    CHECK(config.update([&id](imza::Config& cfg) {
+    REQUIRE(config.update([&id](imza::Config& cfg) {
         imza::Connection connection;
         connection.id      = id;
         connection.api_key = "first";
@@ -98,18 +98,18 @@ TEST_CASE("ConfigStore syncs changed and removed connections to the keychain")
     CHECK(store.get(key, status) == "first");
     CHECK(status == imza::Status::OK);
 
-    CHECK(config.update([](imza::Config& cfg) {
-        cfg.providers[0].api_key = "second";
+    REQUIRE(config.update([](imza::Config& cfg) {
+        cfg.providers.at(0).api_key = "second";
         return true;
     }) == imza::ConfigUpdateResult::UPDATED);
     CHECK(store.get(key, status) == "second");
 
-    CHECK(config.update([](imza::Config& cfg) {
-        cfg.providers[0].label = "renamed";
+    REQUIRE(config.update([](imza::Config& cfg) {
+        cfg.providers.at(0).label = "renamed";
         return true;
     }) == imza::ConfigUpdateResult::UPDATED);
 
-    CHECK(config.update([](imza::Config& cfg) {
+    REQUIRE(config.update([](imza::Config& cfg) {
         cfg.providers.clear();
         return true;
     }) == imza::ConfigUpdateResult::UPDATED);

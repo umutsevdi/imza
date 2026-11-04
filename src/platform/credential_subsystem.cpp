@@ -33,6 +33,8 @@ namespace {
     constexpr std::string_view SECURITY_BIN  = "/usr/bin/security";
     constexpr std::string_view BASE64_PREFIX = "imza-base64:";
     constexpr auto COMMAND_TIMEOUT           = std::chrono::seconds { 30 };
+    // `security -i` splits a stdin line longer than this into two commands.
+    constexpr std::size_t SECURITY_LINE_LIMIT = 4096;
 
     // Single-quote for /bin/sh, the form `security` sees through its shell.
     std::string quote(std::string_view text)
@@ -66,6 +68,10 @@ namespace {
     }
 #endif
 
+    std::string read_backend(const std::string& key, Status& status);
+    Status write_backend(const std::string& key, const std::string& value);
+    Status delete_backend(const std::string& key);
+
     // True when the platform store is usable; `reason` explains a failure.
     bool probe_backend(std::string& reason)
     {
@@ -77,10 +83,19 @@ namespace {
             reason = "/usr/bin/security is missing";
             return false;
         }
-        const CommandResult probe = run_command(
-            std::string(SECURITY_BIN) + " list-keychains", COMMAND_TIMEOUT);
-        if (!command_ok(probe)) {
-            reason = "the macOS keychain is unavailable";
+        // A headless keychain answers list-keychains and misses, but
+        // refuses to store.
+        const std::string probe_key            = "probe/" + unique_session_id();
+        constexpr std::string_view PROBE_VALUE = "imza-probe";
+        if (write_backend(probe_key, std::string(PROBE_VALUE)) != Status::OK) {
+            reason = "the macOS keychain cannot be written";
+            return false;
+        }
+        Status status            = Status::OK;
+        const std::string stored = read_backend(probe_key, status);
+        delete_backend(probe_key);
+        if (status != Status::OK || stored != PROBE_VALUE) {
+            reason = "the macOS keychain cannot be read back";
             return false;
         }
         return true;
@@ -189,6 +204,9 @@ namespace {
         const std::string command = "add-generic-password -U -s "
             + quote(SERVICE) + " -a " + quote(key) + " -w "
             + quote(std::string(BASE64_PREFIX) + base64_encode(value)) + "\n";
+        if (command.size() >= SECURITY_LINE_LIMIT) {
+            return Status::CONFIG_ERROR;
+        }
         const CommandResult result = run_command(
             std::string(SECURITY_BIN) + " -i", COMMAND_TIMEOUT, { }, command);
         return command_ok(result) ? Status::OK : Status::CONFIG_ERROR;

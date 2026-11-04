@@ -117,6 +117,17 @@ inline std::tm local_tm(std::time_t value)
     return local;
 }
 
+inline std::tm utc_tm(std::time_t value)
+{
+    std::tm utc { };
+#ifdef _WIN32
+    gmtime_s(&utc, &value);
+#else
+    gmtime_r(&value, &utc);
+#endif
+    return utc;
+}
+
 inline std::string format_local_time(
     std::chrono::system_clock::time_point point, const char* fmt)
 {
