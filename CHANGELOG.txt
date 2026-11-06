@@ -8,6 +8,15 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
+0.7.3 - Unreleased
+-------------------------------------------------------------------------------
+Changes:
+  - Merged the Context and Permissions widgets into one interactive Runtime
+    widget: compact Files, Skills, MCP, and Permissions rows that expand on
+    click, with the full permission list opening in a read-only viewer. Skill
+    grants now appear in that list.
+
+-------------------------------------------------------------------------------
 0.7.2 - 2026-11-03
 -------------------------------------------------------------------------------
 Changes:

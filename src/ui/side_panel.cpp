@@ -17,6 +17,7 @@
 #include <format>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -129,41 +130,22 @@ public:
             if (_attachments_dirty.exchange(false)) {
                 _attachment_names = _state->session->attachment_names();
             }
-            if (_sidebar.context) {
-                std::vector<ContextSkill> skills;
-                for (const Skill& skill : *env->sorted_skills()) {
-                    skills.push_back({ skill.name,
-                        _state->session->is_skill_loaded(skill.path) });
-                }
-                std::vector<std::string> mcp_servers;
-                if (_state->mcp != nullptr) {
-                    for (const auto& server : _state->mcp->snapshot()) {
-                        if (server.state != McpServerState::CONNECTED) {
-                            continue;
-                        }
-                        mcp_servers.push_back(server.id + " · "
-                            + std::to_string(server.tool_count) + " tools");
-                    }
-                }
-                parts.push_back(render_context_box(env->agent_rules_path(),
-                    _attachment_names, skills, mcp_servers));
-            }
-            if (_sidebar.permissions) {
-                const PermissionStore::Snapshot grants
-                    = _state->permissions->snapshot();
-                PermissionView permissions
-                    = make_permission_view(_state->runtime_flags,
-                        _state->permissions->skip_permissions(), *grants);
-                if (has_custom_permissions(permissions)) {
-                    parts.push_back(render_permissions_box(permissions));
-                }
+            if (_sidebar.runtime) {
+                const RuntimeRowLink link
+                    = [this](RuntimeRow row, std::string_view label,
+                          std::string_view value) {
+                          return _runtime_row_link(row, label, value);
+                      };
+                parts.push_back(
+                    render_runtime_box(_runtime_view(*env), _expanded, link));
             }
         }
         Element body = vbox(std::move(parts));
         if (narrow) {
-            return panel(body) | xflex;
+            return panel(scroll_viewport(std::move(body), _scroll)) | xflex;
         }
-        return panel(body) | size(WIDTH, EQUAL, LayoutCtx::LEFT_WIDTH);
+        return panel(scroll_viewport(std::move(body), _scroll))
+            | size(WIDTH, EQUAL, LayoutCtx::LEFT_WIDTH);
     }
 
     bool OnEvent(Event event) override
@@ -173,10 +155,91 @@ public:
                 return true;
             }
         }
+        // Wheel and arrows scroll the column only when it overflows; the
+        // chat below keeps the keys otherwise.
+        if ((event.is_mouse() || event == Event::ArrowUp
+                || event == Event::ArrowDown || event == Event::PageUp
+                || event == Event::PageDown || event == Event::Home
+                || event == Event::End)
+            && _scroll.max_scroll() > 0
+            && scroll_viewport_event(_scroll, event)) {
+            return true;
+        }
         return false;
     }
 
 private:
+    RuntimeView _runtime_view(const Environment& env)
+    {
+        RuntimeView view;
+        view.rules       = env.agent_rules_path();
+        view.attachments = _attachment_names;
+        for (const Skill& skill : *env.sorted_skills()) {
+            view.skills.push_back(
+                { skill.name, _state->session->is_skill_loaded(skill.path) });
+        }
+        if (_state->mcp != nullptr) {
+            for (const auto& server : _state->mcp->snapshot()) {
+                ++view.mcp_total;
+                if (server.state == McpServerState::CONNECTED) {
+                    view.mcp_connected.push_back({ server.id,
+                        std::to_string(server.tool_count) + " tools" });
+                }
+            }
+        }
+        const PermissionStore::Snapshot grants
+            = _state->permissions->snapshot();
+        view.permissions = make_permission_view(_state->runtime_flags,
+            _state->permissions->skip_permissions(), *grants);
+        return view;
+    }
+
+    Component _runtime_row_link(
+        RuntimeRow row, std::string_view label, std::string_view value)
+    {
+        const RuntimeRowText payload { std::string(label), std::string(value) };
+        const bool expandable = row != RuntimeRow::PERMISSIONS;
+        return _memoized_link(
+            _runtime_links, row, payload,
+            [this, expandable, row](const RuntimeRowText& current) {
+                const bool open = expandable && _expanded.contains(row);
+                return hbox({
+                    text(expandable ? (open ? "⌄ " : "› ") : "  ")
+                        | color(PANEL_FG_DIM),
+                    text(current.label) | bold | color(PANEL_FG) | xflex,
+                    text(current.value) | color(PANEL_FG) | dim,
+                });
+            },
+            [this, expandable, row](const RuntimeRowText&) {
+                if (!expandable) {
+                    _open_permissions_modal();
+                    return;
+                }
+                if (!_expanded.erase(row)) {
+                    _expanded.insert(row);
+                }
+                _scroll.scroll_lines(0);
+                animation::RequestAnimationFrame();
+            },
+            [](const RuntimeRowText& next, RuntimeRowText& existing) {
+                if (existing != next) {
+                    existing = next;
+                }
+            },
+            true);
+    }
+
+    void _open_permissions_modal()
+    {
+        ViewerModal modal { .title = "Permissions",
+            .content
+            = runtime_permissions_markdown(_runtime_view(*_state->environment)),
+            .lang         = "md",
+            .line_numbers = false };
+        modal.save_name = "Permissions";
+        enqueue_user_modal(*_state, std::move(modal));
+    }
+
     template <typename Payload> struct Link {
         std::shared_ptr<Payload> data;
         Component component;
@@ -188,10 +251,17 @@ private:
         bool operator==(const DocumentLink&) const = default;
     };
 
+    struct RuntimeRowText {
+        std::string label;
+        std::string value;
+        bool operator==(const RuntimeRowText&) const = default;
+    };
+
     template <typename Key, typename Payload, typename Render, typename Click,
         typename Update>
     Component _memoized_link(std::map<Key, Link<Payload>>& cache, Key key,
-        const Payload& payload, Render render, Click on_click, Update update)
+        const Payload& payload, Render render, Click on_click, Update update,
+        bool fill = false)
     {
         auto found = cache.find(key);
         if (found == cache.end()) {
@@ -204,7 +274,7 @@ private:
             Component component
                 = hover_link([data, render] { return render(*data); },
                     [data, click = std::move(on_click)] { click(*data); },
-                    PANEL_FG_DIM);
+                    PANEL_FG_DIM, fill);
             _links_container->Add(component);
             found = cache
                         .emplace(std::move(key),
@@ -348,7 +418,10 @@ private:
     std::map<std::string, Link<ChangedFile>> _file_links;
     std::map<std::size_t, Link<DocumentLink>> _document_links;
     std::map<std::size_t, Link<std::string>> _comment_links;
+    std::map<RuntimeRow, Link<RuntimeRowText>> _runtime_links;
     std::vector<Component> _active_links;
+    std::set<RuntimeRow> _expanded;
+    ScrollView _scroll;
 };
 
 ftxui::Component make_side_panel(std::shared_ptr<ApplicationState> state,
@@ -432,58 +505,156 @@ Element render_todo(const TodoList& todo, const LayoutCtx&)
     return titled_section("Tasks", std::move(body));
 }
 
-Element render_context_box(const std::optional<std::string>& rules,
-    const std::vector<std::string>& attachments,
-    const std::vector<ContextSkill>& skills,
-    const std::vector<std::string>& mcp_servers)
+namespace {
+
+    std::string rules_basename(const std::optional<std::string>& rules)
+    {
+        if (!rules) {
+            return { };
+        }
+        return std::filesystem::path(*rules).filename().string();
+    }
+
+    std::vector<std::string> loaded_skill_names(
+        const std::vector<ContextSkill>& skills)
+    {
+        std::vector<std::string> names;
+        for (const ContextSkill& skill : skills) {
+            if (skill.loaded) {
+                names.push_back(skill.name);
+            }
+        }
+        return names;
+    }
+
+    std::string permission_summary(const PermissionView& view)
+    {
+        if (view.approvals_skipped) {
+            return "skipped";
+        }
+        const std::size_t count = view.folders.size() + view.commands.size()
+            + view.mcp_servers.size() + view.skills.size();
+        return std::to_string(count);
+    }
+
+    Element runtime_entry(const RuntimeEntry& entry)
+    {
+        Elements parts { text("  "),
+            paragraph(entry.label) | color(PANEL_FG) | dim | xflex };
+        if (!entry.detail.empty()) {
+            parts.push_back(text(entry.detail) | color(PANEL_FG_DIM));
+        }
+        return hbox(std::move(parts));
+    }
+
+} // namespace
+
+bool has_runtime_content(const RuntimeView& view)
 {
-    Elements context_box;
-    const auto append_values = [&context_box](std::string label,
-                                   const std::vector<std::string>& values) {
+    return view.rules.has_value() || !view.attachments.empty()
+        || !view.skills.empty() || !view.mcp_connected.empty()
+        || has_custom_permissions(view.permissions);
+}
+
+std::string runtime_permissions_markdown(const RuntimeView& view)
+{
+    const PermissionView& permissions = view.permissions;
+    std::string out;
+    out += "| Capability | State |\n| --- | --- |\n";
+    out += std::format(
+        "| Web | {} |\n", permissions.web_disabled ? "off" : "on");
+    out += std::format(
+        "| Shell | {} |\n", permissions.shell_disabled ? "off" : "on");
+    if (permissions.approvals_skipped) {
+        out += "| Approvals | **skipped** |\n";
+    }
+
+    const auto append_section = [&out](std::string_view title,
+                                    std::string_view column,
+                                    const std::vector<std::string>& values) {
         if (values.empty()) {
             return;
         }
-        Elements rendered;
+        out += std::format("\n### {}\n\n| {} |\n| --- |\n", title, column);
         for (const std::string& value : values) {
-            rendered.push_back(paragraph(value) | color(PANEL_FG) | dim);
+            out += std::format("| `{}` |\n", value);
         }
-        context_box.push_back(
-            hbox({ text(std::move(label)) | bold | color(PANEL_FG) | xflex,
-                vbox(std::move(rendered)) }));
     };
+    append_section("Directories", "Path", permissions.folders);
+    append_section("Commands", "Command", permissions.commands);
+    append_section("MCP servers", "Server", permissions.mcp_servers);
+    append_section("Skills", "Skill", permissions.skills);
 
-    if (rules || !attachments.empty()) {
-        std::vector<std::string> files;
-        if (rules) {
-            files.push_back(*rules);
-        }
-        files.insert(files.end(), attachments.begin(), attachments.end());
-        append_values("Files", files);
+    if (permissions.folders.empty() && permissions.commands.empty()
+        && permissions.mcp_servers.empty() && permissions.skills.empty()) {
+        out += "\nNo session grants beyond the workspace.\n";
     }
-    if (!skills.empty()) {
-        std::vector<std::string> loaded_names;
-        for (const ContextSkill& skill : skills) {
-            if (skill.loaded) {
-                loaded_names.push_back(skill.name);
+    return out;
+}
+
+ftxui::Element render_runtime_box(const RuntimeView& view,
+    const std::set<RuntimeRow>& expanded, const RuntimeRowLink& link)
+{
+    if (!has_runtime_content(view)) {
+        return vbox();
+    }
+
+    Elements rows;
+    const auto append_row
+        = [&rows, &expanded, &link](RuntimeRow row, std::string label,
+              std::string value, std::vector<RuntimeEntry> entries) {
+              rows.push_back(link(row, label, value)->Render());
+              if (!expanded.contains(row)) {
+                  return;
+              }
+              for (const RuntimeEntry& entry : entries) {
+                  rows.push_back(runtime_entry(entry));
+              }
+          };
+
+    if (view.rules || !view.attachments.empty()) {
+        const std::string rules_name = rules_basename(view.rules);
+        std::vector<RuntimeEntry> files;
+        if (view.rules) {
+            files.push_back({ *view.rules, { } });
+        }
+        for (const std::string& attachment : view.attachments) {
+            if (!rules_name.empty()
+                && std::filesystem::path(attachment).filename() == rules_name) {
+                continue;
             }
+            files.push_back({ attachment, { } });
         }
-        const std::string label
-            = std::format("Skills {}/{}", loaded_names.size(), skills.size());
-        if (loaded_names.empty()) {
-            context_box.push_back(
-                hbox({ text(label) | bold | color(PANEL_FG) | xflex,
-                    text("none") | color(PANEL_FG) | dim }));
-        } else {
-            append_values(label, loaded_names);
+        // Read before the move: argument evaluation order is unspecified,
+        // so an inline files.size() could observe the moved-from vector.
+        const std::string count = std::to_string(files.size());
+        append_row(RuntimeRow::FILES, "Files", count, std::move(files));
+    }
+
+    if (!view.skills.empty()) {
+        const std::vector<std::string> loaded = loaded_skill_names(view.skills);
+        std::vector<RuntimeEntry> entries;
+        for (const std::string& name : loaded) {
+            entries.push_back({ name, { } });
         }
+        append_row(RuntimeRow::SKILLS, "Skills",
+            std::format("{}/{}", loaded.size(), view.skills.size()),
+            std::move(entries));
     }
-    append_values("MCP", mcp_servers);
-    if (!context_box.empty()) {
-        Element body = vbox(std::move(context_box))
-            | borderStyled(ROUNDED, PANEL_BORDER);
-        return titled_section("Context", std::move(body));
+
+    if (!view.mcp_connected.empty()) {
+        append_row(RuntimeRow::MCP, "MCP",
+            std::format("{}/{}", view.mcp_connected.size(), view.mcp_total),
+            view.mcp_connected);
     }
-    return vbox();
+
+    if (has_custom_permissions(view.permissions)) {
+        append_row(RuntimeRow::PERMISSIONS, "Permissions",
+            permission_summary(view.permissions), { });
+    }
+
+    Element body = vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER);
+    return titled_section("Runtime", std::move(body));
 }
 
 PermissionView make_permission_view(RuntimeFlag flags, bool approvals_skipped,
@@ -499,7 +670,8 @@ PermissionView make_permission_view(RuntimeFlag flags, bool approvals_skipped,
             view.folders.push_back(directory->string());
             continue;
         }
-        if (std::holds_alternative<SkillGrant>(grant)) {
+        if (const auto* skill = std::get_if<SkillGrant>(&grant)) {
+            view.skills.push_back(skill->path.string());
             continue;
         }
         if (const auto* mcp = std::get_if<McpGrant>(&grant)) {
@@ -518,6 +690,7 @@ PermissionView make_permission_view(RuntimeFlag flags, bool approvals_skipped,
     sort_unique(view.folders);
     sort_unique(view.commands);
     sort_unique(view.mcp_servers);
+    sort_unique(view.skills);
     return view;
 }
 
@@ -525,47 +698,7 @@ bool has_custom_permissions(const PermissionView& view)
 {
     return view.web_disabled || view.shell_disabled || view.approvals_skipped
         || !view.folders.empty() || !view.commands.empty()
-        || !view.mcp_servers.empty();
-}
-
-Element render_permissions_box(const PermissionView& view)
-{
-    Elements rows;
-    const auto append_value = [&rows](std::string label, std::string value) {
-        rows.push_back(
-            hbox({ text(std::move(label)) | bold | color(PANEL_FG) | xflex,
-                text(std::move(value)) | color(PANEL_FG) | dim }));
-    };
-    const auto append_values = [&rows](std::string label,
-                                   const std::vector<std::string>& values) {
-        if (values.empty()) {
-            return;
-        }
-        Elements rendered;
-        for (const std::string& value : values) {
-            rendered.push_back(paragraph(value) | color(PANEL_FG) | dim);
-        }
-        rows.push_back(
-            hbox({ text(std::move(label)) | bold | color(PANEL_FG) | xflex,
-                vbox(std::move(rendered)) }));
-    };
-    if (view.web_disabled) {
-        append_value("Web", "disabled");
-    }
-    if (view.shell_disabled) {
-        append_value("Shell", "disabled");
-    }
-    if (view.approvals_skipped) {
-        append_value("Approvals", "skipped");
-    }
-    append_values("Folders", view.folders);
-    append_values("Commands", view.commands);
-    append_values("MCP", view.mcp_servers);
-    if (rows.empty()) {
-        return vbox();
-    }
-    Element body = vbox(std::move(rows)) | borderStyled(ROUNDED, PANEL_BORDER);
-    return titled_section("Permissions", std::move(body));
+        || !view.mcp_servers.empty() || !view.skills.empty();
 }
 
 } // namespace imza

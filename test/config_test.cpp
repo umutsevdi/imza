@@ -1035,7 +1035,7 @@ TEST_CASE("allow and instructions are absent from a minimal config")
     CHECK(loaded.allow.commands.empty());
     CHECK(loaded.instructions.empty());
     CHECK(loaded.sidebar.documents);
-    CHECK(loaded.sidebar.context);
+    CHECK(loaded.sidebar.runtime);
 }
 
 TEST_CASE("a legacy sidebar update flag is ignored, not rejected")
@@ -1075,6 +1075,5 @@ TEST_CASE("config roundtrip preserves hidden sidebar widgets")
     CHECK_FALSE(loaded.sidebar.changed_files);
     CHECK(loaded.sidebar.review_comments);
     CHECK(loaded.sidebar.tasks);
-    CHECK(loaded.sidebar.context);
-    CHECK(loaded.sidebar.permissions);
+    CHECK(loaded.sidebar.runtime);
 }

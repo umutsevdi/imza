@@ -144,8 +144,7 @@ struct SidebarConfig {
     bool review_comments = true;
     bool tasks           = true;
     bool changed_files   = true;
-    bool context         = true;
-    bool permissions     = true;
+    bool runtime         = true;
 };
 
 struct Preferences {

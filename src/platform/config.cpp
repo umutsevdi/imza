@@ -258,8 +258,7 @@ struct StoredSidebar {
     std::optional<bool> review_comments;
     std::optional<bool> tasks;
     std::optional<bool> changed_files;
-    std::optional<bool> context;
-    std::optional<bool> permissions;
+    std::optional<bool> runtime;
 };
 
 struct StoredPreferences {
@@ -601,10 +600,8 @@ Status load_config(
         out.sidebar.tasks = stored_sidebar.tasks.value_or(out.sidebar.tasks);
         out.sidebar.changed_files
             = stored_sidebar.changed_files.value_or(out.sidebar.changed_files);
-        out.sidebar.context
-            = stored_sidebar.context.value_or(out.sidebar.context);
-        out.sidebar.permissions
-            = stored_sidebar.permissions.value_or(out.sidebar.permissions);
+        out.sidebar.runtime
+            = stored_sidebar.runtime.value_or(out.sidebar.runtime);
     }
 
     if (stored.instructions) {
@@ -880,15 +877,11 @@ namespace {
         if (cfg.sidebar.changed_files != defaults.changed_files) {
             sidebar.changed_files = cfg.sidebar.changed_files;
         }
-        if (cfg.sidebar.context != defaults.context) {
-            sidebar.context = cfg.sidebar.context;
-        }
-        if (cfg.sidebar.permissions != defaults.permissions) {
-            sidebar.permissions = cfg.sidebar.permissions;
+        if (cfg.sidebar.runtime != defaults.runtime) {
+            sidebar.runtime = cfg.sidebar.runtime;
         }
         if (sidebar.documents || sidebar.review_comments || sidebar.tasks
-            || sidebar.changed_files || sidebar.context
-            || sidebar.permissions) {
+            || sidebar.changed_files || sidebar.runtime) {
             stored.sidebar = std::move(sidebar);
         }
 

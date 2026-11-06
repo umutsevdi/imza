@@ -969,10 +969,11 @@ namespace {
     class HoverLink : public ComponentBase {
     public:
         HoverLink(std::function<Element()> render,
-            std::function<void()> on_click, Color inactive_color)
+            std::function<void()> on_click, Color inactive_color, bool fill)
             : _render(std::move(render))
             , _on_click(std::move(on_click))
             , _inactive_color(inactive_color)
+            , _fill(fill)
         {
         }
 
@@ -984,6 +985,11 @@ namespace {
                     = std::move(element) | bold | underlined | color(PANEL_FG);
             } else {
                 element = std::move(element) | color(_inactive_color);
+            }
+            if (_fill) {
+                // A trailing filler would size the row to its natural width
+                // and collapse any xflex inside it.
+                return std::move(element) | xflex | reflect(_box);
             }
             return hbox({ std::move(element), filler() }) | reflect(_box);
         }
@@ -1015,15 +1021,16 @@ namespace {
         Color _inactive_color;
         Box _box;
         bool _hovered = false;
+        bool _fill    = false;
     };
 
 } // namespace
 
 Component hover_link(std::function<Element()> render,
-    std::function<void()> on_click, const Color& inactive_color)
+    std::function<void()> on_click, const Color& inactive_color, bool fill)
 {
     return Make<HoverLink>(
-        std::move(render), std::move(on_click), inactive_color);
+        std::move(render), std::move(on_click), inactive_color, fill);
 }
 
 Component split_hover_link(std::string primary, std::string secondary,

@@ -17,6 +17,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -151,10 +152,11 @@ ftxui::Component inline_link_button(std::function<ftxui::Element()> render,
     std::function<void()> on_click,
     const ftxui::Color& inactive_color = PANEL_FG_DIM);
 // Mouse-only link that never takes focus. Emphasis follows hover, so a pane
-// hosting it cannot lose its input cursor to it (see chat.cpp).
+// hosting it cannot lose its input cursor to it (see chat.cpp). `fill` lays the
+// element out across the whole row instead of sizing it to its content.
 ftxui::Component hover_link(std::function<ftxui::Element()> render,
     std::function<void()> on_click,
-    const ftxui::Color& inactive_color = PANEL_FG_DIM);
+    const ftxui::Color& inactive_color = PANEL_FG_DIM, bool fill = false);
 ftxui::Component split_hover_link(std::string primary, std::string secondary,
     std::function<void()> on_click,
     const ftxui::Color& primary_color = HL_GREEN);
@@ -520,11 +522,6 @@ struct ContextSkill {
     bool loaded = false;
 };
 
-ftxui::Element render_context_box(const std::optional<std::string>& rules,
-    const std::vector<std::string>& attachments,
-    const std::vector<ContextSkill>& skills,
-    const std::vector<std::string>& mcp_servers);
-
 struct PermissionView {
     bool web_disabled      = false;
     bool shell_disabled    = false;
@@ -532,6 +529,7 @@ struct PermissionView {
     std::vector<std::string> folders;
     std::vector<std::string> commands;
     std::vector<std::string> mcp_servers;
+    std::vector<std::string> skills;
 };
 
 // `approvals_skipped` comes from PermissionStore::skip_permissions():
@@ -540,7 +538,35 @@ struct PermissionView {
 PermissionView make_permission_view(RuntimeFlag flags, bool approvals_skipped,
     const PermissionStore::Grants& grants);
 bool has_custom_permissions(const PermissionView& view);
-ftxui::Element render_permissions_box(const PermissionView& view);
+
+struct RuntimeEntry {
+    std::string label;
+    std::string detail;
+    bool operator==(const RuntimeEntry&) const = default;
+};
+
+// One summary row of the Runtime widget; the first three expand in place,
+// PERMISSIONS opens the read-only viewer.
+enum class RuntimeRow { FILES, SKILLS, MCP, PERMISSIONS };
+
+struct RuntimeView {
+    std::optional<std::string> rules;
+    std::vector<std::string> attachments;
+    std::vector<ContextSkill> skills;
+    std::vector<RuntimeEntry> mcp_connected;
+    std::size_t mcp_total = 0;
+    PermissionView permissions;
+};
+
+bool has_runtime_content(const RuntimeView& view);
+// Read-only markdown behind the Permissions row.
+std::string runtime_permissions_markdown(const RuntimeView& view);
+// One clickable summary row; the caller owns the click behaviour.
+using RuntimeRowLink = std::function<ftxui::Component(
+    RuntimeRow row, std::string_view label, std::string_view value)>;
+// `expanded` names the rows whose entries are listed under them.
+ftxui::Element render_runtime_box(const RuntimeView& view,
+    const std::set<RuntimeRow>& expanded, const RuntimeRowLink& link);
 
 // Per-chat footer text; the sidechat clears hints and sets its own input
 // hint.
