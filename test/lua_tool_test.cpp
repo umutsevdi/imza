@@ -821,6 +821,7 @@ TEST_CASE("imza.sh workspace argument selects the run directory")
 
 TEST_CASE("imza.sh env argument reaches the child and the gate")
 {
+    imza::test::TempDir dir;
     ShellFixture fx;
     // The fixture reports the variable the child actually received, so the
     // assertion does not depend on the host shell's expansion syntax. The
@@ -838,7 +839,7 @@ TEST_CASE("imza.sh env argument reaches the child and the gate")
     // The typed request carries the env through the gate.
     ShellFixture asking;
     asking.verdict = imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" };
-    const std::string cmd           = imza::test::mutating_command("x");
+    const std::string cmd = imza::test::mutating_command(dir.file("x"));
     const imza::ToolOutput approved = imza::test::run_lua(
         "imza.shell([[" + cmd + "]], 10, nil, { FOO = 'bar' })", asking.host());
     REQUIRE(asking.ask_calls == 1);

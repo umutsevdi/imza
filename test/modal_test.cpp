@@ -628,9 +628,16 @@ TEST_CASE("dangerous skip does not weaken hard rejection")
 TEST_CASE("tools with an automatic policy run without an approval modal")
 {
     // A read inside the workspace is auto-allowed: the point is that no
-    // modal appears, not that any particular binding runs. Reading a file
-    // that is already in the repository keeps the test off the network and
-    // out of the filesystem's approval path.
+    // modal appears, not that any particular binding runs. The scratch
+    // directory is the cwd, so the environment scan adopts it as the
+    // workspace and the read stays off the approval path.
+    const imza::test::TempDir workspace;
+    imza::test::write_file(workspace.file("CMakeLists.txt"), "cmake\n");
+    const imza::test::CurrentDirectory original;
+    std::error_code error;
+    std::filesystem::current_path(workspace.path, error);
+    REQUIRE_FALSE(error);
+
     AgentEnv env(static_cast<imza::RuntimeFlag>(
         imza::interactive_runtime_flags() | imza::RuntimeFlag::WEB));
     auto round = std::make_shared<int>(0);
