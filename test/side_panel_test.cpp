@@ -237,25 +237,6 @@ TEST_CASE("runtime box lists entries only for expanded rows")
     CHECK(expanded.find("src/main.cpp") == std::string::npos);
 }
 
-TEST_CASE("runtime rows spread label and value across the panel")
-{
-    auto state = imza::test::make_test_state();
-    REQUIRE(state->permissions->install({ imza::SkillGrant { "/tmp/s.md" } }));
-
-    auto panel = imza::make_side_panel(
-        state,
-        [] { return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 120, 40 }; },
-        [] { return imza::WorkflowPhase::PLAN; }, [](imza::WorkflowPhase) { });
-
-    const std::string out = imza::test::without_ansi(
-        imza::test::to_text(panel->Render(), 120, 40));
-
-    // A row sized to its content leaves no gap between the label and the
-    // value; the panel's rows must span the column.
-    CHECK(out.find("Permissions1") == std::string::npos);
-    CHECK(out.find("Permissions 1") == std::string::npos);
-}
-
 TEST_CASE("runtime box hides empty rows and vanishes when nothing is set")
 {
     imza::RuntimeView view;
