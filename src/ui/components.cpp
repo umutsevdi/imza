@@ -963,6 +963,49 @@ Component inline_link_button(std::function<Element()> render,
 
 namespace {
 
+    // ftxui's reflect() stores a reference to the caller's Box; the
+    // element tree then dangles if the owning component dies before
+    // Render() runs (a hover_link rendered outside a live container).
+    // This variant owns the box through a shared_ptr, so the element
+    // stays valid on its own.
+    class SharedReflect : public ftxui::Node {
+    public:
+        SharedReflect(ftxui::Element child, std::shared_ptr<ftxui::Box> box)
+            : ftxui::Node(ftxui::unpack(std::move(child)))
+            , _box(std::move(box))
+        {
+        }
+
+        void ComputeRequirement() override
+        {
+            ftxui::Node::ComputeRequirement();
+            requirement_ = children_[0]->requirement();
+        }
+
+        void SetBox(ftxui::Box box) override
+        {
+            *_box = box;
+            ftxui::Node::SetBox(box);
+            children_[0]->SetBox(box);
+        }
+
+        void Render(ftxui::Screen& screen) override
+        {
+            *_box = ftxui::Box::Intersection(screen.stencil, *_box);
+            ftxui::Node::Render(screen);
+        }
+
+    private:
+        std::shared_ptr<ftxui::Box> _box;
+    };
+
+    ftxui::Decorator shared_reflect(std::shared_ptr<ftxui::Box> box)
+    {
+        return [box = std::move(box)](ftxui::Element child) {
+            return std::make_shared<SharedReflect>(std::move(child), box);
+        };
+    }
+
     // Non-focusable, hover-driven link for panes that host a text input:
     // a click cannot move the parent container's selector, so the input
     // keeps the frame's cursor. Modal forms keep inline_link_button.
@@ -989,9 +1032,10 @@ namespace {
             if (_fill) {
                 // A trailing filler would size the row to its natural width
                 // and collapse any xflex inside it.
-                return std::move(element) | xflex | reflect(_box);
+                return std::move(element) | xflex | shared_reflect(_box);
             }
-            return hbox({ std::move(element), filler() }) | reflect(_box);
+            return hbox({ std::move(element), filler() })
+                | shared_reflect(_box);
         }
 
         bool OnEvent(Event event) override
@@ -999,7 +1043,7 @@ namespace {
             if (!event.is_mouse()) {
                 return false;
             }
-            const bool inside = _box.Contain(event.mouse().x, event.mouse().y);
+            const bool inside = _box->Contain(event.mouse().x, event.mouse().y);
             if (inside != _hovered) {
                 _hovered = inside;
                 animation::RequestAnimationFrame();
@@ -1019,9 +1063,9 @@ namespace {
         std::function<Element()> _render;
         std::function<void()> _on_click;
         Color _inactive_color;
-        Box _box;
-        bool _hovered = false;
-        bool _fill    = false;
+        std::shared_ptr<Box> _box = std::make_shared<Box>();
+        bool _hovered             = false;
+        bool _fill                = false;
     };
 
 } // namespace
