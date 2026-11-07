@@ -847,6 +847,133 @@ TEST_CASE("todo changes push plan updates to the client")
     CHECK(contains_line(sink.snapshot(), "\"research\""));
 }
 
+TEST_CASE("plan document changes push markdown chunks to the client")
+{
+    imza::test::IsolatedDataHome data_home;
+    int rounds = 0;
+    auto state = imza::test::make_test_state(imza::PostFn { },
+        imza::test::test_config(),
+        [&](const imza::ChatRequest&, const imza::StreamCallback& cb) {
+            if (++rounds == 1) {
+                cb(imza::make_connected_event());
+                cb(imza::make_tool_call_event({ "lua",
+                    R"json({"script":"imza.plan.create(table.concat({'# Requirements','- ships','# Approach','small','# Changes','- /a.cpp fixes','# Verification','run tests'}, string.char(10)))"})json",
+                    "", "tc-1" }));
+            } else {
+                cb(imza::make_delta_event("drafted"));
+            }
+            cb(imza::make_done_event());
+            return imza::Status::OK;
+        });
+    WireSink sink;
+    imza::acp::AcpInterface interface(*state, { });
+    interface.set_writer([&sink](std::string_view line) { sink.write(line); });
+    initialize(interface);
+    interface.handle_request(
+        JsonValue(1), "session/new", JsonValue::object_t { });
+    const std::string id = created_session_id(sink.snapshot());
+    REQUIRE_FALSE(id.empty());
+    imza::test::wait_for_environment(*state);
+
+    interface.handle_request(JsonValue(2), "session/prompt",
+        object_of({ { "sessionId", JsonValue(id) },
+            { "prompt",
+                JsonValue::array_t { object_of({ { "type", JsonValue("text") },
+                    { "text", JsonValue("plan it") } }) } } }));
+    // Both the delta and the document arrive as message chunks.
+    CHECK(imza::test::wait_until(
+        [&] { return contains_line(sink.snapshot(), "Plan document:"); }));
+    CHECK(contains_line(
+        sink.snapshot(), R"("sessionUpdate":"agent_message_chunk")"));
+    CHECK(contains_line(sink.snapshot(), "# Requirements"));
+}
+
+TEST_CASE("session/new reply advertises availableCommands")
+{
+    imza::test::IsolatedConfigHome config_home;
+    config_home.add_skill("demo-skill", "demo skill for the palette");
+    auto state = imza::test::make_test_state();
+    imza::test::wait_for_environment(*state);
+    WireSink sink;
+    imza::acp::AcpInterface interface(*state, { });
+    interface.set_writer([&sink](std::string_view line) { sink.write(line); });
+    initialize(interface);
+    interface.handle_request(
+        JsonValue(1), "session/new", JsonValue::object_t { });
+    const std::string id = created_session_id(sink.snapshot());
+    REQUIRE_FALSE(id.empty());
+    imza::test::wait_for_environment(*state);
+    bool reply_has_commands = false;
+    for (const std::string& line : sink.snapshot()) {
+        if (line.find("\"id\":1") != std::string::npos
+            && line.find("availableCommands") != std::string::npos) {
+            reply_has_commands = true;
+        }
+    }
+    CHECK(reply_has_commands);
+    CHECK(contains_line(sink.snapshot(), "demo-skill"));
+}
+
+TEST_CASE("config option updates are deduped per session")
+{
+    auto state = imza::test::make_test_state();
+    WireSink sink;
+    imza::acp::AcpInterface interface(*state, { });
+    interface.set_writer([&sink](std::string_view line) { sink.write(line); });
+    interface.handle_request(JsonValue(0), "initialize",
+        object_of({ { "protocolVersion", JsonValue(1.0) },
+            { "clientCapabilities",
+                object_of({ { "session",
+                    object_of({ { "configOptions",
+                        object_of(
+                            { { "boolean", object_of({ }) } }) } }) } }) } }));
+    interface.handle_request(
+        JsonValue(1), "session/new", JsonValue::object_t { });
+    const std::string id = created_session_id(sink.snapshot());
+    REQUIRE_FALSE(id.empty());
+    imza::test::wait_for_environment(*state);
+    auto count_options = [&] {
+        int n = 0;
+        for (const std::string& line : sink.snapshot()) {
+            if (line.find("\"sessionUpdate\":\"config_option_update\"")
+                != std::string::npos) {
+                ++n;
+            }
+        }
+        return n;
+    };
+    interface.handle_request(JsonValue(2), "session/set_config_option",
+        object_of({ { "sessionId", JsonValue(id) },
+            { "configId", JsonValue("skip_permissions") },
+            { "value", JsonValue(true) } }));
+    CHECK(imza::test::wait_until([&] { return count_options() >= 1; }));
+    const int after_change = count_options();
+    interface.handle_request(JsonValue(3), "session/set_config_option",
+        object_of({ { "sessionId", JsonValue(id) },
+            { "configId", JsonValue("skip_permissions") },
+            { "value", JsonValue(true) } }));
+    CHECK(count_options() == after_change);
+}
+
+TEST_CASE("available commands include discovered skills")
+{
+    imza::test::IsolatedConfigHome config_home;
+    config_home.add_skill("demo-skill", "demo skill for the palette");
+    auto state = imza::test::make_test_state();
+    WireSink sink;
+    imza::acp::AcpInterface interface(*state, { });
+    interface.set_writer([&sink](std::string_view line) { sink.write(line); });
+    initialize(interface);
+    interface.handle_request(
+        JsonValue(1), "session/new", JsonValue::object_t { });
+    imza::test::wait_for_environment(*state);
+    CHECK(imza::test::wait_until([&] {
+        return contains_line(sink.snapshot(),
+                   "\"sessionUpdate\":\"available_commands_update\"")
+            && contains_line(sink.snapshot(), "demo-skill");
+    }));
+}
+
 TEST_CASE("usage changes push usage_update to the client")
 {
     imza::test::IsolatedDataHome data_home;

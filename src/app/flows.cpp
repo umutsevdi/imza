@@ -354,13 +354,30 @@ SkillsModal skills_modal(const ApplicationState& state)
 void submit(ApplicationState& state, std::string text,
     std::vector<Attachment> attachments)
 {
-    const std::string_view t = trim(text);
+    std::string_view t = trim(text);
     if (t.empty()) {
         return;
     }
     if (t[0] == '/') {
-        run_slash(state, t);
-        return;
+        // Advertised skills arrive as /name from ACP clients; rewrite to
+        // the $mention the turn pipeline handles.
+        const std::size_t space = t.find(' ');
+        const std::string name(t.substr(
+            1, space == std::string_view::npos ? t.size() - 1 : space - 1));
+        for (const Skill& skill : state.environment->skills()) {
+            if (skill.name == name) {
+                text = "$" + name
+                    + std::string(space == std::string_view::npos
+                            ? ""
+                            : " " + std::string(t.substr(space + 1)));
+                t = trim(text);
+                break;
+            }
+        }
+        if (t[0] == '/') {
+            run_slash(state, t);
+            return;
+        }
     }
     if (state.parent_state != nullptr
         && state.session->phase() == Session::Phase::IDLE) {

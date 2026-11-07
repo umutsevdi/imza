@@ -1007,17 +1007,20 @@ void Session::set_todo(TodoList todo)
 // together: the creating agent has seen exactly what it wrote.
 std::string Session::create_plan(std::string content)
 {
-    std::lock_guard lock(_mutex);
-    if (const std::string error = plan_validation_error(content);
-        !error.empty()) {
-        return error;
+    // Publish outside the lock: callbacks read session state back.
+    {
+        std::lock_guard lock(_mutex);
+        if (const std::string error = plan_validation_error(content);
+            !error.empty()) {
+            return error;
+        }
+        _ensure_unique(_documents);
+        _documents->push_back(
+            SessionDoc { SessionDoc::Kind::PLAN, std::move(content) });
+        ++_plan_version;
+        _plan_seen_version = _plan_version;
+        _dirty             = true;
     }
-    _ensure_unique(_documents);
-    _documents->push_back(
-        SessionDoc { SessionDoc::Kind::PLAN, std::move(content) });
-    ++_plan_version;
-    _plan_seen_version = _plan_version;
-    _dirty             = true;
     _documents_changed.publish();
     return "";
 }
@@ -1025,67 +1028,73 @@ std::string Session::create_plan(std::string content)
 std::string Session::edit_plan(
     const std::string& old, const std::string& fresh, std::size_t count)
 {
-    std::lock_guard lock(_mutex);
-    SessionDoc* plan = nullptr;
-    for (auto it = _documents->rbegin(); it != _documents->rend(); ++it) {
-        if (it->kind == SessionDoc::Kind::PLAN) {
-            plan = &*it;
-            break;
+    {
+        std::lock_guard lock(_mutex);
+        SessionDoc* plan = nullptr;
+        for (auto it = _documents->rbegin(); it != _documents->rend(); ++it) {
+            if (it->kind == SessionDoc::Kind::PLAN) {
+                plan = &*it;
+                break;
+            }
         }
-    }
-    if (plan == nullptr) {
-        return "no plan exists; create one with imza.plan.create";
-    }
-    if (_plan_seen_version != _plan_version) {
-        return "plan has changed since it was last read; call "
-               "imza.plan.get() and retry";
-    }
-    std::string error;
-    std::optional<std::string> patched
-        = replace_text(plan->content, old, fresh, count, error);
-    if (!patched) {
-        return "imza.plan.edit: " + error;
-    }
-    _ensure_unique(_documents);
-    // Re-resolve after the copy-on-write detach.
-    for (auto it = _documents->rbegin(); it != _documents->rend(); ++it) {
-        if (it->kind == SessionDoc::Kind::PLAN) {
-            it->content = std::move(*patched);
-            break;
+        if (plan == nullptr) {
+            return "no plan exists; create one with imza.plan.create";
         }
+        if (_plan_seen_version != _plan_version) {
+            return "plan has changed since it was last read; call "
+                   "imza.plan.get() and retry";
+        }
+        std::string error;
+        std::optional<std::string> patched
+            = replace_text(plan->content, old, fresh, count, error);
+        if (!patched) {
+            return "imza.plan.edit: " + error;
+        }
+        _ensure_unique(_documents);
+        // Re-resolve after the copy-on-write detach.
+        for (auto it = _documents->rbegin(); it != _documents->rend(); ++it) {
+            if (it->kind == SessionDoc::Kind::PLAN) {
+                it->content = std::move(*patched);
+                break;
+            }
+        }
+        ++_plan_version;
+        _plan_seen_version = _plan_version;
+        _dirty             = true;
     }
-    ++_plan_version;
-    _plan_seen_version = _plan_version;
-    _dirty             = true;
     _documents_changed.publish();
     return "";
 }
 
 std::string Session::append_build_decision(std::string entry)
 {
-    std::lock_guard lock(_mutex);
-    _ensure_unique(_documents);
-    if (_documents->empty()
-        || _documents->back().kind != SessionDoc::Kind::BUILD) {
-        _documents->push_back(SessionDoc { SessionDoc::Kind::BUILD, { } });
+    {
+        std::lock_guard lock(_mutex);
+        _ensure_unique(_documents);
+        if (_documents->empty()
+            || _documents->back().kind != SessionDoc::Kind::BUILD) {
+            _documents->push_back(SessionDoc { SessionDoc::Kind::BUILD, { } });
+        }
+        std::string& content = _documents->back().content;
+        if (!content.empty()) {
+            content += "\n\n";
+        }
+        content += entry;
+        _dirty = true;
     }
-    std::string& content = _documents->back().content;
-    if (!content.empty()) {
-        content += "\n\n";
-    }
-    content += entry;
-    _dirty = true;
     _documents_changed.publish();
     return "";
 }
 
 std::string Session::append_handoff_report(std::string content)
 {
-    std::lock_guard lock(_mutex);
-    _ensure_unique(_documents);
-    _documents->push_back(
-        SessionDoc { SessionDoc::Kind::HANDOFF, std::move(content) });
-    _dirty = true;
+    {
+        std::lock_guard lock(_mutex);
+        _ensure_unique(_documents);
+        _documents->push_back(
+            SessionDoc { SessionDoc::Kind::HANDOFF, std::move(content) });
+        _dirty = true;
+    }
     _documents_changed.publish();
     return "";
 }

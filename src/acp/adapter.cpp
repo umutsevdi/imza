@@ -7,6 +7,7 @@
 #include "platform/config.h"
 #include "platform/file_lock.h"
 #include "providers/provider_store.h"
+#include "workspace/skills.h"
 
 #include <algorithm>
 #include <ctime>
@@ -44,6 +45,16 @@ namespace {
     std::string mode_name(Session::Mode mode)
     {
         return mode == Session::Mode::PLAN ? "plan" : "build";
+    }
+
+    std::string document_label(SessionDoc::Kind kind)
+    {
+        switch (kind) {
+        case SessionDoc::Kind::PLAN: return "Plan document:";
+        case SessionDoc::Kind::BUILD: return "Build log:";
+        case SessionDoc::Kind::HANDOFF: return "Handoff report:";
+        }
+        return "Document:";
     }
 
     std::string string_member(const JsonValue& value, std::string_view key)
@@ -435,7 +446,7 @@ bool AcpInterface::require_initialized(
     return false;
 }
 
-void AcpInterface::send_available_commands(AcpSession& session)
+JsonValue AcpInterface::available_commands_payload(AcpSession& session)
 {
     std::vector<std::tuple<std::string, std::string, std::string>> commands;
     for (const SlashCommand& command : slash_commands()) {
@@ -454,10 +465,49 @@ void AcpInterface::send_available_commands(AcpSession& session)
                 std::string(alias), std::string(command.desc), hint);
         }
     }
-    std::string line = session.updates.available_commands(commands);
+    if (const auto skills = session.state->environment->sorted_skills()) {
+        for (const Skill& skill : *skills) {
+            commands.emplace_back(skill.name, skill.description,
+                "Mention as $" + skill.name + " in a prompt");
+        }
+    }
+    return session.updates.available_commands(commands);
+}
+
+void AcpInterface::send_available_commands(AcpSession& session)
+{
+    std::vector<std::string> skill_names;
+    if (const auto skills = session.state->environment->sorted_skills()) {
+        for (const Skill& skill : *skills) {
+            skill_names.push_back(skill.name);
+        }
+    }
+    bool skip;
+    {
+        std::lock_guard lock(session.advertised_mutex);
+        skip = session.skills_advertised
+            && skill_names == session.advertised_skills;
+        session.advertised_skills = skill_names;
+        session.skills_advertised = true;
+    }
+    if (skip) {
+        return;
+    }
+    std::string line = session.updates.available_commands_payload(
+        available_commands_payload(session));
     if (_write) {
         _write(line);
     }
+}
+
+void AcpInterface::send_available_commands_for(const std::string& session_id)
+{
+    std::lock_guard lock(_mutex);
+    auto session = find_session(session_id);
+    if (session == nullptr) {
+        return;
+    }
+    send_available_commands(*session);
 }
 
 std::vector<ConfigOption> AcpInterface::config_options_for(AcpSession& session)
@@ -488,11 +538,26 @@ std::vector<ConfigOption> AcpInterface::config_options_for(AcpSession& session)
 
 void AcpInterface::send_config_options(AcpSession& session)
 {
-    std::string line
-        = session.updates.config_option_update(config_options_for(session));
+    const JsonValue payload  = dump_config_options(config_options_for(session));
+    const std::string dumped = json_dump(payload);
+    if (dumped == session.sent_config_options) {
+        return;
+    }
+    session.sent_config_options = dumped;
+    std::string line            = session.updates.config_option_update(payload);
     if (_write) {
         _write(line);
     }
+}
+
+void AcpInterface::send_config_options_for(const std::string& session_id)
+{
+    std::lock_guard lock(_mutex);
+    auto session = find_session(session_id);
+    if (session == nullptr) {
+        return;
+    }
+    send_config_options(*session);
 }
 
 void AcpInterface::fill_session_state(
@@ -503,9 +568,14 @@ void AcpInterface::fill_session_state(
     if (session == nullptr) {
         return;
     }
-    result["configOptions"] = dump_config_options(config_options_for(*session));
+    const JsonValue payload = dump_config_options(config_options_for(*session));
+    session->sent_config_options = json_dump(payload);
+    result["configOptions"]      = payload;
     result["modes"]
         = dump_session_modes(mode_name(session->state->session->mode()));
+    // Clients build the palette from the setup response, so the reply
+    // must carry the command list, not just later updates.
+    result["availableCommands"] = available_commands_payload(*session);
 }
 
 void AcpInterface::handle_session_new(
@@ -545,17 +615,21 @@ void AcpInterface::handle_session_new(
         *routing    = protocol_id;
     }
 
+    std::shared_ptr<AcpSession> observer_target;
     {
         std::lock_guard lock(_mutex);
         auto [entry, inserted] = _sessions.try_emplace(protocol_id,
             std::make_shared<AcpSession>(
-                AcpSession { protocol_id, state, UpdateBuilder(protocol_id) }));
+                protocol_id, state, UpdateBuilder(protocol_id)));
         if (!inserted) {
             reply_error(id, RPC_INTERNAL_ERROR, "session id collision");
             return;
         }
-        install_observer(*entry->second);
+        observer_target = entry->second;
     }
+    // Outside the adapter mutex: the signals subscribed here replay to
+    // ready subscribers synchronously, and their callbacks take _mutex.
+    install_observer(*observer_target);
     // Carried in the reply so the client renders its switchers at once.
     JsonValue result    = json_object();
     result["sessionId"] = protocol_id;
@@ -626,18 +700,21 @@ void AcpInterface::handle_session_load(
     install_session(*state, std::move(loaded.snapshot));
     install_additional_directories(*state, params);
 
+    std::shared_ptr<AcpSession> observer_target;
     {
         std::lock_guard lock(_mutex);
         auto [entry, inserted] = _sessions.try_emplace(protocol_id,
             std::make_shared<AcpSession>(
-                AcpSession { protocol_id, state, UpdateBuilder(protocol_id) }));
+                protocol_id, state, UpdateBuilder(protocol_id)));
         if (!inserted) {
             reply_error(id, RPC_INTERNAL_ERROR, "session id collision");
             return;
         }
         entry->second->lock = std::move(std::get<FileLock>(guard));
-        install_observer(*entry->second);
+        observer_target     = entry->second;
     }
+    // Outside the adapter mutex: see handle_session_new.
+    install_observer(*observer_target);
     if (method != "session/resume") {
         // Replay precedes the response, per spec.
         std::lock_guard lock(_mutex);
@@ -1011,6 +1088,7 @@ void AcpInterface::handle_set_config_option(
         return;
     }
     std::shared_ptr<ApplicationState> mode_target;
+    std::shared_ptr<ApplicationState> options_target;
     {
         std::lock_guard lock(_mutex);
         auto session = find_session(session_id);
@@ -1021,25 +1099,33 @@ void AcpInterface::handle_set_config_option(
         }
         if (switching_mode) {
             mode_target = session->state;
-        } else if (config_id == "thought_level" && !typed.empty()) {
-            session->state->providers->set_reasoning_effort(
-                to_wire_effort(typed));
-        } else if (config_id == "model" && !typed.empty()) {
-            if (const auto selection
-                = session->state->providers->active_selection();
-                selection != std::nullopt) {
-                session->state->providers->select_model(
-                    { selection->connection_id, typed });
-            }
         } else if (config_id == "skip_permissions") {
+            // Does not reach the provider store, so no callback re-entry.
             session->state->permissions->set_skip_permissions(typed_bool);
+        } else {
+            options_target = session->state;
         }
     }
     // set_mode publishes synchronously on this thread and the observer
-    // re-locks _mutex, so it must run outside the lock.
+    // re-locks _mutex, so it must run outside the lock. Same rule for
+    // provider mutations: the provider subscription callback takes the
+    // adapter mutex when the change notification lands.
     if (mode_target != nullptr) {
         mode_target->session->set_mode(
             typed == "plan" ? Session::Mode::PLAN : Session::Mode::BUILD);
+    }
+    if (options_target != nullptr) {
+        if (config_id == "thought_level" && !typed.empty()) {
+            options_target->providers->set_reasoning_effort(
+                to_wire_effort(typed));
+        } else if (config_id == "model" && !typed.empty()) {
+            if (const auto selection
+                = options_target->providers->active_selection();
+                selection != std::nullopt) {
+                options_target->providers->select_model(
+                    { selection->connection_id, typed });
+            }
+        }
     }
     JsonValue result = json_object();
     // The reply carries the complete new state; the notification pushes
@@ -1132,6 +1218,51 @@ void AcpInterface::install_observer(AcpSession& session)
                   return current.updates.plan(*current.state->session->todo());
               });
           });
+    // Documents have no client-side viewer; each new or changed one
+    // reaches the chat as a markdown chunk.
+    session.documents_subscription
+        = session.state->session->subscribe_to_documents_change([this, id] {
+              push(id, [this](AcpSession& current) {
+                  const auto documents = current.state->session->documents();
+                  std::vector<std::pair<int, std::string>> now;
+                  now.reserve(documents->size());
+                  for (const SessionDoc& doc : *documents) {
+                      now.emplace_back(static_cast<int>(doc.kind), doc.content);
+                  }
+                  if (now == current.pushed_documents) {
+                      return std::string { };
+                  }
+                  // Push only the suffix that differs; a rewritten
+                  // document falls back to a full resend.
+                  std::size_t start = 0;
+                  const std::size_t common
+                      = std::min(now.size(), current.pushed_documents.size());
+                  while (start < common
+                      && now[start] == current.pushed_documents[start]) {
+                      ++start;
+                  }
+                  current.pushed_documents = now;
+                  if (start >= now.size()) {
+                      return std::string { };
+                  }
+                  std::string frames;
+                  for (std::size_t i = start; i < now.size(); ++i) {
+                      ++current.message_id;
+                      frames += current.updates.document_chunk(
+                          document_label(
+                              static_cast<SessionDoc::Kind>(now[i].first)),
+                          now[i].second, current.message_id);
+                      frames += '\n';
+                  }
+                  return frames;
+              });
+          });
+    session.skills_subscription
+        = session.state->environment->subscribe_to_system_change(
+            [this, id] { send_available_commands_for(id); });
+    session.provider_subscription
+        = session.state->providers->subscribe_to_change(
+            [this, id] { send_config_options_for(id); });
     session.compaction_subscription
         = session.state->session->subscribe_to_compaction_change([this, id] {
               if (!_compaction_capable) {

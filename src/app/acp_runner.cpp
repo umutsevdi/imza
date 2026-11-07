@@ -30,6 +30,8 @@ int run_acp(std::shared_ptr<ApplicationState> state)
 
     std::string line;
     while (state->alive.load()) {
+        // The queue's consumer when the TUI loop is absent.
+        state->main_thread->drain();
         const int c = std::getchar();
         if (c == EOF) {
             break;

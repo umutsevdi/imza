@@ -87,6 +87,19 @@ std::string UpdateBuilder::agent_message(
     return emit(std::move(update));
 }
 
+std::string UpdateBuilder::document_chunk(std::string_view kind_label,
+    std::string_view content, std::int64_t message_id)
+{
+    std::string text(kind_label);
+    text += "\n\n```markdown\n";
+    text += content;
+    if (!content.empty() && content.back() != '\n') {
+        text += '\n';
+    }
+    text += "```\n";
+    return agent_message(text, message_id);
+}
+
 std::string UpdateBuilder::agent_thought(
     std::string_view text, std::int64_t message_id)
 {
@@ -247,21 +260,25 @@ std::string UpdateBuilder::available_commands(
     const std::vector<std::tuple<std::string, std::string, std::string>>&
         commands)
 {
-    JsonValue update = update_of("available_commands_update");
     JsonValue::array_t entries;
     entries.reserve(commands.size());
     for (const auto& [name, description, hint] : commands) {
         entries.push_back(available_command(name, description, hint));
     }
-    update["availableCommands"] = std::move(entries);
+    return available_commands_payload(JsonValue(std::move(entries)));
+}
+
+std::string UpdateBuilder::available_commands_payload(const JsonValue& commands)
+{
+    JsonValue update            = update_of("available_commands_update");
+    update["availableCommands"] = commands;
     return emit(std::move(update));
 }
 
-std::string UpdateBuilder::config_option_update(
-    const std::vector<ConfigOption>& options)
+std::string UpdateBuilder::config_option_update(const JsonValue& options)
 {
     JsonValue update        = update_of("config_option_update");
-    update["configOptions"] = dump_config_options(options);
+    update["configOptions"] = options;
     return emit(std::move(update));
 }
 

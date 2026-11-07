@@ -15,6 +15,9 @@ public:
 
     std::string agent_message(std::string_view text, std::int64_t message_id);
     std::string agent_thought(std::string_view text, std::int64_t message_id);
+    // One session document as a fenced markdown chunk labeled by kind.
+    std::string document_chunk(std::string_view kind_label,
+        std::string_view content, std::int64_t message_id);
     std::string tool_call(const ToolCall& call);
     std::string tool_call_update(const ToolCall& call);
     std::string plan(const TodoList& todo);
@@ -36,7 +39,9 @@ public:
     std::string available_commands(
         const std::vector<std::tuple<std::string, std::string, std::string>>&
             commands);
-    std::string config_option_update(const std::vector<ConfigOption>& options);
+    // Pre-built payload variants so callers can dedupe before sending.
+    std::string available_commands_payload(const JsonValue& commands);
+    std::string config_option_update(const JsonValue& options);
     // Announced whenever the session's mode changes, whoever changed it.
     std::string current_mode(std::string_view mode);
 

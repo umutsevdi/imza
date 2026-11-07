@@ -70,6 +70,29 @@ TEST_CASE("permissions modal adds a grant from the keyboard")
     imza::close_modal(*env.state);
 }
 
+TEST_CASE("submit rewrites /skill-name prompts to skill mentions")
+{
+    imza::test::TempDir bundled_root;
+    imza::test::write_file(bundled_root.path / "demo-skill" / "SKILL.md",
+        "---\ndescription: demo\n---\n\nBody.\n");
+    const imza::test::ScopedEnv bundled(
+        "IMZA_BUNDLED_SKILLS", bundled_root.path.string());
+
+    DataHome home;
+    auto state = imza::test::make_test_state(
+        imza::test::run_immediately, imza::test::test_config());
+    imza::test::wait_for_environment(*state);
+
+    imza::submit(*state, "/demo-skill do things");
+    // The rewrite loads the skill instead of failing slash dispatch; the
+    // turn itself may fail later on the missing stream.
+    CHECK(state->session->error().find("Unknown command") == std::string::npos);
+    CHECK_FALSE(state->session->loaded_skill_directories().empty());
+
+    imza::submit(*state, "/definitely-not-a-command");
+    CHECK(state->session->error().find("Unknown command") != std::string::npos);
+}
+
 TEST_CASE("skills modal marks bundled skills and skips their policies")
 {
     // The bundled root must exist before the environment scan runs.

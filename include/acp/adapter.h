@@ -57,10 +57,21 @@ private:
         Signal<>::Subscription mode_subscription;
         Signal<>::Subscription title_subscription;
         Signal<>::Subscription todo_subscription;
+        Signal<>::Subscription documents_subscription;
+        Signal<>::Subscription skills_subscription;
         Signal<>::Subscription compaction_subscription;
         Signal<>::Subscription usage_subscription;
         Signal<const std::string&>::Subscription notice_subscription;
         Signal<const std::string&>::Subscription error_subscription;
+        Signal<>::Subscription provider_subscription;
+        // Last sent payloads; identical republishes skip the wire.
+        std::string sent_config_options;
+        std::vector<std::pair<int, std::string>> pushed_documents;
+        std::vector<std::string> advertised_skills;
+        bool skills_advertised = false;
+        // Own lock: touched under the adapter mutex (session/new) and
+        // from environment threads.
+        std::mutex advertised_mutex;
     };
 
     std::shared_ptr<AcpSession> find_session(const std::string& id);
@@ -113,7 +124,12 @@ private:
     // The senders require _mutex held by the caller; config_options_for
     // only reads the session it is given.
     void send_available_commands(AcpSession& session);
+    JsonValue available_commands_payload(AcpSession& session);
     void send_config_options(AcpSession& session);
+    // By-id variants for signal callbacks, which hold no session
+    // reference.
+    void send_available_commands_for(const std::string& session_id);
+    void send_config_options_for(const std::string& session_id);
     std::vector<ConfigOption> config_options_for(AcpSession& session);
     // The session state every lifecycle reply carries: configOptions and
     // the legacy modes block. No-op when the session vanished.

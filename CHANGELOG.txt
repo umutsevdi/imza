@@ -15,6 +15,11 @@ Changes:
     widget: compact Files, Skills, MCP, and Permissions rows that expand on
     click, with the full permission list opening in a read-only viewer. Skill
     grants now appear in that list.
+  - ACP clients now see skills in their command palette (invocable as
+    /skill-name) and receive plan documents, build logs, and handoff
+    reports as markdown messages when they are created or revised. The
+    model selector now appears on new ACP sessions without toggling any
+    setting.
 
 -------------------------------------------------------------------------------
 0.7.2 - 2026-11-03
