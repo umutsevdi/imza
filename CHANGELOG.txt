@@ -8,7 +8,7 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
-0.7.3 - Unreleased
+0.7.3 - 2026-11-07
 -------------------------------------------------------------------------------
 Changes:
   - Merged the Context and Permissions widgets into one interactive Runtime
