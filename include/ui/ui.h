@@ -98,6 +98,8 @@ inline constexpr auto TRAILING_MARKDOWN_INTERVAL
 // Wider frame for the side-by-side diff viewer, which needs two panes of
 // readable code; every other modal keeps MODAL_MAX_WIDTH.
 inline constexpr int DIFF_VIEWER_MODAL_MAX_WIDTH = 160;
+// Keeps the narrow sidebar scroll viewport visible while it overflows.
+inline constexpr int SIDEBAR_MIN_ROWS = 3;
 
 // Spinner pacing is wall-clock based so animation speed does not follow the
 // render loop's frame rate: one spinner step per SPINNER_FRAME_MS of

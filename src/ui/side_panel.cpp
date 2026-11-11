@@ -140,10 +140,15 @@ public:
                     render_runtime_box(_runtime_view(*env), _expanded, link));
             }
         }
-        Element body = vbox(std::move(parts));
         if (narrow) {
-            return panel(scroll_viewport(std::move(body), _scroll)) | xflex;
+            if (parts.empty()) {
+                return vbox();
+            }
+            return panel(scroll_viewport(vbox(std::move(parts)), _scroll)
+                       | size(HEIGHT, GREATER_THAN, SIDEBAR_MIN_ROWS))
+                | xflex;
         }
+        Element body = vbox(std::move(parts));
         return panel(scroll_viewport(std::move(body), _scroll))
             | size(WIDTH, EQUAL, LayoutCtx::LEFT_WIDTH);
     }
@@ -552,7 +557,9 @@ namespace {
 bool has_runtime_content(const RuntimeView& view)
 {
     return view.rules.has_value() || !view.attachments.empty()
-        || !view.skills.empty() || !view.mcp_connected.empty()
+        || std::any_of(view.skills.begin(), view.skills.end(),
+            [](const ContextSkill& skill) { return skill.loaded; })
+        || !view.mcp_connected.empty()
         || has_custom_permissions(view.permissions);
 }
 
@@ -631,8 +638,8 @@ ftxui::Element render_runtime_box(const RuntimeView& view,
         append_row(RuntimeRow::FILES, "Files", count, std::move(files));
     }
 
-    if (!view.skills.empty()) {
-        const std::vector<std::string> loaded = loaded_skill_names(view.skills);
+    const std::vector<std::string> loaded = loaded_skill_names(view.skills);
+    if (!loaded.empty()) {
         std::vector<RuntimeEntry> entries;
         for (const std::string& name : loaded) {
             entries.push_back({ name, { } });

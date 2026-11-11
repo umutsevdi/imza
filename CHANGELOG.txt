@@ -8,6 +8,16 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
+0.7.4 - 2026-11-12
+-------------------------------------------------------------------------------
+Changes:
+  - The sidebar no longer reserves screen space on narrow terminals when
+    it has nothing to show, and the Runtime widget lists Skills only once
+    a skill is actually loaded. On narrow terminals the sidebar also keeps
+    a few rows visible while its widgets scroll instead of collapsing to a
+    single line.
+
+-------------------------------------------------------------------------------
 0.7.3 - 2026-11-07
 -------------------------------------------------------------------------------
 Changes:

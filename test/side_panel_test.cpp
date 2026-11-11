@@ -254,6 +254,46 @@ TEST_CASE("runtime box hides empty rows and vanishes when nothing is set")
         == std::string::npos);
 }
 
+TEST_CASE("narrow sidebar renders nothing when no widget has content")
+{
+    auto state = imza::test::make_test_state();
+    auto panel = imza::make_side_panel(
+        state,
+        [] {
+            return imza::LayoutCtx { imza::LayoutCtx::Kind::NARROW, 80, 40 };
+        },
+        [] { return imza::WorkflowPhase::BUILD; }, [](imza::WorkflowPhase) { });
+
+    const ftxui::Element probe
+        = ftxui::vbox({ panel->Render(), ftxui::text("MARK") });
+    const std::string out
+        = imza::test::without_ansi(imza::test::to_text(probe, 80, 10));
+    const std::size_t at = out.find("MARK");
+    REQUIRE(at != std::string::npos);
+    CHECK(out.substr(0, at).find_first_not_of(" \n") == std::string::npos);
+}
+
+TEST_CASE("skills row hides until a skill is loaded")
+{
+    imza::RuntimeView view;
+    view.skills = { { "caveman", false }, { "anatomy", false } };
+    CHECK_FALSE(imza::has_runtime_content(view));
+    const std::string unloaded = imza::test::without_ansi(
+        to_text(imza::render_runtime_box(view, { }, plain_row_link())));
+    CHECK(unloaded.find("Skills") == std::string::npos);
+    CHECK(unloaded.find("Runtime") == std::string::npos);
+
+    view.skills[1].loaded = true;
+    CHECK(imza::has_runtime_content(view));
+    const std::string loaded
+        = imza::test::without_ansi(to_text(imza::render_runtime_box(
+            view, { imza::RuntimeRow::SKILLS }, plain_row_link())));
+    CHECK(loaded.find("Skills") != std::string::npos);
+    CHECK(loaded.find("1/2") != std::string::npos);
+    CHECK(loaded.find("anatomy") != std::string::npos);
+    CHECK(loaded.find("caveman") == std::string::npos);
+}
+
 TEST_CASE("runtime permissions markdown reports capabilities and grants")
 {
     const imza::RuntimeView view = runtime_view_with_grants();
