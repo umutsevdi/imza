@@ -16,10 +16,13 @@ Changes:
     a skill is actually loaded. On narrow terminals the sidebar also keeps
     a few rows visible while its widgets scroll instead of collapsing to a
     single line.
-  - Fixed the chat hint bar incorrectly displaying the shortcut even when
-  toggle is not available.
+  - The Amazon Bedrock provider now works without an API key when the machine
+    already has an AWS identity (such as Kubernetes pods with IRSA): imza signs
+    requests with the machine's own credentials automatically.
   - Thought blocks now stream directly in the chat in dimmed text and their
   header toggles them open or closed in place instead of opening a viewer.
+  - Fixed the chat hint bar incorrectly displaying the shortcut even when
+  toggle is not available.
 
 -------------------------------------------------------------------------------
 0.7.3 - 2026-11-07

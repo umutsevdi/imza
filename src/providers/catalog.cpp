@@ -574,8 +574,14 @@ Route resolve_route(const Connection& conn, const Catalog& catalog,
         return route;
     }
     route.dialect = dialect;
-    route.auth
-        = conn.api_key.empty() ? AuthType::NONE : auth_from_npm(provider.npm);
+    if (conn.api_key.empty()) {
+        // Keyless bedrock authenticates over ambient AWS credentials;
+        // other keyless providers have no ambient story and stay NONE.
+        route.auth = conn.id == "amazon-bedrock" ? AuthType::AWS_SIGV4
+                                                 : AuthType::NONE;
+    } else {
+        route.auth = auth_from_npm(provider.npm);
+    }
     switch (dialect) {
     case ApiStandard::OPENAI:
         route.endpoint = route.api + std::string(CHAT_SUFFIX);

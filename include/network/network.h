@@ -43,7 +43,15 @@ StreamEvent make_usage_event(Usage usage);
 StreamEvent make_connected_event();
 StreamEvent make_reasoning_event(std::string text, std::string signature = "");
 
-enum class AuthType { BEARER, ANTHROPIC, OPENAI_SUBSCRIPTION, NONE };
+enum class AuthType {
+    BEARER,
+    ANTHROPIC,
+    OPENAI_SUBSCRIPTION,
+    // SigV4-signed request over ambient AWS credentials (env keys, IRSA
+    // web-identity exchange, or the container credentials endpoint).
+    AWS_SIGV4,
+    NONE
+};
 
 struct Route {
     std::string endpoint;
@@ -61,8 +69,36 @@ struct Route {
 std::vector<std::string> auth_headers(
     AuthType auth, const std::string& key, const std::string& account_id = { });
 
-std::vector<std::string> request_headers(
-    const Route& route, std::vector<std::string> base);
+// Everything the auth layer may need: SigV4 signs method, path, query,
+// selected headers, and the payload hash, so signing happens here rather
+// than in auth_headers().
+struct RequestContext {
+    std::string method;
+    std::string url;
+    std::string payload;
+};
+
+std::vector<std::string> request_headers(const Route& route,
+    std::vector<std::string> base, const RequestContext& context = { });
+
+// Resolves ambient AWS credentials (static env keys, then the IRSA
+// web-identity exchange, then the container credentials endpoint) with a
+// process-wide expiry cache. Empty access key means resolution failed;
+// `message` says why.
+struct AwsCredentials {
+    std::string access_key;
+    std::string secret_key;
+    std::string session_token;
+};
+Status resolve_aws_credentials(AwsCredentials& out, std::string* message);
+// Drops the cached credentials; the next resolution starts over. Test seam.
+void invalidate_aws_credentials();
+// Builds the SigV4 Authorization, x-amz-date, and x-amz-security-token
+// headers for one request over `credentials`. Region and service come from
+// the host (bedrock-runtime.<region>.amazonaws.com, service bedrock).
+std::vector<std::string> sigv4_headers(const AwsCredentials& credentials,
+    const std::string& method, const std::string& url,
+    const std::string& payload);
 
 struct HttpGetOptions {
     std::size_t max_bytes = 0;

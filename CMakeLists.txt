@@ -224,6 +224,7 @@ file(GLOB TEST_SOURCES CONFIGURE_DEPENDS "test/*.cpp")
 
 # Network transport (no ftxui, no cmark)
 add_library(imza_network
+    src/network/aws_sign.cpp
     src/network/json_io.cpp
     src/network/json_rpc.cpp
     src/network/stream_event.cpp

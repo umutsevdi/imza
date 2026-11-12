@@ -114,8 +114,8 @@ Status fetch_models(const Route& route, std::vector<ModelInfo>& out)
         url += "?limit=1000";
     }
 
-    const std::vector<std::string> headers
-        = request_headers(route, { "Accept: application/json" });
+    const std::vector<std::string> headers = request_headers(
+        route, { "Accept: application/json" }, { "GET", url, "" });
 
     std::string body;
     long code       = 0;

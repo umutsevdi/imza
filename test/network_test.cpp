@@ -8,6 +8,7 @@
 #include "network/network.h"
 #include "network/sse_parse.h"
 #include "protocols/mcp.h"
+#include "test_platform.h"
 
 struct JsonTestPayload {
     std::string name;
@@ -997,4 +998,80 @@ TEST_CASE("json-rpc framing is shared by every protocol adapter")
     CHECK(imza::find_member(*body, "code")->get<double>()
         == doctest::Approx(-32602.0));
     CHECK(imza::find_member(error, "id")->get<std::string>() == "abc");
+}
+
+TEST_CASE("sigv4_headers matches the AWS published GET vector")
+{
+    imza::test::set_env(
+        "IMZA_FAKE_UNIX_TIME", "1440938160"); // 20150830T123600Z
+    imza::test::set_env("AWS_REGION", "us-east-1");
+    imza::AwsCredentials credentials;
+    credentials.access_key = "AKIDEXAMPLE";
+    credentials.secret_key = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY";
+
+    const std::vector<std::string> headers = imza::sigv4_headers(
+        credentials, "GET", "https://example.amazonaws.com/", "");
+    imza::test::unset_env("IMZA_FAKE_UNIX_TIME");
+    imza::test::unset_env("AWS_REGION");
+
+    REQUIRE(headers.size() == 2);
+    CHECK(headers[0] == "x-amz-date: 20150830T123600Z");
+    CHECK(headers[1].find(
+              "Credential=AKIDEXAMPLE/20150830/us-east-1/bedrock/aws4_request")
+        != std::string::npos);
+    CHECK(
+        headers[1].find("SignedHeaders=host;x-amz-date") != std::string::npos);
+    CHECK(
+        headers[1].find(
+            ", "
+            "Signature="
+            "66c7d5b3687aef1c9a331ab971fd692447d8ab862097f335ebe9a90f6a9bac11")
+        != std::string::npos);
+}
+
+TEST_CASE("sigv4_headers signs payload and session token")
+{
+    imza::test::set_env(
+        "IMZA_FAKE_UNIX_TIME", "1767225600"); // 20260101T000000Z
+    imza::AwsCredentials credentials;
+    credentials.access_key = "AKIDEXAMPLE";
+    credentials.secret_key = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY";
+    credentials.session_token
+        = "AQoEXAMPLEH4aoAH0gNCAPyJxz4BlCFFxWNE1OPTgk5TthT+F+"
+          "waePd7KeNElwyRQnEeGhbiGjJXh0LdDG4nC9j8nTQ0mOu1Example";
+
+    const std::vector<std::string> headers
+        = imza::sigv4_headers(credentials, "POST",
+            "https://bedrock-runtime.eu-west-1.amazonaws.com/chat/completions",
+            "{\"model\":\"claude\"}");
+    imza::test::unset_env("IMZA_FAKE_UNIX_TIME");
+
+    REQUIRE(headers.size() == 3);
+    CHECK(headers[1] == "x-amz-security-token: " + credentials.session_token);
+    CHECK(headers[2].find(
+              "Credential=AKIDEXAMPLE/20260101/eu-west-1/bedrock/aws4_request")
+        != std::string::npos);
+    CHECK(
+        headers[2].find(
+            ", "
+            "Signature="
+            "624b8ac68992d23d4e5af1444c1ee6a8e9c55247a0d3064c58c9a908e080d716")
+        != std::string::npos);
+}
+
+TEST_CASE("sigv4_headers region derives from the bedrock host")
+{
+    imza::test::set_env("IMZA_FAKE_UNIX_TIME", "1767225600");
+    imza::AwsCredentials credentials;
+    credentials.access_key = "AKIDEXAMPLE";
+    credentials.secret_key = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY";
+
+    const std::vector<std::string> headers = imza::sigv4_headers(credentials,
+        "POST",
+        "https://bedrock-runtime.ap-southeast-2.amazonaws.com/chat/completions",
+        "{}");
+    imza::test::unset_env("IMZA_FAKE_UNIX_TIME");
+    REQUIRE(headers.size() == 2);
+    CHECK(headers[1].find("/ap-southeast-2/bedrock/aws4_request")
+        != std::string::npos);
 }

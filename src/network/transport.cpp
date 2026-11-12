@@ -37,11 +37,26 @@ std::vector<std::string> auth_headers(
     return { "Authorization: Bearer " + key };
 }
 
-std::vector<std::string> request_headers(
-    const Route& route, std::vector<std::string> base)
+std::vector<std::string> request_headers(const Route& route,
+    std::vector<std::string> base, const RequestContext& context)
 {
     if (!route.user_agent.empty()) {
         base.push_back(route.user_agent);
+    }
+    if (route.auth == AuthType::AWS_SIGV4) {
+        AwsCredentials credentials;
+        std::string message;
+        if (resolve_aws_credentials(credentials, &message) != Status::OK) {
+            // Fail closed: drop every header so no unauthenticated request
+            // leaves; the caller surfaces the route error instead.
+            return { };
+        }
+        for (auto& h : sigv4_headers(credentials,
+                 context.method.empty() ? "POST" : context.method, context.url,
+                 context.payload)) {
+            base.push_back(std::move(h));
+        }
+        return base;
     }
     for (auto& h : auth_headers(route.auth, route.api_key, route.account_id)) {
         base.push_back(std::move(h));
@@ -650,8 +665,8 @@ Status stream(const Route& route, const ChatRequest& req, StreamCallback cb,
     const std::string body   = provider.build(req);
     const std::string& url   = route.endpoint;
 
-    std::vector<std::string> header_strs
-        = request_headers(route, stream_headers());
+    std::vector<std::string> header_strs = request_headers(
+        route, stream_headers(), { "POST", route.endpoint, body });
     if (!route.opencode_session.empty()) {
         header_strs.push_back("x-opencode-session: " + route.opencode_session);
     }
