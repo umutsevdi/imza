@@ -13,6 +13,50 @@
 
 using imza::test::to_text;
 
+TEST_CASE("reasoning text expands inline and toggles on the Thought row")
+{
+    auto state = imza::test::make_test_state();
+    state->session->begin_send("hello");
+    state->session->append_item(imza::AssistantTurn {
+        .markdown         = "answer",
+        .reasoning        = "deliberating carefully",
+        .reasoning_ms     = std::chrono::milliseconds { 800 },
+        .reasoning_effort = "high",
+    });
+    state->session->set_phase(imza::Session::Phase::IDLE);
+    auto chat
+        = imza::make_chat(state, [] { return imza::test::wide_layout(); });
+
+    std::string rendered = to_text(chat->Render(), 100, 40);
+    REQUIRE(rendered.find("Thought 0.8s") != std::string::npos);
+    CHECK(rendered.find("deliberating carefully") == std::string::npos);
+
+    REQUIRE(imza::test::click_label(chat, "Thought 0.8s"));
+    rendered = to_text(chat->Render(), 100, 40);
+    CHECK(rendered.find("deliberating carefully") != std::string::npos);
+    CHECK(rendered.find("\xe2\x96\xbe Thought 0.8s") != std::string::npos);
+
+    REQUIRE(imza::test::click_label(chat, "Thought 0.8s"));
+    rendered = to_text(chat->Render(), 100, 40);
+    CHECK(rendered.find("deliberating carefully") == std::string::npos);
+}
+
+TEST_CASE("streaming reasoning shows inline without a click")
+{
+    auto state = imza::test::make_test_state();
+    state->session->begin_send("hello");
+    state->session->append_item(imza::AssistantTurn {
+        .reasoning        = "still deliberating",
+        .reasoning_effort = "high",
+    });
+    state->session->set_phase(imza::Session::Phase::STREAMING);
+    auto chat
+        = imza::make_chat(state, [] { return imza::test::wide_layout(); });
+
+    const std::string rendered = to_text(chat->Render(), 100, 40);
+    CHECK(rendered.find("Thinking") != std::string::npos);
+    CHECK(rendered.find("still deliberating") != std::string::npos);
+}
 TEST_CASE("finished turn without reasoning content hides the thought row")
 {
     auto state = imza::test::make_test_state();

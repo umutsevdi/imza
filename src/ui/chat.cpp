@@ -892,6 +892,7 @@ namespace {
             std::shared_ptr<std::string> label;
             std::shared_ptr<std::string> content;
             std::shared_ptr<std::string> metadata;
+            std::shared_ptr<bool> expanded;
             Component component;
         };
         std::map<std::size_t, ReasoningLink> _reasoning_links;
@@ -1364,12 +1365,18 @@ namespace {
                 = active && !has_reasoning && !done && expected;
             if (has_reasoning || placeholder) {
                 std::string label;
+                bool expanded = false;
+                if (const auto it = _reasoning_links.find(index);
+                    it != _reasoning_links.end()) {
+                    expanded = *it->second.expanded;
+                }
                 if (done) {
                     const double secs
                         = static_cast<double>(t.reasoning_ms->count()) / 1000.0;
                     char buf[32];
                     std::snprintf(buf, sizeof(buf), "%.1f", secs);
-                    label = "▸ Thought " + std::string(buf) + "s";
+                    label = (expanded ? "▾ Thought " : "▸ Thought ")
+                        + std::string(buf) + "s";
                 } else {
                     label = " Thinking…" + elapsed_suffix(*_session);
                 }
@@ -1379,6 +1386,14 @@ namespace {
                 Element row   = done ? btn->Render()
                                      : busy_row(_spinner_step(), btn->Render());
                 parts.push_back(row);
+                if (has_reasoning && (active || expanded)) {
+                    Elements lines;
+                    for (const std::string& line :
+                        wrap_text(trim(t.reasoning), _content_width())) {
+                        lines.push_back(text(" " + line) | dim);
+                    }
+                    parts.push_back(vbox(std::move(lines)));
+                }
             }
             if (!t.markdown.empty()) {
                 parts.push_back(markdown_cached
@@ -1405,16 +1420,21 @@ namespace {
             entry.label    = std::make_shared<std::string>(std::move(label));
             entry.content  = std::make_shared<std::string>(content);
             entry.metadata = std::make_shared<std::string>(std::move(metadata));
+            entry.expanded = std::make_shared<bool>(false);
             auto label_ptr = entry.label;
             auto content_ptr  = entry.content;
-            auto metadata_ptr = entry.metadata;
+            auto expanded_ptr = entry.expanded;
             entry.component
                 = hover_link([label_ptr] { return text(*label_ptr); },
-                    [this, content_ptr, metadata_ptr] {
-                        ViewerModal vm { " Thinking", *content_ptr, "md", 1 };
-                        vm.line_numbers = false;
-                        vm.metadata     = *metadata_ptr;
-                        enqueue_user_modal(*_state, vm);
+                    [this, index, content_ptr, expanded_ptr] {
+                        if (content_ptr->empty()) {
+                            return;
+                        }
+                        *expanded_ptr = !*expanded_ptr;
+                        if (index < _item_versions.size()) {
+                            _item_versions[index] = INVALID_VERSION;
+                        }
+                        animation::RequestAnimationFrame();
                     },
                     PANEL_FG_DIM);
             _interaction_container->Add(entry.component);

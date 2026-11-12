@@ -18,6 +18,8 @@ Changes:
     single line.
   - Fixed the chat hint bar incorrectly displaying the shortcut even when
   toggle is not available.
+  - Thought blocks now stream directly in the chat in dimmed text and their
+  header toggles them open or closed in place instead of opening a viewer.
 
 -------------------------------------------------------------------------------
 0.7.3 - 2026-11-07
