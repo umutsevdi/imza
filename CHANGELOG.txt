@@ -16,6 +16,8 @@ Changes:
     a skill is actually loaded. On narrow terminals the sidebar also keeps
     a few rows visible while its widgets scroll instead of collapsing to a
     single line.
+  - Fixed the chat hint bar incorrectly displaying the shortcut even when
+  toggle is not available.
 
 -------------------------------------------------------------------------------
 0.7.3 - 2026-11-07

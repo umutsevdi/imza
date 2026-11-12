@@ -236,10 +236,14 @@ namespace {
                 [this](WorkflowPhase phase) { _set_phase(phase); });
             _status_line = make_status_line(_state, layout, workflow);
             _chat_hints.phase_line_fn = [this] {
-                return _phase == WorkflowPhase::PLAN
-                    ? std::string("Tab/Shift+Tab switch mode· Ctrl+E chat")
-                    : std::string("Tab/Shift+Tab switch mode · Ctrl+E "
-                                  "Sidechat");
+                if (_phase != WorkflowPhase::PLAN) {
+                    return std::string(
+                        "Tab/Shift+Tab switch mode · Ctrl+E Sidechat");
+                }
+                return _state->session->has_plan()
+                    ? std::string("Tab/Shift+Tab switch mode · Ctrl+E "
+                                  "plan/chat focus")
+                    : std::string("Tab/Shift+Tab switch mode");
             };
             // The plan tab splits 50/50 once a document exists; the chat
             // renders its left half and must budget for those columns.
