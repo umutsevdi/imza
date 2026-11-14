@@ -290,20 +290,6 @@ TEST_CASE("the undo stack is bounded")
     CHECK(single.peek_undo()->path == "huge");
 }
 
-TEST_CASE("switching conversations clears the undo stack")
-{
-    imza::Session session;
-    session.push_undo({ { "a", "1", "2", imza::FileChange::Kind::MODIFIED } });
-    session.set_pending_undo(
-        imza::FileChange { "b", "1", "2", imza::FileChange::Kind::MODIFIED });
-    REQUIRE(session.undo_depth() == 1);
-
-    session.restore(imza::SessionSnapshot { });
-
-    CHECK(session.undo_depth() == 0);
-    CHECK_FALSE(session.pending_undo().has_value());
-}
-
 TEST_CASE("undo reverts a modification")
 {
     imza::test::IsolatedDataHome home;
@@ -700,6 +686,17 @@ TEST_CASE("a new session clears the undo stack")
     env.record({ });
     REQUIRE(env.state->session->undo_depth() == 1);
 
+    // A direct restore drops the stack and the parked entry.
+    imza::Session session;
+    session.push_undo({ { "a", "1", "2", imza::FileChange::Kind::MODIFIED } });
+    session.set_pending_undo(
+        imza::FileChange { "b", "1", "2", imza::FileChange::Kind::MODIFIED });
+    REQUIRE(session.undo_depth() == 1);
+    session.restore(imza::SessionSnapshot { });
+    CHECK(session.undo_depth() == 0);
+    CHECK_FALSE(session.pending_undo().has_value());
+
+    // And the /new slash command goes through the same path.
     imza::run_slash(*env.state, "/new");
 
     CHECK(env.state->session->undo_depth() == 0);

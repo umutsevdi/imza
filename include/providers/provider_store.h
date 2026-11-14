@@ -152,6 +152,9 @@ private:
         struct Fetching { };
         struct Ready {
             std::vector<ModelInfo> models;
+            // Pre-lowered ids in `models` order so lookups never re-
+            // lowercase the list per call.
+            std::vector<std::string> lowered_ids;
         };
         struct Failed {
             Status status = Status::OK;

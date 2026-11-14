@@ -30,18 +30,6 @@ namespace {
     constexpr const char* PERMISSION_METHOD = "session/request_permission";
     constexpr const char* ELICIT_METHOD     = "elicitation/create";
 
-    // Mirrors app/flows' file-private install_session. A child state owns
-    // no subagent manager, so pruning is guarded.
-    void install_session(ApplicationState& state, SessionSnapshot snapshot)
-    {
-        state.session->restore(std::move(snapshot));
-        state.permissions->clear();
-        state.runner->clear();
-        if (state.subagents != nullptr) {
-            state.subagents->prune_completed();
-        }
-    }
-
     std::string mode_name(Session::Mode mode)
     {
         return mode == Session::Mode::PLAN ? "plan" : "build";

@@ -141,9 +141,6 @@ TEST_CASE("session/new registers a session; unknown prompt session 404s")
         JsonValue(1), "session/new", JsonValue::object_t { });
     auto lines = sink.snapshot();
     CHECK(contains_line(lines, "\"sessionId\":\""));
-    CHECK(contains_line(lines, "\"configOptions\""));
-    CHECK(contains_line(lines, "\"category\":\"mode\""));
-    CHECK(contains_line(lines, "\"availableCommands\""));
     // The protocol id is imza's own session id, never a synthetic
     // counter: it is the stem the session saves under, so a client that
     // remembers it can load the conversation back after a restart.

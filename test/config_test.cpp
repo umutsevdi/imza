@@ -45,14 +45,29 @@ static_assert(
 static_assert(
     imza::subagent_default_variant(imza::SubagentRole::BASIC) == "off");
 
-TEST_CASE("load_config missing file yields empty config")
+TEST_CASE("load_config yields an empty config without provider data")
 {
-    const auto path = temp_file("missing.json");
-    imza::Config cfg;
-    std::string error;
-    CHECK(imza::load_config(path, cfg, &error) == imza::Status::OK);
-    CHECK(cfg.providers.empty());
-    CHECK_FALSE(cfg.last_used.has_value());
+    SUBCASE("a missing file loads empty")
+    {
+        const auto path = temp_file("missing.json");
+        imza::Config cfg;
+        std::string error;
+        CHECK(imza::load_config(path, cfg, &error) == imza::Status::OK);
+        CHECK(cfg.providers.empty());
+        CHECK_FALSE(cfg.last_used.has_value());
+    }
+
+    SUBCASE("a body without providers or legacy id loads empty")
+    {
+        const auto path = temp_file("empty.json");
+        {
+            std::ofstream out(path);
+            out << R"({"other": 1})";
+        }
+        imza::Config cfg;
+        CHECK(imza::load_config(path, cfg) == imza::Status::OK);
+        CHECK(cfg.providers.empty());
+    }
 }
 
 TEST_CASE("load_config corrupt JSON fails")
@@ -66,18 +81,6 @@ TEST_CASE("load_config corrupt JSON fails")
     std::string error;
     CHECK(imza::load_config(path, cfg, &error) == imza::Status::CONFIG_ERROR);
     CHECK_FALSE(error.empty());
-}
-
-TEST_CASE("load_config legacy-less body without providers is empty")
-{
-    const auto path = temp_file("empty.json");
-    {
-        std::ofstream out(path);
-        out << "{\"other\": 1}";
-    }
-    imza::Config cfg;
-    CHECK(imza::load_config(path, cfg) == imza::Status::OK);
-    CHECK(cfg.providers.empty());
 }
 
 TEST_CASE("preferences default to the os keychain")
@@ -211,90 +214,294 @@ TEST_CASE("the keychain wins over a stale plaintext field")
     CHECK(store.remove(key) == imza::Status::OK);
 }
 
-TEST_CASE("config roundtrip preserves connections and last_used")
+TEST_CASE("config roundtrip preserves round-tripped fields")
 {
-    const auto path = temp_file("roundtrip.json");
-    imza::Config cfg;
-    cfg.preferences.credentials = imza::Preferences::Credentials::PLAINTEXT;
-    imza::CredentialSubsystem store(imza::CredentialSubsystem::Mode::PLAINTEXT);
-    imza::Connection conn;
-    conn.id            = "openrouter";
-    conn.api_key       = "sk-or-test";
-    conn.refresh_token = "refresh-test";
-    conn.expires_at    = 1756390000;
-    conn.account_id    = "account-test";
-    cfg.providers.push_back(conn);
+    SUBCASE("connections and last_used")
+    {
+        const auto path = temp_file("roundtrip.json");
+        imza::Config cfg;
+        cfg.preferences.credentials = imza::Preferences::Credentials::PLAINTEXT;
+        imza::CredentialSubsystem store(
+            imza::CredentialSubsystem::Mode::PLAINTEXT);
+        imza::Connection conn;
+        conn.id            = "openrouter";
+        conn.api_key       = "sk-or-test";
+        conn.refresh_token = "refresh-test";
+        conn.expires_at    = 1756390000;
+        conn.account_id    = "account-test";
+        cfg.providers.push_back(conn);
 
-    imza::Connection local;
-    local.id                  = "local";
-    local.endpoint            = "http://localhost:11434/v1/chat/completions";
-    local.label               = "my Ollama";
-    local.dialects["glm-5.3"] = imza::ApiStandard::ANTHROPIC;
-    local.dialects["gpt-responses"] = imza::ApiStandard::OPENAI_RESPONSES;
-    cfg.providers.push_back(local);
+        imza::Connection local;
+        local.id       = "local";
+        local.endpoint = "http://localhost:11434/v1/chat/completions";
+        local.label    = "my Ollama";
+        local.dialects["glm-5.3"]       = imza::ApiStandard::ANTHROPIC;
+        local.dialects["gpt-responses"] = imza::ApiStandard::OPENAI_RESPONSES;
+        cfg.providers.push_back(local);
 
-    cfg.last_used        = imza::LastUsed { "openrouter", "" };
-    cfg.reasoning_effort = "high";
+        cfg.last_used        = imza::LastUsed { "openrouter", "" };
+        cfg.reasoning_effort = "high";
 
-    REQUIRE(imza::save_config(path, cfg, &store) == imza::Status::OK);
+        REQUIRE(imza::save_config(path, cfg, &store) == imza::Status::OK);
 
-    imza::Config loaded;
-    CHECK(imza::load_config(path, loaded) == imza::Status::OK);
-    CHECK(loaded.preferences.credentials
-        == imza::Preferences::Credentials::PLAINTEXT);
-    REQUIRE(loaded.providers.size() == 2);
-    CHECK(loaded.providers[0].id == "openrouter");
-    CHECK(loaded.providers[0].api_key == "sk-or-test");
-    CHECK(loaded.providers[0].refresh_token == "refresh-test");
-    CHECK(loaded.providers[0].expires_at == 1756390000);
-    CHECK(loaded.providers[0].account_id == "account-test");
-    CHECK(loaded.providers[0].endpoint.empty());
-    CHECK(loaded.providers[0].label.empty());
-    CHECK(loaded.providers[1].label == "my Ollama");
-    CHECK(loaded.providers[1].endpoint
-        == "http://localhost:11434/v1/chat/completions");
-    REQUIRE(loaded.providers[1].dialects.count("glm-5.3") == 1);
-    CHECK(loaded.providers[1].dialects.at("glm-5.3")
-        == imza::ApiStandard::ANTHROPIC);
-    CHECK(loaded.providers[1].dialects.at("gpt-responses")
-        == imza::ApiStandard::OPENAI_RESPONSES);
-    REQUIRE(loaded.last_used.has_value());
-    CHECK(loaded.last_used->provider == "openrouter");
-    CHECK(loaded.last_used->model.empty());
-    CHECK(loaded.reasoning_effort == "high");
-    const imza::JsonValue written
-        = imza::parse_json(imza::test::read_all(path));
-    REQUIRE(written.is_object());
-    const imza::JsonValue* providers = imza::find_member(written, "providers");
-    REQUIRE(providers != nullptr);
-    REQUIRE(providers->is_array());
-    const auto& provider_list = providers->get<imza::JsonValue::array_t>();
-    REQUIRE(provider_list.size() == 2);
-    CHECK(json_str(imza::find_member(provider_list[0], "id")) == "openrouter");
-    CHECK_FALSE(json_has(provider_list[0], "active"));
-    CHECK_FALSE(json_has(provider_list[0], "provider_id"));
-    CHECK_FALSE(json_has(provider_list[0], "endpoint"));
-    CHECK_FALSE(json_has(provider_list[0], "label"));
-    CHECK_FALSE(json_has(provider_list[0], "dialects"));
-    CHECK_FALSE(json_has(provider_list[1], "api_key"));
-    CHECK_FALSE(json_has(provider_list[1], "refresh_token"));
-    CHECK_FALSE(json_has(provider_list[1], "expires_at"));
-    CHECK_FALSE(json_has(provider_list[1], "account_id"));
-    CHECK(
-        json_str(imza::find_member(provider_list[1], "label")) == "my Ollama");
-    const imza::JsonValue* dialects
-        = imza::find_member(provider_list[1], "dialects");
-    REQUIRE(dialects != nullptr);
-    CHECK(json_str(imza::find_member(*dialects, "gpt-responses"))
-        == "openai-responses");
-    const imza::JsonValue* models = imza::find_member(written, "models");
-    REQUIRE(models != nullptr);
-    const imza::JsonValue* main = imza::find_member(*models, "main");
-    REQUIRE(main != nullptr);
-    CHECK(json_str(imza::find_member(*main, "provider")) == "openrouter");
-    CHECK(json_str(imza::find_member(*main, "reasoning_effort")) == "high");
-    CHECK_FALSE(json_has(written, "last_used"));
-    CHECK_FALSE(json_has(written, "reasoning_effort"));
+        imza::Config loaded;
+        CHECK(imza::load_config(path, loaded) == imza::Status::OK);
+        CHECK(loaded.preferences.credentials
+            == imza::Preferences::Credentials::PLAINTEXT);
+        REQUIRE(loaded.providers.size() == 2);
+        CHECK(loaded.providers[0].id == "openrouter");
+        CHECK(loaded.providers[0].api_key == "sk-or-test");
+        CHECK(loaded.providers[0].refresh_token == "refresh-test");
+        CHECK(loaded.providers[0].expires_at == 1756390000);
+        CHECK(loaded.providers[0].account_id == "account-test");
+        CHECK(loaded.providers[0].endpoint.empty());
+        CHECK(loaded.providers[0].label.empty());
+        CHECK(loaded.providers[1].label == "my Ollama");
+        CHECK(loaded.providers[1].endpoint
+            == "http://localhost:11434/v1/chat/completions");
+        REQUIRE(loaded.providers[1].dialects.count("glm-5.3") == 1);
+        CHECK(loaded.providers[1].dialects.at("glm-5.3")
+            == imza::ApiStandard::ANTHROPIC);
+        CHECK(loaded.providers[1].dialects.at("gpt-responses")
+            == imza::ApiStandard::OPENAI_RESPONSES);
+        REQUIRE(loaded.last_used.has_value());
+        CHECK(loaded.last_used->provider == "openrouter");
+        CHECK(loaded.last_used->model.empty());
+        CHECK(loaded.reasoning_effort == "high");
+        const imza::JsonValue written
+            = imza::parse_json(imza::test::read_all(path));
+        REQUIRE(written.is_object());
+        const imza::JsonValue* providers
+            = imza::find_member(written, "providers");
+        REQUIRE(providers != nullptr);
+        REQUIRE(providers->is_array());
+        const auto& provider_list = providers->get<imza::JsonValue::array_t>();
+        REQUIRE(provider_list.size() == 2);
+        CHECK(json_str(imza::find_member(provider_list[0], "id"))
+            == "openrouter");
+        CHECK_FALSE(json_has(provider_list[0], "active"));
+        CHECK_FALSE(json_has(provider_list[0], "provider_id"));
+        CHECK_FALSE(json_has(provider_list[0], "endpoint"));
+        CHECK_FALSE(json_has(provider_list[0], "label"));
+        CHECK_FALSE(json_has(provider_list[0], "dialects"));
+        CHECK_FALSE(json_has(provider_list[1], "api_key"));
+        CHECK_FALSE(json_has(provider_list[1], "refresh_token"));
+        CHECK_FALSE(json_has(provider_list[1], "expires_at"));
+        CHECK_FALSE(json_has(provider_list[1], "account_id"));
+        CHECK(json_str(imza::find_member(provider_list[1], "label"))
+            == "my Ollama");
+        const imza::JsonValue* dialects
+            = imza::find_member(provider_list[1], "dialects");
+        REQUIRE(dialects != nullptr);
+        CHECK(json_str(imza::find_member(*dialects, "gpt-responses"))
+            == "openai-responses");
+        const imza::JsonValue* models = imza::find_member(written, "models");
+        REQUIRE(models != nullptr);
+        const imza::JsonValue* main = imza::find_member(*models, "main");
+        REQUIRE(main != nullptr);
+        CHECK(json_str(imza::find_member(*main, "provider")) == "openrouter");
+        CHECK(json_str(imza::find_member(*main, "reasoning_effort")) == "high");
+        CHECK_FALSE(json_has(written, "last_used"));
+        CHECK_FALSE(json_has(written, "reasoning_effort"));
+    }
+
+    SUBCASE("global and project skill policies")
+    {
+        const auto path = temp_file("skills.json");
+        imza::Config cfg;
+        cfg.global_skills["docs"]   = imza::SkillPolicy::ALLOW;
+        cfg.global_skills["deploy"] = imza::SkillPolicy::DENY;
+        cfg.project_skills["/work/project"]["release"] = imza::SkillPolicy::ASK;
+        REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
+        imza::Config loaded;
+        REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
+        CHECK(loaded.global_skills.at("docs") == imza::SkillPolicy::ALLOW);
+        CHECK(loaded.global_skills.at("deploy") == imza::SkillPolicy::DENY);
+        CHECK(loaded.project_skills.at("/work/project").at("release")
+            == imza::SkillPolicy::ASK);
+    }
+
+    SUBCASE("subagent models")
+    {
+        const auto path = temp_file("subagents.json");
+        imza::Config cfg;
+        imza::Connection connection;
+        connection.id = "openai";
+        cfg.providers.push_back(std::move(connection));
+        cfg.subagents[imza::SubagentRole::BUILDER]
+            = { "openai", "gpt-builder", "" };
+        cfg.subagents[imza::SubagentRole::RESEARCH]
+            = { "openai", "gpt-research", "high" };
+        cfg.subagents[imza::SubagentRole::BASIC]
+            = { "openai", "gpt-basic", "low" };
+
+        REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
+        imza::Config loaded;
+        REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
+        CHECK(loaded.subagents.at(imza::SubagentRole::BUILDER).model
+            == "gpt-builder");
+        CHECK(loaded.subagents.at(imza::SubagentRole::RESEARCH).variant
+            == "high");
+        CHECK(loaded.subagents.at(imza::SubagentRole::BASIC).variant == "low");
+        const std::string json = imza::test::read_all(path);
+        CHECK(json.find("\"models\"") != std::string::npos);
+        CHECK(json.find("\"researcher\"") != std::string::npos);
+        CHECK(json.find("\"subagents\"") == std::string::npos);
+    }
+
+    SUBCASE("mcp servers")
+    {
+        const auto path = temp_file("mcp-roundtrip.json");
+        imza::Config cfg;
+        imza::McpServerConfig server;
+        server.label                = "Exa";
+        server.description          = "Web search";
+        server.url                  = "https://mcp.exa.ai/mcp";
+        server.headers["x-api-key"] = "secret";
+        server.bearer_token         = "tok";
+        server.autoload             = true;
+        cfg.mcp_servers["exa"]      = server;
+
+        REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
+
+        imza::Config loaded;
+        REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
+        REQUIRE(loaded.mcp_servers.size() == 1);
+        const imza::McpServerConfig& back = loaded.mcp_servers.at("exa");
+        CHECK(back.id == "exa");
+        CHECK(back.label == "Exa");
+        CHECK(back.description == "Web search");
+        CHECK(back.url == "https://mcp.exa.ai/mcp");
+        CHECK(back.headers.at("x-api-key") == "secret");
+        CHECK(back.bearer_token == "tok");
+        CHECK(back.enabled);
+        CHECK(back.autoload);
+    }
+
+    SUBCASE("mcp oauth credentials")
+    {
+        const auto path = temp_file("mcp-oauth-roundtrip.json");
+        imza::Config cfg;
+        imza::McpServerConfig server;
+        server.label               = "Linear";
+        server.catalog_id          = "linear";
+        server.oauth.client_id     = "cid";
+        server.oauth.client_secret = "csecret";
+        server.oauth.issuer        = "https://auth.linear.app";
+        server.oauth.authorization_endpoint
+            = "https://auth.linear.app/oauth/authorize";
+        server.oauth.token_endpoint = "https://auth.linear.app/oauth/token";
+        server.oauth.registration_endpoint
+            = "https://auth.linear.app/oauth/register";
+        server.oauth.scopes        = "read write";
+        server.oauth.access_token  = "tok-1";
+        server.oauth.refresh_token = "refresh-1";
+        server.oauth.expires_at    = 1900000000;
+        cfg.mcp_servers["linear"]  = server;
+
+        REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
+
+        imza::Config loaded;
+        REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
+        REQUIRE(loaded.mcp_servers.size() == 1);
+        const imza::McpOauthCredentials& back
+            = loaded.mcp_servers.at("linear").oauth;
+        CHECK(back == server.oauth);
+
+        // Only the signed-in state persists; an unsigned entry stays minimal.
+        const std::optional<std::string> text = imza::read_text_file(path);
+        REQUIRE(text.has_value());
+        CHECK(text->find(R"("oauth")") != std::string::npos);
+        imza::Config bare;
+        bare.mcp_servers["plain"]     = imza::McpServerConfig { };
+        bare.mcp_servers["plain"].url = "https://mcp.example.com/mcp";
+        const auto bare_path          = temp_file("mcp-oauth-absent.json");
+        REQUIRE(imza::save_config(bare_path, bare) == imza::Status::OK);
+        const std::optional<std::string> bare_text
+            = imza::read_text_file(bare_path);
+        REQUIRE(bare_text.has_value());
+        CHECK(bare_text->find(R"("oauth")") == std::string::npos);
+    }
+
+    SUBCASE("a stdio mcp server")
+    {
+        const auto path = temp_file("mcp-stdio-roundtrip.json");
+        imza::Config cfg;
+        imza::McpServerConfig server;
+        server.id      = "local";
+        server.type    = "stdio";
+        server.command = "npx";
+        server.args    = { "-y", "@modelcontextprotocol/server-filesystem" };
+        server.env["TOKEN"]      = "abc";
+        server.working_directory = "/tmp";
+        cfg.mcp_servers["local"] = server;
+
+        REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
+        imza::Config loaded;
+        REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
+        const imza::McpServerConfig& back = loaded.mcp_servers.at("local");
+        CHECK(back.type == "stdio");
+        CHECK(back.is_stdio());
+        CHECK(back.command == "npx");
+        REQUIRE(back.args.size() == 2);
+        CHECK(back.args[1] == "@modelcontextprotocol/server-filesystem");
+        CHECK(back.env.at("TOKEN") == "abc");
+        CHECK(back.working_directory == "/tmp");
+        CHECK(back.url.empty());
+    }
+
+    SUBCASE("the allow list and instructions")
+    {
+        const auto path = temp_file("allow-roundtrip.json");
+        imza::Config cfg;
+        cfg.allow.directories.emplace_back("/work/project");
+        cfg.allow.commands.push_back(imza::ShellCommandGrant { "git", "push" });
+        cfg.allow.commands.push_back(
+            imza::ShellCommandGrant { "rg", std::nullopt });
+        cfg.instructions.push_back("docs/guide.md");
+
+        REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
+
+        imza::Config loaded;
+        REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
+        REQUIRE(loaded.allow.directories.size() == 1);
+        // The document stores path::string(), which spells separators the
+        // host's way; compare the portable form so the check holds on every
+        // platform.
+        CHECK(loaded.allow.directories[0].generic_string() == "/work/project");
+        REQUIRE(loaded.allow.commands.size() == 2);
+        CHECK(loaded.allow.commands[0].program == "git");
+        CHECK(loaded.allow.commands[0].subcommand == "push");
+        CHECK(loaded.allow.commands[1].program == "rg");
+        CHECK_FALSE(loaded.allow.commands[1].subcommand.has_value());
+        REQUIRE(loaded.instructions.size() == 1);
+        CHECK(loaded.instructions[0] == "docs/guide.md");
+    }
+
+    SUBCASE("hidden sidebar widgets")
+    {
+        const auto path = temp_file("sidebar-roundtrip.json");
+        imza::Config cfg;
+        cfg.sidebar.documents     = false;
+        cfg.sidebar.changed_files = false;
+
+        REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
+
+        // Only the flags that differ from the default are written.
+        const std::string json = imza::test::read_all(path);
+        CHECK(json.find(R"("documents")") != std::string::npos);
+        CHECK(json.find(R"("changed_files")") != std::string::npos);
+        CHECK(json.find(R"("tasks")") == std::string::npos);
+        CHECK(json.find(R"("context")") == std::string::npos);
+
+        imza::Config loaded;
+        REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
+        CHECK_FALSE(loaded.sidebar.documents);
+        CHECK_FALSE(loaded.sidebar.changed_files);
+        CHECK(loaded.sidebar.review_comments);
+        CHECK(loaded.sidebar.tasks);
+        CHECK(loaded.sidebar.runtime);
+    }
 }
 
 TEST_CASE("load_config rejects providers without id")
@@ -501,48 +708,6 @@ TEST_CASE("concurrent config updates preserve unrelated changes")
     CHECK(loaded.global_skills.size() == count);
 }
 
-TEST_CASE("config roundtrip preserves global and project skill policies")
-{
-    const auto path = temp_file("skills.json");
-    imza::Config cfg;
-    cfg.global_skills["docs"]                      = imza::SkillPolicy::ALLOW;
-    cfg.global_skills["deploy"]                    = imza::SkillPolicy::DENY;
-    cfg.project_skills["/work/project"]["release"] = imza::SkillPolicy::ASK;
-    REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
-    imza::Config loaded;
-    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
-    CHECK(loaded.global_skills.at("docs") == imza::SkillPolicy::ALLOW);
-    CHECK(loaded.global_skills.at("deploy") == imza::SkillPolicy::DENY);
-    CHECK(loaded.project_skills.at("/work/project").at("release")
-        == imza::SkillPolicy::ASK);
-}
-
-TEST_CASE("config roundtrip preserves subagent models")
-{
-    const auto path = temp_file("subagents.json");
-    imza::Config cfg;
-    imza::Connection connection;
-    connection.id = "openai";
-    cfg.providers.push_back(std::move(connection));
-    cfg.subagents[imza::SubagentRole::BUILDER]
-        = { "openai", "gpt-builder", "" };
-    cfg.subagents[imza::SubagentRole::RESEARCH]
-        = { "openai", "gpt-research", "high" };
-    cfg.subagents[imza::SubagentRole::BASIC] = { "openai", "gpt-basic", "low" };
-
-    REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
-    imza::Config loaded;
-    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
-    CHECK(loaded.subagents.at(imza::SubagentRole::BUILDER).model
-        == "gpt-builder");
-    CHECK(loaded.subagents.at(imza::SubagentRole::RESEARCH).variant == "high");
-    CHECK(loaded.subagents.at(imza::SubagentRole::BASIC).variant == "low");
-    const std::string json = imza::test::read_all(path);
-    CHECK(json.find("\"models\"") != std::string::npos);
-    CHECK(json.find("\"researcher\"") != std::string::npos);
-    CHECK(json.find("\"subagents\"") == std::string::npos);
-}
-
 TEST_CASE("legacy reviewer key folds into the basic role")
 {
     const auto path = temp_file("legacy-reviewer.json");
@@ -632,80 +797,6 @@ TEST_CASE("load_config rejects invalid nested configuration values")
         imza::Config cfg;
         CHECK(imza::load_config(path, cfg) == imza::Status::CONFIG_ERROR);
     }
-}
-
-TEST_CASE("config roundtrip preserves mcp servers")
-{
-    const auto path = temp_file("mcp-roundtrip.json");
-    imza::Config cfg;
-    imza::McpServerConfig server;
-    server.label                = "Exa";
-    server.description          = "Web search";
-    server.url                  = "https://mcp.exa.ai/mcp";
-    server.headers["x-api-key"] = "secret";
-    server.bearer_token         = "tok";
-    server.autoload             = true;
-    cfg.mcp_servers["exa"]      = server;
-
-    REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
-
-    imza::Config loaded;
-    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
-    REQUIRE(loaded.mcp_servers.size() == 1);
-    const imza::McpServerConfig& back = loaded.mcp_servers.at("exa");
-    CHECK(back.id == "exa");
-    CHECK(back.label == "Exa");
-    CHECK(back.description == "Web search");
-    CHECK(back.url == "https://mcp.exa.ai/mcp");
-    CHECK(back.headers.at("x-api-key") == "secret");
-    CHECK(back.bearer_token == "tok");
-    CHECK(back.enabled);
-    CHECK(back.autoload);
-}
-
-TEST_CASE("config roundtrip preserves mcp oauth credentials")
-{
-    const auto path = temp_file("mcp-oauth-roundtrip.json");
-    imza::Config cfg;
-    imza::McpServerConfig server;
-    server.label               = "Linear";
-    server.catalog_id          = "linear";
-    server.oauth.client_id     = "cid";
-    server.oauth.client_secret = "csecret";
-    server.oauth.issuer        = "https://auth.linear.app";
-    server.oauth.authorization_endpoint
-        = "https://auth.linear.app/oauth/authorize";
-    server.oauth.token_endpoint = "https://auth.linear.app/oauth/token";
-    server.oauth.registration_endpoint
-        = "https://auth.linear.app/oauth/register";
-    server.oauth.scopes        = "read write";
-    server.oauth.access_token  = "tok-1";
-    server.oauth.refresh_token = "refresh-1";
-    server.oauth.expires_at    = 1900000000;
-    cfg.mcp_servers["linear"]  = server;
-
-    REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
-
-    imza::Config loaded;
-    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
-    REQUIRE(loaded.mcp_servers.size() == 1);
-    const imza::McpOauthCredentials& back
-        = loaded.mcp_servers.at("linear").oauth;
-    CHECK(back == server.oauth);
-
-    // Only the signed-in state persists; an unsigned entry stays minimal.
-    const std::optional<std::string> text = imza::read_text_file(path);
-    REQUIRE(text.has_value());
-    CHECK(text->find("\"oauth\"") != std::string::npos);
-    imza::Config bare;
-    bare.mcp_servers["plain"]     = imza::McpServerConfig { };
-    bare.mcp_servers["plain"].url = "https://mcp.example.com/mcp";
-    const auto bare_path          = temp_file("mcp-oauth-absent.json");
-    REQUIRE(imza::save_config(bare_path, bare) == imza::Status::OK);
-    const std::optional<std::string> bare_text
-        = imza::read_text_file(bare_path);
-    REQUIRE(bare_text.has_value());
-    CHECK(bare_text->find("\"oauth\"") == std::string::npos);
 }
 
 TEST_CASE("load_config validates mcp oauth entries")
@@ -839,33 +930,6 @@ TEST_CASE("mcp config accepts catalogue references without urls")
         imza::load_config(neither, bad, &error) == imza::Status::CONFIG_ERROR);
     CHECK(error.find("url or a catalog id") != std::string::npos);
 }
-TEST_CASE("config roundtrips a stdio mcp server")
-{
-    const auto path = temp_file("mcp-stdio-roundtrip.json");
-    imza::Config cfg;
-    imza::McpServerConfig server;
-    server.id           = "local";
-    server.type         = "stdio";
-    server.command      = "npx";
-    server.args         = { "-y", "@modelcontextprotocol/server-filesystem" };
-    server.env["TOKEN"] = "abc";
-    server.working_directory = "/tmp";
-    cfg.mcp_servers["local"] = server;
-
-    REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
-    imza::Config loaded;
-    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
-    const imza::McpServerConfig& back = loaded.mcp_servers.at("local");
-    CHECK(back.type == "stdio");
-    CHECK(back.is_stdio());
-    CHECK(back.command == "npx");
-    REQUIRE(back.args.size() == 2);
-    CHECK(back.args[1] == "@modelcontextprotocol/server-filesystem");
-    CHECK(back.env.at("TOKEN") == "abc");
-    CHECK(back.working_directory == "/tmp");
-    CHECK(back.url.empty());
-}
-
 TEST_CASE("load_config validates stdio mcp server entries")
 {
     const auto no_command = temp_file("mcp-stdio-no-command.json");
@@ -901,33 +965,6 @@ TEST_CASE("load_config validates stdio mcp server entries")
     CHECK(plain.mcp_servers.at("x").type == "http");
     CHECK_FALSE(plain.mcp_servers.at("x").is_stdio());
 }
-TEST_CASE("config roundtrip preserves the allow list and instructions")
-{
-    const auto path = temp_file("allow-roundtrip.json");
-    imza::Config cfg;
-    cfg.allow.directories.emplace_back("/work/project");
-    cfg.allow.commands.push_back(imza::ShellCommandGrant { "git", "push" });
-    cfg.allow.commands.push_back(
-        imza::ShellCommandGrant { "rg", std::nullopt });
-    cfg.instructions.push_back("docs/guide.md");
-
-    REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
-
-    imza::Config loaded;
-    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
-    REQUIRE(loaded.allow.directories.size() == 1);
-    // The document stores path::string(), which spells separators the host's
-    // way; compare the portable form so the check holds on every platform.
-    CHECK(loaded.allow.directories[0].generic_string() == "/work/project");
-    REQUIRE(loaded.allow.commands.size() == 2);
-    CHECK(loaded.allow.commands[0].program == "git");
-    CHECK(loaded.allow.commands[0].subcommand == "push");
-    CHECK(loaded.allow.commands[1].program == "rg");
-    CHECK_FALSE(loaded.allow.commands[1].subcommand.has_value());
-    REQUIRE(loaded.instructions.size() == 1);
-    CHECK(loaded.instructions[0] == "docs/guide.md");
-}
-
 TEST_CASE("allow grants skip directories that no longer exist")
 {
     const imza::test::TempDir dir;
@@ -1051,29 +1088,4 @@ TEST_CASE("a legacy sidebar update flag is ignored, not rejected")
     REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
     CHECK_FALSE(loaded.sidebar.documents);
     CHECK(loaded.sidebar.review_comments);
-}
-
-TEST_CASE("config roundtrip preserves hidden sidebar widgets")
-{
-    const auto path = temp_file("sidebar-roundtrip.json");
-    imza::Config cfg;
-    cfg.sidebar.documents     = false;
-    cfg.sidebar.changed_files = false;
-
-    REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
-
-    // Only the flags that differ from the default are written.
-    const std::string json = imza::test::read_all(path);
-    CHECK(json.find("\"documents\"") != std::string::npos);
-    CHECK(json.find("\"changed_files\"") != std::string::npos);
-    CHECK(json.find("\"tasks\"") == std::string::npos);
-    CHECK(json.find("\"context\"") == std::string::npos);
-
-    imza::Config loaded;
-    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
-    CHECK_FALSE(loaded.sidebar.documents);
-    CHECK_FALSE(loaded.sidebar.changed_files);
-    CHECK(loaded.sidebar.review_comments);
-    CHECK(loaded.sidebar.tasks);
-    CHECK(loaded.sidebar.runtime);
 }

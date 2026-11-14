@@ -5,12 +5,12 @@
 #include <condition_variable>
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
-#include <unordered_map>
 #include <vector>
 
 #include "common/imza_signal.h"
@@ -86,7 +86,7 @@ private:
     std::string _reason;
     // Encoded secrets by keychain key, filled by the worker and kept current
     // by set()/remove().
-    std::unordered_map<std::string, std::string> _secrets;
+    std::map<std::string, std::string, std::less<>> _secrets;
     std::atomic<bool> _ready { false };
     std::atomic<std::uint64_t> _generation { 0 };
     std::jthread _worker;

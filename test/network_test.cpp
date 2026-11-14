@@ -646,10 +646,8 @@ TEST_CASE("base64 decodes padded input and rejects malformed data")
     CHECK_FALSE(imza::base64_decode("Zm9vY2Fk!").has_value());
     CHECK_FALSE(imza::base64_decode("Zm9=Y2F0").has_value());
     CHECK_FALSE(imza::base64_decode("Z=====").has_value());
-}
 
-TEST_CASE("base64 round-trips every byte value")
-{
+    // Every byte value survives an encode/decode round trip.
     std::string bytes;
     for (int i = 0; i < 256; ++i) {
         bytes += static_cast<char>(i);

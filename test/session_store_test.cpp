@@ -28,6 +28,21 @@ namespace {
 
 using JsonValue = imza::JsonValue;
 
+// True when every byte in `text` belongs to a valid UTF-8 sequence.
+// Stands in for the removed util.h helper at the two transcript checks
+// that assert no malformed byte survived persistence.
+bool all_valid_utf8(std::string_view text)
+{
+    for (std::size_t i = 0; i < text.size();) {
+        const std::size_t length = imza::utf8_valid_sequence_length(text, i);
+        if (length == 0) {
+            return false;
+        }
+        i += length;
+    }
+    return true;
+}
+
 imza::Status load_session(const std::filesystem::path& path,
     imza::Session& session, std::filesystem::path* workspace = nullptr)
 {
@@ -244,61 +259,189 @@ TEST_CASE("saved sessions retain delegated-agent chat transcripts")
         call.subagent_chats[0].transcript.find("report") != std::string::npos);
 }
 
-TEST_CASE("lua dispatch log survives session persistence")
+TEST_CASE("rich tool results survive session persistence")
 {
     DataHome home;
-    const imza::ToolCallRequest request { "lua",
-        R"json({"script":"print(1)"})json", "", "call-1" };
-    imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT,
-        "1\n" };
-    result.dispatch_log
-        = { { "read", "/tmp/a", true }, { "sh", "false", false } };
 
-    imza::Session source;
-    make_tool_session(request, std::move(result), source);
-    imza::Session loaded;
-    roundtrip(source, loaded);
-    const auto loaded_items = loaded.items();
-    REQUIRE(loaded_items->size() == 3);
-    const auto& call = std::get<imza::ToolCall>((*loaded_items)[2]);
-    REQUIRE(call.result.has_value());
-    REQUIRE(call.result->dispatch_log.size() == 2);
-    const imza::LuaBindingCall read { "read", "/tmp/a", true };
-    const imza::LuaBindingCall shell { "sh", "false", false };
-    CHECK(call.result->dispatch_log[0] == read);
-    CHECK(call.result->dispatch_log[1] == shell);
-}
+    SUBCASE("the lua dispatch log")
+    {
+        const imza::ToolCallRequest request { "lua",
+            R"json({"script":"print(1)"})json", "", "call-1" };
+        imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT,
+            "1\n" };
+        result.dispatch_log
+            = { { "read", "/tmp/a", true }, { "sh", "false", false } };
 
-TEST_CASE("lua return value survives session persistence")
-{
-    DataHome home;
-    const imza::ToolCallRequest request { "lua",
-        R"json({"script":"return {a = 1}"})json", "", "call-1" };
-    imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT, "" };
-    result.return_value
-        = imza::parse_json(R"json({"a":1,"b":[true,null]})json");
+        imza::Session source;
+        make_tool_session(request, std::move(result), source);
+        imza::Session loaded;
+        roundtrip(source, loaded);
+        const auto loaded_items = loaded.items();
+        REQUIRE(loaded_items->size() == 3);
+        const auto& call = std::get<imza::ToolCall>((*loaded_items)[2]);
+        REQUIRE(call.result.has_value());
+        REQUIRE(call.result->dispatch_log.size() == 2);
+        const imza::LuaBindingCall read { "read", "/tmp/a", true };
+        const imza::LuaBindingCall shell { "sh", "false", false };
+        CHECK(call.result->dispatch_log[0] == read);
+        CHECK(call.result->dispatch_log[1] == shell);
+    }
 
-    imza::Session source;
-    make_tool_session(request, std::move(result), source);
-    imza::Session loaded;
-    roundtrip(source, loaded);
-    const auto loaded_items = loaded.items();
-    const auto& call        = std::get<imza::ToolCall>((*loaded_items)[2]);
-    REQUIRE(call.result.has_value());
-    REQUIRE(call.result->return_value.has_value());
-    const imza::JsonValue& returned = *call.result->return_value;
-    const imza::JsonValue* a        = imza::find_member(returned, "a");
-    REQUIRE(a != nullptr);
-    const int a_value = a->as<int>();
-    CHECK(a_value == 1);
-    const imza::JsonValue* b = imza::find_member(returned, "b");
-    REQUIRE(b != nullptr);
-    REQUIRE(b->is_array());
-    const auto& b_array = b->get<JsonValue::array_t>();
-    REQUIRE(b_array.size() == 2);
-    REQUIRE(b_array[0].is_boolean());
-    CHECK(b_array[0].get<bool>());
-    CHECK(b_array[1].is_null());
+    SUBCASE("the lua return value")
+    {
+        const imza::ToolCallRequest request { "lua",
+            R"json({"script":"return {a = 1}"})json", "", "call-1" };
+        imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT,
+            "" };
+        result.return_value
+            = imza::parse_json(R"json({"a":1,"b":[true,null]})json");
+
+        imza::Session source;
+        make_tool_session(request, std::move(result), source);
+        imza::Session loaded;
+        roundtrip(source, loaded);
+        const auto loaded_items = loaded.items();
+        const auto& call        = std::get<imza::ToolCall>((*loaded_items)[2]);
+        REQUIRE(call.result.has_value());
+        REQUIRE(call.result->return_value.has_value());
+        const imza::JsonValue& returned = *call.result->return_value;
+        const imza::JsonValue* a        = imza::find_member(returned, "a");
+        REQUIRE(a != nullptr);
+        const int a_value = a->as<int>();
+        CHECK(a_value == 1);
+        const imza::JsonValue* b = imza::find_member(returned, "b");
+        REQUIRE(b != nullptr);
+        REQUIRE(b->is_array());
+        const auto& b_array = b->get<JsonValue::array_t>();
+        REQUIRE(b_array.size() == 2);
+        REQUIRE(b_array[0].is_boolean());
+        CHECK(b_array[0].get<bool>());
+        CHECK(b_array[1].is_null());
+    }
+
+    SUBCASE("lua aggregate diffs")
+    {
+        const imza::ToolCallRequest request { "lua",
+            R"json({"script":"imza.fs.edit(..."} )json", "", "call-1" };
+        imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT,
+            "" };
+        imza::DiffView diff;
+        diff.file = "/tmp/a.txt";
+        diff.rows.push_back({ imza::DiffRow::Kind::SAME, 1, 1, "x", "x" });
+        diff.rows.push_back({ imza::DiffRow::Kind::REMOVE, 2, { }, "old", "" });
+        diff.rows.push_back({ imza::DiffRow::Kind::ADD, { }, 2, "", "new" });
+        result.diffs.push_back(diff);
+
+        imza::Session source;
+        make_tool_session(request, std::move(result), source);
+        imza::Session loaded;
+        roundtrip(source, loaded);
+        const auto loaded_items = loaded.items();
+        const auto& call        = std::get<imza::ToolCall>((*loaded_items)[2]);
+        REQUIRE(call.result.has_value());
+        REQUIRE(call.result->diffs.size() == 1);
+        CHECK(call.result->diffs[0].file == "/tmp/a.txt");
+        REQUIRE(call.result->diffs[0].rows.size() == 3);
+        CHECK(
+            call.result->diffs[0].rows[1].kind == imza::DiffRow::Kind::REMOVE);
+        CHECK(call.result->diffs[0].rows[1].left == "old");
+        CHECK(call.result->diffs[0].rows[2].kind == imza::DiffRow::Kind::ADD);
+        CHECK(call.result->diffs[0].rows[2].right == "new");
+    }
+
+    SUBCASE("canvas charts")
+    {
+        const imza::ToolCallRequest request { "lua", "{}", "", "call-1" };
+        imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT,
+            "" };
+        imza::CanvasView pie;
+        pie.kind   = imza::CanvasView::Kind::PIE;
+        pie.title  = "Share";
+        pie.series = { { "a", { 1.0 } }, { "b", { 2.5 } } };
+        imza::CanvasView surface;
+        surface.kind = imza::CanvasView::Kind::SURFACE;
+        surface.grid = { { 1, 2 }, { 3, 4 } };
+        result.canvases.push_back(std::move(pie));
+        result.canvases.push_back(std::move(surface));
+
+        imza::Session source;
+        make_tool_session(request, std::move(result), source);
+        imza::Session loaded;
+        roundtrip(source, loaded);
+        const auto loaded_items = loaded.items();
+        const auto& call        = std::get<imza::ToolCall>((*loaded_items)[2]);
+        REQUIRE(call.result.has_value());
+        REQUIRE(call.result->canvases.size() == 2);
+        CHECK(call.result->canvases[0].kind == imza::CanvasView::Kind::PIE);
+        CHECK(call.result->canvases[0].title == "Share");
+        REQUIRE(call.result->canvases[0].series.size() == 2);
+        CHECK(call.result->canvases[0].series[1].label == "b");
+        CHECK(call.result->canvases[0].series[1].values[0]
+            == doctest::Approx(2.5));
+        CHECK(call.result->canvases[1].kind == imza::CanvasView::Kind::SURFACE);
+        REQUIRE(call.result->canvases[1].grid.size() == 2);
+        CHECK(call.result->canvases[1].grid[1][0] == doctest::Approx(3.0));
+    }
+
+    SUBCASE("native attachments")
+    {
+        const std::string image_bytes("\x89PNG\r\n\x1a\n\0payload", 16);
+        const std::string pdf_bytes("%PDF-1.7\n\0payload", 17);
+        imza::Session source;
+        source.begin_send("review",
+            { { "notes.txt", "plain text" },
+                { "image.dat", image_bytes, imza::Attachment::Type::IMAGE,
+                    "image/png" },
+                { "document.dat", pdf_bytes, imza::Attachment::Type::PDF,
+                    "application/pdf" } });
+
+        std::filesystem::path archived;
+        imza::Session loaded;
+        roundtrip(source, loaded, &archived);
+
+        // The document carries attachments as tagged entries, binary bytes
+        // inlined as base64 rather than raw.
+        std::ifstream file(archived, std::ios::binary);
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+        const imza::JsonValue root   = imza::parse_json(buffer.str());
+        const imza::JsonValue* items = imza::find_member(root, "items");
+        REQUIRE(items != nullptr);
+        REQUIRE(items->is_array());
+        const auto& item_list = items->get<JsonValue::array_t>();
+        REQUIRE(item_list.size() >= 1);
+        const imza::JsonValue* attachments
+            = imza::find_member(item_list[0], "attachments");
+        REQUIRE(attachments != nullptr);
+        REQUIRE(attachments->is_array());
+        const auto& list = attachments->get<JsonValue::array_t>();
+        REQUIRE(list.size() == 3);
+        const auto str = [](const imza::JsonValue* v) {
+            return v != nullptr && v->is_string() ? v->as<std::string>() : "";
+        };
+        CHECK(str(imza::find_member(list[0], "type")) == "text");
+        CHECK(str(imza::find_member(list[0], "content")) == "plain text");
+        CHECK(str(imza::find_member(list[1], "type")) == "image");
+        CHECK(str(imza::find_member(list[1], "media_type")) == "image/png");
+        CHECK(imza::find_member(list[1], "content") != nullptr);
+        CHECK(str(imza::find_member(list[1], "content")) != image_bytes);
+        CHECK(str(imza::find_member(list[2], "type")) == "pdf");
+        CHECK(
+            str(imza::find_member(list[2], "media_type")) == "application/pdf");
+
+        const auto loaded_items = loaded.items();
+        const auto& current
+            = std::get<imza::UserTurn>(loaded_items->front()).attachments;
+        REQUIRE(current.size() == 3);
+        CHECK(current[0].type == imza::Attachment::Type::TEXT);
+        CHECK(current[0].content == "plain text");
+        CHECK(current[1].type == imza::Attachment::Type::IMAGE);
+        CHECK(current[1].media_type == "image/png");
+        CHECK(current[1].content == image_bytes);
+        CHECK(current[2].type == imza::Attachment::Type::PDF);
+        CHECK(current[2].media_type == "application/pdf");
+        CHECK(current[2].content == pdf_bytes);
+    }
 }
 
 TEST_CASE("a tool result with invalid utf-8 still loads and replays clean")
@@ -319,12 +462,12 @@ TEST_CASE("a tool result with invalid utf-8 still loads and replays clean")
     const auto loaded_items = loaded.items();
     const auto& call        = std::get<imza::ToolCall>((*loaded_items)[2]);
     REQUIRE(call.result.has_value());
-    CHECK_FALSE(imza::strip_invalid_utf8(call.result->text).has_value());
+    CHECK(all_valid_utf8(call.result->text));
 
     const std::vector<imza::Message> history
         = loaded.build_history("system prompt");
     for (const imza::Message& message : history) {
-        CHECK_FALSE(imza::strip_invalid_utf8(message.content).has_value());
+        CHECK(all_valid_utf8(message.content));
     }
 }
 
@@ -345,68 +488,6 @@ TEST_CASE("legacy lua result without a return value still loads")
     REQUIRE(call.result.has_value());
     CHECK_FALSE(call.result->return_value.has_value());
     CHECK(call.result->text == "1\n");
-}
-
-TEST_CASE("lua aggregate diffs survive session persistence")
-{
-    DataHome home;
-    const imza::ToolCallRequest request { "lua",
-        R"json({"script":"imza.fs.edit(...)"} )json", "", "call-1" };
-    imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT, "" };
-    imza::DiffView diff;
-    diff.file = "/tmp/a.txt";
-    diff.rows.push_back({ imza::DiffRow::Kind::SAME, 1, 1, "x", "x" });
-    diff.rows.push_back({ imza::DiffRow::Kind::REMOVE, 2, { }, "old", "" });
-    diff.rows.push_back({ imza::DiffRow::Kind::ADD, { }, 2, "", "new" });
-    result.diffs.push_back(diff);
-
-    imza::Session source;
-    make_tool_session(request, std::move(result), source);
-    imza::Session loaded;
-    roundtrip(source, loaded);
-    const auto loaded_items = loaded.items();
-    const auto& call        = std::get<imza::ToolCall>((*loaded_items)[2]);
-    REQUIRE(call.result.has_value());
-    REQUIRE(call.result->diffs.size() == 1);
-    CHECK(call.result->diffs[0].file == "/tmp/a.txt");
-    REQUIRE(call.result->diffs[0].rows.size() == 3);
-    CHECK(call.result->diffs[0].rows[1].kind == imza::DiffRow::Kind::REMOVE);
-    CHECK(call.result->diffs[0].rows[1].left == "old");
-    CHECK(call.result->diffs[0].rows[2].kind == imza::DiffRow::Kind::ADD);
-    CHECK(call.result->diffs[0].rows[2].right == "new");
-}
-
-TEST_CASE("canvas charts survive session persistence")
-{
-    DataHome home;
-    const imza::ToolCallRequest request { "lua", "{}", "", "call-1" };
-    imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT, "" };
-    imza::CanvasView pie;
-    pie.kind   = imza::CanvasView::Kind::PIE;
-    pie.title  = "Share";
-    pie.series = { { "a", { 1.0 } }, { "b", { 2.5 } } };
-    imza::CanvasView surface;
-    surface.kind = imza::CanvasView::Kind::SURFACE;
-    surface.grid = { { 1, 2 }, { 3, 4 } };
-    result.canvases.push_back(std::move(pie));
-    result.canvases.push_back(std::move(surface));
-
-    imza::Session source;
-    make_tool_session(request, std::move(result), source);
-    imza::Session loaded;
-    roundtrip(source, loaded);
-    const auto loaded_items = loaded.items();
-    const auto& call        = std::get<imza::ToolCall>((*loaded_items)[2]);
-    REQUIRE(call.result.has_value());
-    REQUIRE(call.result->canvases.size() == 2);
-    CHECK(call.result->canvases[0].kind == imza::CanvasView::Kind::PIE);
-    CHECK(call.result->canvases[0].title == "Share");
-    REQUIRE(call.result->canvases[0].series.size() == 2);
-    CHECK(call.result->canvases[0].series[1].label == "b");
-    CHECK(call.result->canvases[0].series[1].values[0] == doctest::Approx(2.5));
-    CHECK(call.result->canvases[1].kind == imza::CanvasView::Kind::SURFACE);
-    REQUIRE(call.result->canvases[1].grid.size() == 2);
-    CHECK(call.result->canvases[1].grid[1][0] == doctest::Approx(3.0));
 }
 
 TEST_CASE("lua aggregate diffs round-trip SKIP and clamp unknown kinds")
@@ -541,8 +622,8 @@ TEST_CASE("missing or stale workspace falls back to the current directory")
     imza::LoadedSession loaded;
     REQUIRE(imza::read_session(stale, loaded) == imza::Status::OK);
     CHECK(loaded.workspace == directory.original);
-    REQUIRE(loaded.snapshot.items.size() == 1);
-    CHECK(std::get<imza::UserTurn>(loaded.snapshot.items.front()).text
+    REQUIRE(loaded.snapshot.items->size() == 1);
+    CHECK(std::get<imza::UserTurn>(loaded.snapshot.items->front()).text
         == "hello");
 
     const std::filesystem::path legacy = home.root() / "legacy.json";
@@ -645,64 +726,9 @@ TEST_CASE("locked sessions block loads and deletion, then recover")
     store.deactivate();
 }
 
-TEST_CASE("native and legacy attachments survive session persistence")
+TEST_CASE("a legacy attachment transcript loads with typed text entries")
 {
     DataHome home;
-    const std::string image_bytes("\x89PNG\r\n\x1a\n\0payload", 16);
-    const std::string pdf_bytes("%PDF-1.7\n\0payload", 17);
-    imza::Session source;
-    source.begin_send("review",
-        { { "notes.txt", "plain text" },
-            { "image.dat", image_bytes, imza::Attachment::Type::IMAGE,
-                "image/png" },
-            { "document.dat", pdf_bytes, imza::Attachment::Type::PDF,
-                "application/pdf" } });
-
-    REQUIRE(imza::save_session(source) == imza::Status::OK);
-    const auto saved = imza::saved_sessions();
-    REQUIRE(saved.size() == 1);
-    std::ifstream file(saved.front().path, std::ios::binary);
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    const imza::JsonValue root   = imza::parse_json(buffer.str());
-    const imza::JsonValue* items = imza::find_member(root, "items");
-    REQUIRE(items != nullptr);
-    REQUIRE(items->is_array());
-    const auto& item_list = items->get<JsonValue::array_t>();
-    REQUIRE(item_list.size() >= 1);
-    const imza::JsonValue* attachments
-        = imza::find_member(item_list[0], "attachments");
-    REQUIRE(attachments != nullptr);
-    REQUIRE(attachments->is_array());
-    const auto& list = attachments->get<JsonValue::array_t>();
-    REQUIRE(list.size() == 3);
-    const auto str = [](const imza::JsonValue* v) {
-        return v != nullptr && v->is_string() ? v->as<std::string>() : "";
-    };
-    CHECK(str(imza::find_member(list[0], "type")) == "text");
-    CHECK(str(imza::find_member(list[0], "content")) == "plain text");
-    CHECK(str(imza::find_member(list[1], "type")) == "image");
-    CHECK(str(imza::find_member(list[1], "media_type")) == "image/png");
-    CHECK(imza::find_member(list[1], "content") != nullptr);
-    CHECK(str(imza::find_member(list[1], "content")) != image_bytes);
-    CHECK(str(imza::find_member(list[2], "type")) == "pdf");
-    CHECK(str(imza::find_member(list[2], "media_type")) == "application/pdf");
-
-    imza::Session loaded;
-    REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
-    const auto loaded_items = loaded.items();
-    const auto& current
-        = std::get<imza::UserTurn>(loaded_items->front()).attachments;
-    REQUIRE(current.size() == 3);
-    CHECK(current[0].type == imza::Attachment::Type::TEXT);
-    CHECK(current[0].content == "plain text");
-    CHECK(current[1].type == imza::Attachment::Type::IMAGE);
-    CHECK(current[1].media_type == "image/png");
-    CHECK(current[1].content == image_bytes);
-    CHECK(current[2].type == imza::Attachment::Type::PDF);
-    CHECK(current[2].media_type == "application/pdf");
-    CHECK(current[2].content == pdf_bytes);
-
     const std::filesystem::path legacy
         = home.root() / "legacy-attachments.json";
     {
@@ -713,7 +739,7 @@ TEST_CASE("native and legacy attachments survive session persistence")
     imza::LoadedSession legacy_loaded;
     REQUIRE(imza::read_session(legacy, legacy_loaded) == imza::Status::OK);
     const auto& legacy_attachments
-        = std::get<imza::UserTurn>(legacy_loaded.snapshot.items.front())
+        = std::get<imza::UserTurn>(legacy_loaded.snapshot.items->front())
               .attachments;
     REQUIRE(legacy_attachments.size() == 1);
     CHECK(legacy_attachments[0].path == "old.txt");
@@ -798,10 +824,10 @@ TEST_CASE("legacy plans-only transcript loads as plan documents")
 
     imza::LoadedSession loaded;
     REQUIRE(imza::read_session(legacy, loaded) == imza::Status::OK);
-    REQUIRE(loaded.snapshot.documents.size() == 1);
-    CHECK(
-        loaded.snapshot.documents.front().kind == imza::SessionDoc::Kind::PLAN);
-    CHECK(loaded.snapshot.documents.front().content.find("# Requirements")
+    REQUIRE(loaded.snapshot.documents->size() == 1);
+    CHECK(loaded.snapshot.documents->front().kind
+        == imza::SessionDoc::Kind::PLAN);
+    CHECK(loaded.snapshot.documents->front().content.find("# Requirements")
         != std::string::npos);
 }
 
@@ -957,20 +983,22 @@ TEST_CASE("pre-Glaze transcript with unknown members still loads")
 
     imza::LoadedSession loaded;
     REQUIRE(imza::read_session(legacy, loaded) == imza::Status::OK);
-    REQUIRE(loaded.snapshot.items.size() == 3);
-    const auto* user = std::get_if<imza::UserTurn>(&loaded.snapshot.items[0]);
+    REQUIRE(loaded.snapshot.items->size() == 3);
+    const auto* user
+        = std::get_if<imza::UserTurn>(&(*loaded.snapshot.items)[0]);
     REQUIRE(user != nullptr);
     CHECK(user->text == "hello");
     const auto* assistant
-        = std::get_if<imza::AssistantTurn>(&loaded.snapshot.items[1]);
+        = std::get_if<imza::AssistantTurn>(&(*loaded.snapshot.items)[1]);
     REQUIRE(assistant != nullptr);
     CHECK(assistant->markdown == "answer");
-    const auto* tool = std::get_if<imza::ToolCall>(&loaded.snapshot.items[2]);
+    const auto* tool
+        = std::get_if<imza::ToolCall>(&(*loaded.snapshot.items)[2]);
     REQUIRE(tool != nullptr);
     REQUIRE(tool->result.has_value());
     CHECK(tool->result->text == "out");
-    CHECK(loaded.snapshot.todo.items.size() == 1);
-    CHECK(loaded.snapshot.todo.items[0].content == "task");
+    CHECK(loaded.snapshot.todo->items.size() == 1);
+    CHECK(loaded.snapshot.todo->items[0].content == "task");
 }
 
 TEST_CASE("notices survive session persistence")

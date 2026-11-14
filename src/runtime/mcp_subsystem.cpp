@@ -129,11 +129,18 @@ McpSubsystem::McpSubsystem(
     reload(std::move(servers));
 }
 
+void McpSubsystem::stop()
+{
+    mark_dead();
+    std::lock_guard lock(_map_mutex);
+    _death_cv.notify_all();
+}
+
 McpSubsystem::~McpSubsystem()
 {
     // Workers reference this through the signal and their entries; stop
     // streams and retries, then join before any member dies.
-    mark_dead();
+    stop();
     for (auto& [id, entry] : _servers) {
         entry->stream_cancel.store(true);
     }
@@ -317,9 +324,9 @@ void McpSubsystem::run_handshake(
 
 bool McpSubsystem::wait_interruptible(long ms) const
 {
-    for (long waited = 0; waited < ms && !!alive(); waited += 200) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    }
+    std::unique_lock lock(_map_mutex);
+    _death_cv.wait_for(
+        lock, std::chrono::milliseconds(ms), [this] { return !alive(); });
     return !alive();
 }
 

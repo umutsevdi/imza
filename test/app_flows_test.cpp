@@ -352,7 +352,7 @@ TEST_CASE("a finished review pass alerts and toasts the attended root")
     REQUIRE(pump->wait_for([&] { return alerts.size() == 2; }));
     CHECK(alerts.back() == "Handoff report ready");
     REQUIRE(pump->wait_for(
-        [&] { return !state->session->snapshot().documents.empty(); }));
+        [&] { return !state->session->snapshot().documents->empty(); }));
     CHECK(
         toast_text(*state).find("Handoff report saved.") != std::string::npos);
 }
@@ -389,4 +389,36 @@ TEST_CASE("a cancelled review pass stays silent")
     CHECK(alerts.empty());
     CHECK(state->session->error().empty());
     CHECK(toast_text(*state).empty());
+}
+
+TEST_CASE("workflow phase navigation")
+{
+    using imza::Session;
+    using imza::WorkflowPhase;
+
+    CHECK(imza::next_workflow_phase(WorkflowPhase::PLAN, true)
+        == WorkflowPhase::BUILD);
+    CHECK(imza::next_workflow_phase(WorkflowPhase::BUILD, true)
+        == WorkflowPhase::REVIEW);
+    CHECK(imza::next_workflow_phase(WorkflowPhase::REVIEW, true)
+        == WorkflowPhase::PLAN);
+    CHECK(imza::previous_workflow_phase(WorkflowPhase::PLAN, true)
+        == WorkflowPhase::REVIEW);
+    CHECK(imza::previous_workflow_phase(WorkflowPhase::REVIEW, true)
+        == WorkflowPhase::BUILD);
+    CHECK(imza::previous_workflow_phase(WorkflowPhase::BUILD, true)
+        == WorkflowPhase::PLAN);
+
+    CHECK(imza::next_workflow_phase(WorkflowPhase::PLAN, false)
+        == WorkflowPhase::BUILD);
+    CHECK(imza::next_workflow_phase(WorkflowPhase::BUILD, false)
+        == WorkflowPhase::PLAN);
+    CHECK(imza::previous_workflow_phase(WorkflowPhase::PLAN, false)
+        == WorkflowPhase::BUILD);
+    CHECK(imza::previous_workflow_phase(WorkflowPhase::BUILD, false)
+        == WorkflowPhase::PLAN);
+
+    CHECK(imza::workflow_mode(WorkflowPhase::PLAN) == Session::Mode::PLAN);
+    CHECK(imza::workflow_mode(WorkflowPhase::BUILD) == Session::Mode::BUILD);
+    CHECK_FALSE(imza::workflow_mode(WorkflowPhase::REVIEW).has_value());
 }

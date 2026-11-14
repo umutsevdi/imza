@@ -17,6 +17,19 @@ namespace fs = std::filesystem;
 
 namespace {
 
+// True when every byte in `text` belongs to a valid UTF-8 sequence.
+bool all_valid_utf8(std::string_view text)
+{
+    for (std::size_t i = 0; i < text.size();) {
+        const std::size_t length = imza::utf8_valid_sequence_length(text, i);
+        if (length == 0) {
+            return false;
+        }
+        i += length;
+    }
+    return true;
+}
+
 imza::LuaHost plan_session_host(imza::Session& session)
 {
     imza::LuaHost host { };
@@ -302,7 +315,7 @@ TEST_CASE("lua print truncation respects the hard output cap")
         = imza::test::run_lua("print(string.rep('\\u{2713}', 30000))");
     CHECK(wide.text.size() <= 64 * 1024);
     CHECK(wide.text.find("[truncated]") != std::string::npos);
-    CHECK_FALSE(imza::strip_invalid_utf8(wide.text).has_value());
+    CHECK(all_valid_utf8(wide.text));
 }
 
 TEST_CASE("imza.fs.read returns 1-based windows and empty for empty files")
@@ -351,34 +364,38 @@ TEST_CASE("imza.fs.list returns entries with type and size fields")
 
 TEST_CASE("imza.fs.grep returns file, line, and text per match")
 {
-    imza::test::TempDir dir;
-    imza::test::write_file(
-        dir.file("hay.cpp"), "int cat = 1;\nint dog = 2;\ncat();\n");
+    SUBCASE("a directory target reports the file per row")
+    {
+        imza::test::TempDir dir;
+        imza::test::write_file(
+            dir.file("hay.cpp"), "int cat = 1;\nint dog = 2;\ncat();\n");
 
-    const imza::ToolOutput out = imza::test::run_lua(
-        "local rows = imza.fs.grep([[" + imza::utf8_from_path(dir.path)
-        + "]], 'cat')\n"
-          "print(#rows, rows[1].file, rows[1].line, rows[1].text)\n"
-          "for _, r in ipairs(rows) do print(r.file, r.line, r.text) end");
-    CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(out.text.find("hay.cpp    1    int cat = 1;") != std::string::npos);
-    CHECK(out.text.find("hay.cpp    3    cat();") != std::string::npos);
-}
+        const imza::ToolOutput out = imza::test::run_lua(
+            "local rows = imza.fs.grep([[" + imza::utf8_from_path(dir.path)
+            + "]], 'cat')\n"
+              "print(#rows, rows[1].file, rows[1].line, rows[1].text)\n"
+              "for _, r in ipairs(rows) do print(r.file, r.line, r.text) end");
+        CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
+        CHECK(
+            out.text.find("hay.cpp    1    int cat = 1;") != std::string::npos);
+        CHECK(out.text.find("hay.cpp    3    cat();") != std::string::npos);
+    }
 
-TEST_CASE("imza.fs.grep accepts a single file target and fills the file field")
-{
-    imza::test::TempDir dir;
-    imza::test::write_file(dir.file("one.cpp"), "only match here\nnope\n");
+    SUBCASE("a single file target fills the file field")
+    {
+        imza::test::TempDir dir;
+        imza::test::write_file(dir.file("one.cpp"), "only match here\nnope\n");
 
-    const imza::ToolOutput file_out
-        = imza::test::run_lua("local rows = imza.fs.grep([["
-            + imza::utf8_from_path(dir.file("one.cpp"))
-            + "]], 'match')\n"
-              "if #rows ~= 1 then error('expected 1 row') end\n"
-              "print(rows[1].file, rows[1].line, rows[1].text)");
-    CHECK(file_out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(file_out.text.find("one.cpp    1    only match here")
-        != std::string::npos);
+        const imza::ToolOutput file_out
+            = imza::test::run_lua("local rows = imza.fs.grep([["
+                + imza::utf8_from_path(dir.file("one.cpp"))
+                + "]], 'match')\n"
+                  "if #rows ~= 1 then error('expected 1 row') end\n"
+                  "print(rows[1].file, rows[1].line, rows[1].text)");
+        CHECK(file_out.kind == imza::ToolOutput::Kind::OUTPUT);
+        CHECK(file_out.text.find("one.cpp    1    only match here")
+            != std::string::npos);
+    }
 }
 
 TEST_CASE("imza.fs.grep uses POSIX extended regular expressions")
@@ -1272,15 +1289,32 @@ TEST_CASE("imza.fs.edit errors on missing match and empty old")
 TEST_CASE("imza.fs.write creates and rewrites files")
 {
     imza::test::TempDir dir;
-    const std::string path     = dir.file("new.txt").string();
-    const imza::ToolOutput out = imza::test::run_lua("imza.fs.write([[" + path
-        + "]], 'v1\\n')\n"
-          "imza.fs.write([["
-        + path + "]], 'v2\\n')");
-    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(imza::test::read_all(dir.file("new.txt")) == "v2\n");
-    REQUIRE(out.diffs.size() == 1);
-    CHECK(out.diffs[0].file == path);
+
+    SUBCASE("a rewrite collapses into one net diff")
+    {
+        const std::string path = dir.file("new.txt").string();
+        const imza::ToolOutput out
+            = imza::test::run_lua("imza.fs.write([[" + path
+                + "]], 'v1\\n')\n"
+                  "imza.fs.write([["
+                + path + "]], 'v2\\n')");
+        REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+        CHECK(imza::test::read_all(dir.file("new.txt")) == "v2\n");
+        REQUIRE(out.diffs.size() == 1);
+        CHECK(out.diffs[0].file == path);
+    }
+
+    SUBCASE("a whole-file write to a new path reads as a creation")
+    {
+        const std::string path     = dir.file("fresh.txt").string();
+        const imza::ToolOutput out = imza::test::run_lua(
+            "imza.fs.write([[" + path + "]], 'new content')");
+        CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
+        REQUIRE(out.diffs.size() == 1);
+        CHECK(out.diffs[0].file == path);
+        REQUIRE(out.diffs[0].rows.size() == 1);
+        CHECK(out.diffs[0].rows[0].kind == imza::DiffRow::Kind::ADD);
+    }
 }
 
 TEST_CASE("imza.fs.write creates missing parent directories")
@@ -1485,28 +1519,30 @@ TEST_CASE("imza.file mutations outside the workspace follow the ask verdict")
     }
 }
 
-TEST_CASE("canvas line emits a declarative chart and returns nothing")
+TEST_CASE("canvas charts emit declarative views from happy-path scripts")
 {
-    const imza::ToolOutput out = imza::test::run_lua(
-        "return imza.canvas.line({ title = 'CPU', data = { 1, 2, 3 } })");
-    REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK_FALSE(out.return_value.has_value());
-    REQUIRE(out.canvases.size() == 1);
-    const imza::CanvasView& chart = out.canvases[0];
-    CHECK(chart.kind == imza::CanvasView::Kind::LINE);
-    CHECK(chart.title == "CPU");
-    REQUIRE(chart.series.size() == 1);
-    REQUIRE(chart.series[0].values.size() == 3);
-    CHECK(chart.series[0].values[2] == doctest::Approx(3.0));
-    REQUIRE(out.dispatch_log.size() == 1);
-    CHECK(out.dispatch_log[0].binding == "canvas.line");
-    CHECK(out.dispatch_log[0].target == "CPU");
-    CHECK(out.dispatch_log[0].ok);
-}
+    SUBCASE("line with anonymous series returns nothing")
+    {
+        const imza::ToolOutput out = imza::test::run_lua(
+            "return imza.canvas.line({ title = 'CPU', data = { 1, 2, 3 } })");
+        REQUIRE(out.kind == imza::ToolOutput::Kind::OUTPUT);
+        CHECK_FALSE(out.return_value.has_value());
+        REQUIRE(out.canvases.size() == 1);
+        const imza::CanvasView& chart = out.canvases[0];
+        CHECK(chart.kind == imza::CanvasView::Kind::LINE);
+        CHECK(chart.title == "CPU");
+        REQUIRE(chart.series.size() == 1);
+        REQUIRE(chart.series[0].values.size() == 3);
+        CHECK(chart.series[0].values[2] == doctest::Approx(3.0));
+        REQUIRE(out.dispatch_log.size() == 1);
+        CHECK(out.dispatch_log[0].binding == "canvas.line");
+        CHECK(out.dispatch_log[0].target == "CPU");
+        CHECK(out.dispatch_log[0].ok);
+    }
 
-TEST_CASE("canvas line accepts named series")
-{
-    const imza::ToolOutput out = imza::test::run_lua(R"lua(
+    SUBCASE("line with named series")
+    {
+        const imza::ToolOutput out = imza::test::run_lua(R"lua(
 return imza.canvas.line({
   title = 'Trend',
   data = {
@@ -1515,15 +1551,16 @@ return imza.canvas.line({
   },
 })
 )lua");
-    REQUIRE(out.canvases.size() == 1);
-    REQUIRE(out.canvases[0].series.size() == 2);
-    CHECK(out.canvases[0].series[0].label == "a");
-    CHECK(out.canvases[0].series[1].values[1] == doctest::Approx(4.0));
-}
+        REQUIRE(out.canvases.size() == 1);
+        REQUIRE(out.canvases[0].series.size() == 2);
+        CHECK(out.canvases[0].series[0].label == "a");
+        CHECK(out.canvases[0].series[1].values[1] == doctest::Approx(4.0));
+    }
 
-TEST_CASE("canvas bar and pie take labeled points")
-{
-    const imza::ToolOutput out = imza::test::run_lua(R"lua(
+    SUBCASE("bar and pie take labeled points")
+    {
+
+        const imza::ToolOutput out = imza::test::run_lua(R"lua(
 local bar = imza.canvas.bar({
   title = 'Fruit',
   data = { { label = 'apple', value = 3 }, { label = 'pear', value = 5 } },
@@ -1532,12 +1569,24 @@ local pie = imza.canvas.pie({
   data = { { label = 'a', value = 1 }, { label = 'b', value = 2 } },
 })
 )lua");
-    REQUIRE(out.canvases.size() == 2);
-    CHECK(out.canvases[0].kind == imza::CanvasView::Kind::BAR);
-    CHECK(out.canvases[0].title == "Fruit");
-    CHECK(out.canvases[0].series[1].label == "pear");
-    CHECK(out.canvases[0].series[1].values[0] == doctest::Approx(5.0));
-    CHECK(out.canvases[1].kind == imza::CanvasView::Kind::PIE);
+        REQUIRE(out.canvases.size() == 2);
+        CHECK(out.canvases[0].kind == imza::CanvasView::Kind::BAR);
+        CHECK(out.canvases[0].title == "Fruit");
+        CHECK(out.canvases[0].series[1].label == "pear");
+        CHECK(out.canvases[0].series[1].values[0] == doctest::Approx(5.0));
+        CHECK(out.canvases[1].kind == imza::CanvasView::Kind::PIE);
+    }
+
+    SUBCASE("surface takes a rectangular z grid")
+    {
+        const imza::ToolOutput out = imza::test::run_lua(
+            "return imza.canvas.surface("
+            "{ title = 'Z', data = { { 1, 2, 3 }, { 4, 5, 6 } } })");
+        REQUIRE(out.canvases.size() == 1);
+        CHECK(out.canvases[0].kind == imza::CanvasView::Kind::SURFACE);
+        REQUIRE(out.canvases[0].grid.size() == 2);
+        CHECK(out.canvases[0].grid[1][2] == doctest::Approx(6.0));
+    }
 }
 
 TEST_CASE("canvas rejects malformed and non-positive chart data")
@@ -1565,17 +1614,6 @@ print(select(2, pcall(imza.canvas.surface, { data = { { 1, 2 }, { 3 } } })))
     CHECK(out.canvases.empty());
 }
 
-TEST_CASE("canvas surface takes a rectangular z grid")
-{
-    const imza::ToolOutput out = imza::test::run_lua(
-        "return imza.canvas.surface("
-        "{ title = 'Z', data = { { 1, 2, 3 }, { 4, 5, 6 } } })");
-    REQUIRE(out.canvases.size() == 1);
-    CHECK(out.canvases[0].kind == imza::CanvasView::Kind::SURFACE);
-    REQUIRE(out.canvases[0].grid.size() == 2);
-    CHECK(out.canvases[0].grid[1][2] == doctest::Approx(6.0));
-}
-
 TEST_CASE("imza.fs.mkdir creates nested directories")
 {
     WorkspaceFixture fx;
@@ -1587,7 +1625,6 @@ TEST_CASE("imza.fs.mkdir creates nested directories")
     REQUIRE(out.dispatch_log.size() == 1);
     CHECK(out.dispatch_log[0].binding == "fs.mkdir");
 }
-
 TEST_CASE("imza.fs.mkdir rejects a file occupying the path")
 {
     WorkspaceFixture fx;
@@ -1752,19 +1789,6 @@ TEST_CASE("imza.fs.remove shows a deletion diff for a file")
     for (const imza::DiffRow& row : out.diffs[0].rows) {
         CHECK(row.kind == imza::DiffRow::Kind::REMOVE);
     }
-}
-
-TEST_CASE("a whole-file write to a new path reads as a creation")
-{
-    imza::test::TempDir dir;
-    const std::string path = dir.file("fresh.txt").string();
-    const imza::ToolOutput out
-        = imza::test::run_lua("imza.fs.write([[" + path + "]], 'new content')");
-    CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
-    REQUIRE(out.diffs.size() == 1);
-    CHECK(out.diffs[0].file == path);
-    REQUIRE(out.diffs[0].rows.size() == 1);
-    CHECK(out.diffs[0].rows[0].kind == imza::DiffRow::Kind::ADD);
 }
 
 TEST_CASE("canvas caps charts per run and fails closed")

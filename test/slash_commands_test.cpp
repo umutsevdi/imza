@@ -347,7 +347,7 @@ TEST_CASE("run_slash /make-skill seeds a Build-mode turn")
     CHECK(last_model_message.find(".agents/skills") != std::string::npos);
     REQUIRE(state->session->has_items());
     const SessionSnapshot snapshot = state->session->snapshot();
-    const auto* user_turn = std::get_if<UserTurn>(&snapshot.items.front());
+    const auto* user_turn = std::get_if<UserTurn>(&snapshot.items->front());
     REQUIRE(user_turn != nullptr);
     CHECK(user_turn->text == "/make-skill deploy with docker compose");
 }

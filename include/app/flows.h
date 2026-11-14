@@ -83,6 +83,11 @@ PermissionContext permission_context_for(
 PermissionEvaluation evaluate_permission(ApplicationState& state,
     const ToolCallRequest& request, Session::Mode mode);
 std::string format_session_list(const std::vector<SavedSession>& sessions);
+// Installs a loaded snapshot as the active conversation: restore, then
+// clear the workspace-scoped grants and the conversation-scoped runner
+// and subagent state. Guarded on subagents so child states without a
+// manager (ACP sessions) share the same protocol.
+void install_session(ApplicationState& state, SessionSnapshot snapshot);
 // The current skill catalogue as the skills modal renders it, bundled
 // entries flagged.
 SkillsModal skills_modal(const ApplicationState& state);

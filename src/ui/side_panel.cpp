@@ -19,6 +19,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace imza {
@@ -74,13 +75,20 @@ public:
               _state->environment->subscribe_to_workspace_change(
                   [] { animation::RequestAnimationFrame(); }))
         , _system_subscription(_state->environment->subscribe_to_system_change(
-              [] { animation::RequestAnimationFrame(); }))
+              [this, redraw = redraw_on_change(_state)] {
+                  _runtime_dirty = true;
+                  redraw();
+              }))
         , _repository_subscription(
               _state->environment->subscribe_to_repository_change(
-                  [] { animation::RequestAnimationFrame(); }))
+                  [this, redraw = redraw_on_change(_state)] {
+                      _runtime_dirty = true;
+                      redraw();
+                  }))
         , _attachments_subscription(
               _state->session->subscribe_to_attachments_change([this] {
                   _attachments_dirty.store(true);
+                  _runtime_dirty = true;
                   animation::RequestAnimationFrame();
               }))
         , _review_subscription(_state->review
@@ -88,15 +96,31 @@ public:
                         [] { animation::RequestAnimationFrame(); })
                   : Signal<>::Subscription { })
         , _skills_subscription(_state->session->subscribe_to_skills_change(
-              redraw_on_change(_state)))
+              [this, redraw = redraw_on_change(_state)] {
+                  _runtime_dirty = true;
+                  redraw();
+              }))
         , _permission_subscription(
               _state->permissions->subscribe_to_grants_change(
-                  redraw_on_change(_state)))
+                  [this, redraw = redraw_on_change(_state)] {
+                      _runtime_dirty = true;
+                      redraw();
+                  }))
         , _skip_subscription(_state->permissions->subscribe_to_skip_change(
-              redraw_on_change(_state)))
+              [this, redraw = redraw_on_change(_state)] {
+                  _runtime_dirty = true;
+                  redraw();
+              }))
         , _documents_subscription(
               _state->session->subscribe_to_documents_change(
                   redraw_on_change(_state)))
+        , _mcp_subscription(_state->mcp
+                  ? _state->mcp->subscribe_to_change(
+                        [this, redraw = redraw_on_change(_state)] {
+                            _runtime_dirty = true;
+                            redraw();
+                        })
+                  : Signal<>::Subscription { })
     {
         _links_container = Container::Vertical({ });
         Add(_links_container);
@@ -137,7 +161,7 @@ public:
                           return _runtime_row_link(row, label, value);
                       };
                 parts.push_back(
-                    render_runtime_box(_runtime_view(*env), _expanded, link));
+                    render_runtime_box(_runtime_view(), _expanded, link));
             }
         }
         if (narrow) {
@@ -174,7 +198,15 @@ public:
     }
 
 private:
-    RuntimeView _runtime_view(const Environment& env)
+    const RuntimeView& _runtime_view()
+    {
+        if (_runtime_dirty.exchange(false) || !_runtime_cache) {
+            _runtime_cache = _build_runtime_view(*_state->environment);
+        }
+        return *_runtime_cache;
+    }
+
+    RuntimeView _build_runtime_view(const Environment& env) const
     {
         RuntimeView view;
         view.rules       = env.agent_rules_path();
@@ -237,8 +269,7 @@ private:
     void _open_permissions_modal()
     {
         ViewerModal modal { .title = "Permissions",
-            .content
-            = runtime_permissions_markdown(_runtime_view(*_state->environment)),
+            .content      = runtime_permissions_markdown(_runtime_view()),
             .lang         = "md",
             .line_numbers = false };
         modal.save_name = "Permissions";
@@ -420,10 +451,13 @@ private:
     Signal<>::Subscription _skip_subscription;
     Signal<>::Subscription _documents_subscription;
     Component _links_container;
+    Signal<>::Subscription _mcp_subscription;
     std::map<std::string, Link<ChangedFile>> _file_links;
     std::map<std::size_t, Link<DocumentLink>> _document_links;
     std::map<std::size_t, Link<std::string>> _comment_links;
     std::map<RuntimeRow, Link<RuntimeRowText>> _runtime_links;
+    std::atomic<bool> _runtime_dirty { true };
+    std::optional<RuntimeView> _runtime_cache;
     std::vector<Component> _active_links;
     std::set<RuntimeRow> _expanded;
     ScrollView _scroll;

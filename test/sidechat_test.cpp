@@ -61,14 +61,14 @@ TEST_CASE("sidechat toggle hides and reopens without discarding the session")
     CHECK_FALSE(state->sidechat_open);
     REQUIRE(state->sidechat == sidechat);
     const SessionSnapshot hidden = sidechat->session->snapshot();
-    CHECK(hidden.items.size() == 1);
+    CHECK(hidden.items->size() == 1);
     CHECK(std::holds_alternative<ConnectModal>(sidechat->session->modal()));
 
     open_sidechat(*state);
     CHECK(state->sidechat_open);
     REQUIRE(state->sidechat == sidechat);
     const SessionSnapshot reshown = sidechat->session->snapshot();
-    CHECK(reshown.items.size() == 1);
+    CHECK(reshown.items->size() == 1);
     CHECK(std::holds_alternative<ConnectModal>(sidechat->session->modal()));
 }
 
@@ -84,13 +84,13 @@ TEST_CASE("sidechat loads its context lazily on the first prompt")
     const SessionSnapshot empty = state->sidechat->session->snapshot();
     CHECK_FALSE(state->sidechat->sidechat_context_seeded);
     CHECK(empty.compacted_summary.empty());
-    CHECK(empty.items.empty());
+    CHECK(empty.items->empty());
 
     ensure_sidechat_seeded(*state->sidechat);
     REQUIRE(state->sidechat->sidechat_context_seeded);
     const SessionSnapshot seeded = state->sidechat->session->snapshot();
     CHECK(seeded.compacted_summary.find("first answer") != std::string::npos);
-    CHECK(seeded.items.empty());
+    CHECK(seeded.items->empty());
 
     ensure_sidechat_seeded(*state->sidechat);
     CHECK(state->sidechat->session->snapshot().compacted_summary
@@ -118,7 +118,7 @@ TEST_CASE("refresh_sidechat clears the sidechat and the next prompt reloads")
     const SessionSnapshot shell = state->sidechat->session->snapshot();
     CHECK_FALSE(state->sidechat->sidechat_context_seeded);
     CHECK(shell.compacted_summary.empty());
-    CHECK(shell.items.empty());
+    CHECK(shell.items->empty());
 
     ensure_sidechat_seeded(*state->sidechat);
     REQUIRE(state->sidechat->sidechat_context_seeded);
@@ -126,7 +126,7 @@ TEST_CASE("refresh_sidechat clears the sidechat and the next prompt reloads")
     CHECK(fresh.compacted_summary.find("second answer") != std::string::npos);
     CHECK(
         fresh.compacted_summary.find("sidechat question") == std::string::npos);
-    CHECK(fresh.items.empty());
+    CHECK(fresh.items->empty());
     CHECK_FALSE(fresh.title.empty());
 }
 
@@ -166,7 +166,7 @@ TEST_CASE("compacting a sidechat drops the stale seed without a model call")
     CHECK(after.compacted_item_count == 0);
     bool own_turn_survives = false;
     bool event_completed   = false;
-    for (const auto& item : after.items) {
+    for (const auto& item : *after.items) {
         if (const auto* turn = std::get_if<UserTurn>(&item)) {
             own_turn_survives
                 = own_turn_survives || turn->text == "own question";

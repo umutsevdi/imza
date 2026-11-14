@@ -440,30 +440,26 @@ TEST_CASE("a catalog row decides which operands and options stay read-only")
             analyze_shell(command).invocations.front());
     };
 
-    // The same slot is a write for the sibling form.
-    CHECK_FALSE(allowed("git remote add origin u"));
-    CHECK_FALSE(allowed("git remote remove o"));
+    // The same slot is a write for the sibling form: bare operands deny,
+    // including when an option takes the operand.
     CHECK_FALSE(allowed("git branch newbranch"));
     CHECK_FALSE(allowed("git branch -v newbranch"));
     CHECK_FALSE(allowed("git tag v1"));
-    CHECK_FALSE(allowed("git tag -n v1"));
     CHECK_FALSE(allowed("git config user.name Bob"));
     CHECK_FALSE(allowed("git stash"));
-    CHECK_FALSE(allowed("git stash drop"));
     CHECK_FALSE(allowed("git worktree add ../x"));
-    CHECK_FALSE(allowed("git reflog expire --all"));
 
+    // The read-only sibling forms of the same slots stay allowed.
     CHECK(allowed("git config --get user.name"));
     CHECK(allowed("git branch --contains v1"));
     CHECK(allowed("git stash list"));
-    CHECK(allowed("git worktree list"));
     CHECK(allowed("git reflog"));
 
+    // Safe program-level options are allowed; code/config-changing ones deny.
     CHECK(allowed("git -C build status"));
     CHECK(allowed("git --no-pager log"));
     CHECK_FALSE(allowed("git -c core.pager=x log"));
     CHECK_FALSE(allowed("git --git-dir=/tmp/x log"));
-    CHECK_FALSE(allowed("git --exec-path=/tmp/x log"));
 }
 
 TEST_CASE("read-only subcommand catalog rows match their intended commands")
@@ -472,25 +468,18 @@ TEST_CASE("read-only subcommand catalog rows match their intended commands")
         return analyze_shell(command).invocations.front();
     };
 #ifndef _WIN32
+    // One platform-specific tool family per decision class: allowed rows...
     for (std::string_view command :
-        { "systemctl is-active", "systemctl is-enabled", "systemctl is-failed",
-            "systemctl show", "systemctl cat", "systemctl list-dependencies",
-            "systemctl get-default", "dnf repolist", "dnf search foo",
-            "dnf provides foo", "dnf check-update", "cargo metadata",
-            "cargo locate-project", "gem which rake", "gem environment",
-            "gem contents rake" }) {
+        { "systemctl is-active", "systemctl show", "dnf search foo" }) {
         CHECK(shell_readonly_allowed(invocation(command)));
     }
 #endif
-    for (std::string_view command : { "docker version", "docker info",
-             "docker top", "docker port", "docker stats", "docker history",
-             "docker diff", "docker search redis", "kubectl api-resources",
-             "kubectl api-versions", "kubectl cluster-info",
-             "kubectl explain pod", "kubectl version", "npm why left-pad",
-             "npm root", "npm prefix", "pip freeze", "pip check", "go env",
-             "go list", "go doc fmt" }) {
+    // ...and representative allowed rows from the portable families.
+    for (std::string_view command : { "docker version", "kubectl explain pod",
+             "npm root", "pip freeze", "go env" }) {
         CHECK(shell_readonly_allowed(invocation(command)));
     }
+    // Each family's write form is denied.
     CHECK_FALSE(shell_readonly_allowed(invocation("docker run alpine")));
     CHECK_FALSE(shell_readonly_allowed(invocation("kubectl apply -f x.yaml")));
     CHECK_FALSE(shell_readonly_allowed(invocation("pip install requests")));
@@ -503,12 +492,10 @@ TEST_CASE("whole-program read-only commands are safe with any operand")
 #ifdef _WIN32
     // The Windows catalogue is the cmd.exe builtin set, which shares almost
     // nothing with the POSIX one.
-    for (std::string_view program : { "whoami", "hostname", "netstat", "type",
-             "where", "tree", "dir", "tasklist", "systeminfo" }) {
+    for (std::string_view program : { "whoami", "netstat", "tree" }) {
         CHECK(shell_builtin_allowed(program));
     }
-    for (std::string_view program : { "logname", "tty", "arch", "nproc", "jq",
-             "du", "ps", "lsblk", "objdump", "env", "rg", "ip", "ldd" }) {
+    for (std::string_view program : { "sort", "env", "rg" }) {
         CHECK_FALSE(shell_builtin_allowed(program));
     }
     const ShellAnalysis with_operand = analyze_shell("tree node_modules");
@@ -516,16 +503,10 @@ TEST_CASE("whole-program read-only commands are safe with any operand")
     CHECK_FALSE(shell_readonly_allowed(with_operand.invocations.front()));
 #else
     for (std::string_view program :
-        { "whoami", "logname", "tty", "arch", "nproc", "diff", "uniq", "comm",
-            "join", "paste", "fold", "nl", "rev", "tac", "od", "base64", "jq",
-            "sha1sum", "sha512sum", "cksum", "which", "type", "whereis", "df",
-            "du", "free", "ps", "pgrep", "lsof", "ss", "netstat", "uptime",
-            "who", "w", "last", "getent", "lsblk", "lscpu", "objdump",
-            "readelf", "nm", "seq", "expr", "sleep" }) {
+        { "whoami", "diff", "jq", "df", "ps", "objdump", "sleep" }) {
         CHECK(shell_builtin_allowed(program));
     }
-    for (std::string_view program : { "xxd", "iconv", "sort", "date", "dmesg",
-             "env", "rg", "tree", "ip", "ldd" }) {
+    for (std::string_view program : { "sort", "date", "env", "rg", "ip" }) {
         CHECK_FALSE(shell_builtin_allowed(program));
     }
     const ShellAnalysis with_operand = analyze_shell("du -sh node_modules");

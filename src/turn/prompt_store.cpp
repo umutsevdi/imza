@@ -388,7 +388,7 @@ std::string format_handoff_prompt(std::string_view instructions,
     std::string plan;
     std::vector<std::string> revisions;
     std::string build_log;
-    for (const SessionDoc& doc : snapshot.documents) {
+    for (const SessionDoc& doc : *snapshot.documents) {
         switch (doc.kind) {
         case SessionDoc::Kind::PLAN: revisions.push_back(doc.content); break;
         case SessionDoc::Kind::BUILD:
@@ -417,7 +417,7 @@ std::string format_handoff_prompt(std::string_view instructions,
 
     JsonValue messages  = JsonValue::array_t { };
     auto& message_array = messages.get<JsonValue::array_t>();
-    for (const ConversationItem& item : snapshot.items) {
+    for (const ConversationItem& item : *snapshot.items) {
         if (const auto* user = std::get_if<UserTurn>(&item)) {
             message_array.push_back(JsonValue(user->text));
         }

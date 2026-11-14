@@ -55,6 +55,17 @@ namespace {
         return models;
     }
 
+    std::vector<std::string> lowered_model_ids(
+        const std::vector<ModelInfo>& models)
+    {
+        std::vector<std::string> ids;
+        ids.reserve(models.size());
+        for (const ModelInfo& model : models) {
+            ids.push_back(to_lower(model.id));
+        }
+        return ids;
+    }
+
     // EVREN gates its API behind a one-time terms acceptance: read the
     // current version, then post it. Repeated acceptance is harmless, so
     // this always runs before the connect probe. The terms endpoints
@@ -140,22 +151,23 @@ namespace {
     // Exact id match first, else the longest prefix match: a decorated id
     // (a fine-tune, a dated snapshot) resolves to its base row, while a
     // short id cannot match an unrelated model. Returns nullptr when
-    // nothing matches.
-    template <typename Item, typename KeyFn>
-    const Item* resolve_model(
-        const std::vector<Item>& items, std::string_view key, KeyFn key_of)
+    // nothing matches. `keys` holds the pre-lowered ids in items order so
+    // the scan never re-lowercases the list per call.
+    template <typename Item>
+    const Item* resolve_model(const std::vector<Item>& items,
+        const std::vector<std::string>& keys, std::string_view key)
     {
-        for (const Item& item : items) {
-            if (to_lower(key_of(item)) == key) {
-                return &item;
+        for (std::size_t i = 0; i < items.size(); ++i) {
+            if (keys[i] == key) {
+                return &items[i];
             }
         }
         const Item* best     = nullptr;
         std::size_t best_len = 0;
-        for (const Item& item : items) {
-            const std::string id = to_lower(key_of(item));
+        for (std::size_t i = 0; i < items.size(); ++i) {
+            const std::string& id = keys[i];
             if (id.size() > best_len && key.starts_with(id)) {
-                best     = &item;
+                best     = &items[i];
                 best_len = id.size();
             }
         }
@@ -177,6 +189,26 @@ namespace {
             if (lowered.size() > best_len && key.starts_with(lowered)) {
                 best     = &item;
                 best_len = lowered.size();
+            }
+        }
+        return best;
+    }
+
+    // Pricing rows are stored with pre-lowered keys, so the scan compares
+    // bytes directly instead of lowering every key per call.
+    const ModelPricing* resolve_pricing_row(
+        const std::map<std::string, ModelPricing>& items, std::string_view key)
+    {
+        const auto exact = items.find(std::string(key));
+        if (exact != items.end()) {
+            return &exact->second;
+        }
+        const ModelPricing* best = nullptr;
+        std::size_t best_len     = 0;
+        for (const auto& [id, pricing] : items) {
+            if (id.size() > best_len && key.starts_with(id)) {
+                best     = &pricing;
+                best_len = id.size();
             }
         }
         return best;
@@ -605,8 +637,8 @@ ModelMetadata ProviderStore::model_metadata_for(
     if (live != _model_catalog.end()) {
         if (const auto* ready
             = std::get_if<CatalogEntry::Ready>(&live->second.state)) {
-            if (const ModelInfo* match = resolve_model(ready->models, key,
-                    [](const ModelInfo& i) { return i.id; })) {
+            if (const ModelInfo* match
+                = resolve_model(ready->models, ready->lowered_ids, key)) {
                 metadata.context_limit = match->context_length.value_or(0);
                 metadata.capabilities  = match->capabilities;
             }
@@ -662,7 +694,7 @@ ModelPricing ProviderStore::pricing_for(
     // Keys are qualified (`provider/model`), so the lookup can only match
     // this provider's rows; a bare id can never borrow a sibling's.
     const std::string qualified = provider_id + "/" + key;
-    const ModelPricing* match   = resolve_model(_pricing, qualified);
+    const ModelPricing* match   = resolve_pricing_row(_pricing, qualified);
     return match != nullptr ? *match : ModelPricing { };
 }
 
@@ -907,8 +939,11 @@ void ProviderStore::_start_fetch_locked(const std::string& connection_id)
     }
     const int generation = ++_generations[connection_id];
     if (subscription_connection(connection->id)) {
+        std::vector<ModelInfo> models
+            = catalog_models(_catalog, connection->id);
+        std::vector<std::string> lowered_ids = lowered_model_ids(models);
         _model_catalog[connection_id] = CatalogEntry { CatalogEntry::Ready {
-            catalog_models(_catalog, connection->id) } };
+            std::move(models), std::move(lowered_ids) } };
         return;
     }
     const Route probe
@@ -919,8 +954,11 @@ void ProviderStore::_start_fetch_locked(const std::string& connection_id)
         return;
     }
     if (catalog_models_only(connection->id)) {
+        std::vector<ModelInfo> models
+            = catalog_models(_catalog, connection->id);
+        std::vector<std::string> lowered_ids = lowered_model_ids(models);
         _model_catalog[connection_id] = CatalogEntry { CatalogEntry::Ready {
-            catalog_models(_catalog, connection->id) } };
+            std::move(models), std::move(lowered_ids) } };
         return;
     }
     _model_catalog[connection_id] = CatalogEntry { CatalogEntry::Fetching { } };
@@ -970,8 +1008,10 @@ void ProviderStore::_start_fetch_locked(const std::string& connection_id)
                 return;
             }
             if (status == Status::OK) {
+                const std::vector<std::string> lowered_ids
+                    = lowered_model_ids(models);
                 _model_catalog[connection_id] = CatalogEntry {
-                    CatalogEntry::Ready { std::move(models) }
+                    CatalogEntry::Ready { std::move(models), lowered_ids }
                 };
             } else {
                 _model_catalog[connection_id]
@@ -1013,7 +1053,9 @@ Status ProviderStore::_commit_connection_locked(const ConnectResult& result,
         return Status::CONFIG_ERROR;
     }
     ++_generations[id];
-    _model_catalog[id] = CatalogEntry { CatalogEntry::Ready { models } };
+    std::vector<std::string> lowered_ids = lowered_model_ids(models);
+    _model_catalog[id]                   = CatalogEntry { CatalogEntry::Ready {
+        models, std::move(lowered_ids) } };
     return Status::OK;
 }
 

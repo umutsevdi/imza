@@ -1,15 +1,18 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
 
+#include "common/imza_signal.h"
 #include "common/types.h"
 #include "conversation/session.h"
 #include "network/network.h"
@@ -108,6 +111,10 @@ private:
     std::atomic<bool> _compaction_active { false };
     std::optional<std::jthread> _worker;
     std::optional<std::jthread> _compaction_worker;
+    // Gates the retry backoff wait; mark_dead() plus a notify ends it.
+    std::mutex _wait_mutex;
+    std::condition_variable _wait_cv;
+    Signal<>::Subscription _interrupt_subscription;
     int _retry_after_secs = 0;
 };
 

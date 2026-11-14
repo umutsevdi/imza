@@ -114,13 +114,30 @@ TurnSettings make_turn_settings(
 std::string conversation_transcript(
     const std::string& compacted_summary, const SessionSnapshot& snapshot)
 {
+    std::size_t total
+        = compacted_summary.empty() ? 0 : compacted_summary.size() + 32;
+    for (const ConversationItem& item : *snapshot.items) {
+        if (const auto* user = std::get_if<UserTurn>(&item)) {
+            total += user->text.size();
+        } else if (const auto* assistant = std::get_if<AssistantTurn>(&item)) {
+            total += assistant->markdown.size();
+        } else if (const auto* notice = std::get_if<Notice>(&item)) {
+            total += notice->text.size();
+        } else if (const auto* call = std::get_if<ToolCall>(&item)) {
+            total += call->args.size();
+            if (call->result) {
+                total += call->result->text.size();
+            }
+        }
+    }
     std::string out;
+    out.reserve(total);
     if (!compacted_summary.empty()) {
         out += "\nUSER:\n<session-summary>\n";
         out += compacted_summary;
         out += "\n";
     }
-    for (const ConversationItem& item : snapshot.items) {
+    for (const ConversationItem& item : *snapshot.items) {
         out += item_transcript(item);
     }
     return out;
@@ -150,12 +167,18 @@ TurnRunner::TurnRunner(ApplicationState& state, PostFn post,
     , _stream_fn(std::move(stream_fn))
     , _tools(std::move(tools))
 {
-    _specs_all = tool_specs(_tools);
+    _specs_all              = tool_specs(_tools);
+    _interrupt_subscription = state.session->subscribe_to_interrupt(
+        [this] { _wait_cv.notify_all(); });
 }
 
 TurnRunner::~TurnRunner()
 {
     mark_dead();
+    {
+        std::lock_guard lock(_wait_mutex);
+    }
+    _wait_cv.notify_all();
     _compaction_worker.reset();
     _worker.reset();
 }
@@ -181,6 +204,10 @@ void TurnRunner::clear()
 void TurnRunner::stop()
 {
     mark_dead();
+    {
+        std::lock_guard lock(_wait_mutex);
+    }
+    _wait_cv.notify_all();
     _compaction_worker.reset();
 }
 
@@ -267,7 +294,7 @@ void TurnRunner::_run_compaction(TurnSettings settings, bool report_nothing)
 
     const SessionSnapshot snapshot = _state->session->snapshot();
     const std::optional<std::size_t> last_user
-        = last_user_turn_index(snapshot.items);
+        = last_user_turn_index(*snapshot.items);
     const std::size_t boundary = last_user.has_value() ? *last_user + 1 : 0;
     if (boundary <= snapshot.compacted_item_count) {
         nothing_to_compact();
@@ -525,12 +552,15 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
             using namespace std::chrono_literals;
             const auto deadline
                 = std::chrono::steady_clock::now() + std::chrono::seconds(wait);
-            while (std::chrono::steady_clock::now() < deadline) {
-                if (!alive() || _state->session->interrupt_requested()) {
-                    _finish_idle();
-                    return;
-                }
-                std::this_thread::sleep_for(50ms);
+            {
+                std::unique_lock lock(_wait_mutex);
+                _wait_cv.wait_until(lock, deadline, [this] {
+                    return !alive() || _state->session->interrupt_requested();
+                });
+            }
+            if (!alive() || _state->session->interrupt_requested()) {
+                _finish_idle();
+                return;
             }
             continue;
         }

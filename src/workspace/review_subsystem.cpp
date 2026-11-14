@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
-#include <fstream>
 
 namespace imza {
 namespace {
@@ -18,38 +17,30 @@ namespace {
             if (path.empty()) {
                 continue;
             }
-            std::ifstream input(root / path, std::ios::binary);
-            if (!input) {
+            const UntrackedFileContent content
+                = read_untracked_file(root / path, true);
+            if (!content.readable) {
                 continue;
             }
             ReviewFile file;
             file.new_path = path;
-            file.kind     = ReviewFile::Kind::UNTRACKED;
             ReviewHunk hunk;
-            hunk.header         = "@@ -0,0 +1 @@";
-            hunk.new_start      = 1;
-            std::size_t line_no = 1;
-            std::string line;
-            while (std::getline(input, line)) {
-                if (line.find('\0') != std::string::npos) {
-                    file.kind      = ReviewFile::Kind::BINARY;
-                    file.additions = 0;
-                    hunk.lines.clear();
-                    break;
+            hunk.header    = "@@ -0,0 +1 @@";
+            hunk.new_start = 1;
+            if (content.binary) {
+                file.kind = ReviewFile::Kind::BINARY;
+            } else {
+                file.kind           = ReviewFile::Kind::UNTRACKED;
+                std::size_t line_no = 1;
+                for (const std::string& line : content.line_contents) {
+                    hunk.lines.push_back(
+                        ReviewLine { ReviewLine::Kind::ADDITION, std::nullopt,
+                            line_no++, line });
                 }
-                if (!line.empty() && line.back() == '\r') {
-                    line.pop_back();
-                }
-                hunk.lines.push_back(ReviewLine { ReviewLine::Kind::ADDITION,
-                    std::nullopt, line_no++, std::move(line) });
-                ++file.additions;
+                file.additions = content.line_contents.size();
+                hunk.new_count = file.additions;
+                file.hunks.push_back(std::move(hunk));
             }
-            if (file.kind == ReviewFile::Kind::BINARY) {
-                review.files.push_back(std::move(file));
-                continue;
-            }
-            hunk.new_count = file.additions;
-            file.hunks.push_back(std::move(hunk));
             review.files.push_back(std::move(file));
         }
     }

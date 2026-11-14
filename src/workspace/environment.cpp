@@ -522,6 +522,9 @@ void Environment::_start_git_worker()
         // cadence; a cheap stat of the git metadata (index/HEAD) pulls it
         // forward when the user stages work or moves the branch.
         std::optional<std::uint64_t> stamp;
+        // Tree fingerprint of the last successful refresh; nullopt until
+        // one completes, so the first tick always runs the trio.
+        std::optional<std::uint64_t> refresh_stamp;
         if (const auto initial = workspace();
             initial != nullptr && initial->project_root) {
             stamp = git_metadata_stamp(initial->project_root.value());
@@ -549,6 +552,9 @@ void Environment::_start_git_worker()
                 if (next != stamp) {
                     stamp            = next;
                     refresh_deadline = now;
+                    // The root moved or its metadata moved: the previous
+                    // tree fingerprint describes a different repository.
+                    refresh_stamp.reset();
                 }
             }
             if (now < refresh_deadline) {
@@ -561,6 +567,13 @@ void Environment::_start_git_worker()
             const std::filesystem::path& root
                 = observed_workspace->project_root.value();
             if (git_index_locked(root)) {
+                continue;
+            }
+            // An unchanged tree fingerprint means the previous status,
+            // branch, and diff still hold: skip the subprocess trio.
+            const std::optional<std::uint64_t> current_stamp
+                = git_refresh_stamp(root);
+            if (refresh_stamp.has_value() && current_stamp == refresh_stamp) {
                 continue;
             }
             const CommandResult status
@@ -595,6 +608,11 @@ void Environment::_start_git_worker()
                         std::make_shared<RepositoryState>(std::move(next)),
                         observed_workspace);
                 }
+                // Captured after the trio: `git status` itself rewrites the
+                // index stat-cache, so a pre-run stamp would read as a
+                // change on the next tick. Only a successful refresh may
+                // arm the skip, so failures are retried.
+                refresh_stamp = git_refresh_stamp(root);
             }
         }
     });

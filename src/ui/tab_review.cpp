@@ -137,6 +137,10 @@ namespace {
                            paragraph(snapshot.error) | color(PANEL_FG_DIM) }))
                     | flex;
             }
+            std::map<std::string, std::size_t> comment_counts;
+            for (const ReviewComment& comment : snapshot.comments) {
+                ++comment_counts[comment.anchor.file];
+            }
             _rendered_review = snapshot.review;
             if (snapshot.review->files.empty()) {
                 return center(
@@ -153,8 +157,8 @@ namespace {
             for (std::size_t file_index = 0;
                 file_index < snapshot.review->files.size(); ++file_index) {
                 const ReviewFile& file = snapshot.review->files[file_index];
-                _push_file(rows, snapshot, file, file_index, review_width,
-                    side_by_side);
+                _push_file(rows, snapshot, comment_counts, file, file_index,
+                    review_width, side_by_side);
                 if (file_index + 1 < snapshot.review->files.size()) {
                     _flush_spacer(rows);
                     rows.push_back(separatorEmpty());
@@ -202,16 +206,12 @@ namespace {
                 : _selected_comment ? "↑↓ navigate · e edit · DEL delete"
                                     : "↑↓ navigate · [] files · Enter comment "
                                       "· c collapse";
-            const ReviewSubsystem::Snapshot review_snapshot
-                = _state->review->snapshot();
             Elements bottom { };
-            const bool review_running
-                = review_snapshot.findings.task_id.has_value();
-            const bool handoff_running
-                = review_snapshot.handoff.task_id.has_value();
-            _plan_box         = Box { };
-            _review_slot_box  = Box { };
-            _handoff_slot_box = Box { };
+            const bool review_running  = snapshot.findings.task_id.has_value();
+            const bool handoff_running = snapshot.handoff.task_id.has_value();
+            _plan_box                  = Box { };
+            _review_slot_box           = Box { };
+            _handoff_slot_box          = Box { };
             Elements actions {
                 _plan_button->Render() | reflect(_plan_box),
                 text(" "),
@@ -481,17 +481,17 @@ namespace {
         }
 
         void _push_file(Elements& rows,
-            const ReviewSubsystem::Snapshot& snapshot, const ReviewFile& file,
-            std::size_t file_index, int review_width, bool side_by_side)
+            const ReviewSubsystem::Snapshot& snapshot,
+            const std::map<std::string, std::size_t>& comment_counts,
+            const ReviewFile& file, std::size_t file_index, int review_width,
+            bool side_by_side)
         {
             Elements file_rows;
             const std::string& path
                 = file.new_path.empty() ? file.old_path : file.new_path;
-            const bool collapsed       = _collapsed.contains(path);
-            const std::size_t comments = std::ranges::count_if(
-                snapshot.comments, [&path](const ReviewComment& comment) {
-                    return comment.anchor.file == path;
-                });
+            const bool collapsed = _collapsed.contains(path);
+            const std::size_t comments
+                = comment_counts.contains(path) ? comment_counts.at(path) : 0;
             Elements header_parts {
                 text(collapsed ? "› " : "⌄ ") | color(PANEL_FG_DIM),
                 text(path) | bold | color(PANEL_FG),

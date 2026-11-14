@@ -283,11 +283,7 @@ std::string mcp_session_id(const std::vector<std::string>& headers)
         if (name.size() != SESSION_KEY.size()) {
             continue;
         }
-        if (!std::equal(name.begin(), name.end(), SESSION_KEY.begin(),
-                [](char a, char b) {
-                    return std::tolower(static_cast<unsigned char>(a))
-                        == std::tolower(static_cast<unsigned char>(b));
-                })) {
+        if (!iequal(name, SESSION_KEY)) {
             continue;
         }
         const std::string value(trim(std::string_view(

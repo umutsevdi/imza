@@ -265,48 +265,6 @@ ChangeSummary summarize_git_diff(std::string_view diff)
     return summary;
 }
 
-void summarize_untracked_files(const std::filesystem::path& root,
-    const std::vector<ChangedFile>& files, ChangeSummary& summary)
-{
-    for (const ChangedFile& file : files) {
-        if (file.kind != ChangedFile::Kind::UNTRACKED) {
-            continue;
-        }
-        hash_bytes(summary.signature, file.path);
-        summary.signature ^= 0xFF;
-        summary.signature *= FNV_PRIME;
-        std::ifstream input(root / file.path, std::ios::binary);
-        if (!input) {
-            continue;
-        }
-        std::array<char, 8192> buffer;
-        std::size_t lines = 0;
-        bool binary       = false;
-        bool has_content  = false;
-        char last         = '\0';
-        while (input) {
-            input.read(buffer.data(), buffer.size());
-            const std::streamsize count = input.gcount();
-            if (count <= 0) {
-                continue;
-            }
-            const std::string_view chunk(
-                buffer.data(), static_cast<std::size_t>(count));
-            hash_bytes(summary.signature, chunk);
-            has_content = true;
-            last        = chunk.back();
-            binary      = binary || chunk.find('\0') != std::string_view::npos;
-            lines += std::ranges::count(chunk, '\n');
-        }
-        if (!binary) {
-            if (has_content && last != '\n') {
-                ++lines;
-            }
-            summary.additions += lines;
-        }
-    }
-}
-
 ReviewLoadResult parse_git_diff(std::string_view patch)
 {
     RepositoryReview review;
@@ -387,6 +345,141 @@ ReviewLoadResult parse_git_diff(std::string_view patch)
         }
     }
     return review;
+}
+
+UntrackedFileContent read_untracked_file(
+    const std::filesystem::path& path, bool keep_lines)
+{
+    UntrackedFileContent content;
+    std::uint64_t signature = FNV_OFFSET;
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        return content;
+    }
+    content.readable = true;
+    std::array<char, 8192> buffer;
+    char last        = '\0';
+    bool has_content = false;
+    std::string pending;
+    while (input) {
+        input.read(buffer.data(), buffer.size());
+        const std::streamsize count = input.gcount();
+        if (count <= 0) {
+            continue;
+        }
+        const std::string_view chunk(
+            buffer.data(), static_cast<std::size_t>(count));
+        hash_bytes(signature, chunk);
+        has_content = true;
+        last        = chunk.back();
+        content.binary
+            = content.binary || chunk.find('\0') != std::string_view::npos;
+        if (keep_lines && !content.binary) {
+            std::size_t start = 0;
+            while (true) {
+                const std::size_t newline = chunk.find('\n', start);
+                if (newline == std::string_view::npos) {
+                    pending.append(chunk.substr(start));
+                    break;
+                }
+                pending.append(chunk.substr(start, newline - start));
+                if (!pending.empty() && pending.back() == '\r') {
+                    pending.pop_back();
+                }
+                content.line_contents.push_back(std::move(pending));
+                pending.clear();
+                ++content.lines;
+                start = newline + 1;
+            }
+        } else {
+            content.lines
+                += static_cast<std::size_t>(std::ranges::count(chunk, '\n'));
+        }
+    }
+    content.hash = signature;
+    if (!content.binary) {
+        if (keep_lines) {
+            if (!pending.empty()) {
+                if (pending.back() == '\r') {
+                    pending.pop_back();
+                }
+                content.line_contents.push_back(std::move(pending));
+            }
+            content.lines = content.line_contents.size();
+        } else if (has_content && last != '\n') {
+            ++content.lines;
+        }
+    }
+    return content;
+}
+
+void summarize_untracked_files(const std::filesystem::path& root,
+    const std::vector<ChangedFile>& files, ChangeSummary& summary)
+{
+    for (const ChangedFile& file : files) {
+        if (file.kind != ChangedFile::Kind::UNTRACKED) {
+            continue;
+        }
+        hash_bytes(summary.signature, file.path);
+        summary.signature ^= 0xFF;
+        summary.signature *= FNV_PRIME;
+        const UntrackedFileContent content
+            = read_untracked_file(root / file.path, false);
+        if (!content.readable) {
+            continue;
+        }
+        hash_bytes(summary.signature, std::to_string(content.hash));
+        if (!content.binary) {
+            summary.additions += content.lines;
+        }
+    }
+}
+
+std::optional<std::uint64_t> git_refresh_stamp(
+    const std::filesystem::path& root)
+{
+    const std::optional<std::uint64_t> metadata = git_metadata_stamp(root);
+    if (!metadata.has_value()) {
+        return std::nullopt;
+    }
+    std::uint64_t stamp = FNV_OFFSET;
+    hash_bytes(stamp, std::to_string(*metadata));
+    std::error_code ec;
+    for (std::filesystem::recursive_directory_iterator it(root,
+             std::filesystem::directory_options::skip_permission_denied, ec),
+        end;
+        !ec && it != end; it.increment(ec)) {
+        if (it->is_directory(ec)) {
+            if (ec) {
+                return std::nullopt;
+            }
+            const std::string name = it->path().filename().string();
+            if (name == ".git") {
+                it.disable_recursion_pending();
+            }
+            continue;
+        }
+        if (!it->is_regular_file(ec)) {
+            continue;
+        }
+        const auto written = it->last_write_time(ec);
+        if (ec) {
+            return std::nullopt;
+        }
+        const auto size = it->file_size(ec);
+        if (ec) {
+            return std::nullopt;
+        }
+        hash_bytes(stamp, it->path().string());
+        hash_bytes(stamp,
+            std::to_string(
+                static_cast<long long>(written.time_since_epoch().count())));
+        hash_bytes(stamp, std::to_string(size));
+    }
+    if (ec) {
+        return std::nullopt;
+    }
+    return stamp;
 }
 
 std::optional<std::string> git_working_diff(

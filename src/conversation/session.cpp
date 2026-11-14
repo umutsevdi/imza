@@ -44,11 +44,7 @@ namespace {
         if (heading.size() != name.size()) {
             return false;
         }
-        return std::equal(
-            heading.begin(), heading.end(), name.begin(), [](char a, char b) {
-                return std::tolower(static_cast<unsigned char>(a))
-                    == static_cast<unsigned char>(b);
-            });
+        return iequal(heading, name);
     }
 
     std::string plan_validation_error(const std::string& content)
@@ -352,7 +348,7 @@ bool Session::has_plan() const
 
 SessionSnapshot Session::_build_snapshot() const
 {
-    return { _title, *_items, *_todo, *_documents, _compacted_summary,
+    return { _title, _items, _todo, _documents, _compacted_summary,
         _compacted_item_count, _mode == Mode::PLAN, _persistence, _totals,
         _last, _total_cost, _usage_log, _client };
 }
@@ -379,10 +375,10 @@ void Session::restore(SessionSnapshot snapshot)
         std::lock_guard lock(_mutex);
         previous_mode = _mode;
         _title        = std::move(snapshot.title);
-        _items        = std::make_shared<std::vector<ConversationItem>>(
+        _items        = std::const_pointer_cast<std::vector<ConversationItem>>(
             std::move(snapshot.items));
-        _todo      = std::make_shared<TodoList>(std::move(snapshot.todo));
-        _documents = std::make_shared<std::vector<SessionDoc>>(
+        _todo = std::const_pointer_cast<TodoList>(std::move(snapshot.todo));
+        _documents = std::const_pointer_cast<std::vector<SessionDoc>>(
             std::move(snapshot.documents));
         _plan_version           = _documents->size();
         _plan_seen_version      = _plan_version;
@@ -519,6 +515,7 @@ std::vector<std::string> Session::attachment_names() const
 {
     std::lock_guard lock(_mutex);
     std::vector<std::string> names;
+    std::set<std::string_view> seen;
     for (const ConversationItem& item : *_items) {
         const auto* user = std::get_if<UserTurn>(&item);
         if (user == nullptr) {
@@ -527,10 +524,10 @@ std::vector<std::string> Session::attachment_names() const
         for (const Attachment& attachment : user->attachments) {
             std::string name
                 = utf8_from_path(path_from_utf8(attachment.path).filename());
-            if (!name.empty()
-                && std::find(names.begin(), names.end(), name) == names.end()) {
-                names.push_back(std::move(name));
+            if (name.empty() || !seen.insert(name).second) {
+                continue;
             }
+            names.push_back(std::move(name));
         }
     }
     return names;
@@ -753,13 +750,14 @@ void Session::append_item(ConversationItem item)
 
 void Session::append_notice(std::string text)
 {
+    const std::string& published = text;
     {
         std::lock_guard lock(_mutex);
         _dirty = true;
         _ensure_unique(_items);
         _items->emplace_back(Notice { std::move(text) });
     }
-    _notice_published.publish(text);
+    _notice_published.publish(published);
 }
 
 Signal<const std::string&>::Subscription Session::subscribe_to_notice(
@@ -892,23 +890,29 @@ void Session::fill_tool_result(
     const ToolCallRequest& req, ToolCall::Result result)
 {
     // Moved out first: the undo stack owns the contents, and the transcript
-    // copy must not carry them (snapshots copy items).
+    // copy must not carry them.
     std::vector<FileChange> changes = std::move(result.changes);
-    ToolCall finished;
+    // The observer reads the filled call through the shared item buffer:
+    // copy-on-write detaches before any mutation, so the reference stays
+    // stable without an unbounded copy of the result text.
+    std::shared_ptr<const std::vector<ConversationItem>> buffer;
+    const ToolCall* finished = nullptr;
     {
         std::lock_guard lock(_mutex);
         _ensure_unique(_items);
         if (auto* call = _find_tool_locked(req, true)) {
             call->result = std::move(result);
-            finished     = *call;
+            finished     = call;
             _dirty       = true;
         }
         // Same lock as the result, so stack order matches transcript order.
         _push_undo_locked(std::move(changes));
+        buffer = _items;
     }
     // Outside the lock: external interfaces push the final update.
-    if (_tool_result_observer && !finished.call_id.empty()) {
-        _tool_result_observer(finished);
+    if (_tool_result_observer && finished != nullptr
+        && !finished->call_id.empty()) {
+        _tool_result_observer(*finished);
     }
 }
 
@@ -1210,7 +1214,19 @@ void Session::reset_reasoning()
     _reasoning_start = std::chrono::steady_clock::now();
 }
 
-void Session::request_interrupt() { _interrupt_requested.store(true); }
+void Session::request_interrupt()
+{
+    if (_interrupt_requested.exchange(true)) {
+        return;
+    }
+    _interrupted.publish();
+}
+
+Signal<>::Subscription Session::subscribe_to_interrupt(
+    Signal<>::Callback callback)
+{
+    return _interrupted.subscribe(std::move(callback));
+}
 
 void Session::clear_interrupt() { _interrupt_requested.store(false); }
 

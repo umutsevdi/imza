@@ -283,15 +283,6 @@ namespace {
         return true;
     }
 
-    void install_session(ApplicationState& state, SessionSnapshot snapshot)
-    {
-        state.session->restore(std::move(snapshot));
-        // Grants are workspace-scoped: a new conversation starts clean.
-        state.permissions->clear();
-        state.runner->clear();
-        state.subagents->prune_completed();
-    }
-
     void new_session(ApplicationState& state)
     {
         if (state.session->has_pending_work()) {
@@ -334,6 +325,21 @@ namespace {
     }
 
 } // namespace
+
+// Installs a loaded snapshot as the active conversation: restore, then
+// clear the workspace-scoped and conversation-scoped runtime state.
+// Shared with the ACP adapter, whose child states own no subagent
+// manager, hence the guard.
+void install_session(ApplicationState& state, SessionSnapshot snapshot)
+{
+    state.session->restore(std::move(snapshot));
+    // Grants are workspace-scoped: a new conversation starts clean.
+    state.permissions->clear();
+    state.runner->clear();
+    if (state.subagents != nullptr) {
+        state.subagents->prune_completed();
+    }
+}
 
 SkillsModal skills_modal(const ApplicationState& state)
 {
@@ -594,14 +600,16 @@ bool allow_add_command(
     return true;
 }
 
-bool allow_remove_directory(ApplicationState& state, std::size_t index)
+template <typename T>
+bool allow_remove(
+    ApplicationState& state, T AllowConfig::* member, std::size_t index)
 {
-    const bool removed = state.config->update([index](Config& cfg) {
-        if (index >= cfg.allow.directories.size()) {
+    const bool removed = state.config->update([member, index](Config& cfg) {
+        auto& entries = cfg.allow.*member;
+        if (index >= entries.size()) {
             return false;
         }
-        cfg.allow.directories.erase(
-            cfg.allow.directories.begin() + static_cast<std::ptrdiff_t>(index));
+        entries.erase(entries.begin() + static_cast<std::ptrdiff_t>(index));
         return true;
     }) == ConfigUpdateResult::UPDATED;
     if (!removed) {
@@ -611,21 +619,14 @@ bool allow_remove_directory(ApplicationState& state, std::size_t index)
     return true;
 }
 
+bool allow_remove_directory(ApplicationState& state, std::size_t index)
+{
+    return allow_remove(state, &AllowConfig::directories, index);
+}
+
 bool allow_remove_command(ApplicationState& state, std::size_t index)
 {
-    const bool removed = state.config->update([index](Config& cfg) {
-        if (index >= cfg.allow.commands.size()) {
-            return false;
-        }
-        cfg.allow.commands.erase(
-            cfg.allow.commands.begin() + static_cast<std::ptrdiff_t>(index));
-        return true;
-    }) == ConfigUpdateResult::UPDATED;
-    if (!removed) {
-        state.session->set_error("Failed to save permission grants.");
-        return false;
-    }
-    return true;
+    return allow_remove(state, &AllowConfig::commands, index);
 }
 
 std::future<ModalResult> request_modal(
@@ -1565,7 +1566,8 @@ namespace {
             = conversation_transcript(seed.compacted_summary, seed);
         if (!seed_transcript.empty()) {
             seed.compacted_summary = seed_transcript;
-            seed.items.clear();
+            seed.items
+                = std::make_shared<const std::vector<ConversationItem>>();
             // The transcript absorbed everything the parent had marked
             // compacted; nothing is skipped until the sidechat compacts.
             seed.compacted_item_count = 0;
@@ -1614,10 +1616,10 @@ void refresh_sidechat(ApplicationState& state)
     }
     interrupt(*state.sidechat);
     SessionSnapshot shell = state.sidechat->session->snapshot();
-    shell.items.clear();
+    shell.items = std::make_shared<const std::vector<ConversationItem>>();
     shell.compacted_summary.clear();
     shell.compacted_item_count = 0;
-    shell.todo                 = TodoList { };
+    shell.todo                 = std::make_shared<const TodoList>();
     shell.persistence          = UnsavedSession { };
     state.sidechat->session->restore(std::move(shell));
     state.sidechat->session->clear_error();

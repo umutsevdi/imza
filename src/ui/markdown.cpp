@@ -59,7 +59,8 @@ namespace {
     // Single cmark walk driving the sink. The sink receives block /
     // inline events; table structure is buffered by the walker and delivered as
     // begin / cell / row / end calls so sinks never touch cmark themselves.
-    void walk_markdown(cmark_node* doc, FtxuiSink& s);
+    void walk_markdown(cmark_node* doc, FtxuiSink& s,
+        std::vector<int> list_stack = { }, int item_index = 0);
 
     class FtxuiSink {
     public:
@@ -372,7 +373,8 @@ namespace {
         std::vector<uint8_t> _aligns;
     };
 
-    void walk_markdown(cmark_node* doc, FtxuiSink& s)
+    void walk_markdown(cmark_node* doc, FtxuiSink& s,
+        std::vector<int> list_stack, int item_index)
     {
         cmark_iter* iter = cmark_iter_new(doc);
 
@@ -380,8 +382,9 @@ namespace {
         bool row_is_header = false;
         TableSpec spec;
 
-        std::vector<int> lists; // 1 = ordered, 0 = bullet; depth via size
-        int item_index = 0;
+        std::vector<int> lists = std::move(list_stack); // 1 = ordered, 0 =
+                                                        // bullet; depth via
+                                                        // size
 
         Style st;
 
@@ -525,17 +528,25 @@ namespace {
         cmark_iter_free(iter);
     }
 
+    void render_markdown_node(cmark_node* doc, int width, Elements& out,
+        std::vector<int> list_stack = { }, int item_index = 0)
+    {
+        FtxuiSink sink(width);
+        walk_markdown(doc, sink, std::move(list_stack), item_index);
+        out.push_back(sink.take());
+    }
+
 } // namespace
 
 Element render_markdown_element(std::string_view md, int width)
 {
-    FtxuiSink sink(width);
+    Elements out;
     cmark_node* doc = parse(md);
     if (doc) {
-        walk_markdown(doc, sink);
+        render_markdown_node(doc, width, out);
     }
     cmark_node_free(doc);
-    return sink.take();
+    return out.empty() ? ftxui::text("") : vbox(std::move(out));
 }
 
 namespace {
@@ -588,31 +599,39 @@ std::vector<MarkdownBlock> render_markdown_blocks(
     }
     const std::vector<std::size_t> offsets = line_offsets(md);
     // Top-level blocks; a list expands to one selectable block per item so
-    // a single "1." / "-" line can carry its own annotation. Rendering each
-    // slice separately keeps tables, code, and quotes intact, and the
-    // excerpt is the block's first source line - the natural
-    // imza.plan.edit old-string target.
-    const std::function<void(cmark_node*)> emit = [&](cmark_node* node) {
+    // a single "1." / "-" line can carry its own annotation. The excerpt is
+    // the block's first source line - the natural imza.plan.edit
+    // old-string target.
+    const auto emit = [&](cmark_node* node, std::vector<int> list_stack,
+                          int item_index) {
         MarkdownBlock block;
-        block.line    = cmark_node_get_start_line(node);
-        block.source  = std::string(first_line(line_slice(md, offsets,
+        block.line   = cmark_node_get_start_line(node);
+        block.source = std::string(first_line(line_slice(md, offsets,
             cmark_node_get_start_line(node), cmark_node_get_start_line(node))));
-        block.element = render_markdown_element(
-            line_slice(md, offsets, cmark_node_get_start_line(node),
-                cmark_node_get_end_line(node)),
-            width);
+        Elements out;
+        render_markdown_node(
+            node, width, out, std::move(list_stack), item_index);
+        block.element = out.empty() ? ftxui::text("") : vbox(std::move(out));
         blocks.push_back(std::move(block));
     };
     for (cmark_node* node = cmark_node_first_child(doc); node != nullptr;
         node              = cmark_node_next(node)) {
         if (cmark_node_get_type(node) == CMARK_NODE_LIST) {
+            const bool ordered
+                = cmark_node_get_list_type(node) == CMARK_ORDERED_LIST;
+            int item_index = cmark_node_get_list_start(node) - 1;
             for (cmark_node* item     = cmark_node_first_child(node);
                 item != nullptr; item = cmark_node_next(item)) {
-                emit(item);
+                if (ordered) {
+                    ++item_index;
+                }
+                emit(item,
+                    ordered ? std::vector<int> { 1 } : std::vector<int> { 0 },
+                    item_index);
             }
             continue;
         }
-        emit(node);
+        emit(node, { }, 0);
     }
     cmark_node_free(doc);
     return blocks;

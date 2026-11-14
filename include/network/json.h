@@ -84,11 +84,30 @@ inline std::optional<std::string> repair_json_string_bytes(
     return repaired;
 }
 
+// Repair only ever drops bytes that are either control characters or
+// non-ASCII; when neither appears, the repair pass provably returns
+// nullopt and the clean parse can run without the byte scan. Glaze does
+// not validate UTF-8 on read, so this gate (not parse failure) is what
+// keeps invalid sequences healing.
+inline bool json_needs_byte_repair(std::string_view text)
+{
+    for (const char c : text) {
+        const unsigned char b = static_cast<unsigned char>(c);
+        if (b < 0x20 || b >= 0x80) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Parse into a reflected struct, reporting the parse error. The output
 // is unspecified on failure.
 template <typename T>
 [[nodiscard]] glz::error_ctx json_parse_checked(std::string_view text, T& out)
 {
+    if (!json_needs_byte_repair(text)) {
+        return glz::read<JSON_READ>(out, text);
+    }
     if (auto repaired = repair_json_string_bytes(text)) {
         return glz::read<JSON_READ>(out, *repaired);
     }
@@ -164,16 +183,26 @@ template <typename T>
 // degrades to `null`.
 template <typename Range> std::string json_dump_array(const Range& items)
 {
-    std::string out = "[";
-    bool first      = true;
-    for (const auto& item : items) {
-        if (!first) {
-            out += ',';
+    std::string out;
+    if (glz::write<JSON_WRITE>(items, out)) {
+        // Rare failure (allocation or a non-serializable element): fall
+        // back to the per-item path so one bad item degrades to `null`
+        // instead of losing the whole array.
+        std::string degraded = "[";
+        bool first           = true;
+        for (const auto& item : items) {
+            if (!first) {
+                degraded += ',';
+            }
+            first = false;
+            degraded += json_dump(item);
         }
-        first = false;
-        out += json_dump(item);
+        degraded += ']';
+        return degraded;
     }
-    out += ']';
+    if (auto repaired = repair_json_string_bytes(out)) {
+        return std::move(*repaired);
+    }
     return out;
 }
 

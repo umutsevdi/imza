@@ -291,7 +291,12 @@ namespace {
             const std::string_view line(*entry);
             const std::size_t equals    = line.find('=');
             const std::string_view name = line.substr(0, equals);
-            if (env.count(std::string(name)) == 0) {
+            const auto found = std::lower_bound(env.begin(), env.end(), name,
+                [](const std::pair<const std::string, std::string>& candidate,
+                    std::string_view key) {
+                    return std::string_view(candidate.first) < key;
+                });
+            if (found == env.end() || std::string_view(found->first) != name) {
                 merged.emplace_back(line);
             }
         }

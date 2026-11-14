@@ -6,6 +6,7 @@
 #include "protocols/mcp.h"
 
 #include <atomic>
+#include <condition_variable>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -60,7 +61,9 @@ class McpSubsystem final : public Subsystem {
 public:
     explicit McpSubsystem(std::map<std::string, McpServerConfig> servers,
         McpSubsystemHooks hooks = { });
-    ~McpSubsystem();
+    ~McpSubsystem() override;
+
+    void stop() override;
 
     McpSubsystem(const McpSubsystem&)            = delete;
     McpSubsystem& operator=(const McpSubsystem&) = delete;
@@ -144,6 +147,8 @@ private:
     bool wait_interruptible(long ms) const;
 
     mutable std::mutex _map_mutex;
+    // Notified from mark_dead so wait_interruptible parks instead of polling.
+    mutable std::condition_variable _death_cv;
     std::map<std::string, std::shared_ptr<ServerEntry>> _servers;
     // Workers spawn follow-up work (retries, listeners) from their own
     // threads, so appends race the destructor's join.

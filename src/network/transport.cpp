@@ -6,9 +6,11 @@
 
 #include <curl/curl.h>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cctype>
 #include <charconv>
+#include <cstring>
 #include <mutex>
 #include <optional>
 #include <string_view>
@@ -330,13 +332,14 @@ namespace {
         }
     }
 
-    // Extracts complete lines (LF or CRLF) from `buf` and passes each to
-    // `consume`; returns the byte count consumed so the caller can erase.
-    // Stops early when `consume` returns false.
+    // Extracts complete lines (LF or CRLF) from `buf` from `start` on and
+    // passes each to `consume`; returns the absolute position after the
+    // last consumed line. Stops early when `consume` returns false.
     template <typename Consume>
-    std::size_t consume_sse_lines(const std::string& buf, Consume&& consume)
+    std::size_t consume_sse_lines(
+        const std::string& buf, std::size_t start, Consume&& consume)
     {
-        std::size_t pos = 0;
+        std::size_t pos = start;
         while (true) {
             const std::size_t nl = buf.find('\n', pos);
             if (nl == std::string::npos) {
@@ -424,6 +427,7 @@ namespace {
         const SseEventCallback* on_event = nullptr;
         long http_status                 = 0;
         std::string buf;
+        std::size_t consumed = 0;
         SseLineState line;
     };
 
@@ -456,13 +460,17 @@ namespace {
     {
         auto* ctx = static_cast<SseStreamCtx*>(userdata);
         ctx->buf.append(ptr, n);
-        ctx->buf.erase(
-            0, consume_sse_lines(ctx->buf, [ctx](std::string_view line) {
+        ctx->consumed = consume_sse_lines(
+            ctx->buf, ctx->consumed, [ctx](std::string_view line) {
                 if (ctx->line.feed(line)) {
                     sse_dispatch(*ctx);
                 }
                 return true;
-            }));
+            });
+        if (ctx->consumed > ctx->buf.size() / 2) {
+            ctx->buf.erase(0, ctx->consumed);
+            ctx->consumed = 0;
+        }
         return n;
     }
 
@@ -546,6 +554,7 @@ namespace {
         StreamCallback cb;
         ParseState parse_state;
         std::string buf;
+        std::size_t consumed = 0;
         SseLineState line;
         std::string raw;
         std::vector<StreamEvent> outs;
@@ -612,13 +621,17 @@ namespace {
         }
         mark_connected(*ctx);
         ctx->buf.append(ptr, n);
-        ctx->buf.erase(
-            0, consume_sse_lines(ctx->buf, [ctx](std::string_view line) {
+        ctx->consumed = consume_sse_lines(
+            ctx->buf, ctx->consumed, [ctx](std::string_view line) {
                 if (ctx->line.feed(line)) {
                     dispatch_block(*ctx);
                 }
                 return !ctx->parse_state.terminal;
-            }));
+            });
+        if (ctx->consumed > ctx->buf.size() / 2) {
+            ctx->buf.erase(0, ctx->consumed);
+            ctx->consumed = 0;
+        }
         return n;
     }
 
@@ -750,6 +763,51 @@ Provider get_provider(const Route& route)
     return openai_provider;
 }
 
+namespace {
+
+    // ASCII case-insensitive substring test; neither argument is copied.
+    bool icontains(std::string_view hay, std::string_view needle)
+    {
+        if (needle.empty()) {
+            return true;
+        }
+        const auto eq = [](char x, char y) {
+            return std::tolower(static_cast<unsigned char>(x))
+                == std::tolower(static_cast<unsigned char>(y));
+        };
+        return std::search(
+                   hay.begin(), hay.end(), needle.begin(), needle.end(), eq)
+            != hay.end();
+    }
+
+    // icontains over `kind + " " + msg` without materializing the join: a
+    // needle spanning the two halves sits inside the seam window built
+    // from the last needle bytes of one side and the first of the other.
+    bool icontains_joined(
+        std::string_view kind, std::string_view msg, std::string_view needle)
+    {
+        if (icontains(kind, needle) || icontains(msg, needle)) {
+            return true;
+        }
+        if (needle.size() < 2) {
+            return false;
+        }
+        const std::size_t half = needle.size() - 1;
+        std::array<char, 64> seam { };
+        std::size_t used = 0;
+        const std::string_view tail
+            = kind.size() > half ? kind.substr(kind.size() - half) : kind;
+        std::memcpy(seam.data(), tail.data(), tail.size());
+        used += tail.size();
+        seam[used++]                = ' ';
+        const std::string_view head = msg.substr(0, std::min(half, msg.size()));
+        std::memcpy(seam.data() + used, head.data(), head.size());
+        used += head.size();
+        return icontains(std::string_view(seam.data(), used), needle);
+    }
+
+} // namespace
+
 Status parse_api_error(std::string_view body, std::string& message)
 {
     message.clear();
@@ -780,16 +838,14 @@ Status parse_api_error(std::string_view body, std::string& message)
     if (msg.empty() && kind.empty()) {
         return Status::OK;
     }
-    const std::string hay = to_lower(kind + " " + msg);
-    Status st             = Status::API_ERROR;
-    if (hay.find("rate") != std::string::npos
-        || hay.find("too many") != std::string::npos) {
+    const auto matches = [&](std::string_view needle) {
+        return icontains_joined(kind, msg, needle);
+    };
+    Status st = Status::API_ERROR;
+    if (matches("rate") || matches("too many")) {
         st = Status::RATE_LIMITED;
-    } else if (hay.find("quota") != std::string::npos
-        || hay.find("balance") != std::string::npos
-        || hay.find("credit") != std::string::npos
-        || hay.find("insufficient") != std::string::npos
-        || hay.find("billing") != std::string::npos) {
+    } else if (matches("quota") || matches("balance") || matches("credit")
+        || matches("insufficient") || matches("billing")) {
         st = Status::BUDGET_EXCEEDED;
     }
     message = std::move(msg);

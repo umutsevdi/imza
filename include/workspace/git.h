@@ -58,6 +58,30 @@ ChangeSummary summarize_git_diff(std::string_view diff);
 void summarize_untracked_files(const std::filesystem::path& root,
     const std::vector<ChangedFile>& files, ChangeSummary& summary);
 
+struct UntrackedFileContent {
+    bool readable      = false;
+    bool binary        = false;
+    std::size_t lines  = 0;
+    std::uint64_t hash = 0;
+    // Populated when `keep_lines` is set: '\n'-split lines with one
+    // trailing '\r' stripped. Empty for binary or unreadable files.
+    std::vector<std::string> line_contents;
+};
+
+// Shared untracked-file reader: hashes the raw bytes, counts lines ('\n'
+// split plus a final unterminated line), and flags NUL-containing files
+// binary. Unreadable files report `readable == false`.
+UntrackedFileContent read_untracked_file(
+    const std::filesystem::path& path, bool keep_lines);
+
+// Fingerprint covering everything a repository refresh observes: the git
+// metadata stamp plus the `(mtime, size, path)` of every file outside
+// `.git`, so unstaged edits and new untracked files are detected without
+// spawning git. Nullopt when the metadata or the tree walk fails; the
+// caller then refreshes unconditionally.
+std::optional<std::uint64_t> git_refresh_stamp(
+    const std::filesystem::path& root);
+
 struct GitDiffOptions {
     bool renames = false;
     bool numstat = false;

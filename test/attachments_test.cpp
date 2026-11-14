@@ -225,8 +225,10 @@ TEST_CASE("session exposes unique attachment basenames and publishes changes")
     CHECK(changes == 1);
 
     imza::SessionSnapshot snapshot;
-    snapshot.items.push_back(
-        imza::UserTurn { "restored", { { "notes/plan.txt", "content" } } });
+    snapshot.items
+        = std::make_shared<const std::vector<imza::ConversationItem>>(
+            std::vector<imza::ConversationItem> { imza::UserTurn {
+                "restored", { { "notes/plan.txt", "content" } } } });
     session.restore(std::move(snapshot));
 
     CHECK(

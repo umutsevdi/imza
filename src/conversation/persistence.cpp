@@ -874,10 +874,10 @@ Status save_session(Session& session)
     doc.title     = snapshot.title.empty() ? std::string { UNTITLED_TITLE }
                                            : snapshot.title;
     doc.saved_at  = format_local_time("%Y-%m-%d %H:%M:%S");
-    doc.todo      = map_all(snapshot.todo.items, [](const TodoItem& item) {
+    doc.todo      = map_all(snapshot.todo->items, [](const TodoItem& item) {
         return StoredTodoItem { item.content, static_cast<int>(item.status) };
     });
-    doc.documents = map_all(snapshot.documents, [](const SessionDoc& entry) {
+    doc.documents = map_all(*snapshot.documents, [](const SessionDoc& entry) {
         return StoredDocument {
             entry.kind == SessionDoc::Kind::BUILD         ? "build"
                 : entry.kind == SessionDoc::Kind::HANDOFF ? "handoff"
@@ -896,7 +896,7 @@ Status save_session(Session& session)
     doc.usage_log = map_all(
         snapshot.usage_log, [](const UsageEntry& e) { return to_stored(e); });
     std::vector<StoredItem> items;
-    for (auto& item : snapshot.items) {
+    for (const ConversationItem& item : *snapshot.items) {
         // A still-streaming tool call has no complete arguments and must
         // never be written out.
         if (const auto* tool = std::get_if<ToolCall>(&item);
@@ -980,9 +980,12 @@ Status read_session(const std::filesystem::path& path, LoadedSession& loaded)
     snapshot.persistence = PersistedSession { path };
     snapshot.title       = doc.title;
     snapshot.client      = doc.client.value_or(std::string { });
+    auto todo_items      = std::make_shared<TodoList>();
+    auto documents       = std::make_shared<std::vector<SessionDoc>>();
+    auto items           = std::make_shared<std::vector<ConversationItem>>();
     if (doc.todo) {
         for (const auto& entry : *doc.todo) {
-            snapshot.todo.items.push_back(stored_todo_item(entry));
+            todo_items->items.push_back(stored_todo_item(entry));
         }
     }
     snapshot.compacted_summary = doc.compacted_summary.value_or("");
@@ -991,7 +994,7 @@ Status read_session(const std::filesystem::path& path, LoadedSession& loaded)
     snapshot.plan_mode = doc.mode.value_or("") != "build";
     if (doc.documents) {
         for (const auto& entry : *doc.documents) {
-            snapshot.documents.push_back(SessionDoc {
+            documents->push_back(SessionDoc {
                 entry.kind == "build"         ? SessionDoc::Kind::BUILD
                     : entry.kind == "handoff" ? SessionDoc::Kind::HANDOFF
                                               : SessionDoc::Kind::PLAN,
@@ -1001,8 +1004,7 @@ Status read_session(const std::filesystem::path& path, LoadedSession& loaded)
     } else if (doc.plans) {
         // Legacy files stored plan revisions only.
         for (const auto& plan : *doc.plans) {
-            snapshot.documents.push_back(
-                SessionDoc { SessionDoc::Kind::PLAN, plan });
+            documents->push_back(SessionDoc { SessionDoc::Kind::PLAN, plan });
         }
     }
     if (doc.items) {
@@ -1011,7 +1013,7 @@ Status read_session(const std::filesystem::path& path, LoadedSession& loaded)
             // strict type) fails the whole parse; unknown item kinds are
             // skipped by from_stored so foreign sessions still load.
             if (auto item = from_stored(stored)) {
-                snapshot.items.push_back(std::move(*item));
+                items->push_back(std::move(*item));
             }
         }
     }
@@ -1040,6 +1042,9 @@ Status read_session(const std::filesystem::path& path, LoadedSession& loaded)
     if (!snapshot.usage_log.empty()) {
         snapshot.last = snapshot.usage_log.back().usage;
     }
+    snapshot.todo      = std::move(todo_items);
+    snapshot.documents = std::move(documents);
+    snapshot.items     = std::move(items);
     loaded = LoadedSession { std::move(snapshot), std::move(workspace) };
     return Status::OK;
 }

@@ -163,9 +163,13 @@ inline constexpr std::size_t MAX_UNDO_BYTES = 16 * 1024 * 1024;
 
 struct SessionSnapshot {
     std::string title;
-    std::vector<ConversationItem> items;
-    TodoList todo;
-    std::vector<SessionDoc> documents;
+    // Shared views of the transcript state, so snapshot() is O(1); the
+    // session's copy-on-write detach keeps them stable while held.
+    std::shared_ptr<const std::vector<ConversationItem>> items
+        = std::make_shared<std::vector<ConversationItem>>();
+    std::shared_ptr<const TodoList> todo = std::make_shared<TodoList>();
+    std::shared_ptr<const std::vector<SessionDoc>> documents
+        = std::make_shared<std::vector<SessionDoc>>();
     std::string compacted_summary;
     std::size_t compacted_item_count = 0;
     bool plan_mode                   = true;
@@ -430,6 +434,10 @@ public:
     // A session error was set; the payload is the error text.
     [[nodiscard]] Signal<const std::string&>::Subscription subscribe_to_error(
         Signal<const std::string&>::Callback callback);
+    // request_interrupt() flipped the interrupt flag (rising edge only);
+    // waiters use it to end bounded waits promptly.
+    [[nodiscard]] Signal<>::Subscription subscribe_to_interrupt(
+        Signal<>::Callback callback);
 
 private:
     AssistantTurn* _last_assistant_locked();
@@ -540,6 +548,8 @@ private:
     // separate so consumers can pick a severity.
     Signal<const std::string&> _notice_published;
     Signal<const std::string&> _error_published;
+    // Rising-edge notification for interrupt waiters.
+    Signal<> _interrupted;
 };
 
 enum class WorkflowPhase { PLAN, BUILD, REVIEW };

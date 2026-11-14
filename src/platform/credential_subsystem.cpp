@@ -409,7 +409,7 @@ std::optional<std::string> CredentialSubsystem::cached_secret(
     std::string_view key) const
 {
     std::lock_guard lock(_mutex);
-    const auto found = _secrets.find(std::string(key));
+    const auto found = _secrets.find(key);
     if (found == _secrets.end()) {
         return std::nullopt;
     }

@@ -13,7 +13,7 @@ namespace {
 
     std::optional<std::string> first_tool_error(const SessionSnapshot& snapshot)
     {
-        for (const ConversationItem& item : snapshot.items) {
+        for (const ConversationItem& item : *snapshot.items) {
             const auto* tool = std::get_if<ToolCall>(&item);
             if (tool == nullptr || !tool->result
                 || tool->result->kind != ToolCall::Result::Kind::ERROR) {

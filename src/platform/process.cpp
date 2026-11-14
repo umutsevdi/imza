@@ -43,7 +43,8 @@ struct Process::Impl {
     std::condition_variable cv;
     std::deque<std::string> lines;
     std::string stdout_buffer;
-    bool stdout_closed = false;
+    std::size_t stdout_consumed = 0;
+    bool stdout_closed          = false;
     std::string stderr_tail;
     std::size_t stderr_cap  = 8192;
     long terminate_grace_ms = 2000;
@@ -105,7 +106,7 @@ struct Process::Impl {
     void publish_lines(bool flush)
     {
         std::lock_guard lock(mutex);
-        std::size_t start = 0;
+        std::size_t start = stdout_consumed;
         while (true) {
             const std::size_t newline = stdout_buffer.find('\n', start);
             if (newline == std::string::npos) {
@@ -116,11 +117,17 @@ struct Process::Impl {
             lines.push_back(std::move(line));
             start = newline + 1;
         }
-        stdout_buffer.erase(0, start);
+        stdout_consumed = start;
+        if (stdout_consumed > stdout_buffer.size() / 2) {
+            stdout_buffer.erase(0, stdout_consumed);
+            stdout_consumed = 0;
+        }
         if (flush && !stdout_buffer.empty()) {
-            strip_cr(stdout_buffer);
-            lines.push_back(std::move(stdout_buffer));
+            std::string tail = stdout_buffer.substr(stdout_consumed);
             stdout_buffer.clear();
+            stdout_consumed = 0;
+            strip_cr(tail);
+            lines.push_back(std::move(tail));
         }
         cv.notify_all();
     }
@@ -273,7 +280,14 @@ std::unique_ptr<Process> Process::spawn(
             const std::string_view line(*entry);
             const std::size_t eq        = line.find('=');
             const std::string_view name = line.substr(0, eq);
-            if (options.env.count(std::string(name)) == 0) {
+            const auto found            = std::lower_bound(options.env.begin(),
+                options.env.end(), name,
+                [](const std::pair<const std::string, std::string>& candidate,
+                    std::string_view key) {
+                    return std::string_view(candidate.first) < key;
+                });
+            if (found == options.env.end()
+                || std::string_view(found->first) != name) {
                 env_storage.emplace_back(line);
             }
         }

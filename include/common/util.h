@@ -1,5 +1,4 @@
 #pragma once
-
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -15,9 +14,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
 namespace imza {
-
 // True when `target` equals `root` or lies underneath it. Both paths are
 // expected to be canonical; an empty root contains nothing.
 inline bool path_within(
@@ -29,7 +26,6 @@ inline bool path_within(
     const std::filesystem::path relative = target.lexically_relative(root);
     return target == root || (!relative.empty() && *relative.begin() != "..");
 }
-
 // Paths and JSON strings meet as UTF-8 text; `std::filesystem::path`
 // conversions via `string()` use the system code page on Windows and would
 // corrupt non-ASCII names.
@@ -38,12 +34,10 @@ inline std::string utf8_from_path(const std::filesystem::path& path)
     const std::u8string text = path.u8string();
     return std::string(text.begin(), text.end());
 }
-
 inline std::filesystem::path path_from_utf8(std::string_view text)
 {
     return std::filesystem::path(std::u8string(text.begin(), text.end()));
 }
-
 // UTF-8 text of `path` with forward slashes: the canonical form for
 // user-visible and model-visible path strings. `native` formatting leaks
 // backslashes on Windows and makes paths inside prompts, tool output, and
@@ -53,7 +47,6 @@ inline std::string portable_string(const std::filesystem::path& path)
     const std::u8string text = path.generic_u8string();
     return std::string(text.begin(), text.end());
 }
-
 inline std::string env_or_empty(const char* key)
 {
 #ifdef _WIN32
@@ -70,7 +63,6 @@ inline std::string env_or_empty(const char* key)
     return value != nullptr ? std::string(value) : "";
 #endif
 }
-
 // Appends '.' unless the text already ends with sentence punctuation.
 inline std::string ensure_sentence_end(std::string text)
 {
@@ -80,7 +72,6 @@ inline std::string ensure_sentence_end(std::string text)
     }
     return text;
 }
-
 template <typename Container>
 std::string join(const Container& items, std::string_view sep)
 {
@@ -95,7 +86,6 @@ std::string join(const Container& items, std::string_view sep)
     }
     return out;
 }
-
 inline std::string join_lines(
     const std::vector<std::string>& lines, bool trailing_newline)
 {
@@ -105,7 +95,6 @@ inline std::string join_lines(
     }
     return out;
 }
-
 inline std::tm local_tm(std::time_t value)
 {
     std::tm local { };
@@ -116,7 +105,6 @@ inline std::tm local_tm(std::time_t value)
 #endif
     return local;
 }
-
 inline std::tm utc_tm(std::time_t value)
 {
     std::tm utc { };
@@ -127,7 +115,6 @@ inline std::tm utc_tm(std::time_t value)
 #endif
     return utc;
 }
-
 inline std::string format_local_time(
     std::chrono::system_clock::time_point point, const char* fmt)
 {
@@ -137,12 +124,10 @@ inline std::string format_local_time(
     out << std::put_time(&local, fmt);
     return out.str();
 }
-
 inline std::string format_local_time(const char* fmt)
 {
     return format_local_time(std::chrono::system_clock::now(), fmt);
 }
-
 // Expands ${VAR} and ${VAR:-default} from the environment; unmatched
 // references expand to empty. Text outside references is copied verbatim.
 inline std::string expand_env_vars(const std::string& text)
@@ -174,7 +159,6 @@ inline std::string expand_env_vars(const std::string& text)
         pos = end + 1;
     }
 }
-
 inline std::string_view trim(std::string_view s)
 {
     size_t b = 0;
@@ -187,7 +171,6 @@ inline std::string_view trim(std::string_view s)
     }
     return s.substr(b, e - b);
 }
-
 // Longest prefix of `text` that is at most `max_bytes` bytes and does not
 // end in the middle of a UTF-8 sequence.
 inline std::string_view truncate_utf8(
@@ -202,15 +185,11 @@ inline std::string_view truncate_utf8(
     }
     return text.substr(0, cut);
 }
-
 // Cap shared by tool outputs; enforced with truncate_marked.
 inline constexpr std::size_t MAX_OUTPUT_BYTES = 64 * 1024;
-
 // Cap for tool text that feeds the model directly (web, mcp, docs).
-inline constexpr std::size_t MAX_TOOL_TEXT = 40000;
-
+inline constexpr std::size_t MAX_TOOL_TEXT          = 40000;
 inline constexpr std::string_view TRUNCATION_MARKER = "\n[truncated]";
-
 // Cut at a UTF-8 boundary and mark when over `cap`.
 inline std::string truncate_marked(std::string_view text, std::size_t cap,
     std::string_view marker = TRUNCATION_MARKER)
@@ -222,7 +201,6 @@ inline std::string truncate_marked(std::string_view text, std::size_t cap,
     out += marker;
     return out;
 }
-
 // Like truncate_marked, but the marker reports the kept size.
 inline std::string truncate_with_count(std::string_view text, std::size_t cap)
 {
@@ -234,7 +212,6 @@ inline std::string truncate_with_count(std::string_view text, std::size_t cap)
         + " of the content]";
     return out;
 }
-
 // RFC 3986 unreserved characters; everything else is percent-encoded.
 inline std::string percent_encode(std::string_view value)
 {
@@ -255,7 +232,6 @@ inline std::string percent_encode(std::string_view value)
     }
     return out;
 }
-
 // Start index of the whitespace-delimited token ending at `cursor`.
 inline std::size_t word_begin(std::string_view text, std::size_t cursor)
 {
@@ -266,7 +242,6 @@ inline std::size_t word_begin(std::string_view text, std::size_t cursor)
     }
     return begin;
 }
-
 // End index (exclusive) of a `$name` mention body whose '$' sits at `hash`.
 // The body spans [A-Za-z0-9_-]; an empty body ends right after the '$'.
 inline std::size_t mention_end(std::string_view text, std::size_t hash)
@@ -281,7 +256,6 @@ inline std::size_t mention_end(std::string_view text, std::size_t hash)
     }
     return end;
 }
-
 inline std::string to_lower(std::string_view s)
 {
     std::string out;
@@ -291,7 +265,15 @@ inline std::string to_lower(std::string_view s)
     }
     return out;
 }
-
+// Allocation-free ASCII case-insensitive equality.
+inline bool iequal(std::string_view a, std::string_view b)
+{
+    return a.size() == b.size()
+        && std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
+               return std::tolower(static_cast<unsigned char>(x))
+                   == std::tolower(static_cast<unsigned char>(y));
+           });
+}
 // Length in bytes of the UTF-8 sequence whose lead byte is `lead`.
 inline std::size_t utf8_sequence_length(unsigned char lead)
 {
@@ -306,7 +288,6 @@ inline std::size_t utf8_sequence_length(unsigned char lead)
     }
     return 1;
 }
-
 // Byte length of the valid UTF-8 sequence starting at `i`, or 0 when the
 // bytes there are not one. Validates rather than classifying the lead byte.
 inline std::size_t utf8_valid_sequence_length(
@@ -348,38 +329,6 @@ inline std::size_t utf8_valid_sequence_length(
     }
     return length;
 }
-
-// Drops bytes that are not part of any valid UTF-8 sequence. Returns
-// nullopt when the input is already valid.
-inline std::optional<std::string> strip_invalid_utf8(std::string_view text)
-{
-    std::optional<std::string> repaired;
-    std::size_t copied = 0; // bytes of `text` already appended to *repaired
-    for (std::size_t i = 0; i < text.size();) {
-        const unsigned char c = static_cast<unsigned char>(text[i]);
-        if (c < 0x80) {
-            ++i;
-            continue;
-        }
-        const std::size_t length = utf8_valid_sequence_length(text, i);
-        if (length != 0) {
-            i += length;
-            continue;
-        }
-        if (!repaired) {
-            repaired.emplace(text.substr(0, i));
-            copied = i;
-        }
-        repaired->append(text.substr(copied, i - copied));
-        copied = i + 1; // drop the invalid byte
-        ++i;
-    }
-    if (repaired) {
-        repaired->append(text.substr(copied));
-    }
-    return repaired;
-}
-
 // Number of display columns: one per UTF-8 sequence.
 inline std::size_t utf8_width(std::string_view s)
 {
@@ -390,7 +339,6 @@ inline std::size_t utf8_width(std::string_view s)
     }
     return w;
 }
-
 inline std::string strip_slash(std::string_view base)
 {
     std::string out(base);
@@ -399,7 +347,6 @@ inline std::string strip_slash(std::string_view base)
     }
     return out;
 }
-
 inline std::size_t count_lines(std::string_view text)
 {
     if (text.empty()) {
@@ -407,7 +354,6 @@ inline std::size_t count_lines(std::string_view text)
     }
     return 1 + static_cast<std::size_t>(std::ranges::count(text, '\n'));
 }
-
 inline std::string take_lines(std::string_view text, std::size_t max)
 {
     std::string out;
@@ -420,7 +366,6 @@ inline std::string take_lines(std::string_view text, std::size_t max)
     }
     return out;
 }
-
 inline std::vector<std::string> split_lines(std::string_view text)
 {
     std::vector<std::string> lines;
@@ -439,7 +384,6 @@ inline std::vector<std::string> split_lines(std::string_view text)
     }
     return lines;
 }
-
 inline std::string home_dir()
 {
     return env_or_empty(
@@ -450,7 +394,6 @@ inline std::string home_dir()
 #endif
     );
 }
-
 // Expands a leading `~` (alone or followed by a separator) to the home
 // directory. `~user` and any other input are returned unchanged.
 inline std::string expand_user_path(std::string_view path)
@@ -467,7 +410,6 @@ inline std::string expand_user_path(std::string_view path)
     }
     return home + std::string(path.substr(1));
 }
-
 // Globally unique, sortable identifier: wall-clock milliseconds plus a random
 // 32-bit suffix. Generated once per fresh Session object; a loaded session
 // instead adopts its source file's stem as the id so saves continue that file
@@ -484,14 +426,11 @@ inline std::string unique_session_id()
         << suffix;
     return out.str();
 }
-
-inline std::string base64_encode(std::string_view data)
+inline std::string base64_encode_impl(
+    std::string_view data, std::string_view alphabet, bool pad)
 {
-    constexpr std::string_view ALPHABET
-        = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string encoded;
-    encoded.reserve(((data.size() + 2) / 3) * 4);
-
+    encoded.reserve((data.size() + 2) / 3 * 4);
     for (std::size_t offset = 0; offset < data.size(); offset += 3) {
         const auto first         = static_cast<unsigned char>(data[offset]);
         const auto second        = offset + 1 < data.size()
@@ -503,17 +442,28 @@ inline std::string base64_encode(std::string_view data)
         const unsigned int value = (static_cast<unsigned int>(first) << 16)
             | (static_cast<unsigned int>(second) << 8)
             | static_cast<unsigned int>(third);
-
-        encoded.push_back(ALPHABET[(value >> 18) & 0x3f]);
-        encoded.push_back(ALPHABET[(value >> 12) & 0x3f]);
-        encoded.push_back(
-            offset + 1 < data.size() ? ALPHABET[(value >> 6) & 0x3f] : '=');
-        encoded.push_back(
-            offset + 2 < data.size() ? ALPHABET[value & 0x3f] : '=');
+        encoded.push_back(alphabet[(value >> 18) & 0x3f]);
+        encoded.push_back(alphabet[(value >> 12) & 0x3f]);
+        if (offset + 1 < data.size()) {
+            encoded.push_back(alphabet[(value >> 6) & 0x3f]);
+        } else if (pad) {
+            encoded.push_back('=');
+        }
+        if (offset + 2 < data.size()) {
+            encoded.push_back(alphabet[value & 0x3f]);
+        } else if (pad) {
+            encoded.push_back('=');
+        }
     }
     return encoded;
 }
 
+inline std::string base64_encode(std::string_view data)
+{
+    return base64_encode_impl(data,
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
+        true);
+}
 inline std::optional<std::string> base64_decode(std::string_view input)
 {
     const auto value = [](char c) -> int {
@@ -563,37 +513,13 @@ inline std::optional<std::string> base64_decode(std::string_view input)
     }
     return out;
 }
-
 // URL-safe alphabet ('-','_'), no padding: JWT segments, PKCE challenges.
 inline std::string base64url_encode(std::string_view data)
 {
-    constexpr std::string_view ALPHABET
-        = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    std::string encoded;
-    encoded.reserve((data.size() + 2) / 3 * 4);
-    for (std::size_t offset = 0; offset < data.size(); offset += 3) {
-        const auto first         = static_cast<unsigned char>(data[offset]);
-        const auto second        = offset + 1 < data.size()
-            ? static_cast<unsigned char>(data[offset + 1])
-            : 0;
-        const auto third         = offset + 2 < data.size()
-            ? static_cast<unsigned char>(data[offset + 2])
-            : 0;
-        const unsigned int value = (static_cast<unsigned int>(first) << 16)
-            | (static_cast<unsigned int>(second) << 8)
-            | static_cast<unsigned int>(third);
-        encoded.push_back(ALPHABET[(value >> 18) & 0x3f]);
-        encoded.push_back(ALPHABET[(value >> 12) & 0x3f]);
-        if (offset + 1 < data.size()) {
-            encoded.push_back(ALPHABET[(value >> 6) & 0x3f]);
-        }
-        if (offset + 2 < data.size()) {
-            encoded.push_back(ALPHABET[value & 0x3f]);
-        }
-    }
-    return encoded;
+    return base64_encode_impl(data,
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+        false);
 }
-
 // Lenient inverse of base64url_encode: unpadded input, "" on any invalid
 // character (callers treat that as an undecodable segment).
 inline std::string base64url_decode(std::string_view input)
@@ -626,7 +552,6 @@ inline std::string base64url_decode(std::string_view input)
     }
     return out;
 }
-
 // Inverse of percent_encode for query-component values; malformed escapes
 // pass through unchanged.
 inline std::string percent_decode(std::string_view value)
@@ -659,5 +584,4 @@ inline std::string percent_decode(std::string_view value)
     }
     return out;
 }
-
 } // namespace imza

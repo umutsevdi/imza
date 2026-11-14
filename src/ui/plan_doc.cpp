@@ -230,7 +230,7 @@ namespace {
             }
             const SessionSnapshot snap = _state->session->snapshot();
             _revision                  = 0;
-            for (const SessionDoc& doc : snap.documents) {
+            for (const SessionDoc& doc : *snap.documents) {
                 if (doc.kind == SessionDoc::Kind::PLAN) {
                     ++_revision;
                 }

@@ -8,6 +8,14 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
+0.7.5 - Unreleased
+-------------------------------------------------------------------------------
+Changes:
+  - Subagents and modals now receive notice texts correctly (previously the
+    published text could arrive empty), and rendering long markdown documents
+    in the review tab is faster.
+
+-------------------------------------------------------------------------------
 0.7.4 - 2026-11-12
 -------------------------------------------------------------------------------
 Changes:

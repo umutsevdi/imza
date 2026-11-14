@@ -75,9 +75,25 @@ namespace {
 
     std::string session_transcript(const Session& session)
     {
+        const auto items  = session.items();
+        std::size_t total = 0;
+        for (const ConversationItem& item : *items) {
+            if (const auto* user = std::get_if<UserTurn>(&item)) {
+                total += user->text.size();
+            } else if (const auto* assistant
+                = std::get_if<AssistantTurn>(&item)) {
+                total
+                    += assistant->reasoning.size() + assistant->markdown.size();
+            } else if (const auto* tool = std::get_if<ToolCall>(&item)) {
+                total += tool->args.size();
+                if (tool->result) {
+                    total += tool->result->text.size();
+                }
+            }
+        }
         std::string transcript;
-        const SessionSnapshot snapshot = session.snapshot();
-        for (const ConversationItem& item : snapshot.items) {
+        transcript.reserve(total + 64 * items->size());
+        for (const ConversationItem& item : *items) {
             if (const auto* user = std::get_if<UserTurn>(&item)) {
                 transcript += "## User\n\n" + user->text + "\n\n";
             } else if (const auto* assistant
@@ -104,9 +120,8 @@ namespace {
 
     std::string last_useful_output(const Session& session)
     {
-        const SessionSnapshot snapshot = session.snapshot();
-        for (auto it = snapshot.items.rbegin(); it != snapshot.items.rend();
-            ++it) {
+        const auto items = session.items();
+        for (auto it = items->rbegin(); it != items->rend(); ++it) {
             if (const auto* assistant = std::get_if<AssistantTurn>(&*it);
                 assistant != nullptr && !assistant->markdown.empty()) {
                 return assistant->markdown;
