@@ -156,8 +156,8 @@ int main(int argc, char** argv)
         return imza::run_acp(state);
     }
     if (cli.one_shot) {
-        const imza::OneShotResult result
-            = imza::run_one_shot(*state, *cli.one_shot);
+        imza::OneShotResult result = imza::run_one_shot(*state, *cli.one_shot);
+        imza::finish_one_shot(*state, *cli.one_shot, result);
         if (!result.output.empty()) {
             imza::print_markdown_output(result.output);
         }

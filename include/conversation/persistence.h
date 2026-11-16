@@ -51,6 +51,10 @@ GlobalUsageSummary summarize_usage(
 inline constexpr char UNTITLED_TITLE[] = "Untitled session";
 
 Status save_session(Session& session);
+// One-shot (`--ask`/`--exec`) exit save: same serialization as
+// save_session, written under unattended_dir() and never added to the
+// session index, so it stays invisible to the session picker.
+Status save_unattended_session(Session& session);
 Status read_session(const std::filesystem::path& path, LoadedSession& loaded);
 std::vector<SavedSession> saved_sessions();
 // The subset created by one client: an empty `client` selects terminal

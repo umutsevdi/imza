@@ -1,6 +1,9 @@
 #include "app/application_state.h"
 #include "app/flows.h"
+#include "conversation/persistence.h"
 #include "network/json.h"
+#include "platform/config.h"
+#include "platform/json_file.h"
 #include "runtime/main_thread_queue.h"
 #include "test_fs.h"
 #include "test_state.h"
@@ -200,4 +203,75 @@ TEST_CASE("one-shot retries transient server errors before stream data")
     CHECK(result.kind == imza::OneShotResult::Kind::SUCCESS);
     CHECK(result.output == "recovered");
     CHECK(calls.load() == 2);
+}
+
+TEST_CASE("finish_one_shot saves the session and writes the JSON record")
+{
+    imza::test::IsolatedDataHome home;
+    auto state = make_one_shot_state(
+        [](const imza::ChatRequest&, const imza::StreamCallback& callback) {
+            callback(imza::make_delta_event("done"));
+            callback(imza::make_done_event());
+            return imza::Status::OK;
+        });
+    REQUIRE(
+        imza::test::wait_until([&] { return state->environment->ready(); }));
+    const imza::OneShotResult run = imza::run_one_shot(
+        *state, { imza::OneShotRequest::Mode::EXEC, "task" });
+    REQUIRE(run.kind == imza::OneShotResult::Kind::SUCCESS);
+
+    const imza::test::TempDir scratch;
+    imza::OneShotRequest request { imza::OneShotRequest::Mode::EXEC, "task",
+        scratch.file("record.json") };
+    imza::OneShotResult result = run;
+    imza::finish_one_shot(*state, request, result);
+
+    const std::filesystem::path expected
+        = imza::unattended_dir() / (state->session->session_id() + ".json");
+    REQUIRE(result.session_file.has_value());
+    CHECK(*result.session_file == expected);
+    CHECK(std::filesystem::exists(expected));
+    CHECK(imza::saved_sessions().empty());
+
+    const std::optional<imza::JsonValue> record
+        = imza::read_json_file(scratch.file("record.json"));
+    REQUIRE(record.has_value());
+    const auto* kind = imza::find_member(*record, "kind");
+    REQUIRE(kind != nullptr);
+    CHECK(kind->get<std::string>() == "success");
+    const auto* output = imza::find_member(*record, "output");
+    REQUIRE(output != nullptr);
+    CHECK(output->get<std::string>() == "done");
+    const auto* file = imza::find_member(*record, "session_file");
+    REQUIRE(file != nullptr);
+    CHECK(file->get<std::string>() == imza::utf8_from_path(expected));
+}
+
+TEST_CASE("a failed run is still saved and recorded")
+{
+    imza::test::IsolatedDataHome home;
+    auto state = make_one_shot_state(
+        [](const imza::ChatRequest&, const imza::StreamCallback& callback) {
+            callback(imza::make_error_event(
+                imza::Status::BUDGET_EXCEEDED, "no credits"));
+            return imza::Status::BUDGET_EXCEEDED;
+        });
+    REQUIRE(
+        imza::test::wait_until([&] { return state->environment->ready(); }));
+
+    const imza::test::TempDir scratch;
+    const imza::OneShotRequest request { imza::OneShotRequest::Mode::ASK, "go",
+        scratch.file("record.json") };
+    imza::OneShotResult result = imza::run_one_shot(*state, request);
+    imza::finish_one_shot(*state, request, result);
+    REQUIRE(result.kind == imza::OneShotResult::Kind::PROVIDER_FAILURE);
+
+    const std::optional<imza::JsonValue> record
+        = imza::read_json_file(scratch.file("record.json"));
+    REQUIRE(record.has_value());
+    const auto* kind = imza::find_member(*record, "kind");
+    REQUIRE(kind != nullptr);
+    CHECK(kind->get<std::string>() == "provider_failure");
+    CHECK(std::filesystem::exists(
+        imza::unattended_dir() / (state->session->session_id() + ".json")));
 }

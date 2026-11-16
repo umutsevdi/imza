@@ -225,6 +225,7 @@ CliResult run_cli(int argc, char** argv)
     std::string shell;
     std::string ask;
     std::string exec;
+    std::string output_json;
     std::vector<std::string> allowed_directories;
     std::vector<std::string> allowed_commands;
     std::vector<std::string> allowed_mcp;
@@ -247,6 +248,9 @@ CliResult run_cli(int argc, char** argv)
         = app.add_option("-e,--exec", exec, "Run a one-shot build agent query")
               ->type_name("<query>");
     ask_option->excludes(exec_option);
+    app.add_option("--output-json", output_json,
+           "Write a JSON result record for a one-shot run")
+        ->type_name("<path>");
     app.add_option("-s,--session", session_arguments,
            "Open a session by ID, list with 'ls', or delete with 'rm ID'")
         ->type_name("<id>|ls|rm <id>")
@@ -360,7 +364,10 @@ CliResult run_cli(int argc, char** argv)
         result.one_shot = OneShotRequest { ask_option->count() > 0
                 ? OneShotRequest::Mode::ASK
                 : OneShotRequest::Mode::EXEC,
-            ask_option->count() > 0 ? std::move(ask) : std::move(exec) };
+            ask_option->count() > 0 ? std::move(ask) : std::move(exec),
+            output_json.empty()
+                ? std::nullopt
+                : std::optional { std::filesystem::path(output_json) } };
     };
 
     if (update_requested) {

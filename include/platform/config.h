@@ -235,6 +235,10 @@ inline std::filesystem::path update_state_path()
 {
     return data_dir() / "update.json";
 }
+inline std::filesystem::path unattended_dir()
+{
+    return data_dir() / "unattended";
+}
 inline std::filesystem::path prompts_dir() { return data_dir() / "prompts"; }
 std::optional<std::string> read_changelog(void);
 

@@ -1020,3 +1020,35 @@ TEST_CASE("notices survive session persistence")
     REQUIRE(notice != nullptr);
     CHECK(notice->text == "Working directory changed to /tmp/target");
 }
+
+TEST_CASE("unattended saves write outside the index and stay loadable")
+{
+    DataHome home;
+    imza::Session source;
+    source.set_title("Unattended run");
+    source.begin_send("hello");
+    source.append_assistant("model", "off");
+    source.apply(imza::make_delta_event("world"), { });
+
+    REQUIRE(imza::save_unattended_session(source) == imza::Status::OK);
+
+    const std::filesystem::path unattended
+        = imza::unattended_dir() / (source.session_id() + ".json");
+    CHECK(std::filesystem::exists(unattended));
+    CHECK(std::filesystem::exists(imza::unattended_dir()));
+    // Invisible to the session picker: no index entry, no session file
+    // in sessions_dir (the directory itself may hold the index).
+    CHECK(imza::saved_sessions().empty());
+    std::error_code ec;
+    std::size_t session_files = 0;
+    for (const auto& entry :
+        std::filesystem::directory_iterator(imza::sessions_dir(), ec)) {
+        session_files += entry.path().extension() == ".json"
+            && entry.path().filename() != ".index.json";
+    }
+    CHECK(session_files == 0);
+
+    imza::Session loaded;
+    REQUIRE(load_session(unattended, loaded) == imza::Status::OK);
+    CHECK(loaded.title() == "Unattended run");
+}

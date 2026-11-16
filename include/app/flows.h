@@ -21,6 +21,9 @@ struct OneShotRequest {
     enum class Mode { ASK, EXEC };
     Mode mode;
     std::string query;
+    // When set, finish_one_shot writes a JSON result record here after
+    // the run.
+    std::optional<std::filesystem::path> output_json_path;
 };
 
 struct OneShotResult {
@@ -34,6 +37,8 @@ struct OneShotResult {
     Kind kind = Kind::SUCCESS;
     std::string output;
     std::string error;
+    // Set when the run's session was persisted under unattended_dir().
+    std::optional<std::filesystem::path> session_file;
 };
 
 struct CliResult {
@@ -98,6 +103,12 @@ int run_acp(std::shared_ptr<ApplicationState> state);
 OneShotResult run_one_shot(
     ApplicationState& state, const OneShotRequest& request);
 int one_shot_exit_code(OneShotResult::Kind kind);
+// Persists the finished run's session under unattended_dir() and, when
+// `request.output_json_path` is set, writes the JSON result record
+// (kind, error, output, session file path). Save failures never change
+// the result; a record write failure surfaces in `error`.
+void finish_one_shot(ApplicationState& state, const OneShotRequest& request,
+    OneShotResult& result);
 void submit(ApplicationState& state, std::string text,
     std::vector<Attachment> attachments = { });
 void resolve_modal(ApplicationState& state, ModalResult result);

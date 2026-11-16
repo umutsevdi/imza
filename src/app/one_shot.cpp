@@ -1,5 +1,9 @@
 #include "app/flows.h"
 
+#include "conversation/persistence.h"
+#include "network/json.h"
+#include "platform/config.h"
+#include "platform/json_file.h"
 #include "runtime/main_thread_queue.h"
 #include "turn/turn_runner.h"
 
@@ -10,6 +14,13 @@
 namespace imza {
 
 namespace {
+
+    struct OutputRecord {
+        std::string kind;
+        std::string error;
+        std::string output;
+        std::string session_file;
+    };
 
     std::optional<std::string> first_tool_error(const SessionSnapshot& snapshot)
     {
@@ -87,6 +98,43 @@ int one_shot_exit_code(OneShotResult::Kind kind)
     case OneShotResult::Kind::INTERRUPTED: return 130;
     }
     return 1;
+}
+
+void finish_one_shot(ApplicationState& state, const OneShotRequest& request,
+    OneShotResult& result)
+{
+    if (save_unattended_session(*state.session) == Status::OK) {
+        result.session_file
+            = unattended_dir() / (state.session->session_id() + ".json");
+    }
+    if (!request.output_json_path) {
+        return;
+    }
+    const char* kind = "success";
+    switch (result.kind) {
+    case OneShotResult::Kind::SUCCESS: kind = "success"; break;
+    case OneShotResult::Kind::BLOCKED_PERMISSION:
+        kind = "blocked_permission";
+        break;
+    case OneShotResult::Kind::INTERRUPTED: kind = "interrupted"; break;
+    case OneShotResult::Kind::PROVIDER_FAILURE:
+        kind = "provider_failure";
+        break;
+    case OneShotResult::Kind::TOOL_FAILURE: kind = "tool_failure"; break;
+    }
+    const OutputRecord record { kind, result.error, result.output,
+        result.session_file ? utf8_from_path(*result.session_file)
+                            : std::string { } };
+    if (const std::optional<std::string> serialized = json_dump_checked(record);
+        serialized) {
+        const Status st
+            = write_json_file(*request.output_json_path, *serialized + "\n");
+        if (st != Status::OK && result.error.empty()) {
+            result.error = "Failed to write the output record.";
+        }
+    } else if (result.error.empty()) {
+        result.error = "Failed to serialize the output record.";
+    }
 }
 
 } // namespace imza

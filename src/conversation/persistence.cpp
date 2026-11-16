@@ -3,6 +3,7 @@
 #include "common/util.h"
 #include "conversation/session.h"
 #include "network/json.h"
+#include "platform/config.h"
 #include "platform/file_lock.h"
 #include "platform/json_file.h"
 
@@ -857,7 +858,11 @@ namespace {
 
 } // namespace
 
-Status save_session(Session& session)
+// Serialization + file write shared by interactive and unattended saves.
+// `index` selects whether the save joins the session index; unattended
+// saves skip it, so they never surface in the session picker.
+Status write_session_file(
+    Session& session, const std::filesystem::path& directory, bool index)
 {
     std::optional<SessionSnapshot> pending = session.snapshot_for_save();
     if (!pending) {
@@ -910,7 +915,7 @@ Status save_session(Session& session)
     doc.items = std::move(items);
 
     const std::filesystem::path path
-        = sessions_dir() / (session.session_id() + ".json");
+        = directory / (session.session_id() + ".json");
 
     auto serialized = json_dump_checked(doc);
     if (!serialized) {
@@ -923,6 +928,9 @@ Status save_session(Session& session)
     session.set_persistence(PersistedSession { path });
     const SavedSession saved { path, doc.title, doc.saved_at,
         from_stored(*doc.usage), snapshot.client, std::move(workspace) };
+    if (!index) {
+        return Status::OK;
+    }
     if (mutate_index([&](std::vector<SavedSession>& indexed) {
             // A re-save of the same run rewrites the same file, so replace
             // its index entry instead of duplicating it.
@@ -938,6 +946,16 @@ Status save_session(Session& session)
     }
     reconcile_index(saved);
     return Status::OK;
+}
+
+Status save_session(Session& session)
+{
+    return write_session_file(session, sessions_dir(), true);
+}
+
+Status save_unattended_session(Session& session)
+{
+    return write_session_file(session, unattended_dir(), false);
 }
 
 Status read_session(const std::filesystem::path& path, LoadedSession& loaded)
