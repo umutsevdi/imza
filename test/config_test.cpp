@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <thread>
 #include <vector>
 
@@ -797,6 +798,48 @@ TEST_CASE("load_config rejects invalid nested configuration values")
         imza::Config cfg;
         CHECK(imza::load_config(path, cfg) == imza::Status::CONFIG_ERROR);
     }
+}
+
+TEST_CASE("capabilities parse, validate, and roundtrip")
+{
+    imza::Config cfg;
+    const auto path = temp_file("capabilities.json");
+    {
+        std::ofstream out(path);
+        out << R"({"capabilities": {"web": false, "subagents": 2}})";
+    }
+    CHECK(imza::load_config(path, cfg) == imza::Status::OK);
+    CHECK_FALSE(cfg.capabilities.web);
+    CHECK(cfg.capabilities.subagents == 2);
+    CHECK(imza::save_config(path, cfg) == imza::Status::OK);
+    imza::Config reloaded;
+    CHECK(imza::load_config(path, reloaded) == imza::Status::OK);
+    CHECK_FALSE(reloaded.capabilities.web);
+    CHECK(reloaded.capabilities.subagents == 2);
+
+    const std::array invalid {
+        std::pair {
+            "capabilities-over.json", R"({"capabilities": {"subagents": 9}})" },
+        std::pair { "capabilities-negative.json",
+            R"({"capabilities": {"subagents": -1}})" },
+    };
+    for (const auto& [name, json] : invalid) {
+        CAPTURE(name);
+        const auto bad = temp_file(name);
+        {
+            std::ofstream out(bad);
+            out << json;
+        }
+        imza::Config bad_cfg;
+        CHECK(imza::load_config(bad, bad_cfg) == imza::Status::CONFIG_ERROR);
+    }
+
+    const auto minimal = temp_file("capabilities-minimal.json");
+    CHECK(imza::save_config(minimal, imza::Config { }) == imza::Status::OK);
+    std::ifstream in(minimal);
+    const std::string text { std::istreambuf_iterator<char>(in),
+        std::istreambuf_iterator<char>() };
+    CHECK(text.find("\"capabilities\"") == std::string::npos);
 }
 
 TEST_CASE("load_config validates mcp oauth entries")

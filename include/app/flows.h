@@ -50,6 +50,7 @@ struct CliResult {
     std::optional<std::string> variant;
     std::optional<bool> web;
     std::optional<bool> shell;
+    std::optional<int> max_subagents;
     std::optional<OneShotRequest> one_shot;
     // Set instead of running the update inline, so the caller owns
     // presentation.

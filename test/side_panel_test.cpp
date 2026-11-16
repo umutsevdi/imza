@@ -160,6 +160,11 @@ TEST_CASE("permission view keeps skill grants alongside the rest")
     const imza::PermissionView plain = imza::make_permission_view(
         imza::interactive_runtime_flags(), false, { });
     CHECK_FALSE(imza::has_custom_permissions(plain));
+
+    const imza::PermissionView capped = imza::make_permission_view(
+        imza::interactive_runtime_flags(), false, { }, 2);
+    CHECK(capped.subagent_limit == 2);
+    CHECK(imza::has_custom_permissions(capped));
 }
 
 namespace {
@@ -303,6 +308,22 @@ TEST_CASE("runtime permissions markdown reports capabilities and grants")
     CHECK(out.find("| Shell | on |") != std::string::npos);
     CHECK(out.find("/outside") != std::string::npos);
     CHECK(out.find("cmake --build") != std::string::npos);
+
+    imza::RuntimeView capped          = view;
+    capped.permissions.subagent_limit = 3;
+    const std::string capped_out = imza::runtime_permissions_markdown(capped);
+    CHECK(capped_out.find("| Subagents | max 3 |") != std::string::npos);
+
+    imza::RuntimeView disabled          = view;
+    disabled.permissions.subagent_limit = 0;
+    CHECK(
+        imza::runtime_permissions_markdown(disabled).find("| Subagents | off |")
+        != std::string::npos);
+    imza::RuntimeView unlimited          = view;
+    unlimited.permissions.subagent_limit = imza::MAX_SUBAGENT_TASKS;
+    CHECK(imza::runtime_permissions_markdown(unlimited).find(
+              "| Subagents | unlimited |")
+        != std::string::npos);
     // The viewer renders the title; the body must not repeat it.
     CHECK(out.find("# Permissions") == std::string::npos);
     // Approvals are only listed when bypassed.

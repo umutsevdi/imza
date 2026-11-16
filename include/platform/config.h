@@ -125,6 +125,10 @@ struct McpServerConfig {
 
 enum class SubagentRole { BUILDER, RESEARCH, BASIC };
 
+// The subagent tool's wire-schema task ceiling; the capability cap cannot
+// exceed it.
+inline constexpr int MAX_SUBAGENT_TASKS = 8;
+
 struct SubagentModelConfig {
     std::string provider;
     std::string model;
@@ -153,8 +157,17 @@ struct Preferences {
     Credentials credentials = Credentials::OS;
 };
 
+// Run-level capability switches read once at startup. `subagents` caps
+// tool-call delegation (0 disables); internal review/title runs are not
+// scoped by it.
+struct CapabilitiesConfig {
+    bool web      = true;
+    int subagents = MAX_SUBAGENT_TASKS;
+};
+
 struct Config {
     Preferences preferences;
+    CapabilitiesConfig capabilities;
     std::vector<Connection> providers;
     std::optional<LastUsed> last_used;
     std::optional<std::string> reasoning_effort;

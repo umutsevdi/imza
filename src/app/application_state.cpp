@@ -43,7 +43,7 @@ namespace {
                         ? make_permission_context(*state->environment,
                               *state->permissions, state->session->mode(),
                               state->session->loaded_skill_directories(),
-                              state->mcp.get())
+                              state->mcp.get(), state->max_subagents)
                         : PermissionContext { };
                 },
             .ask = [state](ModalPayload payload) -> std::future<ModalResult> {
@@ -333,6 +333,7 @@ namespace {
         state->post          = guarded_post(state.get(), std::move(post));
         state->on_exit       = [] { };
         state->runtime_flags = runtime_flags;
+        state->max_subagents = config.capabilities.subagents;
         if (use_default_tools) {
             ApplicationState* captured = state.get();
             // Filled before the roster is built: the accessor reads the
@@ -385,6 +386,7 @@ namespace {
         state->parent_routing = std::move(parent_routing);
         state->agent_label    = std::move(agent_label);
         state->runtime_flags  = parent.runtime_flags;
+        state->max_subagents  = parent.max_subagents;
         state->sidebar        = parent.sidebar;
         wire(state, std::move(stream_fn), std::move(tools));
         return state;

@@ -1006,6 +1006,47 @@ TEST_CASE("central evaluator assigns explicit policies to built-in tools")
         == PermissionDecision::Kind::REJECT);
 }
 
+TEST_CASE("the subagent capability cap bounds tool-call delegation")
+{
+    PermissionFixture fixture;
+    const Config config;
+    const std::vector<Skill> skills;
+    Session loaded;
+
+    const auto evaluate_with_cap = [&](int cap, std::string arguments) {
+        PermissionContext context = fixture.context(Session::Mode::PLAN);
+        context.max_subagents     = cap;
+        return evaluate_tool_request(
+            { "subagent", std::move(arguments), "", "" }, context, config,
+            skills, loaded);
+    };
+
+    CHECK(evaluate_with_cap(
+              0, R"({"tasks":[{"mode":"research","prompt":"inspect"}]})")
+              .decision.kind
+        == PermissionDecision::Kind::REJECT);
+    CHECK(
+        evaluate_with_cap(0,
+            R"json({"tasks":[{"mode":"research","prompt":"a"},{"mode":"research","prompt":"b"}]})json")
+            .decision.reason
+        == "subagent: delegation is disabled for this run");
+    CHECK(
+        evaluate_with_cap(2,
+            R"json({"tasks":[{"mode":"research","prompt":"a"},{"mode":"research","prompt":"b"}]})json")
+            .decision.kind
+        == PermissionDecision::Kind::ACCEPT);
+    CHECK(
+        evaluate_with_cap(MAX_SUBAGENT_TASKS,
+            R"json({"tasks":[{"mode":"research","prompt":"a"},{"mode":"research","prompt":"b"},{"mode":"research","prompt":"c"},{"mode":"research","prompt":"d"},{"mode":"research","prompt":"e"},{"mode":"research","prompt":"f"},{"mode":"research","prompt":"g"},{"mode":"research","prompt":"h"}]})json")
+            .decision.kind
+        == PermissionDecision::Kind::ACCEPT);
+    const auto over = evaluate_with_cap(2,
+        R"json({"tasks":[{"mode":"research","prompt":"a"},{"mode":"research","prompt":"b"},{"mode":"research","prompt":"c"}]})json");
+    CHECK(over.decision.kind == PermissionDecision::Kind::REJECT);
+    CHECK(over.decision.reason
+        == "subagent: 3 tasks requested but the run is limited to 2");
+}
+
 TEST_CASE("shell policy reuses, combines, and broadens session grants")
 {
     PermissionFixture fixture;

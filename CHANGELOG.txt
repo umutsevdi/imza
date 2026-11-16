@@ -14,6 +14,9 @@ Changes:
   - One-shot runs (`--ask` / `--exec`) now keep a full transcript of what the
     agent did: every run is saved automatically, and `--output-json` writes a
     machine-readable summary for scripts and CI pipelines.
+  - You can now cap or disable subagent delegation (`capabilities.subagents`
+    in the config, or `--max-subagents` on the command line) and turn off web
+    access in the config (`capabilities.web`), for budget-conscious runs.
   - Subagents and modals now receive notice texts correctly (previously the
     published text could arrive empty), and rendering long markdown documents
     in the review tab is faster.

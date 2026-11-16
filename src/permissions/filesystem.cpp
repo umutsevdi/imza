@@ -189,10 +189,11 @@ namespace {
 PermissionContext make_permission_context(const Environment& environment,
     const PermissionStore& permissions, SessionMode mode,
     std::vector<std::filesystem::path> skill_directories,
-    const McpSubsystem* mcp)
+    const McpSubsystem* mcp, int max_subagents)
 {
     return { environment.system(), environment.workspace(),
-        permissions.snapshot(), mode, std::move(skill_directories), mcp };
+        permissions.snapshot(), mode, std::move(skill_directories), mcp,
+        max_subagents };
 }
 
 const std::filesystem::path& filesystem_target(const FilesystemRequest& request)

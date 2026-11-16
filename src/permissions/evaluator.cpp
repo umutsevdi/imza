@@ -173,6 +173,18 @@ PermissionEvaluation evaluate_tool_request(const ToolCallRequest& original,
                 arguments, context.mode == SessionMode::BUILD)) {
             return reject(std::move(request), *error);
         }
+        // Tool-call delegation only; internal run_subagent callers bypass
+        // this gate.
+        if (context.max_subagents <= 0) {
+            return reject(std::move(request),
+                "subagent: delegation is disabled for this run");
+        }
+        if (static_cast<int>(arguments.tasks.size()) > context.max_subagents) {
+            return reject(std::move(request),
+                "subagent: " + std::to_string(arguments.tasks.size())
+                    + " tasks requested but the run is limited to "
+                    + std::to_string(context.max_subagents));
+        }
         return accept(std::move(request));
     }
     case RosterTool::LUA: {

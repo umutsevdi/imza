@@ -19,6 +19,25 @@
         }
       }
     },
+    "capabilities": {
+      "type": "object",
+      "description": "Run-level capability switches, read once at startup. A `--web` or `--max-subagents` command-line flag overrides the matching value for that process.",
+      "additionalProperties": false,
+      "properties": {
+        "web": {
+          "type": "boolean",
+          "default": true,
+          "description": "Web access for the agent (web.fetch / web.search / the web Lua module). False disables it for the run; bindings fail closed."
+        },
+        "subagents": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8,
+          "default": 8,
+          "description": "Maximum number of concurrent tasks one subagent tool call may delegate. 0 disables the subagent tool for the model; internal runs (review passes, session titles) are not limited by this."
+        }
+      }
+    },
     "providers": {
       "type": "array",
       "description": "Provider connections. Two entries sharing an id are disambiguated by label, whose identity becomes `id/label`.",

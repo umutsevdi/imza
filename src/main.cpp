@@ -53,7 +53,16 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    const imza::RuntimeFlag runtime = imza::runtime_flags_for(cli);
+    // Fold config capabilities into the resolved values before the flags
+    // and the state read them; the explicit CLI override wins.
+    imza::CliResult resolved = cli;
+    if (!cfg.capabilities.web) {
+        resolved.web = false;
+    }
+    if (resolved.max_subagents) {
+        cfg.capabilities.subagents = *resolved.max_subagents;
+    }
+    const imza::RuntimeFlag runtime = imza::runtime_flags_for(resolved);
     // Read before the config is moved into the application state.
     imza::PermissionStore::Grants startup_grants
         = imza::allow_grants(cfg.allow);

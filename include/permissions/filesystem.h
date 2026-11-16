@@ -30,6 +30,8 @@ struct PermissionContext {
     std::vector<std::filesystem::path> skill_directories;
     // MCP inventory for the load_mcp gate; null when the run has no MCP.
     const McpSubsystem* mcp = nullptr;
+    // Model-facing subagent tool task ceiling; 0 disables delegation.
+    int max_subagents = MAX_SUBAGENT_TASKS;
 };
 
 struct PermissionDecision {
@@ -60,7 +62,7 @@ bool command_touches_sensitive(std::string_view command);
 PermissionContext make_permission_context(const Environment& environment,
     const PermissionStore& permissions, SessionMode mode,
     std::vector<std::filesystem::path> skill_directories = { },
-    const McpSubsystem* mcp                              = nullptr);
+    const McpSubsystem* mcp = nullptr, int max_subagents = MAX_SUBAGENT_TASKS);
 FilesystemEvaluation evaluate_filesystem_request(
     FilesystemRequest request, const PermissionContext& context);
 std::optional<ExternalGrant> filesystem_session_grant(

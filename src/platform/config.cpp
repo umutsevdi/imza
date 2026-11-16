@@ -265,9 +265,15 @@ struct StoredPreferences {
     std::optional<std::string> credentials;
 };
 
+struct StoredCapabilities {
+    std::optional<bool> web;
+    std::optional<int> subagents;
+};
+
 struct StoredConfig {
     std::optional<std::string> schema_url;
     std::optional<StoredPreferences> preferences;
+    std::optional<StoredCapabilities> capabilities;
     std::optional<std::vector<StoredConnection>> providers;
     std::optional<StoredModels> models;
     std::optional<StoredSkills> skills;
@@ -313,6 +319,21 @@ Status load_config(
         } else {
             return fail(Status::CONFIG_ERROR,
                 "unknown 'preferences.credentials' value '" + mode + "'");
+        }
+    }
+
+    if (stored.capabilities) {
+        if (stored.capabilities->web.has_value()) {
+            out.capabilities.web = *stored.capabilities->web;
+        }
+        if (stored.capabilities->subagents.has_value()) {
+            const int subagents = *stored.capabilities->subagents;
+            if (subagents < 0 || subagents > MAX_SUBAGENT_TASKS) {
+                return fail(Status::CONFIG_ERROR,
+                    "'capabilities.subagents' must be between 0 and "
+                        + std::to_string(MAX_SUBAGENT_TASKS));
+            }
+            out.capabilities.subagents = subagents;
         }
     }
 
@@ -669,6 +690,20 @@ namespace {
             ? "plaintext"
             : "os";
         stored.preferences = std::move(preferences);
+        {
+            StoredCapabilities capabilities;
+            const CapabilitiesConfig defaults = CapabilitiesConfig { };
+            if (cfg.capabilities.web != defaults.web) {
+                capabilities.web = cfg.capabilities.web;
+            }
+            if (cfg.capabilities.subagents != defaults.subagents) {
+                capabilities.subagents = cfg.capabilities.subagents;
+            }
+            if (capabilities.web.has_value()
+                || capabilities.subagents.has_value()) {
+                stored.capabilities = std::move(capabilities);
+            }
+        }
         std::vector<StoredConnection> providers;
         providers.reserve(cfg.providers.size());
         for (const Connection& conn : cfg.providers) {
@@ -1099,10 +1134,10 @@ template <> struct glz::meta<imza::CredentialBlob> {
 };
 
 template <> struct glz::meta<imza::StoredConfig> {
-    using T = imza::StoredConfig;
-    static constexpr auto value
-        = glz::object("$schema", &T::schema_url, "preferences", &T::preferences,
-            "providers", &T::providers, "models", &T::models, "skills",
-            &T::skills, "mcp_servers", &T::mcp_servers, "allow", &T::allow,
-            "sidebar", &T::sidebar, "instructions", &T::instructions);
+    using T                     = imza::StoredConfig;
+    static constexpr auto value = glz::object("$schema", &T::schema_url,
+        "preferences", &T::preferences, "capabilities", &T::capabilities,
+        "providers", &T::providers, "models", &T::models, "skills", &T::skills,
+        "mcp_servers", &T::mcp_servers, "allow", &T::allow, "sidebar",
+        &T::sidebar, "instructions", &T::instructions);
 };

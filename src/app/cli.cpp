@@ -223,6 +223,7 @@ CliResult run_cli(int argc, char** argv)
     std::string variant;
     std::string web;
     std::string shell;
+    int max_subagents = -1;
     std::string ask;
     std::string exec;
     std::string output_json;
@@ -273,6 +274,10 @@ CliResult run_cli(int argc, char** argv)
            "Enable or disable the shell tool (default: true)")
         ->type_name("<bool>")
         ->check(CLI::IsMember({ "true", "false" }));
+    app.add_option("--max-subagents", max_subagents,
+           "Cap concurrent subagent tasks per call, 0 disables (default: 8)")
+        ->type_name("<0-8>")
+        ->check(CLI::Range(0, 8));
     app.add_option("-D,--allow-dir", allowed_directories,
            "Allow access to one or more additional directories")
         ->type_name("<directory>...")
@@ -355,6 +360,9 @@ CliResult run_cli(int argc, char** argv)
         }
         if (!shell.empty()) {
             result.shell = shell == "true";
+        }
+        if (max_subagents >= 0) {
+            result.max_subagents = max_subagents;
         }
     };
     auto apply_one_shot = [&](CliResult& result) {

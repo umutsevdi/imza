@@ -227,7 +227,8 @@ private:
         const PermissionStore::Snapshot grants
             = _state->permissions->snapshot();
         view.permissions = make_permission_view(_state->runtime_flags,
-            _state->permissions->skip_permissions(), *grants);
+            _state->permissions->skip_permissions(), *grants,
+            _state->max_subagents);
         return view;
     }
 
@@ -606,6 +607,12 @@ std::string runtime_permissions_markdown(const RuntimeView& view)
         "| Web | {} |\n", permissions.web_disabled ? "off" : "on");
     out += std::format(
         "| Shell | {} |\n", permissions.shell_disabled ? "off" : "on");
+    out += std::format("| Subagents | {} |\n",
+        permissions.subagent_limit <= 0
+            ? "off"
+            : (permissions.subagent_limit >= MAX_SUBAGENT_TASKS
+                      ? "unlimited"
+                      : "max " + std::to_string(permissions.subagent_limit)));
     if (permissions.approvals_skipped) {
         out += "| Approvals | **skipped** |\n";
     }
@@ -699,11 +706,12 @@ ftxui::Element render_runtime_box(const RuntimeView& view,
 }
 
 PermissionView make_permission_view(RuntimeFlag flags, bool approvals_skipped,
-    const PermissionStore::Grants& grants)
+    const PermissionStore::Grants& grants, int max_subagents)
 {
     PermissionView view;
     view.web_disabled      = (flags & RuntimeFlag::WEB) == RuntimeFlag::NONE;
     view.shell_disabled    = (flags & RuntimeFlag::SHELL) == RuntimeFlag::NONE;
+    view.subagent_limit    = max_subagents;
     view.approvals_skipped = approvals_skipped;
 
     for (const PermissionGrant& grant : grants) {
@@ -738,8 +746,9 @@ PermissionView make_permission_view(RuntimeFlag flags, bool approvals_skipped,
 bool has_custom_permissions(const PermissionView& view)
 {
     return view.web_disabled || view.shell_disabled || view.approvals_skipped
-        || !view.folders.empty() || !view.commands.empty()
-        || !view.mcp_servers.empty() || !view.skills.empty();
+        || view.subagent_limit != MAX_SUBAGENT_TASKS || !view.folders.empty()
+        || !view.commands.empty() || !view.mcp_servers.empty()
+        || !view.skills.empty();
 }
 
 } // namespace imza

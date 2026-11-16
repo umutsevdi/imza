@@ -689,7 +689,8 @@ PermissionContext permission_context_for(
     ApplicationState& state, Session::Mode mode)
 {
     return make_permission_context(*state.environment, *state.permissions, mode,
-        state.session->loaded_skill_directories(), state.mcp.get());
+        state.session->loaded_skill_directories(), state.mcp.get(),
+        state.max_subagents);
 }
 
 PermissionEvaluation evaluate_permission(

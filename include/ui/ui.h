@@ -29,6 +29,7 @@
 #include "conversation/session.h"
 #include "network/network.h"
 #include "permissions/permission_store.h"
+#include "platform/config.h"
 #include "runtime/notification_store.h"
 #include "tools/skills.h"
 
@@ -525,8 +526,10 @@ struct ContextSkill {
 };
 
 struct PermissionView {
-    bool web_disabled      = false;
-    bool shell_disabled    = false;
+    bool web_disabled   = false;
+    bool shell_disabled = false;
+    // Model-facing subagent tool cap; MAX_SUBAGENT_TASKS means unlimited.
+    int subagent_limit     = MAX_SUBAGENT_TASKS;
     bool approvals_skipped = false;
     std::vector<std::string> folders;
     std::vector<std::string> commands;
@@ -538,7 +541,8 @@ struct PermissionView {
 // the live value, not the startup flags. `flags` still carries the
 // static web/shell capability switches.
 PermissionView make_permission_view(RuntimeFlag flags, bool approvals_skipped,
-    const PermissionStore::Grants& grants);
+    const PermissionStore::Grants& grants,
+    int max_subagents = MAX_SUBAGENT_TASKS);
 bool has_custom_permissions(const PermissionView& view);
 
 struct RuntimeEntry {

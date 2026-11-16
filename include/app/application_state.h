@@ -81,6 +81,8 @@ struct ApplicationState {
     ModalRequestFn parent_routing;
     std::string agent_label;
     RuntimeFlag runtime_flags = interactive_runtime_flags();
+    // Subagent tool task ceiling; internal runs are not scoped by it.
+    int max_subagents = MAX_SUBAGENT_TASKS;
     // Sidebar widget visibility, captured from the config at startup and
     // inherited by children; presentation state, not a provider concern.
     SidebarConfig sidebar;
