@@ -184,12 +184,22 @@ public:
                 return true;
             }
         }
-        // Wheel and arrows scroll the column only when it overflows; the
-        // chat below keeps the keys otherwise.
-        if ((event.is_mouse() || event == Event::ArrowUp
-                || event == Event::ArrowDown || event == Event::PageUp
-                || event == Event::PageDown || event == Event::Home
-                || event == Event::End)
+        // Wheel scrolls the column only over its own rendered box and only
+        // when it overflows; arrows stay sidebar-only. The chat and tabs
+        // keep every other event.
+        if (event.is_mouse()
+            && (event.mouse().button == Mouse::WheelUp
+                || event.mouse().button == Mouse::WheelDown)) {
+            if (_scroll.box.Contain(event.mouse().x, event.mouse().y)
+                && _scroll.max_scroll() > 0
+                && scroll_viewport_event(_scroll, event)) {
+                return true;
+            }
+            return false;
+        }
+        if ((event == Event::ArrowUp || event == Event::ArrowDown
+                || event == Event::PageUp || event == Event::PageDown
+                || event == Event::Home || event == Event::End)
             && _scroll.max_scroll() > 0
             && scroll_viewport_event(_scroll, event)) {
             return true;
