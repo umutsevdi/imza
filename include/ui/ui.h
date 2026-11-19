@@ -616,8 +616,14 @@ ftxui::Component make_plan_doc(std::shared_ptr<ApplicationState> state,
     LayoutFn layout, const bool* focused);
 ftxui::Component make_review(std::shared_ptr<ApplicationState> state,
     LayoutFn layout, WorkflowNavigateFn navigate);
+// Whether the panel's last frame drew no widget.
+struct SidePanelStatus {
+    std::function<bool()> is_empty;
+};
+
 ftxui::Component make_side_panel(std::shared_ptr<ApplicationState> state,
-    LayoutFn layout, WorkflowFn workflow, WorkflowNavigateFn navigate);
+    LayoutFn layout, WorkflowFn workflow, WorkflowNavigateFn navigate,
+    SidePanelStatus* status = nullptr);
 
 ftxui::Component make_status_line(std::shared_ptr<ApplicationState> state,
     LayoutFn layout, WorkflowFn workflow);

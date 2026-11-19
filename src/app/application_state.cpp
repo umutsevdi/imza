@@ -233,7 +233,6 @@ namespace {
             = std::move(config.mcp_servers);
         // Taken before the config moves into the config store.
         std::vector<std::string> instructions = std::move(config.instructions);
-        state->sidebar                        = config.sidebar;
         // Resolves the providers off the startup path; ConfigStore overlays
         // what it finds.
         state->credentials = std::make_shared<CredentialSubsystem>(
@@ -387,7 +386,6 @@ namespace {
         state->agent_label    = std::move(agent_label);
         state->runtime_flags  = parent.runtime_flags;
         state->max_subagents  = parent.max_subagents;
-        state->sidebar        = parent.sidebar;
         wire(state, std::move(stream_fn), std::move(tools));
         return state;
     }

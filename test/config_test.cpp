@@ -479,29 +479,19 @@ TEST_CASE("config roundtrip preserves round-tripped fields")
         CHECK(loaded.instructions[0] == "docs/guide.md");
     }
 
-    SUBCASE("hidden sidebar widgets")
+    SUBCASE("a removed sidebar section is dropped on save")
     {
-        const auto path = temp_file("sidebar-roundtrip.json");
-        imza::Config cfg;
-        cfg.sidebar.documents     = false;
-        cfg.sidebar.changed_files = false;
-
-        REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
-
-        // Only the flags that differ from the default are written.
-        const std::string json = imza::test::read_all(path);
-        CHECK(json.find(R"("documents")") != std::string::npos);
-        CHECK(json.find(R"("changed_files")") != std::string::npos);
-        CHECK(json.find(R"("tasks")") == std::string::npos);
-        CHECK(json.find(R"("context")") == std::string::npos);
+        const auto path = temp_file("sidebar-removed.json");
+        {
+            std::ofstream out(path);
+            out << R"({"sidebar":{"documents":false,"tasks":false}})";
+        }
 
         imza::Config loaded;
         REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
-        CHECK_FALSE(loaded.sidebar.documents);
-        CHECK_FALSE(loaded.sidebar.changed_files);
-        CHECK(loaded.sidebar.review_comments);
-        CHECK(loaded.sidebar.tasks);
-        CHECK(loaded.sidebar.runtime);
+        REQUIRE(imza::save_config(path, loaded) == imza::Status::OK);
+        CHECK(imza::test::read_all(path).find(R"("sidebar")")
+            == std::string::npos);
     }
 }
 
@@ -1114,21 +1104,4 @@ TEST_CASE("allow and instructions are absent from a minimal config")
     CHECK(loaded.allow.directories.empty());
     CHECK(loaded.allow.commands.empty());
     CHECK(loaded.instructions.empty());
-    CHECK(loaded.sidebar.documents);
-    CHECK(loaded.sidebar.runtime);
-}
-
-TEST_CASE("a legacy sidebar update flag is ignored, not rejected")
-{
-    // The update banner moved to the notification overlay; a config written
-    // by an older build still carries the flag and must keep loading.
-    const auto path = temp_file("sidebar-legacy-update.json");
-    {
-        std::ofstream out(path);
-        out << R"({"sidebar":{"update":false,"documents":false}})";
-    }
-    imza::Config loaded;
-    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
-    CHECK_FALSE(loaded.sidebar.documents);
-    CHECK(loaded.sidebar.review_comments);
 }

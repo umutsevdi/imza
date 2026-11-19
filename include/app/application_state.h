@@ -83,9 +83,6 @@ struct ApplicationState {
     RuntimeFlag runtime_flags = interactive_runtime_flags();
     // Subagent tool task ceiling; internal runs are not scoped by it.
     int max_subagents = MAX_SUBAGENT_TASKS;
-    // Sidebar widget visibility, captured from the config at startup and
-    // inherited by children; presentation state, not a provider concern.
-    SidebarConfig sidebar;
     std::atomic<bool> alive { true };
     Signal<>::Subscription env_subscription;
     Signal<>::Subscription system_subscription;

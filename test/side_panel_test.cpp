@@ -69,30 +69,6 @@ TEST_CASE("documents widget interleaves build logs with plan revisions")
     CHECK(viewer->content.find("added dependency Z") != std::string::npos);
 }
 
-TEST_CASE("side panel hides widgets disabled in the sidebar config")
-{
-    imza::Config config      = imza::test::test_config();
-    config.sidebar.documents = false;
-    config.sidebar.tasks     = false;
-    auto state
-        = imza::test::make_test_state(imza::test::run_immediately, config);
-
-    REQUIRE(state->session->create_plan(imza::test::PLAN_SKELETON).empty());
-    state->session->set_todo(imza::TodoList {
-        { { "hidden task", imza::TodoItem::Status::PENDING } } });
-
-    auto panel = imza::make_side_panel(
-        state,
-        [] { return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 120, 40 }; },
-        [] { return imza::WorkflowPhase::PLAN; }, [](imza::WorkflowPhase) { });
-
-    const std::string out = imza::test::to_text(panel->Render(), 120, 40);
-    CHECK(out.find("Documents") == std::string::npos);
-    CHECK(out.find("Initial Plan") == std::string::npos);
-    CHECK(out.find("Tasks") == std::string::npos);
-    CHECK(out.find("hidden task") == std::string::npos);
-}
-
 TEST_CASE("runtime widget counts only reachable mcp servers")
 {
     imza::test::allow_loopback_direct();
@@ -259,23 +235,32 @@ TEST_CASE("runtime box hides empty rows and vanishes when nothing is set")
         == std::string::npos);
 }
 
-TEST_CASE("narrow sidebar renders nothing when no widget has content")
+TEST_CASE("sidebar renders nothing when no widget has content")
 {
+    const imza::test::CurrentDirectory directory;
+    const imza::test::TempDir scratch;
     auto state = imza::test::make_test_state();
-    auto panel = imza::make_side_panel(
-        state,
-        [] {
-            return imza::LayoutCtx { imza::LayoutCtx::Kind::NARROW, 80, 40 };
-        },
-        [] { return imza::WorkflowPhase::BUILD; }, [](imza::WorkflowPhase) { });
+    REQUIRE(state->environment->chdir(scratch.path)
+        == imza::Environment::ChdirResult::CHANGED);
+    imza::test::wait_for_environment(*state);
 
-    const ftxui::Element probe
-        = ftxui::vbox({ panel->Render(), ftxui::text("MARK") });
-    const std::string out
-        = imza::test::without_ansi(imza::test::to_text(probe, 80, 10));
-    const std::size_t at = out.find("MARK");
-    REQUIRE(at != std::string::npos);
-    CHECK(out.substr(0, at).find_first_not_of(" \n") == std::string::npos);
+    for (const auto kind :
+        { imza::LayoutCtx::Kind::NARROW, imza::LayoutCtx::Kind::WIDE }) {
+        imza::SidePanelStatus status;
+        auto panel = imza::make_side_panel(
+            state, [kind] { return imza::LayoutCtx { kind, 120, 40 }; },
+            [] { return imza::WorkflowPhase::BUILD; },
+            [](imza::WorkflowPhase) { }, &status);
+
+        const ftxui::Element probe
+            = ftxui::vbox({ panel->Render(), ftxui::text("MARK") });
+        const std::string out
+            = imza::test::without_ansi(imza::test::to_text(probe, 120, 10));
+        const std::size_t at = out.find("MARK");
+        REQUIRE(at != std::string::npos);
+        CHECK(out.substr(0, at).find_first_not_of(" \n") == std::string::npos);
+        CHECK(status.is_empty());
+    }
 }
 
 TEST_CASE("skills row hides until a skill is loaded")

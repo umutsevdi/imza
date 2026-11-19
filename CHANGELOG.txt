@@ -8,21 +8,18 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
-0.7.5 - Unreleased
+0.7.5 - 2026-11-19
 -------------------------------------------------------------------------------
 Changes:
   - One-shot runs (`--ask` / `--exec`) now keep a full transcript of what the
     agent did: every run is saved automatically, and `--output-json` writes a
     machine-readable summary for scripts and CI pipelines.
   - You can now cap or disable subagent delegation (`capabilities.subagents`
-    in the config, or `--max-subagents` on the command line) and turn off web
-    access in the config (`capabilities.web`), for budget-conscious runs.
-  - Subagents and modals now receive notice texts correctly (previously the
-    published text could arrive empty), and rendering long markdown documents
-    in the review tab is faster.
+    in the config, or `--max-subagents` on the command line).
+  - Links in chat replies, plan documents and viewers now open in your browser
+    when clicked.
+  - The sidebar now appears only when it has something to show.
   - Fixed mouse wheel scroll bug on panes with overflowing content.
-  - Links in chat replies, plan documents and viewers now open in your
-    browser when clicked, and brighten under the pointer like other links.
 
 -------------------------------------------------------------------------------
 0.7.4 - 2026-11-12

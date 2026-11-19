@@ -233,8 +233,10 @@ namespace {
         {
             const LayoutFn layout     = [this] { return _layout; };
             const WorkflowFn workflow = [this] { return _phase; };
-            _side        = make_side_panel(_state, layout, workflow,
-                [this](WorkflowPhase phase) { _set_phase(phase); });
+            _side                     = make_side_panel(
+                _state, layout, workflow,
+                [this](WorkflowPhase phase) { _set_phase(phase); },
+                &_side_panel_status);
             _status_line = make_status_line(_state, layout, workflow);
             _chat_hints.phase_line_fn = [this] {
                 if (_phase != WorkflowPhase::PLAN) {
@@ -336,6 +338,9 @@ namespace {
             const bool side_by_side = _state->sidechat_open && !narrow
                 && _phase != WorkflowPhase::PLAN;
 
+            const bool side_empty
+                = _side_panel_status.is_empty && _side_panel_status.is_empty();
+
             Element root;
             if (narrow && _sidechat_status.focused
                 && _phase != WorkflowPhase::PLAN) {
@@ -354,17 +359,24 @@ namespace {
                     = vbox({ hbox({ text(" "), title_p | xflex, tab }),
                           std::move(content) })
                     | xflex | yflex;
-                root = vbox({ hbox({ side | yflex, text(" "),
-                                  std::move(main_panel) | xflex | yflex })
-                               | flex,
-                           separatorEmpty(), status })
+                Element body = side_empty
+                    ? std::move(main_panel)
+                    : hbox({ side | yflex, text(" "),
+                          std::move(main_panel) | xflex | yflex });
+                root
+                    = vbox({ std::move(body) | flex, separatorEmpty(), status })
                     | flex;
             } else {
                 Element content = std::move(right_col) | xflex | yflex;
-                root            = vbox({ hbox({ title_p | xflex, tab }), side,
-                                      separatorEmpty(), std::move(content),
-                                      separatorEmpty(), status })
-                    | flex;
+                Elements rows { hbox({ title_p | xflex, tab }) };
+                if (!side_empty) {
+                    rows.push_back(std::move(side));
+                }
+                rows.push_back(separatorEmpty());
+                rows.push_back(std::move(content));
+                rows.push_back(separatorEmpty());
+                rows.push_back(std::move(status));
+                root = vbox(std::move(rows)) | flex;
             }
 
             Component popup_source = nullptr;
@@ -648,6 +660,7 @@ namespace {
         SelectionCopier _selection;
         ftxui::Component _sidechat;
         SidechatStatus _sidechat_status;
+        SidePanelStatus _side_panel_status;
         Component _side;
         Component _modal;
         Component _status_line;

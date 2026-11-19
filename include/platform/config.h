@@ -141,16 +141,6 @@ struct AllowConfig {
     std::vector<ShellCommandGrant> commands;
 };
 
-// Per-widget visibility for the sidebar. Every widget is shown by default;
-// a false flag hides it for the whole session (read once at startup).
-struct SidebarConfig {
-    bool documents       = true;
-    bool review_comments = true;
-    bool tasks           = true;
-    bool changed_files   = true;
-    bool runtime         = true;
-};
-
 struct Preferences {
     // Where provider secrets live: the OS keychain, or config.json itself.
     enum class Credentials { OS, PLAINTEXT };
@@ -176,7 +166,6 @@ struct Config {
     std::map<std::string, std::map<std::string, SkillPolicy>> project_skills;
     std::map<std::string, McpServerConfig> mcp_servers;
     AllowConfig allow;
-    SidebarConfig sidebar;
     // Extra instruction files loaded after the workspace agent file;
     // absolute or project-root-relative paths.
     std::vector<std::string> instructions;

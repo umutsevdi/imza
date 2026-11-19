@@ -65,12 +65,13 @@ namespace {
 class SidePanel : public ComponentBase {
 public:
     SidePanel(std::shared_ptr<ApplicationState> state, LayoutFn layout,
-        WorkflowFn workflow, WorkflowNavigateFn navigate)
+        WorkflowFn workflow, WorkflowNavigateFn navigate,
+        std::shared_ptr<bool> rendered_empty)
         : _state(std::move(state))
         , _layout(std::move(layout))
         , _workflow(std::move(workflow))
         , _navigate(std::move(navigate))
-        , _sidebar(_state->sidebar)
+        , _rendered_empty(std::move(rendered_empty))
         , _workspace_subscription(
               _state->environment->subscribe_to_workspace_change(
                   [] { animation::RequestAnimationFrame(); }))
@@ -132,42 +133,36 @@ public:
         const bool narrow   = ctx.kind == LayoutCtx::Kind::NARROW;
         _active_links.clear();
         Elements parts;
-        if (_sidebar.documents) {
-            _append_documents(parts);
-        } else {
-            _document_links.clear();
-        }
-        if (_sidebar.review_comments) {
-            _append_review_comments(parts);
-        }
+        _append_documents(parts);
+        _append_review_comments(parts);
         const auto todo = _state->session->todo();
-        if (_sidebar.tasks && !todo->items.empty()) {
+        if (!todo->items.empty()) {
             parts.push_back(render_todo(*todo, ctx) | yflex);
         }
         if (!narrow) {
             const auto& env       = _state->environment;
             const auto repository = env->repository();
-            if (_sidebar.changed_files && repository
-                && !repository->changed_files.empty()) {
+            if (repository && !repository->changed_files.empty()) {
                 parts.push_back(_render_changed_files(*repository) | yflex);
             }
             if (_attachments_dirty.exchange(false)) {
                 _attachment_names = _state->session->attachment_names();
             }
-            if (_sidebar.runtime) {
+            const RuntimeView& runtime = _runtime_view();
+            if (has_runtime_content(runtime)) {
                 const RuntimeRowLink link
                     = [this](RuntimeRow row, std::string_view label,
                           std::string_view value) {
                           return _runtime_row_link(row, label, value);
                       };
-                parts.push_back(
-                    render_runtime_box(_runtime_view(), _expanded, link));
+                parts.push_back(render_runtime_box(runtime, _expanded, link));
             }
         }
+        *_rendered_empty = parts.empty();
+        if (*_rendered_empty) {
+            return vbox();
+        }
         if (narrow) {
-            if (parts.empty()) {
-                return vbox();
-            }
             return panel(scroll_viewport(vbox(std::move(parts)), _scroll)
                        | size(HEIGHT, GREATER_THAN, SIDEBAR_MIN_ROWS))
                 | xflex;
@@ -449,7 +444,7 @@ private:
     LayoutFn _layout;
     WorkflowFn _workflow;
     WorkflowNavigateFn _navigate;
-    SidebarConfig _sidebar;
+    std::shared_ptr<bool> _rendered_empty;
     Signal<>::Subscription _workspace_subscription;
     Signal<>::Subscription _system_subscription;
     Signal<>::Subscription _repository_subscription;
@@ -475,10 +470,16 @@ private:
 };
 
 ftxui::Component make_side_panel(std::shared_ptr<ApplicationState> state,
-    LayoutFn layout, WorkflowFn workflow, WorkflowNavigateFn navigate)
+    LayoutFn layout, WorkflowFn workflow, WorkflowNavigateFn navigate,
+    SidePanelStatus* status)
 {
-    return ftxui::Make<SidePanel>(std::move(state), std::move(layout),
-        std::move(workflow), std::move(navigate));
+    auto empty      = std::make_shared<bool>(true);
+    Component panel = ftxui::Make<SidePanel>(std::move(state),
+        std::move(layout), std::move(workflow), std::move(navigate), empty);
+    if (status != nullptr) {
+        status->is_empty = [empty] { return *empty; };
+    }
+    return panel;
 }
 
 namespace {
