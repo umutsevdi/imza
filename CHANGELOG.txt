@@ -21,6 +21,8 @@ Changes:
     published text could arrive empty), and rendering long markdown documents
     in the review tab is faster.
   - Fixed mouse wheel scroll bug on panes with overflowing content.
+  - Links in chat replies, plan documents and viewers now open in your
+    browser when clicked, and brighten under the pointer like other links.
 
 -------------------------------------------------------------------------------
 0.7.4 - 2026-11-12

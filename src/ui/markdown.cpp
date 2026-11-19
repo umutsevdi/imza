@@ -344,7 +344,7 @@ namespace {
                 e |= underlined;
                 e |= color(HL_CYAN);
                 if (!fl.url.empty()) {
-                    e |= hyperlink(fl.url);
+                    e |= clickable_link(fl.url);
                 }
             }
             return e;

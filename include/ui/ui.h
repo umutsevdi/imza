@@ -163,6 +163,14 @@ ftxui::Component hover_link(std::function<ftxui::Element()> render,
 ftxui::Component split_hover_link(std::string primary, std::string secondary,
     std::function<void()> on_click,
     const ftxui::Color& primary_color = HL_GREEN);
+// Link text for markdown: paints the OSC 8 escape and records its cells, so
+// a left press opens the URL even where the terminal reports clicks to imza.
+ftxui::Decorator clickable_link(std::string url);
+// The frame's link table, rebuilt by the root every render.
+void clear_link_targets();
+std::optional<std::string> link_target_at(int x, int y);
+// Sets the link under the pointer; returns whether it changed.
+bool set_link_hover(std::optional<std::string> url);
 std::string elapsed_text(std::chrono::milliseconds elapsed);
 std::string compact_number(std::uint64_t n);
 ftxui::Element hint_bar(std::string hint);

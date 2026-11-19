@@ -1,6 +1,7 @@
 #include "app/flows.h"
 #include "conversation/persistence.h"
 #include "platform/clipboard.h"
+#include "platform/command_runner.h"
 #include "runtime/main_thread_queue.h"
 #include "tools/skills.h"
 #include "ui/frame_pulse.h"
@@ -317,6 +318,7 @@ namespace {
 
         Element OnRender() override
         {
+            clear_link_targets();
             _sync_review_availability();
             _restore_focus_after_modal();
             const auto terminal_size = ftxui::Terminal::Size();
@@ -389,7 +391,7 @@ namespace {
                 Element popup = popup_source->Render()
                     | borderStyled(ROUNDED, PANEL_BORDER) | bgcolor(PANEL_COLOR)
                     | color(PANEL_FG) | clear_under | size(WIDTH, EQUAL, mw)
-                    | size(HEIGHT, LESS_THAN, mh);
+                    | size(HEIGHT, LESS_THAN, mh) | reflect(_modal_box);
                 root = dbox({ dim(std::move(root)), center(std::move(popup)) });
             }
 
@@ -446,6 +448,9 @@ namespace {
                 return true;
             }
             if (_selection.handle(event, *_state)) {
+                return true;
+            }
+            if (_handle_link_mouse(event)) {
                 return true;
             }
             if (_state->session->exit_confirm()
@@ -570,6 +575,38 @@ namespace {
             }
         }
 
+        // Rendered links resolve against the frame's table: a hover brightens
+        // what a press would open. Returns whether the press was consumed.
+        bool _handle_link_mouse(Event& event)
+        {
+            if (!event.is_mouse()) {
+                return false;
+            }
+            const Mouse& m = event.mouse();
+            // A modal dims the panes behind it; their links stay inert.
+            const bool dimmed = (_state->session->exit_confirm()
+                                    || _state->session->modal_kind() != 0
+                                    || (_sidechat_status.has_modal
+                                        && _sidechat_status.has_modal()))
+                && !_modal_box.Contain(m.x, m.y);
+            const std::optional<std::string> url
+                = dimmed ? std::nullopt : link_target_at(m.x, m.y);
+            if (m.motion == Mouse::Moved) {
+                if (set_link_hover(url)) {
+                    animation::RequestAnimationFrame();
+                }
+                return false;
+            }
+            if (!url || m.button != Mouse::Left || m.motion != Mouse::Pressed) {
+                return false;
+            }
+            if (!open_browser(*url) && _state->notifications) {
+                _state->notifications->publish(
+                    true, "Could not open " + *url + " in a browser.");
+            }
+            return true;
+        }
+
         void _focus_main()
         {
             if (_selected == static_cast<int>(WorkflowPhase::REVIEW)) {
@@ -633,6 +670,7 @@ namespace {
         bool _review_available_cached { false };
         int _selected { 0 };
         ftxui::Box _main_pane_box { };
+        ftxui::Box _modal_box { };
         bool _modal_was_open = false;
     };
 

@@ -150,6 +150,34 @@ TEST_CASE("render_markdown_element renders lists and headings")
     CHECK(out.find("1. first") != std::string::npos);
 }
 
+TEST_CASE("markdown links are clickable and emphasize on hover")
+{
+    const auto render = [] {
+        imza::clear_link_targets();
+        auto screen = ftxui::Screen::Create(
+            ftxui::Dimension::Fixed(60), ftxui::Dimension::Fixed(6));
+        ftxui::Render(screen,
+            imza::render_markdown_element(
+                "see [docs](https://example.com/x) now", 60));
+        return screen;
+    };
+    // "see " is four columns, so the label occupies 4..7 of the first row.
+    const ftxui::Screen plain = render();
+    CHECK(imza::link_target_at(4, 0)
+        == std::optional<std::string>("https://example.com/x"));
+    CHECK_FALSE(imza::link_target_at(0, 0).has_value());
+    CHECK_FALSE(plain.CellAt(4, 0).bold);
+
+    imza::set_link_hover(std::optional<std::string>("https://example.com/x"));
+    const ftxui::Screen hovered = render();
+    CHECK(hovered.CellAt(4, 0).bold);
+    CHECK_FALSE(hovered.CellAt(0, 0).bold);
+
+    imza::set_link_hover(std::nullopt);
+    imza::clear_link_targets();
+    CHECK_FALSE(imza::link_target_at(4, 0).has_value());
+}
+
 TEST_CASE("render_markdown_element drops html")
 {
     const std::string out = to_text(

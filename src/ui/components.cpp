@@ -6,6 +6,7 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <format>
 #include <ftxui/component/animation.hpp>
@@ -1068,7 +1069,95 @@ namespace {
         bool _fill                = false;
     };
 
+    struct LinkTarget {
+        Box box;
+        std::string url;
+    };
+
+    struct LinkFrame {
+        std::vector<LinkTarget> targets;
+        std::optional<std::string> hovered;
+    };
+
+    // Rebuilt every frame by the root, so presses and hovers resolve against
+    // exactly what is on screen.
+    LinkFrame& link_frame()
+    {
+        static LinkFrame frame;
+        return frame;
+    }
+
+    class LinkNode : public Node {
+    public:
+        LinkNode(Element child, std::string url)
+            : Node(Elements { std::move(child) })
+            , _url(std::move(url))
+        {
+        }
+
+        void SetBox(Box box) override
+        {
+            Node::SetBox(box);
+            children_[0]->SetBox(box);
+        }
+
+        void Render(Screen& screen) override
+        {
+            const Box visible  = Box::Intersection(screen.stencil, box_);
+            const bool hovered = link_frame().hovered == _url;
+            // Relative targets would swallow the click and open nothing.
+            if (!visible.IsEmpty()
+                && (_url.starts_with("http") || _url.starts_with("mailto:"))) {
+                link_frame().targets.push_back({ visible, _url });
+            }
+            const uint8_t id = screen.RegisterHyperlink(_url);
+            for (int y = visible.y_min; y <= visible.y_max; ++y) {
+                for (int x = visible.x_min; x <= visible.x_max; ++x) {
+                    Cell& cell     = screen.CellAt(x, y);
+                    cell.hyperlink = id;
+                    if (hovered) {
+                        cell.bold             = true;
+                        cell.foreground_color = PANEL_FG;
+                    }
+                }
+            }
+            Node::Render(screen);
+        }
+
+    private:
+        std::string _url;
+    };
+
 } // namespace
+
+Decorator clickable_link(std::string url)
+{
+    return [url = std::move(url)](Element child) {
+        return std::make_shared<LinkNode>(std::move(child), url);
+    };
+}
+
+void clear_link_targets() { link_frame().targets.clear(); }
+
+bool set_link_hover(std::optional<std::string> url)
+{
+    if (link_frame().hovered == url) {
+        return false;
+    }
+    link_frame().hovered = std::move(url);
+    return true;
+}
+
+std::optional<std::string> link_target_at(int x, int y)
+{
+    const auto& targets = link_frame().targets;
+    for (auto it = targets.rbegin(); it != targets.rend(); ++it) {
+        if (it->box.Contain(x, y)) {
+            return it->url;
+        }
+    }
+    return std::nullopt;
+}
 
 Component hover_link(std::function<Element()> render,
     std::function<void()> on_click, const Color& inactive_color, bool fill)
