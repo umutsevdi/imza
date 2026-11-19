@@ -13,14 +13,14 @@
 
 namespace imza {
 
-namespace {
+struct OutputRecord {
+    std::string kind;
+    std::string error;
+    std::string output;
+    std::string session_file;
+};
 
-    struct OutputRecord {
-        std::string kind;
-        std::string error;
-        std::string output;
-        std::string session_file;
-    };
+namespace {
 
     std::optional<std::string> first_tool_error(const SessionSnapshot& snapshot)
     {
