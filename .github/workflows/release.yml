@@ -266,20 +266,30 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: www/dist
-      - name: Wait for artifact visibility
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          for i in $(seq 1 30); do
-            if gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" \
-                -q '.artifacts[] | select(.name == "github-pages")' | grep -q '"name"'; then
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "::error::github-pages artifact never became visible to the API."
-          exit 1
-      - uses: actions/deploy-pages@v4
+      # deploy-pages resolves the artifact through the internal Actions
+      # Results API, whose index can trail the upload by minutes; the
+      # public REST API is unaffected, so polling it still left the deploy
+      # failing. The metadata fetch fails fast and before any deployment
+      # is created, so retrying the step is side-effect-free.
+      - name: Deploy to GitHub Pages
+        id: pages_deploy_1
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+      - name: Wait for internal artifact index (retry 2)
+        if: steps.pages_deploy_1.outcome == 'failure'
+        run: sleep 90
+      - name: Deploy to GitHub Pages (retry 2)
+        id: pages_deploy_2
+        if: steps.pages_deploy_1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+      - name: Wait for internal artifact index (final)
+        if: steps.pages_deploy_2.outcome == 'failure'
+        run: sleep 120
+      - name: Deploy to GitHub Pages (final)
+        id: pages_deploy_3
+        if: steps.pages_deploy_2.outcome == 'failure'
+        uses: actions/deploy-pages@v4
   homebrew:
     # The tap repo (umutsevdi/homebrew-imza) is a plain store: this pipeline
     # is the only writer of Casks/imza.rb. Runs after `release` so the asset
