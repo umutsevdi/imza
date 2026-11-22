@@ -8,7 +8,7 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
-0.7.6 - Unreleased
+0.7.6 - 2026-11-22
 -------------------------------------------------------------------------------
 Changes:
   - Shell commands run by the agent now return a single result with a clear
