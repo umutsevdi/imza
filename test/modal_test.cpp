@@ -331,7 +331,7 @@ TEST_CASE("tool accept: output fills result, request half byte-stable")
         env.requests.push_back(req);
         if ((*round)++ == 0) {
             cb(imza::make_tool_call_event({ "lua",
-                R"json({"script":"local out, code = imza.shell('inspect -la') print(out) print('shell-complete')"})json",
+                R"json({"script":"local r = imza.shell('inspect -la') print(r.output) print('shell-complete')"})json",
                 "list files" }));
         }
         cb(imza::make_done_event());
@@ -451,7 +451,7 @@ TEST_CASE("an overlay queues behind a pending tool prompt")
         env.requests.push_back(req);
         if ((*round)++ < 2) {
             cb(imza::make_tool_call_event({ "lua",
-                R"json({"script":"local out, code = imza.shell('cmake --build build') print(code)"})json",
+                R"json({"script":"local r = imza.shell('cmake --build build') print(r.code)"})json",
                 "" }));
         }
         cb(imza::make_done_event());
@@ -586,7 +586,7 @@ TEST_CASE("dangerous skip accepts permission-gated tools without a modal")
                      const imza::StreamCallback& cb) {
         if (req.messages.back().type == imza::Message::Type::USER) {
             cb(imza::make_tool_call_event({ "lua",
-                R"json({"script":"local out, code = imza.shell('true') print(code)"})json",
+                R"json({"script":"local r = imza.shell('true') print(r.code)"})json",
                 "", "call" }));
         }
         cb(imza::make_done_event());

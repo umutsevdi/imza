@@ -8,6 +8,14 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
+0.7.6 - Unreleased
+-------------------------------------------------------------------------------
+Changes:
+  - Shell commands run by the agent now return a single result with a clear
+    OK / ERROR / TIMEOUT status, so failures are no longer mistaken for
+    successes.
+
+-------------------------------------------------------------------------------
 0.7.5 - 2026-11-19
 -------------------------------------------------------------------------------
 Changes:

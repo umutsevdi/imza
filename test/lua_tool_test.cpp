@@ -771,22 +771,23 @@ TEST_CASE("web bindings fail closed before argument validation")
 TEST_CASE("imza.sh runs a single command and returns exit code")
 {
     ShellFixture fx;
-    const imza::ToolOutput out
-        = imza::test::run_lua("local out, code = imza.shell('"
-                + imza::test::echo_command("hello-sh") + "')\nprint(out, code)",
-            fx.host());
+    const imza::ToolOutput out = imza::test::run_lua("local r = imza.shell('"
+            + imza::test::echo_command("hello-sh")
+            + "')\nprint(r.output, r.code, r.status)",
+        fx.host());
     CHECK(out.kind == imza::ToolOutput::Kind::OUTPUT);
     // The host shell's echo emits CRLF on Windows; the binding passes the
     // bytes through, so compare after normalizing line endings.
-    CHECK(imza::test::normalize_newlines(out.text) == "hello-sh\n    0\n");
+    CHECK(
+        imza::test::normalize_newlines(out.text) == "hello-sh\n    0    OK\n");
     CHECK(fx.ask_calls == 0);
 
     const imza::ToolOutput failing
-        = imza::test::run_lua("local out, code = imza.shell('"
-                + imza::test::failing_command() + "')\nprint(code)",
+        = imza::test::run_lua("local r = imza.shell('"
+                + imza::test::failing_command() + "')\nprint(r.code, r.status)",
             fx.host());
     CHECK(failing.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(failing.text == "1\n");
+    CHECK(failing.text == "1    ERROR\n");
 
     const imza::ToolOutput disabled
         = imza::test::run_lua("imza.shell('echo x')\nprint('dead')");
@@ -806,10 +807,10 @@ TEST_CASE("imza.sh workspace argument selects the run directory")
     fx.workspace->working_directory = dir.path;
 
     const imza::ToolOutput absolute = imza::test::run_lua(
-        "local out, code = imza.shell('" + imza::test::print_cwd_command()
-            + "', 10, [[" + dir.path.string()
+        "local r = imza.shell('" + imza::test::print_cwd_command() + "', 10, [["
+            + dir.path.string()
             + "]])\n"
-              "print(out, code)",
+              "print(r.output, r.code)",
         fx.host());
     CHECK(absolute.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(absolute.text.find(dir.path.string()) != std::string::npos);
@@ -817,8 +818,8 @@ TEST_CASE("imza.sh workspace argument selects the run directory")
 
     fs::create_directories(dir.file("sub"));
     const imza::ToolOutput relative = imza::test::run_lua(
-        "local out, code = imza.shell('" + imza::test::print_cwd_command()
-            + "', 10, 'sub')\nprint(out, code)",
+        "local r = imza.shell('" + imza::test::print_cwd_command()
+            + "', 10, 'sub')\nprint(r.output, r.code)",
         fx.host());
     CHECK(relative.text.find((dir.file("sub")).string()) != std::string::npos);
 
@@ -845,10 +846,10 @@ TEST_CASE("imza.sh env argument reaches the child and the gate")
     // program is not catalogued, so the gate asks; ACCEPT_ONCE lets it run.
     fx.verdict = imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" };
     const imza::ToolOutput env_run
-        = imza::test::run_lua("local out, code = imza.shell([["
+        = imza::test::run_lua("local r = imza.shell([["
                 + imza::test::fixture_command("env", "IMZA_TEST_MARKER")
                 + "]], 10, nil, { IMZA_TEST_MARKER = 'present' })\n"
-                  "print(out, code)",
+                  "print(r.output, r.code)",
             fx.host());
     CHECK(env_run.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(env_run.text.find("present") != std::string::npos);
@@ -868,9 +869,49 @@ TEST_CASE("imza.sh env argument reaches the child and the gate")
     // A nil env argument is the same as omitting it.
     const std::string plain       = imza::test::echo_command("plain");
     const imza::ToolOutput no_env = imza::test::run_lua(
-        "local out = imza.shell([[" + plain + "]], 10, nil)\nprint(out)",
+        "local r = imza.shell([[" + plain + "]], 10, nil)\nprint(r.output)",
         fx.host());
     CHECK(no_env.text.find("plain") != std::string::npos);
+}
+
+TEST_CASE("imza.sh reports command outcomes through status")
+{
+    ShellFixture fx;
+    const imza::ToolOutput ok = imza::test::run_lua("local r = imza.shell('"
+            + imza::test::echo_command("fine") + "')\nprint(r.status, r.code)",
+        fx.host());
+    CHECK(ok.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(ok.text == "OK    0\n");
+
+    const imza::ToolOutput failed = imza::test::run_lua("local r = imza.shell('"
+            + imza::test::failing_command() + "')\nprint(r.status, r.code)",
+        fx.host());
+    CHECK(failed.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(failed.text == "ERROR    1\n");
+
+    ShellFixture unaccounted;
+    unaccounted.verdict
+        = imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" };
+    const imza::ToolOutput missing = imza::test::run_lua(
+        "local r = imza.shell('imza-no-such-program-ever')\n"
+        "print(r.status, r.code == 0 and 'zero' or 'not-0')",
+        unaccounted.host());
+    // The shell itself starts and reports its own status for the missing
+    // program (127 on POSIX): a normal ERROR, not a throw or a spawn
+    // failure, and the shell's message lands in `output`.
+    CHECK(missing.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(missing.text == "ERROR    not-0\n");
+
+    // The fixture sleeps far longer than the 1 s timeout: the command is
+    // killed, and the call is a normal result rather than a throw.
+    ShellFixture sleeper;
+    sleeper.verdict = imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" };
+    const imza::ToolOutput timed_out = imza::test::run_lua(
+        "local r = imza.shell([[" + imza::test::sleep_seconds(30)
+            + "]], 1)\nprint(r.status, r.code)",
+        sleeper.host());
+    CHECK(timed_out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(timed_out.text == "TIMEOUT    -1\n");
 }
 
 TEST_CASE("imza.sh rejects only multiple command expressions")
@@ -921,8 +962,9 @@ TEST_CASE("imza.sh applies the native approval and session grant flow")
     ShellFixture once;
     once.verdict = imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" };
     const imza::ToolOutput accepted = imza::test::run_lua(
-        "local out, code = imza.shell('echo $HOME')\nprint(code)", once.host());
-    CHECK(accepted.text == "0\n");
+        "local r = imza.shell('echo $HOME')\nprint(r.code, r.status)",
+        once.host());
+    CHECK(accepted.text == "0    OK\n");
     REQUIRE(once.ask_calls == 1);
     REQUIRE(once.last_prompt.has_value());
     CHECK(once.last_prompt->name == "shell");
@@ -938,9 +980,9 @@ TEST_CASE("imza.sh applies the native approval and session grant flow")
         = imza::ToolVerdict { imza::ToolDecision::ACCEPT_FOR_SESSION, "" };
     const std::string create_a = imza::test::mutating_command(dir.file("a"));
     const imza::ToolOutput granted = imza::test::run_lua(
-        "local out, code = imza.shell([[" + create_a + "]])\nprint(code)",
+        "local r = imza.shell([[" + create_a + "]])\nprint(r.code, r.status)",
         session.host());
-    CHECK(granted.text == "0\n");
+    CHECK(granted.text == "0    OK\n");
     REQUIRE(session.ask_calls == 1);
     REQUIRE(session.last_prompt.has_value());
     CHECK(session.last_prompt->name == "shell");
@@ -976,10 +1018,11 @@ TEST_CASE("imza.sh accepts pre-installed grants and skip-permissions silently")
     CHECK(pre.install({ imza::ShellCommandGrant {
         std::string(imza::test::mutating_program()), pre_granted_path } }));
     pre.verdict = imza::ToolVerdict { imza::ToolDecision::REJECT, "unused" };
-    const imza::ToolOutput auto_run = imza::test::run_lua(
-        "local out, code = imza.shell([[" + pre_granted + "]])\nprint(code)",
-        pre.host());
-    CHECK(auto_run.text == "0\n");
+    const imza::ToolOutput auto_run
+        = imza::test::run_lua("local r = imza.shell([[" + pre_granted
+                + "]])\nprint(r.code, r.status)",
+            pre.host());
+    CHECK(auto_run.text == "0    OK\n");
     CHECK(pre.ask_calls == 0);
 
     ShellFixture skipped;
@@ -987,11 +1030,11 @@ TEST_CASE("imza.sh accepts pre-installed grants and skip-permissions silently")
     skipped.verdict
         = imza::ToolVerdict { imza::ToolDecision::REJECT, "unused" };
     const imza::ToolOutput bypassed
-        = imza::test::run_lua("local out, code = imza.shell([["
+        = imza::test::run_lua("local r = imza.shell([["
                 + imza::test::mutating_command(dir.file("skip"))
-                + "]])\nprint(code)",
+                + "]])\nprint(r.code, r.status)",
             skipped.host());
-    CHECK(bypassed.text == "0\n");
+    CHECK(bypassed.text == "0    OK\n");
     CHECK(skipped.ask_calls == 0);
 }
 

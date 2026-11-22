@@ -286,21 +286,21 @@ namespace {
             fs::path(args.run_dir), { }, StderrCapture::MERGE, args.run_env);
         credit_deadline(*run_of(L), std::chrono::steady_clock::now() - started);
 
-        if (!r.spawned) {
-            record_call(L, "shell", command, false);
-            return binding_error(L, "shell: failed to execute command");
-        }
-        if (r.timed_out) {
-            record_call(L, "shell", command, false);
-            return binding_error(
-                L, "shell: timed out after " + std::to_string(timeout) + "s");
-        }
-        record_call(L, "shell", command, r.exit_code == 0);
-        const std::string output
-            = truncate_marked(std::move(r.output), MAX_OUTPUT_BYTES);
+        const char* status = r.timed_out      ? "TIMEOUT"
+            : (r.spawned && r.exit_code == 0) ? "OK"
+                                              : "ERROR";
+        record_call(L, "shell", command, std::string_view { status } == "OK");
+        const std::string output = r.spawned
+            ? truncate_marked(std::move(r.output), MAX_OUTPUT_BYTES)
+            : std::string { };
+        lua_createtable(L, 0, 3);
         lua_pushlstring(L, output.data(), output.size());
-        lua_pushinteger(L, r.exit_code);
-        return 2;
+        lua_setfield(L, -2, "output");
+        lua_pushinteger(L, r.timed_out || !r.spawned ? -1 : r.exit_code);
+        lua_setfield(L, -2, "code");
+        lua_pushstring(L, status);
+        lua_setfield(L, -2, "status");
+        return 1;
     }
 
     // Parks the VM thread in slices, crediting the paused time back to the
@@ -397,12 +397,11 @@ Throws when dismissed by the user; unavailable in unattended runs.)desc",
             "shell",
             binding_shell,
             R"desc((command: string, timeout?: integer=10, workspace?: string,
-env?: table<string, string>) returns output: string, exit_code: integer, throws
-Runs a single external command, returning its captured output (capped at 64 KB)
-and exit status.
-A non-zero exit_code is a successful call, so test exit_code rather than nil.
-Throws when the command could not start, timed out (1..240 s) or was denied.
-Chains and pipelines are rejected. Compose results in Lua instead.
+env?: table<string, string>) returns ShellResult, throws
+Runs a single external command and returns a result table:
+`output` (captured output, capped at 64 KB), `code` (exit code; -1 on timeout or spawn failure), and `status` (shell result enum).
+Check status rather than code, and never branch on nil: a non-zero exit is a normal ERROR result, not a failed call.
+Throws on bad arguments, chains or pipelines (compose results in Lua instead), and permission denial.
 `workspace` is the directory the command runs in. `env` maps variable
 names to values, merged over the inherited environment.)desc",
             LuaCapability::SHELL,
@@ -420,6 +419,8 @@ const LuaModule& core_module()
         "AskCard = { prompt: string, options?: string[], multi?: bool, "
         "free_text?: bool }",
         "AskAnswer = { question: string, answer: string }",
+        "ShellResult = { output: string, code: integer, "
+        "status: 'OK' | 'ERROR' | 'TIMEOUT' }",
     };
     static constexpr LuaModule MODULE { true, "", "", types, BINDINGS };
     return MODULE;
