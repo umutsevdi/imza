@@ -19,6 +19,7 @@ Changes:
   - The agent no longer undoes changes it didn't make, knows when a change
     is too small to need tests, and reports honestly when checks fail instead
     of pressing on.
+  - Fixed the "Thought" section stopping halfway across the screen.
 
 -------------------------------------------------------------------------------
 0.7.5 - 2026-11-19

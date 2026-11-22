@@ -1388,10 +1388,32 @@ namespace {
                 parts.push_back(row);
                 if (has_reasoning && (active || expanded)) {
                     Elements lines;
-                    for (const std::string& line :
-                        wrap_text(trim(t.reasoning), _content_width())) {
-                        lines.push_back(text(" " + line) | dim);
-                    }
+                    for_each_line(trim(t.reasoning),
+                        [&lines](std::size_t, std::string_view line) {
+                            Elements words;
+                            bool needs_sep = false;
+                            std::size_t i  = 0;
+                            while (i < line.size()) {
+                                const std::size_t start = i;
+                                while (i < line.size() && line[i] != ' ') {
+                                    ++i;
+                                }
+                                if (needs_sep && start < i) {
+                                    words.push_back(text(" "));
+                                }
+                                if (start < i) {
+                                    words.push_back(
+                                        text(std::string(
+                                            line.substr(start, i - start)))
+                                        | dim);
+                                    needs_sep = true;
+                                }
+                                ++i;
+                            }
+                            lines.push_back(words.empty()
+                                    ? text(" ") | dim
+                                    : flexbox(std::move(words)) | dim);
+                        });
                     parts.push_back(vbox(std::move(lines)));
                 }
             }

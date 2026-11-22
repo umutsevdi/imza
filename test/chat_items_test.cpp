@@ -41,6 +41,28 @@ TEST_CASE("reasoning text expands inline and toggles on the Thought row")
     CHECK(rendered.find("deliberating carefully") == std::string::npos);
 }
 
+TEST_CASE("expanded reasoning wraps at the full pane width")
+{
+    auto state = imza::test::make_test_state();
+    state->session->begin_send("hello");
+    state->session->append_item(imza::AssistantTurn {
+        .reasoning        = std::string(80, 'x') + " " + std::string(80, 'y'),
+        .reasoning_ms     = std::chrono::milliseconds { 800 },
+        .reasoning_effort = "high",
+    });
+    state->session->set_phase(imza::Session::Phase::IDLE);
+    auto chat
+        = imza::make_chat(state, [] { return imza::test::wide_layout(); });
+    REQUIRE(imza::test::click_label(chat, "Thought 0.8s"));
+
+    const std::string rendered = to_text(chat->Render(), 100, 40);
+    std::size_t longest        = 0;
+    for (const auto& line : imza::split_lines(rendered)) {
+        longest = std::max(longest, line.size());
+    }
+    CHECK(longest > 60);
+}
+
 TEST_CASE("streaming reasoning shows inline without a click")
 {
     auto state = imza::test::make_test_state();

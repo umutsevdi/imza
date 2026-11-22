@@ -266,6 +266,19 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: www/dist
+      - name: Wait for artifact visibility
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 30); do
+            if gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" \
+                -q '.artifacts[] | select(.name == "github-pages")' | grep -q '"name"'; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::github-pages artifact never became visible to the API."
+          exit 1
       - uses: actions/deploy-pages@v4
   homebrew:
     # The tap repo (umutsevdi/homebrew-imza) is a plain store: this pipeline
