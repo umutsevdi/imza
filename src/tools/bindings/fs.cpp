@@ -5,6 +5,7 @@
 #include "common/ts_query.h"
 #include "common/util.h"
 #include "tools/file_ops.h"
+#include "workspace/attachments.h"
 #include "workspace/files.h"
 
 #include <tree_sitter/api.h>
@@ -82,7 +83,37 @@ namespace {
             return denied;
         }
 
-        // load_text rejects binary files, so any read range agrees with edit.
+        // Sniff before text loading: a PDF is valid text and would
+        // otherwise read as gibberish lines.
+        std::string media_error;
+        if (auto media = load_media_file(target, media_error)) {
+            if (first != std::nullopt || last != std::nullopt) {
+                return binding_error(L,
+                    "read: " + path + " is media (" + media->media_type
+                        + ") and has no lines; read it without a line range to "
+                          "return it to the model");
+            }
+            const std::string display
+                = utf8_from_path(path_from_utf8(path).filename());
+            const std::string type     = media->media_type;
+            const std::uintmax_t bytes = std::filesystem::file_size(target);
+            run_of(L)->media.push_back(std::move(*media));
+            record_call(L, "fs.read", target, true);
+            lua_newtable(L);
+            lua_pushliteral(L, "media");
+            lua_setfield(L, -2, "kind");
+            lua_pushlstring(L, display.data(), display.size());
+            lua_setfield(L, -2, "path");
+            lua_pushlstring(L, type.data(), type.size());
+            lua_setfield(L, -2, "media_type");
+            lua_pushinteger(L, static_cast<lua_Integer>(bytes));
+            lua_setfield(L, -2, "size");
+            return 1;
+        }
+        if (!media_error.empty()) {
+            return binding_error(L, "read: " + media_error);
+        }
+
         std::string err;
         std::string content;
         if (!load_text(target, content, err)) {
@@ -980,11 +1011,15 @@ namespace {
         {
             "read",
             binding_read,
-            R"desc((path: string, first_line?: integer=1 last_line?: integer=nil) returns string, throws
+            R"desc((path: string, first_line?: integer=1 last_line?: integer=nil) returns string | MediaFile, throws
 Read the file at `path` returning its content.
 first_line..last_line inclusive omit last_line to read to the end.
 Throws on no such file, first_line past the end, last_line < first_line, or a
-binary file. Over 64 KB is cut and marked "[truncated]".)desc",
+binary file. Over 64 KB is cut and marked "[truncated]".
+A file sniffed as an image (PNG, JPEG, GIF, WebP) or PDF instead returns
+a {kind="media", path, media_type, size} descriptor and sends the file
+itself to the model as viewable media; call it without a line range
+(media files have no lines). Media over 8 MB throws.)desc",
         },
         {
             "list",

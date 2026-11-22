@@ -97,6 +97,29 @@ namespace {
             && history_size >= 4;
     }
 
+    // Unknown capabilities keep the media: a capable request renders it,
+    // an incapable one fails loudly once.
+    void gate_tool_media(Message& message, std::optional<Capabilities> caps)
+    {
+        if (!caps || message.media.empty()) {
+            return;
+        }
+        std::vector<Attachment> kept;
+        for (Attachment& media : message.media) {
+            const Capabilities needed = media.type == Attachment::Type::IMAGE
+                ? Capabilities::IMAGE
+                : Capabilities::PDF;
+            if (has_capability(*caps, needed)) {
+                kept.push_back(std::move(media));
+                continue;
+            }
+            message.content += "\n[media dropped: the current model cannot "
+                               "view "
+                + media.media_type + " " + media.path + "]";
+        }
+        message.media = std::move(kept);
+    }
+
 } // namespace
 
 TurnSettings make_turn_settings(
@@ -381,11 +404,18 @@ void TurnRunner::spawn_compaction(TurnSettings settings)
 void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
 {
     _authenticate_route(settings);
+    settings.capabilities
+        = _state->providers
+              ->model_metadata_for(settings.model, settings.connection_id)
+              .capabilities;
     for (const ConnectionView& view : _state->providers->connections()) {
         if (view.id == settings.connection_id) {
             _state->session->set_entry_provider(view.provider);
             break;
         }
+    }
+    for (Message& message : history) {
+        gate_tool_media(message, settings.capabilities);
     }
     int retries                 = 0;
     std::uint64_t prompt_tokens = 0;
@@ -588,8 +618,8 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
         }
 
         const size_t history_before = history.size();
-        _drain_pending_asks(
-            history, text_buffer, active_dialect, settings.mode);
+        _drain_pending_asks(history, text_buffer, active_dialect, settings.mode,
+            settings.capabilities);
         if (!alive()) {
             return;
         }
@@ -618,7 +648,8 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
 }
 
 void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
-    const std::string& assistant_text, ApiStandard dialect, Session::Mode mode)
+    const std::string& assistant_text, ApiStandard dialect, Session::Mode mode,
+    std::optional<Capabilities> capabilities)
 {
     std::vector<Message> tool_msgs;
     bool had_tool_calls = false;
@@ -687,6 +718,7 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
         history.push_back(std::move(assistant));
     }
     for (auto& m : tool_msgs) {
+        gate_tool_media(m, capabilities);
         history.push_back(std::move(m));
     }
 }
@@ -729,11 +761,13 @@ void TurnRunner::_finish_tool(const ToolCallRequest& req,
     ToolCall::Result result, std::string history_text,
     std::vector<Message>& tool_msgs)
 {
+    Message tool { Message::Type::TOOL, std::move(history_text), { }, req.id };
+    // Copied, not moved: the session keeps the result for persistence.
+    tool.media = result.media;
     _post([this, req, result = std::move(result)]() mutable {
         _state->session->fill_tool_result(req, std::move(result));
     });
-    tool_msgs.push_back(
-        { Message::Type::TOOL, std::move(history_text), { }, req.id });
+    tool_msgs.push_back(std::move(tool));
 }
 
 void TurnRunner::_run_tool(const PermissionEvaluation& evaluation,
@@ -764,6 +798,7 @@ void TurnRunner::_run_tool(const PermissionEvaluation& evaluation,
     result.diffs                   = std::move(out.diffs);
     result.changes                 = std::move(out.changes);
     result.canvases                = std::move(out.canvases);
+    result.media                   = std::move(out.media);
     result.dispatch_log            = std::move(out.dispatch_log);
     const std::string history_text = tool_result_text(result);
     _finish_tool(req, std::move(result), history_text, tool_msgs);

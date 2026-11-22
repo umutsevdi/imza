@@ -77,6 +77,7 @@ struct ToolCall {
         // One entry per accepted file mutation, in call order, for undo.
         std::vector<FileChange> changes;
         std::vector<CanvasView> canvases;
+        std::vector<Attachment> media;
         std::optional<ShellStatus> shell_status;
         std::vector<LuaBindingCall> dispatch_log;
     };

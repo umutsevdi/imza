@@ -140,6 +140,28 @@ namespace openai {
                 message.tool_call_id = m.tool_call_id;
             }
             body.messages.push_back(std::move(message));
+            if (m.type == Message::Type::TOOL && !m.media.empty()) {
+                // Chat-completions tool messages are text-only; the media
+                // follows as a user turn naming the tool call it belongs
+                // to, so the model can pair it with the result.
+                RequestMessage follow;
+                follow.role = "user";
+                std::vector<ContentPart> parts;
+                parts.push_back(TextPart { "text",
+                    "Media returned by tool call " + m.tool_call_id + ":" });
+                for (const Attachment& media : m.media) {
+                    if (media.type == Attachment::Type::IMAGE) {
+                        parts.push_back(MediaPart { "image_url",
+                            ImageUrl { media_data_url(media) }, std::nullopt });
+                    } else {
+                        parts.push_back(MediaPart { "file", std::nullopt,
+                            FileContent {
+                                media.path, media_data_url(media) } });
+                    }
+                }
+                follow.content = glz::raw_json { json_dump_array(parts) };
+                body.messages.push_back(std::move(follow));
+            }
         }
         return json_dump(body);
     }

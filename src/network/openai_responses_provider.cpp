@@ -86,6 +86,28 @@ namespace openai_responses {
         if (message.type == Message::Type::TOOL) {
             input.push_back(CallOutput { "function_call_output",
                 message.tool_call_id, message.content });
+            if (!message.media.empty()) {
+                // function_call_output is text-only; the media follows as a
+                // user turn naming the tool call it belongs to.
+                InputMessage follow;
+                follow.role = "user";
+                std::vector<InputContent> parts;
+                parts.push_back(TextPart { "input_text",
+                    "Media returned by tool call " + message.tool_call_id
+                        + ":" });
+                for (const Attachment& media : message.media) {
+                    if (media.type == Attachment::Type::IMAGE) {
+                        parts.push_back(
+                            MediaPart { "input_image", media_data_url(media),
+                                std::nullopt, std::nullopt });
+                    } else {
+                        parts.push_back(MediaPart { "input_file", std::nullopt,
+                            media.path, media_data_url(media) });
+                    }
+                }
+                follow.content = glz::raw_json { json_dump_array(parts) };
+                input.push_back(std::move(follow));
+            }
             return;
         }
 

@@ -524,6 +524,7 @@ TYPES)desc";
             out.dispatch_log       = std::move(run.log);
             out.blocked_permission = run.blocked_permission;
             out.canvases           = std::move(run.canvases);
+            out.media              = std::move(run.media);
             out.changes            = std::move(run.changes);
             for (FileChange& change : out.changes) {
                 change.shell_side_effects = shell_ran;

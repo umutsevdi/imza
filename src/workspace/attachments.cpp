@@ -17,31 +17,73 @@ namespace {
     constexpr std::size_t MAX_ATTACHMENTS                = 20;
     constexpr std::size_t MAX_TOTAL_BYTES                = 4 * 1024 * 1024;
 
-    std::optional<std::pair<Attachment::Type, std::string>> native_type(
-        std::string_view content)
-    {
-        const auto starts_with = [&](std::string_view signature) {
-            return content.size() >= signature.size()
-                && content.compare(0, signature.size(), signature) == 0;
-        };
-        if (starts_with(std::string_view("\x89PNG\r\n\x1a\n", 8))) {
-            return std::pair { Attachment::Type::IMAGE, "image/png" };
-        }
-        if (starts_with(std::string_view("\xff\xd8\xff", 3))) {
-            return std::pair { Attachment::Type::IMAGE, "image/jpeg" };
-        }
-        if (starts_with("GIF87a") || starts_with("GIF89a")) {
-            return std::pair { Attachment::Type::IMAGE, "image/gif" };
-        }
-        if (content.size() >= 12 && content.compare(0, 4, "RIFF") == 0
-            && content.compare(8, 4, "WEBP") == 0) {
-            return std::pair { Attachment::Type::IMAGE, "image/webp" };
-        }
-        if (starts_with("%PDF-")) {
-            return std::pair { Attachment::Type::PDF, "application/pdf" };
-        }
+} // namespace
+
+std::optional<std::pair<Attachment::Type, std::string>> sniff_media_type(
+    std::string_view content)
+{
+    const auto starts_with = [&](std::string_view signature) {
+        return content.size() >= signature.size()
+            && content.compare(0, signature.size(), signature) == 0;
+    };
+    if (starts_with(std::string_view("\x89PNG\r\n\x1a\n", 8))) {
+        return std::pair { Attachment::Type::IMAGE, "image/png" };
+    }
+    if (starts_with(std::string_view("\xff\xd8\xff", 3))) {
+        return std::pair { Attachment::Type::IMAGE, "image/jpeg" };
+    }
+    if (starts_with("GIF87a") || starts_with("GIF89a")) {
+        return std::pair { Attachment::Type::IMAGE, "image/gif" };
+    }
+    if (content.size() >= 12 && content.compare(0, 4, "RIFF") == 0
+        && content.compare(8, 4, "WEBP") == 0) {
+        return std::pair { Attachment::Type::IMAGE, "image/webp" };
+    }
+    if (starts_with("%PDF-")) {
+        return std::pair { Attachment::Type::PDF, "application/pdf" };
+    }
+    return std::nullopt;
+}
+
+std::optional<Attachment> load_media_file(
+    const std::filesystem::path& path, std::string& error)
+{
+    std::error_code ec;
+    std::ifstream file(path, std::ios::binary);
+    char signature[16];
+    file.read(signature, sizeof signature);
+    const auto native = sniff_media_type(
+        std::string_view(signature, static_cast<std::size_t>(file.gcount())));
+    if (!native) {
         return std::nullopt;
     }
+    const std::uintmax_t size = std::filesystem::file_size(path, ec);
+    if (ec || size > MAX_BINARY_ATTACHMENT_BYTES) {
+        error = "media file exceeds the "
+            + std::to_string(MAX_BINARY_ATTACHMENT_BYTES / (1024 * 1024))
+            + " MiB limit: " + utf8_from_path(path.filename()) + " ("
+            + std::to_string(size / (1024 * 1024)) + " MiB)";
+        return std::nullopt;
+    }
+    file.clear();
+    file.seekg(0);
+    std::ostringstream buffer;
+    buffer << file.rdbuf();
+    if (!file && !file.eof()) {
+        error = "cannot read media file: " + utf8_from_path(path.filename());
+        return std::nullopt;
+    }
+    std::string content = buffer.str();
+    Attachment media;
+    media.path       = utf8_from_path(path);
+    media.type       = native->first;
+    media.media_type = native->second;
+    media.content    = std::move(content);
+    media.encoded    = base64_encode(media.content);
+    return media;
+}
+
+namespace {
 
     std::string escape_attribute(std::string_view value)
     {
@@ -226,7 +268,7 @@ AttachmentResult load_attachment(
     std::ifstream file(path, std::ios::binary);
     char signature[16];
     file.read(signature, sizeof signature);
-    const auto native = native_type(
+    const auto native = sniff_media_type(
         std::string_view(signature, static_cast<std::size_t>(file.gcount())));
     const std::uintmax_t size = std::filesystem::file_size(path, ec);
     const std::uintmax_t limit

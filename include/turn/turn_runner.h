@@ -32,6 +32,7 @@ struct TurnSettings {
     Session::Mode mode = Session::Mode::PLAN;
     std::string connection_id;
     Route route;
+    std::optional<Capabilities> capabilities;
 };
 
 struct ProviderSelection;
@@ -82,7 +83,7 @@ private:
     void _begin_compaction_job(TurnSettings settings, bool report_nothing);
     void _drain_pending_asks(std::vector<Message>& history,
         const std::string& assistant_text, ApiStandard dialect,
-        Session::Mode mode);
+        Session::Mode mode, std::optional<Capabilities> capabilities);
     void _apply_tool_result(const PermissionEvaluation& evaluation,
         const ModalResult& res, Session::Mode mode,
         std::vector<Message>& tool_msgs);

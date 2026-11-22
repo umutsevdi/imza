@@ -143,6 +143,7 @@ struct StoredItem {
     std::optional<JsonValue> return_value;
     std::optional<std::vector<StoredDiff>> diffs;
     std::optional<std::vector<StoredCanvas>> canvases;
+    std::optional<std::vector<StoredAttachment>> media;
     std::optional<int> shell_exit;
     std::optional<int> shell_timeout;
     std::optional<std::vector<StoredDispatch>> dispatch_log;
@@ -472,6 +473,12 @@ namespace {
                         stored.canvases = std::move(canvases);
                     }
                 }
+                if (!tool->result->media.empty()) {
+                    stored.media = map_all(
+                        tool->result->media, [](const Attachment& attachment) {
+                            return to_stored(attachment);
+                        });
+                }
                 if (tool->result->shell_status) {
                     std::visit(
                         [&](const auto& status) {
@@ -598,6 +605,28 @@ namespace {
                             if (auto view = from_stored(canvas)) {
                                 result.canvases.push_back(std::move(*view));
                             }
+                        }
+                    }
+                    if (stored.media) {
+                        for (const auto& entry : *stored.media) {
+                            Attachment attachment;
+                            attachment.path        = entry.path;
+                            const auto parsed_type = Attachment::parse_type(
+                                entry.type.value_or("text"));
+                            if (!parsed_type
+                                || *parsed_type == Attachment::Type::TEXT) {
+                                continue;
+                            }
+                            const auto content = base64_decode(entry.content);
+                            if (!content) {
+                                continue;
+                            }
+                            attachment.type    = *parsed_type;
+                            attachment.content = *content;
+                            attachment.media_type
+                                = entry.media_type.value_or("");
+                            attachment.encoded = entry.content;
+                            result.media.push_back(std::move(attachment));
                         }
                     }
                     if (stored.shell_exit) {

@@ -383,6 +383,45 @@ TEST_CASE("rich tool results survive session persistence")
         CHECK(call.result->canvases[1].grid[1][0] == doctest::Approx(3.0));
     }
 
+    SUBCASE("tool-result media")
+    {
+        const imza::ToolCallRequest request { "lua",
+            R"json({"script":"return imza.fs.read('shot.png')"})json", "",
+            "call-1" };
+        imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT,
+            "read shot.png\n" };
+        result.media.push_back(
+            { "shot.png", "cat", imza::Attachment::Type::IMAGE, "image/png" });
+        result.media.push_back({ "report.pdf", std::string("\xff\0", 2),
+            imza::Attachment::Type::PDF, "application/pdf" });
+
+        imza::Session source;
+        make_tool_session(request, std::move(result), source);
+        imza::Session loaded;
+        roundtrip(source, loaded);
+        const auto loaded_items = loaded.items();
+        const auto& call        = std::get<imza::ToolCall>((*loaded_items)[2]);
+        REQUIRE(call.result.has_value());
+        REQUIRE(call.result->media.size() == 2);
+        CHECK(call.result->media[0].type == imza::Attachment::Type::IMAGE);
+        CHECK(call.result->media[0].media_type == "image/png");
+        CHECK(call.result->media[0].content == "cat");
+        CHECK(call.result->media[1].type == imza::Attachment::Type::PDF);
+        CHECK(call.result->media[1].media_type == "application/pdf");
+
+        // The rebuilt history replays the media onto the tool message.
+        const auto history = loaded.build_history("system");
+        bool replayed      = false;
+        for (const imza::Message& message : history) {
+            if (message.type == imza::Message::Type::TOOL
+                && !message.media.empty()) {
+                replayed = true;
+                CHECK(message.media[0].media_type == "image/png");
+            }
+        }
+        CHECK(replayed);
+    }
+
     SUBCASE("native attachments")
     {
         const std::string image_bytes("\x89PNG\r\n\x1a\n\0payload", 16);

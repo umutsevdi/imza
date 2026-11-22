@@ -35,6 +35,7 @@ struct ToolOutput {
     std::vector<FileChange> changes { };
     // Charts the canvas module rendered for the chat.
     std::vector<CanvasView> canvases { };
+    std::vector<Attachment> media { };
     std::vector<LuaBindingCall> dispatch_log { };
     bool blocked_permission = false;
 };

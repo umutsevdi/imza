@@ -1290,8 +1290,12 @@ std::vector<Message> Session::build_history(
             }
             history.back().tool_calls.push_back(
                 ToolCallEntry { tc->call_id, tc->name, tc->args });
-            history.push_back({ Message::Type::TOOL, tool_result_text(*tc), { },
-                tc->call_id });
+            Message tool { Message::Type::TOOL, tool_result_text(*tc), { },
+                tc->call_id };
+            if (tc->result) {
+                tool.media = tc->result->media;
+            }
+            history.push_back(std::move(tool));
         }
     }
 

@@ -345,6 +345,52 @@ TEST_CASE("imza.fs.read returns 1-based windows and empty for empty files")
     CHECK(bad_range.text.find("1-based") != std::string::npos);
 }
 
+TEST_CASE("imza.fs.read returns images and PDFs as viewable media")
+{
+    imza::test::TempDir dir;
+    const std::string png
+        = std::string("\x89PNG\r\n\x1a\n", 8) + std::string(16, '\0');
+    imza::test::write_file(dir.file("shot.png"), png);
+    imza::test::write_file(dir.file("doc.pdf"), "%PDF-1.4\n%%EOF\n");
+
+    const imza::ToolOutput image = imza::test::run_lua(
+        "return imza.fs.read([[" + dir.file("shot.png").string() + "]])");
+    REQUIRE(image.kind == imza::ToolOutput::Kind::OUTPUT);
+    REQUIRE(image.return_value.has_value());
+    const imza::JsonValue* kind
+        = imza::find_member(*image.return_value, "kind");
+    REQUIRE(kind != nullptr);
+    CHECK(kind->as<std::string>() == "media");
+    const imza::JsonValue* media_type
+        = imza::find_member(*image.return_value, "media_type");
+    REQUIRE(media_type != nullptr);
+    CHECK(media_type->as<std::string>() == "image/png");
+    REQUIRE(image.media.size() == 1);
+    CHECK(image.media[0].type == imza::Attachment::Type::IMAGE);
+    CHECK(image.media[0].media_type == "image/png");
+    CHECK_FALSE(image.media[0].encoded.empty());
+
+    const imza::ToolOutput pdf = imza::test::run_lua(
+        "return imza.fs.read([[" + dir.file("doc.pdf").string() + "]])");
+    REQUIRE(pdf.kind == imza::ToolOutput::Kind::OUTPUT);
+    REQUIRE(pdf.media.size() == 1);
+    CHECK(pdf.media[0].type == imza::Attachment::Type::PDF);
+    CHECK(pdf.media[0].media_type == "application/pdf");
+
+    const imza::ToolOutput ranged = imza::test::run_lua(
+        "imza.fs.read([[" + dir.file("shot.png").string() + "]], 1, 2)");
+    CHECK(ranged.kind == imza::ToolOutput::Kind::ERROR);
+    CHECK(ranged.text.find("has no lines") != std::string::npos);
+    CHECK(ranged.media.empty());
+
+    imza::test::write_file(
+        dir.file("blob.bin"), std::string("\x01\x02\0\x03", 4));
+    const imza::ToolOutput binary = imza::test::run_lua(
+        "imza.fs.read([[" + dir.file("blob.bin").string() + "]])");
+    CHECK(binary.kind == imza::ToolOutput::Kind::ERROR);
+    CHECK(binary.media.empty());
+}
+
 TEST_CASE("imza.fs.list returns entries with type and size fields")
 {
     imza::test::TempDir dir;

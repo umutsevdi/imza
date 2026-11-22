@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "common/types.h"
@@ -26,6 +27,17 @@ struct AttachmentResult {
     std::optional<Attachment> attachment;
     std::string error;
 };
+
+// Image or PDF type plus media type for a file's leading bytes.
+std::optional<std::pair<Attachment::Type, std::string>> sniff_media_type(
+    std::string_view signature);
+
+// Loads an already-authorized file as media. Nullopt with `error` empty
+// means the file is not media; nullopt with `error` set means it is media
+// but too large or unreadable. No confinement check: the caller has
+// authorized the path.
+std::optional<Attachment> load_media_file(
+    const std::filesystem::path& path, std::string& error);
 
 std::optional<AttachmentToken> attachment_token_at(
     std::string_view text, std::size_t cursor);

@@ -398,6 +398,14 @@ ToolReport make_tool_report(const ToolCall& call)
         report.sections.push_back(
             ToolReportCanvas { index, &call.result->canvases[index] });
     }
+    if (!call.result->media.empty()) {
+        std::string media;
+        for (const Attachment& attachment : call.result->media) {
+            media += "- " + attachment.media_type + " `" + attachment.path
+                + "` (sent to the model)\n";
+        }
+        report.sections.push_back(ToolReportMarkdown { std::move(media) });
+    }
     return report;
 }
 

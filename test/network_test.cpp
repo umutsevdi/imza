@@ -749,6 +749,99 @@ TEST_CASE("Anthropic serializes user images and PDFs")
     CHECK(str(at(*at(blocks[2], "source"), "data")) == "/wA=");
 }
 
+TEST_CASE("Anthropic serializes tool-result media inside the tool_result block")
+{
+    imza::Route route;
+    route.dialect       = imza::ApiStandard::ANTHROPIC;
+    const auto provider = imza::get_provider(route);
+
+    imza::ChatRequest request;
+    request.model = "claude";
+    imza::Message assistant { imza::Message::Type::ASSISTANT, "looking" };
+    assistant.tool_calls.push_back({ "tu_1", "lua", "{}" });
+    request.messages.push_back(std::move(assistant));
+    imza::Message tool { imza::Message::Type::TOOL, "read shot.png", { },
+        "tu_1" };
+    tool.media.push_back(
+        { "shot.png", "cat", imza::Attachment::Type::IMAGE, "image/png" });
+    request.messages.push_back(std::move(tool));
+
+    const imza::JsonValue value    = wire(provider.build(request));
+    const imza::JsonValue& result  = idx(*at(value, "messages"), 1);
+    const imza::JsonValue* content = at(result, "content");
+    REQUIRE(content != nullptr);
+    REQUIRE(content->is_array());
+    const auto& blocks = content->get<imza::JsonValue::array_t>();
+    REQUIRE(blocks.size() == 1);
+    CHECK(str(at(blocks[0], "type")) == "tool_result");
+    CHECK(str(at(blocks[0], "tool_use_id")) == "tu_1");
+    const imza::JsonValue* inner = at(blocks[0], "content");
+    REQUIRE(inner != nullptr);
+    REQUIRE(inner->is_array());
+    const auto& parts = inner->get<imza::JsonValue::array_t>();
+    REQUIRE(parts.size() == 2);
+    CHECK(str(at(parts[0], "type")) == "text");
+    CHECK(str(at(parts[0], "text")) == "read shot.png");
+    CHECK(str(at(parts[1], "type")) == "image");
+    CHECK(str(at(*at(parts[1], "source"), "data")) == "Y2F0");
+}
+
+// Chat-completions tool messages and responses function_call_output are
+// text-only, so media follows as a user turn naming the tool call.
+imza::ChatRequest media_tool_request(std::string model)
+{
+    imza::ChatRequest request;
+    request.model = std::move(model);
+    imza::Message assistant { imza::Message::Type::ASSISTANT, "looking" };
+    assistant.tool_calls.push_back({ "call_1", "lua", "{}" });
+    request.messages.push_back(std::move(assistant));
+    imza::Message tool { imza::Message::Type::TOOL, "read shot.png", { },
+        "call_1" };
+    tool.media.push_back(
+        { "shot.png", "cat", imza::Attachment::Type::IMAGE, "image/png" });
+    request.messages.push_back(std::move(tool));
+    return request;
+}
+
+TEST_CASE("OpenAI dialects follow a media tool result with a user media turn")
+{
+    SUBCASE("chat completions")
+    {
+        const auto provider = imza::get_provider(imza::Route { });
+        const imza::JsonValue value
+            = wire(provider.build(media_tool_request("gpt-4o")));
+        const auto& messages
+            = at(value, "messages")->get<imza::JsonValue::array_t>();
+        REQUIRE(messages.size() == 3);
+        CHECK(str(at(messages[1], "role")) == "tool");
+        CHECK(str(at(messages[1], "tool_call_id")) == "call_1");
+        CHECK(str(at(messages[2], "role")) == "user");
+        const auto& parts
+            = at(messages[2], "content")->get<imza::JsonValue::array_t>();
+        REQUIRE(parts.size() == 2);
+        CHECK(str(at(parts[0], "type")) == "text");
+        CHECK(str(at(parts[0], "text")).find("call_1") != std::string::npos);
+        CHECK(str(at(parts[1], "type")) == "image_url");
+    }
+
+    SUBCASE("responses")
+    {
+        imza::Route route;
+        route.dialect       = imza::ApiStandard::OPENAI_RESPONSES;
+        const auto provider = imza::get_provider(route);
+        const imza::JsonValue value
+            = wire(provider.build(media_tool_request("gpt-5")));
+        const auto& input = at(value, "input")->get<imza::JsonValue::array_t>();
+        REQUIRE(input.size() == 4);
+        CHECK(str(at(input[2], "type")) == "function_call_output");
+        const auto& parts
+            = at(input[3], "content")->get<imza::JsonValue::array_t>();
+        REQUIRE(parts.size() == 2);
+        CHECK(str(at(parts[0], "type")) == "input_text");
+        CHECK(str(at(parts[1], "type")) == "input_image");
+    }
+}
+
 TEST_CASE(
     "providers keep scalar content and ignore media on assistant messages")
 {

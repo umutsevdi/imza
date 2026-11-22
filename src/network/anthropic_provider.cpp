@@ -40,7 +40,8 @@ namespace anthropic {
     struct ToolResultBlock {
         std::string type = "tool_result";
         std::string tool_use_id;
-        std::string content;
+        // A plain string, or a block array when the result carries media.
+        glz::raw_json content;
     };
 
     using ContentBlock = std::variant<TextBlock, ThinkingBlockWire, MediaBlock,
@@ -115,8 +116,27 @@ namespace anthropic {
                 continue;
             }
             if (m.type == Message::Type::TOOL) {
-                tool_results.push_back(
-                    { "tool_result", m.tool_call_id, m.content });
+                ToolResultBlock block;
+                block.tool_use_id = m.tool_call_id;
+                if (m.media.empty()) {
+                    block.content = raw_content(m.content);
+                } else {
+                    // Media rides inside the tool_result as content blocks;
+                    // Anthropic accepts images and PDFs there natively.
+                    std::vector<ContentBlock> blocks;
+                    if (!m.content.empty()) {
+                        blocks.push_back(TextBlock { "text", m.content });
+                    }
+                    for (const Attachment& media : m.media) {
+                        blocks.push_back(MediaBlock {
+                            media.type == Attachment::Type::IMAGE ? "image"
+                                                                  : "document",
+                            { "base64", media.media_type,
+                                media.encoded_or_compute() } });
+                    }
+                    block.content = glz::raw_json { json_dump_array(blocks) };
+                }
+                tool_results.push_back(std::move(block));
                 continue;
             }
             flush_results();

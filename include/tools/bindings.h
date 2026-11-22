@@ -59,6 +59,7 @@ struct LuaRunContext {
     // One entry per accepted call, in order, for the undo stack.
     std::vector<FileChange> changes;
     std::vector<CanvasView> canvases;
+    std::vector<Attachment> media;
     // Borrowed; set by the driver before any binding can run, so
     // binding code never null-checks it.
     const LuaHost* host = nullptr;
