@@ -18,6 +18,8 @@ Changes:
     button (or `/commit`) opens a dialog with a multi-line message, the
     branch and remote, and Commit / Push buttons. The result arrives as a
     notification, so a failed push is never missed.
+  - A deleted or moved file now shows as a single line in the chat
+    instead of a wall of red diff lines.
 
 -------------------------------------------------------------------------------
 0.7.6 - 2026-11-22

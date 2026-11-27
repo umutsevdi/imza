@@ -665,6 +665,7 @@ namespace {
                     { source, content, "", FileChange::Kind::REMOVED });
                 run->mutations.push_back(
                     { source, content, "", FileChange::Kind::REMOVED });
+                record_call(L, "fs.move", source, true);
             }
         }
         return 0;

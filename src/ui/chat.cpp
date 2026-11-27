@@ -192,6 +192,12 @@ namespace {
         return assistant_item(std::string_view(t.markdown), width);
     }
 
+    Element file_event_row(std::string_view verb, const std::string& detail)
+    {
+        return hbox({ text(std::string(verb)) | color(PANEL_FG_DIM), text(" "),
+            text(detail) | color(PANEL_FG) });
+    }
+
     // Interaction maps store either a bare Component or a struct wrapping
     // one (ReasoningLink); this picks the component out of either.
     template <typename T> Component& interaction_component(T& value)
@@ -1123,7 +1129,16 @@ namespace {
                     }
                     continue;
                 }
-                const DiffView& diff  = *report_diff->view;
+                const DiffView& diff = *report_diff->view;
+                if (report_diff->kind == ToolReportDiff::Kind::MOVED) {
+                    rows.push_back(file_event_row(
+                        "Moved", report_diff->from + " -> " + diff.file));
+                    continue;
+                }
+                if (report_diff->kind == ToolReportDiff::Kind::REMOVED) {
+                    rows.push_back(file_event_row("Deleted", diff.file));
+                    continue;
+                }
                 std::size_t additions = 0;
                 std::size_t deletions = 0;
                 for (const DiffRow& row : diff.rows) {

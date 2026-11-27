@@ -6,6 +6,7 @@
 #include <doctest/doctest.h>
 
 #include "app/application_state.h"
+#include "common/text_edit.h"
 #include "conversation/format.h"
 #include "test_helpers.h"
 #include "test_state.h"
@@ -161,6 +162,50 @@ TEST_CASE("finished lua card labels the run by workspace buckets")
         = imza::test::without_ansi(to_text(chat->Render(), 100, 40));
     CHECK(rendered.find("Executed · 2 reads · 1 edit · 1 command")
         != std::string::npos);
+}
+
+TEST_CASE("deleted and moved files collapse to one line in the lua card")
+{
+    auto state = imza::test::make_test_state();
+    state->session->begin_send("x");
+
+    const imza::ToolCallRequest request { "lua",
+        R"json({"script":"return 1"})json", "", "call-1" };
+    state->session->apply(imza::make_tool_call_start_event(request), { });
+    state->session->apply(imza::make_tool_call_event(request), { });
+    imza::ToolCall::Result result { imza::ToolCall::Result::Kind::OUTPUT, "" };
+    const std::string gone = "/work/gone.txt";
+    const std::string from = "/work/old.txt";
+    const std::string to   = "/work/new.txt";
+    const std::string copy = "/work/copy.txt";
+    const std::string edit = "/work/edit.txt";
+    result.dispatch_log    = { { "fs.remove", gone, true },
+        { "fs.move", to, true }, { "fs.move", from, true },
+        { "fs.copy", copy, true }, { "fs.edit", edit, true } };
+    result.diffs           = {
+        imza::make_diff_view(gone, imza::split_lines("a\nb\n"), { }),
+        imza::make_diff_view(to, { }, imza::split_lines("a\nb\n")),
+        imza::make_diff_view(from, imza::split_lines("a\nb\n"), { }),
+        imza::make_diff_view(copy, { }, imza::split_lines("c\nd\n")),
+        imza::make_diff_view(
+            edit, imza::split_lines("x\ny\n"), imza::split_lines("x\nz\n")),
+    };
+    state->session->fill_tool_result(request, std::move(result));
+
+    auto chat
+        = imza::make_chat(state, [] { return imza::test::wide_layout(); });
+    const std::string rendered
+        = imza::test::without_ansi(to_text(chat->Render(), 100, 40));
+
+    CHECK(rendered.find("Deleted /work/gone.txt") != std::string::npos);
+    CHECK(rendered.find("Moved /work/old.txt -> /work/new.txt")
+        != std::string::npos);
+    CHECK(rendered.find("+ a") == std::string::npos);
+    CHECK(rendered.find("+ b") == std::string::npos);
+    CHECK(rendered.find("/work/copy.txt") != std::string::npos);
+    CHECK(rendered.find("+ c") != std::string::npos);
+    CHECK(rendered.find("/work/edit.txt") != std::string::npos);
+    CHECK(rendered.find("+ z") != std::string::npos);
 }
 
 TEST_CASE("virtual list windows the visible rows and keeps measured heights")

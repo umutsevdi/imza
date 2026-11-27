@@ -1854,6 +1854,11 @@ TEST_CASE("imza.fs.copy and move transfer a file and fail closed")
     CHECK(result.diffs[0].rows[0].kind == imza::DiffRow::Kind::ADD);
     CHECK(result.diffs[1].file == target);
     CHECK(result.diffs[1].rows[0].kind == imza::DiffRow::Kind::REMOVE);
+    REQUIRE(result.dispatch_log.size() == 2);
+    CHECK(result.dispatch_log[0].binding == "fs.move");
+    CHECK(result.dispatch_log[0].target == moved);
+    CHECK(result.dispatch_log[1].binding == "fs.move");
+    CHECK(result.dispatch_log[1].target == target);
 
     // A missing source is an error, not a silent no-op.
     const imza::ToolOutput missing = imza::test::run_lua("imza.fs.copy([["

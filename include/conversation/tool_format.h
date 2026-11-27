@@ -21,6 +21,9 @@ struct ToolReportMarkdown {
 };
 
 struct ToolReportDiff {
+    enum class Kind { EDIT, REMOVED, MOVED };
+    Kind kind = Kind::EDIT;
+    std::string from;
     std::size_t index;
     const DiffView* view;
 };

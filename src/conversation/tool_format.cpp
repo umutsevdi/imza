@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <map>
+#include <set>
 
 namespace imza {
 
@@ -351,6 +353,74 @@ std::string lua_dispatch_summary(const ToolCall& call)
     return summary;
 }
 
+namespace {
+
+    bool all_rows_kind(const DiffView& diff, const DiffRow::Kind kind)
+    {
+        return !diff.rows.empty()
+            && std::all_of(diff.rows.begin(), diff.rows.end(),
+                [&](const DiffRow& row) { return row.kind == kind; });
+    }
+
+    const DiffView* find_diff(
+        const ToolCall& call, const std::string& path, const DiffRow::Kind kind)
+    {
+        if (!call.result.has_value()) {
+            return nullptr;
+        }
+        for (const DiffView& diff : call.result->diffs) {
+            if (diff.file == path && all_rows_kind(diff, kind)) {
+                return &diff;
+            }
+        }
+        return nullptr;
+    }
+
+    // Rows cannot tell a deletion from a move's source half; the dispatch
+    // log can. `fs.move` logs destination then source.
+    struct DiffClassification {
+        std::map<std::string, ToolReportDiff::Kind> kinds;
+        std::set<std::string> dropped;
+        std::map<std::string, std::string> moved_from;
+    };
+
+    DiffClassification classify_diffs(const ToolCall& call)
+    {
+        DiffClassification out;
+        if (!call.result.has_value()) {
+            return out;
+        }
+        const std::vector<LuaBindingCall>& log = call.result->dispatch_log;
+        for (std::size_t i = 0; i < log.size(); ++i) {
+            if (log[i].binding == "fs.remove"
+                && find_diff(call, log[i].target, DiffRow::Kind::REMOVE)
+                    != nullptr) {
+                out.kinds[log[i].target] = ToolReportDiff::Kind::REMOVED;
+                continue;
+            }
+            if (log[i].binding != "fs.move" || i + 1 >= log.size()
+                || log[i + 1].binding != "fs.move"
+                || find_diff(call, log[i + 1].target, DiffRow::Kind::REMOVE)
+                    == nullptr) {
+                continue;
+            }
+            const std::string& destination = log[i].target;
+            const std::string& source      = log[i + 1].target;
+            if (find_diff(call, destination, DiffRow::Kind::ADD) != nullptr) {
+                out.moved_from[destination] = source;
+                out.kinds[destination]      = ToolReportDiff::Kind::MOVED;
+                out.dropped.insert(source);
+            } else {
+                // Overwrite: the destination keeps its mixed-row diff, so
+                // the source half is only a deletion.
+                out.kinds[source] = ToolReportDiff::Kind::REMOVED;
+            }
+        }
+        return out;
+    }
+
+} // namespace
+
 ToolReport make_tool_report(const ToolCall& call)
 {
     ToolReport report;
@@ -390,9 +460,21 @@ ToolReport make_tool_report(const ToolCall& call)
         report.sections.push_back(
             ToolReportMarkdown { quoted_error(call.result->text) });
     }
+    const DiffClassification classes = classify_diffs(call);
     for (std::size_t index = 0; index < call.result->diffs.size(); ++index) {
-        report.sections.push_back(
-            ToolReportDiff { index, &call.result->diffs[index] });
+        const DiffView& diff = call.result->diffs[index];
+        if (classes.dropped.contains(diff.file)) {
+            continue;
+        }
+        ToolReportDiff section { ToolReportDiff::Kind::EDIT, "", index, &diff };
+        if (const auto kind = classes.kinds.find(diff.file);
+            kind != classes.kinds.end()) {
+            section.kind = kind->second;
+            if (kind->second == ToolReportDiff::Kind::MOVED) {
+                section.from = classes.moved_from.at(diff.file);
+            }
+        }
+        report.sections.push_back(std::move(section));
     }
     for (std::size_t index = 0; index < call.result->canvases.size(); ++index) {
         report.sections.push_back(
