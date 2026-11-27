@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -147,7 +148,22 @@ struct Preferences {
     Credentials credentials = Credentials::OS;
     enum class UpdateChecks { DAILY, WEEKLY, OFF };
     UpdateChecks update_checks = UpdateChecks::DAILY;
+    // Retention age of saved sessions, swept at every startup: sessions
+    // older than the period are deleted. `never` keeps everything.
+    enum class TrimFrequency { NEVER, WEEKLY, MONTHLY };
+    TrimFrequency trim_frequency = TrimFrequency::MONTHLY;
 };
+
+// The retention age a trim frequency stands for; zero days for `never`.
+inline std::chrono::days trim_age_days(Preferences::TrimFrequency frequency)
+{
+    switch (frequency) {
+    case Preferences::TrimFrequency::NEVER: return std::chrono::days { 0 };
+    case Preferences::TrimFrequency::WEEKLY: return std::chrono::days { 7 };
+    case Preferences::TrimFrequency::MONTHLY: return std::chrono::days { 30 };
+    }
+    return std::chrono::days { 0 };
+}
 
 // Run-level capability switches read once at startup. `subagents` caps
 // tool-call delegation (0 disables); internal review/title runs are not

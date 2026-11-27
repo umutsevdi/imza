@@ -22,6 +22,12 @@
           "enum": ["daily", "weekly", "off"],
           "default": "daily",
           "description": "How often installed builds look for a newer release in the background and announce one they already know about: once a day, once a week, or never. `imza --update` always checks regardless of this setting."
+        },
+        "trim_frequency": {
+          "type": "string",
+          "enum": ["never", "weekly", "monthly"],
+          "default": "monthly",
+          "description": "How long saved sessions are kept. At every startup imza deletes, in the background, every regular session and one-shot (`--ask` / `--exec`) transcript older than this period: `weekly` keeps 7 days, `monthly` keeps 30, `never` keeps everything. A session open in another imza process, and the session being opened, are never deleted."
         }
       }
     },

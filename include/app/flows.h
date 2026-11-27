@@ -98,6 +98,11 @@ void install_session(ApplicationState& state, SessionSnapshot snapshot);
 // the skill catalogue, draining the main-thread queue so the posted
 // publishes land instead of accumulating.
 void wait_for_environment_ready(ApplicationState& state, int timeout_ms);
+// Starts the background sweep of sessions older than the configured
+// retention age (preferences.trim_frequency); a no-op when set to `never`.
+// Call once the startup session, if any, has been restored, so the sweep
+// sees it as active and skips it.
+void start_session_trim(ApplicationState& state);
 // The current skill catalogue as the skills modal renders it, bundled
 // entries flagged.
 SkillsModal skills_modal(const ApplicationState& state);

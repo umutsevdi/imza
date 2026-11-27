@@ -255,6 +255,7 @@ struct StoredAllow {
 struct StoredPreferences {
     std::optional<std::string> credentials;
     std::optional<std::string> update_checks;
+    std::optional<std::string> trim_frequency;
 };
 
 struct StoredCapabilities {
@@ -324,6 +325,21 @@ Status load_config(
         } else {
             return fail(Status::CONFIG_ERROR,
                 "unknown 'preferences.update_checks' value '" + mode + "'");
+        }
+    }
+
+    if (stored.preferences && stored.preferences->trim_frequency) {
+        const std::string& mode = *stored.preferences->trim_frequency;
+        if (mode == "never") {
+            out.preferences.trim_frequency = Preferences::TrimFrequency::NEVER;
+        } else if (mode == "weekly") {
+            out.preferences.trim_frequency = Preferences::TrimFrequency::WEEKLY;
+        } else if (mode == "monthly") {
+            out.preferences.trim_frequency
+                = Preferences::TrimFrequency::MONTHLY;
+        } else {
+            return fail(Status::CONFIG_ERROR,
+                "unknown 'preferences.trim_frequency' value '" + mode + "'");
         }
     }
 
@@ -686,6 +702,13 @@ namespace {
                     == Preferences::UpdateChecks::WEEKLY
                 ? "weekly"
                 : "off";
+        }
+        if (cfg.preferences.trim_frequency
+            != Preferences::TrimFrequency::MONTHLY) {
+            preferences.trim_frequency = cfg.preferences.trim_frequency
+                    == Preferences::TrimFrequency::WEEKLY
+                ? "weekly"
+                : "never";
         }
         stored.preferences = std::move(preferences);
         {

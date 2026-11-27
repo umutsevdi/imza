@@ -1641,6 +1641,12 @@ bool restore_session_at_startup(ApplicationState& state,
     return true;
 }
 
+void start_session_trim(ApplicationState& state)
+{
+    const std::shared_ptr<const Config> config = state.config->snapshot();
+    state.sessions->trim(trim_age_days(config->preferences.trim_frequency));
+}
+
 void delete_saved_session(
     ApplicationState& state, const std::filesystem::path& path)
 {

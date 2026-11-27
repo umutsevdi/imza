@@ -8,6 +8,7 @@
 #include "platform/json_file.h"
 
 #include <algorithm>
+#include <chrono>
 #include <functional>
 #include <map>
 #include <optional>
@@ -1328,6 +1329,104 @@ DeleteSessionResult delete_saved_session(const std::filesystem::path& path)
     }
     reconcile_index();
     return DeleteSessionResult::OK;
+}
+
+namespace {
+
+    // Unattended transcripts are never indexed, so their age is read from
+    // the document; one that cannot be read or parsed has no age.
+    std::optional<std::chrono::system_clock::time_point> unattended_saved_at(
+        const std::filesystem::path& file)
+    {
+        const std::optional<std::string> stored = read_text_file(file);
+        if (!stored) {
+            return std::nullopt;
+        }
+        StoredSessionDoc doc;
+        if (json_parse_checked(*stored, doc)) {
+            return std::nullopt;
+        }
+        return parse_local_time(doc.saved_at, "%Y-%m-%d %H:%M:%S");
+    }
+
+    bool same_file(
+        const std::filesystem::path& a, const std::filesystem::path& b)
+    {
+        if (b.empty()) {
+            return false;
+        }
+        if (a == b) {
+            return true;
+        }
+        std::error_code ec;
+        return std::filesystem::equivalent(a, b, ec) && !ec;
+    }
+
+    std::vector<std::filesystem::path> unattended_files()
+    {
+        std::vector<std::filesystem::path> files;
+        std::error_code ec;
+        if (!std::filesystem::is_directory(unattended_dir(), ec) || ec) {
+            return files;
+        }
+        std::filesystem::directory_iterator it(unattended_dir(), ec);
+        if (ec) {
+            return files;
+        }
+        for (const auto& entry : it) {
+            if (entry.is_regular_file(ec) && !ec
+                && entry.path().extension() == ".json") {
+                files.push_back(entry.path());
+            }
+        }
+        return files;
+    }
+
+} // namespace
+
+TrimResult trim_saved_sessions(std::chrono::days age,
+    std::chrono::system_clock::time_point now,
+    const std::filesystem::path& keep)
+{
+    if (age <= std::chrono::days { 0 }) {
+        return { };
+    }
+    const auto cutoff = now - age;
+    TrimResult out;
+    for (const SavedSession& session : saved_sessions()) {
+        if (same_file(session.path, keep)) {
+            continue;
+        }
+        const auto saved
+            = parse_local_time(session.saved_at, "%Y-%m-%d %H:%M:%S");
+        if (!saved) {
+            ++out.skipped_invalid;
+            continue;
+        }
+        if (*saved >= cutoff) {
+            continue;
+        }
+        if (delete_saved_session(session.path) != DeleteSessionResult::OK) {
+            ++out.skipped_locked;
+            continue;
+        }
+        ++out.regular_removed;
+    }
+    for (const std::filesystem::path& file : unattended_files()) {
+        const auto saved = unattended_saved_at(file);
+        if (!saved) {
+            ++out.skipped_invalid;
+            continue;
+        }
+        if (*saved >= cutoff) {
+            continue;
+        }
+        std::error_code ec;
+        if (std::filesystem::remove(file, ec) && !ec) {
+            ++out.unattended_removed;
+        }
+    }
+    return out;
 }
 
 } // namespace imza

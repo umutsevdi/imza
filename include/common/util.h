@@ -128,6 +128,25 @@ inline std::string format_local_time(const char* fmt)
 {
     return format_local_time(std::chrono::system_clock::now(), fmt);
 }
+// Inverse of format_local_time: parses `text` in the local time zone with
+// `fmt` and returns the time point, or nullopt when it does not match.
+inline std::optional<std::chrono::system_clock::time_point> parse_local_time(
+    std::string_view text, const char* fmt)
+{
+    std::tm local { };
+    std::istringstream in { std::string(text) };
+    in >> std::get_time(&local, fmt);
+    if (in.fail()) {
+        return std::nullopt;
+    }
+    local.tm_isdst          = -1;
+    const std::time_t value = std::mktime(&local);
+    if (value == static_cast<std::time_t>(-1)) {
+        return std::nullopt;
+    }
+    return std::chrono::system_clock::from_time_t(value);
+}
+
 // Expands ${VAR} and ${VAR:-default} from the environment; unmatched
 // references expand to empty. Text outside references is copied verbatim.
 inline std::string expand_env_vars(const std::string& text)

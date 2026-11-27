@@ -10,6 +10,10 @@ CHANGELOG
 -------------------------------------------------------------------------------
 0.8.0 - Unreleased
 -------------------------------------------------------------------------------
+- Old sessions can now be cleaned up automatically: set
+`preferences.trim_frequency` to `weekly` or `monthly` (the default) and
+imza deletes saved chats and one-shot transcripts older than that in the
+background at startup; `never` keeps everything.
 - Stage, commit, and push without leaving Imza: the Changed files widget
 shows staged and unstaged files with a checkbox each, and its Commit
 button (or `/commit`) opens a dialog with a multi-line message, the

@@ -87,6 +87,56 @@ void roundtrip(imza::Session& source, imza::Session& loaded,
     REQUIRE(load_session(saved.front().path, loaded) == imza::Status::OK);
 }
 
+// The archived file of a saved session, located by its id.
+std::filesystem::path saved_path_of(const imza::Session& session)
+{
+    for (const imza::SavedSession& entry : imza::saved_sessions()) {
+        if (entry.path.stem() == session.session_id()) {
+            return entry.path;
+        }
+    }
+    FAIL("session was not saved");
+    return { };
+}
+
+// Rewrites the "saved_at" value in the first document that follows
+// `title` (session file or index entry), so the trim sees a different age.
+void restamp_after_title(const std::filesystem::path& file,
+    std::string_view title, std::string_view stamp)
+{
+    std::string text           = imza::test::read_all(file);
+    const std::size_t title_at = text.find(std::string(title));
+    REQUIRE(title_at != std::string::npos);
+    const std::size_t key = text.find("\"saved_at\"", title_at);
+    REQUIRE(key != std::string::npos);
+    const std::size_t colon = text.find(':', key);
+    const std::size_t at    = text.find('"', colon + 1);
+    REQUIRE(at != std::string::npos);
+    text.replace(at + 1, stamp.size(), stamp);
+    imza::test::write_file(file, text);
+}
+
+// Makes a saved session look `age_days` old in both its file and the index.
+void backdate(const imza::Session& session, int age_days)
+{
+    const std::string stamp = imza::format_local_time(
+        std::chrono::system_clock::now() - std::chrono::hours { 24 * age_days },
+        "%Y-%m-%d %H:%M:%S");
+    const std::filesystem::path path = saved_path_of(session);
+    restamp_after_title(path, session.title(), stamp);
+    restamp_after_title(
+        imza::sessions_dir() / ".index.json", session.title(), stamp);
+}
+
+// Corrupts the save stamp of one session's file and index entry.
+void undate(const imza::Session& session)
+{
+    const std::filesystem::path path = saved_path_of(session);
+    restamp_after_title(path, session.title(), "not a date");
+    restamp_after_title(
+        imza::sessions_dir() / ".index.json", session.title(), "not a date");
+}
+
 } // namespace
 
 TEST_CASE("saved sessions continue in place and rewrite the same file")
@@ -1090,4 +1140,127 @@ TEST_CASE("unattended saves write outside the index and stay loadable")
     imza::Session loaded;
     REQUIRE(load_session(unattended, loaded) == imza::Status::OK);
     CHECK(loaded.title() == "Unattended run");
+}
+
+TEST_CASE("trim removes regular and unattended sessions past the retention age")
+{
+    DataHome home;
+    imza::Session fresh;
+    fresh.set_title("Fresh session");
+    fresh.begin_send("hello");
+    REQUIRE(imza::save_session(fresh) == imza::Status::OK);
+
+    imza::Session stale;
+    stale.set_title("Stale session");
+    stale.begin_send("hello");
+    REQUIRE(imza::save_session(stale) == imza::Status::OK);
+    const std::filesystem::path stale_path = saved_path_of(stale);
+    backdate(stale, 40);
+
+    imza::Session unattended_fresh;
+    unattended_fresh.set_title("Fresh run");
+    unattended_fresh.begin_send("hello");
+    REQUIRE(
+        imza::save_unattended_session(unattended_fresh) == imza::Status::OK);
+    imza::Session unattended_stale;
+    unattended_stale.set_title("Stale run");
+    unattended_stale.begin_send("hello");
+    REQUIRE(
+        imza::save_unattended_session(unattended_stale) == imza::Status::OK);
+    const std::filesystem::path unattended_stale_path
+        = imza::unattended_dir() / (unattended_stale.session_id() + ".json");
+    // Unattended files are not indexed, so only the document is restamped.
+    restamp_after_title(unattended_stale_path, unattended_stale.title(),
+        imza::format_local_time(
+            std::chrono::system_clock::now() - std::chrono::hours { 24 * 40 },
+            "%Y-%m-%d %H:%M:%S"));
+
+    const imza::TrimResult result = imza::trim_saved_sessions(
+        std::chrono::days { 30 }, std::chrono::system_clock::now());
+    CHECK(result.regular_removed == 1);
+    CHECK(result.unattended_removed == 1);
+
+    CHECK_FALSE(std::filesystem::exists(stale_path));
+    CHECK_FALSE(std::filesystem::exists(unattended_stale_path));
+    CHECK(std::filesystem::exists(saved_path_of(fresh)));
+    CHECK(std::filesystem::exists(
+        imza::unattended_dir() / (unattended_fresh.session_id() + ".json")));
+    const auto remaining = imza::saved_sessions();
+    REQUIRE(remaining.size() == 1);
+    CHECK(remaining.front().path == saved_path_of(fresh));
+}
+
+TEST_CASE("trim keeps locked, active, and undatable sessions")
+{
+    DataHome home;
+    CurrentDirectory directory;
+
+    imza::Session locked;
+    locked.set_title("Locked elsewhere");
+    locked.begin_send("hello");
+    REQUIRE(imza::save_session(locked) == imza::Status::OK);
+    const std::filesystem::path locked_path = saved_path_of(locked);
+    backdate(locked, 40);
+    imza::test::ForeignLock foreign(locked_path);
+
+    imza::Session active;
+    active.set_title("Being opened");
+    active.begin_send("hello");
+    REQUIRE(imza::save_session(active) == imza::Status::OK);
+    const std::filesystem::path active_path = saved_path_of(active);
+    backdate(active, 40);
+
+    imza::Session undatable;
+    undatable.set_title("No date");
+    undatable.begin_send("hello");
+    REQUIRE(imza::save_session(undatable) == imza::Status::OK);
+    const std::filesystem::path undatable_path = saved_path_of(undatable);
+    undate(undatable);
+
+    const imza::TrimResult result
+        = imza::trim_saved_sessions(std::chrono::days { 30 },
+            std::chrono::system_clock::now(), active_path);
+    CHECK(result.skipped_locked == 1);
+    CHECK(result.skipped_invalid == 1);
+    CHECK(result.regular_removed == 0);
+    CHECK(std::filesystem::exists(locked_path));
+    CHECK(std::filesystem::exists(active_path));
+    CHECK(std::filesystem::exists(undatable_path));
+}
+
+TEST_CASE("trim with a zero age removes nothing and never creates the "
+          "unattended directory")
+{
+    DataHome home;
+    imza::Session stale;
+    stale.set_title("Stale session");
+    stale.begin_send("hello");
+    REQUIRE(imza::save_session(stale) == imza::Status::OK);
+    backdate(stale, 40);
+
+    const imza::TrimResult result = imza::trim_saved_sessions(
+        std::chrono::days { 0 }, std::chrono::system_clock::now());
+    CHECK(result.regular_removed == 0);
+    CHECK(result.unattended_removed == 0);
+    CHECK(std::filesystem::exists(saved_path_of(stale)));
+    CHECK_FALSE(std::filesystem::exists(imza::unattended_dir()));
+}
+
+TEST_CASE("SessionStore::trim republishes the listing once the sweep finishes")
+{
+    DataHome home;
+    imza::Session stale;
+    stale.set_title("Stale session");
+    stale.begin_send("hello");
+    REQUIRE(imza::save_session(stale) == imza::Status::OK);
+    backdate(stale, 40);
+
+    imza::SessionStore store;
+    CHECK_FALSE(store.trim(std::chrono::days { 0 }));
+    REQUIRE(store.trim(std::chrono::days { 30 }));
+    CHECK_FALSE(store.trim(std::chrono::days { 30 }));
+    REQUIRE(imza::test::wait_until(
+        [&] { return store.ready() && store.sessions().empty(); }));
+    store.stop();
+    CHECK_FALSE(store.trim(std::chrono::days { 30 }));
 }

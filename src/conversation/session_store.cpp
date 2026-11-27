@@ -2,6 +2,7 @@
 
 #include "conversation/session.h"
 
+#include <chrono>
 #include <utility>
 
 namespace imza {
@@ -14,7 +15,26 @@ SessionStore::SessionStore()
 {
 }
 
-SessionStore::~SessionStore() = default;
+SessionStore::~SessionStore() { stop(); }
+
+void SessionStore::stop()
+{
+    {
+        std::lock_guard<std::mutex> lock_guard(_mutex);
+        if (!alive()) {
+            return;
+        }
+        mark_dead();
+    }
+    // The listing worker is a short one-shot scan with no stop token.
+    if (_worker.joinable()) {
+        _worker.join();
+    }
+    if (_trim_worker.joinable()) {
+        _trim_worker.request_stop();
+        _trim_worker.join();
+    }
+}
 
 bool SessionStore::ready() const { return _ready.load(); }
 
@@ -40,6 +60,7 @@ DeleteSessionResult SessionStore::remove(const std::filesystem::path& path)
         std::lock_guard<std::mutex> lock_guard(_mutex);
         if (_active_lock && _active_lock->path() == lock_path_for(path)) {
             _active_lock.reset();
+            _active_session_path.clear();
         }
     }
     _generation.fetch_add(1);
@@ -64,7 +85,8 @@ bool SessionStore::activate(const std::filesystem::path& path)
         return false;
     }
     std::lock_guard<std::mutex> lock_guard(_mutex);
-    _active_lock = std::move(std::get<FileLock>(acquired));
+    _active_lock         = std::move(std::get<FileLock>(acquired));
+    _active_session_path = path;
     return true;
 }
 
@@ -72,6 +94,40 @@ void SessionStore::deactivate()
 {
     std::lock_guard<std::mutex> lock_guard(_mutex);
     _active_lock.reset();
+    _active_session_path.clear();
+}
+
+std::filesystem::path SessionStore::_active_path() const
+{
+    std::lock_guard<std::mutex> lock_guard(_mutex);
+    return _active_session_path;
+}
+
+bool SessionStore::trim(std::chrono::days age)
+{
+    if (age <= std::chrono::days { 0 }) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock_guard(_mutex);
+    // alive() is checked under the same mutex stop() flips it under, so no
+    // sweep can start once shutdown has begun.
+    if (!alive() || _trim_worker.joinable()) {
+        return false;
+    }
+    _generation.fetch_add(1);
+    const std::uint64_t generation = _generation.load();
+    _trim_worker = std::jthread([this, age, keep = _active_session_path,
+                                    generation](std::stop_token stop) {
+        if (stop.stop_requested()) {
+            return;
+        }
+        trim_saved_sessions(age, std::chrono::system_clock::now(), keep);
+        if (stop.stop_requested()) {
+            return;
+        }
+        _publish_if_current(saved_sessions(), generation);
+    });
+    return true;
 }
 
 Signal<>::Subscription SessionStore::subscribe_to_change(

@@ -128,6 +128,7 @@ int main(int argc, char** argv)
         if (imza::restore_session_at_startup(*state, *cli.session_path,
                 cli.working_directory ? std::optional<std::filesystem::path> { }
                                       : std::nullopt)) {
+            imza::start_session_trim(*state);
             return imza::run_repl(std::move(state));
         }
         std::println(stderr, "failed to load session '{}': {}",
@@ -158,6 +159,7 @@ int main(int argc, char** argv)
         std::println(stderr, "failed to select variant '{}'", *cli.variant);
         return 2;
     }
+    imza::start_session_trim(*state);
     if (cli.acp_requested) {
         return imza::run_acp(state);
     }

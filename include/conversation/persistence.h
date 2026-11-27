@@ -1,5 +1,7 @@
 #pragma once
 
+#include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -71,5 +73,20 @@ bool session_file_locked(const std::filesystem::path& path);
 
 enum class DeleteSessionResult { OK, INVALID_PATH, REMOVE_FAILED };
 DeleteSessionResult delete_saved_session(const std::filesystem::path& path);
+
+struct TrimResult {
+    std::size_t regular_removed    = 0;
+    std::size_t unattended_removed = 0;
+    std::size_t skipped_locked     = 0;
+    std::size_t skipped_invalid    = 0;
+};
+
+// Startup sweep: deletes every regular session and unattended transcript
+// whose save time is older than `age` before `now`. The active session's
+// file (`keep`) and any file another imza process holds are left alone;
+// an unparseable save time keeps the file. A zero `age` trims nothing.
+TrimResult trim_saved_sessions(std::chrono::days age,
+    std::chrono::system_clock::time_point now,
+    const std::filesystem::path& keep = { });
 
 } // namespace imza

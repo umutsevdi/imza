@@ -177,6 +177,9 @@ namespace {
         if (state.subagents != nullptr) {
             state.stoppable.push_back(state.subagents.get());
         }
+        if (state.sessions != nullptr && state.parent_state == nullptr) {
+            state.stoppable.push_back(state.sessions.get());
+        }
     }
 
     void wire(std::shared_ptr<ApplicationState> state, StreamFn stream_fn,

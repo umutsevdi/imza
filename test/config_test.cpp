@@ -144,6 +144,41 @@ TEST_CASE("update check preference round-trips and rejects unknown values")
     CHECK(error.find("update_checks") != std::string::npos);
 }
 
+TEST_CASE("trim frequency preference round-trips and rejects unknown values")
+{
+    const auto path = temp_file("preferences-trim-frequency.json");
+    imza::Config cfg;
+    cfg.preferences.trim_frequency = imza::Preferences::TrimFrequency::WEEKLY;
+    REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
+
+    imza::Config loaded;
+    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
+    CHECK(loaded.preferences.trim_frequency
+        == imza::Preferences::TrimFrequency::WEEKLY);
+
+    imza::Config defaults;
+    REQUIRE(imza::save_config(path, defaults) == imza::Status::OK);
+    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
+    CHECK(loaded.preferences.trim_frequency
+        == imza::Preferences::TrimFrequency::MONTHLY);
+
+    cfg.preferences.trim_frequency = imza::Preferences::TrimFrequency::NEVER;
+    REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
+    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
+    CHECK(loaded.preferences.trim_frequency
+        == imza::Preferences::TrimFrequency::NEVER);
+
+    {
+        std::ofstream out(path);
+        out << R"({"preferences": {"trim_frequency": "hourly"}})";
+    }
+    imza::Config invalid;
+    std::string error;
+    CHECK(
+        imza::load_config(path, invalid, &error) == imza::Status::CONFIG_ERROR);
+    CHECK(error.find("trim_frequency") != std::string::npos);
+}
+
 TEST_CASE("keychain mode omits secrets and reloads them from the store")
 {
     imza::CredentialSubsystem store(imza::CredentialSubsystem::Mode::OS);
