@@ -3,6 +3,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -123,7 +124,42 @@ public:
     void check_for_updates(
         std::string binary_version, Preferences::UpdateChecks update_checks);
 
+    using GitActionCallback = std::function<void(GitActionResult)>;
+    // Marshals the completion onto the UI thread; the composition root
+    // passes the MainThreadQueue's PostFn, declared here so this layer
+    // does not depend on runtime.
+    using GitActionPost = std::function<void(std::function<void()>)>;
+
+    // Runs a staging/commit/push on a pooled worker and hands the result
+    // to `on_done` through `post`, so the UI thread never blocks on git. A
+    // successful operation nudges the repository poll so the widget and
+    // Review reflect it before the next scheduled tick. Workers join in
+    // stop(); a completion arriving after shutdown is dropped.
+    void stage(const std::string& path, bool staged, GitActionPost post,
+        GitActionCallback on_done);
+    // Stages or unstages several paths in one git invocation; empty is a
+    // no-op that still reports success.
+    void stage_many(std::vector<std::string> paths, bool staged,
+        GitActionPost post, GitActionCallback on_done);
+    void commit(
+        std::string message, GitActionPost post, GitActionCallback on_done);
+    void push(GitActionPost post, GitActionCallback on_done);
+    // What the commit dialog shows beside the message: the origin remote's
+    // URL (nullopt when none is configured) and the staged diffstat.
+    struct CommitContext {
+        std::optional<std::string> origin;
+        StagedStat staged;
+    };
+    void commit_context(
+        GitActionPost post, std::function<void(CommitContext)> on_done);
+    void stop() override;
+
 private:
+    void _run_git_action(
+        std::function<GitActionResult(const std::filesystem::path&)> action,
+        GitActionPost post, GitActionCallback on_done);
+    void _request_repository_refresh();
+    std::optional<std::filesystem::path> _project_root() const;
     void _publish_workspace(std::shared_ptr<const WorkspaceEnvironment> ws,
         std::uint64_t generation);
     void _publish_system(std::shared_ptr<const SystemEnvironment> system);
@@ -158,6 +194,12 @@ private:
     std::condition_variable_any _system_ready_cv;
     std::jthread _worker;
     std::jthread _git_worker;
+    // Set by a staging/commit/push so the next poll tick refreshes now
+    // instead of at its deadline; `_refresh_cv` wakes the wait early.
+    std::atomic<bool> _refresh_requested { false };
+    std::mutex _refresh_mutex;
+    std::condition_variable_any _refresh_cv;
+    WorkerPool _git_actions;
     std::jthread _system_worker;
     std::jthread _update_worker;
 };

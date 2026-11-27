@@ -172,6 +172,17 @@ std::optional<std::size_t> run_review_pass(
     ApplicationState& state, ReviewPassRequest request, std::string& error);
 // Cancels a running pass. False when nothing was running.
 bool cancel_review_pass(ApplicationState& state, ReviewPass pass);
+// Opens the commit dialog over the staged files; refused with an error
+// when the workspace has no Git repository or nothing is staged.
+void open_commit_modal(ApplicationState& state);
+// Runs git off the UI thread, closes the dialog once the request is
+// accepted, and reports the outcome as a toast: the commit on completion,
+// then the push when it finishes, since a push can fail after the dialog
+// is gone and is reported separately.
+void commit_and_notify(ApplicationState& state, std::string message, bool push);
+// Pushes the current branch and reports the outcome as a toast; used by the
+// sidebar, where there is no commit dialog to close.
+void push_and_notify(ApplicationState& state);
 // Generate the handoff report: reconcile the plan, the user's messages, the
 // build log, and the final diff into one document stored on the session.
 // Reachable from any workflow phase; runs alongside an AI review pass, and

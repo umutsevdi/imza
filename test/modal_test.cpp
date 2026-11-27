@@ -4,10 +4,13 @@
 #include <ftxui/screen/screen.hpp>
 
 #include "app/flows.h"
+#include "common/modal.h"
 #include "common/util.h"
 #include "conversation/format.h"
+#include "platform/command_runner.h"
 #include "test_fs.h"
 #include "test_helpers.h"
+#include "test_platform.h"
 #include "test_state.h"
 #include "tools/tool.h"
 #include "turn/delegation.h"
@@ -802,4 +805,131 @@ TEST_CASE("mcp connect approval omits the session-wide choice")
     CHECK(flat.find("cloudflare") != std::string::npos);
     // No session-wide choice: a connect approval is one-shot.
     CHECK(flat.find("session") == std::string::npos);
+}
+namespace {
+
+// A repository with a seed commit and one staged file, plus an
+// environment rooted there. The two commit-dialog tests share it.
+struct CommitFixture {
+    explicit CommitFixture(std::string remote = { })
+        : state(imza::test::make_test_state(pump.fn()))
+    {
+        imza::test::init_test_repo(scratch.path, true);
+        const auto git = [this](const std::string& arguments) {
+            REQUIRE(imza::command_ok(
+                imza::run_command(imza::git_command(scratch.path, arguments),
+                    std::chrono::seconds { 10 })));
+        };
+        if (!remote.empty()) {
+            git("remote add origin " + remote);
+        }
+        imza::test::write_file(scratch.file("feature.txt"), "feature\n");
+        git("add feature.txt");
+
+        std::filesystem::current_path(scratch.path);
+        REQUIRE(state->environment->chdir(scratch.path)
+            == imza::Environment::ChdirResult::CHANGED);
+        imza::test::wait_for_environment(*state);
+        REQUIRE(pump.wait_for([&] {
+            const auto repository = state->environment->repository();
+            return repository && repository->changed_files.size() == 1;
+        }));
+    }
+
+    ~CommitFixture() { std::filesystem::current_path(keep.original); }
+
+    imza::test::TempDir scratch;
+    imza::test::CurrentDirectory keep;
+    imza::test::PostPump pump;
+    std::shared_ptr<imza::ApplicationState> state;
+};
+
+} // namespace
+
+TEST_CASE("commit modal shows the branch and staged stat, and commits on Enter")
+{
+    if (!imza::test::git_available()) {
+        return;
+    }
+    CommitFixture fixture;
+    imza::open_commit_modal(*fixture.state);
+    REQUIRE(std::holds_alternative<imza::CommitModal>(
+        fixture.state->session->modal()));
+    ftxui::Component modal = imza::make_modal(fixture.state);
+    // The staged diffstat and remote are read off the UI thread, so the
+    // footer fills in a moment after the dialog opens.
+    REQUIRE(fixture.pump.wait_for([&] {
+        return imza::test::collapse_whitespace(
+                   imza::test::without_ansi(
+                       imza::test::to_text(modal->Render(), 70, 16)))
+                   .find("1 file changed")
+            != std::string::npos;
+    }));
+    const std::string flat = imza::test::collapse_whitespace(
+        imza::test::without_ansi(imza::test::to_text(modal->Render(), 70, 16)));
+    CHECK(flat.find("will be committed to:") != std::string::npos);
+    CHECK(flat.find("main") != std::string::npos);
+    CHECK(flat.find("Commit") != std::string::npos);
+
+    // An empty message is refused inline instead of reaching git.
+    modal->OnEvent(ftxui::Event::Return);
+    CHECK(std::holds_alternative<imza::CommitModal>(
+        fixture.state->session->modal()));
+    fixture.pump.pump();
+    const std::string refused = imza::test::collapse_whitespace(
+        imza::test::without_ansi(imza::test::to_text(modal->Render(), 70, 16)));
+    CHECK(refused.find("Write a commit title first.") != std::string::npos);
+
+    imza::test::type(modal, "Add feature");
+    fixture.pump.pump();
+    const std::string typed = imza::test::collapse_whitespace(
+        imza::test::without_ansi(imza::test::to_text(modal->Render(), 70, 16)));
+    CHECK(typed.find("Add feature") != std::string::npos);
+
+    modal->OnEvent(ftxui::Event::Return);
+    CHECK_FALSE(std::holds_alternative<imza::CommitModal>(
+        fixture.state->session->modal()));
+    REQUIRE(fixture.pump.wait_for([&] {
+        return fixture.state->notifications->notifications()->size() == 1;
+    }));
+    const auto notes = fixture.state->notifications->notifications();
+    CHECK_FALSE(notes->front().error);
+    CHECK(notes->front().description.find("Committed ") == 0);
+    CHECK(notes->front().description.find("Add feature") != std::string::npos);
+
+    const imza::CommandResult log = imza::run_command("git -C "
+            + imza::shell_quote(fixture.scratch.path) + " log -1 --format=%s",
+        std::chrono::seconds { 10 });
+    CHECK(imza::trim(log.output) == "Add feature");
+}
+
+TEST_CASE("commit modal names the origin remote when one is configured")
+{
+    if (!imza::test::git_available()) {
+        return;
+    }
+    CommitFixture fixture("https://example.test/repo.git");
+
+    imza::open_commit_modal(*fixture.state);
+    ftxui::Component modal = imza::make_modal(fixture.state);
+    REQUIRE(fixture.pump.wait_for([&] {
+        const std::string flat
+            = imza::test::collapse_whitespace(imza::test::without_ansi(
+                imza::test::to_text(modal->Render(), 70, 16)));
+        return flat.find("https://example.test/repo.git") != std::string::npos;
+    }));
+}
+
+TEST_CASE("open_commit_modal refuses when nothing is staged")
+{
+    const imza::test::CurrentDirectory keep;
+    const imza::test::TempDir scratch;
+    auto state = imza::test::make_test_state();
+    REQUIRE(state->environment->chdir(scratch.path)
+        == imza::Environment::ChdirResult::CHANGED);
+    imza::test::wait_for_environment(*state);
+    imza::open_commit_modal(*state);
+    CHECK(state->session->modal().index() == 0);
+    CHECK(state->session->error().find("Stage at least one file")
+        != std::string::npos);
 }

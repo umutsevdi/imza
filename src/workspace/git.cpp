@@ -8,11 +8,55 @@
 #include <charconv>
 #include <chrono>
 #include <fstream>
+#include <optional>
+#include <span>
 #include <utility>
 
 namespace imza {
 
 namespace {
+
+    constexpr auto GIT_TIMEOUT = std::chrono::seconds { 15 };
+
+    // Stderr is merged: these are user-initiated actions, and git's
+    // diagnostic is what the failure message shows.
+    GitActionResult git_action(const std::filesystem::path& root,
+        const std::string& arguments,
+        std::chrono::seconds timeout = GIT_TIMEOUT)
+    {
+        const CommandResult result
+            = run_command(git_command(root, arguments), timeout);
+        if (!command_ok(result)) {
+            return { false, result.output };
+        }
+        return { true, result.output };
+    }
+
+    std::string quoted_paths(std::span<const std::string> paths)
+    {
+        std::string out;
+        for (const std::string& path : paths) {
+            out += " " + shell_quote(path);
+        }
+        return out;
+    }
+
+    ChangedFile::Area changed_file_area(std::string_view status)
+    {
+        if (status.size() < 2) {
+            return ChangedFile::Area::UNSTAGED;
+        }
+        // '!' is porcelain's ignored marker: not a change on either side.
+        const auto in_index = [](char code) {
+            return code != ' ' && code != '?' && code != '!';
+        };
+        const bool staged   = in_index(status[0]);
+        const bool unstaged = in_index(status[1]);
+        if (staged && unstaged) {
+            return ChangedFile::Area::BOTH;
+        }
+        return staged ? ChangedFile::Area::STAGED : ChangedFile::Area::UNSTAGED;
+    }
 
     constexpr std::uint64_t FNV_OFFSET = 14695981039346656037ULL;
     constexpr std::uint64_t FNV_PRIME  = 1099511628211ULL;
@@ -164,8 +208,9 @@ std::vector<ChangedFile> parse_git_status(std::string_view status)
         if (line.size() < 4 || line[2] != ' ') {
             continue;
         }
-        files.push_back(ChangedFile { line.substr(3),
-            changed_file_kind(std::string_view(line).substr(0, 2)) });
+        const std::string_view code = std::string_view(line).substr(0, 2);
+        files.push_back(ChangedFile {
+            line.substr(3), changed_file_kind(code), changed_file_area(code) });
     }
     return files;
 }
@@ -513,6 +558,141 @@ std::optional<std::string> git_working_diff(
         return std::nullopt;
     }
     return std::move(diff.output);
+}
+
+namespace {
+
+    // Stdout is parsed, so git's warnings on stderr would land before the
+    // value.
+    std::optional<std::string> git_query(const std::filesystem::path& root,
+        const std::string& arguments,
+        std::chrono::seconds timeout = GIT_TIMEOUT)
+    {
+        const CommandResult result = run_command(git_command(root, arguments),
+            timeout, { }, { }, StderrCapture::STDOUT_ONLY);
+        if (!command_ok(result)) {
+            return std::nullopt;
+        }
+        return std::string(trim(result.output));
+    }
+
+    // Short hash and subject of the new HEAD, for the commit toast.
+    std::optional<std::string> git_head_summary(
+        const std::filesystem::path& root)
+    {
+        return git_query(root, "log -1 --format='%h %s'");
+    }
+
+    // True when HEAD's branch has an upstream configured.
+    bool git_has_upstream(const std::filesystem::path& root)
+    {
+        return git_query(
+            root, "rev-parse --abbrev-ref --symbolic-full-name '@{u}'")
+            .has_value();
+    }
+
+} // namespace
+
+std::string git_command(
+    const std::filesystem::path& root, std::string_view arguments)
+{
+    return "git -C " + shell_quote(root) + " " + std::string(arguments);
+}
+
+GitActionResult git_stage(
+    const std::filesystem::path& root, std::span<const std::string> paths)
+{
+    if (paths.empty()) {
+        return { true, { } };
+    }
+    return git_action(root, "add -- " + quoted_paths(paths));
+}
+
+GitActionResult git_unstage(
+    const std::filesystem::path& root, std::span<const std::string> paths)
+{
+    if (paths.empty()) {
+        return { true, { } };
+    }
+    // `restore --staged` diffs against HEAD, which an unborn branch lacks.
+    const GitActionResult restore
+        = git_action(root, "restore --staged -- " + quoted_paths(paths));
+    if (restore.ok || git_query(root, "rev-parse --verify HEAD").has_value()) {
+        return restore;
+    }
+    return git_action(root, "rm --cached -q -- " + quoted_paths(paths));
+}
+
+GitActionResult git_commit(
+    const std::filesystem::path& root, std::string_view message)
+{
+    // The message rides stdin rather than -m: `-F -` takes the text as
+    // written, so quotes, backticks and `$` inside need no shell escaping.
+    // Stderr is merged so failures that only explain themselves there
+    // (missing identity, signing) still reach the user; `-q` keeps the
+    // success output empty.
+    CommandResult result = run_command(git_command(root, "commit -q -F -"),
+        GIT_TIMEOUT, { }, std::string(message));
+    if (!command_ok(result)) {
+        return { false, result.output };
+    }
+    const std::optional<std::string> summary = git_head_summary(root);
+    return { true, summary.value_or("committed") };
+}
+
+GitActionResult git_push(const std::filesystem::path& root)
+{
+    const std::optional<std::string> branch
+        = git_query(root, "branch --show-current");
+    const bool has_upstream = git_has_upstream(root);
+    if ((!branch.has_value() || branch->empty()) && !has_upstream) {
+        return { false,
+            "The current branch has no upstream and no name to "
+            "publish; push it manually." };
+    }
+    // Quiet: git's report is a multi-line block, so the toast names the
+    // branch instead.
+    const GitActionResult pushed = has_upstream
+        ? git_action(root, "push -q", std::chrono::seconds { 120 })
+        : git_action(root, "push -q -u origin " + shell_quote(*branch),
+              std::chrono::seconds { 120 });
+    if (!pushed.ok) {
+        return pushed;
+    }
+    return { true, branch.value_or("the current branch") };
+}
+
+std::optional<std::string> git_remote_origin(const std::filesystem::path& root)
+{
+    return git_query(root, "remote get-url origin");
+}
+
+StagedStat git_staged_stat(const std::filesystem::path& root)
+{
+    StagedStat stat;
+    const std::optional<std::string> numstat
+        = git_query(root, "diff --cached --numstat --no-renames");
+    if (!numstat.has_value()) {
+        return stat;
+    }
+    // "added<TAB>deleted<TAB>path"; binary files report "-" for both.
+    const auto count = [](std::string_view field) -> std::size_t {
+        std::size_t value = 0;
+        std::from_chars(field.data(), field.data() + field.size(), value);
+        return value;
+    };
+    for (const std::string& line : split_lines(*numstat)) {
+        const std::size_t first_tab  = line.find('\t');
+        const std::size_t second_tab = line.find('\t', first_tab + 1);
+        if (first_tab == std::string::npos || second_tab == std::string::npos) {
+            continue;
+        }
+        ++stat.files;
+        stat.additions += count(std::string_view(line).substr(0, first_tab));
+        stat.deletions += count(std::string_view(line).substr(
+            first_tab + 1, second_tab - first_tab - 1));
+    }
+    return stat;
 }
 
 } // namespace imza

@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <filesystem>
 #include <optional>
@@ -11,7 +12,9 @@
 #include <vector>
 
 #include "common/util.h"
+#include "platform/command_runner.h"
 #include "test_fs.h"
+#include "test_platform.h"
 #include "workspace/environment.h"
 
 namespace {
@@ -19,6 +22,7 @@ namespace {
 TEST_CASE("git status parser creates typed changed files")
 {
     using Kind = imza::ChangedFile::Kind;
+    using Area = imza::ChangedFile::Area;
     const auto files
         = imza::parse_git_status(" M src/app.cpp\n"
                                  "A  new file.cpp\n"
@@ -33,15 +37,19 @@ TEST_CASE("git status parser creates typed changed files")
 
     REQUIRE(files.size() == 9);
     CHECK((files[0] == imza::ChangedFile { "src/app.cpp", Kind::MODIFIED }));
-    CHECK((files[1] == imza::ChangedFile { "new file.cpp", Kind::ADDED }));
+    CHECK((files[1]
+        == imza::ChangedFile { "new file.cpp", Kind::ADDED, Area::STAGED }));
     CHECK((files[2] == imza::ChangedFile { "notes.txt", Kind::UNTRACKED }));
-    CHECK((files[3] == imza::ChangedFile { "old.cpp", Kind::DELETED }));
+    CHECK((files[3]
+        == imza::ChangedFile { "old.cpp", Kind::DELETED, Area::STAGED }));
     CHECK((files[4]
         == imza::ChangedFile {
-            "old name.cpp -> new name.cpp", Kind::RENAMED }));
+            "old name.cpp -> new name.cpp", Kind::RENAMED, Area::STAGED }));
     CHECK((files[5]
-        == imza::ChangedFile { "source.cpp -> copy.cpp", Kind::COPIED }));
-    CHECK((files[6] == imza::ChangedFile { "conflict.cpp", Kind::CONFLICTED }));
+        == imza::ChangedFile {
+            "source.cpp -> copy.cpp", Kind::COPIED, Area::STAGED }));
+    CHECK((files[6]
+        == imza::ChangedFile { "conflict.cpp", Kind::CONFLICTED, Area::BOTH }));
     CHECK((files[7] == imza::ChangedFile { "type.cpp", Kind::MODIFIED }));
     CHECK((files[8] == imza::ChangedFile { "ignored.cpp", Kind::UNKNOWN }));
 }
@@ -49,15 +57,224 @@ TEST_CASE("git status parser creates typed changed files")
 TEST_CASE("git status parser resolves combined index and worktree states")
 {
     using Kind = imza::ChangedFile::Kind;
+    using Area = imza::ChangedFile::Area;
     const auto files
         = imza::parse_git_status("AM added.cpp\nMD deleted.cpp\nAA both.cpp\n");
 
     REQUIRE(files.size() == 3);
     CHECK(files[0].kind == Kind::ADDED);
+    CHECK(files[0].area == Area::BOTH);
     CHECK(files[1].kind == Kind::DELETED);
+    CHECK(files[1].area == Area::BOTH);
     CHECK(files[2].kind == Kind::CONFLICTED);
+    CHECK(files[2].area == Area::BOTH);
 }
 
+TEST_CASE("git status parser keeps worktree-only changes unstaged")
+{
+    using Area       = imza::ChangedFile::Area;
+    const auto files = imza::parse_git_status(" M unstaged.cpp\n"
+                                              "M  staged.cpp\n"
+                                              "MM both.cpp\n"
+                                              "?? untracked.cpp\n");
+
+    REQUIRE(files.size() == 4);
+    CHECK(files[0].area == Area::UNSTAGED);
+    CHECK(files[1].area == Area::STAGED);
+    CHECK(files[2].area == Area::BOTH);
+    CHECK(files[3].area == Area::UNSTAGED);
+}
+
+namespace {
+
+    std::string git_in(
+        const std::filesystem::path& root, const std::string& arguments)
+    {
+        return std::string(imza::trim(imza::run_command(
+            imza::git_command(root, arguments), std::chrono::seconds { 10 },
+            { }, { }, imza::StderrCapture::STDOUT_ONLY)
+                .output));
+    }
+
+    bool git_ok(const std::filesystem::path& root, const std::string& arguments)
+    {
+        return imza::command_ok(imza::run_command(
+            imza::git_command(root, arguments), std::chrono::seconds { 10 },
+            { }, { }, imza::StderrCapture::STDOUT_ONLY));
+    }
+
+    std::string porcelain_area(
+        const std::filesystem::path& root, const std::string& path)
+    {
+        const auto files = imza::parse_git_status(
+            git_in(root, "status --porcelain=v1 --untracked-files=all"));
+        for (const auto& file : files) {
+            if (file.path == path) {
+                switch (file.area) {
+                case imza::ChangedFile::Area::UNSTAGED: return "unstaged";
+                case imza::ChangedFile::Area::STAGED: return "staged";
+                case imza::ChangedFile::Area::BOTH: return "both";
+                }
+            }
+        }
+        return "clean";
+    }
+
+} // namespace
+
+TEST_CASE("git stage and unstage move a file across the index")
+{
+    if (!imza::test::git_available()) {
+        return;
+    }
+    const imza::test::TempDir dir;
+    imza::test::init_test_repo(dir.path, true);
+    imza::test::write_file(dir.file("tracked.txt"), "changed\n");
+    imza::test::write_file(dir.file("new.txt"), "new\n");
+    REQUIRE(porcelain_area(dir.path, "tracked.txt") == "unstaged");
+    REQUIRE(porcelain_area(dir.path, "new.txt") == "unstaged");
+
+    const std::array<std::string, 2> paths { "tracked.txt", "new.txt" };
+    const imza::GitActionResult staged = imza::git_stage(dir.path, paths);
+    REQUIRE(staged.ok);
+    CHECK(porcelain_area(dir.path, "tracked.txt") == "staged");
+    CHECK(porcelain_area(dir.path, "new.txt") == "staged");
+
+    const imza::GitActionResult unstaged = imza::git_unstage(dir.path, paths);
+    REQUIRE(unstaged.ok);
+    CHECK(porcelain_area(dir.path, "tracked.txt") == "unstaged");
+    CHECK(porcelain_area(dir.path, "new.txt") == "unstaged");
+}
+
+TEST_CASE("git unstage works before the first commit")
+{
+    if (!imza::test::git_available()) {
+        return;
+    }
+    const imza::test::TempDir dir;
+    imza::test::init_test_repo(dir.path, false);
+    imza::test::write_file(dir.file("first.txt"), "first\n");
+    const std::array<std::string, 1> paths { "first.txt" };
+    REQUIRE(imza::git_stage(dir.path, paths).ok);
+    REQUIRE(porcelain_area(dir.path, "first.txt") == "staged");
+
+    const imza::GitActionResult unstaged = imza::git_unstage(dir.path, paths);
+    REQUIRE(unstaged.ok);
+    CHECK(porcelain_area(dir.path, "first.txt") == "unstaged");
+}
+
+TEST_CASE("git commit takes a multi-line message and reports the new head")
+{
+    if (!imza::test::git_available()) {
+        return;
+    }
+    const imza::test::TempDir dir;
+    imza::test::init_test_repo(dir.path, true);
+    imza::test::write_file(dir.file("feature.cpp"), "int main() {}\n");
+    const std::array<std::string, 1> paths { "feature.cpp" };
+    REQUIRE(imza::git_stage(dir.path, paths).ok);
+
+    const imza::GitActionResult committed = imza::git_commit(
+        dir.path, "Add feature\n\nLonger explanation `with` $chars'.\n");
+    REQUIRE(committed.ok);
+    CHECK(committed.output == git_in(dir.path, "log -1 --format='%h %s'"));
+    CHECK(git_in(dir.path, "log -1 --format=%B").find("Longer explanation")
+        != std::string::npos);
+    CHECK(porcelain_area(dir.path, "feature.cpp") == "clean");
+}
+
+TEST_CASE("git staged stat counts the index against HEAD")
+{
+    if (!imza::test::git_available()) {
+        return;
+    }
+    const imza::test::TempDir dir;
+    imza::test::init_test_repo(dir.path, true);
+    imza::test::write_file(dir.file("seed.txt"), "seed\nsecond\n");
+    imza::test::write_file(dir.file("new.txt"), "a\nb\nc\n");
+    imza::test::write_file(dir.file("blob.bin"), std::string("\0\1\2", 3));
+    const std::array<std::string, 3> paths { "seed.txt", "new.txt",
+        "blob.bin" };
+    REQUIRE(imza::git_stage(dir.path, paths).ok);
+
+    const imza::StagedStat stat = imza::git_staged_stat(dir.path);
+    CHECK(stat.files == 3);
+    CHECK(stat.additions == 4);
+    CHECK(stat.deletions == 0);
+
+    // Staged deletions count too, and an emptied index reports nothing.
+    REQUIRE(git_ok(dir.path, "rm -q --cached new.txt"));
+    const imza::StagedStat partial = imza::git_staged_stat(dir.path);
+    CHECK(partial.files == 2);
+    const std::array<std::string, 2> rest { "seed.txt", "blob.bin" };
+    REQUIRE(imza::git_unstage(dir.path, rest).ok);
+    const imza::StagedStat after = imza::git_staged_stat(dir.path);
+    CHECK(after.files == 0);
+}
+
+TEST_CASE("git commit failure carries git's diagnosis")
+{
+    if (!imza::test::git_available()) {
+        return;
+    }
+    const imza::test::TempDir dir;
+    imza::test::init_test_repo(dir.path, true);
+
+    const imza::GitActionResult committed = imza::git_commit(dir.path, "x");
+    CHECK_FALSE(committed.ok);
+    CHECK_FALSE(committed.output.empty());
+}
+
+TEST_CASE("git push publishes the branch and names it on success")
+{
+    if (!imza::test::git_available()) {
+        return;
+    }
+    const imza::test::TempDir dir;
+    imza::test::init_test_repo(dir.path, true);
+    // A bare local repository as origin: a real push with no network.
+    const imza::test::TempDir origin;
+    REQUIRE(git_ok(origin.path, "init -q --bare"));
+    REQUIRE(git_ok(
+        dir.path, "remote add origin " + imza::shell_quote(origin.path)));
+    imza::test::write_file(dir.file("pushed.txt"), "pushed\n");
+    REQUIRE(git_ok(dir.path, "add pushed.txt"));
+    REQUIRE(git_ok(dir.path, "commit -q -m pushed"));
+
+    // No upstream yet: the first push takes the `-u origin` path.
+    const imza::GitActionResult first = imza::git_push(dir.path);
+    REQUIRE(first.ok);
+    CHECK(first.output == "main");
+    CHECK(git_ok(origin.path, "rev-parse main"));
+    CHECK(
+        git_ok(dir.path, "rev-parse --abbrev-ref --symbolic-full-name '@{u}'"));
+
+    // Upstream set: the plain push path, still naming the branch.
+    imza::test::write_file(dir.file("pushed.txt"), "pushed twice\n");
+    REQUIRE(git_ok(dir.path, "add pushed.txt"));
+    REQUIRE(git_ok(dir.path, "commit -q -m again"));
+    const imza::GitActionResult second = imza::git_push(dir.path);
+    REQUIRE(second.ok);
+    CHECK(second.output == "main");
+}
+
+TEST_CASE("git push failure carries git's diagnosis")
+{
+    if (!imza::test::git_available()) {
+        return;
+    }
+    const imza::test::TempDir dir;
+    imza::test::init_test_repo(dir.path, true);
+    // The origin points at a directory that is not a repository, so git
+    // rejects the push and explains itself.
+    const imza::test::TempDir not_a_repo;
+    REQUIRE(git_ok(
+        dir.path, "remote add origin " + imza::shell_quote(not_a_repo.path)));
+
+    const imza::GitActionResult pushed = imza::git_push(dir.path);
+    CHECK_FALSE(pushed.ok);
+    CHECK_FALSE(pushed.output.empty());
+}
 TEST_CASE("git branch normalization removes command whitespace")
 {
     CHECK(imza::normalize_git_branch("feature/status-ui\n")

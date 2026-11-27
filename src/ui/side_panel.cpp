@@ -39,6 +39,7 @@ namespace {
     }
 
     Element changed_file_item(const ChangedFile& file);
+    Element unstaged_divider();
 
     Element changed_files_panel(Elements rows, const ChangeSummary& changes)
     {
@@ -66,12 +67,14 @@ class SidePanel : public ComponentBase {
 public:
     SidePanel(std::shared_ptr<ApplicationState> state, LayoutFn layout,
         WorkflowFn workflow, WorkflowNavigateFn navigate,
-        std::shared_ptr<bool> rendered_empty)
+        std::shared_ptr<bool> rendered_empty,
+        std::function<void()> restore_focus)
         : _state(std::move(state))
         , _layout(std::move(layout))
         , _workflow(std::move(workflow))
         , _navigate(std::move(navigate))
         , _rendered_empty(std::move(rendered_empty))
+        , _restore_focus(std::move(restore_focus))
         , _workspace_subscription(
               _state->environment->subscribe_to_workspace_change(
                   [] { animation::RequestAnimationFrame(); }))
@@ -125,6 +128,14 @@ public:
     {
         _links_container = Container::Vertical({ });
         Add(_links_container);
+        _stage_all_label = "Stage All";
+        _stage_all_button
+            = action_button(&_stage_all_label, [this] { _toggle_stage_all(); });
+        _commit_button = action_button("Commit", [this] { _open_commit(); });
+        _push_button   = action_button("Push", [this] { _push(); });
+        _links_container->Add(_stage_all_button);
+        _links_container->Add(_commit_button);
+        _links_container->Add(_push_button);
     }
 
     Element OnRender() override
@@ -144,6 +155,9 @@ public:
             const auto repository = env->repository();
             if (repository && !repository->changed_files.empty()) {
                 parts.push_back(_render_changed_files(*repository) | yflex);
+            } else {
+                _prune_changed_files(repository ? repository->changed_files
+                                                : std::vector<ChangedFile> { });
             }
             if (_attachments_dirty.exchange(false)) {
                 _attachment_names = _state->session->attachment_names();
@@ -349,13 +363,195 @@ private:
         parts.push_back(titled_box("Documents", std::move(rows)));
     }
 
+    // Staged rows first, then a divider and the unstaged ones, so the
+    // checkbox column reads top-down as "what the next commit takes".
     Element _render_changed_files(const RepositoryState& repository)
     {
-        Elements rows;
-        for (const ChangedFile& file : repository.changed_files) {
-            rows.push_back(_changed_file_link(file)->Render());
+        _prune_changed_files(repository.changed_files);
+        // A click shows its effect at once; the entry drops once the
+        // snapshot reports the same area or the action failed.
+        for (auto it = _pending_stage->begin(); it != _pending_stage->end();) {
+            const auto reported = std::ranges::find(
+                repository.changed_files, it->first, &ChangedFile::path);
+            if (reported == repository.changed_files.end()
+                || reported->area == it->second) {
+                it = _pending_stage->erase(it);
+            } else {
+                ++it;
+            }
         }
+        // Porcelain interleaves the two areas in path order, so the rows
+        // are gathered per area rather than split at the first unstaged
+        // entry.
+        Elements rows;
+        Elements unstaged;
+        for (ChangedFile file : repository.changed_files) {
+            if (const auto pending = _pending_stage->find(file.path);
+                pending != _pending_stage->end()) {
+                file.area = pending->second;
+            }
+            (is_staged(file) ? rows : unstaged)
+                .push_back(_changed_file_row(file));
+        }
+        if (!rows.empty() && !unstaged.empty()) {
+            rows.push_back(unstaged_divider());
+        }
+        for (Element& row : unstaged) {
+            rows.push_back(std::move(row));
+        }
+        rows.push_back(_commit_row(repository));
         return changed_files_panel(std::move(rows), repository.changes);
+    }
+
+    Element _changed_file_row(const ChangedFile& file)
+    {
+        Component checkbox = _stage_checkbox(file);
+        _active_links.push_back(checkbox);
+        return hbox({ checkbox->Render(), _changed_file_link(file)->Render() });
+    }
+
+    // Files that left the snapshot leave their controls behind: the
+    // components stop rendering but would accumulate for the session's
+    // lifetime. Detach them from the dispatch container and drop the
+    // cache entries, like _document_links clearing when empty.
+    void _prune_changed_files(const std::vector<ChangedFile>& live)
+    {
+        const auto prune = [&live](auto& cache) {
+            for (auto it = cache.begin(); it != cache.end();) {
+                const bool still_listed = std::any_of(live.begin(), live.end(),
+                    [&path = it->first](
+                        const ChangedFile& file) { return file.path == path; });
+                if (still_listed) {
+                    ++it;
+                    continue;
+                }
+                it->second.component->Detach();
+                it = cache.erase(it);
+            }
+        };
+        prune(_stage_checks);
+        prune(_file_links);
+    }
+
+    // The bulk button flips its meaning with the tree: everything staged
+    // means the useful action is to take it all back out again. All three
+    // are real buttons, so they join the event dispatch list by hand each
+    // frame.
+    Element _commit_row(const RepositoryState& repository)
+    {
+        const bool any_unstaged = std::ranges::any_of(repository.changed_files,
+            [](const ChangedFile& file) { return !is_staged(file); });
+        _bulk_stages.store(!any_unstaged);
+        _stage_all_label = any_unstaged ? "Stage All" : "Unstage All";
+        _active_links.push_back(_stage_all_button);
+        _active_links.push_back(_commit_button);
+        _active_links.push_back(_push_button);
+        return hbox({ _stage_all_button->Render(), text(" "),
+                   _commit_button->Render(), text(" "), _push_button->Render(),
+                   filler() })
+            | xflex;
+    }
+
+    void _open_commit()
+    {
+        if (_restore_focus) {
+            _restore_focus();
+        }
+        // open_commit_modal is the chokepoint: without staged files it
+        // refuses with an error instead of opening.
+        imza::open_commit_modal(*_state);
+    }
+
+    void _push()
+    {
+        if (_restore_focus) {
+            _restore_focus();
+        }
+        imza::push_and_notify(*_state);
+    }
+
+    void _toggle_stage_all()
+    {
+        if (_restore_focus) {
+            _restore_focus();
+        }
+        const auto repository = _state->environment->repository();
+        if (!repository) {
+            return;
+        }
+        const bool staged = !_bulk_stages.load();
+        const ChangedFile::Area target
+            = staged ? ChangedFile::Area::STAGED : ChangedFile::Area::UNSTAGED;
+        std::vector<std::string> paths;
+        for (const ChangedFile& file : repository->changed_files) {
+            if (file.area == target) {
+                continue;
+            }
+            paths.push_back(file.path);
+            (*_pending_stage)[file.path] = target;
+        }
+        if (paths.empty()) {
+            return;
+        }
+        animation::RequestAnimationFrame();
+        _state->environment->stage_many(std::move(paths), staged, _state->post,
+            [state = _state, pending = _pending_stage,
+                verb = staged ? "stage" : "unstage"](GitActionResult result) {
+                if (result.ok) {
+                    return;
+                }
+                pending->clear();
+                state->session->set_error(std::string("Could not ") + verb
+                    + " the changes: " + result.output);
+            });
+    }
+
+    // `staged` is the area the user wants the file to end up in, read off
+    // the live snapshot rather than a row captured earlier.
+    void _toggle_stage(const std::string& path, bool staged)
+    {
+        if (_restore_focus) {
+            _restore_focus();
+        }
+        (*_pending_stage)[path]
+            = staged ? ChangedFile::Area::STAGED : ChangedFile::Area::UNSTAGED;
+        animation::RequestAnimationFrame();
+        _state->environment->stage(path, staged, _state->post,
+            [state = _state, pending = _pending_stage, path](
+                GitActionResult result) {
+                if (result.ok) {
+                    return;
+                }
+                // Already on the main thread: drop the optimistic row so
+                // it snaps back to what git reports.
+                pending->erase(path);
+                state->session->set_error(
+                    "Could not update the index: " + result.output);
+            });
+    }
+
+    // One stock ftxui Checkbox per row, showing only the glyph; the path
+    // beside it stays the hover link into Review. The checked flag mirrors
+    // the row's staged state, so the control's own toggle lands on the
+    // action rather than on a bool the next snapshot would overwrite.
+    Component _stage_checkbox(const ChangedFile& file)
+    {
+        const auto found = _stage_checks.find(file.path);
+        if (found != _stage_checks.end()) {
+            *found->second.checked = is_staged(file);
+            return found->second.component;
+        }
+        auto checked = std::make_shared<bool>(is_staged(file));
+        CheckboxOption option;
+        option.checked   = checked.get();
+        option.on_change = [this, path = file.path] {
+            // The control has already flipped its flag: that is the target.
+            _toggle_stage(path, *(_stage_checks.at(path).checked));
+        };
+        Component component = Checkbox("", checked.get(), option);
+        _links_container->Add(component);
+        _stage_checks.emplace(file.path, StageCheck { checked, component });
+        return component;
     }
 
     void _append_review_comments(Elements& parts)
@@ -459,6 +655,22 @@ private:
     Component _links_container;
     Signal<>::Subscription _mcp_subscription;
     std::map<std::string, Link<ChangedFile>> _file_links;
+    struct StageCheck {
+        std::shared_ptr<bool> checked;
+        Component component;
+    };
+    std::map<std::string, StageCheck> _stage_checks;
+    // Shared with the stage completion, which may outlive the panel at
+    // teardown.
+    std::shared_ptr<std::map<std::string, ChangedFile::Area>> _pending_stage
+        = std::make_shared<std::map<std::string, ChangedFile::Area>>();
+    std::function<void()> _restore_focus;
+    Component _stage_all_button;
+    Component _push_button;
+    std::string _stage_all_label;
+    // True when every changed file is staged, so the bulk button unstages.
+    std::atomic<bool> _bulk_stages { false };
+    Component _commit_button;
     std::map<std::size_t, Link<DocumentLink>> _document_links;
     std::map<std::size_t, Link<std::string>> _comment_links;
     std::map<RuntimeRow, Link<RuntimeRowText>> _runtime_links;
@@ -475,7 +687,8 @@ ftxui::Component make_side_panel(std::shared_ptr<ApplicationState> state,
 {
     auto empty      = std::make_shared<bool>(true);
     Component panel = ftxui::Make<SidePanel>(std::move(state),
-        std::move(layout), std::move(workflow), std::move(navigate), empty);
+        std::move(layout), std::move(workflow), std::move(navigate), empty,
+        status != nullptr ? status->restore_focus : std::function<void()> { });
     if (status != nullptr) {
         status->is_empty = [empty] { return *empty; };
     }
@@ -512,6 +725,14 @@ namespace {
             text(" "),
             paragraph(file.path) | color(PANEL_FG) | xflex,
         });
+    }
+
+    // The trailing cell keeps the rule from drawing over the box border.
+    Element unstaged_divider()
+    {
+        return hbox(
+                   { text("── Unstaged "), separatorLight() | flex, text(" ") })
+            | color(PANEL_FG_DIM);
     }
 
     Element todo_item(const TodoItem& it)

@@ -233,7 +233,10 @@ namespace {
         {
             const LayoutFn layout     = [this] { return _layout; };
             const WorkflowFn workflow = [this] { return _phase; };
-            _side                     = make_side_panel(
+            // Before make_side_panel: the panel copies the callback at
+            // construction.
+            _side_panel_status.restore_focus = [this] { _focus_main(); };
+            _side                            = make_side_panel(
                 _state, layout, workflow,
                 [this](WorkflowPhase phase) { _set_phase(phase); },
                 &_side_panel_status);

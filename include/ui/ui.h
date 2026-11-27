@@ -144,6 +144,10 @@ ftxui::InputOption field_option(std::string* content, int* cursor,
     std::function<void()> on_enter = { });
 ftxui::InputOption password_option(std::string* content, int* cursor,
     std::string placeholder, std::function<void()> on_change = { });
+// Multi-line variant for longer prose; Enter submits, MULTILINE_KEY adds
+// a line.
+ftxui::InputOption multiline_field_option(std::string* content, int* cursor,
+    std::string placeholder, std::function<void()> on_change = { });
 ftxui::Component action_button(std::string label,
     std::function<void()> on_click, const ftxui::Color& color = PANEL_BORDER,
     const ftxui::Color& color_focussed = PANEL_COLOR_FOCUS);
@@ -616,9 +620,13 @@ ftxui::Component make_plan_doc(std::shared_ptr<ApplicationState> state,
     LayoutFn layout, const bool* focused);
 ftxui::Component make_review(std::shared_ptr<ApplicationState> state,
     LayoutFn layout, WorkflowNavigateFn navigate);
-// Whether the panel's last frame drew no widget.
 struct SidePanelStatus {
+    // Whether the panel's last frame drew no widget.
     std::function<bool()> is_empty;
+    // The panel's controls (checkboxes, the commit button) are focusable
+    // like any ftxui component; after one handles a click the panel hands
+    // focus back so the chat input keeps the cursor.
+    std::function<void()> restore_focus;
 };
 
 ftxui::Component make_side_panel(std::shared_ptr<ApplicationState> state,
@@ -644,6 +652,7 @@ ftxui::Component make_subscription_signin(
 ftxui::Component make_subagents(std::shared_ptr<ApplicationState> state);
 ftxui::Component make_sessions(std::shared_ptr<ApplicationState> state);
 ftxui::Component make_usage(std::shared_ptr<ApplicationState> state);
+ftxui::Component make_commit(std::shared_ptr<ApplicationState> state);
 ftxui::Component make_skills(std::shared_ptr<ApplicationState> state);
 ftxui::Component make_modal(std::shared_ptr<ApplicationState> state);
 // Sidechat column: owns its chat pane, modal host, focus state, and mouse

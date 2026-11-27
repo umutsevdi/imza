@@ -5,10 +5,13 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <variant>
 #include <vector>
+
+#include "platform/command_runner.h"
 
 namespace imza {
 
@@ -24,11 +27,59 @@ struct ChangedFile {
         UNKNOWN,
     };
 
+    // Which side of the index the change sits on, from the porcelain XY
+    // pair: X (index) and Y (worktree). `??` is UNSTAGED.
+    enum class Area { UNSTAGED, STAGED, BOTH };
+
     std::string path;
     Kind kind = Kind::UNKNOWN;
+    Area area = Area::UNSTAGED;
 
     bool operator==(const ChangedFile&) const = default;
 };
+
+// Both sides of the index count as staged: a BOTH row is in the next
+// commit and its worktree half can still be restaged.
+inline bool is_staged(const ChangedFile& file)
+{
+    return file.area != ChangedFile::Area::UNSTAGED;
+}
+
+struct GitActionResult {
+    bool ok { false };
+    // Combined stdout/stderr as git reported it; the first line is what the
+    // user sees.
+    std::string output;
+};
+
+// Adds `paths` to the index. A path deleted from the worktree is staged as
+// a deletion.
+GitActionResult git_stage(
+    const std::filesystem::path& root, std::span<const std::string> paths);
+// Removes `paths` from the index without touching the worktree. Files
+// never committed fall back to `rm --cached`, since `restore --staged`
+// needs a HEAD.
+GitActionResult git_unstage(
+    const std::filesystem::path& root, std::span<const std::string> paths);
+// Shell command running git with `arguments` anchored to `root`.
+std::string git_command(
+    const std::filesystem::path& root, std::string_view arguments);
+
+GitActionResult git_commit(
+    const std::filesystem::path& root, std::string_view message);
+// Quiet push, or `-u origin <branch>` when the branch has no upstream; on
+// success the output is the published branch's name.
+GitActionResult git_push(const std::filesystem::path& root);
+std::optional<std::string> git_remote_origin(const std::filesystem::path& root);
+
+struct StagedStat {
+    std::size_t files     = 0;
+    std::size_t additions = 0;
+    std::size_t deletions = 0;
+};
+
+// Numstat of the index against HEAD: what the next commit will contain.
+StagedStat git_staged_stat(const std::filesystem::path& root);
 
 std::vector<ChangedFile> parse_git_status(std::string_view status);
 std::string normalize_git_branch(std::string_view branch);

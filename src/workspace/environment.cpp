@@ -501,13 +501,12 @@ Environment::Environment(std::vector<std::string> instructions)
 void Environment::_start_git_worker()
 {
     _git_worker = std::jthread([this](const std::stop_token& stop) {
-        std::mutex poll_mutex;
-        std::condition_variable_any poll_cv;
-        const auto wait_until =
-            [&](std::chrono::steady_clock::time_point deadline) {
-                std::unique_lock lock(poll_mutex);
-                poll_cv.wait_until(lock, stop, deadline, [] { return false; });
-            };
+        const auto wait_until
+            = [&](std::chrono::steady_clock::time_point deadline) {
+                  std::unique_lock lock(_refresh_mutex);
+                  _refresh_cv.wait_until(lock, stop, deadline,
+                      [this] { return _refresh_requested.load(); });
+              };
         {
             std::unique_lock lock(_workspace_mutex);
             if (!_workspace_ready_cv.wait(
@@ -543,6 +542,12 @@ void Environment::_start_git_worker()
             const auto observed_workspace = workspace();
             const bool has_root           = observed_workspace != nullptr
                 && observed_workspace->project_root.has_value();
+            if (_refresh_requested.exchange(false)) {
+                // An action moved the index or HEAD: the previous tree
+                // fingerprint describes a state that no longer exists.
+                refresh_stamp.reset();
+                refresh_deadline = now;
+            }
             if (now >= metadata_deadline) {
                 metadata_deadline = now + metadata_interval;
                 const std::optional<std::uint64_t> next = has_root
@@ -576,14 +581,19 @@ void Environment::_start_git_worker()
             if (refresh_stamp.has_value() && current_stamp == refresh_stamp) {
                 continue;
             }
+            // Anchored to the repository root, like the diff below: the
+            // two must agree.
             const CommandResult status
-                = run_command("git status --porcelain=v1 --untracked-files=all "
-                              "--ignore-submodules=dirty",
+                = run_command(git_command(root,
+                                  "status --porcelain=v1 "
+                                  "--untracked-files=all "
+                                  "--ignore-submodules=dirty"),
                     std::chrono::seconds { 5 }, { }, { },
                     StderrCapture::STDOUT_ONLY);
-            const CommandResult branch = run_command(
-                "git branch --show-current", std::chrono::seconds { 5 }, { },
-                { }, StderrCapture::STDOUT_ONLY);
+            const CommandResult branch
+                = run_command(git_command(root, "branch --show-current"),
+                    std::chrono::seconds { 5 }, { }, { },
+                    StderrCapture::STDOUT_ONLY);
             const std::optional<std::string> diff = git_working_diff(root,
                 { .renames             = true,
                     .numstat           = true,
@@ -687,6 +697,116 @@ Environment::ChdirResult Environment::chdir(const std::filesystem::path& dir)
         scan_workspace(canonical, _instructions));
     _publish_workspace(std::move(workspace), generation);
     return ChdirResult::CHANGED;
+}
+
+void Environment::stop()
+{
+    mark_dead();
+    _request_repository_refresh();
+    if (_git_worker.joinable()) {
+        _git_worker.request_stop();
+        _git_worker.join();
+    }
+    _git_actions.join_all();
+}
+
+std::optional<std::filesystem::path> Environment::_project_root() const
+{
+    const auto current = workspace();
+    if (current == nullptr) {
+        return std::nullopt;
+    }
+    return current->project_root;
+}
+
+void Environment::_request_repository_refresh()
+{
+    // Flag and notify under the wait's own lock: a notify issued while the
+    // git worker is between its predicate check and its block would
+    // otherwise be lost until the next deadline.
+    std::lock_guard lock(_refresh_mutex);
+    _refresh_requested.store(true);
+    _refresh_cv.notify_all();
+}
+
+void Environment::_run_git_action(
+    std::function<GitActionResult(const std::filesystem::path&)> action,
+    GitActionPost post, GitActionCallback on_done)
+{
+    const std::optional<std::filesystem::path> root = _project_root();
+    if (!root.has_value()) {
+        post([on_done] { on_done({ false, "No Git repository found." }); });
+        return;
+    }
+    // The worker captures plain values only; application state is reached
+    // through the caller's closures, which already outlive the operation.
+    _git_actions.spawn(
+        [root = *root, action = std::move(action), post = std::move(post),
+            on_done = std::move(on_done), this] {
+            GitActionResult result = action(root);
+            if (result.ok) {
+                _request_repository_refresh();
+            }
+            if (!alive()) {
+                return;
+            }
+            post([result, on_done] { on_done(result); });
+        });
+}
+
+void Environment::stage(const std::string& path, bool staged,
+    GitActionPost post, GitActionCallback on_done)
+{
+    stage_many({ path }, staged, std::move(post), std::move(on_done));
+}
+
+void Environment::stage_many(std::vector<std::string> paths, bool staged,
+    GitActionPost post, GitActionCallback on_done)
+{
+    _run_git_action(
+        [paths = std::move(paths), staged](const std::filesystem::path& root) {
+            return staged ? git_stage(root, paths) : git_unstage(root, paths);
+        },
+        std::move(post), std::move(on_done));
+}
+
+void Environment::commit(
+    std::string message, GitActionPost post, GitActionCallback on_done)
+{
+    _run_git_action(
+        [message = std::move(message)](const std::filesystem::path& root) {
+            return git_commit(root, message);
+        },
+        std::move(post), std::move(on_done));
+}
+
+void Environment::push(GitActionPost post, GitActionCallback on_done)
+{
+    _run_git_action(
+        [](const std::filesystem::path& root) { return git_push(root); },
+        std::move(post), std::move(on_done));
+}
+
+void Environment::commit_context(
+    GitActionPost post, std::function<void(CommitContext)> on_done)
+{
+    // Pooled like the actions so git never runs on the UI thread, but a
+    // read-only query nudges no refresh.
+    const std::optional<std::filesystem::path> root = _project_root();
+    if (!root.has_value()) {
+        post([on_done] { on_done(CommitContext { }); });
+        return;
+    }
+    _git_actions.spawn([root = *root, post = std::move(post),
+                           on_done = std::move(on_done), this] {
+        CommitContext context;
+        context.origin = git_remote_origin(root);
+        context.staged = git_staged_stat(root);
+        if (!alive()) {
+            return;
+        }
+        post([context, on_done] { on_done(context); });
+    });
 }
 
 Signal<>::Subscription Environment::_subscribe_when_ready(Signal<>& signal,

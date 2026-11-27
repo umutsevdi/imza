@@ -13,6 +13,11 @@ CHANGELOG
 Changes:
   - Update notices can now be turned down: set `preferences.update_checks`
     to `weekly` or `off` in config.json, and `imza --update` always checks.
+  - Stage, commit, and push without leaving Imza: the Changed files widget
+    shows staged and unstaged files with a checkbox each, and its Commit
+    button (or `/commit`) opens a dialog with a multi-line message, the
+    branch and remote, and Commit / Push buttons. The result arrives as a
+    notification, so a failed push is never missed.
 
 -------------------------------------------------------------------------------
 0.7.6 - 2026-11-22

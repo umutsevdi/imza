@@ -78,6 +78,10 @@ struct ViewerModal {
 
 struct SessionsModal { };
 
+// Commit dialog opened from the Changed files widget or /commit; the view
+// owns the draft message and its own error line.
+struct CommitModal { };
+
 struct McpModal { };
 
 struct PermissionsModal { };
@@ -100,9 +104,15 @@ struct SkillsModal {
 
 using ModalPayload = std::variant<std::monostate, ViewerModal, PermissionPrompt,
     QuestionForm, ConnectModal, SessionsModal, SkillsModal, McpModal,
-    PermissionsModal, UsageModal>;
+    PermissionsModal, UsageModal, CommitModal>;
+
+struct CommitResult {
+    std::string message;
+    // False: commit only. True: push after the commit succeeds.
+    bool push = false;
+};
 
 using ModalResult = std::variant<std::monostate, ToolVerdict, ModalAnswer,
-    ConnectResult, ModelChoice, std::filesystem::path>;
+    ConnectResult, ModelChoice, std::filesystem::path, CommitResult>;
 
 } // namespace imza

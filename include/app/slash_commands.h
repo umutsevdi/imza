@@ -28,7 +28,8 @@ struct SlashCommand {
         PERMISSIONS,
         CHDIR,
         UNDO,
-        USAGE
+        USAGE,
+        COMMIT
     };
 
     std::string_view name;

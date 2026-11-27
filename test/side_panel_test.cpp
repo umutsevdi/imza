@@ -1,13 +1,18 @@
+#include <algorithm>
+#include <chrono>
 #include <filesystem>
+#include <ranges>
 #include <string>
 #include <variant>
 
 #include <doctest/doctest.h>
 
 #include "loopback_mcp_server.h"
+#include "platform/command_runner.h"
 #include "runtime/mcp_subsystem.h"
 #include "test_fs.h"
 #include "test_helpers.h"
+#include "test_platform.h"
 #include "test_state.h"
 #include "ui/ui.h"
 #include "workspace/environment.h"
@@ -233,6 +238,243 @@ TEST_CASE("runtime box hides empty rows and vanishes when nothing is set")
     CHECK(to_text(imza::render_runtime_box(empty, { }, plain_row_link()))
               .find("Runtime")
         == std::string::npos);
+}
+
+namespace {
+
+// One staged and one unstaged change, so the widget has both groups.
+void seed_staged_and_unstaged(const std::filesystem::path& root)
+{
+    imza::test::init_test_repo(root, true);
+    const auto git = [&root](const std::string& arguments) {
+        REQUIRE(imza::command_ok(imza::run_command(
+            imza::git_command(root, arguments), std::chrono::seconds { 10 },
+            { }, { }, imza::StderrCapture::STDOUT_ONLY)));
+    };
+    imza::test::write_file(root / "staged.txt", "staged\n");
+    imza::test::write_file(root / "unstaged.txt", "unstaged\n");
+    git("add staged.txt");
+}
+
+std::shared_ptr<imza::ApplicationState> repo_state(
+    const std::filesystem::path& root)
+{
+    const imza::test::CurrentDirectory keep;
+    auto state = imza::test::make_test_state();
+    std::filesystem::current_path(root);
+    REQUIRE(state->environment->chdir(root)
+        == imza::Environment::ChdirResult::CHANGED);
+    imza::test::wait_for_environment(*state);
+    REQUIRE(imza::test::wait_until([&] {
+        const auto repository = state->environment->repository();
+        return repository && repository->changed_files.size() == 2;
+    }));
+    std::filesystem::current_path(keep.original);
+    return state;
+}
+
+} // namespace
+
+TEST_CASE("changed files widget groups staged before unstaged with checkboxes")
+{
+    if (!imza::test::git_available()) {
+        return;
+    }
+    const imza::test::TempDir scratch;
+    seed_staged_and_unstaged(scratch.path);
+    auto state = repo_state(scratch.path);
+    auto panel = imza::make_side_panel(
+        state,
+        [] { return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 120, 40 }; },
+        [] { return imza::WorkflowPhase::BUILD; }, [](imza::WorkflowPhase) { });
+
+    const std::string out
+        = imza::test::without_ansi(to_text(panel->Render(), 120, 40));
+    const std::size_t staged_at   = out.find("staged.txt");
+    const std::size_t divider_at  = out.find("Unstaged");
+    const std::size_t unstaged_at = out.find("unstaged.txt");
+    const std::size_t commit_at   = out.rfind("Commit");
+
+    REQUIRE(staged_at != std::string::npos);
+    REQUIRE(divider_at != std::string::npos);
+    REQUIRE(unstaged_at != std::string::npos);
+    REQUIRE(commit_at != std::string::npos);
+    CHECK(staged_at < divider_at);
+    CHECK(divider_at < unstaged_at);
+    CHECK(unstaged_at < commit_at);
+    // The staged row shows a checked box, the unstaged row an empty one;
+    // the glyphs are ftxui's own Checkbox marks.
+    const std::string staged_row = out.substr(0, staged_at);
+    CHECK(staged_row.rfind("▣") != std::string::npos);
+    const std::string unstaged_row
+        = out.substr(staged_at, unstaged_at - staged_at);
+    CHECK(unstaged_row.rfind("☐") != std::string::npos);
+    CHECK(unstaged_row.find("▣") == std::string::npos);
+}
+
+TEST_CASE("changed files widget omits the divider with only unstaged files")
+{
+    if (!imza::test::git_available()) {
+        return;
+    }
+    const imza::test::TempDir scratch;
+    seed_staged_and_unstaged(scratch.path);
+    const auto unstaged = imza::run_command("git -C "
+            + imza::shell_quote(scratch.path) + " restore --staged staged.txt",
+        std::chrono::seconds { 10 });
+    REQUIRE(imza::command_ok(unstaged));
+    auto state = repo_state(scratch.path);
+    auto panel = imza::make_side_panel(
+        state,
+        [] { return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 120, 40 }; },
+        [] { return imza::WorkflowPhase::BUILD; }, [](imza::WorkflowPhase) { });
+
+    const std::string out
+        = imza::test::without_ansi(to_text(panel->Render(), 120, 40));
+    CHECK(out.find("Unstaged") == std::string::npos);
+    CHECK(out.find("▣") == std::string::npos);
+    CHECK(out.find("Commit") != std::string::npos);
+}
+
+TEST_CASE("sidebar Commit button opens the commit dialog")
+{
+    if (!imza::test::git_available()) {
+        return;
+    }
+    const imza::test::TempDir scratch;
+    seed_staged_and_unstaged(scratch.path);
+    auto state = repo_state(scratch.path);
+    auto panel = imza::make_side_panel(
+        state,
+        [] { return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 120, 40 }; },
+        [] { return imza::WorkflowPhase::BUILD; }, [](imza::WorkflowPhase) { });
+
+    REQUIRE(imza::test::click_label(panel, "Commit", 120, 40));
+    CHECK(std::holds_alternative<imza::CommitModal>(state->session->modal()));
+}
+
+TEST_CASE("sidebar bulk button stages all, then unstages all")
+{
+    if (!imza::test::git_available()) {
+        return;
+    }
+    const imza::test::TempDir scratch;
+    seed_staged_and_unstaged(scratch.path);
+    auto state = repo_state(scratch.path);
+    auto panel = imza::make_side_panel(
+        state,
+        [] { return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 120, 40 }; },
+        [] { return imza::WorkflowPhase::BUILD; }, [](imza::WorkflowPhase) { });
+
+    REQUIRE(imza::test::click_label(panel, "Stage All", 120, 40));
+    REQUIRE(imza::test::wait_until([&] {
+        const auto repository = state->environment->repository();
+        return repository
+            && std::ranges::all_of(
+                repository->changed_files, [](const imza::ChangedFile& file) {
+                    return file.area == imza::ChangedFile::Area::STAGED;
+                });
+    }));
+    CHECK(state->session->error().empty());
+
+    // Everything staged: the same control now offers the reverse.
+    const std::string staged_view
+        = imza::test::without_ansi(to_text(panel->Render(), 120, 40));
+    CHECK(staged_view.find("Unstage All") != std::string::npos);
+    CHECK(staged_view.find("Stage All") == std::string::npos);
+
+    REQUIRE(imza::test::click_label(panel, "Unstage All", 120, 40));
+    REQUIRE(imza::test::wait_until([&] {
+        const auto repository = state->environment->repository();
+        return repository
+            && std::ranges::all_of(
+                repository->changed_files, [](const imza::ChangedFile& file) {
+                    return file.area == imza::ChangedFile::Area::UNSTAGED;
+                });
+    }));
+    CHECK(state->session->error().empty());
+}
+
+TEST_CASE("sidebar shows Commit and Push side by side")
+{
+    if (!imza::test::git_available()) {
+        return;
+    }
+    const imza::test::TempDir scratch;
+    seed_staged_and_unstaged(scratch.path);
+    auto state = repo_state(scratch.path);
+    auto panel = imza::make_side_panel(
+        state,
+        [] { return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 120, 40 }; },
+        [] { return imza::WorkflowPhase::BUILD; }, [](imza::WorkflowPhase) { });
+
+    const std::string out
+        = imza::test::without_ansi(to_text(panel->Render(), 120, 40));
+    const std::size_t commit_at = out.rfind("Commit");
+    const std::size_t push_at   = out.rfind("Push");
+    REQUIRE(commit_at != std::string::npos);
+    REQUIRE(push_at != std::string::npos);
+    CHECK(commit_at < push_at);
+}
+
+TEST_CASE("clicking a changed file checkbox stages it and clicking the path "
+          "opens Review")
+{
+    if (!imza::test::git_available()) {
+        return;
+    }
+    const imza::test::TempDir scratch;
+    seed_staged_and_unstaged(scratch.path);
+    auto state    = repo_state(scratch.path);
+    int navigated = 0;
+    auto panel    = imza::make_side_panel(
+        state,
+        [] { return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 120, 40 }; },
+        [] { return imza::WorkflowPhase::BUILD; },
+        [&navigated](imza::WorkflowPhase) { ++navigated; });
+
+    // The checkbox sits at the row start; click it without touching the path.
+    auto screen = ftxui::Screen::Create(
+        ftxui::Dimension::Fixed(120), ftxui::Dimension::Fixed(40));
+    ftxui::Render(screen, panel->Render());
+    const std::vector<std::string> lines = imza::split_lines(screen.ToString());
+    int row                              = -1;
+    for (std::size_t y = 0; y < lines.size(); ++y) {
+        if (imza::test::without_ansi(lines[y]).find("unstaged.txt")
+            != std::string::npos) {
+            row = static_cast<int>(y);
+            break;
+        }
+    }
+    REQUIRE(row >= 0);
+    // The glyph's display column, not its byte offset: the border and the
+    // checkbox are multi-byte.
+    const std::string row_text
+        = imza::test::without_ansi(lines[static_cast<std::size_t>(row)]);
+    const std::size_t box_byte = row_text.find("☐");
+    REQUIRE(box_byte != std::string::npos);
+    const std::size_t box_x
+        = imza::utf8_width(std::string_view(row_text).substr(0, box_byte));
+    ftxui::Mouse click;
+    click.button = ftxui::Mouse::Left;
+    click.motion = ftxui::Mouse::Pressed;
+    click.x      = static_cast<int>(box_x);
+    click.y      = row;
+    REQUIRE(panel->OnEvent(ftxui::Event::Mouse("", click)));
+    CHECK(navigated == 0);
+    REQUIRE(imza::test::wait_until([&] {
+        const auto repository = state->environment->repository();
+        return repository
+            && std::ranges::all_of(
+                repository->changed_files, [](const imza::ChangedFile& file) {
+                    return file.area != imza::ChangedFile::Area::UNSTAGED;
+                });
+    }));
+    CHECK(state->session->error().empty());
+    state->session->clear_error();
+
+    REQUIRE(imza::test::click_label(panel, "unstaged.txt", 120, 40));
+    CHECK(navigated == 1);
 }
 
 TEST_CASE("sidebar renders nothing when no widget has content")

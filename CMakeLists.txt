@@ -404,6 +404,7 @@ add_library(imza_ui
     src/ui/frame_pulse.cpp
     src/ui/greeting.cpp
     src/ui/markdown.cpp
+    src/ui/modals/commit.cpp
     src/ui/modals/connect.cpp
     src/ui/modals/mcp.cpp
     src/ui/modals/permissions.cpp

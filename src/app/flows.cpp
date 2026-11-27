@@ -932,6 +932,10 @@ void resolve_modal(ApplicationState& state, ModalResult result)
     if (auto* choice = std::get_if<ModelChoice>(&result)) {
         state.providers->select_model(*choice);
     }
+    if (auto* commit = std::get_if<CommitResult>(&result)) {
+        // The usual pop-and-clear below closes the dialog; git runs after.
+        commit_and_notify(state, std::move(commit->message), commit->push);
+    }
     {
         auto entry = state.session->queue.try_pop();
         if (entry && entry->promise) {
@@ -1068,6 +1072,7 @@ void run_slash(ApplicationState& state, std::string_view command)
             make_turn_settings(
                 *state.providers->active_selection(), state.session->mode()));
         break;
+    case SlashCommand::Action::COMMIT: open_commit_modal(state); break;
     case SlashCommand::Action::MAKE_SKILL:
         if (args.empty()) {
             state.session->set_error(
@@ -1377,6 +1382,79 @@ void run_handoff(ApplicationState& state)
     if (!error.empty()) {
         state.session->set_error(std::move(error));
     }
+}
+
+namespace {
+
+    // git's own hints ("hint:", usage blocks) follow the diagnosis; the
+    // first non-empty line is the part worth a toast.
+    std::string git_error_line(std::string_view output)
+    {
+        for (const std::string& line : split_lines(output)) {
+            if (!trim(line).empty()) {
+                return line;
+            }
+        }
+        return "git did not explain the failure.";
+    }
+
+    void report_git_action(ApplicationState& state,
+        const GitActionResult& result, std::string_view success_prefix,
+        std::string_view failure_prefix)
+    {
+        if (state.notifications == nullptr) {
+            return;
+        }
+        state.notifications->publish(!result.ok,
+            result.ok
+                ? std::string(success_prefix) + result.output + "."
+                : std::string(failure_prefix) + git_error_line(result.output));
+    }
+
+} // namespace
+
+void open_commit_modal(ApplicationState& state)
+{
+    if (state.parent_state != nullptr) {
+        open_commit_modal(*state.parent_state);
+        return;
+    }
+    const auto repository = state.environment->repository();
+    const bool has_staged = repository
+        && std::ranges::any_of(repository->changed_files,
+            [](const ChangedFile& file) { return is_staged(file); });
+    if (!has_staged) {
+        state.session->set_error("Stage at least one file before committing.");
+        return;
+    }
+    enqueue_user_modal(state, CommitModal { });
+}
+
+void push_and_notify(ApplicationState& state)
+{
+    state.environment->push(state.post, [&state](GitActionResult result) {
+        report_git_action(state, result, "Pushed ", "Push failed: ");
+    });
+}
+
+void commit_and_notify(ApplicationState& state, std::string message, bool push)
+{
+    // Called from resolve_modal, which closes the dialog as soon as git
+    // accepts the request; the outcome arrives as a toast because git runs
+    // after the modal is gone.
+    state.environment->commit(std::move(message), state.post,
+        [&state, post = state.post, push](GitActionResult committed) {
+            report_git_action(
+                state, committed, "Committed ", "Commit failed: ");
+            if (!committed.ok || !push) {
+                return;
+            }
+            // Push runs after the commit landed and is reported on its
+            // own: it may fail alone (rejected, offline, no credentials).
+            state.environment->push(post, [&state](GitActionResult pushed) {
+                report_git_action(state, pushed, "Pushed ", "Push failed: ");
+            });
+        });
 }
 
 std::string export_viewer_content(

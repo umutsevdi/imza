@@ -97,6 +97,11 @@ std::string lua_path(const std::filesystem::path& path);
 // fixtures report a skip instead of a 20-second silent timeout without it.
 bool git_available();
 
+// Initializes a repository with a fixed identity, so commits never depend
+// on the developer's own configuration, and with `with_commit`, one seed
+// commit. Requires git_available().
+void init_test_repo(const std::filesystem::path& root, bool with_commit);
+
 // A foreign holder parked on a worker thread for the lifetime of the object.
 // The thread matters: Windows named mutexes are recursive per-thread, so a
 // lock taken on the calling thread is invisible to foreign_lock_live() and

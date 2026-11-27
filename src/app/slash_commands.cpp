@@ -104,6 +104,8 @@ std::span<const SlashCommand> slash_commands()
             SlashCommand::Action::UNDO, false, UNDO_ALIASES },
         { "/usage", "show session and lifetime token/cost analytics",
             SlashCommand::Action::USAGE, false, USAGE_ALIASES },
+        { "/commit", "write a commit message and push the staged changes",
+            SlashCommand::Action::COMMIT },
         { "/changelog", "show the version history",
             SlashCommand::Action::CHANGELOG },
         { "/exit", "quit imza", SlashCommand::Action::EXIT, false,

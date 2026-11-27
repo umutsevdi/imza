@@ -2,6 +2,8 @@
 
 #include "common/util.h"
 #include "platform/command_runner.h"
+#include "test_fs.h"
+#include "workspace/git.h"
 
 #include <atomic>
 #include <chrono>
@@ -346,6 +348,26 @@ bool git_available()
         return result.spawned && result.exit_code == 0;
     }();
     return available;
+}
+
+void init_test_repo(const std::filesystem::path& root, bool with_commit)
+{
+    const auto git = [root](const std::string& arguments) {
+        REQUIRE(command_ok(imza::run_command(imza::git_command(root, arguments),
+            std::chrono::seconds { 10 }, { }, { },
+            imza::StderrCapture::STDOUT_ONLY)));
+    };
+    // A fixed identity, so commits never depend on the developer's own
+    // configuration.
+    git("init -q -b main");
+    git("config user.email test@example.com");
+    git("config user.name Imza Test");
+    git("config commit.gpgsign false");
+    if (with_commit) {
+        write_file(root / "seed.txt", "seed\n");
+        git("add seed.txt");
+        git("commit -q -m seed");
+    }
 }
 
 struct ForeignLock::Impl {

@@ -148,6 +148,13 @@ namespace {
     // in reverse registration order.
     void register_stoppable(ApplicationState& state)
     {
+        // Process-wide and shared by children, so only the root stops
+        // it. Registered first so teardown stops it last, after
+        // everything that may still stage or commit; its git-action
+        // workers post through the state.
+        if (state.environment != nullptr && state.parent_state == nullptr) {
+            state.stoppable.push_back(state.environment.get());
+        }
         if (state.runner != nullptr) {
             state.stoppable.push_back(state.runner.get());
         }
