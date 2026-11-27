@@ -11,6 +11,7 @@
 #include "platform/file_lock.h"
 #include "providers/catalog.h"
 #include "test_platform.h"
+#include "workspace/environment.h"
 
 namespace imza::test {
 
@@ -186,19 +187,8 @@ inline std::string read_all(const std::filesystem::path& path)
         std::istreambuf_iterator<char>() };
 }
 
-// RAII isolation of the config home: a fresh TempDir is exported through the
-// variable the environment scan reads on this platform. Imza discovers global
-// skills under `<config-home>/agents/skills`.
 class IsolatedConfigHome {
 public:
-    // The scan prefers XDG_CONFIG_HOME (`agent_config_base_dir` in
-    // workspace/environment.cpp) before HOME/.config on every non-Windows
-    // platform, so both must point into the scratch root. HOME points there
-    // too: the scan also walks `<home>/.agents/skills` and friends, which
-    // keeps a developer's real skills from leaking into the suite.
-    // USERPROFILE is what home_dir() reads on Windows, so it is exported
-    // unconditionally: harmless elsewhere, and without it the Windows scan
-    // would read the real profile.
     IsolatedConfigHome()
         : _previous(env_value(config_home_variable()))
         , _had_previous(!_previous.empty())
@@ -223,12 +213,14 @@ public:
 
     std::filesystem::path root() const { return _root.path; }
 
-    // Creates `<root>/agents/skills/<name>/SKILL.md` with a description.
+    // Creates `<config-dir>/agents/skills/<name>/SKILL.md` with a
+    // description, through the production resolver so the location follows
+    // the platform's config layout (Application Support on macOS).
     std::filesystem::path add_skill(
         const std::string& name, const std::string& description) const
     {
         const std::filesystem::path skill
-            = _root.path / "agents" / "skills" / name;
+            = imza::global_skills_directory() / name;
         write_file(skill / "SKILL.md",
             "---\ndescription: " + description + "\n---\n\nBody.\n");
         return skill / "SKILL.md";

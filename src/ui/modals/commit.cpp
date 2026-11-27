@@ -129,8 +129,8 @@ namespace {
         Element OnRender() override
         {
             const auto repository = _state->environment->repository();
-            _commit_label = *_committed ? "Committed" : "Commit";
-            Elements rows = modal_header("Commit");
+            _commit_label         = *_committed ? "Committed" : "Commit";
+            Elements rows         = modal_header("Commit");
             rows.push_back(separatorEmpty());
             rows.push_back(_title_input->Render());
             rows.push_back(_body_input->Render()

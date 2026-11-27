@@ -580,14 +580,14 @@ namespace {
     std::optional<std::string> git_head_summary(
         const std::filesystem::path& root)
     {
-        return git_query(root, "log -1 --format='%h %s'");
+        return git_query(root, "log -1 --oneline");
     }
 
     // True when HEAD's branch has an upstream configured.
     bool git_has_upstream(const std::filesystem::path& root)
     {
         return git_query(
-            root, "rev-parse --abbrev-ref --symbolic-full-name '@{u}'")
+            root, "rev-parse --abbrev-ref --symbolic-full-name @{u}")
             .has_value();
     }
 
@@ -596,7 +596,7 @@ namespace {
         const std::filesystem::path& root)
     {
         const std::optional<std::string> count
-            = git_query(root, "rev-list --count '@{u}..HEAD'");
+            = git_query(root, "rev-list --count @{u}..HEAD");
         if (!count.has_value()) {
             return std::nullopt;
         }

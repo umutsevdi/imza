@@ -74,6 +74,7 @@ public:
     enum class ChdirResult { CHANGED, UNCHANGED, FAILED };
 
     explicit Environment(std::vector<std::string> instructions = { });
+    ~Environment() override { stop(); }
     std::shared_ptr<const SystemEnvironment> system() const
     {
         std::shared_lock lock(_workspace_mutex);

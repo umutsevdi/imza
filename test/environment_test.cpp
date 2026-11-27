@@ -177,7 +177,7 @@ TEST_CASE("git commit takes a multi-line message and reports the new head")
     const imza::GitActionResult committed = imza::git_commit(
         dir.path, "Add feature\n\nLonger explanation `with` $chars'.\n");
     REQUIRE(committed.ok);
-    CHECK(committed.output == git_in(dir.path, "log -1 --format='%h %s'"));
+    CHECK(committed.output == git_in(dir.path, "log -1 --oneline"));
     CHECK(git_in(dir.path, "log -1 --format=%B").find("Longer explanation")
         != std::string::npos);
     CHECK(porcelain_area(dir.path, "feature.cpp") == "clean");
@@ -246,8 +246,7 @@ TEST_CASE("git push publishes the branch and names it on success")
     REQUIRE(first.ok);
     CHECK(first.output == "main");
     CHECK(git_ok(origin.path, "rev-parse main"));
-    CHECK(
-        git_ok(dir.path, "rev-parse --abbrev-ref --symbolic-full-name '@{u}'"));
+    CHECK(git_ok(dir.path, "rev-parse --abbrev-ref --symbolic-full-name @{u}"));
 
     // Upstream set: the plain push path, still naming the branch.
     imza::test::write_file(dir.file("pushed.txt"), "pushed twice\n");
