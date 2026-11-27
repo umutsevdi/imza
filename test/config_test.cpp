@@ -115,6 +115,35 @@ TEST_CASE("load_config rejects an unknown credentials preference")
     CHECK(error.find("credentials") != std::string::npos);
 }
 
+TEST_CASE("update check preference round-trips and rejects unknown values")
+{
+    const auto path = temp_file("preferences-update-checks.json");
+    imza::Config cfg;
+    cfg.preferences.update_checks = imza::Preferences::UpdateChecks::WEEKLY;
+    REQUIRE(imza::save_config(path, cfg) == imza::Status::OK);
+
+    imza::Config loaded;
+    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
+    CHECK(loaded.preferences.update_checks
+        == imza::Preferences::UpdateChecks::WEEKLY);
+
+    imza::Config defaults;
+    REQUIRE(imza::save_config(path, defaults) == imza::Status::OK);
+    REQUIRE(imza::load_config(path, loaded) == imza::Status::OK);
+    CHECK(loaded.preferences.update_checks
+        == imza::Preferences::UpdateChecks::DAILY);
+
+    {
+        std::ofstream out(path);
+        out << R"({"preferences": {"update_checks": "hourly"}})";
+    }
+    imza::Config invalid;
+    std::string error;
+    CHECK(
+        imza::load_config(path, invalid, &error) == imza::Status::CONFIG_ERROR);
+    CHECK(error.find("update_checks") != std::string::npos);
+}
+
 TEST_CASE("keychain mode omits secrets and reloads them from the store")
 {
     imza::CredentialSubsystem store(imza::CredentialSubsystem::Mode::OS);

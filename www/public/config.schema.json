@@ -16,6 +16,12 @@
           "enum": ["os", "plaintext"],
           "default": "os",
           "description": "Where provider secrets are stored. `os` keeps them in the system keychain and omits them from this file; if no keychain is usable, imza falls back to plaintext for that run and warns. `plaintext` keeps them in this file and never touches the keychain."
+        },
+        "update_checks": {
+          "type": "string",
+          "enum": ["daily", "weekly", "off"],
+          "default": "daily",
+          "description": "How often installed builds look for a newer release in the background and announce one they already know about: once a day, once a week, or never. `imza --update` always checks regardless of this setting."
         }
       }
     },

@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include <ctime>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -51,6 +52,37 @@ TEST_CASE("expected_asset_name merges the version into the platform asset")
     CHECK(expected_asset_name({ "pacman", "zypper" }, "0.3.1").empty());
     CHECK(expected_asset_name({ }, "0.3.1").empty());
 #endif
+}
+
+TEST_CASE("check_for_update honors the configured check interval")
+{
+    const imza::test::IsolatedDataHome home;
+    const auto cache_path  = home.imza_dir() / "update.json";
+    const std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
+    auto seed              = [&](std::int64_t age_secs) {
+        imza::JsonValue root = JsonValue::object_t { };
+        {
+            auto& object = root.get<JsonValue::object_t>();
+            object["last_checked_at"]
+                = JsonValue(static_cast<double>(now - age_secs));
+            object["version"] = JsonValue("9.9.9");
+        }
+        REQUIRE(imza::write_json_file(cache_path, imza::json_dump(root))
+            == imza::Status::OK);
+    };
+    using Checks = imza::Preferences::UpdateChecks;
+
+    SUBCASE("a cache older than a day is still fresh for weekly checks")
+    {
+        seed(2 * 86400);
+        CHECK(imza::check_for_update({ }, "0.2.2", Checks::WEEKLY) == "9.9.9");
+    }
+
+    SUBCASE("off never refreshes, even when the cache is stale")
+    {
+        seed(400 * 86400);
+        CHECK(imza::check_for_update({ }, "0.2.2", Checks::OFF) == "9.9.9");
+    }
 }
 
 TEST_CASE("cached_update reads the update.json state file")

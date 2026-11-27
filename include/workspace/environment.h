@@ -13,6 +13,7 @@
 
 #include "common/imza_signal.h"
 #include "common/types.h"
+#include "platform/config.h"
 #include "workspace/git.h"
 #include "workspace/skills.h"
 
@@ -112,12 +113,15 @@ public:
     [[nodiscard]] Signal<>::Subscription subscribe_to_update_change(
         Signal<>::Callback callback);
 
-    // Version of an installable newer release, or nullopt.
+    // Version of an installable newer release, or nullopt. Empty while the
+    // user has turned update checks off.
     std::optional<std::string> update_available() const;
 
     // Publishes the cached result and refreshes it in the background when
-    // `update.json` is older than a day. No-op after the first call.
-    void check_for_updates(std::string binary_version);
+    // `update.json` is older than the configured interval. No-op after the
+    // first call.
+    void check_for_updates(
+        std::string binary_version, Preferences::UpdateChecks update_checks);
 
 private:
     void _publish_workspace(std::shared_ptr<const WorkspaceEnvironment> ws,
@@ -145,6 +149,7 @@ private:
     Signal<> _update_changed;
     mutable std::mutex _update_mutex;
     std::optional<std::string> _update_version;
+    std::atomic<bool> _update_checks_off { false };
     std::atomic<bool> _update_checked { false };
     std::uint64_t _workspace_generation { 0 };
     std::atomic<bool> _workspace_ready { false };

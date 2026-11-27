@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "common/types.h"
+#include "platform/config.h"
 
 namespace imza {
 
@@ -28,10 +29,11 @@ std::string expected_asset_name(
 std::optional<std::string> cached_update(std::string_view current_version);
 
 // Like cached_update, but refetches GitHub and persists the result when
-// update.json is older than a day.
+// update.json is older than the configured interval.
 std::optional<std::string> check_for_update(
     const std::vector<std::string>& package_managers,
-    std::string_view current_version);
+    std::string_view current_version,
+    Preferences::UpdateChecks update_checks = Preferences::UpdateChecks::DAILY);
 
 // Fetches the latest release regardless of the cache, persists it, and
 // returns the installable update.

@@ -43,6 +43,14 @@ namespace {
     constexpr long FETCH_TIMEOUT_SECS    = 30;
     constexpr long DOWNLOAD_TIMEOUT_SECS = 600;
     constexpr std::int64_t ONE_DAY_SECS  = 86400;
+    constexpr std::int64_t ONE_WEEK_SECS = 7 * ONE_DAY_SECS;
+
+    std::int64_t check_interval_secs(Preferences::UpdateChecks update_checks)
+    {
+        return update_checks == Preferences::UpdateChecks::WEEKLY
+            ? ONE_WEEK_SECS
+            : ONE_DAY_SECS;
+    }
 
     std::string_view version_core(std::string_view version)
     {
@@ -71,13 +79,13 @@ namespace {
         return value;
     }
 
-    bool update_cache_stale(
-        const UpdateCache& cache, std::int64_t now_unix_secs)
+    bool update_cache_stale(const UpdateCache& cache,
+        std::int64_t now_unix_secs, std::int64_t interval_secs)
     {
         if (cache.last_checked_at <= 0) {
             return true;
         }
-        return cache.last_checked_at + ONE_DAY_SECS <= now_unix_secs;
+        return cache.last_checked_at + interval_secs <= now_unix_secs;
     }
 
     UpdateCache load_update_cache(const std::filesystem::path& path)
@@ -212,10 +220,12 @@ std::optional<std::string> cached_update(std::string_view current_version)
 
 std::optional<std::string> check_for_update(
     const std::vector<std::string>& package_managers,
-    std::string_view current_version)
+    std::string_view current_version, Preferences::UpdateChecks update_checks)
 {
     const UpdateCache cache = load_update_cache(update_state_path());
-    if (!update_cache_stale(cache, std::time(nullptr))) {
+    if (update_checks == Preferences::UpdateChecks::OFF
+        || !update_cache_stale(
+            cache, std::time(nullptr), check_interval_secs(update_checks))) {
         return cached_version(cache, current_version);
     }
     const std::optional<UpdateInfo> update

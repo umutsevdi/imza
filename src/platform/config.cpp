@@ -254,6 +254,7 @@ struct StoredAllow {
 
 struct StoredPreferences {
     std::optional<std::string> credentials;
+    std::optional<std::string> update_checks;
 };
 
 struct StoredCapabilities {
@@ -309,6 +310,20 @@ Status load_config(
         } else {
             return fail(Status::CONFIG_ERROR,
                 "unknown 'preferences.credentials' value '" + mode + "'");
+        }
+    }
+
+    if (stored.preferences && stored.preferences->update_checks) {
+        const std::string& mode = *stored.preferences->update_checks;
+        if (mode == "daily") {
+            out.preferences.update_checks = Preferences::UpdateChecks::DAILY;
+        } else if (mode == "weekly") {
+            out.preferences.update_checks = Preferences::UpdateChecks::WEEKLY;
+        } else if (mode == "off") {
+            out.preferences.update_checks = Preferences::UpdateChecks::OFF;
+        } else {
+            return fail(Status::CONFIG_ERROR,
+                "unknown 'preferences.update_checks' value '" + mode + "'");
         }
     }
 
@@ -666,6 +681,12 @@ namespace {
             = cfg.preferences.credentials == Preferences::Credentials::PLAINTEXT
             ? "plaintext"
             : "os";
+        if (cfg.preferences.update_checks != Preferences::UpdateChecks::DAILY) {
+            preferences.update_checks = cfg.preferences.update_checks
+                    == Preferences::UpdateChecks::WEEKLY
+                ? "weekly"
+                : "off";
+        }
         stored.preferences = std::move(preferences);
         {
             StoredCapabilities capabilities;

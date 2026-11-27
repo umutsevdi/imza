@@ -725,7 +725,8 @@ int run_repl(std::shared_ptr<ApplicationState> state)
         screen.Exit();
     };
     state->providers->ensure_catalog_fresh();
-    state->environment->check_for_updates(IMZA_VERSION);
+    state->environment->check_for_updates(
+        IMZA_VERSION, state->config->snapshot()->preferences.update_checks);
     if (state->providers->config().providers.empty()) {
         imza::enqueue_user_modal(
             *state, ConnectModal { ConnectModal::Entry::MANAGE });

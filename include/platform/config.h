@@ -145,6 +145,8 @@ struct Preferences {
     // Where provider secrets live: the OS keychain, or config.json itself.
     enum class Credentials { OS, PLAINTEXT };
     Credentials credentials = Credentials::OS;
+    enum class UpdateChecks { DAILY, WEEKLY, OFF };
+    UpdateChecks update_checks = UpdateChecks::DAILY;
 };
 
 // Run-level capability switches read once at startup. `subagents` caps

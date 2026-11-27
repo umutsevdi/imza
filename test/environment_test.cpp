@@ -433,6 +433,18 @@ TEST_CASE("skill descriptions fold block scalars into one line")
         == "literal one literal two");
 }
 
+TEST_CASE("update checks off hides a cached newer version")
+{
+    const imza::test::IsolatedDataHome home;
+    imza::test::write_file(home.imza_dir() / "update.json",
+        R"({"last_checked_at": 1, "version": "9.9.9"})");
+
+    imza::Environment env;
+    env.check_for_updates("0.2.2", imza::Preferences::UpdateChecks::OFF);
+    REQUIRE(wait_until_ready(env));
+    CHECK_FALSE(env.update_available().has_value());
+}
+
 TEST_CASE("bundled skills are discovered and flagged")
 {
     // Point the bundled root at a scratch directory; RAII restores the

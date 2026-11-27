@@ -734,34 +734,39 @@ Signal<>::Subscription Environment::subscribe_to_update_change(
 
 std::optional<std::string> Environment::update_available() const
 {
+    if (_update_checks_off.load()) {
+        return std::nullopt;
+    }
     std::lock_guard lock(_update_mutex);
     return _update_version;
 }
 
-void Environment::check_for_updates(std::string binary_version)
+void Environment::check_for_updates(
+    std::string binary_version, Preferences::UpdateChecks update_checks)
 {
+    _update_checks_off = update_checks == Preferences::UpdateChecks::OFF;
     if (_update_checked.exchange(true)) {
         return;
     }
-    _update_worker = std::jthread(
-        [this, version = std::move(binary_version)](std::stop_token stop) {
-            std::vector<std::string> package_managers;
-            {
-                std::unique_lock lock(_workspace_mutex);
-                if (!_system_ready_cv.wait(
-                        lock, stop, [this] { return _system_ready.load(); })) {
-                    return;
-                }
-                package_managers = _system->package_managers;
+    _update_worker = std::jthread([this, version = std::move(binary_version),
+                                      update_checks](std::stop_token stop) {
+        std::vector<std::string> package_managers;
+        {
+            std::unique_lock lock(_workspace_mutex);
+            if (!_system_ready_cv.wait(
+                    lock, stop, [this] { return _system_ready.load(); })) {
+                return;
             }
-            std::optional<std::string> available
-                = check_for_update(package_managers, version);
-            {
-                std::lock_guard lock(_update_mutex);
-                _update_version = std::move(available);
-            }
-            _update_changed.publish();
-        });
+            package_managers = _system->package_managers;
+        }
+        std::optional<std::string> available
+            = check_for_update(package_managers, version, update_checks);
+        {
+            std::lock_guard lock(_update_mutex);
+            _update_version = std::move(available);
+        }
+        _update_changed.publish();
+    });
 }
 
 std::optional<std::string> Environment::agent_rules_path() const

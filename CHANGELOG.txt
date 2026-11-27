@@ -8,6 +8,13 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
+0.8.0 - Unreleased
+-------------------------------------------------------------------------------
+Changes:
+  - Update notices can now be turned down: set `preferences.update_checks`
+    to `weekly` or `off` in config.json, and `imza --update` always checks.
+
+-------------------------------------------------------------------------------
 0.7.6 - 2026-11-22
 -------------------------------------------------------------------------------
 Changes:

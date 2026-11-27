@@ -44,8 +44,20 @@ namespace {
         return result;
     }
 
+    Preferences::UpdateChecks update_checks_preference()
+    {
+        Config config;
+        if (load_config(config_path(), config) != Status::OK) {
+            return Preferences::UpdateChecks::DAILY;
+        }
+        return config.preferences.update_checks;
+    }
+
     void print_update_banner()
     {
+        if (update_checks_preference() == Preferences::UpdateChecks::OFF) {
+            return;
+        }
         if (const std::optional<std::string> version
             = cached_update(IMZA_VERSION)) {
             std::println(stderr, "<Update available v{}>", *version);
