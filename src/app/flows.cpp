@@ -1414,9 +1414,15 @@ namespace {
 
     void report_git_action(ApplicationState& state,
         const GitActionResult& result, std::string_view success_prefix,
-        std::string_view failure_prefix)
+        std::string_view failure_prefix,
+        std::string_view up_to_date_message = { })
     {
         if (state.notifications == nullptr) {
+            return;
+        }
+        if (result.ok && result.up_to_date) {
+            state.notifications->publish(
+                false, std::string(up_to_date_message));
             return;
         }
         state.notifications->publish(!result.ok,
@@ -1447,7 +1453,8 @@ void open_commit_modal(ApplicationState& state)
 void push_and_notify(ApplicationState& state)
 {
     state.environment->push(state.post, [&state](GitActionResult result) {
-        report_git_action(state, result, "Pushed ", "Push failed: ");
+        report_git_action(
+            state, result, "Pushed ", "Push failed: ", "Already up to date.");
     });
 }
 
@@ -1466,7 +1473,8 @@ void commit_and_notify(ApplicationState& state, std::string message, bool push)
             // Push runs after the commit landed and is reported on its
             // own: it may fail alone (rejected, offline, no credentials).
             state.environment->push(post, [&state](GitActionResult pushed) {
-                report_git_action(state, pushed, "Pushed ", "Push failed: ");
+                report_git_action(state, pushed, "Pushed ",
+                    "Push failed: ", "Already up to date.");
             });
         });
 }

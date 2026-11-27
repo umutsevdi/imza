@@ -317,7 +317,7 @@ void McpSubsystem::run_handshake(
         if (attempt < MAX_RECONNECT_ATTEMPTS) {
             const long delay
                 = RETRY_DELAYS_SECS[static_cast<std::size_t>(attempt - 1)];
-            _hooks.notify(false,
+            _hooks.notify(true,
                 "MCP server '" + config.id + "' disconnected - retrying.");
             spawn([this, entry, delay] {
                 if (wait_interruptible(delay * 1000)) {
@@ -694,7 +694,7 @@ bool McpSubsystem::refresh_entry_tokens(
         oauth.token_endpoint, client, oauth.refresh_token, { }, tokens, detail);
     if (status != Status::OK) {
         detail = "sign-in needed again: " + detail;
-        _hooks.notify(false,
+        _hooks.notify(true,
             "Could not renew the access token for MCP server '" + server_id
                 + "': " + detail);
         return false;

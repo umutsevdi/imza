@@ -1,4 +1,5 @@
 #include <chrono>
+#include <filesystem>
 #include <string>
 #include <thread>
 #include <vector>
@@ -7,10 +8,15 @@
 
 #include "app/application_state.h"
 #include "app/flows.h"
+#include "platform/command_runner.h"
 #include "runtime/notification_store.h"
+#include "test_fs.h"
 #include "test_helpers.h"
+#include "test_platform.h"
 #include "test_state.h"
 #include "ui/ui.h"
+#include "workspace/environment.h"
+#include "workspace/git.h"
 
 using imza::test::to_text;
 using imza::test::without_ansi;
@@ -112,6 +118,52 @@ TEST_CASE("publishing and dismissing announce through the change signal")
     CHECK(changes == 1);
     store.dismiss(id);
     CHECK(changes == 2);
+}
+
+// A repository whose upstream already holds every commit: the shape a
+// second Push button press sees.
+void seed_pushed_repo(
+    const std::filesystem::path& root, const std::filesystem::path& origin)
+{
+    imza::test::init_test_repo(root, true);
+    const auto git = [&root](const std::string& arguments) {
+        REQUIRE(imza::command_ok(imza::run_command(
+            imza::git_command(root, arguments), std::chrono::seconds { 10 },
+            { }, { }, imza::StderrCapture::STDOUT_ONLY)));
+    };
+    REQUIRE(imza::command_ok(
+        imza::run_command(imza::git_command(origin, "init -q --bare"),
+            std::chrono::seconds { 10 }, { }, { },
+            imza::StderrCapture::STDOUT_ONLY)));
+    git("remote add origin " + imza::shell_quote(origin.string()));
+    git("push -q -u origin HEAD");
+}
+
+TEST_CASE("pushing an up-to-date branch never claims a push")
+{
+    if (!imza::test::git_available()) {
+        return;
+    }
+    imza::test::TempDir root;
+    imza::test::TempDir origin;
+    seed_pushed_repo(root.path, origin.path);
+
+    const imza::test::CurrentDirectory keep;
+    imza::test::PostPump pump;
+    auto state = imza::test::make_test_state(pump.fn());
+    std::filesystem::current_path(root.path);
+    REQUIRE(state->environment->chdir(root.path)
+        == imza::Environment::ChdirResult::CHANGED);
+    imza::test::wait_for_environment(*state);
+
+    imza::push_and_notify(*state);
+    REQUIRE(pump.wait_for(
+        [&] { return !state->notifications->notifications()->empty(); }));
+
+    const auto entries = entries_of(*state->notifications);
+    REQUIRE(entries.size() == 1);
+    CHECK(entries[0].description == "Already up to date.");
+    CHECK_FALSE(entries[0].error);
 }
 
 TEST_CASE("an alert rings the terminal without adding an overlay entry")

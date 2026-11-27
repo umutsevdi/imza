@@ -14,6 +14,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -107,14 +108,29 @@ TEST_CASE("mcp manager connects, caches tools, and calls through the session")
 
 TEST_CASE("mcp manager reports connection failures and gates calls")
 {
+    std::mutex mutex;
+    std::vector<std::pair<bool, std::string>> notices;
+    imza::McpSubsystemHooks hooks;
+    hooks.notify = [&](bool error, std::string message) {
+        std::lock_guard lock(mutex);
+        notices.emplace_back(error, std::move(message));
+    };
     imza::McpSubsystem manager(
-        { { "dead", server_config("dead", "http://127.0.0.1:1/mcp") } });
+        { { "dead", server_config("dead", "http://127.0.0.1:1/mcp") } }, hooks);
 
     manager.connect("dead");
     REQUIRE(wait_state(manager, "dead", imza::McpServerState::FAILED));
     const auto snapshot = manager.snapshot();
     CHECK(snapshot[0].state == imza::McpServerState::FAILED);
     CHECK_FALSE(snapshot[0].detail.empty());
+    // The retry notice is a failure, never an info toast.
+    REQUIRE(wait_for([&] {
+        std::lock_guard lock(mutex);
+        return !notices.empty();
+    }));
+    CHECK(notices.front().first);
+    CHECK(notices.front().second.find("disconnected - retrying")
+        != std::string::npos);
 
     imza::McpToolCallResult result;
     std::string detail;

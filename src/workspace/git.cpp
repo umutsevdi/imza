@@ -591,6 +591,24 @@ namespace {
             .has_value();
     }
 
+    // Nullopt when git cannot tell (tracking ref never fetched).
+    std::optional<std::size_t> git_ahead_count(
+        const std::filesystem::path& root)
+    {
+        const std::optional<std::string> count
+            = git_query(root, "rev-list --count '@{u}..HEAD'");
+        if (!count.has_value()) {
+            return std::nullopt;
+        }
+        std::size_t value       = 0;
+        const char* const begin = count->data();
+        const char* const end   = begin + count->size();
+        if (std::from_chars(begin, end, value).ptr != end) {
+            return std::nullopt;
+        }
+        return value;
+    }
+
 } // namespace
 
 std::string git_command(
@@ -649,6 +667,13 @@ GitActionResult git_push(const std::filesystem::path& root)
         return { false,
             "The current branch has no upstream and no name to "
             "publish; push it manually." };
+    }
+    // git exits 0 on "Everything up-to-date" too.
+    if (has_upstream) {
+        const std::optional<std::size_t> ahead = git_ahead_count(root);
+        if (ahead == 0) {
+            return { true, { }, true };
+        }
     }
     // Quiet: git's report is a multi-line block, so the toast names the
     // branch instead.

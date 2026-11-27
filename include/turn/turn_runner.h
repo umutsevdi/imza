@@ -79,7 +79,9 @@ private:
         std::size_t begin, std::size_t end, const TurnSettings& settings);
     // Shared body of the automatic trigger and manual /compact, run on
     // the compaction worker.
-    void _run_compaction(TurnSettings settings, bool report_nothing);
+    enum class CompactionOutcome { COMPACTED, NOTHING, FAILED };
+    CompactionOutcome _run_compaction(
+        TurnSettings settings, bool report_nothing);
     void _begin_compaction_job(TurnSettings settings, bool report_nothing);
     void _drain_pending_asks(std::vector<Message>& history,
         const std::string& assistant_text, ApiStandard dialect,

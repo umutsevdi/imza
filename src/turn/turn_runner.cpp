@@ -303,7 +303,8 @@ std::optional<std::string> TurnRunner::_summarize(
 // Summarize everything past the previous compaction boundary and fold the
 // result into the session's compacted context. Runs on the compaction
 // worker; the caller dispatched `_begin_compaction_job` first.
-void TurnRunner::_run_compaction(TurnSettings settings, bool report_nothing)
+TurnRunner::CompactionOutcome TurnRunner::_run_compaction(
+    TurnSettings settings, bool report_nothing)
 {
     _authenticate_route(settings);
     const auto nothing_to_compact = [this, report_nothing] {
@@ -322,7 +323,7 @@ void TurnRunner::_run_compaction(TurnSettings settings, bool report_nothing)
     const std::size_t boundary = last_user.has_value() ? *last_user + 1 : 0;
     if (boundary <= snapshot.compacted_item_count) {
         nothing_to_compact();
-        return;
+        return CompactionOutcome::NOTHING;
     }
 
     // A sidechat's seeded context is a verbatim copy of the parent
@@ -333,19 +334,25 @@ void TurnRunner::_run_compaction(TurnSettings settings, bool report_nothing)
         const auto event_id = _state->session->begin_compaction().first;
         _state->session->finish_compaction(event_id, "", 0, true);
         _finish_idle();
-        return;
+        return CompactionOutcome::NOTHING;
     }
 
     std::vector<Message> history = _state->session->build_history(
         _state->prompts->system(), settings.route.dialect);
     if (history.size() < 2) {
         nothing_to_compact();
-        return;
+        return CompactionOutcome::NOTHING;
     }
 
     // build_history leads with [system, <session-summary>] when a
     // summary exists; summarize only what that summary does not cover.
     const std::size_t begin = snapshot.compacted_summary.empty() ? 1 : 2;
+
+    // Only the background job has no timeline event to show the pause.
+    if (!report_nothing && !_state->is_sidechat && _state->notifications) {
+        _state->notifications->publish(
+            false, "Compacting the conversation in the background…");
+    }
 
     const auto [event_id, prefix_size] = _state->session->begin_compaction();
     const std::optional<std::string> summary
@@ -353,7 +360,7 @@ void TurnRunner::_run_compaction(TurnSettings settings, bool report_nothing)
     if (!summary) {
         _state->session->finish_compaction(event_id, "", prefix_size, false);
         _finish_idle();
-        return;
+        return CompactionOutcome::FAILED;
     }
 
     const auto absorbed = boundary - snapshot.compacted_item_count;
@@ -363,13 +370,14 @@ void TurnRunner::_run_compaction(TurnSettings settings, bool report_nothing)
                 event_id, std::move(text), absorbed);
             _on_finish("");
         });
-        return;
+        return CompactionOutcome::COMPACTED;
     }
     // The automatic path replaces the compacted context wholesale, so
     // the previous summary rides along under the earlier-compactions tag.
     _state->session->finish_compaction(event_id,
         fold_compaction_summary(snapshot.compacted_summary, *summary),
         prefix_size, true);
+    return CompactionOutcome::COMPACTED;
 }
 
 void TurnRunner::_begin_compaction_job(
@@ -378,20 +386,27 @@ void TurnRunner::_begin_compaction_job(
     if (_compaction_active.exchange(true)) {
         return;
     }
-    // Background compaction is otherwise silent; announce it so the overlay
-    // explains the pause. The finish notice is posted from the worker.
-    if (_state->notifications) {
-        _state->notifications->publish(
-            false, "Compacting the conversation in the background…");
-    }
-    _compaction_worker.emplace([this, settings = std::move(settings),
-                                   report_nothing]() mutable {
-        _run_compaction(std::move(settings), report_nothing);
-        _compaction_active.store(false);
-        if (_state->notifications) {
-            _state->notifications->publish(false, "Conversation compacted.");
-        }
-    });
+    _compaction_worker.emplace(
+        [this, settings = std::move(settings), report_nothing]() mutable {
+            const CompactionOutcome outcome
+                = _run_compaction(std::move(settings), report_nothing);
+            _compaction_active.store(false);
+            // The manual path reports its own outcome and a sidechat
+            // shares the root's overlay.
+            if (report_nothing || _state->is_sidechat) {
+                return;
+            }
+            // NOTHING is routine: the trigger is a token estimate.
+            _post([this, outcome] {
+                if (outcome == CompactionOutcome::FAILED) {
+                    _state->session->set_error("Compaction failed.");
+                } else if (outcome == CompactionOutcome::COMPACTED
+                    && _state->notifications) {
+                    _state->notifications->publish(
+                        false, "Conversation compacted.");
+                }
+            });
+        });
 }
 
 // The manual /compact path: forced compaction while the session is idle.

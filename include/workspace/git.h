@@ -50,6 +50,9 @@ struct GitActionResult {
     // Combined stdout/stderr as git reported it; the first line is what the
     // user sees.
     std::string output;
+    // git_push only: the upstream already held every commit, so nothing
+    // ran and `output` is empty.
+    bool up_to_date { false };
 };
 
 // Adds `paths` to the index. A path deleted from the worktree is staged as
@@ -68,7 +71,8 @@ std::string git_command(
 GitActionResult git_commit(
     const std::filesystem::path& root, std::string_view message);
 // Quiet push, or `-u origin <branch>` when the branch has no upstream; on
-// success the output is the published branch's name.
+// success the output is the published branch's name. When the upstream
+// already has every commit, no push runs and the result is `up_to_date`.
 GitActionResult git_push(const std::filesystem::path& root);
 std::optional<std::string> git_remote_origin(const std::filesystem::path& root);
 

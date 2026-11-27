@@ -316,10 +316,14 @@ namespace {
             = std::make_shared<Environment>(std::move(instructions));
         state->review = std::make_shared<ReviewSubsystem>();
         // The found-update notice rides the overlay alongside the sidebar
-        // banner; the environment publishes it once, from its worker.
+        // banner.
+        auto update_notified = std::make_shared<std::atomic<bool>>(false);
         state->update_subscription
             = state->environment->subscribe_to_update_change(
-                [raw = state.get()] {
+                [raw = state.get(), update_notified] {
+                    if (update_notified->exchange(true)) {
+                        return;
+                    }
                     const std::optional<std::string> version
                         = raw->environment->update_available();
                     if (raw->notifications && version) {

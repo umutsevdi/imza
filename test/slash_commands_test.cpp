@@ -358,6 +358,11 @@ TEST_CASE("run_slash /compact guards an empty session")
 
     run_slash(*state, "/compact");
     CHECK(state->session->error() == "Nothing to compact.");
+    CHECK(std::ranges::none_of(
+        *state->notifications->notifications(), [](const Notification& entry) {
+            return entry.description.find("Compacting") == 0
+                || entry.description == "Conversation compacted.";
+        }));
 }
 
 TEST_CASE("run_slash /compact folds a forced summary into the session")

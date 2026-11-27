@@ -256,6 +256,13 @@ TEST_CASE("git push publishes the branch and names it on success")
     const imza::GitActionResult second = imza::git_push(dir.path);
     REQUIRE(second.ok);
     CHECK(second.output == "main");
+    CHECK_FALSE(second.up_to_date);
+
+    // git exits 0 on "Everything up-to-date" too.
+    const imza::GitActionResult third = imza::git_push(dir.path);
+    REQUIRE(third.ok);
+    CHECK(third.up_to_date);
+    CHECK(third.output.empty());
 }
 
 TEST_CASE("git push failure carries git's diagnosis")
