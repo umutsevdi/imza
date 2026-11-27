@@ -8,7 +8,7 @@ ISSUES & SUPPORT: <https://github.com/umutsevdi/imza/issues>
 
 CHANGELOG
 -------------------------------------------------------------------------------
-0.8.0 - Unreleased
+0.8.0 - 2026-11-28
 -------------------------------------------------------------------------------
 - Old sessions can now be cleaned up automatically: set
 `preferences.trim_frequency` to `weekly` or `monthly` (the default) and
