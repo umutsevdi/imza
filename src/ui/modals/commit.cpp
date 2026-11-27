@@ -118,7 +118,7 @@ namespace {
             _body_input  = Input(
                 body_option(&_body, &_body_cursor, [this] { _error.clear(); }));
             _commit_button
-                = action_button("Commit", [this] { _commit(false); });
+                = action_button(&_commit_label, [this] { _commit(false); });
             _push_button = action_button("Push", [this] { _commit(true); });
             Add(Container::Vertical({ _title_input, _body_input,
                 Container::Horizontal({ _commit_button, _push_button }) }));
@@ -129,7 +129,8 @@ namespace {
         Element OnRender() override
         {
             const auto repository = _state->environment->repository();
-            Elements rows         = modal_header("Commit");
+            _commit_label = *_committed ? "Committed" : "Commit";
+            Elements rows = modal_header("Commit");
             rows.push_back(separatorEmpty());
             rows.push_back(_title_input->Render());
             rows.push_back(_body_input->Render()
@@ -140,7 +141,9 @@ namespace {
                 rows.push_back(paragraph(_error) | color(HL_RED));
                 rows.push_back(separatorEmpty());
             }
-            if (repository != nullptr) {
+            if (*_committed) {
+                rows.push_back(text("Committed.") | color(HL_GREEN));
+            } else if (repository != nullptr) {
                 const std::optional<std::string> origin
                     = _context->known ? _context->context.origin : std::nullopt;
                 for (Element& row : commit_summary(
@@ -149,11 +152,18 @@ namespace {
                 }
             }
             rows.push_back(separatorEmpty());
-            rows.push_back(hbox(
-                { _commit_button->Render(), text("  "), _push_button->Render(),
-                    filler(), text("Enter commit · ") | color(PANEL_FG_DIM),
+            Elements actions = { _commit_button->Render(), text("  "),
+                _push_button->Render(), filler() };
+            if (*_committed) {
+                actions.push_back(text("Esc close") | color(PANEL_FG_DIM));
+            } else {
+                actions.push_back(
+                    text("Enter commit · ") | color(PANEL_FG_DIM));
+                actions.push_back(
                     text(std::string(MULTILINE_KEY) + " new line · Esc close")
-                        | color(PANEL_FG_DIM) }));
+                    | color(PANEL_FG_DIM));
+            }
+            rows.push_back(hbox(std::move(actions)));
             return vbox(std::move(rows)) | xflex;
         }
 
@@ -207,13 +217,33 @@ namespace {
 
         void _commit(bool push)
         {
+            if (*_committed) {
+                // The commit landed: Push publishes it and closes the
+                // dialog, Commit has nothing left to take.
+                if (push) {
+                    imza::push_and_notify(*_state);
+                    imza::close_modal(*_state);
+                }
+                return;
+            }
             if (trim(_title).empty()) {
                 _error = "Write a commit title first.";
                 _title_input->TakeFocus();
                 return;
             }
-            imza::resolve_modal(
-                *_state, ModalResult { CommitResult { _message(), push } });
+            if (push) {
+                imza::resolve_modal(
+                    *_state, ModalResult { CommitResult { _message(), true } });
+                return;
+            }
+            // Commit-only keeps the dialog open so Push stays reachable.
+            // The flag is shared because the completion may outlive the
+            // dialog.
+            imza::commit_and_notify(
+                *_state, _message(), false, [committed = _committed](bool ok) {
+                    committed->store(ok);
+                    animation::RequestAnimationFrame();
+                });
         }
 
         std::shared_ptr<ApplicationState> _state;
@@ -222,6 +252,9 @@ namespace {
         Component _body_input;
         Component _commit_button;
         Component _push_button;
+        std::string _commit_label = "Commit";
+        std::shared_ptr<std::atomic<bool>> _committed
+            = std::make_shared<std::atomic<bool>>(false);
         std::string _title;
         int _title_cursor = 0;
         std::string _body;

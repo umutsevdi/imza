@@ -1458,15 +1458,17 @@ void push_and_notify(ApplicationState& state)
     });
 }
 
-void commit_and_notify(ApplicationState& state, std::string message, bool push)
+void commit_and_notify(ApplicationState& state, std::string message, bool push,
+    std::function<void(bool)> on_committed)
 {
-    // Called from resolve_modal, which closes the dialog as soon as git
-    // accepts the request; the outcome arrives as a toast because git runs
-    // after the modal is gone.
     state.environment->commit(std::move(message), state.post,
-        [&state, post = state.post, push](GitActionResult committed) {
+        [&state, post = state.post, push,
+            on_committed = std::move(on_committed)](GitActionResult committed) {
             report_git_action(
                 state, committed, "Committed ", "Commit failed: ");
+            if (on_committed) {
+                on_committed(committed.ok);
+            }
             if (!committed.ok || !push) {
                 return;
             }

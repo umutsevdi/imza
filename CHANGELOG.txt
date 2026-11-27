@@ -19,8 +19,8 @@ shows staged and unstaged files with a checkbox each, and its Commit
 button (or `/commit`) opens a dialog with a multi-line message, the
 branch and remote, and Commit / Push buttons. The result arrives as a
 notification, so a failed push is never missed.
-- Committing without pushing no longer takes the Push button with it:
-the Changed files widget stays while commits are waiting to be pushed.
+- The commit dialog now stays open after committing, so Push is one
+press away; pushing closes it.
 - A deleted or moved file now shows as a single line in the chat
 instead of a wall of red diff lines.
 - Update notices can now be turned down: set `preferences.update_checks`

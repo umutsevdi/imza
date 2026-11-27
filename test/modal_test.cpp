@@ -846,7 +846,7 @@ struct CommitFixture {
 
 } // namespace
 
-TEST_CASE("commit modal shows the branch and staged stat, and commits on Enter")
+TEST_CASE("commit modal commits on Enter and keeps Push reachable")
 {
     if (!imza::test::git_available()) {
         return;
@@ -886,8 +886,10 @@ TEST_CASE("commit modal shows the branch and staged stat, and commits on Enter")
         imza::test::without_ansi(imza::test::to_text(modal->Render(), 70, 16)));
     CHECK(typed.find("Add feature") != std::string::npos);
 
+    // Enter commits without closing: the dialog reports the landed
+    // commit and Push stays reachable.
     modal->OnEvent(ftxui::Event::Return);
-    CHECK_FALSE(std::holds_alternative<imza::CommitModal>(
+    CHECK(std::holds_alternative<imza::CommitModal>(
         fixture.state->session->modal()));
     REQUIRE(fixture.pump.wait_for([&] {
         return fixture.state->notifications->notifications()->size() == 1;
@@ -897,10 +899,24 @@ TEST_CASE("commit modal shows the branch and staged stat, and commits on Enter")
     CHECK(notes->front().description.find("Committed ") == 0);
     CHECK(notes->front().description.find("Add feature") != std::string::npos);
 
+    const std::string committed = imza::test::collapse_whitespace(
+        imza::test::without_ansi(imza::test::to_text(modal->Render(), 70, 16)));
+    CHECK(committed.find("Committed") != std::string::npos);
+    CHECK(committed.find("Push") != std::string::npos);
+    CHECK(committed.find("will be committed to:") == std::string::npos);
+
     const imza::CommandResult log = imza::run_command("git -C "
             + imza::shell_quote(fixture.scratch.path) + " log -1 --format=%s",
         std::chrono::seconds { 10 });
     CHECK(imza::trim(log.output) == "Add feature");
+
+    // Push publishes the landed commit and closes the dialog.
+    REQUIRE(imza::test::click_label(modal, "Push", 70, 16));
+    CHECK(fixture.state->session->modal().index() == 0);
+    REQUIRE(fixture.pump.wait_for([&] {
+        return fixture.state->notifications->notifications()->size() == 2;
+    }));
+    CHECK(fixture.state->notifications->notifications()->back().error);
 }
 
 TEST_CASE("commit modal names the origin remote when one is configured")

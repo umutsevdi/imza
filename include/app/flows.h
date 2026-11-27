@@ -184,11 +184,13 @@ bool cancel_review_pass(ApplicationState& state, ReviewPass pass);
 // Opens the commit dialog over the staged files; refused with an error
 // when the workspace has no Git repository or nothing is staged.
 void open_commit_modal(ApplicationState& state);
-// Runs git off the UI thread, closes the dialog once the request is
-// accepted, and reports the outcome as a toast: the commit on completion,
-// then the push when it finishes, since a push can fail after the dialog
-// is gone and is reported separately.
-void commit_and_notify(ApplicationState& state, std::string message, bool push);
+// Runs git off the UI thread and reports the outcome as a toast: the
+// commit on completion, then the push when it finishes, since a push can
+// fail after the dialog is gone and is reported separately. The caller
+// closes the dialog; `on_committed` fires through the state's PostFn once
+// the commit landed or failed, so a dialog that stays open can react.
+void commit_and_notify(ApplicationState& state, std::string message, bool push,
+    std::function<void(bool)> on_committed = { });
 // Pushes the current branch and reports the outcome as a toast; used by the
 // sidebar, where there is no commit dialog to close.
 void push_and_notify(ApplicationState& state);
