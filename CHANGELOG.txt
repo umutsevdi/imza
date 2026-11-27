@@ -29,6 +29,7 @@ and quitting while the agent waits for your approval no longer hangs;
 skill installs also stop cleanly on shutdown.
 - Long provider and model names now truncate cleanly in the usage
 breakdown instead of cutting mid-character.
+- Agents can now access bundled changelog.
 
 -------------------------------------------------------------------------------
 0.7.6 - 2026-11-22

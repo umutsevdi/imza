@@ -40,3 +40,12 @@ Guidelines:
 
 Questions about the user's own project or codebase are not covered by this
 skill; work on those normally.
+
+The changelog is not part of `wiki/`, but it is shipped
+alongside this skill - it sits next to the `skills/` folder containing
+this skill (`../../CHANGELOG.txt` on Unix installs, `../CHANGELOG.txt` on
+Windows). For questions about recent changes, versions, or whether a
+feature has shipped, read it there; the newest section is at the top, so
+the latest section answers "what's new" questions without reading the
+whole file. If the file is missing (e.g. the skill was copied out of its
+install), say so and ask the user to run `/changelog`.

@@ -1393,7 +1393,20 @@ TrimResult trim_saved_sessions(std::chrono::days age,
     }
     const auto cutoff = now - age;
     TrimResult out;
-    for (const SavedSession& session : saved_sessions()) {
+    std::set<std::string> known;
+    std::vector<SavedSession> regular = saved_sessions();
+    for (const SavedSession& session : regular) {
+        known.insert(session.path.filename().string());
+    }
+    for (const std::string& file : session_files()) {
+        if (known.contains(file)) {
+            continue;
+        }
+        if (auto metadata = read_session_metadata(sessions_dir() / file)) {
+            regular.push_back(std::move(*metadata));
+        }
+    }
+    for (const SavedSession& session : regular) {
         if (same_file(session.path, keep)) {
             continue;
         }
