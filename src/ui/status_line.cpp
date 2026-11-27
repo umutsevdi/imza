@@ -114,7 +114,7 @@ namespace {
                 }
             }
             if (session.total_cost > 0) {
-                bar.push_back(text(" · " + _money_text(session.total_cost))
+                bar.push_back(text(" · " + money_text(session.total_cost))
                     | color(PANEL_FG_DIM));
             }
             const std::string tags = capability_tags(_capabilities);
@@ -260,14 +260,6 @@ namespace {
             return _state->providers
                 ->model_metadata_for(selection->model, selection->connection_id)
                 .capabilities;
-        }
-
-        std::string _money_text(double cost)
-        {
-            std::ostringstream o;
-            o << '$' << std::fixed << std::setprecision(cost >= 1.0 ? 2 : 3)
-              << cost;
-            return o.str();
         }
 
         std::string _abbreviate_home(const std::string& path)

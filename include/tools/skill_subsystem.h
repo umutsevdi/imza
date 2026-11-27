@@ -78,6 +78,8 @@ public:
     explicit SkillSubsystem(SkillSubsystemHooks hooks = { });
     ~SkillSubsystem();
 
+    void stop() override;
+
     SkillSubsystem(const SkillSubsystem&)            = delete;
     SkillSubsystem& operator=(const SkillSubsystem&) = delete;
 

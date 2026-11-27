@@ -94,6 +94,10 @@ std::string format_session_list(const std::vector<SavedSession>& sessions);
 // and subagent state. Guarded on subagents so child states without a
 // manager (ACP sessions) share the same protocol.
 void install_session(ApplicationState& state, SessionSnapshot snapshot);
+// Blocks up to timeout_ms for the asynchronous workspace scan to publish
+// the skill catalogue, draining the main-thread queue so the posted
+// publishes land instead of accumulating.
+void wait_for_environment_ready(ApplicationState& state, int timeout_ms);
 // The current skill catalogue as the skills modal renders it, bundled
 // entries flagged.
 SkillsModal skills_modal(const ApplicationState& state);

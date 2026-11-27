@@ -132,19 +132,23 @@ McpSubsystem::McpSubsystem(
 void McpSubsystem::stop()
 {
     mark_dead();
-    std::lock_guard lock(_map_mutex);
-    _death_cv.notify_all();
+    {
+        std::lock_guard lock(_map_mutex);
+        for (auto& [id, entry] : _servers) {
+            entry->stream_cancel.store(true);
+        }
+        _death_cv.notify_all();
+    }
+    // Registered teardown joins here: the notify hook fires while the
+    // notification store and the entries it reads are still alive.
+    _workers.join_all();
 }
 
 McpSubsystem::~McpSubsystem()
 {
-    // Workers reference this through the signal and their entries; stop
-    // streams and retries, then join before any member dies.
+    // Workers reference this through the signal and their entries; stop()
+    // stops streams and retries and joins before any member dies.
     stop();
-    for (auto& [id, entry] : _servers) {
-        entry->stream_cancel.store(true);
-    }
-    _workers.join_all();
     for (auto& [id, entry] : _servers) {
         std::lock_guard io_lock(entry->io);
         mcp_end_session(entry->session);
@@ -179,7 +183,16 @@ void McpSubsystem::reload(std::map<std::string, McpServerConfig> servers)
                 continue;
             }
             std::shared_ptr<ServerEntry> entry = found->second;
-            if (connection_fields_changed(entry->config, config)) {
+            // Sign-ins and refreshes rewrite config under state_mutex, so
+            // the comparison reads it under the same lock even though the
+            // map lock already pins the entry.
+            bool connection_changed = false;
+            {
+                std::lock_guard state_lock(entry->state_mutex);
+                connection_changed
+                    = connection_fields_changed(entry->config, config);
+            }
+            if (connection_changed) {
                 // Connection changed: drop the session without network
                 // I/O; the server expires the abandoned session itself.
                 std::lock_guard io_lock(entry->io);
@@ -219,6 +232,11 @@ std::shared_ptr<McpSubsystem::ServerEntry> McpSubsystem::find(
 
 void McpSubsystem::spawn(std::function<void()> work)
 {
+    // A spawn landing after join_all() during teardown would destroy a
+    // joinable thread; the latch gate keeps the pool clean.
+    if (!alive()) {
+        return;
+    }
     _workers.spawn(std::move(work));
 }
 
@@ -249,7 +267,12 @@ void McpSubsystem::run_handshake(
     }
 
     std::string detail;
-    std::optional<McpSession> fresh = make_session(entry->config, detail);
+    McpServerConfig config;
+    {
+        std::lock_guard state_lock(entry->state_mutex);
+        config = entry->config;
+    }
+    std::optional<McpSession> fresh = make_session(config, detail);
     std::vector<McpToolDefinition> tools;
     bool failed           = false;
     bool was_reconnecting = false;
@@ -288,16 +311,14 @@ void McpSubsystem::run_handshake(
     }
     _changed.publish();
     if (!failed && was_reconnecting) {
-        _hooks.notify(
-            false, "MCP server '" + entry->config.id + "' reconnected.");
+        _hooks.notify(false, "MCP server '" + config.id + "' reconnected.");
     }
     if (failed) {
         if (attempt < MAX_RECONNECT_ATTEMPTS) {
             const long delay
                 = RETRY_DELAYS_SECS[static_cast<std::size_t>(attempt - 1)];
             _hooks.notify(false,
-                "MCP server '" + entry->config.id
-                    + "' disconnected - retrying.");
+                "MCP server '" + config.id + "' disconnected - retrying.");
             spawn([this, entry, delay] {
                 if (wait_interruptible(delay * 1000)) {
                     return;
@@ -306,7 +327,7 @@ void McpSubsystem::run_handshake(
             });
         } else {
             _hooks.notify(true,
-                "MCP server '" + entry->config.id
+                "MCP server '" + config.id
                     + "' could not be reached: " + detail);
         }
         return;
@@ -346,9 +367,11 @@ void McpSubsystem::run_listener(std::shared_ptr<ServerEntry> entry)
         std::string stream_url;
         std::vector<std::string> headers;
         {
-            // Snapshot the session identity; the GET itself must not hold
-            // the I/O mutex (calls and re-lists acquire it in callbacks).
-            std::lock_guard io_lock(entry->io);
+            // Snapshot the session identity and config-derived credentials
+            // under state_mutex: sign-ins and refreshes rewrite config and
+            // session there. The GET itself must not hold the I/O mutex
+            // (calls and re-lists acquire it in callbacks).
+            std::lock_guard state_lock(entry->state_mutex);
             stream_url = resolved_mcp_url(entry->config);
             headers    = {
                 "Accept: text/event-stream",
@@ -465,6 +488,9 @@ void McpSubsystem::autoload()
     {
         std::lock_guard map_lock(_map_mutex);
         for (const auto& [id, entry] : _servers) {
+            // reload rewrites config under state_mutex while the map lock
+            // is held; the read must use the same guard.
+            std::lock_guard state_lock(entry->state_mutex);
             if (entry->config.autoload) {
                 ids.push_back(id);
             }
@@ -550,9 +576,11 @@ void McpSubsystem::run_sign_in(std::shared_ptr<ServerEntry> entry)
     std::string url;
     bool has_client = false;
     McpOauthClient existing;
+    McpServerConfig snapshot;
     {
         std::lock_guard state_lock(entry->state_mutex);
-        url = resolved_mcp_url(entry->config);
+        snapshot = entry->config;
+        url      = resolved_mcp_url(entry->config);
         if (!entry->config.oauth.client_id.empty()) {
             existing.client_id     = entry->config.oauth.client_id;
             existing.client_secret = entry->config.oauth.client_secret;
@@ -562,7 +590,7 @@ void McpSubsystem::run_sign_in(std::shared_ptr<ServerEntry> entry)
 
     const McpSignInOutcome outcome = url.empty()
         ? McpSignInOutcome { .status = Status::CONFIG_ERROR,
-              .detail                = dangling_catalog_detail(entry->config) }
+              .detail                = dangling_catalog_detail(snapshot) }
         : mcp_oauth_sign_in(url, has_client ? &existing : nullptr, hooks,
               entry->sign_in_cancel);
 
@@ -644,9 +672,11 @@ bool McpSubsystem::refresh_entry_tokens(
     const std::shared_ptr<ServerEntry>& entry, bool forced, std::string& detail)
 {
     McpOauthCredentials oauth;
+    std::string server_id;
     {
         std::lock_guard state_lock(entry->state_mutex);
-        oauth = entry->config.oauth;
+        oauth     = entry->config.oauth;
+        server_id = entry->config.id;
     }
     if (!forced
         && (oauth.expires_at <= 0
@@ -665,8 +695,8 @@ bool McpSubsystem::refresh_entry_tokens(
     if (status != Status::OK) {
         detail = "sign-in needed again: " + detail;
         _hooks.notify(false,
-            "Could not renew the access token for MCP server '"
-                + entry->config.id + "': " + detail);
+            "Could not renew the access token for MCP server '" + server_id
+                + "': " + detail);
         return false;
     }
     {
@@ -677,12 +707,20 @@ bool McpSubsystem::refresh_entry_tokens(
         }
         entry->config.oauth.expires_at = tokens.expires_at;
     }
-    if (_hooks.persist_server && !!alive()
-        && still_tracked(entry->config.id, entry)) {
-        _hooks.persist_server(entry->config);
+    if (_hooks.persist_server && !!alive()) {
+        // Snapshot under the lock: sign-ins rewrite config concurrently,
+        // and the hook copies the value only after it returns.
+        McpServerConfig persisted;
+        {
+            std::lock_guard state_lock(entry->state_mutex);
+            persisted = entry->config;
+        }
+        if (still_tracked(persisted.id, entry)) {
+            _hooks.persist_server(persisted);
+        }
     }
-    _hooks.notify(false,
-        "Renewed the access token for MCP server '" + entry->config.id + "'.");
+    _hooks.notify(
+        false, "Renewed the access token for MCP server '" + server_id + "'.");
     return true;
 }
 

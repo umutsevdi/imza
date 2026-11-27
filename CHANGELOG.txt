@@ -10,473 +10,412 @@ CHANGELOG
 -------------------------------------------------------------------------------
 0.8.0 - Unreleased
 -------------------------------------------------------------------------------
-Changes:
-  - Update notices can now be turned down: set `preferences.update_checks`
-    to `weekly` or `off` in config.json, and `imza --update` always checks.
-  - Stage, commit, and push without leaving Imza: the Changed files widget
-    shows staged and unstaged files with a checkbox each, and its Commit
-    button (or `/commit`) opens a dialog with a multi-line message, the
-    branch and remote, and Commit / Push buttons. The result arrives as a
-    notification, so a failed push is never missed.
-  - A deleted or moved file now shows as a single line in the chat
-    instead of a wall of red diff lines.
+- Update notices can now be turned down: set `preferences.update_checks`
+to `weekly` or `off` in config.json, and `imza --update` always checks.
+- Stage, commit, and push without leaving Imza: the Changed files widget
+shows staged and unstaged files with a checkbox each, and its Commit
+button (or `/commit`) opens a dialog with a multi-line message, the
+branch and remote, and Commit / Push buttons. The result arrives as a
+notification, so a failed push is never missed.
+- A deleted or moved file now shows as a single line in the chat
+instead of a wall of red diff lines.
+- Finishing a subagent no longer interrupts background work elsewhere,
+and quitting while the agent waits for your approval no longer hangs;
+skill installs also stop cleanly on shutdown.
+- Long provider and model names now truncate cleanly in the usage
+breakdown instead of cutting mid-character.
 
 -------------------------------------------------------------------------------
 0.7.6 - 2026-11-22
 -------------------------------------------------------------------------------
-Changes:
-  - Shell commands run by the agent now return a single result with a clear
-    OK / ERROR / TIMEOUT status, so failures are no longer mistaken for
-    successes.
-  - The agent can now look at images and PDFs in your workspace: reading one
-    shows it to the model when the selected model supports that file type.
-  - The agent no longer undoes changes it didn't make, knows when a change
-    is too small to need tests, and reports honestly when checks fail instead
-    of pressing on.
-  - Fixed the "Thought" section stopping halfway across the screen.
+- Shell commands run by the agent now return a single result with a clear
+OK / ERROR / TIMEOUT status, so failures are no longer mistaken for
+successes.
+- The agent can now look at images and PDFs in your workspace: reading one
+shows it to the model when the selected model supports that file type.
+- The agent no longer undoes changes it didn't make, knows when a change
+is too small to need tests, and reports honestly when checks fail instead
+of pressing on.
+- Fixed the "Thought" section stopping halfway across the screen.
 
 -------------------------------------------------------------------------------
 0.7.5 - 2026-11-19
 -------------------------------------------------------------------------------
-Changes:
-  - One-shot runs (`--ask` / `--exec`) now keep a full transcript of what the
-    agent did: every run is saved automatically, and `--output-json` writes a
-    machine-readable summary for scripts and CI pipelines.
-  - You can now cap or disable subagent delegation (`capabilities.subagents`
-    in the config, or `--max-subagents` on the command line).
-  - Links in chat replies, plan documents and viewers now open in your browser
-    when clicked.
-  - The sidebar now appears only when it has something to show.
-  - Fixed mouse wheel scroll bug on panes with overflowing content.
+- One-shot runs (`--ask` / `--exec`) now keep a full transcript of what the
+agent did: every run is saved automatically, and `--output-json` writes a
+machine-readable summary for scripts and CI pipelines.
+- You can now cap or disable subagent delegation (`capabilities.subagents`
+in the config, or `--max-subagents` on the command line).
+- Links in chat replies, plan documents and viewers now open in your browser
+when clicked.
+- The sidebar now appears only when it has something to show.
+- Fixed mouse wheel scroll bug on panes with overflowing content.
 
 -------------------------------------------------------------------------------
 0.7.4 - 2026-11-12
 -------------------------------------------------------------------------------
-Changes:
-  - The sidebar no longer reserves screen space on narrow terminals when
-    it has nothing to show, and the Runtime widget lists Skills only once
-    a skill is actually loaded. On narrow terminals the sidebar also keeps
-    a few rows visible while its widgets scroll instead of collapsing to a
-    single line.
-  - The Amazon Bedrock provider now works without an API key when the machine
-    already has an AWS identity (such as Kubernetes pods with IRSA): imza signs
-    requests with the machine's own credentials automatically.
-  - Thought blocks now stream directly in the chat in dimmed text and their
-  header toggles them open or closed in place instead of opening a viewer.
-  - Fixed the chat hint bar incorrectly displaying the shortcut even when
-  toggle is not available.
+- The sidebar no longer reserves screen space on narrow terminals when
+it has nothing to show, and the Runtime widget lists Skills only once
+a skill is actually loaded. On narrow terminals the sidebar also keeps
+a few rows visible while its widgets scroll instead of collapsing to a
+single line.
+- The Amazon Bedrock provider now works without an API key when the machine
+already has an AWS identity (such as Kubernetes pods with IRSA): imza signs
+requests with the machine's own credentials automatically.
+- Thought blocks now stream directly in the chat in dimmed text and their
+header toggles them open or closed in place instead of opening a viewer.
+- Fixed the chat hint bar incorrectly displaying the shortcut even when
+toggle is not available.
 
 -------------------------------------------------------------------------------
 0.7.3 - 2026-11-07
 -------------------------------------------------------------------------------
-Changes:
-  - Merged the Context and Permissions widgets into one interactive Runtime
-    widget: compact Files, Skills, MCP, and Permissions rows that expand on
-    click, with the full permission list opening in a read-only viewer. Skill
-    grants now appear in that list.
-  - ACP clients now see skills in their command palette (invocable as
-    /skill-name) and receive plan documents, build logs, and handoff
-    reports as markdown messages when they are created or revised. The
-    model selector now appears on new ACP sessions without toggling any
-    setting.
+- Merged the Context and Permissions widgets into one interactive Runtime
+widget: compact Files, Skills, MCP, and Permissions rows that expand on
+click, with the full permission list opening in a read-only viewer. Skill
+grants now appear in that list.
+- ACP clients now see skills in their command palette (invocable as
+/skill-name) and receive plan documents, build logs, and handoff
+reports as markdown messages when they are created or revised. The
+model selector now appears on new ACP sessions without toggling any
+setting.
 
 -------------------------------------------------------------------------------
 0.7.2 - 2026-11-03
 -------------------------------------------------------------------------------
-Changes:
-  - Added support for Amazon Bedrock, Azure OpenAI, Cloudflare Workers AI and
-    Databricks, which build their address from a variable you export
-    (`AWS_REGION`, `AZURE_RESOURCE_NAME`, `CLOUDFLARE_ACCOUNT_ID`,
-    `DATABRICKS_HOST`) instead of a fixed one. These providers have no model
-    list to fetch, so their models come from the built-in catalog and Test
-    verifies your key with a single-token request.
-  - Execution blocks now explicitly displays used tools.
-  - Imza can now be driven from editors that support the Agent Client
-    Protocol (ACP), running imza's sandbox and permission layers with the interface
-    provided by the IDE or text editor of choice. Imza exposes many of it's 
-    features through ACP. However features of imza that are beyond ACP specification
-    are not exposed. And they should be configured through imza itself or it's
-    configuration file.
+- Added support for Amazon Bedrock, Azure OpenAI, Cloudflare Workers AI and
+Databricks, which build their address from a variable you export
+(`AWS_REGION`, `AZURE_RESOURCE_NAME`, `CLOUDFLARE_ACCOUNT_ID`,
+`DATABRICKS_HOST`) instead of a fixed one. These providers have no model
+list to fetch, so their models come from the built-in catalog and Test
+verifies your key with a single-token request.
+- Execution blocks now explicitly displays used tools.
+- Imza can now be driven from editors that support the Agent Client
+Protocol (ACP), running imza's sandbox and permission layers with the interface
+provided by the IDE or text editor of choice. Imza exposes many of it's 
+features through ACP. However features of imza that are beyond ACP specification
+are not exposed. And they should be configured through imza itself or it's
+configuration file.
 
 -------------------------------------------------------------------------------
 0.7.1 - 2026-10-27
 -------------------------------------------------------------------------------
-Changes:
-  - Each agent message now shows the tokens it used and the date right of
-    the model name, and the new /usage command opens a spending dashboard
-    with per-model and per-day charts for this session and all saved
-    sessions combined.
-  - `/variant` now takes the reasoning effort right on the input line
-    (`/variant high`) with autocomplete suggestions, instead of opening a
-    picker dialog.
-  - Plan documentation now loads on demand.
-  - Fixed `imza.fs.ts_query` ignoring its query predicates, so filtered
-    searches returned unfiltered matches.
-  - Read-only shell commands now cover far more common forms.
-  - Secret-bearing files (.env, keys, credentials, .git contents) now
-    always require explicit approval, even inside an allowed directory,
-    and shell commands naming them are never auto-accepted.
-  - Fixed provider connections showing as failed.
-  - Fixed bugs regarding `imza --update`.
-  - The three loader tools are now consistently named `load_skill`,
-    `load_module`, and `load_mcp`, and their chat cards and approval
-    dialogs are labeled uniformly.
+- Each agent message now shows the tokens it used and the date right of
+the model name, and the new /usage command opens a spending dashboard
+with per-model and per-day charts for this session and all saved
+sessions combined.
+- `/variant` now takes the reasoning effort right on the input line
+(`/variant high`) with autocomplete suggestions, instead of opening a
+picker dialog.
+- Plan documentation now loads on demand.
+- Fixed `imza.fs.ts_query` ignoring its query predicates, so filtered
+searches returned unfiltered matches.
+- Read-only shell commands now cover far more common forms.
+- Secret-bearing files (.env, keys, credentials, .git contents) now
+always require explicit approval, even inside an allowed directory,
+and shell commands naming them are never auto-accepted.
+- Fixed provider connections showing as failed.
+- Fixed bugs regarding `imza --update`.
+- The three loader tools are now consistently named `load_skill`,
+`load_module`, and `load_mcp`, and their chat cards and approval
+dialogs are labeled uniformly.
 
 -------------------------------------------------------------------------------
 0.7.0 - 2026-10-24
 -------------------------------------------------------------------------------
-Changes:
-  - Imza is now installable with Homebrew: `brew install umutsevdi/imza/imza`;
-    every release updates the cask automatically.
-  - New /undo command reverts the last file change the agent made, one file
-    at a time.
-  - API keys and subscription tokens now live in your operating system's
-    keychain. Existing keys move over automatically on the first start.
-  - Added arm64 Linux packages.
-  - New /cd command switches the session to another directory without
-    restarting.
-  - Slash commands now understand the names other coding agents use: /quit
-    completes to /exit, /clear to /new, /agents to /subagents, /reasoning to
-    /variant, and so on; a typo gets a suggestion.
-  - New /permissions dialog manages the persistent permission grants, so
-    stopping the same prompts no longer requires editing config.json.
-  - Added a central in-app notification system.
-  - Increased subagent limit to 8.
-  - Fixed the chat input cursor disappearing or blinking.
-  - Improved performance during diff scans.
-  - Reduced CPU usage during streaming.
-  - Fixed a rare crash when closing Imza while a provider connection was
-    still being tested.
-  - Fixed sessions opened by another Imza process not being recognized as
-    in use on Windows, letting a switch overwrite them.
-  - Fixed child processes on Windows losing their environment.
-  - Fixed a bug that caused agent's mode to be displayed incorrectly when
-    loaded from a session.
+- Imza is now installable with Homebrew: `brew install umutsevdi/imza/imza`;
+every release updates the cask automatically.
+- New /undo command reverts the last file change the agent made, one file
+at a time.
+- API keys and subscription tokens now live in your operating system's
+keychain. Existing keys move over automatically on the first start.
+- Added arm64 Linux packages.
+- New /cd command switches the session to another directory without
+restarting.
+- Slash commands now understand the names other coding agents use: /quit
+completes to /exit, /clear to /new, /agents to /subagents, /reasoning to
+/variant, and so on; a typo gets a suggestion.
+- New /permissions dialog manages the persistent permission grants, so
+stopping the same prompts no longer requires editing config.json.
+- Added a central in-app notification system.
+- Increased subagent limit to 8.
+- Fixed the chat input cursor disappearing or blinking.
+- Improved performance during diff scans.
+- Reduced CPU usage during streaming.
+- Fixed a rare crash when closing Imza while a provider connection was
+still being tested.
+- Fixed sessions opened by another Imza process not being recognized as
+in use on Windows, letting a switch overwrite them.
+- Fixed child processes on Windows losing their environment.
+- Fixed a bug that caused agent's mode to be displayed incorrectly when
+loaded from a session.
 
 -------------------------------------------------------------------------------
 0.6.4 - 2026-10-17
 -------------------------------------------------------------------------------
-Changes:
-  - Fixed formatting issues in one-shot answers (--ask/--exec) and --update.
-  - Imza now ships its own documentation as a bundled `imza-docs` skill; the
-    agent can answer questions about Imza itself, and the skill is always
-    allowed and cannot be removed.
-  - New /auto command lets you turn permission approvals on or off while
-    the app is running; the input box changes color while approvals are
-    skipped.
-  - Updated sidebar widgets.
-  - Subscription sign-in refresh can no longer freeze the app when the
-    token service stalls, and the Review tab no longer keeps a background
-    worker alive after it closes.
-  - Wrapping a command in `bash -c` (or `sh`, `cmd /c`, `powershell -c`, and
-    similar) no longer sidesteps the shell rules.
-  - Searching with `imza.fs.grep` now skips build output, dependency trees,
-    and version-control internals, and reads each file once — searching a
-    whole project finishes quickly instead of timing out. A path you name
-    explicitly is still searched as given.
-  - Two new bindings round out what used to need a shell: `imza.json` to read
-    and write JSON in Lua, and `imza.fs.copy`/`move` to copy or move a file
-    through the permission gate.
-  - Copying, moving, and deleting a file now show up in the diff view, so a
-    deletion reads as a deletion and a new file as a new file instead of
-    happening invisibly.
+- Fixed formatting issues in one-shot answers (--ask/--exec) and --update.
+- Imza now ships its own documentation as a bundled `imza-docs` skill; the
+agent can answer questions about Imza itself, and the skill is always
+allowed and cannot be removed.
+- New /auto command lets you turn permission approvals on or off while
+the app is running; the input box changes color while approvals are
+skipped.
+- Updated sidebar widgets.
+- Subscription sign-in refresh can no longer freeze the app when the
+token service stalls, and the Review tab no longer keeps a background
+worker alive after it closes.
+- Wrapping a command in `bash -c` (or `sh`, `cmd /c`, `powershell -c`, and
+similar) no longer sidesteps the shell rules.
+- Searching with `imza.fs.grep` now skips build output, dependency trees,
+and version-control internals, and reads each file once — searching a
+whole project finishes quickly instead of timing out. A path you name
+explicitly is still searched as given.
+- Two new bindings round out what used to need a shell: `imza.json` to read
+and write JSON in Lua, and `imza.fs.copy`/`move` to copy or move a file
+through the permission gate.
+- Copying, moving, and deleting a file now show up in the diff view, so a
+deletion reads as a deletion and a new file as a new file instead of
+happening invisibly.
 
 -------------------------------------------------------------------------------
 0.6.3 - 2026-10-15
 -------------------------------------------------------------------------------
-Changes:
-  - Added bindings for `imza.sleep` and `imza.bg.shell`.
-  - Increased timeout limits for shell commands and lua bindings.
-  - Startup no longer waits on the first git scan, so the window appears
-    sooner; the Changes widget fills in a moment later.
-  - The agent can now ask to connect an MCP server it discovers; approval
-    is per connect, and `--allow-mcp`/`--allow-skill` pre-approve servers
-    and skills for one-shot runs. Loading a skill also grants read access
-    to its own folder, so skill scripts run without a second approval.
+- Added bindings for `imza.sleep` and `imza.bg.shell`.
+- Increased timeout limits for shell commands and lua bindings.
+- Startup no longer waits on the first git scan, so the window appears sooner; 
+the Changes widget fills in a moment later.
+- The agent can now ask to connect an MCP server it discovers; approval is per 
+connect, and `--allow-mcp`/`--allow-skill` pre-approve servers and skills for 
+one-shot runs. Loading a skill also grants read access to its own folder, so 
+skill scripts run without a second approval.
 
 -------------------------------------------------------------------------------
 0.6.2 - 2026-10-14
 -------------------------------------------------------------------------------
-<https://github.com/umutsevdi/imza/releases/tag/v0.6.2>
-
-Changes:
-  - The agent now records the decisions it makes while building for transparency.
-  - Imza can generate a handoff document based on what was planned, how it was
-    implemented, and what changed along the way. Run it from Review. Each run
-    keeps its own report, so a session that goes through several stints keeps
-    one per stint.
-  - Discover and install skills without leaving Imza: `/skills` now has a
-    Search tab backed by skills.sh, showing install counts and marking the
-    ones you already have.
-  - The sidebar Documents list now labels plan revisions, build logs, and
-    handoff reports consistently, numbered per kind.
-  - Any viewer can now be exported: press e to save its content under
-    .imza/ and open it in your editor.
-  - On Windows the multi-line shortcut is now shown as Alt+Shift+Enter, since
-    terminals reserve Alt+Enter for the full-screen toggle.
-  - OpenAI Subscription sign-in now shows the device code and the full
-    verification URL, so it can be completed over SSH where no browser opens.
-  - Fixed a regression that caused OpenAI Subscription to fail.
-  - Imza polls git less often: the Changes widget and Review now refresh on a
-    cheap index/HEAD check and a slower fallback, roughly halving background
-    git activity.
+- The agent now records the decisions it makes while building for transparency.
+- Imza can generate a handoff document based on what was planned, how it was
+implemented, and what changed along the way. Run it from Review. Each run
+keeps its own report, so a session that goes through several stints keeps
+one per stint.
+- Discover and install skills without leaving Imza: `/skills` now has a Search 
+tab backed by skills.sh, showing install counts and marking the ones you 
+already have.
+- The sidebar Documents list now labels plan revisions, build logs, and handoff 
+reports consistently, numbered per kind.
+- Any viewer can now be exported: press e to save its content under .imza/ and 
+open it in your editor.
+- On Windows the multi-line shortcut is now shown as Alt+Shift+Enter, since 
+terminals reserve Alt+Enter for the full-screen toggle.
+- OpenAI Subscription sign-in now shows the device code and the full 
+verification URL, so it can be completed over SSH where no browser opens.
+- Fixed a regression that caused OpenAI Subscription to fail.
+- Imza polls git less often: the Changes widget and Review now refresh on a 
+cheap index/HEAD check and a slower fallback, roughly halving background git 
+activity.
 
 -------------------------------------------------------------------------------
 0.6.1 - 2026-10-12
 -------------------------------------------------------------------------------
-<https://github.com/umutsevdi/imza/releases/tag/v0.6.1>
-
-Changes:
-  - Imza opens faster: system detection and the provider catalog load in the
-    background while the first frame renders.
-  - Delete and directory creation actions are now monitored by Imza's runtime.
-  - The sidebar widgets can be hidden individually through the new `sidebar`
-    object in config.json.
-  - The startup banner now shows a rotating line: a useful tip during the
-    day, and a gentler note after 22:00.
-  - Ctrl+C and Ctrl+D now ask for confirmation before closing a session that
-    has a conversation, so a mistyped key no longer ends your work.
+- Imza opens faster: system detection and the provider catalog load in the 
+background while the first frame renders.
+- Delete and directory creation actions are now monitored by Imza's runtime. 
+The sidebar widgets can be hidden individually through the new `sidebar` object 
+in config.json.
+- The startup banner now shows a rotating line: a useful tip during the day, 
+and a gentler note after 22:00.
+- Ctrl+C and Ctrl+D now ask for confirmation before closing a session that has 
+a conversation, so a mistyped key no longer ends your work.
 
 -------------------------------------------------------------------------------
 0.6.0 - 2026-10-10
 -------------------------------------------------------------------------------
-<https://github.com/umutsevdi/imza/releases/tag/v0.6.0>
-MCP Release
-
-Changes:
-  - Full Model Context Protocol (MCP) support: remote MCP servers or
-    local programs (stdio transport) connect through the new /mcp dialog,
-    which offers a curated catalogue of 38 popular services (GitHub, GitLab,
-    Linear, Slack, Notion, Figma, Stripe, and more) alongside a
-    custom-endpoint option. Services that use browser sign-in (like
-    Cloudflare and Linear) authorize with one press, and their access
-    renews in the background. The agent discovers each server's tools on
-    demand and calls them directly. Connected servers appear in the sidebar
-    with live tool counts, tool rosters refresh automatically when servers
-    change, failed connections recover with retries, and every server
-    carries its own credential and timeout settings. Servers can be flagged
-    to connect automatically at startup, the sidebar lists only the servers
-    the agent can actually reach, and inactive servers are shown as such.
-  - Added the EVREN provider.
-  - The config file can now pre-approve directories and shell commands, and
-    list extra instruction files to follow alongside AGENTS.md.
-  - Startup memory usage reduced by replacing the JSON library with one
-    that does not leave its parsing scratch space in memory.
-  - Reduced idle CPU and memory usage of the side panel.
-  - Performance improvement on attachment encoding.
-  - Fixed sessions becoming unloadable when the transcript contained terminal
-    escape codes (colored command output); affected saved sessions load
-    again.
-  - Fixed MCP servers locking up after their session expired; they reconnect
-    and keep taking calls.
-  - Keystrokes are no longer lost or garbled while the agent runs commands.
-  - Fixed sessions becoming unusable after a tool result contained invalid
-    text; affected saved sessions load again.
-  - Fixed a rare crash when the task list updated while the sidebar was
-    redrawing.
-  - Expanded the set of shell commands that run without asking, and removed
-    a few that could not be approved safely.
+- Full Model Context Protocol (MCP) support: remote MCP servers or
+local programs (stdio transport) connect through the new /mcp dialog,
+which offers a curated catalogue of 38 popular services (GitHub, GitLab,
+Linear, Slack, Notion, Figma, Stripe, and more) alongside a
+custom-endpoint option. Services that use browser sign-in (like
+Cloudflare and Linear) authorize with one press, and their access
+renews in the background. The agent discovers each server's tools on
+demand and calls them directly. Connected servers appear in the sidebar
+with live tool counts, tool rosters refresh automatically when servers
+change, failed connections recover with retries, and every server
+carries its own credential and timeout settings. Servers can be flagged
+to connect automatically at startup, the sidebar lists only the servers
+the agent can actually reach, and inactive servers are shown as such.
+- Added the EVREN provider.
+- The config file can now pre-approve directories and shell commands, and list 
+extra instruction files to follow alongside AGENTS.md.
+- Startup memory usage reduced by replacing the JSON library with one that does 
+not leave its parsing scratch space in memory.
+- Reduced idle CPU and memory usage of the side panel.
+- Performance improvement on attachment encoding.
+- Fixed sessions becoming unloadable when the transcript contained terminal 
+escape codes (colored command output); affected saved sessions load again.
+- Fixed MCP servers locking up after their session expired; they reconnect and 
+keep taking calls.
+- Keystrokes are no longer lost or garbled while the agent runs commands.
+- Fixed sessions becoming unusable after a tool result contained invalid text; 
+affected saved sessions load again.
+- Fixed a rare crash when the task list updated while the sidebar was redrawing.
+- Expanded the set of shell commands that run without asking, and removed a few 
+that could not be approved safely.
 
 -------------------------------------------------------------------------------
 0.5.2 - 2026-10-04
 -------------------------------------------------------------------------------
-<https://github.com/umutsevdi/imza/releases/tag/v0.5.2>
-
-Changes:
-  - Compaction now runs in the background after a turn finishes, so
-    replies are no longer delayed by it.
-  - The Sidechat no longer re-summarizes the whole conversation.
-  - Thought blocks are no longer shown when the model produced no
-    reasoning content.
-  - Simplified plan document generation.
-  - The loading animation now sits to the left of the hints line while
-    the agent is working.
-  - Fixed a stuck state after interrupting a tool that blocked /compact
-    and session switching.
+- Compaction now runs in the background after a turn finishes, so replies are 
+no longer delayed by it.
+- The Sidechat no longer re-summarizes the whole conversation.
+- Thought blocks are no longer shown when the model produced no reasoning 
+content.
+- Simplified plan document generation.
+- The loading animation now sits to the left of the hints line while the agent 
+is working.
+- Fixed a stuck state after interrupting a tool that blocked /compact and 
+session switching.
 
 -------------------------------------------------------------------------------
 0.5.1 - 2026-10-03
 -------------------------------------------------------------------------------
-<https://github.com/umutsevdi/imza/releases/tag/v0.5.1>
-
-Changes:
-  - Added support for Google, DeepInfra, Fireworks AI, SiliconFlow and
-    CoreWeave.
-  - Added a loading animation to the input bar while the agent is working.
-  - Fixed scroll behaviour of Plan Document pane.
-  - Bindings now aborts the script on error instead of being silently ignored.
-  - Fixed Sidechat pane layout issues on Build mode.
-  - Fixed Sidechat pane animation issues. 
+- Added support for Google, DeepInfra, Fireworks AI, SiliconFlow and CoreWeave.
+- Added a loading animation to the input bar while the agent is working.
+- Fixed scroll behaviour of Plan Document pane.
+- Bindings now aborts the script on error instead of being silently ignored.
+- Fixed Sidechat pane layout issues on Build mode.
+- Fixed Sidechat pane animation issues. 
 
 -------------------------------------------------------------------------------
 0.5.0 - 2026-09-30
 -------------------------------------------------------------------------------
-<https://github.com/umutsevdi/imza/releases/tag/v0.5.0>
-
-Changes:
-  - Redesigned Plan Mode. Plan mode now generates a spec document on demand on
-  side pane. You can attach notes to any block or section in the document 
-  and send them as one revise request to update. You can also request for update
-  via chat messages.
-  Plans and it's revisions are stored in session data.
-  - Added the /compact and /make-skill commands.
-  - Added multi-modal input support for image types and PDF files.
-  - Added support for charts.
-  - Added select-to-copy.
-  - Fixed a hidden Sidechat intercepting clicks and keystrokes meant for the
+- Redesigned Plan Mode. Plan mode now generates a spec document on demand on
+side pane. You can attach notes to any block or section in the document 
+and send them as one revise request to update. You can also request for update
+via chat messages.
+Plans and it's revisions are stored in session data.
+- Added the /compact and /make-skill commands.
+- Added multi-modal input support for image types and PDF files.
+- Added support for charts.
+- Added select-to-copy.
+- Fixed a hidden Sidechat intercepting clicks and keystrokes meant for the
 main chat.
-  - Clicking the plan document or chat pane now moves focus between them on
-the Plan tab.
-  - Fixed keyboard focus not returning to the chat after closing a dialog.
-  - Added syntax highlighting for Markdown, YAML, TOML, C#, and XML files,
+- Clicking the plan document or chat pane now moves focus between them on the
+Plan tab.
+- Fixed keyboard focus not returning to the chat after closing a dialog.
+- Added syntax highlighting for Markdown, YAML, TOML, C#, and XML files,
 registered TSX and Jupyter notebook files.
-  - fs.write now creates missing parent directories instead of failing.
-  - A welcome banner is shown in the chat when the app opens, until the
-first message is sent.
-  - Fixed a crash when a mentioned skill is denied by project permissions.
-  - Fixed update downloads rejecting certain successful server responses.
-  - Fixed the tab menu highlighting the wrong tab when a session opens in
-Build mode.
+- fs.write now creates missing parent directories instead of failing.
+- A welcome banner is shown in the chat when the app opens, until the first
+message is sent.
+- Fixed a crash when a mentioned skill is denied by project permissions.
+- Fixed update downloads rejecting certain successful server responses.
+- Fixed the tab menu highlighting the wrong tab when a session opens in Build
+mode.
 
 -------------------------------------------------------------------------------
 0.4.1 - 2026-09-24
 -------------------------------------------------------------------------------
-<https://github.com/umutsevdi/imza/releases/tag/v0.4.1>
-
-Changes:
-  - Tool calls show a unified Planning → Executing → Executed status, so the
+- Tool calls show a unified Planning → Executing → Executed status, so the
 agent no longer looks idle while it streams a tool call's arguments.
-  - Fixed a crash when Lua returns a list containing mixed value types.
-  - Fixed a bug that caused `tool.grep(...)` to fail.
+- Fixed a crash when Lua returns a list containing mixed value types.
+- Fixed a bug that caused `tool.grep(...)` to fail.
 
 -------------------------------------------------------------------------------
 0.4.0 - 2026-09-22
 -------------------------------------------------------------------------------
-<https://github.com/umutsevdi/imza/releases/tag/v0.4.0>
-
-Changes:
-  - NEW: Rewritten the agent tool call system. See: <https://github.com/umutsevdi/imza/discussions/1>
-  - Tool call results use custom renderers depending on return types.
-  - Clearer tool error messages: failed file lookups show the resolved path,
+- NEW: Rewritten the agent tool call system. See: <https://github.com/umutsevdi/imza/discussions/1>
+- Tool call results use custom renderers depending on return types.
+- Clearer tool error messages: failed file lookups show the resolved path,
 edits report the searched text, and the Lua tool description documents the
 ask call shape and the return-over-print preference.
-  - UI polish.
-  - Internal cleanup: removed an unused legacy field from stored tool
+- UI polish.
+- Internal cleanup: removed an unused legacy field from stored tool
 results.
 
 -------------------------------------------------------------------------------
 0.3.0 - 2026-09-18
 -------------------------------------------------------------------------------
-<https://github.com/umutsevdi/imza/releases/tag/v0.3.0>
-
-Changes:
-  - Fixed high idle CPU usage caused by constant chat timeline redraws.
-  - Improved system, subagent, compaction, and review prompts based on research
+- Fixed high idle CPU usage caused by constant chat timeline redraws.
+- Improved system, subagent, compaction, and review prompts based on research
 into other coding agents.
-  - Increased maximum timeout for streams. Added retry for server errors (HTTP 
+- Increased maximum timeout for streams. Added retry for server errors (HTTP 
 408, 409, 5xx).
-  - Imza sends a recognizable user-agent on provider requests.
-  - Loaded sessions continue in place, active chats are locked against other 
-imza processes.
-  - Added `Sidechat`, a place to ask questions without disrupting the main 
+- Imza sends a recognizable user-agent on provider requests.
+- Loaded sessions continue in place, active chats are locked against other imza
+processes.
+- Added `Sidechat`, a place to ask questions without disrupting the main 
 agent. The Sidechat is toggled with Ctrl+S, its context reloads from the main
 chat on the next prompt. 
-  - Session explorer and Connect now deletes with the Del key, so filtering no
+- Session explorer and Connect now deletes with the Del key, so filtering no
 longer triggers deletions.
-  - Updated Subagent model picker.
+- Updated Subagent model picker.
 
 -------------------------------------------------------------------------------
 0.2.3 - 2026-09-14
 -------------------------------------------------------------------------------
-<https://github.com/umutsevdi/imza/releases/tag/v0.2.3>
-
-Changes:
-  - Added automated update checks with an in-app notice and an explicit `imza --update` installer.
-  - Standardized release artifact naming to `imza-<version>-<os>-<arch>.<ext>`.
+- Added automated update checks with an in-app notice and an explicit `imza --update` installer.
+- Standardized release artifact naming to `imza-<version>-<os>-<arch>.<ext>`.
 
 -------------------------------------------------------------------------------
 0.2.2 - 2026-09-13
 -------------------------------------------------------------------------------
-<https://github.com/umutsevdi/imza/releases/tag/v0.2.2>
-
-Changes:
-  - Fixed a bug that caused curl request to abruptly end on MacOS.
-  - Performance improvements in `read` tool calls and session changes
-  - Added per-prompt overrides from Markdown files in the user data directory.
-  - Improved permission system.
-  - Added persistent chat input history and fixed multiline paste submission.
-  - Made Plan and Build mode instructions consistent across every model turn.
-  - Added terminal notifications when an agent turn finishes or needs user input.
+- Fixed a bug that caused curl request to abruptly end on MacOS.
+- Performance improvements in `read` tool calls and session changes
+- Added per-prompt overrides from Markdown files in the user data directory.
+- Improved permission system.
+- Added persistent chat input history and fixed multiline paste submission.
+- Made Plan and Build mode instructions consistent across every model turn.
+- Added terminal notifications when an agent turn finishes or needs user input.
 
 -------------------------------------------------------------------------------
 0.2.1 - 2026-09-11
 -------------------------------------------------------------------------------
-<https://github.com/umutsevdi/imza/releases/tag/v0.2.1>
-
-Changes:
-  - Fixed `find` tool opening up on each call.
-  - Fixed session corruption bugs.
+- Fixed `find` tool opening up on each call.
+- Fixed session corruption bugs.
 
 -------------------------------------------------------------------------------
 0.2.0 - 2026-09-10
 -------------------------------------------------------------------------------
-<https://github.com/umutsevdi/imza/releases/tag/v0.2.0>
-
-Changes:
-  - Rebranded as `imza`.
-  - Added support for `OpenAI Responses` format.
-  - Text wrapping and session file locking fixes.
-  - Added support for more model providers.
-  - Added `find` tool.
-  - Fixed various tool bugs
+- Rebranded as `imza`.
+- Added support for `OpenAI Responses` format.
+- Text wrapping and session file locking fixes.
+- Added support for more model providers.
+- Added `find` tool.
+- Fixed various tool bugs
 
 -------------------------------------------------------------------------------
 0.1.3 - 2026-09-09
 -------------------------------------------------------------------------------
-<https://github.com/umutsevdi/imza/releases/tag/v0.1.3>
-
-Changes:
-  - Improved Windows startup time.
-  - Improved response rendering performance.
-  - Reduced memory usage when preparing modal content.
-  - Improved chat rendering performance.
-  - Fixed review horizontal scrolling and focus.
-  - Session list now loads in the background from a session index.
-  - Added cross-process file locking for config and session files.
-  - Concurrent Ursa instances no longer overwrite each other's config changes.
-  - Fixed title-generation subagent ignoring the configured reasoning effort.
-  - Various internal cleanups and code deduplication.
+- Improved Windows startup time.
+- Improved response rendering performance.
+- Reduced memory usage when preparing modal content.
+- Improved chat rendering performance.
+- Fixed review horizontal scrolling and focus.
+- Session list now loads in the background from a session index.
+- Added cross-process file locking for config and session files.
+- Concurrent Ursa instances no longer overwrite each other's config changes.
+- Fixed title-generation subagent ignoring the configured reasoning effort.
 
 -------------------------------------------------------------------------------
 0.1.2 - 2026-09-08
 -------------------------------------------------------------------------------
-<https://github.com/umutsevdi/imza/releases/tag/v0.1.2>
-
-Changes:
-  - Added CLI commands.
-  - Rewritten permission system.
-     - Permissions can be set using CLI options or using user responses.
-     - Added shell command evaluation based permissions.
-     - Added directory access management.
-  - Performance improvements on large conversations.
-  - Performance improvements on large diff reviews.
-  - Added headless mode.
-  - Various other small bug fixes.
+- Added CLI commands.
+- Rewritten permission system.
+    - Permissions can be set using CLI options or using user responses.
+    - Added shell command evaluation based permissions.
+    - Added directory access management.
+- Performance improvements on large conversations.
+- Performance improvements on large diff reviews.
+- Added headless mode.
+- Various other small bug fixes.
 
 -------------------------------------------------------------------------------
 0.1.1 - 2026-09-05
 -------------------------------------------------------------------------------
-<https://github.com/umutsevdi/imza/releases/tag/v0.1.1>
-
-Changes:
-  - Added syntax highlighting for 20 languages.
-  - Markdown rendering for `ViewerModal`'s.
-  - Added labels for custom providers.
+- Added syntax highlighting for 20 languages.
+- Markdown rendering for `ViewerModal`'s.
+- Added labels for custom providers.
 
 -------------------------------------------------------------------------------
 0.1.0 - 2026-09-04
 -------------------------------------------------------------------------------
-<https://github.com/umutsevdi/imza/releases/tag/v0.1.0>
-
-Changes:
-  - Initial version.
+- Initial version.

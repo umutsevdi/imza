@@ -221,6 +221,7 @@ void TurnRunner::spawn(std::vector<Message> history, TurnSettings settings)
 void TurnRunner::clear()
 {
     _blocked_permission.store(false);
+    std::lock_guard lock(_stream_mutex);
     _stream_events.clear();
 }
 
@@ -328,8 +329,7 @@ void TurnRunner::_run_compaction(TurnSettings settings, bool report_nothing)
     // transcript: re-summarizing it would pay a full round-trip over
     // material the parent already owns. Drop the stale seed instead;
     // the sidechat's own items stay in the timeline.
-    if (_state->parent_state != nullptr
-        && !snapshot.compacted_summary.empty()) {
+    if (_state->is_sidechat && !snapshot.compacted_summary.empty()) {
         const auto event_id = _state->session->begin_compaction().first;
         _state->session->finish_compaction(event_id, "", 0, true);
         _finish_idle();
@@ -429,7 +429,10 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
             return session->interrupt_requested();
         };
         _state->session->reset_reasoning();
-        _stream_events.clear();
+        {
+            std::lock_guard lock(_stream_mutex);
+            _stream_events.clear();
+        }
         std::string text_buffer;
         std::string error_msg;
         Status error_status                 = Status::OK;
@@ -451,6 +454,7 @@ void TurnRunner::_drive(std::vector<Message> history, TurnSettings settings)
                     return;
                 }
                 if (ev.kind == StreamEvent::Kind::TOOL_CALL) {
+                    std::lock_guard lock(_stream_mutex);
                     _stream_events.push_back(ev);
                 }
                 if (ev.kind == StreamEvent::Kind::CONTENT_DELTA
@@ -653,8 +657,13 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
 {
     std::vector<Message> tool_msgs;
     bool had_tool_calls = false;
+    std::vector<StreamEvent> events;
+    {
+        std::lock_guard lock(_stream_mutex);
+        events = _stream_events;
+    }
 
-    for (const auto& ev : _stream_events) {
+    for (const auto& ev : events) {
         if (!alive()) {
             return;
         }
@@ -724,7 +733,7 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
         = _state->session->last_assistant();
     Message assistant = assistant_message(assistant_text,
         reasoning_source.has_value() ? &*reasoning_source : nullptr, dialect);
-    for (const auto& ev : _stream_events) {
+    for (const auto& ev : events) {
         if (ev.kind == StreamEvent::Kind::TOOL_CALL) {
             assistant.tool_calls.push_back(ToolCallEntry {
                 ev.tool_call.id, ev.tool_call.name, ev.tool_call.args });

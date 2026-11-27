@@ -22,6 +22,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -341,6 +342,20 @@ void install_session(ApplicationState& state, SessionSnapshot snapshot)
     }
 }
 
+void wait_for_environment_ready(ApplicationState& state, int timeout_ms)
+{
+    MainThreadQueue* main_thread = state.main_thread.get();
+    for (int waited = 0; waited < timeout_ms && !state.environment->ready();
+        waited += 50) {
+        if (main_thread != nullptr) {
+            main_thread->wait_for_task(std::chrono::milliseconds(50));
+            main_thread->drain();
+        } else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+    }
+}
+
 SkillsModal skills_modal(const ApplicationState& state)
 {
     SkillsModal modal;
@@ -385,8 +400,7 @@ void submit(ApplicationState& state, std::string text,
             return;
         }
     }
-    if (state.parent_state != nullptr
-        && state.session->phase() == Session::Phase::IDLE) {
+    if (state.is_sidechat && state.session->phase() == Session::Phase::IDLE) {
         ensure_sidechat_seeded(state);
     }
     if (state.session->phase() == Session::Phase::IDLE) {
@@ -988,7 +1002,7 @@ namespace {
 
 void run_slash(ApplicationState& state, std::string_view command)
 {
-    if (state.parent_state != nullptr) {
+    if (state.is_sidechat) {
         run_slash(*state.parent_state, command);
         return;
     }
@@ -1415,7 +1429,7 @@ namespace {
 
 void open_commit_modal(ApplicationState& state)
 {
-    if (state.parent_state != nullptr) {
+    if (state.is_sidechat) {
         open_commit_modal(*state.parent_state);
         return;
     }
@@ -1482,8 +1496,8 @@ std::string export_viewer_content(
         return { };
     }
     std::string write_error;
-    if (!save_text(filesystem_target(request).string(), payload.content,
-            write_error)) {
+    if (!save_text(filesystem_target(*evaluation.request).string(),
+            payload.content, write_error)) {
         error = "Could not export: " + write_error;
         return { };
     }
@@ -1661,7 +1675,7 @@ namespace {
 
 void ensure_sidechat_seeded(ApplicationState& state)
 {
-    if (state.parent_state == nullptr || state.sidechat_context_seeded) {
+    if (!state.is_sidechat || state.sidechat_context_seeded) {
         return;
     }
     state.session->restore(sidechat_seed(*state.parent_state));

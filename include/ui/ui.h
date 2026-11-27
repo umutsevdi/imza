@@ -177,6 +177,7 @@ std::optional<std::string> link_target_at(int x, int y);
 bool set_link_hover(std::optional<std::string> url);
 std::string elapsed_text(std::chrono::milliseconds elapsed);
 std::string compact_number(std::uint64_t n);
+std::string money_text(double cost);
 ftxui::Element hint_bar(std::string hint);
 // The shared busy spinner, dimmed to the panel palette.
 ftxui::Element dim_spinner(int frame);

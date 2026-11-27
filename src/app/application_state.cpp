@@ -155,6 +155,16 @@ namespace {
         if (state.environment != nullptr && state.parent_state == nullptr) {
             state.stoppable.push_back(state.environment.get());
         }
+        // Both bear workers and are shared with children, so only the root
+        // stops them. Registered here so their joins happen while the
+        // runner, environment, and notification store they hook into are
+        // still alive.
+        if (state.mcp != nullptr && state.parent_state == nullptr) {
+            state.stoppable.push_back(state.mcp.get());
+        }
+        if (state.skill_subsystem != nullptr && state.parent_state == nullptr) {
+            state.stoppable.push_back(state.skill_subsystem.get());
+        }
         if (state.runner != nullptr) {
             state.stoppable.push_back(state.runner.get());
         }
@@ -291,12 +301,12 @@ namespace {
               };
         mcp_hooks.open_browser
             = [](const std::string& url) { return open_browser(url); };
-        mcp_hooks.notify
-            = [raw = state.get()](bool error, std::string message) {
-                  if (raw->notifications) {
-                      raw->notifications->publish(error, std::move(message));
-                  }
-              };
+        mcp_hooks.notify = [notifications = state->notifications](
+                               bool error, std::string message) {
+            if (notifications) {
+                notifications->publish(error, std::move(message));
+            }
+        };
         state->mcp = std::make_shared<McpSubsystem>(
             std::move(mcp_servers), std::move(mcp_hooks));
         state->mcp->autoload();
@@ -473,6 +483,10 @@ std::shared_ptr<ApplicationState> make_sidechat_application_state(
 {
     std::shared_ptr<ApplicationState> state(new ApplicationState());
     state->lua_state = make_lua_state();
+    // Marks the flows that copy the parent transcript or open UI on the
+    // parent; the teardown guard in register_stoppable keys on
+    // parent_state instead, which initialize_child sets for every child.
+    state->is_sidechat = true;
     // Built first: the roster captures the child that is moved below.
     std::vector<Tool> roster = sidechat_roster(parent, *state);
     state                    = initialize_child(

@@ -106,7 +106,10 @@ private:
     StreamFn _stream_fn;
     std::vector<Tool> _tools;
     std::vector<ToolSpec> _specs_all;
+    // Written and read on the turn worker; clear() is the one main-thread
+    // access, so every touch guards on this mutex.
     std::vector<StreamEvent> _stream_events;
+    std::mutex _stream_mutex;
     std::atomic<bool> _blocked_permission { false };
     std::atomic<int> _last_fail { static_cast<int>(Status::OK) };
     std::atomic<bool> _compaction_active { false };

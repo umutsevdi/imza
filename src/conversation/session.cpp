@@ -402,8 +402,9 @@ void Session::restore(SessionSnapshot snapshot)
         _modal_handle = std::make_shared<const ModalPayload>(_modal);
         _queued       = std::make_shared<std::vector<QueuedMessage>>();
         // A restored conversation carries no pending dialogs, loaded
-        // skills, or skill-gated submissions.
-        queue.clear();
+        // skills, or skill-gated submissions; abandoning settles the
+        // promises of any modal that never reached the screen.
+        queue.abandon();
         _loaded_skills.clear();
         _skill_contents.clear();
         _pending_skill_turn.reset();
@@ -441,6 +442,15 @@ void Session::restore(SessionSnapshot snapshot)
         ++_content_serial;
     }
     _attachments_changed.publish();
+    // The restore also replaces plan documents, todo, loaded skills,
+    // compaction, and usage totals; their cached subscribers (plan editor,
+    // side panel, ACP session updates) re-read the snapshot on publish,
+    // mirroring the per-domain mutators.
+    _documents_changed.publish();
+    _todo_changed.publish();
+    _skills_changed.publish();
+    _compaction_changed.publish();
+    _usage_changed.publish();
     // Published outside the lock, mirroring set_mode: the UI follows this
     // signal to land on the restored conversation's phase.
     if (_mode != previous_mode) {

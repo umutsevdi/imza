@@ -27,7 +27,8 @@ public:
     std::optional<PendingModal> try_pop();
     std::optional<PendingModal> peek_front() const;
     std::size_t size() const;
-    void clear();
+    // Settles every pending promise with a monostate result, then drops
+    // the entries: a waiter blocked on a modal future must never hang.
     void abandon();
 
 private:

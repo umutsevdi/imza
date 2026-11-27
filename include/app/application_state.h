@@ -75,6 +75,10 @@ struct ApplicationState {
     bool sidechat_open             = false;
     bool sidechat_context_seeded   = false;
     ApplicationState* parent_state = nullptr;
+    // Every child has a parent; only the sidechat copies the parent
+    // transcript and routes slash commands and UI modals to it, so those
+    // flows key on this flag, not on parent_state.
+    bool is_sidechat = false;
 
     PostFn post;
     std::function<void()> on_exit;

@@ -175,7 +175,7 @@ void PickerList::refill(
     selected = 0;
     for (const auto& [id, label] : entries) {
         if (!needle.empty() && to_lower(label).find(needle) == std::string::npos
-            && id.find(needle) == std::string::npos) {
+            && to_lower(id).find(needle) == std::string::npos) {
             continue;
         }
         ids.push_back(id);
@@ -393,6 +393,13 @@ std::string compact_number(std::uint64_t n)
         return buf;
     }
     return std::to_string(n);
+}
+
+std::string money_text(double cost)
+{
+    std::ostringstream o;
+    o << '$' << std::fixed << std::setprecision(cost >= 1.0 ? 2 : 3) << cost;
+    return o.str();
 }
 
 std::string choice_marker(bool multi, bool selected)

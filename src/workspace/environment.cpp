@@ -251,9 +251,13 @@ namespace {
 
     std::filesystem::path agent_config_base_dir()
     {
-#ifdef _WIN32
+#if defined(_WIN32)
         const char* appdata = std::getenv("APPDATA");
         return std::filesystem::path(appdata && *appdata ? appdata : ".");
+#elif defined(__APPLE__)
+        const char* home = std::getenv("HOME");
+        return std::filesystem::path(home && *home ? home : ".") / "Library"
+            / "Application Support";
 #else
         const char* xdg = std::getenv("XDG_CONFIG_HOME");
         if (xdg && *xdg) {
@@ -500,6 +504,11 @@ Environment::Environment(std::vector<std::string> instructions)
 
 void Environment::_start_git_worker()
 {
+    // A completion racing stop() must not resurrect the poller after the
+    // teardown joined it.
+    if (!alive()) {
+        return;
+    }
     _git_worker = std::jthread([this](const std::stop_token& stop) {
         const auto wait_until
             = [&](std::chrono::steady_clock::time_point deadline) {
@@ -703,9 +712,24 @@ void Environment::stop()
 {
     mark_dead();
     _request_repository_refresh();
+    // Join the system scanner before the git poller: its completion calls
+    // _start_git_worker, which would otherwise resurrect the poller after
+    // this already joined it.
+    if (_system_worker.joinable()) {
+        _system_worker.request_stop();
+        _system_worker.join();
+    }
     if (_git_worker.joinable()) {
         _git_worker.request_stop();
         _git_worker.join();
+    }
+    if (_worker.joinable()) {
+        _worker.request_stop();
+        _worker.join();
+    }
+    if (_update_worker.joinable()) {
+        _update_worker.request_stop();
+        _update_worker.join();
     }
     _git_actions.join_all();
 }

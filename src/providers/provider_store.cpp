@@ -974,8 +974,10 @@ void ProviderStore::_start_fetch_locked(const std::string& connection_id)
             return;
         }
         // Snapshot after the wait: only then does the config view carry
-        // the overlaid keychain secret.
+        // the overlaid keychain secret. The route resolves from _catalog
+        // under the same lock: the refresh worker rewrites it concurrently.
         Connection snapshot;
+        Route route;
         {
             std::lock_guard lock(_mutex);
             const Connection* current = find_connection(
@@ -984,9 +986,9 @@ void ProviderStore::_start_fetch_locked(const std::string& connection_id)
                 return;
             }
             snapshot = *current;
+            route
+                = _route_locked(snapshot, default_dialect(snapshot, _catalog));
         }
-        const Route route
-            = _route_locked(snapshot, default_dialect(snapshot, _catalog));
         if (route.api.empty()) {
             std::lock_guard lock(_mutex);
             if (_generations[connection_id] == generation) {

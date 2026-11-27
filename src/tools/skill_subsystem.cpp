@@ -206,7 +206,9 @@ SkillSubsystem::SkillSubsystem(SkillSubsystemHooks hooks)
 {
 }
 
-SkillSubsystem::~SkillSubsystem()
+SkillSubsystem::~SkillSubsystem() { stop(); }
+
+void SkillSubsystem::stop()
 {
     mark_dead();
     _workers.join_all();
@@ -214,6 +216,9 @@ SkillSubsystem::~SkillSubsystem()
 
 void SkillSubsystem::spawn(std::function<void()> work)
 {
+    if (!alive()) {
+        return;
+    }
     _workers.spawn(std::move(work));
 }
 
@@ -314,8 +319,12 @@ void SkillSubsystem::run_search(std::string query)
     long code             = 0;
     const std::string url = _hooks.base_url
         + "/api/search?q=" + percent_encode(query) + "&limit=30";
-    const Status st
-        = http_get(url, { user_agent() }, SEARCH_TIMEOUT_SECS, body, &code);
+    const Status st = alive()
+        ? http_get(url, { user_agent() }, SEARCH_TIMEOUT_SECS, body, &code)
+        : Status::CANCELLED;
+    if (!alive()) {
+        return;
+    }
 
     std::vector<RemoteSkill> results;
     std::string status;
@@ -353,8 +362,12 @@ void SkillSubsystem::run_install(RemoteSkill skill)
     std::string body;
     long code             = 0;
     const std::string url = _hooks.base_url + "/api/download/" + skill.id;
-    const Status st
-        = http_get(url, { user_agent() }, DOWNLOAD_TIMEOUT_SECS, body, &code);
+    const Status st       = alive()
+        ? http_get(url, { user_agent() }, DOWNLOAD_TIMEOUT_SECS, body, &code)
+        : Status::CANCELLED;
+    if (!alive()) {
+        return;
+    }
 
     std::string status;
     bool ok = true;

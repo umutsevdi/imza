@@ -2,7 +2,7 @@
 [Desktop Entry]
 Name=Imza
 GenericName=Imza
-Comment=Open source multi-modal coding agent.
+Comment=An open source coding agent.
 Categories=Development;IDE
 Exec=imza %U
 Terminal=true

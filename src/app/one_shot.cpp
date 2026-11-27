@@ -59,11 +59,7 @@ OneShotResult run_one_shot(
     // Skill mentions resolve at submit time, so give the asynchronous
     // workspace scan a chance to publish the catalogue first; an empty
     // catalogue after the timeout still runs, degraded but functional.
-    for (int waited = 0; waited < 5000 && !state.environment->ready();
-        waited += 50) {
-        main_thread.wait_for_task(std::chrono::milliseconds(50));
-        main_thread.drain();
-    }
+    wait_for_environment_ready(state, 5000);
     submit(state, request.query);
     wait_for_completion(state, main_thread);
 

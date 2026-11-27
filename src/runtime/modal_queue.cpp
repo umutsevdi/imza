@@ -38,12 +38,6 @@ std::size_t ModalQueue::size() const
     return _entries.size();
 }
 
-void ModalQueue::clear()
-{
-    std::lock_guard lock(_mutex);
-    _entries.clear();
-}
-
 void ModalQueue::abandon()
 {
     std::lock_guard lock(_mutex);

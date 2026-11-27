@@ -30,22 +30,6 @@ namespace {
     constexpr int COL_PROVIDER = 12;
     constexpr int COL_MODEL    = 22;
 
-    std::string fit(std::string value, int width)
-    {
-        if (static_cast<int>(value.size()) <= width) {
-            return value;
-        }
-        return value.substr(0, std::max(1, width - 1)) + "…";
-    }
-
-    std::string money_text(double cost)
-    {
-        std::ostringstream o;
-        o << '$' << std::fixed << std::setprecision(cost >= 1.0 ? 2 : 3)
-          << cost;
-        return o.str();
-    }
-
     Element usage_table(const std::vector<std::vector<std::string>>& cells,
         const std::vector<int>& right_columns)
     {
