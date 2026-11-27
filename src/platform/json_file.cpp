@@ -8,22 +8,52 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <cerrno>
+#include <chrono>
+#include <system_error>
+#include <thread>
 #endif
 
 namespace imza {
 
+namespace {
+
+    std::optional<std::string> read_text_once(const std::filesystem::path& path)
+    {
+        std::ifstream file(path, std::ios::binary);
+        if (!file) {
+            return std::nullopt;
+        }
+        std::ostringstream buffer;
+        buffer << file.rdbuf();
+        if (file.bad() && !file.eof()) {
+            return std::nullopt;
+        }
+        return buffer.str();
+    }
+
+} // namespace
+
 std::optional<std::string> read_text_file(const std::filesystem::path& path)
 {
-    std::ifstream file(path, std::ios::binary);
-    if (!file) {
-        return std::nullopt;
+#ifdef _WIN32
+    // Filter drivers (antivirus, search indexing) briefly deny opens of
+    // files written moments ago; retry while the file still exists so a
+    // transient lock is not reported like a missing file.
+    for (int attempt = 0; attempt < 60; ++attempt) {
+        if (auto text = read_text_once(path)) {
+            return text;
+        }
+        std::error_code ec;
+        if (!std::filesystem::exists(path, ec) || ec) {
+            return std::nullopt;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
     }
-    std::ostringstream buffer;
-    buffer << file.rdbuf();
-    if (file.bad() && !file.eof()) {
-        return std::nullopt;
-    }
-    return buffer.str();
+    return std::nullopt;
+#else
+    return read_text_once(path);
+#endif
 }
 
 std::optional<JsonValue> read_json_file(const std::filesystem::path& path)
@@ -84,10 +114,26 @@ Status write_json_file(
         }
     }
 #ifdef _WIN32
-    if (!MoveFileExW(tmp.c_str(), path.c_str(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        ec = std::error_code(
-            static_cast<int>(GetLastError()), std::system_category());
+    // Filter drivers (antivirus, search indexing) hold just-written files
+    // open for a short scan; the rename then fails with a sharing
+    // violation. Retry the bounded window before reporting the error.
+    bool moved = false;
+    for (int attempt = 0; attempt < 80 && !moved; ++attempt) {
+        if (MoveFileExW(tmp.c_str(), path.c_str(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            moved = true;
+            break;
+        }
+        const DWORD error = GetLastError();
+        if (error != ERROR_SHARING_VIOLATION && error != ERROR_ACCESS_DENIED) {
+            ec = std::error_code(
+                static_cast<int>(error), std::system_category());
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    }
+    if (!moved && !ec) {
+        ec = std::error_code(EACCES, std::generic_category());
     }
 #else
     // Owner-only; the rename carries this mode onto the destination.

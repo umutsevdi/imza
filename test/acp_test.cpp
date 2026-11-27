@@ -105,6 +105,20 @@ std::string created_session_id(const std::vector<std::string>& lines)
     }
     return { };
 }
+
+// The wire frame replying to request `id`; empty when the reply has not
+// arrived. Checking the frame for its own id keeps an earlier reply (say,
+// initialize's) from masking the call under test.
+std::string reply_for(const std::vector<std::string>& lines, int id)
+{
+    const std::string marker = "\"id\":" + std::to_string(id);
+    for (const std::string& line : lines) {
+        if (line.find(marker) != std::string::npos) {
+            return line;
+        }
+    }
+    return { };
+}
 } // namespace
 
 TEST_CASE("unknown methods return -32601; extension requests too")
@@ -550,7 +564,9 @@ TEST_CASE("a loaded session is locked; a second load is refused until closed")
 
     first.handle_request(JsonValue(1), "session/load",
         object_of({ { "sessionId", JsonValue(id) } }));
-    CHECK(contains_line(first_sink.snapshot(), "\"result\""));
+    REQUIRE_FALSE(reply_for(first_sink.snapshot(), 1).empty());
+    CHECK(reply_for(first_sink.snapshot(), 1).find("\"result\"")
+        != std::string::npos);
     CHECK(imza::session_file_locked(session_path));
 
     // A second connection (another editor window) must be refused instead
@@ -564,8 +580,10 @@ TEST_CASE("a loaded session is locked; a second load is refused until closed")
             { "clientInfo", object_of({ { "name", JsonValue("zed") } }) } }));
     second.handle_request(JsonValue(1), "session/load",
         object_of({ { "sessionId", JsonValue(id) } }));
-    CHECK(contains_line(second_sink.snapshot(), "-32002"));
-    CHECK(contains_line(second_sink.snapshot(), "open in another"));
+    const std::string refusal = reply_for(second_sink.snapshot(), 1);
+    REQUIRE_FALSE(refusal.empty());
+    CHECK(refusal.find("-32002") != std::string::npos);
+    CHECK(refusal.find("open in another") != std::string::npos);
 
     // The first connection still works: the refusal did not disturb it.
     first.handle_request(JsonValue(2), "session/list", JsonValue::object_t { });
@@ -578,7 +596,9 @@ TEST_CASE("a loaded session is locked; a second load is refused until closed")
     // The lock is gone, so the second connection can take over.
     second.handle_request(JsonValue(2), "session/load",
         object_of({ { "sessionId", JsonValue(id) } }));
-    CHECK(contains_line(second_sink.snapshot(), "\"result\""));
+    REQUIRE_FALSE(reply_for(second_sink.snapshot(), 2).empty());
+    CHECK(reply_for(second_sink.snapshot(), 2).find("\"result\"")
+        != std::string::npos);
     CHECK(imza::session_file_locked(session_path));
 }
 

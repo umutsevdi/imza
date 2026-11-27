@@ -347,7 +347,11 @@ TEST_CASE("review pass retries a truncated reply instead of failing")
             } },
         error);
 
-    REQUIRE(pump->wait_for([&] { return calls->load() >= 2; }));
+    // Wait for the outcome, not the call count: the retry's completion
+    // callback lands after the second stream call has already started.
+    REQUIRE(pump->wait_for([&] {
+        return calls->load() >= 2 && state->review->comments().size() == 1;
+    }));
     CHECK(state->session->error().find("invalid JSON") == std::string::npos);
     REQUIRE(state->review->comments().size() == 1);
     CHECK(state->review->comments().front().body.find("real finding")

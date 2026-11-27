@@ -641,7 +641,7 @@ TEST_CASE("skill descriptions fold block scalars into one line")
     };
     for (const auto& [name, content] : cases) {
         imza::test::write_file(
-            home.root() / "agents" / "skills" / name / "SKILL.md", content);
+            imza::global_skills_directory() / name / "SKILL.md", content);
     }
 
     imza::Environment env;

@@ -249,7 +249,7 @@ TEST_CASE("skills modal searches as you type and installs the choice")
     bool installed = false;
     for (int i = 0; i < 200 && !installed; ++i) {
         installed = std::filesystem::is_regular_file(
-            config_home.root() / "agents" / "skills" / "demo" / "SKILL.md");
+            imza::global_skills_directory() / "demo" / "SKILL.md");
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     CHECK(installed);
