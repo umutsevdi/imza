@@ -41,10 +41,8 @@ std::optional<UpdateInfo> fetch_update(
     const std::vector<std::string>& package_managers,
     std::string_view current_version);
 
-// Downloads the release asset into `directory`; nullopt on failure.
 std::optional<std::filesystem::path> download_update(
     const UpdateInfo& update, const std::filesystem::path& directory);
-// Runs the downloaded installer; returns its exit status.
 int run_installer(const std::filesystem::path& installer);
 
 } // namespace imza

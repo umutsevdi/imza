@@ -161,7 +161,7 @@ namespace {
         if (state.review != nullptr) {
             state.stoppable.push_back(state.review.get());
         }
-        if (state.bg_processes != nullptr) {
+        if (state.bg_processes != nullptr && state.parent_state == nullptr) {
             state.stoppable.push_back(state.bg_processes.get());
         }
         if (state.subagents != nullptr) {
@@ -362,7 +362,7 @@ namespace {
     }
 
     std::shared_ptr<ApplicationState> initialize_child(
-        std::shared_ptr<ApplicationState> state, const ApplicationState& parent,
+        std::shared_ptr<ApplicationState> state, ApplicationState& parent,
         PostFn post, StreamFn stream_fn, ModalRequestFn parent_routing,
         std::string agent_label, std::vector<Tool> tools)
     {
@@ -382,6 +382,9 @@ namespace {
         // manager: imza.bg.shell works inside a subagent, and teardown
         // kills every process this process started.
         state->bg_processes = parent.bg_processes;
+        // Marks every component above as shared: register_stoppable skips
+        // them, so a child dying mid-run cannot stop process-wide state.
+        state->parent_state = &parent;
         // A child owns no review pane and spawns no subagents of its own:
         // delegation is stripped from its roster and the review tab is
         // root-only. Both stay null here rather than allocating a
@@ -414,11 +417,21 @@ namespace {
 ApplicationState::~ApplicationState()
 {
     alive.store(false);
-    // In-flight network requests would otherwise hold their full transfer
-    // timeout while the component stops below join their workers.
-    imza::abort_all_transfers();
-    // The session's queue abandons its pending promises in ~Session,
-    // which runs when the state releases its shared_ptr below.
+    // A child holds no transfer of its own: its turn worker has exited by
+    // the time the run lambda destroys the state, so aborting here would
+    // only kill the root's in-flight requests.
+    if (parent_state == nullptr) {
+        // In-flight network requests would otherwise hold their full
+        // transfer timeout while the components stopped below join their
+        // workers.
+        imza::abort_all_transfers();
+    }
+    // The turn worker blocks on modal futures that only a queue resolve
+    // settles, so settle them here; ~Session abandons an already-empty
+    // queue when the shared_ptr releases below.
+    if (session) {
+        session->queue.abandon();
+    }
     // Subscriptions disconnect through their own RAII; the explicit
     // disconnects here only order them before workers stop.
     provider_subscription.disconnect();
@@ -441,7 +454,7 @@ std::shared_ptr<ApplicationState> make_application_state(
 }
 
 std::shared_ptr<ApplicationState> make_child_application_state(
-    const ApplicationState& parent, PostFn post, StreamFn stream_fn,
+    ApplicationState& parent, PostFn post, StreamFn stream_fn,
     ModalRequestFn parent_routing, std::string agent_label)
 {
     std::shared_ptr<ApplicationState> state(new ApplicationState());
@@ -459,8 +472,7 @@ std::shared_ptr<ApplicationState> make_sidechat_application_state(
     ApplicationState& parent)
 {
     std::shared_ptr<ApplicationState> state(new ApplicationState());
-    state->lua_state    = make_lua_state();
-    state->parent_state = &parent;
+    state->lua_state = make_lua_state();
     // Built first: the roster captures the child that is moved below.
     std::vector<Tool> roster = sidechat_roster(parent, *state);
     state                    = initialize_child(

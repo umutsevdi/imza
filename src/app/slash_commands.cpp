@@ -30,7 +30,6 @@ namespace {
     constexpr std::array<std::string_view, 1> UNDO_ALIASES { "revert" };
     constexpr std::array<std::string_view, 1> USAGE_ALIASES { "spend" };
 
-    // The query without its leading slash, lowercased.
     std::string command_key(std::string_view query)
     {
         if (!query.empty() && query.front() == '/') {

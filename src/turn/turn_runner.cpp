@@ -693,7 +693,23 @@ void TurnRunner::_drain_pending_asks(std::vector<Message>& history,
         }
 
         // The roster gate only asks for skills, which carry a prompt.
-        const ModalResult res = _modal_request(*evaluation.prompt).get();
+        // The future is settled by a modal queue this worker cannot reach
+        // (the parent's when routed through parent_routing), so poll
+        // instead of blocking: stop() marks this runner dead and the wait
+        // must not outlive it, or teardown's join would hang.
+        std::future<ModalResult> asked = _modal_request(*evaluation.prompt);
+        ModalResult res;
+        while (true) {
+            if (asked.wait_for(std::chrono::milliseconds(50))
+                == std::future_status::ready) {
+                res = asked.get();
+                break;
+            }
+            if (!alive()) {
+                res = std::monostate { };
+                break;
+            }
+        }
         _apply_tool_result(evaluation, res, mode, tool_msgs);
         if (_state->session->interrupt_requested()) {
             return;

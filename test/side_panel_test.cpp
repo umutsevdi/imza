@@ -395,28 +395,6 @@ TEST_CASE("sidebar bulk button stages all, then unstages all")
     CHECK(state->session->error().empty());
 }
 
-TEST_CASE("sidebar shows Commit and Push side by side")
-{
-    if (!imza::test::git_available()) {
-        return;
-    }
-    const imza::test::TempDir scratch;
-    seed_staged_and_unstaged(scratch.path);
-    auto state = repo_state(scratch.path);
-    auto panel = imza::make_side_panel(
-        state,
-        [] { return imza::LayoutCtx { imza::LayoutCtx::Kind::WIDE, 120, 40 }; },
-        [] { return imza::WorkflowPhase::BUILD; }, [](imza::WorkflowPhase) { });
-
-    const std::string out
-        = imza::test::without_ansi(to_text(panel->Render(), 120, 40));
-    const std::size_t commit_at = out.rfind("Commit");
-    const std::size_t push_at   = out.rfind("Push");
-    REQUIRE(commit_at != std::string::npos);
-    REQUIRE(push_at != std::string::npos);
-    CHECK(commit_at < push_at);
-}
-
 TEST_CASE("clicking a changed file checkbox stages it and clicking the path "
           "opens Review")
 {

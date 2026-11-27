@@ -106,7 +106,7 @@ private:
     friend std::shared_ptr<ApplicationState> make_application_state(
         PostFn, Config, StreamFn, RuntimeFlag);
     friend std::shared_ptr<ApplicationState> make_child_application_state(
-        const ApplicationState&, PostFn, StreamFn, ModalRequestFn, std::string);
+        ApplicationState&, PostFn, StreamFn, ModalRequestFn, std::string);
     friend std::shared_ptr<ApplicationState> make_sidechat_application_state(
         ApplicationState&);
 };
@@ -116,7 +116,7 @@ std::shared_ptr<ApplicationState> make_application_state(PostFn post,
     RuntimeFlag runtime_flags = interactive_runtime_flags());
 
 std::shared_ptr<ApplicationState> make_child_application_state(
-    const ApplicationState& parent, PostFn post, StreamFn stream_fn = { },
+    ApplicationState& parent, PostFn post, StreamFn stream_fn = { },
     ModalRequestFn parent_routing = { }, std::string agent_label = { });
 
 std::shared_ptr<ApplicationState> make_sidechat_application_state(

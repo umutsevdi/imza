@@ -835,6 +835,30 @@ TEST_CASE("imza.sh runs a single command and returns exit code")
     CHECK(failing.kind == imza::ToolOutput::Kind::OUTPUT);
     CHECK(failing.text == "1    ERROR\n");
 
+    ShellFixture unaccounted;
+    unaccounted.verdict
+        = imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" };
+    const imza::ToolOutput missing = imza::test::run_lua(
+        "local r = imza.shell('imza-no-such-program-ever')\n"
+        "print(r.status, r.code == 0 and 'zero' or 'not-0')",
+        unaccounted.host());
+    // The shell itself starts and reports its own status for the missing
+    // program (127 on POSIX): a normal ERROR, not a throw or a spawn
+    // failure, and the shell's message lands in `output`.
+    CHECK(missing.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(missing.text == "ERROR    not-0\n");
+
+    // The fixture sleeps far longer than the 1 s timeout: the command is
+    // killed, and the call is a normal result rather than a throw.
+    ShellFixture sleeper;
+    sleeper.verdict = imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" };
+    const imza::ToolOutput timed_out = imza::test::run_lua(
+        "local r = imza.shell([[" + imza::test::sleep_seconds(30)
+            + "]], 1)\nprint(r.status, r.code)",
+        sleeper.host());
+    CHECK(timed_out.kind == imza::ToolOutput::Kind::OUTPUT);
+    CHECK(timed_out.text == "TIMEOUT    -1\n");
+
     const imza::ToolOutput disabled
         = imza::test::run_lua("imza.shell('echo x')\nprint('dead')");
     CHECK(disabled.kind == imza::ToolOutput::Kind::ERROR);
@@ -918,46 +942,6 @@ TEST_CASE("imza.sh env argument reaches the child and the gate")
         "local r = imza.shell([[" + plain + "]], 10, nil)\nprint(r.output)",
         fx.host());
     CHECK(no_env.text.find("plain") != std::string::npos);
-}
-
-TEST_CASE("imza.sh reports command outcomes through status")
-{
-    ShellFixture fx;
-    const imza::ToolOutput ok = imza::test::run_lua("local r = imza.shell('"
-            + imza::test::echo_command("fine") + "')\nprint(r.status, r.code)",
-        fx.host());
-    CHECK(ok.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(ok.text == "OK    0\n");
-
-    const imza::ToolOutput failed = imza::test::run_lua("local r = imza.shell('"
-            + imza::test::failing_command() + "')\nprint(r.status, r.code)",
-        fx.host());
-    CHECK(failed.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(failed.text == "ERROR    1\n");
-
-    ShellFixture unaccounted;
-    unaccounted.verdict
-        = imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" };
-    const imza::ToolOutput missing = imza::test::run_lua(
-        "local r = imza.shell('imza-no-such-program-ever')\n"
-        "print(r.status, r.code == 0 and 'zero' or 'not-0')",
-        unaccounted.host());
-    // The shell itself starts and reports its own status for the missing
-    // program (127 on POSIX): a normal ERROR, not a throw or a spawn
-    // failure, and the shell's message lands in `output`.
-    CHECK(missing.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(missing.text == "ERROR    not-0\n");
-
-    // The fixture sleeps far longer than the 1 s timeout: the command is
-    // killed, and the call is a normal result rather than a throw.
-    ShellFixture sleeper;
-    sleeper.verdict = imza::ToolVerdict { imza::ToolDecision::ACCEPT_ONCE, "" };
-    const imza::ToolOutput timed_out = imza::test::run_lua(
-        "local r = imza.shell([[" + imza::test::sleep_seconds(30)
-            + "]], 1)\nprint(r.status, r.code)",
-        sleeper.host());
-    CHECK(timed_out.kind == imza::ToolOutput::Kind::OUTPUT);
-    CHECK(timed_out.text == "TIMEOUT    -1\n");
 }
 
 TEST_CASE("imza.sh rejects only multiple command expressions")
