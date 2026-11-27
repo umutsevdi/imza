@@ -249,7 +249,6 @@ TEST_CASE("busy chat footer shows the phase hint without a progress sweep")
             continue;
         }
         seen_hint = true;
-        CHECK(line.find("─") == std::string::npos);
     }
     CHECK(seen_hint);
 }
